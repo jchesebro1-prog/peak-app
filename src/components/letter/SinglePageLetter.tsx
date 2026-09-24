@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { PrintButton } from "./print-button";
+import { FitOnePage } from "./FitOnePage";
 // Baked letterhead fallback (shared with the flame/inspection/repair letters).
 import letterhead from "@/app/(app)/flame-tests/letter/peak-letterhead.jpg";
 
@@ -107,8 +108,8 @@ export function SinglePageLetter({
         <PrintButton accent={accent} />
       </div>
 
-      <div style={{ padding: "8px 16px 60px" }}>
-        <div className="pk-doc-page">
+      <div className="pk-doc-wrap" style={{ padding: "8px 16px 60px" }}>
+        <div className="pk-doc-page pk-fit-one">
           <div style={{ fontFamily: SANS, fontSize: "11pt", lineHeight: 1.5, color: "#111" }}>
             {/* letterhead + accent hairline */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -124,7 +125,7 @@ export function SinglePageLetter({
             <div style={{ height: 1, background: accent, marginTop: 12, marginBottom: 18 }} />
 
             {/* header band: title/eyebrow (+ status) | meta grid */}
-            <div style={{ display: "flex", border: "1px solid #cfcfcf" }}>
+            <div className="pk-keep" style={{ display: "flex", border: "1px solid #cfcfcf" }}>
               <div
                 style={{
                   flex: "0 0 56%",
@@ -208,7 +209,7 @@ export function SinglePageLetter({
 
             {/* parties row */}
             {parties && (
-              <div style={{ display: "flex", border: "1px solid #cfcfcf", borderTop: "none" }}>
+              <div className="pk-keep" style={{ display: "flex", border: "1px solid #cfcfcf", borderTop: "none" }}>
                 {parties.map((p, i) => (
                   <div
                     key={p.label}
@@ -239,6 +240,7 @@ export function SinglePageLetter({
                   <div key={i} style={{ marginBottom: 18 }}>
                     {s.heading && (
                       <div
+                        className="pk-keep-next"
                         style={{
                           display: "inline-block",
                           fontSize: "9.5pt",
@@ -266,7 +268,7 @@ export function SinglePageLetter({
 
             {/* term-definition strip */}
             {terms && terms.items.length > 0 && (
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 8, padding: "13px 16px", background: "#fafbfc", marginTop: 6 }}>
+              <div className="pk-keep" style={{ border: "1px solid #e4e7ec", borderRadius: 8, padding: "13px 16px", background: "#fafbfc", marginTop: 6 }}>
                 {terms.heading && (
                   <div style={{ ...ctrlLabel, color: accentInk, marginBottom: 9 }}>{terms.heading}</div>
                 )}
@@ -287,17 +289,21 @@ export function SinglePageLetter({
               </div>
             )}
 
-            {/* limitation notice (punch #73) — optional, opt-in per caller */}
-            {notice && (
-              <div style={{ borderTop: "1px solid #e4e7ec", marginTop: 22, paddingTop: 12, fontSize: "8pt", color: "#9aa0ab", lineHeight: 1.5 }}>
-                {notice}
-              </div>
-            )}
+            {/* limitation notice (punch #73) + footer — kept together so the
+                footer never lands alone on the next page without its notice */}
+            <div className="pk-keep">
+              {notice && (
+                <div style={{ borderTop: "1px solid #e4e7ec", marginTop: 22, paddingTop: 12, fontSize: "8pt", color: "#9aa0ab", lineHeight: 1.5 }}>
+                  {notice}
+                </div>
+              )}
 
-            {/* footer */}
-            <div style={{ borderTop: notice ? "none" : "1px solid #e4e7ec", marginTop: notice ? 10 : 26, paddingTop: notice ? 0 : 12, fontSize: "8.5pt", color: "#8c919c", lineHeight: 1.5 }}>
-              {footer}
+              {/* footer */}
+              <div style={{ borderTop: notice ? "none" : "1px solid #e4e7ec", marginTop: notice ? 10 : 26, paddingTop: notice ? 0 : 12, fontSize: "8.5pt", color: "#8c919c", lineHeight: 1.5 }}>
+                {footer}
+              </div>
             </div>
+            <FitOnePage />
           </div>
         </div>
       </div>

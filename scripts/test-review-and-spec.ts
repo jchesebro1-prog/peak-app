@@ -184,7 +184,8 @@ import {
   resolveVenueDoctrine,
 } from "@/lib/venue-doctrine";
 import { buildAssessmentSheet } from "@/lib/venue-assessment-sheet";
-import { renderLetterPdf } from "@/lib/pdf";
+import { renderLetterPdf, type LetterBlock, type LetterDoc, type FieldSheetPage } from "@/lib/pdf";
+import { inflateSync } from "node:zlib";
 import {
   assemblyDescription,
   assemblyUnitTotals,
@@ -5954,6 +5955,141 @@ for (const venueClass of VENUE_CLASSES.map((item) => item.key)) {
   ok(
     sheetPdf.subarray(0, 8).toString("latin1") === "%PDF-1.4",
     `${venueClass} field sheet renders to PDF bytes`
+  );
+}
+
+/* --- pdf.ts: pagination (physical page count, footers, continuation headers) --- */
+{
+  // The writer deflate-compresses every page's content stream, so page text
+  // isn't a plain substring of the file bytes — inflate each /FlateDecode
+  // stream (skips the JPEG XObject, which uses /DCTDecode) to get at it.
+  const pdfPageTexts = (buf: Buffer): string[] => {
+    const raw = buf.toString("latin1");
+    const re = /<<[^>]*\/Filter \/FlateDecode[^>]*>>\r?\nstream\r?\n/g;
+    const texts: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw))) {
+      const start = m.index + m[0].length;
+      const end = raw.indexOf("\nendstream", start);
+      if (end < 0) continue;
+      texts.push(inflateSync(Buffer.from(raw.slice(start, end), "latin1")).toString("latin1"));
+    }
+    return texts;
+  };
+  const pdfPageCount = (buf: Buffer): number =>
+    (buf.toString("latin1").match(/\/Type \/Page \/Parent/g) || []).length;
+
+  const baseLetterDoc: Omit<LetterDoc, "blocks"> = {
+    companyName: "Peak Systems Group",
+    accent: "#7b3f8a",
+    tag: "Flame Test Proposal",
+    meta: [
+      { label: "Date:", value: "2026-09-24" },
+      { label: "Venue:", value: "Test Venue" },
+    ],
+    re: "Flame testing for Test Venue",
+    greeting: "Jeff",
+    costLine: "The above services will cost $1,234.",
+    costTail: "This total covers labor and materials as scoped above.",
+    taxNote: "Sales tax, if required, will be billed at the local rate.",
+    signer: { name: "Jeff Chesebro", title: "Owner", email: "jeff@example.com" },
+  };
+
+  // A short letter — well within one page — must render as a single page
+  // with no footer at all (requirement: single-page output is unchanged).
+  const shortBlocks: LetterBlock[] = [
+    { kind: "p", text: "Thanks for the opportunity to quote this work." },
+    { kind: "p", text: "We look forward to getting started." },
+  ];
+  const shortPdf = renderLetterPdf({ ...baseLetterDoc, blocks: shortBlocks });
+  const shortTexts = pdfPageTexts(shortPdf);
+  ok(pdfPageCount(shortPdf) === 1, "short letter: renders exactly one physical page");
+  ok(shortTexts.length === 1, "short letter: exactly one content stream");
+  ok(
+    !shortTexts.some((t) => t.includes("Page 1 of")),
+    "short letter: no page-number footer on a single-page document"
+  );
+
+  // A long letter — many paragraphs — must overflow to 2+ pages, each with
+  // a "Page n of N" footer, and continuation pages get a running header.
+  const longBlocks: LetterBlock[] = Array.from({ length: 40 }, (_, i): LetterBlock => ({
+    kind: "p",
+    text:
+      `Paragraph ${i + 1}: this is a long enough sentence of filler proposal ` +
+      `copy, repeated many times over, to reliably push the rendered letter ` +
+      `past a single US Letter page and force at least one real page break ` +
+      `during layout so the pagination logic under test actually engages.`,
+  }));
+  const longPdf = renderLetterPdf({ ...baseLetterDoc, blocks: longBlocks });
+  const longTexts = pdfPageTexts(longPdf);
+  const longPageCount = pdfPageCount(longPdf);
+  ok(longPageCount >= 2, "long letter: overflows to 2+ physical pages");
+  ok(longTexts.length === longPageCount, "long letter: one content stream per physical page");
+  ok(
+    longTexts.some((t) => t.includes("Page 1 of")),
+    "long letter: page 1 carries a \"Page 1 of N\" footer"
+  );
+  ok(
+    longTexts.some((t) => t.includes("continued")),
+    "long letter: a continuation page carries the running \"continued\" header"
+  );
+  ok(
+    longTexts.every((t, i) => t.includes(`Page ${i + 1} of ${longPageCount}`)),
+    "long letter: every physical page's footer counts pages correctly and in order"
+  );
+}
+
+/* --- pdf.ts: field-sheet pagination (physical footer counts, continued header) --- */
+{
+  const pdfPageTexts = (buf: Buffer): string[] => {
+    const raw = buf.toString("latin1");
+    const re = /<<[^>]*\/Filter \/FlateDecode[^>]*>>\r?\nstream\r?\n/g;
+    const texts: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw))) {
+      const start = m.index + m[0].length;
+      const end = raw.indexOf("\nendstream", start);
+      if (end < 0) continue;
+      texts.push(inflateSync(Buffer.from(raw.slice(start, end), "latin1")).toString("latin1"));
+    }
+    return texts;
+  };
+  const pdfPageCount = (buf: Buffer): number =>
+    (buf.toString("latin1").match(/\/Type \/Page \/Parent/g) || []).length;
+
+  const manyRows = Array.from({ length: 90 }, (_, i) => ({
+    label: `Field ${i + 1}`,
+    value: `Answer ${i + 1}`,
+  }));
+  const overflowPage: FieldSheetPage = {
+    title: "Overflow Section Test",
+    sections: [{ heading: "Big section", rows: manyRows }],
+  };
+  const overflowDoc: LetterDoc = {
+    companyName: "Peak Systems Group",
+    accent: "#7b3f8a",
+    tag: "Field Sheet Test",
+    meta: [], re: "", greeting: "", blocks: [], costLine: "", costTail: "", taxNote: "",
+    signer: { name: "", title: "" },
+    fieldSheet: { job: "TEST-1", date: "2026-09-24", footer: "Test footer", pages: [overflowPage] },
+  };
+  const overflowPdf = renderLetterPdf(overflowDoc);
+  const overflowTexts = pdfPageTexts(overflowPdf);
+  const overflowPageCount = pdfPageCount(overflowPdf);
+  ok(overflowPageCount >= 2, "field sheet: an oversized logical page overflows to 2+ physical pages");
+  ok(
+    overflowTexts.every((t) => t.includes(`OF ${overflowPageCount}`)),
+    "field sheet: the PAGE n OF N footer total counts physical, not logical, pages"
+  );
+  ok(
+    overflowTexts.some((t, i) => i > 0 && t.includes(`PAGE ${i + 1} OF`)),
+    "field sheet: physical continuation pages advance the page number"
+  );
+  ok(
+    // parens in a PDF literal string are backslash-escaped by esc(), so the
+    // title reads "...\(continued\)" in the raw content stream.
+    overflowTexts.slice(1).some((t) => t.includes("continued")),
+    "field sheet: an overflowed physical page redraws the header band as continued"
   );
 }
 

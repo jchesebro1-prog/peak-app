@@ -813,13 +813,58 @@ button.pk-searchbar-glass {
     max-width: none !important;
   }
   .pk-doc-page {
-    box-shadow: none;
-    border: none;
-    width: auto;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
+    box-shadow: none !important;
+    border: none !important;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
     page-break-after: always;
+    break-after: page;
+  }
+  /* Avoid a trailing blank page after the last (or only) sheet. */
+  .pk-doc-page:last-of-type {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  /* Fit-to-one-page (SinglePageLetter only) — FitOnePage.tsx measures the
+     sheet's on-screen content height and writes --pk-print-zoom on the
+     sheet; this only takes effect in print, so screen layout is untouched. */
+  .pk-doc-page.pk-fit-one {
+    zoom: var(--pk-print-zoom, 1);
+  }
+  /* Print-only utilities — no-ops on screen since they carry no rules
+     outside this block. .pk-doc-wrap is the padded wrapper AROUND a
+     .pk-doc-page; the keep rules apply to content inside one. */
+  .pk-doc-wrap {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: none !important;
+  }
+  .pk-doc-page tr,
+  .pk-doc-page li,
+  .pk-doc-page img,
+  .pk-doc-page figure,
+  .pk-doc-page .pk-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .pk-doc-page h1,
+  .pk-doc-page h2,
+  .pk-doc-page h3,
+  .pk-doc-page h4,
+  .pk-doc-page .pk-keep-next {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .pk-doc-page p {
+    orphans: 3;
+    widows: 3;
+  }
+  .pk-doc-page thead {
+    display: table-header-group;
   }
   @page {
     size: letter;

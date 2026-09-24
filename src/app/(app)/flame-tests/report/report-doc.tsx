@@ -332,7 +332,7 @@ function Letterhead({
   alt: string;
 }) {
   return (
-    <div style={{ marginBottom: tag ? 24 : 20 }}>
+    <div className="pk-keep" style={{ marginBottom: tag ? 24 : 20 }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
@@ -384,6 +384,7 @@ function VenueTable({ m, total }: { m: ReportModel; total: boolean }) {
   return (
     <>
       <div
+        className="pk-keep"
         style={{
           display: "grid",
           gridTemplateColumns: VENUE_GRID,
@@ -406,6 +407,7 @@ function VenueTable({ m, total }: { m: ReportModel; total: boolean }) {
       {m.venueRows.map((v, i) => (
         <div
           key={i}
+          className="pk-keep"
           style={{
             display: "grid",
             gridTemplateColumns: VENUE_GRID,
@@ -447,6 +449,7 @@ function VenueTable({ m, total }: { m: ReportModel; total: boolean }) {
       ))}
       {total && (
         <div
+          className="pk-keep"
           style={{
             display: "grid",
             gridTemplateColumns: VENUE_GRID,
@@ -477,6 +480,7 @@ function VenueTable({ m, total }: { m: ReportModel; total: boolean }) {
 function MetaGrid({ m, bordered }: { m: ReportModel; bordered: boolean }) {
   return (
     <div
+      className="pk-keep"
       style={
         bordered
           ? {
@@ -519,10 +523,11 @@ function MetaGrid({ m, bordered }: { m: ReportModel; bordered: boolean }) {
 
 function Nfpa({ accent, soft, text }: { accent: string; soft: boolean; text: string }) {
   if (soft) {
-    return <p style={{ margin: "0 0 14px", fontSize: "9.5pt", color: "#6b7079", lineHeight: 1.5 }}>{text}</p>;
+    return <p className="pk-keep" style={{ margin: "0 0 14px", fontSize: "9.5pt", color: "#6b7079", lineHeight: 1.5 }}>{text}</p>;
   }
   return (
     <p
+      className="pk-keep"
       style={{
         margin: "0 0 14px",
         fontSize: "10pt",
@@ -593,8 +598,10 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               </p>
             )}
             <p style={{ margin: "0 0 16px" }}>{m.closing}</p>
-            <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
-            <Signer m={m} />
+            <div className="pk-keep">
+              <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
+              <Signer m={m} />
+            </div>
           </div>
         )}
 
@@ -621,6 +628,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               }}
             >
               <div
+                className="pk-keep-next"
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -660,8 +668,10 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               </p>
             )}
             <p style={{ margin: "0 0 16px" }}>{m.closing}</p>
-            <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
-            <Signer m={m} />
+            <div className="pk-keep">
+              <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
+              <Signer m={m} />
+            </div>
           </div>
         )}
 
@@ -680,61 +690,63 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                 }
               />
             </div>
-            <div style={{ textAlign: "center", marginBottom: 16 }}>
-              <div
-                style={{
-                  fontSize: "8.5pt",
-                  fontWeight: 700,
-                  letterSpacing: ".16em",
-                  textTransform: "uppercase",
-                  color: accent,
-                }}
-              >
-                NFPA 705 · Field Flame Test
+            <div className="pk-keep">
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: "8.5pt",
+                    fontWeight: 700,
+                    letterSpacing: ".16em",
+                    textTransform: "uppercase",
+                    color: accent,
+                  }}
+                >
+                  NFPA 705 · Field Flame Test
+                </div>
+                <div
+                  style={{
+                    fontSize: "21pt",
+                    fontWeight: 800,
+                    letterSpacing: "-.01em",
+                    marginTop: 7,
+                    lineHeight: 1.1,
+                  }}
+                >
+                  Certificate of Flame Resistance
+                </div>
+                <div style={{ height: 2, width: 66, background: accent, margin: "14px auto 0" }} />
               </div>
-              <div
-                style={{
-                  fontSize: "21pt",
-                  fontWeight: 800,
-                  letterSpacing: "-.01em",
-                  marginTop: 7,
-                  lineHeight: 1.1,
-                }}
-              >
-                Certificate of Flame Resistance
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    fontSize: "12pt",
+                    fontWeight: 800,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    color: m.statusInk,
+                    background: m.statusSoft,
+                    border: `2px solid ${m.statusBd}`,
+                    padding: "9px 26px",
+                    borderRadius: 9,
+                  }}
+                >
+                  {m.statusLabel}
+                </span>
               </div>
-              <div style={{ height: 2, width: 66, background: accent, margin: "14px auto 0" }} />
-            </div>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-              <span
+              <p
                 style={{
-                  display: "inline-block",
-                  fontSize: "12pt",
-                  fontWeight: 800,
-                  letterSpacing: ".08em",
-                  textTransform: "uppercase",
-                  color: m.statusInk,
-                  background: m.statusSoft,
-                  border: `2px solid ${m.statusBd}`,
-                  padding: "9px 26px",
-                  borderRadius: 9,
+                  textAlign: "center",
+                  fontSize: "10.5pt",
+                  lineHeight: 1.55,
+                  color: "#40454e",
+                  maxWidth: "5.6in",
+                  margin: "0 auto 22px",
                 }}
               >
-                {m.statusLabel}
-              </span>
+                {m.certificateParagraph}
+              </p>
             </div>
-            <p
-              style={{
-                textAlign: "center",
-                fontSize: "10.5pt",
-                lineHeight: 1.55,
-                color: "#40454e",
-                maxWidth: "5.6in",
-                margin: "0 auto 22px",
-              }}
-            >
-              {m.certificateParagraph}
-            </p>
 
             <MetaGrid m={m} bordered />
 
@@ -753,6 +765,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
 
             {/* about-this-test explainer */}
             <div
+              className="pk-keep"
               style={{
                 breakInside: "avoid",
                 border: "1px solid #e4e7ec",
@@ -821,6 +834,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             </div>
 
             <div
+              className="pk-keep"
               style={{
                 marginTop: 22,
                 display: "flex",
@@ -848,43 +862,46 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
           </div>
         )}
 
-        {/* Limitation notice (punch #73) — shared by all three variants
-            (letter/summary/certificate). Wording lives in ONE place
-            (src/lib/compliance-notices.ts) — see the DRAFT WORDING comment
-            there; not yet reviewed by counsel or signed off by product. */}
-        <div
-          style={{
-            fontFamily: "var(--font-ui)",
-            fontSize: "8pt",
-            color: "#8c919c",
-            lineHeight: 1.5,
-            borderTop: "1px solid #eef0f3",
-            paddingTop: 8,
-            marginTop: 22,
-          }}
-        >
-          {FLAME_TEST_LIMITATION_NOTICE}
-        </div>
+        {/* Limitation notice (punch #73) + running footer — kept together
+            (shared by all three variants: letter/summary/certificate).
+            Wording lives in ONE place (src/lib/compliance-notices.ts) — see
+            the DRAFT WORDING comment there; not yet reviewed by counsel or
+            signed off by product. */}
+        <div className="pk-keep">
+          <div
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "8pt",
+              color: "#8c919c",
+              lineHeight: 1.5,
+              borderTop: "1px solid #eef0f3",
+              paddingTop: 8,
+              marginTop: 22,
+            }}
+          >
+            {FLAME_TEST_LIMITATION_NOTICE}
+          </div>
 
-        {/* shared running footer */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontFamily: "var(--font-ui)",
-            fontSize: "8pt",
-            color: "#aab0bb",
-            borderTop: "1px solid #eef0f3",
-            paddingTop: 6,
-            marginTop: 10,
-          }}
-        >
-          <span>
-            {m.companyName}
-            {m.officeCity ? " · " + m.officeCity : ""}
-          </span>
-          <span>NFPA 705 · Field Flame Test</span>
+          {/* shared running footer */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              fontFamily: "var(--font-ui)",
+              fontSize: "8pt",
+              color: "#aab0bb",
+              borderTop: "1px solid #eef0f3",
+              paddingTop: 6,
+              marginTop: 10,
+            }}
+          >
+            <span>
+              {m.companyName}
+              {m.officeCity ? " · " + m.officeCity : ""}
+            </span>
+            <span>NFPA 705 · Field Flame Test</span>
+          </div>
         </div>
       </div>
     </div>

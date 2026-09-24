@@ -93,6 +93,19 @@ export type PreviewProps = {
 
 const DAY_MS = 86400000;
 
+const PRINT_CSS = `
+@media print {
+  @page { size: letter; margin: 0.6in; }
+  body * { visibility: hidden; }
+  .est-doc, .est-doc * { visibility: visible; }
+  .est-screen, .est-previewbody, .est-docwrap { height: auto !important; min-height: 0 !important; overflow: visible !important; }
+  .est-prevhead { display: none !important; }
+  .est-screen .est-doc { position: absolute; left: 0; top: 0; width: 100% !important; height: auto !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; border-radius: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .est-doc .est-secband { break-inside: avoid; break-after: avoid; page-break-after: avoid; }
+  .est-doc .est-line, .est-doc .est-optbox, .est-doc .est-totals, .est-doc .est-terms, .est-doc .est-accept, .est-doc .est-sig { break-inside: avoid; page-break-inside: avoid; }
+}
+`;
+
 function longDate(ms: number): string {
   return new Date(ms).toLocaleDateString("en-US", {
     month: "long",
@@ -192,6 +205,7 @@ export default function PreviewDoc(p: PreviewProps) {
       className="est-screen"
       style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
     >
+      <style>{PRINT_CSS}</style>
       {p.phone && (
         <div
           style={{
@@ -312,6 +326,7 @@ export default function PreviewDoc(p: PreviewProps) {
         </div>
         <button
           type="button"
+          onClick={() => window.print()}
           style={{
             fontFamily: "var(--font-ui)",
             fontSize: 13,
@@ -503,6 +518,7 @@ export default function PreviewDoc(p: PreviewProps) {
           {previewSections.map((ps) => (
             <div key={ps.num + ps.name}>
               <div
+                className="est-secband"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -532,7 +548,7 @@ export default function PreviewDoc(p: PreviewProps) {
                 </span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>
                   {ps.subtotalLabel}
-                  <button type="button" onClick={() => p.setSectionPresentation(ps.id, ps.presentation === "narrative" ? "itemized" : "narrative")} style={{ marginLeft: 8, border: "1px solid rgba(255,255,255,.25)", borderRadius: 5, background: "transparent", color: "#fff", fontSize: 10, padding: "3px 6px", cursor: "pointer" }}>
+                  <button type="button" className="pk-no-print" onClick={() => p.setSectionPresentation(ps.id, ps.presentation === "narrative" ? "itemized" : "narrative")} style={{ marginLeft: 8, border: "1px solid rgba(255,255,255,.25)", borderRadius: 5, background: "transparent", color: "#fff", fontSize: 10, padding: "3px 6px", cursor: "pointer" }}>
                     {ps.presentation === "narrative" ? "Narrative" : "Itemized"}
                   </button>
                 </span>
@@ -546,6 +562,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   {ps.lines.map((ln) => (
                     <div
                       key={ln.key}
+                      className="est-line"
                       style={{
                         display: "grid",
                         gridTemplateColumns: lineCols,
@@ -610,6 +627,7 @@ export default function PreviewDoc(p: PreviewProps) {
                   ))}
                   {ps.hasFreight && (p.pdfNotes || p.pdfPrices) && (
                     <div
+                      className="est-line"
                       style={{
                         display: "grid",
                         gridTemplateColumns: lineCols,
@@ -635,6 +653,7 @@ export default function PreviewDoc(p: PreviewProps) {
                 </div>
               ) : !isItemized ? (
                 <div
+                  className="est-line"
                   style={{
                     padding: "7px 13px 9px",
                     fontSize: 11.5,
@@ -653,6 +672,7 @@ export default function PreviewDoc(p: PreviewProps) {
           {/* optional additions — priced, not in the total */}
           {showOptions && (
             <div
+              className="est-optbox"
               style={{
                 border: `1px dashed ${ACCENT_BD}`,
                 borderRadius: 6,
@@ -679,6 +699,7 @@ export default function PreviewDoc(p: PreviewProps) {
               {optionItems.map(({ sec, it }) => (
                 <div
                   key={sec + "-" + it.id}
+                  className="est-line"
                   style={{
                     display: "grid",
                     gridTemplateColumns: lineCols,
@@ -715,6 +736,7 @@ export default function PreviewDoc(p: PreviewProps) {
 
           {/* totals */}
           <div style={{ borderTop: "2px solid #16181d", paddingTop: 14, marginTop: 22 }}>
+            <div className="est-totals">
             <div
               style={{
                 display: "flex",
@@ -781,10 +803,11 @@ export default function PreviewDoc(p: PreviewProps) {
                 {fmt(p.t.grand)}
               </span>
             </div>
+            </div>
 
             {p.pdfTerms && (
               <>
-                <div style={{ marginTop: 18 }}>
+                <div className="est-terms" style={{ marginTop: 18 }}>
                   <div style={{ ...microLabel, marginBottom: 6 }}>Terms</div>
                   <ul
                     style={{
@@ -803,6 +826,7 @@ export default function PreviewDoc(p: PreviewProps) {
 
                 {/* acceptance */}
                 <div
+                  className="est-accept"
                   style={{
                     borderTop: "1px solid #ececf0",
                     marginTop: 16,
@@ -815,6 +839,7 @@ export default function PreviewDoc(p: PreviewProps) {
                     {p.companyName} customer portal.
                   </div>
                   <div
+                    className="est-sig"
                     style={{
                       display: "grid",
                       gridTemplateColumns: "2fr 1.4fr 1fr",

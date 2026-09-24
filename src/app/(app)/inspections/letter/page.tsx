@@ -339,7 +339,7 @@ export default async function InspectionLetterPage({
       </div>
 
       {/* work-order sheet */}
-      <div style={{ padding: "26px 16px 60px" }}>
+      <div className="pk-doc-wrap" style={{ padding: "26px 16px 60px" }}>
         <div className="pk-doc-page">
           <div style={{ fontFamily: SANS, fontSize: "11pt", lineHeight: 1.5, color: "#111" }}>
             {/* 1) letterhead + accent hairline */}
@@ -356,7 +356,7 @@ export default async function InspectionLetterPage({
             <div style={{ height: 1, background: accent, marginTop: 12, marginBottom: 18 }} />
 
             {/* 2) document-control header band */}
-            <div style={{ display: "flex", border: "1px solid #cfcfcf" }}>
+            <div className="pk-keep" style={{ display: "flex", border: "1px solid #cfcfcf" }}>
               <div
                 style={{
                   flex: "0 0 58%",
@@ -418,7 +418,7 @@ export default async function InspectionLetterPage({
             </div>
 
             {/* 3) parties row */}
-            <div style={{ display: "flex", border: "1px solid #cfcfcf", borderTop: "none", marginBottom: 24 }}>
+            <div className="pk-keep" style={{ display: "flex", border: "1px solid #cfcfcf", borderTop: "none", marginBottom: 24 }}>
               <div style={{ flex: "1 1 50%", padding: "13px 16px", borderRight: "1px solid #cfcfcf" }}>
                 <div style={ctrlLabel}>Issued to</div>
                 <div style={{ fontWeight: 600, marginTop: 5 }}>{venueName}</div>
@@ -451,6 +451,7 @@ export default async function InspectionLetterPage({
             {/* 4) scope of work */}
             <div style={{ marginBottom: 20 }}>
               <div
+                className="pk-keep-next"
                 style={{
                   display: "inline-block",
                   fontSize: "10pt",
@@ -502,6 +503,7 @@ export default async function InspectionLetterPage({
                 {scopeRows.map((r, i) => (
                   <div
                     key={i}
+                    className="pk-keep"
                     style={{
                       display: "grid",
                       gridTemplateColumns: "8% 56% 18% 18%",
@@ -563,6 +565,7 @@ export default async function InspectionLetterPage({
 
             {/* 5) standard & deliverable callout + cadence note */}
             <div
+              className="pk-keep"
               style={{
                 borderLeft: `3px solid ${accent}`,
                 background: accentFaint,
@@ -587,12 +590,13 @@ export default async function InspectionLetterPage({
               </span>
               {standardsQuote}
             </div>
-            <div style={{ fontSize: "9pt", color: "#8c919c", marginBottom: 22, lineHeight: 1.5 }}>
+            <div className="pk-keep" style={{ fontSize: "9pt", color: "#8c919c", marginBottom: 22, lineHeight: 1.5 }}>
               {cadenceNote}
             </div>
 
             {/* 6) engagement fee box */}
             <div
+              className="pk-keep"
               style={{
                 border: `1.5px solid ${accent}`,
                 borderTop: `3px solid ${accent}`,
@@ -627,7 +631,7 @@ export default async function InspectionLetterPage({
             </div>
 
             {/* 7) authorization / sign-off */}
-            <div style={{ borderTop: "1px solid #cfcfcf", marginTop: 22, paddingTop: 16 }}>
+            <div className="pk-keep" style={{ borderTop: "1px solid #cfcfcf", marginTop: 22, paddingTop: 16 }}>
               <p style={{ margin: "0 0 18px", fontSize: "10pt", color: "#3a3f4a", lineHeight: 1.6 }}>
                 {signoffCta}
               </p>

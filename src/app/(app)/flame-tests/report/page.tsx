@@ -245,7 +245,7 @@ export default async function FlameTestReportPage({
 
   return (
     <ReportFrame chrome={chrome} showTabs>
-      <div style={{ padding: "26px 16px 60px" }}>
+      <div className="pk-doc-wrap" style={{ padding: "26px 16px 60px" }}>
         <ReportBody m={model} variant={variant} />
       </div>
     </ReportFrame>

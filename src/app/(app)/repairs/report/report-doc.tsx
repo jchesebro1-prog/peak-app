@@ -200,7 +200,7 @@ function Letterhead({
   alt: string;
 }) {
   return (
-    <div style={{ marginBottom: tag ? 24 : 20 }}>
+    <div className="pk-keep" style={{ marginBottom: tag ? 24 : 20 }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
@@ -252,6 +252,7 @@ function ScopeList({ m }: { m: ReportModel }) {
   return (
     <>
       <div
+        className="pk-keep-next"
         style={{
           padding: "0 0 6px",
           borderBottom: "1px solid #e4e7ec",
@@ -267,6 +268,7 @@ function ScopeList({ m }: { m: ReportModel }) {
       {m.scopeItems.map((it, i) => (
         <div
           key={i}
+          className="pk-keep"
           style={{
             display: "flex",
             justifyContent: "space-between",
@@ -296,6 +298,7 @@ function PartsList({ m }: { m: ReportModel }) {
   return (
     <>
       <div
+        className="pk-keep-next"
         style={{
           padding: "0 0 6px",
           borderBottom: "1px solid #e4e7ec",
@@ -311,6 +314,7 @@ function PartsList({ m }: { m: ReportModel }) {
       {m.partsUsed.map((p, i) => (
         <div
           key={i}
+          className="pk-keep"
           style={{
             padding: "7px 0",
             borderBottom: "1px solid #f4f5f7",
@@ -327,6 +331,7 @@ function PartsList({ m }: { m: ReportModel }) {
 function MetaGrid({ m, bordered }: { m: ReportModel; bordered: boolean }) {
   return (
     <div
+      className="pk-keep"
       style={
         bordered
           ? {
@@ -371,6 +376,7 @@ function FollowUp({ m, accent }: { m: ReportModel; accent: string }) {
   if (!m.hasFollowUp) return null;
   return (
     <p
+      className="pk-keep"
       style={{
         margin: "0 0 14px",
         fontSize: "10pt",
@@ -462,8 +468,10 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             <p style={{ margin: "0 0 16px" }}>
               Enclosed you will find an invoice for these services.
             </p>
-            <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
-            <Signer m={m} />
+            <div className="pk-keep">
+              <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
+              <Signer m={m} />
+            </div>
           </div>
         )}
 
@@ -486,6 +494,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               }}
             >
               <div
+                className="pk-keep-next"
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -528,8 +537,10 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
               All workmanship is covered by our {m.warrantyMonths}-month warranty — good through{" "}
               {m.warrantyThrough}. Enclosed you will find an invoice for these services.
             </p>
-            <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
-            <Signer m={m} />
+            <div className="pk-keep">
+              <p style={{ margin: "0 0 6px" }}>If you have any questions, please contact me directly at:</p>
+              <Signer m={m} />
+            </div>
           </div>
         )}
 
@@ -548,65 +559,67 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
                 }
               />
             </div>
-            <div style={{ textAlign: "center", marginBottom: 16 }}>
-              <div
-                style={{
-                  fontSize: "8.5pt",
-                  fontWeight: 700,
-                  letterSpacing: ".16em",
-                  textTransform: "uppercase",
-                  color: accent,
-                }}
-              >
-                {m.categoryLabel} · {m.priorityLong}
+            <div className="pk-keep">
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: "8.5pt",
+                    fontWeight: 700,
+                    letterSpacing: ".16em",
+                    textTransform: "uppercase",
+                    color: accent,
+                  }}
+                >
+                  {m.categoryLabel} · {m.priorityLong}
+                </div>
+                <div
+                  style={{
+                    fontSize: "21pt",
+                    fontWeight: 800,
+                    letterSpacing: "-.01em",
+                    marginTop: 7,
+                    lineHeight: 1.1,
+                  }}
+                >
+                  Repair Service Report
+                </div>
+                <div style={{ height: 2, width: 66, background: accent, margin: "14px auto 0" }} />
               </div>
-              <div
-                style={{
-                  fontSize: "21pt",
-                  fontWeight: 800,
-                  letterSpacing: "-.01em",
-                  marginTop: 7,
-                  lineHeight: 1.1,
-                }}
-              >
-                Repair Service Report
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    fontSize: "12pt",
+                    fontWeight: 800,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    color: m.statusInk,
+                    background: m.statusSoft,
+                    border: `2px solid ${m.statusBd}`,
+                    padding: "9px 26px",
+                    borderRadius: 9,
+                  }}
+                >
+                  {m.statusLabel}
+                </span>
               </div>
-              <div style={{ height: 2, width: 66, background: accent, margin: "14px auto 0" }} />
-            </div>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-              <span
+              <p
                 style={{
-                  display: "inline-block",
-                  fontSize: "12pt",
-                  fontWeight: 800,
-                  letterSpacing: ".08em",
-                  textTransform: "uppercase",
-                  color: m.statusInk,
-                  background: m.statusSoft,
-                  border: `2px solid ${m.statusBd}`,
-                  padding: "9px 26px",
-                  borderRadius: 9,
+                  textAlign: "center",
+                  fontSize: "10.5pt",
+                  lineHeight: 1.55,
+                  color: "#40454e",
+                  maxWidth: "5.6in",
+                  margin: "0 auto 22px",
                 }}
               >
-                {m.statusLabel}
-              </span>
+                This report records that {m.companyName} completed the{" "}
+                {m.categoryLabel.toLowerCase()} repair at{" "}
+                <strong style={{ color: "#1a1c20" }}>{m.venueName}</strong> ({m.locationLabel}) on{" "}
+                {m.dateLabel}
+                {m.fromInspection ? ", from rigging inspection " + m.fromInspection : ""}.
+              </p>
             </div>
-            <p
-              style={{
-                textAlign: "center",
-                fontSize: "10.5pt",
-                lineHeight: 1.55,
-                color: "#40454e",
-                maxWidth: "5.6in",
-                margin: "0 auto 22px",
-              }}
-            >
-              This report records that {m.companyName} completed the{" "}
-              {m.categoryLabel.toLowerCase()} repair at{" "}
-              <strong style={{ color: "#1a1c20" }}>{m.venueName}</strong> ({m.locationLabel}) on{" "}
-              {m.dateLabel}
-              {m.fromInspection ? ", from rigging inspection " + m.fromInspection : ""}.
-            </p>
 
             <MetaGrid m={m} bordered />
 
@@ -619,6 +632,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             {m.hasWork && (
               <div style={{ marginBottom: 16 }}>
                 <div
+                  className="pk-keep-next"
                   style={{
                     padding: "0 0 6px",
                     borderBottom: "1px solid #e4e7ec",
@@ -647,6 +661,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
 
             {/* warranty explainer */}
             <div
+              className="pk-keep"
               style={{
                 breakInside: "avoid",
                 border: "1px solid #e4e7ec",
@@ -699,6 +714,7 @@ export function ReportBody({ m, variant }: { m: ReportModel; variant: ReportVari
             </div>
 
             <div
+              className="pk-keep"
               style={{
                 marginTop: 22,
                 display: "flex",

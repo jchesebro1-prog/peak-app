@@ -218,8 +218,21 @@ export type LetterDoc = {
 class Pdf {
   private objs: Array<Buffer | null> = [null]; // 1-indexed
   private pageIds: number[] = [];
+  /** Pages already laid out: each keeps its raw ops plus any deferred ops
+   *  (e.g. "Page n of N" footers) that can only be rendered once build()
+   *  knows the final page count. */
+  private finishedPages: Array<{
+    ops: string[];
+    deferred: Array<(pageNum: number, total: number) => string[]>;
+  }> = [];
   private ops: string[] = [];
+  private deferred: Array<(pageNum: number, total: number) => string[]> = [];
   private extraResources = "";
+  /** Fires right after an automatic (ensure()-triggered) page break, once
+   *  the new page's cursor is reset — lets a compositor redraw a
+   *  continuation header/title on the fresh page. Not fired for an
+   *  explicit newPage() call (callers handle that page's header inline). */
+  onAutoBreak: (() => void) | null = null;
   y = PAGE_H - MARGIN_T;
 
   alloc(): number {
@@ -267,13 +280,32 @@ class Pdf {
   }
 
   newPage(): void {
-    this.flushPage();
-    this.y = PAGE_H - MARGIN_T;
+    this.breakPage(false);
   }
 
   /** Break the page unless `h` points of vertical room remain. */
   ensure(h: number): void {
-    if (this.y - h < MARGIN_B) this.newPage();
+    if (this.y - h < MARGIN_B) this.breakPage(true);
+  }
+
+  /** Force a page break for content-flow reasons (e.g. moving a whole
+   *  paragraph to avoid a widow/orphan) — counts as automatic, so it fires
+   *  onAutoBreak just like a failed ensure() would. */
+  breakForContent(): void {
+    this.breakPage(true);
+  }
+
+  private breakPage(auto: boolean): void {
+    this.flushPage();
+    this.y = PAGE_H - MARGIN_T;
+    if (auto && this.onAutoBreak) this.onAutoBreak();
+  }
+
+  /** Queue ops to render once the final page count is known — e.g. a
+   *  "Page n of N" footer. Runs at build() time and is appended to
+   *  whichever page is current right now (so call it once per page). */
+  deferText(fn: (pageNum: number, total: number) => string[]): void {
+    this.deferred.push(fn);
   }
 
   /** One text line at the cursor (no wrapping). */
@@ -352,26 +384,34 @@ class Pdf {
 
   private flushPage(): void {
     if (!this.ops.length) return;
-    const contentId = this.alloc();
-    this.setStream(
-      contentId,
-      "/Filter /FlateDecode",
-      deflateSync(Buffer.from(this.ops.join("\n"), "latin1"))
-    );
-    const pageId = this.alloc();
-    this.pageIds.push(pageId);
-    this.set(
-      pageId,
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] ` +
-        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>` +
-        (this.extraResources ? ` /XObject <<${this.extraResources} >>` : "") +
-        ` >> /Contents ${contentId} 0 R >>`
-    );
+    this.finishedPages.push({ ops: this.ops, deferred: this.deferred });
     this.ops = [];
+    this.deferred = [];
   }
 
   build(): Buffer {
     this.flushPage();
+    const total = this.finishedPages.length;
+    for (let idx = 0; idx < this.finishedPages.length; idx++) {
+      const page = this.finishedPages[idx];
+      let ops = page.ops;
+      for (const fn of page.deferred) ops = ops.concat(fn(idx + 1, total));
+      const contentId = this.alloc();
+      this.setStream(
+        contentId,
+        "/Filter /FlateDecode",
+        deflateSync(Buffer.from(ops.join("\n"), "latin1"))
+      );
+      const pageId = this.alloc();
+      this.pageIds.push(pageId);
+      this.set(
+        pageId,
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] ` +
+          `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>` +
+          (this.extraResources ? ` /XObject <<${this.extraResources} >>` : "") +
+          ` >> /Contents ${contentId} 0 R >>`
+      );
+    }
     this.set(1, "<< /Type /Catalog /Pages 2 0 R >>");
     this.set(
       2,
@@ -426,25 +466,42 @@ function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
 
   pages.forEach((page, pageIndex) => {
     if (pageIndex) pdf.newPage();
-    if (imageName && info) {
-      const h = Math.min(doc.headerFull ? 58 : 38, (CONTENT_W * info.h) / info.w);
-      const w = Math.min(CONTENT_W, (h * info.w) / info.h);
-      pdf.image(imageName, MARGIN_L, w, h);
-    } else {
-      pdf.line(doc.companyName, { size: 18, bold: true, leading: 22 });
-    }
-    pdf.space(6);
-    pdf.hairline(pdf.y, "#16181d", 1.4);
-    pdf.line(page.title, { size: 13, bold: true, color: doc.accent, leading: 21 });
-    pdf.line(`JOB/OPP #  ${sheet.job}`, { size: 9.5, bold: true, leading: 14 });
-    pdf.line(`DATE  ${sheet.date || "—"}`, { size: 9.5, leading: 14 });
-    pdf.line(`PAGE ${pageIndex + 1} OF ${pages.length}`, {
-      size: 9.5,
-      bold: true,
-      align: "right",
-      leading: 0,
-    });
-    pdf.space(10);
+
+    /** Header band for this logical page — redrawn (with "(continued)")
+     *  whenever a physical page break happens mid-page. The "PAGE n OF N"
+     *  line is deferred: it must count *physical* pages, known only once
+     *  the whole document has been laid out. */
+    const drawHeaderBand = (continued: boolean) => {
+      if (imageName && info) {
+        const h = Math.min(doc.headerFull ? 58 : 38, (CONTENT_W * info.h) / info.w);
+        const w = Math.min(CONTENT_W, (h * info.w) / info.h);
+        pdf.image(imageName, MARGIN_L, w, h);
+      } else {
+        pdf.line(doc.companyName, { size: 18, bold: true, leading: 22 });
+      }
+      pdf.space(6);
+      pdf.hairline(pdf.y, "#16181d", 1.4);
+      pdf.line(page.title + (continued ? " (continued)" : ""), {
+        size: 13,
+        bold: true,
+        color: doc.accent,
+        leading: 21,
+      });
+      pdf.line(`JOB/OPP #  ${sheet.job}`, { size: 9.5, bold: true, leading: 14 });
+      pdf.line(`DATE  ${sheet.date || "—"}`, { size: 9.5, leading: 14 });
+      const pageLineY = pdf.y;
+      pdf.deferText((pageNum, total) => {
+        const text = winAnsi(`PAGE ${pageNum} OF ${total}`);
+        const x = PAGE_W - MARGIN_R - measure(text, 9.5, true);
+        return [
+          `BT /F2 9.5 Tf ${rgb(INK)} rg 1 0 0 1 ${x.toFixed(2)} ${pageLineY.toFixed(2)} Tm (${esc(text)}) Tj ET`,
+        ];
+      });
+      pdf.space(10);
+    };
+
+    pdf.onAutoBreak = () => drawHeaderBand(true);
+    drawHeaderBand(false);
 
     for (const section of page.sections) {
       pdf.line(section.heading.toUpperCase(), {
@@ -464,7 +521,43 @@ function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
 
     pdf.line(sheet.footer, { size: 8.5, color: LABEL_INK, leading: 16 });
   });
+  pdf.onAutoBreak = null;
   return pdf.build();
+}
+
+/** A "Page n of N" footer, centered in the bottom margin — registered once
+ *  per page; renders nothing when the whole letter is a single page. */
+function letterFooter(pageNum: number, total: number): string[] {
+  if (total <= 1) return [];
+  const size = 9;
+  const text = winAnsi(`Page ${pageNum} of ${total}`);
+  const x = (PAGE_W - measure(text, size, false)) / 2;
+  const y = 40;
+  return [
+    `BT /F1 ${size} Tf ${rgb(LABEL_INK)} rg 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${esc(text)}) Tj ET`,
+  ];
+}
+
+/** Paragraph body with orphan/widow control: a paragraph that would split
+ *  across pages must leave at least 2 lines on each side, otherwise the
+ *  whole paragraph moves to the next page instead. */
+function paraKeepTogether(pdf: Pdf, text: string): void {
+  const size = 11.5;
+  const leading = size * 1.5;
+  const width = PAGE_W - MARGIN_R - MARGIN_L;
+  const lines = wrap(winAnsi(text), size, false, width);
+  const usableH = PAGE_H - MARGIN_T - MARGIN_B;
+  const maxPerPage = Math.max(1, Math.floor(usableH / leading));
+  const availableLines = Math.max(0, Math.floor((pdf.y - MARGIN_B) / leading));
+  if (
+    lines.length > availableLines &&
+    lines.length <= maxPerPage &&
+    (availableLines < 2 || lines.length - availableLines < 2)
+  ) {
+    pdf.breakForContent();
+  }
+  for (const l of lines) pdf.line(l, { size, leading, x: MARGIN_L });
+  pdf.space(10);
 }
 
 /** Render a proposal letter (the /flame-tests/letter · /inspections/letter
@@ -472,6 +565,21 @@ function renderFieldSheetPdf(doc: LetterDoc, sheet: FieldSheetDoc): Buffer {
 export function renderLetterPdf(doc: LetterDoc): Buffer {
   if (doc.fieldSheet) return renderFieldSheetPdf(doc, doc.fieldSheet);
   const pdf = initPdf();
+
+  // Every page gets a "Page n of N" footer (a no-op when there's only one
+  // page); pages 2+ also get a small running header so a reader who lands
+  // mid-document knows what they're looking at.
+  pdf.deferText(letterFooter);
+  pdf.onAutoBreak = () => {
+    const text = winAnsi(`${doc.companyName}  ·  ${doc.tag}  ·  continued`);
+    pdf.op(
+      `BT /F1 8.5 Tf ${rgb(LABEL_INK)} rg 1 0 0 1 ${MARGIN_L} ${pdf.y.toFixed(2)} Tm (${esc(text)}) Tj ET`
+    );
+    pdf.y -= 12;
+    pdf.hairline(pdf.y, "#e4e7ec", 0.7);
+    pdf.y -= 16;
+    pdf.deferText(letterFooter);
+  };
 
   /* letterhead */
   const jpeg = doc.headerJpeg || null;
@@ -543,7 +651,7 @@ export function renderLetterPdf(doc: LetterDoc): Buffer {
   /* body blocks */
   for (const b of doc.blocks) {
     if (b.kind === "p") {
-      pdf.para(b.text, { after: 10 });
+      paraKeepTogether(pdf, b.text);
     } else if (b.kind === "quote") {
       const size = 10;
       const inset = 14;
@@ -560,6 +668,18 @@ export function renderLetterPdf(doc: LetterDoc): Buffer {
       pdf.space(pad - 2);
       pdf.space(12);
     } else {
+      // Keep the bold heading with at least the next 2 lines of its list
+      // (or all of it, if it's shorter) so it never gets stranded alone
+      // at the bottom of a page.
+      const bulletSize = 11.5;
+      const bulletLeading = bulletSize * 1.5;
+      const bulletWidth = PAGE_W - MARGIN_R - MARGIN_L;
+      let leadLines = 0;
+      for (const item of b.items) {
+        leadLines += wrap(winAnsi("•  " + item), bulletSize, false, bulletWidth).length;
+        if (leadLines >= 2) break;
+      }
+      pdf.ensure(16 + 2 + Math.min(leadLines, 2) * bulletLeading);
       pdf.line(b.heading.toUpperCase(), {
         size: 9,
         bold: true,
@@ -573,8 +693,18 @@ export function renderLetterPdf(doc: LetterDoc): Buffer {
     }
   }
 
-  /* cost + tax notes */
+  /* cost + tax notes — kept together as one group, never split across the
+     page break, mirroring the quote box's own self-measured ensure() */
   {
+    const width = PAGE_W - MARGIN_R - MARGIN_L;
+    const costLines = wrap(winAnsi(doc.costLine), 11.5, true, width);
+    const tailLines = doc.costTail ? wrap(winAnsi(doc.costTail), 11.5, false, width) : [];
+    const taxLines = wrap(winAnsi(doc.taxNote), 10, false, width);
+    const groupH =
+      costLines.length * 11.5 * 1.5 +
+      (tailLines.length ? tailLines.length * 11.5 * 1.5 + 4 : 0) +
+      taxLines.length * 10 * 1.5;
+    pdf.ensure(groupH);
     // bold sentence + regular tail flowing on (approximate the inline <strong>)
     pdf.para(doc.costLine, { bold: true, after: 0 });
     if (doc.costTail) pdf.para(doc.costTail, { after: 4 });

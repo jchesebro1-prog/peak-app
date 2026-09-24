@@ -181,7 +181,7 @@ export default async function ConsultingLetterPage({
             : { display: "block", width: "100%", height: "auto", marginBottom: 16 }}
         />
         {/* header band */}
-        <div style={{ borderBottom: `3px solid ${accent}`, paddingBottom: 14, marginBottom: 22 }}>
+        <div className="pk-keep" style={{ borderBottom: `3px solid ${accent}`, paddingBottom: 14, marginBottom: 22 }}>
           <div style={{ fontFamily: SANS, fontSize: 17, fontWeight: 800, letterSpacing: "-.01em" }}>{companyName}</div>
           <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: accent, marginTop: 6 }}>
             {kind === "spec" ? "Specification Package" : "Consulting Proposal & Professional Services Agreement"}
@@ -198,7 +198,7 @@ export default async function ConsultingLetterPage({
           <>
             <p style={BODY}>{renderField(t, "consulting_proposal", "intro", vars)}</p>
 
-            <div style={{ ...H2, color: accent }}>Scope of services</div>
+            <div className="pk-keep-next" style={{ ...H2, color: accent }}>Scope of services</div>
             <p style={BODY}>{renderField(t, "consulting_proposal", "scopeLead", vars)}</p>
             {scopes.length ? (
               <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 12.5, margin: "4px 0 12px" }}>
@@ -223,7 +223,7 @@ export default async function ConsultingLetterPage({
                 </tbody>
               </table>
             ) : (
-              <p style={{ ...BODY, background: "#f9fafb", border: "1px solid #eef0f3", borderRadius: 8, padding: "12px 14px" }}>
+              <p className="pk-keep" style={{ ...BODY, background: "#f9fafb", border: "1px solid #eef0f3", borderRadius: 8, padding: "12px 14px" }}>
                 {pay.scope || "Scope to be defined."}
               </p>
             )}
@@ -235,7 +235,7 @@ export default async function ConsultingLetterPage({
 
             {scopes.length ? null : (
               <>
-                <div style={{ ...H2, color: accent }}>Professional fee</div>
+                <div className="pk-keep-next" style={{ ...H2, color: accent }}>Professional fee</div>
                 {pay.feeMode === "milestones" && pay.fees.length > 0 ? (
                   <>
                     <p style={BODY}>{renderField(t, "consulting_proposal", "feeLineMilestones", vars)}</p>
@@ -263,13 +263,13 @@ export default async function ConsultingLetterPage({
               </>
             )}
 
-            <div style={{ ...H2, color: accent }}>Terms</div>
+            <div className="pk-keep-next" style={{ ...H2, color: accent }}>Terms</div>
             <p style={BODY}>{renderField(t, "consulting_proposal", "termsBlock", vars)}</p>
             {pay.terms && <p style={BODY}>{pay.terms}</p>}
 
             {assumptions.length > 0 && (
               <>
-                <div style={{ ...H2, color: accent }}>Assumptions</div>
+                <div className="pk-keep-next" style={{ ...H2, color: accent }}>Assumptions</div>
                 <p style={BODY}>{renderField(t, "consulting_proposal", "assumptionsLead", vars)}</p>
                 <ul style={{ fontFamily: SANS, fontSize: 12.5, lineHeight: 1.65, margin: "0 0 10px", paddingLeft: 22 }}>
                   {assumptions.map((a, i) => (
@@ -279,32 +279,34 @@ export default async function ConsultingLetterPage({
               </>
             )}
 
-            <div style={{ ...H2, color: accent }}>Acceptance</div>
-            <p style={BODY}>{renderField(t, "consulting_proposal", "signoff", vars)}</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 34, fontFamily: SANS, fontSize: 11.5 }}>
-              {[customer || "Customer", companyName].map((party) => (
-                <div key={party}>
-                  <div style={{ borderBottom: "1.5px solid #16181d", height: 34 }} />
-                  <div style={{ marginTop: 6, color: "#5b616e" }}>{party} — signature / date</div>
-                </div>
-              ))}
+            <div className="pk-keep-next" style={{ ...H2, color: accent }}>Acceptance</div>
+            <div className="pk-keep">
+              <p style={BODY}>{renderField(t, "consulting_proposal", "signoff", vars)}</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 34, fontFamily: SANS, fontSize: 11.5 }}>
+                {[customer || "Customer", companyName].map((party) => (
+                  <div key={party}>
+                    <div style={{ borderBottom: "1.5px solid #16181d", height: 34 }} />
+                    <div style={{ marginTop: 6, color: "#5b616e" }}>{party} — signature / date</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </>
         ) : (
           <>
             <p style={BODY}>{renderField(t, "consulting_spec", "coverIntro", vars)}</p>
 
-            <div style={{ ...H2, color: accent }}>General conditions</div>
+            <div className="pk-keep-next" style={{ ...H2, color: accent }}>General conditions</div>
             <p style={BODY}>{renderField(t, "consulting_spec", "generalConditions", vars)}</p>
 
             {pay.scope && (
               <>
-                <div style={{ ...H2, color: accent }}>Project scope</div>
+                <div className="pk-keep-next" style={{ ...H2, color: accent }}>Project scope</div>
                 <p style={BODY}>{pay.scope}</p>
               </>
             )}
 
-            <div style={{ ...H2, color: accent }}>Equipment schedule</div>
+            <div className="pk-keep-next" style={{ ...H2, color: accent }}>Equipment schedule</div>
             <p style={BODY}>{renderField(t, "consulting_spec", "scheduleLead", vars)}</p>
             {linkedDesigns.length ? (
               <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 12.5, margin: "4px 0 12px" }}>
@@ -337,7 +339,7 @@ export default async function ConsultingLetterPage({
               </p>
             )}
 
-            <div style={{ ...H2, color: accent }}>Clarifications</div>
+            <div className="pk-keep-next" style={{ ...H2, color: accent }}>Clarifications</div>
             <p style={BODY}>{renderField(t, "consulting_spec", "closing", vars)}</p>
           </>
         )}

@@ -281,11 +281,11 @@ export default async function RepairLetterPage({
       </div>
 
       {/* letter sheet */}
-      <div style={{ padding: "26px 16px 60px" }}>
+      <div className="pk-doc-wrap" style={{ padding: "26px 16px 60px" }}>
         <div className="pk-doc-page">
           <div style={{ fontFamily: SANS, fontSize: "11pt", lineHeight: 1.5, color: "#111" }}>
             {/* letterhead */}
-            <div style={{ marginBottom: 26 }}>
+            <div className="pk-keep" style={{ marginBottom: 26 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={settings.logoDark || letterhead.src}
@@ -354,6 +354,7 @@ export default async function RepairLetterPage({
             {scopeItems.length > 0 && (
               <div style={{ margin: "0 0 14px" }}>
                 <div
+                  className="pk-keep-next"
                   style={{
                     fontSize: "9pt",
                     fontWeight: 600,
@@ -366,7 +367,7 @@ export default async function RepairLetterPage({
                   Scope of work
                 </div>
                 {scopeItems.map((text, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 3 }}>
+                  <div key={i} className="pk-keep" style={{ display: "flex", gap: 8, marginBottom: 3 }}>
                     <span style={{ color: "#aab0bb" }}>•</span>
                     <span>{text}</span>
                   </div>
@@ -376,6 +377,7 @@ export default async function RepairLetterPage({
 
             {notes && (
               <p
+                className="pk-keep"
                 style={{
                   margin: "0 0 14px",
                   fontSize: "10pt",
@@ -394,6 +396,7 @@ export default async function RepairLetterPage({
             {parts.length > 0 && (
               <div style={{ margin: "0 0 14px" }}>
                 <div
+                  className="pk-keep-next"
                   style={{
                     fontSize: "9pt",
                     fontWeight: 600,
@@ -406,7 +409,7 @@ export default async function RepairLetterPage({
                   Parts &amp; materials
                 </div>
                 {parts.map((p, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 3 }}>
+                  <div key={i} className="pk-keep" style={{ display: "flex", gap: 8, marginBottom: 3 }}>
                     <span style={{ color: "#aab0bb" }}>•</span>
                     <span>
                       {(p.qty || 1) + "× " + p.name}
@@ -419,6 +422,7 @@ export default async function RepairLetterPage({
             {hasVenueList && (
               <div style={{ margin: "0 0 14px" }}>
                 <div
+                  className="pk-keep-next"
                   style={{
                     fontSize: "9pt",
                     fontWeight: 600,
@@ -431,7 +435,7 @@ export default async function RepairLetterPage({
                   Venues included
                 </div>
                 {venueListRows.map((text, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 3 }}>
+                  <div key={i} className="pk-keep" style={{ display: "flex", gap: 8, marginBottom: 3 }}>
                     <span style={{ color: "#aab0bb" }}>•</span>
                     <span>{text}</span>
                   </div>
@@ -443,6 +447,7 @@ export default async function RepairLetterPage({
 
             {emergency && (
               <p
+                className="pk-keep"
                 style={{
                   margin: "0 0 13px",
                   fontSize: "10pt",
@@ -470,11 +475,13 @@ export default async function RepairLetterPage({
               {renderField(settings.templates, "repairs_proposal", "warranty", { warrantyMonths })}
             </p>
 
-            <p style={{ margin: "0 0 6px" }}>If you have any questions please contact me directly at:</p>
-            <div style={{ marginTop: 16, lineHeight: 1.5 }}>
-              <div style={{ fontWeight: 600 }}>—{owner}</div>
-              <div style={{ color: "#40454e" }}>{signerTitle}</div>
-              {signerEmail && <div style={{ color: "#40454e" }}>{signerEmail}</div>}
+            <div className="pk-keep">
+              <p style={{ margin: "0 0 6px" }}>If you have any questions please contact me directly at:</p>
+              <div style={{ marginTop: 16, lineHeight: 1.5 }}>
+                <div style={{ fontWeight: 600 }}>—{owner}</div>
+                <div style={{ color: "#40454e" }}>{signerTitle}</div>
+                {signerEmail && <div style={{ color: "#40454e" }}>{signerEmail}</div>}
+              </div>
             </div>
           </div>
         </div>

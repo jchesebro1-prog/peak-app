@@ -27,6 +27,88 @@ export type ReportLayout = "report" | "dossier" | "compact";
 
 const STRIPE = "repeating-linear-gradient(45deg,#eef0f3,#eef0f3 11px,#e7eaef 11px,#e7eaef 22px)";
 
+/* ============================================================
+ * Print-pagination budget helpers
+ * ------------------------------------------------------------
+ * The report is printed as a stack of fixed 8.5x11in `.rp-sheet`s
+ * (`overflow: hidden` on screen — see page.tsx for the `overflow: visible`
+ * print safety net). Chunked sections (rubric, recommendations, the
+ * rigging-log summary, and one-up detail-log sheets) need to know ahead of
+ * render time whether a slice of rows will fit on one sheet, but there's no
+ * DOM to measure at server-render time — so these estimate rendered height
+ * from text length instead.
+ *
+ * Estimates are deliberately conservative: narrower columns and wider
+ * average glyphs than the CSS actually renders, so a sheet chunks a little
+ * early rather than overflows. Kept pure and exported so they're testable
+ * independent of the JSX below.
+ * ============================================================ */
+
+/** Usable content height (px @ 96dpi) inside one `.rp-sheet`'s body: 11in
+ *  page height minus the running head, the running foot, and the
+ *  0.5in/0.7in body padding used throughout this file — rounded down for
+ *  safety margin. */
+export const SHEET_CONTENT_BUDGET_PX = 800;
+
+/** Conservative characters-per-line for a column `colWidthIn` inches wide
+ *  set in `fontSizePx`. Assumes an average glyph width of ~0.56x the font
+ *  size (wider than most proportional fonts render), so this under-counts
+ *  chars/line and correspondingly over-counts the resulting line/height
+ *  estimate. */
+export function estCharsPerLine(colWidthIn: number, fontSizePx: number): number {
+  const widthPx = colWidthIn * 96;
+  const avgGlyphPx = Math.max(1, fontSizePx * 0.56);
+  return Math.max(8, Math.floor(widthPx / avgGlyphPx));
+}
+
+/** Estimated wrapped-line count for `text` in a column `colWidthIn` inches
+ *  wide at `fontSizePx`. Empty text still costs 1 line (the "—" placeholder
+ *  every section falls back to). */
+export function estLineCount(text: string | null | undefined, colWidthIn: number, fontSizePx: number): number {
+  const len = (text || "").trim().length || 1;
+  return Math.max(1, Math.ceil(len / estCharsPerLine(colWidthIn, fontSizePx)));
+}
+
+/** Estimated rendered height (px) of a `numLines`-line text block at
+ *  `fontSizePx` / `lineHeight`, plus any fixed chrome (label, padding,
+ *  margins) passed in `chromePx`. */
+export function estTextBlockPx(numLines: number, fontSizePx: number, lineHeight: number, chromePx = 0): number {
+  return Math.round(numLines * fontSizePx * lineHeight) + chromePx;
+}
+
+/** Greedily packs `items` onto pages under `budgetPx`, charging `headerPx`
+ *  against the first item on the first page and `continuationHeaderPx`
+ *  against the first item on every later page (this only accounts for
+ *  extra in-page chrome like a title or table header — the running
+ *  head/foot are identical on every sheet regardless). Always makes
+ *  forward progress: a single item taller than the whole budget still gets
+ *  its own page rather than looping forever — the print-CSS
+ *  `overflow: visible` safety net (page.tsx) covers that rare case. Pure,
+ *  order-preserving. */
+export function paginateByHeight<T>(
+  items: T[],
+  itemPx: (item: T) => number,
+  budgetPx: number,
+  headerPx: number,
+  continuationHeaderPx: number = headerPx
+): T[][] {
+  const pages: T[][] = [];
+  let cur: T[] = [];
+  let used = headerPx;
+  for (const item of items) {
+    const h = itemPx(item);
+    if (used + h > budgetPx && cur.length) {
+      pages.push(cur);
+      cur = [];
+      used = continuationHeaderPx;
+    }
+    cur.push(item);
+    used += h;
+  }
+  if (cur.length) pages.push(cur);
+  return pages;
+}
+
 export function InspectionReportSheets({
   record,
   accent,
@@ -177,7 +259,7 @@ export function InspectionReportSheets({
     const label = kind === "after" ? "AFTER PHOTO" : "BEFORE PHOTO";
     const imgH = isDossier ? "2.7in" : "2.4in";
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, ...(isReport ? { flex: 1, minWidth: 0 } : {}) }}>
+      <div className="rp-photo" style={{ display: "flex", flexDirection: "column", gap: 6, ...(isReport ? { flex: 1, minWidth: 0 } : {}) }}>
         <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600, letterSpacing: ".1em", textTransform: "uppercase", color: "#aab0bb" }}>{cap}</div>
         {dataUrl ? (
           <img src={dataUrl} alt={cap} style={{ width: "100%", height: imgH, objectFit: "cover", borderRadius: 4, border: "1px solid #e4e7ec", display: "block" }} />
@@ -190,7 +272,52 @@ export function InspectionReportSheets({
     );
   };
 
-  const detailLog = (l: InspectionLog) => {
+  /* ---- one-up detail-log overflow plan (bug #2) ----
+   * report/dossier one-up sheets used to render explanation + solution/
+   * work-performed uncapped, so a log with a lot of text could overflow
+   * its 11in sheet. Estimate the rendered height of the photo column and
+   * the text column and, when the full sheet wouldn't fit, drop the
+   * work-performed/solution block (and the photos too, if it's still too
+   * tall) onto a continuation sheet rather than letting the sheet grow. */
+  const DETAIL_HEADER_PX = 130; // severity/status pills + title + location + border/padding
+  const DETAIL_BODY_TOP_PAD = 20; // paddingTop above the photo/text area
+  const DETAIL_TEXT_COL_IN = isDossier ? 6.9 : 3.9; // stacked full-width vs. grid's "1fr" column
+  const detailPhotoPx = (l: InspectionLog): number => {
+    const single = isDossier ? 276 : 247; // image height + label + gap, per photoBox()
+    if (l.status !== "closed") return single;
+    // closed logs show before + after: stacked (report/compact) sums the two; side-by-side (dossier) doesn't.
+    return isDossier ? single : single * 2 + 12;
+  };
+  const detailTextPx = (l: InspectionLog, includeBody: boolean): number => {
+    const explPx = estTextBlockPx(estLineCount(l.explanation, DETAIL_TEXT_COL_IN, 12.5), 12.5, 1.6, 12) + ((l.standards || []).length ? 28 : 0);
+    if (!includeBody) return explPx;
+    const bodyText = l.status === "closed" ? l.workPerformed || "—" : l.solution || "—";
+    const bodyPx = estTextBlockPx(estLineCount(bodyText, DETAIL_TEXT_COL_IN, 12.5), 12.5, 1.6, 32);
+    const fnYear = yearOf(l.firstNoted);
+    const curYear = yearOf(r.surveyDate);
+    const hasFirstNoted = !!l.firstNoted && !!fnYear && !!curYear && String(fnYear) !== String(curYear);
+    return explPx + bodyPx + (hasFirstNoted ? 30 : 0);
+  };
+  const detailTotalPx = (l: InspectionLog, includeBody: boolean, includePhotos: boolean): number => {
+    const photos = includePhotos ? detailPhotoPx(l) : 0;
+    const text = detailTextPx(l, includeBody);
+    // dossier stacks photos above text (sum); report/compact run them side
+    // by side in a grid (row height = the taller of the two columns).
+    const area = isDossier ? photos + text + (includePhotos ? 16 : 0) : Math.max(photos, text);
+    return DETAIL_HEADER_PX + DETAIL_BODY_TOP_PAD + area;
+  };
+  const planDetailLog = (l: InspectionLog): { moveBody: boolean; movePhotos: boolean } => {
+    if (detailTotalPx(l, true, true) <= SHEET_CONTENT_BUDGET_PX) return { moveBody: false, movePhotos: false };
+    if (detailTotalPx(l, false, true) <= SHEET_CONTENT_BUDGET_PX) return { moveBody: true, movePhotos: false };
+    // Still too tall with just the photos — move both. If explanation alone
+    // is still too long (rare), the print-CSS overflow:visible safety net
+    // (page.tsx) plus break-inside:avoid keep it from clipping mid-row.
+    return { moveBody: true, movePhotos: true };
+  };
+
+  const detailLog = (l: InspectionLog, opts?: { hidePhotos?: boolean; hideBody?: boolean }) => {
+    const hidePhotos = !!opts?.hidePhotos;
+    const hideBody = !!opts?.hideBody;
     const m = severityMeta(l.severity);
     const isClosed = l.status === "closed";
     const bodyLabel = isClosed ? "Work performed" : "Recommended solution";
@@ -222,10 +349,12 @@ export function InspectionReportSheets({
           </div>
 
           <div style={isDossier ? { flex: 1, display: "flex", flexDirection: "column", gap: 16, paddingTop: 18 } : { flex: 1, display: "grid", gridTemplateColumns: "2.9in 1fr", gap: 22, paddingTop: 20 }}>
-            <div style={isDossier ? { display: "flex", gap: 12 } : { display: "flex", flexDirection: "column", gap: 12 }}>
-              {photoBox("before", l.beforePhoto)}
-              {isClosed && photoBox("after", l.afterPhoto)}
-            </div>
+            {!hidePhotos && (
+              <div style={isDossier ? { display: "flex", gap: 12 } : { display: "flex", flexDirection: "column", gap: 12 }}>
+                {photoBox("before", l.beforePhoto)}
+                {isClosed && photoBox("after", l.afterPhoto)}
+              </div>
+            )}
             <div style={{ minWidth: 0 }}>
               <div style={sectionLabelStyle}>Explanation of problem</div>
               <p style={textStyle}>{l.explanation || "—"}</p>
@@ -236,9 +365,13 @@ export function InspectionReportSheets({
                   ))}
                 </div>
               )}
-              <div style={{ ...sectionLabelStyle, marginTop: 20 }}>{bodyLabel}</div>
-              <p style={textStyle}>{bodyText}</p>
-              {hasFirstNoted && <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 14, fontStyle: "italic" }}>{firstNotedLine}</div>}
+              {!hideBody && (
+                <>
+                  <div style={{ ...sectionLabelStyle, marginTop: 20 }}>{bodyLabel}</div>
+                  <p style={textStyle}>{bodyText}</p>
+                  {hasFirstNoted && <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 14, fontStyle: "italic" }}>{firstNotedLine}</div>}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -247,9 +380,98 @@ export function InspectionReportSheets({
     );
   };
 
-  /* ---- compact 2-up detail pages (6 per sheet) ---- */
+  /** Continuation sheet for whatever `detailLog` had to drop — same running
+   *  head/foot, a small "(continued)" marker, and just the moved photos
+   *  and/or body block. */
+  const detailLogContinued = (l: InspectionLog, showPhotos: boolean, showBody: boolean) => {
+    const m = severityMeta(l.severity);
+    const isClosed = l.status === "closed";
+    const bodyLabel = isClosed ? "Work performed" : "Recommended solution";
+    const bodyText = isClosed ? l.workPerformed || "—" : l.solution || "—";
+    return (
+      <div key={l.id + "-cont"} className="rp-sheet" style={sheet}>
+        {head}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "0.5in 0.7in" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: 12, borderBottom: `2px solid ${m.bar}` }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#9aa0ab", flexShrink: 0 }}>LOG {l.id}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#16181d", minWidth: 0, flex: 1 }}>{l.problem}</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", fontStyle: "italic", flexShrink: 0 }}>(continued)</span>
+          </div>
+          <div style={isDossier ? { display: "flex", flexDirection: "column", gap: 16, paddingTop: 18 } : { display: "flex", gap: 22, paddingTop: 20 }}>
+            {showPhotos && (
+              <div style={isDossier ? { display: "flex", gap: 12 } : { display: "flex", flexDirection: "column", gap: 12 }}>
+                {photoBox("before", l.beforePhoto)}
+                {isClosed && photoBox("after", l.afterPhoto)}
+              </div>
+            )}
+            {showBody && (
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={sectionLabelStyle}>{bodyLabel}</div>
+                <p style={textStyle}>{bodyText}</p>
+              </div>
+            )}
+          </div>
+        </div>
+        {foot}
+      </div>
+    );
+  };
+
+  /** One-up detail sheet(s) for a single log — 1 sheet when it fits, 2 when
+   *  `planDetailLog` had to move content off. */
+  const detailLogSheets = (l: InspectionLog): ReactNode[] => {
+    const plan = planDetailLog(l);
+    if (!plan.moveBody && !plan.movePhotos) return [detailLog(l)];
+    return [detailLog(l, { hidePhotos: plan.movePhotos, hideBody: plan.moveBody }), detailLogContinued(l, plan.movePhotos, plan.moveBody)];
+  };
+
+  /* ---- compact 2-up detail pages ----
+   * Real-DOM measurement showed a fixed "6 logs/page" (3 grid-rows of 2)
+   * routinely overflowed by 200px+ — each card runs ~330-360px tall once
+   * its photo box + explanation + solution/work-performed text are
+   * accounted for, and 3 rows of those don't fit one sheet. Pack cards two
+   * at a time (matching the CSS grid's own row-pairing) by estimated
+   * height instead of a fixed count. */
+  const CARD_TEXT_COL_IN = 3.15; // inner card width (half the 2-col grid, minus card padding/gap), conservative
+  const compactClip = (s: string | null | undefined, max: number): string => {
+    const t = s || "";
+    return t.length > max ? t.slice(0, max - 2).replace(/\s+\S*$/, "") + "…" : t || "—";
+  };
+  const compactCardPx = (l: InspectionLog): number => {
+    const isClosed = l.status === "closed";
+    const bodyText = isClosed ? l.workPerformed || "—" : l.solution || "—";
+    const expShort = compactClip(l.explanation, 190);
+    const bodyShort = compactClip(bodyText, 150);
+    return (
+      28 /* card padding(26) + border(2) */ +
+      20 /* header row: dot + "LOG N" + status pill */ +
+      estTextBlockPx(estLineCount(l.problem, CARD_TEXT_COL_IN, 14), 14, 1.5, 9) /* title, marginTop9 */ +
+      122 /* photo box: 1.15in + label/marginTop + border */ +
+      estTextBlockPx(estLineCount(expShort, CARD_TEXT_COL_IN, 11.5), 11.5, 1.5, 10) +
+      24 /* "Work performed"/"Recommended solution" label, marginTop11 */ +
+      estTextBlockPx(estLineCount(bodyShort, CARD_TEXT_COL_IN, 11.5), 11.5, 1.5, 3)
+    );
+  };
+  const COMPACT_HEADER_PX = 55; // h1(39) + marginBottom16, page 1 only
   const compactPages: InspectionLog[][] = [];
-  for (let i = 0; i < logsAll.length; i += 6) compactPages.push(logsAll.slice(i, i + 6));
+  {
+    let cur: InspectionLog[] = [];
+    let used = COMPACT_HEADER_PX;
+    for (let i = 0; i < logsAll.length; i += 2) {
+      const pair = logsAll.slice(i, i + 2);
+      const rowGap = cur.length > 0 ? 14 : 0;
+      const rowPx = Math.max(...pair.map(compactCardPx));
+      if (used + rowGap + rowPx > SHEET_CONTENT_BUDGET_PX && cur.length > 0) {
+        compactPages.push(cur);
+        cur = [];
+        used = 0;
+      }
+      const gap = cur.length > 0 ? 14 : 0;
+      cur.push(...pair);
+      used += gap + rowPx;
+    }
+    if (cur.length) compactPages.push(cur);
+  }
 
   /* ---- rubric appendix pagination ---- */
   const rub = r.rubric || [];
@@ -262,6 +484,7 @@ export function InspectionReportSheets({
   let rubRated = 0;
   let rubTotal = 0;
   const rubricPages: RubRow[][] = [];
+  let rubricStandfirst = "";
   if (hasRubricData) {
     const rows: RubRow[] = [];
     let lastG: string | null = null;
@@ -277,22 +500,35 @@ export function InspectionReportSheets({
         rows.push({ kind: "item", letter: it.l, label: it.label, rating: it.rating });
       });
     });
-    const budget = 40;
-    let cur: RubRow[] = [];
-    let lines = 0;
-    rows.forEach((row) => {
-      const cost = row.kind === "group" ? 2.2 : row.kind === "section" ? (row.comments ? 2.6 : 1.5) : 1;
-      if (lines + cost > budget && cur.length) {
-        rubricPages.push(cur);
-        cur = [];
-        lines = 0;
-      }
-      cur.push(row);
-      lines += cost;
-    });
-    if (cur.length) rubricPages.push(cur);
+    // Real px budgeting, calibrated against actual rendered heights (via a
+    // Playwright probe against the dev server — see PR notes). The old
+    // budget used an arbitrary "40 units" scale with flat per-row costs
+    // that turned out far too generous relative to what a page actually
+    // holds (real pages were overflowing by 200px+ regardless of comment
+    // length), so this switches to the same px-estimate + paginateByHeight
+    // machinery the other sections use.
+    const RUBRIC_COMMENT_COL_IN = 6.9;
+    const GROUP_ROW_PX = 30; // label line (fontSize10, default 1.5 line-height) + 15px marginTop
+    const SECTION_BASE_PX = 33.5; // marginTop9 + padding/border4.5 + title/meta row (fontSize13, 1.5 line-height)
+    const SECTION_COMMENT_CHROME_PX = 3; // marginTop above the comment line
+    const SECTION_COMMENT_LINE_PX = 16.5; // comment line at fontSize11, default 1.5 line-height
+    const ITEM_ROW_PX = 29; // padding 5px x2 + border1 + fontSize12, default 1.5 line-height
+    const COLUMN_HEADER_PX = 38; // repeats on every page: own height(22) + marginTop16
+    const rubricRowPx = (row: RubRow): number => {
+      if (row.kind === "group") return GROUP_ROW_PX;
+      if (row.kind === "item") return ITEM_ROW_PX;
+      return row.comments
+        ? SECTION_BASE_PX + SECTION_COMMENT_CHROME_PX + estLineCount(row.comments, RUBRIC_COMMENT_COL_IN, 11) * SECTION_COMMENT_LINE_PX
+        : SECTION_BASE_PX;
+    };
+    rubricStandfirst = "Every rigging component was visually inspected and rated — " + rubRated + " of " + rubTotal + " items assessed. This log documents the full walkthrough for your reference.";
+    const rubricStandfirstPx = estTextBlockPx(estLineCount(rubricStandfirst, 7.0, 12.5), 12.5, 1.55);
+    // Page-1 overhead: h1(39) + marginTop6 + standfirst + marginTop12 +
+    // ratings legend row(16) + the column-header row (which then repeats
+    // on every page, incl. continuations, via COLUMN_HEADER_PX below).
+    const RUBRIC_HEADER_PX = 39 + 6 + rubricStandfirstPx + 12 + 16 + COLUMN_HEADER_PX;
+    rubricPages.push(...paginateByHeight(rows, rubricRowPx, SHEET_CONTENT_BUDGET_PX, RUBRIC_HEADER_PX, COLUMN_HEADER_PX));
   }
-  const rubricStandfirst = "Every rigging component was visually inspected and rated — " + rubRated + " of " + rubTotal + " items assessed. This log documents the full walkthrough for your reference.";
 
   /* ---- venue information ---- */
   const vi = r.venueInfo || {};
@@ -318,6 +554,38 @@ export function InspectionReportSheets({
   const hasMeasurements = measurementGroups.length > 0;
   const venueStandfirst = "The physical facts of the venue and its rigging system" + (hasMeasurements ? ", with stage measurements recorded during the site visit." : ".");
 
+  /* ---- venue information pagination ----
+   * This page used to be a single always-one-sheet render. A fully filled
+   * out record (kv table + system & equipment + stage measurements) is
+   * routinely taller than one sheet on its own — not just with an unusually
+   * long "Owner concerns" note — so it needs the same chunk-when-it-
+   * overflows treatment as the other appendix sections. Rows, then the
+   * system block, then the measurements block are packed in order (same
+   * order they render in); a long kv table can itself spill across pages,
+   * and the system/measurements blocks land wherever they fit. */
+  type VenueItem = { kind: "row"; vr: { k: string; v: string } } | { kind: "system" } | { kind: "measurements" };
+  const VENUE_ROW_VAL_COL_IN = 4.7; // value column: 2.1in-label kv box, minus padding
+  const venueRowPx = (vr: { k: string; v: string }) => estTextBlockPx(estLineCount(vr.v, VENUE_ROW_VAL_COL_IN, 13.5), 13.5, 1.5, 21);
+  const SYSTEM_VAL_COL_IN = 3.3; // half of the 2-col system grid, minus gap/padding
+  const systemItemPx = (v: string) => estTextBlockPx(estLineCount(v, SYSTEM_VAL_COL_IN, 12.5), 12.5, 1.5, 15);
+  // Grid rows pair 2 items per visual row (34px baseline each); a wrapped
+  // value only grows its own pair, but summing the excess across all items
+  // is a conservative stand-in for "which pair" without tracking pairing.
+  const systemRowsPx = hasSystem ? Math.ceil(systemRows.length / 2) * 34 + systemRows.reduce((sum, sr) => sum + Math.max(0, systemItemPx(sr.v) - 34), 0) : 0;
+  const systemBlockPx = hasSystem ? 26 /* marginTop */ + 23 /* h2 */ + 12 /* marginTop */ + systemRowsPx : 0;
+  // measurementGroups render as a 3-col CSS grid — all columns stretch to
+  // the tallest group's natural height, so the grid's height is that max.
+  const measurementsGridPx = hasMeasurements ? Math.max(...measurementGroups.map((g) => 20 + g.items.length * 31)) : 0;
+  const measurementsBlockPx = hasMeasurements ? 26 /* marginTop */ + 23 /* h2 */ + 14 /* marginTop */ + measurementsGridPx + 14 /* marginTop */ + 16 /* footnote */ : 0;
+  const venueStandfirstPx = estTextBlockPx(estLineCount(venueStandfirst, 7.0, 12.5), 12.5, 1.55);
+  const VENUE_HEADER_PX = 39 /* h1 */ + 6 /* marginTop */ + venueStandfirstPx + 20; /* marginTop before the kv box */
+  const VENUE_CONT_HEADER_PX = 39 /* "(continued)" h1 */ + 20;
+  const venueItems: VenueItem[] = venueRows.map((vr) => ({ kind: "row" as const, vr }));
+  if (hasSystem) venueItems.push({ kind: "system" });
+  if (hasMeasurements) venueItems.push({ kind: "measurements" });
+  const venueItemPx = (item: VenueItem): number => (item.kind === "row" ? venueRowPx(item.vr) : item.kind === "system" ? systemBlockPx : measurementsBlockPx);
+  const venuePages: VenueItem[][] = paginateByHeight(venueItems, venueItemPx, SHEET_CONTENT_BUDGET_PX, VENUE_HEADER_PX, VENUE_CONT_HEADER_PX);
+
   /* ---- recommendations ---- */
   const recRank: Record<string, number> = { urgent: 0, necessary: 1, basic: 2 };
   const recOpen = (r.logs || [])
@@ -332,11 +600,50 @@ export function InspectionReportSheets({
     logRef: "#" + l.id,
   }));
   const recEmpty = recRows.length === 0;
-  const recPages: typeof recRows[] = [];
-  for (let i = 0; i < recRows.length; i += 11) recPages.push(recRows.slice(i, i + 11));
+  // Column widths (in): full 7.1in content width minus the #/priority/log
+  // columns and their gaps, minus the row's own right padding.
+  const REC_TEXT_COL_IN = 4.9;
+  const recRowPx = (rr: (typeof recRows)[number]) => {
+    const titlePx = estTextBlockPx(estLineCount(rr.problem, REC_TEXT_COL_IN, 12.5), 12.5, 1.35);
+    const bodyPx = estTextBlockPx(estLineCount(rr.text, REC_TEXT_COL_IN, 11.5), 11.5, 1.5, 2 /* marginTop */);
+    return 21 /* row padding (20) + border (1) */ + titlePx + bodyPx;
+  };
+  // Header block: h1 + standfirst + marginTop to the table (page 1 only);
+  // the column-header row itself repeats on every page (below).
+  const REC_HEADER_PX = 90;
+  const REC_CONT_HEADER_PX = 38;
+  const recPages: typeof recRows[] = paginateByHeight(recRows, recRowPx, SHEET_CONTENT_BUDGET_PX, REC_HEADER_PX, REC_CONT_HEADER_PX);
   const recStandfirst = c.open + " open finding" + (c.open === 1 ? "" : "s") + " to address, prioritized Urgent → Necessary → Basic. Closed items are omitted.";
   const recBasis = "Recommendations are based on OSHA 1910 fall-protection standards, NFPA 80 & 101 life-safety codes, and the ANSI E1 entertainment-technology series (E1.4 counterweight rigging, E1.22 fire-safety curtain).";
   const renovationText = "The most effective way to resolve these findings is a renovation package that addresses the open Urgent and Necessary repairs together so the venue can operate safely. Because of the potential structural concerns noted above and the number of findings across the system, the logs above are not individually estimated — a consolidated renovation budget is prepared separately and can be started from this report.";
+
+  /* ---- rigging log summary pagination ----
+   * Bug #1: this used to render every open+closed log on one sheet with no
+   * chunking at all, so a venue with a lot of findings would overflow the
+   * page. Flatten group headers + log rows into one list (same pattern as
+   * the rubric appendix above) and pack them by estimated height. When it
+   * all fits on one sheet (the common case), we render the original
+   * single-sheet, single-group-wrapper markup unchanged below so small
+   * reports keep their exact look and page count. */
+  type SummaryRow =
+    | { kind: "group"; key: string; label: string; bar: string; ink: string; count: number; first: boolean }
+    | { kind: "log"; log: InspectionLog };
+  const summaryFlat: SummaryRow[] = [];
+  summaryGroups.forEach((g, gi) => {
+    summaryFlat.push({ kind: "group", key: g.key, label: g.label, bar: g.bar, ink: g.ink, count: g.rows.length, first: gi === 0 });
+    g.rows.forEach((l) => summaryFlat.push({ kind: "log", log: l }));
+  });
+  // Problem-text column: 7.1in content width minus the id column, the
+  // status pill, and the two 13px flex gaps between them.
+  const SUMMARY_ROW_TEXT_COL_IN = 5.6;
+  const summaryRowPx = (row: SummaryRow): number => {
+    if (row.kind === "group") return (row.first ? 0 : 18) /* group gap */ + 33 /* header row + border */;
+    return estTextBlockPx(estLineCount(row.log.problem, SUMMARY_ROW_TEXT_COL_IN, 13), 13, 1.35, 17 /* row padding + border */);
+  };
+  // Header block: h1 + standfirst + marginTop to the list (page 1 only).
+  const SUMMARY_HEADER_PX = 72;
+  const SUMMARY_CONT_HEADER_PX = 37; // h1 "(continued)" + marginTop to the list
+  const summaryPages: SummaryRow[][] = paginateByHeight(summaryFlat, summaryRowPx, SHEET_CONTENT_BUDGET_PX, SUMMARY_HEADER_PX, SUMMARY_CONT_HEADER_PX);
 
   const wrap = (children: ReactNode, key?: string) => (
     <div key={key} className="rp-sheet" style={sheet}>
@@ -393,7 +700,7 @@ export function InspectionReportSheets({
               { k: "Inspector", v: r.inspector || "—" },
               { k: "Condition", v: cond.label },
             ].map((row) => (
-              <div key={row.k} style={{ display: "flex", borderBottom: "1px solid #eceef1" }}>
+              <div key={row.k} className="rp-kv-row" style={{ display: "flex", borderBottom: "1px solid #eceef1" }}>
                 <div style={{ width: "2.3in", flexShrink: 0, padding: "12px 15px", fontFamily: "var(--font-mono)", fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: "#8c919c", background: "#fafbfc", borderRight: "1px solid #eceef1" }}>{row.k}</div>
                 <div style={{ flex: 1, padding: "12px 15px", fontSize: 14, fontWeight: 600 }}>{row.v}</div>
               </div>
@@ -487,52 +794,129 @@ export function InspectionReportSheets({
       )}
 
       {/* ============ VENUE INFORMATION ============ */}
-      {wrap(
-        <>
-          <div style={h1}>Venue information</div>
-          <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 6, lineHeight: 1.55 }}>{venueStandfirst}</div>
-          <div style={{ marginTop: 20, border: "1px solid #e4e7ec", borderRadius: 4 }}>
-            {venueRows.map((vr) => (
-              <div key={vr.k} style={{ display: "flex", borderBottom: "1px solid #eceef1" }}>
-                <div style={{ width: "2.1in", flexShrink: 0, padding: "10px 15px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".07em", textTransform: "uppercase", color: "#8c919c", background: "#fafbfc", borderRight: "1px solid #eceef1" }}>{vr.k}</div>
-                <div style={{ flex: 1, padding: "10px 15px", fontSize: 13.5, fontWeight: 600 }}>{vr.v}</div>
-              </div>
-            ))}
-          </div>
-          {hasSystem && (
+      {venuePages.length <= 1 ? (
+        // Everything fits on one sheet — render the original unchunked
+        // markup verbatim so small/typical reports keep their exact look.
+        wrap(
+          <>
+            <div style={h1}>Venue information</div>
+            <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 6, lineHeight: 1.55 }}>{venueStandfirst}</div>
+            <div style={{ marginTop: 20, border: "1px solid #e4e7ec", borderRadius: 4 }}>
+              {venueRows.map((vr) => (
+                <div key={vr.k} className="rp-kv-row" style={{ display: "flex", borderBottom: "1px solid #eceef1" }}>
+                  <div style={{ width: "2.1in", flexShrink: 0, padding: "10px 15px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".07em", textTransform: "uppercase", color: "#8c919c", background: "#fafbfc", borderRight: "1px solid #eceef1" }}>{vr.k}</div>
+                  <div style={{ flex: 1, padding: "10px 15px", fontSize: 13.5, fontWeight: 600 }}>{vr.v}</div>
+                </div>
+              ))}
+            </div>
+            {hasSystem && (
+              <>
+                <div style={{ ...h2, marginTop: 26 }}>System &amp; equipment</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 26px", marginTop: 12 }}>
+                  {systemRows.map((sr) => (
+                    <div key={sr.k} className="rp-kv-row" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid #f0f1f4" }}>
+                      <span style={{ fontSize: 11.5, color: "#8c919c", flexShrink: 0 }}>{sr.k}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right" }}>{sr.v}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {hasMeasurements && (
+              <>
+                <div style={{ ...h2, marginTop: 26 }}>Stage measurements</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 14 }}>
+                  {measurementGroups.map((mg) => (
+                    <div key={mg.group}>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, letterSpacing: ".07em", textTransform: "uppercase", color: accentInk, paddingBottom: 6, borderBottom: "2px solid #16181d" }}>{mg.group}</div>
+                      {mg.items.map((mi) => (
+                        <div key={mi.label} className="rp-kv-row" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid #f4f5f7" }}>
+                          <span style={{ fontSize: 11, color: "#5b616e", lineHeight: 1.3 }}>{mi.label}</span>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{mi.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 14, lineHeight: 1.5 }}>Field dimensions are approximate; verify against architectural drawings before fabrication.</div>
+              </>
+            )}
+          </>,
+          "venue-info"
+        )
+      ) : (
+        // Overflowed one sheet — rows (then system, then measurements) packed
+        // by estimated height; continuation sheets title " (continued)".
+        venuePages.map((items, pi) =>
+          wrap(
             <>
-              <div style={{ ...h2, marginTop: 26 }}>System &amp; equipment</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 26px", marginTop: 12 }}>
-                {systemRows.map((sr) => (
-                  <div key={sr.k} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid #f0f1f4" }}>
-                    <span style={{ fontSize: 11.5, color: "#8c919c", flexShrink: 0 }}>{sr.k}</span>
-                    <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right" }}>{sr.v}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-          {hasMeasurements && (
-            <>
-              <div style={{ ...h2, marginTop: 26 }}>Stage measurements</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 14 }}>
-                {measurementGroups.map((mg) => (
-                  <div key={mg.group}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, letterSpacing: ".07em", textTransform: "uppercase", color: accentInk, paddingBottom: 6, borderBottom: "2px solid #16181d" }}>{mg.group}</div>
-                    {mg.items.map((mi) => (
-                      <div key={mi.label} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid #f4f5f7" }}>
-                        <span style={{ fontSize: 11, color: "#5b616e", lineHeight: 1.3 }}>{mi.label}</span>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{mi.value}</span>
+              <div style={h1}>{"Venue information" + (pi === 0 ? "" : " (continued)")}</div>
+              {pi === 0 && <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 6, lineHeight: 1.55 }}>{venueStandfirst}</div>}
+              {(() => {
+                const out: ReactNode[] = [];
+                let i = 0;
+                while (i < items.length) {
+                  const item = items[i];
+                  if (item.kind === "row") {
+                    const rowsChunk: Array<{ k: string; v: string }> = [];
+                    while (i < items.length && items[i].kind === "row") {
+                      rowsChunk.push((items[i] as { kind: "row"; vr: { k: string; v: string } }).vr);
+                      i++;
+                    }
+                    out.push(
+                      <div key="kv" style={{ marginTop: 20, border: "1px solid #e4e7ec", borderRadius: 4 }}>
+                        {rowsChunk.map((vr) => (
+                          <div key={vr.k} className="rp-kv-row" style={{ display: "flex", borderBottom: "1px solid #eceef1" }}>
+                            <div style={{ width: "2.1in", flexShrink: 0, padding: "10px 15px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".07em", textTransform: "uppercase", color: "#8c919c", background: "#fafbfc", borderRight: "1px solid #eceef1" }}>{vr.k}</div>
+                            <div style={{ flex: 1, padding: "10px 15px", fontSize: 13.5, fontWeight: 600 }}>{vr.v}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 14, lineHeight: 1.5 }}>Field dimensions are approximate; verify against architectural drawings before fabrication.</div>
-            </>
-          )}
-        </>,
-        "venue-info"
+                    );
+                  } else if (item.kind === "system") {
+                    out.push(
+                      <div key="system" style={{ marginTop: 26 }}>
+                        <div style={h2}>System &amp; equipment</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 26px", marginTop: 12 }}>
+                          {systemRows.map((sr) => (
+                            <div key={sr.k} className="rp-kv-row" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid #f0f1f4" }}>
+                              <span style={{ fontSize: 11.5, color: "#8c919c", flexShrink: 0 }}>{sr.k}</span>
+                              <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right" }}>{sr.v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                    i++;
+                  } else {
+                    out.push(
+                      <div key="measurements" style={{ marginTop: 26 }}>
+                        <div style={h2}>Stage measurements</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 18, marginTop: 14 }}>
+                          {measurementGroups.map((mg) => (
+                            <div key={mg.group}>
+                              <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fontWeight: 600, letterSpacing: ".07em", textTransform: "uppercase", color: accentInk, paddingBottom: 6, borderBottom: "2px solid #16181d" }}>{mg.group}</div>
+                              {mg.items.map((mi) => (
+                                <div key={mi.label} className="rp-kv-row" style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid #f4f5f7" }}>
+                                  <span style={{ fontSize: 11, color: "#5b616e", lineHeight: 1.3 }}>{mi.label}</span>
+                                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{mi.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 14, lineHeight: 1.5 }}>Field dimensions are approximate; verify against architectural drawings before fabrication.</div>
+                      </div>
+                    );
+                    i++;
+                  }
+                }
+                return out;
+              })()}
+            </>,
+            "venue-info-" + pi
+          )
+        )
       )}
 
       {/* ============ ABOUT YOUR VENUE ============ */}
@@ -608,7 +992,7 @@ export function InspectionReportSheets({
                     </div>
                   );
                 return (
-                  <div key={ri} style={{ display: "flex", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #f4f5f7" }}>
+                  <div key={ri} className="rp-log-row" style={{ display: "flex", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #f4f5f7" }}>
                     <span style={{ flex: 1, fontSize: 12, color: "#3a3f4a" }}>
                       <b style={{ fontWeight: 600, color: "#aab0bb", fontFamily: "var(--font-mono)", fontSize: 10, marginRight: 8 }}>{row.letter}</b>
                       {row.label}
@@ -628,34 +1012,67 @@ export function InspectionReportSheets({
         )}
 
       {/* ============ RIGGING LOG SUMMARY ============ */}
-      {wrap(
-        <>
-          <div style={h1}>Rigging log summary</div>
-          <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 6 }}>{c.open + " open · " + c.closed + " closed · " + c.total + " total findings"}</div>
-          <div style={{ marginTop: 20 }}>
-            {summaryGroups.map((g) => (
-              <div key={g.key} style={{ marginBottom: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0 8px", borderBottom: `2px solid ${g.bar}` }}>
-                  <span style={{ display: "inline-block", fontSize: 13, fontWeight: 800, letterSpacing: ".01em", color: g.ink }}>{g.label}</span>
-                  <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>{g.rows.length + " log" + (g.rows.length === 1 ? "" : "s")}</span>
-                </div>
-                {g.rows.map((l) => (
-                  <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 13, padding: "8px 2px", borderBottom: "1px solid #f0f1f4" }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#5b616e", width: 26, flexShrink: 0, textAlign: "right" }}>{l.id}</span>
-                    <span style={statusPill(l.status)}>{statusMeta(l.status).label}</span>
-                    <span style={{ fontSize: 13, lineHeight: 1.35, flex: 1, minWidth: 0 }}>{l.problem}</span>
+      {summaryPages.length <= 1 ? (
+        // Everything fits on one sheet — render the original unchunked
+        // markup verbatim so small reports keep their exact look.
+        wrap(
+          <>
+            <div style={h1}>Rigging log summary</div>
+            <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 6 }}>{c.open + " open · " + c.closed + " closed · " + c.total + " total findings"}</div>
+            <div style={{ marginTop: 20 }}>
+              {summaryGroups.map((g) => (
+                <div key={g.key} style={{ marginBottom: 18 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0 8px", borderBottom: `2px solid ${g.bar}` }}>
+                    <span style={{ display: "inline-block", fontSize: 13, fontWeight: 800, letterSpacing: ".01em", color: g.ink }}>{g.label}</span>
+                    <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>{g.rows.length + " log" + (g.rows.length === 1 ? "" : "s")}</span>
                   </div>
-                ))}
+                  {g.rows.map((l) => (
+                    <div key={l.id} className="rp-log-row" style={{ display: "flex", alignItems: "center", gap: 13, padding: "8px 2px", borderBottom: "1px solid #f0f1f4" }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#5b616e", width: 26, flexShrink: 0, textAlign: "right" }}>{l.id}</span>
+                      <span style={statusPill(l.status)}>{statusMeta(l.status).label}</span>
+                      <span style={{ fontSize: 13, lineHeight: 1.35, flex: 1, minWidth: 0 }}>{l.problem}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {logsAll.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>No logged findings in this inspection.</div>}
+            </div>
+          </>,
+          "summary"
+        )
+      ) : (
+        // Overflowed one sheet — same rows, chunked by estimated height.
+        // Continuation sheets repeat the running head/foot (via `wrap`)
+        // with the title suffixed " (continued)".
+        summaryPages.map((rows, pi) =>
+          wrap(
+            <>
+              <div style={h1}>{"Rigging log summary" + (pi === 0 ? "" : " (continued)")}</div>
+              {pi === 0 && <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 6 }}>{c.open + " open · " + c.closed + " closed · " + c.total + " total findings"}</div>}
+              <div style={{ marginTop: 20 }}>
+                {rows.map((row, ri) =>
+                  row.kind === "group" ? (
+                    <div key={"g" + row.key + pi} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0 8px", marginTop: ri === 0 ? 0 : 18, borderBottom: `2px solid ${row.bar}` }}>
+                      <span style={{ display: "inline-block", fontSize: 13, fontWeight: 800, letterSpacing: ".01em", color: row.ink }}>{row.label}</span>
+                      <span style={{ fontSize: 11.5, color: "#9aa0ab" }}>{row.count + " log" + (row.count === 1 ? "" : "s")}</span>
+                    </div>
+                  ) : (
+                    <div key={"l" + row.log.id} className="rp-log-row" style={{ display: "flex", alignItems: "center", gap: 13, padding: "8px 2px", borderBottom: "1px solid #f0f1f4" }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "#5b616e", width: 26, flexShrink: 0, textAlign: "right" }}>{row.log.id}</span>
+                      <span style={statusPill(row.log.status)}>{statusMeta(row.log.status).label}</span>
+                      <span style={{ fontSize: 13, lineHeight: 1.35, flex: 1, minWidth: 0 }}>{row.log.problem}</span>
+                    </div>
+                  )
+                )}
               </div>
-            ))}
-            {logsAll.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>No logged findings in this inspection.</div>}
-          </div>
-        </>,
-        "summary"
+            </>,
+            "summary-" + pi
+          )
+        )
       )}
 
       {/* ============ DETAIL LOGS ============ */}
-      {oneUp && logsAll.map((l) => detailLog(l))}
+      {oneUp && logsAll.flatMap((l) => detailLogSheets(l))}
       {isCompact &&
         compactPages.map((pageLogs, pi) =>
           wrap(
@@ -666,10 +1083,10 @@ export function InspectionReportSheets({
                   const m = severityMeta(l.severity);
                   const isClosed = l.status === "closed";
                   const bodyText = isClosed ? l.workPerformed || "—" : l.solution || "—";
-                  const expShort = (l.explanation || "").length > 190 ? l.explanation.slice(0, 188).replace(/\s+\S*$/, "") + "…" : l.explanation || "—";
-                  const bodyShort = (bodyText || "").length > 150 ? bodyText.slice(0, 148).replace(/\s+\S*$/, "") + "…" : bodyText;
+                  const expShort = compactClip(l.explanation, 190);
+                  const bodyShort = compactClip(bodyText, 150);
                   return (
-                    <div key={l.id} style={{ border: "1px solid #e4e7ec", borderRadius: 5, borderTop: `4px solid ${m.bar}`, padding: "13px 14px", display: "flex", flexDirection: "column" }}>
+                    <div key={l.id} className="rp-log-row" style={{ border: "1px solid #e4e7ec", borderRadius: 5, borderTop: `4px solid ${m.bar}`, padding: "13px 14px", display: "flex", flexDirection: "column" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                           <span style={{ width: 9, height: 9, borderRadius: "50%", flexShrink: 0, background: m.bar }} />
@@ -715,7 +1132,7 @@ export function InspectionReportSheets({
                 <span style={{ width: "0.5in", flexShrink: 0, textAlign: "right" }}>Log</span>
               </div>
               {rows.map((rr) => (
-                <div key={rr.num} style={{ display: "flex", alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #f0f1f4" }}>
+                <div key={rr.num} className="rp-log-row" style={{ display: "flex", alignItems: "flex-start", padding: "10px 0", borderBottom: "1px solid #f0f1f4" }}>
                   <span style={{ width: 30, flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, color: "#5b616e" }}>{rr.num}</span>
                   <span style={{ width: "1.15in", flexShrink: 0 }}>
                     <span style={{ display: "inline-block", fontSize: 9, fontWeight: 700, letterSpacing: ".03em", textTransform: "uppercase", color: rr.sev.ink, background: rr.sev.soft, border: `1px solid ${rr.sev.bd}`, padding: "2px 8px", borderRadius: 5 }}>{rr.sev.label}</span>

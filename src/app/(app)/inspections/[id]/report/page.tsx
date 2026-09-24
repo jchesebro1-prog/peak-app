@@ -27,6 +27,14 @@ const CSS = `
   @media print {
     .rp-desk { background: #fff !important; padding: 0 !important; gap: 0 !important; }
     .rp-sheet { box-shadow: none !important; margin: 0 !important; }
+    /* Safety net: the pagination budgets in report-doc.tsx are estimates,
+       not measurements. If one still misjudges, let the sheet grow instead
+       of silently clipping content (the on-screen .rp-sheet is
+       overflow: hidden) -- combined with break-inside: avoid below, an
+       overflow spills onto a following printed page instead of getting cut
+       mid-row. */
+    .rp-sheet { overflow: visible !important; }
+    .rp-kv-row, .rp-log-row, .rp-photo { break-inside: avoid; }
     @page { size: letter; margin: 0; }
   }
 `;
