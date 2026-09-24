@@ -7367,3 +7367,20 @@ mode; they get the customer document). Verified at 1440×900: the body split sta
 the top, no horizontal overflow, the column scrolls internally. Gates: tsc 0 errors, `test:specs`
 2032 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors — identical to the
 origin/main baseline at 77c657c. Decision D218.
+
+---
+
+## 164. Estimator — the Quote details column is collapsible — DONE 2026-09-24 (D219)
+
+**Reported:** 2026-09-24 (Jeff, right after #163 shipped): "make the right sidebar collapsible."
+
+**Done 2026-09-24.** The column from #163 gains a header row (`QUOTE DETAILS` + **Hide ›**);
+hiding it leaves a 36px dark tab (`‹` + a vertical "Quote details" label) whose whole height is
+the Show button, and the section cards take the freed 264px. The choice is remembered per browser
+in `localStorage["quartzite.estimator.metaOpen"]`, applied after mount so the server and first
+client render always agree (a collapsed user sees a brief open→closed settle on load, by design).
+Below 860px the collapsed tab becomes a short horizontal bar. The four field groups are untouched.
+Verified in a browser at 1440×900: Hide → 36px strip and the cards column grew from 878px to
+1142px; reload → still collapsed; a real click on the strip → expanded again, stored `"1"`.
+Gates: tsc 0 errors, `test:specs` 2032 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124
+problems / 0 errors — identical to the origin/main baseline at 9c5b719. Decision D219.

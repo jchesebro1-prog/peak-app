@@ -101,6 +101,8 @@ const CSS = `
 .est-scroll::-webkit-scrollbar { width: 10px; }
 .est-scroll::-webkit-scrollbar-thumb { background: #d6d9e0; border-radius: 8px; border: 3px solid #f7f8fa; }
 .est-meta::-webkit-scrollbar-thumb { background: #3a3e46; border-color: #23262d; }
+.est-meta-toggle:hover { color: #fff !important; border-color: #4a4e56 !important; }
+.est-meta-tab:hover { color: #fff !important; background: #2b2e35 !important; }
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
 .est-warm:focus { border-color: #e3cf94 !important; outline: none; }
 .est-secname:hover { border-color: #e4e7ec !important; }
@@ -120,6 +122,8 @@ const CSS = `
   .est-body { flex-direction: column !important; }
   .est-side { width: 100% !important; border-right: none !important; border-bottom: 1px solid #ececf0 !important; }
   .est-meta { width: 100% !important; order: -1; overflow: visible !important; border-left: none !important; border-bottom: 1px solid #2b2e35 !important; }
+  .est-meta-collapsed .est-meta-tab { flex-direction: row !important; justify-content: center !important; padding: 8px 12px !important; }
+  .est-meta-vlabel { writing-mode: horizontal-tb !important; }
   .est-main { overflow: visible !important; padding: 16px 16px 48px !important; }
   .est-docwrap { padding: 16px !important; }
   .est-doc { width: 100% !important; padding: 26px 20px !important; }
@@ -278,6 +282,27 @@ const META_SECTION: CSSProperties = {
 };
 const META_SUB: CSSProperties = { fontSize: 11, color: "#6b7079", marginTop: 2 };
 const META_HINT: CSSProperties = { fontSize: 10.5, color: "#6b7079", lineHeight: 1.35 };
+const META_OPEN_KEY = "quartzite.estimator.metaOpen";
+const META_HEAD: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  padding: "10px 12px 10px 16px",
+  borderBottom: "1px solid #2b2e35",
+};
+const META_TOGGLE: CSSProperties = {
+  fontFamily: "var(--font-ui)",
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#9aa0ab",
+  background: "transparent",
+  border: "1px solid #3a3e46",
+  borderRadius: 6,
+  padding: "4px 8px",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
 
 const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 months", "6–12 months", "TBD"] as const;
 
@@ -325,6 +350,25 @@ export default function EstimatorClient({
   // the estimator's first viewport. The bar can be expanded whenever a user
   // needs to submit, claim, decide, attest, or send the quote.
   const [reviewBarOpen, setReviewBarOpen] = useState(false);
+  /** Quote-details column (#164). Defaults open on both server and first client
+   *  render; the remembered choice is applied after mount so hydration matches. */
+  const [metaOpen, setMetaOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(META_OPEN_KEY) === "0") setMetaOpen(false);
+    } catch {
+      /* storage unavailable (private mode, blocked) — stay open */
+    }
+  }, []);
+  const toggleMeta = () => {
+    const next = !metaOpen;
+    setMetaOpen(next);
+    try {
+      window.localStorage.setItem(META_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
   const [reviewerSel, setReviewerSel] = useState("queue");
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
@@ -2753,143 +2797,199 @@ export default function EstimatorClient({
             </div>
 
             {/* quote details — the former context bar + note rows, now a right
-                column so the systems + cards get the first viewport (#163, D218) */}
-            <aside
-              className="est-meta est-scroll"
-              aria-label="Quote details"
-              style={{
-                width: 300,
-                flexShrink: 0,
-                minHeight: 0,
-                overflowY: "auto",
-                background: "#23262d",
-                borderLeft: "1px solid #2b2e35",
-                color: "#fff",
-              }}
-            >
-              <section style={META_SECTION}>
-                <span style={CTX_LABEL}>Prepared for</span>
-                <select
-                  value={customerId || ""}
-                  onChange={(e) => pickCustomer(e.target.value)}
-                  title="Linked customer — flows to the project when this quote is won"
-                  style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                >
-                  {customerOptions.map((o) => (
-                    <option key={o.value || "__none"} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                {showVenuePick && (
-                  <>
-                    <span style={META_SUB}>at</span>
-                    <select
-                      value={locationId || ""}
-                      onChange={(e) => pickVenue(e.target.value)}
-                      title="Which of the customer's venues"
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                    >
-                      {venueOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                {showContactPick && (
-                  <>
-                    <span style={META_SUB}>attn</span>
-                    <select
-                      value={currentContact ? currentContact.name : ""}
-                      onChange={(e) => pickContact(e.target.value)}
-                      title="Contact this quote is prepared for"
-                      style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
-                    >
-                      {contactOptions.map((o) => (
-                        <option key={o.value || "__none"} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                <span style={META_SUB}>category</span>
-                <input
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  onBlur={() => {
-                    const v = category.trim();
-                    if (v !== category) setCategory(v);
-                    if (v === categorySaved.current) return;
-                    categorySaved.current = v;
-                    persistMeta({ category: v });
-                  }}
-                  placeholder="Category"
-                  title="Quote category — shown on the Quotes hub"
-                  style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
-                />
-              </section>
-
-              <section style={META_SECTION}>
-                <span style={CTX_LABEL}>Quote note</span>
-                <input
-                  className="est-notefield"
-                  value={quoteNote}
-                  onChange={(e) => onQuoteNote(e.target.value)}
-                  placeholder="Cover language printed on the quote header — e.g. Thank you for the opportunity…"
-                  style={{
-                    width: "100%",
-                    minWidth: 0,
-                    fontFamily: "var(--font-ui)",
-                    fontSize: 12.5,
-                    color: "#fff",
-                    background: "#2b2e35",
-                    border: "1px solid #3a3e46",
-                    borderRadius: 7,
-                    padding: "8px 11px",
-                  }}
-                />
-                <span style={META_HINT}>Shows on the PDF header</span>
-              </section>
-
-              <section style={META_SECTION}>
-                <span style={CTX_LABEL}>Assumptions</span>
-                {assumptionLibrary.length > 0 && (
-                  <div style={{ display: "grid", gap: 5 }}>
-                    {assumptionLibrary.map((line) => (
-                      <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
-                        <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
-                        <span>{line}</span>
-                      </label>
+                column so the systems + cards get the first viewport (#163, D218);
+                collapsible to a 36px tab, remembered per browser (#164, D219) */}
+            {metaOpen ? (
+              <aside
+                className="est-meta est-scroll"
+                aria-label="Quote details"
+                style={{
+                  width: 300,
+                  flexShrink: 0,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  background: "#23262d",
+                  borderLeft: "1px solid #2b2e35",
+                  color: "#fff",
+                }}
+              >
+                <div style={META_HEAD}>
+                  <span style={{ ...CTX_LABEL, fontWeight: 600 }}>Quote details</span>
+                  <button
+                    type="button"
+                    className="est-meta-toggle"
+                    onClick={toggleMeta}
+                    aria-expanded={true}
+                    title="Hide quote details"
+                    style={META_TOGGLE}
+                  >
+                    Hide ›
+                  </button>
+                </div>
+                <section style={META_SECTION}>
+                  <span style={CTX_LABEL}>Prepared for</span>
+                  <select
+                    value={customerId || ""}
+                    onChange={(e) => pickCustomer(e.target.value)}
+                    title="Linked customer — flows to the project when this quote is won"
+                    style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                  >
+                    {customerOptions.map((o) => (
+                      <option key={o.value || "__none"} value={o.value}>
+                        {o.label}
+                      </option>
                     ))}
-                  </div>
-                )}
-                <textarea
-                  className="est-notefield"
-                  value={assumptions}
-                  onChange={(e) => onAssumptions(e.target.value)}
-                  placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
-                  rows={3}
-                  style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
-                />
-                <span style={META_HINT}>Company defaults + editable exceptions</span>
-              </section>
+                  </select>
+                  {showVenuePick && (
+                    <>
+                      <span style={META_SUB}>at</span>
+                      <select
+                        value={locationId || ""}
+                        onChange={(e) => pickVenue(e.target.value)}
+                        title="Which of the customer's venues"
+                        style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                      >
+                        {venueOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                  {showContactPick && (
+                    <>
+                      <span style={META_SUB}>attn</span>
+                      <select
+                        value={currentContact ? currentContact.name : ""}
+                        onChange={(e) => pickContact(e.target.value)}
+                        title="Contact this quote is prepared for"
+                        style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                      >
+                        {contactOptions.map((o) => (
+                          <option key={o.value || "__none"} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                  <span style={META_SUB}>category</span>
+                  <input
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    onBlur={() => {
+                      const v = category.trim();
+                      if (v !== category) setCategory(v);
+                      if (v === categorySaved.current) return;
+                      categorySaved.current = v;
+                      persistMeta({ category: v });
+                    }}
+                    placeholder="Category"
+                    title="Quote category — shown on the Quotes hub"
+                    style={{ ...DARK_SELECT, width: "100%", minWidth: 0, cursor: "text" }}
+                  />
+                </section>
 
-              <section style={{ ...META_SECTION, borderBottom: "none" }}>
-                <span style={CTX_LABEL}>Suggested install timeframe</span>
-                <select
-                  value={installTimeframe}
-                  onChange={(e) => onInstallTimeframe(e.target.value)}
-                  aria-label="Suggested install timeframe"
-                  style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                <section style={META_SECTION}>
+                  <span style={CTX_LABEL}>Quote note</span>
+                  <input
+                    className="est-notefield"
+                    value={quoteNote}
+                    onChange={(e) => onQuoteNote(e.target.value)}
+                    placeholder="Cover language printed on the quote header — e.g. Thank you for the opportunity…"
+                    style={{
+                      width: "100%",
+                      minWidth: 0,
+                      fontFamily: "var(--font-ui)",
+                      fontSize: 12.5,
+                      color: "#fff",
+                      background: "#2b2e35",
+                      border: "1px solid #3a3e46",
+                      borderRadius: 7,
+                      padding: "8px 11px",
+                    }}
+                  />
+                  <span style={META_HINT}>Shows on the PDF header</span>
+                </section>
+
+                <section style={META_SECTION}>
+                  <span style={CTX_LABEL}>Assumptions</span>
+                  {assumptionLibrary.length > 0 && (
+                    <div style={{ display: "grid", gap: 5 }}>
+                      {assumptionLibrary.map((line) => (
+                        <label key={line} style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, color: "#d7dae0", lineHeight: 1.35, cursor: "pointer" }}>
+                          <input type="checkbox" checked={checkedAssumptions.has(line)} onChange={() => toggleAssumption(line)} style={{ marginTop: 2 }} />
+                          <span>{line}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    className="est-notefield"
+                    value={assumptions}
+                    onChange={(e) => onAssumptions(e.target.value)}
+                    placeholder="Add quote-specific assumptions, exclusions, and exceptions…"
+                    rows={3}
+                    style={{ width: "100%", minWidth: 0, resize: "vertical", fontFamily: "var(--font-ui)", fontSize: 12.5, color: "#fff", background: "#2b2e35", border: "1px solid #3a3e46", borderRadius: 7, padding: "8px 11px" }}
+                  />
+                  <span style={META_HINT}>Company defaults + editable exceptions</span>
+                </section>
+
+                <section style={{ ...META_SECTION, borderBottom: "none" }}>
+                  <span style={CTX_LABEL}>Suggested install timeframe</span>
+                  <select
+                    value={installTimeframe}
+                    onChange={(e) => onInstallTimeframe(e.target.value)}
+                    aria-label="Suggested install timeframe"
+                    style={{ ...DARK_SELECT, width: "100%", minWidth: 0 }}
+                  >
+                    {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                  <span style={META_HINT}>Carries to the project goal when this quote is won</span>
+                </section>
+              </aside>
+            ) : (
+              <aside
+                className="est-meta est-meta-collapsed"
+                aria-label="Quote details (collapsed)"
+                style={{
+                  width: 36,
+                  flexShrink: 0,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "#23262d",
+                  borderLeft: "1px solid #2b2e35",
+                  color: "#fff",
+                }}
+              >
+                <button
+                  type="button"
+                  className="est-meta-tab"
+                  onClick={toggleMeta}
+                  aria-expanded={false}
+                  title="Show quote details"
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
+                    gap: 10,
+                    padding: "12px 0",
+                    background: "transparent",
+                    border: "none",
+                    color: "#9aa0ab",
+                    cursor: "pointer",
+                    fontFamily: "var(--font-ui)",
+                  }}
                 >
-                  {INSTALL_TIMEFRAMES.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-                <span style={META_HINT}>Carries to the project goal when this quote is won</span>
-              </section>
-            </aside>
+                  <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>‹</span>
+                  <span className="est-meta-vlabel" style={{ ...CTX_LABEL, writingMode: "vertical-rl", whiteSpace: "nowrap" }}>Quote details</span>
+                </button>
+              </aside>
+            )}
           </div>
 
           {/* configurator modals */}

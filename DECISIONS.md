@@ -4920,3 +4920,14 @@ deviation from the prototype's layout only: markup, state, handlers and copy are
 nothing was made collapsible — the review bar already is (77c657c), and a second toggle would hide
 fields the estimator needs on every quote. If 300px proves tight on a laptop, narrowing the
 Systems rail or letting the column collapse is the next lever, not moving the fields back.
+
+## D219. The Quote details column collapses to a tab and remembers the choice per browser (#164, 2026-09-24)
+
+Jeff asked for the #163 column to be collapsible the hour it shipped. Three calls: (1) the
+collapsed form is a 36px tab rather than nothing — the fields are needed on every quote, so the way
+back has to stay visible; (2) the preference is per browser in localStorage, not per quote or per
+user in the database — it is a screen-real-estate choice, and the same person wants it collapsed on
+a laptop and open on a monitor; (3) the stored value is applied in a mount effect, never in the
+`useState` initializer, so hydration always renders it open and a collapsed user sees a brief
+settle instead of a React hydration error. D218's "nothing was made collapsible" is superseded by
+this entry; its layout stays.
