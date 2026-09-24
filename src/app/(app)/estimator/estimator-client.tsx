@@ -100,6 +100,7 @@ const CSS = `
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
 .est-warm:focus { border-color: #e3cf94 !important; outline: none; }
 .est-secname:hover { border-color: #e4e7ec !important; }
+.est-title:hover { border-color: #4a4e56 !important; }
 .est-secname:focus { border-color: #c4c9d2 !important; background: #fff !important; outline: none; }
 .est-notefield:focus { border-color: #4a4e56 !important; outline: none; }
 .est-row:hover { background: #fafbff; }
@@ -313,6 +314,11 @@ export default function EstimatorClient({
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
+  // #160: the quote name is editable in the header (click-to-edit).
+  const [projectName, setProjectName] = useState(initial.projectName);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(initial.projectName);
+  const titleOpenRef = useRef(false);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [paymentTerms, setPaymentTerms] = useState(initial.paymentTerms);
   // #110: user-named quote category — persisted on blur, not per keystroke.
@@ -524,6 +530,22 @@ export default function EstimatorClient({
     });
   };
 
+  const openTitle = () => {
+    titleOpenRef.current = true;
+    setTitleDraft(projectName);
+    setTitleEditing(true);
+  };
+  /** Enter/blur save, Esc reverts. The ref makes Enter-then-blur a single save. */
+  const closeTitle = (save: boolean) => {
+    if (!titleOpenRef.current) return;
+    titleOpenRef.current = false;
+    setTitleEditing(false);
+    const next = titleDraft.trim();
+    if (!save || !next || next === projectName) return;
+    setProjectName(next);
+    persistMeta({ name: next }); // no-op until the first save; doSave carries it then
+  };
+
   const applySync = (r: ReviewSync) => {
     if (r.review) setReview(r.review);
     if (r.status) setStatus(r.status);
@@ -538,7 +560,9 @@ export default function EstimatorClient({
     startTransition(async () => {
       try {
         const res = await saveQuoteAction(loadedId, {
-          name: initial.projectName,
+          name: projectName,
+          // D205: only the create save retires the replaced draft.
+          replaces: loadedId ? "" : initial.replaces,
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
@@ -1605,18 +1629,66 @@ export default function EstimatorClient({
           >
             <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
               <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 600,
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {initial.projectName}
-                </div>
+                {titleEditing ? (
+                  <input
+                    autoFocus
+                    aria-label="Quote name"
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={() => closeTitle(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        closeTitle(true);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        closeTitle(false);
+                      }
+                    }}
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      fontFamily: "var(--font-ui)",
+                      color: "#fff",
+                      background: "#2b2e35",
+                      border: "1px solid #4a4e56",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      width: 340,
+                      maxWidth: "100%",
+                      outline: "none",
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openTitle}
+                    title="Rename this quote"
+                    style={{
+                      display: "block",
+                      maxWidth: "100%",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      fontFamily: "var(--font-ui)",
+                      color: "#fff",
+                      background: "none",
+                      border: "1px dashed transparent",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      margin: "-3px -7px",
+                      cursor: "text",
+                      textAlign: "left",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    className="est-title"
+                  >
+                    {projectName}
+                  </button>
+                )}
                 <div
                   style={{
                     fontSize: 11,
@@ -2827,7 +2899,7 @@ export default function EstimatorClient({
           }
           hasAttn={hasAttn}
           attnLine={attnLine}
-          projectName={initial.projectName}
+          projectName={projectName}
           venueLabel={(() => {
             const l = locations.find((x) => x.id === locationId);
             if (!l) return "";

@@ -313,6 +313,9 @@ export type InitialQuote = {
   sections: SpecSection[] | null;
   /** Imported vendor quotes (#143) — top-level on the doc, not in spec. */
   vendorQuotes: VendorQuote[];
+  /** #160 / D205 — the draft this new estimate replaces ("Change type"); "" otherwise.
+   *  Sent with the FIRST save only, which retires that draft server-side. */
+  replaces: string;
 };
 
 /**

@@ -180,6 +180,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/quotes/new?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+quote&type=repair" },
   { route: "/quotes/new?replaces=Q-2041" },
   { route: "/quotes/new?customer=ghost-id" },
+  { route: "/estimator?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+estimate" },
+  { route: "/estimator?customer=lakefront&category=Acoustics&replaces=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // CE-1001 is not seeded directly: it is lazily minted by
   // syncEngagementsFromQuotes() from the seeded won consulting quote Q-2045.

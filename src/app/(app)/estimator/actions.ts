@@ -12,6 +12,7 @@ import {
   getAll,
   requestChanges,
   requireApprovalToAdvance,
+  retireReplacedDraft,
   setStatus,
   STAGES,
   submitForReview,
@@ -87,6 +88,8 @@ export type SavePayload = {
   /** Always sent in full (#143) — the stored list is replaced, so removing a
    *  vendor quote in the builder actually removes it from the doc. */
   vendorQuotes: VendorQuote[];
+  /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
+  replaces?: string;
 };
 
 export type SaveResult = {
@@ -322,6 +325,8 @@ export async function saveQuoteAction(
       }
     }
     q = q || created;
+    // D205: the replaced draft goes only once its replacement exists.
+    if (payload.replaces) await retireReplacedDraft(payload.replaces, created.id);
   }
   refresh();
   return {
@@ -488,6 +493,7 @@ export async function updateQuoteMetaAction(
     contactName?: string;
     quoteNote?: string;
     category?: string;
+    name?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
   await requireUser();
@@ -504,6 +510,8 @@ export async function updateQuoteMetaAction(
   if (typeof meta.contactName === "string") patch.contactName = meta.contactName;
   if (typeof meta.quoteNote === "string") patch.quoteNote = meta.quoteNote;
   if (typeof meta.category === "string") patch.category = meta.category.trim();
+  // #160: the click-to-edit Estimator title. Blank never clears a name.
+  if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier
   // SERVER-side (never trusted from the client) and re-stamps the quote.
