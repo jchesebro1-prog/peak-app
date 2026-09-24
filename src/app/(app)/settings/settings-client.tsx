@@ -28,6 +28,7 @@ import {
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
+  setDefaultQuoteOfficeAction,
   setRecordingsArchiveMailboxAction,
   setRecordingsBetaUsersAction,
   setRolesAction,
@@ -95,6 +96,7 @@ type OfficeVM = {
   phone: string;
   lat: number | null;
   lng: number | null;
+  quoteDefault?: boolean;
 };
 
 type OfficeDraft = {
@@ -1163,8 +1165,12 @@ export default function SettingsClient({
           <div>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Locations</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
-              Used as the travel origin when estimating a job — the nearest
-              location to the site is picked automatically.
+              The quote origin is where every quote and estimating rule
+              measures travel from. Calendar travel blocks start from each
+              person&rsquo;s &ldquo;Based out of&rdquo; location (Account
+              page), falling back to the quote origin. After changing the
+              quote origin, run Admin → Geocode addresses once to fetch
+              driving routes from it.
             </div>
           </div>
           <button
@@ -1176,8 +1182,12 @@ export default function SettingsClient({
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-          {offices.map((o) => {
+          {(() => {
+            const originId = (offices.find((o) => o.quoteDefault) || offices[0])?.id;
+            const implicitOrigin = !offices.some((o) => o.quoteDefault);
+            return offices.map((o) => {
             const hasCoords = o.lat != null && o.lng != null;
+            const isOrigin = o.id === originId;
             const addr =
               [
                 o.street,
@@ -1236,6 +1246,23 @@ export default function SettingsClient({
                     >
                       {o.type || "Main Office"}
                     </span>
+                    {isOrigin && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: "2px 9px",
+                          borderRadius: 20,
+                          flexShrink: 0,
+                          whiteSpace: "nowrap",
+                          color: "#1f7a52",
+                          background: "#e8f3ee",
+                          border: "1px solid #cfe6db",
+                        }}
+                      >
+                        {implicitOrigin ? "Quote origin (default — first listed)" : "Quote origin"}
+                      </span>
+                    )}
                   </div>
                   <div
                     style={{
@@ -1266,6 +1293,15 @@ export default function SettingsClient({
                 >
                   {hasCoords ? "Located" : "No coords"}
                 </span>
+                {(!isOrigin || implicitOrigin) && (
+                  <button
+                    className="pk-btn-outline"
+                    title="Measure all quote travel from this location"
+                    onClick={() => run(() => setDefaultQuoteOfficeAction(o.id))}
+                  >
+                    Use for quotes
+                  </button>
+                )}
                 <button
                   className="pk-btn-outline"
                   title="Edit office"
@@ -1275,7 +1311,8 @@ export default function SettingsClient({
                 </button>
               </div>
             );
-          })}
+            });
+          })()}
           {offices.length === 0 && (
             <div style={{ fontSize: 12.5, color: "#9aa0ab", padding: "8px 2px" }}>
               No locations yet — add one to enable automatic travel estimates.
