@@ -4,6 +4,7 @@ import {
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
+import { normalizeSku } from "@/lib/davinci/sku";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
@@ -8083,3 +8084,14 @@ ok(pre145.text.includes("fire curtain"), "#145 the pre-filled body carries the m
 ok(pre145.attendees.join("|") === "Dana Kim|Jeff C.", "#145 attendees are split for attachment to the note");
 ok(prefillFromMeeting({ id: "m", at: 0, title: "", attendees: "", minutes: "" }).text === "", "#145 an empty meeting pre-fills nothing rather than a header with no content");
 ok(!prefillFromMeeting({ id: "m", at: OCT6, title: "x", attendees: "", minutes: "y" }).text.includes("undefined"), "#145 a meeting with no attendees never renders the string 'undefined'");
+
+/* ====== #162 DaVinci enrichment — SKU normalizer ====== */
+ok(normalizeSku("ETC:ION XE 2K-US") === "IONXE2KUS", "#162 a MFR: prefix is stripped before normalizing");
+ok(normalizeSku("ION XE 2K-US") === "IONXE2KUS", "#162 a bare production SKU normalizes to the same key");
+ok(normalizeSku("ETC:ION XE 2K-US") === normalizeSku("ION XE 2K-US"), "#162 dev and prod spellings of one part agree");
+ok(normalizeSku("IRWLZ-30/80-120-C-DALI-1") === "IRWLZ3080120CDALI1", "#162 slashes and dashes are dropped");
+ok(normalizeSku("  arcp1s360wy  ") === "ARCP1S360WY", "#162 case and surrounding space are normalized");
+ok(normalizeSku("") === "", "#162 an empty SKU normalizes to empty, not to a match-everything key");
+ok(normalizeSku("::::") === "", "#162 a SKU that is only separators normalizes to empty");
+// A colon INSIDE the model number must not eat the real identifier.
+ok(normalizeSku("Allen & Heath:AH-DLIVE-CDM32-RUFX") === "AHDLIVECDM32RUFX", "#162 only the first prefix segment is dropped");
