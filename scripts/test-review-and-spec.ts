@@ -3292,6 +3292,7 @@ import {
   canAttestApproval,
   type QuoteReview,
 } from "@/lib/stores/quotes";
+import { create as createQuote160, get as getQuote160, remove as removeQuote160, setStatus as setStatus160, retireReplacedDraft } from "@/lib/stores/quotes";
 
 function review(over: Partial<QuoteReview> = {}): QuoteReview {
   return {
@@ -6807,6 +6808,7 @@ seeded()
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
+  .then(() => retireDraftAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -8762,5 +8764,32 @@ async function davinciWriterAsyncChecks(): Promise<void> {
     ok(empty.written === 0 && empty.missing === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
   } finally {
     for (const s of [SKU_A, SKU_B, SKU_C, SKU_D]) await softDeleteDoc("catalog_parts", s);
+  }
+}
+
+/* ====== #160 / D205: Change type retires the replaced DRAFT only ======
+ * Writes only rows it creates and removes them in finally (D202). */
+async function retireDraftAsyncChecks(): Promise<void> {
+  const made: string[] = [];
+  try {
+    const draft = await createQuote160({ name: "#160 fixture draft", customer: "Spec fixture", owner: "spec" });
+    made.push(draft.id);
+    const replacement = await createQuote160({ name: "#160 fixture replacement", customer: "Spec fixture", owner: "spec" });
+    made.push(replacement.id);
+    const lost = await createQuote160({ name: "#160 fixture lost", customer: "Spec fixture", owner: "spec" });
+    made.push(lost.id);
+    await setStatus160(lost.id, "lost");
+
+    ok((await retireReplacedDraft(draft.id, draft.id)) === false, "#160 retireReplacedDraft never retires the quote being saved");
+    ok((await getQuote160(draft.id)) !== null, "#160 …and that quote is still there");
+    ok((await retireReplacedDraft(lost.id, replacement.id)) === false, "#160 retireReplacedDraft refuses a non-draft quote");
+    ok((await getQuote160(lost.id))?.status === "lost", "#160 …and the non-draft is untouched");
+    ok((await retireReplacedDraft("Q-DOES-NOT-EXIST-160", replacement.id)) === false, "#160 retireReplacedDraft no-ops on a missing id");
+    ok((await retireReplacedDraft("", replacement.id)) === false, "#160 retireReplacedDraft no-ops on a blank id");
+    ok((await retireReplacedDraft(draft.id, replacement.id)) === true, "#160 retireReplacedDraft retires a draft");
+    ok((await getQuote160(draft.id)) === null, "#160 the retired draft no longer loads (soft-deleted)");
+    ok((await retireReplacedDraft(draft.id, replacement.id)) === false, "#160 retiring twice is a no-op");
+  } finally {
+    for (const id of made) await removeQuote160(id);
   }
 }

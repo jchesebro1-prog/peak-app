@@ -696,6 +696,22 @@ export async function remove(id: string): Promise<void> {
   await softDeleteDoc("quotes", id);
 }
 
+/**
+ * #160 / D205 — "Change type" on a draft. The replacement's builder calls this
+ * on its FIRST save (create path only), so backing out of the new builder
+ * leaves the old draft untouched. Status is re-checked here, server-side: a
+ * quote that was sent in another tab after the intake opened is never deleted.
+ * Soft delete (remove()), not a `lost` mark — that would skew win-rate reports.
+ */
+export async function retireReplacedDraft(id: string, replacementId?: string | null): Promise<boolean> {
+  const oldId = (id || "").trim();
+  if (!oldId || oldId === replacementId) return false;
+  const old = await get(oldId);
+  if (!old || old.status !== "draft") return false;
+  await remove(oldId);
+  return true;
+}
+
 /* ---- review & approval workflow ---- */
 
 export async function submitForReview(
