@@ -12,7 +12,7 @@
  * Never creates a row, never deletes one, and never writes list/cost/pricedAt.
  */
 import type { Port } from "@/lib/catalog-connect";
-import { list as allParts, mergeUpsert, type CatalogPart } from "@/lib/stores/catalog";
+import { list as allParts, get as getPart, mergeUpsert, type CatalogPart } from "@/lib/stores/catalog";
 import { buildIndex, matchSku } from "@/lib/davinci/match";
 import { loadExtract } from "@/lib/davinci/load";
 import type { DavinciDoc } from "@/lib/davinci/types";
@@ -31,6 +31,7 @@ export type EnrichStats = {
   matched: number;
   writable: number;
   skippedHasPorts: number;
+  skippedNothingToWrite: number;
   unmatched: string[];
 };
 
@@ -41,14 +42,26 @@ export async function planEnrichment(opts: {
 } = {}): Promise<{ plans: EnrichPlan[]; stats: EnrichStats }> {
   const extract = loadExtract();
   const index = buildIndex(extract.records);
-  const only = opts.onlySkus?.length ? new Set(opts.onlySkus) : null;
+  // `undefined` means "no scope" (every row is eligible); an explicitly-passed
+  // `[]` means "scope to nothing" and must match zero rows. Collapsing the two
+  // (via `?.length ? ... : null`) is the same bug class as D202: a writer that
+  // quietly widens its own scope instead of doing nothing when told to touch
+  // nothing.
+  const only = opts.onlySkus === undefined ? null : new Set(opts.onlySkus);
 
   const parts = (await allParts()).filter(
     (p) => (!opts.mfr || p.mfr === opts.mfr) && (!only || only.has(p.sku))
   );
 
   const plans: EnrichPlan[] = [];
-  const stats: EnrichStats = { scanned: parts.length, matched: 0, writable: 0, skippedHasPorts: 0, unmatched: [] };
+  const stats: EnrichStats = {
+    scanned: parts.length,
+    matched: 0,
+    writable: 0,
+    skippedHasPorts: 0,
+    skippedNothingToWrite: 0,
+    unmatched: [],
+  };
 
   for (const p of parts) {
     const rec = matchSku(p.sku, index);
@@ -70,6 +83,7 @@ export async function planEnrichment(opts: {
       stats.skippedHasPorts++;
     } else if (!rec.ports.length && !rec.docs.length) {
       plan.skip = "nothing-to-write";
+      stats.skippedNothingToWrite++;
     } else {
       stats.writable++;
     }
@@ -81,12 +95,23 @@ export async function planEnrichment(opts: {
 export async function applyEnrichment(
   plans: readonly EnrichPlan[],
   opts: { commit: boolean }
-): Promise<{ written: number }> {
-  if (!opts.commit) return { written: 0 };
+): Promise<{ written: number; missing: number }> {
+  if (!opts.commit) return { written: 0, missing: 0 };
   const extract = loadExtract();
   let written = 0;
+  let missing = 0;
   for (const plan of plans) {
     if (plan.skip) continue;
+    // The feature's hard constraint: never create a catalog row. mergeUpsert
+    // creates the document when the SKU doesn't exist, so a stale plan —
+    // one whose row was deleted between planning and applying — would
+    // otherwise silently create a malformed row with no desc/category/unit/
+    // list/cost. This is a per-plan existence check, not a scan: it never
+    // calls list(), only get(sku) for the exact SKU already in hand.
+    if (!(await getPart(plan.sku))) {
+      missing++;
+      continue;
+    }
     // mergeUpsert is `{ ...existing, ...patch }` — a key absent from the patch
     // leaves the stored value, so naming only these four keys is what keeps
     // list, cost and pricedAt untouched.
@@ -108,5 +133,5 @@ export async function applyEnrichment(
     await mergeUpsert(plan.sku, patch);
     written++;
   }
-  return { written };
+  return { written, missing };
 }

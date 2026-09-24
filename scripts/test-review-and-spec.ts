@@ -8354,11 +8354,44 @@ async function davinciWriterAsyncChecks(): Promise<void> {
   await upsertPart({ id: SKU_C, sku: SKU_C, desc: "t", category: "Fixtures", unit: "ea", list: 5, cost: 3, mfr: "TEST162" });
 
   try {
+    // Review finding 1: an explicitly-passed empty onlySkus must scope to
+    // ZERO rows — it is not the same as "no scope" (that's `undefined`).
+    // Collapsing the two is the D202 bug class: a writer that quietly widens
+    // its own scope. This must not touch any of the three fixtures below.
+    const scopedToNothing = await planEnrichment({ mfr: "TEST162", onlySkus: [] });
+    ok(
+      scopedToNothing.plans.length === 0 && scopedToNothing.stats.scanned === 0,
+      "#162 onlySkus: [] matches nothing, not everything"
+    );
+
     const planned = await planEnrichment({ mfr: "TEST162" });
     const bySku = (s: string) => planned.plans.find((p) => p.sku === s);
     ok(bySku(SKU_B)?.skip === "has-ports", "#162 a part with hand-edited ports is skipped, not overwritten");
     ok(!bySku(SKU_C), "#162 a part with no DaVinci entry produces no plan at all");
     ok((bySku(SKU_A)?.ports.length ?? 0) > 0, "#162 a matching part is planned with ports");
+
+    // Review finding 4: pin the report's stats for this exact fixture set —
+    // A and B match (C doesn't), B is the one hand-edited part so it's the
+    // only skip, and A is the only writable row. Values are derived from the
+    // fixtures above, not asserted as magic numbers.
+    ok(planned.stats.scanned === 3, "#162 stats: scanned counts all three TEST162 fixtures");
+    ok(planned.stats.matched === 2, "#162 stats: A and B match a DaVinci record, C does not");
+    ok(planned.stats.writable === 1, "#162 stats: only A is writable — B is skipped, C never matched");
+    ok(planned.stats.skippedHasPorts === 1, "#162 stats: B is the one part skipped for having hand-made ports");
+    // Review finding 5: skippedNothingToWrite closes the gap between matched
+    // and writable + skippedHasPorts, so the report never has an unexplained
+    // shortfall. Neither fixture here hits that branch (extract.ts already
+    // drops DaVinci types with neither ports nor docs), so it's 0 — and the
+    // identity below proves matched is fully accounted for either way.
+    ok(planned.stats.skippedNothingToWrite === 0, "#162 stats: no fixture matches a DaVinci entry with neither ports nor docs");
+    ok(
+      planned.stats.matched === planned.stats.writable + planned.stats.skippedHasPorts + planned.stats.skippedNothingToWrite,
+      "#162 stats: matched is fully accounted for by writable + both skip reasons"
+    );
+    ok(
+      planned.stats.unmatched.length === 1 && planned.stats.unmatched.includes(SKU_C),
+      "#162 stats: unmatched names exactly the no-match SKU"
+    );
 
     // Dry run writes nothing.
     await applyEnrichment(planned.plans, { commit: false });
@@ -8368,17 +8401,54 @@ async function davinciWriterAsyncChecks(): Promise<void> {
     const res = await applyEnrichment(planned.plans, { commit: true });
     const after = await getPart(SKU_A);
     ok(res.written === 1, "#162 exactly the planned rows are written");
+    ok(res.missing === 0, "#162 nothing is missing when every planned row still exists");
     ok((after?.ports?.length ?? 0) > 0, "#162 a commit writes the ports");
     ok(after?.davinci?.typeId != null, "#162 a commit stamps provenance");
     ok(after?.list === before?.list && after?.cost === before?.cost, "#162 list and cost are byte-identical after a commit");
     ok(after?.pricedAt === before?.pricedAt, "#162 pricedAt is never moved by enrichment");
 
+    // Review finding 2: applyEnrichment must never CREATE a row. A plan whose
+    // SKU has no existing catalog row (its row was deleted between planning
+    // and applying) is skipped and counted as missing, not upserted into
+    // existence — reusing a real, fully-formed plan so only the SKU is stale.
+    const ghostSku = "TEST162:GHOST-DELETED-BETWEEN-PLAN-AND-APPLY";
+    const ghostPlan = { ...bySku(SKU_A)!, sku: ghostSku };
+    const ghostRes = await applyEnrichment([ghostPlan], { commit: true });
+    ok(
+      ghostRes.written === 0 && ghostRes.missing === 1,
+      "#162 a plan for a row that no longer exists is counted as missing, not written"
+    );
+    ok((await getPart(ghostSku)) === null, "#162 applying a plan for a deleted row never creates it");
+
     // The hand-made ports on B survived.
     ok((await getPart(SKU_B))?.ports?.[0]?.connectionType === "Edison", "#162 the hand-edited part is untouched by a commit");
 
+    // Review finding 3: force lets a hand-edited part be overwritten too.
+    // With force: true, B is no longer skipped as has-ports, and a commit
+    // then does overwrite its hand-made Edison port with DaVinci's own ports.
+    const forced = await planEnrichment({ mfr: "TEST162", force: true });
+    const forcedBySku = (s: string) => forced.plans.find((p) => p.sku === s);
+    ok(forcedBySku(SKU_B)?.skip !== "has-ports", "#162 force: the hand-edited part is no longer marked has-ports");
+    const bForcedPlanPorts = forcedBySku(SKU_B)?.ports ?? [];
+    ok(bForcedPlanPorts.length > 0, "#162 force: the hand-edited part is planned with real DaVinci ports");
+    const forcedRes = await applyEnrichment(forced.plans, { commit: true });
+    ok(
+      forcedRes.written === forced.stats.writable && forcedRes.missing === 0,
+      "#162 force: the commit writes exactly the now-writable rows"
+    );
+    const bAfterForce = await getPart(SKU_B);
+    ok(
+      bAfterForce?.ports?.[0]?.connectionType !== "Edison",
+      "#162 force: a commit overwrites the hand-made port with DaVinci's"
+    );
+    ok(
+      bAfterForce?.ports?.length === bForcedPlanPorts.length,
+      "#162 force: the written ports match exactly what was planned"
+    );
+
     // Scope: applyEnrichment writes ONLY what it was handed (D202's lesson).
     const empty = await applyEnrichment([], { commit: true });
-    ok(empty.written === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
+    ok(empty.written === 0 && empty.missing === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
   } finally {
     for (const s of [SKU_A, SKU_B, SKU_C]) await softDeleteDoc("catalog_parts", s);
   }
