@@ -7,6 +7,9 @@ import {
 } from "@/db/doc-tables";
 import { getDb } from "@/db";
 import { eq, sql } from "drizzle-orm";
+import { loadPipelines } from "@/lib/pipelines-server";
+import { normalizeProject, type ProjectRecord } from "@/lib/stores/projects";
+import type { Pipelines } from "@/lib/pipelines";
 
 /** Abuse guards for the open sync endpoint. */
 const MAX_RECORDS_PER_COLLECTION = 1000;
@@ -38,6 +41,9 @@ export async function POST(req: Request) {
   };
   const collections = body.collections || {};
   const db = await getDb();
+  // Loaded once, only if a projects batch arrives — an offline device may still
+  // hold a pre-pipeline stage key; it's converted before it's stored.
+  let pipes: Pipelines | null = null;
   const results: Record<
     string,
     Array<{
@@ -78,7 +84,11 @@ export async function POST(req: Request) {
           .where(eq(t.id, rec.id))
           .limit(1);
         const now = Date.now();
-        const doc = { ...rec.doc, id: rec.id };
+        let doc: Record<string, unknown> = { ...rec.doc, id: rec.id };
+        if (coll === "projects") {
+          pipes ||= await loadPipelines();
+          doc = normalizeProject(doc as unknown as ProjectRecord, pipes) as unknown as Record<string, unknown>;
+        }
         if (!existing.length) {
           await db.insert(t).values({
             id: rec.id,

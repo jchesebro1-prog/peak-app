@@ -8,6 +8,27 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { createAssignment } from "@/lib/stores/assignments";
+import { loadPipelines } from "@/lib/pipelines-server";
+import {
+  DEFAULT_PIPELINES,
+  DEFAULT_PROJECT_PIPELINES,
+  PROJECT_TAG_RANK,
+  firstStage,
+  firstStageWithTag,
+  isBacklog,
+  isDone,
+  nextStage,
+  projectPipelineFor,
+  projectStageMeta,
+  projectTag,
+  resolveProjectStage,
+  stageById,
+  type PipelineStage,
+  type Pipelines,
+  type ProjectTag,
+  type StageMeta,
+} from "@/lib/pipelines";
 
 /**
  * ProjectStore — post-acceptance project & order lifecycle. Direct port of
@@ -63,42 +84,37 @@ function uid(p?: string): string {
 
 export type ProjectKind = "project" | "order";
 
-export type ProjectStage =
-  | "procurement"
-  | "delivery"
-  | "scheduled"
-  | "install"
-  | "training"
-  | "signoff"
-  | "complete";
+/** A pipeline stage id (Settings → Pipelines). Kept as an alias so imports compile. */
+export type ProjectStage = string;
 
 export type StageDef = { key: ProjectStage; label: string; short: string };
 
-export const PROJECT_STAGES: StageDef[] = [
-  { key: "procurement", label: "Order materials", short: "Materials" },
-  { key: "delivery", label: "Deliveries", short: "Deliveries" },
-  { key: "scheduled", label: "Crew scheduled", short: "Scheduled" },
-  { key: "install", label: "Install", short: "Install" },
-  { key: "training", label: "Training", short: "Training" },
-  { key: "signoff", label: "Customer sign-off", short: "Sign-off" },
-  { key: "complete", label: "Complete", short: "Complete" },
-];
+function seedStageDefs(pipelineId: string): StageDef[] {
+  const pl = DEFAULT_PROJECT_PIPELINES.find((p) => p.id === pipelineId) || DEFAULT_PROJECT_PIPELINES[0];
+  return pl.stages.map((s) => ({ key: s.id, label: s.label, short: s.label }));
+}
 
-export const ORDER_STAGES: StageDef[] = [
-  { key: "procurement", label: "Order materials", short: "Materials" },
-  { key: "delivery", label: "Deliveries", short: "Deliveries" },
-  { key: "signoff", label: "Delivered & accepted", short: "Delivered" },
-  { key: "complete", label: "Complete", short: "Complete" },
-];
+/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
+export const PROJECT_STAGES: StageDef[] = seedStageDefs("install");
 
+/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
+export const ORDER_STAGES: StageDef[] = seedStageDefs("order");
+
+/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
 export function stagesFor(kind: ProjectKind): StageDef[] {
   return kind === "order" ? ORDER_STAGES : PROJECT_STAGES;
 }
 
-export function stageIndex(kind: ProjectKind, stage: ProjectStage): number {
+/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
+export function stageIndex(kind: ProjectKind, stage: string): number {
   const s = stagesFor(kind);
   const i = s.findIndex((x) => x.key === stage);
   return i < 0 ? 0 : i;
+}
+
+/** The stages of the pipeline this record runs on. */
+export function stagesOf(p: Pick<ProjectRecord, "kind" | "pipelineId">, pipes: Pipelines): PipelineStage<ProjectTag>[] {
+  return projectPipelineFor(pipes, p).stages;
 }
 
 /* ---------- vendor + lead-time knowledge (days to procure) ---------- */
@@ -218,7 +234,18 @@ export type ProjectRecord = {
   targetDate: number | null;
   installStart: number | null;
   installEnd: number | null;
+  /** Settings → Pipelines pipeline id ("install" | "order" seeds). Stamped on every read. */
+  pipelineId: string;
+  /** A stage id within `pipelineId`. Legacy 7-stage keys are converted on read. */
   stage: ProjectStage;
+  /** Derived on every read/write (tag, label, index) — never authoritative. */
+  stageMeta?: StageMeta;
+  /** Imported record whose value wasn't known at the source. */
+  valueUnknown?: boolean;
+  /** The source system's owner name when it didn't match a team member. */
+  legacyOwner?: string;
+  /** Where an imported record came from. */
+  source?: { system: "daylite"; importedAt: number } | null;
   stageHistory: ProjectStageChange[];
   procurement: ProcurementLine[];
   mobilizations: Mobilization[];
@@ -250,8 +277,8 @@ export function signoffScopes(project: Pick<ProjectRecord, "procurement">): stri
  */
 export type ProjectStageChange = {
   at: number;
-  from: ProjectStage | null;
-  to: ProjectStage;
+  from: string | null;
+  to: string;
   by: string;
 };
 
@@ -300,8 +327,12 @@ export function buildProcurementLine(o: Partial<ProcurementLine> = {}): Procurem
   };
 }
 
-/** Port of migrate(): backfill array fields, kind, and stage on read. */
-function normalizeProject(p: ProjectRecord): ProjectRecord {
+/**
+ * Port of migrate(): backfill array fields and kind, then put the record on its
+ * pipeline — legacy 7-stage keys convert to stage ids (spec §3.6) and the
+ * derived stageMeta is stamped. Exported for the import + sync push paths.
+ */
+export function normalizeProject(p: ProjectRecord, pipes: Pipelines): ProjectRecord {
   const rec = p as Record<string, unknown>;
   for (const k of [
     "procurement",
@@ -316,7 +347,10 @@ function normalizeProject(p: ProjectRecord): ProjectRecord {
     if (!Array.isArray(rec[k])) rec[k] = [];
   }
   if (!p.kind) p.kind = "project";
-  if (!p.stage) p.stage = "procurement";
+  const pl = projectPipelineFor(pipes, p);
+  p.pipelineId = pl.id;
+  p.stage = resolveProjectStage(pl, p.kind, p.stage);
+  p.stageMeta = projectStageMeta(pipes, p);
   if (p.projectType === undefined) p.projectType = null;
   return p;
 }
@@ -339,19 +373,20 @@ async function addDismissed(quoteId: string | null | undefined): Promise<void> {
 /** All projects & orders, newest activity first (port of getAll). */
 export async function getAllProjects(): Promise<ProjectRecord[]> {
   const list = await listDocs<ProjectRecord>("projects");
-  return list.map(normalizeProject).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const pipes = await loadPipelines();
+  return list.map((p) => normalizeProject(p, pipes)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 export async function getProject(id: string): Promise<ProjectRecord | null> {
   const p = await getDoc<ProjectRecord>("projects", id);
-  return p ? normalizeProject(p) : null;
+  return p ? normalizeProject(p, await loadPipelines()) : null;
 }
 
 /** Port of byQuote(qid). */
 export async function getProjectByQuote(quoteId: string): Promise<ProjectRecord | null> {
   const list = await listDocs<ProjectRecord>("projects");
   const p = list.find((x) => x.quoteId === quoteId);
-  return p ? normalizeProject(p) : null;
+  return p ? normalizeProject(p, await loadPipelines()) : null;
 }
 
 export async function createProject(
@@ -360,6 +395,9 @@ export async function createProject(
   const t = now();
   const prefix = partial.kind === "order" ? "S" : "P";
   const base = prefix === "S" ? 4000 : 3000;
+  const pipes = await loadPipelines();
+  const pl = projectPipelineFor(pipes, partial);
+  const stage = partial.stage ? resolveProjectStage(pl, partial.kind, partial.stage) : firstStage(pl).id;
   const build = (id: string): ProjectRecord => {
     const p: ProjectRecord = {
       kind: "project",
@@ -376,7 +414,6 @@ export async function createProject(
       targetDate: ahead(42),
       installStart: null,
       installEnd: null,
-      stage: "procurement",
       stageHistory: [],
       procurement: [],
       mobilizations: [],
@@ -388,10 +425,13 @@ export async function createProject(
       signoff: null,
       trainingAt: null,
       ...partial,
+      pipelineId: pl.id,
+      stage,
       id,
       createdAt: t,
       updatedAt: t,
     };
+    p.stageMeta = projectStageMeta(pipes, p);
     // Anchor the history at the stage the record opened in, so the first
     // real transition has a "from" to render against.
     if (!p.stageHistory.length) {
@@ -431,45 +471,62 @@ export async function removeProject(id: string): Promise<void> {
 }
 
 /** Append a transition to the record's stage history. No-op when the stage is unchanged. */
-function recordStageChange(p: ProjectRecord, to: ProjectStage, by: string): void {
+function recordStageChange(p: ProjectRecord, to: string, by: string, pipes: Pipelines): void {
   if (p.stage === to) return;
   if (!Array.isArray(p.stageHistory)) p.stageHistory = [];
   p.stageHistory.push({ at: now(), from: p.stage ?? null, to, by });
   p.stage = to;
+  p.stageMeta = projectStageMeta(pipes, p);
 }
 
+/**
+ * Move a record to a stage of its own pipeline. Refuses (returns null) a stage
+ * id that isn't in the record's pipeline, or a missing/deleted record.
+ */
 export async function setProjectStage(
   id: string,
-  stage: ProjectStage,
+  stageId: string,
   by: string = DEFAULT_ACTOR
 ): Promise<ProjectRecord | null> {
+  const pipes = await loadPipelines();
+  const current = await getDoc<ProjectRecord>("projects", id);
+  if (!current) return null;
+  if (!stageById(projectPipelineFor(pipes, current), stageId)) return null;
+  const prev: { tag: ProjectTag | null } = { tag: null };
   const result = await patchDoc<ProjectRecord>("projects", id, (p) => {
-    recordStageChange(p, stage, by);
-    if (stage === "training" && !p.trainingAt) p.trainingAt = now();
+    normalizeProject(p, pipes);
+    prev.tag = projectTag(p, pipes);
+    recordStageChange(p, stageId, by, pipes);
     p.updatedAt = now();
     return p;
   });
 
   // #17 template expansion: entering a stage adds its standard checklist once
-  // (coverage-key de-dup; TASK_TEMPLATE ships empty until the checklist
-  // homework lands, so this is a safe no-op today). Guarded on `result` —
-  // patchDoc returns null for a nonexistent or soft-deleted project, and the
-  // expansion must not fire when the stage patch never actually applied.
+  // (coverage-key de-dup). Guarded on `result` — patchDoc returns null for a
+  // nonexistent or soft-deleted project, and the expansion must not fire when
+  // the stage patch never actually applied.
   if (result) {
     const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
     const existing = new Set((await tasksForProject(id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
-    for (const item of expandTemplate(TASK_TEMPLATE[stage] || [], id + ":" + stage, existing)) {
+    for (const item of expandTemplate(TASK_TEMPLATE[stageId] || [], id + ":" + stageId, existing)) {
       await createAutoTask({ ...item, projectId: id, title: item.title });
     }
 
-    // Item 16 completion follow-up used to be spawned here as an unassigned-
-    // capable tasks-collection row (item16:completed:<id>). It now lives as
-    // a Home Queue assignment created by signoffAction (D14x) — the only
-    // caller that reaches "complete" through the sign-off Jeff requires
-    // (decision D) — so it isn't duplicated here. A direct stage jump to
-    // "complete" via setStageAction (bypassing sign-off, the still-open
-    // decision D gap) does not spawn a follow-up; that's intentional until
-    // the signoff gate is enforced, not a silent regression.
+    // Done hook (Item 16 / punch #16): the first time a record lands on its
+    // pipeline's Done-tagged stage, mint the "walk the completed site" Home
+    // Queue assignment. Moved here from signoffAction — sign-off now stops at
+    // closeout, so any path that reaches Done (the stage tracker, Advance)
+    // owns the follow-up. Re-entering Done from Done never re-mints.
+    if (projectTag(result, pipes) === "done" && prev.tag !== "done") {
+      const label = result.name || result.customer || id;
+      await createAssignment({
+        title: `Walk the completed site with the end user: ${label}`,
+        assignee: result.owner || "Jeff Chesebro",
+        createdBy: by,
+        link: { kind: "project", id, label },
+        source: "auto: project complete (#16)",
+      });
+    }
   }
 
   return result;
@@ -550,8 +607,8 @@ function deriveProcurement(q: QuoteLike): ProcurementLine[] {
   return out;
 }
 
-/** Port of fromQuote(q) — the id is assigned by the caller. */
-function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
+/** Port of fromQuote(q) — the id is assigned by the caller. Lands on the first stage of the kind's pipeline. */
+function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
   const labor = quoteHasLabor(q);
   const t = now();
   const requestedWindow = typeof q.installTimeframe === "string" ? q.installTimeframe.trim() : "";
@@ -566,8 +623,11 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
   const targetDate = ahead(targetDays);
   const installDuration = labor ? Math.max(6, Number((q.spec as { mobs?: { days?: number }[] } | undefined)?.mobs?.reduce((sum, m) => sum + (Number(m.days) || 0), 0)) || 6) : 0;
   const kind: ProjectKind = labor ? "project" : "order";
+  const pl = projectPipelineFor(pipes, { kind });
+  const stage = firstStage(pl).id;
   return {
     kind,
+    pipelineId: pl.id,
     quoteId: q.id,
     projectType: q.quoteType || null,
     name: q.name,
@@ -583,8 +643,11 @@ function fromQuote(q: QuoteLike): Omit<ProjectRecord, "id"> {
     targetDate,
     installStart: labor ? ahead(Math.max(0, targetDays - installDuration)) : null,
     installEnd: labor ? targetDate : null,
-    stage: "procurement",
-    stageHistory: [], // createProject() anchors the opening entry
+    stage,
+    stageMeta: projectStageMeta(pipes, { kind, pipelineId: pl.id, stage }),
+    // Opening entry — createProject() re-anchors it too, but the sync sweep
+    // inserts directly and must carry its own.
+    stageHistory: [{ at: t, from: null, to: stage, by: q.owner || DEFAULT_ACTOR }],
     procurement: deriveProcurement(q),
     mobilizations: (q.spec && q.spec.mobs) || [],
     deliveries: [],
@@ -603,7 +666,7 @@ export async function createProjectFromQuote(quoteId: string): Promise<ProjectRe
   if (existing) return existing;
   const q = await getDoc<QuoteLike>("quotes", quoteId);
   if (!q || q.quoteType === "flame_test" || q.quoteType === "consulting") return null;
-  const p = await createProject(fromQuote(q));
+  const p = await createProject(fromQuote(q, await loadPipelines()));
 
   // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
   // Unassigned until the project-roles model exists (D87: assign-by-role later).
@@ -652,8 +715,11 @@ export async function spawnServiceLinkedProject(
 ): Promise<ProjectRecord> {
   const existing = await getProjectByQuote(q.id);
   if (existing) return existing;
+  const pl = projectPipelineFor(await loadPipelines(), { kind: "order" });
+  const done = pl.stages.find((s) => s.tag === "done") || pl.stages[pl.stages.length - 1];
   return createProject({
     kind: "order",
+    pipelineId: pl.id,
     quoteId: q.id,
     projectType,
     name: q.name,
@@ -663,7 +729,7 @@ export async function spawnServiceLinkedProject(
     owner: q.owner || DEFAULT_ACTOR,
     value: 0,
     margin: 0,
-    stage: "complete",
+    stage: done.id,
   });
 }
 
@@ -685,6 +751,7 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   let made = 0;
   const skipped: string[] = [];
+  const pipes = await loadPipelines();
   const { createAutoTask } = await import("@/lib/stores/tasks");
   for (const q of quotes) {
     // Only install/system quotes become Projects. Repair and inspection wins
@@ -702,7 +769,7 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
       continue;
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
     try {
-      const body = fromQuote(q);
+      const body = fromQuote(q, pipes);
       const rec = await insertWithPrefixedId<ProjectRecord>(
         "projects",
         body.kind === "order" ? "S" : "P",
@@ -796,7 +863,10 @@ export async function setDeliveryStatus(
   const p = await getProject(id);
   if (!p) return null;
   if (!(p.deliveries || []).some((d) => d.id === deliveryId)) return null;
+  const pipes = await loadPipelines();
   return patchDoc<ProjectRecord>("projects", id, (doc) => {
+    normalizeProject(doc, pipes);
+    const pl = projectPipelineFor(pipes, doc);
     const deliveries = Array.isArray(doc.deliveries) ? doc.deliveries : [];
     doc.deliveries = deliveries;
     const d = deliveries.find((x) => x.id === deliveryId);
@@ -804,17 +874,18 @@ export async function setDeliveryStatus(
     d.status = status;
     if (status === "received") d.receivedAt = now();
     // Delivery-driven lifecycle (#44): once every shipment is physically
-    // received, put an install project into the scheduling queue. This does
-    // not block crew booking and the normal stage controls can still undo or
+    // received, a stage flagged advanceOnDelivered (Equipment ordered,
+    // Deliveries) moves on to the next stage of its pipeline. This does not
+    // block crew booking and the normal stage controls can still undo or
     // correct the transition when a receipt was entered in error.
     if (
       status === "received" &&
-      doc.kind === "project" &&
-      doc.stage === "delivery" &&
       deliveries.length > 0 &&
-      deliveries.every((row) => row.status === "received")
+      deliveries.every((row) => row.status === "received") &&
+      stageById(pl, doc.stage)?.advanceOnDelivered
     ) {
-      recordStageChange(doc, "scheduled", "System");
+      const nx = nextStage(pl, doc.stage);
+      if (nx) recordStageChange(doc, nx.id, "System", pipes);
     }
     doc.updatedAt = now();
     return doc;
@@ -923,12 +994,19 @@ export async function setSignoff(
   signoff: Partial<ProjectSignoff> | null,
   signedBy?: string
 ): Promise<ProjectRecord | null> {
+  const pipes = await loadPipelines();
   return patchDoc<ProjectRecord>("projects", id, (p) => {
+    normalizeProject(p, pipes);
     p.signoff = signoff
       ? { signedBy: signedBy || DEFAULT_ACTOR, signedAt: now(), ...signoff }
       : null;
-    if (signoff && p.stage !== "complete") {
-      recordStageChange(p, "signoff", signedBy || DEFAULT_ACTOR);
+    // Sign-off is the hand-off, not the close: it moves a record that hasn't
+    // reached closeout yet onto its pipeline's first closeout stage (Invoice /
+    // Delivered & accepted). Done is a separate, explicit step.
+    if (signoff && PROJECT_TAG_RANK[projectTag(p, pipes)] < PROJECT_TAG_RANK.closeout) {
+      const pl = projectPipelineFor(pipes, p);
+      const to = firstStageWithTag(pl, "closeout") || firstStageWithTag(pl, "done");
+      if (to) recordStageChange(p, to.id, signedBy || DEFAULT_ACTOR, pipes);
     }
     p.updatedAt = now();
     return p;
@@ -971,22 +1049,21 @@ export function procurementProgress(p: ProjectRecord): number {
 }
 
 export function progressPct(p: ProjectRecord): number {
-  const stages = stagesFor(p.kind);
-  const i = stageIndex(p.kind, p.stage);
-  return Math.round((i / (stages.length - 1)) * 100);
+  const m = p.stageMeta || projectStageMeta(DEFAULT_PIPELINES, p);
+  return m.count > 1 ? Math.round((m.index / (m.count - 1)) * 100) : 100;
 }
 
 /** Anything needing the PM's attention on this project (port of riskFlags). */
 export function riskFlags(p: ProjectRecord): RiskFlag[] {
   const flags: RiskFlag[] = [];
-  if (p.stage === "complete") return flags;
+  if (isDone(p)) return flags;
   for (const l of p.procurement || []) {
     if (lineLate(p, l)) flags.push({ kind: "late-order", label: "Order overdue: " + l.desc });
   }
   const dueIn = Math.ceil(((p.targetDate || 0) - now()) / DAY);
   if (
     p.kind === "project" &&
-    (p.stage === "procurement" || p.stage === "delivery") &&
+    isBacklog(p) &&
     dueIn <= 14 &&
     dueIn >= 0
   ) {

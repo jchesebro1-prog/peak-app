@@ -1,7 +1,7 @@
 import { getSettings, setSettings } from "@/lib/settings";
 import { listDocs, type Doc } from "@/db/doc-store";
 import {
-  resolvePipelines, validateProjectPipeline, validateQuotePipeline, projectPipelineFor, quotePipelineFor, carriesPipeline,
+  resolvePipelines, resolveProjectStage, validateProjectPipeline, validateQuotePipeline, projectPipelineFor, quotePipelineFor, carriesPipeline,
   DEFAULT_PIPELINES, type Pipelines, type ProjectPipeline, type QuotePipeline,
 } from "@/lib/pipelines";
 
@@ -17,7 +17,8 @@ export async function stageUsage(): Promise<Record<string, Record<string, number
   const bump = (pl: string, st: string) => { (out[pl] ||= {})[st] = (out[pl][st] || 0) + 1; };
   for (const p of await listDocs<Doc & { kind?: string; pipelineId?: string; stage?: string }>("projects")) {
     const pl = projectPipelineFor(pipes, p);
-    if (p.stage) bump(pl.id, p.stage);
+    // A doc not yet re-saved may still carry a pre-pipeline key — count it where it reads.
+    if (p.stage) bump(pl.id, resolveProjectStage(pl, p.kind, p.stage));
   }
   for (const q of await listDocs<Doc & { quoteType?: string; pipelineId?: string; stage?: string }>("quotes")) {
     if (!carriesPipeline(q.quoteType) || !q.stage) continue;

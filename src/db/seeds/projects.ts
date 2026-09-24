@@ -73,7 +73,8 @@ export function projectsSeed(): ProjectRecord[] {
       targetDate: ahead(3),
       installStart: ago(1),
       installEnd: ahead(2),
-      stage: "install",
+      pipelineId: "install",
+      stage: "installation",
       stageHistory: [],
       procurement: [
         line({ sku: "RB-MV-MN", desc: "25oz Memorable Velour — main drape", vendor: "Rose Brand", qty: 1, unit: "lot", cost: 9800, leadDays: 32, status: "received", orderedAt: ago(16), po: "PO-1042" }),
@@ -128,6 +129,7 @@ export function projectsSeed(): ProjectRecord[] {
       targetDate: ahead(12),
       installStart: ahead(8),
       installEnd: ahead(12),
+      pipelineId: "install",
       stage: "scheduled",
       stageHistory: [],
       procurement: [
@@ -172,7 +174,8 @@ export function projectsSeed(): ProjectRecord[] {
       targetDate: ahead(40),
       installStart: ahead(36),
       installEnd: ahead(42),
-      stage: "procurement",
+      pipelineId: "install",
+      stage: "equipment-ordered",
       stageHistory: [],
       procurement: [
         line({ sku: "ETC-SENSOR3", desc: "Sensor3 dimming + ThruPower racks", vendor: "ETC", qty: 2, unit: "rack", cost: 18600, leadDays: 56, status: "ordered", orderedAt: ago(4), po: "PO-1051" }),
@@ -217,7 +220,8 @@ export function projectsSeed(): ProjectRecord[] {
       targetDate: ahead(9),
       installStart: null,
       installEnd: null,
-      stage: "delivery",
+      pipelineId: "order",
+      stage: "deliveries",
       stageHistory: [],
       procurement: [
         line({ sku: "RB-COM-16", desc: "16oz Commando Cloth — black masking", vendor: "Rose Brand", qty: 1, unit: "lot", cost: 7400, leadDays: 32, status: "shipped", orderedAt: ago(6), po: "PO-1048" }),
@@ -254,6 +258,7 @@ export function projectsSeed(): ProjectRecord[] {
       targetDate: ago(20),
       installStart: ago(30),
       installEnd: ago(22),
+      pipelineId: "install",
       stage: "complete",
       stageHistory: [],
       procurement: [

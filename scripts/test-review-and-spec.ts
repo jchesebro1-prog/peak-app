@@ -2519,14 +2519,8 @@ import {
 import { boardProjects, dueChipLabel } from "@/app/(app)/projects/board-lib";
 import { PROJECT_STAGES, ORDER_STAGES } from "@/lib/stores/projects";
 
-ok(
-  PROJECT_STAGES.map((s) => s.key).join(",") === "procurement,delivery,scheduled,install,training,signoff,complete",
-  "#19: board columns are the 7-stage installs pipeline"
-);
-ok(
-  ORDER_STAGES.map((s) => s.key).join(",") === "procurement,delivery,signoff,complete",
-  "#19: orders carry a different 4-stage vocabulary — excluded from the board"
-);
+ok(PROJECT_STAGES.map((s) => s.key).join(",") === "deposit,equipment-ordered,initial-contact,scheduled,installation,invoice,complete", "#19: board columns follow the install pipeline");
+ok(ORDER_STAGES.map((s) => s.key).join(",") === "order-materials,deliveries,delivered,complete", "#19: orders follow the order pipeline — excluded from the board");
 {
   const mix: Array<{ kind: "project" | "order" }> = [
     { kind: "project" },
@@ -6941,8 +6935,69 @@ async function pipelinesServerAsyncChecks(): Promise<void> {
   const good = await savePipelines({ project: [renamed, before.project[1]] });
   ok(good.ok, "pipelines-server: a valid edit saves");
   ok((await loadPipelines()).project[0].stages.find((s) => s.id === "invoice")?.label === "Final invoice", "pipelines-server: the saved label reads back");
-  // Task 3 will add the idChange assertion (needs createProject to accept stage ids)
+  // The in-use (idChange) assertion lives in projectsPipelineAsyncChecks — it needs createProject to accept stage ids.
   await savePipelines({ project: before.project, quote: before.quote, defaultQuotePipelineId: "estimate-design" }); // restore
+}
+
+/* ============ PIPELINES (Daylite stages) — projects store on pipelines (Task 3) ============ */
+import * as ProjStore from "@/lib/stores/projects";
+
+async function projectsPipelineAsyncChecks(): Promise<void> {
+  {
+    const P = ProjStore;
+    const a = await P.createProject({ name: "pl-test A" });
+    ok(a.pipelineId === "install" && a.stage === "deposit", "projects: a new install lands at Deposit/PO received");
+    ok(a.stageHistory.length === 1 && a.stageHistory[0].to === "deposit", "projects: opening history entry at the first stage");
+    const o = await P.createProject({ name: "pl-test O", kind: "order" });
+    ok(o.pipelineId === "order" && o.stage === "order-materials", "projects: an order lands at Order materials");
+
+    // legacy doc on read
+    await upsertDoc("projects", { ...a, id: "P-legacy-1", stage: "training", pipelineId: undefined, stageMeta: undefined } as never);
+    const leg = (await P.getProject("P-legacy-1"))!;
+    ok(leg.stage === "installation" && leg.stageMeta?.tag === "onsite", "projects: a legacy 'training' record reads as Installation (onsite)");
+
+    // manual stage + refusal
+    ok(!(await P.setProjectStage(a.id, "bogus")), "projects: a stage id outside the pipeline is refused");
+    const moved = await P.setProjectStage(a.id, "equipment-ordered", "Test");
+    ok(moved?.stage === "equipment-ordered" && moved.stageHistory.at(-1)?.from === "deposit", "projects: stage write records history");
+    const keys = (await tasksForProject(a.id)).map((t) => t.coverageKey || "");
+    ok(keys.some((k) => k.startsWith(a.id + ":equipment-ordered:")), "projects: entering Equipment ordered expands its checklist");
+
+    // delivery advance: only when ALL received and stage.advanceOnDelivered
+    await P.updateProject(a.id, { deliveries: [
+      { id: "d1", label: "Rigging", vendor: "JR Clancy", eta: Date.now(), status: "scheduled" },
+      { id: "d2", label: "Soft goods", vendor: "Rose Brand", eta: Date.now(), status: "scheduled" },
+    ] } as never);
+    await P.setDeliveryStatus(a.id, "d1", "received");
+    ok((await P.getProject(a.id))!.stage === "equipment-ordered", "projects: one of two deliveries received does not advance");
+    await P.setDeliveryStatus(a.id, "d2", "received");
+    ok((await P.getProject(a.id))!.stage === "initial-contact", "projects: last delivery received advances to the next stage");
+
+    // sign-off → closeout, not done
+    await P.setSignoff(a.id, { name: "Pat", role: "Customer" }, "Test");
+    const signed = (await P.getProject(a.id))!;
+    ok(signed.stage === "invoice" && !ProjStore.riskFlags(signed).length, "projects: sign-off moves to Invoice, not Complete");
+    ok(ProjStore.progressPct(signed) === Math.round((5 / 6) * 100), "projects: progress from stage index");
+
+    // service-linked spawn lands done
+    const svc = await P.spawnServiceLinkedProject({ id: "Q-pl-svc", name: "svc" } as never, "repair");
+    ok(svc.pipelineId === "order" && svc.stage === "complete", "projects: service-linked record is born at order/complete");
+
+    for (const id of [a.id, o.id, "P-legacy-1", svc.id]) await P.removeProject(id);
+  }
+  // Task 2's deferred in-use guard — a stage id a live project sits in can't be removed.
+  {
+    const { loadPipelines, savePipelines } = await import("@/lib/pipelines-server");
+    const before = await loadPipelines();
+    const install = before.project.find((p) => p.id === "install")!;
+    const tmp = await ProjStore.createProject({ name: "pipelines-server tmp", stage: "invoice" });
+    const idChange = await savePipelines({ project: [{ ...install, stages: install.stages.map((s) => s.id === "invoice" ? { ...s, id: "billing" } : s) }, before.project.find((p) => p.id === "order")!] });
+    ok(!idChange.ok, "pipelines-server: removing a stage id that a live project sits in is refused");
+    await ProjStore.removeProject(tmp.id);
+    const afterRemove = await savePipelines({ project: [{ ...install, stages: install.stages.map((s) => s.id === "invoice" ? { ...s, id: "billing" } : s) }, before.project.find((p) => p.id === "order")!] });
+    ok(afterRemove.ok, "pipelines-server: the same change is allowed once no live record uses the stage");
+    await savePipelines({ project: before.project, quote: before.quote, defaultQuotePipelineId: "estimate-design" }); // restore seeds
+  }
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async
@@ -6959,6 +7014,7 @@ seeded()
   .then(() => templateScheduleAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
   .then(() => pipelinesServerAsyncChecks())
+  .then(() => projectsPipelineAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);

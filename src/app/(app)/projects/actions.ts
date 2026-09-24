@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { activeUsers } from "@/lib/users";
-import { createAssignment } from "@/lib/stores/assignments";
 import {
   getProject,
   setProjectStage,
@@ -18,7 +17,6 @@ import {
   setSignoff,
   signoffScopes,
   createProjectFromQuote,
-  stagesFor,
   type ProjectStage,
   type LineStatus,
   type DeliveryStatus,
@@ -75,8 +73,8 @@ export async function setStageAction(formData: FormData): Promise<void> {
   if (!id || !stage) return;
   const p = await getProject(id);
   if (!p) return;
-  if (!stagesFor(p.kind).some((s) => s.key === stage)) return; // illegal for kind
   try {
+    // setProjectStage refuses (null) a stage id outside the record's pipeline.
     if (!await setProjectStage(id, stage, user.name)) {
       projectErrorPath(id, formTab(formData, "overview"), "That project could not be updated — please refresh and try again.");
     }
@@ -177,7 +175,9 @@ export async function removeCrewAction(formData: FormData): Promise<void> {
   revalidatePath("/", "layout");
 }
 
-/** Record customer sign-off at hand-off, then close the job out (→ complete). */
+/** Record customer sign-off at hand-off — moves the job to its closeout stage
+ *  (setSignoff). Done, and the #16 follow-up, happen at the Done stage
+ *  (setProjectStage's done hook), not here. */
 export async function signoffAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = str(formData, "id");
@@ -205,34 +205,6 @@ export async function signoffAction(formData: FormData): Promise<void> {
   } catch (error) {
     console.error("signoffAction: sign-off save failed", error);
     projectErrorPath(id, formTab(formData, "signoff"), "Couldn’t record sign-off — please try again.");
-  }
-  // Punch #16 (D14x): narrow idempotency guard — setProjectStage has no
-  // "already at this stage" early return (recordStageChange() is a no-op
-  // internally but doesn't stop the caller's side effects), so this checks
-  // the stage we fetched BEFORE the transition rather than restructuring
-  // setProjectStage itself. Only fires the very first time a project reaches
-  // "complete", the one caller (signoffAction) reaching it through the
-  // sign-off Jeff requires (decision D) for a real completion.
-  const wasComplete = p.stage === "complete";
-  try {
-    await setProjectStage(id, "complete", user.name);
-  } catch (error) {
-    console.error("signoffAction: completion failed", error);
-    projectErrorPath(id, formTab(formData, "signoff"), "Sign-off was recorded, but the project could not be completed. Please try again.");
-  }
-  if (!wasComplete) {
-    try {
-      await createAssignment({
-        title: `Walk the completed site with the end user: ${p.name || p.customer || id}`,
-        assignee: p.owner || "Jeff Chesebro",
-        createdBy: user.name,
-        link: { kind: "project", id, label: p.name || p.customer || id },
-        source: "auto: project complete (#16)",
-      });
-    } catch (error) {
-      console.error("signoffAction: follow-up mint failed", error);
-      redirect(`/projects/${encodeURIComponent(id)}?tab=signoff&err=` + encodeURIComponent("Sign-off was recorded, but the follow-up task could not be created. Please try again."));
-    }
   }
   revalidatePath("/", "layout");
 }
