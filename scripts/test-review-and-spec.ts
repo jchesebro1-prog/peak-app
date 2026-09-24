@@ -6,6 +6,7 @@ import {
 import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
+import { extractLibrary } from "@/lib/davinci/extract";
 import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
@@ -8216,3 +8217,58 @@ ok(
   DEFAULT_WIRE_TYPES.filter((w) => w.interchangeable).map((w) => w.id).join(",") === "speaker-pair",
   "#162 no ETC wire type is marked interchangeable — speaker-pair remains the only one"
 );
+
+/* ====== #162 extractor ====== */
+const LIB162 = {
+  timestamp: "2026-09-02T01:37:52.850Z",
+  constants: {
+    languages: [{ languageId: "L-EN", text: "English" }, { languageId: "L-FR", text: "Francais" }],
+    documentTypes: [{ documentTypeId: "T-DS", text: "Datasheet" }, { documentTypeId: "T-MN", text: "Manual" }, { documentTypeId: "T-BR", text: "Brochure" }],
+    categories: [{ categoryId: "C-1", text: "ColorSource" }, { categoryId: "C-X", text: "Internal-DO NOT USE" }],
+    portDirections: [{ portDirectionId: "D-IN", text: "Input" }, { portDirectionId: "D-OUT", text: "Output" }, { portDirectionId: "D-BUS", text: "Bus" }],
+    connectorTypes: [{ connectorTypeId: "K-PC", text: "powerCON In" }, { connectorTypeId: "K-DMX", text: "DMX Male" }, { connectorTypeId: "K-GEN", text: "Power" }],
+    portProtocols: [],
+  },
+  documents: { documents: [
+    { documentId: "DOC-1", url: "https://example.test/ds-en.pdf", metadata: { name: "CSPAR Datasheet", type: "T-DS", language: "L-EN" } },
+    { documentId: "DOC-2", url: "https://example.test/ds-fr.pdf", metadata: { name: "CSPAR Datasheet FR", type: "T-DS", language: "L-FR" } },
+    { documentId: "DOC-3", url: "https://example.test/br-en.pdf", metadata: { name: "CSPAR Brochure", type: "T-BR", language: "L-EN" } },
+  ] },
+  types: [
+    {
+      typeId: "TY-1",
+      typeInformation: { displayName: "ColorSource PAR", categoryId: "C-1" },
+      partInformation: { generatorData: { lookupData: [
+        { modelNumber: "CSPAR", partNumber: "7410A1001" },
+        { modelNumber: "CSPAR-X", partNumber: "7410A1002" },
+      ] } },
+      documents: ["DOC-1", "DOC-2", "DOC-3"],
+      ports: [
+        { name: "", portProtocolId: "aa07559e-6609-4ec6-8df3-8990d6bc9909", connectorTypeId: "K-PC", portDirectionId: "D-IN" },
+        { name: "", portProtocolId: "698f9701-604c-4432-902f-19866c061108", connectorTypeId: "K-DMX", portDirectionId: "D-IN" },
+        { name: "", portProtocolId: "aa07559e-6609-4ec6-8df3-8990d6bc9909", connectorTypeId: "K-GEN", portDirectionId: "D-BUS" },
+      ],
+    },
+    // Excluded: internal category.
+    { typeId: "TY-X", typeInformation: { displayName: "RouteStubPrototype", categoryId: "C-X" },
+      partInformation: { generatorData: { lookupData: [{ modelNumber: "STUB", partNumber: "X" }] } },
+      documents: [], ports: [{ name: "", portProtocolId: "698f9701-604c-4432-902f-19866c061108", connectorTypeId: "K-DMX", portDirectionId: "D-IN" }] },
+    // No ports and no docs: nothing to contribute, must not appear.
+    { typeId: "TY-0", typeInformation: { displayName: "Empty", categoryId: "C-1" },
+      partInformation: { generatorData: { lookupData: [{ modelNumber: "EMPTY", partNumber: "E" }] } }, documents: [], ports: [] },
+  ],
+};
+const ex162 = extractLibrary(LIB162);
+ok(ex162.libraryTimestamp === "2026-09-02T01:37:52.850Z", "#162 the extract stamps the library's own timestamp");
+ok(ex162.records.length === 1, "#162 internal-category and contentless types are dropped from the extract");
+const r162 = ex162.records[0];
+ok(r162.modelNumbers.includes("CSPAR") && r162.modelNumbers.includes("7410A1001"), "#162 both model and part numbers are indexed");
+ok(r162.modelNumbers.length === 4, "#162 all four identifiers of a two-variant type are indexed");
+ok(r162.modelNumbers.every((m) => m === m.toUpperCase()), "#162 indexed identifiers are pre-normalized");
+ok(r162.docs.length === 1 && r162.docs[0].kind === "datasheet", "#162 only the English Datasheet/Manual documents survive");
+ok(r162.docs[0].url === "https://example.test/ds-en.pdf", "#162 the document URL is carried verbatim");
+ok(r162.ports.length === 3, "#162 every port of a kept type is emitted");
+ok(r162.ports[0].connectionType === "powerCON/True1" && r162.ports[0].direction === "in", "#162 a powerCON input maps through");
+ok(r162.ports[1].connectionType === "DMX512 (5-pin XLR)", "#162 a DMX port maps through");
+ok(r162.ports[2].connectionType === "line power (unspecified)" && r162.ports[2].direction === "io", "#162 a generic-connector Bus power port becomes unspecified/io");
+ok(r162.ports.every((p) => typeof p.name === "string"), "#162 every emitted port has a string name, never undefined");

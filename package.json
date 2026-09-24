@@ -20,6 +20,7 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
     "db:export": "tsx scripts/export.ts",
+    "davinci:extract": "tsx scripts/davinci-extract.ts",
     "db:inventory": "tsx scripts/inventory.ts",
     "ports:rules": "tsx scripts/port-rules.ts",
     "geo": "tsx scripts/enrich-addresses.ts",
