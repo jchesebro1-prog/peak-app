@@ -7321,7 +7321,7 @@ rows. Same spec as #160. Decision to log on build: D207.
 
 ---
 
-## 162. DaVinci → catalog enrichment — ports + datasheet links on the ETC book — OPEN
+## 162. DaVinci → catalog enrichment — ports + datasheet links on the ETC book — DONE 2026-09-24 (D209)
 
 **Reported:** 2026-09-23. D187 closed this on 2026-09-22 as "does not intersect Peak's catalog",
 but every check behind that ran against local dev (10 ETC rows). Production holds **3,959 ETC
@@ -7336,3 +7336,14 @@ keyed on UUID and the tool refuses an unknown one. Developed against a local cop
 production explicitly.
 Spec: `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md` (originally
 labelled #160, which collided with the quote-intake item — renumbered 2026-09-23).
+
+**Done 2026-09-24.** Ran against production after a full backup
+(`backups/peak-backup-20260924-0148.json`, 40,999 records): **2,917 ETC rows enriched** — 2,647
+gained ports, 2,872 gained manufacturer document links. All 3,959 ETC rows still carry both `list`
+and `cost`; the catalog is still 37,403 rows (nothing created); no non-ETC row was touched.
+Gates at merge: tsc clean, `test:specs` 2032 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 0
+errors and 0 new warnings. Decisions D208 (supersedes D187) and D209.
+
+Two blockers were caught by the final whole-branch review and fixed before the write, both verified
+against real data — see D209.
+

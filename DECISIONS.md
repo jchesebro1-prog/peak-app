@@ -4851,3 +4851,58 @@ production.
 
 Supersedes D187. The enrichment design it unblocks is
 `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md` (punch #162).
+
+## D209. The DaVinci enrichment shipped — scoped by manufacturer, ports deduped (#162, 2026-09-24)
+
+2,917 of production's 3,959 ETC catalog rows now carry manufacturer-authored ports (2,647) and
+public ETC document links (2,872), written after a full backup. All 3,959 still carry `list` and
+`cost`, the catalog is still 37,403 rows, and no non-ETC row was touched. This is the first port
+data production has ever held.
+
+**It is an enricher, not an importer.** It matches on SKU, so it only ever touches rows Peak already
+owns and prices; it creates no rows and has no opinion on price. Re-running it after a future
+price-book import picks up the new rows with no code change. The source is a committed 1.39 MB
+extract (`data/davinci-extract.json`, 1,720 records) distilled from ETC's 42 MB library, which stays
+gitignored on one machine.
+
+**Two defects the final whole-branch review caught, both of which would have shipped:**
+
+1. **Nothing constrained a match to the right manufacturer.** Matching is by normalized SKU alone,
+   and the documented write command was unscoped. Verified against the real extract: `Symetrix:4.50%`
+   normalizes to `450` and matched ETC's "Source Four 50 Degree"; so did `Draper:450`, `Crestron:405`
+   and `Biamp:0`. Production holds 19,326 Draper / Crestron / Legrand AV rows whose part numbers look
+   exactly like that, and none had ever been run against the index. This is the same false-positive
+   class D187 recorded as `QSC:SP-36` ↔ `SP3-6`, and it would have put another manufacturer's
+   datasheet in front of a customer. Fixed: the extract now carries DaVinci's manufacturer, an
+   explicit allowlist maps ETC / Echoflex / High End Systems onto Peak's single `ETC` book,
+   `planEnrichment` **requires** a manufacturer scope and throws without one, comparison goes through
+   `mfrKey()` like the rest of the codebase, and the report prints a `rejected, wrong mfr` count.
+
+2. **62 of 1,720 records carried duplicate ports**, which `parsePortsField` rejects because the Grid
+   inspector keys on `${name}-${connectionType}`. Enriching those rows would have made them
+   permanently un-saveable: any later edit — even a price change — would fail validation and strand
+   the row behind a `partError`. Fixed by collapsing identical ports into `count: N`, which `Port`
+   already supported.
+
+**Design decisions that survived review**, recorded because each was a real fork:
+
+- Unmapped ETC protocols pass through verbatim as their own namespaced connection types rather than
+  collapsing into the nearest Peak one. `canConnect` is exact string equality, so a passed-through
+  `ETC EchoConnect` mates only with itself — no false positives. Collapsing would have let the Grid
+  validate an Echoflex sensor against a DMX terminal block. 508 parts would have imported unwireable
+  without this.
+- The protocol map is keyed on UUID, never a name: `constantName` "NewPortProtocol" names three
+  distinct ArcSystem driver channels plus an internal blank, and ten protocols share the signal name
+  `F-DRIVE`. An unknown UUID throws rather than guessing.
+- Voltage classes stay distinct (D4b in the spec). The draft sent every hardwired power protocol to
+  `bare-end`, which would have let a low-voltage auxiliary bus validate against a 480V feeder.
+- Collisions are resolved deterministically — 440 identifiers are owned by more than one DaVinci
+  type — preferring an active type over a discontinued one, then the one with more ports.
+
+**Still open, deliberately:** `RDM` remains the one connection type with no wire type (DaVinci never
+emits it; whether it belongs on `dmx-5pin` is a call about Peak's own taxonomy). 1,042 ETC rows
+matched nothing — configurator placeholders, bare option codes, lamps, clamps — and
+`npm run davinci:enrich -- --mfr=ETC --unmatched` lists them.
+
+Spec: `docs/superpowers/specs/2026-09-23-davinci-etc-catalog-enrichment-design.md`.
+Supersedes nothing; extends D208.
