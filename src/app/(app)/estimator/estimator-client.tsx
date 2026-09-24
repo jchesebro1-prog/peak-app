@@ -2067,6 +2067,7 @@ export default function EstimatorClient({
               style={{
                 display: "flex",
                 alignItems: "center",
+                justifyContent: reviewBarOpen ? "initial" : "flex-end",
                 gap: 14,
                 flexWrap: "wrap",
                 rowGap: 11,
@@ -2076,27 +2077,31 @@ export default function EstimatorClient({
                 flexShrink: 0,
               }}
             >
-              <span
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: "50%",
-                  background: "#fff",
-                  border: "1px solid " + rm.bd,
-                  color: rm.ink,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 14,
-                  flexShrink: 0,
-                }}
-              >
-                {rm.icon}
-              </span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
-                <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
-              </div>
+              {reviewBarOpen && (
+                <>
+                  <span
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: "50%",
+                      background: "#fff",
+                      border: "1px solid " + rm.bd,
+                      color: rm.ink,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {rm.icon}
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
+                    <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
+                  </div>
+                </>
+              )}
               <button
                 type="button"
                 aria-expanded={reviewBarOpen}
@@ -2114,10 +2119,10 @@ export default function EstimatorClient({
                   whiteSpace: "nowrap",
                 }}
               >
-                {reviewBarOpen ? "Hide review actions" : "Review actions"} {reviewBarOpen ? "⌃" : "⌄"}
+                {reviewBarOpen ? "Collapse review status" : "Show review status"} {reviewBarOpen ? "⌃" : "⌄"}
               </button>
               {reviewBarOpen && (
-              <div id="estimator-review-actions" style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                <div id="estimator-review-actions" style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                 {rbCanSubmit && (
                   <>
                     <select
@@ -2256,7 +2261,7 @@ export default function EstimatorClient({
                     Send to customer →
                   </button>
                 )}
-              </div>
+                </div>
               )}
             </div>
           )}
