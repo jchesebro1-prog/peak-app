@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Map as LeafletMapType, LayerGroup } from "leaflet";
 
 /**
@@ -26,20 +26,67 @@ export default function LeafletMap({
   height = 320,
   center,
   zoom,
+  picked,
+  onPick,
 }: {
   pins: MapPin[];
   height?: number;
   center?: [number, number];
   zoom?: number;
+  /** Pick mode (#169): one draggable pin at `picked`; a map click or a pin
+   *  drag reports the point through `onPick`. Absent => display-only, as
+   *  every other map in the app uses it. */
+  picked?: { lat: number; lng: number } | null;
+  onPick?: (p: { lat: number; lng: number }) => void;
 }) {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMapType | null>(null);
   const layerRef = useRef<LayerGroup | null>(null);
+  const pickMarkerRef = useRef<import("leaflet").Marker | null>(null);
+  const onPickRef = useRef(onPick);
+  const pickedRef = useRef(picked);
+  const leafletRef = useRef<typeof import("leaflet") | null>(null);
+  useEffect(() => {
+    onPickRef.current = onPick;
+    pickedRef.current = picked;
+  });
+
+  /** Draw / move / remove the single pick-mode pin to match `picked`. */
+  const syncPick = useCallback(() => {
+    const L = leafletRef.current;
+    const map = mapRef.current;
+    if (!L || !map) return;
+    const p = pickedRef.current;
+    if (!p || !onPickRef.current) {
+      pickMarkerRef.current?.remove();
+      pickMarkerRef.current = null;
+      return;
+    }
+    if (pickMarkerRef.current) {
+      pickMarkerRef.current.setLatLng([p.lat, p.lng]);
+      return;
+    }
+    // A divIcon, not L.marker's default icon — the default needs image
+    // assets the bundler does not ship.
+    const icon = L.divIcon({
+      className: "",
+      html: '<div style="width:18px;height:18px;border-radius:50%;background:var(--accent);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)"></div>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+    const m = L.marker([p.lat, p.lng], { icon, draggable: true }).addTo(map);
+    m.on("dragend", () => {
+      const ll = m.getLatLng();
+      onPickRef.current?.({ lat: ll.lat, lng: ll.lng });
+    });
+    pickMarkerRef.current = m;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const L = (await import("leaflet")).default;
+      leafletRef.current = L;
       if (cancelled || !elRef.current) return;
       if (!mapRef.current) {
         mapRef.current = L.map(elRef.current, {
@@ -63,6 +110,11 @@ export default function LeafletMap({
           )
           .addTo(mapRef.current);
         layerRef.current = L.layerGroup().addTo(mapRef.current);
+        // Only reacts when a caller passed onPick; display maps ignore clicks.
+        mapRef.current.on("click", (e) => {
+          const cb = onPickRef.current;
+          if (cb) cb({ lat: e.latlng.lat, lng: e.latlng.lng });
+        });
       }
       const layer = layerRef.current!;
       layer.clearLayers();
@@ -98,11 +150,12 @@ export default function LeafletMap({
       } else {
         mapRef.current!.setView([44.5, -89.5], 6); // Wisconsin
       }
+      syncPick();
     })();
     return () => {
       cancelled = true;
     };
-  }, [pins, center, zoom]);
+  }, [pins, center, zoom, syncPick]);
 
   useEffect(() => {
     return () => {
@@ -110,6 +163,13 @@ export default function LeafletMap({
       mapRef.current = null;
     };
   }, []);
+
+  // Deliberately does NOT refit or re-centre, so the view doesn't jump
+  // while a pin is dragged.
+  useEffect(() => {
+    syncPick();
+    if (elRef.current) elRef.current.style.cursor = onPick ? "crosshair" : "";
+  }, [picked?.lat, picked?.lng, onPick, syncPick]);
 
   return (
     <div
