@@ -283,6 +283,73 @@ const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [install
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
 ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
 
+/* --- #160: quote intake → builder hand-off (pure) --- */
+import { builderPath, SERVICE_TYPES, BUILDER_BASE } from "@/app/(app)/quotes/new/types";
+import {
+  readHandoff, pickVenueId, pickContactName, seedVenueOn, intakeInitial, quoteServiceType, quoteEditPath,
+  quoteContactName, quoteLineCount, sameBuilder, canChangeType, replaceConfirmMessage, wonEditMessage,
+  systemQuoteName, CHANGE_TYPE_DISABLED_HINT,
+} from "@/app/(app)/quotes/new/handoff";
+{
+  const params160 = (href: string) => new URL(href, "http://x").searchParams;
+  for (const t of SERVICE_TYPES.map((s) => s.key)) {
+    const href = builderPath(t, "lakefront", { name: "Main Hall refit", venue: "lf2", contact: "Tom Reyes", replaces: "Q-2041", category: "Acoustics" });
+    const p = params160(href);
+    ok(href.startsWith(BUILDER_BASE[t] + "?"), `#160 builderPath(${t}) targets its builder`);
+    ok(p.get("customer") === "lakefront" && p.get("name") === "Main Hall refit" && p.get("contact") === "Tom Reyes" && p.get("replaces") === "Q-2041", `#160 builderPath(${t}) carries customer, name, contact and replaces`);
+    ok(t === "rental" ? !p.has("venue") : p.get("venue") === "lf2", `#160 builderPath(${t}) ${t === "rental" ? "drops venue (rental has none)" : "carries the venue id"}`);
+    ok(t === "custom" ? p.get("category") === "Acoustics" : !p.has("category"), `#160 builderPath(${t}) sends category only for custom`);
+  }
+  ok(builderPath("system", "lakefront") === "/estimator?customer=lakefront", "#160 builderPath with no options is unchanged");
+  ok(builderPath("repair", "") === "/repairs/quote", "#160 builderPath with no customer has no query string");
+  ok(!params160(builderPath("system", "c1", { name: "   " })).has("name"), "#160 a blank quote name is not forwarded");
+
+  const h = readHandoff({ customer: " lakefront ", name: ["Studio refit", "x"], venue: "lf2", contact: "Tom Reyes", replaces: "Q-2041", type: "repair", category: "" });
+  ok(h.customerId === "lakefront" && h.name === "Studio refit" && h.venueId === "lf2" && h.contactName === "Tom Reyes" && h.replaces === "Q-2041" && h.type === "repair", "#160 readHandoff trims and takes the first of repeated params");
+  ok(readHandoff({}).customerId === "" && readHandoff({}).replaces === "", "#160 readHandoff of nothing is all blanks");
+
+  const cust160 = {
+    id: "lakefront",
+    locations: [{ id: "lf1", primary: true }, { id: "lf2", primary: false }],
+    contacts: [{ name: "Dana Whitlock", primary: true }, { name: "Tom Reyes", primary: false }],
+  };
+  ok(pickVenueId(cust160, "lf2") === "lf2", "#160 a venue on the customer is honoured");
+  ok(pickVenueId(cust160, "nope") === "lf1", "#160 an unknown venue id falls back to the primary");
+  ok(pickVenueId(cust160, "nope", false) === "", "#160 without fallback an unknown venue id is blank");
+  ok(pickVenueId({ locations: [] }, "lf1") === "", "#160 a customer with no venues yields no venue");
+  ok(pickContactName(cust160, "Tom Reyes") === "Tom Reyes", "#160 a contact on the customer is honoured");
+  ok(pickContactName(cust160, "Stranger") === "Dana Whitlock", "#160 an unknown contact falls back to the primary");
+  ok(pickContactName(cust160, "Stranger", false) === "", "#160 without fallback an unknown contact is blank");
+  const on160 = seedVenueOn(cust160.locations, "lf2");
+  ok(on160.lf2 === true && on160.lf1 === false, "#160 a forwarded venue is the only venue switched on");
+  const onDefault160 = seedVenueOn(cust160.locations, "");
+  ok(onDefault160.lf1 === true && onDefault160.lf2 === false, "#160 with no forwarded venue the primary is on (unchanged rule)");
+  const onNoPrimary160 = seedVenueOn([{ id: "a", primary: false }, { id: "b", primary: false }], "zzz");
+  ok(onNoPrimary160.a === true && onNoPrimary160.b === false, "#160 no primary and an unknown venue → first venue on");
+
+  const dir160 = [{ id: "lakefront", name: "Lakefront PAC", type: "", locations: [{ id: "lf1", label: "Main Hall", city: "", state: "", primary: true }], contacts: [{ name: "Dana Whitlock", role: "", primary: true }] }];
+  const ii = intakeInitial({ type: "flame_test", category: "", customerId: "lakefront", venueId: "lf1", contactName: "Dana Whitlock", name: "Q name" }, dir160);
+  ok(ii.type === "flame_test" && ii.customerId === "lakefront" && ii.locationId === "lf1" && ii.contactName === "Dana Whitlock" && ii.name === "Q name", "#160 intakeInitial keeps a valid customer, venue and contact");
+  const bad = intakeInitial({ type: "bogus", category: "", customerId: "ghost", venueId: "lf1", contactName: "Dana Whitlock", name: "" }, dir160);
+  ok(bad.type === "system" && bad.customerId === "" && bad.locationId === "" && bad.contactName === "", "#160 intakeInitial ignores an unknown customer id (form starts blank) and an unknown type");
+  const badVenue = intakeInitial({ type: "repair", category: "", customerId: "lakefront", venueId: "zz", contactName: "Nobody", name: "" }, dir160);
+  ok(badVenue.customerId === "lakefront" && badVenue.locationId === "" && badVenue.contactName === "", "#160 intakeInitial drops a venue/contact that isn't on the customer");
+
+  ok(quoteServiceType({}) === "system" && quoteServiceType({ category: "Acoustics" }) === "custom" && quoteServiceType({ quoteType: "flame_test" }) === "flame_test", "#160 quoteServiceType maps estimator, custom and typed quotes");
+  ok(quoteServiceType({ quoteType: "weird" }) === "system", "#160 an unknown quoteType is treated as a system quote");
+  ok(quoteEditPath({ id: "Q-1", quoteType: "repair" }) === "/repairs/quote?id=Q-1" && quoteEditPath({ id: "Q-2" }) === "/estimator?id=Q-2", "#160 quoteEditPath opens each type in its own builder");
+  ok(quoteContactName({ contactName: "A" }) === "A" && quoteContactName({ contact: { name: "B" } }) === "B" && quoteContactName({}) === "", "#160 quoteContactName reads estimator and service contact shapes");
+  ok(quoteLineCount({ spec: { sections: [{ items: [1, 2] }, { items: [3] }] } }) === 3, "#160 estimator lines are counted across systems");
+  ok(quoteLineCount({ flameTest: { venues: [1, 2] } }) === 2 && quoteLineCount({ repair: { items: [1], parts: [1, 2] } }) === 3 && quoteLineCount({ rental: { lines: [1] } }) === 1 && quoteLineCount({ consulting: { scopes: [1, 2] } }) === 2, "#160 service quote lines are counted from their engine subdoc");
+  ok(quoteLineCount({}) === 0, "#160 a quote with no lines counts 0");
+  ok(sameBuilder("system", "custom") && sameBuilder("repair", "repair") && !sameBuilder("system", "repair"), "#160 system and custom share the Estimator, so switching between them is not a replace");
+  ok(canChangeType("draft") && !canChangeType("sent") && !canChangeType("won") && !canChangeType("lost"), "#160 Change type is drafts-only");
+  ok(CHANGE_TYPE_DISABLED_HINT === "Already sent — start a new quote instead.", "#160 disabled Change-type hint copy");
+  ok(replaceConfirmMessage("Q-2041", 12) === "Q-2041 and its 12 lines will be replaced. Continue?" && replaceConfirmMessage("Q-9", 1) === "Q-9 and its 1 line will be replaced. Continue?", "#160 replace confirm names the quote and its line count");
+  ok(wonEditMessage("venue") === "This quote is won — its project/job keeps the old venue. Change the quote anyway?", "#160 won-edit confirm copy");
+  ok(systemQuoteName("Lakefront PAC", "") === "Lakefront PAC — System" && systemQuoteName("Lakefront PAC", " Acoustics ") === "Lakefront PAC — Acoustics" && systemQuoteName("", "") === "New estimate", "#160 blank-name fallback for Estimator quotes");
+}
+
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link
 ETC-1,Fixture body,2,ea,$100.25,$150.50,https://example.com/fixture

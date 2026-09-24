@@ -120,6 +120,8 @@ export default function QuoteIntakeForm({
     const payload: IntakeSubmit = {
       type,
       category: type === "custom" ? category.trim() : "",
+      name: "",
+      replaces: "",
       customerMode,
       customerId,
       newCustomerName: newCustomer.name,

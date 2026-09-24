@@ -94,5 +94,5 @@ export async function createQuoteIntakeAction(
 
   if (!customerId) return { ok: false, error: "Pick or create a customer first." };
 
-  redirect(builderPath(input.type, customerId, category));
+  redirect(builderPath(input.type, customerId, { category }));
 }
