@@ -636,7 +636,25 @@ export async function setStatus(
   return withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
-  if (!q || q.status === status) return q;
+  if (!q) return null;
+  if (q.status === status) {
+    // #170: nothing to transition, but the downstream record may still be
+    // MISSING. This early return is the layer that actually gated the bug —
+    // `spawnFromQuote` was never reached at all. The four service builder
+    // screens persist their quote, call setStatus(id, "won") and then act;
+    // cfc00ad deleted the `createFromQuote`/`syncFromQuotes` calls they used
+    // to make for themselves, so re-approving an ALREADY-won quote created
+    // nothing anywhere. Replaying the spawn repairs that. No write, no
+    // history entry, no revision and no #16 assignment happen here — those
+    // belong to a real transition, and a no-op re-save must stay a no-op
+    // everywhere except this one idempotent repair. The approval gate is
+    // deliberately not consulted either: no status is being advanced, and
+    // every creator the replay reaches dedupes on the quote id, so the cost
+    // when the record already exists is one read.
+    const { spawnFromQuote } = await import("./quote-spawn");
+    await spawnFromQuote(q, q.status, { replayUnchanged: true });
+    return q;
+  }
   const gate = resolveStatusGate(status, q.review, opts);
   if (!gate.ok) throw new Error(gate.error);
   const result = await patchDoc<Quote>("quotes", id, (doc) => {
@@ -652,10 +670,11 @@ export async function setStatus(
 
   // Punch #16 (D14x): an install sale notifies the company as a Home Queue
   // task, not email — see PUNCHLIST.md #16 for the five findings against an
-  // automated send. The early-return above (`q.status === status`) means
-  // this only runs the moment a quote actually transitions INTO "won", never
-  // on a no-op re-save of an already-won quote. Scoped to the quote types
-  // that actually become an Installs project (mirrors syncProjectsFromQuotes'
+  // automated send. The unchanged-status branch above returns before reaching
+  // here, so this only runs the moment a quote actually transitions INTO
+  // "won", never on a no-op re-save of an already-won quote (#170's spawn
+  // replay is deliberately the only thing that branch does). Scoped to the
+  // quote types that actually become an Installs project (mirrors syncProjectsFromQuotes'
   // own exclusion list) — flame-test/repair/inspection/consulting wins run
   // their own service workflows and dashboards, so an "install sold" task
   // for those would be noise. There is no separate PM role (D87) — `owner`

@@ -323,7 +323,13 @@ function normalizeProject(p: ProjectRecord): ProjectRecord {
 
 /* ---------- dismissed list (blob singleton "projects_dismissed") ---------- */
 
-async function dismissedQuoteIds(): Promise<string[]> {
+/**
+ * Quotes whose converted project was DELETED — the sweep (and, since #169,
+ * the per-quote creator reached from `quote-spawn.ts`) must never re-create
+ * them. Exported so the router can consult the list without a second module
+ * restating DISMISSED_BLOB_ID.
+ */
+export async function dismissedQuoteIds(): Promise<string[]> {
   const blob = await getBlob<{ ids: string[] }>(DISMISSED_BLOB_ID, { ids: [] });
   return Array.isArray(blob.ids) ? blob.ids : [];
 }

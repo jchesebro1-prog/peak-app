@@ -6861,6 +6861,7 @@ seeded()
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
+  .then(() => quoteSpawnAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -8815,5 +8816,278 @@ async function davinciWriterAsyncChecks(): Promise<void> {
     ok(empty.written === 0 && empty.missing === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
   } finally {
     for (const s of [SKU_A, SKU_B, SKU_C, SKU_D]) await softDeleteDoc("catalog_parts", s);
+  }
+}
+
+/* ====================================================================
+   #169 / #170 / #171 — spawnFromQuote correctness (D225).
+
+   `setStatus` routes every won/sent/lost quote through
+   `src/lib/stores/quote-spawn.ts`, inside its transaction. Three defects
+   in that router are pinned here, each against the real doc-store (a
+   scratch datadir under `npm run test:specs`):
+
+     #169 a project the user DELETED must stay deleted — the dismissed
+          list the page-load sweep has always honoured now gates the
+          per-quote creator too;
+     #170 re-approving an ALREADY-won quote must still spawn — the four
+          service builder screens set `won` and then act, and cfc00ad
+          deleted their own `createFromQuote` calls;
+     #171 losing consulting quote A must not touch quote B's engagement —
+          the `lost` branch used to borrow the full-collection sweep.
+
+   Fixtures are `TEST169:`-prefixed and torn down in `finally`, because
+   this may run against the one shared Neon instance, not a scratch DB.
+   ==================================================================== */
+import { getBlob, listDocs as listDocs169, patchDoc as patchDoc169, setBlob } from "../src/db/doc-store";
+import { setStatus as setQuoteStatus169 } from "../src/lib/stores/quotes";
+import { dismissedQuoteIds } from "../src/lib/stores/projects";
+import { getEngagementByQuote } from "../src/lib/stores/engagements";
+import { byQuote as flameByQuote } from "../src/lib/stores/flame-jobs";
+
+async function quoteSpawnAsyncChecks(): Promise<void> {
+  const PRE = "TEST169:";
+  const Q_PROJECT = `${PRE}system`;
+  const Q_FLAME = `${PRE}flame`;
+  const Q_REPAIR = `${PRE}repair`;
+  const Q_INSPECTION = `${PRE}inspection`;
+  const Q_RENTAL = `${PRE}rental`;
+  const Q_CONSULT_WON = `${PRE}consulting-won`;
+  const Q_LOST_A = `${PRE}consulting-lost-a`;
+  const Q_KEEP_B = `${PRE}consulting-keep-b`;
+  const Q_UNKNOWN = `${PRE}unknown-type`;
+  const QUOTE_IDS = [
+    Q_PROJECT, Q_FLAME, Q_REPAIR, Q_INSPECTION, Q_RENTAL,
+    Q_CONSULT_WON, Q_LOST_A, Q_KEEP_B, Q_UNKNOWN,
+  ];
+  // The dismissed list is a blob singleton, so it is snapshotted and put
+  // back verbatim rather than edited in place (the ids this test adds are
+  // removed by the restore below, whatever else is in the list).
+  const dismissedBefore = await dismissedQuoteIds();
+
+  /** A complete-enough quote doc. `upsertDoc` writes the collection
+   *  directly — the same way the #13 block above fakes its quotes — so
+   *  the spawn is exercised without the builder UI/actions. */
+  const seedQuote = (
+    id: string,
+    quoteType: string,
+    status: string,
+    extra: Record<string, unknown> = {}
+  ) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#169 harness ${quoteType} quote`,
+      quoteType,
+      status,
+      customer: "Test Customer #169",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+      ...extra,
+    });
+
+  /** Every setStatus here names the builder screens' own bypass: these
+   *  fixtures carry no approval record, and the approval gate is not what
+   *  is under test. */
+  const win = (id: string) =>
+    setQuoteStatus169(id, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+
+  try {
+    /* ---------- #169: a deleted project must stay deleted ---------- */
+    await seedQuote(Q_PROJECT, "system", "draft");
+    await win(Q_PROJECT);
+    const born = await getProjectByQuote(Q_PROJECT);
+    ok(!!born, "#169 winning a system quote spawns its Installs project");
+    if (born) await removeProject(born.id);
+    ok(
+      (await dismissedQuoteIds()).includes(Q_PROJECT),
+      "#169 deleting a quote-born project records that quote on the dismissed list"
+    );
+    ok(await getProjectByQuote(Q_PROJECT) === null, "#169 the deleted project is gone");
+
+    // (a) a re-save of the SAME won status — the #170 replay path.
+    await win(Q_PROJECT);
+    ok(
+      await getProjectByQuote(Q_PROJECT) === null,
+      "#169 re-saving an already-won quote does NOT resurrect the project the user deleted"
+    );
+
+    // (b) a genuine lost → won transition, the router's original path.
+    await setQuoteStatus169(Q_PROJECT, "lost", "Test Harness");
+    await win(Q_PROJECT);
+    ok(
+      await getProjectByQuote(Q_PROJECT) === null,
+      "#169 winning a dismissed quote again does NOT resurrect the project (real transition too)"
+    );
+
+    /* ---------- #170: re-approving an already-won quote spawns ----------
+     * Each fixture is seeded ALREADY at `won` with no downstream record —
+     * exactly the state a builder screen's approve action lands in when the
+     * quote was won before (setStatus early-returns on an unchanged status,
+     * and cfc00ad deleted the actions' own createFromQuote calls). */
+    await seedQuote(Q_FLAME, "flame_test", "won", {
+      flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] },
+    });
+    ok(await flameByQuote(Q_FLAME) === null, "#170 flame fixture starts with no job");
+    await win(Q_FLAME);
+    const flameJob = await flameByQuote(Q_FLAME);
+    ok(!!flameJob, "#170 re-approving an already-won flame-test quote creates its job");
+    await win(Q_FLAME);
+    ok(
+      (await flameByQuote(Q_FLAME))?.id === flameJob?.id,
+      "#170 a second re-approval creates the flame job exactly once"
+    );
+
+    await seedQuote(Q_REPAIR, "repair", "won", {
+      repair: { title: "Harness repair", category: "other", venues: [{ id: null, label: "Main Stage" }] },
+    });
+    ok(await repairByQuote(Q_REPAIR) === null, "#170 repair fixture starts with no job");
+    await win(Q_REPAIR);
+    const repairJob = await repairByQuote(Q_REPAIR);
+    ok(!!repairJob, "#170 re-approving an already-won repair quote creates its job");
+    await win(Q_REPAIR);
+    ok(
+      (await repairByQuote(Q_REPAIR))?.id === repairJob?.id,
+      "#170 a second re-approval creates the repair job exactly once"
+    );
+
+    await seedQuote(Q_INSPECTION, "inspection", "won", {
+      inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] },
+    });
+    ok((await inspectionsByQuote(Q_INSPECTION)).length === 0, "#170 inspection fixture starts with no record");
+    await win(Q_INSPECTION);
+    ok(
+      (await inspectionsByQuote(Q_INSPECTION)).length === 1,
+      "#170 re-approving an already-won inspection quote creates its requested record"
+    );
+    await win(Q_INSPECTION);
+    ok(
+      (await inspectionsByQuote(Q_INSPECTION)).length === 1,
+      "#170 a second re-approval creates the inspection record exactly once"
+    );
+
+    await seedQuote(Q_RENTAL, "rental", "won", {
+      rental: {
+        lines: [{
+          itemId: `${PRE}item`, locationId: `${PRE}loc`, qty: 2,
+          startDate: Date.UTC(2027, 0, 4), endDate: Date.UTC(2027, 0, 8), rate: 25,
+        }],
+      },
+    });
+    ok((await bookingsByQuote(Q_RENTAL)).length === 0, "#170 rental fixture starts with no booking");
+    await win(Q_RENTAL);
+    ok(
+      (await bookingsByQuote(Q_RENTAL)).length === 1,
+      "#170 re-approving an already-won rental quote creates its booking"
+    );
+    await win(Q_RENTAL);
+    ok(
+      (await bookingsByQuote(Q_RENTAL)).length === 1,
+      "#170 a second re-approval creates the rental booking exactly once"
+    );
+
+    await seedQuote(Q_CONSULT_WON, "consulting", "won");
+    ok(await getEngagementByQuote(Q_CONSULT_WON) === null, "#170 consulting fixture starts with no engagement");
+    await win(Q_CONSULT_WON);
+    const consultEng = await getEngagementByQuote(Q_CONSULT_WON);
+    ok(!!consultEng, "#170 re-approving an already-won consulting quote creates its engagement");
+    ok(consultEng?.status === "awarded", "#170 the replayed consulting engagement is born at awarded");
+    await win(Q_CONSULT_WON);
+    ok(
+      (await getEngagementByQuote(Q_CONSULT_WON))?.id === consultEng?.id,
+      "#170 a second re-approval creates the consulting engagement exactly once"
+    );
+
+    // A system quote that was never dismissed must still spawn on replay —
+    // proving #169's new dismissed check gates only the dismissed case.
+    const projectReplay = `${PRE}system-replay`;
+    QUOTE_IDS.push(projectReplay);
+    await seedQuote(projectReplay, "system", "won");
+    await win(projectReplay);
+    ok(
+      !!(await getProjectByQuote(projectReplay)),
+      "#170 re-approving an already-won system quote creates its project"
+    );
+
+    /* ---------- #171: losing A must not touch B ----------
+     * B is deliberately left OUT OF SYNC (quote won, engagement still at
+     * proposal_sent) — precisely the divergence the page-load sweep exists
+     * to repair. A's status change must leave that repair to the sweep. */
+    await seedQuote(Q_LOST_A, "consulting", "draft");
+    await setQuoteStatus169(Q_LOST_A, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const engA = await getEngagementByQuote(Q_LOST_A);
+    ok(engA?.status === "proposal_sent", "#171 sending consulting quote A opens its engagement at proposal_sent");
+
+    await seedQuote(Q_KEEP_B, "consulting", "draft");
+    await setQuoteStatus169(Q_KEEP_B, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const engB = await getEngagementByQuote(Q_KEEP_B);
+    ok(engB?.status === "proposal_sent", "#171 quote B's engagement also starts at proposal_sent");
+    // Move B's QUOTE to won behind setStatus's back, so its engagement stays
+    // at proposal_sent and a full-collection sweep would advance it.
+    await patchDoc169("quotes", Q_KEEP_B, (doc) => {
+      doc.status = "won";
+      return doc;
+    });
+
+    await setQuoteStatus169(Q_LOST_A, "lost", "Test Harness");
+    const engAAfter = await getEngagementByQuote(Q_LOST_A);
+    ok(engAAfter?.status === "closed", "#171 losing consulting quote A closes A's own engagement");
+    ok(
+      engAAfter?.decisions?.[0]?.decision === "Proposal lost",
+      "#171 A's close still records the 'Proposal lost' decision (copy unchanged)"
+    );
+    ok(
+      (engAAfter?.decisions?.[0]?.context || "").includes(Q_LOST_A),
+      "#171 the decision names the quote whose status decided it"
+    );
+    const engBAfter = await getEngagementByQuote(Q_KEEP_B);
+    ok(
+      engBAfter?.status === "proposal_sent",
+      `#171 losing quote A does NOT patch unrelated quote B's engagement (B is ${engBAfter?.status})`
+    );
+    ok(
+      (engBAfter?.decisions || []).length === 0,
+      "#171 quote B's engagement gains no decision entry from A's status change"
+    );
+    ok(
+      (engBAfter?.updatedAt || 0) === (engB?.updatedAt || 0),
+      "#171 quote B's engagement is not written to at all during A's transaction"
+    );
+
+    /* ---------- an unrecognised quoteType never throws ---------- */
+    await seedQuote(Q_UNKNOWN, "no-such-quote-type", "draft");
+    let threw = false;
+    try {
+      await win(Q_UNKNOWN);
+    } catch {
+      threw = true;
+    }
+    ok(!threw, "#169 an unrecognised quoteType is handled, never a throw");
+  } finally {
+    // Teardown: fixed prefix, re-queried by that prefix rather than by
+    // local variables, so a mid-test throw still cleans up everything.
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "consulting_engagements", "tasks"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const a of await listDocs169("assignments")) {
+      const link = a.link as { id?: string } | null;
+      if (typeof link?.id === "string" && link.id.startsWith(PRE)) await softDeleteDoc("assignments", a.id);
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+    // Blob singleton — put the snapshot back rather than editing in place.
+    await setBlob("projects_dismissed", { ids: dismissedBefore });
+    ok(
+      (await getBlob<{ ids: string[] }>("projects_dismissed", { ids: [] })).ids.every((i) => !i.startsWith(PRE)),
+      "#169 teardown leaves no TEST169 id on the dismissed list"
+    );
   }
 }
