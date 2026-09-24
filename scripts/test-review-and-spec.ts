@@ -8168,3 +8168,51 @@ ok(DIRECTION_MAP["Configurable"] === "io", "#162 a Configurable port maps to io"
 ok(Object.keys(DIRECTION_MAP).length === 5, "#162 all five DaVinci directions are mapped");
 
 ok(PASSTHROUGH_TYPES.length > 0 && PASSTHROUGH_TYPES.every((t) => t.startsWith("ETC ")), "#162 every pass-through type is namespaced so it cannot collide with a Peak type");
+
+/* ====== #162 taxonomy ====== */
+ok(CONNECTION_TYPES.includes("line power (unspecified)"), "#162 the unspecified-power type exists");
+ok(
+  PASSTHROUGH_TYPES.every((t) => CONNECTION_TYPES.includes(t)),
+  "#162 every pass-through type the protocol map can emit is a declared connection type"
+);
+// No orphans: anything the map emits must be carried by some wire type, or the
+// Grid can validate the wire but offer no cable for it.
+const emitted162 = [...new Set(Object.values(PROTOCOL_MAP).flatMap((m) =>
+  m.kind === "peak" || m.kind === "passthrough" ? [m.connectionType] : []
+).concat(["powerCON/True1", "bare-end", "line power (unspecified)"]))];
+const orphans162 = emitted162.filter((t) => compatibleWireTypes(t, DEFAULT_WIRE_TYPES).length === 0);
+ok(orphans162.length === 0, `#162 no connection type is left without a wire type (orphans: ${orphans162.join(", ")})`);
+
+// D1 — pass-through mates with itself and nothing else.
+const p162 = (connectionType: string, direction: "in" | "out" | "io") => ({ name: "", direction, connectionType });
+ok(
+  canConnect(p162("ETC EchoConnect", "out"), p162("ETC EchoConnect", "in")),
+  "#162 an EchoConnect output reaches an EchoConnect input"
+);
+ok(
+  !canConnect(p162("ETC EchoConnect", "out"), p162("contact closure", "in")),
+  "#162 EchoConnect does NOT reach a contact closure — the collapse this design refuses"
+);
+ok(
+  !canConnect(p162("ETC ArcSystem D4 driver", "out"), p162("ETC ArcSystem D2 driver", "in")),
+  "#162 two different ArcSystem driver families never cross-connect"
+);
+ok(
+  canConnect(p162("ETC ArcSystem D4 driver", "out"), p162("ETC ArcSystem D4 driver", "in")),
+  "#162 one ArcSystem driver family connects to itself"
+);
+// D4 — unspecified power reaches unspecified power (fixture ↔ dimmer) but is
+// not silently equated with a specific connector.
+ok(
+  canConnect(p162("line power (unspecified)", "in"), p162("line power (unspecified)", "out")),
+  "#162 a Source Four's unspecified power inlet reaches a dimmer's unspecified outlet"
+);
+ok(
+  !canConnect(p162("line power (unspecified)", "in"), p162("Edison", "out")),
+  "#162 unspecified power is not silently treated as Edison"
+);
+// speaker-pair stays the ONLY interchangeable family.
+ok(
+  DEFAULT_WIRE_TYPES.filter((w) => w.interchangeable).map((w) => w.id).join(",") === "speaker-pair",
+  "#162 no ETC wire type is marked interchangeable — speaker-pair remains the only one"
+);
