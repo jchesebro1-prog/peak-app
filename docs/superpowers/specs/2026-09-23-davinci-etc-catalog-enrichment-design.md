@@ -206,11 +206,14 @@ coordination code — only this note.
 ports (already mapped), its English document links, and provenance
 (`libraryTimestamp`, `typeId`).
 
-Measured, not estimated: **0.52 MB minified**. The 3,424 matched catalog rows
-are backed by only **908 distinct DaVinci types** (one type covers many SKU
-variants — `ColorSource PAR` alone covers 11), carrying 7,083 indexed model
-numbers, 2,335 port rows and 1,173 document links. Small enough to commit,
-diff and review like any other source file.
+Measured, not estimated: **1.35 MB minified** — 1,720 records, 14,108 indexed
+identifiers, 6,241 ports and 2,836 document links, covering every eligible
+DaVinci type. (The subset that matches today's catalog is smaller still: the
+3,424 matched rows are backed by only **908 distinct types**, because one type
+covers many SKU variants — `ColorSource PAR` alone covers 11 — and comes to
+0.52 MB. The extract carries the full set so a future price-book import needs
+no regeneration.) Small enough to commit, diff and review like any other
+source file.
 
 A separate `npm run davinci:extract` regenerates it from the full library when
 ETC ships a new export. This makes the enrichment reproducible on any machine
