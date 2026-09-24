@@ -5670,7 +5670,10 @@ own numbers when they're present; report "N priced from catalog, M custom" in th
 `design/engagements/markup/viewer.tsx:471` (`💬`). #3's rule: no pictographs, no U+FE0F; plain
 text or an SVG where the glyph was the only affordance.
 
-## Q — Labor: "shouldn't fill more than a single mobilization" — NEEDS JEFF
+## Q — Labor: "shouldn't fill more than a single mobilization" — ANSWERED 2026-09-23 → #161
+
+> **Jeff, 2026-09-23:** open Labor with ONE mobilization; the five D136 values are the per-type
+> crew × days defaults, not five pre-filled rows. Tracked as #161.
 
 The same review list also asks for five default mobilizations (Site Visit 1×1, Install 4×5, Hang
 2×3, Commissioning 2×3, Training 1×1), which D136 ships. Read together, the likely meaning is that
@@ -7282,3 +7285,36 @@ change (`CatalogPart.ports?: Port[]` already existed). Builds on #158 (D187-D191
 Still open — the whole review loop is Jeff reading `npm run ports:rules`'s output and replying
 with the `--rules` list to apply; nothing is applied until he does. Decisions: D192-D197,
 D199-D200 (D198 skipped — see the D199 entry in DECISIONS.md).
+
+---
+
+## 160. Quote intake flow — company "+ New quote", searchable customer, name/rename, change type, catalog rapid-add — OPEN
+
+**Reported:** 2026-09-23 (Jeff's practice run). From a company, "+ New quote" didn't pick the
+company, didn't offer type or name, and the quote couldn't be renamed from "New estimate".
+Adding many catalog parts meant re-clicking + each time with qty stuck at 1.
+`/quotes/new?type=system` "Search customers…" appeared not to search.
+
+**Causes (code-verified):** company button links to bare `/estimator`
+(`companies/[id]/page.tsx:324`); Estimator title is static (`estimator-client.tsx:1618`);
+`addPart` closes the picker and hardcodes qty 1 (`:850`); the intake search filters a closed
+`<select>`; `builderPath` forwards only `?customer=`, dropping a picked venue/contact.
+
+**Agreed design:** company button → `/quotes/new?customer=`; `CustomerCombobox` on intake; optional
+Quote name; venue/contact/name forwarded to all builders; click-to-edit Estimator title; won-quote
+edit warning; drafts-only "Change type" (old draft retired on the new quote's first save);
+catalog rows get a qty box, picker stays open, "✓ Added" confirm.
+Spec: `docs/superpowers/specs/2026-09-23-quote-intake-and-estimator-flow-design.md`.
+Decisions to log on build: D205, D206.
+
+---
+
+## 161. Estimator Labor opens with one mobilization; the five presets become per-type defaults — OPEN
+
+**Reported:** 2026-09-23 (Jeff). "The Labor input needs to only do a single mobilization not
+multiple when clicking the button." Clarified: the D136 values (Site Visit 1×1, Install 4×5,
+Hang 2×3, Commissioning 2×3, Training 1×1) are crew-size × days defaults per type.
+
+**Fix:** `defaultLaborMobs` (`estimator/labor-defaults.ts:45`) returns one blank row; picking a
+type fills people/days from the lookup only while they're untouched. Supersedes D136's opening
+rows. Same spec as #160. Decision to log on build: D207.
