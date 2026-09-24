@@ -185,6 +185,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/flame-tests/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+flame" },
   { route: "/repairs/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&replaces=Q-2041" },
   { route: "/inspections/quote?customer=lakefront&venue=lf2&contact=Nobody&name=Smoke+inspection" },
+  { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
+  { route: "/rentals/quote?customer=lakefront&contact=Tom+Reyes&name=Smoke+rental&replaces=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // CE-1001 is not seeded directly: it is lazily minted by
   // syncEngagementsFromQuotes() from the seeded won consulting quote Q-2045.

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { priceRental } from "@/lib/pricing/rental";
+import { ChangeTypeControl } from "@/components/quote-flow-controls";
 import { saveRentalQuote, approveRentalQuote, checkRentalAvailabilityAction } from "./actions";
 
 /**
@@ -49,6 +50,10 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
+  /** Quote status — drives Change type (D205). "draft" when new. */
+  status: string;
+  /** #160 / D205 — the draft this new quote replaces; posted on the create save. */
+  replaces: string;
 };
 
 type BuilderLineRow = { key: string; itemId: string; locationId: string; qty: string };
@@ -293,6 +298,7 @@ export function QuoteBuilder({
     fd.set("editingId", editingId || "");
     fd.set("customerId", customerId);
     fd.set("quoteName", quoteName);
+    fd.set("replaces", editingId ? "" : initial.replaces);
     const c = selectedContact();
     fd.set("contactName", c?.name || "");
     fd.set("contactRole", c?.role || "");
@@ -372,6 +378,7 @@ export function QuoteBuilder({
             >
               Auto-priced
             </span>
+            {editingId && <ChangeTypeControl quoteId={editingId} status={initial.status} />}
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>
             Cheapest of day/week/month billing per line, live availability shown as you add gear.

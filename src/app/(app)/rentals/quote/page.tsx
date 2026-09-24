@@ -5,6 +5,7 @@ import { list as listItems, type EquipmentCategory } from "@/lib/stores/equipmen
 import { list as listLocations } from "@/lib/stores/equipment-locations";
 import { getSettings } from "@/lib/settings";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
+import { pickContactName, readHandoff } from "@/app/(app)/quotes/new/handoff";
 
 export const metadata = { title: "Rental quote — Quartzite-6" };
 
@@ -75,6 +76,7 @@ export default async function RentalQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
+  const handoff = readHandoff(sp);
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
 
@@ -101,6 +103,8 @@ export default async function RentalQuotePage({
     saved,
     approved,
     savedId: "",
+    status: "draft",
+    replaces: "",
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -137,18 +141,20 @@ export default async function RentalQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      status: editQuote.status,
+      replaces: "",
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;
     if (cust) {
-      const primary = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial = {
         ...initial,
         customerId: cust.id,
-        quoteName: cust.name + " — Rental",
-        contactSel: primary ? primary.name : "",
+        quoteName: handoff.name || cust.name + " — Rental",
+        contactSel: pickContactName(cust, handoff.contactName),
         saved: false,
         approved: false,
+        replaces: handoff.replaces,
       };
     }
   }
