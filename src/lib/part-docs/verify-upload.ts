@@ -32,7 +32,15 @@ export async function verifyUploadedBlob(
   if (!blobPathBelongsTo(input.blobPathname, input.documentId)) {
     return { ok: false, error: "That upload does not belong to this document." };
   }
-  const head = await deps.head(input.blobPathname, SNIFF_BYTES);
+  let head: { bytes: Uint8Array; size: number } | null;
+  try {
+    head = await deps.head(input.blobPathname, SNIFF_BYTES);
+  } catch {
+    // A Blob read failure (network, BlobError, …) is not the same as "never
+    // arrived" — don't claim that, and never surface the vendor's own
+    // error text to the browser.
+    return { ok: false, error: "Couldn't read the uploaded file — try again" };
+  }
   if (!head) return { ok: false, error: "The upload didn't arrive — try again." };
   const refuse = async (error: string) => {
     try {

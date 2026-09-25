@@ -77,6 +77,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(json);
   } catch (e) {
     if (e instanceof UploadRefused) return NextResponse.json({ error: e.message }, { status: e.status });
-    return NextResponse.json({ error: (e as Error)?.message ?? "upload refused" }, { status: 400 });
+    // Anything else (a BlobError, a network failure inside handleUpload,
+    // an unsigned/malformed callback) is never shown to the browser —
+    // only our own UploadRefused messages are meant to be seen.
+    return NextResponse.json({ error: "Upload could not be authorized." }, { status: 400 });
   }
 }

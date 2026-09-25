@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
+import { deleteBlob } from "@/lib/blob";
 import { get as getPart } from "@/lib/stores/catalog";
 import {
   attachDocument,
@@ -11,7 +12,7 @@ import {
   replaceDocumentFile,
 } from "@/lib/stores/part-documents";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
-import { isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
+import { blobPathBelongsTo, isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
 /**
@@ -30,14 +31,44 @@ function revalidate(): void {
   revalidatePath("/catalog");
 }
 
+/** How many `getPart` lookups run at once in `liveSkus` — bounded so a
+ *  500-SKU drop doesn't fire 500 sequential (or 500 simultaneous) reads. */
+const LIVE_SKU_BATCH = 20;
+
 /** The SKUs among `skus` that are live catalog parts (deduped, capped). */
 async function liveSkus(skus: readonly string[]): Promise<string[]> {
+  const candidates = [...new Set(skus.slice(0, MAX_SKUS_PER_CALL))]
+    .map((raw) => String(raw || "").trim())
+    .filter(Boolean);
   const out: string[] = [];
-  for (const raw of new Set(skus.slice(0, MAX_SKUS_PER_CALL))) {
-    const sku = String(raw || "").trim();
-    if (sku && (await getPart(sku))) out.push(sku);
+  for (let i = 0; i < candidates.length; i += LIVE_SKU_BATCH) {
+    const batch = candidates.slice(i, i + LIVE_SKU_BATCH);
+    const parts = await Promise.all(batch.map((sku) => getPart(sku)));
+    parts.forEach((part, j) => {
+      if (part) out.push(batch[j]);
+    });
   }
   return out;
+}
+
+/**
+ * A browser can direct-to-Blob upload a file and then have the action that
+ * was meant to record it refuse for an unrelated reason (bad kind, no live
+ * SKUs) — that blob is now an orphan. Delete it, but ONLY once the pathname
+ * has passed the tightened `blobPathBelongsTo` for the very document id the
+ * caller claims it belongs to; a pathname that doesn't belong there might be
+ * someone else's document (or nothing), and must never be touched from
+ * here. A
+ * failed delete is swallowed — a later sweep can still find and remove
+ * strays (no such sweep exists yet; see the report).
+ */
+async function cleanupOrphan(documentId: string, blobPathname: unknown): Promise<void> {
+  if (!blobPathBelongsTo(blobPathname, documentId)) return;
+  try {
+    await deleteBlob(blobPathname);
+  } catch {
+    /* best effort */
+  }
 }
 
 /** A browser finished uploading a NEW document's file: check it, record the
@@ -51,9 +82,18 @@ export async function attachUploadedDocumentAction(input: {
 }): Promise<DocActionResult<{ documentId: string; linked: number }>> {
   const user = await requireUser();
   if (!isDocumentId(input.documentId)) return { ok: false, error: "Not a document id." };
-  if (!isPartDocKind(input.kind)) return { ok: false, error: "Pick Datasheet or Spec sheet." };
+  if (!isPartDocKind(input.kind)) {
+    await cleanupOrphan(input.documentId, input.blobPathname);
+    return { ok: false, error: "Pick Datasheet or Spec sheet." };
+  }
   const skus = await liveSkus(input.skus || []);
-  if (!skus.length) return { ok: false, error: "Those parts are no longer in the catalog." };
+  if (!skus.length) {
+    await cleanupOrphan(input.documentId, input.blobPathname);
+    return { ok: false, error: "Those parts are no longer in the catalog." };
+  }
+  // A document already existing under this id is not this upload's blob to
+  // delete — it may be a legitimate concurrent Replace, or the browser
+  // simply retried; leave the blob alone either way.
   if (await getDocument(input.documentId)) return { ok: false, error: "That document already exists — use Replace." };
 
   const checked = await verifyUploadedBlob(input);

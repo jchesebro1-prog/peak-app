@@ -1,4 +1,4 @@
-import { del, get, put } from "@vercel/blob";
+import { del, get, head, put } from "@vercel/blob";
 
 /**
  * Vercel Blob seam (D116, MASTER-HOWTO §9) — file bytes out of the
@@ -72,7 +72,16 @@ export async function getBlobHead(
     bytes.set(c.subarray(0, take), at);
     at += take;
   }
-  return { bytes, size: res.blob.size };
+  // A reported size of 0 alongside bytes actually read is not trustworthy —
+  // some responses omit Content-Length, and callers cap on this number
+  // (part documents, #DOC: 25 MB). Ask `head` for the store's own listed
+  // size rather than treating the stream as unbounded.
+  let size = res.blob.size;
+  if (size === 0 && total > 0) {
+    const meta = await head(pathname);
+    size = meta.size;
+  }
+  return { bytes, size };
 }
 
 /** Stream a private blob's bytes (server-side; the proxy route's engine). */

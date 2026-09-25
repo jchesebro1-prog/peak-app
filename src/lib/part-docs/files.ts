@@ -49,14 +49,23 @@ function indexOfAscii(bytes: Uint8Array, text: string, limit: number): number {
 /**
  * What the bytes really are. PDF: `%PDF-` within the first 1,024 bytes (the
  * PDF spec allows leading junk there). DOC: the OLE2 compound-file magic.
- * DOCX: a ZIP whose entry names include `word/` in the first 64 KB — every
- * Word-written .docx lists `word/document.xml` there; a plain ZIP or an
- * .xlsx does not.
+ * DOCX: a ZIP whose entry names include BOTH `[Content_Types].xml` (every
+ * OOXML package — .docx, .xlsx, .pptx — lists this at the archive root)
+ * AND `word/` (only a Word part) in the first 64 KB. Requiring both closes
+ * a gap where a ZIP that merely names a `word/` path somewhere (but isn't
+ * an OOXML package at all) would otherwise sniff as a .docx; a plain ZIP
+ * or an .xlsx (which has `[Content_Types].xml` but no `word/`) still fails.
  */
 export function sniffDocumentType(bytes: Uint8Array): SniffedType | null {
   if (indexOfAscii(bytes, "%PDF-", 1024) >= 0) return "pdf";
   if (startsWith(bytes, OLE2)) return "doc";
-  if (startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]) && indexOfAscii(bytes, "word/", 64 * 1024) >= 0) return "docx";
+  if (
+    startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]) &&
+    indexOfAscii(bytes, "[Content_Types].xml", 64 * 1024) >= 0 &&
+    indexOfAscii(bytes, "word/", 64 * 1024) >= 0
+  ) {
+    return "docx";
+  }
   return null;
 }
 

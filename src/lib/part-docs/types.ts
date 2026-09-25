@@ -112,12 +112,14 @@ export function isDocumentId(v: unknown): v is string {
 
 /** Same rule as src/lib/blob.ts `safeName` (which is server-only because it
  *  shares a module with the Blob SDK), duplicated here so the browser can
- *  build the exact pathname the upload route will accept. */
+ *  build the exact pathname the upload route will accept. A leading `.` or
+ *  `_` is also stripped (not just trailing `_`) so the result always starts
+ *  with a character `SAFE_FILE_SEGMENT` allows — see `blobPathBelongsTo`. */
 export function safeDocFileName(name: string): string {
   return (
     String(name ?? "")
       .replace(/[^a-zA-Z0-9._-]+/g, "_")
-      .replace(/^_+|_+$/g, "")
+      .replace(/^[._]+|_+$/g, "")
       .slice(0, 80) || "file"
   );
 }
@@ -128,11 +130,26 @@ export function partDocBlobPath(documentId: string, fileName: string): string {
   return `${PART_DOC_PREFIX}${documentId}/${safeDocFileName(fileName)}`;
 }
 
+/**
+ * The file segment of a part-doc blob path, after the `part-docs/<id>/`
+ * prefix: what `safeDocFileName` produces, plus whatever suffix Blob's
+ * `addRandomSuffix` appends. A strict allow-list, not a blocklist — `get`
+ * concatenates the pathname into a URL, and WHATWG URL parsing treats `\`
+ * as `/` and percent-decodes `%2e%2e`/`%2f` before dot-segment removal on
+ * some paths, so a blocklist of literal `..` and `/` can be bypassed by an
+ * encoded or backslash-separated traversal segment (e.g.
+ * `%2e%2e\PD-000000000000\x.pdf`). No `%`, `\`, `?`, `#`, or space can ever
+ * appear in an accepted segment, and a leading `.` is refused so a bare
+ * `.` or `..` (encoded or not) never matches either.
+ */
+const SAFE_FILE_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
 /** Does `pathname` belong to `documentId`? Used on every client-supplied
  *  pathname before the server reads or records it — a client blobPath is
  *  untrusted input. */
 export function blobPathBelongsTo(pathname: unknown, documentId: string): pathname is string {
   if (typeof pathname !== "string" || !isDocumentId(documentId)) return false;
   const prefix = `${PART_DOC_PREFIX}${documentId}/`;
-  return pathname.startsWith(prefix) && pathname.length > prefix.length && !pathname.includes("..") && !pathname.slice(prefix.length).includes("/");
+  if (!pathname.startsWith(prefix)) return false;
+  return SAFE_FILE_SEGMENT.test(pathname.slice(prefix.length));
 }

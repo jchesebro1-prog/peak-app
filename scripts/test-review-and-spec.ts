@@ -15569,6 +15569,27 @@ import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDo
 }
 
 /* ======================================================================
+   Part documents (#DOC) — Fix wave: blobPathBelongsTo tightened to a
+   strict file-segment allow-list (a blocklist of literal ".." and "/"
+   can be bypassed once @vercel/blob's `get` concatenates the pathname
+   into a URL — WHATWG parsing treats "\" as "/" and can percent-decode
+   "%2e%2e"/"%2f" before dot-segment removal). No test here calls Blob;
+   this is pure string-rule coverage of the tightened regex.
+   ====================================================================== */
+{
+  const ID = "PD-abcdef123456";
+  ok(!blobPathBelongsTo(`part-docs/${ID}/%2e%2e\\PD-000000000000/x.pdf`, ID), "part docs ids: an encoded-dot-dot + backslash traversal payload is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a%2Fb.pdf`, ID), "part docs ids: a percent-encoded slash in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a?.pdf`, ID), "part docs ids: a literal ? in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a#.pdf`, ID), "part docs ids: a literal # in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a\\b.pdf`, ID), "part docs ids: a bare backslash in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/ .pdf`, ID), "part docs ids: a space in the file segment is refused");
+  ok(blobPathBelongsTo(`part-docs/${ID}/guide-spec-ab12CD34.docx`, ID), "part docs ids: a legit Blob-suffixed file name is accepted");
+  ok(safeDocFileName(".hidden.pdf") === "hidden.pdf", "part docs ids: safeDocFileName strips a leading dot rather than leave one");
+  ok(blobPathBelongsTo(partDocBlobPath(ID, ".hidden.pdf"), ID) && blobPathBelongsTo(partDocBlobPath(ID, "...pdf"), ID), "part docs ids: whatever safeDocFileName produces always satisfies the strict segment rule, even from an all-dot name");
+}
+
+/* ======================================================================
    Part documents (#DOC) — Task 2: the coverage rule, the quoted-parts
    counter, the filename matcher and the kind guesser. All pure.
    ====================================================================== */
@@ -15712,13 +15733,24 @@ const pdDocBytes = (s: string, pad = 0) => new Uint8Array([...new Array(pad).fil
 const pdDocx = () => {
   const b = new Uint8Array(200);
   b.set([0x50, 0x4b, 0x03, 0x04], 0);
-  b.set([..."word/document.xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."[Content_Types].xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."word/document.xml"].map((c) => c.charCodeAt(0)), 60);
+  return b;
+};
+// A ZIP that names a word/ path but is not an OOXML package at all (no
+// [Content_Types].xml) — Fix wave: requiring both markers must still
+// refuse this, not just a plain non-Word ZIP like pdXlsx below.
+const pdWordLikeZipNotOoxml = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."word/not-really-office.txt"].map((c) => c.charCodeAt(0)), 30);
   return b;
 };
 const pdXlsx = () => {
   const b = new Uint8Array(200);
   b.set([0x50, 0x4b, 0x03, 0x04], 0);
-  b.set([..."xl/workbook.xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."[Content_Types].xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."xl/workbook.xml"].map((c) => c.charCodeAt(0)), 60);
   return b;
 };
 const pdOle = () => new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
@@ -15727,8 +15759,9 @@ ok(sniffDocumentType(pdDocBytes("%PDF-1.7\n")) === "pdf", "part docs bytes: %PDF
 ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 500)) === "pdf", "part docs bytes: %PDF- after leading junk (inside 1 KB) is still a PDF");
 ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 2000)) === null, "part docs bytes: …but not past the first 1 KB");
 ok(sniffDocumentType(pdOle()) === "doc", "part docs bytes: the OLE2 magic is a Word .doc");
-ok(sniffDocumentType(pdDocx()) === "docx", "part docs bytes: a ZIP naming word/ is a .docx");
+ok(sniffDocumentType(pdDocx()) === "docx", "part docs bytes: a ZIP naming both [Content_Types].xml and word/ is a .docx");
 ok(sniffDocumentType(pdXlsx()) === null, "part docs bytes: a ZIP that is not Word is refused");
+ok(sniffDocumentType(pdWordLikeZipNotOoxml()) === null, "part docs bytes: a ZIP naming word/ WITHOUT [Content_Types].xml (not really OOXML) is refused");
 ok(sniffDocumentType(pdDocBytes("<!DOCTYPE html><html>")) === null, "part docs bytes: an HTML error page is refused");
 const pdCheck = checkDocumentBytes("datasheet", pdDocx());
 ok(!pdCheck.ok && pdCheck.error === "Datasheets must be PDF files.", "part docs bytes: a datasheet slot refuses Word");
@@ -15757,4 +15790,13 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
   ok(!big.ok && big.error === "That file is over 25 MB.", "part docs upload: over 25 MB is refused");
   const word = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/g.docx`, fileName: "Guide Spec.docx", kind: "specsheet" }, fake(pdDocx()));
   ok(word.ok && word.file.contentType === CONTENT_TYPES.docx && word.file.fileName === "Guide Spec.docx", "part docs upload: a Word spec sheet is accepted");
+
+  // Fix wave: a Blob read failure (network, BlobError, …) is not "never
+  // arrived" and must never leak the vendor's own error text.
+  const blobDown = {
+    head: async () => { throw new Error("BlobError: fetch failed, connect ECONNREFUSED 127.0.0.1:443"); },
+    remove: async (p: string) => { removed.push(p); },
+  };
+  const readFailure = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, blobDown);
+  ok(!readFailure.ok && readFailure.error === "Couldn't read the uploaded file — try again", "part docs upload: a Blob read failure is refused with a generic message, not the vendor's own text");
 }

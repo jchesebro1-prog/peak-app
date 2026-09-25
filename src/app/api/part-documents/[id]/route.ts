@@ -11,8 +11,8 @@ import { contentDisposition, contentTypeForFileName } from "@/lib/part-docs/file
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   await requireUser();
-  const { id } = await ctx.params;
-  const doc = await getDocument(decodeURIComponent(id));
+  const { id } = await ctx.params; // already decoded by Next's router
+  const doc = await getDocument(id);
   if (!doc) return new Response("Not found", { status: 404 });
 
   let blobKey = doc.blobKey;
@@ -29,7 +29,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     if (h === null && doc.sourceUrl && /^https?:\/\//i.test(doc.sourceUrl)) return Response.redirect(doc.sourceUrl, 302);
     return new Response("Not found", { status: 404 });
   }
-  const stream = await getBlobStream(blobKey);
+  let stream: ReadableStream | null;
+  try {
+    stream = await getBlobStream(blobKey);
+  } catch {
+    // A Blob read failure (network, BlobError, …) — never surface the
+    // vendor's own error text to the browser.
+    return new Response("Couldn't read the file — try again", { status: 502 });
+  }
   if (!stream) return new Response("File missing from storage", { status: 404 });
   return new Response(stream, {
     headers: {
