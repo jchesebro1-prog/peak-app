@@ -6862,6 +6862,7 @@ seeded()
   .then(() => templateScheduleAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
+  .then(() => outsideTransactionAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -9146,5 +9147,100 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
       (await dismissedQuoteIds()).every((i) => !i.startsWith(PRE)),
       "#169 teardown leaves no TEST169 id on the dismissed list"
     );
+  }
+}
+
+/* ======================================================================
+   #172 — detached work must not ride the caller's transaction.
+
+   `getDb()` reads an AsyncLocalStorage that `withTransaction` sets, so work
+   STARTED inside a unit but resolving AFTER it commits inherits a dead
+   transaction handle and throws "Transaction is closed" — into a
+   `.catch(() => {})` in the detached shapes that exist today
+   (comms.queuePeakLabelSync → gmail/label-sync.queueLabelSync).
+   `outsideTransaction()` is the escape hatch.
+
+   This proves the real timing rather than a shape: both continuations are
+   registered inside a live transaction and gated on a promise that is only
+   released after the unit has committed. The naive registration is kept
+   side by side deliberately — it is what makes the wrapped assertion
+   non-vacuous, and it fails the moment the wrapper stops doing anything.
+   ====================================================================== */
+import { getDb, outsideTransaction, withTransaction } from "../src/db";
+
+async function outsideTransactionAsyncChecks(): Promise<void> {
+  const PRE = "TEST172:";
+  const UNIT_ID = `${PRE}unit-write`;
+  const DETACHED_ID = `${PRE}detached-write`;
+  try {
+    const pooled = await getDb();
+
+    // Released only after the unit commits, so both continuations genuinely
+    // outlive the transaction.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let txHandle: unknown = null;
+    let wrappedHandle: unknown = null;
+    let naiveHandle: unknown = null;
+    let wrapped: Promise<void> = Promise.resolve();
+    let naive: Promise<void> = Promise.resolve();
+
+    await withTransaction(async () => {
+      txHandle = await getDb();
+      // A real write, so this is a real transaction and not an empty unit.
+      await upsertDoc("quotes", { id: UNIT_ID, name: "#172 unit write", status: "draft" });
+
+      // FIXED shape — the continuation is REGISTERED with the ALS exited.
+      // (A `.then()` captures the context at registration, not at
+      // resolution, which is exactly why wrapping the kickoff works.)
+      wrapped = outsideTransaction(() =>
+        gate.then(async () => {
+          wrappedHandle = await getDb();
+          await upsertDoc("quotes", {
+            id: DETACHED_ID,
+            name: "#172 detached write",
+            status: "draft",
+          });
+        })
+      );
+
+      // NAIVE shape — registered inside the unit, unwrapped.
+      naive = gate.then(async () => {
+        naiveHandle = await getDb();
+      });
+    });
+
+    ok(
+      txHandle !== null && txHandle !== pooled,
+      "#172 baseline: withTransaction really does swap getDb()'s handle for a transaction"
+    );
+
+    // The unit has committed. Only now let the detached work run.
+    release();
+    await wrapped;
+    await naive;
+
+    ok(
+      wrappedHandle === pooled,
+      "#172 work registered through outsideTransaction() resolves against the POOLED handle after the unit commits"
+    );
+    ok(
+      naiveHandle === txHandle,
+      "#172 the SAME work registered without the wrapper still reads the dead transaction — so the wrapper is load-bearing, not decoration"
+    );
+    ok(
+      !!(await getDoc169("quotes", DETACHED_ID)),
+      "#172 the detached write actually lands through the pooled handle after the commit"
+    );
+    ok(
+      !!(await getDoc169("quotes", UNIT_ID)),
+      "#172 the unit's own write still committed normally"
+    );
+  } finally {
+    await softDeleteDoc("quotes", DETACHED_ID);
+    await softDeleteDoc("quotes", UNIT_ID);
   }
 }
