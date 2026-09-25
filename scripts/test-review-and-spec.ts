@@ -8769,6 +8769,7 @@ seeded()
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
+  .then(() => deleteRound2AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -12494,5 +12495,267 @@ async function deletePartBAsyncChecks(): Promise<void> {
     ok(!!(await getRecordingDelB(rec.id)), "DELB recording: the fixture recording reads back before delete");
     await removeRecording(rec.id);
     ok(await getRecordingDelB(rec.id) === null, "DELB recording: the deleted recording is gone from reads");
+  }
+}
+
+/* ======================================================================
+   "Make records have delete portions" — round 2 (the gaps left after
+   deletePartA/B above): project tasks/notes/time-logs, queue assignments,
+   generated bid specs, Grid assemblies, and Grid plan sheets. Every store
+   here previously had create/update but no remove at all — this proves
+   each new remove() actually drops the record from every read path, plus
+   the two guarantees called out at scope time:
+     - a deleted auto-task (createAutoTask, coverageKey-keyed) must not
+       come back on the next template/coverage pass — insertDocIfAbsent
+       conflicts on the deterministic autoTaskId whether or not the row is
+       tombstoned, since the row still physically exists;
+     - removeSheet must refuse while a live placement/space/route still
+       references the sheet, succeed once nothing does, and — because it
+       deliberately never softDeleteDoc's the grid_sheets record itself —
+       an OLDER revision that still lists the sheet must still be able to
+       resolve it after restoreRevision brings that placement back
+       (restoreRevision never touches sheetIds, by design).
+   Fixtures are `fixtureId("DELR2", …)` / `registerFixture()`-registered
+   right after mint, so the suite-level teardown removes all of it.
+   ====================================================================== */
+async function deleteRound2AsyncChecks(): Promise<void> {
+  const meDelR2 = { id: "u1", name: "Test Harness" };
+
+  /* ---------------- project tasks (removeTask + the auto-task tombstone) ---------------- */
+  {
+    const Tasks2 = await import("../src/lib/stores/tasks");
+
+    // Plain removeTask — the mechanism the new TasksCard delete button
+    // (removeTaskAction, projects/actions.ts) calls.
+    const taskId = fixtureId("DELR2", "task");
+    registerFixture("tasks", taskId);
+    await Tasks2.createTask(
+      { id: taskId, title: "DELR2 test task", projectId: fixtureId("DELR2", "task-project") },
+      meDelR2
+    );
+    ok(!!(await Tasks2.getTask(taskId)), "DELR2 tasks setup: fixture task is live");
+    await Tasks2.removeTask(taskId);
+    ok((await Tasks2.getTask(taskId)) === null, "DELR2 tasks: removeTask() — getTask() returns null");
+
+    // The auto-task tombstone guard: a deleted system-created task must
+    // not be recreated by the next coverage pass for the same key.
+    const coverageKey = fixtureId("DELR2", "auto-task-coverage");
+    const autoId = Tasks2.autoTaskId(coverageKey);
+    registerFixture("tasks", autoId);
+    const created = await Tasks2.createAutoTask({ title: "DELR2 auto task", coverageKey });
+    ok(!!created && created.id === autoId, "DELR2 auto-task setup: createAutoTask mints the deterministic id");
+    await Tasks2.removeTask(autoId);
+    ok((await Tasks2.getTask(autoId)) === null, "DELR2 auto-task: removeTask() — getTask() returns null");
+    const recreated = await Tasks2.createAutoTask({ title: "DELR2 auto task retry", coverageKey });
+    ok(recreated === null, "DELR2 auto-task: a deleted auto-task does not come back on the next createAutoTask() pass");
+    ok((await Tasks2.getTask(autoId)) === null, "DELR2 auto-task: still gone after the retried createAutoTask()");
+  }
+
+  /* ---------------- project field notes + time logs ---------------- */
+  {
+    const Projects2 = await import("../src/lib/stores/projects");
+    const p = await Projects2.createProject({ id: fixtureId("DELR2", "project"), name: "DELR2 test project" });
+    registerFixture("projects", p.id);
+
+    await Projects2.addNote(p.id, "Test Harness", "DELR2 test note");
+    let cur = await Projects2.getProject(p.id);
+    const noteId = cur?.notes?.[0]?.id;
+    ok(!!noteId, "DELR2 notes setup: fixture note landed on the project");
+
+    await Projects2.addTime(p.id, "Test Harness", 2.5, "DELR2 test time");
+    cur = await Projects2.getProject(p.id);
+    const entryId = cur?.timeLogs?.[0]?.id;
+    ok(!!entryId, "DELR2 time setup: fixture time entry landed on the project");
+
+    if (noteId) {
+      await Projects2.removeNote(p.id, noteId);
+      cur = await Projects2.getProject(p.id);
+      const note = cur?.notes?.find((n) => n.id === noteId);
+      ok(!!note?.deleted, "DELR2 notes: removeNote() flags the embedded entry deleted:true");
+      ok(
+        (cur?.notes || []).filter((n) => !n.deleted).every((n) => n.id !== noteId),
+        "DELR2 notes: the live-notes read (every UI filter) no longer includes it"
+      );
+    }
+    if (entryId) {
+      await Projects2.removeTime(p.id, entryId);
+      cur = await Projects2.getProject(p.id);
+      const entry = cur?.timeLogs?.find((t) => t.id === entryId);
+      ok(!!entry?.deleted, "DELR2 time: removeTime() flags the embedded entry deleted:true");
+      ok(
+        (cur?.timeLogs || []).filter((t) => !t.deleted).every((t) => t.id !== entryId),
+        "DELR2 time: the live-timeLogs read no longer includes it"
+      );
+    }
+  }
+
+  /* ---------------- queue assignments ---------------- */
+  {
+    const Assignments2 = await import("../src/lib/stores/assignments");
+    const a = await Assignments2.createAssignment({
+      title: "DELR2 test assignment",
+      assignee: "Test Harness",
+      createdBy: "Test Harness",
+    });
+    registerFixture("assignments", a.id);
+    ok(!!(await Assignments2.getAssignment(a.id)), "DELR2 assignments setup: fixture assignment is live");
+    ok(
+      (await Assignments2.allAssignments()).some((x) => x.id === a.id),
+      "DELR2 assignments setup: fixture assignment lists in allAssignments()"
+    );
+    await Assignments2.removeAssignment(a.id);
+    ok((await Assignments2.getAssignment(a.id)) === null, "DELR2 assignments: removeAssignment() — getAssignment() returns null");
+    ok(
+      !(await Assignments2.allAssignments()).some((x) => x.id === a.id),
+      "DELR2 assignments: removeAssignment() — allAssignments() no longer lists it"
+    );
+  }
+
+  /* ---------------- generated bid specs ---------------- */
+  {
+    const Specs2 = await import("../src/lib/stores/generated-specs");
+    const engagementId = fixtureId("DELR2", "spec-engagement");
+    const spec = await Specs2.saveGeneratedSpec({
+      engagementId,
+      source: "upload",
+      bom: [{ sku: "TEST-SKU", desc: "DELR2 test part", qty: 1 }],
+      spec: {
+        projectName: "DELR2 test spec",
+        customer: "Test Customer DELR2",
+        engagementId,
+        preparedBy: "Test Harness",
+        date: Date.now(),
+        sections: [],
+        waived: [],
+      },
+      by: "Test Harness",
+    });
+    registerFixture("generated_specs", spec.id);
+    ok(!!(await Specs2.getGeneratedSpec(spec.id)), "DELR2 generated-specs setup: fixture spec is live");
+    ok(
+      (await Specs2.specsForEngagement(engagementId)).some((s) => s.id === spec.id),
+      "DELR2 generated-specs setup: fixture spec lists under its engagement"
+    );
+    await Specs2.removeGeneratedSpec(spec.id);
+    ok((await Specs2.getGeneratedSpec(spec.id)) === null, "DELR2 generated-specs: removeGeneratedSpec() — getGeneratedSpec() returns null");
+    ok(
+      !(await Specs2.specsForEngagement(engagementId)).some((s) => s.id === spec.id),
+      "DELR2 generated-specs: removeGeneratedSpec() — specsForEngagement() no longer lists it"
+    );
+  }
+
+  /* ---------------- Grid assemblies (user-built only — seeded devices refuse) ---------------- */
+  {
+    const GridCat2 = await import("../src/lib/stores/grid-catalog");
+    const symbols = await GridCat2.listGridSymbols("Test Harness");
+    const device = symbols.find((s) => s.kind !== "assembly");
+    ok(!!device, "DELR2 grid assembly setup: the grid library has at least one device symbol to build from");
+    if (device) {
+      const asm = await GridCat2.createGridAssembly({
+        name: "DELR2 test assembly",
+        manufacturer: "",
+        modelNumber: "",
+        scope: "Lighting",
+        members: [{ symbolId: device.id, qty: 1, x: 0.5, y: 0.5 }],
+        by: "Test Harness",
+      });
+      registerFixture("grid_catalog", asm.id);
+      ok(!!(await GridCat2.getGridSymbol(asm.id)), "DELR2 grid assembly setup: the fixture assembly is live");
+
+      const refusedDevice = await GridCat2.removeGridAssembly(device.id);
+      ok(
+        !refusedDevice.ok && refusedDevice.reason === "not-an-assembly",
+        "DELR2 grid assembly: removeGridAssembly refuses a seeded device symbol"
+      );
+      ok(!!(await GridCat2.getGridSymbol(device.id)), "DELR2 grid assembly: the refused delete leaves the seeded device untouched");
+
+      const removed = await GridCat2.removeGridAssembly(asm.id);
+      ok(removed.ok === true, "DELR2 grid assembly: removeGridAssembly succeeds for a user-built assembly");
+      ok((await GridCat2.getGridSymbol(asm.id)) === null, "DELR2 grid assembly: removeGridAssembly() — getGridSymbol() returns null");
+      ok(
+        !(await GridCat2.listGridSymbols("Test Harness")).some((s) => s.id === asm.id),
+        "DELR2 grid assembly: removeGridAssembly() — listGridSymbols() no longer lists it"
+      );
+    }
+  }
+
+  /* ---------------- Grid plan sheets (in-use refusal + revision-restore resolution) ---------------- */
+  {
+    const GridProj2 = await import("../src/lib/stores/grid-projects");
+    const { DEFAULT_OPTION_ID } = await import("../src/lib/design/grid-options");
+
+    const gp = await GridProj2.createProject({
+      name: "DELR2 test grid project",
+      customer: "Test Customer DELR2",
+      customerId: null,
+      by: "Test Harness",
+    });
+    registerFixture("grid_projects", gp.id);
+
+    const sheetA = await GridProj2.addSheet(gp.id, {
+      name: "DELR2 sheet A", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness",
+    });
+    const sheetB = await GridProj2.addSheet(gp.id, {
+      name: "DELR2 sheet B", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness",
+    });
+    if (sheetA) registerFixture("grid_sheets", sheetA.id);
+    if (sheetB) registerFixture("grid_sheets", sheetB.id);
+    ok(!!sheetA && !!sheetB, "DELR2 grid sheets setup: both fixture sheets were added");
+
+    if (sheetA && sheetB) {
+      await GridProj2.addPlacement(gp.id, {
+        sheetId: sheetA.id, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by: "Test Harness",
+      });
+      let proj = await GridProj2.getProject(gp.id);
+      const placementId = proj?.placements?.find((pl) => pl.sheetId === sheetA.id)?.id;
+      ok(!!placementId, "DELR2 grid sheets setup: the placement landed on sheet A");
+
+      // Sheet B has nothing on it — remove should succeed outright.
+      const removeB = await GridProj2.removeSheet(gp.id, sheetB.id);
+      ok(removeB.ok === true, "DELR2 grid sheets: removeSheet succeeds for an unreferenced sheet");
+      proj = await GridProj2.getProject(gp.id);
+      ok(!(proj?.sheetIds || []).includes(sheetB.id), "DELR2 grid sheets: the removed sheet drops out of sheetIds");
+      ok(
+        !(await GridProj2.listSheets(gp.id)).some((s) => s.id === sheetB.id),
+        "DELR2 grid sheets: the removed sheet is hidden from listSheets()"
+      );
+
+      // Sheet A still has the live placement — remove should refuse.
+      const removeARefused = await GridProj2.removeSheet(gp.id, sheetA.id);
+      ok(
+        !removeARefused.ok && removeARefused.reason === "in-use",
+        "DELR2 grid sheets: removeSheet refuses a sheet a live placement still references"
+      );
+      proj = await GridProj2.getProject(gp.id);
+      ok((proj?.sheetIds || []).includes(sheetA.id), "DELR2 grid sheets: the refused sheet is still listed");
+
+      // Snapshot a revision while the placement (and sheet A) are live,
+      // then free sheet A up and remove it — the "an old revision still
+      // references a since-removed sheet" scenario.
+      const rev = await GridProj2.addRevision(gp.id, { by: "Test Harness", reason: "manual", note: "DELR2 pre-remove snapshot" });
+      ok(!!rev && rev.sheetIds.includes(sheetA.id), "DELR2 grid sheets: the revision snapshot carries sheet A");
+      if (placementId) await GridProj2.removePlacement(gp.id, placementId);
+      const removeANow = await GridProj2.removeSheet(gp.id, sheetA.id);
+      ok(removeANow.ok === true, "DELR2 grid sheets: removeSheet succeeds once its last reference is gone");
+
+      if (rev) {
+        const restored = await GridProj2.restoreRevision(gp.id, rev.rev, "Test Harness");
+        ok(restored.ok === true, "DELR2 grid sheets: restoreRevision succeeds");
+        proj = await GridProj2.getProject(gp.id);
+        ok(
+          !(proj?.sheetIds || []).includes(sheetA.id),
+          "DELR2 grid sheets: restore deliberately does NOT bring sheetIds back (sheets are never orphaned by a restore)"
+        );
+        ok(
+          !!(proj?.placements || []).some((pl) => pl.sheetId === sheetA.id),
+          "DELR2 grid sheets: restore DOES bring back the placement that references the removed sheet"
+        );
+        const stillResolves = await getDoc169("grid_sheets", sheetA.id);
+        ok(
+          !!stillResolves,
+          "DELR2 grid sheets: the removed sheet's own doc still resolves by id — an old revision's placement is never left pointing at nothing"
+        );
+      }
+    }
   }
 }
