@@ -6,6 +6,8 @@ import { getSettings } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { FIXTURE_OPTION_CATEGORIES, resolveSubassembly } from "@/lib/fixture-assemblies";
 import { create, remove, save, type FixtureOptionCategory, type FixtureSubassembly } from "@/lib/stores/subassemblies";
+import { subassemblyPairs, subassemblyRef } from "@/lib/part-docs/assembly-graph";
+import { syncAccessoryLinks } from "@/lib/stores/part-accessory-links";
 
 type Input = { id?: string | null; label: string; description: string; lightEngineSku: string; lensSku: string; lamp: string; position: string; circuit: string; options: Record<FixtureOptionCategory, { sku: string; qty: number }[]> };
 
@@ -63,6 +65,8 @@ export async function saveFixtureAction(input: Input): Promise<{ ok: true; item:
     updatedAt: now,
   };
   const saved = input.id ? await save(item) : await create(item);
+  // Part documents (#DOC): the lens and options become the light engine's accessory links.
+  await syncAccessoryLinks({ source: "assembly", sourceRef: subassemblyRef(saved.id) }, subassemblyPairs(saved));
   revalidatePath("/design/assemblies");
   revalidatePath("/design/subassemblies");
   return { ok: true, item: saved };
@@ -71,6 +75,7 @@ export async function saveFixtureAction(input: Input): Promise<{ ok: true; item:
 export async function deleteSubassemblyAction(id: string): Promise<void> {
   await requirePerm("manage_users");
   await remove(id);
+  await syncAccessoryLinks({ source: "assembly", sourceRef: subassemblyRef(id) }, []);
   revalidatePath("/design/assemblies");
   revalidatePath("/design/subassemblies");
 }

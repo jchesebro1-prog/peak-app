@@ -2490,6 +2490,22 @@ async function main() {
     }
   }
 
+  /* --- part documents (#DOC): Assembly Builder saves sync the graph in one pass --- */
+  {
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const first = await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fa-sync-1", pairs: [{ parentSku: "SYNC-FIX", accessorySku: "SYNC-LENS" }] },
+      { sourceRef: "assembly:fa-sync-2", pairs: [{ parentSku: "SYNC-FIX2", accessorySku: "SYNC-CLAMP" }] },
+    ]);
+    assert.deepEqual(first, { written: 2, removed: 0 }, "part docs graph: one save writes every assembly's links");
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-sync" }, [{ parentSku: "SYNC-FIX", accessorySku: "SYNC-OPT" }]);
+    const second = await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fa-sync-1", pairs: [{ parentSku: "SYNC-FIX", accessorySku: "SYNC-LENS" }] },
+    ]);
+    assert.deepEqual(second, { written: 0, removed: 1 }, "part docs graph: an assembly deleted from the list loses its links");
+    assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "subassembly:SA-sync"), "part docs graph: a subassembly's links are outside the assemblies prefix and survive");
+  }
+
   console.log("review regression checks passed");
 }
 

@@ -50,6 +50,19 @@ export async function syncAccessoryLinks(
   );
 }
 
+/**
+ * Sync many scopes that share a sourceRef prefix in ONE pass — the Assembly
+ * Builder saves every fixture assembly at once. Links under the prefix whose
+ * scope is not in `scopes` (a deleted assembly) are soft-deleted too.
+ */
+export async function syncAccessoryScopes(
+  source: AccessoryLinkSource,
+  refPrefix: string,
+  scopes: ReadonlyArray<{ sourceRef: string; pairs: readonly AccessoryPair[] }>
+): Promise<{ written: number; removed: number }> {
+  return syncScopes(source, (l) => (l.sourceRef ?? "").startsWith(refPrefix), scopes);
+}
+
 async function syncScopes(
   source: AccessoryLinkSource,
   owns: (l: PartAccessoryLink) => boolean,

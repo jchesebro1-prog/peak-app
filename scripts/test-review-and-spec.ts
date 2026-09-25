@@ -16042,3 +16042,41 @@ import { partDocsView } from "@/lib/part-docs/views";
   ok(lens.coveredBy.length === 1 && lens.coveredBy[0].sku === "EDFIX" && lens.coveredBy[0].kinds.join(",") === "datasheet,specsheet", "part docs editor: an accessory shows which fixtures cover it, and for which kinds (a parent without a file is left out)");
   ok(lens.slots.datasheet.state === "covered" && lens.slots.specsheet.state === "covered" && lens.documents.length === 0, "part docs editor: both slots read covered");
 }
+
+/* ======================================================================
+   Part documents (#DOC) — Task 9: Assembly Builder ↔ accessory graph. Pure.
+   ====================================================================== */
+import {
+  assemblyRef, subassemblyRef, fixtureParentSku, fixtureAssemblyPairs, subassemblyPairs, memberCoverageFor, memberCoverageLabel, pairKey,
+} from "@/lib/part-docs/assembly-graph";
+{
+  const asm = {
+    components: [
+      { sku: "S4LED", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+      { sku: "LENS19", label: "Lens", role: "lens" as const, defaultQty: 1 },
+      { sku: "CLAMP", label: "Clamp", role: "mount" as const, defaultQty: 0 },
+      { sku: "S4LED", label: "dup", role: "other" as const, defaultQty: 1 },
+    ],
+  };
+  ok(fixtureParentSku(asm) === "S4LED" && fixtureParentSku({ components: [] }) === null, "part docs assemblies: the fixture component is the parent");
+  const pairs = fixtureAssemblyPairs(asm);
+  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? "in" : "opt"}`).join(",") === "S4LED>LENS19:in,S4LED>CLAMP:opt", "part docs assemblies: every other component is an accessory; qty 0 is optional, the fixture itself is skipped");
+  ok(fixtureAssemblyPairs({ components: [{ sku: "X", label: "x", role: "lens", defaultQty: 1 }] }).length === 0, "part docs assemblies: no fixture, no links");
+  const sub = subassemblyPairs({ lightEngineSku: "ENG", lensSku: "L1", options: { data: [{ sku: "D1", name: "d", cost: 1, qty: 2 }], power: [], mounting: [{ sku: "M1", name: "m", cost: 1, qty: 1 }], accessories: [] } });
+  ok(sub.map((p) => `${p.accessorySku}x${p.maxQty}`).join(",") === "L1x1,D1x2,M1x1" && sub.every((p) => p.parentSku === "ENG"), "part docs assemblies: a subassembly's lens and options are the light engine's accessories");
+  ok(assemblyRef("fa-1") === "assembly:fa-1" && subassemblyRef("SA-1") === "subassembly:SA-1", "part docs assemblies: the two builders keep separate sourceRef namespaces");
+
+  const idx = buildCoverageIndex({
+    documents: [{ id: "PD-engds000000", kind: "datasheet", title: "E", fileName: "e.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-engds000000/e.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] }],
+    links: [{ id: "1", partSku: "S4LED", documentId: "PD-engds000000", kind: "datasheet", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [
+      { id: "a", parentSku: "S4LED", accessorySku: "LENS19", source: "assembly", sourceRef: "assembly:fa-1" },
+      { id: "b", parentSku: "S4LED", accessorySku: "CLAMP", source: "assembly", sourceRef: "assembly:fa-1", ownDatasheet: true },
+    ],
+    parts: [],
+  });
+  const cov = memberCoverageFor(idx, [...pairs, { parentSku: "S4LED", accessorySku: "NEW" }]);
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "LENS19")]) === "Covered by fixture datasheet", "part docs assemblies: a member reads covered by the fixture datasheet by default");
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "CLAMP")]) === "Has its own datasheet — none attached yet", "part docs assemblies: the own-datasheet toggle opts the member out");
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "NEW")]) === "Save to link it to the fixture" && !cov[pairKey("S4LED", "NEW")].linked, "part docs assemblies: an unsaved member is not linked yet");
+}
