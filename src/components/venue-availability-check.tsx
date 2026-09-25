@@ -46,6 +46,12 @@ function fmtTime(ms: number, allDay: boolean): string {
   return new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function fmtRange(w: { start: number; end: number; allDay: boolean }): string {
+  const start = fmtTime(w.start, w.allDay);
+  const end = fmtTime(w.allDay ? w.end - DAY_MS : w.end, w.allDay);
+  return start === end ? start : `${start}–${end}`;
+}
+
 const WEEKDAY = ["S", "M", "T", "W", "T", "F", "S"];
 
 function weekStartOf(ms: number): number {
@@ -164,7 +170,7 @@ export function VenueAvailabilityCheck({
   } else if (result.check.status === "conflict") {
     tone = "warn";
     const c = result.check.conflicts[0];
-    line = `Venue is blocked: ${c.label || "Busy"} (${fmtTime(c.start, c.allDay)}–${fmtTime(c.end, c.allDay)})`;
+    line = `Venue is blocked: ${c.label || "Busy"} (${fmtRange(c)})`;
   } else if (result.check.status === "outside-open") {
     tone = "warn";
     line = "Outside the venue's open times";
