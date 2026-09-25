@@ -9284,8 +9284,8 @@ async function teardownFixtures(): Promise<void> {
    #177 — the flame builder's toggleVenue must not clobber automaticQuoteName's
    gated update with a second, differently-formatted setQuoteName call.
    Client component (no server round trip for this bug), so — same idiom as
-   the #187 review's client-source checks above — proven by inspecting the
-   built source rather than mounting React. ==================================================================== */
+   the #187 review's client-source checks above — proven by reading the raw
+   .tsx source rather than mounting React. ==================================================================== */
 {
   const flameControlsSrc = readFileSync(
     join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"),
@@ -12750,7 +12750,7 @@ async function statusRefusalAsyncChecks(): Promise<void> {
    when the requested status advance was refused, and must surface the
    refusal through the shared actionError banner. Client component (no
    server round trip for this half of the bug), so — same idiom as the
-   #187 review's client-source checks — proven by inspecting the built
+   #187 review's client-source checks — proven by reading the raw .tsx
    source rather than mounting React. The matching DB-backed proof (create +
    refused advance -> id usable for update, not a second create) is
    refusedAdvanceAsyncChecks() just below.
