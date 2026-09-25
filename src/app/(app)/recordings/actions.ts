@@ -5,7 +5,7 @@ import { checkRecording } from "@/lib/krisp/check";
 import { startKrispImport } from "@/lib/krisp/import";
 import { acceptActionItem, dismissActionItem, insertPrefill, postFeedNote } from "@/lib/krisp/write-back";
 import { requireUser } from "@/lib/session";
-import { getRecording, setKrispPendingForRetry, type KrispStatus, type RecordingRecord } from "@/lib/stores/recordings";
+import { getRecording, removeRecording, setKrispPendingForRetry, type KrispStatus, type RecordingRecord } from "@/lib/stores/recordings";
 
 /**
  * Recording detail actions (Recordings spec §6 `/recordings/[id]` buttons +
@@ -28,6 +28,22 @@ async function loadRecording(id: string): Promise<RecordingRecord> {
   const rec = await getRecording(id);
   if (!rec) throw new Error("Recording not found.");
   return rec;
+}
+
+/** Delete a recording (soft delete — the record only; audio/Drive archive
+ *  are left alone, see removeRecording). Called directly from the detail
+ *  page, not a form action, so it never redirects — the client navigates
+ *  to the parent record on success. */
+export async function deleteRecordingAction(id: string): Promise<ActionResult> {
+  await requireUser();
+  try {
+    await loadRecording(id); // 404s cleanly if it's already gone
+    await removeRecording(id);
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorText(err, "Could not delete the recording.") };
+  }
 }
 
 /** "Check now" — one poll of Krisp for this recording (spec §3.1). */

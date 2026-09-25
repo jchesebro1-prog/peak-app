@@ -37,6 +37,7 @@ import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import EditCustomerModal from "../edit-modal";
 import VenueQuickAdd from "../venue-quick-add";
+import { DeleteVisitButton } from "../delete-visit-button";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -702,6 +703,9 @@ export default async function CustomerDetailPage({
                           {sm.label}
                         </span>
                         <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
+                        <span style={{ marginLeft: "auto" }}>
+                          <DeleteVisitButton id={v.id} />
+                        </span>
                       </div>
                       <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
                         {v.startAt != null

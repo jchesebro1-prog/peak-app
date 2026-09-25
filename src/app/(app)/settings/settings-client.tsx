@@ -36,6 +36,7 @@ import {
   updateMemberAction,
 } from "./actions";
 import UnlocatedVenues from "./unlocated-venues";
+import { ConfirmButton } from "@/components/confirm-button";
 import { reasonLabel } from "./venue-locate-drawer";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
@@ -2529,9 +2530,11 @@ export default function SettingsClient({
               }}
             >
               {!officeIsNew ? (
-                <button className="pk-btn-danger" onClick={removeOffice}>
-                  Remove location
-                </button>
+                <ConfirmButton
+                  label="Remove location"
+                  confirmLabel="Confirm remove"
+                  onConfirm={removeOffice}
+                />
               ) : (
                 <span />
               )}

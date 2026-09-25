@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
 import Link from "next/link";
 import type {
   SurveyRecord,
@@ -169,6 +169,47 @@ function toDraft(r: SurveyRecord): Draft {
 }
 
 type LayoutMode = "long" | "wizard" | "accordion";
+
+/**
+ * Two-step arm/confirm in front of the page's `onDelete` (never
+ * `window.confirm`). `onDelete` already awaits `deleteSurvey` inside its
+ * own try/catch exactly as shipped today — that call is left completely
+ * untouched (including however it resolves deleteSurvey's internal
+ * `redirect()`); only the first click is gated here.
+ */
+function DeleteSurveyButton({ onDelete, disabled }: { onDelete: () => void; disabled: boolean }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 5000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  const style = { flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 9, padding: "10px 14px", cursor: disabled ? "default" : "pointer", minHeight: 42 } as const;
+  if (!armed) {
+    return (
+      <button onClick={() => setArmed(true)} disabled={disabled} style={style}>
+        Delete
+      </button>
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <button
+        onClick={() => {
+          setArmed(false);
+          onDelete();
+        }}
+        disabled={disabled}
+        style={style}
+      >
+        Confirm delete
+      </button>
+      <button onClick={() => setArmed(false)} disabled={disabled} style={{ ...style, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec" }}>
+        Cancel
+      </button>
+    </span>
+  );
+}
 
 export default function SurveyEditor({
   record,
@@ -889,9 +930,7 @@ export default function SurveyEditor({
           <button onClick={onPrintSheet} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
             Print sheet
           </button>
-          <button onClick={onDelete} disabled={saving} style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 9, padding: "10px 14px", cursor: saving ? "default" : "pointer", minHeight: 42 }}>
-            Delete
-          </button>
+          <DeleteSurveyButton onDelete={onDelete} disabled={saving} />
           <button onClick={onSave} disabled={saving} style={{ flexShrink: 0, fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", borderRadius: 9, padding: "11px 20px", cursor: saving ? "default" : "pointer", minHeight: 42, opacity: saving ? 0.7 : 1 }}>
             {saving ? "Saving…" : "Save changes"}
           </button>

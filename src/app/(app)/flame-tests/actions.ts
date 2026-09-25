@@ -9,6 +9,7 @@ import {
   unschedule,
   complete,
   reopen,
+  remove,
   setRenewalOutreach,
   type FlameJobResults,
   type FlameJobVenueResult,
@@ -137,6 +138,26 @@ export async function reopenFlameTest(formData: FormData): Promise<void> {
   if (!job || job.stage !== "completed") return;
   await reopen(id);
   revalidatePath("/", "layout");
+}
+
+/**
+ * Delete a flame-test job (soft delete — doc-store keeps a tombstone).
+ * Called directly from the results screen's Delete control (not a form
+ * action), so it never calls redirect() itself — the client navigates on
+ * success. If the job was still scheduled, its calendar hold (if any) is
+ * cleared best-effort first, same as unscheduleFlameTest.
+ */
+export async function deleteFlameJobAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!id) return { ok: false, error: "Missing job id." };
+  const job = await get(id);
+  if (!job) return { ok: false, error: "That flame test could not be found." };
+  if (job.stage === "scheduled") {
+    await removeServiceCalendar({ kind: "flame", id, assignedTo: job.assignedTo });
+  }
+  await remove(id);
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 /** Stamp / undo this cycle's renewal outreach (IDEAS #37 worklist). */
