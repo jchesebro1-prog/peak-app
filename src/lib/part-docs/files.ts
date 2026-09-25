@@ -98,3 +98,35 @@ export function contentDisposition(fileName: string): string {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
+
+/**
+ * The name to store a fetched file under: the server's Content-Disposition
+ * name, else the URL's last path segment when it looks like a document, else
+ * `fallback` (the document title). Always ends in the sniffed extension.
+ */
+export function fileNameForFetched(contentDisposition: string | null, url: string, fallback: string, type: SniffedType): string {
+  let name = "";
+  const cd = contentDisposition || "";
+  const star = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(cd);
+  if (star) {
+    try {
+      name = decodeURIComponent(star[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      name = "";
+    }
+  }
+  if (!name) {
+    const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(cd);
+    if (plain) name = plain[1].trim();
+  }
+  if (!name) {
+    try {
+      const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+      if (/\.(pdf|docx?)$/i.test(last)) name = last;
+    } catch {
+      /* unparsable URL — fall through */
+    }
+  }
+  name = (name || fallback || "document").split(/[\\/]/).pop()!.trim().slice(0, 180) || "document";
+  return withExtension(name, type);
+}

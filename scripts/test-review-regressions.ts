@@ -2362,6 +2362,57 @@ async function main() {
     assert((await listDocs("part_documents")).some((x) => x.id === legacyDocumentId("DOC-LEGACY")), "part docs legacy: the document itself is never deleted");
   }
 
+  /* --- part documents (#DOC): fetch from links, shared per URL --- */
+  {
+    const { upsert: upsertPart, list: listParts } = await import("@/lib/stores/catalog");
+    const { loadPartDocsState } = await import("@/lib/part-docs/load");
+    const { buildFetchContext, fetchSlot } = await import("@/lib/part-docs/fetch-links");
+    const { slotCoverage } = await import("@/lib/part-docs/coverage");
+    const Docs = await import("@/lib/stores/part-documents");
+    const U1 = "https://etc.example/s4-datasheet.pdf";
+    const U2 = "https://etc.example/broken.pdf";
+    await upsertPart({ sku: "FETCH-A", desc: "A", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U1 }] });
+    await upsertPart({ sku: "FETCH-B", desc: "B", category: "Lighting", unit: "ea", list: 1, cost: 1, productMetadata: { datasheets: [{ kind: "datasheet", fileName: "ds.pdf", sourceUrl: U1 }] } });
+    await upsertPart({ sku: "FETCH-C", desc: "C", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U2 }] });
+    await upsertPart({ sku: "FETCH-D", desc: "D", category: "Lighting", unit: "ea", list: 1, cost: 1 });
+
+    const fetched: string[] = [];
+    let brokenWorks = false;
+    const deps = {
+      fetchDoc: async (url: string) => {
+        fetched.push(url);
+        if (url === U2 && !brokenWorks) return { ok: true as const, file: { bytes: new TextEncoder().encode("<html>error</html>"), contentDisposition: null, finalUrl: url } };
+        return { ok: true as const, file: { bytes: new TextEncoder().encode("%PDF-1.7 x"), contentDisposition: null, finalUrl: url } };
+      },
+      putFile: async (pathname: string) => ({ pathname: pathname.replace(/\.pdf$/, "-rnd.pdf") }),
+    };
+    const ctxFor = async () => buildFetchContext(await loadPartDocsState(await listParts()));
+
+    const a = await fetchSlot(await ctxFor(), { sku: "FETCH-A", kind: "datasheet" }, "Jeff", deps);
+    assert(a.ok && a.documentId && a.alsoLinked === 2, "part docs fetch: a fetched URL is attached to every part that referenced it");
+    const doc = await Docs.getDocument(a.documentId!);
+    assert(doc?.source === "fetch" && doc.sourceUrl === U1 && doc.blobKey?.startsWith(`part-docs/${doc.id}/`) && doc.lastFetch?.ok === true, "part docs fetch: the document stores the file privately under part-docs/<id>/ and remembers the URL");
+    const state = await loadPartDocsState(await listParts());
+    assert.equal(slotCoverage(state.index, "FETCH-B", "datasheet").state, "own", "part docs fetch: the other part is satisfied without a second download");
+    const b = await fetchSlot(await ctxFor(), { sku: "FETCH-B", kind: "datasheet" }, "Jeff", deps);
+    assert(b.ok && fetched.filter((u) => u === U1).length === 1, "part docs fetch: a URL is downloaded once, ever");
+
+    const c1 = await fetchSlot(await ctxFor(), { sku: "FETCH-C", kind: "datasheet" }, "Jeff", deps);
+    assert(!c1.ok && c1.error === "That file is not a PDF.", "part docs fetch: bytes that aren't a PDF are refused with the reason");
+    const cState = await loadPartDocsState(await listParts());
+    const cSlot = slotCoverage(cState.index, "FETCH-C", "datasheet");
+    assert(cSlot.state === "link-only" && cSlot.docs.length === 1, "part docs fetch: the failed URL becomes a link-only document on the part");
+    const failedDoc = await Docs.getDocument(cSlot.state === "link-only" ? cSlot.docs[0].id : "");
+    assert.deepEqual([failedDoc?.lastFetch?.ok, failedDoc?.lastFetch?.error], [false, "That file is not a PDF."], "part docs fetch: …carrying the failure reason for the page to list");
+    brokenWorks = true;
+    const c2 = await fetchSlot(await ctxFor(), { sku: "FETCH-C", kind: "datasheet" }, "Jeff", deps);
+    assert(c2.ok && c2.documentId === failedDoc?.id, "part docs fetch: a retry that succeeds fills the same document");
+    assert.equal((await Docs.getDocument(failedDoc!.id))?.lastFetch?.ok, true, "part docs fetch: …and clears the failure");
+
+    const d = await fetchSlot(await ctxFor(), { sku: "FETCH-D", kind: "datasheet" }, "Jeff", deps);
+    assert(!d.ok && d.error === "No link to fetch.", "part docs fetch: a part with no link says so");
+  }
+
   console.log("review regression checks passed");
 }
 

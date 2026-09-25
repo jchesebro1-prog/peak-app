@@ -205,8 +205,9 @@ export function resolveRedirectHop(location: string, base: string): { ok: true; 
  *  record is still a refusal (DNS rebinding doesn't get to pick which
  *  answer the guard happened to look at). A lookup failure fails CLOSED
  *  (treated as private/unsafe): the fetch would fail anyway, and "can't
- *  verify" is never treated as "safe". */
-async function hostnameIsUnsafe(hostname: string): Promise<boolean> {
+ *  verify" is never treated as "safe". Exported for the part-document
+ *  fetcher (src/lib/part-docs/fetch.ts), which reuses this whole guard. */
+export async function hostnameIsUnsafe(hostname: string): Promise<boolean> {
   const bare = stripBrackets(hostname);
   if (isPrivateOrReservedAddress(bare)) return true;
   if (net.isIP(bare)) return false; // a public literal IP — nothing to resolve

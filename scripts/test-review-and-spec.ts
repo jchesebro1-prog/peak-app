@@ -10068,6 +10068,7 @@ seeded()
   .then(() => deletePartBAsyncChecks())
   .then(() => deleteRound2AsyncChecks())
   .then(() => partDocsUploadAsyncChecks())
+  .then(() => partDocsFetchAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -15847,4 +15848,72 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
 
   const beforeExistsCheck = fnBody.slice(0, existsCheckAt);
   ok(!/verifyUploadedBlob\(|deleteBlob\(|cleanupOrphan\(/.test(beforeExistsCheck), "part docs actions: nothing before the exists-check can touch Blob at all — the bad-kind and no-live-SKU refusals just return {ok:false}");
+}
+
+/* ======================================================================
+   Part documents (#DOC) — Task 5: the guarded fetcher. A fake fetch and
+   IP-literal hosts keep every case offline (a public literal IP needs no
+   DNS; a private one is refused before any request).
+   ====================================================================== */
+import { fetchDocumentBytes } from "@/lib/part-docs/fetch";
+import { fileNameForFetched } from "@/lib/part-docs/files";
+
+ok(fileNameForFetched(`attachment; filename="S4 LED.pdf"`, "https://x.example/a", "t", "pdf") === "S4 LED.pdf", "part docs fetch names: Content-Disposition filename wins");
+ok(fileNameForFetched(`attachment; filename*=UTF-8''Gu%C3%ADa.pdf`, "https://x.example/a", "t", "pdf") === "Guía.pdf", "part docs fetch names: the RFC 5987 name is decoded");
+ok(fileNameForFetched(null, "https://x.example/docs/S4_Datasheet.pdf?v=2", "t", "pdf") === "S4_Datasheet.pdf", "part docs fetch names: else the URL's file name");
+ok(fileNameForFetched(null, "https://www.etcconnect.com/WorkArea/DownloadAsset.aspx?id=1", "Source Four LED", "pdf") === "Source Four LED.pdf", "part docs fetch names: an .aspx endpoint falls back to the title");
+ok(fileNameForFetched(`inline; filename="guide.pdf"`, "https://x.example/a", "t", "docx") === "guide.docx", "part docs fetch names: the extension follows the real bytes");
+
+async function partDocsFetchAsyncChecks(): Promise<void> {
+  const pdf = new TextEncoder().encode("%PDF-1.7\n...");
+  const calls: string[] = [];
+  const fakeFetch = (routes: Record<string, () => Response>) =>
+    (async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      const r = routes[url];
+      return r ? r() : new Response("nope", { status: 404 });
+    }) as typeof fetch;
+  const neverUnsafe = async () => false;
+
+  const scheme = await fetchDocumentBytes("file:///etc/passwd");
+  ok(!scheme.ok && scheme.error === "Only http(s) links can be fetched.", "part docs fetch: a non-http scheme is refused");
+  const loop = await fetchDocumentBytes("http://127.0.0.1/x.pdf", { fetchImpl: fakeFetch({}) });
+  ok(!loop.ok && calls.length === 0, "part docs fetch: a loopback literal is refused before any request (venue-calendar guard)");
+  const meta = await fetchDocumentBytes("http://169.254.169.254/latest", { fetchImpl: fakeFetch({}) });
+  ok(!meta.ok && calls.length === 0, "part docs fetch: the cloud metadata address is refused");
+
+  const hop = await fetchDocumentBytes("http://93.184.216.34/ds.pdf", {
+    fetchImpl: fakeFetch({ "http://93.184.216.34/ds.pdf": () => new Response(null, { status: 302, headers: { location: "http://10.0.0.5/ds.pdf" } }) }),
+  });
+  ok(!hop.ok && !calls.includes("http://10.0.0.5/ds.pdf"), "part docs fetch: a redirect to a private address is refused and never requested");
+
+  const rebind = await fetchDocumentBytes("https://docs.example.com/ds.pdf", { fetchImpl: fakeFetch({}), isUnsafeHost: async () => true });
+  ok(!rebind.ok && rebind.error === "That host isn't reachable from the server.", "part docs fetch: a hostname resolving to a private address is refused");
+
+  const good = await fetchDocumentBytes("http://93.184.216.34/a", {
+    isUnsafeHost: neverUnsafe,
+    fetchImpl: fakeFetch({
+      "http://93.184.216.34/a": () => new Response(null, { status: 301, headers: { location: "/files/ds.pdf" } }),
+      "http://93.184.216.34/files/ds.pdf": () => new Response(pdf, { status: 200, headers: { "content-disposition": 'attachment; filename="ds.pdf"' } }),
+    }),
+  });
+  ok(good.ok && good.file.finalUrl === "http://93.184.216.34/files/ds.pdf" && good.file.bytes.byteLength === pdf.byteLength && good.file.contentDisposition!.includes("ds.pdf"), "part docs fetch: a relative redirect is re-validated, followed, and the bytes returned");
+
+  const big = await fetchDocumentBytes("http://93.184.216.34/big", {
+    isUnsafeHost: neverUnsafe,
+    maxBytes: 4,
+    fetchImpl: fakeFetch({ "http://93.184.216.34/big": () => new Response(pdf, { status: 200 }) }),
+  });
+  ok(!big.ok && big.error === "That file is over 25 MB.", "part docs fetch: the streaming size cap refuses an oversized body");
+  const missing = await fetchDocumentBytes("http://93.184.216.34/404", { isUnsafeHost: neverUnsafe, fetchImpl: fakeFetch({}) });
+  ok(!missing.ok && missing.error === "The link returned HTTP 404.", "part docs fetch: an HTTP error is reported with its status");
+  const loops = await fetchDocumentBytes("http://93.184.216.34/r0", {
+    isUnsafeHost: neverUnsafe,
+    fetchImpl: (async (input: string | URL | Request) => {
+      const n = Number(String(input).split("/r").pop()) + 1;
+      return new Response(null, { status: 302, headers: { location: `/r${n}` } });
+    }) as typeof fetch,
+  });
+  ok(!loops.ok && loops.error === "Too many redirects.", "part docs fetch: a redirect loop stops");
 }

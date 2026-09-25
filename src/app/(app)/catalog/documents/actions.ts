@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { get as getPart } from "@/lib/stores/catalog";
+import { blobEnabled } from "@/lib/blob";
+import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import {
   attachDocument,
   createDocument,
@@ -10,8 +11,10 @@ import {
   getDocument,
   replaceDocumentFile,
 } from "@/lib/stores/part-documents";
+import { buildFetchContext, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
+import { loadPartDocsState } from "@/lib/part-docs/load";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
-import { isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
+import { FETCH_BATCH_SIZE, isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
 /**
@@ -161,4 +164,24 @@ export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: 
   const changed = await setDocNotNeeded((skus || []).slice(0, MAX_SKUS_PER_CALL), kind, !!on);
   revalidate();
   return { ok: true, changed };
+}
+
+/**
+ * Fetch up to FETCH_BATCH_SIZE slots' links (spec §6 "batch fetch runs a
+ * bounded number per request"). The page loops over a selection calling
+ * this; every success and failure is persisted as it happens, so a batch
+ * that is interrupted simply resumes on the next click.
+ */
+export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActionResult<{ results: FetchOutcome[] }>> {
+  const user = await requireUser();
+  if (!blobEnabled()) {
+    return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be fetched on this deployment." };
+  }
+  const batch = (targets || []).filter((t) => t && typeof t.sku === "string" && isPartDocKind(t.kind)).slice(0, FETCH_BATCH_SIZE);
+  if (!batch.length) return { ok: true, results: [] };
+  const ctx = buildFetchContext(await loadPartDocsState(await listCatalog()));
+  const results: FetchOutcome[] = [];
+  for (const t of batch) results.push(await fetchSlot(ctx, { sku: t.sku.trim(), kind: t.kind }, user.name));
+  revalidate();
+  return { ok: true, results };
 }
