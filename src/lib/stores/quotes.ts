@@ -11,6 +11,7 @@ import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
 import { withTransaction } from "@/db";
 import { loadPipelines } from "@/lib/pipelines-server";
+import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import {
   carriesPipeline,
   firstStage,
@@ -847,19 +848,14 @@ export async function setStatus(
   // here, so this only runs the moment a quote actually transitions INTO
   // "won", never on a no-op re-save of an already-won quote (#170's spawn
   // replay is deliberately the only thing that branch does). Scoped to the
-  // quote types that actually become an Installs project (mirrors syncProjectsFromQuotes'
-  // own exclusion list) — flame-test/repair/inspection/consulting wins run
-  // their own service workflows and dashboards, so an "install sold" task
-  // for those would be noise. There is no separate PM role (D87) — `owner`
-  // is the only reliably-present assignee at this hook point.
-  if (
-    result &&
-    status === "won" &&
-    q.quoteType !== "flame_test" &&
-    q.quoteType !== "repair" &&
-    q.quoteType !== "inspection" &&
-    q.quoteType !== "consulting"
-  ) {
+  // quote types that actually become an Installs project — the SAME shared
+  // list projects.ts's three exclusion checks use (PROJECT_EXCLUDED_QUOTE_TYPES,
+  // review round-3: rental was missing here too, independently of the same
+  // gap in projects.ts) — flame-test/repair/inspection/consulting/rental
+  // wins run their own service workflows and dashboards, so an "install
+  // sold" task for those would be noise. There is no separate PM role
+  // (D87) — `owner` is the only reliably-present assignee at this hook point.
+  if (result && status === "won" && !isProjectExcludedQuoteType(q.quoteType)) {
     await createAssignment({
       title: `Install sold — reach out: ${result.name || result.customer || id}`,
       assignee: result.owner || DEFAULT_ACTOR,

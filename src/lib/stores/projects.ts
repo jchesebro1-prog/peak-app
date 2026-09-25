@@ -12,6 +12,7 @@ import { withQuoteLock } from "@/db";
 import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { yearAwareDate } from "@/lib/format";
+import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import {
   DEFAULT_PIPELINES,
   PROJECT_TAG_RANK,
@@ -750,16 +751,7 @@ export async function createProjectFromQuote(
     if (existing) return existing;
     if ((await dismissedQuoteIds()).includes(quoteId)) return null;
     const q = await getDoc<QuoteLike>("quotes", quoteId);
-    if (
-      !q ||
-      q.status !== "won" ||
-      q.quoteType === "flame_test" ||
-      q.quoteType === "repair" ||
-      q.quoteType === "inspection" ||
-      q.quoteType === "consulting" ||
-      q.quoteType === "rental"
-    )
-      return null;
+    if (!q || q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) return null;
     const p = await createProject(fromQuote(q, await loadPipelines()));
 
     // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
@@ -852,16 +844,9 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
     // spawn their OWN records (repair-jobs / inspections syncs) — before this
     // filter they ALSO minted phantom Projects that polluted the Projects
     // list, Schedule, and Field Work (PUNCHLIST #13 bug). Consulting wins
-    // spawn ConsultingEngagements (engagements sync, D90) — same rule.
-    if (
-      q.status !== "won" ||
-      q.quoteType === "flame_test" ||
-      q.quoteType === "repair" ||
-      q.quoteType === "inspection" ||
-      q.quoteType === "consulting" ||
-      q.quoteType === "rental"
-    )
-      continue;
+    // spawn ConsultingEngagements (engagements sync, D90) — same rule. Rental
+    // wins spawn equipment bookings — same rule again (review round 3).
+    if (q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) continue;
     // `haveQ`/`skip` are only a fast-path skip built from one snapshot, not
     // the correctness guard — createProjectFromQuote (#180) re-reads both
     // the live project and the dismissed list fresh, under its advisory
@@ -881,21 +866,15 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
   return { created: made, skipped };
 }
 
-/** Won quotes that have not been converted yet — the "ready to start" strip (port of pendingConversions). */
 /**
  * Won quotes that have not been converted yet — the "ready to start" strip.
  *
  * #180 review: this exclusion list must match createProjectFromQuote's own
- * refusal list EXACTLY, or a quote type that function refuses (and so
- * createProjectFromQuote returns null for) still shows up here with a
- * "Start" button that silently does nothing when clicked. It was missing
- * repair/inspection — those spawn their OWN records (repair-jobs.ts /
- * inspections.ts) and createProjectFromQuote has refused them since #13,
- * but this list only ever excluded flame_test/consulting.
- *
- * "rental" is excluded here, matching createProjectFromQuote and
- * syncProjectsFromQuotes — a won rental becomes equipment bookings
- * (equipment-bookings.ts on the real win path), not an Installs project.
+ * refusal list EXACTLY (both now read PROJECT_EXCLUDED_QUOTE_TYPES), or a
+ * quote type that function refuses (and so createProjectFromQuote returns
+ * null for) still shows up here with a "Start" button that silently does
+ * nothing when clicked. It was missing repair/inspection/rental at
+ * various points — see project-quote-types.ts for the one shared list.
  */
 export async function pendingConversions(): Promise<QuoteLike[]> {
   const skip = await dismissedQuoteIds();
@@ -905,11 +884,7 @@ export async function pendingConversions(): Promise<QuoteLike[]> {
     .filter(
       (q) =>
         q.status === "won" &&
-        q.quoteType !== "flame_test" &&
-        q.quoteType !== "repair" &&
-        q.quoteType !== "inspection" &&
-        q.quoteType !== "consulting" &&
-        q.quoteType !== "rental" &&
+        !isProjectExcludedQuoteType(q.quoteType) &&
         !have.has(q.id) &&
         !skip.includes(q.id)
     )

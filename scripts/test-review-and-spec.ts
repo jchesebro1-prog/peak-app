@@ -9384,6 +9384,7 @@ seeded()
   .then(() => dayliteSupersedeFix2Checks())
   .then(() => dayliteFinalReviewAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
+  .then(() => installSoldExcludesRentalAsyncChecks())
   .then(() => quoteLockTimeoutCatchAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
   .then(() => pendingConversionsAsyncChecks())
@@ -12102,6 +12103,62 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
 }
 
 /* ====================================================================
+   #180 review round 4, item 1 — the #16 "Install sold" task gate
+   (quotes.ts's setStatus) excluded only flame_test/repair/inspection/
+   consulting, so every won RENTAL quote spawned an "Install sold — reach
+   out" task too, even though rentals spawn equipment bookings, not an
+   Installs project. Fixed by having quotes.ts's gate and projects.ts's
+   three exclusion checks all import ONE shared
+   PROJECT_EXCLUDED_QUOTE_TYPES (project-quote-types.ts) instead of each
+   carrying its own inline list — the four had drifted independently
+   before (rental was missing from all of them at various points).
+
+   Proven with a REAL draft->won transition (setStatus, not a copied
+   condition) on a rental quote, contrasted against the SAME transition on
+   a system quote (which SHOULD still get the task) — the positive case is
+   what keeps the negative assertion from being vacuous.
+   ==================================================================== */
+async function installSoldExcludesRentalAsyncChecks(): Promise<void> {
+  const PRE = "TEST180r4:";
+  const Q_SYSTEM = `${PRE}system`;
+  const Q_RENTAL = `${PRE}rental`;
+  const QUOTE_IDS = [Q_SYSTEM, Q_RENTAL];
+  const assignmentsFor = async (quoteId: string) =>
+    (await listDocs169("assignments")).filter(
+      (a) => ((a.link as { id?: string } | null)?.id || "") === quoteId
+    );
+  const seedDraft = (id: string, quoteType: string) =>
+    QuoteStore.create({
+      id,
+      name: `#180 review 4 (item 1) — ${quoteType}`,
+      quoteType,
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+  try {
+    await seedDraft(Q_SYSTEM, "system");
+    await seedDraft(Q_RENTAL, "rental");
+    await QuoteStore.setStatus(Q_SYSTEM, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    await QuoteStore.setStatus(Q_RENTAL, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    ok(
+      (await assignmentsFor(Q_SYSTEM)).length === 1,
+      "#180 review 4 (item 1) fixture: a real draft->won transition on a SYSTEM quote still creates the 'Install sold' assignment — the positive case"
+    );
+    ok(
+      (await assignmentsFor(Q_RENTAL)).length === 0,
+      "#180 review 4 (item 1): a real draft->won transition on a RENTAL quote creates NO 'Install sold' assignment"
+    );
+  } finally {
+    for (const a of await listDocs169("assignments")) {
+      const link = a.link as { id?: string } | null;
+      if (typeof link?.id === "string" && link.id.startsWith(PRE)) await softDeleteDoc("assignments", a.id);
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
+/* ====================================================================
    #180 review round 2, item 6 — a wedged withQuoteLock on the WIN path
    must not roll back the status change itself.
 
@@ -12440,12 +12497,20 @@ async function sweepHealingAsyncChecks(): Promise<void> {
    there is no longer any parameter to bypass it with).
 
    Item 3: `pendingConversions` must exclude EXACTLY the quote types
-   `createProjectFromQuote` refuses — it was missing repair/inspection
-   (they spawn their own records; createProjectFromQuote has refused them
-   since #13), so a won repair/inspection quote showed a "Start" button
-   that silently did nothing. `startConversionAction` must also say so
-   instead of falling through silently when createProjectFromQuote returns
-   null.
+   `createProjectFromQuote` refuses — it was missing repair/inspection at
+   one point (they spawn their own records; createProjectFromQuote has
+   refused them since #13), so a won repair/inspection quote showed a
+   "Start" button that silently did nothing. `startConversionAction` must
+   also say so instead of falling through silently when
+   createProjectFromQuote returns null.
+
+   Review round 4, item 1: both now read the ONE shared
+   PROJECT_EXCLUDED_QUOTE_TYPES (project-quote-types.ts) instead of each
+   carrying its own inline list, which is what makes "exactly matches"
+   structurally guaranteed rather than something that has to be
+   re-verified by hand every time a type is added — this source check now
+   confirms they both import the shared list, not that they happen to
+   repeat the same four names.
    ==================================================================== */
 async function pendingConversionsAsyncChecks(): Promise<void> {
   // Source checks — same raw-source idiom as the client checks above,
@@ -12455,14 +12520,28 @@ async function pendingConversionsAsyncChecks(): Promise<void> {
     !/skipDismissed/.test(projectsSrc),
     "#180 review 2 (item 2): skipDismissed is gone from projects.ts entirely — createProjectFromQuote always honours the dismissed list"
   );
+  ok(
+    /import \{ isProjectExcludedQuoteType \} from "@\/lib\/project-quote-types";/.test(projectsSrc),
+    "#180 review 4 (item 1): projects.ts imports the ONE shared exclusion list rather than carrying its own"
+  );
+  const createBody = projectsSrc.slice(
+    projectsSrc.indexOf("export async function createProjectFromQuote"),
+    projectsSrc.indexOf("/**\n * PUNCHLIST #13")
+  );
+  const syncBody = projectsSrc.slice(
+    projectsSrc.indexOf("export async function syncProjectsFromQuotes"),
+    projectsSrc.indexOf("export async function pendingConversions")
+  );
   const pendingBody = projectsSrc.slice(
     projectsSrc.indexOf("export async function pendingConversions"),
     projectsSrc.indexOf("/* ---------- procurement")
   );
   ok(pendingBody.length > 0, "#180 review 2 (item 3) fixture: pendingConversions is still where the test expects it");
   ok(
-    /q\.quoteType !== "repair"/.test(pendingBody) && /q\.quoteType !== "inspection"/.test(pendingBody),
-    "#180 review 2 (item 3): pendingConversions excludes repair and inspection, matching createProjectFromQuote's own refusal list"
+    /isProjectExcludedQuoteType\(q\.quoteType\)/.test(createBody) &&
+      /isProjectExcludedQuoteType\(q\.quoteType\)/.test(syncBody) &&
+      /isProjectExcludedQuoteType\(q\.quoteType\)/.test(pendingBody),
+    "#180 review 4 (item 1): createProjectFromQuote, syncProjectsFromQuotes and pendingConversions all gate on the SAME shared isProjectExcludedQuoteType() call — they cannot drift apart independently the way they did before"
   );
 
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/projects/actions.ts"), "utf8");
