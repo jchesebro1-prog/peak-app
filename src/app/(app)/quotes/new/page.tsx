@@ -1,17 +1,29 @@
 import { requireUser } from "@/lib/session";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
+import { get as getQuote } from "@/lib/stores/quotes";
 import QuoteIntakeForm from "./intake-form";
-import { isServiceType, type IntakeCustomer, type ServiceType } from "./types";
+import {
+  intakeInitial,
+  quoteContactName,
+  quoteEditPath,
+  quoteLineCount,
+  quoteServiceType,
+  readHandoff,
+  type IntakeReplacing,
+} from "./handoff";
+import type { IntakeCustomer } from "./types";
 
 export const metadata = { title: "New quote — Quartzite-6" };
 
 /**
  * Guided "new quote" intake — the landing screen behind the "+ New quote"
- * split menu (quotes/controls.tsx). Picks (or quick-creates) the customer,
- * venue and contact a quote is for, then hands off to the right builder
- * pre-seeded via ?customer= instead of the builder opening blank.
+ * split menu (quotes/controls.tsx) and a company's "+ New quote" (#160).
+ * Picks (or quick-creates) the customer, venue and contact a quote is for,
+ * plus an optional name, then hands off to the right builder via builderPath.
  *
- * /quotes/new?type=<system|flame_test|repair|inspection|consulting|rental>
+ * /quotes/new?type=<ServiceType>&customer=&venue=&contact=&name=
+ * /quotes/new?replaces=<quoteId>  — "Change type" on a DRAFT (D205): pre-fills
+ *   from that quote with its current type selected. A non-draft is ignored.
  */
 export default async function NewQuotePage({
   searchParams,
@@ -19,14 +31,7 @@ export default async function NewQuotePage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const [, sp, customerDocs] = await Promise.all([requireUser(), searchParams, allCustomers()]);
-
-  const rawType = Array.isArray(sp.type) ? sp.type[0] : sp.type;
-  const initialType: ServiceType = isServiceType(rawType) ? rawType : "system";
-  const requestedCustomer = Array.isArray(sp.customer) ? sp.customer[0] : sp.customer;
-  const requestedName = Array.isArray(sp.name) ? sp.name[0] : sp.name;
-  const requestedVenue = Array.isArray(sp.venue) ? sp.venue[0] : sp.venue;
-  const requestedContact = Array.isArray(sp.contact) ? sp.contact[0] : sp.contact;
-  const requestedReplaces = Array.isArray(sp.replaces) ? sp.replaces[0] : sp.replaces;
+  const h = readHandoff(sp);
 
   const customers: IntakeCustomer[] = customerDocs
     .map((c: CustomerDoc) => ({
@@ -48,19 +53,32 @@ export default async function NewQuotePage({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const initialCustomerId = customers.some((c) => c.id === requestedCustomer) ? requestedCustomer || "" : "";
-  const initialCustomer = customers.find((c) => c.id === initialCustomerId);
-  const initialVenueId = initialCustomer?.locations.some((l) => l.id === requestedVenue) ? requestedVenue || "" : "";
-  const initialContactName = initialCustomer?.contacts.some((c) => c.name === requestedContact) ? requestedContact || "" : "";
+  let seed = {
+    type: h.type,
+    category: h.category,
+    customerId: h.customerId,
+    venueId: h.venueId,
+    contactName: h.contactName,
+    name: h.name,
+  };
+  let replacing: IntakeReplacing | null = null;
+  if (h.replaces) {
+    const old = await getQuote(h.replaces);
+    if (old && old.status === "draft") {
+      const type = quoteServiceType(old);
+      replacing = { id: old.id, type, lines: quoteLineCount(old), editPath: quoteEditPath(old) };
+      seed = {
+        type,
+        category: old.category || "",
+        customerId: old.customerId || "",
+        venueId: old.locationId || "",
+        contactName: quoteContactName(old),
+        name: old.name || "",
+      };
+    }
+  }
+
   return (
-    <QuoteIntakeForm
-      customers={customers}
-      initialType={initialType}
-      initialCustomerId={initialCustomerId}
-      initialName={requestedName || ""}
-      initialVenueId={initialVenueId}
-      initialContactName={initialContactName}
-      initialReplaces={requestedReplaces || ""}
-    />
+    <QuoteIntakeForm customers={customers} initial={intakeInitial(seed, customers)} replacing={replacing} />
   );
 }

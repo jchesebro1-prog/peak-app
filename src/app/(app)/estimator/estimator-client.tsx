@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
@@ -34,6 +33,8 @@ import {
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
+import { ChangeTypeControl } from "@/components/quote-flow-controls";
+import { wonEditMessage, type WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
   DISC_LABEL,
@@ -75,7 +76,7 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor, normalizeLaborMobs } from "./labor-defaults";
+import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
@@ -117,6 +118,7 @@ const CSS = `
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
 .est-warm:focus { border-color: #e3cf94 !important; outline: none; }
 .est-secname:hover { border-color: #e4e7ec !important; }
+.est-title:hover { border-color: #4a4e56 !important; }
 .est-secname:focus { border-color: #c4c9d2 !important; background: #fff !important; outline: none; }
 .est-notefield:focus { border-color: #4a4e56 !important; outline: none; }
 .est-row:hover { background: #fafbff; }
@@ -439,11 +441,15 @@ export default function EstimatorClient({
   const [moveNotice, setMoveNotice] = useState<
     { ok: true; targetId: string; targetName: string } | { ok: false; error: string } | null
   >(null);
-  const [projectName, setProjectName] = useState(initial.projectName);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
+  // #160: the quote name is editable in the header (click-to-edit).
+  const [projectName, setProjectName] = useState(initial.projectName);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(initial.projectName);
+  const titleOpenRef = useRef(false);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [assumptions, setAssumptions] = useState(initial.assumptions || "");
   const checkedAssumptions = useMemo(() => new Set(assumptions.split("\n").map((line) => line.trim()).filter(Boolean)), [assumptions]);
@@ -667,20 +673,40 @@ export default function EstimatorClient({
     });
   };
 
+  const openTitle = () => {
+    titleOpenRef.current = true;
+    setTitleDraft(projectName);
+    setTitleEditing(true);
+  };
+  /** Enter/blur save, Esc reverts. The ref makes Enter-then-blur a single save. */
+  const closeTitle = (save: boolean) => {
+    if (!titleOpenRef.current) return;
+    titleOpenRef.current = false;
+    setTitleEditing(false);
+    const next = titleDraft.trim();
+    if (!save || !next || next === projectName) return;
+    setProjectName(next);
+    persistMeta({ name: next }); // no-op until the first save; doSave carries it then
+  };
+
   /**
    * Guards editing a won quote's customer/venue/contact (PUNCHLIST #178) — a
    * won quote's project/job already keeps the OLD value, so changing these
-   * here would silently disagree with it. Used to be a window.confirm(),
-   * which returns false with no dialog at all in this app's Capacitor
-   * shells — the edit was refused with no explanation. Replaced with an
-   * inline two-step confirm (D127 pattern, settings-client.tsx): nothing
-   * changes, locally or on the server, until the user hits Change in the
-   * banner rendered next to "Prepared for" below.
+   * here would silently disagree with it. `@/components/quote-flow-controls`
+   * has a shared `useWonEditGuard` (D206) other quote builders use for this
+   * same warning, but it still calls window.confirm() under the hood — which
+   * returns false with NO dialog at all in this app's Capacitor shells, so
+   * the edit is refused with no explanation, exactly what #178 reports. The
+   * estimator uses its own inline two-step confirm instead (D127 pattern,
+   * settings-client.tsx): nothing changes, locally or on the server, until
+   * the user hits Change in the banner rendered next to "Prepared for"
+   * below. wonEditMessage/WonEditField (quotes/new/handoff.ts) keep its
+   * copy identical to the shared hook's.
    */
-  const [wonMetaGuard, setWonMetaGuard] = useState<{ label: string; run: () => void } | null>(null);
-  const guardWonMeta = (label: string, run: () => void) => {
+  const [wonMetaGuard, setWonMetaGuard] = useState<{ field: WonEditField; run: () => void } | null>(null);
+  const guardWonMeta = (field: WonEditField, run: () => void) => {
     if (status === "won") {
-      setWonMetaGuard({ label, run });
+      setWonMetaGuard({ field, run });
       return;
     }
     run();
@@ -710,8 +736,9 @@ export default function EstimatorClient({
     startTransition(async () => {
       try {
         const res = await saveQuoteAction(loadedId, {
-          replaces: initial.replaces,
           name: projectName,
+          // D205: only the create save retires the replaced draft.
+          replaces: loadedId ? "" : initial.replaces,
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
@@ -923,7 +950,7 @@ export default function EstimatorClient({
     const name = c ? c.name : custName;
     const pc = c ? c.contacts.find((ct) => ct.primary) || c.contacts[0] : undefined;
     const contact = pc ? pc.name : "";
-    guardWonMeta("the customer", () => {
+    guardWonMeta("customer", () => {
       setCustomerId(id || null);
       setLocationId(locId);
       setCustName(name);
@@ -933,14 +960,14 @@ export default function EstimatorClient({
     });
   };
   const pickVenue = (locId: string) => {
-    guardWonMeta("the venue", () => {
+    guardWonMeta("venue", () => {
       setLocationId(locId || null);
       persistMeta({ locationId: locId || null });
       reapplyAutoTrips(customerId, locId || null);
     });
   };
   const pickContact = (name: string) => {
-    guardWonMeta("the contact", () => {
+    guardWonMeta("contact", () => {
       setContactName(name || "");
       persistMeta({ contactName: name || "" });
     });
@@ -968,14 +995,6 @@ export default function EstimatorClient({
     setInstallTimeframe(v);
     persistMeta({ installTimeframe: v });
   };
-  const onProjectName = (v: string) => {
-    setProjectName(v);
-    if (loadedId) persistMeta({ name: v });
-  };
-
-  const changeTypeHref = loadedId
-    ? `/quotes/new?replaces=${encodeURIComponent(loadedId)}&type=system${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}${locationId ? `&venue=${encodeURIComponent(locationId)}` : ""}${contactName ? `&contact=${encodeURIComponent(contactName)}` : ""}${projectName ? `&name=${encodeURIComponent(projectName)}` : ""}`
-    : "#";
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -1130,10 +1149,13 @@ export default function EstimatorClient({
       ss.map((s) => (s.id === secId ? { ...s, items: [...s.items, ...items] } : s))
     );
 
+  /** #160: a catalog add carries its qty and keeps the picker OPEN (rapid-fire);
+   *  the panel closes only via its toggle or ×. */
   const addPart = (secId: string, cat: SuggestPart, qty = 1) => {
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    const n = Math.max(1, Math.floor(qty) || 1);
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: Math.max(1, qty), unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: n, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
   };
 
@@ -1290,10 +1312,9 @@ export default function EstimatorClient({
         // nor into the NEXT open of the same method on the same system — hence
         // the sequence number rather than a kind/secId comparison.
         if (openSeqRef.current !== seq) return;
-        setLaborDraft((draft) => ({
-          ...freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || ""),
-          mobs: normalizeLaborMobs(draft.mobs, est),
-        }));
+        setLaborDraft(
+          freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
+        );
       });
     }
   };
@@ -1615,7 +1636,7 @@ export default function EstimatorClient({
   const resetAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") =>
     setLaborDraft((d) => ({ ...d, [field]: "", [flag]: true }));
   const addMob = () =>
-    setLaborDraft((d) => ({ ...d, mobs: [...d.mobs, laborMob(travelEstNow())] }));
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.concat([laborMob(travelEstNow())]) }));
   const removeMob = (idx: number) =>
     setLaborDraft((d) =>
       d.mobs.length <= 1 ? d : { ...d, mobs: d.mobs.filter((_, i) => i !== idx) }
@@ -1631,16 +1652,7 @@ export default function EstimatorClient({
       mobs: d.mobs.map((m, i) => {
         if (i !== idx) return m;
         if (val === "__custom__") return { ...m, nameCustom: true, name: "" };
-        const previous = mobDefaultsFor(m.name);
-        const untouched =
-          (previous ? m.people === previous.people && m.days === previous.days : m.people === "1" && m.days === "1");
-        const next = mobDefaultsFor(val);
-        return {
-          ...m,
-          name: val,
-          nameCustom: false,
-          ...(untouched && next ? { people: next.people, days: next.days } : {}),
-        };
+        return applyMobType(m, val);
       }),
     }));
   const useMobNameList = (idx: number) =>
@@ -1947,32 +1959,71 @@ export default function EstimatorClient({
           >
             <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
               <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 600,
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
+                {titleEditing ? (
                   <input
-                    value={projectName}
-                    onChange={(e) => onProjectName(e.target.value)}
-                    aria-label="Estimate name"
-                    style={{ background: "transparent", border: "1px solid transparent", color: "#fff", font: "inherit", width: "100%", minWidth: 140, outline: "none" }}
+                    autoFocus
+                    aria-label="Quote name"
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={() => closeTitle(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        closeTitle(true);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        closeTitle(false);
+                      }
+                    }}
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      fontFamily: "var(--font-ui)",
+                      color: "#fff",
+                      background: "#2b2e35",
+                      border: "1px solid #4a4e56",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      width: 340,
+                      maxWidth: "100%",
+                      outline: "none",
+                    }}
                   />
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#9aa0ab",
-                    fontFamily: "var(--font-mono)",
-                    marginTop: 2,
-                  }}
-                >
-                  {quoteId} · Rev {revNum}
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openTitle}
+                    title="Rename this quote"
+                    style={{
+                      display: "block",
+                      maxWidth: "100%",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      fontFamily: "var(--font-ui)",
+                      color: "#fff",
+                      background: "none",
+                      border: "1px dashed transparent",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      margin: "-3px -7px",
+                      cursor: "text",
+                      textAlign: "left",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    className="est-title"
+                  >
+                    {projectName}
+                  </button>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2 }}>
+                  <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>
+                    {quoteId} · Rev {revNum}
+                  </span>
+                  {loadedId && <ChangeTypeControl quoteId={loadedId} status={status} tone="dark" />}
                 </div>
               </div>
             </div>
@@ -1980,22 +2031,6 @@ export default function EstimatorClient({
               className="est-topright"
               style={{ display: "flex", alignItems: "center", gap: 22, flexShrink: 0 }}
             >
-              <Link
-                href={changeTypeHref}
-                aria-disabled={!loadedId || status !== "draft"}
-                onClick={(e) => {
-                  if (!loadedId || status !== "draft") e.preventDefault();
-                }}
-                title={status === "draft" ? "Start a replacement quote with a different type" : "Already sent — start a new quote instead."}
-                style={{
-                  fontSize: 11,
-                  color: loadedId && status === "draft" ? "#d9b8ff" : "#777d88",
-                  textDecoration: "none",
-                  pointerEvents: loadedId && status === "draft" ? "auto" : "none",
-                }}
-              >
-                Change type
-              </Link>
               <div style={{ textAlign: "right" }}>
                 <div
                   style={{
@@ -3203,7 +3238,7 @@ export default function EstimatorClient({
                       }}
                     >
                       <span style={{ flex: 1, minWidth: 140 }}>
-                        This quote is won — change {wonMetaGuard.label} anyway?
+                        {wonEditMessage(wonMetaGuard.field)}
                       </span>
                       <button
                         type="button"

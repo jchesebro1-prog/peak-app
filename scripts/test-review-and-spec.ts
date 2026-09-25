@@ -202,7 +202,7 @@ import {
   isAllowedSheetMime,
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
-import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
+import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
 import {
   backSolveExtSell,
   computeLabor,
@@ -210,6 +210,7 @@ import {
   foldLaborMobLines,
   lineExtSellOf,
   lineMarginOf,
+  parseAddQty,
   priceFromUnitSellEdit,
   repriceAtMargin,
   repricedAtLineMargin,
@@ -279,14 +280,102 @@ ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults
 ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video share one labor scope");
 ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
 const defaultMobs = defaultLaborMobs(null);
-ok(defaultMobs.length === 1 && defaultMobs[0]?.people === "1" && defaultMobs[0]?.days === "1", "labor opens with one mobilization");
+ok(defaultMobs.length === 1, "#161 labor opens with exactly one mobilization");
+ok(defaultMobs[0].name === "" && defaultMobs[0].people === "1" && defaultMobs[0].days === "1", "#161 the one opening row is a blank type at 1 person x 1 day");
+ok(
+  ["Site Visit", "Install", "Hang", "Commissioning", "Training"].map((n) => `${n}:${mobDefaultsFor(n).people}x${mobDefaultsFor(n).days}`).join("|") ===
+    "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1",
+  "#161 the D136 values survive as per-type crew x day defaults"
+);
+const pickedInstall = applyMobType(defaultMobs[0], "Install");
+ok(pickedInstall.name === "Install" && pickedInstall.people === "4" && pickedInstall.days === "5", "#161 picking Install on an untouched blank row fills 4x5");
+const pickedHang = applyMobType(pickedInstall, "Hang");
+ok(pickedHang.people === "2" && pickedHang.days === "3", "#161 switching type on still-default numbers refills from the new type");
+const touched161 = applyMobType({ ...pickedInstall, people: "6" }, "Hang");
+ok(touched161.name === "Hang" && touched161.people === "6" && touched161.days === "5", "#161 numbers the user edited are never overwritten by a type pick");
+const custom161 = applyMobType({ ...laborMob(null, "Rig day"), nameCustom: true }, "Install");
+ok(custom161.people === "1" && custom161.days === "1", "#161 a custom-named row keeps its numbers when a type is picked");
+ok(applyMobType(defaultMobs[0], "Install").nameCustom === false, "#161 picking a listed type clears the custom flag");
+const installMob = laborMob(null, "Install", "4", "5");
 const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;
-const day10 = computeMob({ ...defaultMobs[0], people: "4", days: "5", hoursPerDay: "10" }, "RIG", testRate);
+const day10 = computeMob({ ...installMob, hoursPerDay: "10" }, "RIG", testRate);
 ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew overtime");
 ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
-const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
+const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [installMob], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
 ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
+
+/* --- #160: quote intake → builder hand-off (pure) --- */
+import { builderPath, SERVICE_TYPES, BUILDER_BASE } from "@/app/(app)/quotes/new/types";
+import {
+  readHandoff, pickVenueId, pickContactName, seedVenueOn, intakeInitial, quoteServiceType, quoteEditPath,
+  quoteContactName, quoteLineCount, sameBuilder, canChangeType, replaceConfirmMessage, wonEditMessage,
+  systemQuoteName, CHANGE_TYPE_DISABLED_HINT,
+} from "@/app/(app)/quotes/new/handoff";
+{
+  const params160 = (href: string) => new URL(href, "http://x").searchParams;
+  for (const t of SERVICE_TYPES.map((s) => s.key)) {
+    const href = builderPath(t, "lakefront", { name: "Main Hall refit", venue: "lf2", contact: "Tom Reyes", replaces: "Q-2041", category: "Acoustics" });
+    const p = params160(href);
+    ok(href.startsWith(BUILDER_BASE[t] + "?"), `#160 builderPath(${t}) targets its builder`);
+    ok(p.get("customer") === "lakefront" && p.get("name") === "Main Hall refit" && p.get("contact") === "Tom Reyes" && p.get("replaces") === "Q-2041", `#160 builderPath(${t}) carries customer, name, contact and replaces`);
+    ok(t === "rental" ? !p.has("venue") : p.get("venue") === "lf2", `#160 builderPath(${t}) ${t === "rental" ? "drops venue (rental has none)" : "carries the venue id"}`);
+    ok(t === "custom" ? p.get("category") === "Acoustics" : !p.has("category"), `#160 builderPath(${t}) sends category only for custom`);
+  }
+  ok(builderPath("system", "lakefront") === "/estimator?customer=lakefront", "#160 builderPath with no options is unchanged");
+  ok(builderPath("repair", "") === "/repairs/quote", "#160 builderPath with no customer has no query string");
+  ok(!params160(builderPath("system", "c1", { name: "   " })).has("name"), "#160 a blank quote name is not forwarded");
+
+  const h = readHandoff({ customer: " lakefront ", name: ["Studio refit", "x"], venue: "lf2", contact: "Tom Reyes", replaces: "Q-2041", type: "repair", category: "" });
+  ok(h.customerId === "lakefront" && h.name === "Studio refit" && h.venueId === "lf2" && h.contactName === "Tom Reyes" && h.replaces === "Q-2041" && h.type === "repair", "#160 readHandoff trims and takes the first of repeated params");
+  ok(readHandoff({}).customerId === "" && readHandoff({}).replaces === "", "#160 readHandoff of nothing is all blanks");
+
+  const cust160 = {
+    id: "lakefront",
+    locations: [{ id: "lf1", primary: true }, { id: "lf2", primary: false }],
+    contacts: [{ name: "Dana Whitlock", primary: true }, { name: "Tom Reyes", primary: false }],
+  };
+  ok(pickVenueId(cust160, "lf2") === "lf2", "#160 a venue on the customer is honoured");
+  ok(pickVenueId(cust160, "nope") === "lf1", "#160 an unknown venue id falls back to the primary");
+  ok(pickVenueId(cust160, "nope", false) === "", "#160 without fallback an unknown venue id is blank");
+  ok(pickVenueId({ locations: [] }, "lf1") === "", "#160 a customer with no venues yields no venue");
+  ok(pickContactName(cust160, "Tom Reyes") === "Tom Reyes", "#160 a contact on the customer is honoured");
+  ok(pickContactName(cust160, "Stranger") === "Dana Whitlock", "#160 an unknown contact falls back to the primary");
+  ok(pickContactName(cust160, "Stranger", false) === "", "#160 without fallback an unknown contact is blank");
+  const on160 = seedVenueOn(cust160.locations, "lf2");
+  ok(on160.lf2 === true && on160.lf1 === false, "#160 a forwarded venue is the only venue switched on");
+  const onDefault160 = seedVenueOn(cust160.locations, "");
+  ok(onDefault160.lf1 === true && onDefault160.lf2 === false, "#160 with no forwarded venue the primary is on (unchanged rule)");
+  const onNoPrimary160 = seedVenueOn([{ id: "a", primary: false }, { id: "b", primary: false }], "zzz");
+  ok(onNoPrimary160.a === true && onNoPrimary160.b === false, "#160 no primary and an unknown venue → first venue on");
+
+  const dir160 = [{ id: "lakefront", name: "Lakefront PAC", type: "", locations: [{ id: "lf1", label: "Main Hall", city: "", state: "", primary: true }], contacts: [{ name: "Dana Whitlock", role: "", primary: true }] }];
+  const ii = intakeInitial({ type: "flame_test", category: "", customerId: "lakefront", venueId: "lf1", contactName: "Dana Whitlock", name: "Q name" }, dir160);
+  ok(ii.type === "flame_test" && ii.customerId === "lakefront" && ii.locationId === "lf1" && ii.contactName === "Dana Whitlock" && ii.name === "Q name", "#160 intakeInitial keeps a valid customer, venue and contact");
+  const bad = intakeInitial({ type: "bogus", category: "", customerId: "ghost", venueId: "lf1", contactName: "Dana Whitlock", name: "" }, dir160);
+  ok(bad.type === "system" && bad.customerId === "" && bad.locationId === "" && bad.contactName === "", "#160 intakeInitial ignores an unknown customer id (form starts blank) and an unknown type");
+  const badVenue = intakeInitial({ type: "repair", category: "", customerId: "lakefront", venueId: "zz", contactName: "Nobody", name: "" }, dir160);
+  ok(badVenue.customerId === "lakefront" && badVenue.locationId === "" && badVenue.contactName === "", "#160 intakeInitial drops a venue/contact that isn't on the customer");
+
+  ok(quoteServiceType({}) === "system" && quoteServiceType({ category: "Acoustics" }) === "custom" && quoteServiceType({ quoteType: "flame_test" }) === "flame_test", "#160 quoteServiceType maps estimator, custom and typed quotes");
+  ok(quoteServiceType({ quoteType: "weird" }) === "system", "#160 an unknown quoteType is treated as a system quote");
+  ok(quoteEditPath({ id: "Q-1", quoteType: "repair" }) === "/repairs/quote?id=Q-1" && quoteEditPath({ id: "Q-2" }) === "/estimator?id=Q-2", "#160 quoteEditPath opens each type in its own builder");
+  ok(quoteContactName({ contactName: "A" }) === "A" && quoteContactName({ contact: { name: "B" } }) === "B" && quoteContactName({}) === "", "#160 quoteContactName reads estimator and service contact shapes");
+  ok(quoteLineCount({ spec: { sections: [{ items: [1, 2] }, { items: [3] }] } }) === 3, "#160 estimator lines are counted across systems");
+  ok(quoteLineCount({ flameTest: { venues: [1, 2] } }) === 2 && quoteLineCount({ repair: { items: [1], parts: [1, 2] } }) === 3 && quoteLineCount({ rental: { lines: [1] } }) === 1 && quoteLineCount({ consulting: { scopes: [1, 2] } }) === 2, "#160 service quote lines are counted from their engine subdoc");
+  ok(quoteLineCount({}) === 0, "#160 a quote with no lines counts 0");
+  ok(sameBuilder("system", "custom") && sameBuilder("repair", "repair") && !sameBuilder("system", "repair"), "#160 system and custom share the Estimator, so switching between them is not a replace");
+  ok(canChangeType("draft") && !canChangeType("sent") && !canChangeType("won") && !canChangeType("lost"), "#160 Change type is drafts-only");
+  ok(CHANGE_TYPE_DISABLED_HINT === "Already sent — start a new quote instead.", "#160 disabled Change-type hint copy");
+  ok(replaceConfirmMessage("Q-2041", 12) === "Q-2041 and its 12 lines will be replaced. Continue?" && replaceConfirmMessage("Q-9", 1) === "Q-9 and its 1 line will be replaced. Continue?", "#160 replace confirm names the quote and its line count");
+  ok(wonEditMessage("venue") === "This quote is won — its project/job keeps the old venue. Change the quote anyway?", "#160 won-edit confirm copy");
+  ok(systemQuoteName("Lakefront PAC", "") === "Lakefront PAC — System" && systemQuoteName("Lakefront PAC", " Acoustics ") === "Lakefront PAC — Acoustics" && systemQuoteName("", "") === "New estimate", "#160 blank-name fallback for Estimator quotes");
+}
+
+/* --- #160: catalog rapid-add quantity box --- */
+ok(parseAddQty("4") === 4 && parseAddQty("12") === 12, "#160 the catalog qty box adds the typed quantity");
+ok(parseAddQty("") === 1 && parseAddQty("0") === 1 && parseAddQty("-3") === 1 && parseAddQty("abc") === 1, "#160 a blank, zero, negative or non-numeric qty adds 1");
+ok(parseAddQty("2.7") === 2, "#160 a fractional qty is floored to a whole unit");
 
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link
@@ -3297,6 +3386,7 @@ import {
   canAttestApproval,
   type QuoteReview,
 } from "@/lib/stores/quotes";
+import { create as createQuote160, get as getQuote160, remove as removeQuote160, setStatus as setStatus160, retireReplacedDraft, retireReplacedDraftSafely } from "@/lib/stores/quotes";
 
 function review(over: Partial<QuoteReview> = {}): QuoteReview {
   return {
@@ -8252,6 +8342,7 @@ seeded()
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
+  .then(() => retireDraftAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
   .then(() => pipelinesServerAsyncChecks())
   .then(() => projectsPipelineAsyncChecks())
@@ -11323,5 +11414,48 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   } finally {
     console.error = realConsoleError;
     await softDeleteDoc("quotes", Q_GATE);
+  }
+}
+
+/* ====== #160 / D205: Change type retires the replaced DRAFT only ======
+ * Writes only rows it creates and removes them in finally (D202). */
+async function retireDraftAsyncChecks(): Promise<void> {
+  const made: string[] = [];
+  try {
+    const draft = await createQuote160({ name: "#160 fixture draft", customer: "Spec fixture", owner: "spec" });
+    made.push(draft.id);
+    const replacement = await createQuote160({ name: "#160 fixture replacement", customer: "Spec fixture", owner: "spec" });
+    made.push(replacement.id);
+    const lost = await createQuote160({ name: "#160 fixture lost", customer: "Spec fixture", owner: "spec" });
+    made.push(lost.id);
+    await setStatus160(lost.id, "lost");
+
+    ok((await retireReplacedDraft(draft.id, draft.id)) === false, "#160 retireReplacedDraft never retires the quote being saved");
+    ok((await getQuote160(draft.id)) !== null, "#160 …and that quote is still there");
+    ok((await retireReplacedDraft(lost.id, replacement.id)) === false, "#160 retireReplacedDraft refuses a non-draft quote");
+    ok((await getQuote160(lost.id))?.status === "lost", "#160 …and the non-draft is untouched");
+    ok((await retireReplacedDraft("Q-DOES-NOT-EXIST-160", replacement.id)) === false, "#160 retireReplacedDraft no-ops on a missing id");
+    ok((await retireReplacedDraft("", replacement.id)) === false, "#160 retireReplacedDraft no-ops on a blank id");
+    ok((await retireReplacedDraft(draft.id, replacement.id)) === true, "#160 retireReplacedDraft retires a draft");
+    ok((await getQuote160(draft.id)) === null, "#160 the retired draft no longer loads (soft-deleted)");
+    ok((await retireReplacedDraft(draft.id, replacement.id)) === false, "#160 retiring twice is a no-op");
+
+    // I1 fixup: retireReplacedDraftSafely never throws, even on garbage input —
+    // the caller has already committed the replacement quote by the time it runs.
+    const safeDraft = await createQuote160({ name: "#160 fixture safe draft", customer: "Spec fixture", owner: "spec" });
+    made.push(safeDraft.id);
+    const safeReplacement = await createQuote160({ name: "#160 fixture safe replacement", customer: "Spec fixture", owner: "spec" });
+    made.push(safeReplacement.id);
+
+    ok((await retireReplacedDraftSafely({}, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on a non-string object");
+    ok((await retireReplacedDraftSafely(null, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on null");
+    ok((await retireReplacedDraftSafely(undefined, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on undefined");
+    ok((await retireReplacedDraftSafely("   ", safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on a blank string");
+    ok((await retireReplacedDraftSafely(safeDraft.id, safeDraft.id, "spec")) === false, "#160 retireReplacedDraftSafely self-guards against retiring the quote being saved");
+    ok((await getQuote160(safeDraft.id)) !== null, "#160 …and that quote is still there");
+    ok((await retireReplacedDraftSafely(safeDraft.id, safeReplacement.id, "spec")) === true, "#160 retireReplacedDraftSafely retires a real draft");
+    ok((await getQuote160(safeDraft.id)) === null, "#160 …and it is gone afterward");
+  } finally {
+    for (const id of made) await removeQuote160(id);
   }
 }

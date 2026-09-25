@@ -20,6 +20,7 @@ export function CustomerCombobox({
   placeholder = "Search customers…",
   disabled = false,
   inputStyle,
+  canChange,
 }: {
   options: CustomerComboboxOption[];
   value: string;
@@ -27,6 +28,8 @@ export function CustomerCombobox({
   placeholder?: string;
   disabled?: boolean;
   inputStyle?: React.CSSProperties;
+  /** Optional veto (D206 won-quote confirm). Returning false keeps the current pick and restores its name in the input. */
+  canChange?: (id: string) => boolean;
 }) {
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -60,6 +63,11 @@ export function CustomerCombobox({
   }, [options, query]);
 
   const pick = (o: CustomerComboboxOption) => {
+    if (o.id !== value && canChange && !canChange(o.id)) {
+      setQuery(selected?.name || "");
+      setOpen(false);
+      return;
+    }
     setQuery(o.name);
     setOpen(false);
     onChange(o.id);
@@ -78,6 +86,10 @@ export function CustomerCombobox({
         placeholder={placeholder}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
+          if (!e.target.value && value && canChange && !canChange("")) {
+            setQuery(selected?.name || "");
+            return;
+          }
           setQuery(e.target.value);
           setOpen(true);
           setActive(0);
