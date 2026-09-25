@@ -5424,3 +5424,26 @@ admin, enforced in the action, not just the UI.
 `syncEngagementsFromQuotes` sweep rebuilt it. `coveredQuoteIds()` in `stores/engagements.ts` now reads with
 `includeDeleted: true` (the #169 project idiom) and gates both create paths. Consequence: re-winning a quote whose
 engagement was deliberately deleted does not bring the engagement back — same as projects.
+
+## D251. Labor overhead is internal: separate lines in the estimate, folded into labor for the customer (#201, 2026-09-25)
+
+Supersedes D244. Jeff wants shop & engineering and the performance bonus visible as their own estimate lines but not on
+anything the customer sees. The lines are stored separately (flag `laborOverhead`; legacy SKU prefixes recognised),
+and `customerLines()` folds their sell into the mobilization line(s) by cost on the customer document only, falling
+back to other labor lines, then to one neutral "Project management, engineering & shop" row — never naming the bonus,
+never dropping the amount. Folding at render time (not at save time) keeps the estimate honest and lets the rule change
+without rewriting saved quotes.
+
+## D252. Grid-only settings live on Design → Grid Settings, admin-gated (#202, 2026-09-25)
+
+`/design/grid/settings` (manage_users) holds the Grid's own knobs: category symbols, the port-rule review with a
+per-rule Apply, wire types and install hours per device. Catalog taxonomy, per-part ports, assemblies, lineset and
+motors stay where they are (they serve more than the Grid) and are linked. The port-rule Apply writes only that rule's
+matches and still skips parts that already have ports, the same safety as the CLI's `--commit`.
+
+## D253. A Grid plan sheet can be removed only when nothing uses it, and revisions bring it back (#203, 2026-09-25)
+
+`removeSheet` refuses while any live placement, space or route references the sheet, and only drops it from the
+project's sheet list — the `grid_sheets` doc and its file are kept, because revisions store `sheetIds`. Restoring a
+revision re-adds any sheet its items reference, so a restore brings back exactly what the revision had.
+
