@@ -374,7 +374,7 @@ async function gateHit(
   row: { city?: string | null; state?: string | null },
   precision: GeocodePrecision,
   ctx: GeocodeCtx,
-  opts?: { cityForCompare?: string | null; zip5?: string }
+  opts?: { cityForCompare?: string | null; zip5?: string; fallback?: boolean }
 ): Promise<GateResult> {
   // Sanity gate: a hit in the wrong state is a bad match, and a bad match
   // silently misprices a quote. Rows with no stated state can't be checked.
@@ -390,12 +390,16 @@ async function gateHit(
   // not — item 4 below still checks it isn't a same-zip coincidence far away.
   const zipMatches = !!(opts?.zip5 && hit.zip && hit.zip.slice(0, 5) === opts.zip5);
 
-  // D235 item 5: a fallback attempt (2 or 3 — the only callers that pass
-  // zip5) with nothing left to compare a city against, because the stated
-  // city cleaned to "", has only the zip left to trust. Without this, an
-  // empty cityForCompare fell through the city-mismatch check below and
-  // accepted unconditionally, zip or no zip.
-  if (opts?.zip5 !== undefined && !cityText)
+  // D235 item 5 / #185 fix round 2 item 2: a fallback attempt (2 or 3 — the
+  // only callers that pass `fallback: true`) with nothing left to compare a
+  // city against, because the stated city cleaned to "", has only the zip
+  // left to trust. This is keyed on "this IS a fallback attempt"
+  // (opts?.fallback), NOT on whether the row happens to carry a zip — a
+  // fallback attempt with no zip either (zip5 undefined, so zipMatches is
+  // always false) must still be rejected here, never fall through and accept
+  // unconditionally just because there was nothing to compare. A row with no
+  // city AND no zip can never be accepted via fallback.
+  if (opts?.fallback && !cityText)
     return zipMatches ? { ok: true } : { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
 
   // Second gate: the right state is not the right place ("Portage" -> Portage
@@ -495,7 +499,7 @@ export async function geocodeVenue(
     await sleep(ctx.delayMs);
     const [hit2] = await search(q2, { limit: 1 });
     if (hit2) {
-      const gate2 = await gateHit(hit2, row, precision, ctx, { cityForCompare: city2, zip5 });
+      const gate2 = await gateHit(hit2, row, precision, ctx, { cityForCompare: city2, zip5, fallback: true });
       if (gate2.ok) return { ok: true, lat: hit2.lat, lng: hit2.lng, precision, hit: hit2 };
     }
   }
@@ -513,7 +517,7 @@ export async function geocodeVenue(
       await sleep(ctx.delayMs);
       const [hit3] = await search(q3, { limit: 1 });
       if (hit3) {
-        const gate3 = await gateHit(hit3, row, precision, ctx, { cityForCompare: city2, zip5 });
+        const gate3 = await gateHit(hit3, row, precision, ctx, { cityForCompare: city2, zip5, fallback: true });
         if (gate3.ok) return { ok: true, lat: hit3.lat, lng: hit3.lng, precision, hit: hit3 };
       }
     }

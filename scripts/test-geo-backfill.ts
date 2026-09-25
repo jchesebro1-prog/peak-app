@@ -442,6 +442,35 @@ async function main() {
     );
     assert.ok(!m.ok, "a same-zip hit far from the resolvable stated-town centre is rejected");
 
+    // Minors (fix round 2, item 4c): the positive counterpart of the above —
+    // a zip-matched fallback hit that IS within ZIP_GATE_MAX_MI of a
+    // resolvable stated centre is accepted, not just rejected when far.
+    const ctxM2 = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "500 near zip dr, wi 53562",
+      hit: { lat: 43.15, lng: -89.46, city: "NearTown", state: "Wisconsin", zip: "53562" },
+    });
+    const m2 = await geocodeVenue(
+      { address: "500 Near Zip Dr", city: "Middleton", state: "WI", zip: "53562" },
+      ctxM2
+    );
+    assert.ok(m2.ok, "a same-zip hit close to the resolvable stated-town centre is accepted");
+
+    // #185 fix round 2, item 2: a fallback attempt must be tied to a PLACE —
+    // the "require the zip when there's no city" rule keys on "this is a
+    // fallback attempt" (an explicit `fallback: true` gate option), not on
+    // whether the row happens to carry a zip. Before this fix, a fallback
+    // attempt whose cleaned city AND row zip were both empty fell through
+    // every check in gateHit() and was accepted unconditionally — a row with
+    // no city and no zip must never be geocoded off a fallback guess.
+    const ctxN = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "123 main st, wi",
+      hit: { lat: 46.6, lng: -90.9, city: "Ashland", state: "Wisconsin" },
+    });
+    const n = await geocodeVenue({ address: "123 Main St", city: "(Unknown)", state: "WI", zip: "" }, ctxN);
+    assert.ok(!n.ok, "no city and no zip on a fallback attempt must never be accepted");
+
     // #185 item 5: with nothing to compare a city against (the stated city
     // cleans to ""), a fallback attempt must fall back to the zip alone —
     // never accept unconditionally just because there's no city text.
