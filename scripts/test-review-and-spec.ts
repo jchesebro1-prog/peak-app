@@ -292,6 +292,7 @@ import {
   normalizeCategoryKey, normalizeArticle, articleIdForPart, resolveSameAs, specStateOf,
   type SpecCategoryArticle, type SpecPartLike,
 } from "@/lib/specs/articles";
+import { STARTER_TEMPLATES, templateId, scaffoldFrom } from "@/lib/stores/spec-templates";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -12711,4 +12712,22 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(junk.manufacturers.length === 1, "articles: normalize drops blank and duplicate manufacturers");
   ok(junk.categoryKeys.length === 1 && junk.categoryKeys[0] === "Curtains", "articles: normalize keeps one spelling per normalized category key");
   ok(junk.sort === 0 && junk.general === "", "articles: normalize defaults sort and general");
+}
+
+/* --- specs: templates --- */
+{
+  ok(templateId("Lighting Controls") === "lighting-controls", "templates: the id is a slug of the key");
+  ok(templateId("  AV / Comms  ") === "av-comms", "templates: slugs collapse punctuation and whitespace");
+  ok(STARTER_TEMPLATES.length >= 5, "templates: at least five starter formulas ship");
+  ok(new Set(STARTER_TEMPLATES.map((t) => templateId(t.key))).size === STARTER_TEMPLATES.length, "templates: starter keys are unique");
+  ok(STARTER_TEMPLATES.every((t) => t.headings.length > 0), "templates: every starter has headings");
+  ok(STARTER_TEMPLATES.every((t) => t.headings.every((h) => h.label && h.guidance)), "templates: every heading carries guidance");
+  ok(STARTER_TEMPLATES.every((t) => t.example === ""), "templates: starters ship without a worked example — the North HS seed supplies those");
+  const fixtures = STARTER_TEMPLATES.find((t) => t.key === "Fixtures")!;
+  ok(!!fixtures, "templates: a Fixtures formula ships");
+  ok(fixtures.headings[0].label === "Basis of Design", "templates: a formula opens with Basis of Design");
+  const scaffold = scaffoldFrom({ ...fixtures, id: "x", updatedAt: 0, updatedBy: "" });
+  ok(scaffold.split("\n").length === fixtures.headings.length, "templates: the scaffold is one line per heading");
+  ok(scaffold.startsWith("Basis of Design:"), "templates: the scaffold labels each line with its heading");
+  ok(!scaffold.includes("  "), "templates: the scaffold is flat — the author indents what belongs deeper");
 }

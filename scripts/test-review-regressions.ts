@@ -1874,6 +1874,40 @@ async function main() {
   assert.deepEqual(await saveLayoutAction("invalid" as never, []), { ok: false }, "#43 save action rejects an invalid surface before auth");
   assert.deepEqual(await resetLayoutAction("invalid" as never), { ok: false }, "#43 reset action rejects an invalid surface before auth");
 
+  /* --- specs: template + curtain-template stores --- */
+  {
+    const SpecTemplates = await import("@/lib/stores/spec-templates");
+    const SpecCurtainTemplates = await import("@/lib/stores/spec-curtain-templates");
+
+    // getDb() awaits the dev auto-seed, which has ALREADY run
+    // seedStarterTemplates() by the time this block executes — so the first
+    // call here legitimately returns 0. Assert the end state, not the count.
+    await SpecTemplates.seedStarterTemplates("Seed");
+    const all = await SpecTemplates.allTemplates();
+    const ids = new Set(all.map((t) => t.id));
+    assert(
+      SpecTemplates.STARTER_TEMPLATES.every((t) => ids.has(SpecTemplates.templateId(t.key))),
+      "templates: after seeding, the collection holds every starter"
+    );
+    assert((await SpecTemplates.seedStarterTemplates("Seed")) === 0, "templates: seeding again writes nothing");
+    assert((await SpecTemplates.ensureStarterTemplates("Seed")) === 0, "templates: ensure is a no-op on a collection that already holds formulas");
+
+    await SpecTemplates.saveTemplate({ key: "Fixtures", title: "Lighting Fixture", headings: [{ label: "X", guidance: "Y" }], rules: "R", example: "E" }, "Jeff");
+    const edited = await SpecTemplates.getTemplate(SpecTemplates.templateId("Fixtures"));
+    assert(edited?.headings.length === 1 && edited.example === "E", "templates: saving by an existing key replaces that formula, not a duplicate");
+    assert((await SpecTemplates.allTemplates()).length === all.length, "templates: saving an existing key adds no row");
+    assert((await SpecTemplates.seedStarterTemplates("Seed")) === 0, "templates: re-seeding never overwrites an edited formula");
+
+    await SpecCurtainTemplates.seedStarterCurtainTemplates("Seed");
+    const curtainIds = new Set((await SpecCurtainTemplates.allCurtainTemplates()).map((t) => t.id));
+    assert(["Border", "Leg", "Draw", "Full"].every((t) => curtainIds.has(t as never)), "curtain templates: one starter per Grid curtain type is present");
+    const leg = await SpecCurtainTemplates.getCurtainTemplate("Leg");
+    assert(!!leg && leg.id === "Leg", "curtain templates: the id is the curtain type");
+    assert(!!leg && ["0", "50", "75", "100"].every((k) => !!leg.fullnessClauses[k as "0"]), "curtain templates: all four fullness clauses ship");
+    assert(!!leg && leg.body.includes("{{material}}") && leg.body.includes("{{fullnessClause}}"), "curtain templates: the starter body carries its slots");
+    assert((await SpecCurtainTemplates.seedStarterCurtainTemplates("Seed")) === 0, "curtain templates: seeding twice writes nothing");
+  }
+
   console.log("review regression checks passed");
 }
 

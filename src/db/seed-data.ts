@@ -194,6 +194,13 @@ export async function seedIfEmpty(db: Db) {
   if (data.seedDemo === true) {
     await seedDemoCollections();
   }
+  // The starter formulas are configuration, not demo data: DEMO_COLLECTIONS is
+  // Object.keys(DOC_TABLES), so the go-live reset wipes spec_templates too.
+  // Both seeds are idempotent by key, so this is safe on every open.
+  const { seedStarterTemplates } = await import("@/lib/stores/spec-templates");
+  const { seedStarterCurtainTemplates } = await import("@/lib/stores/spec-curtain-templates");
+  await seedStarterTemplates();
+  await seedStarterCurtainTemplates();
   // Identity core (D85): bootstrap companies/sites/contacts from the customer
   // directory when the identity tables are empty. The converter no-ops
   // otherwise, so this is safe on every startup.
