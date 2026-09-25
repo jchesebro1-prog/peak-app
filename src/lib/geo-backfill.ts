@@ -36,6 +36,7 @@ import { and, eq, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites, type SiteRow } from "@/db/schema";
 import {
+  FETCH_TIMEOUT_MS,
   haversineMiles,
   hasCoords,
   officesFromSettings,
@@ -545,12 +546,20 @@ export async function backfillVenueCoords(opts?: {
   skipQueries?: readonly string[];
   onProgress?: (done: number, total: number) => void;
   /**
-   * #185 item 1: wall-clock budget for this call, checked before starting
-   * each new query (never mid-query). A failing building row costs about
-   * 4.4s (one search + a town-centre lookup + two fallback searches, each
-   * paced at delayMs) plus four network round trips, so a `limit`-sized
-   * batch of mostly-failing rows can run well past a server action's
-   * maxDuration — the Settings runner passes this; the CLI doesn't, and
+   * #185 fix round 2, item 1: wall-clock budget for this call. WORST-CASE
+   * aware — checked before starting each new query (never mid-query) against
+   * what that query could actually cost, not what it usually costs. A
+   * failing building row can run a search + a town-centre lookup + two
+   * fallback searches, each paced at `delayMs` and each capped by
+   * `FETCH_TIMEOUT_MS` (5s) if Nominatim hangs — so ONE query's true worst
+   * case is `4 * (delayMs + FETCH_TIMEOUT_MS)`, not the ~4.4s it costs when
+   * every request answers instantly. A query only starts when
+   * `elapsed + that worst case <= budgetMs`, so the call can never overrun
+   * its budget by more than the time already spent, and `remaining` still
+   * counts every query that never got to start. `done === 0` bypasses the
+   * check so the very first query always runs — a `budgetMs` too small for
+   * even one worst-case query still guarantees progress instead of stalling
+   * a batch forever. The Settings runner passes this; the CLI doesn't, and
    * defaults to unbounded (no behaviour change).
    */
   budgetMs?: number;
@@ -594,12 +603,20 @@ export async function backfillVenueCoords(opts?: {
   const ctx: GeocodeCtx = { delayMs, townCentres: new Map() };
   const toRun = queries.slice(0, budget);
 
+  // #185 fix round 2, item 1: the worst-case cost of ONE query — a search
+  // plus a town-centre lookup plus two fallback searches, each of which could
+  // individually hang for the full fetch timeout. Computed once; checked
+  // before every query below.
+  const worstCasePerQuery = 4 * (delayMs + FETCH_TIMEOUT_MS);
+
   let done = 0;
   for (const q of toRun) {
-    // #185 item 1: checked before starting each new query, never mid-query —
-    // an in-flight lookup always finishes; only queries not yet begun count
-    // toward `remaining`, same as a `limit` cutoff.
-    if (budgetMs != null && Date.now() - start >= budgetMs) break;
+    // Checked before starting each new query, never mid-query — an in-flight
+    // lookup always finishes; only queries not yet begun count toward
+    // `remaining`, same as a `limit` cutoff. `done === 0` bypasses this so the
+    // very first query always runs, guaranteeing progress even when
+    // `budgetMs` is smaller than one query's worst case.
+    if (budgetMs != null && done > 0 && Date.now() - start + worstCasePerQuery > budgetMs) break;
     const rows = byQuery.get(q)!;
     if (done > 0) await sleep(delayMs);
     report.queriesIssued++;

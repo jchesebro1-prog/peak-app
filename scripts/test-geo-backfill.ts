@@ -253,7 +253,14 @@ async function main() {
   );
   console.log("PASS geo-backfill: postal-city distance gate");
 
-  /* ---- 3b. backfillVenueCoords: a time budget stops the run early (#185 item 1) ---- */
+  /* ---- 3b. backfillVenueCoords: the budget is WORST-CASE aware (#185 fix round 2, item 1) ---- */
+  // The worst case for one in-flight query is 4 * (delayMs + FETCH_TIMEOUT_MS)
+  // — a search + a town-centre lookup + two fallback searches, each capped by
+  // the fetch timeout. Checked BEFORE starting each query (never mid-query),
+  // so with delayMs 0 that worst case is 4*5000=20000ms: any budgetMs well
+  // under that stops the run after the first query regardless of how fast the
+  // stubbed fetch actually answers — no artificial latency needed, and the
+  // test no longer depends on the scratch DB's setup speed to trip the clock.
   {
     await db.delete(sites);
     for (let i = 0; i < 3; i++)
@@ -263,31 +270,30 @@ async function main() {
         when: (u) => q(u).includes(`${i + 1} budget way`),
         hit: { lat: 43 + i / 10, lng: -89, city: `Budgetville${i}`, state: "Wisconsin" },
       });
-    // Simulate real network latency deterministically so the budget has
-    // something to trip against — the stubbed fetch otherwise resolves
-    // instantly and no budgetMs could ever elapse mid-run.
-    const stubbedFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const res = await stubbedFetch(input);
-      await new Promise((r) => setTimeout(r, 100));
-      return res;
-    }) as typeof fetch;
-    let rBudget: Awaited<ReturnType<typeof backfillVenueCoords>>;
-    try {
-      rBudget = await backfillVenueCoords({ limit: 10, dryRun: true, delayMs: 0, budgetMs: 150 });
-    } finally {
-      globalThis.fetch = stubbedFetch;
-    }
-    assert.ok(
-      rBudget.queriesIssued >= 1 && rBudget.queriesIssued < 3,
-      `budget must stop the run before all 3 queries finish (issued ${rBudget.queriesIssued})`
+    const rBudget = await backfillVenueCoords({ limit: 10, dryRun: true, delayMs: 0, budgetMs: 100 });
+    assert.equal(
+      rBudget.queriesIssued,
+      1,
+      `the worst-case check must stop the run after the first query (issued ${rBudget.queriesIssued})`
     );
     assert.equal(
       rBudget.remaining,
-      3 - rBudget.queriesIssued,
+      2,
       "unstarted queries are counted toward remaining, same as a limit cutoff"
     );
-    console.log("PASS geo-backfill: backfillVenueCoords time budget");
+    console.log("PASS geo-backfill: backfillVenueCoords budget is worst-case aware");
+  }
+
+  /* ---- 3c. backfillVenueCoords: the FIRST query always runs, even with budgetMs: 1 ---- */
+  {
+    const r1 = await backfillVenueCoords({ limit: 10, dryRun: true, delayMs: 0, budgetMs: 1 });
+    assert.equal(
+      r1.queriesIssued,
+      1,
+      "done === 0 bypasses the budget check, so the very first query always runs — guaranteed progress"
+    );
+    assert.equal(r1.remaining, 2);
+    console.log("PASS geo-backfill: backfillVenueCoords first query always runs even with budgetMs: 1");
   }
 
   /* ---- 4. warmRoutes must also get past failed routes ---- */

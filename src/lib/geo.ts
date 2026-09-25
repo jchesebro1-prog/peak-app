@@ -84,7 +84,12 @@ export type GeoSearchHit = {
 
 /* ---------------- constants + pure math ---------------- */
 
-const FETCH_TIMEOUT_MS = 5000;
+/**
+ * Exported (#185 fix round 2, item 1) so geo-backfill's per-call budget can
+ * compute its own worst case from the real timeout instead of a copied
+ * literal that could drift out of sync with this one.
+ */
+export const FETCH_TIMEOUT_MS = 5000;
 
 function toRad(d: number): number {
   return (d * Math.PI) / 180;
