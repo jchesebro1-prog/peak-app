@@ -8,6 +8,7 @@ import {
   assignAction,
   convertLeadAction,
   createLeadAction,
+  deleteLeadAction,
   logActivityAction,
   markLostAction,
   requestSiteVisitAction,
@@ -15,6 +16,7 @@ import {
   setNextActionAction,
   setStageAction,
 } from "./actions";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { DrawerDetailVM, LeadCustomerLiteVM, LeadThreadVM, SourceOptionVM } from "./types";
 
 /**
@@ -1208,6 +1210,18 @@ export default function LeadDrawer({
                         </button>
                       </>
                     )}
+                    <ConfirmButton
+                      className="pk-btn-danger"
+                      label="Delete"
+                      confirmLabel="Confirm delete"
+                      style={{ marginLeft: "auto", fontSize: 12.5, padding: "11px 14px" }}
+                      onConfirm={() =>
+                        refresh(async () => {
+                          await deleteLeadAction(vm.id);
+                          router.push(closeHref);
+                        })
+                      }
+                    />
                   </div>
                 </>
               )}
