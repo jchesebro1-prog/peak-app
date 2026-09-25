@@ -15,9 +15,9 @@
  *   update(); a won one is linked to (or creates) its project here, with
  *   `quoteId` set, so the page-load sweep syncProjectsFromQuotes sees the
  *   quote as already converted and never makes a second project.
- * - repairs are written through repair-jobs create(); completedAt years ago
- *   only reads as "Warranty lapsed" — nothing in the app turns a warranty
- *   state into a task or assignment.
+ * - repairs are written through repair-jobs create() with
+ *   DAYLITE_IMPORT_SOURCE; isImportedHistory() keeps them out of the warranty
+ *   follow-up worklist, and nothing turns a warranty state into a task.
  *
  * Idempotence: every id is deterministic (./ids). A planned id that already
  * exists — soft-deleted included, so a record Jeff deleted is not resurrected
@@ -75,7 +75,6 @@ export type Preview = {
 };
 
 const IMPORT_ACTOR = "Daylite import";
-const QUOTE_NOTE = "Imported from Daylite";
 
 /* ---------------------------------------------------------------------------
  * Context — everything loaded ONCE per preview/commit
@@ -404,7 +403,7 @@ async function writeRepair(p: ProjectPlan, r: Resolved, importedAt: number): Pro
     owner: r.owner,
     ...(r.legacyOwner ? { legacyOwner: r.legacyOwner } : {}),
     contact: r.contactName ? { name: r.contactName, ...(r.contact?.title ? { role: r.contact.title } : {}) } : null,
-    source: { kind: "direct", label: "Daylite import" },
+    source: { ...Repairs.DAYLITE_IMPORT_SOURCE },
   });
   // Historical repairs sort by their completion, not by import day.
   if (p.done && completedAt != null) {
@@ -492,8 +491,9 @@ async function writeQuote(q: QuotePlan, r: Resolved, importedAt: number): Promis
     owner: r.owner,
     quoteType: "system",
     pipelineId: q.pipelineId,
+    // `source: "daylite"` is the import marker — nothing goes in quoteNote,
+    // which prints on the customer-facing quote header.
     source: "daylite",
-    quoteNote: QUOTE_NOTE,
   });
   // create() always opens a draft on the pipeline's first stage and defaults
   // an empty owner to Jeff; a plain update sets the imported state — never

@@ -724,6 +724,18 @@ export async function remove(id: string): Promise<void> {
 
 /* ---------- worklists ---------- */
 
+/** The exact `source` the Daylite history import writes on every repair it
+ *  creates (src/lib/daylite/history-commit.ts) — the one place it is spelled. */
+export const DAYLITE_IMPORT_SOURCE: RepairSource = { kind: "direct", label: "Daylite import" };
+
+/** A repair imported from Daylite history — years-old completions whose
+ *  warranties lapsed long ago. Kept out of the follow-up worklist; still a
+ *  completed job everywhere else (stats, lists, the customer record). */
+export function isImportedHistory(rec: Pick<RepairJobRecord, "source"> | null | undefined): boolean {
+  const s = rec?.source;
+  return !!s && s.kind === DAYLITE_IMPORT_SOURCE.kind && s.label === DAYLITE_IMPORT_SOURCE.label;
+}
+
 export type WarrantyFollowUpRow = RepairJobRecord & { _warranty: WarrantyStatus };
 
 /** Completed repairs whose warranty is ending or lapsed → office follow-up list. */
@@ -732,7 +744,7 @@ export async function warrantyFollowUps(
 ): Promise<WarrantyFollowUpRow[]> {
   const all = await listDocs<RepairJobRecord>("repair_jobs");
   let rows = all
-    .filter((j) => j.stage === "completed")
+    .filter((j) => j.stage === "completed" && !isImportedHistory(j))
     .map((j) => ({ ...j, _warranty: warrantyStatus(j) }));
   if (opts.dueOnly)
     rows = rows.filter(

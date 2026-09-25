@@ -7305,6 +7305,11 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok(!!doneRp && doneRp.stage === "completed" && doneRp.completedAt === new Date(2019, 0, 20).getTime() && doneRp.updatedAt === doneRp.completedAt, "daylite commit: done repair completed on its End Date");
   ok(!!doneRp && doneRp.owner === "Dana Importer" && !doneRp.legacyOwner, "daylite commit: owner matches a team member case-insensitively");
   ok(!!doneRp && Repairs.warrantyStatus(doneRp).state === "expired", "daylite commit: a years-old repair reads warranty lapsed (a list state, never a task)");
+  ok(!!doneRp && Repairs.isImportedHistory(doneRp), "daylite commit: the imported repair carries the import source");
+  const followUps = await Repairs.warrantyFollowUps({ dueOnly: true });
+  const allCompleted = await Repairs.warrantyFollowUps();
+  ok(!followUps.some((r) => r.id === ids.doneRp) && !allCompleted.some((r) => r.id === ids.doneRp), "daylite commit: imported history stays out of the warranty follow-up worklist");
+  ok((await Repairs.getAll()).some((r) => r.id === ids.doneRp && r.stage === "completed"), "daylite commit: the imported repair still counts as a completed job");
   const liveRp = await Repairs.get(ids.liveRp);
   ok(!!liveRp && liveRp.stage === "scheduled" && liveRp.completedAt === null && liveRp.valueUnknown === true, "daylite commit: live service call → scheduled repair, UKN");
   ok(!!liveRp && liveRp.owner === "" && liveRp.legacyOwner === "Mike Mundth", "daylite commit: an owner not on the team → unassigned + legacyOwner");
@@ -7314,7 +7319,7 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   );
 
   const bfQ = await QuoteStore.get(ids.bfQ);
-  ok(!!bfQ && bfQ.status === "won" && bfQ.stage === "awarded" && bfQ.pipelineId === "bid-spec" && bfQ.value === 84500 && bfQ.source === "daylite" && bfQ.quoteNote === "Imported from Daylite", "daylite commit: won quote written at its stage, no spawn");
+  ok(!!bfQ && bfQ.status === "won" && bfQ.stage === "awarded" && bfQ.pipelineId === "bid-spec" && bfQ.value === 84500 && bfQ.source === "daylite" && !bfQ.quoteNote, "daylite commit: won quote written at its stage, no spawn, marked by source — no note on the customer-facing header");
   ok(!!bfQ && bfQ.history.length === 1 && bfQ.history[0].to === "won", "daylite commit: quote history is the single imported status");
   const linkedBf = (await listDocs<ProjStore.ProjectRecord>("projects")).filter((p) => p.quoteId === ids.bfQ);
   ok(linkedBf.length === 1 && linkedBf[0].id === ids.bfP && linkedBf[0].stage === "deposit" && linkedBf[0].value === 84500, "daylite commit: exactly one project for the sold job, at Deposit");
