@@ -8,7 +8,7 @@ import { normalizeSku } from "@/lib/davinci/sku";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
 import { buildIndex, buildIndexWithStats, matchSku } from "@/lib/davinci/match";
-import { matchBom, assemble, renderSpecHtml, report, type MatchedRow } from "@/lib/bid-spec";
+import { matchBom, assemble, renderSpecHtml, report, withStoredParts, type MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "@/app/(app)/design/engagements/spec/parse-bom";
 import { TABS } from "@/app/(app)/design/engagements/tabs";
 import { approvalIsStale, openChecklistItems } from "@/lib/consulting-review";
@@ -294,8 +294,8 @@ import {
   type SpecCategoryArticle, type SpecPartLike,
 } from "@/lib/specs/articles";
 import { STARTER_TEMPLATES, templateId, scaffoldFrom } from "@/lib/stores/spec-templates";
-import { validateSameAs, optionalPartFields } from "@/app/(app)/catalog/part-form";
-import { publicCatalogPart } from "@/lib/displays-api";
+import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/catalog/part-form";
+import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
 
 let fail = 0;
@@ -898,6 +898,27 @@ ok(html.includes("PART 1 — GENERAL") && html.includes("PART 2 — PRODUCTS") &
 ok(html.includes("2.01"), "numbers products automatically");
 ok(html.includes("ITEMS NOT SPECIFIED"), "documents the deliberate omission");
 ok(!html.includes("<script"), "no script injection in output");
+
+/* --- assemble: stored-part substitution (saveSpecAction must print the
+ * stored, authored text, never whatever the client's row happened to carry) --- */
+{
+  const sentPart = { id: "SUB-1", sku: "SUB-1", desc: "Fixture", category: "Lighting", unit: "ea", list: 1, cost: 1, specSectionId: "ss-sub", specBody: "Sent text (stale)." } as any;
+  const storedPart = { ...sentPart, specBody: "Stored text (authored)." };
+  const subRows: MatchedRow[] = [
+    { row: { sku: "SUB-1", desc: "x", qty: 1 }, part: sentPart, candidates: [], bucket: "ready" },
+    { row: { sku: "GONE", desc: "y", qty: 1 }, part: null, candidates: [], bucket: "no-match" },
+  ];
+  const storedMap = new Map([["sub-1", storedPart]]);
+  const subbed = withStoredParts(subRows, storedMap);
+  ok(subbed[0].part?.specBody === "Stored text (authored).", "withStoredParts: swaps in the stored part over the sent one");
+  ok(subbed[1].part === null, "withStoredParts: a row with no part passes through unchanged");
+  const subSpec = assemble(
+    subbed,
+    [{ id: "ss-sub", number: "01 01 01", title: "Test Section", sort: 1, part1: "", part3: "", updatedAt: 0, updatedBy: "t" }] as never,
+    { projectName: "P", customer: "C", engagementId: "CE-9", preparedBy: "T", date: Date.now() }
+  );
+  ok(subSpec.sections[0].parts[0].body === "Stored text (authored).", "assemble: printed body is the stored text, not the client-sent one");
+}
 
 /* --- approval staleness --- */
 const phase = (docs: any[], pin: any): EngagementPhase => ({ id: "ph-1", name: "Final Documents", status: "active", review: {} as any, attachments: docs, checklist: [{ id: "ck1", text: "x", state: "open", by: null, at: null, reason: "" }], approvalPin: pin });
@@ -12760,6 +12781,24 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(pub.productMetadata?.specSection === "26 55 61", "displays: specSection reads the canonical section's number over the legacy text");
   ok(pub.productMetadata?.specArticle === "LED Fixtures", "displays: specArticle reads the canonical article's title");
 
+  /* --- etag: the spec library is folded in, so a renumber/rename busts a
+   * conditional GET even though no part's own id/updatedAt/pricedAt moved --- */
+  const etagLib = {
+    sections: [{ id: "ss-g", number: "26 55 61", title: "Fixtures", sort: 1, part1: [], part3: [], part2Style: "paragraphs", quantities: "drawings", updatedAt: 1, updatedBy: "t" }],
+    articles: [{ id: "ar-g", sectionId: "ss-g", sort: 1, title: "LED Fixtures", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" }],
+  };
+  const etagParts = [authd] as never;
+  const etag1 = catalogEtag(etagParts, etagLib as never);
+  ok(etag1 === catalogEtag(etagParts, etagLib as never), "etag: identical parts + library produce an identical ETag");
+  // updateArticle/updateSection always stamp updatedAt on every write, so a
+  // real rename bumps it along with the title — this hashes id+updatedAt
+  // per article/section, which is enough to bust the ETag on any such write.
+  const renamedLib = { ...etagLib, articles: [{ ...etagLib.articles[0], title: "Renamed Fixtures", updatedAt: 2 }] };
+  ok(catalogEtag(etagParts, renamedLib as never) !== etag1, "etag: renaming an article (its updatedAt moves) changes the ETag with no part touched");
+  const renumberedLib = { ...etagLib, sections: [{ ...etagLib.sections[0], updatedAt: 2 }] };
+  ok(catalogEtag(etagParts, renumberedLib as never) !== etag1, "etag: a section's updatedAt bump (e.g. a renumber) changes the ETag");
+  ok(catalogEtag(etagParts) !== etag1, "etag: an absent library still hashes differently than one with sections/articles");
+
   const manifest = buildClientPackageManifest(
     { id: "GRD-T", name: "T", createdAt: 1, quoteId: null,
       options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
@@ -12825,4 +12864,11 @@ async function deletePartBAsyncChecks(): Promise<void> {
   const o = optionalPartFields(fd);
   ok(o.manufacturerPartNumber === "7060A", "part form: a submitted P/N is trimmed");
   ok("manufacturerModelNumber" in o && o.manufacturerModelNumber === undefined, "part form: a submitted blank M/N clears it");
+
+  ok(specSortValue(0) === 0, "part form: an explicit 0 sort is kept, not treated as cleared");
+  ok(specSortValue("0") === 0, "part form: a string '0' sort is kept");
+  ok(specSortValue(3) === 3, "part form: a positive sort is kept");
+  ok(specSortValue("") === undefined, "part form: a blank sort clears it");
+  ok(specSortValue(undefined) === undefined, "part form: an absent sort clears it");
+  ok(specSortValue("abc") === undefined, "part form: a non-numeric sort clears it");
 }

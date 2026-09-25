@@ -88,8 +88,24 @@ export function apiEnvelope<T>(data: T, extraMeta: Record<string, unknown> = {})
   return { data, meta: { apiVersion: "1", generatedAt: Date.now(), ...extraMeta }, links: {} };
 }
 
-export function catalogEtag(parts: CatalogPart[]): string {
-  const source = parts.map((part) => `${part.id}:${part.updatedAt || 0}:${part.pricedAt || 0}`).join("|");
+export function catalogEtag(parts: CatalogPart[], lib?: SpecLookup): string {
+  const partsPart = parts.map((part) => `${part.id}:${part.updatedAt || 0}:${part.pricedAt || 0}`).join("|");
+  // publicProductMetadata's specSection/specArticle (and publicCatalogPart's
+  // spec.title) derive from lib.sections[].number / lib.articles[].title, not
+  // from anything on the part itself — a section renumber or article rename
+  // must still bust a client's If-None-Match, or a conditional GET returns a
+  // 304 carrying stale metadata. Sort by id so ordering never affects the hash.
+  // (updated_since filtering upstream is per-part timestamp only, so it won't
+  // surface a library-only rename either — accepted limitation, same reason.)
+  const sectionsPart = (lib?.sections || [])
+    .map((s) => `${s.id}:${s.updatedAt || 0}`)
+    .sort()
+    .join("|");
+  const articlesPart = (lib?.articles || [])
+    .map((a) => `${a.id}:${a.updatedAt || 0}`)
+    .sort()
+    .join("|");
+  const source = `${partsPart}::${sectionsPart}::${articlesPart}`;
   return `"${createHash("sha1").update(source).digest("hex")}"`;
 }
 

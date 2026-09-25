@@ -10,12 +10,14 @@ import {
   type MatchedRow,
   type SpecCatalogPart,
 } from "@/lib/bid-spec";
-import { list as listCatalog, upsert as upsertPart } from "@/lib/stores/catalog";
+import { list as listCatalog, mergeUpsert } from "@/lib/stores/catalog";
 import { getEngagement } from "@/lib/stores/engagements";
 import { allSections, createSection, seedStarterSections, updateSection } from "@/lib/stores/spec-sections";
+import { allArticles } from "@/lib/stores/spec-articles";
 import { saveGeneratedSpec } from "@/lib/stores/generated-specs";
 import { toArticles } from "@/lib/specs/sections";
 import { hasPrintableSpec } from "@/lib/specs/articles";
+import { withStoredParts } from "@/lib/bid-spec";
 
 /**
  * Bid-spec generator actions (D94). The catalog is the spec library: a
@@ -108,16 +110,27 @@ export async function writePartSpecAction(
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const part = catalog.find((p) => p.sku === sku);
   if (!part) return { ok: false, error: `No catalog part with SKU ${sku}.` };
-  await upsertPart({
-    ...part,
+  // D-SPEC-5 mirror invariant (src/lib/stores/catalog.ts ~149-155):
+  // specSectionId is written only as a MIRROR of specArticleId's own section.
+  // This inline write sets specSectionId directly (there is no article picker
+  // here) — if the part already carries a specArticleId pointing at an
+  // article in a DIFFERENT section, clear it so the pair never disagrees.
+  const articles = await allArticles();
+  const currentArticle = part.specArticleId ? articles.find((a) => a.id === part.specArticleId) : undefined;
+  const clearsArticle = !!currentArticle && currentArticle.sectionId !== specSectionId;
+  // mergeUpsert, never upsert: `part` may be stale by the time this write
+  // lands (another save in between) and a bare upsert would replace the
+  // whole document, silently wiping ports/trade/datasheet/pricing fields.
+  await mergeUpsert(sku, {
     specSectionId,
     specBody: body,
+    ...(clearsArticle ? { specArticleId: undefined } : {}),
     // An inline D94 write is a human writing the text — the review step.
     specState: "authored",
     specSource: "authored",
     specUpdatedAt: Date.now(),
     specUpdatedBy: user.name,
-  } as SpecCatalogPart);
+  });
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -154,7 +167,12 @@ export async function saveSpecAction(input: {
     };
   }
   const sections = await allSections();
-  const spec = assemble(input.rows, sections, {
+  // Print the STORED part's title/body/article/section, never whatever the
+  // client happened to be holding when it posted the save — the spec has to
+  // read as the authored, reviewed text even if the row was matched a while
+  // ago and something (Task 14's importer, a concurrent edit) touched the
+  // part since.
+  const spec = assemble(withStoredParts(input.rows, stored), sections, {
     projectName: eng.name,
     customer: eng.customer,
     engagementId: eng.id,

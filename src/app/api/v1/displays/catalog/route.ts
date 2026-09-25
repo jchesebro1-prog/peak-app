@@ -27,7 +27,7 @@ export async function GET(req: Request) {
   const [sections, articles] = await Promise.all([allSections(), allArticles()]);
   const lib = { sections, articles };
   const parts = (await listCatalog()) as SpecCatalogPart[];
-  const etag = catalogEtag(parts);
+  const etag = catalogEtag(parts, lib);
   if (req.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { etag, ...displaysRateHeaders(rate) } });
   const filteredParts = parts
     .filter((part) => !since || displayTimestamp(part) > since)

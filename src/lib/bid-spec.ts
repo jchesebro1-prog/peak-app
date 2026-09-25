@@ -116,6 +116,24 @@ export function report(rows: MatchedRow[]): MatchReport {
   return { rows, counts, finalizable };
 }
 
+/**
+ * Swap each row's `part` for the caller's own authoritative copy (keyed by
+ * lowercased SKU), leaving everything else on the row untouched. `assemble`
+ * prints exactly the `part` object it is handed, so callers that re-read the
+ * catalog to check printability (`saveSpecAction`) must also feed `assemble`
+ * that freshly-read part — otherwise the document renders whatever
+ * title/body/article/section the client happened to be holding at match
+ * time, which can be stale by the time the save lands. A row with no `part`,
+ * or whose SKU no longer resolves in `stored`, passes through unchanged.
+ */
+export function withStoredParts(rows: MatchedRow[], stored: Map<string, SpecCatalogPart>): MatchedRow[] {
+  return rows.map((r) => {
+    if (!r.part) return r;
+    const fresh = stored.get(norm(r.part.sku));
+    return fresh ? { ...r, part: fresh } : r;
+  });
+}
+
 /* ----------------------------- assembly ----------------------------- */
 
 export type AssembledPart = {

@@ -26,6 +26,17 @@ export function optionalPartFields(fd: FormData): {
   return out;
 }
 
+/**
+ * `specSort` (order within an article) legitimately wants to be 0 — the
+ * first item. `Number(v) || undefined` treats 0 as falsy and silently clears
+ * it back to "unset" on every save. Only blank/NaN/non-finite input clears
+ * the field; an explicit 0 (or any other finite number) is kept.
+ */
+export function specSortValue(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) && String(v ?? "").trim() !== "" ? n : undefined;
+}
+
 /** The same-as rules the Spec panel's save enforces. null = fine. */
 export function validateSameAs(
   sku: string,

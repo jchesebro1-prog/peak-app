@@ -12,7 +12,7 @@ import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { runCatalogImport } from "./import";
 import { parsePortsField, serializePorts } from "@/lib/catalog-ports";
 import type { Port } from "@/lib/catalog-connect";
-import { validateSameAs, optionalPartFields } from "./part-form";
+import { validateSameAs, optionalPartFields, specSortValue } from "./part-form";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -333,7 +333,7 @@ export async function writePartSpecFieldsAction(input: {
       specTitle: String(input.specTitle || "").trim() || undefined,
       specBody: String(input.specBody || ""),
       specSameAs: sameAs || undefined,
-      specSort: Number(input.specSort) || undefined,
+      specSort: specSortValue(input.specSort),
       // Saving here is the review step: whatever the row's provenance was, a
       // human has now read it, so it becomes authored.
       specState: "authored",
