@@ -765,11 +765,57 @@ export function dayliteImportSource(done: boolean): RepairSource {
 /** A repair imported as Daylite HISTORY (done in Daylite) — a years-old
  *  completion whose warranty lapsed long ago. Kept out of the warranty
  *  follow-up worklist; still a completed job everywhere else (stats, lists,
- *  the customer record). A live imported repair behaves like any other. */
+ *  the customer record). See `isLapsedLiveImport` below for the LIVE
+ *  counterpart (#192) — a live imported repair with an unlapsed warranty
+ *  still behaves like any other. */
 export function isImportedHistory(rec: Pick<RepairJobRecord, "source"> | null | undefined): boolean {
   const s = rec?.source;
   const h = dayliteImportSource(true);
   return !!s && s.kind === h.kind && s.refId === h.refId && s.label === h.label;
+}
+
+/** A repair imported as Daylite LIVE (still open there) — dayliteImportSource's
+ *  other marker. */
+function isImportedLive(rec: Pick<RepairJobRecord, "source"> | null | undefined): boolean {
+  const s = rec?.source;
+  const h = dayliteImportSource(false);
+  return !!s && s.kind === h.kind && s.refId === h.refId && s.label === h.label;
+}
+
+/**
+ * #192 — a Daylite service call that's still *New* there (imported LIVE,
+ * ordinary open work) can still land at a completed/invoiced Daylite stage
+ * (Service Completed / Invoice Sent — SERVICE_STAGE_MAP's "completed"
+ * bucket) carrying its old Daylite End Date as `completedAt`
+ * (history-commit.ts's writeRepair sets completedAt off the stage, not the
+ * Daylite Status). If that warranty window has already fully run out, the
+ * record reads as an already-lapsed warranty the moment it's imported —
+ * fifteen-year-old Daylite bookkeeping, not a live warranty issue. Owner
+ * decision: treat it as history too, same as a done-in-Daylite import — kept
+ * off the warranty follow-up worklist, still a completed repair everywhere
+ * else. A live import whose warranty hasn't lapsed yet (a genuinely recent
+ * completion) still gets its follow-up: this only fires once the warranty
+ * has actually run out. Pure — reads no clock but the one passed in.
+ */
+export function isLapsedLiveImport(
+  rec: Pick<RepairJobRecord, "source" | "stage" | "completedAt" | "warrantyMonths"> | null | undefined,
+  nowMs: number = now()
+): boolean {
+  if (!rec || rec.stage !== "completed" || !isImportedLive(rec)) return false;
+  if (rec.completedAt == null) return false;
+  const expiresAt = rec.completedAt + (rec.warrantyMonths ?? DEFAULT_WARRANTY_MONTHS) * MONTH;
+  return expiresAt < nowMs;
+}
+
+/** Kept out of warranty follow-ups altogether: Daylite-imported history
+ *  (#187/D241) or a Daylite-imported live record whose warranty has already
+ *  lapsed, which is effectively the same thing (#192). Still a completed
+ *  repair everywhere else (stats, lists, the customer record). */
+export function excludedFromWarrantyFollowUps(
+  rec: Pick<RepairJobRecord, "source" | "stage" | "completedAt" | "warrantyMonths"> | null | undefined,
+  nowMs: number = now()
+): boolean {
+  return isImportedHistory(rec) || isLapsedLiveImport(rec, nowMs);
 }
 
 export type WarrantyFollowUpRow = RepairJobRecord & { _warranty: WarrantyStatus };
@@ -780,7 +826,7 @@ export async function warrantyFollowUps(
 ): Promise<WarrantyFollowUpRow[]> {
   const all = await listDocs<RepairJobRecord>("repair_jobs");
   let rows = all
-    .filter((j) => j.stage === "completed" && !isImportedHistory(j))
+    .filter((j) => j.stage === "completed" && !excludedFromWarrantyFollowUps(j))
     .map((j) => ({ ...j, _warranty: warrantyStatus(j) }));
   if (opts.dueOnly)
     rows = rows.filter(

@@ -8379,6 +8379,66 @@ async function repairValueEditorAsyncChecks(): Promise<void> {
   ok(knownValue(filledRp!) === 4200, "#188: knownValue now counts the filled-in repair at its real value");
 }
 
+/**
+ * ============ #192: a live-but-lapsed Daylite import reads as history for
+ * warranty follow-ups ============
+ *
+ * A Daylite service call that's still *New* there (imported LIVE — ordinary
+ * open work) can still land at a completed/invoiced Daylite stage (Service
+ * Completed / Invoice Sent) with an old End Date, because writeRepair sets
+ * `completedAt` off the mapped app stage, not the Daylite Status. Before this
+ * fix it read as an already-lapsed warranty and flooded the follow-up
+ * worklist with fifteen-year-old Daylite bookkeeping. Owner decision: treat
+ * it as history too, once the warranty has actually run out — never for a
+ * genuinely recent completion, and never for an ordinary (non-Daylite)
+ * completed repair, whose expired warranty is real and must keep showing.
+ */
+async function warrantyLapsedLiveAsyncChecks(): Promise<void> {
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+
+  const DAY = 86400000;
+  const tenYearsAgo = Date.now() - 10 * 365 * DAY;
+  const lastMonth = Date.now() - 20 * DAY;
+
+  // ---- pure predicate, no DB ----
+  const liveOld = { source: Repairs.dayliteImportSource(false), stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+  const liveRecent = { source: Repairs.dayliteImportSource(false), stage: "completed" as const, completedAt: lastMonth, warrantyMonths: 12 };
+  const liveScheduled = { source: Repairs.dayliteImportSource(false), stage: "scheduled" as const, completedAt: null, warrantyMonths: 12 };
+  const doneOld = { source: Repairs.dayliteImportSource(true), stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+  const ordinaryOld = { source: { kind: "direct" as const, label: "Created directly" }, stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+
+  ok(Repairs.isLapsedLiveImport(liveOld), "#192: a live Daylite import at Completed whose warranty has fully run out reads as a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(liveRecent), "#192: a live Daylite import whose warranty hasn't run out yet is NOT a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(liveScheduled), "#192: a live Daylite import that isn't at Completed is never a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(doneOld), "#192: a done-in-Daylite import is isImportedHistory's case, not isLapsedLiveImport's");
+  ok(!Repairs.isLapsedLiveImport(ordinaryOld), "#192: an ordinary (non-Daylite) old completed repair is never flagged — its expired warranty is real, not import noise");
+
+  ok(Repairs.excludedFromWarrantyFollowUps(liveOld), "#192: excludedFromWarrantyFollowUps covers the lapsed-live case");
+  ok(Repairs.excludedFromWarrantyFollowUps(doneOld), "#192: excludedFromWarrantyFollowUps still covers the #187 done-history case");
+  ok(!Repairs.excludedFromWarrantyFollowUps(liveRecent), "#192: excludedFromWarrantyFollowUps leaves a genuinely recent live completion alone");
+  ok(!Repairs.excludedFromWarrantyFollowUps(ordinaryOld), "#192: excludedFromWarrantyFollowUps never hides a real (non-Daylite) expired warranty");
+
+  // ---- integration: the worklist itself (DB) ----
+  const lapsedId = fixtureId(192, "lapsed-live");
+  const okId = fixtureId(192, "ordinary-lapsed");
+  const t = Date.now();
+  await createFixture("repair_jobs", Repairs.buildRepairJob(lapsedId, {
+    customer: "TEST192 Lapsed Live", stage: "completed", completedAt: tenYearsAgo, warrantyMonths: 12,
+    source: Repairs.dayliteImportSource(false),
+  }, t));
+  await createFixture("repair_jobs", Repairs.buildRepairJob(okId, {
+    customer: "TEST192 Ordinary Lapsed", stage: "completed", completedAt: tenYearsAgo, warrantyMonths: 12,
+    source: { kind: "direct", label: "Created directly" },
+  }, t));
+
+  const all = await Repairs.warrantyFollowUps();
+  const due = await Repairs.warrantyFollowUps({ dueOnly: true });
+  ok(!all.some((r) => r.id === lapsedId) && !due.some((r) => r.id === lapsedId), "#192: a live-but-lapsed Daylite import stays out of the warranty follow-up worklist");
+  ok(all.some((r) => r.id === okId) && due.some((r) => r.id === okId), "#192: an ordinary completed repair with the same lapsed warranty still shows up — the fix targets the Daylite artifact, not old warranties in general");
+  ok((await Repairs.getAll()).some((r) => r.id === lapsedId && r.stage === "completed"), "#192: the excluded record still counts as a completed repair everywhere else");
+}
+
 /* ============ Task 12: chunked Daylite commit == one full commit (DB) ============ */
 async function dayliteChunkAsyncChecks(): Promise<void> {
   const { previewHistory, commitHistory } = await import("@/lib/daylite/history-commit");
@@ -9349,6 +9409,7 @@ seeded()
   .then(() => moveStageRecordsAsyncChecks())
   .then(() => dayliteCommitAsyncChecks())
   .then(() => repairValueEditorAsyncChecks())
+  .then(() => warrantyLapsedLiveAsyncChecks())
   .then(() => dayliteChunkAsyncChecks())
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
