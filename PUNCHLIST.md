@@ -7595,3 +7595,36 @@ The block now runs in `after()` (next/server), so saving an appointment never wa
 - Per-shop side-by-side distances, map colouring, type-ahead on the typed origin, and a return-trip block (spec §5).
 - The Drive cell markup is duplicated between the two pages.
 - After switching the origin to Madison, most rows read `~` until *Geocode addresses* re-warms routes from Madison.
+
+---
+
+## 185. Geocoder recovers messy addresses: labels, notes, typo'd cities, postal names — DONE 2026-09-24 (D235)
+
+**Reported:** 2026-09-24. Jeff was working the #175 unlocated-venues list, and I offered to teach the geocoder to skip the labels in front of street numbers. He said: "You can do the next fix."
+
+**Measured before designing.** I pulled the 170 addresses still unlocated on production. Replaying today's `geocodeVenue()` against live Nominatim found **2**. There were 0 HTTP errors, so the problem was not throttling: Nominatim really does miss these. The biggest finding: `"<street>, <City>, WI <zip>"` often returns nothing where `"<street>, WI <zip>"` (no city) finds the building. Examples:
+- `6911 Mangrove Lane, WI 53713`
+- `3467 Capitol Dr., WI 53590`, where the venue's city is the typo "Sun Prarie"
+- `300 E Prosser St, WI 53170`, where the postal "Silver Lake" is "Salem Lakes" in OSM
+
+**Done.**
+- **The first lookup is unchanged.** `cleanStreet`, `geocodeQuery` and `precisionOf` are byte-identical to before. Only a building-precision row whose first lookup ends in no-hit or city-mismatch gets two fallbacks:
+  1. `fallbackStreet` + `cleanCity`: labels before the house number, parenthesised notes, the text after a `label:`, bare `Box` / `Mail Drop` / `Building` numbers, and a city/state/zip pasted into the street are dropped. `Rome (Sullivan)` becomes `Rome`, and `Wisc.` becomes `Wisconsin`.
+  2. The street with state and zip only, no city.
+- **Fallback hits must still be tied to the place.** They pass if the city matches, or the hit is inside the 10-mile postal radius. Failing that, the new **zip gate** accepts a hit whose 5-digit zip equals the venue's, but rejects it if the stated town resolves and is more than 25 miles away. A row with neither a city nor a zip can never be accepted by a fallback.
+- **City-precision rows (D185) are untouched.**
+- **Batch time budget.** The Settings batch now has a worst-case-aware time budget (`budgetMs: 45_000`, 4 × (delay + 5s timeout) per query; the first query always runs). The extra lookups can therefore never push a batch past `/settings`' 60s limit, which would recreate the #166 stall.
+
+**Result on the same real data (final code):** **70 of 168 geocoded** (2 before). The recoveries were spot-checked and are plausible. One is only as good as the #166 10-mile postal rule allows: `221 North Main Street, Fall River` matched a North Main St in Columbus, about 5 mi away. The 98 left are mostly rural fire numbers OSM lacks (34), house numbers missing from OSM, street typos (`Unversity Sqaure`) and junk. Those stay for the sidebar's Pin.
+
+**Review:** three review rounds. They caught the budget overrun, a colon rule that mangled real streets on the first lookup (now fallback-only and tighter), a degenerate-street centroid labelled "building", a wrong-zip far match, and a no-city/no-zip hole. All were fixed with tests.
+
+**Gates:**
+- tsc: 0 errors
+- `test:geo-backfill`: ALL PASSED (89 stubbed fetches)
+- `test:drive-distance`: ALL PASSED
+- `test:specs`: 2044 PASS / 0 FAIL
+- `test:smoke`: ALL PASSED
+- eslint: 124 problems / 0 errors, same as origin/main at 6b5c23d
+
+**Jeff's step after deploy:** Settings → Admin → **Geocode addresses**. It only re-tries unlocated venues, then warms routes from the quote origin.

@@ -4994,3 +4994,11 @@ affects #164 equally and belongs in one fix for both rails.
 - **Unlocated rows sort last in both directions.** "Farthest first" should not open with 200 unknowns.
 - **The calendar origin is chosen per appointment:** a typed address, then a saved location with coordinates, then the person's base ("Based out of", else the quote origin). A typed miss falls back to the base and says so in the block's description; it doesn't silently drop the block. The travel block runs in `after()` so a slow geocoder can't time out the save and invite a duplicate meeting. Edits still don't regenerate the block (D144).
 - **Numbering.** #175/#176 and D228/D229, not #169/#170 and D225/D226, which a parallel session claimed first.
+
+## D235. Messy addresses get fallback lookups, gated by zip, only after the normal lookup misses (#185, 2026-09-24)
+
+- **The primary lookup is frozen.** It uses the same query and the same gates as before, so nothing that already geocodes changes, and every new rule is confined to fallbacks. A first version put the new cleanup into `cleanStreet`. Review showed that changed the first lookup's query, and a colon rule mangled real streets on it (`"100 Main St, Suite: 4"` → `"4"`).
+- **"Street + state + zip, no city" is the main fallback.** It was measured as the biggest win on real failures. Nominatim's free text often chokes on a postal city that differs from the OSM municipality, and on a typo'd city.
+- **Zip gate:** a same-zip hit is trusted over a mismatched city name, but not blindly. If the stated town resolves exactly, the hit must be within 25 mi of it, which guards against a mistyped zip matching the same street name elsewhere. If the town doesn't resolve (a typo), the zip alone decides. A fallback with no city and no zip is never accepted. The Portage County trap (D185) stays closed: city-only rows get no fallbacks.
+- **The town-centre cache now uses the cleaned city on the first lookup too.** `Rome (Sullivan)` and `Wisc. Dells` can resolve their centre for the existing 10-mile postal rule. This is a deliberate small widening of attempt-1 acceptance.
+- **The batch budget is worst-case aware** (`elapsed + 4 × (delay + 5 s) > budget` stops before starting a query; the first query always runs). A killed server action loses its skip list, which is how #166's stall happened.
