@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import { get as getCustomerDoc } from "./customers";
 import {
   fieldValue,
@@ -1258,84 +1259,94 @@ async function coveredQuoteIds(): Promise<Set<string>> {
  * the quote prices the venues as one shared trip). Idempotent: returns the
  * existing records when the quote already spawned; null when the quote is
  * missing or not an inspection quote; empty when its records were deleted.
+ *
+ * #180: the whole check-then-insert (including the linked project spawn)
+ * runs under an advisory lock keyed on the quote id (`withQuoteLock`), so a
+ * healing sweep racing another sweep or a live re-approval for the SAME
+ * quote serializes instead of minting duplicate records/projects.
  */
 export async function createFromQuote(
   qid: string
 ): Promise<InspectionRecord[] | null> {
-  const existing = await byQuote(qid);
-  if (existing.length) return existing;
-  // #173: no live record, but a deleted one still means this quote is
-  // handled — `deleteInspection` redirects straight to /inspections, which
-  // sweeps, so without this the delete button silently re-spawns a blank
-  // record under a new id.
-  if ((await coveredQuoteIds()).has(qid)) return [];
-  const q = await getDoc<InspectionQuoteLike>("quotes", qid);
-  if (!q || q.quoteType !== "inspection") return null;
-  const insp = q.inspection || {};
-  const level = levelMeta(insp.level).key;
-  // Identity core (D85): composed from relational rows via the store seam.
-  const cust = q.customerId
-    ? ((await getCustomerDoc(q.customerId)) as CustomerDocLike | null)
-    : null;
-  const venues =
-    insp.venues && insp.venues.length
-      ? insp.venues
-      : [{ id: q.locationId, label: "", lineSets: 0 }];
-  const share = Math.round((q.value || 0) / venues.length);
-  const contact = q.contact || insp.contact || null;
-
-  // PUNCHLIST #13, decision A — one lightweight linked project per QUOTE
-  // (spawned once, shared by every venue-record below), not per venue.
-  const { spawnServiceLinkedProject } = await import("@/lib/stores/projects");
-  const project = await spawnServiceLinkedProject(
-    { id: q.id, name: q.name || "Rigging Inspection", customer: q.customer, customerId: q.customerId, locationId: q.locationId, owner: q.owner, quoteType: q.quoteType },
-    "inspection"
-  );
-
-  const made: InspectionRecord[] = [];
-  for (let i = 0; i < venues.length; i++) {
-    const v = venues[i];
-    const loc = cust
-      ? (cust.locations || []).find((l) => l.id === v.id) || null
+  return withQuoteLock(qid, async () => {
+    const existing = await byQuote(qid);
+    if (existing.length) return existing;
+    // #173: no live record, but a deleted one still means this quote is
+    // handled — `deleteInspection` redirects straight to /inspections, which
+    // sweeps, so without this the delete button silently re-spawns a blank
+    // record under a new id.
+    if ((await coveredQuoteIds()).has(qid)) return [];
+    const q = await getDoc<InspectionQuoteLike>("quotes", qid);
+    if (!q || q.quoteType !== "inspection") return null;
+    const insp = q.inspection || {};
+    const level = levelMeta(insp.level).key;
+    // Identity core (D85): composed from relational rows via the store seam.
+    const cust = q.customerId
+      ? ((await getCustomerDoc(q.customerId)) as CustomerDocLike | null)
       : null;
-    const address = loc
-      ? [loc.street, [loc.city, loc.state].filter(Boolean).join(", "), loc.zip]
-          .filter(Boolean)
-          .join(", ")
-      : "";
-    const lineSets = Math.max(0, Number(v.lineSets) || 0);
-    const rec = await create({
-      quoteId: q.id,
-      projectId: project.id,
-      level,
-      lineSets,
-      // first venue absorbs the rounding remainder
-      value: i === 0 ? (q.value || 0) - share * (venues.length - 1) : share,
-      customer: q.customer || (cust && cust.name) || "",
-      customerId: q.customerId || null,
-      locationId: v.id ?? null,
-      venue: v.label || (loc && loc.label) || "Venue",
-      address,
-      contact: (contact && contact.name) || "",
-      contactPhone: (contact && contact.phone) || "",
-      contactEmail: (contact && contact.email) || "",
-      scope:
-        insp.scope ||
-        levelMeta(level).long +
-          " rigging inspection" +
-          (lineSets ? " — " + lineSets + " line sets." : "."),
-      stage: "requested",
-      owner: q.owner || "Jeff Chesebro",
-      requestedBy: q.owner || "Jeff Chesebro",
-    });
-    made.push(rec);
-  }
-  return made;
+    const venues =
+      insp.venues && insp.venues.length
+        ? insp.venues
+        : [{ id: q.locationId, label: "", lineSets: 0 }];
+    const share = Math.round((q.value || 0) / venues.length);
+    const contact = q.contact || insp.contact || null;
+
+    // PUNCHLIST #13, decision A — one lightweight linked project per QUOTE
+    // (spawned once, shared by every venue-record below), not per venue.
+    const { spawnServiceLinkedProject } = await import("@/lib/stores/projects");
+    const project = await spawnServiceLinkedProject(
+      { id: q.id, name: q.name || "Rigging Inspection", customer: q.customer, customerId: q.customerId, locationId: q.locationId, owner: q.owner, quoteType: q.quoteType },
+      "inspection"
+    );
+
+    const made: InspectionRecord[] = [];
+    for (let i = 0; i < venues.length; i++) {
+      const v = venues[i];
+      const loc = cust
+        ? (cust.locations || []).find((l) => l.id === v.id) || null
+        : null;
+      const address = loc
+        ? [loc.street, [loc.city, loc.state].filter(Boolean).join(", "), loc.zip]
+            .filter(Boolean)
+            .join(", ")
+        : "";
+      const lineSets = Math.max(0, Number(v.lineSets) || 0);
+      const rec = await create({
+        quoteId: q.id,
+        projectId: project.id,
+        level,
+        lineSets,
+        // first venue absorbs the rounding remainder
+        value: i === 0 ? (q.value || 0) - share * (venues.length - 1) : share,
+        customer: q.customer || (cust && cust.name) || "",
+        customerId: q.customerId || null,
+        locationId: v.id ?? null,
+        venue: v.label || (loc && loc.label) || "Venue",
+        address,
+        contact: (contact && contact.name) || "",
+        contactPhone: (contact && contact.phone) || "",
+        contactEmail: (contact && contact.email) || "",
+        scope:
+          insp.scope ||
+          levelMeta(level).long +
+            " rigging inspection" +
+            (lineSets ? " — " + lineSets + " line sets." : "."),
+        stage: "requested",
+        owner: q.owner || "Jeff Chesebro",
+        requestedBy: q.owner || "Jeff Chesebro",
+      });
+      made.push(rec);
+    }
+    return made;
+  });
 }
 
 /** Scan accepted (won) inspection quotes and spawn any records not made yet.
  *  Returns the number of records created. Page-load backfill only
- *  (inspection inbox + scheduler) — never call it inside a transaction. */
+ *  (inspection inbox + scheduler) — never call it inside a transaction.
+ *  Per-quote creation already routes through `createFromQuote`, so its
+ *  advisory lock (#180) guards concurrent sweeps/approvals; `have` is only a
+ *  fast-path skip built from one snapshot, not the correctness guard. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<InspectionQuoteLike>("quotes");
   const have = await coveredQuoteIds();

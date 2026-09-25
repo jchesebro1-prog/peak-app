@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import { get as getCustomerDoc } from "./customers";
 import { flameJobsSeed } from "@/db/seeds/flame-jobs";
 
@@ -466,17 +467,25 @@ async function coveredQuoteIds(): Promise<Set<string>> {
  * Make the job for one accepted flame-test quote (idempotent — returns the
  * existing job if the quote already has one; null when the quote is missing,
  * not a flame-test quote, or its job was deleted).
+ *
+ * #180: the whole check-then-insert runs under an advisory lock keyed on the
+ * quote id (`withQuoteLock`), so two concurrent callers for the SAME quote
+ * (a re-approval racing a healing sweep, or two sweeps racing each other)
+ * serialize — the second re-checks coverage after the first commits and
+ * finds the job already made, rather than minting a duplicate.
  */
 export async function createFromQuote(qid: string): Promise<FlameJob | null> {
-  const existing = await byQuote(qid);
-  if (existing) return existing;
-  // #173: no live job, but a deleted one still means this quote is handled.
-  // Reached on every re-approval of an already-won quote since #170, so the
-  // per-quote creator needs the same tombstone rule as the sweep below.
-  if ((await coveredQuoteIds()).has(qid)) return null;
-  const q = await getDoc<QuoteDoc>("quotes", qid);
-  if (!q || q.quoteType !== "flame_test") return null;
-  return create(await fromQuote(q));
+  return withQuoteLock(qid, async () => {
+    const existing = await byQuote(qid);
+    if (existing) return existing;
+    // #173: no live job, but a deleted one still means this quote is handled.
+    // Reached on every re-approval of an already-won quote since #170, so the
+    // per-quote creator needs the same tombstone rule as the sweep below.
+    if ((await coveredQuoteIds()).has(qid)) return null;
+    const q = await getDoc<QuoteDoc>("quotes", qid);
+    if (!q || q.quoteType !== "flame_test") return null;
+    return create(await fromQuote(q));
+  });
 }
 
 /**
@@ -484,7 +493,10 @@ export async function createFromQuote(qid: string): Promise<FlameJob | null> {
  * Returns how many jobs were created.
  *
  * Page-load backfill only (flame dashboard + scheduler) — never call it
- * inside a transaction; it walks two whole collections.
+ * inside a transaction; it walks two whole collections. Per-quote creation
+ * routes through `createFromQuote` (#180) so the same advisory lock guards a
+ * sweep racing another sweep or a live re-approval; `have` is only a
+ * fast-path skip built from one snapshot, not the correctness guard.
  */
 export async function syncFromQuotes(): Promise<{ created: number; skipped: string[] }> {
   const have = await coveredQuoteIds();
@@ -497,16 +509,9 @@ export async function syncFromQuotes(): Promise<{ created: number; skipped: stri
   for (const q of won) {
     if (have.has(q.id)) continue;
     try {
-      const rec = await fromQuote(q);
-      const t = now();
-      await insertWithPrefixedId<FlameJob>("flame_jobs", "FT", 3000, (id) => ({
-        ...rec,
-        id,
-        createdAt: t,
-        updatedAt: t,
-      }));
+      const rec = await createFromQuote(q.id);
       have.add(q.id);
-      made++;
+      if (rec) made++;
     } catch (error) {
       skipped.push(q.id);
       console.error(`syncFromQuotes(flame): skipped ${q.id} during page-load reconciliation`, error);

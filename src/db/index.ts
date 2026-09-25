@@ -1,6 +1,7 @@
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { sql } from "drizzle-orm";
 
 /**
  * Database client.
@@ -121,6 +122,30 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   return (db as unknown as { transaction: (work: (tx: Db) => Promise<T>) => Promise<T> }).transaction(
     (tx) => transactionStore.run(tx, fn)
   );
+}
+
+/**
+ * Run `fn` inside a transaction holding a Postgres advisory lock scoped to
+ * `key` (#180). The quote→job/project spawners are read-then-insert with no
+ * unique DB constraint to lean on — the link lives in `doc.quoteId` inside a
+ * jsonb column, so nothing at the DB layer stops two concurrent callers from
+ * both deciding a quote is uncovered and each inserting a record for it. An
+ * advisory lock needs no such constraint (and no migration): it is a plain
+ * Postgres session/transaction primitive, held for the life of the
+ * transaction and released automatically on commit or rollback, so a second
+ * caller for the SAME key simply blocks until the first is done, then
+ * re-reads coverage and (correctly) finds nothing left to do. Different keys
+ * never contend. Nesting inside an already-open transaction (e.g. a real win
+ * inside `setStatus`) joins it via `withTransaction`, so the lock is held for
+ * that outer transaction's whole lifetime — exactly what should serialize
+ * against a healing sweep racing the same quote.
+ */
+export async function withQuoteLock<T>(quoteId: string, fn: () => Promise<T>): Promise<T> {
+  return withTransaction(async () => {
+    const db = await getDb();
+    await db.execute(sql`select pg_advisory_xact_lock(hashtext(${quoteId}))`);
+    return fn();
+  });
 }
 
 /**

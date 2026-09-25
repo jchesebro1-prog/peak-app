@@ -9332,6 +9332,7 @@ seeded()
   .then(() => dayliteFinalReviewAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
+  .then(() => quoteLockAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
   .then(() => venueCalendarAsyncChecks())
@@ -12263,6 +12264,128 @@ async function sweepHealingAsyncChecks(): Promise<void> {
     // Fixed prefix, re-queried by that prefix rather than by local
     // variables, so a mid-test throw still cleans up everything.
     for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "tasks"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
+/* ======================================================================
+   #180 — concurrent-safe quote spawning (the healing sweeps).
+
+   Two concurrent createFromQuote() calls for the SAME won quote — the shape
+   of two simultaneous dashboard loads, or a double-clicked sweep Retry —
+   must mint exactly one job/record/booking, not two; and a job already
+   deleted before the race must stay deleted even when raced. The fix
+   (withQuoteLock, an advisory-lock-scoped transaction in src/db/index.ts) is
+   proven directly against each service store's createFromQuote — the same
+   function both the healing sweeps (above) and the real per-quote win path
+   call — by firing it twice with Promise.all and checking the ROW COUNT,
+   not just the return value (two calls resolving to "the same job" proves
+   nothing if the insert underneath still wrote two rows).
+
+   Fixtures are `TEST180:`-prefixed and torn down in `finally`, same
+   convention as #173's sweepHealingAsyncChecks just above.
+   ====================================================================== */
+async function quoteLockAsyncChecks(): Promise<void> {
+  const PRE = "TEST180:";
+  const rowsFor = async (
+    coll: "flame_jobs" | "repair_jobs" | "inspections" | "equipment_bookings",
+    quoteId: string
+  ) => (await listDocs169(coll, { includeDeleted: true })).filter((d) => d.quoteId === quoteId);
+
+  const seedWon = (id: string, quoteType: string, extra: Record<string, unknown> = {}) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#180 harness ${quoteType} quote`,
+      quoteType,
+      status: "won",
+      customer: "Test Customer #180",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+      ...extra,
+    });
+
+  const FLAME_BODY = { flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] } };
+  const REPAIR_BODY = { repair: { title: "#180 repair", category: "other", venues: [{ id: null, label: "Main Stage" }] } };
+  const INSP_BODY = {
+    inspection: {
+      level: "l1",
+      venues: [
+        { id: null, label: "Venue A", lineSets: 4 },
+        { id: null, label: "Venue B", lineSets: 6 },
+      ],
+    },
+  };
+  const RENTAL_BODY = {
+    rental: {
+      lines: [{
+        itemId: `${PRE}item`, locationId: `${PRE}loc`, qty: 1,
+        startDate: Date.UTC(2027, 2, 1), endDate: Date.UTC(2027, 2, 3), rate: 40,
+      }],
+    },
+  };
+
+  const Q_FLAME = `${PRE}flame-race`;
+  const Q_FLAME_DEL = `${PRE}flame-race-deleted`;
+  const Q_REPAIR = `${PRE}repair-race`;
+  const Q_INSP = `${PRE}insp-race`;
+  const Q_RENTAL = `${PRE}rental-race`;
+  const QUOTE_IDS = [Q_FLAME, Q_FLAME_DEL, Q_REPAIR, Q_INSP, Q_RENTAL];
+
+  try {
+    /* ---------------- #180: concurrent race -> exactly one job ---------------- */
+    await seedWon(Q_FLAME, "flame_test", FLAME_BODY);
+    const [f1, f2] = await Promise.all([flameCreate173(Q_FLAME), flameCreate173(Q_FLAME)]);
+    ok(!!f1 && !!f2, "#180 flame: both concurrent createFromQuote calls resolved with a job");
+    ok(!!f1 && !!f2 && f1.id === f2.id, "#180 flame: both concurrent calls returned the SAME job, not two different ones");
+    ok((await rowsFor("flame_jobs", Q_FLAME)).length === 1, "#180 flame: exactly one job row exists for the raced quote (the read-then-insert bug would write two)");
+
+    /* ---- a job already deleted before the race stays deleted under a race ---- */
+    await seedWon(Q_FLAME_DEL, "flame_test", FLAME_BODY);
+    const toDelete = await flameCreate173(Q_FLAME_DEL);
+    ok(!!toDelete, "#180 flame fixture: the to-be-deleted quote gets its job first");
+    if (toDelete) await flameRemove173(toDelete.id);
+    const [g1, g2] = await Promise.all([flameCreate173(Q_FLAME_DEL), flameCreate173(Q_FLAME_DEL)]);
+    ok(g1 === null && g2 === null, "#180 flame: a raced re-check still honours the #173 tombstone — neither concurrent call resurrects the deleted job");
+    ok((await rowsFor("flame_jobs", Q_FLAME_DEL)).length === 1, "#180 flame: still exactly one (tombstoned) row after the race — no second row appeared");
+
+    /* ---------------- repairs ---------------- */
+    await seedWon(Q_REPAIR, "repair", REPAIR_BODY);
+    const [r1, r2] = await Promise.all([createRepairFromQuote(Q_REPAIR), createRepairFromQuote(Q_REPAIR)]);
+    ok(!!r1 && !!r2 && r1.id === r2.id, "#180 repair: a concurrent create/sweep race yields exactly one job, not two");
+    ok((await rowsFor("repair_jobs", Q_REPAIR)).length === 1, "#180 repair: exactly one job row exists for the raced quote");
+
+    /* ---------------- inspections (multi-record per quote + linked project) ---------------- */
+    await seedWon(Q_INSP, "inspection", INSP_BODY);
+    const [i1, i2] = await Promise.all([createInspectionFromQuote(Q_INSP), createInspectionFromQuote(Q_INSP)]);
+    ok(!!i1 && !!i2 && i1.length === 2 && i2.length === 2, "#180 inspection: both racing calls see the same two venue records, not four");
+    ok(
+      !!i1 && !!i2 && i1.map((r) => r.id).sort().join() === i2.map((r) => r.id).sort().join(),
+      "#180 inspection: the two racing calls returned the identical record set, not two different pairs"
+    );
+    ok((await rowsFor("inspections", Q_INSP)).length === 2, "#180 inspection: exactly two rows exist (one per venue) — the race did not double them to four");
+    const raceProjectRows = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === Q_INSP);
+    ok(raceProjectRows.length === 1, "#180 inspection: the linked project the race also spawns is not duplicated either");
+
+    /* ---------------- rentals (multi-record per quote) ---------------- */
+    await seedWon(Q_RENTAL, "rental", RENTAL_BODY);
+    const [b1, b2] = await Promise.all([bookingCreate173(Q_RENTAL), bookingCreate173(Q_RENTAL)]);
+    ok(b1.length === 1 && b2.length === 1, "#180 rental: both racing calls see the single booking, not two");
+    ok(b1[0]?.id === b2[0]?.id, "#180 rental: the two racing calls returned the identical booking");
+    ok((await rowsFor("equipment_bookings", Q_RENTAL)).length === 1, "#180 rental: exactly one booking row exists for the raced quote");
+  } finally {
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings"] as const) {
       for (const d of await listDocs169(coll)) {
         if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
       }

@@ -1,4 +1,5 @@
 import { getDoc, insertWithPrefixedId, listDocs, upsertDoc } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import { qtyOwned } from "./equipment-items";
 
 /**
@@ -151,35 +152,44 @@ async function coveredQuoteIds(): Promise<Set<string>> {
 }
 
 /** Reads quote.rental (written by the rentals/quote builder) and creates one
- *  booking per line, each `confirmed`. Mirrors repair-jobs.ts's createFromQuote. */
+ *  booking per line, each `confirmed`. Mirrors repair-jobs.ts's createFromQuote.
+ *  #180: the whole check-then-insert runs under an advisory lock keyed on
+ *  the quote id (`withQuoteLock`), so a healing sweep racing another sweep
+ *  or a live re-approval for the SAME quote serializes instead of minting
+ *  duplicate bookings. */
 export async function createFromQuote(quoteId: string): Promise<EquipmentBooking[]> {
-  const existing = await byQuote(quoteId);
-  if (existing.length) return existing;
-  // #173: no live booking, but a deleted one still means this quote is handled.
-  if ((await coveredQuoteIds()).has(quoteId)) return [];
-  const q = await getDoc<RentalQuoteLike>("quotes", quoteId);
-  if (!q || q.quoteType !== "rental" || !q.rental) return [];
-  const created: EquipmentBooking[] = [];
-  for (const line of q.rental.lines) {
-    created.push(
-      await create({
-        itemId: line.itemId,
-        locationId: line.locationId,
-        qty: line.qty,
-        quoteId,
-        startDate: line.startDate,
-        endDate: line.endDate,
-        status: "confirmed",
-        rate: line.rate,
-      })
-    );
-  }
-  return created;
+  return withQuoteLock(quoteId, async () => {
+    const existing = await byQuote(quoteId);
+    if (existing.length) return existing;
+    // #173: no live booking, but a deleted one still means this quote is handled.
+    if ((await coveredQuoteIds()).has(quoteId)) return [];
+    const q = await getDoc<RentalQuoteLike>("quotes", quoteId);
+    if (!q || q.quoteType !== "rental" || !q.rental) return [];
+    const created: EquipmentBooking[] = [];
+    for (const line of q.rental.lines) {
+      created.push(
+        await create({
+          itemId: line.itemId,
+          locationId: line.locationId,
+          qty: line.qty,
+          quoteId,
+          startDate: line.startDate,
+          endDate: line.endDate,
+          status: "confirmed",
+          rate: line.rate,
+        })
+      );
+    }
+    return created;
+  });
 }
 
 /** Idempotent sweep — scan won rental quotes, create bookings for any not yet
  *  made. Page-load backfill only (the booking board) — never call it inside a
- *  transaction; it walks two whole collections. */
+ *  transaction; it walks two whole collections. Per-quote creation already
+ *  routes through `createFromQuote`, so its advisory lock (#180) guards
+ *  concurrent sweeps/approvals; `have` is only a fast-path skip built from
+ *  one snapshot, not the correctness guard. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<RentalQuoteLike>("quotes");
   // One coverage read rather than a byQuote() scan per won quote, and
