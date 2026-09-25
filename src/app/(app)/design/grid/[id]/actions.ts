@@ -57,7 +57,8 @@ import {
 } from "@/lib/design/grid-bom";
 import { isFabricRow } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
-import { validateDeviceWire } from "@/lib/catalog-connect";
+import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
+import { getSettings } from "@/lib/settings";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 import type { AState } from "@/app/(app)/design/quick/engine";
 
@@ -526,7 +527,12 @@ export async function addRouteAction(
       ]);
       const bothHavePorts = Boolean(fromPart?.ports?.length && toPart?.ports?.length);
       if (bothHavePorts) {
-        const result = validateDeviceWire(fromPart!, toPart!);
+        // Admin-edited wire-type registry (Design → Grid Settings) — this is
+        // the authority (see the comment above), so it must read the SAME
+        // registry the client's UX-only pre-check used, not the hardcoded
+        // DEFAULT_WIRE_TYPES fallback (validateDeviceWire's default param).
+        const settings = await getSettings();
+        const result = validateDeviceWire(fromPart!, toPart!, resolveWireTypes(settings.wireTypes));
         if (!result.ok)
           return { ok: false, error: `Wire refused — ${result.reason}: ${fromPlacement.partId} → ${toPlacement.partId} share no compatible port.` };
         connectionType = result.connectionType;

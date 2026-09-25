@@ -8,7 +8,7 @@ import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { allEngagements } from "@/lib/stores/engagements";
 import { isOpenEngagement } from "@/lib/consulting-review";
 import { sitesForCompany } from "@/lib/identity/sites";
-import { frac } from "@/lib/stores/pricing";
+import { num } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
 import { groupOf, resolveCategoryMap, tradeOf } from "@/lib/catalog-taxonomy";
@@ -16,6 +16,7 @@ import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
 import { resolveCategoryShapes } from "@/lib/design/grid-symbols";
+import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
 import type { FabricOption } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "@/lib/design/grid-bom";
@@ -64,8 +65,11 @@ export default async function GridEditorPage({
     listCatalog(),
     listGridSymbols(),
     allEngagements(),
-    // Install-hours-per-device knob (D114) — admin-tunable like every rate.
-    frac("grid.laborHoursPerDevice", 0.5),
+    // Install-hours-per-device knob (D114) — admin-tunable, now registered in
+    // pricing.ts GROUPS (key "grid") and editable from Design → Grid Settings
+    // as well as Estimating Rules. num() (not frac()) because this is a raw
+    // hours figure, not a percent rate.
+    num("grid.laborHoursPerDevice", 0.5),
     getSettings(),
     listDesigns({ kind: "lineset" }),
   ]);
@@ -73,6 +77,13 @@ export default async function GridEditorPage({
   // editor receives each part's already-resolved `group` and never sees
   // the map itself.
   const categoryMap = resolveCategoryMap(settings.catalogCategoryMap);
+
+  // Admin-edited wire-type registry (Design → Grid Settings) — threaded into
+  // the client-side canConnect() pre-check the same way the server action
+  // (addRouteAction) re-derives it as the authority. Without this the editor
+  // always fell back to DEFAULT_WIRE_TYPES and an admin's edits here were
+  // invisible to the UX-only check (the server action was the same gap).
+  const wireTypes = resolveWireTypes(settings.wireTypes);
 
   // The D94 bid-spec generator is engagement-scoped; when the customer has a
   // live engagement, the editor links straight into it (the generator's
@@ -199,6 +210,7 @@ export default async function GridEditorPage({
       specHref={specHref}
       venues={venues}
       categoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
+      wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
     />
   );

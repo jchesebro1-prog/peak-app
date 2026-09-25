@@ -211,6 +211,62 @@ export function resolveWireTypes(stored?: WireType[]): WireType[] {
   return stored ?? [...DEFAULT_WIRE_TYPES];
 }
 
+const MAX_WIRE_TYPES = 60;
+
+/**
+ * Validate + normalize a whole-list save from the Grid Settings "Wire
+ * types" editor (the same full-replacement idiom as
+ * cleanGridCategoryShapes/resolveCategoryShapes): the caller posts every
+ * row, and this is the ONLY place that decides what's actually stored.
+ *
+ * - `id`/`label` trimmed, capped, defaulted (`label` falls back to `id`).
+ * - `connectionTypes` filtered to the known CONNECTION_TYPES vocabulary —
+ *   an unrecognized token is dropped silently rather than stored broken,
+ *   same as parsePortsField's CONNECTION_SET check on the catalog side. A
+ *   row left with none is dropped entirely: a wire type that carries
+ *   nothing can never satisfy canConnect and is never offered by
+ *   compatibleWireTypes, so keeping it would only confuse the editor.
+ * - `dollarsPerFt` — a finite number ≥ 0, or omitted.
+ * - `interchangeable` — stored only as literal `true` (never `false`), to
+ *   match the type's `true | undefined` shape.
+ * - Rows past MAX_WIRE_TYPES are dropped, same cap idiom as
+ *   cleanGridCategoryShapes.
+ * - Duplicate `id`s: first one wins.
+ *
+ * An empty result collapses to `null` (clears the settings key, so
+ * resolveWireTypes falls back to the shipped DEFAULT_WIRE_TYPES seed) rather
+ * than storing `[]` — the same reasoning as cleanGridCategoryShapes: a
+ * stored empty array is indistinguishable from "admin meant to delete
+ * everything", and "Restore defaults" followed by Save posts the seed as an
+ * explicit dense array, never empty, so this path is never hit by that flow.
+ */
+export function cleanWireTypes(rows: unknown): WireType[] | null {
+  const CONNECTION_SET = new Set(CONNECTION_TYPES);
+  const seenIds = new Set<string>();
+  const clean: WireType[] = [];
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    if (clean.length >= MAX_WIRE_TYPES) break;
+    const r = raw as Record<string, unknown> | null;
+    if (!r || typeof r !== "object") continue;
+    const id = String(r.id ?? "").trim().slice(0, 60);
+    if (!id || seenIds.has(id)) continue;
+    const connectionTypes = (Array.isArray(r.connectionTypes) ? r.connectionTypes : [])
+      .map((c) => String(c ?? "").trim())
+      .filter((c) => CONNECTION_SET.has(c));
+    if (!connectionTypes.length) continue;
+    const label = String(r.label ?? "").trim().slice(0, 80) || id;
+    const wt: WireType = { id, label, connectionTypes };
+    const cableSku = String(r.cableSku ?? "").trim().slice(0, 60);
+    if (cableSku) wt.cableSku = cableSku;
+    const dpf = Number(r.dollarsPerFt);
+    if (Number.isFinite(dpf) && dpf >= 0) wt.dollarsPerFt = dpf;
+    if (r.interchangeable === true) wt.interchangeable = true;
+    seenIds.add(id);
+    clean.push(wt);
+  }
+  return clean.length ? clean : null;
+}
+
 /**
  * Two ports may connect when the directions complement (at least one side is
  * bidirectional "io", or the two differ — in vs out; same-direction in/in or

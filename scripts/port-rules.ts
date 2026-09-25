@@ -16,19 +16,13 @@
  * to write", the other says "I know this is the live database."
  */
 import { resolveDbTarget, requireHostedConfirmation } from "./db-target";
-import { PORT_RULES, matchRule, proposeForPart, type RulePart } from "../src/lib/catalog-port-rules";
-import { applyRules, isModelish } from "../src/lib/catalog-port-apply";
+import { PORT_RULES } from "../src/lib/catalog-port-rules";
+import { applyRules } from "../src/lib/catalog-port-apply";
+import { buildPortRuleReport, NO_DESC_BRANDS, type PortReportPart } from "../src/lib/catalog-port-report";
 
 const args = process.argv.slice(2);
 const only = (args.find((a) => a.startsWith("--mfr=")) || "").slice(6);
-/** Brands whose descriptions are bare part numbers — reported, never guessed (D192). */
-const NO_DESC_BRANDS = ["Biamp", "JBL"];
 const n = (x: number) => x.toLocaleString("en-US");
-
-/** One line describing a proposed port set — shared by the report's single-
- *  shape and multi-shape renderings so the two can never drift apart. */
-const renderPorts = (ports: readonly { name: string; direction: string; connectionType: string; count?: number }[]) =>
-  ports.map((p) => `${p.name} [${p.direction}${p.count ? ` ×${p.count}` : ""}: ${p.connectionType}]`).join("; ") || "(none)";
 
 async function main() {
   if (args.includes("--apply")) {
@@ -66,8 +60,7 @@ async function main() {
   const db = await getDb();
   const rows = await db.select().from(catalogParts);
 
-  type Row = RulePart & { hasPorts: boolean };
-  const parts: Row[] = [];
+  const parts: PortReportPart[] = [];
   for (const r of rows) {
     if ((r as { deleted?: boolean }).deleted) continue;
     const d = r.doc as Record<string, unknown>;
@@ -81,39 +74,14 @@ async function main() {
     });
   }
 
-  const matchedBy = new Map<string, Row[]>();
-  const unmatched: Row[] = [];
-  const accessoryRows: Row[] = [];
-  let alreadyPorted = 0, noDesc = 0;
-
-  for (const part of parts) {
-    if (part.hasPorts) { alreadyPorted++; continue; }
-    if (isModelish(part.desc, part.sku)) { noDesc++; continue; }
-    const rule = matchRule(part);
-    if (!rule) { unmatched.push(part); continue; }
-    if (rule.accessory) { accessoryRows.push(part); continue; }
-    const list = matchedBy.get(rule.id) || [];
-    list.push(part);
-    matchedBy.set(rule.id, list);
-  }
-
-  // Denominator for the over-broad guard: inferable parts per manufacturer —
-  // excluding accessories and description-less rows, so the ratio measures
-  // what it sounds like.
-  const inferablePerMfr = new Map<string, number>();
-  for (const part of parts) {
-    if (part.hasPorts || isModelish(part.desc, part.sku)) continue;
-    const rule = matchRule(part);
-    if (rule?.accessory) continue;
-    inferablePerMfr.set(part.mfr || "", (inferablePerMfr.get(part.mfr || "") || 0) + 1);
-  }
+  const report = buildPortRuleReport(parts);
+  const { rows: reportRows, unmatched, accessoryRows, alreadyPorted, noDesc, inferablePerMfr } = report;
+  const matchedBy = new Map(reportRows.map((row) => [row.rule.id, row.hits]));
 
   console.log("\nPort rules — proposal report (nothing is written)");
   console.log("=".repeat(72));
 
-  for (const rule of PORT_RULES) {
-    if (rule.accessory) continue;
-    const hits = matchedBy.get(rule.id) || [];
+  for (const { rule, hits, shapes } of reportRows) {
     if (!hits.length) { console.log(`\n${rule.id}\n  matches nothing`); continue; }
 
     // A rule's shape() reads the part it is applied to — channel counts,
@@ -124,22 +92,13 @@ async function main() {
     // written a connector the reviewer was never shown — the exact promise
     // this report exists to keep. Every distinct shape is listed, with its
     // count, largest first.
-    const shapes = new Map<string, { count: number; sample: Row }>();
-    for (const h of hits) {
-      const key = renderPorts(proposeForPart(h)?.ports || []);
-      const seen = shapes.get(key);
-      if (seen) seen.count++;
-      else shapes.set(key, { count: 1, sample: h });
-    }
-    const byCount = [...shapes].sort((a, b) => b[1].count - a[1].count);
-
     console.log(`\n${rule.id}${rule.mfr ? `  ·  ${rule.mfr}` : ""}`);
-    if (byCount.length === 1) {
-      console.log(`  proposes: ${byCount[0][0]}`);
+    if (shapes.length === 1) {
+      console.log(`  proposes: ${shapes[0].key}`);
     } else {
-      console.log(`  proposes ${byCount.length} DIFFERENT shapes across its ${n(hits.length)} matches — approve all of them, not the first:`);
-      for (const [shape, { count, sample }] of byCount) {
-        console.log(`    ${String(count).padStart(5)} ×  ${shape}`);
+      console.log(`  proposes ${shapes.length} DIFFERENT shapes across its ${n(hits.length)} matches — approve all of them, not the first:`);
+      for (const { key, count, sample } of shapes) {
+        console.log(`    ${String(count).padStart(5)} ×  ${key}`);
         console.log(`            e.g. ${sample.sku} — ${sample.desc.slice(0, 54)}`);
       }
     }
