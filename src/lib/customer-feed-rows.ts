@@ -44,6 +44,10 @@ export type FeedRow = {
   letter: string; // letter-dot glyph
   href: string | null; // null = plain row (no navigation)
   by: string; // actor when known; "" hides the segment in the UI
+  /** Set only on a user-authored (non-system) NoteRecord row — the raw note
+   *  id the UI's Delete control removes. Every other row kind is derived
+   *  from another record and has nothing of its own to delete here. */
+  deletableNoteId?: string;
 };
 
 /** Letter-dot families per kind (the app's chip color families). */
@@ -246,7 +250,12 @@ export function projectFeedRows(
   return rows;
 }
 
-/** Real NoteRecord rows — full text as title (the UI clamps display). */
-export function noteFeedRows(n: { id: string; at: number; by: string; text: string }): FeedRow[] {
-  return [row("note", `note:${n.id}`, n.at, n.text, "Note", null, n.by || "")];
+/** Real NoteRecord rows — full text as title (the UI clamps display). A
+ *  system-authored note (e.g. an automated log entry) has no deletableNoteId,
+ *  so the UI never offers a Delete control for it — only for the notes a
+ *  person actually wrote. */
+export function noteFeedRows(n: { id: string; at: number; by: string; text: string; system?: boolean }): FeedRow[] {
+  const r = row("note", `note:${n.id}`, n.at, n.text, "Note", null, n.by || "");
+  if (!n.system) r.deletableNoteId = n.id;
+  return [r];
 }

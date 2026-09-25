@@ -27,6 +27,7 @@ import { dateYear, shortDate, timeAgo } from "@/lib/format";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
 import ActivityComposer from "./activity-composer";
+import NoteDeleteButton from "./note-delete-button";
 import { Avatar } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
 import { defsForType, resolveFieldDefs } from "@/lib/customer-fields";
@@ -480,6 +481,9 @@ export default async function CustomerDetailPage({
                 ) : (
                   <div key={r.id} style={rowStyle}>
                     {inner}
+                    {r.deletableNoteId && (
+                      <NoteDeleteButton customerId={cust.id} noteId={r.deletableNoteId} />
+                    )}
                   </div>
                 );
               })}

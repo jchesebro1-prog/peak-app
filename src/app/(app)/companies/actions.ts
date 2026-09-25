@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { remove, upsert } from "@/lib/stores/customers";
-import { addNoteRecord } from "@/lib/stores/notes";
+import { addNoteRecord, removeNote } from "@/lib/stores/notes";
 import {
   coordsOf,
   estimate,
@@ -199,5 +199,16 @@ export async function addCustomerNoteAction(customerId: string, text: string) {
     return { ok: false as const, error: "Couldn’t save that note — please try again." };
   }
   revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Delete a user-authored note from the Activity feed (soft delete). The UI
+ *  only ever offers this for a note with a deletableNoteId (customer-feed-
+ *  rows.ts's noteFeedRows), i.e. never for a system-authored entry. */
+export async function removeCustomerNoteAction(customerId: string, noteId: string) {
+  await requireUser();
+  if (!noteId) return { ok: false as const, error: "Nothing to delete." };
+  await removeNote(noteId);
+  revalidatePath("/companies/" + encodeURIComponent(customerId));
   return { ok: true as const };
 }
