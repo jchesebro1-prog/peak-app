@@ -8,7 +8,10 @@
 import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturer, checkSize } from "@/lib/catalog-import-guard";
 import { setPriceListEffective } from "@/lib/settings";
-import { list as listCatalog, mergeUpsert, type CatalogProductMetadata } from "@/lib/stores/catalog";
+import { list as listCatalog, mergeUpsert, type CatalogProductMetadata, type CatalogPart } from "@/lib/stores/catalog";
+import { resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
+import { allSections } from "@/lib/stores/spec-sections";
+import { allArticles } from "@/lib/stores/spec-articles";
 import { parseCatalog } from "./parse";
 
 export type CatalogImportInput = {
@@ -52,12 +55,24 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   // preserve-when-absent rule the Import hub's catalogPatch applies), and
   // only a brand-new part takes the 0 a document needs to be well-formed.
   const existing = new Set(catalog.map((p) => p.id)); // the document id IS the SKU (mergeUpsert's lookup)
+  const bySku = new Map<string, CatalogPart>(catalog.map((p) => [p.id, p]));
+  // D-SPEC-5: the price-book importer writes the same canonical pointers the
+  // Import hub's catalogPatch does. Loaded once for the whole file, not once
+  // per row.
+  const [specSections, specArticles] = await Promise.all([allSections(), allArticles()]);
   const priced = parsed.hasList || parsed.hasCost;
   for (const r of valid) {
     const isNew = !existing.has(r.sku);
+    const ex = bySku.get(r.sku);
+    const secId = resolveSectionRef(r.specSection, specSections);
+    const artId = resolveArticleRef(r.specArticle, specArticles, secId ?? (ex?.specSectionId || null));
+    const artSection = artId ? specArticles.find((a) => a.id === artId)!.sectionId : null;
     const productMetadata: CatalogProductMetadata = {
-      ...(r.specSection ? { specSection: r.specSection } : {}),
-      ...(r.specArticle ? { specArticle: r.specArticle } : {}),
+      // A resolved pointer is canonical (handled below) and never also
+      // stored as legacy Displays text; an unresolved one is kept exactly as
+      // 2e284665's columns stored it, so no imported value is lost.
+      ...(r.specSection && !secId ? { specSection: r.specSection } : {}),
+      ...(r.specArticle && !artId ? { specArticle: r.specArticle } : {}),
       ...(r.researchStatus === "researched" || r.researchStatus === "needs-review" ? { researchStatus: r.researchStatus } : {}),
       ...((r.manufacturerUrl || r.sourceDocumentName || r.sourceDocumentDate)
         ? {
@@ -90,6 +105,8 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
         ...(parsed.hasMap || isNew ? { mapPrice: r.mapPrice || null } : {}),
         ...(Object.keys(productMetadata).length ? { productMetadata } : {}),
+        ...(secId ? { specSectionId: secId } : artSection ? { specSectionId: artSection } : {}),
+        ...(artId ? { specArticleId: artId } : {}),
       },
       { pricedAt: input.effectiveAt }
     );

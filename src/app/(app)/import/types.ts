@@ -261,7 +261,10 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     label: "Catalog parts",
     mono: "CA",
     color: "#2f6f8f",
-    blurb: "Vendor price lists — SKU, manufacturer identity, pricing, and MAP.",
+    blurb:
+      "Vendor price lists — SKU, manufacturer identity, pricing, and MAP. " +
+      "Spec Body is multi-line — a quoted cell keeps its indentation. A row that changes spec text lands as a draft, never printed until reviewed; a blank spec cell never clears stored text (clear it in the part editor). " +
+      "Check the mapping step before committing: a vendor column named exactly \"Title\" or \"Source\" can fuzzy-match a spec column.",
     dedupeLabel: "SKU",
     viewHref: "/catalog",
     viewLabel: "View in Catalog",
@@ -277,8 +280,8 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "manufacturerModelNumber", header: "MFR M/N", label: "Manufacturer model number", aliases: ["mfr m/n", "mfr mn", "manufacturer model number", "manufacturer mn", "model number"], example: "7060A" },
       { key: "mapPrice", header: "MAP", label: "Minimum advertised price", kind: "number", aliases: ["map", "map price", "minimum advertised price", "advertised price"], example: "1699.00" },
       { key: "productFamily", header: "Product Family", label: "Product family", aliases: ["product family", "family", "series", "product line"], example: "Source Four LED" },
-      { key: "specSection", header: "Spec Section", label: "Specification section", aliases: ["spec section", "specification section", "csi section"], example: "11 61 13" },
-      { key: "specArticle", header: "Spec Article", label: "Specification article", aliases: ["spec article", "specification article", "csi article"], example: "Stage Lighting Instruments" },
+      { key: "specSectionId", header: "Spec Section", label: "Spec section", aliases: ["spec section", "specification section", "csi section", "spec section id"], example: "11 61 43" },
+      { key: "specArticleId", header: "Spec Article", label: "Spec article", aliases: ["spec article", "specification article", "csi article", "spec article id"], example: "ar-drapes or Theatrical Stage Drapes" },
       { key: "specLanguageKey", header: "Spec Language Key", label: "Spec language key", aliases: ["spec language key", "spec language", "language key"], example: "lighting.instrument" },
       { key: "researchStatus", header: "Research Status", label: "Research status", kind: "enum", options: ["unverified", "needs-review", "researched"], aliases: ["research status", "research", "metadata status"], example: "researched" },
       { key: "manufacturerUrl", header: "Manufacturer URL", label: "Manufacturer URL", aliases: ["manufacturer url", "manufacturer website", "brand url"], example: "https://etcconnect.com" },
@@ -286,6 +289,11 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "guideSpecUrl", header: "Guide Spec URL", label: "Guide spec URL", aliases: ["guide spec url", "guide specification url", "spec url"], example: "https://example.com/guide-spec.pdf" },
       { key: "sourceDocumentName", header: "Source Document Name", label: "Source document name", aliases: ["source document name", "source file", "source document"], example: "ETC product guide 2026.pdf" },
       { key: "sourceDocumentDate", header: "Source Document Date", label: "Source document date", kind: "date", aliases: ["source document date", "source date", "document date"], example: "2026-01-15" },
+      { key: "specTitle", header: "Spec Title", label: "Spec entry title", aliases: ["spec title", "spec entry title", "spec heading"], example: "COLOR MIXING LED PROFILE FIXTURE" },
+      { key: "specBody", header: "Spec Body", label: "Spec text", aliases: ["spec body", "spec text", "specification text"], example: "Basis of Design: ETC ColorSource Spot" },
+      { key: "specSameAs", header: "Spec Same As", label: "Same spec as SKU", aliases: ["spec same as", "same spec as"], example: "CS-SPOT-1" },
+      { key: "specState", header: "Spec State", label: "Spec state", kind: "enum", options: ["authored", "draft"], aliases: ["spec state", "spec status"], example: "draft" },
+      { key: "specSource", header: "Spec Source", label: "Spec source", aliases: ["spec source", "spec provenance"], example: "skill:2026-09-22" },
     ],
   },
   {

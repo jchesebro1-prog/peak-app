@@ -16,6 +16,10 @@ import * as Projects from "@/lib/stores/projects";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { DEFAULT_PIPELINES, projectPipelineFor, resolveProjectStage, type Pipelines } from "@/lib/pipelines";
 import * as Catalog from "@/lib/stores/catalog";
+import { resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
+import { allSections } from "@/lib/stores/spec-sections";
+import { allArticles } from "@/lib/stores/spec-articles";
+import type { SpecLookup } from "@/lib/displays-api";
 import * as Equipment from "@/lib/stores/equipment-items";
 import * as TaskTemplates from "@/lib/stores/task-templates";
 import { allUsers, addUser, setRoles, activeUsers } from "@/lib/users";
@@ -179,7 +183,8 @@ const EQUIPMENT_CATEGORIES = [
 export function catalogPatch(
   v: Values,
   ex: Record<string, unknown> | null,
-  sku: string
+  sku: string,
+  opts: { now?: number; by?: string; specLib?: SpecLookup } = {}
 ): Partial<Omit<Catalog.CatalogPart, "id" | "sku">> {
   const e = ex ?? {};
   const mfr = str(v.mfr) || str(e.mfr);
@@ -187,13 +192,9 @@ export function catalogPatch(
   const metadata: Catalog.CatalogProductMetadata = { ...(existingMetadata || {}) };
   let hasMetadata = false;
   const productFamily = str(v.productFamily);
-  const specSection = str(v.specSection);
-  const specArticle = str(v.specArticle);
   const specLanguageKey = str(v.specLanguageKey);
   const researchStatus = str(v.researchStatus) as Catalog.CatalogProductMetadata["researchStatus"];
   if (productFamily) { metadata.productFamily = productFamily; hasMetadata = true; }
-  if (specSection) { metadata.specSection = specSection; hasMetadata = true; }
-  if (specArticle) { metadata.specArticle = specArticle; hasMetadata = true; }
   if (specLanguageKey) { metadata.specLanguageKey = specLanguageKey; hasMetadata = true; }
   if (["unverified", "needs-review", "researched"].includes(researchStatus || "")) {
     metadata.researchStatus = researchStatus;
@@ -221,6 +222,42 @@ export function catalogPatch(
   if (datasheetUrl) addSourceDoc("datasheet", datasheetUrl);
   if (guideSpecUrl) addSourceDoc("guide-spec", guideSpecUrl);
   if (docs.length && hasMetadata) metadata.datasheets = docs;
+
+  // D-SPEC-5: "Spec Section" / "Spec Article" are the canonical pointer
+  // columns. A value that resolves — a live id, or a CSI number / title that
+  // matches exactly one live record — sets the canonical pointer (an explicit
+  // import value is an instruction, so it may replace a stored pointer). One
+  // that does not resolve is kept as legacy Displays text in productMetadata,
+  // exactly as 2e284665's columns stored it, so no imported value is lost.
+  const secRef = str(v.specSectionId);
+  const artRef = str(v.specArticleId);
+  const lib = opts.specLib;
+  const secId = lib ? resolveSectionRef(secRef, lib.sections) : null;
+  const artId = lib ? resolveArticleRef(artRef, lib.articles, secId ?? (str(e.specSectionId) || null)) : null;
+  if (secRef && !secId) { metadata.specSection = secRef; hasMetadata = true; }
+  if (artRef && !artId) { metadata.specArticle = artRef; hasMetadata = true; }
+  const artSection = artId ? lib!.articles.find((a) => a.id === artId)!.sectionId : null;
+
+  // Spec text. A column absent from the file — or a blank cell — must not
+  // blank the field (prepareRows turns both into ""), and a price re-import
+  // must never wipe authored spec text.
+  const body = str(v.specBody);
+  const title = str(v.specTitle);
+  const changed = (!!body && body !== str(e.specBody)) || (!!title && title !== str(e.specTitle));
+  const explicit = str(v.specState);
+  // Only a row that carries text sets a state. An explicit column wins; with
+  // no explicit state, CHANGED text lands as draft (spec §4 — unreviewed text
+  // must not print) and unchanged text keeps its state, so export → re-import
+  // of untouched rows never demotes authored parts.
+  const state =
+    body || title
+      ? explicit === "authored" || explicit === "draft"
+        ? explicit
+        : changed
+          ? "draft"
+          : undefined
+      : undefined;
+
   return {
     desc: str(v.desc) || str(e.desc) || sku,
     category: str(v.category) || str(e.category) || "Uncategorized",
@@ -232,6 +269,14 @@ export function catalogPatch(
     ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
     ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
     ...(hasMetadata ? { productMetadata: metadata } : {}),
+    ...(secId ? { specSectionId: secId } : artSection ? { specSectionId: artSection } : {}),
+    ...(artId ? { specArticleId: artId } : {}),
+    ...(title ? { specTitle: title } : {}),
+    ...(body ? { specBody: body } : {}),
+    ...(str(v.specSameAs) ? { specSameAs: str(v.specSameAs) } : {}),
+    ...(str(v.specSource) ? { specSource: str(v.specSource) } : {}),
+    ...(state ? { specState: state } : {}),
+    ...(changed ? { specUpdatedAt: opts.now ?? Date.now(), specUpdatedBy: opts.by || "import" } : {}),
   };
 }
 
@@ -625,6 +670,18 @@ async function ttApplyRow(
   if (!saved) throw new Error(`Template set ${rec.id} no longer exists`);
   Object.assign(rec, saved);
   return ttRowWarnings(v, await ttLiveLists(cache));
+}
+
+// Loaded once per commit (not once per row) — a large catalog file would
+// otherwise re-fetch the full sections/articles library on every row.
+const SPEC_LIB = new WeakMap<CommitContext, Promise<SpecLookup>>();
+function specLibFor(ctx: CommitContext): Promise<SpecLookup> {
+  let p = SPEC_LIB.get(ctx);
+  if (!p) {
+    p = Promise.all([allSections(), allArticles()]).then(([sections, articles]) => ({ sections, articles }));
+    SPEC_LIB.set(ctx, p);
+  }
+  return p;
 }
 
 const WRITERS: Record<string, Writer> = {
@@ -1070,7 +1127,7 @@ const WRITERS: Record<string, Writer> = {
       // row written just before it.
       const ex = cache.find((p) => ci(p.sku, v.sku)) || null;
       const sku = ex ? str(ex.sku) : str(v.sku);
-      const patch = catalogPatch(v, ex, sku);
+      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: await specLibFor(ctx) });
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
@@ -1083,7 +1140,8 @@ const WRITERS: Record<string, Writer> = {
     // the catalog update path dedupes through `find` alone and reads only ctx.
     update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
-      await Catalog.mergeUpsert(sku, catalogPatch(v, ex, sku), { pricedAt: ctx.effectiveAt });
+      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: await specLibFor(ctx) });
+      await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
     },
     exportObjects: async () => {
       const list = await Catalog.list();
@@ -1099,8 +1157,10 @@ const WRITERS: Record<string, Writer> = {
         manufacturerModelNumber: p.manufacturerModelNumber || "",
         mapPrice: p.mapPrice ?? "",
         productFamily: p.productMetadata?.productFamily || "",
-        specSection: p.productMetadata?.specSection || "",
-        specArticle: p.productMetadata?.specArticle || "",
+        // D-SPEC-5: the canonical id when there is one (it re-imports exactly);
+        // otherwise the legacy Displays text, which re-imports as legacy text.
+        specSectionId: p.specSectionId || p.productMetadata?.specSection || "",
+        specArticleId: p.specArticleId || p.productMetadata?.specArticle || "",
         specLanguageKey: p.productMetadata?.specLanguageKey || "",
         researchStatus: p.productMetadata?.researchStatus || "",
         manufacturerUrl: p.productMetadata?.source?.manufacturerUrl || "",
@@ -1108,6 +1168,16 @@ const WRITERS: Record<string, Writer> = {
         guideSpecUrl: p.productMetadata?.datasheets?.find((d) => d.kind === "guide-spec")?.sourceUrl || "",
         sourceDocumentName: p.productMetadata?.source?.sourceDocumentName || "",
         sourceDocumentDate: p.productMetadata?.source?.sourceDocumentDate ? isoOf(p.productMetadata.source.sourceDocumentDate) : "",
+        specTitle: p.specTitle || "",
+        specBody: p.specBody || "",
+        specSameAs: p.specSameAs || "",
+        // Deliberately blank. The state is a review stamp, not data: a file
+        // that has left Peak comes back unreviewed. With the column blank,
+        // Step 2's rule keeps untouched rows' state and lands edited rows as
+        // draft. Emitting "authored" would let a skill-edited row print
+        // unreviewed text.
+        specState: "",
+        specSource: p.specSource || "",
       }));
     },
   },

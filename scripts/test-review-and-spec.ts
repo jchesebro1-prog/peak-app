@@ -130,6 +130,7 @@ import { xlsxToCsv } from "@/lib/import/xlsx-to-csv";
 import { IMPORT_TYPES, getTypeMeta, type ImportTypeMeta } from "@/app/(app)/import/types";
 import {
   autoMap,
+  norm,
   normalizeZip,
   parseCsv as parseImportCsv,
   prepareRows,
@@ -4992,6 +4993,55 @@ async function asyncChecks(): Promise<void> {
       created.category === "Uncategorized" && created.unit === "ea",
       "#81 create still applies its own defaults for absent columns"
     );
+  }
+
+  /* --- specs: catalog import columns --- */
+  {
+    const cat = IMPORT_TYPES.find((t) => t.key === "catalog")!;
+    const keys = cat.fields.map((f) => f.key);
+    const SPEC_KEYS = ["specSectionId", "specArticleId", "specTitle", "specBody", "specSameAs", "specState", "specSource"];
+    for (const k of SPEC_KEYS) ok(keys.includes(k), `catalog import: the ${k} column exists`);
+    ok(!keys.includes("specSection") && !keys.includes("specArticle") && !keys.includes("model"), "catalog import: one set of pointer columns, and no model column");
+    ok(
+      cat.fields.find((f) => f.key === "specSectionId")!.header === "Spec Section" &&
+        cat.fields.find((f) => f.key === "specArticleId")!.header === "Spec Article",
+      "catalog import: the canonical pointers keep the headers existing files already use"
+    );
+    ok(cat.fields.filter((f) => SPEC_KEYS.includes(f.key)).every((f) => !f.hidden), "catalog import: every spec column is advertised in the template and the export");
+    ok(cat.fields.find((f) => f.key === "specState")!.options?.join(",") === "authored,draft", "catalog import: specState is an enum of exactly the two states");
+
+    // Scoped to the spec columns: the pre-existing catalog fields already repeat
+    // aliases among themselves (family, series, model number), which is not
+    // this task's to fix.
+    const candsOf = (f: { header: string; label: string; key: string; aliases?: string[] }) =>
+      [f.header, f.label, f.key, ...(f.aliases || [])].map(norm).filter(Boolean);
+    const others = new Set(cat.fields.filter((f) => !SPEC_KEYS.includes(f.key)).flatMap(candsOf));
+    const mine = cat.fields.filter((f) => SPEC_KEYS.includes(f.key)).flatMap((f) => [...new Set(candsOf(f))]);
+    ok(mine.every((a) => !others.has(a)), "catalog import: no spec column claims a header or alias another catalog column owns");
+    ok(new Set(mine).size === mine.length, "catalog import: no two spec columns claim the same alias");
+
+    // The wipe bug: a price-only row must carry no spec key at all.
+    const lib = {
+      sections: [{ id: "ss-i", number: "11 61 43", title: "Curtains", sort: 1, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" }],
+      articles: [{ id: "ar-i", sectionId: "ss-i", sort: 1, title: "Theatrical Stage Drapes", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" }],
+    };
+    const stored = { sku: "SP-1", desc: "Drape", category: "Curtains", unit: "ea", list: 10, cost: 5, mfr: "Rose Brand", specBody: "Authored text.", specState: "authored" };
+    const priceOnly = prepareRows([["SP-1", "12"]], autoMap(["SKU", "List Price"], cat.fields), cat.fields);
+    const pricePatch = catalogPatch(priceOnly.rows[0].values, stored, "SP-1", { now: 1, specLib: lib });
+    ok(SPEC_KEYS.every((k) => !(k in pricePatch)), "catalog import: a price-only row carries no spec key, so it cannot wipe or demote");
+
+    const withText = prepareRows([["SP-1", "New text."]], autoMap(["SKU", "Spec Body"], cat.fields), cat.fields);
+    const textPatch = catalogPatch(withText.rows[0].values, stored, "SP-1", { now: 7, by: "Jeff", specLib: lib });
+    ok(textPatch.specBody === "New text." && textPatch.specState === "draft" && textPatch.specUpdatedAt === 7, "catalog import: changed text lands as draft, stamped by the writer's clock");
+    const same = prepareRows([["SP-1", "Authored text."]], autoMap(["SKU", "Spec Body"], cat.fields), cat.fields);
+    ok(!("specState" in catalogPatch(same.rows[0].values, stored, "SP-1", { specLib: lib })), "catalog import: re-importing unchanged text keeps its state");
+
+    const ptr = prepareRows([["SP-1", "11-61-43", "theatrical stage drapes"]], autoMap(["SKU", "Spec Section", "Spec Article"], cat.fields), cat.fields);
+    const ptrPatch = catalogPatch(ptr.rows[0].values, stored, "SP-1", { specLib: lib });
+    ok(ptrPatch.specSectionId === "ss-i" && ptrPatch.specArticleId === "ar-i", "catalog import: Spec Section / Spec Article resolve to the canonical pointers");
+    const legacy = prepareRows([["SP-1", "Stage Lighting Instruments"]], autoMap(["SKU", "Spec Article"], cat.fields), cat.fields);
+    const legacyPatch = catalogPatch(legacy.rows[0].values, stored, "SP-1", { specLib: lib });
+    ok(!("specArticleId" in legacyPatch) && legacyPatch.productMetadata?.specArticle === "Stage Lighting Instruments", "catalog import: an unresolvable Spec Article is kept as legacy text, never dropped");
   }
 
   /* --- Rentals module, Task 1: equipment items + locations data layer ---
