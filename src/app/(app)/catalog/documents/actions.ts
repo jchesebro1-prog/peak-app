@@ -11,10 +11,10 @@ import {
   getDocument,
   replaceDocumentFile,
 } from "@/lib/stores/part-documents";
-import { buildFetchContext, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
+import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
-import { FETCH_BATCH_SIZE, isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
+import { FETCH_ACTION_BUDGET_MS, FETCH_BATCH_SIZE, isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
 /**
@@ -171,6 +171,20 @@ export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: 
  * bounded number per request"). The page loops over a selection calling
  * this; every success and failure is persisted as it happens, so a batch
  * that is interrupted simply resumes on the next click.
+ *
+ * Review fix wave 1, I1: also bounded by WALL CLOCK, not just count — a
+ * fetch's own timeout can be up to MAX_FETCH_TIMEOUT_MS (30s), so
+ * FETCH_BATCH_SIZE slots could in principle sail well past Vercel's function
+ * limit. `createFetchBudget` hands every `fetchSlot` call in this loop one
+ * shared deadline (same budgetMs/worst-case pattern as
+ * settings/actions.ts's geocodeBatchAction): a slot only starts a new fetch
+ * attempt while there's room left for a full worst-case one, and a target
+ * that never got a look in comes back with the fixed "not attempted, run
+ * again" text rather than being silently dropped — the caller (the page) is
+ * expected to re-submit whatever didn't get attempted. The catalog is
+ * listed and `buildFetchContext` runs once for the whole call, not once per
+ * target. M3: a `fetchSlot` call is wrapped too, so a thrown store/blob
+ * error on one slot can't take the rest of the batch down with it.
  */
 export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActionResult<{ results: FetchOutcome[] }>> {
   const user = await requireUser();
@@ -180,8 +194,16 @@ export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActio
   const batch = (targets || []).filter((t) => t && typeof t.sku === "string" && isPartDocKind(t.kind)).slice(0, FETCH_BATCH_SIZE);
   if (!batch.length) return { ok: true, results: [] };
   const ctx = buildFetchContext(await loadPartDocsState(await listCatalog()));
+  const budget = createFetchBudget(FETCH_ACTION_BUDGET_MS);
   const results: FetchOutcome[] = [];
-  for (const t of batch) results.push(await fetchSlot(ctx, { sku: t.sku.trim(), kind: t.kind }, user.name));
+  for (const t of batch) {
+    const target = { sku: t.sku.trim(), kind: t.kind };
+    try {
+      results.push(await fetchSlot(ctx, target, user.name, undefined, budget));
+    } catch {
+      results.push({ ...target, ok: false, error: "Could not store the file." });
+    }
+  }
   revalidate();
   return { ok: true, results };
 }

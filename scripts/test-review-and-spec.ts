@@ -15916,4 +15916,24 @@ async function partDocsFetchAsyncChecks(): Promise<void> {
     }) as typeof fetch,
   });
   ok(!loops.ok && loops.error === "Too many redirects.", "part docs fetch: a redirect loop stops");
+
+  // Review fix wave 1, M7(c): a body that never finishes must be refused by
+  // the timeout, not hang the request forever. The fake response's stream
+  // only ever settles when the AbortController's signal fires — exactly
+  // what guardedFetchBytes's timer drives — so this proves the timeout
+  // actually tears down an in-progress body read, not just a pre-body wait.
+  const slow = await fetchDocumentBytes("http://93.184.216.34/slow", {
+    isUnsafeHost: neverUnsafe,
+    timeoutMs: 20,
+    fetchImpl: (async (_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch,
+  });
+  ok(!slow.ok && slow.error === "The link took too long to respond.", "part docs fetch: a slow body hitting the timeout is refused, not left hanging");
 }

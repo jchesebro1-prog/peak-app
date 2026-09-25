@@ -2378,10 +2378,11 @@ async function main() {
 
     const fetched: string[] = [];
     let brokenWorks = false;
+    const ALWAYS_BROKEN_URLS = new Set(["https://etc.example/always-broken.pdf"]);
     const deps = {
       fetchDoc: async (url: string) => {
         fetched.push(url);
-        if (url === U2 && !brokenWorks) return { ok: true as const, file: { bytes: new TextEncoder().encode("<html>error</html>"), contentDisposition: null, finalUrl: url } };
+        if ((url === U2 && !brokenWorks) || ALWAYS_BROKEN_URLS.has(url)) return { ok: true as const, file: { bytes: new TextEncoder().encode("<html>error</html>"), contentDisposition: null, finalUrl: url } };
         return { ok: true as const, file: { bytes: new TextEncoder().encode("%PDF-1.7 x"), contentDisposition: null, finalUrl: url } };
       },
       putFile: async (pathname: string) => ({ pathname: pathname.replace(/\.pdf$/, "-rnd.pdf") }),
@@ -2411,6 +2412,82 @@ async function main() {
 
     const d = await fetchSlot(await ctxFor(), { sku: "FETCH-D", kind: "datasheet" }, "Jeff", deps);
     assert(!d.ok && d.error === "No link to fetch.", "part docs fetch: a part with no link says so");
+
+    /* --- review fix wave 1, M1: kind-keyed dedupe — a URL fetched as a
+       datasheet for one part must never reuse or attach to a spec-sheet
+       document for another part referencing the SAME url, and vice versa. --- */
+    {
+      const U3 = "https://etc.example/shared-doc.pdf";
+      await upsertPart({ sku: "FETCH-F", desc: "F", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U3 }] });
+      await upsertPart({ sku: "FETCH-G", desc: "G", category: "Lighting", unit: "ea", list: 1, cost: 1, productMetadata: { datasheets: [{ kind: "guide-spec", fileName: "spec.pdf", sourceUrl: U3 }] } });
+
+      const f = await fetchSlot(await ctxFor(), { sku: "FETCH-F", kind: "datasheet" }, "Jeff", deps);
+      assert(f.ok && !!f.documentId, "part docs fetch M1: the datasheet slot for a shared URL fetches fine");
+      const g = await fetchSlot(await ctxFor(), { sku: "FETCH-G", kind: "specsheet" }, "Jeff", deps);
+      assert(g.ok && !!g.documentId && g.documentId !== f.documentId, "part docs fetch M1: the SAME url fetched for a different kind makes its own document, not the other kind's");
+      const gDoc = await Docs.getDocument(g.documentId!);
+      assert.equal(gDoc?.kind, "specsheet", "part docs fetch M1: the new document carries the kind it was fetched for");
+
+      const links = await Docs.allDocumentLinks();
+      assert(!links.some((l) => l.partSku === "FETCH-F" && l.documentId === g.documentId), "part docs fetch M1: the datasheet part is never linked to the spec-sheet document from the same url");
+      assert(!links.some((l) => l.partSku === "FETCH-G" && l.documentId === f.documentId), "part docs fetch M1: the spec-sheet part is never linked to the datasheet document from the same url");
+    }
+
+    /* --- review fix wave 1, M2: a failed URL is shared with every part
+       that referenced it, and never re-downloaded within the SAME call --- */
+    {
+      const U4 = "https://etc.example/always-broken.pdf";
+      await upsertPart({ sku: "FETCH-E1", desc: "E1", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U4 }] });
+      await upsertPart({ sku: "FETCH-E2", desc: "E2", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U4 }] });
+
+      const sharedCtx = await ctxFor(); // ONE context reused across both calls — same as one fetchLinksAction batch
+      const before = fetched.filter((u) => u === U4).length;
+      const e1 = await fetchSlot(sharedCtx, { sku: "FETCH-E1", kind: "datasheet" }, "Jeff", deps);
+      assert(!e1.ok && e1.error === "That file is not a PDF.", "part docs fetch M2: the first part sharing a broken url fails normally");
+      const e2 = await fetchSlot(sharedCtx, { sku: "FETCH-E2", kind: "datasheet" }, "Jeff", deps);
+      assert(!e2.ok && e2.error === "That file is not a PDF.", "part docs fetch M2: the second part sharing the SAME broken url in the same call reports the same failure");
+      assert.equal(fetched.filter((u) => u === U4).length, before + 1, "part docs fetch M2: the broken url is downloaded only once across both parts in the same call");
+
+      const eState = await loadPartDocsState(await listParts());
+      const e1Slot = slotCoverage(eState.index, "FETCH-E1", "datasheet");
+      const e2Slot = slotCoverage(eState.index, "FETCH-E2", "datasheet");
+      assert(e1Slot.state === "link-only" && e2Slot.state === "link-only" && e1Slot.docs[0].id === e2Slot.docs[0].id, "part docs fetch M2: both parts sharing the broken url end up pointing at the SAME failed link-only document");
+    }
+
+    /* --- review fix wave 1, M3: a thrown store/blob write is caught and
+       isolated — the slot reports a fixed refusal, the batch continues --- */
+    {
+      await upsertPart({ sku: "FETCH-H", desc: "H", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/throws.pdf" }] });
+      await upsertPart({ sku: "FETCH-I", desc: "I", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/fine.pdf" }] });
+      const throwingDeps = { fetchDoc: deps.fetchDoc, putFile: async (): Promise<{ pathname: string }> => { throw new Error("blob store is down"); } };
+
+      const h = await fetchSlot(await ctxFor(), { sku: "FETCH-H", kind: "datasheet" }, "Jeff", throwingDeps);
+      assert(!h.ok && h.error === "Could not store the file.", "part docs fetch M3: a thrown putFile is caught and reported, never thrown out of fetchSlot");
+      const i = await fetchSlot(await ctxFor(), { sku: "FETCH-I", kind: "datasheet" }, "Jeff", deps);
+      assert(i.ok && !!i.documentId, "part docs fetch M3: a later slot in the same batch still succeeds after an isolated throw");
+    }
+
+    /* --- review fix wave 1, I1: the per-call wall-clock budget — a target
+       past the deadline is never attempted and says so with fixed text --- */
+    {
+      const { createFetchBudget, NOT_ATTEMPTED_ERROR } = await import("@/lib/part-docs/fetch-links");
+      await upsertPart({ sku: "FETCH-J1", desc: "J1", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/j1.pdf" }] });
+      await upsertPart({ sku: "FETCH-J2", desc: "J2", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/j2.pdf" }] });
+
+      let clock = 0;
+      const budget = createFetchBudget(1000, () => clock); // a budget far smaller than one fetch's 30s worst case
+      const jCtx = await ctxFor();
+      const before = fetched.length;
+
+      const j1 = await fetchSlot(jCtx, { sku: "FETCH-J1", kind: "datasheet" }, "Jeff", deps, budget);
+      assert(j1.ok, "part docs fetch I1: the very first fetch of a call always runs, even under a budget smaller than one worst case");
+      assert.equal(fetched.length, before + 1, "part docs fetch I1: …and it actually fetched");
+
+      clock += 999; // only 1ms of the 1000ms budget left — nowhere near FETCH_WORST_CASE_MS
+      const j2 = await fetchSlot(jCtx, { sku: "FETCH-J2", kind: "datasheet" }, "Jeff", deps, budget);
+      assert(!j2.ok && j2.error === NOT_ATTEMPTED_ERROR, "part docs fetch I1: a target past the deadline comes back as not attempted, with the fixed text");
+      assert.equal(fetched.length, before + 1, "part docs fetch I1: …and no fetch was made for it");
+    }
   }
 
   console.log("review regression checks passed");

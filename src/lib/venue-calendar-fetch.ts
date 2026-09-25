@@ -233,14 +233,65 @@ export async function validateIcsUrl(raw: string): Promise<{ ok: true; url: stri
 
 /* ---------------- fetch + redirect loop + capped/timed body read ---------------- */
 
+export type GuardedFetchDeps = {
+  fetchImpl?: typeof fetch;
+  isUnsafeHost?: (hostname: string) => Promise<boolean>;
+};
+
+/** Only the four error messages that a slow/oversized/failing response can
+ *  produce differ between callers (an HTTP status, an oversized body, a
+ *  timeout, and "couldn't reach it at all") — everything about the SSRF
+ *  guard and the redirect walk is shared and must not differ. Defaults are
+ *  fetchIcsWindows's own wording, so it doesn't have to pass this at all. */
+export type GuardedFetchErrorText = {
+  httpStatus?: (status: number) => string;
+  tooLarge?: string;
+  timeout?: string;
+  network?: string;
+};
+
+export type GuardedFetchOptions = {
+  maxBytes: number;
+  timeoutMs: number;
+  maxRedirects: number;
+  accept: string;
+  userAgent: string;
+  deps?: GuardedFetchDeps;
+  errorText?: GuardedFetchErrorText;
+};
+
+export type GuardedFetchResult =
+  | { ok: true; bytes: Uint8Array; contentType: string | null; contentDisposition: string | null; finalUrl: string }
+  | { ok: false; error: string };
+
+const DEFAULT_GUARDED_FETCH_ERROR_TEXT: Required<GuardedFetchErrorText> = {
+  httpStatus: (status) => `Feed returned HTTP ${status}.`,
+  tooLarge: "Feed is too large to import.",
+  timeout: "Feed took too long to respond.",
+  network: "Could not reach that calendar feed.",
+};
+
 /**
- * Fetch + parse a venue's .ics feed for [now-30d, now+400d). Fails soft on
- * every error (bad URL, private/unresolvable host, timeout, non-calendar
- * body, oversized body, too many redirects) — returns `{ ok: false, error
- * }` rather than throwing, so a caller can always fall back to whatever
- * windows it already had.
+ * The shared guarded-fetch core (#DOC I2 — review fix wave 1): validate,
+ * fetch, and follow redirects — re-validating scheme + literal-host + DNS on
+ * EVERY hop, `redirect: "manual"` so nothing built into `fetch` can skip that
+ * re-validation — then stream the body under a byte cap and a single
+ * `AbortController` timeout that covers the whole operation (every hop's
+ * `fetch()` call plus the body read afterward). Never throws.
+ *
+ * This is the one guarded fetcher in the app: `fetchIcsWindows` below and
+ * `src/lib/part-docs/fetch.ts`'s `fetchDocumentBytes` both call this instead
+ * of each re-implementing the guard. The SSRF guard, the redirect walk and
+ * the byte cap are identical for both callers; only the returned error TEXT
+ * for an HTTP-status/oversized/timeout/network failure differs, via
+ * `errorText` — the caller maps this function's outcome to its own wording
+ * rather than this function trying to please two callers with one string.
  */
-export async function fetchIcsWindows(rawUrl: string, tz?: string): Promise<IcsFetchResult> {
+export async function guardedFetchBytes(rawUrl: string, opts: GuardedFetchOptions): Promise<GuardedFetchResult> {
+  const doFetch = opts.deps?.fetchImpl ?? fetch;
+  const unsafe = opts.deps?.isUnsafeHost ?? hostnameIsUnsafe;
+  const errorText = { ...DEFAULT_GUARDED_FETCH_ERROR_TEXT, ...opts.errorText };
+
   const first = validateIcsUrlSync(rawUrl);
   if (!first.ok) return first;
 
@@ -250,82 +301,117 @@ export async function fetchIcsWindows(rawUrl: string, tz?: string): Promise<IcsF
   // subsequent streamed body read, which is exactly the gap that let a
   // slow body evade the "5s timeout".
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
   try {
     let url = first.url;
-    if (await hostnameIsUnsafe(new URL(url).hostname)) {
+    if (await unsafe(new URL(url).hostname)) {
       return { ok: false, error: "That host isn't reachable from the server." };
     }
 
     let res: Response;
     for (let hop = 0; ; hop++) {
-      res = await fetch(url, {
-        headers: { Accept: "text/calendar, text/plain, */*", "User-Agent": "peak-app/1.0 (Peak Systems Group venue calendars)" },
+      res = await doFetch(url, {
+        headers: { Accept: opts.accept, "User-Agent": opts.userAgent },
         signal: controller.signal,
         redirect: "manual",
       });
       const isRedirect = res.status >= 300 && res.status < 400;
       const location = res.headers.get("location");
       if (!isRedirect || !location) break;
-      if (hop >= MAX_REDIRECTS) return { ok: false, error: "Too many redirects." };
+      // M6 (review fix wave 1): a redirect response can itself carry a body
+      // — cancel it before following the next hop so the connection behind
+      // it doesn't sit open for the rest of the walk.
+      if (res.body) {
+        try {
+          await res.body.cancel();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (hop >= opts.maxRedirects) return { ok: false, error: "Too many redirects." };
       const hopResult = resolveRedirectHop(location, url);
       if (!hopResult.ok) return hopResult;
-      if (await hostnameIsUnsafe(new URL(hopResult.url).hostname)) {
+      if (await unsafe(new URL(hopResult.url).hostname)) {
         return { ok: false, error: "Redirected to a host that isn't reachable from the server." };
       }
       url = hopResult.url;
     }
 
-    if (!res.ok) return { ok: false, error: `Feed returned HTTP ${res.status}.` };
+    if (!res.ok) return { ok: false, error: errorText.httpStatus(res.status) };
 
-    // Cap the body read so a misbehaving/huge feed can't hold the request
-    // open indefinitely or blow up memory — read via the stream and ABORT
-    // (not just stop reading) once the cap is exceeded, so the underlying
-    // connection is actually torn down rather than left to drain.
-    let text: string;
+    const declared = Number(res.headers.get("content-length") || 0);
+    if (declared > opts.maxBytes) return { ok: false, error: errorText.tooLarge };
+
+    // Cap the body read so a misbehaving/huge response can't hold the
+    // request open indefinitely or blow up memory — read via the stream and
+    // ABORT (not just stop reading) once the cap is exceeded, so the
+    // underlying connection is actually torn down rather than left to drain.
+    const chunks: Uint8Array[] = [];
+    let total = 0;
     if (res.body) {
       const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let out = "";
-      let total = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         total += value.byteLength;
-        if (total > MAX_BODY_BYTES) {
+        if (total > opts.maxBytes) {
           controller.abort();
           try {
             await reader.cancel();
           } catch {
             /* ignore */
           }
-          return { ok: false, error: "Feed is too large to import." };
+          return { ok: false, error: errorText.tooLarge };
         }
-        out += decoder.decode(value, { stream: true });
+        chunks.push(value);
       }
-      out += decoder.decode();
-      text = out;
-    } else {
-      text = await res.text();
     }
-
-    if (!/BEGIN:VCALENDAR/i.test(text)) {
-      return { ok: false, error: "That doesn't look like a calendar (.ics) feed." };
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const c of chunks) {
+      bytes.set(c, at);
+      at += c.byteLength;
     }
-
-    const now = Date.now();
-    const windows = parseIcs(text, { from: now - 30 * DAY_MS, to: now + 400 * DAY_MS, tz });
-    return { ok: true, windows };
+    return {
+      ok: true,
+      bytes,
+      contentType: res.headers.get("content-type"),
+      contentDisposition: res.headers.get("content-disposition"),
+      finalUrl: url,
+    };
   } catch (err) {
-    if (controller.signal.aborted) {
-      return { ok: false, error: "Feed took too long to respond." };
-    }
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      return { ok: false, error: "Feed took too long to respond." };
-    }
-    return { ok: false, error: "Could not reach that calendar feed." };
+    if (controller.signal.aborted) return { ok: false, error: errorText.timeout };
+    if (err instanceof DOMException && err.name === "TimeoutError") return { ok: false, error: errorText.timeout };
+    return { ok: false, error: errorText.network };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Fetch + parse a venue's .ics feed for [now-30d, now+400d). Fails soft on
+ * every error (bad URL, private/unresolvable host, timeout, non-calendar
+ * body, oversized body, too many redirects) — returns `{ ok: false, error
+ * }` rather than throwing, so a caller can always fall back to whatever
+ * windows it already had.
+ */
+export async function fetchIcsWindows(rawUrl: string, tz?: string): Promise<IcsFetchResult> {
+  const got = await guardedFetchBytes(rawUrl, {
+    maxBytes: MAX_BODY_BYTES,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxRedirects: MAX_REDIRECTS,
+    accept: "text/calendar, text/plain, */*",
+    userAgent: "peak-app/1.0 (Peak Systems Group venue calendars)",
+  });
+  if (!got.ok) return got;
+
+  const text = new TextDecoder().decode(got.bytes);
+  if (!/BEGIN:VCALENDAR/i.test(text)) {
+    return { ok: false, error: "That doesn't look like a calendar (.ics) feed." };
+  }
+
+  const now = Date.now();
+  const windows = parseIcs(text, { from: now - 30 * DAY_MS, to: now + 400 * DAY_MS, tz });
+  return { ok: true, windows };
 }

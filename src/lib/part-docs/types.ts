@@ -94,6 +94,20 @@ export const MAX_PART_DOC_BYTES = 25 * 1024 * 1024;
  *  30 s timeout, so the page loops over a selection in batches this size. */
 export const FETCH_BATCH_SIZE = 4;
 
+/** Ceiling on a single fetch attempt's own timeout (review fix wave 1, I1) —
+ *  also doubles as "one fetch's worst case" for the batch deadline check in
+ *  src/lib/part-docs/fetch-links.ts (mirrors src/lib/geo-backfill.ts's
+ *  worstCasePerQuery pattern: the check uses the ceiling, not whatever time
+ *  happens to be left, so it can never let a call overrun by more than the
+ *  time already spent). */
+export const MAX_FETCH_TIMEOUT_MS = 30_000;
+
+/** Wall-clock budget for one `fetchLinksAction` call (I1) — keeps the whole
+ *  batch under Vercel's function limit with headroom for the request/
+ *  response and revalidation, same margin as settings/actions.ts's
+ *  geocodeBatchAction (budgetMs 45_000 under a 60s maxDuration). */
+export const FETCH_ACTION_BUDGET_MS = 45_000;
+
 /** Blob pathname prefix — every part document lives under it. */
 export const PART_DOC_PREFIX = "part-docs/";
 
