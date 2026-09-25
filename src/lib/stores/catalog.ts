@@ -1,4 +1,4 @@
-import { clearCollection, getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 
@@ -230,4 +230,18 @@ export async function mergeUpsert(
  * other pricing/rate collections are intentionally untouched. */
 export async function clearCatalogPriceList(): Promise<number> {
   return clearCollection("catalog_parts");
+}
+
+/**
+ * Soft delete one part. Callers that resolve a part by id/SKU already treat
+ * a miss as "not in the catalog" rather than an error (e.g. Grid's
+ * pricingById.get() falls back to a zero-priced placeholder in
+ * design/grid-quote.ts — resolveTierCatalog), so removing a SKU here can't
+ * crash an existing quote line or BOM read; it just stops the part from
+ * being offered/priced going forward. Quote/vendor-quote lines copy a
+ * part's desc/price at the moment they're added (they don't re-resolve the
+ * catalog on read), so a past quote's line text is unaffected either way.
+ */
+export async function remove(sku: string): Promise<void> {
+  await softDeleteDoc("catalog_parts", sku);
 }
