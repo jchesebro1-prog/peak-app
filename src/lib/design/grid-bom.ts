@@ -99,6 +99,8 @@ export type GridCurtain = {
   /** 0 | 50 | 75 | 100. */
   fullnessPct: number;
   fabricSku: string;
+  /** Optional. Empty means the curtain template's defaultColor prints. */
+  color?: string;
 };
 
 /** Placement slice the curtain BOM needs. */

@@ -294,6 +294,7 @@ import {
   type SpecCategoryArticle, type SpecPartLike,
 } from "@/lib/specs/articles";
 import { STARTER_TEMPLATES, templateId, scaffoldFrom } from "@/lib/stores/spec-templates";
+import { fullnessKey, curtainGroupKey, fillCurtainTemplate } from "@/lib/specs/curtains";
 import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/catalog/part-form";
 import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
@@ -12755,6 +12756,56 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(scaffold.split("\n").length === fixtures.headings.length, "templates: the scaffold is one line per heading");
   ok(scaffold.startsWith("Basis of Design:"), "templates: the scaffold labels each line with its heading");
   ok(!scaffold.includes("  "), "templates: the scaffold is flat — the author indents what belongs deeper");
+}
+
+/* --- specs: curtains --- */
+{
+  const tpl = {
+    id: "Leg" as const, articleId: "ar-drapes", sort: 20, title: "Legs",
+    body: "Basis of Design: {{name}}\n  Material: {{material}}\n  Color: {{color}}\n  Size: {{width}} by {{height}}\n  Fabrication: {{fullnessClause}}\n  Hang Method: {{hang}}",
+    fullnessClauses: { "0": "Flat.", "50": "Fifty.", "75": "Seventy-five.", "100": "Hundred." },
+    hang: "Tie lines.", defaultColor: "Black unless noted otherwise",
+    updatedAt: 1, updatedBy: "Jeff",
+  };
+  const leg = { type: "Leg" as const, name: "SL Leg 1", widthFt: 10, heightFt: 24, fullnessPct: 50, fabricSku: "VEL-22" };
+
+  ok(fullnessKey(0) === "0" && fullnessKey(50) === "50" && fullnessKey(75) === "75" && fullnessKey(100) === "100", "curtains: the four fullness keys map straight through");
+  ok(fullnessKey(60) === "50", "curtains: an off-scale fullness snaps down to the nearest defined clause");
+  ok(fullnessKey(999) === "100", "curtains: an absurd fullness clamps to 100");
+  ok(fullnessKey(-5) === "0", "curtains: a negative fullness clamps to 0");
+
+  const out = fillCurtainTemplate(tpl, leg, "22oz Velour");
+  ok(out.body.includes("22oz Velour"), "curtains: {{material}} is the fabric row's description");
+  ok(out.body.includes("Black unless noted otherwise"), "curtains: an uncoloured curtain takes the template's default colour");
+  ok(out.body.includes("Fifty."), "curtains: the fullness clause is chosen by the placement's fullness");
+  ok(out.body.includes("Tie lines."), "curtains: {{hang}} comes from the template");
+  ok(out.body.includes("10") && out.body.includes("24"), "curtains: width and height are substituted");
+  ok(out.title === "Legs", "curtains: the entry takes the template's title");
+  ok(!out.body.includes("{{"), "curtains: a fully configured curtain leaves no unfilled slot");
+
+  const red = fillCurtainTemplate(tpl, { ...leg, color: "Red" }, "22oz Velour");
+  ok(red.body.includes("Red") && !red.body.includes("Black unless"), "curtains: a placement colour beats the template default");
+
+  ok(
+    curtainGroupKey(leg, "22oz Velour") === curtainGroupKey({ ...leg, name: "SL Leg 2", widthFt: 12 }, "22oz Velour"),
+    "curtains: two legs of the same fabric, colour and fullness are one entry whatever their size"
+  );
+  ok(
+    curtainGroupKey(leg, "22oz Velour") !== curtainGroupKey({ ...leg, fullnessPct: 75 }, "22oz Velour"),
+    "curtains: a different fullness is a different entry"
+  );
+  ok(
+    curtainGroupKey(leg, "22oz Velour") !== curtainGroupKey(leg, "16oz Velour"),
+    "curtains: a different fabric is a different entry"
+  );
+  ok(
+    curtainGroupKey(leg, "22oz Velour") !== curtainGroupKey({ ...leg, color: "Red" }, "22oz Velour"),
+    "curtains: a different colour is a different entry"
+  );
+  ok(
+    curtainGroupKey(leg, "22oz Velour") !== curtainGroupKey({ ...leg, type: "Border" as const }, "22oz Velour"),
+    "curtains: a different type is a different entry"
+  );
 }
 
 /* --- specs: draft gating (D-SPEC-6) --- */

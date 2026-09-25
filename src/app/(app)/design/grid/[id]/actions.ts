@@ -305,6 +305,7 @@ export async function placeCurtainAction(
       heightFt: number;
       fullnessPct: number;
       fabricSku: string;
+      color?: string;
     };
     category?: string;
     optionId: string;
@@ -338,6 +339,7 @@ export async function placeCurtainAction(
     heightFt: height,
     fullnessPct: Number(c.fullnessPct),
     fabricSku: fabric.id,
+    color: (c.color || "").trim().slice(0, 40) || undefined,
   };
   const p = await addCurtainPlacement(projectId, {
     sheetId: input.sheetId,

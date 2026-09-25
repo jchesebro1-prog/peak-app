@@ -74,6 +74,7 @@ export default function CurtainDrop({
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
   const [fullnessPct, setFullnessPct] = useState(50);
+  const [color, setColor] = useState("");
 
   const widthFt = parseFloat(width) || 0;
   const heightFt = parseFloat(height) || 0;
@@ -84,6 +85,7 @@ export default function CurtainDrop({
     heightFt,
     fullnessPct,
     fabricSku,
+    color: color.trim() || undefined,
   };
   const fabric = fabrics.find((f) => f.sku === fabricSku);
   const price = curtainPriceEach(curtainSpecOf(draft), fabric?.pricePerSqft || 0, coeffs);
@@ -187,6 +189,16 @@ export default function CurtainDrop({
             );
           })}
         </div>
+      </div>
+
+      <div style={{ marginBottom: 9 }}>
+        <label style={LBL}>Color (optional)</label>
+        <input
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          placeholder="Black"
+          style={INPUT}
+        />
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#5b616e", marginBottom: 8 }}>
