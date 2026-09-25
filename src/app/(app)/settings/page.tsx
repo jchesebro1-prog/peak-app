@@ -18,6 +18,7 @@ import {
   SHARED_KEYS,
 } from "@/lib/gmail/config";
 import { listConnections } from "@/lib/gmail/connections";
+import { loadPipelines, stageUsage } from "@/lib/pipelines-server";
 import SettingsClient from "./settings-client";
 
 export const metadata = { title: "Settings — Quartzite-6" };
@@ -41,6 +42,8 @@ export default async function SettingsPage() {
   const isAdmin = can("manage_users", me.roles);
   const settings = await getSettings();
   const users = isAdmin ? await allUsers() : [];
+  const pipelines = isAdmin ? await loadPipelines() : null;
+  const pipelineUsage = isAdmin ? await stageUsage() : {};
 
   // ---- Mailboxes (Gmail) — admin surface, env-gated ----
   const gmailOn = gmailEnabled();
@@ -156,6 +159,8 @@ export default async function SettingsPage() {
           meName={me.name}
           gmail={{ enabled: gmailOn, mailboxes: mailboxVMs, redirectUri, redirectWarning }}
           recordings={recordings}
+          pipelines={pipelines!}
+          pipelineUsage={pipelineUsage}
           settings={{
             companyName: settings.companyName,
             accent: settings.accent,

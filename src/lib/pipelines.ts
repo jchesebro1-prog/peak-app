@@ -104,6 +104,26 @@ export const LEGACY_STAGE_LABELS: Record<string, string> = {
 
 const ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * Settings → Pipelines "+ Add stage": mint a stable kebab-case id from a
+ * label, de-duplicated against the pipeline's own ids ("-2", "-3"…). Ids are
+ * immutable once saved (the editor mints this once, on first add, and never
+ * re-slugs an existing row when its label changes later).
+ */
+export function slugStageId(label: string, existingIds: readonly string[] = []): string {
+  const base =
+    (label || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "stage";
+  const taken = new Set(existingIds);
+  if (!taken.has(base)) return base;
+  let i = 2;
+  while (taken.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
 function baseErrors<T extends string>(p: Pipeline<T>, tags: readonly T[]): string[] {
   const errs: string[] = [];
   if (!p || typeof p !== "object") return ["Pipeline is missing."];

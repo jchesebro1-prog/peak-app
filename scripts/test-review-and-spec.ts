@@ -6859,7 +6859,7 @@ import {
   DEFAULT_PIPELINES, DEFAULT_PROJECT_PIPELINES, DEFAULT_QUOTE_PIPELINES, validateProjectPipeline, validateQuotePipeline,
   resolvePipelines, projectPipelineFor, quotePipelineFor, firstStage, firstStageWithTag, nextStage, resolveProjectStage,
   projectStageMeta, projectTag, isDone, isOnSite, isBacklog, isActive, stageLabelFor, carriesPipeline,
-  statusForQuoteStage, quoteStageForStatus, quoteStagePillLabel,
+  statusForQuoteStage, quoteStageForStatus, quoteStagePillLabel, slugStageId,
 } from "@/lib/pipelines";
 {
   const install = DEFAULT_PROJECT_PIPELINES.find((p) => p.id === "install")!;
@@ -6939,6 +6939,14 @@ import {
   ok(quoteStagePillLabel(DEFAULT_PIPELINES, { status: "lost", pipelineId: "estimate-design", stage: "presentation" }, "Lost") === "Lost", "pipelines: a lost quote's pill stays Lost, not the stage it died in");
   ok(quoteStagePillLabel(DEFAULT_PIPELINES, { quoteType: "flame_test", status: "draft", stage: "design" }, "Draft") === "Draft", "pipelines: a service quote's pill is untouched");
   ok(quoteStagePillLabel(DEFAULT_PIPELINES, { status: "draft", pipelineId: "estimate-design", stage: "gone" }, "Draft") === "Draft", "pipelines: an unresolved stage falls back to the status label");
+
+  // slugStageId (Settings → Pipelines "+ Add stage", Task 7)
+  ok(slugStageId("Punch List") === "punch-list", "slugStageId: kebab-cases a label");
+  ok(slugStageId("Punch List", ["punch-list"]) === "punch-list-2", "slugStageId: collision de-dupes with -2");
+  ok(slugStageId("Punch List", ["punch-list", "punch-list-2"]) === "punch-list-3", "slugStageId: -2 taken too → -3");
+  ok(slugStageId("Re-Check!! #1") === "re-check-1", "slugStageId: non-alphanumerics collapse to single dashes, stripped at the edges");
+  ok(slugStageId("") === "stage", "slugStageId: an empty label falls back to \"stage\"");
+  ok(slugStageId("   ") === "stage", "slugStageId: a blank label falls back to \"stage\"");
 }
 
 /* ============ PIPELINES (Daylite stages) — settings storage + server loader ============ */
@@ -7100,6 +7108,48 @@ async function quotesPipelineAsyncChecks(): Promise<void> {
   }
 }
 
+/* ============ PIPELINES (Daylite stages) — Settings "Move records" (Task 7) ============ */
+async function moveStageRecordsAsyncChecks(): Promise<void> {
+  const { moveStageRecords } = await import("@/lib/pipelines-server");
+  const P = ProjStore;
+  const Q = QuoteStore;
+
+  // projects: two live records parked on Scheduled both move to Installation, with history recorded.
+  // Seed fixtures can already have a project sitting on Scheduled, so the move count is asserted as
+  // a delta over what was there before, not a hardcoded 2 (moveStageRecords moves every live record
+  // on the stage, not just these two).
+  {
+    const before = (await P.getAllProjects()).filter((p) => p.pipelineId === "install" && p.stage === "scheduled").length;
+    const a = await P.createProject({ name: "move-test A" });
+    const b = await P.createProject({ name: "move-test B" });
+    await P.setProjectStage(a.id, "scheduled", "Test");
+    await P.setProjectStage(b.id, "scheduled", "Test");
+    const res = await moveStageRecords("project", "install", "scheduled", "installation", "Test");
+    ok(res.ok && res.moved === before + 2, "moveStageRecords: two live projects on Scheduled both move to Installation (plus any already there)");
+    const aAfter = await P.getProject(a.id);
+    const bAfter = await P.getProject(b.id);
+    ok(aAfter?.stage === "installation" && bAfter?.stage === "installation", "moveStageRecords: both records land on the target stage");
+    ok(aAfter?.stageHistory.at(-1)?.from === "scheduled" && aAfter.stageHistory.at(-1)?.to === "installation", "moveStageRecords: the move records stage history like a normal stage write");
+    await P.removeProject(a.id);
+    await P.removeProject(b.id);
+    const empty = await moveStageRecords("project", "install", "scheduled", "installation", "Test");
+    ok(empty.ok && empty.moved === 0, "moveStageRecords: no live records on the stage moves zero, not an error");
+  }
+
+  // quotes: same-tag moves land; a different-tag move is refused (status changes stay deliberate)
+  {
+    const q = await Q.create({ name: "move-test quote", customer: "Test" });
+    ok(q.stage === "first-contact", "moveStageRecords setup: a new quote starts at First Contact (Draft)");
+    const same = await moveStageRecords("quote", "estimate-design", "first-contact", "design", "Test");
+    ok(same.ok && same.moved === 1, "moveStageRecords: a same-tag quote move (Draft → Draft) succeeds");
+    ok((await Q.get(q.id))?.stage === "design", "moveStageRecords: the quote landed on the target stage");
+    const diff = await moveStageRecords("quote", "estimate-design", "design", "presentation", "Test");
+    ok(!diff.ok && /changes their status/.test(diff.error), "moveStageRecords: a Draft → Sent-tag quote move is refused");
+    ok((await Q.get(q.id))?.stage === "design", "moveStageRecords: a refused move leaves the quote where it was");
+    await Q.remove(q.id);
+  }
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -7116,6 +7166,7 @@ seeded()
   .then(() => pipelinesServerAsyncChecks())
   .then(() => projectsPipelineAsyncChecks())
   .then(() => quotesPipelineAsyncChecks())
+  .then(() => moveStageRecordsAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);

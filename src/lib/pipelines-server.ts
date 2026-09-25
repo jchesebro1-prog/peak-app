@@ -2,7 +2,7 @@ import { getSettings, setSettings } from "@/lib/settings";
 import { listDocs, type Doc } from "@/db/doc-store";
 import {
   resolvePipelines, resolveProjectStage, validateProjectPipeline, validateQuotePipeline, projectPipelineFor, quotePipelineFor, carriesPipeline,
-  DEFAULT_PIPELINES, type Pipelines, type ProjectPipeline, type QuotePipeline,
+  stageById, DEFAULT_PIPELINES, type Pipelines, type ProjectPipeline, type QuotePipeline,
 } from "@/lib/pipelines";
 
 export async function loadPipelines(): Promise<Pipelines> {
@@ -55,6 +55,58 @@ export async function savePipelines(input: {
   if (input.defaultQuotePipelineId) patch.defaultQuotePipelineId = input.defaultQuotePipelineId;
   await setSettings(patch);
   return { ok: true };
+}
+
+/**
+ * Settings → Pipelines "Move records": rewrite every live record parked on
+ * an in-use stage to a target stage of the SAME pipeline, so the stage can
+ * then be removed. Projects go through `setProjectStage` (records history,
+ * runs the checklist/Done hooks — same as a normal drag). Quotes only move
+ * when the source and target stage share a tag: a different tag would change
+ * the quote's Draft/Sent/Won status as a side effect, which stays a
+ * deliberate action taken from the quote itself, not from Settings.
+ *
+ * The store modules (`@/lib/stores/projects`, `@/lib/stores/quotes`) both
+ * import `loadPipelines` from this module, so they're loaded dynamically
+ * here to avoid a static import cycle — the same pattern `projects.ts` uses
+ * for `@/lib/stores/tasks` inside `afterStageChange`.
+ */
+export async function moveStageRecords(
+  kind: "project" | "quote",
+  pipelineId: string,
+  fromStage: string,
+  toStage: string,
+  actor: string
+): Promise<{ ok: true; moved: number } | { ok: false; error: string }> {
+  if (fromStage === toStage) return { ok: false, error: "Pick a different stage to move records to." };
+  const pipes = await loadPipelines();
+
+  if (kind === "project") {
+    const pl = pipes.project.find((p) => p.id === pipelineId);
+    if (!pl || !stageById(pl, fromStage) || !stageById(pl, toStage))
+      return { ok: false, error: "Unknown pipeline or stage." };
+    const { getAllProjects, setProjectStage } = await import("@/lib/stores/projects");
+    const targets = (await getAllProjects()).filter(
+      (p) => projectPipelineFor(pipes, p).id === pipelineId && p.stage === fromStage
+    );
+    let moved = 0;
+    for (const p of targets) if (await setProjectStage(p.id, toStage, actor)) moved++;
+    return { ok: true, moved };
+  }
+
+  const pl = pipes.quote.find((q) => q.id === pipelineId);
+  const from = pl && stageById(pl, fromStage);
+  const to = pl && stageById(pl, toStage);
+  if (!pl || !from || !to) return { ok: false, error: "Unknown pipeline or stage." };
+  if (from.tag !== to.tag)
+    return { ok: false, error: "Moving quotes between Draft/Sent/Won stages changes their status — do that from the quote." };
+  const targets = (await listDocs<Doc & { quoteType?: string; pipelineId?: string; stage?: string }>("quotes")).filter(
+    (q) => carriesPipeline(q.quoteType) && q.stage === fromStage && quotePipelineFor(pipes, q).id === pipelineId
+  );
+  const { update } = await import("@/lib/stores/quotes");
+  let moved = 0;
+  for (const q of targets) if (await update(q.id, { stage: toStage })) moved++;
+  return { ok: true, moved };
 }
 
 export { DEFAULT_PIPELINES };

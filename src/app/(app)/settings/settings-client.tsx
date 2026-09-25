@@ -40,6 +40,8 @@ import type { UserStatus } from "@/lib/users";
 import type { GeoSearchHit } from "@/lib/geo";
 import type { CustomFieldDef } from "@/lib/customer-fields";
 import { CustomerFieldsCard } from "./customer-fields-card";
+import type { Pipelines } from "@/lib/pipelines";
+import { PipelinesCard } from "./pipelines-card";
 import Link from "next/link";
 import { SegmentedToggle } from "@/components/ui";
 import {
@@ -169,6 +171,8 @@ export default function SettingsClient({
   phaseWeights,
   consultingDisciplines,
   customerFieldDefs,
+  pipelines,
+  pipelineUsage,
   offices,
   users,
 }: {
@@ -196,6 +200,11 @@ export default function SettingsClient({
   /** #145 D165 — the discipline vocabulary (mergedConsultingDisciplines). */
   consultingDisciplines: string[];
   customerFieldDefs: CustomFieldDef[];
+  /** Settings → Pipelines (Task 7). */
+  pipelines: Pipelines;
+  /** Stage usage counts, keyed by pipeline id then stage id — the editor's
+   *  remove guard and "Move records" picker. */
+  pipelineUsage: Record<string, Record<string, number>>;
   offices: OfficeVM[];
   users: UserVM[];
 }) {
@@ -2148,6 +2157,7 @@ export default function SettingsClient({
               ))}
             </div>
           </section>
+          <PipelinesCard pipelines={pipelines} usage={pipelineUsage} />
           <CustomerFieldsCard
             key={customerFieldDefs.map((d) => d.id).join("|")}
             defs={customerFieldDefs}

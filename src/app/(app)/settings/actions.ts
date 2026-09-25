@@ -27,6 +27,8 @@ import {
 } from "@/lib/customer-fields";
 import { cleanGridCategoryShapes } from "@/lib/design/grid-symbols";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
+import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
+import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -672,4 +674,37 @@ export async function setRecordingsBetaUsersAction(userIds: string[]) {
   await setSettings({ recordingsBetaUsers: clean });
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/* ---- Pipelines (Settings → Pipelines) ---- */
+
+/** Full-replacement save of the project and/or quote pipelines, and/or the
+ *  default quote pipeline. Thin wrapper — savePipelines() validates (pure
+ *  validators) and refuses removing a stage still holding records. */
+export async function savePipelinesAction(input: {
+  project?: ProjectPipeline[];
+  quote?: QuotePipeline[];
+  defaultQuotePipelineId?: string;
+}) {
+  await requirePerm("manage_users");
+  const res = await savePipelines(input);
+  if (!res.ok) return res;
+  revalidatePath("/", "layout");
+  return res;
+}
+
+/** "Move records" — rewrites every live record on an in-use stage to another
+ *  stage of the same pipeline, so the stage can then be removed. Thin
+ *  wrapper over moveStageRecords(); see its doc comment for the project vs.
+ *  quote rules. */
+export async function moveStageRecordsAction(
+  kind: "project" | "quote",
+  pipelineId: string,
+  fromStage: string,
+  toStage: string
+) {
+  const me = await requirePerm("manage_users");
+  const res = await moveStageRecords(kind, pipelineId, fromStage, toStage, me.name);
+  revalidatePath("/", "layout");
+  return res;
 }
