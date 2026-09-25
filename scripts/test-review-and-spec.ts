@@ -9311,6 +9311,42 @@ async function teardownFixtures(): Promise<void> {
   );
 }
 
+/* ====================================================================
+   Security review (2026-09-25), D84/punch #60 — saveQuoteAction's shared
+   `patch` object must never carry a `status` key (quotes.update() has no
+   approval gate), and its update (loadedId) branch must route a CHANGED
+   status through the gated setStatus() path instead. Server action, but
+   the same raw-source idiom as the client checks above applies just as
+   well — proven by reading actions.ts directly rather than calling the
+   "use server" function (requireUser() throws outside a request scope).
+   The matching DB-backed proof (a non-approver's "won" is refused, status
+   unchanged) is estimatorUpdateStatusGateAsyncChecks() further down.
+   ==================================================================== */
+{
+  const estimatorActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/estimator/actions.ts"),
+    "utf8"
+  );
+  const patchBody = estimatorActionsSrc.slice(
+    estimatorActionsSrc.indexOf("const patch: QuotePatch = {"),
+    estimatorActionsSrc.indexOf("let q: Quote | null = null;")
+  );
+  ok(patchBody.length > 0, "#180 review fixture: saveQuoteAction's shared patch object is still where the test expects it");
+  ok(
+    !/status:\s*payload\.status/.test(patchBody),
+    "#180 review: saveQuoteAction's shared patch never carries payload.status — quotes.update() has no approval gate, no history stamp and no spawn trigger"
+  );
+  const loadedIdBranch = estimatorActionsSrc.slice(
+    estimatorActionsSrc.indexOf("if (loadedId) {"),
+    estimatorActionsSrc.indexOf("} else {")
+  );
+  ok(loadedIdBranch.length > 0, "#180 review fixture: saveQuoteAction's update (loadedId) branch is still where the test expects it");
+  ok(
+    /payload\.status !== prior\?\.status/.test(loadedIdBranch) && /setStatus\(loadedId, payload\.status\)/.test(loadedIdBranch),
+    "#180 review: the update branch routes a CHANGED status through the gated setStatus(), not the raw update() merge"
+  );
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -9336,6 +9372,7 @@ seeded()
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
   .then(() => refusedAdvanceAsyncChecks())
+  .then(() => estimatorUpdateStatusGateAsyncChecks())
   .then(() => venueCalendarAsyncChecks())
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
@@ -12795,6 +12832,65 @@ async function refusedAdvanceAsyncChecks(): Promise<void> {
     ok(survivors181[0]?.id === Q_ESTIMATOR, "#181 the single surviving quote is the one the create branch originally minted");
   } finally {
     await softDeleteDoc("quotes", Q_ESTIMATOR);
+  }
+}
+
+/* ====================================================================
+   Security review (2026-09-25), D84/punch #60 — saveQuoteAction's UPDATE
+   path (an existing quote, loadedId truthy) used to write `payload.status`
+   straight through quotes.update(), an unguarded Object.assign with no
+   approval gate, no status history and no spawnFromQuote trigger. Reachable
+   by clicking Save before a refused changeStatus round trip returns, or by
+   calling the "use server" action directly (it is not a client-only door).
+
+   The fix: `patch` (actions.ts) no longer carries a `status` key at all: a
+   changed status on the update path now routes through the SAME gated
+   `setStatus()` the create branch and changeStatus/setStatusAction already
+   use. requireUser() throws outside a request scope, so saveQuoteAction
+   itself can't be called from this harness (same constraint noted at
+   #145/#174/#181 above) — this reproduces the exact sequence the fixed
+   update branch runs: update() the fields (no status), then setStatus()
+   only when the payload's status differs from what was stored.
+   ==================================================================== */
+async function estimatorUpdateStatusGateAsyncChecks(): Promise<void> {
+  const Q = "TEST180:estimator-update-status-bypass";
+  try {
+    const created = await QuoteStore.create({
+      id: Q,
+      name: "#180 review — update-path status bypass",
+      quoteType: "system",
+      status: "draft",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+    const prior = await QuoteStore.get(created.id);
+    // The fixed action's field-only patch — no `status` key, same as
+    // actions.ts's `patch` object after this review.
+    await QuoteStore.update(created.id, { name: "Renamed by a non-approver's Save" });
+    let refused = false;
+    if ("won" !== prior?.status) {
+      try {
+        await QuoteStore.setStatus(created.id, "won");
+      } catch {
+        refused = true;
+      }
+    }
+    ok(
+      refused,
+      "#180 review: a non-approver's status 'won' on the update path is refused by the SAME gated setStatus() the fixed action now routes through"
+    );
+    const after = await QuoteStore.get(created.id);
+    ok(
+      after?.status === "draft",
+      "#180 review: the quote's stored status is unchanged after a non-approver's update carried status 'won' — the old bug would have let it through"
+    );
+    ok(
+      after?.name === "Renamed by a non-approver's Save",
+      "#180 review: the field-only patch (name) still applies normally — only status is gated, not the whole save"
+    );
+  } finally {
+    await softDeleteDoc("quotes", Q);
   }
 }
 

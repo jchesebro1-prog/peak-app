@@ -437,6 +437,11 @@ export default function EstimatorClient({
   const [attestOpen, setAttestOpen] = useState(false);
   const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  /** True while changeStatus/changeStage's own gated setStatusAction/
+   *  setQuoteStageAction round trip is in flight (security review,
+   *  2026-09-25) — disables Save so a click landing in that window can't
+   *  race the server's own gate with a second, ungated status value. */
+  const [statusChanging, setStatusChanging] = useState(false);
   /** Result banner for "Move system" — never auto-navigates (the user may
    *  have other unsaved edits on the CURRENT estimate). */
   const [moveNotice, setMoveNotice] = useState<
@@ -806,18 +811,23 @@ export default function EstimatorClient({
     setStatus(v);
     if (loadedId) {
       const id = loadedId;
+      setStatusChanging(true);
       startTransition(async () => {
-        const r = await setStatusAction(id, v);
-        if (!r.ok) {
-          // Punch #60: server rejected the transition (e.g. "won" without an
-          // approval on record) — roll back the optimistic UI change and
-          // surface why, instead of silently pretending it worked.
-          setStatus(prevStatus);
-          setActionError(r.error || "That status change was rejected.");
-          return;
+        try {
+          const r = await setStatusAction(id, v);
+          if (!r.ok) {
+            // Punch #60: server rejected the transition (e.g. "won" without an
+            // approval on record) — roll back the optimistic UI change and
+            // surface why, instead of silently pretending it worked.
+            setStatus(prevStatus);
+            setActionError(r.error || "That status change was rejected.");
+            return;
+          }
+          setActionError(null);
+          applySync(r);
+        } finally {
+          setStatusChanging(false);
         }
-        setActionError(null);
-        applySync(r);
       });
     }
   };
@@ -834,16 +844,21 @@ export default function EstimatorClient({
     const prevStage = stage;
     const prevStatus = status;
     setStage(stageId);
+    setStatusChanging(true);
     startTransition(async () => {
-      const r = await setQuoteStageAction(id, stageId);
-      if (!r.ok) {
-        setStage(prevStage);
-        setStatus(prevStatus);
-        setActionError(r.error || "That stage change was rejected.");
-        return;
+      try {
+        const r = await setQuoteStageAction(id, stageId);
+        if (!r.ok) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          setActionError(r.error || "That stage change was rejected.");
+          return;
+        }
+        setActionError(null);
+        applyStageSync(r);
+      } finally {
+        setStatusChanging(false);
       }
-      setActionError(null);
-      applyStageSync(r);
     });
   };
 
@@ -2058,6 +2073,8 @@ export default function EstimatorClient({
               <button
                 type="button"
                 onClick={doSave}
+                disabled={statusChanging}
+                title={statusChanging ? "A status change is still saving — try again in a moment." : undefined}
                 style={{
                   fontFamily: "var(--font-ui)",
                   fontSize: 13,
@@ -2065,7 +2082,8 @@ export default function EstimatorClient({
                   border: "none",
                   borderRadius: 8,
                   padding: "9px 15px",
-                  cursor: "pointer",
+                  cursor: statusChanging ? "not-allowed" : "pointer",
+                  opacity: statusChanging ? 0.6 : 1,
                   ...(justSaved
                     ? { background: "#22361f", color: "#5fd29a" }
                     : { background: "#2b2e35", color: "#cfd3da" }),

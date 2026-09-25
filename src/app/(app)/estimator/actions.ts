@@ -300,6 +300,10 @@ export async function saveQuoteAction(
   payload: SavePayload
 ): Promise<SaveResult> {
   const user = await requireUser();
+  // `status` is deliberately NOT one of these fields — see the loadedId
+  // branch below (security review, 2026-09-25): quotes.update() is an
+  // unguarded field merge with no approval gate, no history stamp, and no
+  // spawnFromQuote trigger, so a status change must never ride it.
   const patch: QuotePatch = {
     name: payload.name,
     customer: payload.customer,
@@ -313,7 +317,6 @@ export async function saveQuoteAction(
     category: (payload.category || "").trim(),
     value: payload.value,
     margin: payload.margin,
-    status: payload.status,
     source: "estimator",
     spec: { sections: payload.sections, mobs: payload.mobs },
   };
@@ -346,6 +349,26 @@ export async function saveQuoteAction(
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
+    // Security review (2026-09-25), D84/punch #60: a changed status can only
+    // reach the DB through the gated setStatus() path — the approval gate,
+    // status history and spawnFromQuote all live there, and `update()`
+    // above deliberately never carries `status` (see `patch`'s own comment).
+    // Reachable here whenever Save fires with a changed status dropdown
+    // before (or instead of) changeStatus's own setStatusAction call — the
+    // "use server" action is also callable directly, bypassing the client
+    // dropdown's own transition rules entirely.
+    if (q && payload.status !== prior?.status) {
+      try {
+        q = await setStatus(loadedId, payload.status);
+      } catch (e) {
+        // Same split as the create branch below: the gate's refusal is the
+        // user's to read (#174); the field edits above are still saved.
+        statusError = statusFailureMessage(
+          e,
+          "estimator/actions saveQuoteAction: setStatus on an existing quote threw"
+        );
+      }
+    }
   } else {
     // #62 gave every mint a retry budget; `insertWithPrefixedId` THROWS once an
     // id collision outlasts it (doc-store.ts). Rare, but this is a save button —
