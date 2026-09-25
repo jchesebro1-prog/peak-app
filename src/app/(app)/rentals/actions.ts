@@ -4,7 +4,23 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import * as equipmentItems from "@/lib/stores/equipment-items";
 import * as equipmentLocations from "@/lib/stores/equipment-locations";
+import { list as listBookings } from "@/lib/stores/equipment-bookings";
 import type { EquipmentCategory } from "@/lib/stores/equipment-items";
+
+type Result = { ok: true } | { ok: false; error: string };
+
+/** A booking counts as active/upcoming when it isn't cancelled/returned and
+ *  its window hasn't fully ended yet — mirrors equipment-bookings.ts's
+ *  availableQty() "confirmed or out" committed-status rule. */
+async function hasActiveOrUpcomingBooking(
+  match: (b: Awaited<ReturnType<typeof listBookings>>[number]) => boolean
+): Promise<boolean> {
+  const now = Date.now();
+  const all = await listBookings();
+  return all.some(
+    (b) => match(b) && (b.status === "confirmed" || b.status === "out") && b.endDate >= now
+  );
+}
 
 /**
  * Rentals hub mutations (Task 4). Edits go through `mergeUpsert` rather than
@@ -77,4 +93,39 @@ export async function upsertEquipmentLocation(formData: FormData): Promise<void>
     ...(address ? { address } : {}),
   });
   revalidatePath("/rentals");
+}
+
+/** Delete a rental item (soft delete). Refused when the item has an
+ *  active/upcoming booking — a booking row still points at this itemId and
+ *  must not silently start referencing a gone item. */
+export async function deleteEquipmentItemAction(id: string): Promise<Result> {
+  await requirePerm("create");
+  const clean = id.trim();
+  if (!clean) return { ok: false, error: "Missing item id." };
+  if (await hasActiveOrUpcomingBooking((b) => b.itemId === clean)) {
+    return {
+      ok: false,
+      error: "This item has an active or upcoming booking — cancel or complete it first.",
+    };
+  }
+  await equipmentItems.remove(clean);
+  revalidatePath("/rentals");
+  return { ok: true };
+}
+
+/** Delete a rental location (soft delete). Same active/upcoming-booking
+ *  refusal as items, keyed on locationId instead. */
+export async function deleteEquipmentLocationAction(id: string): Promise<Result> {
+  await requirePerm("create");
+  const clean = id.trim();
+  if (!clean) return { ok: false, error: "Missing location id." };
+  if (await hasActiveOrUpcomingBooking((b) => b.locationId === clean)) {
+    return {
+      ok: false,
+      error: "This location has an active or upcoming booking — cancel or complete it first.",
+    };
+  }
+  await equipmentLocations.remove(clean);
+  revalidatePath("/rentals");
+  return { ok: true };
 }

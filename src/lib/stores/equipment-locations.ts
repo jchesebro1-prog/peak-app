@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 
 /**
  * Rentals module — equipment locations (warehouse/trailer/etc.) that
@@ -38,4 +38,11 @@ export async function upsert(
     return doc;
   }
   return insertWithPrefixedId<EquipmentLocation>(COLLECTION, "loc", 0, (id) => ({ ...loc, id }));
+}
+
+/** Soft delete one location. The active/upcoming-booking refusal lives in
+ *  the caller (rentals/actions.ts) — same reasoning as equipment-items.ts's
+ *  remove(). */
+export async function remove(id: string): Promise<void> {
+  await softDeleteDoc("equipment_locations", id);
 }
