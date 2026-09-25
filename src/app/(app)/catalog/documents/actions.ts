@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { blobEnabled } from "@/lib/blob";
-import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
+import { searchDocs } from "@/db/doc-store";
+import { get as getPart, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import {
   allDocuments,
   attachDocument,
@@ -13,6 +14,7 @@ import {
   replaceDocumentFile,
 } from "@/lib/stores/part-documents";
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
+import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
@@ -240,5 +242,41 @@ export async function searchDocumentsAction(q: string): Promise<DocActionResult<
     .sort((a, b) => Number(!!b.blobKey) - Number(!!a.blobKey) || a.title.localeCompare(b.title))
     .slice(0, 20)
     .map((d) => ({ id: d.id, title: d.title, fileName: d.fileName, kind: d.kind, hasFile: !!d.blobKey }));
+  return { ok: true, hits };
+}
+
+export type PartHit = { sku: string; desc: string; mfr: string };
+export type FileMatchRow = { fileName: string; kind: PartDocKind; confidence: FilenameMatch["confidence"]; parts: PartHit[] };
+
+const MAX_FILES_PER_MATCH = 500;
+const hitOf = (p: Pick<CatalogPart, "sku" | "desc" | "mfr">): PartHit => ({ sku: p.sku, desc: p.desc, mfr: p.mfr || "" });
+
+/** Bulk drop: match each file name to catalog part(s) by SKU / MFR P/N / MFR
+ *  M/N (longest match wins) and guess its kind. Only names cross the wire —
+ *  the catalog never ships to the browser. */
+export async function matchFilesAction(fileNames: string[]): Promise<DocActionResult<{ rows: FileMatchRow[] }>> {
+  await requireUser();
+  const names = (fileNames || []).map((n) => String(n || "")).filter(Boolean).slice(0, MAX_FILES_PER_MATCH);
+  const parts = await listCatalog();
+  const bySku = new Map(parts.map((p) => [p.sku, p]));
+  const rows = matchFileRows(names, parts).map(({ skus, ...m }) => ({ ...m, parts: skus.map((s) => hitOf(bySku.get(s)!)) }));
+  return { ok: true, rows };
+}
+
+/** Part search for an unmatched or ambiguous bulk-drop row. SQL-side
+ *  candidate filter (never materializes the catalog), then a token match. */
+export async function searchPartsAction(q: string): Promise<DocActionResult<{ hits: PartHit[] }>> {
+  await requireUser();
+  const query = String(q || "").trim();
+  if (query.length < 2) return { ok: true, hits: [] };
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const candidates = await searchDocs<CatalogPart>("catalog_parts", tokens[0], 200);
+  const hits = candidates
+    .filter((p) => {
+      const hay = `${p.sku} ${p.desc} ${p.mfr || ""} ${p.manufacturerPartNumber || ""} ${p.manufacturerModelNumber || ""}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    })
+    .slice(0, 20)
+    .map(hitOf);
   return { ok: true, hits };
 }

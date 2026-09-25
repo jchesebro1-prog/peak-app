@@ -77,3 +77,15 @@ export function guessKind(fileName: string): PartDocKind {
   const base = name.replace(/\.[a-z0-9]{1,5}$/, "");
   return /spec|guide/.test(base) ? "specsheet" : "datasheet";
 }
+
+/** Bulk-drop review rows (spec §3): one per file, in order. */
+export function matchFileRows(
+  fileNames: readonly string[],
+  parts: readonly MatchablePart[]
+): Array<{ fileName: string; kind: PartDocKind; confidence: FilenameMatch["confidence"]; skus: string[] }> {
+  const index = buildFilenameIndex(parts);
+  return fileNames.map((fileName) => {
+    const m = matchFileName(fileName, index);
+    return { fileName, kind: guessKind(fileName), confidence: m.confidence, skus: m.skus };
+  });
+}

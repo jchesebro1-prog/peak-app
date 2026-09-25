@@ -16001,3 +16001,13 @@ import { alsoCoversSuggestions, commonPrefixLength, familyKey, isSameFamily } fr
   ok(s.map((x) => `${x.sku}:${x.reason}`).join(",") === "LENS-19:accessory,S4LED-S3-DAYLT:family", "part docs suggest: accessories first, then same-manufacturer family; linked, other-brand and unrelated parts are left out");
   ok(alsoCoversSuggestions(parts[0], parts, [], new Set(), 1).length === 1, "part docs suggest: the list is capped");
 }
+
+/* --- Part documents (#DOC) — Task 7: bulk-drop review rows --- */
+import { matchFileRows } from "@/lib/part-docs/filename-match";
+{
+  const rows = matchFileRows(
+    ["ColorSource PAR Datasheet.pdf", "CSPAR guide spec.docx", "random.pdf"],
+    [{ sku: "ETC:CSPAR", manufacturerModelNumber: "ColorSource PAR" }]
+  );
+  ok(rows.map((r) => `${r.confidence}:${r.kind}:${r.skus.join("|")}`).join(",") === "high:datasheet:ETC:CSPAR,high:specsheet:ETC:CSPAR,none:datasheet:", "part docs bulk: one review row per file, in order, with kind and matched SKUs");
+}
