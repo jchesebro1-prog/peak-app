@@ -11,7 +11,8 @@ import {
   type QueueItem,
   type QueueSource,
 } from "@/lib/queue-types";
-import { createAssignmentAction, setAssignmentDoneAction } from "./actions";
+import { ConfirmButton } from "@/components/confirm-button";
+import { createAssignmentAction, removeAssignmentAction, setAssignmentDoneAction } from "./actions";
 
 /**
  * My Queue view (D93). Rows are mostly DERIVED — clicking one takes you to
@@ -192,6 +193,19 @@ export default function QueueView({
                     {d.text}
                   </span>
                 )}
+                {it.writable && (
+                  <ConfirmButton
+                    className="pk-btn-danger"
+                    label="Delete"
+                    confirmLabel="Confirm"
+                    style={{ fontSize: 10.5, padding: "3px 7px", flexShrink: 0 }}
+                    onConfirm={async () => {
+                      const r = await removeAssignmentAction(it.key.replace("assignment:", ""));
+                      if (!r.ok) throw new Error(r.error);
+                      router.refresh();
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -223,6 +237,17 @@ export default function QueueView({
               >
                 Reopen
               </button>
+              <ConfirmButton
+                className="pk-btn-danger"
+                label="Delete"
+                confirmLabel="Confirm"
+                style={{ fontSize: 10.5, padding: "3px 7px", flexShrink: 0 }}
+                onConfirm={async () => {
+                  const r = await removeAssignmentAction(a.id);
+                  if (!r.ok) throw new Error(r.error);
+                  router.refresh();
+                }}
+              />
             </div>
           ))}
         </Card>

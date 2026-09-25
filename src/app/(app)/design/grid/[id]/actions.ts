@@ -20,6 +20,7 @@ import {
   removePlacement,
   removeProject,
   removeRoute,
+  removeSheet,
   removeSpace,
   renameOption,
   renameProject,
@@ -45,7 +46,7 @@ import { getSite } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolShape } from "@/lib/stores/grid-catalog";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
@@ -57,7 +58,8 @@ import {
 } from "@/lib/design/grid-bom";
 import { isFabricRow } from "@/lib/design/grid-curtains";
 import { polygonArea } from "@/lib/design/grid-geometry";
-import { validateDeviceWire } from "@/lib/catalog-connect";
+import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
+import { getSettings } from "@/lib/settings";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 import type { AState } from "@/app/(app)/design/quick/engine";
 
@@ -107,6 +109,19 @@ export async function createGridAssemblyAction(input: {
   }
   revalidatePath("/design/grid");
   return { ok: true, id: assembly.id };
+}
+
+export async function removeGridAssemblyAction(id: string): Promise<Result> {
+  await requireUser();
+  const r = await removeGridAssembly(id);
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: r.reason === "not-an-assembly" ? "Only assemblies you built can be deleted." : "That assembly could not be found.",
+    };
+  }
+  revalidatePath("/design/grid");
+  return { ok: true };
 }
 
 export async function saveGridIntakeAction(input: {
@@ -480,6 +495,29 @@ export async function removeSpaceAction(
   return { ok: true };
 }
 
+/** Delete a plan sheet from the editor's sheet list (the sheet's own doc
+ *  stays put — see removeSheet, grid-projects.ts — so an older revision can
+ *  still resolve it). Refuses while a placement/space/route on the LIVE
+ *  design still references it. */
+export async function removeSheetAction(
+  projectId: string,
+  sheetId: string
+): Promise<Result> {
+  await requireUser();
+  const r = await removeSheet(projectId, sheetId);
+  if (!r.ok) {
+    return {
+      ok: false,
+      error:
+        r.reason === "in-use"
+          ? "This sheet still has devices, spaces, or wires on it — remove those first."
+          : "That sheet could not be found.",
+    };
+  }
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
 /* ------------------------------ routes (D110) ------------------------------ */
 
 export async function addRouteAction(
@@ -528,7 +566,12 @@ export async function addRouteAction(
       ]);
       const bothHavePorts = Boolean(fromPart?.ports?.length && toPart?.ports?.length);
       if (bothHavePorts) {
-        const result = validateDeviceWire(fromPart!, toPart!);
+        // Admin-edited wire-type registry (Design → Grid Settings) — this is
+        // the authority (see the comment above), so it must read the SAME
+        // registry the client's UX-only pre-check used, not the hardcoded
+        // DEFAULT_WIRE_TYPES fallback (validateDeviceWire's default param).
+        const settings = await getSettings();
+        const result = validateDeviceWire(fromPart!, toPart!, resolveWireTypes(settings.wireTypes));
         if (!result.ok)
           return { ok: false, error: `Wire refused — ${result.reason}: ${fromPlacement.partId} → ${toPlacement.partId} share no compatible port.` };
         connectionType = result.connectionType;

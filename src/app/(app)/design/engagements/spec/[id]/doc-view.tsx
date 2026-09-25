@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, PageHeader, Pill } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm-button";
+import { removeGeneratedSpecAction } from "../generated-actions";
 
 /**
  * Saved-spec viewer (D94). The document is rendered server-side into
@@ -33,6 +36,7 @@ export default function SpecDocView({
   html: string;
   filename: string;
 }) {
+  const router = useRouter();
   const BTN: React.CSSProperties = {
     border: "1px solid #dfe2e8",
     background: "#fff",
@@ -92,6 +96,16 @@ export default function SpecDocView({
             >
               Download .docx
             </a>
+            <ConfirmButton
+              className="pk-btn-danger"
+              label="Delete"
+              confirmLabel="Confirm delete"
+              onConfirm={async () => {
+                const r = await removeGeneratedSpecAction(specId, engagementId);
+                if (!r.ok) throw new Error(r.error);
+                router.push(`/design/engagements/spec?id=${engagementId}`);
+              }}
+            />
           </div>
         }
       />

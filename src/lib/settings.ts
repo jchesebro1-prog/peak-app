@@ -78,7 +78,10 @@ export type AppSettingsData = {
   /** Wire-type registry override (punch #39) — a full replacement list
    *  resolved via resolveWireTypes in lib/catalog-connect (stored ?? the
    *  DEFAULT_WIRE_TYPES seed list, not a per-key merge). Feeds Grid wiring
-   *  validation (Task 4). */
+   *  validation (Task 4) — both editor.tsx's client-side pre-check and
+   *  addRouteAction's server-side authority resolve this same list, rather
+   *  than falling back to DEFAULT_WIRE_TYPES. Edited in Design → Grid
+   *  Settings (/design/grid/settings). */
   wireTypes?: import("@/lib/catalog-connect").WireType[];
   /** Customer custom-field DEFINITIONS (#23) — FULL REPLACEMENT on save
    *  (the wireTypes idiom, never a per-key merge): resolveFieldDefs in
@@ -102,7 +105,10 @@ export type AppSettingsData = {
   /** Grid symbol per catalog category (#131, D154) — FULL REPLACEMENT on
    *  save (the wireTypes idiom): resolveCategoryShapes in
    *  lib/design/grid-symbols returns the seed when absent and exactly the
-   *  stored map when present. Edited in Settings → Admin → Grid symbols. */
+   *  stored map when present. Edited in Design → Grid Settings
+   *  (/design/grid/settings) — moved off Settings → Admin (D154 shipped
+   *  there; the card was dropped from Settings without a new home until
+   *  this route). */
   gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
   /** Pipelines (spec 2026-09-24 §3) — FULL REPLACEMENT lists (the wireTypes
    *  idiom). resolvePipelines in lib/pipelines returns the Daylite seeds when

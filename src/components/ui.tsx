@@ -187,18 +187,28 @@ export function StatusPill({
   tone = "gray",
   children,
   minWidth = 84,
+  maxWidth,
+  title,
 }: {
   tone?: string;
   children: ReactNode;
   minWidth?: number;
+  /** Caps the pill's own width (e.g. "100%" inside a fixed-width grid
+   *  cell) — the label truncates with an ellipsis instead of overflowing
+   *  into a neighboring column. Absent = unbounded, the original behavior. */
+  maxWidth?: number | string;
+  /** Full label on hover/long-press when it's been truncated by maxWidth. */
+  title?: string;
 }) {
   return (
     <span
+      title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
         minWidth,
+        maxWidth,
         fontSize: 11.5,
         fontWeight: 600,
         color: "#fff",
@@ -208,7 +218,9 @@ export function StatusPill({
         whiteSpace: "nowrap",
       }}
     >
-      {children}
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {children}
+      </span>
     </span>
   );
 }

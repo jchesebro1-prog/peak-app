@@ -212,9 +212,12 @@ import {
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
 import {
   backSolveExtSell,
+  buildLaborItems,
   computeLabor,
   computeMob,
+  customerLines,
   foldLaborMobLines,
+  isLaborOverheadItem,
   lineExtSellOf,
   lineMarginOf,
   parseAddQty,
@@ -227,10 +230,9 @@ import {
   systemItemsCost,
   systemItemsRev,
   vendorTotalSeed,
-  type LaborExtra,
   type RateFn,
 } from "@/app/(app)/estimator/pricing";
-import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
+import type { SpecItem, SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -460,11 +462,15 @@ const foldTarget = foldLaborMobLines([9000], [12857.14], [{ label: "shop & engin
 ok(foldTarget[0].price === 15660, "labor fold: with the modal total passed, the single line equals it to the cent (15660, not 15659.99)");
 ok(foldLaborMobLines([9000], [12857.14], [{ label: "b", cost: 450, price: 642.85 }], 99999).map((l) => l.price)[0] === round2(12857.14 + 642.85), "labor fold: a target far from the lines' sum (not rounding drift) is ignored");
 
-// addLabor itself: computeLabor's real shop/bonus/allowance output, folded
-// the same way addLabor (estimator-client.tsx) folds it, must land on the
-// SAME totals a pre-fold caller would have gotten from one line per mob
-// plus separate shop/allowance/bonus lines — to the cent.
-const foldRate: RateFn = (sku: string) =>
+// buildLaborItems (pricing.ts): the pure line-building half of addLabor
+// (estimator-client.tsx). Reverted back to separate lines, off a recent
+// change that had folded them together (owner request: "I like
+// setting the shop and engineering as separate lines ... and the bonus") —
+// one line per mobilization, plus shop & engineering / allowance /
+// performance bonus as their OWN separate lines when present, each tagged
+// laborOverhead. foldLaborMobLines is unchanged; it now backs customerLines
+// below instead (the CUSTOMER-document-only fold).
+const laborBuildRate: RateFn = (sku: string) =>
   ({
     "RIG-LBR": 50,
     "RIG-OT": 75,
@@ -473,29 +479,42 @@ const foldRate: RateFn = (sku: string) =>
     "SHP-IN": 45,
     "DRF-SUB": 50,
   }[sku] || 0);
-function foldFromDraft(draft: Parameters<typeof computeLabor>[0]) {
-  const r = computeLabor(draft, foldRate);
-  const priceAt = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
-  const activeMobs = r.mobs.filter((m) => m.cost > 0);
-  const mobCosts = activeMobs.map((m) => round2(m.cost));
-  const mobPrices = mobCosts.map((c) => priceAt(c));
-  const extras: LaborExtra[] = [];
-  if (r.shopCost > 0) extras.push({ label: "shop & engineering", cost: round2(r.shopCost), price: priceAt(round2(r.shopCost)) });
-  if (r.performanceBonus > 0) extras.push({ label: "performance bonus", cost: round2(r.performanceBonus), price: priceAt(round2(r.performanceBonus)) });
-  if (r.misc > 0) extras.push({ label: "allowance", cost: round2(r.misc), price: priceAt(round2(r.misc)) });
-  const oldCost = mobCosts.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.cost, 0);
-  const oldPrice = mobPrices.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.price, 0);
-  const folded = foldLaborMobLines(mobCosts, mobPrices, extras);
-  return { folded, oldCost, oldPrice };
+function expectedLaborLineCount(r: ReturnType<typeof computeLabor>): number {
+  return (
+    r.mobs.filter((m) => m.cost > 0).length +
+    (r.shopCost > 0 ? 1 : 0) +
+    (r.misc > 0 ? 1 : 0) +
+    (r.performanceBonus > 0 ? 1 : 0)
+  );
+}
+function idGenFrom(start: number) {
+  let n = start;
+  return () => n++;
 }
 
 const oneMobDraft = { discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "500" };
-const oneMobFold = foldFromDraft(oneMobDraft);
-ok(oneMobFold.folded.length === 1, "estimator labor: a single mobilization still yields exactly one line once shop/allowance/bonus fold in");
+const oneMobR = computeLabor(oneMobDraft, laborBuildRate);
+const oneMobItems = buildLaborItems(oneMobR, "Rigging", idGenFrom(1));
 ok(
-  oneMobFold.folded.reduce((a, f) => a + f.cost, 0) === oneMobFold.oldCost &&
-    oneMobFold.folded.reduce((a, f) => a + f.price, 0) === oneMobFold.oldPrice,
-  "estimator labor: folded cost/price match the old mob+shop+allowance+bonus line sum to the cent (with misc)"
+  oneMobItems.length === expectedLaborLineCount(oneMobR) && oneMobItems.length > 1,
+  "buildLaborItems: one mobilization plus its shop/allowance/bonus overhead land as that many SEPARATE lines, not folded into one"
+);
+ok(oneMobItems.filter((it) => it.mob).length === 1, "buildLaborItems: exactly one line carries the mob field (the mobilization line)");
+ok(
+  oneMobItems.some((it) => it.laborOverhead === "shop" && it.sku.startsWith("LAB-SHOP-") && it.desc === "Shop & engineering — PM, fabrication & drafting"),
+  "buildLaborItems: shop & engineering is its own LAB-SHOP- line tagged laborOverhead:'shop', the older separate-line desc restored"
+);
+ok(
+  oneMobItems.some((it) => it.laborOverhead === "misc" && it.sku.startsWith("LAB-MISC-") && it.desc === "Project allowance / misc"),
+  "buildLaborItems: the allowance is its own LAB-MISC- line tagged laborOverhead:'misc', the older separate-line desc restored"
+);
+ok(
+  oneMobItems.some((it) => it.laborOverhead === "bonus" && it.sku.startsWith("LAB-BONUS-") && it.desc === "Performance bonus — 5% of labor cost"),
+  "buildLaborItems: the performance bonus is its own LAB-BONUS- line tagged laborOverhead:'bonus', the older separate-line desc restored"
+);
+ok(
+  round2(oneMobItems.reduce((a, it) => a + it.price, 0)) === round2(oneMobR.totalPrice),
+  "buildLaborItems: the separate lines' prices still sum to the modal's rounded 'Price · ext' total to the cent"
 );
 
 const multiMobDraft = {
@@ -512,13 +531,140 @@ const multiMobDraft = {
   drfAuto: true,
   misc: "", // no allowance this time
 };
-const multiMobFold = foldFromDraft(multiMobDraft);
-ok(multiMobFold.folded.length === 2, "estimator labor: two mobilizations still yield two lines once shop/bonus fold in");
+const multiMobR = computeLabor(multiMobDraft, laborBuildRate);
+const multiMobItems = buildLaborItems(multiMobR, "Rigging", idGenFrom(1));
 ok(
-  multiMobFold.folded.reduce((a, f) => a + f.cost, 0) === multiMobFold.oldCost &&
-    multiMobFold.folded.reduce((a, f) => a + f.price, 0) === multiMobFold.oldPrice,
-  "estimator labor: folded cost/price match the old mob+shop+bonus line sum to the cent (without misc)"
+  multiMobItems.length === expectedLaborLineCount(multiMobR) && multiMobItems.filter((it) => it.mob).length === 2,
+  "buildLaborItems: two mobilizations still yield two separate mob lines once shop/bonus are added as their own lines"
 );
+ok(multiMobItems.some((it) => it.laborOverhead === "misc") === false, "buildLaborItems: no allowance line when misc is blank");
+ok(
+  round2(multiMobItems.reduce((a, it) => a + it.price, 0)) === round2(multiMobR.totalPrice),
+  "buildLaborItems: two-mob total still matches the modal's rounded total to the cent (no misc this time)"
+);
+
+const zeroMobDraft = { discipline: "RIG", margin: "20", mobs: [{ ...defaultMobs[0], people: "0", days: "1" }], pmHrs: "2", pmAuto: false, shopHrs: "0", drfHrs: "0", drfAuto: false, misc: "150" };
+const zeroMobR = computeLabor(zeroMobDraft, laborBuildRate);
+const zeroMobItems = buildLaborItems(zeroMobR, "Rigging", idGenFrom(1));
+ok(
+  zeroMobItems.every((it) => !it.mob) && zeroMobItems.length === expectedLaborLineCount(zeroMobR),
+  "buildLaborItems: every mobilization costing $0 still emits the overhead lines with nothing to attach a mob field to"
+);
+
+/* --- customerLines (pricing.ts): the CUSTOMER document's own labor fold ---
+ * Owner request: shop & engineering / performance bonus / allowance stay as
+ * separate lines in the estimate (buildLaborItems above) but must never
+ * appear on the customer-facing document — their sell folds into a home
+ * line instead, so the section's displayed total is unchanged. */
+let clId = 1;
+const clNextId = () => clId++;
+function mobItem(mobCost: number, mobPrice: number, name: string): SpecItem {
+  const id = clNextId();
+  return {
+    id,
+    sku: "LAB-RIG-" + id,
+    desc: name + " — Rigging",
+    qty: 1,
+    unit: "lot",
+    cost: mobCost,
+    price: mobPrice,
+    labor: true,
+    mob: { type: name, days: 1, crew: 1, discipline: "Rigging" },
+  };
+}
+function overheadItem(kind: "shop" | "bonus" | "misc", price: number, legacySkuOnly = false): SpecItem {
+  const id = clNextId();
+  const skuPrefix = kind === "shop" ? "LAB-SHOP-" : kind === "bonus" ? "LAB-BONUS-" : "LAB-MISC-";
+  return {
+    id,
+    sku: skuPrefix + id,
+    desc: kind === "shop" ? "Shop & engineering — PM, fabrication & drafting" : kind === "bonus" ? "Performance bonus — 5% of labor cost" : "Project allowance / misc",
+    qty: 1,
+    unit: "lot",
+    cost: price,
+    price,
+    labor: true,
+    ...(legacySkuOnly ? {} : { laborOverhead: kind }),
+  };
+}
+const sumCL = (rows: ReturnType<typeof customerLines>) => round2(rows.reduce((a, r) => a + r.ext, 0));
+
+// one mob + shop + bonus -> folds onto the single mob line.
+const mobShopBonusSec: EstimatorSpecSection = {
+  id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+  items: [mobItem(1000, 1400, "Install"), overheadItem("shop", 140), overheadItem("bonus", 77)],
+};
+const mobShopBonusCL = customerLines(mobShopBonusSec);
+ok(mobShopBonusCL.length === 1 && !!mobShopBonusCL[0].item, "customerLines: one mob + shop + bonus folds down to exactly one customer-facing row (the mob line)");
+ok(sumCL(mobShopBonusCL) === 1400 + 140 + 77, "customerLines: that one row's ext equals the sum of all three original sells");
+ok(sumCL(mobShopBonusCL) === round2(systemItemsRev(mobShopBonusSec)), "customerLines: the folded total matches the section's own systemItemsRev — nothing gained or lost");
+
+// two mobs proportional split sums exactly.
+const twoMobSec: EstimatorSpecSection = {
+  id: "s2", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+  items: [mobItem(1000, 1300, "Site Visit"), mobItem(3000, 3900, "Hang"), overheadItem("misc", 130)],
+};
+const twoMobCL = customerLines(twoMobSec);
+ok(twoMobCL.length === 2 && twoMobCL.every((r) => !!r.item), "customerLines: two mobs + one overhead line still show as two customer rows, not three");
+ok(sumCL(twoMobCL) === round2(systemItemsRev(twoMobSec)), "customerLines: two-mob proportional split still sums exactly to the section total");
+
+// overhead without a mob line but with another labor line.
+const otherLaborSec: EstimatorSpecSection = {
+  id: "s3", name: "General labor", kind: "materials", mfr: "", freightPct: 0,
+  items: [
+    { id: clNextId(), sku: "LAB-CUSTOM-1", desc: "Standby crew", qty: 1, unit: "lot", cost: 500, price: 700, labor: true },
+    overheadItem("shop", 140),
+  ],
+};
+const otherLaborCL = customerLines(otherLaborSec);
+ok(otherLaborCL.length === 1 && !!otherLaborCL[0].item, "customerLines: with no mobilization line, overhead folds into the section's other labor line instead");
+ok(sumCL(otherLaborCL) === 700 + 140, "customerLines: folded onto the other labor line, the ext still sums to both sells exactly");
+
+// overhead with no labor lines at all -> neutral combined row.
+const noLaborSec: EstimatorSpecSection = {
+  id: "s4", name: "Odd section", kind: "materials", mfr: "", freightPct: 0,
+  items: [{ id: clNextId(), sku: "ETC-1", desc: "Fixture", qty: 2, unit: "ea", cost: 100, price: 150 }, overheadItem("bonus", 77)],
+};
+const noLaborCL = customerLines(noLaborSec);
+ok(noLaborCL.length === 2, "customerLines: with no labor line to fold onto, the overhead becomes its own neutral combined row alongside the untouched material line");
+const combinedRow = noLaborCL.find((r) => !r.item);
+ok(!!combinedRow && "desc" in combinedRow && combinedRow.desc === "Project management, engineering & shop", "customerLines: the neutral row is titled generically and never names the bonus");
+ok(!!combinedRow && combinedRow.ext === 77, "customerLines: the neutral row still carries the full overhead amount — never dropped");
+
+// legacy SKU-only overhead lines (no laborOverhead flag) are still detected.
+const legacySec: EstimatorSpecSection = {
+  id: "s5", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+  items: [mobItem(1000, 1400, "Install"), overheadItem("shop", 140, true), overheadItem("bonus", 77, true)],
+};
+ok(legacySec.items.every((it) => !it.laborOverhead), "customerLines test setup: the legacy fixture really has no laborOverhead flag");
+ok(
+  isLaborOverheadItem({ labor: true, sku: "LAB-SHOP-9" }) === true &&
+    isLaborOverheadItem({ labor: true, sku: "LAB-BONUS-9" }) === true &&
+    isLaborOverheadItem({ labor: true, sku: "LAB-MISC-9" }) === true &&
+    isLaborOverheadItem({ labor: true, sku: "LAB-RIG-9" }) === false &&
+    isLaborOverheadItem({ labor: false, sku: "LAB-SHOP-9" }) === false,
+  "isLaborOverheadItem: matches only labor lines with the SHOP/BONUS/MISC sku prefix — a mobilization sku (LAB-RIG-/LIG-/AUD-/VID-/OTH-) or a non-labor line never does"
+);
+const legacyCL = customerLines(legacySec);
+ok(legacyCL.length === 1 && sumCL(legacyCL) === 1400 + 140 + 77, "customerLines: an older flag-less quote's LAB-SHOP-/LAB-BONUS- lines are still detected and folded by SKU prefix alone");
+
+// non-labor lines are untouched; option lines are excluded, same as everywhere else.
+const mixedSec: EstimatorSpecSection = {
+  id: "s6", name: "Mixed", kind: "materials", mfr: "", freightPct: 0,
+  items: [
+    { id: clNextId(), sku: "ETC-1", desc: "Fixture", qty: 2, unit: "ea", cost: 100, price: 150 },
+    { id: clNextId(), sku: "ETC-2", desc: "Optional upgrade", qty: 1, unit: "ea", cost: 50, price: 80, option: true },
+    mobItem(1000, 1400, "Install"),
+    overheadItem("shop", 140),
+  ],
+};
+const mixedCL = customerLines(mixedSec);
+ok(mixedCL.length === 2, "customerLines: option lines are excluded (same as the rest of the customer document) and the material line is left exactly as-is");
+ok(
+  mixedCL.some((r) => r.item && r.item.sku === "ETC-1" && r.ext === 300),
+  "customerLines: a plain material line's ext is untouched by the labor fold"
+);
+
 
 // Unit sell / ext sell back-solve — each keeps the other in sync.
 const unitEdit = priceFromUnitSellEdit(199.999);
@@ -966,6 +1112,7 @@ import {
   CONNECTION_TYPES,
   DEFAULT_WIRE_TYPES,
   resolveWireTypes,
+  cleanWireTypes,
   canConnect,
   compatibleWireTypes,
   type Port,
@@ -1028,6 +1175,36 @@ ok(resolveWireTypes() !== DEFAULT_WIRE_TYPES, "connect: resolveWireTypes with no
 ok(JSON.stringify(resolveWireTypes()) === JSON.stringify(DEFAULT_WIRE_TYPES), "connect: resolveWireTypes with no stored value is equal in content to the defaults");
 const storedWireTypes = [{ id: "custom", label: "Custom", connectionTypes: ["Edison"] }];
 ok(resolveWireTypes(storedWireTypes) === storedWireTypes, "connect: resolveWireTypes returns the stored array when provided");
+
+/* --- cleanWireTypes (Grid Settings build) — the whole-list save behind the
+ *  Wire types card, same full-replacement idiom as cleanGridCategoryShapes. */
+const cleanedGood = cleanWireTypes([
+  { id: "cat6", label: "Cat6", connectionTypes: ["HDMI", "  ", "not-a-real-type"], dollarsPerFt: 0.5, interchangeable: true },
+]);
+ok(
+  !!cleanedGood && cleanedGood.length === 1 && cleanedGood[0].id === "cat6" &&
+    JSON.stringify(cleanedGood[0].connectionTypes) === JSON.stringify(["HDMI"]),
+  "cleanWireTypes: keeps a valid row, drops an unrecognized connectionType and blank entries"
+);
+ok(cleanedGood?.[0].dollarsPerFt === 0.5 && cleanedGood?.[0].interchangeable === true,
+  "cleanWireTypes: keeps a valid dollarsPerFt and interchangeable:true");
+ok(cleanWireTypes([{ id: "x", label: "X", connectionTypes: ["nonsense-type"] }]) === null,
+  "cleanWireTypes: a row left with zero known connectionTypes is dropped entirely, collapsing to null");
+ok(cleanWireTypes([]) === null, "cleanWireTypes: an empty list collapses to null (falls back to DEFAULT_WIRE_TYPES), same as cleanGridCategoryShapes");
+ok(cleanWireTypes(null) === null && cleanWireTypes(undefined) === null, "cleanWireTypes: null/undefined input is safe and collapses to null");
+const dupeIds = cleanWireTypes([
+  { id: "cat6", label: "First", connectionTypes: ["HDMI"] },
+  { id: "cat6", label: "Second", connectionTypes: ["SDI/BNC"] },
+]);
+ok(!!dupeIds && dupeIds.length === 1 && dupeIds[0].label === "First",
+  "cleanWireTypes: a duplicate id keeps the first occurrence, drops the rest");
+ok(cleanWireTypes([{ id: "noname", connectionTypes: ["HDMI"] }])?.[0].label === "noname",
+  "cleanWireTypes: a blank label falls back to the id, same as the symbols card's category default");
+const roundTrip = cleanWireTypes(DEFAULT_WIRE_TYPES);
+ok(!!roundTrip && JSON.stringify(roundTrip) === JSON.stringify(DEFAULT_WIRE_TYPES),
+  "cleanWireTypes: round-trips DEFAULT_WIRE_TYPES unchanged — every shipped row is already valid");
+ok(JSON.stringify(resolveWireTypes(cleanWireTypes(DEFAULT_WIRE_TYPES) ?? undefined)) === JSON.stringify(DEFAULT_WIRE_TYPES),
+  "cleanWireTypes -> resolveWireTypes round trip: saving the defaults verbatim resolves back to the defaults");
 
 
 /* --- Task 4: validateDeviceWire — grid device-wire compatibility gate (#39) --- */
@@ -1459,6 +1636,45 @@ ok(matchRule({
 })?.id !== "speaker-70v",
   "ruleset: a networked amplifier described only as '...POE+ AMP' does not get a 70V speaker input");
 
+/* --- buildPortRuleReport (Grid Settings build) — the shared computation
+ *  behind both `npm run ports:rules` and the Grid Settings "Port rules
+ *  review" card, on synthetic fixture parts so this test never touches a
+ *  database. Covers: a real match, an already-ported part skipped, and a
+ *  part matched by nothing. */
+import { buildPortRuleReport, type PortReportPart } from "@/lib/catalog-port-report";
+
+const reportFixture: PortReportPart[] = [
+  // Matches "amplifier" and has no ports yet — counted as a hit.
+  { sku: "FIX:AMP1", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC", hasPorts: false },
+  // Same rule, second match, so the rule's hit count is 2 and its sample list
+  // has more than one entry.
+  { sku: "FIX:AMP2", desc: "8 Channel power amp for touring rigs", category: "Audio", mfr: "QSC", hasPorts: false },
+  // Would match "amplifier" too, but already has ports — must be skipped
+  // (hand edits win) and counted under alreadyPorted, not as a hit.
+  { sku: "FIX:AMP3", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC", hasPorts: true },
+  // A bare model number with no usable prose — counted under noDesc, never a hit.
+  { sku: "FIX:MODELISH", desc: "2039611", category: "Audio", mfr: "EAW", hasPorts: false },
+  // A physical accessory — the accessory layer claims it; counted separately
+  // from both hits and "matched by nothing".
+  { sku: "FIX:BRACKET", desc: "Mounting bracket for speaker", category: "Audio", mfr: "QSC", hasPorts: false },
+  // Real prose, no rule fires on it — "matched by nothing".
+  { sku: "FIX:MYSTERY", desc: "A perfectly ordinary widget with no port shape rule", category: "Widgets", mfr: "Acme", hasPorts: false },
+];
+const fixtureReport = buildPortRuleReport(reportFixture);
+const ampRow = fixtureReport.rows.find((r) => r.rule.id === "amplifier");
+ok(!!ampRow && ampRow.hits.map((h) => h.sku).sort().join(",") === "FIX:AMP1,FIX:AMP2",
+  "buildPortRuleReport: the amplifier rule matches both un-ported amplifiers and only those two");
+ok(fixtureReport.alreadyPorted === 1, "buildPortRuleReport: the already-ported amplifier is counted under alreadyPorted, not as a hit");
+ok(fixtureReport.noDesc === 1, "buildPortRuleReport: a bare model-number description is counted under noDesc");
+ok(fixtureReport.accessoryRows.map((h) => h.sku).join(",") === "FIX:BRACKET",
+  "buildPortRuleReport: an accessory match is bucketed separately from hits and unmatched");
+ok(fixtureReport.unmatched.map((h) => h.sku).join(",") === "FIX:MYSTERY",
+  "buildPortRuleReport: real prose with no matching rule is bucketed as unmatched (\"matched by nothing\")");
+const emptyRuleRow = fixtureReport.rows.find((r) => r.hits.length === 0);
+ok(!!emptyRuleRow, "buildPortRuleReport: a rule with zero hits is still present in `rows` (so the UI can render its own \"matches nothing\")");
+ok(fixtureReport.rows.every((r) => !r.rule.accessory),
+  "buildPortRuleReport: `rows` never includes the accessory rule itself (only proposal-bearing rules)");
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
@@ -1561,6 +1777,10 @@ ok(activeKeyFor("/design/assemblies") === "assemblies",
   "#130 /design/assemblies lights the Assembly Builder child");
 ok(activeKeyFor("/design/subassemblies") === "assemblies",
   "#130 the old Subassemblies path lights the Assembly Builder child too");
+ok(activeKeyFor("/design/grid/settings") === "gridsettings",
+  "Grid settings build: /design/grid/settings lights its own gridsettings key");
+ok(activeKeyFor("/design/grid/abc123") === "designoverview",
+  "a Grid editor id (not literally \"settings\") still falls through to designoverview");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
@@ -1576,9 +1796,11 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * Grid" and the standalone index it pointed at is gone. "steel" and
  * "fixtures" moved to the KNOWLEDGE group (#136). */
 /* "subassemblies" left the group when it became a tab of the Assembly
- * Builder (#130) — /design/subassemblies redirects there. */
+ * Builder (#130) — /design/subassemblies redirects there. "gridsettings"
+ * joined after "designs" (Grid settings build) — Grid symbols, port rules,
+ * wire types, and install labor now live at /design/grid/settings. */
 const DESIGN_CHILDREN = [
-  "designoverview", "engagements", "designs",
+  "designoverview", "engagements", "designs", "gridsettings",
   "lineset", "assemblies", "motors",
 ];
 ok(
@@ -1709,11 +1931,11 @@ ok(
   SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
   "Settings exposes company and admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
+ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens (Grid settings build added Grid Settings)");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/templates,/estimating-rules,/task-templates,/import",
-  "Admin links Templates, Estimating Rules, Task Templates, Import — by their own routes",
+    "/templates,/estimating-rules,/task-templates,/import,/design/grid/settings",
+  "Admin links Templates, Estimating Rules, Task Templates, Import, Grid Settings — by their own routes",
 );
 
 // ---- General dissolution (D99): the group is gone ----
@@ -3239,6 +3461,25 @@ import {
   ok(pj[2].title.length === 80, "#21: project-note titles clamp to 80 chars");
   ok(pj[2].ts === T3 && pj[3].ts === T1, "#21: NEWEST-FIRST ProjectNote order passes through untouched — the loader sorts by ts");
   ok(pj[2].kind === "project-note" && pj[0].kind === "project-stage", "#21: project row kinds");
+
+  // a soft-deleted project note (deleted:true — the field-notes delete
+  // portion) must never surface in the customer Activity feed.
+  const pjWithDeleted = projectFeedRows(
+    {
+      id: "P-3002",
+      name: "DELR2 feed-rows test project",
+      stageHistory: [],
+      notes: [
+        { id: "nt-live", at: T1, by: "Jeff Chesebro", text: "Still live" },
+        { id: "nt-gone", at: T2, by: "Jeff Chesebro", text: "Deleted note", deleted: true },
+      ],
+    },
+    DEFAULT_PIPELINES
+  );
+  ok(
+    pjWithDeleted.length === 1 && pjWithDeleted[0].id === "project:P-3002:note:nt-live",
+    "DELR2: projectFeedRows skips a deleted:true project note — only the live one reaches the customer feed"
+  );
 
   // notes — the real record rows
   const nr = noteFeedRows({ id: "N-7001", at: T2, by: "Jeff Chesebro", text: "Board approved the budget" });
@@ -9008,6 +9249,7 @@ seeded()
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
+  .then(() => deleteRound2AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -13187,4 +13429,276 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(filterCoverage(rows, { q: "point" }).length === 1, "coverage: the search matches the description, case-insensitively");
   ok(filterCoverage(rows, { q: "p3" }).length === 1, "coverage: the search matches the SKU too");
   ok(filterCoverage(rows, { onBomOnly: true, state: "missing" }).length === 1, "coverage: filters compose");
+}
+
+/* ======================================================================
+   "Make records have delete portions" — round 2 (the gaps left after
+   deletePartA/B above): project tasks/notes/time-logs, queue assignments,
+   generated bid specs, Grid assemblies, and Grid plan sheets. Every store
+   here previously had create/update but no remove at all — this proves
+   each new remove() actually drops the record from every read path, plus
+   the two guarantees called out at scope time:
+     - a deleted auto-task (createAutoTask, coverageKey-keyed) must not
+       come back on the next template/coverage pass — insertDocIfAbsent
+       conflicts on the deterministic autoTaskId whether or not the row is
+       tombstoned, since the row still physically exists;
+     - removeSheet must refuse while a live placement/space/route still
+       references the sheet, succeed once nothing does, and — because it
+       deliberately never softDeleteDoc's the grid_sheets record itself —
+       an OLDER revision that still references the sheet must be able to
+       fully resolve it again after a restore: restoreRevision re-adds any
+       removed sheet the restored placements/spaces/routes reference back
+       onto sheetIds (it still leaves an UNREFERENCED removed sheet alone —
+       sheets are never orphaned by a restore, but they also aren't forced
+       back onto the live list just because an old snapshot happened to
+       carry them).
+   A companion check lives with the #21 customer-feed-rows spec above:
+   projectFeedRows() must skip a deleted:true project note.
+   Fixtures are `fixtureId("DELR2", …)` / `registerFixture()`-registered
+   right after mint, so the suite-level teardown removes all of it.
+   ====================================================================== */
+async function deleteRound2AsyncChecks(): Promise<void> {
+  const meDelR2 = { id: "u1", name: "Test Harness" };
+
+  /* ---------------- project tasks (removeTask + the auto-task tombstone) ---------------- */
+  {
+    const Tasks2 = await import("../src/lib/stores/tasks");
+
+    // Plain removeTask — the mechanism the new TasksCard delete button
+    // (removeTaskAction, projects/actions.ts) calls.
+    const taskId = fixtureId("DELR2", "task");
+    registerFixture("tasks", taskId);
+    await Tasks2.createTask(
+      { id: taskId, title: "DELR2 test task", projectId: fixtureId("DELR2", "task-project") },
+      meDelR2
+    );
+    ok(!!(await Tasks2.getTask(taskId)), "DELR2 tasks setup: fixture task is live");
+    await Tasks2.removeTask(taskId);
+    ok((await Tasks2.getTask(taskId)) === null, "DELR2 tasks: removeTask() — getTask() returns null");
+
+    // The auto-task tombstone guard: a deleted system-created task must
+    // not be recreated by the next coverage pass for the same key.
+    const coverageKey = fixtureId("DELR2", "auto-task-coverage");
+    const autoId = Tasks2.autoTaskId(coverageKey);
+    registerFixture("tasks", autoId);
+    const created = await Tasks2.createAutoTask({ title: "DELR2 auto task", coverageKey });
+    ok(!!created && created.id === autoId, "DELR2 auto-task setup: createAutoTask mints the deterministic id");
+    await Tasks2.removeTask(autoId);
+    ok((await Tasks2.getTask(autoId)) === null, "DELR2 auto-task: removeTask() — getTask() returns null");
+    const recreated = await Tasks2.createAutoTask({ title: "DELR2 auto task retry", coverageKey });
+    ok(recreated === null, "DELR2 auto-task: a deleted auto-task does not come back on the next createAutoTask() pass");
+    ok((await Tasks2.getTask(autoId)) === null, "DELR2 auto-task: still gone after the retried createAutoTask()");
+  }
+
+  /* ---------------- project field notes + time logs ---------------- */
+  {
+    const Projects2 = await import("../src/lib/stores/projects");
+    const p = await Projects2.createProject({ id: fixtureId("DELR2", "project"), name: "DELR2 test project" });
+    registerFixture("projects", p.id);
+
+    await Projects2.addNote(p.id, "Test Harness", "DELR2 test note");
+    let cur = await Projects2.getProject(p.id);
+    const noteId = cur?.notes?.[0]?.id;
+    ok(!!noteId, "DELR2 notes setup: fixture note landed on the project");
+
+    await Projects2.addTime(p.id, "Test Harness", 2.5, "DELR2 test time");
+    cur = await Projects2.getProject(p.id);
+    const entryId = cur?.timeLogs?.[0]?.id;
+    ok(!!entryId, "DELR2 time setup: fixture time entry landed on the project");
+
+    if (noteId) {
+      await Projects2.removeNote(p.id, noteId);
+      cur = await Projects2.getProject(p.id);
+      const note = cur?.notes?.find((n) => n.id === noteId);
+      ok(!!note?.deleted, "DELR2 notes: removeNote() flags the embedded entry deleted:true");
+      ok(
+        (cur?.notes || []).filter((n) => !n.deleted).every((n) => n.id !== noteId),
+        "DELR2 notes: the live-notes read (every UI filter) no longer includes it"
+      );
+    }
+    if (entryId) {
+      await Projects2.removeTime(p.id, entryId);
+      cur = await Projects2.getProject(p.id);
+      const entry = cur?.timeLogs?.find((t) => t.id === entryId);
+      ok(!!entry?.deleted, "DELR2 time: removeTime() flags the embedded entry deleted:true");
+      ok(
+        (cur?.timeLogs || []).filter((t) => !t.deleted).every((t) => t.id !== entryId),
+        "DELR2 time: the live-timeLogs read no longer includes it"
+      );
+    }
+  }
+
+  /* ---------------- queue assignments ---------------- */
+  {
+    const Assignments2 = await import("../src/lib/stores/assignments");
+    const a = await Assignments2.createAssignment({
+      title: "DELR2 test assignment",
+      assignee: "Test Harness",
+      createdBy: "Test Harness",
+    });
+    registerFixture("assignments", a.id);
+    ok(!!(await Assignments2.getAssignment(a.id)), "DELR2 assignments setup: fixture assignment is live");
+    ok(
+      (await Assignments2.allAssignments()).some((x) => x.id === a.id),
+      "DELR2 assignments setup: fixture assignment lists in allAssignments()"
+    );
+    await Assignments2.removeAssignment(a.id);
+    ok((await Assignments2.getAssignment(a.id)) === null, "DELR2 assignments: removeAssignment() — getAssignment() returns null");
+    ok(
+      !(await Assignments2.allAssignments()).some((x) => x.id === a.id),
+      "DELR2 assignments: removeAssignment() — allAssignments() no longer lists it"
+    );
+  }
+
+  /* ---------------- generated bid specs ---------------- */
+  {
+    const Specs2 = await import("../src/lib/stores/generated-specs");
+    const engagementId = fixtureId("DELR2", "spec-engagement");
+    const spec = await Specs2.saveGeneratedSpec({
+      engagementId,
+      source: "upload",
+      bom: [{ sku: "TEST-SKU", desc: "DELR2 test part", qty: 1 }],
+      spec: {
+        projectName: "DELR2 test spec",
+        customer: "Test Customer DELR2",
+        engagementId,
+        preparedBy: "Test Harness",
+        date: Date.now(),
+        sections: [],
+        waived: [],
+      },
+      by: "Test Harness",
+    });
+    registerFixture("generated_specs", spec.id);
+    ok(!!(await Specs2.getGeneratedSpec(spec.id)), "DELR2 generated-specs setup: fixture spec is live");
+    ok(
+      (await Specs2.specsForEngagement(engagementId)).some((s) => s.id === spec.id),
+      "DELR2 generated-specs setup: fixture spec lists under its engagement"
+    );
+    await Specs2.removeGeneratedSpec(spec.id);
+    ok((await Specs2.getGeneratedSpec(spec.id)) === null, "DELR2 generated-specs: removeGeneratedSpec() — getGeneratedSpec() returns null");
+    ok(
+      !(await Specs2.specsForEngagement(engagementId)).some((s) => s.id === spec.id),
+      "DELR2 generated-specs: removeGeneratedSpec() — specsForEngagement() no longer lists it"
+    );
+  }
+
+  /* ---------------- Grid assemblies (user-built only — seeded devices refuse) ---------------- */
+  {
+    const GridCat2 = await import("../src/lib/stores/grid-catalog");
+    const symbols = await GridCat2.listGridSymbols("Test Harness");
+    const device = symbols.find((s) => s.kind !== "assembly");
+    ok(!!device, "DELR2 grid assembly setup: the grid library has at least one device symbol to build from");
+    if (device) {
+      const asm = await GridCat2.createGridAssembly({
+        name: "DELR2 test assembly",
+        manufacturer: "",
+        modelNumber: "",
+        scope: "Lighting",
+        members: [{ symbolId: device.id, qty: 1, x: 0.5, y: 0.5 }],
+        by: "Test Harness",
+      });
+      registerFixture("grid_catalog", asm.id);
+      ok(!!(await GridCat2.getGridSymbol(asm.id)), "DELR2 grid assembly setup: the fixture assembly is live");
+
+      const refusedDevice = await GridCat2.removeGridAssembly(device.id);
+      ok(
+        !refusedDevice.ok && refusedDevice.reason === "not-an-assembly",
+        "DELR2 grid assembly: removeGridAssembly refuses a seeded device symbol"
+      );
+      ok(!!(await GridCat2.getGridSymbol(device.id)), "DELR2 grid assembly: the refused delete leaves the seeded device untouched");
+
+      const removed = await GridCat2.removeGridAssembly(asm.id);
+      ok(removed.ok === true, "DELR2 grid assembly: removeGridAssembly succeeds for a user-built assembly");
+      ok((await GridCat2.getGridSymbol(asm.id)) === null, "DELR2 grid assembly: removeGridAssembly() — getGridSymbol() returns null");
+      ok(
+        !(await GridCat2.listGridSymbols("Test Harness")).some((s) => s.id === asm.id),
+        "DELR2 grid assembly: removeGridAssembly() — listGridSymbols() no longer lists it"
+      );
+    }
+  }
+
+  /* ---------------- Grid plan sheets (in-use refusal + revision-restore resolution) ---------------- */
+  {
+    const GridProj2 = await import("../src/lib/stores/grid-projects");
+    const { DEFAULT_OPTION_ID } = await import("../src/lib/design/grid-options");
+
+    const gp = await GridProj2.createProject({
+      name: "DELR2 test grid project",
+      customer: "Test Customer DELR2",
+      customerId: null,
+      by: "Test Harness",
+    });
+    registerFixture("grid_projects", gp.id);
+
+    const sheetA = await GridProj2.addSheet(gp.id, {
+      name: "DELR2 sheet A", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness",
+    });
+    const sheetB = await GridProj2.addSheet(gp.id, {
+      name: "DELR2 sheet B", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,<svg/>", by: "Test Harness",
+    });
+    if (sheetA) registerFixture("grid_sheets", sheetA.id);
+    if (sheetB) registerFixture("grid_sheets", sheetB.id);
+    ok(!!sheetA && !!sheetB, "DELR2 grid sheets setup: both fixture sheets were added");
+
+    if (sheetA && sheetB) {
+      await GridProj2.addPlacement(gp.id, {
+        sheetId: sheetA.id, page: 1, x: 0.5, y: 0.5, partId: "TEST-PART", optionId: DEFAULT_OPTION_ID, by: "Test Harness",
+      });
+      let proj = await GridProj2.getProject(gp.id);
+      const placementId = proj?.placements?.find((pl) => pl.sheetId === sheetA.id)?.id;
+      ok(!!placementId, "DELR2 grid sheets setup: the placement landed on sheet A");
+
+      // Sheet B has nothing on it — remove should succeed outright.
+      const removeB = await GridProj2.removeSheet(gp.id, sheetB.id);
+      ok(removeB.ok === true, "DELR2 grid sheets: removeSheet succeeds for an unreferenced sheet");
+      proj = await GridProj2.getProject(gp.id);
+      ok(!(proj?.sheetIds || []).includes(sheetB.id), "DELR2 grid sheets: the removed sheet drops out of sheetIds");
+      ok(
+        !(await GridProj2.listSheets(gp.id)).some((s) => s.id === sheetB.id),
+        "DELR2 grid sheets: the removed sheet is hidden from listSheets()"
+      );
+
+      // Sheet A still has the live placement — remove should refuse.
+      const removeARefused = await GridProj2.removeSheet(gp.id, sheetA.id);
+      ok(
+        !removeARefused.ok && removeARefused.reason === "in-use",
+        "DELR2 grid sheets: removeSheet refuses a sheet a live placement still references"
+      );
+      proj = await GridProj2.getProject(gp.id);
+      ok((proj?.sheetIds || []).includes(sheetA.id), "DELR2 grid sheets: the refused sheet is still listed");
+
+      // Snapshot a revision while the placement (and sheet A) are live,
+      // then free sheet A up and remove it — the "an old revision still
+      // references a since-removed sheet" scenario.
+      const rev = await GridProj2.addRevision(gp.id, { by: "Test Harness", reason: "manual", note: "DELR2 pre-remove snapshot" });
+      ok(!!rev && rev.sheetIds.includes(sheetA.id), "DELR2 grid sheets: the revision snapshot carries sheet A");
+      if (placementId) await GridProj2.removePlacement(gp.id, placementId);
+      const removeANow = await GridProj2.removeSheet(gp.id, sheetA.id);
+      ok(removeANow.ok === true, "DELR2 grid sheets: removeSheet succeeds once its last reference is gone");
+
+      if (rev) {
+        const restored = await GridProj2.restoreRevision(gp.id, rev.rev, "Test Harness");
+        ok(restored.ok === true, "DELR2 grid sheets: restoreRevision succeeds");
+        proj = await GridProj2.getProject(gp.id);
+        ok(
+          !!(proj?.sheetIds || []).includes(sheetA.id),
+          "DELR2 grid sheets: restore RE-ADDS a removed sheet the restored placements/spaces/routes reference — it is not left orphaned"
+        );
+        ok(
+          !!(proj?.placements || []).some((pl) => pl.sheetId === sheetA.id),
+          "DELR2 grid sheets: restore DOES bring back the placement that references the removed sheet"
+        );
+        const stillResolves = await getDoc169("grid_sheets", sheetA.id);
+        ok(
+          !!stillResolves,
+          "DELR2 grid sheets: the removed sheet's own doc was never deleted by removeSheet — it still resolves by id once restored"
+        );
+        ok(
+          (await GridProj2.listSheets(gp.id)).some((s) => s.id === sheetA.id),
+          "DELR2 grid sheets: the re-added sheet is visible again in listSheets() — not just sheetIds"
+        );
+      }
+    }
+  }
 }

@@ -414,8 +414,8 @@ export default async function FieldWorkPage({
     };
   };
   addIdentity(me.name, me.id);
-  (p.notes || []).forEach((n) => addIdentity(n.by));
-  (p.timeLogs || []).forEach((l) => addIdentity(l.person));
+  (p.notes || []).filter((n) => !n.deleted).forEach((n) => addIdentity(n.by));
+  (p.timeLogs || []).filter((l) => !l.deleted).forEach((l) => addIdentity(l.person));
 
   // Recordings (spec §6): the on-site header gets the Record control + list.
   const strip = await loadRecordingsStrip("project", p.id);

@@ -8096,17 +8096,98 @@ matter and they're a small follow-up each.
 
 ---
 
-## 199. Settings — the Grid symbols card (#131) is unreachable — OPEN
+## 199. Settings — the Grid symbols card (#131) is unreachable — DONE 2026-09-25 (D252)
 
 **Found during the 2026-09-25 cleanup.** `settings/grid-symbols-card.tsx` (per-category Grid symbol defaults, #131,
 46c321d) has no importer. `2855d84` ("Clarify company and admin settings ownership") removed it from
 `settings-client.tsx` along with its `gridCategoryShapes`/`gridLiveCategories` props, and nothing re-homed it. The
 file was kept, not deleted. **Ask Jeff:** was dropping it intended? If not, re-add it under Settings → Admin.
 
+**Done 2026-09-25.** Jeff: it "should have just got transferred to a grid settings page. Along with port reviews and
+other grid specific settings." It now lives on the new **Design → Grid Settings** page (`/design/grid/settings`), see #202.
+
 ---
 
-## 200. Quotes hub — a long stage pill overlaps the Value column — OPEN
+## 200. Quotes hub — a long stage pill overlaps the Value column — DONE 2026-09-25
 
 **Found during browser verification 2026-09-25.** On `/quotes` at 1440 px, "Presentation/Delivery" overflows the
 Status column onto the row's Value ("$17…"). Predates this branch (the hub's row grid is unchanged apart from the
 new Delete in the expanded detail). Widen the status column or let the pill wrap.
+
+**Done 2026-09-25.** `StatusPill` gained optional `maxWidth`/`title` (the label ellipsizes, full name on hover; other
+callers unchanged) and the `/quotes` Status track widened 96 → 132 px. Stage names are editable and unbounded, so
+widening alone wouldn't hold. Verified at 1440 px: Value reads "$175k" again, the pill reads "Presentation/Deli…".
+
+---
+
+## 201. Estimator — shop & engineering and the bonus are separate lines again, hidden from the customer — DONE 2026-09-25 (D251)
+
+**Reported:** 2026-09-25 (Jeff, on #193/D244): "I like setting the shop and engineering as separate lines [in] the
+estimate and the bonus, however I don't like seeing it on the customer facing."
+
+**Done.** "Add labor" again adds one line per mobilization **plus** separate *Shop & engineering*, *Project allowance /
+misc* and *Performance bonus* lines (tagged `laborOverhead`), all editable in the estimate. The **customer document**
+(`preview-doc.tsx`, the only customer view with per-line prices) never shows them: `customerLines(sec)` folds their sell
+into the section's mobilization line(s) in proportion to cost — else into the section's other labor lines, else one
+neutral "Project management, engineering & shop" row — so the rows still add up exactly to the section total and the
+quote total is unchanged. Quotes saved before #193 (bare `LAB-SHOP-`/`LAB-BONUS-`/`LAB-MISC-` lines) are recognised by
+SKU and hidden the same way; quotes built during #193's few hours keep their already-folded line. The lines still match
+the modal's Price · ext to the cent.
+
+Also fixed while here: labor lines leaked into the **client-package BOM** (as "missing-catalog" gaps) and the **bid-spec
+BOM** — both now skip `labor` lines.
+
+Verified in the browser: Install 4×5 → estimate shows Install $12,857.14, Shop & engineering $2,057.14, Performance bonus
+$745.72; the customer preview shows one line "Install — Other · 1 lot · $15,660.00", no shop/engineering/bonus text,
+same $15,879.24 total.
+
+---
+
+## 202. Design → Grid Settings — symbols, port-rule review, wire types, install hours — DONE 2026-09-25 (D252)
+
+**Reported:** 2026-09-25 (Jeff): move the Grid symbols card "to a grid settings page. Along with port reviews and other
+grid specific settings."
+
+**Done.** New admin page `/design/grid/settings` (Design nav → *Grid Settings*, also linked from Settings → Admin):
+- **Grid symbols** — the #131 per-category symbol card (#199).
+- **Port rules review** — every rule in `PORT_RULES` with its note, target, proposed ports, how many port-less catalog
+  parts it matches, sample parts and "matches nothing"; **Apply** writes that one rule's ports (two-step confirm with
+  the count). Until now the only review loop was reading `npm run ports:rules` output (#159). The report logic moved
+  to `src/lib/catalog-port-report.ts`, shared with the script (one pass over the catalog).
+- **Wire types** — an editor for `settings.wireTypes`. It had no UI **and was never read**: `resolveWireTypes` had no
+  callers, so wiring checks always used the defaults. The Grid editor's pre-check and `addRouteAction` now honour it.
+- **Install labor per device** — `grid.laborHoursPerDevice` is now a registered rate (default 0.5 h, unchanged), also
+  visible in Estimating Rules. It was hard-wired to 0.5 before.
+- **Related settings** — links to Catalog categories & ports, Assembly Builder, Lineset, Motor Library.
+
+Verified in the browser on a scratch DB (29-part catalog: 0 rule matches, as expected).
+
+---
+
+## 203. Delete — the remaining record types — DONE 2026-09-25 (D253)
+
+**Reported:** 2026-09-25 (Jeff): "Make records have delete portions."
+
+**Done** (all soft, all behind the two-step `ConfirmButton`):
+- **Project tasks** — the project Tasks card; a deleted auto-task is not re-created by the stage checklist.
+- **Project field notes and time entries** — project view and Field Work (through the offline outbox); every reader
+  skips them, including the customer Activity feed and time totals.
+- **Queue assignments** — open and recently-completed lists.
+- **Generated bid specs** — the "Previously generated" list and the spec page.
+- **Grid assemblies** (user-made `GASM-` entries) — a new list in the Assemblies panel. Seeded device symbols are not
+  deletable (the palette re-seeds them).
+- **Grid plan sheets** — refused while any placement, space or route uses the sheet; the sheet file is kept, and
+  restoring an older revision that used it brings it back (D253).
+
+Not given a delete, with reasons: estimating-rate rows (fixed rows defined in code — edit/reset only), client packages
+(generated and downloaded on the spot; nothing lists them), review snapshots (frozen approval copies), equipment
+bookings (cancel is their lifecycle), history logs. Spec sections get their delete in the Specs build.
+
+---
+
+## 204. A price-only Import-hub catalog import resets MAP to $0 — OPEN
+
+**Found 2026-09-25** while amending the Specs plan. `src/app/(app)/import/registry.ts` ~233: the catalog patch writes
+MAP from the row even when the file has no MAP column, so a price-list import that only carries cost/list zeroes every
+part's MAP. Fix with the file's own `str(v.x) ? {...} : {}` preserve-when-absent pattern.
+

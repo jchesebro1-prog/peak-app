@@ -93,6 +93,7 @@ export const NAV: NavEntry[] = [
        * (D108), chosen at creation. The standalone Grid index is gone — a
        * Grid project can no longer exist independent of a design record. */
       { key: "designs", label: "The Grid", href: "/design/designs" },
+      { key: "gridsettings", label: "Grid Settings", href: "/design/grid/settings" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
       { key: "motors", label: "Motor Library", href: "/design/motors" },
@@ -124,6 +125,10 @@ export function activeKeyFor(pathname: string): string {
   // #130: both builders live on /design/assemblies (Subassemblies is a tab;
   // the old path redirects), so both light the Assembly Builder child.
   if (pathname.startsWith("/design/assemblies") || pathname.startsWith("/design/subassemblies")) return "assemblies";
+  // Grid settings — like assemblies above, this needs its OWN key before the
+  // generic "/design" → designoverview fallback below, which every other
+  // /design/* route (including /design/grid/<id>, the editor) still uses.
+  if (pathname.startsWith("/design/grid/settings")) return "gridsettings";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/queue": "queue",

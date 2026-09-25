@@ -4,13 +4,16 @@ import { useMemo, useState } from "react";
 import type { PartLite } from "@/lib/design/grid-bom";
 import { GRID_LAYERS } from "@/lib/design/grid-scopes";
 import { GRID_SHAPES, GRID_SHAPE_LABEL } from "@/lib/design/grid-symbols";
-import { createGridAssemblyAction } from "./actions";
+import { ConfirmButton } from "@/components/confirm-button";
+import { createGridAssemblyAction, removeGridAssemblyAction } from "./actions";
 
 const FIELD: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 8px", font: "inherit", fontSize: 12, color: "#16181d", background: "#fff" };
 const BTN: React.CSSProperties = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "5px 9px", font: "inherit", fontSize: 11.5, fontWeight: 600, color: "#3d424e", background: "#fff", cursor: "pointer" };
 
 export default function AssembliesPanel({ parts, onChanged }: { parts: PartLite[]; onChanged: () => void }) {
   const devices = useMemo(() => parts.filter((p) => p.kind !== "assembly"), [parts]);
+  const assemblies = useMemo(() => parts.filter((p) => p.kind === "assembly"), [parts]);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [manufacturer, setManufacturer] = useState("");
@@ -38,6 +41,31 @@ export default function AssembliesPanel({ parts, onChanged }: { parts: PartLite[
         <button type="button" style={{ ...BTN, padding: "3px 7px", fontSize: 10.5 }} onClick={() => setOpen((v) => !v)}>{open ? "Close" : "+ Build"}</button>
       </div>
       <div style={{ fontSize: 11, color: "#8c919c", lineHeight: 1.4, marginTop: 5 }}>Build a parent symbol from child objects. Assemblies remain searchable and place as one rectangular object.</div>
+      {deleteError && <div style={{ fontSize: 11, color: "#a0442b", marginTop: 6 }}>{deleteError}</div>}
+      {assemblies.length > 0 && (
+        <div style={{ marginTop: 8, display: "grid", gap: 3 }}>
+          {assemblies.map((a) => (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, padding: "4px 2px", borderTop: "1px solid #f4f5f7" }}>
+              <span style={{ flex: 1, minWidth: 0, color: "#3d424e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.desc}</span>
+              <ConfirmButton
+                className="pk-btn-danger"
+                label="Delete"
+                confirmLabel="Confirm"
+                style={{ fontSize: 10, padding: "3px 6px", flexShrink: 0 }}
+                onConfirm={async () => {
+                  setDeleteError(null);
+                  const r = await removeGridAssemblyAction(a.id);
+                  if (!r.ok) {
+                    setDeleteError(r.error);
+                    throw new Error(r.error);
+                  }
+                  onChanged();
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
       {open && (
         <div style={{ marginTop: 10, display: "grid", gap: 7 }}>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Assembly name" style={FIELD} />

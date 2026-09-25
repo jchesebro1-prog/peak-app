@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, PageHeader, Pill } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { BomRow, MatchedRow } from "@/lib/bid-spec";
 import { parseCsv } from "./parse-bom";
 import {
@@ -14,6 +15,7 @@ import {
   seedSectionsAction,
   writePartSpecAction,
 } from "./actions";
+import { removeGeneratedSpecAction } from "./generated-actions";
 
 /**
  * Bid-spec generator UI (D94): pick a source → resolve the match report →
@@ -253,6 +255,17 @@ export default function SpecGenerator({
                     {s.waivedCount ? ` · ${s.waivedCount} not specified` : ""}
                   </Link>
                   <span style={{ color: "#9aa0ab", fontSize: 11.5 }}>{s.createdBy}</span>
+                  <ConfirmButton
+                    className="pk-btn-danger"
+                    label="Delete"
+                    confirmLabel="Confirm"
+                    style={{ fontSize: 10.5, padding: "3px 7px", flexShrink: 0 }}
+                    onConfirm={async () => {
+                      const r = await removeGeneratedSpecAction(s.id, engagement.id);
+                      if (!r.ok) throw new Error(r.error);
+                      router.refresh();
+                    }}
+                  />
                 </div>
               ))}
             </Card>

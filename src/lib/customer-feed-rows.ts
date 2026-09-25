@@ -237,7 +237,7 @@ export function projectFeedRows(
     kind?: string | null;
     pipelineId?: string | null;
     stageHistory: Array<{ at: number; to: string; by: string }>;
-    notes: Array<{ id: string; at: number; by: string; text: string }>;
+    notes: Array<{ id: string; at: number; by: string; text: string; deleted?: boolean }>;
   },
   pipes: Pipelines
 ): FeedRow[] {
@@ -246,7 +246,8 @@ export function projectFeedRows(
     row("project-stage", `project:${p.id}:stage:${i}`, h.at, `Project ${p.id} → ${stageLabelFor(pipes, p, h.to)}`, p.name, href, h.by || "")
   );
   for (const n of p.notes || [])
-    rows.push(row("project-note", `project:${p.id}:note:${n.id}`, n.at, n.text.slice(0, 80), p.name, href, n.by || ""));
+    if (!n.deleted)
+      rows.push(row("project-note", `project:${p.id}:note:${n.id}`, n.at, n.text.slice(0, 80), p.name, href, n.by || ""));
   return rows;
 }
 

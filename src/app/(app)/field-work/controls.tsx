@@ -12,8 +12,11 @@ import {
   addFieldTask,
   postFieldNote,
   logFieldTime,
+  removeFieldNote,
+  removeFieldTime,
 } from "./actions";
 import { saveThroughOutbox, type ServerSaveResult } from "@/lib/sync/save";
+import { ConfirmButton } from "@/components/confirm-button";
 import { yearAwareDate } from "@/lib/format";
 
 /* ============================================================
@@ -329,11 +332,40 @@ export default function FieldWorkDetail({
     void persist(next, () => logFieldTime(fd));
   }
 
+  /** Soft-delete one field note (flags the embedded entry — never spliced,
+   *  so the outbox's whole-doc upsert can't resurrect it on a stale sync). */
+  async function onRemoveNote(noteId: string): Promise<void> {
+    const cur = pRef.current;
+    const next: ProjectRecord = {
+      ...cur,
+      notes: (cur.notes || []).map((n) => (n.id === noteId ? { ...n, deleted: true } : n)),
+    };
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("noteId", noteId);
+    await persist(next, () => removeFieldNote(fd));
+  }
+
+  /** Soft-delete one time-log entry — see onRemoveNote above. */
+  async function onRemoveTime(entryId: string): Promise<void> {
+    const cur = pRef.current;
+    const next: ProjectRecord = {
+      ...cur,
+      timeLogs: (cur.timeLogs || []).map((t) => (t.id === entryId ? { ...t, deleted: true } : t)),
+    };
+    const fd = new FormData();
+    fd.set("id", cur.id);
+    fd.set("entryId", entryId);
+    await persist(next, () => removeFieldTime(fd));
+  }
+
   /* ---------- derived (from local state) ---------- */
 
-  const myLogs = (p.timeLogs || []).filter((l) => l.person === meName);
+  const liveNotes = (p.notes || []).filter((n) => !n.deleted);
+  const liveTimeLogs = (p.timeLogs || []).filter((l) => !l.deleted);
+  const myLogs = liveTimeLogs.filter((l) => l.person === meName);
   const myHours = myLogs.reduce((a, l) => a + (l.hours || 0), 0);
-  const crewHours = (p.timeLogs || []).reduce((a, l) => a + (l.hours || 0), 0);
+  const crewHours = liveTimeLogs.reduce((a, l) => a + (l.hours || 0), 0);
 
   // tasks grouped by section (insertion order preserved)
   const groupsMap: Record<string, TaskRecord[]> = {};
@@ -683,7 +715,7 @@ export default function FieldWorkDetail({
             </div>
           </form>
 
-          {(p.notes || []).map((n) => {
+          {liveNotes.map((n) => {
             const idn = identityOf(n.by);
             return (
               <div
@@ -718,6 +750,13 @@ export default function FieldWorkDetail({
                   <span style={{ marginLeft: "auto", fontSize: 11, color: "#aab0bb" }}>
                     {timeAgo(n.at)}
                   </span>
+                  <ConfirmButton
+                    className="pk-btn-danger"
+                    label="Delete"
+                    confirmLabel="Confirm"
+                    style={{ fontSize: 10.5, padding: "3px 7px", flexShrink: 0 }}
+                    onConfirm={() => onRemoveNote(n.id)}
+                  />
                 </div>
                 <div style={{ fontSize: 13.5, lineHeight: 1.5, color: "#2f333b" }}>{n.text}</div>
                 {n.photo && (
@@ -737,7 +776,7 @@ export default function FieldWorkDetail({
               </div>
             );
           })}
-          {(p.notes || []).length === 0 && (
+          {liveNotes.length === 0 && (
             <div
               style={{ textAlign: "center", color: "#9aa0ab", fontSize: 12.5, padding: 14 }}
             >
@@ -850,7 +889,7 @@ export default function FieldWorkDetail({
             </div>
           </div>
 
-          {(p.timeLogs || [])
+          {liveTimeLogs
             .slice()
             .sort((a, b) => (b.date || 0) - (a.date || 0))
             .map((l) => {
@@ -908,10 +947,17 @@ export default function FieldWorkDetail({
                     </div>
                     <div style={{ fontSize: 10, color: "#aab0bb" }}>{timeAgo(l.date)}</div>
                   </div>
+                  <ConfirmButton
+                    className="pk-btn-danger"
+                    label="Delete"
+                    confirmLabel="Confirm"
+                    style={{ fontSize: 10.5, padding: "3px 7px", flexShrink: 0 }}
+                    onConfirm={() => onRemoveTime(l.id)}
+                  />
                 </div>
               );
             })}
-          {(p.timeLogs || []).length === 0 && (
+          {liveTimeLogs.length === 0 && (
             <div style={{ textAlign: "center", color: "#9aa0ab", fontSize: 12.5, padding: 10 }}>
               No hours logged yet.
             </div>

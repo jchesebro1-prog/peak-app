@@ -483,6 +483,14 @@ export const GROUPS: PricingGroup[] = [
       formula("fixture.line", "Fixture line (one combined line)", "ext = unit × qty   ·   cost/ea = fixtureCost + add-on costs   ·   hang/focus labor left to Configure labor"),
     ],
   },
+  {
+    key: "grid", label: "The Grid", live: true,
+    sub: "Install labor knob for the Grid's auto-priced BOM",
+    note: "Live — reprices every Grid design's suggested install labor immediately. General store (not percent-based): the raw value IS the hours figure, unlike the % rates above.",
+    items: [
+      rate("grid.laborHoursPerDevice", "Install labor — hours per device", 0.5, "hr", { min: 0, max: 8, step: 0.05, help: "Hours of install labor The Grid suggests per placed device, before any per-part override. design/grid/[id]/page.tsx reads this via num(), not frac() — the stored value IS the hours figure." }),
+    ],
+  },
 ];
 
 let BY_ID: Record<string, PricingEntry> = {};
