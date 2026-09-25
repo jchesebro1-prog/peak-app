@@ -19,7 +19,8 @@ import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
 import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
-import { domainOf, isPublicDomain } from "@/lib/gmail/config";
+import { domainOf, isPublicDomain, personalKey } from "@/lib/gmail/config";
+import { getConnectionInfo } from "@/lib/gmail/connections";
 import {
   linkThread,
   rememberAddress,
@@ -54,8 +55,12 @@ export async function linkThreadToCustomerAction(
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
 
   // #125 — the picked identity message's address, else the thread contact.
-  const sender = identityAddressFor(t);
-  const senderEmail = resolveAddressFor(t);
+  // I follow-up review — selfEmail = the signed-in user's own connected
+  // mailbox address, so an outbound identity message's first recipient
+  // skips a self-CC instead of remembering our own address on the customer.
+  const myConn = await getConnectionInfo(personalKey(me.id));
+  const sender = identityAddressFor(t, myConn?.address);
+  const senderEmail = resolveAddressFor(t, myConn?.address);
   const senderName = sender?.name || t.contactName;
   let contactId = opts.contactId ?? null;
   if (opts.remember && senderEmail) {

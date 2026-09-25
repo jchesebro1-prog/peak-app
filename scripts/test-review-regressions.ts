@@ -2099,6 +2099,62 @@ async function main() {
     assert.equal(r3consulting?.venueCustomer, "Lakefront ISD", "#123/I1 …with its display name alongside");
   }
 
+  // I4 follow-up review — threadQuoteLinkStatus is the decision
+  // createQuoteIntakeAction now checks BEFORE saveCustomerAction
+  // (quotes/new/actions.ts, right after the thread validity check, well
+  // before any customer/venue/contact write) instead of only inside
+  // linkThreadToNewQuote after the save already ran. createQuoteIntakeAction
+  // itself is session-gated (requireUser()) and can't be called from this
+  // harness — this pins the extracted decision function directly, which is
+  // what the action's early-exit relies on for correctness.
+  {
+    const { threadQuoteLinkStatus, linkThreadToNewQuote } = await import("@/lib/gmail/linking");
+    const r3now = Date.now();
+
+    // No link at all → clear, free to proceed.
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3status-clear", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Fresh thread", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    let statusThread = await getDoc<CommThread>("comms", "C-r3status-clear");
+    assert.deepEqual(await threadQuoteLinkStatus(statusThread!, "lakefront"), { kind: "clear" }, "threadQuoteLinkStatus: no link → clear");
+    assert.deepEqual(await threadQuoteLinkStatus(statusThread!, null), { kind: "clear" }, "threadQuoteLinkStatus: no link, no candidate customer either → still clear");
+
+    // Linked to an inbox draft for a DIFFERENT customer than the candidate → conflict.
+    const madeForOther = await linkThreadToNewQuote("C-r3status-clear", {
+      customerId: "rose-brand", customer: "Rose Brand", locationId: null, contactName: "", quoteType: "system", category: "", owner: "Tester",
+    });
+    assert.ok(madeForOther.ok, "fixture: minted a draft for rose-brand");
+    statusThread = await getDoc<CommThread>("comms", "C-r3status-clear");
+    assert.equal(statusThread?.link?.type, "quote", "fixture: thread now links that draft");
+    const conflictStatus = await threadQuoteLinkStatus(statusThread!, "lakefront");
+    assert.ok(conflictStatus.kind === "conflict" && conflictStatus.link.id === statusThread!.link!.id, "threadQuoteLinkStatus: an inbox draft for a DIFFERENT customer is a conflict, not a reuse");
+
+    // Same thread, candidate customer MATCHES the draft's own customer → reuse.
+    const reuseStatus = await threadQuoteLinkStatus(statusThread!, "rose-brand");
+    assert.ok(reuseStatus.kind === "reuse" && reuseStatus.quoteId === statusThread!.link!.id, "threadQuoteLinkStatus: the SAME customer as the linked draft → reuse");
+
+    // "new customer" mode (candidateCustomerId: null) can never reuse — even
+    // though a customer-picking retry against rose-brand would have reused.
+    assert.equal((await threadQuoteLinkStatus(statusThread!, null)).kind, "conflict", "threadQuoteLinkStatus: no candidate customer (creatingCustomer) never reads as reuse, always conflict when a link exists");
+
+    // A thread linked to a LEAD (never a quote at all) → always conflict,
+    // whatever the candidate customer is — this is the exact "linked-elsewhere"
+    // shape createQuoteIntakeAction now catches before ever calling
+    // saveCustomerAction, so a refusal here strands nothing.
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3status-lead", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: "lakefront", customer: "Lakefront ISD", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Already a lead", channel: "email", status: "waiting_us", assignedTo: "", link: { type: "lead", id: "L-9002", label: "L-9002 · Some Lead" },
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "linked",
+    });
+    const leadThread = await getDoc<CommThread>("comms", "C-r3status-lead");
+    const leadStatus = await threadQuoteLinkStatus(leadThread!, "lakefront");
+    assert.ok(leadStatus.kind === "conflict" && leadStatus.link.type === "lead" && leadStatus.link.id === "L-9002", "threadQuoteLinkStatus: a lead link is always a conflict, matching customer or not");
+  }
+
   // #124 — siteId follows the customer: setThreadSite stamps it, a re-link
   // to the same customer keeps it, a different customer clears it.
   {

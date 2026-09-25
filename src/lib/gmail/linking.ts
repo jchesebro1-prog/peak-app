@@ -81,6 +81,14 @@ export function applyResweepPatch(d: CommThread, next: CommThread): boolean {
   return true;
 }
 
+// I follow-up review — matchesFilter/resweepThreads process a batch of
+// threads that can each belong to a DIFFERENT connected mailbox
+// (t.gmailAccountKey varies per thread), so there's no single selfEmail to
+// pass; resolving one per thread here would turn a two-query bulk sweep
+// into an extra connection lookup per candidate. Left on the domain-only
+// fallback (INTERNAL_DOMAIN in inbox-identity.ts already catches the common
+// @peaksystemsgroup.com case); setIdentityMessage above, which acts on ONE
+// thread, does look up that thread's own mailbox address.
 function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): boolean {
   if (!f) return true;
   const e = resolveAddressFor(t); // #125 — the picked identity message, else the counterpart
@@ -276,6 +284,41 @@ export type LinkThreadToNewQuoteResult =
    *  without an explicit confirm (opts.confirmReplace). */
   | { ok: false; reason: "linked-elsewhere"; link: CommLink };
 
+export type ThreadQuoteLinkStatus =
+  | { kind: "clear" }
+  | { kind: "reuse"; quoteId: string; name: string }
+  | { kind: "conflict"; link: CommLink };
+
+/** I4 follow-up review — whether minting a new quote for `customerId` on a
+ *  thread would reuse an already-linked inbox draft, conflict with a
+ *  different existing link, or be free to proceed. Exported so
+ *  createQuoteIntakeAction can check this BEFORE saving any customer/venue/
+ *  contact (it used to run only inside linkThreadToNewQuote, by which point
+ *  saveCustomerAction had already run — a refusal stranded a newly-created
+ *  customer, and "Create another" minted a second one on retry). `customerId
+ *  null` (no customer picked/created yet, e.g. mid "new customer" flow)
+ *  can never match an existing draft, so it always reads as "conflict" when
+ *  the thread has any link at all — never a false "reuse". */
+export async function threadQuoteLinkStatus(
+  t: Pick<CommThread, "link">,
+  customerId: string | null
+): Promise<ThreadQuoteLinkStatus> {
+  if (!t.link) return { kind: "clear" };
+  if (t.link.type === "quote" && customerId) {
+    const { get: getQuoteDoc } = await import("@/lib/stores/quotes");
+    const existingQuote = await getQuoteDoc(t.link.id);
+    if (
+      existingQuote &&
+      existingQuote.source === "inbox" &&
+      existingQuote.status === "draft" &&
+      existingQuote.customerId === customerId
+    ) {
+      return { kind: "reuse", quoteId: existingQuote.id, name: existingQuote.name };
+    }
+  }
+  return { kind: "conflict", link: t.link };
+}
+
 /** #123 — "+ New quote" from a thread. The guided intake's builders only
  *  mint a quote on their first save (createQuoteIntakeAction just redirects
  *  into one), so this mints the draft directly to have an id to link: the
@@ -308,22 +351,15 @@ export async function linkThreadToNewQuote(
   const t = await getThread(threadId);
   if (!t) return { ok: false, reason: "not-found" };
 
-  const { get: getQuoteDoc, create: createQuote } = await import("@/lib/stores/quotes");
-  if (t.link?.type === "quote") {
-    const existingQuote = await getQuoteDoc(t.link.id);
-    if (
-      existingQuote &&
-      existingQuote.source === "inbox" &&
-      existingQuote.status === "draft" &&
-      existingQuote.customerId === input.customerId
-    ) {
-      return { ok: true, quoteId: existingQuote.id, name: existingQuote.name, reused: true };
-    }
+  const status = await threadQuoteLinkStatus(t, input.customerId);
+  if (status.kind === "reuse") {
+    return { ok: true, quoteId: status.quoteId, name: status.name, reused: true };
   }
-  if (t.link && !opts.confirmReplace) {
-    return { ok: false, reason: "linked-elsewhere", link: t.link };
+  if (status.kind === "conflict" && !opts.confirmReplace) {
+    return { ok: false, reason: "linked-elsewhere", link: status.link };
   }
 
+  const { create: createQuote } = await import("@/lib/stores/quotes");
   const contact = input.contactName.trim()
     ? { name: input.contactName.trim(), role: input.contactRole || "", email: input.contactEmail || "" }
     : null;
@@ -397,7 +433,17 @@ export async function setIdentityMessage(
   const id =
     messageId && (t.messages || []).some((m) => m.id === messageId) ? messageId : null;
   const probe: CommThread = { ...t, identityMessageId: id, suggestionDismissed: false };
-  const address = resolveAddressFor(probe);
+  // I follow-up review — this thread's own mailbox address, so picking an
+  // outbound message as the identity source skips a self-CC on its To
+  // instead of resolving to our own address. One thread, one lookup — cheap
+  // here, unlike the bulk resweepThreads/matchesFilter below (see their
+  // own comment for why they stay domain-only).
+  let selfEmail: string | undefined;
+  if (t.gmailAccountKey) {
+    const { getConnectionInfo } = await import("./connections");
+    selfEmail = (await getConnectionInfo(t.gmailAccountKey))?.address;
+  }
+  const address = resolveAddressFor(probe, selfEmail);
   const next: CommThread = { ...probe };
   await applyResolution(
     next,

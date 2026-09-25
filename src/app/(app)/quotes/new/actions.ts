@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { get as getThread, visibleTo } from "@/lib/stores/comms";
-import { linkThreadToNewQuote } from "@/lib/gmail/linking";
+import { linkThreadToNewQuote, threadQuoteLinkStatus } from "@/lib/gmail/linking";
 import { quoteEditPath, quoteServiceType, sameBuilder } from "./handoff";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
@@ -24,6 +24,7 @@ function linkedRecordHref(link: { type: string; id: string }): string {
   if (link.type === "survey") return `/venue-assessments?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
   if (link.type === "project") return `/projects`;
+  if (link.type === "flame_job") return `/flame-tests/results?job=${id}`;
   return "#";
 }
 
@@ -84,6 +85,32 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
   const pickedCustomerId = (input.customerId || "").trim();
   if (!creatingCustomer && !pickedCustomerId) {
     return { ok: false, error: "Pick a customer, or add a new one." };
+  }
+
+  // I4 follow-up review — checked here, BEFORE saveCustomerAction runs
+  // below: a thread already linked to something else used to only get
+  // caught by linkThreadToNewQuote's own check, by which point a brand-new
+  // customer/venue/contact had already been saved — a refusal stranded it,
+  // and "Create another" minted a second one on retry. A new customer
+  // (creatingCustomer) can never be the SAME customer an existing inbox
+  // draft already belongs to, so it never reads as a reusable "same
+  // customer" match here — only as a conflict, same as any other type of
+  // existing link. linkThreadToNewQuote re-checks this at mint time too
+  // (the authoritative check — this is purely to fail BEFORE any write).
+  if (threadId && thread) {
+    const candidateCustomerId = creatingCustomer ? null : pickedCustomerId || null;
+    const preStatus = await threadQuoteLinkStatus(thread, candidateCustomerId);
+    if (preStatus.kind === "conflict" && !input.confirmReplaceLink) {
+      return {
+        ok: false,
+        linkedElsewhere: {
+          type: preStatus.link.type,
+          id: preStatus.link.id,
+          label: preStatus.link.label || preStatus.link.id,
+          href: linkedRecordHref(preStatus.link),
+        },
+      };
+    }
   }
 
   const existing = !creatingCustomer ? await getCustomer(pickedCustomerId) : null;

@@ -710,8 +710,12 @@ export default async function InboxPage({
       : null;
     // #125 — the address that drives linking: the picked identity message's,
     // else the counterpart (same rule resolveCustomerId / resweep use).
-    const identity = identityAddressFor(sel);
-    const senderEmailLc = resolveAddressFor(sel);
+    // I follow-up review — myAddress (resolved above, the same
+    // best-known-address chain the box header uses) as selfEmail: an
+    // outbound identity message's first recipient skips a self-CC to this
+    // mailbox instead of reading it as the thread's counterpart.
+    const identity = identityAddressFor(sel, myAddress);
+    const senderEmailLc = resolveAddressFor(sel, myAddress);
     const senderDomain = domainOf(senderEmailLc);
     const senderIsPublicDomain = !senderDomain || isPublicDomain(senderDomain);
     // One query, only when a customer is linked and the domain is claimable

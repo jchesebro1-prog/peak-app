@@ -1681,6 +1681,12 @@ export async function resolveCustomerId(
   if (!t) return null;
   if (t.customerId) return t.customerId;
   // #125 — the picked identity message's address, else the counterpart.
+  // I follow-up review — no selfEmail here: this store-level helper has no
+  // "current user"/mailbox in hand (it's called from many contexts, some
+  // read-only render paths with no connection lookup budget), and comms.ts
+  // deliberately never imports gmail/connections — keeping the domain-only
+  // fallback (INTERNAL_DOMAIN) rather than adding a Gmail-account query to
+  // every call site of what is otherwise a plain data-store function.
   const { resolveAddressFor } = await import("@/lib/inbox-identity");
   const email = resolveAddressFor(t);
   if (!email) return null;

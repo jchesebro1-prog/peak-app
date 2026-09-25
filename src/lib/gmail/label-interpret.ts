@@ -179,7 +179,12 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           // one is set, else the thread contact; a Peak/Customers label
           // applied on a multi-party or forwarded thread must remember the
           // SAME address the sidebar is showing, not always the counterpart.
-          const identityEmail = resolveAddressFor(t);
+          // selfEmail = this mailbox's own connected address (`conn`,
+          // already fetched above for the modify-scope check) — the I
+          // follow-up review: firstRecipient skips it on an outbound
+          // identity message so a self-CC never gets remembered as the
+          // customer's own contact address.
+          const identityEmail = resolveAddressFor(t, conn?.address);
           if (identityEmail) {
             await rememberAddress(c.id, identityEmail, t.contactName, null, {
               id: userIdOfKey(key) || "u1",
@@ -202,7 +207,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           {
             org: t.customer || t.contactName,
             contact: t.contactName,
-            email: resolveAddressFor(t),
+            email: resolveAddressFor(t, conn?.address),
             source: "manual",
             message: t.subject,
             customerId: t.customerId,
