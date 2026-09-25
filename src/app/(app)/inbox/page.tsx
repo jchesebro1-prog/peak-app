@@ -478,7 +478,7 @@ export default async function InboxPage({
     const cat = categoryMeta(t.category);
     // #128 — drafts keep the "To: …" line as their name (rowName's "last
     // responder ignoring me" makes no sense on a message that hasn't sent).
-    const who = isDrafts ? null : rowName(t, me);
+    const who = isDrafts ? null : rowName(t);
     return {
       id: t.id,
       unread,

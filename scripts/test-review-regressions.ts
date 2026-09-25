@@ -2177,6 +2177,49 @@ async function main() {
     assert.equal(await signatureFor("Nobody Here"), "", "#127 no row → empty signature");
   }
 
+  // #128 review (I3) — sendDraft threads `me` through to the sent message's
+  // author instead of always stamping DEFAULT_USER, and rowName() (pure,
+  // already covered by test:specs) reads the result by DIRECTION so a
+  // mismatched Gmail display name on the outbound message still reads as me.
+  {
+    const { sendDraft, get: getThreadDoc, DEFAULT_USER } = await import("@/lib/stores/comms");
+    const { rowName } = await import("@/lib/inbox-rows");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3senddraft", mailbox: "personal", mailboxUser: "Sarah Ops", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Draft to send", channel: "email", status: "draft", assignedTo: "", link: null,
+      draft: { to: "brenda.t96@lakefront.k12.mn.us", subject: "Draft to send", body: "Hi Brenda" },
+      messages: [{ id: "m1", at: r3now - 1000, direction: "in", channel: "email", author: "Brenda Gauchel", body: "hello", fromEmail: "brenda.t96@lakefront.k12.mn.us" }],
+      createdAt: r3now, updatedAt: r3now,
+    });
+    await sendDraft("C-r3senddraft", "Sarah Ops");
+    let r3t = await getThreadDoc("C-r3senddraft");
+    const r3sent = (r3t?.messages || []).at(-1);
+    assert.equal(r3sent?.author, "Sarah Ops", "#128 review: sendDraft(id, me) stamps the real sender, not the DEFAULT_USER fallback");
+
+    // No `me` passed — still falls back to DEFAULT_USER (existing behaviour,
+    // not a regression: every real caller passes the signed-in user's name).
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3senddraft2", mailbox: "personal", mailboxUser: DEFAULT_USER, unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Draft to send 2", channel: "email", status: "draft", assignedTo: "", link: null,
+      draft: { to: "brenda.t96@lakefront.k12.mn.us", subject: "Draft to send 2", body: "Hi again" },
+      messages: [], createdAt: r3now, updatedAt: r3now,
+    });
+    await sendDraft("C-r3senddraft2");
+    r3t = await getThreadDoc("C-r3senddraft2");
+    assert.equal((r3t?.messages || []).at(-1)?.author, DEFAULT_USER, "#128 review: sendDraft with no `me` still falls back to DEFAULT_USER");
+
+    // The Gmail bridge can stamp an outbound message's author with whatever
+    // display name the account had at send time — rowName must still read it
+    // as "me" via direction, not by matching that name against anything.
+    r3t = await getThreadDoc("C-r3senddraft");
+    const r3row = rowName(r3t!);
+    assert.equal(r3row.primary, "Brenda Gauchel", "#128 review: the sent reply (author 'Sarah Ops') doesn't become primary — the inbound message still does, since the outbound one is me by direction");
+    assert.equal(r3row.secondary, "Brenda, me (2)", "#128 review: …and collapses into the 'me' chain slot regardless of its stamped author name");
+  }
+
   console.log("review regression checks passed");
 }
 

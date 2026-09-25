@@ -9329,22 +9329,27 @@ import {
     ({ id, at, direction, channel: "email", author, body: "" });
   const T = (messages: CommMessage[]) => ({ messages, contactName: "Brenda Gauchel", customer: "Lakefront ISD" });
   const me = "Jeff Chesebro";
-  const r3a = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", me)]), me);
+  const r3a = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", me)]));
   ok(r3a.primary === "Brenda Gauchel" && r3a.secondary === "Brenda, me (2)", "rowName: my reply is ignored — Brenda stays primary; chain 'Brenda, me (2)'");
-  const r3b = rowName(T([M("1", 1, "out", me)]), me);
+  const r3b = rowName(T([M("1", 1, "out", me)]));
   ok(r3b.primary === "Brenda Gauchel" && r3b.secondary === "me", "rowName: all mine → counterpart, chain 'me'");
-  const r3c = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "in", "Chris Hale"), M("3", 3, "out", me)]), me);
+  const r3c = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "in", "Chris Hale"), M("3", 3, "out", me)]));
   ok(r3c.primary === "Chris Hale" && r3c.secondary === "Brenda, Chris, me (3)", "rowName: newest non-me author wins; chain in first-seen order");
-  const r3d = rowName(T([M("2", 5, "in", "Late Reply"), M("1", 1, "in", "Early Bird")]), me);
+  const r3d = rowName(T([M("2", 5, "in", "Late Reply"), M("1", 1, "in", "Early Bird")]));
   ok(r3d.primary === "Late Reply" && r3d.secondary === "Early, Late (2)", "rowName: newest by `at`, not array order");
-  const r3e = rowName(T([M("1", 1, "in", "Brenda Gauchel")]), me);
-  ok(r3e.primary === "Brenda Gauchel" && r3e.secondary === "Brenda", "rowName: single message → no count");
-  const r3f = rowName(T([]), me);
+  const r3e = rowName(T([M("1", 1, "in", "Brenda Gauchel")]));
+  ok(r3e.primary === "Brenda Gauchel" && r3e.secondary === "", "rowName: I3 review — a single author matching the primary name is redundant, hidden");
+  const r3f = rowName(T([]));
   ok(r3f.primary === "Brenda Gauchel" && r3f.secondary === "", "rowName: no messages → counterpart, empty chain");
-  const r3g = rowName({ messages: [], contactName: "", customer: "" }, me);
+  const r3g = rowName({ messages: [], contactName: "", customer: "" });
   ok(r3g.primary === "Customer", "rowName: nothing known → 'Customer'");
-  const r3h = rowName({ messages: [M("1", 1, "out", me)], contactName: "", customer: "Lakefront ISD" }, me);
+  const r3h = rowName({ messages: [M("1", 1, "out", me)], contactName: "", customer: "Lakefront ISD" });
   ok(r3h.primary === "Lakefront ISD", "rowName: counterpart falls back to the customer name");
+  // I3 review — "me" is direction === "out", never a name match: the Inbox
+  // is personal-only (one mailbox per signed-in user), so an outbound
+  // message is me whatever display name Gmail happened to stamp on it.
+  const r3i = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", "Jeff C. (Peak Systems Group)")]));
+  ok(r3i.primary === "Brenda Gauchel" && r3i.secondary === "Brenda, me (2)", "rowName: an outbound message is me by DIRECTION, whatever its stamped author name says");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

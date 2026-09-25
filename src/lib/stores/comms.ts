@@ -1401,7 +1401,10 @@ export async function updateDraft(
 /** Send a draft: promote its fields onto the thread, drop out of Drafts
  *  (status leaves 'draft'), land in Sent via the outbound message — the
  *  prototype's simulated send. Delivery runs through deliverMessage(). */
-export async function sendDraft(id: string): Promise<CommThread | null> {
+/** #128 review (I3) — `me` threads through to addMessage's author, same as
+ *  reply()/logNoteAction/compose(); without it every sent draft stamped
+ *  DEFAULT_USER regardless of who actually sent it. */
+export async function sendDraft(id: string, me?: string): Promise<CommThread | null> {
   const t = await get(id);
   if (!t) return null;
   const d = t.draft || {};
@@ -1417,6 +1420,7 @@ export async function sendDraft(id: string): Promise<CommThread | null> {
     channel: "email",
     body: d.body || "",
     attachments: d.attachments,
+    me,
   });
 }
 
