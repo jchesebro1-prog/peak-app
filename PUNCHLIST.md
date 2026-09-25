@@ -7557,7 +7557,7 @@ pre-existing orphaned flame jobs, repairs, inspections and bookings had no repai
 had zero callers. Each is reattached through `safeSweep` on its owning page **and its scheduling page**, with
 tombstone-aware coverage so the reattachment cannot turn a delete into a resurrection.
 
-## 174. A spawn defect rendered as a governance refusal — DONE 2026-09-24 (D228)
+## 174. A spawn defect rendered as a governance refusal — DONE 2026-09-24 (D230)
 
 `setStatus` throws both for the approval gate and for any defect in the spawn graph, and every caller rendered them
 identically. `ApprovalGateRefused` + `isApprovalGateRefusal` (brand-by-value, not `instanceof`) and one shared
@@ -7566,7 +7566,7 @@ identically. `ApprovalGateRefused` + `isApprovalGateRefusal` (brand-by-value, no
 
 ---
 
-## 175. The flame builder renames a hand-typed quote, in a format its own helper disagrees with — OPEN
+## 177. The flame builder renames a hand-typed quote, in a format its own helper disagrees with — OPEN
 
 **Reported:** 2026-09-24. Verified on `main`.
 
@@ -7581,7 +7581,7 @@ last touched it.
 **Ask:** gate it like `:336`, and have it call `automaticQuoteName()` rather than building its own string. Nothing
 already saved changes.
 
-## 176. Four live `window.confirm()` sites, in an app whose own decision log says it throws silently — OPEN
+## 178. Four live `window.confirm()` sites, in an app whose own decision log says it throws silently — OPEN
 
 **Reported:** 2026-09-24. Verified on `main`.
 
@@ -7607,7 +7607,7 @@ It works in a desktop browser; nobody has checked it in the shells.
 **Ask:** adopt the inline pattern D127 already established in `settings-client.tsx`, or retire the D96 claim from
 the decision log — but the two states should not coexist.
 
-## 177. `redeem: tampered code -> not ok` is a ~1% flake in the spec harness — OPEN
+## 179. `redeem: tampered code -> not ok` is a ~1% flake in the spec harness — OPEN
 
 **Reported:** 2026-09-24. **Measured: 4 failures in 400 iterations.** It fired roughly one run in four across a
 long gate-running session.
@@ -7622,7 +7622,7 @@ that was fixed. A 1% flake re-teaches exactly that habit.
 **Ask:** make the tamper deterministic — flip a byte that is always significant rather than one at the base64url
 boundary.
 
-## 178. The healing sweeps are read-then-insert with no uniqueness on `quoteId` — OPEN
+## 180. The healing sweeps are read-then-insert with no uniqueness on `quoteId` — OPEN
 
 **Reported:** 2026-09-24, raised by D227's own change.
 
@@ -7638,7 +7638,7 @@ transactional to close, reopened narrowly.
 the same guarantee the spawn uses. The eventual fix is probably a one-off backfill plus deleting the sweeps — see
 D227 on why they still exist.
 
-## 179. A refused status advance on a create save lets the Estimator mint a duplicate quote — OPEN
+## 181. A refused status advance on a create save lets the Estimator mint a duplicate quote — OPEN
 
 **Reported:** 2026-09-24. Verified on `main`.
 

@@ -5035,8 +5035,11 @@ registering inside the exited scope is what matters, not where the promise resol
 **Honest scope:** this is preventative. `withTransaction` today exists only in `setStatus`, and nothing in its call
 closure reaches the Gmail path — so the silent dropped label sync was not yet reachable. It becomes reachable the
 first time a comms flow wraps a quote status change, which is exactly the kind of change nobody would think to audit
-for this. **Named behaviour change:** a sync queued inside a unit that later rolls back will now actually run,
-rather than throwing. Better, but different.
+for this. **Named behaviour change:** a sync queued inside a unit that later rolls back will now actually run, rather than
+throwing. Better, but different — and note this is a production-only property. On Neon the detached write takes a
+second pooled connection immediately and is genuinely independent of the unit; on dev PGlite, which serializes the
+whole process behind one connection, it simply waits, so the independence is not observable locally. "It behaved in
+dev" is not evidence about this one.
 
 ## D227. A tombstone is coverage: the healing sweeps stop resurrecting deleted records (#173, 2026-09-24)
 
@@ -5061,11 +5064,16 @@ doc, so a tombstone handed back looks live — collect a `Set` of quote ids, nev
 **This reverses a documented intent.** `flame-jobs.ts` described re-creation after removal as deliberate prototype
 parity. That was written when the sweep ran on a win, not on every dashboard load. The comment is corrected.
 
-**Consequences, stated plainly:** a tombstone is now permanent coverage and there is no undelete UI. Page load is
+**Consequences, stated plainly:** a tombstone is coverage and there is no undelete UI — but it is not quite
+permanent. For `flame_jobs`, `repair_jobs` and `inspections`, `/api/sync/push` writes `deleted: false` on every
+update, so an offline device that edits a record the server has since tombstoned un-deletes it, after which the
+coverage set no longer holds that quote. Narrow, but it is a resurrection path guarded by neither mechanism.
+Projects are actually better protected here, because the dismissed list is a blob and never travels over sync —
+worth saying, since this entry otherwise presents the blob as the weaker legacy shape. Page load is
 serialized behind the sweep on seven screens. And the reattached sweeps are still read-then-insert with no
-uniqueness on `quoteId` — see #178.
+uniqueness on `quoteId` — see #180.
 
-## D228. A policy refusal and a defect no longer look the same (#174, 2026-09-24)
+## D230. A policy refusal and a defect no longer look the same (#174, 2026-09-24)
 
 `setStatus` throws for two unrelated reasons: the approval gate refusing a transition, whose message is written for
 the user, and any defect in the spawn graph, which is not. Every caller rendered both identically, so a `TypeError`
