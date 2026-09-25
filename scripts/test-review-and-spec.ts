@@ -10067,6 +10067,7 @@ seeded()
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   .then(() => deleteRound2AsyncChecks())
+  .then(() => partDocsUploadAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -15696,4 +15697,64 @@ import type { PartDocument as PdDoc, PartDocumentLink as PdLink, PartAccessoryLi
   ok(guessKind("S4LED Guide Spec.pdf") === "specsheet" && guessKind("x-specification.PDF") === "specsheet", "part docs kind: spec/guide/specification → spec sheet");
   ok(guessKind("anything.docx") === "specsheet" && guessKind("anything.DOC") === "specsheet", "part docs kind: Word → spec sheet");
   ok(guessKind("S4LED Datasheet.pdf") === "datasheet", "part docs kind: everything else → datasheet");
+}
+
+/* ======================================================================
+   Part documents (#DOC) — Task 4: magic bytes and the upload check.
+   verifyUploadedBlob runs against fake Blob deps — no token, no network.
+   ====================================================================== */
+import {
+  sniffDocumentType, checkDocumentBytes, contentDisposition, contentTypeForFileName, acceptFor, CONTENT_TYPES,
+} from "@/lib/part-docs/files";
+import { verifyUploadedBlob, displayFileName } from "@/lib/part-docs/verify-upload";
+
+const pdDocBytes = (s: string, pad = 0) => new Uint8Array([...new Array(pad).fill(0x20), ...[...s].map((c) => c.charCodeAt(0))]);
+const pdDocx = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."word/document.xml"].map((c) => c.charCodeAt(0)), 30);
+  return b;
+};
+const pdXlsx = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."xl/workbook.xml"].map((c) => c.charCodeAt(0)), 30);
+  return b;
+};
+const pdOle = () => new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
+
+ok(sniffDocumentType(pdDocBytes("%PDF-1.7\n")) === "pdf", "part docs bytes: %PDF- is a PDF");
+ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 500)) === "pdf", "part docs bytes: %PDF- after leading junk (inside 1 KB) is still a PDF");
+ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 2000)) === null, "part docs bytes: …but not past the first 1 KB");
+ok(sniffDocumentType(pdOle()) === "doc", "part docs bytes: the OLE2 magic is a Word .doc");
+ok(sniffDocumentType(pdDocx()) === "docx", "part docs bytes: a ZIP naming word/ is a .docx");
+ok(sniffDocumentType(pdXlsx()) === null, "part docs bytes: a ZIP that is not Word is refused");
+ok(sniffDocumentType(pdDocBytes("<!DOCTYPE html><html>")) === null, "part docs bytes: an HTML error page is refused");
+const pdCheck = checkDocumentBytes("datasheet", pdDocx());
+ok(!pdCheck.ok && pdCheck.error === "Datasheets must be PDF files.", "part docs bytes: a datasheet slot refuses Word");
+ok(checkDocumentBytes("specsheet", pdDocx()).ok && checkDocumentBytes("specsheet", pdOle()).ok, "part docs bytes: a spec-sheet slot takes Word");
+ok(contentTypeForFileName("A.DOCX") === CONTENT_TYPES.docx && contentTypeForFileName("a.pdf") === "application/pdf", "part docs bytes: content type by name for history files");
+ok(contentDisposition('Ünïcode "x".pdf') === `inline; filename="_n_code _x_.pdf"; filename*=UTF-8''${encodeURIComponent('Ünïcode "x".pdf')}`, "part docs bytes: the disposition carries an ASCII fallback and the UTF-8 name");
+ok(acceptFor("datasheet") === ".pdf,application/pdf" && acceptFor("specsheet").includes(".docx"), "part docs bytes: the file picker accept list follows the slot");
+ok(displayFileName("S4 Datasheet", "pdf") === "S4 Datasheet.pdf" && displayFileName("guide.PDF", "pdf") === "guide.PDF" && displayFileName("guide.pdf", "docx") === "guide.docx", "part docs bytes: the display name ends in the real extension");
+
+async function partDocsUploadAsyncChecks(): Promise<void> {
+  const removed: string[] = [];
+  const fake = (bytes: Uint8Array | null, size = 1000) => ({
+    head: async () => (bytes ? { bytes, size } : null),
+    remove: async (p: string) => { removed.push(p); },
+  });
+  const ID = "PD-abcdef123456";
+  const good = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/ds-Ab12.pdf`, fileName: "ds.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7")));
+  ok(good.ok && good.file.blobKey === `part-docs/${ID}/ds-Ab12.pdf` && good.file.size === 1000 && good.file.contentType === "application/pdf", "part docs upload: a real PDF under its own path is accepted");
+  const foreign = await verifyUploadedBlob({ documentId: ID, blobPathname: "part-docs/PD-000000000000/x.pdf", fileName: "x.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7")));
+  ok(!foreign.ok && removed.length === 0, "part docs upload: another document's pathname is refused without touching it");
+  const missing = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, fake(null));
+  ok(!missing.ok && missing.error.includes("didn't arrive"), "part docs upload: a blob that isn't there is refused");
+  const html = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, fake(pdDocBytes("<html>")));
+  ok(!html.ok && removed.includes(`part-docs/${ID}/x.pdf`), "part docs upload: a file that is not a PDF is refused and its blob deleted");
+  const big = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/big.pdf`, fileName: "big.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7"), 26 * 1024 * 1024));
+  ok(!big.ok && big.error === "That file is over 25 MB.", "part docs upload: over 25 MB is refused");
+  const word = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/g.docx`, fileName: "Guide Spec.docx", kind: "specsheet" }, fake(pdDocx()));
+  ok(word.ok && word.file.contentType === CONTENT_TYPES.docx && word.file.fileName === "Guide Spec.docx", "part docs upload: a Word spec sheet is accepted");
 }

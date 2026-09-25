@@ -36,6 +36,45 @@ export async function putBlob(
   return { url: res.url, pathname: res.pathname };
 }
 
+/**
+ * The first `max` bytes of a private blob, plus its stored size — enough to
+ * sniff what a client-uploaded file really is (part documents, #DOC) without
+ * pulling a 25 MB file through the function. Null when the blob is missing.
+ */
+export async function getBlobHead(
+  pathname: string,
+  max: number
+): Promise<{ bytes: Uint8Array; size: number } | null> {
+  const res = await get(pathname, { access: "private" });
+  if (!res || res.statusCode !== 200 || !res.stream) return null;
+  const reader = res.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
+  }
+  const bytes = new Uint8Array(Math.min(total, max));
+  let at = 0;
+  for (const c of chunks) {
+    const take = Math.min(c.byteLength, bytes.length - at);
+    if (take <= 0) break;
+    bytes.set(c.subarray(0, take), at);
+    at += take;
+  }
+  return { bytes, size: res.blob.size };
+}
+
 /** Stream a private blob's bytes (server-side; the proxy route's engine). */
 export async function getBlobStream(
   pathname: string
