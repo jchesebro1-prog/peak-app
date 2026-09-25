@@ -15551,3 +15551,18 @@ async function gridSymbolLookAsyncChecks(): Promise<void> {
   ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
   ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
 }
+
+/* ======================================================================
+   Part documents (#DOC) — Task 1: document ids and blob paths. Pure.
+   ====================================================================== */
+import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDocFileName } from "@/lib/part-docs/types";
+
+{
+  const id = newDocumentId();
+  ok(/^PD-[0-9a-f]{12}$/.test(id) && isDocumentId(id) && newDocumentId() !== id, "part docs ids: PD- + 12 hex, random");
+  ok(!isDocumentId("PD-../x") && !isDocumentId("Q-2041") && !isDocumentId(null), "part docs ids: anything else is refused");
+  ok(safeDocFileName("ETC S4 / Datasheet (EN).pdf") === "ETC_S4_Datasheet_EN_.pdf" && safeDocFileName("") === "file", "part docs ids: file names are made path-safe");
+  ok(partDocBlobPath("PD-abcdef123456", "a b.pdf") === "part-docs/PD-abcdef123456/a_b.pdf", "part docs ids: the blob path is part-docs/<id>/<file>");
+  ok(blobPathBelongsTo("part-docs/PD-abcdef123456/a_b-Xy12.pdf", "PD-abcdef123456"), "part docs ids: a suffixed pathname under the id belongs to it");
+  ok(!blobPathBelongsTo("part-docs/PD-other123456/a.pdf", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/../x", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/sub/x.pdf", "PD-abcdef123456"), "part docs ids: another document's path, traversal and nesting are refused");
+}
