@@ -1,4 +1,4 @@
-import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import type { CompanyRow } from "@/db/schema";
 import { allCompanies, companyIdTaken, getCompany } from "@/lib/identity/companies";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
@@ -242,6 +242,21 @@ export async function createVendorCompany(name: string): Promise<CompanyRow> {
   if (!co) throw new Error("Vendor company was not created.");
   if (!(await getVendorProfile(id))) await writeProfile(blankProfile(id));
   return co;
+}
+
+/**
+ * Soft delete the vendor PROFILE document (manufacturers/price lists/
+ * discounts/registration/contactRoles) — NOT the vendor's underlying
+ * company row (that's identity/companies.ts's softDeleteCompany, a
+ * separate, already-existing delete). getVendorProfile/vendorProfileFor
+ * already treat a missing doc as "blank" for a vendor with no profile yet,
+ * so this is a well-defined, non-destructive-to-identity reset: the
+ * company, its contacts and sites are untouched, and vendorForManufacturer
+ * (allVendorProfiles → listDocs, tombstones excluded) correctly stops
+ * finding any manufacturer this profile had claimed.
+ */
+export async function removeVendorProfile(id: string): Promise<void> {
+  await softDeleteDoc("vendor_profiles", id);
 }
 
 /** The vendor company for a manufacturer name: an existing VENDOR whose

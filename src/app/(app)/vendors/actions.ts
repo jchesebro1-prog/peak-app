@@ -20,6 +20,7 @@ import {
   isVendorCompany,
   logPriceList,
   releaseManufacturer,
+  removeVendorProfile,
   saveVendorProfile,
   setContactRole,
   vendorCompanyNamed,
@@ -189,6 +190,25 @@ export async function setContactRoleAction(vendorId: string, contactId: string, 
   } catch (err) {
     console.error("setContactRoleAction", err);
     return { ok: false, error: "Couldn't save that contact's role — please try again." };
+  }
+  revalidate();
+  return { ok: true };
+}
+
+/** Overview tab — delete the vendor's profile data (manufacturers claimed,
+ *  price-list ledger, discounts, project registration, contact roles).
+ *  Soft-deletes the profile document only; the vendor's company record,
+ *  contacts and sites are untouched (that delete is
+ *  identity/companies.ts's softDeleteCompany, reached from elsewhere). */
+export async function removeVendorProfileAction(vendorId: string): Promise<R> {
+  await requirePerm("create");
+  const missing = await vendorOr(vendorId);
+  if (missing) return missing;
+  try {
+    await removeVendorProfile(vendorId);
+  } catch (err) {
+    console.error("removeVendorProfileAction", err);
+    return { ok: false, error: "Couldn't delete this vendor's profile — please try again." };
   }
   revalidate();
   return { ok: true };
