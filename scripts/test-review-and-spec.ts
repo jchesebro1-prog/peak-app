@@ -11356,6 +11356,33 @@ async function deletePartAAsyncChecks(): Promise<void> {
     await Quotes.remove(id);
     ok((await Quotes.get(id)) === null, "delete/quotes: remove() — get() returns null");
     ok(!(await Quotes.getAll()).some((q) => q.id === id), "delete/quotes: remove() — getAll() no longer lists it");
+
+    // Coordinator review: a quote deleted while a builder still has it open
+    // must not come back on the next autosave/save. update()/setStatus()
+    // both read via getDoc() first, which already excludes a soft-deleted
+    // row (db/doc-store.ts:71), so patchDoc's read-then-write sees "no
+    // record" and performs NO write at all — not even a re-deleted no-op.
+    // Every service builder's "Save" (flame-tests/repairs/inspections/
+    // rentals/estimator actions.ts) calls update(), never create(), once it
+    // has a loaded id, so this is the one seam that matters.
+    const patched = await Quotes.update(id, { name: "should never resurrect" });
+    ok(patched === null, "delete/quotes: update() on a deleted quote is a no-op (returns null)");
+    ok((await Quotes.get(id)) === null, "delete/quotes: update() on a deleted quote does not resurrect it");
+    let statusThrew: unknown = null;
+    try {
+      await Quotes.setStatus(id, "sent", "Test Harness");
+    } catch (e) {
+      statusThrew = e;
+    }
+    ok(statusThrew === null, "delete/quotes: setStatus() on a deleted quote does not throw");
+    ok((await Quotes.get(id)) === null, "delete/quotes: setStatus() on a deleted quote does not resurrect it");
+
+    // The Change-type flow's retireReplacedDraft() only ever soft-deletes
+    // (never create()/upsert()s), and itself reads via get() — so retiring
+    // an already-deleted draft is a safe, idempotent no-op too.
+    const retired = await Quotes.retireReplacedDraft(id);
+    ok(retired === false, "delete/quotes: retireReplacedDraft() on an already-deleted draft is a no-op (returns false)");
+    ok((await Quotes.get(id)) === null, "delete/quotes: retireReplacedDraft() does not resurrect a deleted quote");
   }
 
   // --- tasks ------------------------------------------------------------
