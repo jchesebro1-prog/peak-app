@@ -278,6 +278,14 @@ if (process.env.DATABASE_URL) {
       "  env -u DATABASE_URL npm run test:specs"
   );
 }
+import {
+  parseOutline,
+  stripLabel,
+  outlineToText,
+  fillSlots,
+  substitutePlaceholders,
+  MAX_OUTLINE_DEPTH,
+} from "@/lib/specs/outline";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -12495,4 +12503,81 @@ async function deletePartBAsyncChecks(): Promise<void> {
     await removeRecording(rec.id);
     ok(await getRecordingDelB(rec.id) === null, "DELB recording: the deleted recording is gone from reads");
   }
+}
+
+/* --- specs: outline --- */
+{
+  const a = parseOutline("Top one\n  Sub one\n  Sub two\nTop two");
+  ok(a.lines.length === 4, "outline: four lines");
+  ok(a.lines[0].label === "A." && a.lines[0].depth === 0, "outline: article top level is A.");
+  ok(a.lines[1].label === "1." && a.lines[1].depth === 1, "outline: two spaces is one level, labelled 1.");
+  ok(a.lines[2].label === "2.", "outline: siblings increment");
+  ok(a.lines[3].label === "B." && a.lines[3].depth === 0, "outline: returning to the top level continues A., B.");
+  ok(a.warnings.length === 0, "outline: a four-level-shallow body warns about nothing");
+
+  const e = parseOutline("Top one\n  Sub one", "entry");
+  ok(e.lines[0].label === "1." && e.lines[0].depth === 1, "outline: a product entry's top level prints 1., not A.");
+  ok(e.lines[1].label === "a.", "outline: the entry's second level prints a.");
+
+  const tab = parseOutline("Top\n\tSub");
+  ok(tab.lines[1].depth === 1, "outline: a tab counts as one level");
+
+  const reset = parseOutline("One\n  a\n  b\nTwo\n  c");
+  ok(reset.lines[4].label === "1.", "outline: a deeper counter resets under a new parent");
+
+  ok(stripLabel("A. Basis of Design") === "Basis of Design", "outline: strips an A. label");
+  ok(stripLabel("1) Amperage") === "Amperage", "outline: strips a 1) label");
+  ok(stripLabel("(a) Colour") === "Colour", "outline: strips a parenthesised label");
+  ok(stripLabel("1.1 Section Includes") === "1.1 Section Includes", "outline: 1.1 is an article number, not a label");
+  ok(stripLabel("110V supply") === "110V supply", "outline: leaves ordinary text alone");
+
+  const blank = parseOutline("One\n\n\n  Two\n   \n");
+  ok(blank.lines.length === 2, "outline: blank and whitespace-only lines are ignored");
+
+  const deep = parseOutline("1\n  2\n    3\n      4\n        5\n          6");
+  ok(deep.lines.length === 6, "outline: every line still prints when clamped");
+  ok(deep.lines[5].depth === MAX_OUTLINE_DEPTH - 1, "outline: depth beyond the fifth level clamps to the fifth");
+  ok(deep.warnings.some((w) => w.includes("deeper")), "outline: clamping raises a warning");
+
+  const jump = parseOutline("One\n      Way too deep");
+  ok(jump.lines[1].depth === 1, "outline: a level jump of more than one is pulled back to one");
+
+  ok(
+    outlineToText(parseOutline("One\n  Two").lines, "  ") === "A. One\n  1. Two",
+    "outline: outlineToText indents by depth"
+  );
+
+  ok(
+    fillSlots("{{material}} in {{color}}", { material: "22oz velour", color: "Black" }) === "22oz velour in Black",
+    "outline: fillSlots replaces known slots"
+  );
+  ok(fillSlots("{{unknown}}", { a: "b" }) === "{{unknown}}", "outline: fillSlots leaves unknown slots for the placeholder pass");
+
+  const solo = substitutePlaceholders("Acceptable manufacturers:\n  {{manufacturers}}", {
+    manufacturers: ["ETC", "Chauvet"],
+  });
+  ok(
+    solo.text === "Acceptable manufacturers:\n    ETC\n    Chauvet",
+    "outline: a placeholder alone on a line expands one item per line, one level deeper"
+  );
+  ok(solo.warnings.length === 0, "outline: a filled list warns about nothing");
+
+  const inline = substitutePlaceholders("Approved: {{manufacturers}}.", { manufacturers: ["ETC", "Chauvet"] });
+  ok(inline.text === "Approved: ETC, Chauvet.", "outline: an inline list placeholder joins with commas");
+
+  const scalar = substitutePlaceholders("Section {{section.number}} — {{section.title}}", {
+    section: { number: "11 61 23", title: "Stage Curtains" },
+  });
+  ok(scalar.text === "Section 11 61 23 — Stage Curtains", "outline: scalar placeholders substitute");
+
+  const unknown = substitutePlaceholders("See {{project.architect}}", {});
+  ok(unknown.text === "See {{project.architect}}", "outline: an unknown placeholder prints literally");
+  ok(unknown.warnings.some((w) => w.includes("project.architect")), "outline: an unknown placeholder warns by name");
+
+  const empty = substitutePlaceholders("Manufacturers:\n  {{manufacturers}}", { manufacturers: [] });
+  ok(empty.text === "Manufacturers:", "outline: an empty list placeholder drops its own line");
+  ok(empty.warnings.length === 1, "outline: an empty list placeholder warns once");
+
+  const dupes = substitutePlaceholders("{{nope}} and {{nope}}", {});
+  ok(dupes.warnings.length === 1, "outline: repeated identical warnings are reported once");
 }

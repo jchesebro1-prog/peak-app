@@ -89,6 +89,9 @@ export const equipmentLocations = docTable("equipment_locations"); // Rentals mo
 export const equipmentBookings = docTable("equipment_bookings"); // Rentals module — booking/reservation records against equipment items (D129, Task 2)
 export const recordings = docTable("recordings"); // in-app site-visit audio → Krisp transcription → write-back (docs/superpowers/specs/2026-09-21-krisp-recordings-design.md §1.1; migration 0021)
 export const vendorProfiles = docTable("vendor_profiles"); // Vendors module (#122) — one profile per vendor company, id = company id; migration 0024_vendor_profiles
+export const specArticles = docTable("spec_articles"); // Specs module (D161) — Part 2 category articles: manufacturers + the "A. General" clause; migration 0025_spec_library
+export const specTemplates = docTable("spec_templates"); // Specs module (D161) — per-category authoring formulas (headings + guidance + a worked example); migration 0025_spec_library
+export const specCurtainTemplates = docTable("spec_curtain_templates"); // Specs module (D161) — one document per Grid curtain type; migration 0025_spec_library
 
 export const DOC_TABLES = {
   quotes,
@@ -120,6 +123,9 @@ export const DOC_TABLES = {
   equipment_bookings: equipmentBookings,
   recordings,
   vendor_profiles: vendorProfiles,
+  spec_articles: specArticles,
+  spec_templates: specTemplates,
+  spec_curtain_templates: specCurtainTemplates,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;
