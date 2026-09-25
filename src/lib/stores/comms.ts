@@ -290,6 +290,10 @@ export type CommThread = {
    *  (add/remove) for this thread. Echo-suppression stamp; unset until the
    *  first successful sync. */
   peakLabelsAppliedAt?: number;
+  /** #124 — the linked venue: a CustomerLocation.id (directory id) of the
+   *  linked customer. Cleared whenever customerId changes to a different
+   *  customer (linkThread / applyResweepPatch / Peak label removal). */
+  siteId?: string | null;
 };
 
 function mid(n: number): string {

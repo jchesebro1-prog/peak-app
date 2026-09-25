@@ -9241,6 +9241,11 @@ import {
     "newQuoteHref: every prefill, thread last"
   );
   ok(newQuoteHref({ threadId: "C-1032", customerId: null, contactName: "" }) === "/quotes/new?thread=C-1032", "newQuoteHref: unlinked thread carries only thread=");
+  ok(
+    newQuoteHref({ threadId: "C-1032", customerId: "lakefront", contactName: "Brenda Gauchel", siteId: "loc1" }) ===
+      "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&venue=loc1&thread=C-1032",
+    "newQuoteHref: #124 a linked venue rides along as venue="
+  );
   ok(quoteNameFromSubject("Re: Fwd: Curtain quote for the PAC") === "Curtain quote for the PAC", "quoteNameFromSubject strips Re:/Fwd: prefixes");
   ok(quoteNameFromSubject("RE: re: FW: hello") === "hello", "quoteNameFromSubject strips repeated prefixes case-insensitively");
   ok(quoteNameFromSubject("") === "Untitled estimate" && quoteNameFromSubject("(no subject)") === "Untitled estimate", "quoteNameFromSubject falls back");

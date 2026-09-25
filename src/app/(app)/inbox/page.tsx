@@ -728,6 +728,18 @@ export default async function InboxPage({
         ).length
       : 0;
     const senderEmailLc = (sel.contactEmail || "").trim().toLowerCase();
+    // #124 — the linked customer's venues: value = CustomerLocation.id, the
+    // id the quote intake's locationId uses.
+    const siteOptions: Opt[] = (linkedCustomer?.locations || [])
+      .filter((l) => !!l.id)
+      .map((l) => ({
+        value: l.id as string,
+        label: [l.label || "Venue", [l.city, l.state].filter(Boolean).join(", ")]
+          .filter(Boolean)
+          .join(" — "),
+      }));
+    const siteId =
+      sel.siteId && siteOptions.some((o) => o.value === sel.siteId) ? sel.siteId : null;
     const customerCard: ReaderVM["customerCard"] = linkedCustomer
       ? {
           id: linkedCustomer.id,
@@ -830,6 +842,8 @@ export default async function InboxPage({
         : null,
       candidates: resolution === "ambiguous" ? candidates : [],
       customerCard,
+      siteId,
+      siteOptions,
       customerOptions: customers
         .map((c) => ({ value: c.id, label: c.name }))
         .sort((a, b) => a.label.localeCompare(b.label)),

@@ -69,6 +69,8 @@ export function applyResweepPatch(d: CommThread, next: CommThread): boolean {
   if (d.customerId && d.resolution === "linked") return false;
   // Fresh doc has a customer the snapshot didn't — never downgrade.
   if (d.customerId && !next.customerId) return false;
+  // #124 — a venue belongs to one customer; a different customer drops it.
+  if (d.customerId !== next.customerId) d.siteId = null;
   d.customerId = next.customerId;
   d.customer = next.customer;
   d.resolvedContactId = next.resolvedContactId ?? null;
@@ -233,6 +235,8 @@ export async function linkThread(
 ): Promise<void> {
   const name = await customerNameFor(customerId);
   await patchDoc<CommThread>("comms", threadId, (d) => {
+    // #124 — a venue belongs to one customer; a different customer drops it.
+    if (d.customerId !== customerId) d.siteId = null;
     d.customerId = customerId;
     d.customer = name;
     d.resolvedContactId = contactId ?? d.resolvedContactId ?? null;
@@ -284,4 +288,15 @@ export async function linkThreadToNewQuote(
   if (!t.customerId) await linkThread(threadId, input.customerId, t.resolvedContactId ?? null);
   await setLink(threadId, { type: "quote", id: q.id, label: `${q.id} · ${q.name}` });
   return { quoteId: q.id, name: q.name };
+}
+
+/** #124 — stamp (or clear) the thread's venue. Validation (the site belongs
+ *  to the linked customer) is the action's job; this is the store write. */
+export async function setThreadSite(
+  threadId: string,
+  siteId: string | null
+): Promise<CommThread | null> {
+  return patchDoc<CommThread>("comms", threadId, (d) => {
+    d.siteId = siteId || null;
+  });
 }

@@ -10,7 +10,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
-import { get as getThread } from "@/lib/stores/comms";
+import { get as getThread, resolveCustomerId, visibleTo } from "@/lib/stores/comms";
 import type { CommThread } from "@/lib/stores/comms";
 import { get as getCustomer, contactsForId } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
@@ -20,7 +20,7 @@ import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
 import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
-import { linkThread, rememberAddress, resweepThreads } from "@/lib/gmail/linking";
+import { linkThread, rememberAddress, resweepThreads, setThreadSite } from "@/lib/gmail/linking";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -171,17 +171,24 @@ export async function quickAddContactAction(input: {
 /** Link sidebar's "new venue" quick-add — appends a location to the
  *  customer through the SAME path the Companies screen and guided quote
  *  intake use (saveCustomerAction), never the legacy name-keyed
- *  setLocations blob. */
+ *  setLocations blob. Returns the new site's directory id; with `threadId`
+ *  (the Venue card's "+ New venue", #124) it also links that venue to the
+ *  thread, adopting the customer first if the thread had none stored. */
 export async function quickAddVenueAction(input: {
   customerId: string;
   label: string;
   city: string;
   state: string;
-}): Promise<R> {
-  await requireUser();
+  threadId?: string;
+}): Promise<{ ok: true; siteId: string | null } | { ok: false; error: string }> {
+  const me = await requireUser();
   const existing = await getCustomer(input.customerId);
   if (!existing) return { ok: false, error: "Customer not found." };
+  const thread = input.threadId ? await getThread(input.threadId) : null;
+  if (input.threadId && (!thread || !visibleTo(thread, me.name)))
+    return { ok: false, error: "Thread not found." };
 
+  const beforeIds = new Set((existing.locations || []).map((l) => l.id).filter(Boolean));
   const locations: LocationInput[] = (existing.locations || []).map(toLocationInput);
   locations.push({
     label: (input.label || "").trim() || "Venue",
@@ -208,6 +215,36 @@ export async function quickAddVenueAction(input: {
     contacts,
   });
   if (!res.ok) return { ok: false, error: "Couldn't save that venue." };
+
+  const after = await getCustomer(existing.id);
+  const added = (after?.locations || []).find((l) => !!l.id && !beforeIds.has(l.id));
+  const siteId = added?.id || null;
+  if (thread && siteId) {
+    if (!thread.customerId) await linkThread(thread.id, existing.id, thread.resolvedContactId ?? null);
+    await setThreadSite(thread.id, siteId);
+  }
+  revalidate();
+  return { ok: true, siteId };
+}
+
+/** #124 — Venue card: stamp (or clear) the thread's venue. The venue must
+ *  be one of the linked customer's own locations; a thread that only
+ *  resolved read-time (needsAdopt) adopts the customer first so siteId
+ *  never exists without a stored customerId. */
+export async function setThreadSiteAction(threadId: string, siteId: string | null): Promise<R> {
+  const me = await requireUser();
+  const t = await getThread(threadId);
+  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const customerId = t.customerId || (await resolveCustomerId(t));
+  if (!customerId) return { ok: false, error: "Link a customer first." };
+  const clean = (siteId || "").trim() || null;
+  if (clean) {
+    const c = await getCustomer(customerId);
+    if (!(c?.locations || []).some((l) => l.id === clean))
+      return { ok: false, error: "That venue isn't on this customer." };
+  }
+  if (!t.customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
+  await setThreadSite(threadId, clean);
   revalidate();
   return { ok: true };
 }

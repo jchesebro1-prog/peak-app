@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * #96 §2 / #123 — the reader's link sidebar. The thread's work link
- * (WorkLinkCard) renders first — the primary Inbox action is attaching the
- * thread to an existing quote/survey/project or starting a new quote for
- * it — followed by one card per CRM resolution state (linked / suggested /
- * ambiguous / unknown) and a quick-add card for contacts + venues once a
- * customer is in play.
+ * #96 §2 / #123 / #124 — the reader's link sidebar, top to bottom:
+ *   1. Work     — WorkLinkCard (#123): link chip + picker + "+ New quote"
+ *   2. Customer — one card per resolution state (linked / suggested /
+ *                 ambiguous / unknown), unchanged from #96
+ *   3. Venue    — (#124) only once linked: the customer's venues + quick-add
+ *   4. Quick add — contacts + venues once a customer is in play
  *
  * Everything here is display + server-action calls on a server-built
  * ReaderVM: no fetching, no env, no store imports.
@@ -24,6 +24,7 @@ import {
   releaseDomainAction,
   quickAddCustomerAction,
   quickAddVenueAction,
+  setThreadSiteAction,
 } from "./link-actions";
 import WorkLinkCard from "./work-link-card";
 import { ACCENT_BTN, BODY, BTN, CARD, CHECK_ROW, H, MONO, MUTED, PRIMARY, SELECT } from "./sidebar-styles";
@@ -43,6 +44,8 @@ export default function LinkSidebar({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<"contact" | "venue" | null>(null);
+  // Venue card's "+ New venue…" (separate from the quick-add card's + Venue)
+  const [venueAdding, setVenueAdding] = useState(false);
   // "Wrong customer?" re-pick on the linked card
   const [changing, setChanging] = useState(false);
   // customer picker value on the unknown card ("__new" opens the quick-add)
@@ -277,6 +280,70 @@ export default function LinkSidebar({
                   false
                 )}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- venue (#124) — only once a customer is linked ---- */}
+      {vm.resolution === "linked" && vm.customerCard && (
+        <div style={CARD}>
+          <div style={H}>Venue</div>
+          <select
+            value={venueAdding ? "__new" : vm.siteId || ""}
+            disabled={pending}
+            onChange={(e) => {
+              const v = e.target.value;
+              setError(null);
+              if (v === "__new") {
+                setVenueAdding(true);
+                return;
+              }
+              setVenueAdding(false);
+              run(() => setThreadSiteAction(vm.id, v || null));
+            }}
+            style={SELECT}
+          >
+            <option value="">No venue</option>
+            {vm.siteOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+            <option value="__new">+ New venue…</option>
+          </select>
+          {venueAdding && (
+            <div style={{ marginTop: 8 }}>
+              <EntityQuickAdd
+                kind="venue"
+                value={newVenue}
+                onChange={setNewVenue}
+                submitting={pending}
+                error={error}
+                onCancel={() => {
+                  setVenueAdding(false);
+                  setError(null);
+                }}
+                onSubmit={() =>
+                  run(
+                    () =>
+                      quickAddVenueAction({
+                        customerId: vm.customerCard!.id,
+                        ...newVenue,
+                        threadId: vm.id,
+                      }),
+                    () => {
+                      setVenueAdding(false);
+                      setNewVenue({ label: "", city: "", state: "" });
+                    }
+                  )
+                }
+              />
+            </div>
+          )}
+          {vm.siteId && !venueAdding && (
+            <div style={{ ...MUTED, marginTop: 6 }}>
+              Quotes started from this thread carry this venue.
             </div>
           )}
         </div>
@@ -561,7 +628,7 @@ export default function LinkSidebar({
       )}
 
       {/* EntityQuickAdd renders the error inside an open form — don't repeat it */}
-      {error && !adding && pickId !== "__new" && (
+      {error && !adding && !venueAdding && pickId !== "__new" && (
         <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>
       )}
     </aside>

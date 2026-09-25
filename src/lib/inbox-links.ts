@@ -14,18 +14,22 @@ export const LINK_TYPE_OPTIONS: Array<{ value: LinkWorkType; label: string }> = 
   { value: "project", label: "Project" },
 ];
 
-/** /quotes/new pre-filled from a thread (customer/contact reuse the same
- *  ?customer=/?contact= params the intake's own hand-off already reads —
- *  see quotes/new/handoff.ts readHandoff); the intake mints the draft quote,
- *  links the thread to it and returns to /inbox?thread= (quotes/new/actions.ts). */
+/** /quotes/new pre-filled from a thread (customer/contact/venue reuse the
+ *  same ?customer=/?contact=/?venue= params the intake's own hand-off
+ *  already reads — see quotes/new/handoff.ts readHandoff); the intake mints
+ *  the draft quote, links the thread to it and returns to /inbox?thread=
+ *  (quotes/new/actions.ts). */
 export function newQuoteHref(p: {
   threadId: string;
   customerId: string | null;
   contactName: string;
+  /** #124 — the thread's linked venue, if any. */
+  siteId?: string | null;
 }): string {
   const qs = new URLSearchParams();
   if (p.customerId) qs.set("customer", p.customerId);
   if (p.contactName) qs.set("contact", p.contactName);
+  if (p.siteId) qs.set("venue", p.siteId);
   qs.set("thread", p.threadId);
   return "/quotes/new?" + qs.toString();
 }

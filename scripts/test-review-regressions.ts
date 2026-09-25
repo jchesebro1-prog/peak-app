@@ -2029,6 +2029,28 @@ async function main() {
     );
   }
 
+  // #124 — siteId follows the customer: setThreadSite stamps it, a re-link
+  // to the same customer keeps it, a different customer clears it.
+  {
+    const { setThreadSite } = await import("@/lib/gmail/linking");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3site", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: "lakefront", customer: "Lakefront ISD", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Venue", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "linked",
+    });
+    await setThreadSite("C-r3site", "loc1");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, "loc1", "#124 setThreadSite stamps siteId");
+    await linkThread("C-r3site", "lakefront");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, "loc1", "#124 re-linking the same customer keeps the venue");
+    await linkThread("C-r3site", "rose-brand");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, null, "#124 linking a different customer clears the venue");
+    await setThreadSite("C-r3site", "loc2");
+    await setThreadSite("C-r3site", null);
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, null, "#124 setThreadSite(null) clears");
+  }
+
   console.log("review regression checks passed");
 }
 

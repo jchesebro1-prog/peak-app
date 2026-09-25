@@ -223,6 +223,12 @@ export type ReaderVM = {
     /** the customer's contact whose email matches the sender, "" if none */
     contactName: string;
   } | null;
+  /** #124 — the thread's linked venue (a CustomerLocation.id of the linked
+   *  customer; null when it isn't among siteOptions any more, e.g. removed
+   *  from the customer, or the customer changed). */
+  siteId: string | null;
+  /** #124 — the linked customer's venues, for the sidebar's Venue select. */
+  siteOptions: Opt[];
   /** every customer, for the pickers */
   customerOptions: Opt[];
   /** #122 — the same companies split into "Customers" / "Vendors" optgroups

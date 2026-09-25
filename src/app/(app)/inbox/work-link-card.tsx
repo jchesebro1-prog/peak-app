@@ -55,6 +55,7 @@ export default function WorkLinkCard({ vm }: { vm: ReaderVM }) {
         threadId: vm.id,
         customerId: vm.resolvedCustomerId,
         contactName: vm.customerCard?.contactName || "",
+        siteId: vm.siteId,
       })
     );
 

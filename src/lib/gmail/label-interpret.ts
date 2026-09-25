@@ -235,6 +235,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           d.customerId = null;
           d.customer = "";
           d.resolution = "unknown";
+          d.siteId = null; // #124 — no customer, no venue
         });
         applied++;
       }
