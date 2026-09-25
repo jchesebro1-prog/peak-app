@@ -2152,7 +2152,7 @@ ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === tru
 
 /* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
  *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
-import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit } from "@/lib/dashboard/metrics";
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast } from "@/lib/dashboard/metrics";
 const metricsProjects = [
   { kind: "project", stage: "scheduled" },
   { kind: "project", stage: "deposit" },
@@ -2185,6 +2185,34 @@ const uknProfit = projectedProfit(uknProjects);
 ok(uknProfit.value === 500, `#UKN: projectedProfit's open-book value ignores the unknown project's stray $900 (got ${uknProfit.value})`);
 ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is margin × the known value only (got ${uknProfit.profit})`);
 ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-value project in its book");
+
+// installsForecast's toBill/collected sums (#189) — "To be billed" and
+// "Expected collected" already exclude UKN records via knownValue; the
+// widgets need a count of what's being excluded so a mostly-unknown horizon
+// doesn't read as a small real number.
+const nowT189 = Date.now();
+const f189 = installsForecast(
+  [
+    { kind: "project", stage: "deposit", value: 1000, margin: 0.3, targetDate: nowT189 + 10 * DAY },
+    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: 0.3, targetDate: nowT189 + 20 * DAY },
+  ] as unknown as Parameters<typeof installsForecast>[0],
+  [],
+  nowT189,
+  12
+);
+ok(f189.toBill === 1000, `#189: toBill sums only the known-value project landing in the horizon (got ${f189.toBill})`);
+ok(f189.toBillUnknownCount === 1, "#189: toBillUnknownCount counts the UKN project the to-be-billed sum is silently excluding");
+const f189collected = installsForecast(
+  [
+    { kind: "project", stage: "deposit", value: 800, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+  ] as unknown as Parameters<typeof installsForecast>[0],
+  [],
+  nowT189,
+  12
+);
+ok(f189collected.collected === 800, `#189: collected sums only the known-value project (got ${f189collected.collected})`);
+ok(f189collected.collectedUnknownCount === 1, "#189: collectedUnknownCount counts the UKN project the expected-collected sum is silently excluding");
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });
@@ -8225,6 +8253,10 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok(c.soldLinked === 1 && c.soldNewProject === 1, "daylite commit: preview — one won quote links the Deerfield install, one (Big Foot) will create its project");
   ok(c.valued === 2 && c.ukn === 4, "daylite commit: preview — 2 valued jobs, 4 UKN");
   ok(c.needsPick === 2 && pv.needsPick.some((r) => r.id === ids.dfd), "daylite commit: preview — the Deerfield install (and its opp) need a company pick");
+  ok(
+    pv.needsPick.every((r) => r.companiesRaw === "Camosy Construction, Deerfield School District"),
+    "#190: every needs-a-pick preview row carries the raw Daylite Companies cell next to its candidates, not just the matched names"
+  );
   const dfdRow = pv.rows.find((r) => r.id === ids.dfd)!;
   ok(dfdRow.company === "Deerfield School District", "daylite commit: the pick pre-fills the first non-contractor company, not Camosy (General Contractor)");
   ok(!dfdRow.flags.some((f) => f.startsWith("contact not on file")), "daylite commit: Pat Doe matches the seeded contact at the default company");
@@ -8359,6 +8391,88 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok((await ProjStore.getProject(zz.del)) === null, "daylite commit: the deleted project stays deleted");
   const oldQ = await QuoteStore.get(zz.oldQ);
   ok(!!oldQ && oldQ.owner === "" && oldQ.legacyOwner === "Old Timer" && oldQ.status === "draft" && oldQ.stage === "design" && oldQ.value === 2000, "daylite commit: a single-write quote keeps an unmatched owner unassigned (no Jeff default) + legacyOwner");
+}
+
+/**
+ * ============ #188: repair job value editor (DB) ============
+ *
+ * Repair jobs had no value editor, so an imported repair's UKN couldn't be
+ * filled in (mirrors setProjectValue, D240).
+ */
+async function repairValueEditorAsyncChecks(): Promise<void> {
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+
+  const uknRpId = fixtureId(188, "ukn-repair");
+  await createFixture("repair_jobs", Repairs.buildRepairJob(uknRpId, {
+    customer: "TEST188 UKN Repair", value: 900, valueUnknown: true,
+  }, Date.now()));
+  const uknRp = await Repairs.get(uknRpId);
+  ok(!!uknRp && uknRp.valueUnknown === true && knownValue(uknRp) === 0, "#188: a repair created with valueUnknown starts flagged, and knownValue ignores its stray $900");
+  const filledRp = await Repairs.setRepairValue(uknRpId, 4200);
+  ok(filledRp?.value === 4200, "#188: setRepairValue saves the new value");
+  ok(filledRp?.valueUnknown === false, "#188: setRepairValue clears valueUnknown");
+  ok(knownValue(filledRp!) === 4200, "#188: knownValue now counts the filled-in repair at its real value");
+}
+
+/**
+ * ============ #192: a live-but-lapsed Daylite import reads as history for
+ * warranty follow-ups ============
+ *
+ * A Daylite service call that's still *New* there (imported LIVE — ordinary
+ * open work) can still land at a completed/invoiced Daylite stage (Service
+ * Completed / Invoice Sent) with an old End Date, because writeRepair sets
+ * `completedAt` off the mapped app stage, not the Daylite Status. Before this
+ * fix it read as an already-lapsed warranty and flooded the follow-up
+ * worklist with fifteen-year-old Daylite bookkeeping. Owner decision: treat
+ * it as history too, once the warranty has actually run out — never for a
+ * genuinely recent completion, and never for an ordinary (non-Daylite)
+ * completed repair, whose expired warranty is real and must keep showing.
+ */
+async function warrantyLapsedLiveAsyncChecks(): Promise<void> {
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+
+  const DAY = 86400000;
+  const tenYearsAgo = Date.now() - 10 * 365 * DAY;
+  const lastMonth = Date.now() - 20 * DAY;
+
+  // ---- pure predicate, no DB ----
+  const liveOld = { source: Repairs.dayliteImportSource(false), stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+  const liveRecent = { source: Repairs.dayliteImportSource(false), stage: "completed" as const, completedAt: lastMonth, warrantyMonths: 12 };
+  const liveScheduled = { source: Repairs.dayliteImportSource(false), stage: "scheduled" as const, completedAt: null, warrantyMonths: 12 };
+  const doneOld = { source: Repairs.dayliteImportSource(true), stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+  const ordinaryOld = { source: { kind: "direct" as const, label: "Created directly" }, stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+
+  ok(Repairs.isLapsedLiveImport(liveOld), "#192: a live Daylite import at Completed whose warranty has fully run out reads as a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(liveRecent), "#192: a live Daylite import whose warranty hasn't run out yet is NOT a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(liveScheduled), "#192: a live Daylite import that isn't at Completed is never a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(doneOld), "#192: a done-in-Daylite import is isImportedHistory's case, not isLapsedLiveImport's");
+  ok(!Repairs.isLapsedLiveImport(ordinaryOld), "#192: an ordinary (non-Daylite) old completed repair is never flagged — its expired warranty is real, not import noise");
+
+  ok(Repairs.excludedFromWarrantyFollowUps(liveOld), "#192: excludedFromWarrantyFollowUps covers the lapsed-live case");
+  ok(Repairs.excludedFromWarrantyFollowUps(doneOld), "#192: excludedFromWarrantyFollowUps still covers the #187 done-history case");
+  ok(!Repairs.excludedFromWarrantyFollowUps(liveRecent), "#192: excludedFromWarrantyFollowUps leaves a genuinely recent live completion alone");
+  ok(!Repairs.excludedFromWarrantyFollowUps(ordinaryOld), "#192: excludedFromWarrantyFollowUps never hides a real (non-Daylite) expired warranty");
+
+  // ---- integration: the worklist itself (DB) ----
+  const lapsedId = fixtureId(192, "lapsed-live");
+  const okId = fixtureId(192, "ordinary-lapsed");
+  const t = Date.now();
+  await createFixture("repair_jobs", Repairs.buildRepairJob(lapsedId, {
+    customer: "TEST192 Lapsed Live", stage: "completed", completedAt: tenYearsAgo, warrantyMonths: 12,
+    source: Repairs.dayliteImportSource(false),
+  }, t));
+  await createFixture("repair_jobs", Repairs.buildRepairJob(okId, {
+    customer: "TEST192 Ordinary Lapsed", stage: "completed", completedAt: tenYearsAgo, warrantyMonths: 12,
+    source: { kind: "direct", label: "Created directly" },
+  }, t));
+
+  const all = await Repairs.warrantyFollowUps();
+  const due = await Repairs.warrantyFollowUps({ dueOnly: true });
+  ok(!all.some((r) => r.id === lapsedId) && !due.some((r) => r.id === lapsedId), "#192: a live-but-lapsed Daylite import stays out of the warranty follow-up worklist");
+  ok(all.some((r) => r.id === okId) && due.some((r) => r.id === okId), "#192: an ordinary completed repair with the same lapsed warranty still shows up — the fix targets the Daylite artifact, not old warranties in general");
+  ok((await Repairs.getAll()).some((r) => r.id === lapsedId && r.stage === "completed"), "#192: the excluded record still counts as a completed repair everywhere else");
 }
 
 /* ============ Task 12: chunked Daylite commit == one full commit (DB) ============ */
@@ -9330,6 +9444,8 @@ seeded()
   .then(() => quotesPipelineAsyncChecks())
   .then(() => moveStageRecordsAsyncChecks())
   .then(() => dayliteCommitAsyncChecks())
+  .then(() => repairValueEditorAsyncChecks())
+  .then(() => warrantyLapsedLiveAsyncChecks())
   .then(() => dayliteChunkAsyncChecks())
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
@@ -11367,6 +11483,10 @@ ok(
   ok(svc.stage === "scheduled" && !svc.done && svc.value === null, "daylite: live service call → scheduled repair, UKN");
   const dfd = plan.projects.find((p) => p.name.startsWith("DEERFIELD"))!;
   ok(dfd.stage === "installation" && dfd.companyCandidates.length === 2, "daylite: live install stage + two company candidates");
+  ok(
+    dfd.companiesCellRaw === "Camosy Construction, Deerfield School District",
+    "#190: companiesCellRaw is the Companies cell verbatim, not just the names matched out of it"
+  );
   ok(plan.skipped.projects["Cancelled"] === 1, "daylite: cancelled skipped, filed under skipped.projects");
   ok(plan.skipped.opportunities["Lost"] === 1, "daylite: a Lost opp is skipped, filed under skipped.opportunities");
   const bf = plan.quotes.find((q) => q.name.startsWith("BIG FOOT"))!;

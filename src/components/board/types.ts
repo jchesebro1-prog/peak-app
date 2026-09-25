@@ -20,6 +20,11 @@ export type BoardCardVM = {
   sub: string;
   value: number;
   valueLabel: string;
+  /** True when `value` is 0 because the underlying job value is UKN (#189)
+   *  — lets the column total say how many of its cards it's hiding, rather
+   *  than reading like a small real number. Undefined on card sources with
+   *  no UKN concept (leads/opportunities). */
+  valueUnknown?: boolean;
   /** Pill chips under the sub line (follow-up warning, source badge, Won/Lost…). */
   chips: ChipVM[];
   /** border-left strip color; undefined = transparent. */

@@ -99,6 +99,10 @@ export default function BoardView({
         {columns.map((col) => {
           const colCards = cards.filter((c) => colOf(c) === col.key);
           const val = colCards.reduce((s, c) => s + (c.value || 0), 0);
+          // #189 — a column total already excludes UKN cards from `val` (they
+          // contribute 0); say how many so a column of mostly-unknown value
+          // doesn't read as a small real number.
+          const valUnknown = colCards.filter((c) => c.valueUnknown).length;
           return (
             <div
               key={col.key}
@@ -122,6 +126,7 @@ export default function BoardView({
               </div>
               <div style={{ padding: "0 13px 6px", fontFamily: "var(--font-mono)", fontSize: 10, color: "#aab0bb" }}>
                 {val > 0 ? shortMoneyZero(val) : "—"}
+                {valUnknown > 0 ? ` · ${valUnknown} with unknown value` : ""}
               </div>
               <div
                 className="lv-col"
