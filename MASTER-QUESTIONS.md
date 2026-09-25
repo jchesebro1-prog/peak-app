@@ -425,6 +425,18 @@ follows the sync-architecture spec.
   server yet). ✦ fine; live push (SSE) can come with Gmail/Phase 7
   ☐ want instant office↔field updates sooner: ______
 
+## O. Daylite pipelines + history import (built 2026-09-24, #187)
+
+Install projects and system quotes now run on Daylite-named pipelines you can
+edit in Settings → Pipelines (D236–D239), and `/import/daylite` brings in the
+project and opportunity history (D241–D242).
+
+- **O1.** Does the **BID SPEC** pipeline have a stage before **Collect
+  Information**? The Daylite export numbers Create BID as "3", which suggests
+  one. ✦ no — Collect Information is first ☐ yes, it is called: ______ (it
+  would be added as a Draft stage; you can also add it yourself in Settings →
+  Pipelines)
+
 ---
 
 *Answered items get moved into DECISIONS.md with a date. This form

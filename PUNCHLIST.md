@@ -7820,3 +7820,79 @@ Only class names changed, plus a compact inline size where the dead `pk-btn-sm` 
 - **Not checked in the browser:** the site-visit modal. It needs a connected Gmail to open, and its change is the same one-class swap.
 
 **Gates:** tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors (same as origin/main at b1c375e).
+
+---
+
+## 187. Daylite pipelines + project history import — DONE 2026-09-24 (D236-D243)
+
+**Reported:** 2026-09-24 (Jeff): get completed and live project history out of Daylite, and make the app's stages the
+Daylite stages the team already works in. Spec: `docs/superpowers/specs/2026-09-24-daylite-pipelines-and-history-import-design.md`;
+plan: `docs/superpowers/plans/2026-09-24-daylite-pipelines-and-history-import.md`; branch `feat/daylite-pipelines`.
+
+**Done.**
+- **Pipelines (D236-D239).** Install projects run Deposit/PO received → Equipment ordered → Initial contact →
+  Scheduled → Installation → Invoice → Complete; orders run their own four stages; system quotes run Estimate/Design
+  or BID SPEC and stop at Won. Code reasons only about a fixed tag per stage, so **Settings → Pipelines** can rename,
+  add, reorder, retag and remove stages (in-use guard + *Move records*). Sign-off moves a job to Invoice; Complete is
+  manual. Board, detail tracker, Schedule, Field Work, Home and the estimator stage bar all render from the pipeline.
+  Old stage keys convert at read time and on sync push.
+- **UKN (D240).** An unknown job value shows UKN, stays out of every total, and has a *Value unknown* filter; the
+  project detail can now edit the contract value.
+- **Daylite history import (D241-D242)** at `/import/daylite`: preview, company pickers, chunked idempotent confirm.
+  Service calls → Repairs, Custom Cables → orders, won opportunities fill values, open opportunities → quotes; no
+  spawn, no tasks. It supersedes the July script's projects, leads and combined-name company stubs (untouched records
+  only, soft delete). The July script now imports identity only.
+- Dates outside the current year now show the year ("Closed Sep 14, 2012").
+
+**Real-file run** (copy of the dev DB): preview 19 s; 2,132 created, 0 errors, 27.4 s end to end (1,675 July leads
+and 215 junk companies retired); re-run 2,126 already imported; 2 warranty follow-ups.
+
+**Gates** (after merging origin/main at 9a9bedc): tsc 0 errors, `test:specs` 2481 PASS / 0 FAIL, `test:smoke` 118/118
+ALL PASSED, eslint on the 58 changed .ts/.tsx files 0 errors / 46 warnings (the same files on origin/main: 0 errors /
+44 warnings).
+
+**Jeff's step:** run the import on production — upload both TSVs, review the preview, Confirm (#191).
+Open question: MASTER-QUESTIONS O1 (a BID SPEC stage before Collect Information?).
+
+---
+
+## 188. Repairs have no value editor, so an imported repair's UKN can't be filled in — OPEN
+
+**Found while building #187 (D240).** Projects gained a contract-value editor that clears UKN on save; repair jobs
+carry `valueUnknown` too but have no editor, so ~865 imported service calls stay UKN until one exists. Add a value
+field to the repair detail that writes `value` and clears `valueUnknown`, mirroring the project editor.
+
+---
+
+## 189. "· N with unknown value" is not on every total — OPEN
+
+**Found while building #187 (D240).** Totals skip UKN records, but only some say how many they skipped. The
+Projects board column totals and the to-be-billed total show a figure with no "· N with unknown value" suffix, so a
+column of mostly-UKN history reads as a small real number. Add the suffix wherever a job-value sum renders.
+
+---
+
+## 190. The Daylite import's needs-pick table should show the raw Daylite cell — OPEN
+
+**Found while building #187.** A row whose company cell names several companies gets a picker listing the
+candidate companies, but not the cell Daylite actually held, so Jeff has to guess what the original said. Show the
+raw Companies cell next to the picker.
+
+---
+
+## 191. Time the Daylite import on production during Jeff's first real run — OPEN
+
+**Found while building #187.** The real-file run was measured on a local PGlite copy (27.4 s end to end). Production
+is Neon over the network, one write per record, in 150-row chunks under a 300 s function limit. Watch the first real
+run's chunk timings (Vercel logs); if a chunk nears the limit, lower the client chunk size in
+`src/app/(app)/import/daylite/daylite-client.tsx`.
+
+---
+
+## 192. Live repairs at a completed stage with an old End Date show as lapsed warranties — OPEN
+
+**Found while building #187 (D241).** A Daylite service call that is still *New* but sits at Service Completed /
+Invoice Sent imports as a live `completed` repair with its old End Date. The import keeps live rows on live
+semantics (only done-in-Daylite repairs are excluded from warranty follow-ups), so these can land on the warranty
+follow-up worklist as already lapsed. Decide with Jeff: flag them in the preview, exclude them as history, or leave
+them for the team to close out.

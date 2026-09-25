@@ -1,9 +1,11 @@
 # Daylite pipelines + project history import — design
 
 - **Date:** 2026-09-24
-- **Status:** design approved in conversation with Jeff; awaiting written-spec review
+- **Status:** **Implemented** on `feat/daylite-pipelines` (`428ddaa`…`9da377e`, merged
+  with origin/main at `bbf3256`, then `523a052` year-on-dates and `42258be` July script
+  identity-only). Punch **#187**; decisions **D236–D243**; follow-ups #188–#192.
 - **Branch / worktree:** `feat/daylite-pipelines` · `../peak-app-worktree-daylite-pipelines`
-- **Numbers:** punch # and D-numbers are assigned at landing time, recomputed from
+- **Numbers:** punch # and D-numbers were assigned at landing time, recomputed from
   `origin/main` immediately before the docs commit (sessions collide within the hour).
 - **Source files (Jeff, Dropbox):** `Projects - all.tsv` (2,218 rows),
   `Opportunties - All.tsv` (sic, 2,042 rows), `Calendar Events.tsv` (2,288 rows, **not
@@ -166,7 +168,9 @@ downstream changes.
   current stage's tag is lower. Lost clears nothing — the stage stays where the deal died
   (useful history); the pill shows "Lost".
 - Moving between two stages with the same tag (First Contact → Design) is a plain stage
-  write with a history entry — no status change.
+  write — no status change. *As built:* it writes **no** quote history entry (quote
+  history is the status log); and a stored stage whose tag disagrees with the status is
+  snapped to the status on read (D238).
 - Lead → quote conversion creates the quote at `firstStage` of `estimate-design`.
 
 ### 3.5 Settings UI
@@ -217,16 +221,19 @@ written until **Confirm**. Runs in production under Jeff's login — no env pull
 All classification/mapping is a pure module (`src/lib/daylite/history.ts`) so the spec
 harness covers it and the dry run uses the same code.
 
-**Idempotence.** Ids are deterministic via `scripts/daylite-ids.ts` (D180 — the single
-source of truth; the hub imports it, no second copy): projects `projectId(name, company)`
+**Idempotence.** Ids are deterministic via `src/lib/daylite/ids.ts` (D180 — the single
+source of truth, moved from `scripts/daylite-ids.ts`, which now re-exports it; the hub
+and the July script both import it, no second copy): projects `projectId(name, company)`
 (`P-dl-…`, the id the July script already used), plus new `repairId` (`RP-dl-…`, matching the store's `RP-4000` prefix) and
-`quoteId` (`Q-dl-…`) helpers added to that module. A re-run finds existing ids and skips
+`quoteId` (`Q-dl-…`) helpers added to that module — a deviation from the `RP-4000` /
+`Q-2041` id formats, logged in D241. A re-run finds existing ids and skips
 them (reported as "already imported"). Every record carries
 `source: { system: "daylite", importedAt }`.
 
 **Supersedes** the Projects.csv / Opportunities.csv branches of
 `scripts/import-daylite.ts` (opps → leads, projects → procurement). Those branches are
-removed so two mappings can't drift; the script keeps identity (companies/people) only.
+removed (`42258be`) so two mappings can't drift; the script keeps identity
+(companies/venues/people) only and points at `/import/daylite`.
 
 ### 4.2 Projects file
 
@@ -262,7 +269,7 @@ already exists as a job; the deposit step belonged to the opportunity.)
 
 | State | Handling |
 |---|---|
-| Won | **Value source only.** Matched to a project on norm(name)+norm(company); the project gets `value` and `valueUnknown: false`. (303 matches.) Unmatched Won opps are not imported. |
+| Won | **Value source only.** Matched to a project on norm(name)+norm(company), punctuation ignored; the project gets `value` and `valueUnknown: false`. (303 matches.) Unmatched Won opps are not imported. |
 | Open (73) | System quote `Q-dl-…`, value from Value, `pipelineId` by Pipeline (Estimate/Design → `estimate-design`, BID SPEC → `bid-spec`, blank → `estimate-design`), no line items, note "Imported from Daylite". |
 | Lost, Suspended, Abandoned | Skipped. |
 
@@ -307,8 +314,9 @@ Daylite path must not, since it creates/links projects explicitly.
 Counts per bucket (done installs, live installs, done/live service, orders, open quotes,
 won-and-linked, skipped by reason, already imported), valued vs UKN, unmatched and
 blank companies, the multi-company pickers, and live rows listed individually (≈130) so
-Jeff can eyeball them. Confirm writes; a result panel links to Projects / Repairs / Quotes
-filtered to `source: daylite`.
+Jeff can eyeball them. Confirm writes in 150-row chunks; a result panel links to
+Projects / Repairs / Quotes. *As built:* the links are plain `/projects` etc. — there is
+no source filter (D243).
 
 ### 4.6 Superseding the July import
 
@@ -350,6 +358,9 @@ Rules (code: `src/lib/daylite/history-commit.ts`, `src/lib/daylite/july-cleanup.
   any doc table (nor settings/blobs) references it or its base venue. Kept ones are
   listed with the reason. The reference scan is one query per table for all candidates.
 - July projects no row matches are counted in the preview and never removed.
+- **Real-file run** (copy of the dev DB): preview 19 s; commit 2,132 created / 0 errors in
+  13.8 s; finalize to 27.4 s total (1,675 July leads, 215 junk companies retired); re-run
+  2,126 already imported; warranty follow-ups 2. Logged as D242.
 - **Fix 1 (review):**
   - A service-call row never retires an id another install/order row has as its own id
     (the July script collapsed same-name jobs into one project; the install overwrites it).
@@ -434,4 +445,9 @@ re-run gates.
 - **O1** — does BID SPEC have a stage before Collect Information (export numbers Create BID
   as 3)? If yes, add it as a `draft` stage in the seed; editable later regardless.
 - **O2** — resolved: the July import is in the data; the history import supersedes it —
-  see §4.6.
+  see §4.6 (D242).
+- O1 is asked in MASTER-QUESTIONS §O. Follow-ups found while building (PUNCHLIST):
+  **#188** repairs value editor · **#189** "· N with unknown value" on every total (board
+  columns, to-be-billed) · **#190** needs-pick table should show the raw Daylite cell ·
+  **#191** time the import on production (Neon) during Jeff's first real run · **#192**
+  live repairs at a completed stage with an old End Date show as lapsed warranties.

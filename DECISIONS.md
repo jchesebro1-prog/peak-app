@@ -5185,3 +5185,142 @@ twice against **one** datadir is what surfaced it, and is now the check that pro
 - **Zip gate:** a same-zip hit is trusted over a mismatched city name, but not blindly. If the stated town resolves exactly, the hit must be within 25 mi of it, which guards against a mistyped zip matching the same street name elsewhere. If the town doesn't resolve (a typo), the zip alone decides. A fallback with no city and no zip is never accepted. The Portage County trap (D185) stays closed: city-only rows get no fallbacks.
 - **The town-centre cache now uses the cleaned city on the first lookup too.** `Rome (Sullivan)` and `Wisc. Dells` can resolve their centre for the existing 10-mile postal rule. This is a deliberate small widening of attempt-1 acceptance.
 - **The batch budget is worst-case aware** (`elapsed + 4 × (delay + 5 s) > budget` stops before starting a query; the first query always runs). A killed server action loses its skip list, which is how #166's stall happened.
+
+## D236. Stages are Daylite pipelines of stable ids, and code reasons only about a fixed tag (#187, 2026-09-24)
+
+The hardcoded seven-stage `ProjectStage` list (and `PROJECT_STAGES`/`ORDER_STAGES`/`stagesFor`/`stageIndex`) is gone.
+A **pipeline** is an ordered list of stages; each stage has an `id` (a slug, never shown), a `label` Jeff edits, and
+one fixed **tag** — `backlog | scheduled | onsite | closeout | done` for projects, `draft | sent | won` for quotes.
+Code never compares a stage id or label; it asks the tag (`isDone`, `isOnSite`, `isBacklog`, `isActive`,
+`projectStageMeta`, all in `src/lib/pipelines.ts`, pure). That is what lets Jeff rename, add, remove or reorder
+stages without breaking scheduling, risk flags, Field Work, metrics or reports. Records carry `pipelineId` + `stage`
+and a stamped `stageMeta` for readers that have no pipelines loaded.
+
+**Settings → Pipelines** (admin) edits them: label, reorder, tag, `advanceOnDelivered`, add, remove, and the default
+quote pipeline. The validator refuses a save that breaks the model: unique ids, exactly one `done` stage and it is
+last (projects); a `draft` and a `sent` stage and exactly one `won` stage, last, tags never going backwards (quotes).
+**Stage ids are immutable once saved** — only labels change — because every stored record points at the id. A stage
+that any record sits in **cannot be removed**; the editor shows the count and offers *Move those records to…* first,
+which moves projects through `setProjectStage` (history, checklist and Done hooks, as a drag would). Quotes move
+only between stages that share a tag — a different tag would change the quote's status from Settings, which stays a
+deliberate action taken on the quote. A stored list that fails validation
+falls back to the seeds rather than rendering a broken board. Schedule's colour lookup falls back to the tag colour
+and never throws on an unknown stage.
+
+## D237. The install pipeline is Jeff's seven Daylite stages; sign-off lands at the closeout stage and Complete is manual (#187, 2026-09-24)
+
+Install (`kind: project`): **Deposit/PO received → Equipment ordered → Initial contact → Scheduled → Installation →
+Invoice → Complete** (Jeff, J5 in the spec). Order (`kind: order`): Order materials → Deliveries → Delivered &
+accepted → Complete. A won quote lands at the first stage with an opening history entry, on every path
+(`createProjectFromQuote` and the page-load sweep alike).
+
+- **Deliveries** advance the project only when **all** of them are received and the current stage has
+  `advanceOnDelivered` (Equipment ordered / Deliveries).
+- **Customer sign-off no longer completes the project.** It moves the job to the first `closeout` stage (Invoice /
+  Delivered & accepted) if it is earlier. Complete is set by hand, when paid — as it is in Daylite.
+- **The completion follow-up fires on reaching Done from any path** — manual move, board drag, import mover — through
+  one post-transition hook, not only from the old sign-off→complete branch. Automatic advances expand their stage
+  checklist the same way a manual move does.
+- The `training → trainingAt` stamp is dropped; nothing read it.
+
+## D238. Quotes stop at Won; only system quotes carry a pipeline, and its stage tag is the status (#187, 2026-09-24)
+
+Post-sale steps (down payment, equipment, install, invoice) live on the project, so quote pipelines end at their
+`won` stage. Only **system** quotes (and untyped ones) carry a pipeline — **Estimate/Design** (First Contact, Design,
+Presentation/Delivery, Acceptance) or **BID SPEC** (Collect Information, Create BID, BID Sent, Awarded). Flame test,
+inspection, repair, rental and consulting quotes keep status only.
+
+**The stage's tag is the status, in lock-step both ways.** A stage move whose tag differs runs the real `setStatus`
+— approval gate, history, revision-on-send, the #16 "Install sold" task, spawn — and a gate refusal leaves the stage
+where it was (surfaced through `statusFailureMessage`, D230). Any status write from elsewhere snaps the stage inside
+the same patch: forward to the status's first stage, back to it when the status moves backwards; `lost` leaves the
+stage where the deal died and the pill reads "Lost".
+
+Two readings of the spec were settled here, both deliberately:
+- **Read-time normalization snaps a mismatched stage to the status.** A stored stage whose tag disagrees with the
+  status (an old write, an edited pipeline) is corrected on read to the status's stage — the status is what every
+  other module reads, so it wins.
+- **A same-tag stage move (First Contact → Design) writes no quote history entry.** Quote `history` is the status
+  log that the approval, renewal and reporting code reads; a stage-only move is not a status transition. The spec's
+  wording said "with a history entry"; this deviates from it on purpose.
+
+## D239. Legacy stage keys convert at read time — no SQL migration — and history keeps its old labels (#187, 2026-09-24)
+
+Projects and quotes are JSONB documents with no promoted stage column, so conversion lives in the store normalizers
+and persists on the next save: `procurement`/`delivery` → Equipment ordered (orders: Order materials / Deliveries),
+`scheduled` → Scheduled, `install`/`training` → Installation, `signoff` → Invoice (orders: Delivered & accepted),
+`complete` → Complete, missing/unknown → the first stage. `/api/sync/push` runs the same conversion, so an offline
+Field Work device pushing an old key is converted, not stored raw. A system quote without a pipeline reads as
+Estimate/Design with the stage its status implies.
+
+Existing `stageHistory` entries keep their old keys; a frozen legacy label map renders them ("Crew scheduled",
+"Training"…). Stage checklists are re-keyed to the new ids (procurement + delivery → equipment-ordered, install +
+training → installation, signoff → invoice); a stage Jeff adds later has no checklist. **Known edge, accepted:** task
+rows are never rewritten, so a legacy project re-entering a stage whose coverage key changed can expand that
+checklist once more.
+
+## D240. UKN: an unknown job value is shown as "UKN", never $0, and stays out of every total (#187, 2026-09-24)
+
+`valueUnknown?: boolean` on projects and repair jobs (the stored value stays 0). Every value render goes through
+`formatJobValue`, which prints **UKN**; metrics, dashboard and report sums skip those records. The Projects list gains
+a **Value unknown** filter. The project detail gains a contract-value editor, and saving any value there clears the
+flag. Only the Daylite importer sets it. **Repairs have no value editor yet**, so an imported repair's UKN can't be
+filled from the app (punch #188); the "· N with unknown value" suffix is not yet on every total (#189).
+
+## D241. The Daylite history import: what lands where (#187, 2026-09-24)
+
+An Import-hub card at `/import/daylite` (admin) takes the Projects and/or Opportunities export, previews every row, and
+writes nothing until Confirm. Classification and mapping are pure (`src/lib/daylite/history.ts`); the write is
+`src/lib/daylite/history-commit.ts`.
+
+- **Skipped:** Cancelled, Abandoned and Deferred projects; Lost, Suspended and Abandoned opportunities.
+- **Service calls → Repairs** (Pipeline Service Call/Repair, or blank Pipeline with a Service/Component Repair
+  category). A done one lands `completed` at its End Date and is **excluded from warranty follow-ups**
+  (`isImportedHistory`), so fifteen years of expired warranties don't flood the worklist.
+- **Custom Cables → orders.** Everything else → install projects: Done at Complete with its End Date as the close,
+  New at the mapped Daylite stage.
+- **Won opportunities are a value source only**, matched to a project by name + company with punctuation ignored.
+  **Open opportunities → system quotes** on the pipeline their Pipeline column names; won-stage ones link to (or
+  create) **exactly one project per sold job**.
+- **No automation:** no spawn, no approval gate, no #16 task, no follow-ups; imported quotes are written directly,
+  not through `setStatus`.
+- **Chunked, idempotent commit:** the client posts 150-row chunks (server cap 500) so each fits a serverless time
+  limit; ids are deterministic, a taken id is skipped as "already imported", and a failed chunk is simply retried.
+- **Ids.** `src/lib/daylite/ids.ts` is now the one copy of the name hashing (moved from `scripts/daylite-ids.ts`,
+  which re-exports it). It adds **`RP-dl-…`** and **`Q-dl-…`** — a deviation from the `RP-4000` / `Q-2041` id formats,
+  taken because an import id must be a pure function of the Daylite row to make re-runs idempotent.
+- Owners match current users by exact name; anyone else is kept as `legacyOwner` text so history loads no one's
+  worklist. Company cells naming several companies are split against known names, never on bare commas; an
+  ambiguous row gets a picker.
+
+Real-file run on a copy of the dev DB: 2,132 created in 13.8 s, 27.4 s end to end; a re-run reports 2,126 already
+imported; warranty follow-ups 2.
+
+## D242. The history import supersedes the July import — soft delete only, and only records nobody touched (#187, 2026-09-24)
+
+`scripts/import-daylite.ts` ran in July and wrote 1,784 `P-dl-` projects (service calls and cancelled jobs included,
+all "complete", value 0, no dates), 1,675 `L-dl-` leads and stub companies for combined names like "C.D. Smith
+Construction, Muermann Engineering". Jeff decided (2026-09-24): **replace** the July projects, **retire** the July
+leads, **retire** the junk combined-name companies, all in the same import.
+
+- A **July record** is a live `P-dl-`/`L-dl-` doc with no daylite `source` marker. Only **untouched** ones
+  (`updatedAt − createdAt < 60 s`) are replaced or retired; an edited one is left exactly as it is and listed.
+- **A July record linked to a quote is never retired.** Overwriting one carries its `quoteId` forward, so a split
+  import (Opportunities first, then Projects) still replaces it with full data.
+- Before anything is retired, one batched scan of every doc table (plus settings and blobs) looks for records
+  pointing at it; a hit keeps it, with the reason.
+- **Every decision is checked again inside the UPDATE** (live, no marker, untouched, no `quoteId`); an UPDATE that
+  matches nothing is reported as changed-since and kept.
+- A combined-name company is retired only when it decomposes fully into two or more other live companies and has no
+  contact, no venue but its own base venue, no email domain and no reference anywhere.
+- **Every removal is a soft delete** — recoverable. July projects no row matches are counted, never removed.
+
+The July script now imports identity only (companies, base venues, people); its project and opportunity branches are
+deleted so two mappings can't drift.
+
+## D243. Two small UI deviations from the pipelines spec (#187, 2026-09-24)
+
+- **The company page's project badge shows the full stage label** ("Deposit/PO received"), not a short form: labels
+  are Jeff-editable, and a derived abbreviation of an arbitrary label would be wrong more often than long.
+- **The import result panel links plain `/projects`**, not a list filtered to `source: daylite` as the spec said —
+  the Projects list has no source filter, and adding one only for this panel wasn't worth a new filter axis.

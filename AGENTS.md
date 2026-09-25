@@ -198,6 +198,16 @@ See `.env.example`.
     through the same engine's seam. Remaining is Jeff-gated: real phase-
     weight values, first template-set content, the Drive mailbox backing
     engagement files, and Drive folder naming (PUNCHLIST #145).
+12. ✅ **Daylite pipelines + history import** (#187, D236–D243) — project
+    and system-quote stages are Daylite-named pipelines edited in Settings →
+    Pipelines (`src/lib/pipelines.ts`); code reads a fixed stage **tag**,
+    never a stage id or label. Install runs Deposit/PO received → … →
+    Invoice → Complete (sign-off lands at Invoice, Complete is manual);
+    quotes stop at Won, stage tag = status. Legacy stage keys convert at
+    read time. UKN marks unknown job values. `/import/daylite` imports
+    Daylite project/opportunity history (`src/lib/daylite/`) and
+    supersedes the July script, which now imports identity only.
+    Remaining: Jeff's production run (#191), follow-ups #188–#192, O1.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
