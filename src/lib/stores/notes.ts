@@ -1,5 +1,6 @@
-import { insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, softDeleteDoc } from "@/db/doc-store";
 import type { FileRef } from "@/lib/consulting-files";
+import { can } from "@/lib/team";
 
 /**
  * Notes (#21) — the first REAL note record in the app (the three prior
@@ -60,6 +61,11 @@ export async function allNotes(): Promise<NoteRecord[]> {
   return list.map(normalizeNote).sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 
+export async function getNote(id: string): Promise<NoteRecord | null> {
+  const doc = await getDoc<NoteRecord>("notes", id);
+  return doc ? normalizeNote(doc) : null;
+}
+
 /** The customer feed read — denormalized customerId, one filter. */
 export async function notesForCustomer(customerId: string): Promise<NoteRecord[]> {
   return (await allNotes()).filter((n) => n.customerId === customerId);
@@ -104,4 +110,25 @@ export async function addNoteRecord(
 /** Soft delete (doc-store tombstone). */
 export async function removeNote(id: string): Promise<void> {
   await softDeleteDoc("notes", id);
+}
+
+/**
+ * Who may delete a note — pure, so it's testable without a request context
+ * (requireUser()/requirePerm() throw "headers was called outside a request
+ * scope" outside a real one; the caller, companies/actions.ts's
+ * removeCustomerNoteAction, is the one place this runs against a real
+ * session). A system-authored note (an automated log entry) is never
+ * deletable through this control, no matter who's asking. Otherwise the
+ * note's own author — matched by `by`, the app's name-string convention for
+ * "who did this" (addNoteRecord writes `by: me.name`, same as every other
+ * activity-log actor field) — or anyone with manage_users (team admin).
+ */
+export function canDeleteNote(
+  note: Pick<NoteRecord, "system" | "by">,
+  actor: { name: string; roles: string[] | null | undefined }
+): { ok: true } | { ok: false; error: string } {
+  if (note.system) return { ok: false, error: "System-authored notes can't be deleted." };
+  if (note.by && note.by === actor.name) return { ok: true };
+  if (can("manage_users", actor.roles)) return { ok: true };
+  return { ok: false, error: "You can only delete your own notes." };
 }

@@ -11394,6 +11394,39 @@ async function deletePartAAsyncChecks(): Promise<void> {
       updatedAt: t,
     });
     ok((await Notes.notesForCustomer(customerId)).some((n) => n.id === id), "delete/notes setup: fixture note lists under its customer");
+
+    // canDeleteNote — the pure authorization rule removeCustomerNoteAction
+    // (companies/actions.ts) enforces server-side. Tested directly: the
+    // action itself calls requireUser(), which throws "headers was called
+    // outside a request scope" outside a real request, so it isn't callable
+    // from here (same reasoning as equipment-bookings.ts's
+    // hasCommittedBooking() above and this file's #145 milestone-phase
+    // extraction).
+    const note = await Notes.getNote(id);
+    if (note) {
+      ok(
+        Notes.canDeleteNote(note, { name: "Test Harness", roles: [] }).ok,
+        "delete/notes: canDeleteNote allows the note's own author"
+      );
+      const byOther = Notes.canDeleteNote(note, { name: "Someone Else", roles: [] });
+      ok(!byOther.ok, "delete/notes: canDeleteNote refuses a non-author with no manage_users");
+      ok(
+        !byOther.ok && /your own notes/.test(byOther.error),
+        "delete/notes: the non-author refusal names the rule, not a generic failure"
+      );
+      ok(
+        Notes.canDeleteNote(note, { name: "Someone Else", roles: ["Admin"] }).ok,
+        "delete/notes: canDeleteNote allows a non-author WITH manage_users"
+      );
+      const systemNote = { ...note, system: true };
+      const bySystemAuthor = Notes.canDeleteNote(systemNote, { name: note.by, roles: [] });
+      ok(!bySystemAuthor.ok, "delete/notes: canDeleteNote refuses a system note even for its own \"author\"");
+      const bySystemAdmin = Notes.canDeleteNote(systemNote, { name: "Someone Else", roles: ["Admin"] });
+      ok(!bySystemAdmin.ok, "delete/notes: canDeleteNote refuses a system note even for manage_users");
+    } else {
+      ok(false, "delete/notes setup: fixture note round-trips through getNote()");
+    }
+
     await Notes.removeNote(id);
     ok(!(await Notes.notesForCustomer(customerId)).some((n) => n.id === id), "delete/notes: removeNote() — notesForCustomer() no longer lists it");
   }

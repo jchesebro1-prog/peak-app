@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { remove, upsert } from "@/lib/stores/customers";
-import { addNoteRecord, removeNote } from "@/lib/stores/notes";
+import { addNoteRecord, canDeleteNote, getNote, removeNote } from "@/lib/stores/notes";
 import {
   coordsOf,
   estimate,
@@ -204,10 +204,18 @@ export async function addCustomerNoteAction(customerId: string, text: string) {
 
 /** Delete a user-authored note from the Activity feed (soft delete). The UI
  *  only ever offers this for a note with a deletableNoteId (customer-feed-
- *  rows.ts's noteFeedRows), i.e. never for a system-authored entry. */
+ *  rows.ts's noteFeedRows), i.e. never for a system-authored entry — but
+ *  that's a UI convenience, not the gate: the server re-checks against the
+ *  real record (canDeleteNote, notes.ts) so a stale client or a direct call
+ *  can't delete someone else's note or a system entry. Throws on refusal —
+ *  the ConfirmButton this feeds shows a thrown Error's message inline. */
 export async function removeCustomerNoteAction(customerId: string, noteId: string) {
-  await requireUser();
-  if (!noteId) return { ok: false as const, error: "Nothing to delete." };
+  const me = await requireUser();
+  if (!noteId) throw new Error("Nothing to delete.");
+  const note = await getNote(noteId);
+  if (!note) throw new Error("That note is already gone.");
+  const gate = canDeleteNote(note, { name: me.name, roles: me.roles });
+  if (!gate.ok) throw new Error(gate.error);
   await removeNote(noteId);
   revalidatePath("/companies/" + encodeURIComponent(customerId));
   return { ok: true as const };
