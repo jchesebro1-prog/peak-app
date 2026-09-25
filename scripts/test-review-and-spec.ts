@@ -8957,15 +8957,19 @@ ok(
 \t\t"Sisters of St. Francis Dubuque, IA - BID"\tDone\tInstallation\t"8 • Final Payment Received"\t\t10/21/11\t2/22/12\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
 \tService\t"SERVICE CALL:  Pardeeville Gym - Audio Issues"\tNew\tService Call\t"2 • Service Scheduled"\t\t3/2/26\t\t\t\t\t"Pardeeville Schools"\t"Mike Mundth"\t
 \t\t"DEERFIELD HS - Gym AV BID"\tNew\tBasic Install\t"3 • Installation"\t\t4/1/26\t\t\t\t"Pat Doe"\t"Camosy Construction, Deerfield School District"\t"Isaac Mittlesteadt"\t
-\t\t"Old job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"X"\t"Y"\t`;
+\t\t"Old job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"X"\t"Y"\t
+\t\t"St. John's Luth – Montello"\tNew\tBasic Install\t\t\t5/1/26\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t`;
   const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
 \t\t"Sisters of St. Francis Dubuque, IA - BID"\tWon\t\t\t"$48,200.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
 \tBid\t"BIG FOOT HS WALWORTH - Auditorium AV Upgrades"\tOpen\t\t\t"$84,500.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
-\tDesign\t"AL RINGLING - Lighting"\tOpen\t\t\t"$122,475.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"Al Ringling Theatre"\t"Jeff Chesebro"\t`;
+\tDesign\t"AL RINGLING - Lighting"\tOpen\t\t\t"$122,475.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"Al Ringling Theatre"\t"Jeff Chesebro"\t
+\tBid\t"Random Lost Opp"\tLost\t\t\t"$10,000.00"\tBID SPEC\t"1 • Collect Information"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\t\t"ST JOHNS LUTH  MONTELLO"\tWon\t\t\t"$15,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
+\t\t"St John's Luth. Montello!!"\tWon\t\t\t"$5,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t`;
   const known = new Set(["sisters of st. francis", "pardeeville schools", "camosy construction", "deerfield school district", "big foot high school", "al ringling theatre", "sound devices, llc"]);
   const kn = (n: string) => known.has(n.trim().toLowerCase());
   const rows = parseTsv(P);
-  ok(rows.length === 4 && rows[0]["Name"] === "Sisters of St. Francis Dubuque, IA - BID", "daylite: TSV parse keeps quoted commas");
+  ok(rows.length === 5 && rows[0]["Name"] === "Sisters of St. Francis Dubuque, IA - BID", "daylite: TSV parse keeps quoted commas");
   ok(classifyProject(rows[3]).bucket === "skip" && classifyProject(rows[1]).bucket === "service" && classifyProject(rows[0]).bucket === "install", "daylite: classify");
   ok(stripStage("8 • Final Payment Received") === "final payment received", "daylite: stripStage");
   ok(stripStage("8 – Final Payment Received") === "final payment received" && stripStage("8 — Final Payment Received") === "final payment received", "daylite: en-dash and em-dash normalize the same as a hyphen before lookup");
@@ -8981,17 +8985,25 @@ ok(
   ok(svc.stage === "scheduled" && !svc.done && svc.value === null, "daylite: live service call → scheduled repair, UKN");
   const dfd = plan.projects.find((p) => p.name.startsWith("DEERFIELD"))!;
   ok(dfd.stage === "installation" && dfd.companyCandidates.length === 2, "daylite: live install stage + two company candidates");
-  ok(plan.skipped["Cancelled"] === 1, "daylite: cancelled skipped");
+  ok(plan.skipped.projects["Cancelled"] === 1, "daylite: cancelled skipped, filed under skipped.projects");
+  ok(plan.skipped.opportunities["Lost"] === 1, "daylite: a Lost opp is skipped, filed under skipped.opportunities");
   const bf = plan.quotes.find((q) => q.name.startsWith("BIG FOOT"))!;
   ok(bf.pipelineId === "bid-spec" && bf.stage === "awarded" && bf.status === "won" && bf.projectStage === "deposit" && bf.value === 84500, "daylite: awarded open opp → won quote + project at Deposit");
   const al = plan.quotes.find((q) => q.name.startsWith("AL RINGLING"))!;
   ok(al.pipelineId === "estimate-design" && al.stage === "design" && al.status === "draft", "daylite: design-stage opp → draft quote");
   ok(!plan.quotes.some((q) => q.name.startsWith("Sisters")), "daylite: won opps are value-only, not quotes");
 
+  // Punctuation-blind value matching: "St. John's Luth – Montello" (project) vs
+  // "ST JOHNS LUTH  MONTELLO" / "St John's Luth. Montello!!" (two Won opps,
+  // different values) — same job, same company, retyped three different ways.
+  const sjl = plan.projects.find((p) => p.name.startsWith("St. John"))!;
+  ok(sjl.value === 15000, "daylite: loose punctuation-blind name match finds the Won opp value despite apostrophe/dash/case/spacing differences");
+  ok(plan.stats.valueConflicts === 1, "daylite: two Won opps sharing one loose key count as one value conflict, resolved to the larger value");
+
   // Duplicate name+company rows must not collide silently — the first wins, the rest are counted.
   const dupeRows = parseTsv(P).slice(0, 1).concat(parseTsv(P).slice(0, 1));
   const dupePlan = planHistory({ projects: dupeRows, opportunities: [], knownCompany: kn });
-  ok(dupePlan.projects.length === 1 && dupePlan.skipped["duplicate"] === 1, "daylite: a repeated project row keeps the first plan and counts the rest as duplicate, never a colliding id");
+  ok(dupePlan.projects.length === 1 && dupePlan.skipped.projects["duplicate"] === 1, "daylite: a repeated project row keeps the first plan and counts the rest as duplicate, never a colliding id");
 }
 
 /* ====== #162 the writer (scratch datadir only) ====== */

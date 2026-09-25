@@ -17,7 +17,7 @@
  * §4.2 (Projects file), §4.3 (Opportunities file), §4.4 (Matching).
  */
 
-import { norm, projectId, repairId, quoteId } from "./ids";
+import { projectId, repairId, quoteId } from "./ids";
 
 // ---------------------------------------------------------------------------
 // TSV parsing
@@ -335,18 +335,35 @@ function companyFields(cell: string, knownCompany: (name: string) => boolean): {
   return candidates.length === 0 ? { candidates, raw: (cell || "").trim() } : { candidates };
 }
 
+/**
+ * Punctuation-blind key for Won-opp → project VALUE matching only. Ids stay
+ * on the strict `norm` from ./ids (unchanged) — this loose key exists
+ * because the same job's name is often re-typed with different apostrophes,
+ * dashes, and spacing between the Opportunities and Projects exports (e.g.
+ * "St. John's Luth – Montello" vs "ST JOHNS LUTH  MONTELLO").
+ */
+const looseKey = (s: string): string => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 export function planHistory(input: {
   projects: TsvRow[];
   opportunities: TsvRow[];
   knownCompany: (name: string) => boolean;
-}): { projects: ProjectPlan[]; quotes: QuotePlan[]; skipped: Record<string, number> } {
+}): {
+  projects: ProjectPlan[];
+  quotes: QuotePlan[];
+  skipped: { projects: Record<string, number>; opportunities: Record<string, number> };
+  stats: { valueConflicts: number };
+} {
   const { projects, opportunities, knownCompany } = input;
-  const skipped: Record<string, number> = {};
-  const bump = (k: string) => { skipped[k] = (skipped[k] || 0) + 1; };
-  const seenIds = new Set<string>();
+  const skippedProjects: Record<string, number> = {};
+  const skippedOpportunities: Record<string, number> = {};
+  const bumpProject = (k: string) => { skippedProjects[k] = (skippedProjects[k] || 0) + 1; };
+  const bumpOpportunity = (k: string) => { skippedOpportunities[k] = (skippedOpportunities[k] || 0) + 1; };
+  const seenProjectIds = new Set<string>();
+  const seenQuoteIds = new Set<string>();
 
-  // ---- Opportunities: Won → value index; Open → quotes; else → skipped ----
-  const wonValueIndex = new Map<string, number>();
+  // ---- Opportunities: Won → value index (loose key); Open → quotes; else → skipped ----
+  const wonValuesByKey = new Map<string, number[]>();
   const quotes: QuotePlan[] = [];
 
   for (const o of opportunities) {
@@ -358,17 +375,21 @@ export function planHistory(input: {
     const value = parseMoney(o["Value"] || "");
 
     if (stateLc === "won") {
-      if (value > 0) wonValueIndex.set(`${norm(name)}|${norm(companyForId)}`, value);
+      if (value > 0) {
+        const key = `${looseKey(name)}|${looseKey(companyForId)}`;
+        const arr = wonValuesByKey.get(key);
+        if (arr) arr.push(value); else wonValuesByKey.set(key, [value]);
+      }
       continue; // value source only, never a quote
     }
     if (stateLc !== "open") {
-      bump(state || "Unknown");
+      bumpOpportunity(state || "Unknown");
       continue;
     }
 
     const id = quoteId(name, companyForId);
-    if (seenIds.has(id)) { bump("duplicate"); continue; }
-    seenIds.add(id);
+    if (seenQuoteIds.has(id)) { bumpOpportunity("duplicate"); continue; }
+    seenQuoteIds.add(id);
 
     const resolved = resolveOppStage(o["Pipeline"] || "", o["Stage"] || "");
     const plan: QuotePlan = {
@@ -387,12 +408,22 @@ export function planHistory(input: {
     quotes.push(plan);
   }
 
+  // Resolve the loose-keyed Won values: several opps sharing one loose key
+  // (re-quoted / re-typed over time) take the largest value, counted once
+  // per conflicting key.
+  let valueConflicts = 0;
+  const wonValueIndex = new Map<string, number>();
+  for (const [key, values] of wonValuesByKey) {
+    if (new Set(values).size > 1) valueConflicts++;
+    wonValueIndex.set(key, Math.max(...values));
+  }
+
   // ---- Projects ----
   const projectPlans: ProjectPlan[] = [];
 
   for (const r of projects) {
     const { bucket, reason } = classifyProject(r);
-    if (bucket === "skip") { bump(reason || "Unknown"); continue; }
+    if (bucket === "skip") { bumpProject(reason || "Unknown"); continue; }
 
     const status = (r["Status"] || "").trim();
     const done = status.toLowerCase() === "done";
@@ -402,8 +433,8 @@ export function planHistory(input: {
 
     const kind: ProjectPlan["kind"] = bucket === "service" ? "repair" : bucket === "order" ? "order" : "project";
     const id = kind === "repair" ? repairId(name, companyForId) : projectId(name, companyForId);
-    if (seenIds.has(id)) { bump("duplicate"); continue; }
-    seenIds.add(id);
+    if (seenProjectIds.has(id)) { bumpProject("duplicate"); continue; }
+    seenProjectIds.add(id);
 
     const startRaw = toMs(r["Start Date"] || "");
     const endRaw = toMs(r["End Date"] || "");
@@ -422,7 +453,7 @@ export function planHistory(input: {
     }
 
     // wonValueIndex only ever holds values > 0 (see the Won-opp loop above).
-    const value = wonValueIndex.get(`${norm(name)}|${norm(companyForId)}`) ?? null;
+    const value = wonValueIndex.get(`${looseKey(name)}|${looseKey(companyForId)}`) ?? null;
 
     projectPlans.push({
       kind,
@@ -441,5 +472,10 @@ export function planHistory(input: {
     });
   }
 
-  return { projects: projectPlans, quotes, skipped };
+  return {
+    projects: projectPlans,
+    quotes,
+    skipped: { projects: skippedProjects, opportunities: skippedOpportunities },
+    stats: { valueConflicts },
+  };
 }
