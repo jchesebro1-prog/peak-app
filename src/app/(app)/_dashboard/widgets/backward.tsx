@@ -54,7 +54,7 @@ export const BACKWARD_RENDERERS = {
   ),
 
   backlog: async (ctx) => (
-    <ProjectList title="Backlog" sub="Sold — in procurement or delivery" rows={backlogProjects(await ctx.data.projects())} empty="No sold work waiting on materials." />
+    <ProjectList title="Backlog" sub="Sold — in backlog stages" rows={backlogProjects(await ctx.data.projects())} empty="No sold work waiting on materials." />
   ),
 
   "equipment-sold": async (ctx) => {

@@ -8,8 +8,16 @@ import {
   syncProjectsFromQuotes,
   fmtDate,
   type ProjectRecord,
-  type ProjectStage,
 } from "@/lib/stores/projects";
+import { loadPipelines } from "@/lib/pipelines-server";
+import {
+  PROJECT_TAG_META,
+  isDone,
+  isOnSite,
+  projectStageMeta,
+  type Pipelines,
+  type ProjectTag,
+} from "@/lib/pipelines";
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, startOfDay, type WorkItem } from "@/lib/operations-work";
 import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/stores/tasks";
@@ -24,27 +32,14 @@ function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
-/** Stage chip palette — port of Field Work.dc.html stageMeta. */
-const STAGE_META: Record<
-  ProjectStage,
-  { label: string; soft: string; ink: string; bd: string }
-> = {
-  procurement: { label: "Prep", soft: "#fbf3dd", ink: "#8a6d1f", bd: "#f0e2bd" },
-  delivery: { label: "Awaiting delivery", soft: "#e9eefb", ink: "#3155a8", bd: "#d4ddf3" },
-  scheduled: { label: "Scheduled", soft: "#efeaf6", ink: "#5b4b8a", bd: "#ddd3ec" },
-  install: { label: "Installing", soft: "#fbeede", ink: "#9a5a1f", bd: "#f0dcc0" },
-  training: { label: "Training", soft: "#e4f1f6", ink: "#1f6a8a", bd: "#c5e2ec" },
-  signoff: { label: "Sign-off", soft: "#eaf6ef", ink: "#1f7a52", bd: "#cce9da" },
-  complete: { label: "Complete", soft: "#f1f2f5", ink: "#5b616e", bd: "#e4e7ec" },
-};
-
 const CSS = `
   .fw-tab:hover { color: #16181d; }
   .fw-card-link:hover { background: #fafbff; }
 `;
 
-function chip(stage: ProjectStage): React.CSSProperties {
-  const m = STAGE_META[stage] || STAGE_META.procurement;
+/** Stage chip, coloured by the stage's tag (PROJECT_TAG_META — the one tag map). */
+function chip(tag: ProjectTag): React.CSSProperties {
+  const m = PROJECT_TAG_META[tag] ?? PROJECT_TAG_META.backlog;
   return {
     display: "inline-block",
     fontSize: 10,
@@ -90,8 +85,8 @@ function svcChip(type: WorkItem["type"]): React.CSSProperties {
  * booking whose inclusive span covers today (and the project isn't complete).
  * `meName: null` = team scope (D113.10): anyone's booking counts.
  */
-function myProjectToday(p: ProjectRecord, meName: string | null, todayMs: number): boolean {
-  if (p.kind !== "project" || p.stage === "complete") return false;
+function myProjectToday(p: ProjectRecord, meName: string | null, todayMs: number, pipelines: Pipelines): boolean {
+  if (p.kind !== "project" || isDone(p, pipelines)) return false;
   return p.crew.some(
     (c) =>
       (meName === null || c.person === meName) &&
@@ -124,10 +119,11 @@ export default async function FieldWorkPage({
     ...projectSyncBase,
     skipped: projectSyncOutcome.error ? [...projectSyncBase.skipped, projectSyncOutcome.error] : projectSyncBase.skipped,
   };
-  const [all, users, serviceWork] = await Promise.all([
+  const [all, users, serviceWork, pipelines] = await Promise.all([
     getAllProjects(),
     activeUsers(),
     loadServiceWork(),
+    loadPipelines(),
   ]);
   await ensureProjectTasksMigrated(all);
   const taskRows = await allTasks();
@@ -149,11 +145,9 @@ export default async function FieldWorkPage({
     );
 
     const fieldJobs = all
-      .filter((p) => myProjectToday(p, teamScope ? null : me.name, today))
+      .filter((p) => myProjectToday(p, teamScope ? null : me.name, today, pipelines))
       .sort((a, b) => (a.targetDate || 0) - (b.targetDate || 0));
-    const onSiteCount = fieldJobs.filter(
-      (p) => p.stage === "install" || p.stage === "training"
-    ).length;
+    const onSiteCount = fieldJobs.filter((p) => isOnSite(p, pipelines)).length;
 
     type DayRow = { day: number; node: React.ReactNode };
 
@@ -164,7 +158,8 @@ export default async function FieldWorkPage({
     const projectRows: DayRow[] = fieldJobs.map((p) => {
       const jobTasks = taskRows.filter((t) => t.projectId === p.id);
       const done = jobTasks.filter((t) => t.status === "done").length;
-      const onSite = p.stage === "install" || p.stage === "training";
+      const meta = p.stageMeta || projectStageMeta(pipelines, p);
+      const onSite = meta.tag === "onsite";
       const strip = strips.get(p.id);
       // The card is itself a link, so the strip (links) sits in a footer
       // attached below it rather than nested inside the anchor.
@@ -179,7 +174,7 @@ export default async function FieldWorkPage({
             style={hasStrip ? { ...CARD_LINK_STYLE, marginBottom: 0, borderRadius: "14px 14px 0 0" } : { ...CARD_LINK_STYLE, marginBottom: 0 }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
-              <span style={chip(p.stage)}>{STAGE_META[p.stage]?.label || p.stage}</span>
+              <span style={chip(meta.tag)}>{meta.label}</span>
               {onSite && (
                 <span
                   style={{
@@ -187,9 +182,9 @@ export default async function FieldWorkPage({
                     fontSize: 9,
                     fontWeight: 700,
                     letterSpacing: ".06em",
-                    color: "#9a5a1f",
-                    background: "#fbeede",
-                    border: "1px solid #f0dcc0",
+                    color: PROJECT_TAG_META.onsite.ink,
+                    background: PROJECT_TAG_META.onsite.soft,
+                    border: `1px solid ${PROJECT_TAG_META.onsite.bd}`,
                     padding: "2px 7px",
                     borderRadius: 5,
                   }}
@@ -436,6 +431,7 @@ export default async function FieldWorkPage({
         initialTab={tab}
         recordings={strip.recordings}
         canShowRecord={strip.canRecord}
+        pipelines={pipelines}
       />
     </>
   );

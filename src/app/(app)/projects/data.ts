@@ -5,13 +5,16 @@ import { ensureProjectTasksMigrated, allTasks, type TaskRecord } from "@/lib/sto
 import { taskTemplateSetsFor, type TaskTemplateSetRecord } from "@/lib/stores/task-templates";
 import type { Identity } from "./view";
 import { safeSweep } from "@/lib/safe-sweep";
+import { loadPipelines } from "@/lib/pipelines-server";
+import type { Pipelines } from "@/lib/pipelines";
 
 /**
  * Shared loader for the Projects screen (list + detail routes). Mirrors the
  * prototype's on-load `ProjectStore.syncFromQuotes()` — won quotes that carry
  * install labor auto-materialize as projects/orders — then reads the book,
  * pending conversions, the customer directory (for rename-safe names) and the
- * active roster (crew options + note/crew avatars).
+ * active roster (crew options + note/crew avatars), plus Settings → Pipelines
+ * (board columns, stage tracker and stage labels render from it).
  */
 export async function loadProjectsData(): Promise<{
   projects: Awaited<ReturnType<typeof getAllProjects>>;
@@ -23,15 +26,17 @@ export async function loadProjectsData(): Promise<{
   people: { id: string; name: string }[];
   templateSets: TaskTemplateSetRecord[];
   syncSkipped: string[];
+  pipelines: Pipelines;
 }> {
   const syncOutcome = await safeSweep("projects", syncProjectsFromQuotes, { created: 0, skipped: [] });
   const sync = syncOutcome.value;
-  const [projects, pending, customers, users, templateSets] = await Promise.all([
+  const [projects, pending, customers, users, templateSets, pipelines] = await Promise.all([
     getAllProjects(),
     pendingConversions(),
     allCustomers(),
     activeUsers(),
     taskTemplateSetsFor("project"),
+    loadPipelines(),
   ]);
   // #17: promote any project's still-embedded tasks[] into the tasks
   // collection before reading it, so the detail tasks card (and anything
@@ -47,7 +52,7 @@ export async function loadProjectsData(): Promise<{
   const roster = users.map((u) => u.name);
   const people = users.map((u) => ({ id: u.id, name: u.name }));
   return {
-    projects, pending, custById, identity, roster, taskRows, people, templateSets,
+    projects, pending, custById, identity, roster, taskRows, people, templateSets, pipelines,
     syncSkipped: syncOutcome.error ? [...sync.skipped, syncOutcome.error] : sync.skipped,
   };
 }
@@ -57,6 +62,8 @@ export function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
+/** "complete" stays the URL value (bookmarks, deep links) but means "on the
+ *  pipeline's Done-tagged stage" — view.tsx filters it with `isDone`. */
 const FILTERS = ["active", "risk", "orders", "complete", "all"];
 export function normFilter(v: string): string {
   return FILTERS.includes(v) ? v : "active";

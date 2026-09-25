@@ -2527,10 +2527,10 @@ import {
 
 /* ============ PROJECTS BOARD (#19) ============ */
 import { boardProjects, dueChipLabel } from "@/app/(app)/projects/board-lib";
-import { PROJECT_STAGES, ORDER_STAGES } from "@/lib/stores/projects";
+import { DEFAULT_PROJECT_PIPELINES as BOARD_PIPELINES } from "@/lib/pipelines";
 
-ok(PROJECT_STAGES.map((s) => s.key).join(",") === "deposit,equipment-ordered,initial-contact,scheduled,installation,invoice,complete", "#19: board columns follow the install pipeline");
-ok(ORDER_STAGES.map((s) => s.key).join(",") === "order-materials,deliveries,delivered,complete", "#19: orders follow the order pipeline — excluded from the board");
+ok(BOARD_PIPELINES.find((p) => p.id === "install")!.stages.map((s) => s.id).join(",") === "deposit,equipment-ordered,initial-contact,scheduled,installation,invoice,complete", "#19: board columns follow the install pipeline");
+ok(BOARD_PIPELINES.find((p) => p.id === "order")!.stages.map((s) => s.id).join(",") === "order-materials,deliveries,delivered,complete", "#19: orders follow the order pipeline — excluded from the board");
 {
   const mix: Array<{ kind: "project" | "order" }> = [
     { kind: "project" },
@@ -2539,10 +2539,10 @@ ok(ORDER_STAGES.map((s) => s.key).join(",") === "order-materials,deliveries,deli
   ];
   ok(boardProjects(mix).length === 2, "#19: boardProjects keeps kind === project only");
 }
-ok(dueChipLabel("complete", -3, "Jul 20") === "Closed Jul 20", "#19: complete cards read Closed <date>");
-ok(dueChipLabel("install", -3, "") === "3d overdue", "#19: past-due cards read Nd overdue");
-ok(dueChipLabel("install", 0, "") === "Due today", "#19: due-today wording preserved");
-ok(dueChipLabel("procurement", 12, "") === "Due in 12d", "#19: future cards read Due in Nd");
+ok(dueChipLabel(true, -3, "Jul 20") === "Closed Jul 20", "#19: done cards read Closed <date>");
+ok(dueChipLabel(false, -3, "") === "3d overdue", "#19: past-due cards read Nd overdue");
+ok(dueChipLabel(false, 0, "") === "Due today", "#19: due-today wording preserved");
+ok(dueChipLabel(false, 12, "") === "Due in 12d", "#19: future cards read Due in Nd");
 
 /* ============ LEAD THREAD (#34) — visit lifecycle + convert gate ============ */
 import {

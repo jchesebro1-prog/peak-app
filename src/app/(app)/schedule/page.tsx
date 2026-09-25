@@ -15,8 +15,9 @@ import {
   criticalLineId,
   orderByDate,
   type ProjectRecord,
-  type ProjectStage,
 } from "@/lib/stores/projects";
+import { loadPipelines } from "@/lib/pipelines-server";
+import { PROJECT_TAG_META, projectStageMeta, type Pipelines, type ProjectTag, type StageMeta } from "@/lib/pipelines";
 import { loadServiceWork } from "@/lib/operations-work-server";
 import { WORK_TYPE_META, type WorkType } from "@/lib/operations-work";
 import { allEngagements, syncEngagementsFromQuotes } from "@/lib/stores/engagements";
@@ -54,16 +55,14 @@ function md(ts: number): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-/* ---------- stage palette (port of Scheduling stageMeta) ---------- */
-const SM: Record<ProjectStage, { ink: string; soft: string; bd: string; label: string }> = {
-  procurement: { ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd", label: "Materials" },
-  delivery: { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", label: "Deliveries" },
-  scheduled: { ink: "#5b4b8a", soft: "#efeaf6", bd: "#ddd3ec", label: "Scheduled" },
-  install: { ink: "#9a5a1f", soft: "#fbeede", bd: "#f0dcc0", label: "Installing" },
-  training: { ink: "#1f6a8a", soft: "#e4f1f6", bd: "#c5e2ec", label: "Training" },
-  signoff: { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", label: "Sign-off" },
-  complete: { ink: "#5b616e", soft: "#f1f2f5", bd: "#e4e7ec", label: "Complete" },
-};
+/* ---------- stage colours: the one tag map ----------
+   Every colour read goes through tagColor(), which falls back to the backlog
+   set for any tag it doesn't know — a stage id renamed/added in Settings →
+   Pipelines (or a legacy key) can never throw here again. Labels come from
+   the record's stageMeta, so Settings-edited names show. */
+const tagColor = (tag: ProjectTag | null | undefined) =>
+  PROJECT_TAG_META[tag as ProjectTag] ?? PROJECT_TAG_META.backlog;
+const metaOf = (p: ProjectRecord, pipelines: Pipelines): StageMeta => p.stageMeta || projectStageMeta(pipelines, p);
 
 const PALETTE = ["#5b4b8a", "#2f6f4f", "#3155a8", "#9a5a1f", "#1f6a8a", "#b4543a", "#7b3f8a", "#3f7a6a"];
 
@@ -85,7 +84,10 @@ type Booking = {
   projectId: string;
   projectName: string;
   customer: string;
-  stage: ProjectStage;
+  /** The project's stage tag (service bars: "scheduled") — colour key. */
+  tag: ProjectTag;
+  /** The project's stage label as named in Settings (service bars: "Scheduled"). */
+  label: string;
   completed: boolean;
   crewId: string;
   mobId: string | null;
@@ -147,7 +149,8 @@ export default async function SchedulePage({
     ...projectSyncBase,
     skipped: projectSyncOutcome.error ? [...projectSyncBase.skipped, projectSyncOutcome.error] : projectSyncBase.skipped,
   };
-  const [projects, users] = await Promise.all([getAllProjects(), activeUsers()]);
+  const [projects, users, pipelines] = await Promise.all([getAllProjects(), activeUsers(), loadPipelines()]);
+  const tagOf = (p: ProjectRecord) => metaOf(p, pipelines).tag;
   const serviceWork = await loadServiceWork();
 
   /* ---- URL state ---- */
@@ -195,14 +198,16 @@ export default async function SchedulePage({
   const colorOf = (p: ProjectRecord) => projColor[p.id] || "#5b4b8a";
 
   const bookings: Booking[] = [];
-  projects.forEach((p) =>
+  projects.forEach((p) => {
+    const meta = metaOf(p, pipelines);
     (p.crew || []).forEach((c) =>
       bookings.push({
         projectId: p.id,
         projectName: p.name,
         customer: p.customer || "",
-        stage: p.stage,
-        completed: p.stage === "complete",
+        tag: meta.tag,
+        label: meta.label,
+        completed: meta.tag === "done",
         crewId: c.id,
         mobId: c.mobId || null,
         person: c.person,
@@ -211,11 +216,11 @@ export default async function SchedulePage({
         end: c.end,
         color: colorOf(p),
       })
-    )
-  );
+    );
+  });
 
-  const schedulable = projects.filter((p) => p.stage !== "complete");
-  const activeProjects = projects.filter((p) => p.kind === "project" && p.stage !== "complete");
+  const schedulable = projects.filter((p) => tagOf(p) !== "done");
+  const activeProjects = projects.filter((p) => p.kind === "project" && tagOf(p) !== "done");
   const onSiteNow = bookings.filter((b) => b.start <= now && b.end >= now).length;
 
   const standfirst =
@@ -257,7 +262,8 @@ export default async function SchedulePage({
       projectId: w.id,
       projectName: w.title,
       customer: w.subtitle,
-      stage: "scheduled",
+      tag: "scheduled",
+      label: "Scheduled",
       completed: false,
       crewId: w.id,
       mobId: null,
@@ -305,14 +311,15 @@ export default async function SchedulePage({
       const loc = await locationById(p.customerId, p.locationId);
       const c = loc ? coordsOf(loc) : null;
       if (!c) return null;
-      const sm = SM[p.stage] || SM.procurement;
+      const meta = metaOf(p, pipelines);
       return {
         id: p.id,
         name: p.name,
         city: loc?.city || "",
         state: loc?.state || "",
         color: colorOf(p),
-        stageLabel: sm.label,
+        stageTag: meta.tag,
+        stageLabel: meta.label,
         pin: {
           id: p.id,
           lat: c.lat,
@@ -418,7 +425,7 @@ export default async function SchedulePage({
 
   /* ================= PROJECT TIMELINE MODEL ================= */
   const tlProjects = projects
-    .filter((p) => p.stage !== "complete")
+    .filter((p) => tagOf(p) !== "done")
     .sort((a, b) => (a.installStart || a.targetDate || 0) - (b.installStart || b.targetDate || 0));
   const critOf = (p: ProjectRecord) => {
     const id = criticalLineId(p);
@@ -1552,7 +1559,8 @@ export default async function SchedulePage({
                     const cl = critOf(p);
                     const leadStart = cl ? orderByDate(p, cl) : p.startedAt || p.createdAt || now;
                     const onSite = p.installStart || p.targetDate || now;
-                    const sm = SM[p.stage] || SM.procurement;
+                    const pm = metaOf(p, pipelines);
+                    const sm = { ...tagColor(pm.tag), label: pm.label };
                     const ps = tlSeg(leadStart, onSite - DAY);
                     const tgX = tlXOf(p.targetDate || 0) + tlDayW / 2;
                     const hasTarget = !!p.targetDate && tgX >= 0 && tgX <= tlGridW;
@@ -1828,9 +1836,9 @@ export default async function SchedulePage({
                       flexShrink: 0,
                       fontSize: 9.5,
                       fontWeight: 600,
-                      color: SM[projects.find((p) => p.id === m.id)?.stage || "procurement"].ink,
-                      background: SM[projects.find((p) => p.id === m.id)?.stage || "procurement"].soft,
-                      border: `1px solid ${SM[projects.find((p) => p.id === m.id)?.stage || "procurement"].bd}`,
+                      color: tagColor(m.stageTag).ink,
+                      background: tagColor(m.stageTag).soft,
+                      border: `1px solid ${tagColor(m.stageTag).bd}`,
                       padding: "2px 7px",
                       borderRadius: 20,
                     }}

@@ -5,17 +5,18 @@ import type { ProjectKind } from "@/lib/stores/projects";
  * harness exercises them without touching the DB.
  */
 
-/** Board mode shows INSTALLS only — ORDER_STAGES is a different 4-stage
- *  vocabulary; orders keep the master-detail list (decision A, spec §3). */
+/** Board mode shows INSTALLS only — orders run the separate `order`
+ *  pipeline; they keep the master-detail list (decision A, spec §3). */
 export function boardProjects<T extends { kind: ProjectKind }>(rows: T[]): T[] {
   return rows.filter((r) => r.kind === "project");
 }
 
 /** The list card's due/age chip, extracted verbatim from view.tsx (was
  *  inline at the listSrc.map card, ~line 510) so the board card and the
- *  list row always agree — and so it's testable. */
-export function dueChipLabel(stage: string, due: number, closedDate: string): string {
-  if (stage === "complete") return "Closed " + closedDate;
+ *  list row always agree — and so it's testable. `done` = the record sits
+ *  on its pipeline's Done-tagged stage (`isDone`), whatever it's called. */
+export function dueChipLabel(done: boolean, due: number, closedDate: string): string {
+  if (done) return "Closed " + closedDate;
   if (due < 0) return Math.abs(due) + "d overdue";
   if (due === 0) return "Due today";
   return "Due in " + due + "d";

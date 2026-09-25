@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { RecordingsStrip, type RecordingStripItem } from "@/components/recordings/recordings-strip";
 import { firstName } from "@/lib/team";
-import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
+import type { ProjectRecord } from "@/lib/stores/projects";
+import { PROJECT_TAG_META, projectStageMeta, type Pipelines, type ProjectTag } from "@/lib/pipelines";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import {
   toggleFieldTask,
@@ -46,22 +47,11 @@ export type FieldWorkDetailProps = {
   recordings?: RecordingStripItem[];
   /** spec §6 Record-control visibility, computed by the page. */
   canShowRecord?: boolean;
+  /** Settings → Pipelines, loaded by the page — the stage chip's label + tag. */
+  pipelines: Pipelines;
 };
 
 /* ---- palettes & formatters (ported from page.tsx / projects.ts — pure) ---- */
-
-const STAGE_META: Record<
-  ProjectStage,
-  { label: string; soft: string; ink: string; bd: string }
-> = {
-  procurement: { label: "Prep", soft: "#fbf3dd", ink: "#8a6d1f", bd: "#f0e2bd" },
-  delivery: { label: "Awaiting delivery", soft: "#e9eefb", ink: "#3155a8", bd: "#d4ddf3" },
-  scheduled: { label: "Scheduled", soft: "#efeaf6", ink: "#5b4b8a", bd: "#ddd3ec" },
-  install: { label: "Installing", soft: "#fbeede", ink: "#9a5a1f", bd: "#f0dcc0" },
-  training: { label: "Training", soft: "#e4f1f6", ink: "#1f6a8a", bd: "#c5e2ec" },
-  signoff: { label: "Sign-off", soft: "#eaf6ef", ink: "#1f7a52", bd: "#cce9da" },
-  complete: { label: "Complete", soft: "#f1f2f5", ink: "#5b616e", bd: "#e4e7ec" },
-};
 
 const LINE_STATUS_COLOR: Record<string, string> = {
   received: "#1f7a52",
@@ -114,8 +104,9 @@ function uid(p: string): string {
   return p + Math.random().toString(36).slice(2, 8);
 }
 
-function chipDark(stage: ProjectStage): React.CSSProperties {
-  const m = STAGE_META[stage] || STAGE_META.procurement;
+/** Stage chip, coloured by the stage's tag (PROJECT_TAG_META — the one tag map). */
+function chipDark(tag: ProjectTag): React.CSSProperties {
+  const m = PROJECT_TAG_META[tag] ?? PROJECT_TAG_META.backlog;
   return {
     display: "inline-block",
     fontSize: 10,
@@ -142,8 +133,12 @@ export default function FieldWorkDetail({
   initialTab,
   recordings = [],
   canShowRecord = false,
+  pipelines,
 }: FieldWorkDetailProps) {
   const [p, setP] = useState<ProjectRecord>(project);
+  // Field captures never move the stage, so the stamped meta stays current;
+  // derive it from the passed pipelines when the record arrived without one.
+  const stageMeta = p.stageMeta || projectStageMeta(pipelines, p);
   // Latest record for building the whole-doc offline payload, synchronously —
   // rapid checkbox taps must each mutate from the freshest state.
   const pRef = useRef<ProjectRecord>(project);
@@ -399,7 +394,7 @@ export default function FieldWorkDetail({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
-          <span style={chipDark(p.stage)}>{STAGE_META[p.stage]?.label || p.stage}</span>
+          <span style={chipDark(stageMeta.tag)}>{stageMeta.label}</span>
           <span
             style={{
               marginLeft: "auto",

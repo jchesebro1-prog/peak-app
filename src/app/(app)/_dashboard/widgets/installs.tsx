@@ -1,5 +1,6 @@
 import { money } from "@/lib/format";
-import type { ProjectRecord, ProjectStage } from "@/lib/stores/projects";
+import type { ProjectRecord } from "@/lib/stores/projects";
+import { DEFAULT_PIPELINES, PROJECT_TAG_META, PROJECT_TAG_RANK, projectStageMeta, type ProjectTag } from "@/lib/pipelines";
 import type { MapPin } from "@/components/map/LeafletMap";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { installsForecast } from "@/lib/dashboard/metrics";
@@ -24,17 +25,15 @@ import { tile } from "./tile";
 
 const HORIZON = 12;
 
-type StageMeta = { label: string; color: string; order: number };
-const STG: Record<string, StageMeta> = {
-  procurement: { label: "Procurement", color: "#c9a23a", order: 0 },
-  delivery: { label: "Delivery", color: "#3f7bb8", order: 1 },
-  scheduled: { label: "Scheduled", color: "#2f8f6b", order: 2 },
-  install: { label: "Install", color: ACCENT, order: 3 },
-  training: { label: "Training", color: "#8a6d1f", order: 4 },
-  signoff: { label: "Sign-off", color: "#8a7d6b", order: 5 },
-};
-function stg(k: ProjectStage | string): StageMeta {
-  return STG[k] || { label: k, color: "#8c919c", order: 9 };
+/** Stage colour + order by TAG (the one tag map) — a stage renamed or added
+ *  in Settings → Pipelines colours and sorts by its tag, never by id/label. */
+function tagColor(tag: ProjectTag | null | undefined): string {
+  return (PROJECT_TAG_META[tag as ProjectTag] ?? PROJECT_TAG_META.backlog).dot;
+}
+/** The record's stage tag + Settings label — stamped by the store on read. */
+function stg(p: ProjectRecord): { label: string; color: string } {
+  const m = p.stageMeta || projectStageMeta(DEFAULT_PIPELINES, p);
+  return { label: m.label, color: tagColor(m.tag) };
 }
 
 function coordsOf(
@@ -54,9 +53,11 @@ async function forecast(ctx: WidgetCtx) {
   return installsForecast(projects, engagements, ctx.now, HORIZON);
 }
 
+// byStage is grouped by stage label and carries the tag (Task 4a); rows sort
+// by tag rank (a stable sort — same-tag stages keep their first-seen order).
 const stageRows = (f: Awaited<ReturnType<typeof forecast>>) =>
   f.byStage
-    .map((s) => ({ label: stg(s.stage).label, count: s.count, value: s.value, color: stg(s.stage).color, order: stg(s.stage).order }))
+    .map((s) => ({ label: s.stage, count: s.count, value: s.value, color: tagColor(s.tag), order: PROJECT_TAG_RANK[s.tag] ?? 9 }))
     .sort((a, b) => a.order - b.order);
 
 export const INSTALLS_RENDERERS = {
@@ -174,11 +175,11 @@ export const INSTALLS_RENDERERS = {
                     width: 8,
                     height: 8,
                     borderRadius: "50%",
-                    background: stg(p.stage).color,
+                    background: stg(p).color,
                     flexShrink: 0,
                   }}
                 />
-                {p.targetDate ? `Lands ${monYear(p.targetDate)}` : "No target"} · {stg(p.stage).label}
+                {p.targetDate ? `Lands ${monYear(p.targetDate)}` : "No target"} · {stg(p).label}
               </div>
             </div>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600 }}>
@@ -257,7 +258,7 @@ export const INSTALLS_RENDERERS = {
                     bottom: 0,
                     left: `${leftPct}%`,
                     width: `${widthPct}%`,
-                    background: stg(p.stage).color,
+                    background: stg(p).color,
                     borderRadius: 6,
                     display: "flex",
                     alignItems: "center",
@@ -316,9 +317,9 @@ export const INSTALLS_RENDERERS = {
           id: p.id,
           lat: c.lat,
           lng: c.lng,
-          color: stg(p.stage).color,
+          color: stg(p).color,
           label: p.name,
-          sub: `${p.customer} · ${money(p.value)} · ${stg(p.stage).label}`,
+          sub: `${p.customer} · ${money(p.value)} · ${stg(p).label}`,
           size: 13 + Math.round(((p.value || 0) / mapMax) * 10),
         };
       })

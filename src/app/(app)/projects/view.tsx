@@ -4,8 +4,7 @@ import type { TaskRecord } from "@/lib/stores/tasks";
 import type { TaskTemplateSetRecord } from "@/lib/stores/task-templates";
 import { firstName, deriveInitials, fallbackColor } from "@/lib/team";
 import {
-  stagesFor,
-  stageIndex,
+  stagesOf,
   progressPct,
   procurementProgress,
   riskFlags,
@@ -17,7 +16,6 @@ import {
   fmtDateY,
   timeAgo,
   STAGING_BUFFER,
-  PROJECT_STAGES,
   signoffScopes,
   type ProjectRecord,
   type ProjectStage,
@@ -27,6 +25,18 @@ import {
   type QuoteLike,
   VENDORS,
 } from "@/lib/stores/projects";
+import {
+  PROJECT_TAG_META,
+  firstStageWithTag,
+  isDone,
+  isOnSite,
+  projectPipelineFor,
+  projectStageMeta,
+  type Pipelines,
+  type ProjectPipeline,
+  type ProjectTag,
+  type StageMeta,
+} from "@/lib/pipelines";
 import {
   setStageAction,
   cycleLineAction,
@@ -84,15 +94,12 @@ export const PROJECTS_CSS = `
 
 type Meta = { label: string; ink: string; soft: string; bd: string };
 
-const STAGE_META: Record<string, Meta> = {
-  procurement: { label: "Materials", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" },
-  delivery: { label: "Deliveries", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" },
-  scheduled: { label: "Crew scheduled", ink: "#5b4b8a", soft: "#efeaf6", bd: "#ddd3ec" },
-  install: { label: "Installing", ink: "#9a5a1f", soft: "#fbeede", bd: "#f0dcc0" },
-  training: { label: "Training", ink: "#1f6a8a", soft: "#e4f1f6", bd: "#c5e2ec" },
-  signoff: { label: "Sign-off", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da" },
-  complete: { label: "Complete", ink: "#5b616e", soft: "#f1f2f5", bd: "#e4e7ec" },
-};
+/** Stage chip colours come from the one tag map (PROJECT_TAG_META) — a
+ *  stage renamed or added in Settings → Pipelines colours by its tag. */
+const tagMeta = (tag: ProjectTag | null | undefined) => PROJECT_TAG_META[tag as ProjectTag] ?? PROJECT_TAG_META.backlog;
+
+/** The stamped stageMeta when the store provided it, else derived from the live pipelines. */
+const metaOf = (p: ProjectRecord, pipelines: Pipelines): StageMeta => p.stageMeta || projectStageMeta(pipelines, p);
 
 const LINE_META: Record<LineStatus, Meta> = {
   pending: { label: "Pending", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" },
@@ -133,10 +140,10 @@ function kindBadgeStyle(kind: ProjectKind): CSSProperties {
 }
 const kindLabel = (k: ProjectKind) => (k === "order" ? "ORDER" : "PROJECT");
 
-function stagePill(stage: string): { label: string; style: CSSProperties } {
-  const m = STAGE_META[stage] || STAGE_META.procurement;
+function stagePill(meta: StageMeta): { label: string; style: CSSProperties } {
+  const m = tagMeta(meta.tag);
   return {
-    label: m.label,
+    label: meta.label,
     style: {
       display: "inline-block",
       fontSize: 10,
@@ -149,10 +156,10 @@ function stagePill(stage: string): { label: string; style: CSSProperties } {
     },
   };
 }
-const barColorFor = (stage: string) =>
-  stage === "complete"
+const barColorFor = (tag: ProjectTag) =>
+  tag === "done"
     ? "#9aa0ab"
-    : stage === "install" || stage === "training" || stage === "signoff"
+    : tag === "onsite" || tag === "closeout"
       ? ACCENT
       : "#c9b24f";
 
@@ -209,6 +216,7 @@ export function ProjectsView({
   taskRows,
   people,
   templateSets,
+  pipelines,
 }: {
   projects: ProjectRecord[];
   pending: QuoteLike[];
@@ -225,14 +233,16 @@ export function ProjectsView({
   people: { id: string; name: string }[];
   /** Reusable task-template sets applicable to projects (D149, #118) — empty on the list view. */
   templateSets: TaskTemplateSetRecord[];
+  /** Settings → Pipelines (loaded by the page) — board columns, stage tracker, labels. */
+  pipelines: Pipelines;
 }) {
   const custName = (p: { customerId: string | null; customer: string }) =>
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
 
-  const active = projects.filter((p) => p.stage !== "complete");
+  const active = projects.filter((p) => !isDone(p, pipelines));
   const activeValue = active.reduce((a, p) => a + (p.value || 0), 0);
   const atRisk = active.filter((p) => riskFlags(p).length);
-  const installing = projects.filter((p) => p.stage === "install" || p.stage === "training");
+  const installing = projects.filter((p) => isOnSite(p, pipelines));
 
   const stats = [
     { label: "Active", value: String(active.length), sub: shortMoney(activeValue) + " in delivery", color: "#16181d" },
@@ -255,7 +265,7 @@ export function ProjectsView({
     active: active.length,
     risk: atRisk.length,
     orders: projects.filter((p) => p.kind === "order").length,
-    complete: projects.filter((p) => p.stage === "complete").length,
+    complete: projects.filter((p) => isDone(p, pipelines)).length,
     all: projects.length,
   };
   const filterDefs: Array<[string, string]> = [
@@ -270,7 +280,8 @@ export function ProjectsView({
   if (filter === "active") listSrc = active;
   else if (filter === "risk") listSrc = atRisk;
   else if (filter === "orders") listSrc = projects.filter((p) => p.kind === "order");
-  else if (filter === "complete") listSrc = projects.filter((p) => p.stage === "complete");
+  // The "complete" URL key stays; it means "on a Done-tagged stage".
+  else if (filter === "complete") listSrc = projects.filter((p) => isDone(p, pipelines));
 
   const curPath = sel ? "/projects/" + encodeURIComponent(sel.id) : "/projects";
   const whoQ = who || undefined;
@@ -293,12 +304,12 @@ export function ProjectsView({
 
   // #19 board mode: installs only, read-only (no moveAction, empty canMoveTo
   // — stage changes keep their deliberate setProjectStage path). Columns are
-  // the 7 install stages with the view-layer STAGE_META labels.
+  // the install pipeline's stages as named in Settings → Pipelines, dotted by tag.
   const idLookup = makeIdentityLookup(identity);
-  const boardColumns: BoardColumnVM[] = PROJECT_STAGES.map((s) => ({
-    key: s.key as string,
-    label: STAGE_META[s.key].label,
-    dot: STAGE_META[s.key].ink,
+  const boardColumns: BoardColumnVM[] = projectPipelineFor(pipelines, { kind: "project" }).stages.map((s) => ({
+    key: s.id,
+    label: s.label,
+    dot: tagMeta(s.tag).dot,
   }));
   const boardCards: BoardCardVM[] = boardProjects(projects).map((p) => ({
     id: p.id,
@@ -310,7 +321,7 @@ export function ProjectsView({
     chips: [],
     owner: p.owner ? { initials: idLookup.initialsOf(p.owner), color: idLookup.colorOf(p.owner) } : null,
     ownerTitle: p.owner || "Unassigned",
-    ageLabel: dueChipLabel(p.stage, daysUntil(p.targetDate), fmtDate(p.updatedAt)),
+    ageLabel: dueChipLabel(isDone(p, pipelines), daysUntil(p.targetDate), fmtDate(p.updatedAt)),
     href: "/projects/" + encodeURIComponent(p.id) + qs({ view: "board", who: whoQ }),
     canMoveTo: [],
   }));
@@ -644,12 +655,13 @@ export function ProjectsView({
         {/* LEFT: list */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
           {listSrc.map((p) => {
-            const sp = stagePill(p.stage);
+            const meta = metaOf(p, pipelines);
+            const sp = stagePill(meta);
             const isSel = sel != null && p.id === sel.id;
             const risks = riskFlags(p);
             const due = daysUntil(p.targetDate);
             const pct = progressPct(p);
-            const dueLabel = dueChipLabel(p.stage, due, fmtDate(p.updatedAt));
+            const dueLabel = dueChipLabel(meta.tag === "done", due, fmtDate(p.updatedAt));
             return (
               <Link
                 key={p.id}
@@ -716,7 +728,7 @@ export function ProjectsView({
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
                   <div style={{ flex: 1, height: 5, background: "#eef0f3", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ width: pct + "%", height: "100%", background: barColorFor(p.stage) }} />
+                    <div style={{ width: pct + "%", height: "100%", background: barColorFor(meta.tag) }} />
                   </div>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#9aa0ab" }}>{pct}%</span>
                 </div>
@@ -776,6 +788,7 @@ export function ProjectsView({
               taskRows={taskRows}
               people={people}
               templateSets={templateSets}
+              pipelines={pipelines}
             />
           ) : (
             <div
@@ -834,6 +847,7 @@ function ProjectDetail({
   taskRows,
   people,
   templateSets,
+  pipelines,
 }: {
   p: ProjectRecord;
   tab: string;
@@ -846,17 +860,23 @@ function ProjectDetail({
   taskRows: TaskRecord[];
   people: { id: string; name: string }[];
   templateSets: TaskTemplateSetRecord[];
+  pipelines: Pipelines;
 }) {
   const { colorOf, initialsOf } = makeIdentityLookup(identity);
-  const stages = stagesFor(p.kind);
-  const curIdx = stageIndex(p.kind, p.stage);
+  // The record's own pipeline — an order walks the order pipeline, a job on a
+  // custom pipeline walks that one.
+  const pipeline = projectPipelineFor(pipelines, p);
+  const stages = stagesOf(p, pipelines);
+  const meta = metaOf(p, pipelines);
+  const found = stages.findIndex((s) => s.id === p.stage);
+  const curIdx = found >= 0 ? found : Math.max(0, Math.min(meta.index, stages.length - 1));
   const isOrder = p.kind === "order";
-  const isDone = p.stage === "complete";
+  const done = meta.tag === "done";
 
   const due = daysUntil(p.targetDate);
-  const dueBig = isDone ? "Done" : due < 0 ? Math.abs(due) + "d late" : due + "d";
-  const dueColor = isDone ? "#5b616e" : due < 0 ? "#b4543a" : due <= 7 ? "#9a6a1f" : "#16181d";
-  const dueSub = isDone ? "closed out" : isOrder ? "to delivery" : "to install";
+  const dueBig = done ? "Done" : due < 0 ? Math.abs(due) + "d late" : due + "d";
+  const dueColor = done ? "#5b616e" : due < 0 ? "#b4543a" : due <= 7 ? "#9a6a1f" : "#16181d";
+  const dueSub = done ? "closed out" : isOrder ? "to delivery" : "to install";
 
   const detailBase = "/projects/" + encodeURIComponent(p.id);
   const whoQ = who || undefined;
@@ -894,12 +914,9 @@ function ProjectDetail({
       ];
   const curTab = tabDefs.some((t) => t[0] === tab) ? tab : "overview";
 
-  const canAdvance = !isDone && curIdx < stages.length - 1;
-  const advanceLabel = canAdvance
-    ? curIdx + 1 === stages.length - 1
-      ? "Mark complete"
-      : "Advance to " + stages[curIdx + 1].short
-    : "";
+  const canAdvance = !done && curIdx < stages.length - 1;
+  const next = canAdvance ? stages[curIdx + 1] : null;
+  const advanceLabel = next ? (next.tag === "done" ? "Mark complete" : "Advance to " + next.label) : "";
   const nodeWidth = Math.max(64, Math.floor(640 / stages.length));
 
   return (
@@ -957,7 +974,7 @@ function ProjectDetail({
             const fg = st === "done" ? "#fff" : st === "current" ? "var(--accent)" : "#b9bec7";
             return (
               <div
-                key={s.key}
+                key={s.id}
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -979,7 +996,7 @@ function ProjectDetail({
                 />
                 <form action={setStageAction} style={{ margin: 0, zIndex: 1 }}>
                   <input type="hidden" name="id" value={p.id} />
-                  <input type="hidden" name="stage" value={s.key} />
+                  <input type="hidden" name="stage" value={s.id} />
                   <button
                     type="submit"
                     title={"Set stage: " + s.label}
@@ -1014,7 +1031,7 @@ function ProjectDetail({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {s.short}
+                  {s.label}
                 </span>
               </div>
             );
@@ -1022,10 +1039,10 @@ function ProjectDetail({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-          {canAdvance && (
+          {next && (
             <form action={setStageAction} style={{ margin: 0 }}>
               <input type="hidden" name="id" value={p.id} />
-              <input type="hidden" name="stage" value={stages[Math.min(curIdx + 1, stages.length - 1)].key} />
+              <input type="hidden" name="stage" value={next.id} />
               <button
                 type="submit"
                 style={{
@@ -1044,14 +1061,14 @@ function ProjectDetail({
               </button>
             </form>
           )}
-          {isDone && (
+          {done && (
             <span
               style={{
                 fontSize: 12.5,
                 fontWeight: 600,
-                color: "#1f7a52",
-                background: "#eaf6ef",
-                border: "1px solid #cce9da",
+                color: PROJECT_TAG_META.done.ink,
+                background: PROJECT_TAG_META.done.soft,
+                border: "1px solid " + PROJECT_TAG_META.done.bd,
                 padding: "8px 13px",
                 borderRadius: 8,
               }}
@@ -1151,7 +1168,7 @@ function ProjectDetail({
         )}
         {curTab === "timeline" && <TimelineTab p={p} isOrder={isOrder} />}
         {curTab === "packet" && <HandoffPacketTab p={p} taskRows={taskRows} />}
-        {curTab === "signoff" && <SignoffTab p={p} curIdx={curIdx} initialsOf={initialsOf} />}
+        {curTab === "signoff" && <SignoffTab p={p} meta={meta} pipeline={pipeline} initialsOf={initialsOf} />}
       </div>
     </>
   );
@@ -2030,11 +2047,13 @@ function TimelineTab({ p, isOrder }: { p: ProjectRecord; isOrder: boolean }) {
 
 function SignoffTab({
   p,
-  curIdx,
+  meta,
+  pipeline,
   initialsOf,
 }: {
   p: ProjectRecord;
-  curIdx: number;
+  meta: StageMeta;
+  pipeline: ProjectPipeline;
   initialsOf: (n: string) => string;
 }) {
   const so = p.signoff;
@@ -2076,16 +2095,19 @@ function SignoffTab({
     );
   }
 
-  const signoffIdx = stageIndex(p.kind, "signoff");
+  // Sign-off lands the job on its pipeline's first closeout stage (Invoice /
+  // Delivered & accepted); Complete stays a manual stage move.
+  const moveTo = firstStageWithTag(pipeline, "closeout") || firstStageWithTag(pipeline, "done");
+  const moveNote = moveTo ? ` Signing off moves the job to ${moveTo.label}.` : "";
   const gateNote =
-    curIdx >= signoffIdx || p.stage === "install" || p.stage === "training"
+    meta.tag === "onsite" || meta.tag === "closeout" || meta.tag === "done"
       ? "Ready for hand-off."
-      : "Usually done after install & training.";
+      : "Usually done after the on-site work.";
 
   return (
     <>
       <div style={{ fontSize: 12.5, color: "#8c919c", marginBottom: 14, lineHeight: 1.5 }}>
-        Record customer acceptance at hand-off. {gateNote}
+        Record customer acceptance at hand-off.{moveNote} {gateNote}
       </div>
       <form action={signoffAction} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input type="hidden" name="id" value={p.id} />
@@ -2127,7 +2149,7 @@ function SignoffTab({
             marginTop: 4,
           }}
         >
-          Record sign-off &amp; complete
+          Record sign-off
         </button>
       </form>
     </>

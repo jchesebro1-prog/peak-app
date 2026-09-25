@@ -12,7 +12,6 @@ import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
 import {
   DEFAULT_PIPELINES,
-  DEFAULT_PROJECT_PIPELINES,
   PROJECT_TAG_RANK,
   firstStage,
   firstStageWithTag,
@@ -86,31 +85,6 @@ export type ProjectKind = "project" | "order";
 
 /** A pipeline stage id (Settings → Pipelines). Kept as an alias so imports compile. */
 export type ProjectStage = string;
-
-export type StageDef = { key: ProjectStage; label: string; short: string };
-
-function seedStageDefs(pipelineId: string): StageDef[] {
-  const pl = DEFAULT_PROJECT_PIPELINES.find((p) => p.id === pipelineId) || DEFAULT_PROJECT_PIPELINES[0];
-  return pl.stages.map((s) => ({ key: s.id, label: s.label, short: s.label }));
-}
-
-/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
-export const PROJECT_STAGES: StageDef[] = seedStageDefs("install");
-
-/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
-export const ORDER_STAGES: StageDef[] = seedStageDefs("order");
-
-/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
-export function stagesFor(kind: ProjectKind): StageDef[] {
-  return kind === "order" ? ORDER_STAGES : PROJECT_STAGES;
-}
-
-/** @deprecated — removed in Task 4b; use stagesOf / stageMeta */
-export function stageIndex(kind: ProjectKind, stage: string): number {
-  const s = stagesFor(kind);
-  const i = s.findIndex((x) => x.key === stage);
-  return i < 0 ? 0 : i;
-}
 
 /** The stages of the pipeline this record runs on. */
 export function stagesOf(p: Pick<ProjectRecord, "kind" | "pipelineId">, pipes: Pipelines): PipelineStage<ProjectTag>[] {

@@ -48,6 +48,7 @@ export default async function ProjectsPage({
         taskRows={data.taskRows}
         people={data.people}
         templateSets={data.templateSets}
+        pipelines={data.pipelines}
       />
     </>
   );
