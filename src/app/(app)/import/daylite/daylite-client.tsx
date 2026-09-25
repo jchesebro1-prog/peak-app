@@ -567,7 +567,8 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                   <thead>
                     <tr>
                       <th style={th}>Row</th>
-                      <th style={th}>Daylite companies</th>
+                      <th style={th}>Daylite cell</th>
+                      <th style={th}>Matched</th>
                       <th style={th}>Import under</th>
                     </tr>
                   </thead>
@@ -577,6 +578,9 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                         <td style={td}>
                           <div style={{ fontWeight: 500 }}>{r.name}</div>
                           <div style={{ fontSize: 11, color: "#9aa0ab" }}>{KIND_LABEL[r.kind]}</div>
+                        </td>
+                        <td style={{ ...td, color: "#5b616e", fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
+                          {r.companiesRaw || "—"}
                         </td>
                         <td style={{ ...td, color: "#5b616e" }}>{r.candidates.join(", ")}</td>
                         <td style={td}>

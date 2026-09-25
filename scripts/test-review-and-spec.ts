@@ -8217,6 +8217,10 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok(c.soldLinked === 1 && c.soldNewProject === 1, "daylite commit: preview — one won quote links the Deerfield install, one (Big Foot) will create its project");
   ok(c.valued === 2 && c.ukn === 4, "daylite commit: preview — 2 valued jobs, 4 UKN");
   ok(c.needsPick === 2 && pv.needsPick.some((r) => r.id === ids.dfd), "daylite commit: preview — the Deerfield install (and its opp) need a company pick");
+  ok(
+    pv.needsPick.every((r) => r.companiesRaw === "Camosy Construction, Deerfield School District"),
+    "#190: every needs-a-pick preview row carries the raw Daylite Companies cell next to its candidates, not just the matched names"
+  );
   const dfdRow = pv.rows.find((r) => r.id === ids.dfd)!;
   ok(dfdRow.company === "Deerfield School District", "daylite commit: the pick pre-fills the first non-contractor company, not Camosy (General Contractor)");
   ok(!dfdRow.flags.some((f) => f.startsWith("contact not on file")), "daylite commit: Pat Doe matches the seeded contact at the default company");
@@ -11359,6 +11363,10 @@ ok(
   ok(svc.stage === "scheduled" && !svc.done && svc.value === null, "daylite: live service call → scheduled repair, UKN");
   const dfd = plan.projects.find((p) => p.name.startsWith("DEERFIELD"))!;
   ok(dfd.stage === "installation" && dfd.companyCandidates.length === 2, "daylite: live install stage + two company candidates");
+  ok(
+    dfd.companiesCellRaw === "Camosy Construction, Deerfield School District",
+    "#190: companiesCellRaw is the Companies cell verbatim, not just the names matched out of it"
+  );
   ok(plan.skipped.projects["Cancelled"] === 1, "daylite: cancelled skipped, filed under skipped.projects");
   ok(plan.skipped.opportunities["Lost"] === 1, "daylite: a Lost opp is skipped, filed under skipped.opportunities");
   const bf = plan.quotes.find((q) => q.name.startsWith("BIG FOOT"))!;

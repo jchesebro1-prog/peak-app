@@ -362,6 +362,9 @@ export type ProjectPlan = {
   companyCandidates: string[];
   companyRaw?: string; // only set when companyCandidates is empty — the raw cell, for the preview
   companyUnmatched?: string[]; // set when SOME pieces matched and some didn't — the leftover, for the preview
+  /** The Companies cell verbatim, always set (#190) — shown next to the
+   *  needs-a-pick picker so Jeff sees what Daylite actually held. */
+  companiesCellRaw: string;
   people: string[];
   owner: string;
   done: boolean;
@@ -380,6 +383,9 @@ export type QuotePlan = {
   companyCandidates: string[];
   companyRaw?: string;
   companyUnmatched?: string[];
+  /** The Companies cell verbatim, always set (#190) — shown next to the
+   *  needs-a-pick picker so Jeff sees what Daylite actually held. */
+  companiesCellRaw: string;
   people: string[];
   owner: string;
   pipelineId: string;
@@ -402,10 +408,15 @@ function splitPeople(cell: string): string[] {
 function companyFields(
   cell: string,
   knownCompany: (name: string) => boolean
-): { candidates: string[]; raw?: string; unmatched?: string[] } {
+): { candidates: string[]; raw?: string; unmatched?: string[]; cellRaw: string } {
   const { matched, unmatched } = splitCompaniesDetailed(cell, knownCompany);
-  if (matched.length === 0) return { candidates: matched, raw: (cell || "").trim() };
-  return unmatched.length > 0 ? { candidates: matched, unmatched } : { candidates: matched };
+  // #190 — cellRaw is the Companies cell verbatim, always returned (unlike
+  // `raw`, which stays gated to the no-match case its existing consumers
+  // rely on) so the needs-a-pick table can show Jeff exactly what Daylite
+  // held next to the picker, not just the names matched out of it.
+  const cellRaw = (cell || "").trim();
+  if (matched.length === 0) return { candidates: matched, raw: cellRaw, cellRaw };
+  return unmatched.length > 0 ? { candidates: matched, unmatched, cellRaw } : { candidates: matched, cellRaw };
 }
 
 /**
@@ -452,7 +463,7 @@ export function planHistory(input: {
     const state = (o["State"] || "").trim();
     const stateLc = state.toLowerCase();
     const name = (o["Name"] || "").trim();
-    const { candidates, raw, unmatched } = companyFields(o["Companies"] || "", knownCompany);
+    const { candidates, raw, unmatched, cellRaw } = companyFields(o["Companies"] || "", knownCompany);
     const companyForId = candidates[0] || raw || "";
     const value = parseMoney(o["Value"] || "");
 
@@ -482,6 +493,7 @@ export function planHistory(input: {
       companyCandidates: candidates,
       ...(raw !== undefined ? { companyRaw: raw } : {}),
       ...(unmatched && unmatched.length > 0 ? { companyUnmatched: unmatched } : {}),
+      companiesCellRaw: cellRaw,
       people: splitPeople(o["People"] || ""),
       owner: o["Owner"] || "",
       pipelineId: resolved.pipelineId,
@@ -519,7 +531,7 @@ export function planHistory(input: {
 
     const status = (r["Status"] || "").trim();
     const done = status.toLowerCase() === "done";
-    const { candidates, raw, unmatched } = companyFields(r["Companies"] || "", knownCompany);
+    const { candidates, raw, unmatched, cellRaw } = companyFields(r["Companies"] || "", knownCompany);
     const companyForId = candidates[0] || raw || "";
 
     const kind: ProjectPlan["kind"] = bucket === "service" ? "repair" : bucket === "order" ? "order" : "project";
@@ -558,6 +570,7 @@ export function planHistory(input: {
       companyCandidates: candidates,
       ...(raw !== undefined ? { companyRaw: raw } : {}),
       ...(unmatched && unmatched.length > 0 ? { companyUnmatched: unmatched } : {}),
+      companiesCellRaw: cellRaw,
       people: splitPeople(r["People"] || ""),
       owner: r["Owner"] || "",
       done,
