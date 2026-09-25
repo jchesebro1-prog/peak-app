@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { outlineToText, renderBody } from "@/lib/specs/outline";
-import { scaffoldFrom, type SpecTemplateHeading } from "@/lib/stores/spec-templates";
+import { scaffoldFrom, type SpecTemplateHeading } from "@/lib/specs/templates";
 import { timeAgo } from "@/lib/format";
 import { writePartSpecFieldsAction } from "./actions";
 
