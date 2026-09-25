@@ -16011,3 +16011,34 @@ import { matchFileRows } from "@/lib/part-docs/filename-match";
   );
   ok(rows.map((r) => `${r.confidence}:${r.kind}:${r.skus.join("|")}`).join(",") === "high:datasheet:ETC:CSPAR,high:specsheet:ETC:CSPAR,none:datasheet:", "part docs bulk: one review row per file, in order, with kind and matched SKUs");
 }
+
+/* --- Part documents (#DOC) — Task 8: the part editor's Documents view --- */
+import { partDocsView } from "@/lib/part-docs/views";
+{
+  const file = (id: string, kind: "datasheet" | "specsheet", at: number): PdDoc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1, blobKey: `part-docs/${id}/f.pdf`, sourceUrl: null,
+    source: "upload", uploadedAt: at, uploadedBy: "Jeff",
+    history: [{ blobKey: `part-docs/${id}/old.pdf`, fileName: "old.pdf", size: 1, replacedAt: at - 1, replacedBy: "Chris" }],
+  });
+  const idx = buildCoverageIndex({
+    documents: [file("PD-edfixds0000", "datasheet", 10), file("PD-edfixss0000", "specsheet", 20), file("PD-edlens00000", "datasheet", 5)],
+    links: [
+      { id: "1", partSku: "EDFIX", documentId: "PD-edfixds0000", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "2", partSku: "EDFIX", documentId: "PD-edfixss0000", kind: "specsheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [
+      { id: "a", parentSku: "EDFIX", accessorySku: "EDLENS", source: "assembly" },
+      { id: "b", parentSku: "EDFIX", accessorySku: "EDCLAMP", source: "davinci" },
+      { id: "c", parentSku: "EDBARE", accessorySku: "EDLENS", source: "davinci" },
+    ],
+    parts: [],
+  });
+  const desc = (s: string) => `${s} desc`;
+  const fix = partDocsView(idx, "EDFIX", desc);
+  ok(fix.documents.map((d) => d.id).join(",") === "PD-edfixss0000,PD-edfixds0000", "part docs editor: the part's documents, newest first");
+  ok(fix.documents[0].history[0].fileName === "old.pdf" && fix.documents[0].history[0].index === 0, "part docs editor: replaced files are listed for viewing");
+  ok(fix.accessories.map((a) => a.sku).join(",") === "EDLENS,EDCLAMP" && fix.coveredBy.length === 0, "part docs editor: a fixture lists the accessories it covers");
+  const lens = partDocsView(idx, "EDLENS", desc);
+  ok(lens.coveredBy.length === 1 && lens.coveredBy[0].sku === "EDFIX" && lens.coveredBy[0].kinds.join(",") === "datasheet,specsheet", "part docs editor: an accessory shows which fixtures cover it, and for which kinds (a parent without a file is left out)");
+  ok(lens.slots.datasheet.state === "covered" && lens.slots.specsheet.state === "covered" && lens.documents.length === 0, "part docs editor: both slots read covered");
+}

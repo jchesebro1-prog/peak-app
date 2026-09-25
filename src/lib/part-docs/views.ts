@@ -124,3 +124,59 @@ export function progressLine(rows: readonly DocumentRow[], kind: PartDocKind): s
   const noun = kind === "datasheet" ? "a datasheet" : "a spec sheet";
   return `${done.toLocaleString("en-US")} of ${rows.length.toLocaleString("en-US")} quoted parts have ${noun}`;
 }
+
+export type PartDocRow = {
+  id: string;
+  kind: PartDocKind;
+  title: string;
+  fileName: string;
+  hasFile: boolean;
+  sourceUrl: string | null;
+  source: string;
+  uploadedAt: number;
+  uploadedBy: string;
+  history: Array<{ index: number; fileName: string; replacedAt: number; replacedBy: string }>;
+};
+
+/** The part editor's Documents section (#DOC, spec §3). */
+export type PartDocsView = {
+  sku: string;
+  slots: Record<PartDocKind, SlotView>;
+  /** Every document linked to this part, either kind, newest first. */
+  documents: PartDocRow[];
+  /** Fixtures whose documents cover this part, and for which kinds. */
+  coveredBy: Array<PartRef & { kinds: PartDocKind[] }>;
+  /** Parts this one covers (its accessories). */
+  accessories: PartRef[];
+};
+
+export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: string) => string): PartDocsView {
+  const linked = index.docsBySku.get(sku);
+  const documents = [...(linked?.datasheet ?? []), ...(linked?.specsheet ?? [])]
+    .sort((a, b) => b.uploadedAt - a.uploadedAt)
+    .map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      title: d.title,
+      fileName: d.fileName,
+      hasFile: !!d.blobKey,
+      sourceUrl: d.sourceUrl,
+      source: d.source,
+      uploadedAt: d.uploadedAt,
+      uploadedBy: d.uploadedBy,
+      history: (d.history || []).map((h, i) => ({ index: i, fileName: h.fileName, replacedAt: h.replacedAt, replacedBy: h.replacedBy })),
+    }));
+  const coveredBy: PartDocsView["coveredBy"] = [];
+  for (const p of index.parentsOf.get(sku) ?? []) {
+    if (p.ownDatasheet) continue;
+    const kinds = (["datasheet", "specsheet"] as const).filter((k) => (index.docsBySku.get(p.parentSku)?.[k] ?? []).some((d) => !!d.blobKey));
+    if (kinds.length) coveredBy.push({ sku: p.parentSku, desc: descOf(p.parentSku), kinds: [...kinds] });
+  }
+  return {
+    sku,
+    slots: { datasheet: slotViewFor(index, sku, "datasheet", descOf), specsheet: slotViewFor(index, sku, "specsheet", descOf) },
+    documents,
+    coveredBy,
+    accessories: (index.childrenOf.get(sku) ?? []).map((s) => ({ sku: s, desc: descOf(s) })),
+  };
+}

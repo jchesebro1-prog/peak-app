@@ -6,7 +6,7 @@ import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
-import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
+import { CatalogControls, CatalogImportPanel } from "./controls";
 import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { PriceDateBanner } from "./price-date-banner";
@@ -22,6 +22,9 @@ import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
 import { articleIdForPart } from "@/lib/specs/articles";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { partDocsView, type PartDocsView } from "@/lib/part-docs/views";
+import PartDocumentsSection from "./part-documents-section";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 
@@ -186,6 +189,12 @@ export default async function CatalogPage({
   // Displays pointer, else D94's section) — see articleIdForPart.
   const defaultArticleId = editingPart
     ? articleIdForPart({ ...editingPart, specArticleId: undefined }, specArticleDocs, specSections)
+    : null;
+  // Part documents (#DOC): the Documents section's view, computed only when a
+  // part is open — one load of the three document collections.
+  const descBySku = editingPart ? new Map(parts.map((p) => [p.sku, p.desc])) : null;
+  const partDocs = editingPart
+    ? partDocsView((await loadPartDocsState(parts)).index, editingPart.sku, (s) => descBySku!.get(s) ?? "")
     : null;
 
   return (
@@ -544,6 +553,7 @@ export default async function CatalogPage({
           specArticles={specArticles}
           specTemplates={specTemplates}
           defaultArticleId={defaultArticleId}
+          partDocs={partDocs}
           error={partError}
         />
       )}
@@ -655,6 +665,7 @@ function PartFormModal({
   specArticles,
   specTemplates,
   defaultArticleId,
+  partDocs,
   error,
 }: {
   part: CatalogPart | null;
@@ -662,17 +673,18 @@ function PartFormModal({
   priceDate: number | null;
   categories: string[];
   manufacturers: string[];
-  /** Datasheet attach/replace/remove (punch #39, Task 5) is admin-gated —
-   *  same convention as the Categories & trades card. */
+  /** Deleting a part is admin-gated — same convention as the Categories &
+   *  trades card. (Documents are not: anyone signed in, D-DOC-6.) */
   isAdmin: boolean;
   /** Task 13 — the Spec panel shows for anyone who can `create` (owner
-   *  decision 3), not admin-only like the datasheet control above, because
-   *  the datasheet control writes Peak's own blob storage and the spec
-   *  write is gated by requirePerm("create") inside the action itself. */
+   *  decision 3); the spec write is gated by requirePerm("create") inside
+   *  the action itself. */
   canCreate: boolean;
   specArticles: SpecPanelArticle[];
   specTemplates: SpecPanelTemplate[];
   defaultArticleId: string | null;
+  /** Part documents (#DOC) — null for a new, unsaved part. */
+  partDocs: PartDocsView | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
 }) {
@@ -918,12 +930,13 @@ function PartFormModal({
               </div>
             )}
 
-            {/* Datasheet attach/replace/remove (punch #39, Task 5) — admin
-                only, and only once the part exists (its SKU is the doc id
-                the blob pathname is keyed under). */}
-            {isAdmin && editing && part && (
+            {/* Part documents (#DOC) — the datasheet / spec-sheet slots,
+                this part's documents and its accessory coverage. Anyone
+                signed in (spec §2.4); only once the part exists. Replaces
+                the admin-only single-datasheet control (D-DOC-6). */}
+            {editing && part && partDocs && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-                <PartDatasheetControl sku={part.sku} datasheetName={part.datasheetName} />
+                <PartDocumentsSection key={part.sku} view={partDocs} />
               </div>
             )}
 

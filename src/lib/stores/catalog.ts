@@ -107,8 +107,10 @@ export type CatalogPart = {
    *  bytes live in Vercel Blob, never in this doc (10.7k parts × MB-scale
    *  jsonb is exactly the anti-pattern D116 exists to avoid); this is just
    *  the blob's pathname, streamed by the authenticated
-   *  /api/part-datasheet/<sku> proxy. Always set/cleared together with
-   *  datasheetName by uploadPartDatasheetAction/removePartDatasheetAction. */
+   *  /api/part-datasheet/<sku> proxy. LEGACY since part documents (#DOC):
+   *  nothing writes it any more; the backfill (src/lib/part-docs/legacy.ts)
+   *  turns it into a shared `part_documents` row, and it stays readable
+   *  for the readers that have not switched. */
   datasheetBlobKey?: string;
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
