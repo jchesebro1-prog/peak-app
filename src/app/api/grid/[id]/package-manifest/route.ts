@@ -3,11 +3,12 @@ import { requireUser } from "@/lib/session";
 import { getProject } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { buildClientPackageManifest } from "@/lib/client-package";
+import { loadPartDocsState } from "@/lib/part-docs/load";
 
 /**
  * Read-only package readiness seam (punch #40). Private Blob pathnames never
- * leave the server; consumers receive the existing authenticated datasheet
- * proxy URL instead. The eventual PDF/ZIP writer and the readiness UI use the
+ * leave the server; consumers receive the authenticated part-document
+ * viewer URL instead (#DOC). The eventual PDF/ZIP writer and the readiness UI use the
  * same manifest builder.
  */
 export async function GET(
@@ -18,17 +19,17 @@ export async function GET(
   const { id } = await params;
   const project = await getProject(decodeURIComponent(id));
   if (!project) return NextResponse.json({ error: "Design not found." }, { status: 404 });
-  const manifest = buildClientPackageManifest(project, await listCatalog());
+  const catalog = await listCatalog();
+  const { index } = await loadPartDocsState(catalog);
+  const manifest = buildClientPackageManifest(project, catalog, null, index);
+  const url = (documentId: string) => `/api/part-documents/${encodeURIComponent(documentId)}`;
   return NextResponse.json({
     ...manifest,
-    datasheets: manifest.datasheets.map(({ sku, name }) => ({
-      sku,
-      name,
-      url: `/api/part-datasheet/${encodeURIComponent(sku)}`,
-    })),
-    items: manifest.items.map(({ datasheet, ...item }) => ({
+    documents: manifest.documents.map((d) => ({ ...d, url: url(d.documentId) })),
+    items: manifest.items.map((item) => ({
       ...item,
-      datasheet: datasheet ? { name: datasheet.name, url: `/api/part-datasheet/${encodeURIComponent(item.sku)}` } : null,
+      datasheet: item.datasheet ? { ...item.datasheet, url: url(item.datasheet.documentId) } : null,
+      specsheet: item.specsheet ? { ...item.specsheet, url: url(item.specsheet.documentId) } : null,
     })),
   });
 }

@@ -120,23 +120,8 @@ export function skusOnBomSince(
 }
 
 /** What coverage needs off a catalog part — a superset of SpecPartLike, so a
- *  real CatalogPart is structurally assignable with no cast. A datasheet is
- *  any of: a Peak-uploaded PDF (`datasheetName`), a manufacturer datasheet
- *  link from DaVinci (#162, `docs[].kind === "datasheet"`), or a researched
- *  datasheet/cut sheet on the Displays metadata (`productMetadata.datasheets`). */
-export type CoveragePart = SpecPartLike & {
-  desc?: string;
-  datasheetName?: string;
-  docs?: Array<{ kind: string }>;
-  productMetadata?: { datasheets?: Array<{ kind: string }> };
-};
-
-export function hasDatasheet(p: CoveragePart): boolean {
-  if (p.datasheetName) return true;
-  if ((p.docs ?? []).some((d) => d.kind === "datasheet")) return true;
-  if ((p.productMetadata?.datasheets ?? []).some((d) => d.kind === "datasheet" || d.kind === "cut-sheet")) return true;
-  return false;
-}
+ *  real CatalogPart is structurally assignable with no cast. */
+export type CoveragePart = SpecPartLike & { desc?: string };
 
 /** `articleIdForPart` once per part, keyed by SKU — the one Map the library
  *  page's article-count table and `coverageRows` below both read, instead of
@@ -157,11 +142,15 @@ export function articleIdMapForParts(
 /** One row per catalog part — mapped to an article or not, spec'd or not.
  *  `bySku` (for specStateOf's same-as resolution) is built once here, not
  *  per part. `articleIdBySku` is the shared, already-computed map from
- *  `articleIdMapForParts` — see final fix wave item 10. */
+ *  `articleIdMapForParts` — see final fix wave item 10. `datasheetOk` is
+ *  the part-documents coverage rule's answer (#DOC, spec §7 —
+ *  datasheetSatisfiedSkus): own file, not needed, or covered by a fixture;
+ *  a link nobody has fetched no longer counts. */
 export function coverageRows(
   parts: CoveragePart[],
   articleIdBySku: Map<string, string | null>,
-  onBom: Set<string>
+  onBom: Set<string>,
+  datasheetOk: ReadonlySet<string>
 ): CoverageRow[] {
   const bySku = new Map<string, CoveragePart>();
   for (const p of parts) bySku.set(p.sku, p);
@@ -173,7 +162,7 @@ export function coverageRows(
     articleId: articleIdBySku.get(p.sku) ?? null,
     state: specStateOf(p, bySku),
     onBom: onBom.has(p.sku),
-    hasDatasheet: hasDatasheet(p),
+    hasDatasheet: datasheetOk.has(p.sku),
   }));
 }
 

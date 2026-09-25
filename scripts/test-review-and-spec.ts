@@ -317,7 +317,7 @@ import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/c
 import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
 import {
-  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, hasDatasheet, coverageRows, filterCoverage, articleIdMapForParts,
+  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, articleIdMapForParts,
 } from "@/app/(app)/design/specs/coverage";
 
 let fail = 0;
@@ -15226,12 +15226,11 @@ async function deletePartBAsyncChecks(): Promise<void> {
     { sku: "P4", desc: "Pointer", category: "Fixtures", specSameAs: "P1" },
     { sku: "P5", desc: "Unmapped", category: "Nothing" },
   ];
-  ok(hasDatasheet({ sku: "D1", docs: [{ kind: "datasheet" }] }), "coverage: a DaVinci datasheet link counts as a datasheet");
-  ok(!hasDatasheet({ sku: "D2", docs: [{ kind: "manual" }] }), "coverage: a manual alone is not a datasheet");
-  ok(hasDatasheet({ sku: "D3", productMetadata: { datasheets: [{ kind: "cut-sheet" }] } }), "coverage: a researched cut sheet counts");
-  ok(!hasDatasheet({ sku: "D4", productMetadata: { datasheets: [{ kind: "guide-spec" }] } }), "coverage: a guide spec alone is not a datasheet");
+  // #DOC: whether a part "has a datasheet" is the part-documents coverage
+  // rule's answer (datasheetSatisfiedSkus, tested in the #DOC blocks); the
+  // table only reports the set it is handed. A link-only URL no longer counts.
   const articleIdBySku = articleIdMapForParts(parts as never, articles, sections);
-  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]));
+  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]), new Set(["P1"]));
   ok(rows.length === 5, "coverage: every part gets a row, mapped or not");
   ok(rows.find((r) => r.sku === "P1")!.state === "authored", "coverage: an authored part reads authored");
   ok(rows.find((r) => r.sku === "P2")!.state === "draft", "coverage: a draft reads draft, never authored");
@@ -16123,4 +16122,54 @@ import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
   ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#DOC prefill: the manufacturer gate refuses every record");
   const noLens = planDavinciPrefill(ex, [{ sku: "CSPAR" }], allowEtc);
   ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#DOC prefill: a link with no Peak part on one end writes nothing");
+}
+
+/* ======================================================================
+   Part documents (#DOC) — Task 11: the client package carries each
+   document once, covers accessories only in context, and says so.
+   ====================================================================== */
+import { resolvePackageDocs, packageEntryName } from "@/lib/part-docs/package";
+import { coveredNote } from "@/lib/client-package";
+{
+  const file = (id: string, kind: "datasheet" | "specsheet", name: string): PdDoc => ({
+    id, kind, title: name, fileName: name, contentType: "application/pdf", size: 1, blobKey: `part-docs/${id}/${name}`, sourceUrl: null,
+    source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const idx = buildCoverageIndex({
+    documents: [file("PD-pkgfix00000", "datasheet", "S4 Datasheet.pdf"), file("PD-pkgspec0000", "specsheet", "S4 Guide.docx")],
+    links: [
+      { id: "1", partSku: "PKG-FIX", documentId: "PD-pkgfix00000", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "2", partSku: "PKG-FIX", documentId: "PD-pkgspec0000", kind: "specsheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [
+      { id: "a", parentSku: "PKG-FIX", accessorySku: "PKG-LENS", source: "assembly" },
+      { id: "b", parentSku: "PKG-FIX", accessorySku: "PKG-CLAMP", source: "davinci" },
+    ],
+    parts: [{ sku: "PKG-NN", docNotNeeded: { datasheet: true } }],
+  });
+  const withFix = resolvePackageDocs(idx, ["PKG-FIX", "PKG-LENS", "PKG-CLAMP", "PKG-NN"]);
+  ok(withFix.documents.length === 2 && withFix.documents.find((d) => d.kind === "datasheet")!.skus.join(",") === "PKG-FIX,PKG-LENS,PKG-CLAMP", "part docs package: the fixture datasheet is listed once, serving the fixture and its accessories");
+  ok(withFix.bySku.get("PKG-LENS")!.datasheetCoveredBy.join(",") === "PKG-FIX" && withFix.bySku.get("PKG-LENS")!.datasheetOk, "part docs package: an accessory on the same quote is covered by its fixture");
+  ok(withFix.bySku.get("PKG-NN")!.datasheetOk && !withFix.bySku.get("PKG-NN")!.datasheet, "part docs package: not-needed is no gap and no file");
+  const alone = resolvePackageDocs(idx, ["PKG-LENS"]);
+  ok(!alone.bySku.get("PKG-LENS")!.datasheetOk && alone.documents.length === 0, "part docs package: an accessory quoted without its fixture is not covered on that quote");
+  ok(!resolvePackageDocs(null, ["PKG-FIX"]).bySku.get("PKG-FIX")!.datasheetOk, "part docs package: no index means no documents");
+  const used = new Set<string>();
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  ok(packageEntryName({ documentId: "PD-a", kind: "datasheet", name: "S4 Datasheet.pdf" }, used, safe) === "datasheets/S4_Datasheet.pdf", "part docs package: datasheets go under datasheets/");
+  ok(packageEntryName({ documentId: "PD-b", kind: "datasheet", name: "S4 Datasheet.pdf" }, used, safe) === "datasheets/PD-b-S4_Datasheet.pdf", "part docs package: a clashing name is prefixed with its id");
+  ok(packageEntryName({ documentId: "PD-c", kind: "specsheet", name: "g.docx" }, used, safe) === "specsheets/g.docx", "part docs package: spec sheets go under specsheets/");
+  ok(coveredNote("PKG-LENS", ["PKG-FIX"]).note === "covered by PKG-FIX", "part docs package: the gap report says covered by <fixture>");
+
+  const part = (sku: string) => ({ id: sku, sku, desc: sku, category: "Lighting", unit: "ea", list: 1, cost: 1 });
+  const grid = (placements: string[]) => ({
+    id: "GRD-PKG", name: "P", createdAt: 1, quoteId: null,
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
+    placements: placements.map((partId, i) => ({ id: `gp-${i}`, optionId: "opt-a", partId })),
+  });
+  const m = buildClientPackageManifest(grid(["PKG-FIX", "PKG-LENS", "PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
+  ok(!m.gaps.some((g) => g.kind === "missing-datasheet"), "part docs package: a Grid design with the fixture has no datasheet gap for its lens");
+  ok(m.covered.length === 1 && m.covered[0].note === "covered by PKG-FIX" && m.documents.length === 2 && m.counts.datasheets === 1, "part docs package: the manifest lists the covered accessory and each document once");
+  const lensOnly = buildClientPackageManifest(grid(["PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
+  ok(lensOnly.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === "PKG-LENS"), "part docs package: a lens placed without its fixture is a missing-datasheet gap on that design");
 }

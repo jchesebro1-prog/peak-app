@@ -8,6 +8,8 @@ import * as Quotes from "@/lib/stores/quotes";
 import * as GridProjects from "@/lib/stores/grid-projects";
 import * as GeneratedSpecs from "@/lib/stores/generated-specs";
 import type { SpecCategoryArticle } from "@/lib/specs/articles";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { datasheetSatisfiedSkus } from "@/lib/part-docs/coverage";
 import { ON_BOM_WINDOW_MS, articleIdMapForParts, coverageRows, filterCoverage, skusOnBomSince, type CoverageState } from "../coverage";
 import {
   AddSectionForm,
@@ -113,7 +115,10 @@ export default async function SpecLibraryPage({
   const coverageQ = one(sp.q);
 
   const onBom = skusOnBomSince({ quotes, gridProjects, generated }, Date.now() - ON_BOM_WINDOW_MS);
-  const coverageAll = coverageRows(parts, articleIdBySku, onBom);
+  // #DOC: the datasheet column is the part-documents coverage rule.
+  const { index: docIndex } = await loadPartDocsState(parts);
+  const datasheetOk = datasheetSatisfiedSkus(docIndex, parts.map((p) => p.sku));
+  const coverageAll = coverageRows(parts, articleIdBySku, onBom, datasheetOk);
   const coverageFiltered = filterCoverage(coverageAll, {
     articleId: articleParam || undefined,
     state: stateParam || undefined,
