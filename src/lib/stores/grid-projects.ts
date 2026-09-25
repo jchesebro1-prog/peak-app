@@ -469,6 +469,37 @@ export async function listSheets(projectId: string): Promise<GridSheet[]> {
     .filter((s): s is GridSheet => Boolean(s));
 }
 
+/**
+ * Remove one sheet from the project's display order. Refuses when any LIVE
+ * placement/space/route still references it — those would otherwise paint
+ * against a background that's no longer reachable. Deliberately does NOT
+ * softDeleteDoc the `grid_sheets` record: it stays a normal, readable doc
+ * (dropped only from `sheetIds`), so an older GridRevision that still lists
+ * this sheet in its own `sheetIds` can still resolve it by id through
+ * getDoc/the /api/grid-sheets/<id> proxy the moment restoreRevision puts the
+ * id back on the live list (see restoreRevision below — it re-adds a
+ * removed sheet the revision being restored actually references). Hard-
+ * deleting the doc or its blob would break that resolution outright.
+ */
+export async function removeSheet(
+  projectId: string,
+  sheetId: string
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "no-such-sheet" | "in-use" }> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  if (!(project.sheetIds || []).includes(sheetId)) return { ok: false, reason: "no-such-sheet" };
+  const inUse =
+    (project.placements || []).some((pl) => pl.sheetId === sheetId) ||
+    (project.spaces || []).some((sp) => sp.sheetId === sheetId) ||
+    (project.routes || []).some((r) => r.sheetId === sheetId);
+  if (inUse) return { ok: false, reason: "in-use" };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, reason: "not-found" };
+}
+
 export async function addPlacement(
   projectId: string,
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }
@@ -1010,7 +1041,13 @@ export async function addRevision(
  * Recall an earlier revision onto the live design. Non-destructive by
  * construction (the quotes idiom): the current state is snapshotted FIRST,
  * so walking back never discards the direction walked away from. sheetIds
- * are NOT applied — sheets are never orphaned by a restore.
+ * are NOT applied wholesale from the snapshot — a sheet added since, or
+ * removed for reasons unrelated to this revision, is left exactly as it
+ * is. The one exception: a sheet that WAS removed (removeSheet only drops
+ * it from sheetIds — the doc itself is never deleted) and that the
+ * restored placements/spaces/routes actually reference is added BACK onto
+ * sheetIds, or those items would land on the live design pointing at a
+ * sheet the editor no longer shows.
  */
 export async function restoreRevision(
   projectId: string,
@@ -1028,6 +1065,22 @@ export async function restoreRevision(
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
     doc.routes = [...(target.routes || [])];
+    // sheetIds themselves are still never restored wholesale from the
+    // snapshot (a sheet added since, or removed for reasons unrelated to
+    // this revision, should stay exactly as it is) — but a sheet that WAS
+    // removed since this snapshot and that the restored placements/spaces/
+    // routes actually reference must come back into the live list, or
+    // those items land back on the design pointing at a sheet the editor
+    // no longer shows. The sheet's own doc was never deleted by removeSheet
+    // (only dropped from sheetIds), so it still resolves the moment its id
+    // is back on the list.
+    const referencedSheetIds = new Set<string>();
+    for (const pl of target.placements) referencedSheetIds.add(pl.sheetId);
+    for (const sp of target.spaces) referencedSheetIds.add(sp.sheetId);
+    for (const r of target.routes || []) referencedSheetIds.add(r.sheetId);
+    const liveSheetIds = new Set(doc.sheetIds || []);
+    for (const sid of referencedSheetIds) liveSheetIds.add(sid);
+    doc.sheetIds = Array.from(liveSheetIds);
     // Quote links are bookkeeping, not design state: a restore brings back
     // the option LIST and membership, but every option that still exists
     // keeps its CURRENT quote link, and the project mirror is re-derived.

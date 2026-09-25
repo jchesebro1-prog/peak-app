@@ -26,6 +26,7 @@ export async function GET(
   }
   const projectTasks = tasks.filter((task) => task.projectId === project.id);
   const done = projectTasks.filter((task) => task.status === "done").length;
+  const liveNotes = (project.notes || []).filter((n) => !n.deleted);
   const crew = project.crew?.length
     ? project.crew.map((member) => `${member.person} (${member.role || "crew"})`).join(", ")
     : "Unassigned";
@@ -53,15 +54,15 @@ export async function GET(
       heading: "Field progress",
       rows: [
         { label: "Tasks", value: `${done} of ${projectTasks.length} complete` },
-        { label: "Notes", value: `${project.notes?.length || 0} recorded` },
+        { label: "Notes", value: `${liveNotes.length} recorded` },
         { label: "Customer acceptance", value: project.signoff ? `Signed by ${project.signoff.name || "customer"} · ${fmtDateY(project.signoff.signedAt)}` : "Pending" },
         { label: "Linked design package", value: project.quoteId ? `Available from linked quote ${project.quoteId}` : "No linked quote" },
       ],
     },
-    ...(project.notes?.length
+    ...(liveNotes.length
       ? [{
           heading: "Recent notes",
-          rows: project.notes.slice(0, 12).map((note) => ({ label: `${note.by} · ${fmtDateY(note.at)}`, value: note.text })),
+          rows: liveNotes.slice(0, 12).map((note) => ({ label: `${note.by} · ${fmtDateY(note.at)}`, value: note.text })),
         }]
       : []),
     {

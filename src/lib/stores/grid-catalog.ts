@@ -1,5 +1,5 @@
 import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catalog";
-import { listDocs, patchDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
+import { listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
 import type { GridShape } from "@/lib/design/grid-symbols";
 
@@ -125,6 +125,21 @@ export async function createGridAssembly(input: {
     createdAt: t,
     updatedAt: t,
   }));
+}
+
+/** Delete a user-created assembly (soft delete). Refuses a seeded device
+ *  symbol — listGridSymbols only re-seeds when the WHOLE collection is
+ *  empty, which a lone assembly delete never causes (the seeded devices
+ *  stay), but the guard keeps this from ever being reachable for them even
+ *  if a caller skips the UI's own kind==="assembly" filter. */
+export async function removeGridAssembly(
+  id: string
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "not-an-assembly" }> {
+  const symbol = await getGridSymbol(id);
+  if (!symbol) return { ok: false, reason: "not-found" };
+  if (symbol.kind !== "assembly") return { ok: false, reason: "not-an-assembly" };
+  await softDeleteDoc("grid_catalog", id);
+  return { ok: true };
 }
 
 /** Set or clear (null) one entry's symbol override (#131). Returns null when

@@ -1,4 +1,4 @@
-import { getDoc, listDocs, patchDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 
 /* ------------------------------------------------------------------ *
  * Assignments (D93) — the ONE new record behind My Queue.
@@ -112,4 +112,10 @@ export async function updateAssignment(
 
 export async function getAssignment(id: string): Promise<Assignment | null> {
   return getDoc<Assignment>("assignments", id);
+}
+
+/** Delete an assignment (soft delete — doc-store tombstone, same as every
+ *  other collection removal in this app). */
+export async function removeAssignment(id: string): Promise<void> {
+  await softDeleteDoc("assignments", id);
 }

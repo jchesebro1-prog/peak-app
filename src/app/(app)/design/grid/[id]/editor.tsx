@@ -60,12 +60,14 @@ import {
   placeCurtainAction,
   placeDeviceAction,
   removePlacementAction,
+  removeSheetAction,
   setPlacementCategoryAction,
   setSymbolShapeAction,
   setVenueAction,
   linkLinesetDesignAction,
   createClientPackageAction,
 } from "./actions";
+import { ConfirmButton } from "@/components/confirm-button";
 import CurtainDrop from "./curtain-drop";
 import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
@@ -1139,6 +1141,20 @@ export default function GridEditor({
               </option>
             ))}
           </select>
+        )}
+        {sheet && (
+          <ConfirmButton
+            className="pk-btn-danger"
+            label="Delete sheet"
+            confirmLabel="Confirm"
+            style={{ fontSize: 11.5, padding: "6px 10px" }}
+            title="Deletes this sheet from the design — refused while it still has devices, spaces, or wires on it"
+            onConfirm={async () => {
+              const r = await removeSheetAction(project.id, sheet.id);
+              if (!r.ok) throw new Error(r.error);
+              router.refresh();
+            }}
+          />
         )}
         <OptionSwitcher
           projectId={project.id}

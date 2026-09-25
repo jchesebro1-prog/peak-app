@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import {
   type AssignmentLink,
   createAssignment,
+  removeAssignment,
   setAssignmentDone,
   updateAssignment,
 } from "@/lib/stores/assignments";
@@ -55,6 +56,18 @@ export async function setAssignmentDoneAction(
   } catch (error) {
     console.error("setAssignmentDoneAction: assignment update failed", error);
     return { ok: false, error: "Couldn’t update the assignment — please try again." };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function removeAssignmentAction(id: string): Promise<Result> {
+  await requireUser();
+  try {
+    await removeAssignment(id);
+  } catch (error) {
+    console.error("removeAssignmentAction: assignment delete failed", error);
+    return { ok: false, error: "Couldn’t delete the assignment — please try again." };
   }
   revalidatePath("/", "layout");
   return { ok: true };
