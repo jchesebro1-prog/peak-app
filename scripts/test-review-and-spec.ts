@@ -6859,7 +6859,7 @@ import {
   DEFAULT_PIPELINES, DEFAULT_PROJECT_PIPELINES, DEFAULT_QUOTE_PIPELINES, validateProjectPipeline, validateQuotePipeline,
   resolvePipelines, projectPipelineFor, quotePipelineFor, firstStage, firstStageWithTag, nextStage, resolveProjectStage,
   projectStageMeta, projectTag, isDone, isOnSite, isBacklog, isActive, stageLabelFor, carriesPipeline,
-  statusForQuoteStage, quoteStageForStatus,
+  statusForQuoteStage, quoteStageForStatus, quoteStagePillLabel,
 } from "@/lib/pipelines";
 {
   const install = DEFAULT_PROJECT_PIPELINES.find((p) => p.id === "install")!;
@@ -6932,6 +6932,13 @@ import {
   ok(quoteStageForStatus(ed, "sent", "acceptance") === "presentation", "pipelines: a status moving backwards moves the stage back to that status's first stage");
   ok(validateQuotePipeline({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "draft" }, { id: "b", label: "B", tag: "won" }] }).length > 0, "pipelines: quote needs a sent stage");
   ok(quoteStageForStatus({ id: "q", label: "Q", stages: [{ id: "a", label: "A", tag: "draft" }, { id: "b", label: "B", tag: "won" }] }, "sent", "a") === "a", "pipelines: a status with no matching stage keeps the current stage");
+
+  // quoteStagePillLabel (Quotes hub row pill, Task 6)
+  ok(quoteStagePillLabel(DEFAULT_PIPELINES, { status: "draft", pipelineId: "estimate-design", stage: "design" }, "Draft") === "Design", "pipelines: pill shows the stage label for a pipeline quote");
+  ok(quoteStagePillLabel(DEFAULT_PIPELINES, { status: "sent", pipelineId: "bid-spec", stage: "bid-sent" }, "Sent") === "BID Sent", "pipelines: pill works on the bid-spec pipeline too");
+  ok(quoteStagePillLabel(DEFAULT_PIPELINES, { status: "lost", pipelineId: "estimate-design", stage: "presentation" }, "Lost") === "Lost", "pipelines: a lost quote's pill stays Lost, not the stage it died in");
+  ok(quoteStagePillLabel(DEFAULT_PIPELINES, { quoteType: "flame_test", status: "draft", stage: "design" }, "Draft") === "Draft", "pipelines: a service quote's pill is untouched");
+  ok(quoteStagePillLabel(DEFAULT_PIPELINES, { status: "draft", pipelineId: "estimate-design", stage: "gone" }, "Draft") === "Draft", "pipelines: an unresolved stage falls back to the status label");
 }
 
 /* ============ PIPELINES (Daylite stages) — settings storage + server loader ============ */

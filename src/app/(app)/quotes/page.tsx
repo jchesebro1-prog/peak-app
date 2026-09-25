@@ -10,6 +10,8 @@ import {
   type Quote,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
+import { loadPipelines } from "@/lib/pipelines-server";
+import { quoteStagePillLabel } from "@/lib/pipelines";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getEngagementForQuoteRef, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
 import { allUsers, reviewers } from "@/lib/users";
@@ -107,13 +109,14 @@ export default async function QuotesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, customers, users, reviewerRows] = await Promise.all([
+  const [user, sp, quotes, customers, users, reviewerRows, pipes] = await Promise.all([
     requireUser(),
     searchParams,
     getAll(),
     allCustomers(),
     allUsers(),
     reviewers(),
+    loadPipelines(),
   ]);
   const me = user.name;
 
@@ -654,7 +657,7 @@ export default async function QuotesPage({
                   style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}
                 >
                   <StatusPill tone={QUOTE_STATUS_TONE[q.status] || "gray"} minWidth={64}>
-                    {STAGE_LABEL[q.status] || STAGE_LABEL.draft}
+                    {quoteStagePillLabel(pipes, q, STAGE_LABEL[q.status] || STAGE_LABEL.draft)}
                   </StatusPill>
                   {rMeta && (
                     <span

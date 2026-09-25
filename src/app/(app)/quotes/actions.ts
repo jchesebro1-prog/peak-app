@@ -78,14 +78,22 @@ export async function setQuoteStageAction(formData: FormData): Promise<void> {
   revalidatePath("/", "layout");
 }
 
-/** Switch a draft system quote to another quote pipeline (lands on its first stage). */
+/**
+ * Switch a draft system quote to another quote pipeline (lands on its first stage).
+ * setQuotePipeline refuses (returns null, never throws) outside draft or for an
+ * unknown pipeline id — surfaced the same `?statusError=` way as the status/stage
+ * actions above, instead of silently doing nothing (it used to).
+ */
 export async function setQuotePipelineAction(formData: FormData): Promise<void> {
   await requireUser();
   const id = String(formData.get("id") || "");
   const pipelineId = String(formData.get("pipelineId") || "");
+  const back = String(formData.get("back") || "/quotes");
   if (!id || !pipelineId) return;
   const q = await setQuotePipeline(id, pipelineId);
-  if (!q) return;
+  if (!q) {
+    redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent("That pipeline change was refused."));
+  }
   revalidatePath("/", "layout");
 }
 

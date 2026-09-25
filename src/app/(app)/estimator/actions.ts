@@ -14,6 +14,8 @@ import {
   requestChanges,
   requireApprovalToAdvance,
   setStatus,
+  setQuoteStage,
+  setQuotePipeline,
   STAGES,
   submitForReview,
   update,
@@ -133,6 +135,11 @@ export type SaveResult = {
   updatedAt: number;
   review: QuoteReview | null;
   status: QuoteStatus | null;
+  /** Daylite stage bar (Task 6) — a brand-new quote is created with no id
+   *  (and so no stage bar) until this save returns; these let the client
+   *  show the right stage highlighted immediately, with no extra round trip. */
+  pipelineId: string | null;
+  stage: string | null;
   /** What was actually stored (#143) — attachments moved into Blob storage
    *  come back as blobPath so the next save doesn't re-upload the bytes. */
   vendorQuotes?: VendorQuote[];
@@ -157,6 +164,28 @@ function refresh() {
 async function syncOf(id: string): Promise<ReviewSync> {
   const q = await get(id);
   return { ok: !!q, review: q?.review ?? null, status: q?.status ?? null };
+}
+
+/** Client-callable twin of ReviewSync for the Daylite stage bar (Task 6) — the
+ *  estimator's useTransition callers need the pipeline fields back too. */
+export type StageSync = {
+  ok: boolean;
+  status: QuoteStatus | null;
+  review: QuoteReview | null;
+  pipelineId: string | null;
+  stage: string | null;
+  error?: string;
+};
+
+async function stageSyncOf(id: string): Promise<StageSync> {
+  const q = await get(id);
+  return {
+    ok: !!q,
+    status: q?.status ?? null,
+    review: q?.review ?? null,
+    pipelineId: q?.pipelineId ?? null,
+    stage: q?.stage ?? null,
+  };
 }
 
 /**
@@ -331,6 +360,8 @@ export async function saveQuoteAction(
         updatedAt: Date.now(),
         review: null,
         status: null,
+        pipelineId: null,
+        stage: null,
         error:
           e instanceof Error
             ? e.message
@@ -372,6 +403,10 @@ export async function saveQuoteAction(
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
     status: q?.status ?? null,
+    // Daylite stage bar (Task 6) — normalized on read (normalizeQuotePipeline);
+    // null for a service quote (quoteType set to something other than system).
+    pipelineId: q?.pipelineId ?? null,
+    stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
     ...(statusError ? { error: statusError } : {}),
   };
@@ -617,6 +652,59 @@ export async function setStatusAction(
   }
   refresh();
   return syncOf(id);
+}
+
+/**
+ * Move a system quote to a pipeline stage from the estimator header's Daylite
+ * stage bar (Task 6). Thin wrapper — all the real logic (approval gate on a
+ * status-changing move, history, revision-on-send, spawn) lives in
+ * setQuoteStage/setStatus; a same-status-tag move is a plain stage write. A
+ * stage that changes the quote's status inherits setStatus's approval gate
+ * exactly like setStatusAction above and THROWS on refusal, caught here the
+ * same way — never a second source of truth for the gate.
+ */
+export async function setQuoteStageAction(id: string, stageId: string): Promise<StageSync> {
+  const user = await requireUser();
+  if (!id || !stageId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
+  try {
+    await setQuoteStage(id, stageId, user.name);
+  } catch (e) {
+    const cur = await get(id);
+    return {
+      ok: false,
+      status: cur?.status ?? null,
+      review: cur?.review ?? null,
+      pipelineId: cur?.pipelineId ?? null,
+      stage: cur?.stage ?? null,
+      error: e instanceof Error ? e.message : "That stage change was refused.",
+    };
+  }
+  refresh();
+  return stageSyncOf(id);
+}
+
+/**
+ * Switch a draft system quote to another quote pipeline (Estimate/Design ⇄
+ * BID SPEC) from the header's pipeline select. setQuotePipeline refuses
+ * (returns null, never throws) outside draft or for an unknown pipeline id.
+ */
+export async function setQuotePipelineAction(id: string, pipelineId: string): Promise<StageSync> {
+  await requireUser();
+  if (!id || !pipelineId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
+  const q = await setQuotePipeline(id, pipelineId);
+  if (!q) {
+    const cur = await get(id);
+    return {
+      ok: false,
+      status: cur?.status ?? null,
+      review: cur?.review ?? null,
+      pipelineId: cur?.pipelineId ?? null,
+      stage: cur?.stage ?? null,
+      error: "That pipeline change was refused.",
+    };
+  }
+  refresh();
+  return stageSyncOf(id);
 }
 
 export async function submitReviewAction(

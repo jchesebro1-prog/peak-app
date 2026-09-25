@@ -279,3 +279,23 @@ export function normalizeQuotePipeline<Q extends { quoteType?: string | null; st
   else delete q.stage;
   return q;
 }
+
+/**
+ * Status-pill text for the Quotes hub (Task 6): a pipeline (system) quote's
+ * pill reads its stage label — "First Contact", "Design", etc. — instead of
+ * the coarse Draft/Sent/Won status text; the pill's colour stays the status
+ * colour (QUOTE_STATUS_TONE keyed on q.status, unaffected by this). A quote
+ * that carries no pipeline (service quotes), or is Lost, or whose stage
+ * doesn't resolve, keeps the plain status label the caller passes in — Lost
+ * always shows "Lost", never the stage the deal happened to die in (stages
+ * only carry the draft/sent/won tags, never lost, so a lost quote's stage
+ * would otherwise print the wrong thing).
+ */
+export function quoteStagePillLabel<Q extends { quoteType?: string | null; status: string; pipelineId?: string | null; stage?: string | null }>(
+  pipes: Pipelines,
+  q: Q,
+  statusLabel: string
+): string {
+  if (!carriesPipeline(q.quoteType) || q.status === "lost") return statusLabel;
+  return stageById(quotePipelineFor(pipes, q), q.stage)?.label || statusLabel;
+}

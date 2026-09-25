@@ -2,6 +2,7 @@ import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
+import type { Pipelines } from "@/lib/pipelines";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -316,6 +317,13 @@ export type InitialQuote = {
   quoteId: string;
   status: QuoteStatus;
   review: QuoteReview;
+  /** Undefined/"system" on a fresh estimate — the Daylite stage bar (Task 6)
+   *  only renders for quotes carriesPipeline() says carry a pipeline. */
+  quoteType?: string | null;
+  /** Normalized on read by the quotes store (normalizeQuotePipeline) — null
+   *  for a quote type that carries no pipeline, or an unsaved estimate. */
+  pipelineId: string | null;
+  stage: string | null;
   projectName: string;
   custName: string;
   customerId: string | null;
@@ -355,6 +363,9 @@ export type AiSource = {
 
 export type EstimatorProps = {
   initial: InitialQuote;
+  /** Settings → Pipelines (Task 6) — the Daylite stage bar reads the loaded
+   *  quote's pipeline from here; loaded once server-side (loadPipelines()). */
+  pipelines: Pipelines;
   /** Branding for the customer document (Settings → Branding, D69). */
   companyName: string;
   logoDark: string | null;

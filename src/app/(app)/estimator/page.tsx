@@ -12,6 +12,7 @@ import {
 } from "@/lib/stores/customers";
 import { reviewers as reviewerUsers, activeUsers } from "@/lib/users";
 import { getSettings, type Office } from "@/lib/settings";
+import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
@@ -93,6 +94,9 @@ async function initialFrom(
       quoteId: FALLBACK.quoteId,
       status: "draft",
       review: rvNone(),
+      quoteType: null,
+      pipelineId: null,
+      stage: null,
       projectName: FALLBACK.projectName,
       custName: FALLBACK.custName,
       customerId: null,
@@ -140,6 +144,12 @@ async function initialFrom(
     quoteId: q.id,
     status: q.status,
     review: q.review || rvNone(),
+    // Normalized on read by the quotes store (normalizeQuotePipeline) — a
+    // system quote always reads with a pipeline + stage that agree with its
+    // status; a service quote (quoteType set to something else) reads null.
+    quoteType: q.quoteType ?? null,
+    pipelineId: q.pipelineId ?? null,
+    stage: q.stage ?? null,
     projectName: q.name || FALLBACK.projectName,
     custName: cname,
     customerId: cid,
@@ -203,7 +213,7 @@ export default async function EstimatorPage({
 
   const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -213,6 +223,7 @@ export default async function EstimatorPage({
       getFixtureRates(),
       activeUsers(),
       catalogList(),
+      loadPipelines(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -312,6 +323,7 @@ export default async function EstimatorPage({
   return (
     <EstimatorClient
       initial={initial}
+      pipelines={pipelines}
       companyName={settings.companyName || "Peak Systems Group"}
       logoDark={settings.logoDark || null}
       fabrics={fabrics}

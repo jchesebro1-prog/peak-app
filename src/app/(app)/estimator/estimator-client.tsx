@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
+import { carriesPipeline, stageById } from "@/lib/pipelines";
 import {
   addQuoteTaskAction,
   applyQuoteTemplateAction,
@@ -19,6 +20,8 @@ import {
   saveQuoteAction,
   searchQuotesAction,
   sendToCustomerAction,
+  setQuotePipelineAction,
+  setQuoteStageAction,
   setQuoteTaskStatusAction,
   setStatusAction,
   submitReviewAction,
@@ -27,6 +30,7 @@ import {
   updateQuoteTaskAction,
   type MoveSystemTarget,
   type ReviewSync,
+  type StageSync,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
@@ -257,6 +261,12 @@ const STATUS_DOT: Record<string, string> = {
   lost: "#8c919c",
 };
 
+/** Overlapping-chevron breadcrumb shape (Daylite stage bar, Task 6). Every
+ *  segment gets the same clip-path and a negative left margin so the next
+ *  segment's notch sits over the previous segment's point, and a rising
+ *  z-index (left → right) so that notch actually shows through. */
+const CHEVRON_CLIP = "polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 10px 50%)";
+
 const DARK_SELECT: CSSProperties = {
   fontFamily: "var(--font-ui)",
   fontSize: 12.5,
@@ -325,6 +335,7 @@ const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 mont
 
 export default function EstimatorClient({
   initial,
+  pipelines,
   companyName,
   logoDark,
   fabrics,
@@ -363,6 +374,11 @@ export default function EstimatorClient({
   const [quoteId, setQuoteId] = useState(initial.quoteId);
   const [status, setStatus] = useState<QuoteStatus>(initial.status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
+  /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
+     changes it), so it stays a plain const rather than state. */
+  const quoteType = initial.quoteType;
+  const [pipelineId, setPipelineId] = useState(initial.pipelineId);
+  const [stage, setStage] = useState(initial.stage);
   // Keep the review status visible without making its action controls consume
   // the estimator's first viewport. The bar can be expanded whenever a user
   // needs to submit, claim, decide, attest, or send the quote.
@@ -646,6 +662,16 @@ export default function EstimatorClient({
     if (r.status) setStatus(r.status);
   };
 
+  /** Same idea as applySync, for the Daylite stage bar's StageSync (Task 6) —
+   *  a stage move can also change status/review (setQuoteStage runs setStatus
+   *  underneath when the tag changes), so all four fields sync together. */
+  const applyStageSync = (r: StageSync) => {
+    if (r.review) setReview(r.review);
+    if (r.status) setStatus(r.status);
+    if (r.pipelineId) setPipelineId(r.pipelineId);
+    if (r.stage) setStage(r.stage);
+  };
+
   const doSave = () => {
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
@@ -683,6 +709,11 @@ export default function EstimatorClient({
           setRevDateMs(res.updatedAt);
           if (res.review) setReview(res.review);
           if (res.status) setStatus(res.status);
+          // Daylite stage bar (Task 6) — a brand-new quote has no pipeline
+          // until this first save creates it; pick it up immediately so the
+          // bar shows the right stage highlighted without another round trip.
+          if (res.pipelineId) setPipelineId(res.pipelineId);
+          if (res.stage) setStage(res.stage);
         }
         setJustSaved(true);
         if (savedTimer.current) clearTimeout(savedTimer.current);
@@ -719,6 +750,52 @@ export default function EstimatorClient({
         applySync(r);
       });
     }
+  };
+
+  /**
+   * Daylite stage bar (Task 6). A stage move can change the quote's status
+   * underneath (setQuoteStage runs the real setStatus when the stage's tag
+   * differs) — optimistic-update both, and roll both back on a gate refusal,
+   * mirroring changeStatus above exactly.
+   */
+  const changeStage = (stageId: string) => {
+    if (!loadedId || status === "lost") return;
+    const id = loadedId;
+    const prevStage = stage;
+    const prevStatus = status;
+    setStage(stageId);
+    startTransition(async () => {
+      const r = await setQuoteStageAction(id, stageId);
+      if (!r.ok) {
+        setStage(prevStage);
+        setStatus(prevStatus);
+        setActionError(r.error || "That stage change was rejected.");
+        return;
+      }
+      setActionError(null);
+      applyStageSync(r);
+    });
+  };
+
+  /** The pipeline select (Estimate/Design ⇄ BID SPEC) — draft only, lands on
+   *  the new pipeline's first stage. */
+  const changePipeline = (pid: string) => {
+    if (!loadedId || status !== "draft") return;
+    const id = loadedId;
+    const prevPipelineId = pipelineId;
+    const prevStage = stage;
+    setPipelineId(pid);
+    startTransition(async () => {
+      const r = await setQuotePipelineAction(id, pid);
+      if (!r.ok) {
+        setPipelineId(prevPipelineId);
+        setStage(prevStage);
+        setActionError(r.error || "That pipeline change was rejected.");
+        return;
+      }
+      setActionError(null);
+      applyStageSync(r);
+    });
   };
 
   /* ---------------- review & approval ---------------- */
@@ -1716,6 +1793,17 @@ export default function EstimatorClient({
     isOwner && rev.state !== "approved" && rev.state !== "changes" && !sentAlready;
   const showReviewBar = !!loadedId;
 
+  /* ---------------- Daylite stage bar (Task 6) ---------------- */
+  // No bar for an unsaved new quote (no id to move), and none for a quote
+  // type that carries no pipeline (service quotes build their own screens).
+  const showStageBar = !!loadedId && carriesPipeline(quoteType);
+  const stageBarPipeline =
+    pipelines.quote.find((p) => p.id === pipelineId) ||
+    pipelines.quote.find((p) => p.id === pipelines.defaultQuotePipelineId) ||
+    pipelines.quote[0];
+  const stageBarCurIdx = stageBarPipeline.stages.findIndex((s) => s.id === stage);
+  const stageBarLostLabel = status === "lost" ? stageById(stageBarPipeline, stage)?.label : null;
+
   /* ---------------- ctx bar options ---------------- */
   const customerOptions = [
     {
@@ -1970,6 +2058,91 @@ export default function EstimatorClient({
               </button>
             </div>
           </div>
+
+          {/* Daylite stage bar (Task 6) — system quotes only, none for an
+              unsaved estimate. Read-only + a "Lost" marker on a lost quote;
+              the pipeline switch (Estimate/Design ⇄ BID SPEC) only while
+              draft, since a sent/won stage carries contractual meaning. */}
+          {showStageBar && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 16,
+                flexWrap: "wrap",
+                rowGap: 8,
+                padding: "9px 22px",
+                background: "#22252b",
+                borderBottom: "1px solid #2b2e35",
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                {stageBarPipeline.stages.map((s, i) => {
+                  const isCurrent = i === stageBarCurIdx;
+                  const isPast = stageBarCurIdx >= 0 && i < stageBarCurIdx;
+                  const readOnly = status === "lost";
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      disabled={readOnly}
+                      onClick={() => changeStage(s.id)}
+                      title={readOnly ? "Lost — the stage the quote died at" : "Set stage: " + s.label}
+                      style={{
+                        fontFamily: "var(--font-ui)",
+                        fontSize: 11,
+                        fontWeight: isCurrent ? 700 : 600,
+                        color: isCurrent ? "#16181d" : isPast ? "#cfd3da" : "#7d828d",
+                        background: isCurrent ? "var(--accent)" : "#2b2e35",
+                        border: "1px solid " + (isCurrent ? "var(--accent)" : "#3a3e46"),
+                        padding: "6px 16px 6px 20px",
+                        marginLeft: i === 0 ? 0 : -10,
+                        clipPath: CHEVRON_CLIP,
+                        cursor: readOnly ? "default" : "pointer",
+                        whiteSpace: "nowrap",
+                        position: "relative",
+                        zIndex: i + 1,
+                        opacity: readOnly ? 0.6 : 1,
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {status === "lost" && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#e0a08f",
+                    background: "#3a2b26",
+                    border: "1px solid #5a3c33",
+                    borderRadius: 20,
+                    padding: "4px 11px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ✕ Lost{stageBarLostLabel ? " at " + stageBarLostLabel : ""}
+                </span>
+              )}
+              {status === "draft" && (
+                <select
+                  value={stageBarPipeline.id}
+                  onChange={(e) => changePipeline(e.target.value)}
+                  aria-label="Quote pipeline"
+                  style={{ ...DARK_SELECT, borderRadius: 7, padding: "6px 9px" }}
+                >
+                  {pipelines.quote.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           {/* review & approval banner */}
           {showReviewBar && (
