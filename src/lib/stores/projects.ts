@@ -756,7 +756,8 @@ export async function createProjectFromQuote(
       q.quoteType === "flame_test" ||
       q.quoteType === "repair" ||
       q.quoteType === "inspection" ||
-      q.quoteType === "consulting"
+      q.quoteType === "consulting" ||
+      q.quoteType === "rental"
     )
       return null;
     const p = await createProject(fromQuote(q, await loadPipelines()));
@@ -857,7 +858,8 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
       q.quoteType === "flame_test" ||
       q.quoteType === "repair" ||
       q.quoteType === "inspection" ||
-      q.quoteType === "consulting"
+      q.quoteType === "consulting" ||
+      q.quoteType === "rental"
     )
       continue;
     // `haveQ`/`skip` are only a fast-path skip built from one snapshot, not
@@ -891,12 +893,9 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
  * inspections.ts) and createProjectFromQuote has refused them since #13,
  * but this list only ever excluded flame_test/consulting.
  *
- * "rental" is NOT excluded here, matching createProjectFromQuote and
- * syncProjectsFromQuotes — see PUNCHLIST #180 item 3's report on whether
- * that's intended (rentals get their own booking spawn via
- * equipment-bookings.ts on the real win path, but nothing stops a won
- * rental quote from ALSO becoming an Installs project through this
- * generic default-case path).
+ * "rental" is excluded here, matching createProjectFromQuote and
+ * syncProjectsFromQuotes — a won rental becomes equipment bookings
+ * (equipment-bookings.ts on the real win path), not an Installs project.
  */
 export async function pendingConversions(): Promise<QuoteLike[]> {
   const skip = await dismissedQuoteIds();
@@ -910,6 +909,7 @@ export async function pendingConversions(): Promise<QuoteLike[]> {
         q.quoteType !== "repair" &&
         q.quoteType !== "inspection" &&
         q.quoteType !== "consulting" &&
+        q.quoteType !== "rental" &&
         !have.has(q.id) &&
         !skip.includes(q.id)
     )
