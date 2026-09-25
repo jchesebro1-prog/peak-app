@@ -108,6 +108,16 @@ export const MAX_FETCH_TIMEOUT_MS = 30_000;
  *  geocodeBatchAction (budgetMs 45_000 under a 60s maxDuration). */
 export const FETCH_ACTION_BUDGET_MS = 45_000;
 
+/** Wall-clock budget for one `prefillFromDavinciAction` call (review fix
+ *  wave 1) — the same 45 s under the page's 60 s maxDuration as the fetch
+ *  action; planning (the catalog load) counts against it too. */
+export const PREFILL_ACTION_BUDGET_MS = 45_000;
+
+/** A pre-fill write chunk only starts while this much budget remains: one
+ *  DOC_BATCH_CHUNK (500-row) multi-row statement over the network, with a
+ *  generous margin — measured well under a second on a local database. */
+export const PREFILL_CHUNK_WORST_CASE_MS = 5_000;
+
 /** Blob pathname prefix — every part document lives under it. */
 export const PART_DOC_PREFIX = "part-docs/";
 

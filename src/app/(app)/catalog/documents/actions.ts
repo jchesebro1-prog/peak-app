@@ -13,13 +13,21 @@ import {
   getDocument,
   replaceDocumentFile,
 } from "@/lib/stores/part-documents";
-import { applyPrefill, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
+import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
-import { FETCH_ACTION_BUDGET_MS, FETCH_BATCH_SIZE, isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
+import {
+  FETCH_ACTION_BUDGET_MS,
+  FETCH_BATCH_SIZE,
+  PREFILL_ACTION_BUDGET_MS,
+  PREFILL_CHUNK_WORST_CASE_MS,
+  isDocumentId,
+  isPartDocKind,
+  type PartDocKind,
+} from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
 /**
@@ -284,17 +292,26 @@ export async function searchPartsAction(q: string): Promise<DocActionResult<{ hi
 
 /** Admin: write the DaVinci pre-fill (link-only ETC datasheets + the ETC
  *  accessory graph). Idempotent — a second click writes nothing new. The
- *  same write as `npm run part-docs:davinci -- --apply --commit`. */
-export async function prefillFromDavinciAction(): Promise<DocActionResult<{ summary: string }>> {
+ *  same write as `npm run part-docs:davinci -- --apply --commit`.
+ *
+ *  Review fix wave 1: the writes are batched (500 rows per statement), and
+ *  the whole call runs on a wall-clock budget (PREFILL_ACTION_BUDGET_MS,
+ *  under the page's 60 s maxDuration) checked between write chunks. If the
+ *  budget runs out first it stops cleanly and says so — clicking again
+ *  continues where it stopped, since every phase skips what already landed. */
+export async function prefillFromDavinciAction(): Promise<DocActionResult<{ summary: string; complete: boolean }>> {
   const user = await requirePerm("manage_users");
+  const shouldStop = createPrefillStopper(PREFILL_ACTION_BUDGET_MS, PREFILL_CHUNK_WORST_CASE_MS);
   const plan = await planPrefillFromDavinci();
-  const r = await applyPrefill(plan, user.name);
+  const r = await applyPrefill(plan, user.name, { shouldStop });
   revalidate();
   return {
     ok: true,
+    complete: r.complete,
     summary:
       `${r.documentsCreated} new datasheet link${r.documentsCreated === 1 ? "" : "s"}, ${r.linksCreated} part link${r.linksCreated === 1 ? "" : "s"}, ` +
       `${r.accessoryWritten} accessory link${r.accessoryWritten === 1 ? "" : "s"} written, ${r.accessoryRemoved} removed ` +
-      `(${plan.stats.typesMatched} DaVinci types matched ${plan.stats.parts} ETC parts).`,
+      `(${plan.stats.typesMatched} DaVinci types matched ${plan.stats.parts} ETC parts).` +
+      (r.complete ? "" : " Not finished within this request's time limit — click Pre-fill from DaVinci again to continue where it stopped."),
   };
 }

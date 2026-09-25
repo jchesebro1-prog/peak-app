@@ -2519,10 +2519,10 @@ async function main() {
       stats: { parts: 3, typesMatched: 2, documents: 1, documentLinks: 2, accessoryPairs: 1, accessoryLinksUnmatched: 0 },
     };
     const first = await applyPrefill(plan, "DaVinci pre-fill");
-    assert.deepEqual(first, { documentsCreated: 1, linksCreated: 2, accessoryWritten: 1, accessoryRemoved: 0 }, "part docs prefill: documents, links and the graph are written");
+    assert.deepEqual(first, { documentsCreated: 1, linksCreated: 2, accessoryWritten: 1, accessoryRemoved: 0, complete: true }, "part docs prefill: documents, links and the graph are written");
     const doc = await Docs.getDocument(davinciDocumentId(url));
     assert(doc && doc.source === "davinci" && doc.blobKey === null && doc.sourceUrl === url && doc.language === "en" && doc.title === "CSPAR Datasheet", "part docs prefill: a link-only DaVinci document — nothing downloaded");
-    assert.deepEqual(await applyPrefill(plan, "DaVinci pre-fill"), { documentsCreated: 0, linksCreated: 0, accessoryWritten: 0, accessoryRemoved: 0 }, "part docs prefill: a second run writes nothing");
+    assert.deepEqual(await applyPrefill(plan, "DaVinci pre-fill"), { documentsCreated: 0, linksCreated: 0, accessoryWritten: 0, accessoryRemoved: 0, complete: true }, "part docs prefill: a second run writes nothing");
     await Docs.detachDocument(doc!.id, "PF-CSPAR2");
     await applyPrefill(plan, "DaVinci pre-fill");
     assert(!(await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-CSPAR2"), "part docs prefill: a human's detach survives a re-run");
@@ -2535,6 +2535,146 @@ async function main() {
     await applyPrefill({ ...plan, documents: [{ url: fetchedUrl, label: "F", typeId: "TY-2", skus: ["PF-F"] }] }, "DaVinci pre-fill");
     assert.equal(await Docs.getDocument(davinciDocumentId(fetchedUrl)), null, "part docs prefill: a URL someone already fetched gets no second document");
     assert((await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-F" && l.documentId === fetched!.id), "part docs prefill: …the part is linked to the fetched one instead");
+  }
+
+  /* --- part documents (#DOC) review fix wave 1: batched doc-store writes
+         mean exactly what their single-row versions mean --- */
+  {
+    const DS = await import("@/db/doc-store");
+    const { getDb } = await import("@/db");
+    const { DOC_TABLES } = await import("@/db/doc-tables");
+    const { inArray } = await import("drizzle-orm");
+    const coll = "review_snapshots" as const;
+    const t = DOC_TABLES[coll];
+    const rowsOf = async (ids: string[]) => {
+      const db = await getDb();
+      const rows = await db.select().from(t).where(inArray(t.id, ids));
+      return new Map(rows.map((r) => [r.id, r]));
+    };
+    // Twin rows: S-* go through the single-row API, B-* through the batch one.
+    const seedBoth = async (suffix: string, doc: Record<string, unknown>) => {
+      await DS.upsertDoc(coll, { id: `S-${suffix}`, ...doc });
+      await DS.upsertDoc(coll, { id: `B-${suffix}`, ...doc });
+    };
+    await seedBoth("live", { v: 1 });
+    await seedBoth("gone", { v: 1 });
+    await DS.softDeleteDoc(coll, "S-gone");
+    await DS.softDeleteDoc(coll, "B-gone");
+    await DS.setReview(coll, "S-live", { state: "seen" });
+    await DS.setReview(coll, "B-live", { state: "seen" });
+    const same = async (suffixes: string[], label: string) => {
+      const rows = await rowsOf(suffixes.flatMap((x) => [`S-${x}`, `B-${x}`]));
+      for (const x of suffixes) {
+        const a = rows.get(`S-${x}`);
+        const b = rows.get(`B-${x}`);
+        assert(a && b, `${label}: both twins exist (${x})`);
+        const strip = (d: unknown) => { const { id: _id, ...rest } = d as Record<string, unknown>; void _id; return rest; };
+        assert.deepEqual(
+          // review.at is setReview's own clock stamp — the twins were triaged a millisecond apart.
+          { doc: strip(b!.doc), rev: b!.rev, deleted: b!.deleted, review: { ...(b!.review ?? {}), at: 0 } },
+          { doc: strip(a!.doc), rev: a!.rev, deleted: a!.deleted, review: { ...(a!.review ?? {}), at: 0 } },
+          `${label}: the batch row matches its single-row twin (${x})`
+        );
+      }
+    };
+
+    // insertDocsIfAbsent ≡ insertDocIfAbsent: new → inserted; live or
+    // soft-deleted → untouched; a duplicate inside the batch → first wins.
+    const singleIns = [
+      await DS.insertDocIfAbsent(coll, { id: "S-new", v: 2 }),
+      await DS.insertDocIfAbsent(coll, { id: "S-live", v: 2 }),
+      await DS.insertDocIfAbsent(coll, { id: "S-gone", v: 2 }),
+      await DS.insertDocIfAbsent(coll, { id: "S-dup", v: "first" }),
+      await DS.insertDocIfAbsent(coll, { id: "S-dup", v: "second" }),
+    ];
+    assert.deepEqual(singleIns, [true, false, false, true, false], "batch writes: the single-row baseline behaves as documented");
+    const ins = await DS.insertDocsIfAbsent(coll, [
+      { id: "B-new", v: 2 }, { id: "B-live", v: 2 }, { id: "B-gone", v: 2 }, { id: "B-dup", v: "first" }, { id: "B-dup", v: "second" },
+    ]);
+    assert.deepEqual({ ids: [...ins.ids].sort(), complete: ins.complete }, { ids: ["B-dup", "B-new"], complete: true }, "batch writes: insertDocsIfAbsent reports only the rows it inserted");
+    await same(["new", "live", "gone", "dup"], "batch writes: insertDocsIfAbsent");
+    assert.equal(await DS.getDoc(coll, "B-gone"), null, "batch writes: insertDocsIfAbsent never revives a soft-deleted row");
+
+    // upsertDocs ≡ upsertDoc: replace the doc, bump rev, revive a soft-deleted
+    // row, keep review; a duplicate id inside the batch keeps the LAST doc.
+    const seqBefore = await rowsOf(["B-live", "B-gone"]);
+    await DS.upsertDoc(coll, { id: "S-live", v: 3 });
+    await DS.upsertDoc(coll, { id: "S-gone", v: 3 });
+    await DS.upsertDoc(coll, { id: "S-fresh", v: 3 });
+    const up = await DS.upsertDocs(coll, [{ id: "B-live", v: 3 }, { id: "B-gone", v: 3 }, { id: "B-fresh", v: 3 }]);
+    assert.deepEqual({ n: up.ids.length, complete: up.complete }, { n: 3, complete: true }, "batch writes: upsertDocs reports every row written");
+    await same(["live", "gone", "fresh"], "batch writes: upsertDocs");
+    const seqAfter = await rowsOf(["B-live", "B-gone"]);
+    assert(Number(seqAfter.get("B-live")!.seq) > Number(seqBefore.get("B-live")!.seq) && Number(seqAfter.get("B-gone")!.seq) > Number(seqBefore.get("B-gone")!.seq), "batch writes: the _seq_bump trigger fires per row on a multi-row upsert");
+    await DS.upsertDocs(coll, [{ id: "B-last", v: "a" }, { id: "B-last", v: "b" }]);
+    assert.equal((await DS.getDoc<{ id: string; v: string }>(coll, "B-last"))?.v, "b", "batch writes: a duplicate id in one upsertDocs keeps the last document");
+
+    // softDeleteDocs ≡ softDeleteDoc, and pull-sync sees every batched change.
+    const cursor = Math.max(...[...(await rowsOf(["S-live", "B-live", "S-new", "B-new", "S-fresh", "B-fresh"])).values()].map((r) => Number(r.seq)));
+    await DS.softDeleteDoc(coll, "S-live");
+    await DS.softDeleteDoc(coll, "S-new");
+    await DS.softDeleteDoc(coll, "S-missing");
+    const del = await DS.softDeleteDocs(coll, ["B-live", "B-new", "B-missing", "B-live"]);
+    assert.deepEqual({ ids: [...del.ids].sort(), complete: del.complete }, { ids: ["B-live", "B-new"], complete: true }, "batch writes: softDeleteDocs reports the rows that matched");
+    await same(["live", "new"], "batch writes: softDeleteDocs");
+    const pulled = await DS.listSince(coll, cursor, 1000);
+    assert(["B-live", "B-new"].every((id) => pulled.changes.some((c) => c.id === id && c.deleted)), "batch writes: pull-sync (listSince) sees batched soft-deletes");
+    const pulled2 = await DS.listSince(coll, 0, 5000);
+    assert(["B-fresh", "B-dup"].every((id) => pulled2.changes.some((c) => c.id === id)), "batch writes: pull-sync sees batched inserts");
+
+    // Chunking + the between-chunks stop.
+    let chunks = 0;
+    const many = Array.from({ length: 7 }, (_, i) => ({ id: `B-chunk-${i}`, v: i }));
+    const stopped = await DS.insertDocsIfAbsent(coll, many, { chunkSize: 3, shouldStop: () => ++chunks > 1 });
+    assert.deepEqual({ n: stopped.ids.length, complete: stopped.complete }, { n: 3, complete: false }, "batch writes: shouldStop halts cleanly between chunks");
+    const rest = await DS.insertDocsIfAbsent(coll, many, { chunkSize: 3 });
+    assert.deepEqual({ n: rest.ids.length, complete: rest.complete }, { n: 4, complete: true }, "batch writes: a re-run writes exactly the rest");
+    assert.deepEqual(await DS.upsertDocs(coll, []), { ids: [], complete: true }, "batch writes: an empty batch is a complete no-op");
+  }
+
+  /* --- part documents (#DOC) review fix wave 1: the pre-fill at production
+         scale is batched, budgeted, and resumable --- */
+  {
+    const { applyPrefill, createPrefillStopper } = await import("@/lib/part-docs/davinci-apply");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    // Production-sized (spec review: ~362 documents, ~3,959 links, ~6,666
+    // pairs): 400 documents × 10 parts, 7,000 pairs — many 500-row chunks.
+    const documents = Array.from({ length: 400 }, (_, i) => ({
+      url: `https://etc.example/bulk/${i}.pdf`, label: `Bulk ${i} Datasheet`, typeId: `TY-B${i}`,
+      skus: Array.from({ length: 10 }, (_, j) => `PFB-${i}-${j}`),
+    }));
+    const accessoryPairs = Array.from({ length: 7000 }, (_, i) => ({ parentSku: `PFB-${i % 400}-0`, accessorySku: `PFB-ACC-${i}`, maxQty: 1, sourceRef: `TY-B${i % 400}` }));
+    const plan = { libraryTimestamp: "t", documents, accessoryPairs, stats: { parts: 4000, typesMatched: 400, documents: 400, documentLinks: 4000, accessoryPairs: 7000, accessoryLinksUnmatched: 0 } };
+    const priorDavinci = (await Acc.allAccessoryLinks()).filter((l) => l.source === "davinci").length;
+
+    // A budget that allows 5 chunks: the documents (1) + 4 of the 8 link chunks.
+    let allowed = 5;
+    const cut = await applyPrefill(plan, "DaVinci pre-fill", { shouldStop: () => allowed-- <= 0 });
+    assert.deepEqual(cut, { documentsCreated: 400, linksCreated: 2000, accessoryWritten: 0, accessoryRemoved: 0, complete: false }, "part docs prefill (scale): a run out of budget stops cleanly between chunks and says so");
+    let t0 = Date.now();
+    const resumed = await applyPrefill(plan, "DaVinci pre-fill");
+    const resumeMs = Date.now() - t0;
+    assert.deepEqual(resumed, { documentsCreated: 0, linksCreated: 2000, accessoryWritten: 7000, accessoryRemoved: priorDavinci, complete: true }, "part docs prefill (scale): clicking again finishes exactly the rest");
+    t0 = Date.now();
+    const again = await applyPrefill(plan, "DaVinci pre-fill");
+    const rerunMs = Date.now() - t0;
+    assert.deepEqual(again, { documentsCreated: 0, linksCreated: 0, accessoryWritten: 0, accessoryRemoved: 0, complete: true }, "part docs prefill (scale): a finished pre-fill re-runs as a no-op");
+    console.log(`  part docs prefill (scale): resume 2,000 links + 7,000 pairs ${resumeMs} ms; no-op re-run ${rerunMs} ms`);
+
+    // The action's stopper: the first chunk always runs; later ones only
+    // while a worst-case chunk still fits in the budget.
+    let clock = 0;
+    const stop = createPrefillStopper(10_000, 3_000, () => clock);
+    clock = 20_000;
+    assert.equal(stop(), false, "part docs prefill: the first chunk runs even past the budget (forward progress)");
+    assert.equal(stop(), true, "part docs prefill: a later chunk past the budget does not start");
+    clock = 0;
+    const stop2 = createPrefillStopper(10_000, 3_000, () => clock);
+    assert.equal(stop2(), false, "part docs prefill: stopper — first chunk");
+    clock = 6_999;
+    assert.equal(stop2(), false, "part docs prefill: stopper — a chunk that fits starts");
+    clock = 7_001;
+    assert.equal(stop2(), true, "part docs prefill: stopper — a chunk that would overrun does not");
   }
 
   console.log("review regression checks passed");

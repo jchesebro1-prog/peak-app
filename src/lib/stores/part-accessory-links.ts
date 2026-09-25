@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { listDocs, patchDoc, softDeleteDocs, upsertDocs, type DocBatchOpts } from "@/db/doc-store";
 import type { AccessoryLinkSource, AccessoryPair, PartAccessoryLink } from "@/lib/part-docs/types";
 
 /**
@@ -43,10 +43,26 @@ export async function syncAccessoryLinks(
   scope: { source: AccessoryLinkSource; sourceRef?: string },
   pairs: readonly AccessoryPair[]
 ): Promise<{ written: number; removed: number }> {
+  const { written, removed } = await syncAccessoryLinksBatch(scope, pairs);
+  return { written, removed };
+}
+
+/**
+ * syncAccessoryLinks with a between-chunks stop (`opts.shouldStop`) for a
+ * caller on a wall-clock budget (the DaVinci pre-fill action). Writes land
+ * before removals; when `complete` is false a re-run finishes the job — the
+ * sync is computed afresh from what is live, so nothing is lost or doubled.
+ */
+export async function syncAccessoryLinksBatch(
+  scope: { source: AccessoryLinkSource; sourceRef?: string },
+  pairs: readonly AccessoryPair[],
+  opts: DocBatchOpts = {}
+): Promise<{ written: number; removed: number; complete: boolean }> {
   return syncScopes(
     scope.source,
     (l) => scope.sourceRef === undefined || l.sourceRef === scope.sourceRef,
-    [{ sourceRef: scope.sourceRef, pairs }]
+    [{ sourceRef: scope.sourceRef, pairs }],
+    opts
   );
 }
 
@@ -60,14 +76,16 @@ export async function syncAccessoryScopes(
   refPrefix: string,
   scopes: ReadonlyArray<{ sourceRef: string; pairs: readonly AccessoryPair[] }>
 ): Promise<{ written: number; removed: number }> {
-  return syncScopes(source, (l) => (l.sourceRef ?? "").startsWith(refPrefix), scopes);
+  const { written, removed } = await syncScopes(source, (l) => (l.sourceRef ?? "").startsWith(refPrefix), scopes);
+  return { written, removed };
 }
 
 async function syncScopes(
   source: AccessoryLinkSource,
   owns: (l: PartAccessoryLink) => boolean,
-  scopes: ReadonlyArray<{ sourceRef?: string; pairs: readonly AccessoryPair[] }>
-): Promise<{ written: number; removed: number }> {
+  scopes: ReadonlyArray<{ sourceRef?: string; pairs: readonly AccessoryPair[] }>,
+  opts: DocBatchOpts = {}
+): Promise<{ written: number; removed: number; complete: boolean }> {
   const all = await allAccessoryLinks();
   const own = new Map(all.filter((l) => l.source === source && owns(l)).map((l) => [l.id, l]));
   const ownFlag = new Set(all.filter((l) => l.ownDatasheet).map((l) => `${l.parentSku}\u0000${l.accessorySku}`));
@@ -95,20 +113,19 @@ async function syncScopes(
     }
   }
 
-  let written = 0;
+  // The full changed/stale sets first, then chunked multi-row writes
+  // (review fix wave 1) — the DaVinci scope is ~6.7k rows, one statement
+  // each was minutes on Neon.
+  const changed: PartAccessoryLink[] = [];
   for (const [id, link] of desired) {
     const current = own.get(id);
-    if (current && sameLink(current, link)) continue;
-    await upsertDoc<PartAccessoryLink>("part_accessory_links", link);
-    written++;
+    if (!current || !sameLink(current, link)) changed.push(link);
   }
-  let removed = 0;
-  for (const id of own.keys()) {
-    if (desired.has(id)) continue;
-    await softDeleteDoc("part_accessory_links", id);
-    removed++;
-  }
-  return { written, removed };
+  const stale = [...own.keys()].filter((id) => !desired.has(id));
+  const w = await upsertDocs<PartAccessoryLink>("part_accessory_links", changed, opts);
+  if (!w.complete) return { written: w.ids.length, removed: 0, complete: false };
+  const r = await softDeleteDocs("part_accessory_links", stale, opts);
+  return { written: w.ids.length, removed: r.ids.length, complete: r.complete };
 }
 
 /**

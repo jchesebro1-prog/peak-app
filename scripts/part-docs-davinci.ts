@@ -36,6 +36,7 @@ async function main() {
     console.log("  DRY RUN — nothing written. Add --commit.\n");
     return;
   }
+  // No time budget here (unlike the admin button): the batched writes run to completion.
   const r = await applyPrefill(plan, "DaVinci pre-fill");
   console.log(`  WROTE ${n(r.documentsCreated)} documents, ${n(r.linksCreated)} links, ${n(r.accessoryWritten)} accessory links (${n(r.accessoryRemoved)} removed).\n`);
 }

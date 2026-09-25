@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { getDoc, insertDocIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertDocIfAbsent, insertDocsIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, type DocBatchOpts } from "@/db/doc-store";
 import {
   isDocumentId,
   newDocumentId,
@@ -61,12 +61,10 @@ export type NewPartDocument = {
   at?: number;
 };
 
-/** Insert a new document. Returns null when the id is already taken — never
- *  overwrites (a fetched or replaced document must survive a re-run). */
-export async function createDocument(input: NewPartDocument): Promise<PartDocument | null> {
+function buildDocument(input: NewPartDocument): PartDocument {
   const id = input.id ?? newDocumentId();
   if (!isDocumentId(id)) throw new Error(`Not a document id: ${id}`);
-  const doc: PartDocument = {
+  return {
     id,
     kind: input.kind,
     title: (input.title || "").trim() || titleFromFileName(input.fileName),
@@ -82,7 +80,33 @@ export async function createDocument(input: NewPartDocument): Promise<PartDocume
     uploadedBy: input.by,
     history: [],
   };
+}
+
+/** Insert a new document. Returns null when the id is already taken — never
+ *  overwrites (a fetched or replaced document must survive a re-run). */
+export async function createDocument(input: NewPartDocument): Promise<PartDocument | null> {
+  const doc = buildDocument(input);
   return (await insertDocIfAbsent("part_documents", doc)) ? doc : null;
+}
+
+/**
+ * createDocument for many at once (review fix wave 1 — the DaVinci pre-fill
+ * creates ~360): the same documents, the same never-overwrite rule, written
+ * DOC_BATCH_CHUNK rows per statement. `created` are the ones that were new;
+ * `complete` is false when `opts.shouldStop` cut it short between chunks.
+ */
+export async function createDocuments(
+  inputs: readonly NewPartDocument[],
+  opts: DocBatchOpts = {}
+): Promise<{ created: PartDocument[]; complete: boolean }> {
+  const docs = inputs.map(buildDocument);
+  const r = await insertDocsIfAbsent("part_documents", docs, opts);
+  const inserted = new Set(r.ids);
+  const created: PartDocument[] = [];
+  for (const d of docs) {
+    if (inserted.delete(d.id)) created.push(d);
+  }
+  return { created, complete: r.complete };
 }
 
 export type StoredFile = { blobKey: string; fileName: string; contentType: string; size: number };
@@ -140,22 +164,36 @@ export async function attachDocument(documentId: string, skus: readonly string[]
  * Bulk link for writers that already hold the whole picture (DaVinci
  * pre-fill, legacy backfill). Skips any pair that has EVER been linked —
  * a detached link stays detached, so a re-run never undoes a human's
- * detach. One read of the link table, one insert per new pair.
+ * detach. One read of the link table, then the new pairs written
+ * DOC_BATCH_CHUNK per statement (review fix wave 1).
  */
 export async function ensureLinks(
   pairs: ReadonlyArray<{ partSku: string; documentId: string; kind: PartDocKind }>,
   by: string,
   at = Date.now()
 ): Promise<number> {
+  return (await ensureLinksBatch(pairs, by, {}, at)).added;
+}
+
+/** ensureLinks with a between-chunks stop (`opts.shouldStop`) for a caller
+ *  on a wall-clock budget; `complete` says whether every new pair was
+ *  written. A re-run picks up the rest — it skips whatever already landed. */
+export async function ensureLinksBatch(
+  pairs: ReadonlyArray<{ partSku: string; documentId: string; kind: PartDocKind }>,
+  by: string,
+  opts: DocBatchOpts = {},
+  at = Date.now()
+): Promise<{ added: number; complete: boolean }> {
   const ever = new Set((await listDocs("part_document_links", { includeDeleted: true })).map((l) => l.id));
-  let added = 0;
+  const rows: PartDocumentLink[] = [];
   for (const p of pairs) {
     const id = documentLinkId(p.partSku, p.documentId);
     if (ever.has(id)) continue;
     ever.add(id);
-    if (await insertDocIfAbsent<PartDocumentLink>("part_document_links", { id, partSku: p.partSku, documentId: p.documentId, kind: p.kind, createdAt: at, createdBy: by })) added++;
+    rows.push({ id, partSku: p.partSku, documentId: p.documentId, kind: p.kind, createdAt: at, createdBy: by });
   }
-  return added;
+  const r = await insertDocsIfAbsent<PartDocumentLink>("part_document_links", rows, opts);
+  return { added: r.ids.length, complete: r.complete };
 }
 
 /** Detach (soft delete). True when a live link was removed. */
