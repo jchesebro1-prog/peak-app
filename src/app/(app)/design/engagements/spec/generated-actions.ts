@@ -5,9 +5,9 @@ import { requireUser } from "@/lib/session";
 import { removeGeneratedSpec } from "@/lib/stores/generated-specs";
 
 /**
- * Delete-only actions for saved bid specs (D94). Kept out of ./actions.ts
- * (owned by the in-flight generator work) — same requireUser()-only gate as
- * every other action in that file.
+ * Delete-only actions for saved bid specs. Kept out of ./actions.ts (owned
+ * by the in-flight generator work) — same requireUser()-only gate as every
+ * other action in that file.
  */
 
 export async function removeGeneratedSpecAction(

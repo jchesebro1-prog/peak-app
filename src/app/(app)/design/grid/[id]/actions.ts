@@ -492,10 +492,10 @@ export async function removeSpaceAction(
   return { ok: true };
 }
 
-/** Delete a plan sheet from the editor's sheet list (D116's doc stays put —
- *  see removeSheet, grid-projects.ts — so an older revision can still
- *  resolve it). Refuses while a placement/space/route on the LIVE design
- *  still references it. */
+/** Delete a plan sheet from the editor's sheet list (the sheet's own doc
+ *  stays put — see removeSheet, grid-projects.ts — so an older revision can
+ *  still resolve it). Refuses while a placement/space/route on the LIVE
+ *  design still references it. */
 export async function removeSheetAction(
   projectId: string,
   sheetId: string

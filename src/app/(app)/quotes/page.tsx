@@ -39,10 +39,10 @@ const RB_META: Record<string, { bg: string; bd: string; ink: string; icon: strin
   changes: { bg: "#fcefe9", bd: "#f0d6cd", ink: "#b4543a", icon: "↩", title: "Changes requested" },
 };
 
-// PUNCHLIST #200: the Status track was 96px — a user-editable stage label
-// (Settings → Pipelines) can run to "Presentation/Delivery" (~160px) and
-// overlap the Value column since StatusPill had no width cap. Widened to
-// 132px and StatusPill now caps + ellipsizes instead of overflowing.
+// The Status track was 96px — a user-editable stage label (Settings →
+// Pipelines) can run to "Presentation/Delivery" (~160px) and overlap the
+// Value column since StatusPill had no width cap. Widened to 132px and
+// StatusPill now caps + ellipsizes instead of overflowing.
 const GRID = "30px minmax(0,1fr) 200px 120px 132px 92px";
 
 /** Service quote-type badges (system quotes stay unbadged). */
