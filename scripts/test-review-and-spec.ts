@@ -5116,7 +5116,7 @@ ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("sp
 ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
 ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
 
-/* --- #SYM grid stock symbols (spec 2026-09-25) — Task 1: the Tabler icon generator --- */
+/* --- #206 grid stock symbols (spec 2026-09-25) — Task 1: the Tabler icon generator --- */
 import {
   buildIcons as symBuildIcons, generateFromPackage as symGenerate, parseTablerSvg as symParse, validatePicks as symValidatePicks,
   GENERATED_MODULE_PATH as SYM_MODULE_PATH, LICENSE_PATH as SYM_LICENSE_PATH,
@@ -5126,34 +5126,34 @@ import {
   const els = symParse(
     '<svg viewBox="0 0 24 24" class="icon"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M4 4h16" class="x" /><circle cx="12" cy="12" r="1" fill="currentColor" /></svg>'
   );
-  ok(els.length === 2, "#SYM gen: the invisible 24x24 bounding path is skipped");
-  ok(JSON.stringify(els[0]) === '{"t":"path","a":{"d":"M4 4h16"}}', "#SYM gen: only geometry attributes survive (class dropped)");
-  ok(JSON.stringify(els[1]) === '{"t":"circle","a":{"cx":"12","cy":"12","r":"1"},"fill":true}', "#SYM gen: a currentColor fill is kept as fill:true");
+  ok(els.length === 2, "#206 gen: the invisible 24x24 bounding path is skipped");
+  ok(JSON.stringify(els[0]) === '{"t":"path","a":{"d":"M4 4h16"}}', "#206 gen: only geometry attributes survive (class dropped)");
+  ok(JSON.stringify(els[1]) === '{"t":"circle","a":{"cx":"12","cy":"12","r":"1"},"fill":true}', "#206 gen: a currentColor fill is kept as fill:true");
 
   const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test(String(e)); } };
   const pick = (id: string, tabler: string) => ({ tabler, id, label: id, tags: ["A", "a", " "] });
-  ok(symValidatePicks([pick("x", "a")])[0].tags.join(",") === "a", "#SYM gen: tags are trimmed, lower-cased and de-duplicated");
-  ok(throws(() => symValidatePicks([pick("x", "a"), pick("x", "b")]), /duplicate id/), "#SYM gen: duplicate ids are refused");
-  ok(throws(() => symValidatePicks([pick("x", "a"), pick("y", "a")]), /duplicate tabler/), "#SYM gen: a Tabler icon is picked at most once");
-  ok(throws(() => symValidatePicks([pick("shape-rect", "a")]), /bad id/), "#SYM gen: shape-* ids are reserved for the legacy shapes");
-  ok(throws(() => symValidatePicks([pick("Bad Id", "a")]), /bad id/), "#SYM gen: ids are kebab-case");
+  ok(symValidatePicks([pick("x", "a")])[0].tags.join(",") === "a", "#206 gen: tags are trimmed, lower-cased and de-duplicated");
+  ok(throws(() => symValidatePicks([pick("x", "a"), pick("x", "b")]), /duplicate id/), "#206 gen: duplicate ids are refused");
+  ok(throws(() => symValidatePicks([pick("x", "a"), pick("y", "a")]), /duplicate tabler/), "#206 gen: a Tabler icon is picked at most once");
+  ok(throws(() => symValidatePicks([pick("shape-rect", "a")]), /bad id/), "#206 gen: shape-* ids are reserved for the legacy shapes");
+  ok(throws(() => symValidatePicks([pick("Bad Id", "a")]), /bad id/), "#206 gen: ids are kebab-case");
   ok(throws(() => symBuildIcons([pick("x", "nope-1"), pick("y", "nope-2")], () => null), /nope-1, nope-2/),
-    "#SYM gen: every missing Tabler name is reported at once");
+    "#206 gen: every missing Tabler name is reported at once");
 
   const first = symGenerate(process.cwd());
   const second = symGenerate(process.cwd());
-  ok(first.module === second.module && first.license === second.license, "#SYM gen: two runs are byte-identical");
-  ok(first.count >= 60 && first.count <= 100, `#SYM gen: 60–100 curated icons (got ${first.count})`);
+  ok(first.module === second.module && first.license === second.license, "#206 gen: two runs are byte-identical");
+  ok(first.count >= 60 && first.count <= 100, `#206 gen: 60–100 curated icons (got ${first.count})`);
   ok(first.count === symValidatePicks(JSON.parse(readFileSync(join(process.cwd(), "scripts/grid-icon-picks.json"), "utf8"))).length,
-    "#SYM gen: every pick exists in the installed @tabler/icons outline set (none dropped)");
+    "#206 gen: every pick exists in the installed @tabler/icons outline set (none dropped)");
   ok(readFileSync(join(process.cwd(), SYM_MODULE_PATH), "utf8") === first.module,
-    "#SYM gen: the committed grid-icons.generated.ts is current (npm run icons:grid)");
+    "#206 gen: the committed grid-icons.generated.ts is current (npm run icons:grid)");
   const lic = readFileSync(join(process.cwd(), SYM_LICENSE_PATH), "utf8");
   ok(lic === first.license && lic.includes("MIT License") && lic.includes(`Tabler Icons ${first.version}`),
-    "#SYM gen: LICENSES/tabler-icons.txt is written, current, and names the version");
+    "#206 gen: LICENSES/tabler-icons.txt is written, current, and names the version");
 }
 
-/* --- #SYM grid stock symbols — Task 2: registry, defaults, resolution, clean --- */
+/* --- #206 grid stock symbols — Task 2: registry, defaults, resolution, clean --- */
 import {
   DEFAULT_CATEGORY_ICONS, DEFAULT_SYMBOL_COLORS, GENERIC_ICON_ID, GRID_ICONS, LEGACY_SHAPE_ICON, MAX_CATEGORY_ICONS, SYMBOL_COLOR_KEYS,
   cleanCategoryIcons, cleanSymbolColors, contrastOnWhite, darken, iconById, isGridIconId, isHexColor, legendRows,
@@ -5163,90 +5163,90 @@ import { DEFAULT_CATEGORY_MAP as SYM_CATEGORY_MAP } from "@/lib/catalog-taxonomy
 
 {
   const ctx = symbolContext({});
-  ok(new Set(GRID_ICONS.map((i) => i.id)).size === GRID_ICONS.length, "#SYM: icon ids are unique across Tabler picks + legacy shapes");
-  ok(GRID_ICONS.filter((i) => i.source === "legacy").length === 8 && isGridIconId("shape-diamond"), "#SYM: the eight D154 shapes are registered icons");
+  ok(new Set(GRID_ICONS.map((i) => i.id)).size === GRID_ICONS.length, "#206: icon ids are unique across Tabler picks + legacy shapes");
+  ok(GRID_ICONS.filter((i) => i.source === "legacy").length === 8 && isGridIconId("shape-diamond"), "#206: the eight D154 shapes are registered icons");
   ok(Object.values(LEGACY_SHAPE_ICON).every(isGridIconId) && Object.keys(LEGACY_SHAPE_ICON).length === GRID_SHAPES.length,
-    "#SYM: every legacy shape alias resolves to a registered icon");
-  ok(Object.entries(DEFAULT_CATEGORY_ICONS).every(([, v]) => isGridIconId(v)), "#SYM: every default category icon is registered");
-  ok(Object.keys(SYM_CATEGORY_MAP).every((c) => c in DEFAULT_CATEGORY_ICONS), "#SYM: defaults cover every DEFAULT_CATEGORY_MAP category");
+    "#206: every legacy shape alias resolves to a registered icon");
+  ok(Object.entries(DEFAULT_CATEGORY_ICONS).every(([, v]) => isGridIconId(v)), "#206: every default category icon is registered");
+  ok(Object.keys(SYM_CATEGORY_MAP).every((c) => c in DEFAULT_CATEGORY_ICONS), "#206: defaults cover every DEFAULT_CATEGORY_MAP category");
   ok(["Cameras", "Video", "Speakers", "Lighting", "Control", "Fixture", "Rigging", "Assembly"].every((c) => c in DEFAULT_CATEGORY_ICONS),
-    "#SYM: defaults cover the live Grid library categories");
+    "#206: defaults cover the live Grid library categories");
   ok(isGridIconId(GENERIC_ICON_ID) && iconById("no-such-icon").id === GENERIC_ICON_ID && iconById(null).id === GENERIC_ICON_ID,
-    "#SYM: unknown ids fall back to the generic device icon");
-  ok(GRID_ICONS.every((i) => i.els.length > 0), "#SYM: no icon renders blank");
+    "#206: unknown ids fall back to the generic device icon");
+  ok(GRID_ICONS.every((i) => i.els.length > 0), "#206: no icon renders blank");
 
-  ok(SYMBOL_COLOR_KEYS.length === 10 && new Set(Object.values(DEFAULT_SYMBOL_COLORS)).size === 10, "#SYM: 10 distinct default swatches");
+  ok(SYMBOL_COLOR_KEYS.length === 10 && new Set(Object.values(DEFAULT_SYMBOL_COLORS)).size === 10, "#206: 10 distinct default swatches");
   ok(SYMBOL_COLOR_KEYS.every((k) => isHexColor(DEFAULT_SYMBOL_COLORS[k]) && contrastOnWhite(DEFAULT_SYMBOL_COLORS[k]) >= 3),
-    "#SYM: every default colour has >= 3:1 contrast against the white glyph");
-  ok(Math.abs(contrastOnWhite("#ffffff") - 1) < 1e-9 && contrastOnWhite("#000000") > 20, "#SYM: contrastOnWhite sanity");
-  ok(darken("#d55e00", 0.25) === "#a04700" && darken("#ffffff", 0) === "#ffffff", "#SYM: darken scales each channel");
+    "#206: every default colour has >= 3:1 contrast against the white glyph");
+  ok(Math.abs(contrastOnWhite("#ffffff") - 1) < 1e-9 && contrastOnWhite("#000000") > 20, "#206: contrastOnWhite sanity");
+  ok(darken("#d55e00", 0.25) === "#a04700" && darken("#ffffff", 0) === "#ffffff", "#206: darken scales each channel");
 
   // icon resolution: entry icon > legacy entry shape > category > legacy stored category shape > generic
   const legacyCtx = symbolContext({ gridCategoryShapes: { "Mystery Box": "hexagon", Speakers: "circle" } });
-  ok(symbolLook({ category: "Speakers", icon: "horn", shape: "camera" }, legacyCtx).iconId === "horn", "#SYM: the entry icon wins");
-  ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).iconId === "shape-camera", "#SYM: a legacy entry shape beats the category icon");
-  ok(symbolLook({ category: "Speakers" }, legacyCtx).iconId === "speaker", "#SYM: the category icon beats a stored legacy category shape");
-  ok(symbolLook({ category: "mystery box" }, legacyCtx).iconId === "shape-hexagon", "#SYM: a stored legacy category shape is the last category fallback (case-insensitive)");
+  ok(symbolLook({ category: "Speakers", icon: "horn", shape: "camera" }, legacyCtx).iconId === "horn", "#206: the entry icon wins");
+  ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).iconId === "shape-camera", "#206: a legacy entry shape beats the category icon");
+  ok(symbolLook({ category: "Speakers" }, legacyCtx).iconId === "speaker", "#206: the category icon beats a stored legacy category shape");
+  ok(symbolLook({ category: "mystery box" }, legacyCtx).iconId === "shape-hexagon", "#206: a stored legacy category shape is the last category fallback (case-insensitive)");
   ok(symbolLook({ category: "Mystery Box" }, ctx).iconId === GENERIC_ICON_ID && symbolLook(null, ctx).iconId === GENERIC_ICON_ID,
-    "#SYM: nothing matched → the generic device (the old seed is NOT consulted)");
-  ok(symbolLook({ category: "Speakers", icon: "not-real" }, ctx).iconId === "speaker", "#SYM: an unknown entry icon falls through");
-  ok(symbolLook({ category: "  track " }, ctx).iconId === "track", "#SYM: category match is trimmed + case-insensitive");
+    "#206: nothing matched → the generic device (the old seed is NOT consulted)");
+  ok(symbolLook({ category: "Speakers", icon: "not-real" }, ctx).iconId === "speaker", "#206: an unknown entry icon falls through");
+  ok(symbolLook({ category: "  track " }, ctx).iconId === "track", "#206: category match is trimmed + case-insensitive");
   ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).shape === "camera" && symbolLook({ category: "Mystery Box" }, legacyCtx).shape === "hexagon" &&
-     symbolLook({ category: "Track" }, ctx).shape === "rect", "#SYM: .shape keeps the D154 answer for back-compat callers");
+     symbolLook({ category: "Track" }, ctx).shape === "rect", "#206: .shape keeps the D154 answer for back-compat callers");
 
   // colour resolution: entry > group > trade > scope > Other
-  ok(symbolLook({ category: "Speakers", color: "#123456" }, ctx).color === "#123456", "#SYM: the entry colour wins");
-  ok(symbolLook({ category: "Speakers", color: "red" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers, "#SYM: a malformed entry colour is ignored");
-  ok(symbolLook({ category: "Fixtures" }, ctx).color === DEFAULT_SYMBOL_COLORS.Fixtures, "#SYM: a grouped category takes its group colour");
+  ok(symbolLook({ category: "Speakers", color: "#123456" }, ctx).color === "#123456", "#206: the entry colour wins");
+  ok(symbolLook({ category: "Speakers", color: "red" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers, "#206: a malformed entry colour is ignored");
+  ok(symbolLook({ category: "Fixtures" }, ctx).color === DEFAULT_SYMBOL_COLORS.Fixtures, "#206: a grouped category takes its group colour");
   ok(symbolLook({ category: "Track" }, ctx).color === DEFAULT_SYMBOL_COLORS.Rigging && symbolLook({ category: "Racks" }, ctx).color === DEFAULT_SYMBOL_COLORS.AV,
-    "#SYM: trade-only categories take their trade colour");
-  ok(symbolLook({ category: "Video Controls" }, ctx).color === DEFAULT_SYMBOL_COLORS["Video Controls"], "#SYM: identity group entries resolve");
+    "#206: trade-only categories take their trade colour");
+  ok(symbolLook({ category: "Video Controls" }, ctx).color === DEFAULT_SYMBOL_COLORS["Video Controls"], "#206: identity group entries resolve");
   ok(symbolLook({ category: "Video", gridScope: "Video" }, ctx).color === DEFAULT_SYMBOL_COLORS.AV &&
      symbolLook({ category: "Fixture", gridScope: "Lighting" }, ctx).color === DEFAULT_SYMBOL_COLORS.Lighting,
-    "#SYM: an unmapped Grid category falls back to its Grid scope's colour");
-  ok(symbolLook({ category: "Mystery Box" }, ctx).color === DEFAULT_SYMBOL_COLORS.Other, "#SYM: unmapped, unscoped → Other grey");
+    "#206: an unmapped Grid category falls back to its Grid scope's colour");
+  ok(symbolLook({ category: "Mystery Box" }, ctx).color === DEFAULT_SYMBOL_COLORS.Other, "#206: unmapped, unscoped → Other grey");
   ok(symbolLook({ category: "Mystery Box", group: "Speakers" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers &&
      symbolLook({ category: "Mystery Box", trade: "Rigging" }, ctx).color === DEFAULT_SYMBOL_COLORS.Rigging,
-    "#SYM: a server-resolved group/trade on the entry is honoured");
-  ok(symbolLook({ category: "Track" }, symbolContext({ gridSymbolColors: { Rigging: "#000000" } })).color === "#000000", "#SYM: stored colours apply");
+    "#206: a server-resolved group/trade on the entry is honoured");
+  ok(symbolLook({ category: "Track" }, symbolContext({ gridSymbolColors: { Rigging: "#000000" } })).color === "#000000", "#206: stored colours apply");
   ok(symbolLook({ category: "Track" }, symbolContext({ catalogCategoryMap: { Track: { trade: "AV" } } })).color === DEFAULT_SYMBOL_COLORS.AV,
-    "#SYM: the admin category map decides the trade");
-  ok(!symbolLook({ category: "Track" }, ctx).overridden && symbolLook({ category: "Track", color: "#000000" }, ctx).overridden, "#SYM: overridden flag");
+    "#206: the admin category map decides the trade");
+  ok(!symbolLook({ category: "Track" }, ctx).overridden && symbolLook({ category: "Track", color: "#000000" }, ctx).overridden, "#206: overridden flag");
 
   // resolve + clean
   const merged = resolveCategoryIcons({ speakers: "horn", "New Cat": "wifi", Track: "nope" });
   ok(merged.speakers === "horn" && !("Speakers" in merged) && merged["New Cat"] === "wifi" && merged.Track === "track" && merged.Racks === "rack",
-    "#SYM: resolveCategoryIcons merges per category (case-insensitive replace; bad ids ignored; untouched defaults kept)");
+    "#206: resolveCategoryIcons merges per category (case-insensitive replace; bad ids ignored; untouched defaults kept)");
   ok(resolveCategoryIcons(null) !== resolveCategoryIcons(null) && JSON.stringify(resolveCategoryIcons(undefined)) === JSON.stringify(DEFAULT_CATEGORY_ICONS),
-    "#SYM: resolveCategoryIcons — absent → a fresh copy of the defaults");
+    "#206: resolveCategoryIcons — absent → a fresh copy of the defaults");
   ok(resolveSymbolColors({ AV: "#ABCDEF", Bogus: "#000000", Rigging: "blue" }).AV === "#abcdef" &&
-     resolveSymbolColors({ Rigging: "blue" }).Rigging === DEFAULT_SYMBOL_COLORS.Rigging, "#SYM: resolveSymbolColors validates keys and hex");
-  ok(cleanCategoryIcons({}) === null && cleanCategoryIcons({ " ": "wifi", X: "nope" }) === null, "#SYM: cleanCategoryIcons — nothing valid → null");
-  ok(JSON.stringify(cleanCategoryIcons({ "  Speakers  ": "horn" })) === '{"Speakers":"horn"}', "#SYM: cleanCategoryIcons trims keys");
-  ok(Object.keys(cleanCategoryIcons({ ["x".repeat(80)]: "wifi" }) || {})[0].length === 60, "#SYM: cleanCategoryIcons caps key length at 60");
+     resolveSymbolColors({ Rigging: "blue" }).Rigging === DEFAULT_SYMBOL_COLORS.Rigging, "#206: resolveSymbolColors validates keys and hex");
+  ok(cleanCategoryIcons({}) === null && cleanCategoryIcons({ " ": "wifi", X: "nope" }) === null, "#206: cleanCategoryIcons — nothing valid → null");
+  ok(JSON.stringify(cleanCategoryIcons({ "  Speakers  ": "horn" })) === '{"Speakers":"horn"}', "#206: cleanCategoryIcons trims keys");
+  ok(Object.keys(cleanCategoryIcons({ ["x".repeat(80)]: "wifi" }) || {})[0].length === 60, "#206: cleanCategoryIcons caps key length at 60");
   const many: Record<string, string> = {};
   for (let i = 0; i < MAX_CATEGORY_ICONS + 25; i++) many[`Cat ${i}`] = "wifi";
-  ok(Object.keys(cleanCategoryIcons(many) || {}).length === MAX_CATEGORY_ICONS, "#SYM: cleanCategoryIcons caps the map size");
+  ok(Object.keys(cleanCategoryIcons(many) || {}).length === MAX_CATEGORY_ICONS, "#206: cleanCategoryIcons caps the map size");
   ok(cleanSymbolColors({ Bogus: "#000000", AV: "blue" }) === null && JSON.stringify(cleanSymbolColors({ AV: "#ABCDEF" })) === '{"AV":"#abcdef"}',
-    "#SYM: cleanSymbolColors keeps known keys + #rrggbb only, lower-cased; empty → null");
+    "#206: cleanSymbolColors keeps known keys + #rrggbb only, lower-cased; empty → null");
 
   // search
-  ok(searchIcons("").length === GRID_ICONS.length, "#SYM: an empty search lists everything");
-  ok(searchIcons("Speaker")[0].id === "speaker", "#SYM: searchIcons finds by label (case-insensitive), label-prefix first");
-  ok(searchIcons("loudspeaker").some((i) => i.id === "speaker"), "#SYM: searchIcons finds by tag");
-  ok(searchIcons("rack")[0].id === "rack" && searchIcons("zzzz-nothing").length === 0, "#SYM: searchIcons ranking + empty result");
-  ok(searchIcons("wall station").map((i) => i.id).join(",") === "switch", "#SYM: multi-token queries AND their tokens");
-  ok(searchIcons("", 5).length === 5, "#SYM: searchIcons honours its limit");
+  ok(searchIcons("").length === GRID_ICONS.length, "#206: an empty search lists everything");
+  ok(searchIcons("Speaker")[0].id === "speaker", "#206: searchIcons finds by label (case-insensitive), label-prefix first");
+  ok(searchIcons("loudspeaker").some((i) => i.id === "speaker"), "#206: searchIcons finds by tag");
+  ok(searchIcons("rack")[0].id === "rack" && searchIcons("zzzz-nothing").length === 0, "#206: searchIcons ranking + empty result");
+  ok(searchIcons("wall station").map((i) => i.id).join(",") === "switch", "#206: multi-token queries AND their tokens");
+  ok(searchIcons("", 5).length === 5, "#206: searchIcons honours its limit");
 
   // legend
   const rows = legendRows([
     { category: "Speakers", desc: "A" }, { category: "Speakers", desc: "B" }, { category: "Speakers", icon: "horn", desc: "Horn X" }, { category: "Track", desc: "T" },
   ], ctx);
   ok(rows.length === 3 && rows[0].label === "Speakers" && rows[1].label === "Speakers — Horn X" && rows[2].label === "Track",
-    "#SYM: legendRows — one row per icon+colour; an override is labelled with its entry");
+    "#206: legendRows — one row per icon+colour; an override is labelled with its entry");
 }
 
-/* --- #SYM grid stock symbols — Task 3: the badge renderer --- */
+/* --- #206 grid stock symbols — Task 3: the badge renderer --- */
 import { createElement as symH } from "react";
 import { renderToStaticMarkup as symRender } from "react-dom/server";
 import { SymbolIcon as SymIcon, SymbolShape as SymShape, glyphMetrics as symGlyph } from "@/components/design/symbol-shape";
@@ -5254,25 +5254,25 @@ import { SymbolIcon as SymIcon, SymbolShape as SymShape, glyphMetrics as symGlyp
 {
   const html = symRender(symH("svg", null, symH(SymShape, { iconId: "speaker", x: 10, y: 20, w: 44, h: 30, color: "#008060" })));
   ok(html.includes('data-icon="speaker"') && html.includes('fill="#008060"') && html.includes(`stroke="${darken("#008060")}"`),
-    "#SYM render: a badge in the resolved colour with a darker edge");
+    "#206 render: a badge in the resolved colour with a darker edge");
   ok(html.includes('stroke="#fff"') && html.includes('stroke-linecap="round"') && !html.includes("<image"),
-    "#SYM render: white round-capped glyph, pure SVG");
-  ok((html.match(/<path /g) || []).length === iconById("speaker").els.length, "#SYM render: every glyph element is drawn");
+    "#206 render: white round-capped glyph, pure SVG");
+  ok((html.match(/<path /g) || []).length === iconById("speaker").els.length, "#206 render: every glyph element is drawn");
   const legacy = symRender(symH("svg", null, symH(SymShape, { shape: "diamond", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
-  ok(legacy.includes('data-icon="shape-diamond"'), "#SYM render: the legacy `shape` prop still works (via its alias)");
+  ok(legacy.includes('data-icon="shape-diamond"'), "#206 render: the legacy `shape` prop still works (via its alias)");
   const blank = symRender(symH("svg", null, symH(SymShape, { iconId: "nope", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
-  ok(blank.includes(`data-icon="${GENERIC_ICON_ID}"`), "#SYM render: an unknown icon draws the generic device");
+  ok(blank.includes(`data-icon="${GENERIC_ICON_ID}"`), "#206 render: an unknown icon draws the generic device");
   const filled = symRender(symH("svg", null, symH(SymShape, { iconId: "outlet", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
-  ok(filled.includes('fill="#fff"'), "#SYM render: Tabler's filled dots stay filled");
+  ok(filled.includes('fill="#fff"'), "#206 render: Tabler's filled dots stay filled");
   ok(symRender(symH(SymIcon, { iconId: "camera", color: "#0072b2", size: 16, title: "Camera" })).includes("<title>Camera</title>"),
-    "#SYM render: SymbolIcon is a self-contained titled <svg>");
+    "#206 render: SymbolIcon is a self-contained titled <svg>");
   const small = symGlyph(12, 12);
   const big = symGlyph(44, 30);
   ok(big.strokeWidth === 2 && small.strokeWidth > 2 && small.strokeWidth <= 3 && small.scale * small.strokeWidth >= 0.8,
-    "#SYM render: stroke stays legible from 12px palette badges up to plan markers");
+    "#206 render: stroke stays legible from 12px palette badges up to plan markers");
 }
 
-/* --- #SYM grid stock symbols — Task 4: Grid Settings rows --- */
+/* --- #206 grid stock symbols — Task 4: Grid Settings rows --- */
 import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib/design/grid-icons";
 
 {
@@ -5283,19 +5283,19 @@ import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib
     taxonomy: ["Track", "Pipe"],
   });
   const names = rows.map((r) => r.category);
-  ok(!names.some((n) => /^(fabric|labor)$/i.test(n)), "#SYM rows: Fabric and Labor never get an icon row");
+  ok(!names.some((n) => /^(fabric|labor)$/i.test(n)), "#206 rows: Fabric and Labor never get an icon row");
   ok(names.filter((n) => n.toLowerCase() === "widgets").length === 1 && names.includes("Widgets"),
-    "#SYM rows: de-duplicated trimmed + case-insensitively, first spelling wins");
+    "#206 rows: de-duplicated trimmed + case-insensitively, first spelling wins");
   ok(names.includes("Stored Only") && names.includes("Gizmos") && names.includes("Pipe") && names.includes("Speakers") && !names.includes("speakers"),
-    "#SYM rows: stored, Grid, taxonomy and default categories all appear (a default's spelling beats a stored one)");
-  ok(names.join("|") === [...names].sort((a, b) => a.localeCompare(b)).join("|") && !names.includes(""), "#SYM rows: sorted, no blank row");
+    "#206 rows: stored, Grid, taxonomy and default categories all appear (a default's spelling beats a stored one)");
+  ok(names.join("|") === [...names].sort((a, b) => a.localeCompare(b)).join("|") && !names.includes(""), "#206 rows: sorted, no blank row");
   ok(rows.find((r) => r.category === "Video")?.gridScope === "Video" && rows.find((r) => r.category === "Track")?.gridScope === null,
-    "#SYM rows: a Grid category carries its scope for the preview colour");
-  ok(defaultIconFor(" speakers ") === "speaker" && defaultIconFor("Nope") === GENERIC_ICON_ID, "#SYM: defaultIconFor");
-  ok(SYMBOL_COLOR_KEYS.every((k) => isGridIconId(COLOR_KEY_SAMPLE_ICON[k])), "#SYM: every colour swatch has a registered sample icon");
+    "#206 rows: a Grid category carries its scope for the preview colour");
+  ok(defaultIconFor(" speakers ") === "speaker" && defaultIconFor("Nope") === GENERIC_ICON_ID, "#206: defaultIconFor");
+  ok(SYMBOL_COLOR_KEYS.every((k) => isGridIconId(COLOR_KEY_SAMPLE_ICON[k])), "#206: every colour swatch has a registered sample icon");
 }
 
-/* --- #SYM grid stock symbols — Task 5: client components stay on pure modules --- */
+/* --- #206 grid stock symbols — Task 5: client components stay on pure modules --- */
 {
   const symClientFiles = [
     "src/components/design/symbol-shape.tsx",
@@ -5311,13 +5311,13 @@ import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib
   for (const rel of symClientFiles) {
     const src = readFileSync(join(process.cwd(), rel), "utf8");
     const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
-    ok(valueImports.length === 0, `#SYM: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
+    ok(valueImports.length === 0, `#206: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
   }
   const editorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const riserSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
   ok(!/shapeFor|GRID_SHAPES|categoryShapes/.test(editorSrc) && !/shapeFor|markerColor/.test(riserSrc),
-    "#SYM: the editor and riser resolve badges through symbolLook, not the D154 shapeFor/markerColor path");
-  ok(editorSrc.includes("<PlanLegend") && riserSrc.includes("legendRows("), "#SYM: plan legend + riser legend both draw from legendRows");
+    "#206: the editor and riser resolve badges through symbolLook, not the D154 shapeFor/markerColor path");
+  ok(editorSrc.includes("<PlanLegend") && riserSrc.includes("legendRows("), "#206: plan legend + riser legend both draw from legendRows");
 }
 
 async function asyncChecks(): Promise<void> {
@@ -13721,12 +13721,12 @@ async function deletePartBAsyncChecks(): Promise<void> {
    Fixtures are `fixtureId("DELR2", …)` / `registerFixture()`-registered
    right after mint, so the suite-level teardown removes all of it.
    ====================================================================== */
-/* #SYM grid stock symbols — Task 3: GridSymbol icon/colour round-trip. */
+/* #206 grid stock symbols — Task 3: GridSymbol icon/colour round-trip. */
 async function gridSymbolLookAsyncChecks(): Promise<void> {
   const GridCat = await import("../src/lib/stores/grid-catalog");
   const symbols = await GridCat.listGridSymbols("Test Harness");
   const device = symbols.find((s) => s.kind !== "assembly");
-  ok(!!device, "#SYM store setup: the grid library has a device to build from");
+  ok(!!device, "#206 store setup: the grid library has a device to build from");
   if (!device) return;
   const asm = await GridCat.createGridAssembly({
     name: "SYM test assembly", manufacturer: "", modelNumber: "", scope: "Lighting",
@@ -13736,15 +13736,15 @@ async function gridSymbolLookAsyncChecks(): Promise<void> {
 
   const colourOnly = await GridCat.setGridSymbolLook(asm.id, { color: "#123456" });
   ok(colourOnly?.color === "#123456" && colourOnly?.shape === "hexagon" && !colourOnly?.icon,
-    "#SYM store: a colour-only patch leaves icon and legacy shape alone");
+    "#206 store: a colour-only patch leaves icon and legacy shape alone");
   const withIcon = await GridCat.setGridSymbolLook(asm.id, { icon: "horn" });
   ok(withIcon?.icon === "horn" && withIcon?.shape === null && withIcon?.color === "#123456",
-    "#SYM store: setting an icon clears the legacy shape and keeps the colour");
+    "#206 store: setting an icon clears the legacy shape and keeps the colour");
   const reread = await GridCat.getGridSymbol(asm.id);
-  ok(reread?.icon === "horn" && reread?.color === "#123456", "#SYM store: icon + colour round-trip through the doc-store");
+  ok(reread?.icon === "horn" && reread?.color === "#123456", "#206 store: icon + colour round-trip through the doc-store");
   const cleared = await GridCat.setGridSymbolLook(asm.id, { icon: null, color: null });
-  ok(cleared?.icon === null && cleared?.color === null, "#SYM store: null clears both back to the defaults");
-  ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#SYM store: an unknown entry returns null");
+  ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
+  ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
 }
 
 async function deleteRound2AsyncChecks(): Promise<void> {

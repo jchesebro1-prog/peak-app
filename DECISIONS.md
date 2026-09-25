@@ -5603,3 +5603,49 @@ surfaced (and fixed, Task 6) a pre-existing bug in the part modal: it had no `ma
 `manufacturerModelNumber` inputs, so `upsertPart` wrote `undefined` for both on every save, silently wiping them —
 the modal now has both inputs, and `upsertPart` only patches a field the form actually submitted.
 
+
+## D265. Grid stock symbols are Tabler Icons (MIT), vendored as generated path data (#206, 2026-09-25)
+
+`@tabler/icons` 3.48.0 is a **devDependency, pinned exact**. `scripts/build-grid-icons.ts` (`npm run icons:grid`)
+reads the hand-authored pick list `scripts/grid-icon-picks.json` (86 outline icons → our id, label, tags; D89 holds)
+and writes `src/lib/design/grid-icons.generated.ts` plus `LICENSES/tabler-icons.txt`. The runtime ships only that
+curated data. The pin is exact rather than `^3.48` because `test:specs` byte-compares the committed output against a
+fresh generation — a floating minor would fail the harness on the next install for no product reason. Bumping Tabler
+is a deliberate edit: change the pin, run `npm run icons:grid`, commit both.
+
+## D266. A device's colour is group → trade → Grid scope → grey (#206, 2026-09-25)
+
+Ten swatches: the six catalog groups, the three trades (for trade-only categories such as Track or Racks) and
+`Other`. Defaults are Okabe–Ito hues darkened until a white glyph clears 3:1 (the harness pins it). One step the
+spec didn't list sits before grey: the Grid entry's own `scope` (Lighting, Rigging and Curtains map to their own
+swatch; Audio and Video map to AV). Without it the Grid library's own categories — Lighting, Video, Rigging,
+Cameras, Control, Fixture, which are not in the catalog category map — would all draw grey, defeating "colour says
+the system". Category lookups are trimmed and case-insensitive, like `shapeFor`.
+
+## D267. Category icons and colours are sparse per-key settings; the D154 shapes become a legacy fallback (#206, 2026-09-25)
+
+`settings.gridCategoryIcons` and `settings.gridSymbolColors` store only what differs from the shipped defaults and
+merge per key (a stored key replaces the default whose trimmed, lower-cased name matches). An empty save stores
+`null`; "Reset to defaults" posts that. The old whole-map `gridCategoryShapes` is read only as the step after the
+category icon, and only when an admin actually stored it — the old seed is never consulted, since every seeded
+category now has a real icon. The eight D154 shapes are registered icons (`shape-rect` … `shape-camera`: five
+geometric glyphs plus the three old glyph paths scaled 0.8), so a per-entry `shape` still draws what it meant.
+`symbolLook().shape` keeps the D154 answer for any back-compat caller. The 8-shape settings card and
+`saveGridCategoryShapesAction` are removed; `cleanGridCategoryShapes` stays (the regressions harness pins it).
+
+## D268. The per-entry override: an icon supersedes the shape, and a colour is applied explicitly (#206, 2026-09-25)
+
+Setting or clearing an entry's icon also clears its legacy `shape`, so "Use the category default" really returns to
+the category icon. The colour control drafts locally and applies with a button (a native colour input fires on every
+drag step, which would have been one server write per step); "Use the group colour" clears it. The action keeps the
+#131 gate (`requireUser`) — it edits a shared Grid library entry, the same trust level as before. The Assemblies
+"+ Build" form's new-entry Symbol picker (`createGridAssemblyAction`) got the same icon-supersedes-shape treatment:
+it now accepts an `icon`, validated server-side with `isGridIconId`; `shape` stays accepted for back-compat callers,
+but `createGridAssembly` clears it whenever an `icon` is given, so a caller can't leave both set.
+
+## D269. One legend builder for the plan and the riser (#206, 2026-09-25)
+
+`legendRows` yields one row per distinct icon+colour, first-seen order; a device whose look differs from its
+category default is labelled "<category> — <desc>" (the #131 riser rule). Curtains are left out of the plan legend
+because they draw their own drape glyph, not a badge. The plan legend's open/closed state lives in `localStorage`
+through `useSyncExternalStore` (no hydration mismatch, no setState in an effect) and its rows always print.

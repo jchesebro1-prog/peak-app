@@ -57,8 +57,8 @@ export type PartLite = {
   gridScope?: string;
   symbolWidth?: number;
   symbolHeight?: number;
-  /** Per-entry symbol override (#131) — resolved through shapeFor() with the
-   *  category defaults; absent = use the category default. */
+  /** Legacy per-entry symbol override (#131) — resolved through symbolLook()
+   *  as a fallback alias; absent = use the category default. */
   shape?: GridShape | null;
   /** Per-entry stock-symbol overrides (spec 2026-09-25) — resolved through
    *  symbolLook() in lib/design/grid-icons; absent = the resolved defaults. */

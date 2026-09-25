@@ -109,7 +109,13 @@ export async function createGridAssembly(input: {
   modelNumber: string;
   scope: string;
   members: GridAssemblyMember[];
+  /** Legacy D154 shape, kept for back-compat callers (#206 supersedes it
+   *  with `icon`; a caller that sends both has `icon` win — see
+   *  setGridSymbolLook, which also clears `shape` when `icon` is set). */
   shape?: GridShape | null;
+  /** Per-entry stock-symbol icon override (#206) — validated server-side by
+   *  the caller (createGridAssemblyAction) with isGridIconId. */
+  icon?: string | null;
   by: string;
 }): Promise<GridSymbol> {
   const t = Date.now();
@@ -125,7 +131,8 @@ export async function createGridAssembly(input: {
     ports: [],
     kind: "assembly",
     members: input.members,
-    shape: input.shape ?? null,
+    shape: input.icon ? null : input.shape ?? null,
+    icon: input.icon ?? null,
     createdBy: input.by,
     createdAt: t,
     updatedAt: t,

@@ -87,12 +87,17 @@ export async function createGridAssemblyAction(input: {
   modelNumber: string;
   scope: string;
   members: Array<{ symbolId: string; qty: number; x: number; y: number }>;
-  /** #131 — optional symbol override for the new entry ("" = category default). */
+  /** Legacy #131 shape override, kept for back-compat callers ("" = category
+   *  default). Superseded by `icon` (#206) — a caller that sends both gets
+   *  `icon` (createGridAssembly clears `shape` when `icon` is set). */
   shape?: string;
+  /** Per-entry stock-symbol icon override (#206, "" = category default). */
+  icon?: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
   if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
+  if (input.icon && !isGridIconId(input.icon)) return { ok: false, error: "Unknown icon." };
   let assembly: Awaited<ReturnType<typeof createGridAssembly>>;
   try {
     assembly = await createGridAssembly({
@@ -102,6 +107,7 @@ export async function createGridAssemblyAction(input: {
       scope: input.scope,
       members: input.members,
       shape: isGridShape(input.shape) ? input.shape : null,
+      icon: isGridIconId(input.icon) ? input.icon : null,
       by: user.name,
     });
   } catch (error) {

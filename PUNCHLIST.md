@@ -6140,6 +6140,9 @@ deep links keep working); `/design/subassemblies` redirects.
 
 ## 131. The Grid: selectable symbol per placed item type — DONE 2026-09-21 (D154)
 
+**Superseded 2026-09-25 by #206** — colour-by-group + Tabler-icon-by-category is now the primary look; this
+item's eight D154 shapes survive only as a legacy per-entry alias.
+
 **Reported:** 2026-09-21 (Jeff): "on the plans a select symbol for different items that get placed,
 so it is easier for people to distinguish between different objects."
 
@@ -8218,3 +8221,35 @@ price-only Import-hub catalog import resets MAP to $0 — found while amending t
 fix already scoped) and any Minor a reviewer carried during the branch (see the per-task reports in
 `.superpowers/sdd/task-*-report.md`).
 
+
+---
+
+## 206. The Grid — stock symbols: colour says the system, the glyph says the device — DONE 2026-09-25 (D265…D269)
+
+**Reported:** 2026-09-25 (Jeff, brainstorm): tell what the devices are at a glance using colour and different shapes.
+Spec: `docs/superpowers/specs/2026-09-25-grid-stock-symbols-design.md`; plan:
+`docs/superpowers/plans/2026-09-25-grid-stock-symbols.md`. Supersedes the D154 8-shape vocabulary (#131) as the
+primary look.
+
+**Done.**
+- **Badges everywhere** — plan markers, palette rows, the per-entry picker, riser glyphs and legend, Grid Settings
+  previews and a new plan legend all draw one badge: a rounded rect in the device's colour with a white Tabler
+  glyph (`SymbolShape`/`SymbolIcon`, pure SVG).
+- **Colour** resolves group → trade → the Grid entry's scope → grey: 10 swatches (six catalog groups, three trades,
+  Other), Okabe–Ito-based and ≥ 3:1 against the white glyph.
+- **Icon** resolves entry icon → legacy entry shape → category icon → a stored legacy category shape → the generic
+  device. Every `DEFAULT_CATEGORY_MAP` category and every live Grid category ships with an icon.
+- **86 curated Tabler icons** (MIT, `@tabler/icons` 3.48.0, devDependency only), turned into committed path data by
+  `npm run icons:grid`; licence in `LICENSES/tabler-icons.txt`. No runtime dependency, works offline.
+- **Grid Settings** — the 8-shape card is replaced by *Symbol colours* (10 swatches) and *Category icons* (one
+  searchable icon picker per live category). Both save sparse per-key patches (`gridSymbolColors`,
+  `gridCategoryIcons`) over the shipped defaults; Reset clears them.
+- **Per-entry override** — the editor's Symbol select becomes an icon picker plus an optional colour. The
+  Assemblies "+ Build" form's new-entry Symbol picker was switched from the D154 shape list to the same icon
+  picker (`createGridAssemblyAction` now takes `icon`, validated with `isGridIconId`; `shape` still accepted for
+  back-compat callers).
+- **Plan legend** — collapsible, remembers open/closed per browser, always prints.
+
+**Still open.** Per-model product artwork and admin icon uploads stay out of scope (D154). Wire routes still take
+the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
+lead's call (never against `.data/pglite`).
