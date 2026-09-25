@@ -124,7 +124,7 @@ export function ConsultingQuoteBuilder({
   const [contactRole, setContactRole] = useState(initial?.contactRole || preContact?.role || "");
   const [contactEmail, setContactEmail] = useState(initial?.contactEmail || preContact?.email || "");
   const [terms, setTerms] = useState(initial?.terms || "");
-  const guardWon = useWonEditGuard(initial?.status || "draft");
+  const won = useWonEditGuard(initial?.status || "draft");
 
   /* ---- structured scopes (#35) ---- */
   const [scopeRows, setScopeRows] = useState<ScopeRow[]>(
@@ -180,6 +180,49 @@ export function ConsultingQuoteBuilder({
       setContactRole(ct.role || "");
       setContactEmail(ct.email || "");
     }
+  };
+
+  // #178 — the three won-quote guarded pickers, extracted so CustomerCombobox's
+  // canChange (a synchronous veto) and each field's onChange can share the
+  // exact same apply logic: canChange stashes it via won.guard when the quote
+  // is won and unconfirmed, onChange runs it directly once canChange clears.
+  const pickArchitect = (id: string) => {
+    setCustomerId(id);
+    if (!quoteNameEdited)
+      setQuoteName(
+        [
+          customers.find((c) => c.id === id)?.name,
+          venueCustomer?.locations.find((l) => l.id === locationId)?.label || venueCustomer?.name,
+          "Consulting",
+          String(new Date().getFullYear()),
+        ]
+          .filter(Boolean)
+          .join(" - ")
+      );
+  };
+  const pickVenueCustomer = (id: string) => {
+    setVenueCustomerId(id);
+    setLocationId("");
+    if (!quoteNameEdited)
+      setQuoteName(
+        [architect?.name, customers.find((c) => c.id === id)?.name, "Consulting", String(new Date().getFullYear())]
+          .filter(Boolean)
+          .join(" - ")
+      );
+  };
+  const pickVenueSite = (locId: string) => {
+    setLocationId(locId);
+    if (!quoteNameEdited)
+      setQuoteName(
+        [
+          architect?.name,
+          venueCustomer?.locations.find((l) => l.id === locId)?.label || venueCustomer?.name,
+          "Consulting",
+          String(new Date().getFullYear()),
+        ]
+          .filter(Boolean)
+          .join(" - ")
+      );
   };
 
   const scopes = scopeRows
@@ -257,8 +300,8 @@ export function ConsultingQuoteBuilder({
             searchText: c.contacts.map((x) => `${x.name} ${x.email}`).join(" "),
           }))}
           value={customerId}
-          canChange={() => guardWon("customer")}
-          onChange={(id) => { setCustomerId(id); if (!quoteNameEdited) setQuoteName([customers.find((c) => c.id === id)?.name, venueCustomer?.locations.find((l) => l.id === locationId)?.label || venueCustomer?.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }}
+          canChange={(id) => won.guard("customer", () => pickArchitect(id))}
+          onChange={pickArchitect}
           placeholder="Search architect or billed customer…"
           inputStyle={INPUT}
         />
@@ -272,12 +315,8 @@ export function ConsultingQuoteBuilder({
             searchText: c.locations.map((l) => l.label).join(" "),
           }))}
           value={venueCustomerId}
-          canChange={() => guardWon("venue")}
-          onChange={(id) => {
-            setVenueCustomerId(id);
-            setLocationId("");
-            if (!quoteNameEdited) setQuoteName([architect?.name, customers.find((c) => c.id === id)?.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - "));
-          }}
+          canChange={(id) => won.guard("venue", () => pickVenueCustomer(id))}
+          onChange={pickVenueCustomer}
           placeholder="Search venue company or location…"
           inputStyle={INPUT}
         />
@@ -285,7 +324,15 @@ export function ConsultingQuoteBuilder({
         {venueCustomer && venueCustomer.locations.length > 0 && (
           <>
             <label style={LBL}>Venue site</label>
-            <select value={locationId} onChange={(e) => { if (!guardWon("venue")) return; setLocationId(e.target.value); if (!quoteNameEdited) setQuoteName([architect?.name, venueCustomer.locations.find((l) => l.id === e.target.value)?.label || venueCustomer.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }} style={INPUT}>
+            <select
+              value={locationId}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (!won.guard("venue", () => pickVenueSite(val))) return;
+                pickVenueSite(val);
+              }}
+              style={INPUT}
+            >
               <option value="">— none —</option>
               {venueCustomer.locations.map((l) => (
                 <option key={l.id} value={l.id}>{l.label}</option>
@@ -308,7 +355,11 @@ export function ConsultingQuoteBuilder({
           <input
             name="contactName"
             value={contactName}
-            onChange={(e) => { if (!guardWon("contact")) return; pickContact(e.target.value); }}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (!won.guard("contact", () => pickContact(val))) return;
+              pickContact(val);
+            }}
             placeholder="Name"
             list="consulting-contacts"
             style={INPUT}
@@ -321,6 +372,7 @@ export function ConsultingQuoteBuilder({
           <input name="contactRole" value={contactRole} onChange={(e) => setContactRole(e.target.value)} placeholder="Role" style={INPUT} />
           <input name="contactEmail" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="Email" style={INPUT} />
         </div>
+        {won.prompt}
 
         <label style={LBL}>Scopes of work (title · description · fee)</label>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 9 }}>

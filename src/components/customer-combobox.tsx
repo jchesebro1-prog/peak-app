@@ -38,6 +38,17 @@ export function CustomerCombobox({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
 
+  // #178 — `value` can now change from OUTSIDE a pick(), e.g. a caller's
+  // useWonEditGuard applying a deferred edit once the user answers its
+  // inline prompt. Keep the visible query text in sync with that — adjusted
+  // during render (React's documented pattern for this, not an effect) so it
+  // never fights live typing, which changes `query` but never `value` itself.
+  const [syncedValue, setSyncedValue] = useState(value);
+  if (value !== syncedValue) {
+    setSyncedValue(value);
+    setQuery(selected?.name || "");
+  }
+
   useEffect(() => {
     const close = (e: PointerEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
