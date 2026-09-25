@@ -7349,6 +7349,49 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   await ProjStore.removeProject(ids.testHs);
   const third = await commitHistory(P, "", {}, "Test Admin");
   ok(third.created.projects === 0 && (await ProjStore.getProject(ids.testHs)) === null, "daylite commit: a deleted imported project stays deleted on re-run");
+
+  // A LIVE imported repair is ordinary open work: once it is completed in the
+  // app it belongs in the warranty follow-ups like any other repair.
+  await Repairs.complete(ids.liveRp, {});
+  const liveDone = await Repairs.get(ids.liveRp);
+  ok(!!liveDone && !Repairs.isImportedHistory(liveDone) && (await Repairs.warrantyFollowUps()).some((r) => r.id === ids.liveRp), "daylite commit: a live imported repair completed later is NOT excluded from warranty follow-ups");
+
+  // Fix 2 edge cases: deleted link target (preview and commit agree), live
+  // rows keep live semantics, archived team members are not owners, and a
+  // quote whose owner didn't match stays unassigned (create()'s "→ Jeff"
+  // default never applies to a single-write import).
+  const { setStatus: setUserStatus } = await import("@/lib/users");
+  const old = await addUser({ name: "Old Timer", email: "old.timer@example.test" });
+  await setUserStatus(old.id, "archived");
+  const P2 = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"ZZ Deleted Job"\tNew\tBasic Install\t\t\t5/1/26\t\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\t\t"ZZ Live With End"\tNew\tBasic Install\t\t\t5/1/26\t7/1/26\t\t\t\t"Big Foot High School"\t"Old Timer"\t`;
+  const O2 = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\tBid\t"ZZ Deleted Job"\tOpen\t\t\t"$9,000.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\tDesign\t"ZZ Draft By Old Timer"\tOpen\t\t\t"$2,000.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"Big Foot High School"\t"Old Timer"\t`;
+  const zz = {
+    del: projectId("ZZ Deleted Job", "Big Foot High School"),
+    delQ: quoteId("ZZ Deleted Job", "Big Foot High School"),
+    end: projectId("ZZ Live With End", "Big Foot High School"),
+    oldQ: quoteId("ZZ Draft By Old Timer", "Big Foot High School"),
+  };
+  const first2 = await commitHistory(P2, "", {}, "Test Admin");
+  ok(first2.created.projects === 2 && first2.errors.length === 0, "daylite fix2 setup: two live installs imported");
+  const endRec = await ProjStore.getProject(zz.end);
+  ok(!!endRec && endRec.targetDate === null, "daylite commit: a LIVE install with an End Date but no Due Date gets no target date");
+  ok(!!endRec && endRec.owner === "" && endRec.legacyOwner === "Old Timer", "daylite commit: an archived team member is not matched as owner (active users only)");
+  await ProjStore.removeProject(zz.del);
+  const pv3 = await previewHistory(P2, O2);
+  const delRow = pv3.rows.find((r) => r.id === zz.delQ)!;
+  ok(
+    delRow.flags.some((f) => f.includes("was deleted")) && pv3.counts.soldLinked === 0 && pv3.counts.soldNewProject === 0,
+    "daylite commit: preview shows a won quote whose project was deleted as blocked, not linked, even though that project is in the upload"
+  );
+  const res3 = await commitHistory(P2, O2, {}, "Test Admin");
+  ok(res3.errors.length === 1 && res3.errors[0].startsWith(zz.delQ) && (await QuoteStore.get(zz.delQ)) === null, "daylite commit: commit refuses the same blocked quote (no quote, no resurrected project)");
+  ok((await ProjStore.getProject(zz.del)) === null, "daylite commit: the deleted project stays deleted");
+  const oldQ = await QuoteStore.get(zz.oldQ);
+  ok(!!oldQ && oldQ.owner === "" && oldQ.legacyOwner === "Old Timer" && oldQ.status === "draft" && oldQ.stage === "design" && oldQ.value === 2000, "daylite commit: a single-write quote keeps an unmatched owner unassigned (no Jeff default) + legacyOwner");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

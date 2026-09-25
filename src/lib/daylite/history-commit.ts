@@ -9,40 +9,43 @@
  * - never calls setProjectStage / setSignoff / setDeliveryStatus — those fire
  *   the stage hook (checklist templates, the "walk the completed site"
  *   assignment). A thousand historical jobs must land silently, so projects
- *   are written with createProject + direct doc patches only.
+ *   are built with the store's builder and written directly.
  * - never calls Quotes.setStatus — that mints the "Install sold" assignment
- *   and runs quote-spawn. Imported quotes are written with create() + a plain
- *   update(); a won one is linked to (or creates) its project here, with
+ *   and runs quote-spawn. Imported quotes are built with create()'s builder
+ *   and written once; a won one is linked to (or creates) its project here, with
  *   `quoteId` set, so the page-load sweep syncProjectsFromQuotes sees the
  *   quote as already converted and never makes a second project.
- * - repairs are written through repair-jobs create() with
- *   DAYLITE_IMPORT_SOURCE; isImportedHistory() keeps them out of the warranty
+ * - repairs are built with repair-jobs' own builder and dayliteImportSource();
+ *   isImportedHistory() keeps the done-in-Daylite ones out of the warranty
  *   follow-up worklist, and nothing turns a warranty state into a task.
+ * - every record is written ONCE (the store's builder + one upsert), so a
+ *   failure can never leave a half-written record a re-run would then skip.
  *
  * Idempotence: every id is deterministic (./ids). A planned id that already
  * exists — soft-deleted included, so a record Jeff deleted is not resurrected
- * by the upserting store creates — is skipped and counted.
+ * by the upsert — is skipped and counted.
  *
  * Design spec: docs/superpowers/specs/2026-09-24-daylite-pipelines-and-history-import-design.md §4.
  */
 
-import { getDoc, listDocs, patchDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc, upsertDoc } from "@/db/doc-store";
 import type { ContactRow } from "@/db/schema";
 import { allCompanies } from "@/lib/identity/companies";
 import { allContacts } from "@/lib/identity/contacts";
 import { PARTNER_TYPES } from "@/lib/identity/venue-defaults";
-import { allUsers } from "@/lib/users";
+import { activeUsers } from "@/lib/users";
 import { loadPipelines } from "@/lib/pipelines-server";
 import {
   firstStage,
   projectPipelineFor,
+  quotePipelineFor,
   resolveProjectStage,
   stageById,
   type Pipelines,
   type ProjectPipeline,
 } from "@/lib/pipelines";
 import {
-  createProject,
+  buildProject,
   normalizeProject,
   type ProjectNote,
   type ProjectRecord,
@@ -100,7 +103,7 @@ async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
   const [companyRows, contactRows, users, pipes, projAll, repAll, quoteAll] = await Promise.all([
     allCompanies(),
     allContacts(),
-    allUsers(),
+    activeUsers(),
     loadPipelines(),
     listDocs("projects", { includeDeleted: true }),
     listDocs("repair_jobs", { includeDeleted: true }),
@@ -214,9 +217,11 @@ type SoldMode = "linked" | "new" | "blocked";
 
 function soldMode(ctx: Ctx, q: QuotePlan): SoldMode {
   const target = soldProjectId(q);
+  // A soft-deleted project holds the id — checked FIRST, so a planned row that
+  // commit will skip as already imported can't read as a link target here
+  // (commit refuses it the same way: re-creating would resurrect that record).
+  if (ctx.taken.projects.has(target) && !ctx.liveProjects.has(target)) return "blocked";
   if (ctx.plannedProjects.has(target) || ctx.liveProjects.has(target)) return "linked";
-  // A deleted project holds the id — creating it would resurrect that record.
-  if (ctx.taken.projects.has(target)) return "blocked";
   return "new";
 }
 
@@ -356,8 +361,7 @@ async function writeProject(ctx: Ctx, p: ProjectPlan, r: Resolved, by: string, i
     stage = resolveProjectStage(pl, kind, p.stage);
     history = [{ at: startedAt, from: null, to: stage, by: IMPORT_ACTOR }];
   }
-  await createProject({
-    id: p.id,
+  const rec = buildProject(p.id, {
     kind,
     pipelineId: pl.id,
     name: p.name,
@@ -369,29 +373,25 @@ async function writeProject(ctx: Ctx, p: ProjectPlan, r: Resolved, by: string, i
     valueUnknown: p.value == null,
     stage,
     startedAt,
-    targetDate: p.dueAt ?? p.endedAt ?? null,
+    // The End Date fallback is for done rows only — a live job with no Due
+    // Date has no target (never "42 days from now").
+    targetDate: p.done ? p.dueAt ?? p.endedAt ?? null : p.dueAt ?? null,
     source: { system: "daylite", importedAt },
     stageHistory: history,
     notes: contactNote(r, by, importedAt),
-  });
+  }, ctx.pipes, importedAt);
   // The Projects list's "Closed <date>" chip reads updatedAt (board-lib
-  // dueChipLabel ← fmtDate(p.updatedAt)); createProject stamps now, so a done
-  // record is re-dated to its End Date with a direct patch (updateProject
-  // would bump it back to now).
-  if (closedAt != null) {
-    const at = closedAt;
-    await patchDoc<ProjectRecord>("projects", p.id, (doc) => {
-      doc.updatedAt = at;
-      return doc;
-    });
-  }
+  // dueChipLabel ← fmtDate(p.updatedAt)), so a done record carries its End
+  // Date there. Built with the store's own builder and written ONCE — a
+  // create-then-patch could leave a half-written record a re-run would skip.
+  if (closedAt != null) rec.updatedAt = closedAt;
+  await upsertDoc<ProjectRecord>("projects", rec);
 }
 
 async function writeRepair(p: ProjectPlan, r: Resolved, importedAt: number): Promise<void> {
   const stage = p.stage as Repairs.RepairStageKey;
   const completedAt = stage === "completed" ? p.endedAt ?? p.startedAt ?? null : null;
-  await Repairs.create({
-    id: p.id,
+  const rec = Repairs.buildRepairJob(p.id, {
     title: p.name,
     customer: r.company?.name ?? p.companyRaw ?? "",
     customerId: r.company?.id ?? null,
@@ -403,15 +403,11 @@ async function writeRepair(p: ProjectPlan, r: Resolved, importedAt: number): Pro
     owner: r.owner,
     ...(r.legacyOwner ? { legacyOwner: r.legacyOwner } : {}),
     contact: r.contactName ? { name: r.contactName, ...(r.contact?.title ? { role: r.contact.title } : {}) } : null,
-    source: { ...Repairs.DAYLITE_IMPORT_SOURCE },
-  });
-  // Historical repairs sort by their completion, not by import day.
-  if (p.done && completedAt != null) {
-    await patchDoc<Repairs.RepairJobRecord>("repair_jobs", p.id, (doc) => {
-      doc.updatedAt = completedAt;
-      return doc;
-    });
-  }
+    source: Repairs.dayliteImportSource(p.done),
+  }, importedAt);
+  // Historical repairs sort by their completion, not by import day. One write.
+  if (p.done && completedAt != null) rec.updatedAt = completedAt;
+  await upsertDoc<Repairs.RepairJobRecord>("repair_jobs", rec);
 }
 
 /**
@@ -456,8 +452,7 @@ async function linkOrCreateSoldProject(
   const pl = projectPipelineFor(ctx.pipes, { kind: "project" });
   const stage = resolveProjectStage(pl, "project", q.projectStage || firstStage(pl).id);
   const known = !!q.value && q.value > 0;
-  await createProject({
-    id: targetId,
+  const rec = buildProject(targetId, {
     kind: "project",
     pipelineId: pl.id,
     quoteId: q.id,
@@ -475,37 +470,49 @@ async function linkOrCreateSoldProject(
     source: { system: "daylite", importedAt },
     stageHistory: [{ at: importedAt, from: null, to: stage, by: IMPORT_ACTOR }],
     notes: contactNote(r, by, importedAt),
-  });
+  }, ctx.pipes, importedAt);
+  await upsertDoc<ProjectRecord>("projects", rec);
   ctx.taken.projects.add(targetId);
   return "new";
 }
 
-async function writeQuote(q: QuotePlan, r: Resolved, importedAt: number): Promise<void> {
-  await Quotes.create({
-    id: q.id,
-    name: q.name,
-    customer: r.company?.name ?? q.companyRaw ?? "",
-    customerId: r.company?.id ?? null,
-    contactName: r.contactName ?? "",
-    value: q.value ?? 0,
-    owner: r.owner,
-    quoteType: "system",
-    pipelineId: q.pipelineId,
-    // `source: "daylite"` is the import marker — nothing goes in quoteNote,
-    // which prints on the customer-facing quote header.
-    source: "daylite",
-  });
-  // create() always opens a draft on the pipeline's first stage and defaults
-  // an empty owner to Jeff; a plain update sets the imported state — never
-  // setStatus, which would mint the "Install sold" assignment and spawn.
-  await Quotes.update(q.id, {
+/**
+ * One write: the doc create() would build (same builder), overlaid with the
+ * imported state, then upserted once. Never create()-then-update() — a failure
+ * between the two would leave a draft owned by Jeff that re-runs skip as
+ * "already imported". Never setStatus, which would mint the "Install sold"
+ * assignment and spawn.
+ */
+async function writeQuote(ctx: Ctx, q: QuotePlan, r: Resolved, importedAt: number): Promise<void> {
+  const pl = quotePipelineFor(ctx.pipes, { pipelineId: q.pipelineId });
+  const doc: Quotes.Quote = {
+    ...Quotes.buildQuote(
+      q.id,
+      {
+        name: q.name,
+        customer: r.company?.name ?? q.companyRaw ?? "",
+        customerId: r.company?.id ?? null,
+        contactName: r.contactName ?? "",
+        quoteType: "system",
+      },
+      "system",
+      pl,
+      importedAt
+    ),
+    // Overlaid AFTER the builder so its defaults (draft, first stage, and an
+    // empty owner → Jeff) can't apply. `source: "daylite"` is the import
+    // marker — nothing goes in quoteNote, which prints on the customer's header.
     status: q.status,
-    pipelineId: q.pipelineId,
+    pipelineId: pl.id,
     stage: q.stage,
+    value: Math.round(q.value ?? 0),
     owner: r.owner,
+    preparedBy: r.owner,
     ...(r.legacyOwner ? { legacyOwner: r.legacyOwner } : {}),
     history: [{ at: importedAt, to: q.status }],
-  });
+    source: "daylite",
+  };
+  await upsertDoc<Quotes.Quote>("quotes", doc);
 }
 
 export async function commitHistory(
@@ -567,7 +574,7 @@ export async function commitHistory(
         const mode = await linkOrCreateSoldProject(ctx, q, r, by, importedAt);
         created[mode === "linked" ? "soldLinked" : "soldNewProject"]++;
       }
-      await writeQuote(q, r, importedAt);
+      await writeQuote(ctx, q, r, importedAt);
       ctx.taken.quotes.add(q.id);
       created.quotes++;
     } catch (e) {

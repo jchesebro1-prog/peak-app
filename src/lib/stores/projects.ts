@@ -363,6 +363,60 @@ export async function getProjectByQuote(quoteId: string): Promise<ProjectRecord 
   return p ? normalizeProject(p, await loadPipelines()) : null;
 }
 
+/**
+ * The record createProject() writes, built without writing it. Pure: the
+ * caller supplies the pipelines and the timestamp. Exported so an importer can
+ * overlay fields (e.g. a historical updatedAt) and write the doc once.
+ */
+export function buildProject(
+  id: string,
+  partial: Partial<ProjectRecord>,
+  pipes: Pipelines,
+  t: number
+): ProjectRecord {
+  const pl = projectPipelineFor(pipes, partial);
+  const stage = partial.stage ? resolveProjectStage(pl, partial.kind, partial.stage) : firstStage(pl).id;
+  const p: ProjectRecord = {
+    kind: "project",
+    quoteId: null,
+    projectType: null,
+    name: "Untitled project",
+    customer: "",
+    customerId: null,
+    locationId: null,
+    owner: DEFAULT_ACTOR,
+    value: 0,
+    margin: 0,
+    startedAt: t,
+    targetDate: t + 42 * DAY,
+    installStart: null,
+    installEnd: null,
+    stageHistory: [],
+    procurement: [],
+    mobilizations: [],
+    deliveries: [],
+    crew: [],
+    tasks: [],
+    notes: [],
+    timeLogs: [],
+    signoff: null,
+    trainingAt: null,
+    ...partial,
+    pipelineId: pl.id,
+    stage,
+    id,
+    createdAt: t,
+    updatedAt: t,
+  };
+  p.stageMeta = projectStageMeta(pipes, p);
+  // Anchor the history at the stage the record opened in, so the first
+  // real transition has a "from" to render against.
+  if (!p.stageHistory.length) {
+    p.stageHistory = [{ at: t, from: null, to: p.stage, by: p.owner }];
+  }
+  return p;
+}
+
 export async function createProject(
   partial: Partial<ProjectRecord> = {}
 ): Promise<ProjectRecord> {
@@ -370,49 +424,7 @@ export async function createProject(
   const prefix = partial.kind === "order" ? "S" : "P";
   const base = prefix === "S" ? 4000 : 3000;
   const pipes = await loadPipelines();
-  const pl = projectPipelineFor(pipes, partial);
-  const stage = partial.stage ? resolveProjectStage(pl, partial.kind, partial.stage) : firstStage(pl).id;
-  const build = (id: string): ProjectRecord => {
-    const p: ProjectRecord = {
-      kind: "project",
-      quoteId: null,
-      projectType: null,
-      name: "Untitled project",
-      customer: "",
-      customerId: null,
-      locationId: null,
-      owner: DEFAULT_ACTOR,
-      value: 0,
-      margin: 0,
-      startedAt: t,
-      targetDate: ahead(42),
-      installStart: null,
-      installEnd: null,
-      stageHistory: [],
-      procurement: [],
-      mobilizations: [],
-      deliveries: [],
-      crew: [],
-      tasks: [],
-      notes: [],
-      timeLogs: [],
-      signoff: null,
-      trainingAt: null,
-      ...partial,
-      pipelineId: pl.id,
-      stage,
-      id,
-      createdAt: t,
-      updatedAt: t,
-    };
-    p.stageMeta = projectStageMeta(pipes, p);
-    // Anchor the history at the stage the record opened in, so the first
-    // real transition has a "from" to render against.
-    if (!p.stageHistory.length) {
-      p.stageHistory = [{ at: t, from: null, to: p.stage, by: p.owner }];
-    }
-    return p;
-  };
+  const build = (id: string): ProjectRecord => buildProject(id, partial, pipes, t);
   if (partial.id) {
     const p = build(partial.id);
     await upsertDoc<ProjectRecord>("projects", p);

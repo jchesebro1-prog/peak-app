@@ -18,6 +18,7 @@ import {
   quotePipelineFor,
   quoteStageForStatus,
   statusForQuoteStage,
+  type QuotePipeline,
 } from "@/lib/pipelines";
 
 export { normalizeQuotePipeline };
@@ -364,15 +365,19 @@ export async function byRenewalOf(recordId: string): Promise<Quote | null> {
   return live[0] || null;
 }
 
-/** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
-export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
-  const t = Date.now();
-  const quoteType = partial.quoteType || "system";
-  // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
-  // pipeline is honoured when it exists, else the Settings default.
-  const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
-  const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
-  const build = (id: string): Quote => ({
+/**
+ * The quote document create() writes, built without writing it. Pure: the
+ * caller resolves the pipeline (null for service quotes) and the timestamp.
+ * Exported so an importer can overlay fields and write the doc once.
+ */
+export function buildQuote(
+  id: string,
+  partial: Partial<Quote>,
+  quoteType: string,
+  pl: QuotePipeline | null,
+  t: number
+): Quote {
+  return {
     id,
     name: partial.name || "Untitled estimate",
     customer: partial.customer || "",
@@ -408,7 +413,18 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     updatedAt: t,
     history: [{ at: t, to: "draft" }],
     ...(pl ? { pipelineId: pl.id, stage: firstStage(pl).id } : {}),
-  });
+  };
+}
+
+/** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
+export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
+  const t = Date.now();
+  const quoteType = partial.quoteType || "system";
+  // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
+  // pipeline is honoured when it exists, else the Settings default.
+  const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
+  const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
+  const build = (id: string): Quote => buildQuote(id, partial, quoteType, pl, t);
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
   // the prior upsert semantics.
   if (partial.id) {

@@ -582,13 +582,14 @@ export async function byQuote(qid: string): Promise<RepairJobRecord | null> {
   return list.find((j) => j.quoteId === qid) || null;
 }
 
-/** Prototype defaulted owner to window.Team.CURRENT — server callers pass
- *  partial.owner from the session; fallback matches the prototype. */
-export async function create(
-  partial: Partial<RepairJobRecord> = {}
-): Promise<RepairJobRecord> {
-  const t = now();
-  const build = (id: string): RepairJobRecord => ({
+/** The record create() writes, built without writing it (pure). Exported so
+ *  an importer can overlay fields (e.g. a historical updatedAt) and write once. */
+export function buildRepairJob(
+  id: string,
+  partial: Partial<RepairJobRecord>,
+  t: number
+): RepairJobRecord {
+  return {
     quoteId: null,
     customer: "",
     customerId: null,
@@ -618,7 +619,16 @@ export async function create(
     id,
     createdAt: t,
     updatedAt: t,
-  });
+  };
+}
+
+/** Prototype defaulted owner to window.Team.CURRENT — server callers pass
+ *  partial.owner from the session; fallback matches the prototype. */
+export async function create(
+  partial: Partial<RepairJobRecord> = {}
+): Promise<RepairJobRecord> {
+  const t = now();
+  const build = (id: string): RepairJobRecord => buildRepairJob(id, partial, t);
   if (partial.id) {
     const rec = build(partial.id);
     await upsertDoc<RepairJobRecord>("repair_jobs", rec);
@@ -724,16 +734,22 @@ export async function remove(id: string): Promise<void> {
 
 /* ---------- worklists ---------- */
 
-/** The exact `source` the Daylite history import writes on every repair it
- *  creates (src/lib/daylite/history-commit.ts) — the one place it is spelled. */
-export const DAYLITE_IMPORT_SOURCE: RepairSource = { kind: "direct", label: "Daylite import" };
+/** The `source` the Daylite history import writes on every repair it creates
+ *  (src/lib/daylite/history-commit.ts) — the one place it is spelled.
+ *  `refId` separates a job that was already DONE in Daylite (historical) from
+ *  one still live there, which is imported as ordinary open work. */
+export function dayliteImportSource(done: boolean): RepairSource {
+  return { kind: "direct", refId: done ? "daylite:done" : "daylite:live", label: "Daylite import" };
+}
 
-/** A repair imported from Daylite history — years-old completions whose
- *  warranties lapsed long ago. Kept out of the follow-up worklist; still a
- *  completed job everywhere else (stats, lists, the customer record). */
+/** A repair imported as Daylite HISTORY (done in Daylite) — a years-old
+ *  completion whose warranty lapsed long ago. Kept out of the warranty
+ *  follow-up worklist; still a completed job everywhere else (stats, lists,
+ *  the customer record). A live imported repair behaves like any other. */
 export function isImportedHistory(rec: Pick<RepairJobRecord, "source"> | null | undefined): boolean {
   const s = rec?.source;
-  return !!s && s.kind === DAYLITE_IMPORT_SOURCE.kind && s.label === DAYLITE_IMPORT_SOURCE.label;
+  const h = dayliteImportSource(true);
+  return !!s && s.kind === h.kind && s.refId === h.refId && s.label === h.label;
 }
 
 export type WarrantyFollowUpRow = RepairJobRecord & { _warranty: WarrantyStatus };
