@@ -25,6 +25,7 @@ import {
   makePhase,
   mergedConsultingPhases,
   patchEngagement,
+  removeEngagement,
   setChecklistItem,
   setCommentState,
   setMilestonePhase,
@@ -58,6 +59,24 @@ async function done(): Promise<{ ok: true }> {
 }
 
 /* ---------- header / overview ---------- */
+
+/**
+ * Delete a consulting engagement (soft delete; cascades to its own open
+ * tasks — see removeEngagement). Called directly from the detail header's
+ * Delete control, not a form action, so it never redirects itself — the
+ * client navigates to the hub on success.
+ */
+export async function removeEngagementAction(
+  engId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!engId) return { ok: false, error: "Missing project id." };
+  const eng = await getEngagement(engId);
+  if (!eng) return { ok: false, error: "That consulting project could not be found." };
+  await removeEngagement(engId);
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
 
 export async function setEngagementStatusAction(
   engId: string,
