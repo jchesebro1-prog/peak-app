@@ -10,6 +10,7 @@ import { list as listCatalog } from "@/lib/stores/catalog";
 import { adoptAllLegacySpecPointers } from "@/lib/specs/legacy-pointers";
 import type { SpecArticle, SpecPart2Style, SpecQuantities } from "@/lib/specs/sections";
 import type { SpecCurtainTemplate } from "@/lib/stores/spec-curtain-templates";
+import { GRID_CURTAIN_TYPES, type GridCurtainType } from "@/lib/design/grid-bom";
 
 /**
  * Server actions for the Specs module shell (Task 8). Names are prefixed
@@ -235,7 +236,7 @@ export async function seedTemplatesAction(): Promise<Result<{ made: number }>> {
 }
 
 export async function saveCurtainTemplateAction(input: {
-  id: SpecCurtainTemplate["id"];
+  id: string;
   articleId: string;
   sort: number;
   title: string;
@@ -247,10 +248,13 @@ export async function saveCurtainTemplateAction(input: {
   const user = await requirePerm("create");
   const title = String(input.title || "").trim();
   if (!title) return { ok: false, error: "A curtain template needs a title." };
+  if (!GRID_CURTAIN_TYPES.includes(input.id as GridCurtainType)) {
+    return { ok: false, error: "Unknown curtain type." };
+  }
   try {
     await Curtains.saveCurtainTemplate(
       {
-        id: input.id,
+        id: input.id as GridCurtainType,
         articleId: input.articleId,
         sort: input.sort,
         title,
