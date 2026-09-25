@@ -329,21 +329,22 @@ async function main() {
 
     // The zip gate does not over-accept: attempt 1 itself hits the wrong
     // town (city-mismatch), and the no-city fallback's hit is in yet another
-    // town with a different zip — still rejected, and the reported reason is
-    // attempt 1's own ("reports stay meaningful").
+    // town whose zip is merely ADJACENT to the row's (53590 vs the row's
+    // 53591, not equal) — a strict equality check must reject it, and the
+    // reported reason is attempt 1's own ("reports stay meaningful").
     const ctxC = newGeocodeCtx(0);
     nominatim.push({
       when: (u) => q(u) === "1 typo trail, sun prarie, wi 53591",
-      hit: { lat: 45.0, lng: -91.0, city: "FarAway", state: "Wisconsin", zip: "53001" },
+      hit: { lat: 45.0, lng: -91.0, city: "FarAway", state: "Wisconsin", zip: "53590" },
     });
     nominatim.push({
       when: (u) => q(u) === "1 typo trail, wi 53591",
-      hit: { lat: 44.0, lng: -90.0, city: "Elsewhere", state: "Wisconsin", zip: "53000" },
+      hit: { lat: 44.0, lng: -90.0, city: "Elsewhere", state: "Wisconsin", zip: "53590" },
     });
     const c = await geocodeVenue({ address: "1 Typo Trail", city: "Sun Prarie", state: "WI", zip: "53591" }, ctxC);
     assert.ok(
       !c.ok && c.reason === "city-mismatch" && c.got === "FarAway, WI",
-      "every attempt fails; attempt 1's own city-mismatch is reported"
+      "every attempt fails; an adjacent-but-different zip does not satisfy the zip gate"
     );
 
     // A label address: attempt 1 (full street text) misses; attempt 2 (the
@@ -402,6 +403,7 @@ async function main() {
     // cleans to ""), a fallback attempt must fall back to the zip alone —
     // never accept unconditionally just because there's no city text.
     const ctxI = newGeocodeCtx(0);
+    const callsBeforeI = calls;
     nominatim.push({
       when: (u) => q(u) === "42 blank city rd, wi 53020",
       hit: { lat: 45.5, lng: -92.5, city: "SomeTown", state: "Wisconsin", zip: "53099" },
@@ -411,6 +413,9 @@ async function main() {
       ctxI
     );
     assert.deepEqual(i1, { ok: false, reason: "no-hit" }, "no city to gate on and a mismatched zip is rejected");
+    // Minors (item 6): attempt 3's query here is identical to attempt 2's
+    // (both drop the city, same zip) — it must be skipped, not re-requested.
+    assert.equal(calls - callsBeforeI, 2, "q3 identical to q2 is skipped, not re-requested");
 
     const ctxJ = newGeocodeCtx(0);
     nominatim.push({
@@ -422,6 +427,50 @@ async function main() {
       ctxJ
     );
     assert.ok(j1.ok, "no city to gate on but a matching zip is accepted");
+
+    // Minors (item 6): attempt 1 success makes exactly ONE request — no
+    // fallback query is ever issued when the very first lookup already
+    // clears the gates.
+    const ctxG = newGeocodeCtx(0);
+    const callsBeforeG = calls;
+    nominatim.push({
+      when: (u) => q(u) === "1 clean st, cleantown, wi",
+      hit: { lat: 43.2, lng: -89.9, city: "Cleantown", state: "Wisconsin" },
+    });
+    const g = await geocodeVenue({ address: "1 Clean St", city: "Cleantown", state: "WI" }, ctxG);
+    assert.ok(g.ok);
+    assert.equal(calls - callsBeforeG, 1, "attempt 1 success makes exactly one request");
+
+    // Minors (item 6): a zip+4 row's zip5 (the first five digits) matches a
+    // hit whose postcode is the plain five-digit form.
+    const ctxK = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "60 plus four ln, wi 53592",
+      hit: { lat: 44.9, lng: -91.3, city: "FarCity", state: "Wisconsin", zip: "53592" },
+    });
+    const k = await geocodeVenue(
+      { address: "60 Plus Four Ln", city: "PlusFourTown", state: "WI", zip: "53592-1234" },
+      ctxK
+    );
+    assert.ok(k.ok, "a zip+4 row's zip5 matches a plain five-digit hit zip");
+
+    // Minors (item 6): the zip gate only applies to fallback attempts 2-3 —
+    // attempt 1 must not short-circuit-accept just because its own hit
+    // happens to share the row's zip while disagreeing on city. Prove it by
+    // making both attempt 1 AND the no-city fallback fail, so the venue
+    // stays unlocated even though attempt 1's hit had a matching zip.
+    const ctxF = newGeocodeCtx(0);
+    const callsBeforeF = calls;
+    nominatim.push({
+      when: (u) => q(u) === "50 elm st, alpha, wi 53000",
+      hit: { lat: 46.0, lng: -92.0, city: "Beta", state: "Wisconsin", zip: "53000" },
+    });
+    const f = await geocodeVenue({ address: "50 Elm St", city: "Alpha", state: "WI", zip: "53000" }, ctxF);
+    assert.ok(!f.ok, "a same-zip, wrong-city attempt-1 hit is not accepted on attempt 1 alone");
+    assert.ok(
+      calls - callsBeforeF > 1,
+      "the zip gate is inactive on attempt 1 — it doesn't short-circuit; fallbacks still run"
+    );
 
     console.log("PASS geo-backfill: geocodeVenue fallback chain");
   }

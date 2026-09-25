@@ -506,7 +506,9 @@ export async function geocodeVenue(
   // the building. Only possible when the row actually has a 5-digit zip.
   if (zip5) {
     const q3 = [street2, [state, zip5].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-    if (q3) {
+    // Minors (item 6): a zip+4 row, or a row whose city was already empty,
+    // can leave q3 identical to q or q2 — skip the redundant request.
+    if (q3 && q3 !== q && q3 !== q2) {
       await sleep(ctx.delayMs);
       const [hit3] = await search(q3, { limit: 1 });
       if (hit3) {
