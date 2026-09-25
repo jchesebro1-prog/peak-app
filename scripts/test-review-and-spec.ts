@@ -298,6 +298,9 @@ import { fullnessKey, curtainGroupKey, fillCurtainTemplate } from "@/lib/specs/c
 import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/catalog/part-form";
 import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
+import {
+  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, hasDatasheet, coverageRows, filterCoverage,
+} from "@/app/(app)/design/specs/coverage";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -12922,4 +12925,71 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(specSortValue("") === undefined, "part form: a blank sort clears it");
   ok(specSortValue(undefined) === undefined, "part form: an absent sort clears it");
   ok(specSortValue("abc") === undefined, "part form: a non-numeric sort clears it");
+}
+
+/* --- specs: coverage --- */
+{
+  ok(ON_BOM_WINDOW_MS === 90 * 86_400_000, "coverage: the on-a-BOM window is 90 days");
+
+  ok(
+    skusFromQuoteSpec({ sections: [{ items: [{ sku: "A" }, { sku: "B" }] }, { items: [{ sku: "C" }] }] }).join(",") === "A,B,C",
+    "coverage: the estimator's nested spec yields every item SKU"
+  );
+  ok(skusFromQuoteSpec({ kind: "grid", lines: [{ sku: "D" }, { sku: "CURTAIN" }] }).join(",") === "D,CURTAIN", "coverage: the Grid's flat spec yields its line SKUs");
+  ok(skusFromQuoteSpec(null).length === 0 && skusFromQuoteSpec("nope").length === 0, "coverage: a missing or junk spec yields nothing");
+  ok(skusFromQuoteSpec({ sections: [{ items: [{}, { sku: "  E  " }] }] }).join(",") === "E", "coverage: blank SKUs are dropped and the rest trimmed");
+
+  const now = 1_800_000_000_000;
+  const since = now - ON_BOM_WINDOW_MS;
+  const on = skusOnBomSince(
+    {
+      quotes: [
+        { updatedAt: now - 1000, spec: { sections: [{ items: [{ sku: "RECENT" }] }] } },
+        { updatedAt: since - 1000, spec: { sections: [{ items: [{ sku: "OLD" }] }] } },
+      ],
+      gridProjects: [{ updatedAt: now - 2000, placements: [{ partId: "GRID" }, { partId: "" }] }],
+      generated: [{ createdAt: now - 3000, bom: [{ sku: "D94" }] }, { createdAt: now - 3000, rows: [{ row: { sku: "PHASEB" } }] }],
+    },
+    since
+  );
+  ok(on.has("RECENT") && on.has("GRID") && on.has("D94") && on.has("PHASEB"), "coverage: all four sources count as a BOM appearance");
+  ok(!on.has("OLD"), "coverage: anything older than the window does not count");
+  ok(!on.has(""), "coverage: a blank partId is not a SKU");
+
+  const articles = [{ id: "ar-fix", sectionId: "ss-1", sort: 10, title: "Fixtures", manufacturers: [], general: "", categoryKeys: ["Fixtures"], updatedAt: 1, updatedBy: "J" }];
+  const sections = [{ id: "ss-1", number: "26 55 61", title: "Fixtures", sort: 10, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "J" }];
+  const parts = [
+    { sku: "P1", desc: "Authored", category: "Fixtures", specBody: "Text.", specState: "authored" as const, datasheetName: "p1.pdf" },
+    { sku: "P2", desc: "Draft", category: "Fixtures", specBody: "Text.", specState: "draft" as const },
+    { sku: "P3", desc: "Missing", category: "Fixtures" },
+    { sku: "P4", desc: "Pointer", category: "Fixtures", specSameAs: "P1" },
+    { sku: "P5", desc: "Unmapped", category: "Nothing" },
+  ];
+  ok(hasDatasheet({ sku: "D1", docs: [{ kind: "datasheet" }] }), "coverage: a DaVinci datasheet link counts as a datasheet");
+  ok(!hasDatasheet({ sku: "D2", docs: [{ kind: "manual" }] }), "coverage: a manual alone is not a datasheet");
+  ok(hasDatasheet({ sku: "D3", productMetadata: { datasheets: [{ kind: "cut-sheet" }] } }), "coverage: a researched cut sheet counts");
+  ok(!hasDatasheet({ sku: "D4", productMetadata: { datasheets: [{ kind: "guide-spec" }] } }), "coverage: a guide spec alone is not a datasheet");
+  const rows = coverageRows(parts as never, articles, sections, new Set(["P1", "P3"]));
+  ok(rows.length === 5, "coverage: every part gets a row, mapped or not");
+  ok(rows.find((r) => r.sku === "P1")!.state === "authored", "coverage: an authored part reads authored");
+  ok(rows.find((r) => r.sku === "P2")!.state === "draft", "coverage: a draft reads draft, never authored");
+  ok(rows.find((r) => r.sku === "P3")!.state === "missing", "coverage: a part with no text reads missing");
+  ok(rows.find((r) => r.sku === "P4")!.state === "same-as", "coverage: a resolved pointer reads same-as");
+  ok(rows.find((r) => r.sku === "P5")!.articleId === null, "coverage: an unmapped category has no article");
+  ok(rows.find((r) => r.sku === "P1")!.hasDatasheet === true, "coverage: a datasheet is reported");
+  ok(rows.find((r) => r.sku === "P2")!.hasDatasheet === false, "coverage: no datasheet is reported too");
+  ok(rows.find((r) => r.sku === "P1")!.onBom === true && rows.find((r) => r.sku === "P2")!.onBom === false, "coverage: the on-a-BOM set drives the flag");
+
+  ok(filterCoverage(rows, { onBomOnly: true }).length === 2, "coverage: the on-a-BOM filter keeps only those two");
+  ok(filterCoverage(rows, { datasheetOnly: true }).length === 1, "coverage: the datasheet filter keeps only P1");
+  // P3 (mapped to ar-fix, no text) AND P5 (unmapped category, no text) both
+  // read "missing" — coverageRows runs specStateOf unconditionally on
+  // articleId (brief Step 2), so an unmapped part with no spec text is
+  // "missing" same as a mapped one. Two, not one.
+  ok(filterCoverage(rows, { state: "missing" }).length === 2, "coverage: the state filter narrows to the two textless parts");
+  ok(filterCoverage(rows, { state: "all" }).length === 5, "coverage: state 'all' narrows nothing");
+  ok(filterCoverage(rows, { articleId: "ar-fix" }).length === 4, "coverage: the article filter keeps its four parts");
+  ok(filterCoverage(rows, { q: "point" }).length === 1, "coverage: the search matches the description, case-insensitively");
+  ok(filterCoverage(rows, { q: "p3" }).length === 1, "coverage: the search matches the SKU too");
+  ok(filterCoverage(rows, { onBomOnly: true, state: "missing" }).length === 1, "coverage: filters compose");
 }

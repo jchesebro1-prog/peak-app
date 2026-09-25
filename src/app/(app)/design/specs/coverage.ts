@@ -1,0 +1,188 @@
+import { articleIdForPart, specStateOf, type SpecCategoryArticle, type SpecPartLike } from "@/lib/specs/articles";
+import type { SpecSection } from "@/lib/specs/sections";
+
+/**
+ * Task 12 — the coverage table: which catalog parts have approved spec
+ * language, and which have shown up on a BOM lately without any. Pure
+ * (no store imports) so it's cheap to unit test against production's ~37.4k
+ * catalog parts — every pass below is O(n) over its input with a Map/Set,
+ * never a nested scan.
+ */
+
+/** A part counts as "on a BOM" if it appeared on a quote, a Grid project, or
+ *  a generated bid spec within this window. 90 days. */
+export const ON_BOM_WINDOW_MS = 90 * 86_400_000;
+
+export type CoverageState = "authored" | "same-as" | "draft" | "missing";
+
+export type CoverageRow = {
+  sku: string;
+  desc: string;
+  category: string;
+  articleId: string | null;
+  state: CoverageState;
+  onBom: boolean;
+  hasDatasheet: boolean;
+};
+
+function pushSku(out: string[], sku: unknown): void {
+  if (typeof sku !== "string") return;
+  const t = sku.trim();
+  if (t) out.push(t);
+}
+
+/** Every item SKU inside a saved quote/grid spec, regardless of which of
+ *  the two shapes it's in: the estimator's `sections[].items[]` (nested) or
+ *  the Grid's flat `lines[]`. Never throws on a junk or missing shape. */
+export function skusFromQuoteSpec(spec: unknown): string[] {
+  const out: string[] = [];
+  if (!spec || typeof spec !== "object") return out;
+  const s = spec as Record<string, unknown>;
+
+  if (Array.isArray(s.sections)) {
+    for (const sec of s.sections) {
+      if (!sec || typeof sec !== "object") continue;
+      const items = (sec as Record<string, unknown>).items;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (item && typeof item === "object") pushSku(out, (item as Record<string, unknown>).sku);
+      }
+    }
+  }
+
+  if (Array.isArray(s.lines)) {
+    for (const line of s.lines) {
+      if (line && typeof line === "object") pushSku(out, (line as Record<string, unknown>).sku);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * The union of SKUs that appeared on a BOM since `since`, across three
+ * sources: quotes (estimator's nested spec or the Grid's flat one), Grid
+ * projects (`placements[].partId`), and generated bid specs — the D94 shape
+ * (`bom[].sku`) and Phase B's (`rows[].row.sku`). Each source is scanned
+ * once; each doc's own arrays are scanned once — no nested per-part lookup.
+ */
+export function skusOnBomSince(
+  sources: { quotes: unknown[]; gridProjects: unknown[]; generated: unknown[] },
+  since: number
+): Set<string> {
+  const out = new Set<string>();
+  const add = (sku: unknown) => {
+    if (typeof sku !== "string") return;
+    const t = sku.trim();
+    if (t) out.add(t);
+  };
+
+  for (const q of sources.quotes || []) {
+    if (!q || typeof q !== "object") continue;
+    const r = q as Record<string, unknown>;
+    const at = Number(r.updatedAt ?? r.createdAt ?? 0);
+    if (!(at >= since)) continue;
+    for (const sku of skusFromQuoteSpec(r.spec)) add(sku);
+  }
+
+  for (const p of sources.gridProjects || []) {
+    if (!p || typeof p !== "object") continue;
+    const r = p as Record<string, unknown>;
+    const at = Number(r.updatedAt ?? 0);
+    if (!(at >= since)) continue;
+    const placements = r.placements;
+    if (!Array.isArray(placements)) continue;
+    for (const pl of placements) {
+      if (pl && typeof pl === "object") add((pl as Record<string, unknown>).partId);
+    }
+  }
+
+  for (const g of sources.generated || []) {
+    if (!g || typeof g !== "object") continue;
+    const r = g as Record<string, unknown>;
+    const at = Number(r.createdAt ?? 0);
+    if (!(at >= since)) continue;
+    if (Array.isArray(r.bom)) {
+      for (const row of r.bom) {
+        if (row && typeof row === "object") add((row as Record<string, unknown>).sku);
+      }
+    }
+    if (Array.isArray(r.rows)) {
+      for (const row of r.rows) {
+        if (!row || typeof row !== "object") continue;
+        const inner = (row as Record<string, unknown>).row;
+        if (inner && typeof inner === "object") add((inner as Record<string, unknown>).sku);
+      }
+    }
+  }
+
+  return out;
+}
+
+/** What coverage needs off a catalog part — a superset of SpecPartLike, so a
+ *  real CatalogPart is structurally assignable with no cast. A datasheet is
+ *  any of: a Peak-uploaded PDF (`datasheetName`), a manufacturer datasheet
+ *  link from DaVinci (#162, `docs[].kind === "datasheet"`), or a researched
+ *  datasheet/cut sheet on the Displays metadata (`productMetadata.datasheets`). */
+export type CoveragePart = SpecPartLike & {
+  desc?: string;
+  datasheetName?: string;
+  docs?: Array<{ kind: string }>;
+  productMetadata?: { datasheets?: Array<{ kind: string }> };
+};
+
+export function hasDatasheet(p: CoveragePart): boolean {
+  if (p.datasheetName) return true;
+  if ((p.docs ?? []).some((d) => d.kind === "datasheet")) return true;
+  if ((p.productMetadata?.datasheets ?? []).some((d) => d.kind === "datasheet" || d.kind === "cut-sheet")) return true;
+  return false;
+}
+
+/** One row per catalog part — mapped to an article or not, spec'd or not.
+ *  `bySku` (for specStateOf's same-as resolution) is built once here, not
+ *  per part. */
+export function coverageRows(
+  parts: CoveragePart[],
+  articles: SpecCategoryArticle[],
+  sections: SpecSection[],
+  onBom: Set<string>
+): CoverageRow[] {
+  const bySku = new Map<string, CoveragePart>();
+  for (const p of parts) bySku.set(p.sku, p);
+
+  return parts.map((p) => ({
+    sku: p.sku,
+    desc: p.desc ?? "",
+    category: p.category ?? "",
+    articleId: articleIdForPart(p, articles, sections),
+    state: specStateOf(p, bySku),
+    onBom: onBom.has(p.sku),
+    hasDatasheet: hasDatasheet(p),
+  }));
+}
+
+export function filterCoverage(
+  rows: CoverageRow[],
+  f: { articleId?: string; state?: CoverageState | "all"; onBomOnly?: boolean; datasheetOnly?: boolean; q?: string }
+): CoverageRow[] {
+  let out = rows;
+
+  if (f.articleId) {
+    out = f.articleId === "none" ? out.filter((r) => r.articleId === null) : out.filter((r) => r.articleId === f.articleId);
+  }
+  if (f.state && f.state !== "all") {
+    out = out.filter((r) => r.state === f.state);
+  }
+  if (f.onBomOnly) {
+    out = out.filter((r) => r.onBom);
+  }
+  if (f.datasheetOnly) {
+    out = out.filter((r) => r.hasDatasheet);
+  }
+  const q = (f.q || "").trim().toLowerCase();
+  if (q) {
+    out = out.filter((r) => (r.sku + " " + r.desc).toLowerCase().includes(q));
+  }
+
+  return out;
+}

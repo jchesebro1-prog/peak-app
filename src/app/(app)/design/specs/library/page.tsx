@@ -4,8 +4,18 @@ import * as Sections from "@/lib/stores/spec-sections";
 import * as Articles from "@/lib/stores/spec-articles";
 import * as Templates from "@/lib/stores/spec-templates";
 import * as Catalog from "@/lib/stores/catalog";
+import * as Quotes from "@/lib/stores/quotes";
+import * as GridProjects from "@/lib/stores/grid-projects";
+import * as GeneratedSpecs from "@/lib/stores/generated-specs";
 import { articleIdForPart, type SpecCategoryArticle } from "@/lib/specs/articles";
-import { AddSectionForm, AdoptLegacyPointersButton, ImportExportLibraryControls, SeedStarterSectionsButton } from "./controls";
+import { ON_BOM_WINDOW_MS, coverageRows, filterCoverage, skusOnBomSince, type CoverageState } from "../coverage";
+import {
+  AddSectionForm,
+  AdoptLegacyPointersButton,
+  CoverageControls,
+  ImportExportLibraryControls,
+  SeedStarterSectionsButton,
+} from "./controls";
 
 /**
  * Task 8 — the Specs library index: the Sections table (with the inline
@@ -29,23 +39,39 @@ const CELL: React.CSSProperties = { fontSize: 12.5, color: "#3a3f4a" };
 const PART2_STYLE_LABEL: Record<string, string> = { paragraphs: "Paragraphs", table: "Table" };
 const QUANTITIES_LABEL: Record<string, string> = { drawings: "From drawings", inline: "Inline" };
 
+/** Coverage table cap (punch #92/D142 idiom) — the catalog is ~10.7k rows in
+ *  dev and ~37.4k in production; never render the whole filtered set. */
+const COVERAGE_PAGE = 300;
+
+const STATE_CHIP: Record<CoverageState, { label: string; fg: string; bg: string }> = {
+  authored: { label: "Authored", fg: "#1f7a52", bg: "#e8f5ee" },
+  "same-as": { label: "Same as", fg: "#3a5fb4", bg: "#eaf0fb" },
+  draft: { label: "Draft", fg: "#9a6b12", bg: "#fdf3df" },
+  missing: { label: "Missing", fg: "#b4543a", bg: "#fbeae5" },
+};
+
+function one(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
+
 export default async function SpecLibraryPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser();
-  // No filters on this screen yet — awaited to match the Vendors idiom.
-  await searchParams;
+  const [, sp] = await Promise.all([requireUser(), searchParams]);
   // Owner decision: the starter formulas auto-seed when empty on ANY
   // environment, from whichever read path lists templates first.
   await Templates.ensureStarterTemplates();
 
-  const [sections, articles, parts, templates] = await Promise.all([
+  const [sections, articles, parts, templates, quotes, gridProjects, generated] = await Promise.all([
     Sections.allSections(),
     Articles.allArticles(),
     Catalog.list(),
     Templates.allTemplates(),
+    Quotes.getAll(),
+    GridProjects.listProjects(),
+    GeneratedSpecs.allGeneratedSpecs(),
   ]);
 
   const articlesBySection = new Map<string, SpecCategoryArticle[]>();
@@ -73,6 +99,34 @@ export default async function SpecLibraryPage({
     if (md.specArticle && !p.specArticleId) return true;
     return false;
   });
+
+  /* ---- Task 12: the coverage table ---- */
+  const articleParam = one(sp.article);
+  const stateParam = one(sp.state) as CoverageState | "all" | "";
+  const bomOnly = one(sp.bom) === "1";
+  const datasheetOnly = one(sp.datasheet) === "1";
+  const coverageQ = one(sp.q);
+
+  const onBom = skusOnBomSince({ quotes, gridProjects, generated }, Date.now() - ON_BOM_WINDOW_MS);
+  const coverageAll = coverageRows(parts, articles, sections, onBom);
+  const coverageFiltered = filterCoverage(coverageAll, {
+    articleId: articleParam || undefined,
+    state: stateParam || undefined,
+    onBomOnly: bomOnly,
+    datasheetOnly,
+    q: coverageQ,
+  });
+  const coverageTotal = coverageFiltered.length;
+  const coverageTruncated = coverageTotal > COVERAGE_PAGE;
+  const coverageVisible = coverageFiltered.slice(0, COVERAGE_PAGE);
+
+  const coverageArticleOptions = [...articles]
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .map((a) => {
+      const sec = sections.find((s) => s.id === a.sectionId);
+      return { id: a.id, label: sec ? `${sec.number} · ${a.title}` : a.title };
+    });
+  const articleTitleById = new Map(articles.map((a) => [a.id, a.title]));
 
   return (
     <div className="pk-content" style={{ maxWidth: 1080, margin: "0 auto" }}>
@@ -184,7 +238,97 @@ export default async function SpecLibraryPage({
         )}
       </div>
 
-      {/* Task 12 mounts the coverage table here. */}
+      <div id="coverage" className="pk-card" style={{ padding: 0, overflow: "hidden", marginBottom: 22 }}>
+        <div
+          style={{
+            padding: "12px 18px",
+            borderBottom: "1px solid #f0f1f4",
+            fontSize: 14.5,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>Coverage</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#9aa0ab", fontWeight: 500 }}>
+            {coverageTruncated ? `Showing ${COVERAGE_PAGE} of ${coverageTotal}` : `${coverageTotal} of ${coverageAll.length}`}
+            {" "}part{coverageTotal === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div style={{ padding: "12px 18px", borderBottom: "1px solid #f0f1f4" }}>
+          <CoverageControls
+            q={coverageQ}
+            articleId={articleParam}
+            state={stateParam || "all"}
+            bom={bomOnly}
+            datasheet={datasheetOnly}
+            articleOptions={coverageArticleOptions}
+          />
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "130px minmax(0,1.5fr) minmax(0,1.2fr) 100px 80px 80px",
+            gap: 10,
+            padding: "9px 18px",
+            background: "#fafbfc",
+            borderBottom: "1px solid #f0f1f4",
+          }}
+        >
+          <span style={TH}>SKU</span>
+          <span style={TH}>Description</span>
+          <span style={TH}>Article</span>
+          <span style={TH}>State</span>
+          <span style={{ ...TH, textAlign: "center" }}>On a BOM</span>
+          <span style={{ ...TH, textAlign: "center" }}>Datasheet</span>
+        </div>
+        {coverageVisible.map((r) => {
+          const chip = STATE_CHIP[r.state];
+          const articleTitle = r.articleId ? articleTitleById.get(r.articleId) : null;
+          return (
+            <div
+              key={r.sku}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "130px minmax(0,1.5fr) minmax(0,1.2fr) 100px 80px 80px",
+                gap: 10,
+                padding: "10px 18px",
+                borderBottom: "1px solid #f5f6f8",
+                alignItems: "center",
+              }}
+            >
+              <Link
+                href={`/catalog?edit=${encodeURIComponent(r.sku)}`}
+                style={{ ...CELL, fontFamily: "var(--font-mono)", fontWeight: 600, textDecoration: "none", color: "inherit" }}
+              >
+                {r.sku}
+              </Link>
+              <span style={CELL}>{r.desc || "—"}</span>
+              <span style={CELL}>{articleTitle || "—"}</span>
+              <span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: chip.fg, background: chip.bg, padding: "2px 8px", borderRadius: 20 }}>
+                  {chip.label}
+                </span>
+              </span>
+              <span style={{ textAlign: "center", color: r.onBom ? "#1f7a52" : "#d5d8de" }}>{r.onBom ? "✓" : "—"}</span>
+              <span style={{ textAlign: "center", color: r.hasDatasheet ? "#1f7a52" : "#d5d8de" }}>{r.hasDatasheet ? "✓" : "—"}</span>
+            </div>
+          );
+        })}
+        {coverageVisible.length === 0 && (
+          <div style={{ padding: "36px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
+            No parts match these filters.
+          </div>
+        )}
+        {coverageTruncated && (
+          <div style={{ padding: "10px 18px", fontSize: 11.5, color: "#9aa0ab", borderTop: "1px solid #f5f6f8" }}>
+            Showing {COVERAGE_PAGE} of {coverageTotal} — narrow the filters.
+          </div>
+        )}
+      </div>
 
       <div id="import-export">
         <ImportExportLibraryControls />

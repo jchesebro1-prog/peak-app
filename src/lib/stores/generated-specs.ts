@@ -40,6 +40,13 @@ export async function getGeneratedSpec(id: string): Promise<GeneratedSpec | null
   return getDoc<GeneratedSpec>("generated_specs", id);
 }
 
+/** Every live generated spec (soft-deleted docs excluded, per listDocs'
+ *  default), newest first — for the coverage table's "on a BOM" pass. */
+export async function allGeneratedSpecs(): Promise<GeneratedSpec[]> {
+  const all = await listDocs<GeneratedSpec>("generated_specs");
+  return all.sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export async function saveGeneratedSpec(input: {
   engagementId: string;
   source: string;
