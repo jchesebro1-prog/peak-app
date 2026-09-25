@@ -124,11 +124,15 @@ function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
 }
 
 function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number }> {
-  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number }> }> } | null | undefined;
+  const spec = quote.spec as { sections?: Array<{ kind?: string; items?: Array<{ sku?: string; desc?: string; qty?: number; labor?: boolean }> }> } | null | undefined;
   const rows = new Map<string, { sku: string; desc: string; qty: number }>();
   for (const section of spec?.sections || []) {
     for (const item of section.items || []) {
-      if (section.kind === "labor" || item.qty == null || item.qty <= 0) continue;
+      // A "labor" kind section is already skipped; a non-labor section can
+      // still carry individual labor lines (mobilizations, shop &
+      // engineering, allowance, performance bonus) — they're not equipment
+      // and don't belong in the BOM/client package either.
+      if (section.kind === "labor" || item.labor || item.qty == null || item.qty <= 0) continue;
       const sku = String(item.sku || item.desc || "Unspecified line");
       const current = rows.get(sku);
       if (current) current.qty += item.qty;

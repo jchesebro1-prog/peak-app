@@ -489,40 +489,143 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
   };
 }
 
-/** One always-present labor extra (shop & engineering / performance bonus /
- *  allowance) folded into the mobilization lines by foldLaborMobLines. */
+/**
+ * Pure line-building half of `addLabor` (estimator-client.tsx): one item
+ * per active mobilization, plus shop & engineering / the misc allowance /
+ * the performance bonus as their own separate lines when present — restored
+ * to that older, unfolded shape (owner request: "I like setting the shop
+ * and engineering as separate lines ... and the bonus"). The caller still owns
+ * `pushItems`/`closeInput`/the `r.totalCost <= 0` early-out; `nextId` is
+ * injected so this stays a pure function of its inputs.
+ *
+ * The overhead lines carry `laborOverhead` so `customerLines` (below) can
+ * hide them from the CUSTOMER document without a SKU-prefix guess.
+ *
+ * The modal rounds its "Price · ext" total once (`r.totalPrice`) while each
+ * line here rounds its own share, so bounded rounding drift (≤5¢, scaled by
+ * line count) can appear between the lines' own sum and that total — it
+ * lands on the LAST emitted line, the same bound `foldLaborMobLines` uses
+ * for its own target-total nudge.
+ */
+export function buildLaborItems(r: LaborCalc, discLabel: string, nextId: () => number): SpecItem[] {
+  const price = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
+  const items: SpecItem[] = [];
+  r.mobs.forEach((m, i) => {
+    if (m.cost <= 0) return;
+    const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
+    const desc = label + " — " + discLabel;
+    const comment = (m.raw.comments || "").trim();
+    const internalNote = (m.raw.internalNote || "").trim();
+    const idN = nextId();
+    const skuN = nextId();
+    items.push({
+      id: idN,
+      sku: "LAB-" + r.disc + "-" + skuN,
+      desc,
+      qty: 1,
+      unit: "lot",
+      cost: round2(m.cost),
+      price: price(m.cost),
+      labor: true,
+      comment,
+      internalNote,
+      mob: { type: label, days: m.days, crew: m.people, discipline: discLabel },
+    });
+  });
+  if (r.shopCost > 0) {
+    const idN = nextId();
+    const skuN = nextId();
+    items.push({
+      id: idN,
+      sku: "LAB-SHOP-" + skuN,
+      desc: "Shop & engineering — PM, fabrication & drafting",
+      qty: 1,
+      unit: "lot",
+      cost: round2(r.shopCost),
+      price: price(r.shopCost),
+      labor: true,
+      laborOverhead: "shop",
+    });
+  }
+  if (r.misc > 0) {
+    const idN = nextId();
+    const skuN = nextId();
+    items.push({
+      id: idN,
+      sku: "LAB-MISC-" + skuN,
+      desc: "Project allowance / misc",
+      qty: 1,
+      unit: "lot",
+      cost: round2(r.misc),
+      price: price(r.misc),
+      labor: true,
+      laborOverhead: "misc",
+    });
+  }
+  if (r.performanceBonus > 0) {
+    const idN = nextId();
+    const skuN = nextId();
+    items.push({
+      id: idN,
+      sku: "LAB-BONUS-" + skuN,
+      desc: "Performance bonus — 5% of labor cost",
+      qty: 1,
+      unit: "lot",
+      cost: round2(r.performanceBonus),
+      price: price(r.performanceBonus),
+      labor: true,
+      laborOverhead: "bonus",
+    });
+  }
+  if (items.length) {
+    const target = round2(r.totalPrice);
+    const drift = round2(target - items.reduce((a, it) => a + it.price, 0));
+    if (drift !== 0 && Math.abs(drift) <= 0.05 * items.length) {
+      const last = items[items.length - 1];
+      last.price = round2(last.price + drift);
+    }
+  }
+  return items;
+}
+
+/** One labor extra (shop & engineering / performance bonus / allowance)
+ *  folded by foldLaborMobLines into one or more home lines. */
 export type LaborExtra = { label: string; cost: number; price: number };
 
-/** One mobilization's line after folding, cost/price/internalNote only —
- *  the caller (addLabor, estimator-client.tsx) fills in the rest of the
- *  SpecItem. */
+/** One home line after folding, cost/price/internalNote only — the caller
+ *  fills in the rest of the SpecItem (addLabor) or discards cost/internalNote
+ *  entirely (customerLines, which only wants the folded sell). */
 export type FoldedMobLine = { cost: number; price: number; internalNote: string };
 
 /**
- * Folds the shop & engineering, performance-bonus and allowance costs into
- * each mobilization's own line so `addLabor` emits exactly one line per
- * mobilization — the labor modal's subtitle already promises "one line per
- * mobilization" (labor-modal.tsx); before this fold it silently also added a
- * shop & engineering line (present whenever the auto PM/drafting hours are
- * non-zero, which is nearly always), an optional allowance line, and an
- * always-present 5%-of-cost performance-bonus line.
+ * Proportionally folds a set of "extra" cost/price amounts into a set of
+ * home lines, weighted by each home line's own cost (evenly when every
+ * weight is $0); the LAST home line absorbs the rounding remainder, so the
+ * folded lines' cost and price sum to EXACTLY the pre-fold home lines' + the
+ * extras' cost/price, to the cent.
  *
- * Each extra is split proportionally to every mobilization's own cost
- * (evenly when every mobilization's cost is $0); the LAST mobilization
- * absorbs the rounding remainder, so the folded lines' cost and price sum to
- * EXACTLY what the old one-line-per-extra output summed to, to the cent. The
- * per-mobilization share of each extra lands in `internalNote` — internal
- * only, never rendered on the customer document (section-card.tsx only shows
- * it when isInternal).
+ * Two callers, two different reasons to fold:
  *
- * `mobCosts`/`mobPrices` must already be the same round2'd values the old
- * per-mobilization lines carried, and every `extras[].cost`/`.price` must
- * already be round2'd too — foldLaborMobLines only redistributes them, it
- * does not re-derive them from a margin.
+ * - `addLabor` (estimator-client.tsx) no longer folds shop & engineering /
+ *   performance bonus / allowance into the mobilization lines — those are
+ *   separate, editable lines in the INTERNAL estimate again (reverted, owner
+ *   request: "I like setting the shop and engineering as separate lines").
+ * - `customerLines` below is the fold that replaced it: those same overhead
+ *   lines must never appear on the CUSTOMER document, so their sell gets
+ *   folded into a home line (a mobilization line, or another labor line)
+ *   purely for display — the internal estimate's own lines are untouched.
+ *   The per-home-line share of each extra lands in `internalNote`, which
+ *   `customerLines` ignores; when addLabor folded, that note was what kept
+ *   the estimate readable (section-card.tsx only shows it when isInternal).
  *
- * The modal rounds its total once while each line rounds its own share, so
- * the last line absorbs that cent-level drift toward `targetTotalPrice` and
- * the lines always match the modal's "Price · ext".
+ * `mobCosts`/`mobPrices` (the "weights"/starting values) and every
+ * `extras[].cost`/`.price` must already be round2'd — this function only
+ * redistributes them, it does not re-derive them from a margin.
+ *
+ * With `targetTotalPrice` passed, bounded rounding drift (≤5¢, scaled by
+ * line count) between the lines' own summed price and that already-rounded
+ * total lands on the last line, so the lines always match a caller's single
+ * rounded total (e.g. the labor modal's "Price · ext").
  */
 export function foldLaborMobLines(
   mobCosts: number[],
@@ -581,6 +684,81 @@ export function foldLaborMobLines(
   }
 
   return lines;
+}
+
+/* ---------------- customer-facing labor-overhead fold ---------------- */
+
+/** True for a shop & engineering / performance-bonus / misc-allowance labor
+ *  line — addLabor tags these `laborOverhead` (types.ts); older quotes built
+ *  during the brief window when these folded into the mobilization line
+ *  predate the flag, so their LAB-SHOP-/LAB-BONUS-/LAB-MISC- SKU prefix is
+ *  the fallback (mobilization SKUs use
+ *  LAB-<discipline>-, e.g. LAB-RIG-/LAB-LIG-/LAB-AUD-/LAB-VID-/LAB-OTH-, so
+ *  the two can't collide). */
+export function isLaborOverheadItem(it: Pick<SpecItem, "labor" | "sku" | "laborOverhead">): boolean {
+  if (it.laborOverhead) return true;
+  return !!(it.labor && /^LAB-(SHOP|MISC|BONUS)-/.test(it.sku || ""));
+}
+
+/** One row of the CUSTOMER document: either a real spec line with its
+ *  customer-facing `ext` (overhead sell already folded in when this is the
+ *  home line it folded onto), or — only when a section has overhead lines
+ *  but nothing to fold them into — a synthetic combined row that carries
+ *  their summed sell without naming any category. */
+export type CustomerLine = { item: SpecItem; ext: number } | { item: null; desc: string; ext: number };
+
+/**
+ * The rows the CUSTOMER sees for a section: every non-option line MINUS the
+ * shop & engineering / performance-bonus / allowance overhead lines, with
+ * each overhead line's SELL folded into a home line via `foldLaborMobLines`
+ * so the section's displayed total is unchanged (matches `systemItemsRev`)
+ * even though the overhead lines themselves never appear. Home line,
+ * in order of preference:
+ *
+ *  1. the section's mobilization line(s) (`it.labor && it.mob`), weighted by
+ *     each one's own cost (qty × cost) — the same weighting addLabor once
+ *     used to fold these into the estimate, now reused here for display.
+ *  2. no mobilization line — the section's other labor line(s), weighted by
+ *     their own sell.
+ *  3. no labor line at all — one neutral "Project management, engineering &
+ *     shop" row carrying the summed sell. Never mentions the bonus by name,
+ *     never drops the amount.
+ *
+ * Non-labor lines and option lines are untouched (options are excluded, as
+ * they already are everywhere else on this document).
+ */
+export function customerLines(sec: SpecSection): CustomerLine[] {
+  const visible = sec.items.filter((it) => !it.option);
+  const overhead = visible.filter(isLaborOverheadItem);
+  const rest = visible.filter((it) => !isLaborOverheadItem(it));
+  if (!overhead.length) return rest.map((item) => ({ item, ext: lineExtSellOf(item) }));
+
+  const overheadTotal = round2(overhead.reduce((a, it) => a + lineExtSellOf(it), 0));
+  const extras: LaborExtra[] = overhead.map((it) => ({ label: it.desc, cost: 0, price: round2(lineExtSellOf(it)) }));
+
+  const mobLines = rest.filter((it) => it.labor && it.mob);
+  const otherLaborLines = rest.filter((it) => it.labor && !it.mob);
+  const homeLines = mobLines.length ? mobLines : otherLaborLines;
+  if (!homeLines.length) {
+    // Nothing to fold onto — one neutral combined row rather than dropping
+    // the amount or naming the overhead category on the customer document.
+    return [
+      ...rest.map((item) => ({ item, ext: lineExtSellOf(item) })),
+      { item: null, desc: "Project management, engineering & shop", ext: overheadTotal },
+    ];
+  }
+
+  const weights = homeLines.map((it) =>
+    mobLines.length ? round2(it.qty * it.cost) : round2(lineExtSellOf(it))
+  );
+  const homePrices = homeLines.map((it) => round2(lineExtSellOf(it)));
+  const folded = foldLaborMobLines(weights, homePrices, extras);
+  const foldedById = new Map(homeLines.map((it, i) => [it.id, folded[i].price]));
+
+  return rest.map((item) => ({
+    item,
+    ext: foldedById.has(item.id) ? (foldedById.get(item.id) as number) : lineExtSellOf(item),
+  }));
 }
 
 /** h/m label — local copy of Geo.fmtTime (lib/geo is server-only). */
