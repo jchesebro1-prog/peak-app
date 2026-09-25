@@ -96,10 +96,14 @@ export type ThreadRowVM = {
   /** count of messages[] on the underlying thread; badge hidden when <= 1 */
   msgCount: number;
   messagePreviews: Array<{ author: string; time: string; snippet: string; out: boolean }>;
-  /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author */
+  /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author.
+   *  Kept for the search haystack / drafts row; the row's displayed name is primaryName below. */
   participants: string;
-  /** Compact last-responder context for scanning a busy thread list. */
-  lastResponder: string;
+  /** #128 — author of the newest message that isn't me (drafts: the "To: …"
+   *  line); falls back to the counterpart when every message is mine */
+  primaryName: string;
+  /** #128 — Gmail-style "Brenda, me (3)"; "" on drafts */
+  chain: string;
   subject: string;
   snippet: string;
   time: string;

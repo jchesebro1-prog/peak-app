@@ -23,6 +23,7 @@ import {
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
 import { customersForDomain } from "@/lib/gmail/domains";
 import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { rowName } from "@/lib/inbox-rows";
 import {
   boxMeta,
   callsCount,
@@ -475,6 +476,9 @@ export default async function InboxPage({
     });
     const snip = snippet(t);
     const cat = categoryMeta(t.category);
+    // #128 — drafts keep the "To: …" line as their name (rowName's "last
+    // responder ignoring me" makes no sense on a message that hasn't sent).
+    const who = isDrafts ? null : rowName(t, me);
     return {
       id: t.id,
       unread,
@@ -499,7 +503,8 @@ export default async function InboxPage({
         out: m.direction === "out",
       })),
       participants: participantsFor(t),
-      lastResponder: (t.messages || []).at(-1)?.author || t.contactName || "Unknown",
+      primaryName: who ? who.primary : nm,
+      chain: who ? who.secondary : "",
       subject: t.subject || "(no subject)",
       snippet: snip,
       time: timeAgo(t.updatedAt),

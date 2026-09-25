@@ -36,6 +36,7 @@ import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inb
 import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 import { clampListWidth, parseListWidth, parseSideCollapsed, LIST_WIDTH_DEFAULT } from "@/lib/inbox-layout";
 import { hasSignature, normalizeSignature, signatureBlock, withSignature, SIGNATURE_MAX } from "@/lib/inbox-signature";
+import { rowName } from "@/lib/inbox-rows";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -9320,6 +9321,30 @@ import {
   ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the next blank line");
   ok(hasSignature("x\n-- \ny") && !hasSignature("x\n--\ny") && !hasSignature("x -- y"), "hasSignature: the exact '\\n-- \\n' separator");
   ok(normalizeSignature("a".repeat(2500)).length === SIGNATURE_MAX, "normalizeSignature caps at SIGNATURE_MAX");
+}
+
+/* ---- Inbox round 3 (#128) — row name: last responder, Gmail-style chain ---- */
+{
+  const M = (id: string, at: number, direction: "in" | "out", author: string): CommMessage =>
+    ({ id, at, direction, channel: "email", author, body: "" });
+  const T = (messages: CommMessage[]) => ({ messages, contactName: "Brenda Gauchel", customer: "Lakefront ISD" });
+  const me = "Jeff Chesebro";
+  const r3a = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", me)]), me);
+  ok(r3a.primary === "Brenda Gauchel" && r3a.secondary === "Brenda, me (2)", "rowName: my reply is ignored — Brenda stays primary; chain 'Brenda, me (2)'");
+  const r3b = rowName(T([M("1", 1, "out", me)]), me);
+  ok(r3b.primary === "Brenda Gauchel" && r3b.secondary === "me", "rowName: all mine → counterpart, chain 'me'");
+  const r3c = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "in", "Chris Hale"), M("3", 3, "out", me)]), me);
+  ok(r3c.primary === "Chris Hale" && r3c.secondary === "Brenda, Chris, me (3)", "rowName: newest non-me author wins; chain in first-seen order");
+  const r3d = rowName(T([M("2", 5, "in", "Late Reply"), M("1", 1, "in", "Early Bird")]), me);
+  ok(r3d.primary === "Late Reply" && r3d.secondary === "Early, Late (2)", "rowName: newest by `at`, not array order");
+  const r3e = rowName(T([M("1", 1, "in", "Brenda Gauchel")]), me);
+  ok(r3e.primary === "Brenda Gauchel" && r3e.secondary === "Brenda", "rowName: single message → no count");
+  const r3f = rowName(T([]), me);
+  ok(r3f.primary === "Brenda Gauchel" && r3f.secondary === "", "rowName: no messages → counterpart, empty chain");
+  const r3g = rowName({ messages: [], contactName: "", customer: "" }, me);
+  ok(r3g.primary === "Customer", "rowName: nothing known → 'Customer'");
+  const r3h = rowName({ messages: [M("1", 1, "out", me)], contactName: "", customer: "Lakefront ISD" }, me);
+  ok(r3h.primary === "Lakefront ISD", "rowName: counterpart falls back to the customer name");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async
