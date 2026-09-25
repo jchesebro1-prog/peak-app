@@ -72,16 +72,14 @@ export async function getBlobHead(
     bytes.set(c.subarray(0, take), at);
     at += take;
   }
-  // A reported size of 0 alongside bytes actually read is not trustworthy —
-  // some responses omit Content-Length, and callers cap on this number
-  // (part documents, #DOC: 25 MB). Ask `head` for the store's own listed
-  // size rather than treating the stream as unbounded.
-  let size = res.blob.size;
-  if (size === 0 && total > 0) {
-    const meta = await head(pathname);
-    size = meta.size;
-  }
-  return { bytes, size };
+  // `get`'s own reported size (res.blob.size, from Content-Length) is not
+  // trustworthy for the cap callers enforce on this number (part documents,
+  // #DOC: 25 MB) — Content-Length can be the COMPRESSED size when the
+  // response was transferred with content-encoding, understating the real
+  // byte count, and some responses omit it entirely (reporting 0). Always
+  // ask `head` for the store's own listed (uncompressed) size instead.
+  const meta = await head(pathname);
+  return { bytes, size: meta.size };
 }
 
 /** Stream a private blob's bytes (server-side; the proxy route's engine). */

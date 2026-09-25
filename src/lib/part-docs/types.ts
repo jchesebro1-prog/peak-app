@@ -110,11 +110,13 @@ export function isDocumentId(v: unknown): v is string {
   return typeof v === "string" && /^PD-[A-Za-z0-9]{6,40}$/.test(v);
 }
 
-/** Same rule as src/lib/blob.ts `safeName` (which is server-only because it
- *  shares a module with the Blob SDK), duplicated here so the browser can
- *  build the exact pathname the upload route will accept. A leading `.` or
- *  `_` is also stripped (not just trailing `_`) so the result always starts
- *  with a character `SAFE_FILE_SEGMENT` allows — see `blobPathBelongsTo`. */
+/** Started as the same rule as src/lib/blob.ts `safeName` (which is
+ *  server-only because it shares a module with the Blob SDK), duplicated
+ *  here so the browser can build the exact pathname the upload route will
+ *  accept — the two have since diverged: unlike `safeName`, this strips a
+ *  leading `.` too (not just leading/trailing `_`), so the result always
+ *  starts with a character the strict `SAFE_FILE_SEGMENT` rule allows —
+ *  see `blobPathBelongsTo`. */
 export function safeDocFileName(name: string): string {
   return (
     String(name ?? "")

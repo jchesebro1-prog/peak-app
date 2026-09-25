@@ -15800,3 +15800,51 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
   const readFailure = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, blobDown);
   ok(!readFailure.ok && readFailure.error === "Couldn't read the uploaded file — try again", "part docs upload: a Blob read failure is refused with a generic message, not the vendor's own text");
 }
+
+/* ======================================================================
+   Part documents (#DOC) — Fix wave 2, security re-review: the fix-wave-1
+   orphan cleanup itself opened a hole. attachUploadedDocumentAction's two
+   early refusals (bad kind, no live SKUs) called cleanupOrphan(documentId,
+   blobPathname) BEFORE the "does this document already exist" check —
+   `blobPathBelongsTo` only proves the pathname sits under
+   `part-docs/<documentId>/…`, not that it's the CALLER's own new upload.
+   Any signed-in user can read an existing document's real blobKey (or a
+   history entry's) through sync pull, then call the action with that
+   existing documentId, that real blobPathname, and a deliberately bad
+   kind — the live file was deleted before the exists-check ever ran.
+
+   requireUser() throws outside a request scope (same constraint used
+   throughout this suite — see refusedAdvanceAsyncChecks,
+   estimatorUpdateStatusGateAsyncChecks above), so
+   attachUploadedDocumentAction itself can't be called from this harness.
+   Proven structurally instead, the same way #180/#181 above prove their
+   server-action fixes: read the source, and confirm (a) neither early
+   refusal can reach a delete, and (b) the only code that CAN delete an
+   uploaded blob (verifyUploadedBlob's own refusal path) is positioned
+   strictly after the exists-check in source order, so it is unreachable
+   until the document is confirmed new.
+   ====================================================================== */
+{
+  const docActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/catalog/documents/actions.ts"),
+    "utf8"
+  );
+  // `\(` (not a bare word match) so these don't trip on the prose above
+  // explaining what used to be here — they check for an actual function
+  // definition or call, not a mention in a comment.
+  ok(!/cleanupOrphan\(/.test(docActionsSrc), "part docs actions: the vulnerable cleanupOrphan helper (and every call to it) is gone, not just unused");
+  ok(!/deleteBlob\(/.test(docActionsSrc), "part docs actions: this file never calls deleteBlob directly — the only blob delete anywhere in the upload path is verifyUploadedBlob's own gated refusal");
+
+  const fnStart = docActionsSrc.indexOf("export async function attachUploadedDocumentAction");
+  const fnEnd = docActionsSrc.indexOf("\nexport async function replaceDocumentFileAction");
+  ok(fnStart >= 0 && fnEnd > fnStart, "part docs actions fixture: attachUploadedDocumentAction is still where the test expects it");
+  const fnBody = docActionsSrc.slice(fnStart, fnEnd);
+
+  const existsCheckAt = fnBody.indexOf("await getDocument(input.documentId)");
+  const verifyCallAt = fnBody.indexOf("await verifyUploadedBlob(input)");
+  ok(existsCheckAt >= 0 && verifyCallAt >= 0, "part docs actions fixture: both the exists-check and the verifyUploadedBlob call are still present");
+  ok(verifyCallAt > existsCheckAt, "part docs actions: verifyUploadedBlob (the only call in this function that can delete a blob) runs strictly AFTER the exists-check — unreachable while the document already exists");
+
+  const beforeExistsCheck = fnBody.slice(0, existsCheckAt);
+  ok(!/verifyUploadedBlob\(|deleteBlob\(|cleanupOrphan\(/.test(beforeExistsCheck), "part docs actions: nothing before the exists-check can touch Blob at all — the bad-kind and no-live-SKU refusals just return {ok:false}");
+}
