@@ -3,7 +3,7 @@ import {
   withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
-import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
+import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
@@ -7668,6 +7668,137 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
     reuse.n === 2 && reuse.map.a === 0 && reuse.map.b === 1 && reuse.map.c === 0,
     "#145 packTracks: a track is reused once its occupant has ended, instead of growing a third track"
   );
+}
+
+/* ====== #157 / #154 (D232): ONE shared, noon-anchored Gantt window ======
+ * `/schedule?view=timeline` used to build two windows — one from the
+ * Consulting bars, one from the Installs bars — and lay them out with two
+ * different strategies, so the same x meant two different dates. It also
+ * seeded its window from a raw `Date.now()` and floored it to local
+ * MIDNIGHT, which a US-timezone browser re-floors to the PREVIOUS calendar
+ * day when it re-renders a UTC-rendered grid (#154).
+ *
+ * No DB fixtures here — these are pure-function checks over plain numbers
+ * (the TEST157 names below are the bar keys, not persisted rows). The one
+ * piece of shared state is `process.env.TZ`, restored in the `finally`. */
+{
+  const savedTZ157 = process.env.TZ;
+  try {
+    process.env.TZ = "America/Chicago";
+    // A fixed "now" well away from both bar sets, so the window's extent is
+    // driven by the bars rather than by today.
+    const NOW157 = new Date(2026, 9, 6, 9, 14, 0).getTime(); // Oct 6 2026, 09:14 local
+
+    // Two deliberately DISJOINT bar sets, the shape the real page has: a
+    // consulting engagement running this autumn and an install project
+    // whose procurement lead time started months earlier and whose on-site
+    // window lands months later.
+    const TEST157_CONSULTING = [
+      { startAt: localNoon(new Date(2026, 9, 12).getTime()), dueAt: localNoon(new Date(2026, 10, 20).getTime()) },
+    ];
+    const TEST157_INSTALLS = [
+      { startAt: localNoon(new Date(2026, 5, 1).getTime()), dueAt: localNoon(new Date(2027, 1, 15).getTime()) },
+    ];
+
+    const consultingOnly157 = ganttWindow(TEST157_CONSULTING, NOW157);
+    const installsOnly157 = ganttWindow(TEST157_INSTALLS, NOW157);
+
+    // The control. Without this the "shared window spans both" assertion
+    // below is vacuous — it would also pass if the two sections happened to
+    // agree already.
+    ok(
+      consultingOnly157.start !== installsOnly157.start && consultingOnly157.end !== installsOnly157.end,
+      "#157 control: a per-section window built from one section's bars genuinely differs from the other's at BOTH ends — the same x really did mean two different dates"
+    );
+
+    const shared157 = ganttWindow([...TEST157_CONSULTING, ...TEST157_INSTALLS], NOW157);
+    ok(
+      shared157.start === Math.min(consultingOnly157.start, installsOnly157.start) &&
+        shared157.end === Math.max(consultingOnly157.end, installsOnly157.end),
+      "#157 the shared window is the union of the two per-section windows — earliest start, latest end"
+    );
+    ok(
+      shared157.start < TEST157_INSTALLS[0].startAt && shared157.end > TEST157_INSTALLS[0].dueAt,
+      "#157 the shared window contains the earliest bar start and the latest bar end of BOTH sets, with padding"
+    );
+    ok(
+      shared157.start < TEST157_CONSULTING[0].startAt && shared157.end > TEST157_CONSULTING[0].dueAt,
+      "#157 ...so the consulting bars are inside the shared window too, not clipped by the installs' wider extent"
+    );
+    ok(
+      ganttWindow(TEST157_CONSULTING, NOW157, 26).dayWidth === 26 && shared157.dayWidth === 0,
+      "#157 the window carries the shared px-per-day scale, defaulting to 0 for the percentage-only callers"
+    );
+    // An empty bar set still has to produce a usable window around today —
+    // the Consulting section renders before any engagement is scheduled.
+    const empty157 = ganttWindow([], NOW157);
+    ok(
+      empty157.start < NOW157 && empty157.end > NOW157 && empty157.end > empty157.start,
+      "#157 an empty bar set still yields a window around today rather than a degenerate range"
+    );
+
+    /* ---- #154: the anchor is NOON, so a US-offset browser re-flooring a
+     * UTC-rendered boundary lands on the SAME calendar day. The window is
+     * computed once (on the server) and serialized; the client re-floors it
+     * with `snapToDay`/`dayColumns`, which are local-calendar-day based by
+     * design (D166). Noon gives that re-floor ±12h of slack — every US zone
+     * is within UTC-4…UTC-10 of the deployment's UTC. ---- */
+    process.env.TZ = "UTC";
+    const serverWindow154 = ganttWindow([...TEST157_CONSULTING, ...TEST157_INSTALLS], NOW157);
+    const serverCols154 = dayColumns(serverWindow154.start, serverWindow154.end);
+    const serverFirstDay154 = new Date(serverCols154[0]).getDate();
+    const serverLastDay154 = new Date(serverCols154[serverCols154.length - 1]).getDate();
+    // Captured while TZ is still the *producing* zone: "anchored at local
+    // noon" is a statement about the zone the window was computed in, so
+    // re-testing it after the switch below would only re-measure the offset.
+    const serverBoundariesAtNoon154 =
+      localNoon(serverWindow154.start) === serverWindow154.start && localNoon(serverWindow154.end) === serverWindow154.end;
+    const serverStartsSunday154 = new Date(serverWindow154.start).getDay() === 0;
+
+    // The control for #154: a MIDNIGHT-anchored boundary — what `sow()`
+    // produced before this fix — moves a whole calendar day when the same
+    // instant is re-floored in a US zone. This is the bug, reproduced.
+    const midnightBoundary154 = snapToDay(serverWindow154.start);
+    const midnightDayUTC154 = new Date(midnightBoundary154).getDate();
+
+    process.env.TZ = "America/Chicago";
+    const clientCols154 = dayColumns(serverWindow154.start, serverWindow154.end);
+    ok(
+      new Date(snapToDay(midnightBoundary154)).getDate() !== midnightDayUTC154,
+      "#154 control: a MIDNIGHT-anchored boundary re-floors to a DIFFERENT calendar day in a US zone — the full-day hydration shift, reproduced"
+    );
+    ok(
+      clientCols154.length === serverCols154.length,
+      "#154 the noon-anchored window yields the same NUMBER of day columns on a UTC server and a US-offset client"
+    );
+    ok(
+      new Date(clientCols154[0]).getDate() === serverFirstDay154 &&
+        new Date(clientCols154[clientCols154.length - 1]).getDate() === serverLastDay154,
+      "#154 ...and the same FIRST and LAST calendar day — no full-day shift on hydration"
+    );
+    ok(
+      serverBoundariesAtNoon154,
+      "#154 both window boundaries are anchored at local noon, the anchor every date input in this app writes"
+    );
+    ok(
+      serverStartsSunday154,
+      "#157 the window still starts on a Sunday — the week-ruler padding survives the move to a noon anchor"
+    );
+    // DST: the padding must move by whole LOCAL days, not by raw 86400000ms,
+    // or a window spanning a transition drifts an hour and can floor onto
+    // the wrong day. Nov 1 2026 is the US fall-back.
+    const acrossDst157 = ganttWindow(
+      [{ startAt: localNoon(new Date(2026, 9, 28).getTime()), dueAt: localNoon(new Date(2026, 10, 4).getTime()) }],
+      NOW157
+    );
+    ok(
+      localNoon(acrossDst157.start) === acrossDst157.start && localNoon(acrossDst157.end) === acrossDst157.end,
+      "#154 a window whose padding crosses the DST fall-back still lands exactly on local noon at both ends"
+    );
+  } finally {
+    if (savedTZ157 === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTZ157;
+  }
 }
 
 /* ====== #145: template lines carry scope + units ====== */
