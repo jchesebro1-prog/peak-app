@@ -5604,6 +5604,28 @@ surfaced (and fixed, Task 6) a pre-existing bug in the part modal: it had no `ma
 the modal now has both inputs, and `upsertPart` only patches a field the form actually submitted.
 
 
+## D262. Quote spawning is serialized per quote with a Postgres advisory lock, not a unique index (#180, #181, 2026-09-25)
+
+Concurrent sweeps and wins could mint two jobs/projects for one quote (read-then-insert). Rather than a migration
+adding unique indexes on `quoteId` across six doc collections (shared production DB, tombstoned rows must stay),
+every spawner runs under `withQuoteLock` — a transaction-scoped `pg_advisory_xact_lock(180, hashtext(quoteId))`
+(safe behind Neon's pooler; joins an enclosing transaction; bounded 10 s wait) — and re-reads the quote and its
+coverage inside the lock. Hash collisions only serialize two quotes. The Estimator's Save changes status only through
+the gated `setStatus`, and only when the user changed it from the last server-confirmed status (`baseStatus`).
+
+## D263. A user's own email signature replaces the automatic profile footer (#127, 2026-09-25)
+
+Two signatures existed: the new per-user one and the server-side `withEmailSignature` profile footer. When the
+composer handled a #127 signature (kept or removed) the server skips the footer, so there is never a double
+signature and "remove signature" really removes it; users with no personal signature keep the old footer.
+Signatures are stored per user name in a keyed blob (no migration), like notification prefs.
+
+## D264. Daylite-imported live repairs with an already-lapsed warranty are history (#192, 2026-09-25)
+
+Jeff's call. `isLapsedLiveImport` excludes a Daylite-imported repair that is still "live" at a completed/invoiced
+stage but whose End Date puts its warranty in the past from warranty follow-ups. Read-time only — no data changes;
+repairs created in the app always follow the normal warranty rules.
+
 ## D265. Grid stock symbols are Tabler Icons (MIT), vendored as generated path data (#206, 2026-09-25)
 
 `@tabler/icons` 3.48.0 is a **devDependency, pinned exact**. `scripts/build-grid-icons.ts` (`npm run icons:grid`)

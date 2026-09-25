@@ -6025,7 +6025,7 @@ catalog facet tooltip + banner vendor link; CRM › Vendors nav; seeded `rose-br
 test:specs, test:review:regressions, test:smoke (`/vendors`, `/vendors/rose-brand` + tabs), eslint
 on touched files. Decision D160.
 
-## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — OPEN
+## 123. Inbox: "Link to work" above the customer picker in the link sidebar, plus quick-add quote — DONE 2026-09-25
 
 **Reported:** 2026-09-21 (Jeff): "I want link to work to populate on the left side directly above
 the pick the customer. I want the ability to quick add quote from the link to work."
@@ -6039,7 +6039,9 @@ nothing in the Inbox links to it.
 intake pre-filled with the thread's customer/contact and links the thread to the created quote on
 save; add `lead` to the work-link types (the interpreter already writes `type:"lead"`).
 
-## 124. Inbox: link a venue through the selected customer — OPEN
+**Done 2026-09-25.** "Link to work" sits above the customer picker (`WorkLinkCard`, now with lead links), and "+ New quote" from a thread mints the draft with the customer, venue and contact each builder actually reads, links it to the thread and returns there — idempotent (a second click reopens the same draft) and it never silently replaces an existing lead/quote link (explicit "create another").
+
+## 124. Inbox: link a venue through the selected customer — DONE 2026-09-25
 
 **Reported:** 2026-09-21 (Jeff): "The Venue should also be linkable via the customer when selected."
 
@@ -6049,7 +6051,9 @@ appends a `CustomerLocation` to the customer but never attaches it to the thread
 **Ask:** once a customer is linked, a venue select (that customer's sites + quick-add) that stamps
 `siteId` on the thread; work links created from the thread (quote, survey, inspection) inherit it.
 
-## 125. Inbox: per-message picker to link from a specific message (in or out) — OPEN
+**Done 2026-09-25.** A thread links a venue through its customer (Venue card); cleared when the customer changes.
+
+## 125. Inbox: per-message picker to link from a specific message (in or out) — DONE 2026-09-25
 
 **Reported:** 2026-09-21 (Jeff): "a dropdown menu for a thread and select that message in the thread,
 both incoming and outgoing, to link quicker."
@@ -6062,7 +6066,9 @@ counterpart address, so a multi-party or forwarded thread suggests from the wron
 addresses the resolver and quick-add use; exact semantics (identity source vs message-level link)
 confirmed with Jeff 2026-09-21 before the spec.
 
-## 126. Inbox: resizable list/reader panes + collapsible menu — OPEN
+**Done 2026-09-25.** "Linking from" picks which message's sender/recipient identifies the customer (per-message identity source); internal and own-mailbox addresses are skipped.
+
+## 126. Inbox: resizable list/reader panes + collapsible menu — DONE 2026-09-25
 
 **Reported:** 2026-09-21 (Jeff): "the ability to resize the preview window, inbox, and collapse the
 menu."
@@ -6076,7 +6082,9 @@ with a mobile drawer, not a rail.
 widths remembered per user (localStorage, with sane min/max), and — if Jeff means the app nav — a
 compact mode for the top bar.
 
-## 127. Inbox: email signatures, auto-appended — OPEN
+**Done 2026-09-25.** List/reader pane width and the collapsed menu persist per browser; the splitter is keyboard-operable.
+
+## 127. Inbox: email signatures, auto-appended — DONE 2026-09-25 (D263)
 
 **Reported:** 2026-09-21 (Jeff): "There needs an ability to add signatures so they automatically get
 added."
@@ -6089,7 +6097,9 @@ starts Reply/Reply-all with an empty body (`thread-reader.tsx:430-452`) and `bui
 shared boxes return) inserted into the composer on new/reply/forward below a `-- ` separator, editable
 before send; forward and reply quoting unchanged.
 
-## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — OPEN
+**Done 2026-09-25.** Per-user email signatures (Account → Email signature), auto-appended in the composer with a remove toggle; a personal signature replaces the old automatic profile footer.
+
+## 128. Inbox: list row shows the last person who responded (Gmail-style); "waiting on them" badge stays — DONE 2026-09-25
 
 **Reported:** 2026-09-21 (Jeff): "The name in the inbox preview should be who responded last,
 organized similar to how Gmail works, and if I responded last ignore that and hold the last person to
@@ -6101,6 +6111,8 @@ respond, but hold the badge that says waiting on them."
 
 **Ask:** primary name = author of the newest message that isn't the signed-in user (fallback: the
 counterpart), Gmail-style "Brenda, me (3)" secondary; status/waiting badge unchanged.
+
+**Done 2026-09-25.** List rows show the last person who responded (outbound counts as you); the waiting badge is unchanged.
 
 ## 129. Assembly Builder: assemblies re-price when price lists update — DONE 2026-09-21 (D156)
 
@@ -7623,7 +7635,7 @@ identically. `ApprovalGateRefused` + `isApprovalGateRefusal` (brand-by-value, no
 
 ---
 
-## 177. The flame builder renames a hand-typed quote, in a format its own helper disagrees with — OPEN
+## 177. The flame builder renames a hand-typed quote, in a format its own helper disagrees with — DONE 2026-09-25
 
 **Reported:** 2026-09-24. Verified on `main`.
 
@@ -7637,6 +7649,8 @@ last touched it.
 
 **Ask:** gate it like `:336`, and have it call `automaticQuoteName()` rather than building its own string. Nothing
 already saved changes.
+
+**Done 2026-09-25.** The flame builder's `toggleVenue` had an ungated duplicate `setQuoteName` in a "<venue> <year>" format its own `automaticQuoteName()` disagreed with; removed, so the helper is the single source and a hand-typed name is never renamed.
 
 ## 178. Four live `window.confirm()` sites, in an app whose own decision log says it throws silently — DONE 2026-09-25 (D249)
 
@@ -7671,7 +7685,7 @@ Change-type replace as an inline "Change it / Cancel" and "Continue / Cancel" no
 finds only comments. Known limit: on a won quote, starting a second guarded edit before answering the first replaces
 the first prompt; the first edit is simply not applied.
 
-## 179. `redeem: tampered code -> not ok` is a ~1% flake in the spec harness — OPEN
+## 179. `redeem: tampered code -> not ok` is a ~1% flake in the spec harness — DONE 2026-09-25
 
 **Reported:** 2026-09-24. **Measured: 4 failures in 400 iterations.** It fired roughly one run in four across a
 long gate-running session.
@@ -7686,7 +7700,9 @@ that was fixed. A 1% flake re-teaches exactly that habit.
 **Ask:** make the tamper deterministic — flip a byte that is always significant rather than one at the base64url
 boundary.
 
-## 180. The healing sweeps are read-then-insert with no uniqueness on `quoteId` — OPEN
+**Done 2026-09-25.** The tamper test flipped a character at the ciphertext's base64 padding boundary, where ~1 in 4 substitutes decode to the same bits (66 of 5,000 runs passed as "valid"). It now flips a character inside the unpadded IV segment: 0 of 5,000. AES-GCM already rejected any real tamper — no code weakness.
+
+## 180. The healing sweeps are read-then-insert with no uniqueness on `quoteId` — DONE 2026-09-25 (D262)
 
 **Reported:** 2026-09-24, raised by D227's own change.
 
@@ -7702,7 +7718,9 @@ transactional to close, reopened narrowly.
 the same guarantee the spawn uses. The eventual fix is probably a one-off backfill plus deleting the sweeps — see
 D227 on why they still exist.
 
-## 181. A refused status advance on a create save lets the Estimator mint a duplicate quote — OPEN
+**Done 2026-09-25.** Every spawner that creates a record from a quote — flame, repair, inspection, rental bookings, Installs projects and consulting engagements, on both the win path and the healing sweeps — now runs under a per-quote Postgres advisory lock (`withQuoteLock`, `pg_advisory_xact_lock(180, hashtext(id))`, bounded 10 s wait), re-reads the quote inside the lock and bails if its status no longer qualifies, and keeps the #169/#173/D250 tombstone checks. A lock timeout on the win path no longer rolls back the win (the sweep creates the record next page load). The consulting stage sync re-reads quote and engagement under the lock. One shared `PROJECT_EXCLUDED_QUOTE_TYPES` now drives every "no Installs project for this type" list — which also stops won rentals minting a spurious project and install task.
+
+## 181. A refused status advance on a create save lets the Estimator mint a duplicate quote — DONE 2026-09-25 (D262)
 
 **Reported:** 2026-09-24. Verified on `main`.
 
@@ -7716,6 +7734,8 @@ The user sees one refusal message and ends up with two drafts, one of which they
 **Ask:** adopt the returned id even when the advance is refused, so the retry becomes an update and the refusal
 surfaces as the status message it already is. Rolling the create back inside the transaction is cleaner in theory
 but would throw away the draft the user just typed.
+
+**Done 2026-09-25.** The Estimator now adopts the minted quote id even when the status advance was refused, so the next Save updates instead of creating a duplicate. Found alongside: the Save path could change a quote's status through a raw update (skipping the approval gate, history and spawn) — it now routes through the gated `setStatus`, only when the user really changed it from the status they last saw (`baseStatus`), so a stale tab can't demote a won quote or re-win a lost one; a stale-but-passive save shows a notice, not an error. Save is disabled while a status change is in flight.
 
 ## 175. Fix unlocated venues from a sidebar, and choose the quote origin — DONE 2026-09-24 (D228)
 
@@ -7896,27 +7916,33 @@ Open question: MASTER-QUESTIONS O1 (a BID SPEC stage before Collect Information?
 
 ---
 
-## 188. Repairs have no value editor, so an imported repair's UKN can't be filled in — OPEN
+## 188. Repairs have no value editor, so an imported repair's UKN can't be filled in — DONE 2026-09-25
 
 **Found while building #187 (D240).** Projects gained a contract-value editor that clears UKN on save; repair jobs
 carry `valueUnknown` too but have no editor, so ~865 imported service calls stay UKN until one exists. Add a value
 field to the repair detail that writes `value` and clears `valueUnknown`, mirroring the project editor.
 
+**Done 2026-09-25.** Repairs have a value editor on the results screen (`setRepairValue`), which clears the unknown-value flag.
+
 ---
 
-## 189. "· N with unknown value" is not on every total — OPEN
+## 189. "· N with unknown value" is not on every total — DONE 2026-09-25
 
 **Found while building #187 (D240).** Totals skip UKN records, but only some say how many they skipped. The
 Projects board column totals and the to-be-billed total show a figure with no "· N with unknown value" suffix, so a
 column of mostly-UKN history reads as a small real number. Add the suffix wherever a job-value sum renders.
 
+**Done 2026-09-25.** "· N with unknown value" now shows on the board column totals, the Projects header and the Installs forecast's To-be-billed / Expected-collected tiles.
+
 ---
 
-## 190. The Daylite import's needs-pick table should show the raw Daylite cell — OPEN
+## 190. The Daylite import's needs-pick table should show the raw Daylite cell — DONE 2026-09-25
 
 **Found while building #187.** A row whose company cell names several companies gets a picker listing the
 candidate companies, but not the cell Daylite actually held, so Jeff has to guess what the original said. Show the
 raw Companies cell next to the picker.
+
+**Done 2026-09-25.** The needs-a-pick table shows the raw Daylite Companies cell next to the picker.
 
 ---
 
@@ -7941,13 +7967,15 @@ one call.
 
 ---
 
-## 192. Live repairs at a completed stage with an old End Date show as lapsed warranties — OPEN
+## 192. Live repairs at a completed stage with an old End Date show as lapsed warranties — DONE 2026-09-25 (D264)
 
 **Found while building #187 (D241).** A Daylite service call that is still *New* but sits at Service Completed /
 Invoice Sent imports as a live `completed` repair with its old End Date. The import keeps live rows on live
 semantics (only done-in-Daylite repairs are excluded from warranty follow-ups), so these can land on the warranty
 follow-up worklist as already lapsed. Decide with Jeff: flag them in the preview, exclude them as history, or leave
 them for the team to close out.
+
+**Done 2026-09-25.** Jeff: treat them as history. A Daylite-imported live repair at a completed stage whose warranty had already lapsed is excluded from warranty follow-ups (pure `isLapsedLiveImport`); it stays a normal completed repair everywhere else. No stored data changed; repairs created in the app are unaffected.
 
 ---
 
@@ -8189,11 +8217,13 @@ bookings (cancel is their lifecycle), history logs. Spec sections get their dele
 
 ---
 
-## 204. A price-only Import-hub catalog import resets MAP to $0 — OPEN
+## 204. A price-only Import-hub catalog import resets MAP to $0 — DONE 2026-09-25
 
 **Found 2026-09-25** while amending the Specs plan. `src/app/(app)/import/registry.ts` ~233: the catalog patch writes
 MAP from the row even when the file has no MAP column, so a price-list import that only carries cost/list zeroes every
 part's MAP. Fix with the file's own `str(v.x) ? {...} : {}` preserve-when-absent pattern.
+
+**Done 2026-09-25.** The MAP guard checked `!== undefined` on a number field the parser coerces to 0, so it was always true; MAP is now written only when the row carries a value. The price-book importer already guarded it.
 
 ## 205. Specs module — Phase A (library) — DONE 2026-09-25 (D254…D261)
 
