@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmButton } from "@/components/confirm-button";
 import {
   setValueAction,
   resetItemAction,
@@ -108,19 +109,6 @@ export function RulesActions() {
       const r = await exportJsonAction();
       download(r.name, r.json, "application/json");
     });
-  const onReset = () =>
-    startTransition(async () => {
-      if (
-        typeof window !== "undefined" &&
-        !window.confirm(
-          "Reset every estimating rate back to its default? Formulas are unchanged."
-        )
-      )
-        return;
-      await resetAllAction();
-      router.refresh();
-    });
-
   const btn: React.CSSProperties = {
     fontSize: 12.5,
     fontWeight: 600,
@@ -152,10 +140,10 @@ export function RulesActions() {
       >
         Print
       </button>
-      <button
-        type="button"
+      <ConfirmButton
+        label="Reset"
+        confirmLabel="Reset every rate?"
         disabled={pending}
-        onClick={onReset}
         title="Reset every rate to its default"
         style={{
           ...btn,
@@ -163,9 +151,13 @@ export function RulesActions() {
           background: "#f9ece8",
           border: "1px solid #f0d6cd",
         }}
-      >
-        Reset
-      </button>
+        onConfirm={() =>
+          startTransition(async () => {
+            await resetAllAction();
+            router.refresh();
+          })
+        }
+      />
     </div>
   );
 }

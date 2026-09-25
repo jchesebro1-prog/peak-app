@@ -9,6 +9,7 @@ import { dateYear } from "@/lib/format";
 import { Typeahead } from "@/components/search/typeahead";
 import { catalogFilter, catalogRank } from "@/lib/search/typeahead-rank";
 import { deleteSubassemblyAction, saveFixtureAction } from "./actions";
+import { ConfirmButton } from "@/components/confirm-button";
 
 const pricesNote = (at: number | null) => (at == null ? "prices as of: unknown" : `prices as of ${dateYear(at)}`);
 
@@ -87,7 +88,6 @@ export default function SubassembliesClient({ parts, initial, priceListEffective
     reset(); router.refresh();
   };
   const remove = async (item: FixtureSubassembly) => {
-    if (!window.confirm(`Delete ${item.label}?`)) return;
     await deleteSubassemblyAction(item.id); router.refresh();
   };
 
@@ -153,7 +153,12 @@ export default function SubassembliesClient({ parts, initial, priceListEffective
       </div>
       <div style={{ display: "flex", gap: 6 }}>
         <button type="button" onClick={() => edit(item)} style={{ border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 }}>Edit</button>
-        <button type="button" onClick={() => remove(item)} style={{ border: "1px solid #f0d6cd", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#a0442b", cursor: "pointer", fontSize: 11.5 }}>Delete</button>
+        <ConfirmButton
+          label="Delete"
+          confirmLabel={`Delete ${item.label}?`}
+          style={{ fontSize: 11.5, padding: "6px 9px" }}
+          onConfirm={() => remove(item)}
+        />
       </div>
     </div>
   );

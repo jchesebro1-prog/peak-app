@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmButton } from "@/components/confirm-button";
 import {
   disconnectCalendarAccountAction,
   refreshCalendarConnectionAction,
@@ -125,18 +126,15 @@ export default function CalendarFilterRail({
               >
                 {busyKey === "refresh-" + conn.id ? "…" : "Refresh"}
               </button>
-              <button
+              <ConfirmButton
                 className="pk-btn-outline"
                 disabled={pending}
-                onClick={() => {
-                  if (!confirm("Disconnect " + conn.googleEmail + "? Its calendars will stop showing here."))
-                    return;
-                  run("disc-" + conn.id, () => disconnectCalendarAccountAction(conn.id));
-                }}
+                label="Disconnect"
+                confirmLabel="Confirm"
+                title={"Disconnect " + conn.googleEmail + "? Its calendars will stop showing here."}
+                onConfirm={() => run("disc-" + conn.id, () => disconnectCalendarAccountAction(conn.id))}
                 style={{ fontSize: 10.5, padding: "2px 7px", color: "#a13f3f" }}
-              >
-                Disconnect
-              </button>
+              />
             </div>
 
             {conn.calendars.length === 0 && (
