@@ -111,12 +111,17 @@ type RentalQuoteLike = {
 };
 
 /** Every quote id that already has booking(s) — INCLUDING soft-deleted ones
- *  (#173). The board only cancels bookings today, but doc-store rows can
- *  also be tombstoned (the offline outbox / sync push deletes by row), and
- *  `listDocs` hides tombstones, so coverage built on the live list would
- *  re-book a deleted reservation on the next booking-board load. `listDocs`
- *  does not merge the `deleted` column onto the returned doc, so only quote
- *  ids are collected — a tombstone must never be handed on as a booking. */
+ *  (#173). Unlike the three service stores this mirrors, the tombstone half is
+ *  DEFENSIVE, not load-bearing: bookings have no delete path today. This
+ *  module exports no remove (the board only cancels, via `setStatus`),
+ *  `equipment_bookings` is not in SYNCABLE_COLLECTIONS and `/api/sync/push`
+ *  has no delete verb in any case, and nothing outside the spec suite calls
+ *  `softDeleteDoc("equipment_bookings", …)`. The read stays `includeDeleted`
+ *  so that the day one appears, the booking board's sweep does not re-book a
+ *  deleted reservation; the cost is the same single scan either way.
+ *  `listDocs` does not merge the `deleted` column onto the returned doc, so
+ *  only quote ids are collected — a tombstone must never be handed on as a
+ *  booking. */
 async function coveredQuoteIds(): Promise<Set<string>> {
   const rows = await listDocs<EquipmentBooking>(COLLECTION, { includeDeleted: true });
   const out = new Set<string>();

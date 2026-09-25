@@ -83,12 +83,13 @@ export async function spawnFromQuote(
  *
  * That is a claim about the dismissed BLOB only: it is a projects-only
  * mechanism, no other spawner has one, and minting a second dismissed list
- * here would be a new lifecycle rule rather than a bug fix. It is NOT a
- * ruling on deletion generally. The four service creators dedupe through
- * their own `byQuote`, which reads `listDocs` and therefore cannot see a
- * soft-deleted record — delete a flame job and re-approve the already-won
- * quote and the job comes back, a surface #170's replay widened. The
- * tombstone-aware fix for that is punch #173; nothing is decided here.
+ * here would be a new lifecycle rule rather than a bug fix. The other four
+ * types are guarded in their own stores instead: each keeps a private
+ * `coveredQuoteIds()` that reads `{ includeDeleted: true }`, so a deleted job,
+ * inspection or booking still counts as covered and neither the per-quote
+ * creator nor that type's page-load sweep re-makes it (#173). Between the two
+ * mechanisms, every branch of `spawnFromQuote` is safe against #170's
+ * re-approval replay.
  */
 async function spawnProject(quoteId: string): Promise<void> {
   const { createProjectFromQuote, dismissedQuoteIds } = await import("./projects");

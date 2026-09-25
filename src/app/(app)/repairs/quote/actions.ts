@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
@@ -236,6 +236,10 @@ export async function saveRepairQuote(formData: FormData): Promise<void> {
   try {
     id = await persist(formData);
   } catch (error) {
+    // `persist()` opens with requireUser(), which sends an expired session to
+    // /login BY throwing — a catch in the app directory must never eat that
+    // (same first line as home-actions.ts’s stage-move catch).
+    unstable_rethrow(error);
     console.error("saveRepairQuote: quote save failed", error);
     quoteFailure(formData, "Couldn’t save the repair quote — please try again.");
   }
@@ -253,6 +257,10 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   } catch (error) {
+    // `persist()` opens with requireUser(), which sends an expired session to
+    // /login BY throwing — a catch in the app directory must never eat that
+    // (same first line as home-actions.ts’s stage-move catch).
+    unstable_rethrow(error);
     // #174: the one shared branch, with this screen's own wording as the
     // fallback. Everything landing here today IS a defect — the call above
     // passes `bypassApprovalGate: "engine-owned-flow"`, so the approval gate
