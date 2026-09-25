@@ -1,13 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
   update as updateQuote,
   setStatus,
+  statusFailureMessage,
   retireReplacedDraft,
 } from "@/lib/stores/quotes";
 import {
@@ -235,6 +236,10 @@ export async function saveRepairQuote(formData: FormData): Promise<void> {
   try {
     id = await persist(formData);
   } catch (error) {
+    // `persist()` opens with requireUser(), which sends an expired session to
+    // /login BY throwing — a catch in the app directory must never eat that
+    // (same first line as home-actions.ts’s stage-move catch).
+    unstable_rethrow(error);
     console.error("saveRepairQuote: quote save failed", error);
     quoteFailure(formData, "Couldn’t save the repair quote — please try again.");
   }
@@ -252,8 +257,20 @@ export async function approveRepairQuote(formData: FormData): Promise<void> {
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   } catch (error) {
-    console.error("approveRepairQuote: quote approval failed", error);
-    quoteFailure(formData, "Couldn’t approve the repair quote — please try again.");
+    // `persist()` opens with requireUser(), which sends an expired session to
+    // /login BY throwing — a catch in the app directory must never eat that
+    // (same first line as home-actions.ts’s stage-move catch).
+    unstable_rethrow(error);
+    // #174: the one shared branch, with this screen's own wording as the
+    // fallback. Everything landing here today IS a defect — the call above
+    // passes `bypassApprovalGate: "engine-owned-flow"`, so the approval gate
+    // cannot refuse it — and it is logged as one. If that bypass is ever
+    // dropped, the gate's own sentence reaches the user instead of being
+    // flattened into "please try again".
+    quoteFailure(
+      formData,
+      statusFailureMessage(error, "approveRepairQuote: quote approval failed", "Couldn’t approve the repair quote — please try again.")
+    );
   }
   revalidatePath("/", "layout");
   redirect("/repairs/quote?id=" + encodeURIComponent(id) + "&approved=1");

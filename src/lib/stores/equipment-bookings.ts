@@ -110,11 +110,32 @@ type RentalQuoteLike = {
   };
 };
 
+/** Every quote id that already has booking(s) — INCLUDING soft-deleted ones
+ *  (#173). Unlike the three service stores this mirrors, the tombstone half is
+ *  DEFENSIVE, not load-bearing: bookings have no delete path today. This
+ *  module exports no remove (the board only cancels, via `setStatus`),
+ *  `equipment_bookings` is not in SYNCABLE_COLLECTIONS and `/api/sync/push`
+ *  has no delete verb in any case, and nothing outside the spec suite calls
+ *  `softDeleteDoc("equipment_bookings", …)`. The read stays `includeDeleted`
+ *  so that the day one appears, the booking board's sweep does not re-book a
+ *  deleted reservation; the cost is the same single scan either way.
+ *  `listDocs` does not merge the `deleted` column onto the returned doc, so
+ *  only quote ids are collected — a tombstone must never be handed on as a
+ *  booking. */
+async function coveredQuoteIds(): Promise<Set<string>> {
+  const rows = await listDocs<EquipmentBooking>(COLLECTION, { includeDeleted: true });
+  const out = new Set<string>();
+  for (const b of rows) if (b.quoteId) out.add(b.quoteId);
+  return out;
+}
+
 /** Reads quote.rental (written by the rentals/quote builder) and creates one
  *  booking per line, each `confirmed`. Mirrors repair-jobs.ts's createFromQuote. */
 export async function createFromQuote(quoteId: string): Promise<EquipmentBooking[]> {
   const existing = await byQuote(quoteId);
   if (existing.length) return existing;
+  // #173: no live booking, but a deleted one still means this quote is handled.
+  if ((await coveredQuoteIds()).has(quoteId)) return [];
   const q = await getDoc<RentalQuoteLike>("quotes", quoteId);
   if (!q || q.quoteType !== "rental" || !q.rental) return [];
   const created: EquipmentBooking[] = [];
@@ -136,17 +157,19 @@ export async function createFromQuote(quoteId: string): Promise<EquipmentBooking
 }
 
 /** Idempotent sweep — scan won rental quotes, create bookings for any not yet
- *  made. Safe to call alongside the other four sync* functions in
- *  quotes/actions.ts. */
+ *  made. Page-load backfill only (the booking board) — never call it inside a
+ *  transaction; it walks two whole collections. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<RentalQuoteLike>("quotes");
+  // One coverage read rather than a byQuote() scan per won quote, and
+  // tombstone-aware (#173) so a deleted booking is not re-made.
+  const have = await coveredQuoteIds();
   let made = 0;
   for (const q of quotes) {
     if (q.quoteType !== "rental" || q.status !== "won") continue;
-    const existing = await byQuote(q.id);
-    if (existing.length) continue;
-    const created = await createFromQuote(q.id);
-    made += created.length;
+    if (have.has(q.id)) continue;
+    have.add(q.id);
+    made += (await createFromQuote(q.id)).length;
   }
   return made;
 }

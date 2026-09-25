@@ -162,6 +162,41 @@ export function mergedConsultingDisciplines(stored?: string[] | null): string[] 
 }
 
 /**
+ * #155 D231 — the save-side rule for a consulting quote's disciplines.
+ *
+ * `posted` is untrusted form input (a public server action), so it is
+ * allowlisted rather than trusted: a value survives only if it is in the
+ * live Settings vocabulary OR already on the quote being edited. The
+ * second clause is the fix — a discipline an admin has since deleted from
+ * Settings stays on an old quote (and so keeps gating its template tasks)
+ * unless the user actually unticks it, which the builder's "(removed)"
+ * checkbox says it does. The first clause is the guardrail that was always
+ * here: a value in neither list is refused, so a hand-crafted POST still
+ * can't stash an arbitrary string onto the quote (and, at spawn, the
+ * engagement). `existing` comes from the stored quote, never from the
+ * form, so it can't be widened by the caller.
+ *
+ * Values are trimmed, lowercased (how the vocabulary is stored —
+ * saveConsultingDisciplinesAction) and de-duplicated; both allowlists are
+ * matched case-insensitively so a legacy mixed-case stored vocabulary
+ * still matches. Pass `existing` as empty/null on the create path, where
+ * there is no prior quote and the rule is the plain allowlist.
+ */
+export function resolveDisciplines(
+  posted: unknown,
+  live: readonly string[] | null | undefined,
+  existing?: readonly string[] | null
+): string[] {
+  const norm = (v: unknown): string => String(v ?? "").trim().toLowerCase();
+  const allowed = new Set(
+    [...(live || []), ...(existing || [])].map(norm).filter(Boolean)
+  );
+  return Array.from(
+    new Set((Array.isArray(posted) ? posted : []).map(norm).filter((d) => d && allowed.has(d)))
+  );
+}
+
+/**
  * #145 — pair each phase NAME with its stored weight (absent/invalid → 1)
  * and a stable id. The id is the phase name slugged, so it survives a
  * settings edit that reorders the list and matches across regenerations.

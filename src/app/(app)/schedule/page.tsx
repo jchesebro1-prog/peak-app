@@ -25,7 +25,8 @@ import { OPEN_ENGAGEMENT_STAGES } from "@/lib/consulting-stages";
 import { tasksForEngagement } from "@/lib/stores/tasks";
 import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL } from "./people-lib";
 import { PortfolioGantt } from "./portfolio-gantt";
-import type { GanttBar, GanttRow } from "@/components/gantt/gantt-grid";
+import type { GanttRow } from "@/components/gantt/gantt-grid";
+import { dayColumns, ganttWindow, snapToDay, type GanttWindow } from "@/components/gantt/gantt-lib";
 
 export const metadata = { title: "Schedule — Quartzite-6" };
 
@@ -121,21 +122,48 @@ function packTracks(items: Array<{ s: number; e: number; k: string }>): {
   return { map, n: Math.max(1, ends.length) };
 }
 
-/** #145 (D172) — a sensible visible window for a GanttGrid instance built
- *  from an arbitrary bar set: the full extent of the given bars, padded to
- *  whole weeks (same `sow`/`DAY` local-day convention the Project timeline
- *  model below already uses for tlStart/tlEnd), unioned with `nowTs` so an
- *  all-past, all-future, or empty bar set still shows a window that
- *  includes today rather than a degenerate or empty-looking range. */
-function ganttRange(bars: Array<{ startAt: number; dueAt: number }>, nowTs: number): { start: number; end: number } {
-  let lo = nowTs,
-    hi = nowTs;
-  bars.forEach((b) => {
-    lo = Math.min(lo, b.startAt);
-    hi = Math.max(hi, b.dueAt);
-  });
-  return { start: sow(lo - 3 * DAY), end: sow(hi + 10 * DAY) + 7 * DAY };
-}
+/** #157 (D232) — px per day for the Project timeline's shared window, by
+ *  zoom. The only place the timeline's horizontal scale is decided: both
+ *  its sections lay out as percentages of one window, and this is what
+ *  turns that window into a scrollable pixel width. */
+const TL_DAYW: Record<number, number> = { 8: 26, 12: 18, 16: 13 };
+
+/* #157 — the two section bands inside the one shared timeline grid. The
+   band spans the full (scrollable) inner width so it reads as a divider;
+   its label is `position: sticky` against the same scroll container the
+   row label columns stick to, so "Consulting"/"Installs" stays readable
+   however far the grid is scrolled instead of sliding off to the left. */
+const tlBand: React.CSSProperties = {
+  position: "relative",
+  zIndex: 5,
+  padding: "10px 14px 8px",
+  background: "#fbfbfc",
+  borderBottom: "1px solid #f1f2f5",
+};
+const tlBandLabel: React.CSSProperties = {
+  position: "sticky",
+  left: 14,
+  display: "inline-block",
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: ".05em",
+  textTransform: "uppercase",
+  color: "#9aa0ab",
+};
+const tlEmptyBand: React.CSSProperties = {
+  position: "relative",
+  zIndex: 5,
+  padding: "26px 14px",
+  background: "#fff",
+  borderBottom: "1px solid #f1f2f5",
+};
+const tlEmptyLabel: React.CSSProperties = {
+  position: "sticky",
+  left: 14,
+  display: "inline-block",
+  fontSize: 13,
+  color: "#9aa0ab",
+};
 
 export default async function SchedulePage({
   searchParams,
@@ -431,49 +459,45 @@ export default async function SchedulePage({
     const id = criticalLineId(p);
     return (p.procurement || []).find((x) => x.id === id) || null;
   };
-  let tlStart = 0,
-    tlDays = 0,
-    tlDayW = 18,
-    tlGridW = 0;
   const TLLBLW = 240;
-  if (view === "timeline" && tlProjects.length) {
-    let lo = Infinity,
-      hi = -Infinity;
-    tlProjects.forEach((p) => {
-      const cl = critOf(p);
-      const leadStart = cl ? orderByDate(p, cl) : p.startedAt || p.createdAt || now;
-      const onSite = p.installStart || p.targetDate || now;
-      lo = Math.min(lo, leadStart, onSite);
-      hi = Math.max(hi, p.installEnd || p.targetDate || now, p.targetDate || now);
-    });
-    if (!isFinite(lo)) {
-      lo = now - 14 * DAY;
-      hi = now + 28 * DAY;
-    }
-    tlStart = sow(lo - 3 * DAY);
-    const tlEnd = sow(hi + 10 * DAY) + 7 * DAY;
-    tlDays = Math.max(14, Math.round((tlEnd - tlStart) / DAY));
-    tlDayW = ({ 8: 26, 12: 18, 16: 13 } as Record<number, number>)[zoom] || 18;
-    tlGridW = tlDays * tlDayW;
-  }
-  const tlXOf = (ts: number) => Math.round((sod(ts) - tlStart) / DAY) * tlDayW;
-  const tlSeg = (a: number, b: number) => {
-    const x = tlXOf(a);
-    const x2 = (Math.round((sod(b) - tlStart) / DAY) + 1) * tlDayW;
-    return { x: Math.max(0, x), w: Math.max(tlDayW, x2 - Math.max(0, x)) };
-  };
-  const tlTodayX = tlXOf(now);
+  /** The extent each install row actually draws: its critical line's order
+   *  date through its on-site window (and its target diamond). Built as
+   *  plain `{startAt,dueAt}` bars so the shared window below can be the
+   *  union of these and the consulting bars (#157). */
+  const installBars: Array<{ startAt: number; dueAt: number }> =
+    view === "timeline"
+      ? tlProjects.map((p) => {
+          const cl = critOf(p);
+          const leadStart = cl ? orderByDate(p, cl) : p.startedAt || p.createdAt || now;
+          const onSite = p.installStart || p.targetDate || now;
+          // The target diamond too, so the window really does contain
+          // everything the row draws. Falls back to `onSite` rather than 0
+          // when there's no target, or a missing date would drag the whole
+          // window back to 1970.
+          const target = p.targetDate || onSite;
+          return {
+            startAt: Math.min(leadStart, onSite, target),
+            dueAt: Math.max(p.installEnd || p.targetDate || now, target, onSite),
+          };
+        })
+      : [];
 
   /* ================= CONSULTING ROWS (#145 D172) =================
-     A GanttGrid "Consulting" section, rendered as its own stacked card
-     above the crew-board/timeline board area (never nested inside that
-     area's own bordered container — GanttGrid already brings its own
-     card chrome). One row per open engagement; a scheduled engagement
-     gets a single non-draggable bar spanning its startAt/endAt (the span
-     is edited on the engagement's own Schedule tab, not by dragging here
-     — same rule as install project bars); an unscheduled one still gets a
-     row, just with no bar — the same "empty lane" idiom the By person
-     view uses for a free person. */
+     The "Consulting" section of the Project timeline: one row per open
+     engagement. A scheduled engagement gets a single bar spanning its
+     startAt/endAt (the span is edited on the engagement's own Schedule tab,
+     not by dragging here — same rule as install project bars); an
+     unscheduled one still gets a row, just with no bar — the same "empty
+     lane" idiom the By person view uses for a free person.
+
+     #157 (D232): these rows used to render through PortfolioGantt/GanttGrid
+     as a separate card above the board area, which is exactly how they came
+     to have their own date window and their own layout strategy. They are
+     now drawn by the same row markup as the Installs section below, under
+     the same ruler, over the same window — so the shape here is a plain
+     one-bar row rather than a GanttRow (nothing reads `group`, `tone`,
+     `draggable` or `overrun` any more). GanttGrid is still what the By
+     person view renders. */
   const engColor: Record<string, string> = {};
   openEngagements
     .slice()
@@ -481,32 +505,63 @@ export default async function SchedulePage({
     .forEach((e, i) => {
       engColor[e.id] = PALETTE[i % PALETTE.length];
     });
-  const consultingRows: GanttRow[] = openEngagements
+  type ConsultingTimelineRow = {
+    id: string;
+    label: string;
+    bar: { startAt: number; dueAt: number; color: string } | null;
+  };
+  const consultingRows: ConsultingTimelineRow[] = openEngagements
     .slice()
     .sort((a, b) => (a.startAt || Infinity) - (b.startAt || Infinity))
     .map((e) => {
       const scheduled = (e.startAt || 0) > 0 && (e.endAt || 0) > (e.startAt || 0);
-      const bar: GanttBar | null = scheduled
-        ? {
-            id: e.id,
-            label: e.name,
-            startAt: e.startAt as number,
-            dueAt: e.endAt as number,
-            tone: engColor[e.id] || "#5b4b8a",
-            draggable: false,
-            overrun: false,
-          }
-        : null;
-      // group: "" — the page-level "Consulting" heading above this grid
-      // already names the section; every row here shares one group, so
-      // GanttGrid's OWN internal group-header strip would just repeat that
-      // same label a second time immediately below it.
-      return { id: e.id, label: e.name, group: "", bars: bar ? [bar] : [] };
+      return {
+        id: e.id,
+        label: e.name,
+        bar: scheduled
+          ? { startAt: e.startAt as number, dueAt: e.endAt as number, color: engColor[e.id] || "#5b4b8a" }
+          : null,
+      };
     });
-  const consultingRange = ganttRange(
-    consultingRows.flatMap((r) => r.bars),
-    now
+
+  /* ===== ONE shared timeline window + ONE ruler (#157, D232) =====
+     The Consulting and Installs sections used to build a window each — from
+     their own bar set, and with two different layout strategies (percentage
+     of container vs. a fixed px-per-day) — so the same x-position in the two
+     stacked grids was, in general, two different calendar dates, with
+     nothing on screen to say so. They now share one `{start, end, dayWidth}`
+     spanning the earliest start and latest end of BOTH sets, one scroll
+     container, one sticky ruler, and one layout strategy: percentage of that
+     window, inside an inner width of exactly `days × dayWidth`, which is
+     what keeps the zoom control meaningful while the percentages stay the
+     single source of x. Boundaries are local-noon anchored (#154). */
+  const timelineWindow: GanttWindow = ganttWindow(
+    [...consultingRows.flatMap((r) => (r.bar ? [r.bar] : [])), ...installBars],
+    now,
+    TL_DAYW[zoom] || 18
   );
+  const tlCols = view === "timeline" ? dayColumns(timelineWindow.start, timelineWindow.end) : [];
+  const tlDays = tlCols.length;
+  const tlGridW = tlDays * timelineWindow.dayWidth;
+  /* Percentages are measured against the DAY-COLUMN frame — midnight of the
+     first visible day through the END of the last — so the day columns tile
+     the track exactly 0…100%. Measuring against the window's own noon-to-
+     noon span instead would leave the grid hanging half a column off each
+     edge, since `dayColumns` floors both boundaries to midnight. */
+  const tlOrigin = tlCols.length ? tlCols[0] : snapToDay(timelineWindow.start);
+  const tlSpan = Math.max(1, (tlCols.length ? tlCols[tlCols.length - 1] : tlOrigin) + DAY - tlOrigin);
+  const tlPct = (ts: number) => ((ts - tlOrigin) / tlSpan) * 100;
+  const tlDayPct = (DAY / tlSpan) * 100;
+  /** An inclusive day span [a..b] as percentages of the shared window. */
+  const tlSeg = (a: number, b: number) => {
+    const left = Math.max(0, tlPct(snapToDay(a)));
+    const right = tlPct(snapToDay(b)) + tlDayPct;
+    return { left, width: Math.max(tlDayPct, Math.min(100, right) - left) };
+  };
+  const tlWeekStarts = tlCols.filter((d) => new Date(d).getDay() === 0);
+  const tlWeekends = tlCols.filter((d) => new Date(d).getDay() === 0 || new Date(d).getDay() === 6);
+  const tlTodayCol = snapToDay(now);
+  const tlHasToday = tlCols.length > 0 && tlTodayCol >= tlCols[0] && tlTodayCol <= tlCols[tlCols.length - 1];
 
   /* ================= PEOPLE ROWS (#145 D172) =================
      The By person portfolio view: groupByPerson (people-lib.ts, pure, zero
@@ -542,7 +597,12 @@ export default async function SchedulePage({
   // and an HTTP-200 smoke check, neither of which asserts anything about
   // rows/bars/draggability).
   const personRows: GanttRow[] = view === "people" ? mergeBookingsIntoPersonRows(personBaseRows, bookings) : [];
-  const peopleRange = ganttRange(
+  // One window for the one grid this view renders. `dayWidth` stays 0:
+  // GanttGrid is percentage-of-container with no fixed scale, so there is
+  // no px-per-day to share here — but the noon anchoring (#154) matters,
+  // since this window IS computed on the server and re-floored in the
+  // browser by GanttGrid's `dayColumns`.
+  const peopleRange = ganttWindow(
     personRows.flatMap((r) => r.bars),
     now
   );
@@ -807,58 +867,6 @@ export default async function SchedulePage({
         </div>
       </div>
 
-      {/* ===== consulting (#145 D172) — its own stacked card, above the
-          crew-board/timeline board area, never nested inside that area's
-          own bordered container (GanttGrid already brings its own card
-          chrome). Only for the Project timeline view — "Consulting" above
-          the existing "Installs" group below. ===== */}
-      {view === "timeline" && (
-        <div style={{ marginBottom: 16 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: ".05em",
-              textTransform: "uppercase",
-              color: "#9aa0ab",
-              marginBottom: 8,
-            }}
-          >
-            Consulting
-          </div>
-          {consultingRows.length > 0 ? (
-            <PortfolioGantt rows={consultingRows} startAt={consultingRange.start} endAt={consultingRange.end} draggable={false} />
-          ) : (
-            <div
-              className="pk-card"
-              style={{ padding: "24px 20px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}
-            >
-              No consulting engagements yet.
-            </div>
-          )}
-        </div>
-      )}
-
-      {view === "timeline" && projects.length > 0 && (
-        <div
-          aria-label="Timeline scale note"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            margin: "-4px 0 12px",
-            color: "#8c919c",
-            fontSize: 10.5,
-            fontFamily: "var(--font-mono)",
-            letterSpacing: ".03em",
-          }}
-        >
-          <span style={{ height: 1, flex: 1, background: "#e7e9ee" }} />
-          <span>INSTALLS BELOW · separate date ruler and zoom</span>
-          <span style={{ height: 1, flex: 1, background: "#e7e9ee" }} />
-        </div>
-      )}
-
       {/* ===== board area + map ===== */}
       <div style={{ display: "flex", gap: 0, alignItems: "stretch", minHeight: 0 }}>
         <div
@@ -892,7 +900,11 @@ export default async function SchedulePage({
             )
           )}
 
-          {projects.length === 0 && view !== "people" && (
+          {/* #157: the Project timeline no longer falls back to this — it
+              always renders both of its sections, each with its own empty
+              state, so the Consulting rows don't vanish just because there
+              are no install projects. */}
+          {projects.length === 0 && view === "crew" && (
             <div
               style={{
                 padding: "60px 24px",
@@ -1422,27 +1434,74 @@ export default async function SchedulePage({
             </div>
           )}
 
-          {/* ---------- PROJECT TIMELINE ---------- */}
-          {projects.length > 0 && view === "timeline" && (
-            <div
-              style={{
-                padding: "12px 14px 0",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: ".05em",
-                textTransform: "uppercase",
-                color: "#9aa0ab",
-              }}
-            >
-              Installs
-            </div>
-          )}
-          {projects.length > 0 && view === "timeline" && tlProjects.length > 0 && (
+          {/* ---------- PROJECT TIMELINE (#157, D232) ----------
+              ONE scroll container, ONE sticky ruler and ONE shared window
+              for both sections, so a given x-position is the same calendar
+              date in Consulting as it is in Installs. Everything below is
+              positioned as a percentage of `timelineWindow` (via tlPct /
+              tlSeg); the inner width of `TLLBLW + tlGridW` is what turns
+              that percentage into the zoom's px-per-day and gives the two
+              sections one shared horizontal scroll. */}
+          {view === "timeline" && (
             <div
               className="sch-scroll"
               style={{ overflow: "auto", maxHeight: "calc(100vh - 210px)" }}
             >
               <div style={{ minWidth: TLLBLW + tlGridW, position: "relative" }}>
+                {/* one calendar background behind BOTH sections */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: TLLBLW,
+                    right: 0,
+                    zIndex: 0,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {tlWeekends.map((d) => (
+                    <div
+                      key={"twe" + d}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        bottom: 0,
+                        left: `${tlPct(d)}%`,
+                        width: `${tlDayPct}%`,
+                        background: "#fafbfc",
+                      }}
+                    />
+                  ))}
+                  {tlWeekStarts.map((w) => (
+                    <div
+                      key={"tsep" + w}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        bottom: 0,
+                        left: `${tlPct(w)}%`,
+                        width: 1,
+                        background: "#eef0f3",
+                      }}
+                    />
+                  ))}
+                  {tlHasToday && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        bottom: 0,
+                        left: `${tlPct(tlTodayCol)}%`,
+                        width: `${tlDayPct}%`,
+                        background: "var(--accent-soft)",
+                        borderLeft: "1.5px solid var(--accent)",
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* ===== the one ruler, shared by both sections ===== */}
                 <div
                   style={{
                     display: "flex",
@@ -1467,103 +1526,134 @@ export default async function SchedulePage({
                       background: "#fff",
                       borderRight: "1px solid #e7e9ee",
                     }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "#9aa0ab",
-                        letterSpacing: ".04em",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Project
-                    </span>
-                  </div>
-                  <div style={{ position: "relative", flex: 1, height: 40 }}>
-                    {Array.from({ length: Math.ceil(tlDays / 7) }).map((_, w) => (
+                  />
+                  <div style={{ position: "relative", flex: 1, height: 40, overflow: "hidden" }}>
+                    {tlWeekends.map((d) => (
                       <div
-                        key={"tw" + w}
+                        key={"rwe" + d}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          bottom: 0,
+                          left: `${tlPct(d)}%`,
+                          width: `${tlDayPct}%`,
+                          background: "#fafbfc",
+                        }}
+                      />
+                    ))}
+                    {tlWeekStarts.map((w) => (
+                      <div
+                        key={"rwl" + w}
                         style={{
                           position: "absolute",
                           top: "50%",
                           transform: "translateY(-50%)",
-                          left: w * 7 * tlDayW + 6,
+                          left: `calc(${tlPct(w)}% + 5px)`,
                           fontFamily: "var(--font-mono)",
                           fontSize: 9.5,
                           fontWeight: 600,
+                          letterSpacing: ".04em",
                           color: "#aab0bb",
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {md(tlStart + w * 7 * DAY)}
+                        {md(w).toUpperCase()}
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div style={{ position: "relative" }}>
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: TLLBLW,
-                      width: tlGridW,
-                      height: tlProjects.length * 72,
-                      zIndex: 0,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {Array.from({ length: Math.ceil(tlDays / 7) }).map((_, w) => (
-                      <div
-                        key={"tsep" + w}
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          bottom: 0,
-                          left: w * 7 * tlDayW,
-                          width: 1,
-                          background: "#eef0f3",
-                        }}
-                      />
-                    ))}
-                    {tlTodayX >= 0 && tlTodayX <= tlGridW && (
+                {/* ===== consulting (#145 D172, re-homed under the shared
+                    ruler by #157) ===== */}
+                <div style={tlBand}>
+                  <span style={tlBandLabel}>Consulting</span>
+                </div>
+                {consultingRows.length > 0 ? (
+                  consultingRows.map((row) => (
+                    <div key={row.id} style={{ display: "flex", height: 44, position: "relative", zIndex: 1 }}>
                       <div
                         style={{
-                          position: "absolute",
-                          top: 0,
-                          bottom: 0,
-                          left: tlTodayX,
-                          width: 2,
-                          background: "var(--accent)",
-                          opacity: 0.7,
-                        }}
-                      />
-                    )}
-                    {tlProjects.map((_, r) => (
-                      <div
-                        key={"trl" + r}
-                        style={{
-                          position: "absolute",
+                          position: "sticky",
                           left: 0,
-                          right: 0,
-                          top: (r + 1) * 72,
-                          height: 1,
-                          background: "#f1f2f5",
+                          zIndex: 6,
+                          width: TLLBLW,
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          padding: "0 14px",
+                          background: "#fff",
+                          borderRight: "1px solid #e7e9ee",
+                          borderBottom: "1px solid #f1f2f5",
                         }}
-                      />
-                    ))}
+                      >
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            lineHeight: 1.25,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {row.label}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          position: "relative",
+                          flex: 1,
+                          height: 44,
+                          borderBottom: "1px solid #f1f2f5",
+                        }}
+                      >
+                        {row.bar && (
+                          <div
+                            title={row.label + " · " + md(row.bar.startAt) + " – " + md(row.bar.dueAt)}
+                            style={{
+                              position: "absolute",
+                              top: 11,
+                              left: `${tlSeg(row.bar.startAt, row.bar.dueAt).left}%`,
+                              width: `${tlSeg(row.bar.startAt, row.bar.dueAt).width}%`,
+                              height: 22,
+                              borderRadius: 7,
+                              background: row.bar.color,
+                              color: "#fff",
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "0 8px",
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {row.label}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={tlEmptyBand}>
+                    <span style={tlEmptyLabel}>No consulting engagements yet.</span>
                   </div>
+                )}
 
-                  {tlProjects.map((p) => {
+                {/* ===== installs ===== */}
+                <div style={tlBand}>
+                  <span style={tlBandLabel}>Installs</span>
+                </div>
+                {tlProjects.length > 0 ? (
+                  tlProjects.map((p) => {
                     const cl = critOf(p);
                     const leadStart = cl ? orderByDate(p, cl) : p.startedAt || p.createdAt || now;
                     const onSite = p.installStart || p.targetDate || now;
                     const pm = metaOf(p, pipelines);
                     const sm = { ...tagColor(pm.tag), label: pm.label };
                     const ps = tlSeg(leadStart, onSite - DAY);
-                    const tgX = tlXOf(p.targetDate || 0) + tlDayW / 2;
-                    const hasTarget = !!p.targetDate && tgX >= 0 && tgX <= tlGridW;
+                    const tgPct = tlPct(snapToDay(p.targetDate || 0)) + tlDayPct / 2;
+                    const hasTarget = !!p.targetDate && tgPct >= 0 && tgPct <= 100;
                     return (
                       <Link
                         key={p.id}
@@ -1572,6 +1662,7 @@ export default async function SchedulePage({
                           display: "flex",
                           height: 72,
                           position: "relative",
+                          zIndex: 1,
                           textDecoration: "none",
                           color: "inherit",
                         }}
@@ -1643,8 +1734,8 @@ export default async function SchedulePage({
                             style={{
                               position: "absolute",
                               top: 18,
-                              left: ps.x,
-                              width: ps.w,
+                              left: `${ps.left}%`,
+                              width: `${ps.width}%`,
                               height: 12,
                               borderRadius: 6,
                               background:
@@ -1657,8 +1748,8 @@ export default async function SchedulePage({
                               style={{
                                 position: "absolute",
                                 top: 33,
-                                left: tlSeg(p.installStart, p.installEnd).x,
-                                width: tlSeg(p.installStart, p.installEnd).w,
+                                left: `${tlSeg(p.installStart, p.installEnd).left}%`,
+                                width: `${tlSeg(p.installStart, p.installEnd).width}%`,
                                 height: 20,
                                 borderRadius: 7,
                                 background: sm.ink,
@@ -1681,7 +1772,8 @@ export default async function SchedulePage({
                               style={{
                                 position: "absolute",
                                 top: 38,
-                                left: tgX - 6,
+                                left: `${tgPct}%`,
+                                marginLeft: -6,
                                 width: 11,
                                 height: 11,
                                 background: "#16181d",
@@ -1695,22 +1787,13 @@ export default async function SchedulePage({
                         </div>
                       </Link>
                     );
-                  })}
-                </div>
+                  })
+                ) : (
+                  <div style={tlEmptyBand}>
+                    <span style={tlEmptyLabel}>No active projects to chart.</span>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
-
-          {projects.length > 0 && view === "timeline" && tlProjects.length === 0 && (
-            <div
-              style={{
-                padding: "50px 24px",
-                textAlign: "center",
-                color: "#9aa0ab",
-                fontSize: 13,
-              }}
-            >
-              No active projects to chart.
             </div>
           )}
         </div>

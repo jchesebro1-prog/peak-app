@@ -61,6 +61,8 @@ export function FilterBar({
   types,
   ownerOptions,
   meName,
+  sort,
+  originName,
 }: {
   q: string;
   type: string;
@@ -70,6 +72,8 @@ export function FilterBar({
   types: string[];
   ownerOptions: Array<{ value: string; label: string }>;
   meName: string;
+  sort: string;
+  originName: string | null;
 }) {
   const router = useRouter();
   const [text, setText] = useState(q);
@@ -84,16 +88,18 @@ export function FilterBar({
     setText(q);
   }
 
-  const pushWith = (patch: { q?: string; type?: string; scope?: string; added?: string }) => {
+  const pushWith = (patch: { q?: string; type?: string; scope?: string; added?: string; sort?: string }) => {
     const p = new URLSearchParams();
     const nq = patch.q !== undefined ? patch.q : text;
     const nt = patch.type !== undefined ? patch.type : type;
     const ns = patch.scope !== undefined ? patch.scope : scope;
     const na = patch.added !== undefined ? patch.added : added;
+    const nso = patch.sort !== undefined ? patch.sort : sort;
     if (nq.trim()) p.set("q", nq.trim());
     if (nt && nt !== "all") p.set("type", nt);
     if (ns && ns !== "all") p.set("scope", ns);
     if (na === "7d") p.set("added", "7d");
+    if (nso) p.set("sort", nso);
     const s = p.toString();
     router.push("/companies" + (s ? "?" + s : ""));
   };
@@ -121,6 +127,17 @@ export function FilterBar({
               {o.label}
             </option>
           ))}
+        </select>
+        {/* Drive sort (#176, D229) — Default keeps today's directory order. */}
+        <select
+          className="pk-searchbar-select"
+          aria-label="Sort"
+          value={sort}
+          onChange={(e) => pushWith({ sort: e.target.value })}
+        >
+          <option value="">Default order</option>
+          <option value="near">Nearest first</option>
+          <option value="far">Farthest first</option>
         </select>
         <button
           onClick={() => pushWith({ added: added === "7d" ? "" : "7d" })}
@@ -179,6 +196,10 @@ export function FilterBar({
             </button>
           );
         })}
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 8 }}>
+        {originName ? `Drive times from ${originName}` : "Set a quote origin with coordinates in Settings → Locations to see drive times"}
       </div>
     </div>
   );

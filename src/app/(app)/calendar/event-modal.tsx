@@ -7,6 +7,7 @@ import {
   deleteCalendarEventAction,
   getCalendarEventAction,
   searchPeopleAction,
+  travelOriginOptionsAction,
   updateCalendarEventAction,
 } from "../calendar-actions";
 import { RECURRENCE_PRESETS } from "@/lib/google/recurrence";
@@ -115,6 +116,13 @@ export default function EventModal({
   const [suggestions, setSuggestions] = useState<Attendee[]>([]);
   const searchSeq = useRef(0);
 
+  const [originOpts, setOriginOpts] = useState<{
+    base: { id: string; name: string } | null;
+    offices: Array<{ id: string; name: string }>;
+  } | null>(null);
+  const [originChoice, setOriginChoice] = useState("");
+  const [originAddress, setOriginAddress] = useState("");
+
   useEffect(() => {
     if (target.mode !== "edit") return;
     let cancelled = false;
@@ -157,6 +165,19 @@ export default function EventModal({
     return () => clearTimeout(t);
   }, [attendeeQuery, attendees]);
 
+  useEffect(() => {
+    if (target.mode !== "create") return;
+    let live = true;
+    travelOriginOptionsAction()
+      .then((o) => {
+        if (live) setOriginOpts(o);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [target]);
+
   // Render-time derivation instead of clearing `suggestions` state from the
   // effect above on every keystroke back to empty (avoids a setState-in-
   // effect cascade for the common "cleared the input" case).
@@ -194,6 +215,14 @@ export default function EventModal({
       description: description.trim(),
       recurrencePreset: recurrence,
       attendeeEmails: attendees.map((a) => a.email),
+      travelFrom:
+        target.mode === "create"
+          ? originChoice === "__addr"
+            ? { address: originAddress.trim() }
+            : originChoice
+              ? { officeId: originChoice }
+              : undefined
+          : undefined,
     };
     startTransition(async () => {
       const r =
@@ -281,6 +310,32 @@ export default function EventModal({
 
             <label style={label}>Location</label>
             <input style={field} value={location} onChange={(e) => setLocation(e.target.value)} />
+
+            {target.mode === "create" && !allDay && (
+              <>
+                <label style={label}>Traveling from</label>
+                <select style={field} value={originChoice} onChange={(e) => setOriginChoice(e.target.value)}>
+                  <option value="">{originOpts?.base ? `My base — ${originOpts.base.name}` : "My base"}</option>
+                  {(originOpts?.offices || [])
+                    .filter((o) => o.id !== originOpts?.base?.id)
+                    .map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  <option value="__addr">Another address…</option>
+                </select>
+                {originChoice === "__addr" && (
+                  <input
+                    style={{ ...field, marginTop: 6 }}
+                    value={originAddress}
+                    onChange={(e) => setOriginAddress(e.target.value)}
+                    placeholder="Where are you coming from?"
+                  />
+                )}
+                <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 4 }}>
+                  Used for the automatic “Drive to …” block when the location is a street address.
+                </div>
+              </>
+            )}
 
             <label style={label}>Description</label>
             <textarea

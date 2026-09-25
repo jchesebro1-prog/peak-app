@@ -3,7 +3,7 @@ import {
   withEngagementPhaseIds, defaultMilestonePhaseId, phaseIdsByName, startOfLocalDay,
   type PhaseWeight, type ScheduleLine,
 } from "@/lib/consulting-schedule";
-import { barRect, dateFromX, dayColumns, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
+import { barRect, dateFromX, dayColumns, ganttWindow, localNoon, packTracks, snapToDay } from "@/components/gantt/gantt-lib";
 import { normalizeSku } from "@/lib/davinci/sku";
 import { PROTOCOL_MAP, DIRECTION_MAP, mapProtocol, PASSTHROUGH_TYPES } from "@/lib/davinci/protocol-map";
 import { extractLibrary } from "@/lib/davinci/extract";
@@ -80,7 +80,7 @@ import {
   toDateInput as vendorToDateInput,
 } from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
-import { canRecord, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
+import { canRecord, mergedConsultingDisciplines, phaseWeightsFor, resolveDisciplines } from "@/lib/settings";
 import {
   blankAudio, blankKrisp, isArchivable, mergeActionItems, needsKrispCheck, normalizeRecording,
   recordingParentLabel, recordingStatusChip,
@@ -3724,6 +3724,17 @@ import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items
  * way is a faithful, isolated way to exercise the spawn without going
  * through the real quote builder UI/actions. Asserted inside asyncChecks(). */
 import { upsertDoc } from "../src/db/doc-store";
+/* #149 (D233): every DB-backed fixture in this file is named with
+ * `fixtureId()` and created with `createFixture()`, which registers it for
+ * teardown as it is written. The suite-level `finally` on the promise chain
+ * at the bottom of this file drops them, and then sweeps the whole database
+ * for anything else carrying the marker — so a mid-suite throw cleans up
+ * too, and a datadir survives being reused across runs. Tests that need
+ * their own rows gone BEFORE later tests run call `dropFixtures(<scope>)`
+ * in their own `finally`. See scripts/test-fixtures.ts. */
+import {
+  FIXTURE_MARKER, createFixture, dropFixtures, findFixtureDocs, fixtureId, hardSweepRefusal, sweepFixtures,
+} from "./test-fixtures";
 import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
 import { getProject, getProjectByQuote, removeProject } from "../src/lib/stores/projects";
@@ -4687,8 +4698,13 @@ async function asyncChecks(): Promise<void> {
    *   2. Dedup via byQuote(): if that booking already exists, skip
    *      creating a duplicate, and derive expectations from qtyOwned()
    *      instead of hardcoding 8/5, so the assertions hold whether this is
-   *      the first run ever or the hundredth. */
-  const TEST_BOOKING_QUOTE_ID = "test-quote-task2-lifecycle";
+   *      the first run ever or the hundredth.
+   *
+   * #149: the quoteId now carries the fixture marker, so the booking this
+   * creates — whose own id is generated, not chosen here — is found and
+   * swept by teardown through its `quoteId`. Both branches above still
+   * stand: dedup is what keeps the test honest if teardown ever regresses. */
+  const TEST_BOOKING_QUOTE_ID = fixtureId(129, "booking-lifecycle");
   const TEST_WINDOW_START = new Date("2031-01-01T00:00:00Z").getTime();
   const TEST_WINDOW_END = TEST_WINDOW_START + 86400000;
 
@@ -4723,14 +4739,21 @@ async function asyncChecks(): Promise<void> {
    * written directly via doc-store is a faithful, isolated way to exercise
    * the spawn without the real quote builder UI/actions — createFromQuote()
    * reads the quote the same way (InspectionQuoteLike/RepairQuoteLike are
-   * deliberately minimal structural views, not the quotes.ts store). */
-  const TEST_INSPECTION_QUOTE_ID = "test-quote-punch13-inspection";
-  const TEST_REPAIR_QUOTE_ID = "test-quote-punch13-repair";
+   * deliberately minimal structural views, not the quotes.ts store).
+   *
+   * #149 (D233): this is the oldest fake-quote idiom in the file and the one
+   * that leaked — `test-quote-punch13-*` carried no marker, so nothing could
+   * find it afterwards. It is now `fixtureId()` + `createFixture()`, which
+   * registers each quote for teardown as it is written; the inspection,
+   * repair job and the two spawned projects follow it out through their
+   * `quoteId`. */
+  const TEST_INSPECTION_QUOTE_ID = fixtureId(13, "inspection-quote");
+  const TEST_REPAIR_QUOTE_ID = fixtureId(13, "repair-quote");
 
   {
     const priorInspections = await inspectionsByQuote(TEST_INSPECTION_QUOTE_ID);
     if (!priorInspections.length) {
-      await upsertDoc("quotes", {
+      await createFixture("quotes", {
         id: TEST_INSPECTION_QUOTE_ID,
         name: "PUNCHLIST #13 test inspection quote",
         quoteType: "inspection",
@@ -4767,7 +4790,7 @@ async function asyncChecks(): Promise<void> {
   {
     const priorRepair = await repairByQuote(TEST_REPAIR_QUOTE_ID);
     if (!priorRepair) {
-      await upsertDoc("quotes", {
+      await createFixture("quotes", {
         id: TEST_REPAIR_QUOTE_ID,
         name: "PUNCHLIST #13 test repair quote",
         quoteType: "repair",
@@ -4807,11 +4830,13 @@ async function asyncChecks(): Promise<void> {
    * task really land in the doc-store, then throws on the second — proving
    * `performCapture` deletes the first before rethrowing, and never writes
    * the note. Fixed test id + idempotency check since this writes to the
-   * real persistent dev DB, same as the #13 block above. */
-  const TEST_ROLLBACK_ENG_ID = "test-eng-punch145-rollback";
+   * real persistent dev DB, same as the #13 block above. #149: marked and
+   * registered like #13 — every assertion here proves the capture wrote
+   * nothing, so the engagement doc was the only row that leaked. */
+  const TEST_ROLLBACK_ENG_ID = fixtureId(145, "rollback-engagement");
   {
     if (!(await getEngagement(TEST_ROLLBACK_ENG_ID))) {
-      await upsertDoc("consulting_engagements", {
+      await createFixture("consulting_engagements", {
         id: TEST_ROLLBACK_ENG_ID,
         name: "PUNCHLIST #145 rollback test engagement",
         customer: "Test Customer #145",
@@ -5435,6 +5460,84 @@ async function asyncChecks(): Promise<void> {
         for (const s of (await allTaskTemplateSets()).filter((s) => s.name === name)) {
           await removeTaskTemplateSet(s.id);
         }
+      }
+    }
+  }
+
+  /* ---- #156: phase casing survives a 5-cycle export -> import round trip
+   * through the REAL task_templates writer (commitImport/exportCsv), not a
+   * hand-rolled approximation of either. #145's own round-trip test (T10,
+   * just above) proved assignment targets survive ONE cycle; this proves a
+   * phase NAME's casing survives FIVE — the concern was drift that only
+   * shows up after more than one pass. The contrast case is deliberate:
+   * `discipline` IS lowercased by normalizeLine (task-templates.ts, doc'd
+   * on the TaskTemplateLine type) — asserting that too is what makes the
+   * phase assertion mean something; if both fields came back unchanged this
+   * test wouldn't distinguish "casing is preserved" from "nothing here
+   * transforms anything." */
+  {
+    const ttType156 = getTypeMeta("task_templates");
+    if (!ttType156) throw new Error("#156 setup: task_templates import type not registered");
+    const SET_156 = "TEST156: Phase Casing Round Trip";
+    const PHASE_156 = "Schematic Design";
+    const DISCIPLINE_156_INPUT = "Rigging";
+    const DISCIPLINE_156_STORED = "rigging"; // normalizeLine lowercases discipline, deliberately
+    const rowsFor156 = (csv: string) => {
+      const parsed = parseImportCsv(csv);
+      if (!parsed.ok) throw new Error("#156 setup: csv did not parse — " + parsed.error);
+      const mapping = autoMap(parsed.headers, ttType156.fields);
+      return prepareRows(parsed.rows, mapping, ttType156.fields).rows;
+    };
+    try {
+      const csv156 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_156},consulting,${PHASE_156},${DISCIPLINE_156_INPUT},Casing Check,Design,team,0,100`,
+      ].join("\n");
+      const created156 = await commitImport("task_templates", rowsFor156(csv156), "create", { effectiveAt: Date.now() });
+      ok(created156.created === 1 && created156.errored === 0, "#156 setup: the phase-casing fixture set commits");
+
+      const lineAfterCreate156 = (await allTaskTemplateSets()).find((s) => s.name === SET_156)?.lines[0];
+      ok(
+        lineAfterCreate156?.phase === PHASE_156,
+        `#156 cycle 0 (create): phase stored exactly as "${PHASE_156}", not lowercased or otherwise altered`
+      );
+      ok(
+        lineAfterCreate156?.discipline === DISCIPLINE_156_STORED,
+        "#156 cycle 0 (create): discipline IS lowercased on the way in — the contrast that makes the phase assertion meaningful"
+      );
+
+      // Five export -> re-import cycles, each through the real entry points:
+      // exportCsv (the task_templates writer's exportObjects — same as the
+      // Import hub's download) and commitImport -> ttApplyRow ->
+      // normalizeLine (the same update path a real re-import takes).
+      for (let cycle = 1; cycle <= 5; cycle++) {
+        const exported156 = await exportCsv("task_templates");
+        const lines156 = exported156.split("\n");
+        const header156 = lines156[0];
+        const rowLines156 = lines156.filter((l) => l.startsWith(SET_156 + ","));
+        ok(rowLines156.length === 1, `#156 cycle ${cycle}: export emits exactly the one fixture row`);
+        ok(
+          rowLines156[0]?.includes("," + PHASE_156 + ","),
+          `#156 cycle ${cycle}: the exported CSV cell for Phase is still byte-identical to "${PHASE_156}"`
+        );
+
+        const miniCsv156 = [header156, ...rowLines156].join("\n");
+        const cycleRes156 = await commitImport("task_templates", rowsFor156(miniCsv156), "update", { effectiveAt: Date.now() });
+        ok(cycleRes156.updated === 1 && cycleRes156.errored === 0, `#156 cycle ${cycle}: re-importing the exported row commits cleanly`);
+
+        const lineAfterCycle156 = (await allTaskTemplateSets()).find((s) => s.name === SET_156)?.lines[0];
+        ok(
+          lineAfterCycle156?.phase === PHASE_156,
+          `#156 cycle ${cycle}: phase is still byte-identical to "${PHASE_156}" after export -> import`
+        );
+        ok(
+          lineAfterCycle156?.discipline === DISCIPLINE_156_STORED,
+          `#156 cycle ${cycle}: discipline is still lowercased to "${DISCIPLINE_156_STORED}" (unchanged behavior, re-asserted every cycle)`
+        );
+      }
+    } finally {
+      for (const s of (await allTaskTemplateSets()).filter((s) => s.name === SET_156)) {
+        await removeTaskTemplateSet(s.id);
       }
     }
   }
@@ -7849,6 +7952,17 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
   const r6 = await commitHistory(P4, "", {}, "Test Admin", { start: 0.7, end: 99.2 });
   ok(r6.total === 2 && r6.errors.length === 0 && r6.skippedExisting === 1 && r6.created.julyEditedKept === 1, "daylite 12b fix2: a fractional, past-the-end range is floored and clamped once (scan and slice agree)");
 }
+/* #149 (D233): the sweep script's own safety rule. db-target's two flags
+ * (`--commit`, plus `--yes` for a hosted target) are pinned elsewhere in this
+ * file against requireHostedConfirmation; this is the rule the sweep script
+ * ADDS, and the reason it is a pure function is that a script whose job is
+ * deleting rows should have its refusal asserted rather than read. */
+ok(hardSweepRefusal({ hosted: false, hard: true }) === null, "#149 --hard is allowed on a local scratch datadir");
+ok(hardSweepRefusal({ hosted: true, hard: false }) === null, "#149 a hosted SOFT sweep is allowed — that is what --commit --yes is for");
+ok(
+  (hardSweepRefusal({ hosted: true, hard: true }) || "").includes("Refusing --hard"),
+  "#149 --hard against a hosted target is refused by no flag combination — offline clients need the tombstone"
+);
 
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
@@ -7856,7 +7970,52 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
 // (equipment-items x3, "seeded surveys exist to migrate", "FS-1053 is
 // present in the seed"). One await here covers the whole chain rather than
 // sprinkling it in front of each function that happens to read seeded data.
+/* #149 (D233): the proof that teardown happens, and the only assertion in
+ * this file that is deliberately vacuous on a fresh datadir. `npm run
+ * test:specs` hands the suite a new `mktemp -d` every time, which is exactly
+ * why years of leaked fixtures went unnoticed — nobody ever looked at the
+ * datadir twice. Run the suite TWICE against one datadir and this check, at
+ * the head of the chain before anything has been written, sees whatever the
+ * previous run left behind. */
+async function fixtureLeakChecks(): Promise<void> {
+  const leaked = await findFixtureDocs();
+  ok(
+    leaked.length === 0,
+    `#149 this datadir starts with no live ${FIXTURE_MARKER}-marked fixture from a previous run` +
+      (leaked.length ? ` (found ${leaked.length}: ${leaked.slice(0, 8).map((e) => `${e.coll}/${e.id}`).join(", ")})` : "")
+  );
+}
+
+/** Suite-level teardown: registered fixtures first, then a registry-free
+ *  sweep for anything else carrying the marker (rows the code under test
+ *  spawned, and fixtures whose creator never registered them). Runs in a
+ *  `finally` so a mid-suite throw still cleans up, and never rethrows — a
+ *  teardown failure must not be reported as a test failure, only as noise
+ *  the next run's leak check will turn into a real FAIL.
+ *
+ *  Rows are REMOVED, not tombstoned. Soft delete looks more faithful and is
+ *  actively wrong here: the service creators and sweeps are deliberately
+ *  tombstone-aware (#173), so a tombstoned fixture makes the NEXT run on the
+ *  same datadir refuse to spawn — measured at 21 FAIL before this was fixed.
+ *  See scripts/test-fixtures.ts. */
+async function teardownFixtures(): Promise<void> {
+  try {
+    const dropped = await dropFixtures();
+    const swept = await sweepFixtures({ commit: true, mode: "hard" });
+    if (dropped || swept.length) {
+      console.log(`\n[fixtures] teardown: ${dropped} registered + ${swept.length} marked doc(s) removed`);
+    }
+  } catch (err) {
+    console.error(
+      `\n[fixtures] teardown FAILED — this datadir is now dirty. Clean it with:\n` +
+        `  PGLITE_PATH="${process.env.PGLITE_PATH}" npm run test:sweep-fixtures -- --commit --hard\n`,
+      err
+    );
+  }
+}
+
 seeded()
+  .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
   .then(() => writeBackAsyncChecks())
   .then(() => archiveAsyncChecks())
@@ -7872,6 +8031,13 @@ seeded()
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
   .then(() => dayliteSupersedeFix2Checks())
+  .then(() => quoteSpawnAsyncChecks())
+  .then(() => sweepHealingAsyncChecks())
+  .then(() => outsideTransactionAsyncChecks())
+  .then(() => statusRefusalAsyncChecks())
+  // Before the report and before the `.catch`, so a thrown suite is torn
+  // down exactly like a passing one.
+  .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -8444,6 +8610,38 @@ ok(TEMPLATE_RECORD_LABEL.consulting === "Consulting", "#145 the consulting kind 
 /* phase weights + disciplines merge like every other settings list */
 ok(mergedConsultingDisciplines([]).join(",") === "rigging,curtain,lighting,av", "#145 disciplines default to the four intake groups");
 ok(mergedConsultingDisciplines(["rigging", " AV "]).join(",") === "rigging,AV", "#145 a stored discipline list overrides wholesale and is trimmed");
+
+/* #155 D231 — the save-side discipline rule. A discipline already on the
+ * quote is KEPT unless the user unticks it (the "(removed)" checkbox at
+ * quote/controls.tsx:468 now means what it says), while the allowlist that
+ * stops a forged POST stashing an arbitrary string is untouched: a value in
+ * neither the live vocabulary nor already on this quote is still refused. */
+const live155 = ["rigging", "curtain", "lighting", "av"];
+ok(
+  resolveDisciplines(["rigging", "acoustics"], live155, ["rigging", "acoustics"]).join(",") === "rigging,acoustics",
+  "#155 a discipline removed from Settings but still ticked on the quote survives a save"
+);
+ok(
+  !resolveDisciplines(["rigging"], live155, ["rigging", "acoustics"]).includes("acoustics"),
+  "#155 unticking a removed discipline does remove it"
+);
+ok(
+  resolveDisciplines(["rigging", "pyrotechnics"], live155, ["rigging", "acoustics"]).join(",") === "rigging",
+  "#155 a discipline in neither the live vocabulary nor on the quote is still refused (forged POST)"
+);
+ok(
+  resolveDisciplines(["rigging", "av"], live155, ["rigging"]).join(",") === "rigging,av",
+  "#155 a live discipline ticked for the first time is added"
+);
+ok(
+  resolveDisciplines(["  Acoustics  ", "acoustics", ""], live155, ["acoustics"]).join(",") === "acoustics",
+  "#155 posted disciplines are trimmed, lowercased, blank-stripped and de-duplicated"
+);
+ok(
+  resolveDisciplines("not-an-array", live155, ["acoustics"]).length === 0 &&
+    resolveDisciplines(["rigging"], live155, null).join(",") === "rigging",
+  "#155 a non-array payload resolves to nothing and a create (no existing quote) keeps the plain allowlist"
+);
 const pw145 = phaseWeightsFor({ "Design Development": 6 }, ["Assessment", "Design Development"]);
 ok(pw145[0].weight === 1 && pw145[1].weight === 6, "#145 phaseWeightsFor defaults an unweighted phase to 1 and honours a stored weight");
 ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw145[0].phaseId.length > 0, "#145 phaseWeightsFor carries a stable id per phase name");
@@ -8643,6 +8841,137 @@ ok(typeof tasksForEngagement === "function", "#145 tasksForEngagement is exporte
     reuse.n === 2 && reuse.map.a === 0 && reuse.map.b === 1 && reuse.map.c === 0,
     "#145 packTracks: a track is reused once its occupant has ended, instead of growing a third track"
   );
+}
+
+/* ====== #157 / #154 (D232): ONE shared, noon-anchored Gantt window ======
+ * `/schedule?view=timeline` used to build two windows — one from the
+ * Consulting bars, one from the Installs bars — and lay them out with two
+ * different strategies, so the same x meant two different dates. It also
+ * seeded its window from a raw `Date.now()` and floored it to local
+ * MIDNIGHT, which a US-timezone browser re-floors to the PREVIOUS calendar
+ * day when it re-renders a UTC-rendered grid (#154).
+ *
+ * No DB fixtures here — these are pure-function checks over plain numbers
+ * (the TEST157 names below are the bar keys, not persisted rows). The one
+ * piece of shared state is `process.env.TZ`, restored in the `finally`. */
+{
+  const savedTZ157 = process.env.TZ;
+  try {
+    process.env.TZ = "America/Chicago";
+    // A fixed "now" well away from both bar sets, so the window's extent is
+    // driven by the bars rather than by today.
+    const NOW157 = new Date(2026, 9, 6, 9, 14, 0).getTime(); // Oct 6 2026, 09:14 local
+
+    // Two deliberately DISJOINT bar sets, the shape the real page has: a
+    // consulting engagement running this autumn and an install project
+    // whose procurement lead time started months earlier and whose on-site
+    // window lands months later.
+    const TEST157_CONSULTING = [
+      { startAt: localNoon(new Date(2026, 9, 12).getTime()), dueAt: localNoon(new Date(2026, 10, 20).getTime()) },
+    ];
+    const TEST157_INSTALLS = [
+      { startAt: localNoon(new Date(2026, 5, 1).getTime()), dueAt: localNoon(new Date(2027, 1, 15).getTime()) },
+    ];
+
+    const consultingOnly157 = ganttWindow(TEST157_CONSULTING, NOW157);
+    const installsOnly157 = ganttWindow(TEST157_INSTALLS, NOW157);
+
+    // The control. Without this the "shared window spans both" assertion
+    // below is vacuous — it would also pass if the two sections happened to
+    // agree already.
+    ok(
+      consultingOnly157.start !== installsOnly157.start && consultingOnly157.end !== installsOnly157.end,
+      "#157 control: a per-section window built from one section's bars genuinely differs from the other's at BOTH ends — the same x really did mean two different dates"
+    );
+
+    const shared157 = ganttWindow([...TEST157_CONSULTING, ...TEST157_INSTALLS], NOW157);
+    ok(
+      shared157.start === Math.min(consultingOnly157.start, installsOnly157.start) &&
+        shared157.end === Math.max(consultingOnly157.end, installsOnly157.end),
+      "#157 the shared window is the union of the two per-section windows — earliest start, latest end"
+    );
+    ok(
+      shared157.start < TEST157_INSTALLS[0].startAt && shared157.end > TEST157_INSTALLS[0].dueAt,
+      "#157 the shared window contains the earliest bar start and the latest bar end of BOTH sets, with padding"
+    );
+    ok(
+      shared157.start < TEST157_CONSULTING[0].startAt && shared157.end > TEST157_CONSULTING[0].dueAt,
+      "#157 ...so the consulting bars are inside the shared window too, not clipped by the installs' wider extent"
+    );
+    ok(
+      ganttWindow(TEST157_CONSULTING, NOW157, 26).dayWidth === 26 && shared157.dayWidth === 0,
+      "#157 the window carries the shared px-per-day scale, defaulting to 0 for the percentage-only callers"
+    );
+    // An empty bar set still has to produce a usable window around today —
+    // the Consulting section renders before any engagement is scheduled.
+    const empty157 = ganttWindow([], NOW157);
+    ok(
+      empty157.start < NOW157 && empty157.end > NOW157 && empty157.end > empty157.start,
+      "#157 an empty bar set still yields a window around today rather than a degenerate range"
+    );
+
+    /* ---- #154: the anchor is NOON, so a US-offset browser re-flooring a
+     * UTC-rendered boundary lands on the SAME calendar day. The window is
+     * computed once (on the server) and serialized; the client re-floors it
+     * with `snapToDay`/`dayColumns`, which are local-calendar-day based by
+     * design (D166). Noon gives that re-floor ±12h of slack — every US zone
+     * is within UTC-4…UTC-10 of the deployment's UTC. ---- */
+    process.env.TZ = "UTC";
+    const serverWindow154 = ganttWindow([...TEST157_CONSULTING, ...TEST157_INSTALLS], NOW157);
+    const serverCols154 = dayColumns(serverWindow154.start, serverWindow154.end);
+    const serverFirstDay154 = new Date(serverCols154[0]).getDate();
+    const serverLastDay154 = new Date(serverCols154[serverCols154.length - 1]).getDate();
+    // Captured while TZ is still the *producing* zone: "anchored at local
+    // noon" is a statement about the zone the window was computed in, so
+    // re-testing it after the switch below would only re-measure the offset.
+    const serverBoundariesAtNoon154 =
+      localNoon(serverWindow154.start) === serverWindow154.start && localNoon(serverWindow154.end) === serverWindow154.end;
+    const serverStartsSunday154 = new Date(serverWindow154.start).getDay() === 0;
+
+    // The control for #154: a MIDNIGHT-anchored boundary — what `sow()`
+    // produced before this fix — moves a whole calendar day when the same
+    // instant is re-floored in a US zone. This is the bug, reproduced.
+    const midnightBoundary154 = snapToDay(serverWindow154.start);
+    const midnightDayUTC154 = new Date(midnightBoundary154).getDate();
+
+    process.env.TZ = "America/Chicago";
+    const clientCols154 = dayColumns(serverWindow154.start, serverWindow154.end);
+    ok(
+      new Date(snapToDay(midnightBoundary154)).getDate() !== midnightDayUTC154,
+      "#154 control: a MIDNIGHT-anchored boundary re-floors to a DIFFERENT calendar day in a US zone — the full-day hydration shift, reproduced"
+    );
+    ok(
+      clientCols154.length === serverCols154.length,
+      "#154 the noon-anchored window yields the same NUMBER of day columns on a UTC server and a US-offset client"
+    );
+    ok(
+      new Date(clientCols154[0]).getDate() === serverFirstDay154 &&
+        new Date(clientCols154[clientCols154.length - 1]).getDate() === serverLastDay154,
+      "#154 ...and the same FIRST and LAST calendar day — no full-day shift on hydration"
+    );
+    ok(
+      serverBoundariesAtNoon154,
+      "#154 both window boundaries are anchored at local noon, the anchor every date input in this app writes"
+    );
+    ok(
+      serverStartsSunday154,
+      "#157 the window still starts on a Sunday — the week-ruler padding survives the move to a noon anchor"
+    );
+    // DST: the padding must move by whole LOCAL days, not by raw 86400000ms,
+    // or a window spanning a transition drifts an hour and can floor onto
+    // the wrong day. Nov 1 2026 is the US fall-back.
+    const acrossDst157 = ganttWindow(
+      [{ startAt: localNoon(new Date(2026, 9, 28).getTime()), dueAt: localNoon(new Date(2026, 10, 4).getTime()) }],
+      NOW157
+    );
+    ok(
+      localNoon(acrossDst157.start) === acrossDst157.start && localNoon(acrossDst157.end) === acrossDst157.end,
+      "#154 a window whose padding crosses the DST fall-back still lands exactly on local noon at both ends"
+    );
+  } finally {
+    if (savedTZ157 === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTZ157;
+  }
 }
 
 /* ====== #145: template lines carry scope + units ====== */
@@ -10004,5 +10333,763 @@ async function davinciWriterAsyncChecks(): Promise<void> {
     ok(empty.written === 0 && empty.missing === 0, "#162 an empty plan list writes nothing — apply never queries for more rows");
   } finally {
     for (const s of [SKU_A, SKU_B, SKU_C, SKU_D]) await softDeleteDoc("catalog_parts", s);
+  }
+}
+
+/* ====================================================================
+   #169 / #170 / #171 — spawnFromQuote correctness (D225).
+
+   `setStatus` routes every won/sent/lost quote through
+   `src/lib/stores/quote-spawn.ts`, inside its transaction. Three defects
+   in that router are pinned here, each against the real doc-store (a
+   scratch datadir under `npm run test:specs`):
+
+     #169 a project the user DELETED must stay deleted — the dismissed
+          list the page-load sweep has always honoured now gates the
+          per-quote creator too;
+     #170 re-approving an ALREADY-won quote must still spawn — the four
+          service builder screens set `won` and then act, and cfc00ad
+          deleted their own `createFromQuote` calls;
+     #171 losing consulting quote A must not touch quote B's engagement —
+          the `lost` branch used to borrow the full-collection sweep.
+
+   Fixtures are `TEST169:`-prefixed and torn down in `finally`, because
+   this may run against the one shared Neon instance, not a scratch DB.
+   ==================================================================== */
+import { getDoc as getDoc169, listDocs as listDocs169, patchDoc as patchDoc169, setBlob } from "../src/db/doc-store";
+import { setStatus as setQuoteStatus169 } from "../src/lib/stores/quotes";
+import { DISMISSED_BLOB_ID, dismissedQuoteIds } from "../src/lib/stores/projects";
+import { getEngagementByQuote } from "../src/lib/stores/engagements";
+import { byQuote as flameByQuote } from "../src/lib/stores/flame-jobs";
+
+async function quoteSpawnAsyncChecks(): Promise<void> {
+  const PRE = "TEST169:";
+  const Q_PROJECT = `${PRE}system`;
+  const Q_FLAME = `${PRE}flame`;
+  const Q_REPAIR = `${PRE}repair`;
+  const Q_INSPECTION = `${PRE}inspection`;
+  const Q_RENTAL = `${PRE}rental`;
+  const Q_CONSULT_WON = `${PRE}consulting-won`;
+  const Q_LOST_A = `${PRE}consulting-lost-a`;
+  const Q_KEEP_B = `${PRE}consulting-keep-b`;
+  const Q_UNKNOWN = `${PRE}unknown-type`;
+  const QUOTE_IDS = [
+    Q_PROJECT, Q_FLAME, Q_REPAIR, Q_INSPECTION, Q_RENTAL,
+    Q_CONSULT_WON, Q_LOST_A, Q_KEEP_B, Q_UNKNOWN,
+  ];
+  // The dismissed list is a blob singleton, so it is snapshotted and put
+  // back verbatim rather than edited in place (the ids this test adds are
+  // removed by the restore below, whatever else is in the list).
+  const dismissedBefore = await dismissedQuoteIds();
+  /** #16 "Install sold" assignments pointing at one quote. The replay path
+   *  must create none; a real transition on the same fixture shape does,
+   *  which is what keeps the negative assertion from being vacuous. */
+  const assignmentsFor = async (quoteId: string) =>
+    (await listDocs169("assignments")).filter(
+      (a) => ((a.link as { id?: string } | null)?.id || "") === quoteId
+    );
+
+  /** A complete-enough quote doc. `upsertDoc` writes the collection
+   *  directly — the same way the #13 block above fakes its quotes — so
+   *  the spawn is exercised without the builder UI/actions. */
+  const seedQuote = (
+    id: string,
+    quoteType: string,
+    status: string,
+    extra: Record<string, unknown> = {}
+  ) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#169 harness ${quoteType} quote`,
+      quoteType,
+      status,
+      customer: "Test Customer #169",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+      ...extra,
+    });
+
+  /** Every setStatus here names the builder screens' own bypass: these
+   *  fixtures carry no approval record, and the approval gate is not what
+   *  is under test. */
+  const win = (id: string) =>
+    setQuoteStatus169(id, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+
+  try {
+    /* ---------- #169: a deleted project must stay deleted ---------- */
+    await seedQuote(Q_PROJECT, "system", "draft");
+    await win(Q_PROJECT);
+    const born = await getProjectByQuote(Q_PROJECT);
+    ok(!!born, "#169 winning a system quote spawns its Installs project");
+    ok(
+      (await assignmentsFor(Q_PROJECT)).length === 1,
+      "#16 a REAL draft→won transition on a system quote does create the 'Install sold' assignment"
+    );
+    if (born) await removeProject(born.id);
+    ok(
+      (await dismissedQuoteIds()).includes(Q_PROJECT),
+      "#169 deleting a quote-born project records that quote on the dismissed list"
+    );
+    ok(await getProjectByQuote(Q_PROJECT) === null, "#169 the deleted project is gone");
+
+    // (a) a re-save of the SAME won status — the #170 replay path.
+    await win(Q_PROJECT);
+    ok(
+      await getProjectByQuote(Q_PROJECT) === null,
+      "#169 re-saving an already-won quote does NOT resurrect the project the user deleted"
+    );
+
+    // (b) a genuine lost → won transition, the router's original path.
+    await setQuoteStatus169(Q_PROJECT, "lost", "Test Harness");
+    await win(Q_PROJECT);
+    ok(
+      await getProjectByQuote(Q_PROJECT) === null,
+      "#169 winning a dismissed quote again does NOT resurrect the project (real transition too)"
+    );
+
+    /* ---------- #170: re-approving an already-won quote spawns ----------
+     * Each fixture is seeded ALREADY at `won` with no downstream record —
+     * exactly the state a builder screen's approve action lands in when the
+     * quote was won before (setStatus early-returns on an unchanged status,
+     * and cfc00ad deleted the actions' own createFromQuote calls). */
+    await seedQuote(Q_FLAME, "flame_test", "won", {
+      flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] },
+    });
+    ok(await flameByQuote(Q_FLAME) === null, "#170 flame fixture starts with no job");
+    await win(Q_FLAME);
+    const flameJob = await flameByQuote(Q_FLAME);
+    ok(!!flameJob, "#170 re-approving an already-won flame-test quote creates its job");
+    await win(Q_FLAME);
+    ok(
+      (await flameByQuote(Q_FLAME))?.id === flameJob?.id,
+      "#170 a second re-approval creates the flame job exactly once"
+    );
+
+    await seedQuote(Q_REPAIR, "repair", "won", {
+      repair: { title: "Harness repair", category: "other", venues: [{ id: null, label: "Main Stage" }] },
+    });
+    ok(await repairByQuote(Q_REPAIR) === null, "#170 repair fixture starts with no job");
+    await win(Q_REPAIR);
+    const repairJob = await repairByQuote(Q_REPAIR);
+    ok(!!repairJob, "#170 re-approving an already-won repair quote creates its job");
+    await win(Q_REPAIR);
+    ok(
+      (await repairByQuote(Q_REPAIR))?.id === repairJob?.id,
+      "#170 a second re-approval creates the repair job exactly once"
+    );
+
+    await seedQuote(Q_INSPECTION, "inspection", "won", {
+      inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] },
+    });
+    ok((await inspectionsByQuote(Q_INSPECTION)).length === 0, "#170 inspection fixture starts with no record");
+    await win(Q_INSPECTION);
+    ok(
+      (await inspectionsByQuote(Q_INSPECTION)).length === 1,
+      "#170 re-approving an already-won inspection quote creates its requested record"
+    );
+    await win(Q_INSPECTION);
+    ok(
+      (await inspectionsByQuote(Q_INSPECTION)).length === 1,
+      "#170 a second re-approval creates the inspection record exactly once"
+    );
+
+    await seedQuote(Q_RENTAL, "rental", "won", {
+      rental: {
+        lines: [{
+          itemId: `${PRE}item`, locationId: `${PRE}loc`, qty: 2,
+          startDate: Date.UTC(2027, 0, 4), endDate: Date.UTC(2027, 0, 8), rate: 25,
+        }],
+      },
+    });
+    ok((await bookingsByQuote(Q_RENTAL)).length === 0, "#170 rental fixture starts with no booking");
+    await win(Q_RENTAL);
+    ok(
+      (await bookingsByQuote(Q_RENTAL)).length === 1,
+      "#170 re-approving an already-won rental quote creates its booking"
+    );
+    await win(Q_RENTAL);
+    ok(
+      (await bookingsByQuote(Q_RENTAL)).length === 1,
+      "#170 a second re-approval creates the rental booking exactly once"
+    );
+
+    await seedQuote(Q_CONSULT_WON, "consulting", "won");
+    ok(await getEngagementByQuote(Q_CONSULT_WON) === null, "#170 consulting fixture starts with no engagement");
+    await win(Q_CONSULT_WON);
+    const consultEng = await getEngagementByQuote(Q_CONSULT_WON);
+    ok(!!consultEng, "#170 re-approving an already-won consulting quote creates its engagement");
+    ok(consultEng?.status === "awarded", "#170 the replayed consulting engagement is born at awarded");
+    await win(Q_CONSULT_WON);
+    ok(
+      (await getEngagementByQuote(Q_CONSULT_WON))?.id === consultEng?.id,
+      "#170 a second re-approval creates the consulting engagement exactly once"
+    );
+
+    // A system quote that was never dismissed must still spawn on replay —
+    // proving #169's new dismissed check gates only the dismissed case.
+    const projectReplay = `${PRE}system-replay`;
+    QUOTE_IDS.push(projectReplay);
+    await seedQuote(projectReplay, "system", "won");
+    // The replay path's safety contract (quotes.ts setStatus, unchanged-status
+    // branch): it does the spawn and NOTHING ELSE. `system` is the type that
+    // fires the #16 assignment above, so this fixture exercises every piece of
+    // machinery the branch returns before reaching.
+    const replayBefore = await getDoc169("quotes", projectReplay);
+    const histLen = (q: Record<string, unknown> | null) =>
+      Array.isArray(q?.history) ? (q.history as unknown[]).length : 0;
+    const revLen = (q: Record<string, unknown> | null) =>
+      Array.isArray(q?.revisions) ? (q.revisions as unknown[]).length : 0;
+    await win(projectReplay);
+    ok(
+      !!(await getProjectByQuote(projectReplay)),
+      "#170 re-approving an already-won system quote creates its project"
+    );
+    const replayAfter = await getDoc169("quotes", projectReplay);
+    ok(
+      !!replayBefore && !!replayAfter && histLen(replayAfter) === histLen(replayBefore),
+      "#170 the replay stamps no history entry"
+    );
+    ok(
+      !!replayBefore && !!replayAfter && replayAfter.updatedAt === replayBefore.updatedAt,
+      "#170 the replay does not write the quote at all (updatedAt unchanged)"
+    );
+    ok(
+      revLen(replayAfter) === revLen(replayBefore),
+      "#170 the replay cuts no revision"
+    );
+    ok(
+      (await assignmentsFor(projectReplay)).length === 0,
+      "#170 the replay raises no #16 'Install sold' assignment"
+    );
+
+    /* ---------- #171: losing A must not touch B ----------
+     * B is deliberately left OUT OF SYNC (quote won, engagement still at
+     * proposal_sent) — precisely the divergence the page-load sweep exists
+     * to repair. A's status change must leave that repair to the sweep. */
+    await seedQuote(Q_LOST_A, "consulting", "draft");
+    await setQuoteStatus169(Q_LOST_A, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const engA = await getEngagementByQuote(Q_LOST_A);
+    ok(engA?.status === "proposal_sent", "#171 sending consulting quote A opens its engagement at proposal_sent");
+
+    await seedQuote(Q_KEEP_B, "consulting", "draft");
+    await setQuoteStatus169(Q_KEEP_B, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const engB = await getEngagementByQuote(Q_KEEP_B);
+    ok(engB?.status === "proposal_sent", "#171 quote B's engagement also starts at proposal_sent");
+    // Move B's QUOTE to won behind setStatus's back, so its engagement stays
+    // at proposal_sent and a full-collection sweep would advance it.
+    await patchDoc169("quotes", Q_KEEP_B, (doc) => {
+      doc.status = "won";
+      return doc;
+    });
+
+    await setQuoteStatus169(Q_LOST_A, "lost", "Test Harness");
+    const engAAfter = await getEngagementByQuote(Q_LOST_A);
+    ok(engAAfter?.status === "closed", "#171 losing consulting quote A closes A's own engagement");
+    ok(
+      engAAfter?.decisions?.[0]?.decision === "Proposal lost",
+      "#171 A's close still records the 'Proposal lost' decision (copy unchanged)"
+    );
+    ok(
+      (engAAfter?.decisions?.[0]?.context || "").includes(Q_LOST_A),
+      "#171 the decision names the quote whose status decided it"
+    );
+    const engBAfter = await getEngagementByQuote(Q_KEEP_B);
+    ok(
+      engBAfter?.status === "proposal_sent",
+      `#171 losing quote A does NOT patch unrelated quote B's engagement (B is ${engBAfter?.status})`
+    );
+    ok(
+      (engBAfter?.decisions || []).length === 0,
+      "#171 quote B's engagement gains no decision entry from A's status change"
+    );
+    ok(
+      (engBAfter?.updatedAt || 0) === (engB?.updatedAt || 0),
+      "#171 quote B's engagement is not written to at all during A's transaction"
+    );
+
+    /* ---------- the one BEHAVIOUR change #171 makes ----------
+     * The pure rule is now applied to this quote at its status change rather
+     * than at the next page-load sweep, so re-sending a lost consulting
+     * proposal reopens its closed engagement immediately. A's engagement is
+     * `closed` from the block above. */
+    await setQuoteStatus169(Q_LOST_A, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const engAReopened = await getEngagementByQuote(Q_LOST_A);
+    ok(
+      engAReopened?.status === "proposal_sent",
+      `#171 re-sending a lost consulting quote reopens its engagement at the status change (is ${engAReopened?.status})`
+    );
+    ok(
+      !!engAReopened && engAReopened.id === engAAfter?.id,
+      "#171 the reopen reuses A's OWN engagement — it does not mint a second one"
+    );
+    ok(
+      (await listDocs169("consulting_engagements")).filter((e) => e.quoteId === Q_LOST_A).length === 1,
+      "#171 quote A still has exactly one engagement after the reopen"
+    );
+
+    /* ---------- an unrecognised quoteType never throws ---------- */
+    await seedQuote(Q_UNKNOWN, "no-such-quote-type", "draft");
+    let threw = false;
+    try {
+      await win(Q_UNKNOWN);
+    } catch {
+      threw = true;
+    }
+    ok(!threw, "#169 an unrecognised quoteType is handled, never a throw");
+  } finally {
+    // Teardown: fixed prefix, re-queried by that prefix rather than by
+    // local variables, so a mid-test throw still cleans up everything.
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "consulting_engagements", "tasks"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const a of await listDocs169("assignments")) {
+      const link = a.link as { id?: string } | null;
+      if (typeof link?.id === "string" && link.id.startsWith(PRE)) await softDeleteDoc("assignments", a.id);
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+    // Blob singleton — put the snapshot back rather than editing in place.
+    await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
+    ok(
+      (await dismissedQuoteIds()).every((i) => !i.startsWith(PRE)),
+      "#169 teardown leaves no TEST169 id on the dismissed list"
+    );
+  }
+}
+
+/* ====================================================================
+   #173 — the four service sweeps heal, and only heal (D227).
+
+   `cfc00ad` moved spawning into `setStatus` and deleted the four builder
+   approve actions' own `syncFromQuotes()`/`createFromQuote()` calls, which
+   left `syncFromQuotes` in flame-jobs / repair-jobs / inspections /
+   equipment-bookings with zero callers — so a quote won EARLIER through
+   the Estimator, Inbox or Home had no record and no path to one. The
+   sweeps are reattached on each type's owning page and its scheduler.
+
+   Reattaching them makes the deletion question urgent, so both directions
+   are pinned per store:
+
+     (a) a soft-deleted record is NOT re-created by the sweep — the
+         coverage map reads `{ includeDeleted: true }`, because the delete
+         UI returns to exactly the screens that now sweep;
+     (b) a won quote that never had a record STILL gets one — the whole
+         point of the reattachment, and the half a tombstone fix could
+         quietly break.
+
+   The per-quote creators carry rule (a) too: #170 made re-approving an
+   already-won quote reach them, and their `byQuote` dedupe is equally
+   tombstone-blind.
+
+   NOTE: a sweep is book-wide by nature, so these calls also reconcile any
+   genuinely orphaned won quote in the datadir (a throwaway `mktemp -d`
+   under `npm run test:specs`). Every assertion below is scoped to the
+   `TEST173:` fixtures, and teardown re-queries by that prefix.
+   ==================================================================== */
+import {
+  syncFromQuotes as flameSync173,
+  createFromQuote as flameCreate173,
+  remove as flameRemove173,
+} from "../src/lib/stores/flame-jobs";
+import {
+  syncFromQuotes as repairSync173,
+  remove as repairRemove173,
+} from "../src/lib/stores/repair-jobs";
+import {
+  syncFromQuotes as inspectionSync173,
+  remove as inspectionRemove173,
+} from "../src/lib/stores/inspections";
+import {
+  syncFromQuotes as bookingSync173,
+  createFromQuote as bookingCreate173,
+} from "../src/lib/stores/equipment-bookings";
+
+async function sweepHealingAsyncChecks(): Promise<void> {
+  const PRE = "TEST173:";
+  const Q_FLAME_HEAL = `${PRE}flame-heal`;
+  const Q_FLAME_GONE = `${PRE}flame-deleted`;
+  const Q_REPAIR_HEAL = `${PRE}repair-heal`;
+  const Q_REPAIR_GONE = `${PRE}repair-deleted`;
+  const Q_INSP_HEAL = `${PRE}inspection-heal`;
+  const Q_INSP_GONE = `${PRE}inspection-deleted`;
+  const Q_RENTAL_HEAL = `${PRE}rental-heal`;
+  const Q_RENTAL_GONE = `${PRE}rental-deleted`;
+  const QUOTE_IDS = [
+    Q_FLAME_HEAL, Q_FLAME_GONE, Q_REPAIR_HEAL, Q_REPAIR_GONE,
+    Q_INSP_HEAL, Q_INSP_GONE, Q_RENTAL_HEAL, Q_RENTAL_GONE,
+  ];
+
+  /** Won straight into the collection, never through `setStatus` — that is
+   *  precisely the state the sweep exists for: a win that happened on a
+   *  path which never spawned anything. */
+  const seedWon = (id: string, quoteType: string, extra: Record<string, unknown> = {}) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#173 harness ${quoteType} quote`,
+      quoteType,
+      status: "won",
+      customer: "Test Customer #173",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+      ...extra,
+    });
+
+  /** Rows for one quote INCLUDING tombstones — a re-creation shows up here
+   *  as a second row even though the live list stays empty, which is the
+   *  difference between "not re-created" and "re-created then re-hidden". */
+  const rowsFor = async (coll: "flame_jobs" | "repair_jobs" | "inspections" | "equipment_bookings", quoteId: string) =>
+    (await listDocs169(coll, { includeDeleted: true })).filter((d) => d.quoteId === quoteId);
+
+  const FLAME_BODY = { flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] } };
+  const REPAIR_BODY = { repair: { title: "#173 repair", category: "other", venues: [{ id: null, label: "Main Stage" }] } };
+  const INSP_BODY = { inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] } };
+  const RENTAL_BODY = {
+    rental: {
+      lines: [{
+        itemId: `${PRE}item`, locationId: `${PRE}loc`, qty: 2,
+        startDate: Date.UTC(2027, 0, 4), endDate: Date.UTC(2027, 0, 8), rate: 25,
+      }],
+    },
+  };
+
+  try {
+    /* ---------------- flame tests ---------------- */
+    await seedWon(Q_FLAME_HEAL, "flame_test", FLAME_BODY);
+    await seedWon(Q_FLAME_GONE, "flame_test", FLAME_BODY);
+    const flameGone = await flameCreate173(Q_FLAME_GONE);
+    ok(!!flameGone, "#173 flame fixture: the to-be-deleted quote gets its job first");
+    if (flameGone) await flameRemove173(flameGone.id);
+    ok(await flameByQuote(Q_FLAME_GONE) === null, "#173 flame: the deleted job is gone from the live list");
+    ok(await flameByQuote(Q_FLAME_HEAL) === null, "#173 flame: the orphaned won quote starts with no job");
+
+    await flameSync173();
+    ok(
+      await flameByQuote(Q_FLAME_GONE) === null,
+      "#173 flame sweep does NOT re-create a deleted job"
+    );
+    ok(
+      (await rowsFor("flame_jobs", Q_FLAME_GONE)).length === 1,
+      "#173 flame sweep writes no second row for the deleted job (tombstones counted)"
+    );
+    ok(
+      !!(await flameByQuote(Q_FLAME_HEAL)),
+      "#173 flame sweep still heals a won quote that never had a job"
+    );
+    ok(
+      await flameCreate173(Q_FLAME_GONE) === null,
+      "#173 flame createFromQuote honours the tombstone too (the #170 replay reaches it)"
+    );
+
+    /* ---------------- repairs ---------------- */
+    await seedWon(Q_REPAIR_HEAL, "repair", REPAIR_BODY);
+    await seedWon(Q_REPAIR_GONE, "repair", REPAIR_BODY);
+    const repairGone = await createRepairFromQuote(Q_REPAIR_GONE);
+    ok(!!repairGone, "#173 repair fixture: the to-be-deleted quote gets its job first");
+    if (repairGone) await repairRemove173(repairGone.id);
+    ok(await repairByQuote(Q_REPAIR_GONE) === null, "#173 repair: the deleted job is gone from the live list");
+    ok(await repairByQuote(Q_REPAIR_HEAL) === null, "#173 repair: the orphaned won quote starts with no job");
+
+    await repairSync173();
+    ok(
+      await repairByQuote(Q_REPAIR_GONE) === null,
+      "#173 repair sweep does NOT re-create a deleted job"
+    );
+    ok(
+      (await rowsFor("repair_jobs", Q_REPAIR_GONE)).length === 1,
+      "#173 repair sweep writes no second row for the deleted job (tombstones counted)"
+    );
+    ok(
+      !!(await repairByQuote(Q_REPAIR_HEAL)),
+      "#173 repair sweep still heals a won quote that never had a job"
+    );
+    ok(
+      await createRepairFromQuote(Q_REPAIR_GONE) === null,
+      "#173 repair createFromQuote honours the tombstone too"
+    );
+
+    /* ---------------- inspections ----------------
+     * The load-bearing case: `deleteInspection` soft-deletes and redirects
+     * to /inspections, which now sweeps. */
+    await seedWon(Q_INSP_HEAL, "inspection", INSP_BODY);
+    await seedWon(Q_INSP_GONE, "inspection", INSP_BODY);
+    const inspGone = await createInspectionFromQuote(Q_INSP_GONE);
+    ok(!!inspGone && inspGone.length === 1, "#173 inspection fixture: the to-be-deleted quote gets its record first");
+    for (const r of inspGone || []) await inspectionRemove173(r.id);
+    ok((await inspectionsByQuote(Q_INSP_GONE)).length === 0, "#173 inspection: the deleted record is gone from the live list");
+    ok((await inspectionsByQuote(Q_INSP_HEAL)).length === 0, "#173 inspection: the orphaned won quote starts with no record");
+
+    await inspectionSync173();
+    ok(
+      (await inspectionsByQuote(Q_INSP_GONE)).length === 0,
+      "#173 inspection sweep does NOT re-create a deleted record"
+    );
+    ok(
+      (await rowsFor("inspections", Q_INSP_GONE)).length === 1,
+      "#173 inspection sweep writes no second row for the deleted record (tombstones counted)"
+    );
+    ok(
+      (await inspectionsByQuote(Q_INSP_HEAL)).length === 1,
+      "#173 inspection sweep still heals a won quote that never had a record"
+    );
+    ok(
+      (await createInspectionFromQuote(Q_INSP_GONE) || []).length === 0,
+      "#173 inspection createFromQuote honours the tombstone too"
+    );
+
+    /* ---------------- rentals ----------------
+     * The board cancels rather than deletes today, so the tombstone is
+     * written straight through doc-store — the shape a sync-pushed delete
+     * from the offline outbox lands in. */
+    await seedWon(Q_RENTAL_HEAL, "rental", RENTAL_BODY);
+    await seedWon(Q_RENTAL_GONE, "rental", RENTAL_BODY);
+    const bookingGone = await bookingsByQuote(Q_RENTAL_GONE);
+    ok(bookingGone.length === 0, "#173 rental fixture starts with no booking");
+    await bookingSync173();
+    const bookingMade = await bookingsByQuote(Q_RENTAL_GONE);
+    ok(bookingMade.length === 1, "#173 rental sweep heals a won quote that never had a booking");
+    ok(
+      (await bookingsByQuote(Q_RENTAL_HEAL)).length === 1,
+      "#173 rental sweep heals every orphaned won quote in one pass, not just the first"
+    );
+    for (const b of bookingMade) await softDeleteDoc("equipment_bookings", b.id);
+    ok((await bookingsByQuote(Q_RENTAL_GONE)).length === 0, "#173 rental: the deleted booking is gone from the live list");
+
+    await bookingSync173();
+    ok(
+      (await bookingsByQuote(Q_RENTAL_GONE)).length === 0,
+      "#173 rental sweep does NOT re-create a deleted booking"
+    );
+    ok(
+      (await rowsFor("equipment_bookings", Q_RENTAL_GONE)).length === 1,
+      "#173 rental sweep writes no second row for the deleted booking (tombstones counted)"
+    );
+    ok(
+      (await bookingCreate173(Q_RENTAL_GONE)).length === 0,
+      "#173 rental createFromQuote honours the tombstone too"
+    );
+  } finally {
+    // Fixed prefix, re-queried by that prefix rather than by local
+    // variables, so a mid-test throw still cleans up everything.
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "tasks"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
+/* ======================================================================
+   #172 — detached work must not ride the caller's transaction.
+
+   `getDb()` reads an AsyncLocalStorage that `withTransaction` sets, so work
+   STARTED inside a unit but resolving AFTER it commits inherits a dead
+   transaction handle and throws "Transaction is closed" — into a
+   `.catch(() => {})` in the detached shapes that exist today
+   (comms.queuePeakLabelSync → gmail/label-sync.queueLabelSync).
+   `outsideTransaction()` is the escape hatch.
+
+   This proves the real timing rather than a shape: both continuations are
+   registered inside a live transaction and gated on a promise that is only
+   released after the unit has committed. The naive registration is kept
+   side by side deliberately — it is what makes the wrapped assertion
+   non-vacuous, and it fails the moment the wrapper stops doing anything.
+   ====================================================================== */
+import { getDb, outsideTransaction, withTransaction } from "../src/db";
+
+async function outsideTransactionAsyncChecks(): Promise<void> {
+  const PRE = "TEST172:";
+  const UNIT_ID = `${PRE}unit-write`;
+  const DETACHED_ID = `${PRE}detached-write`;
+  try {
+    const pooled = await getDb();
+
+    // Released only after the unit commits, so both continuations genuinely
+    // outlive the transaction.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let txHandle: unknown = null;
+    let wrappedHandle: unknown = null;
+    let naiveHandle: unknown = null;
+    let wrapped: Promise<void> = Promise.resolve();
+    let naive: Promise<void> = Promise.resolve();
+
+    await withTransaction(async () => {
+      txHandle = await getDb();
+      // A real write, so this is a real transaction and not an empty unit.
+      await upsertDoc("quotes", { id: UNIT_ID, name: "#172 unit write", status: "draft" });
+
+      // FIXED shape — the continuation is REGISTERED with the ALS exited.
+      // (A `.then()` captures the context at registration, not at
+      // resolution, which is exactly why wrapping the kickoff works.)
+      wrapped = outsideTransaction(() =>
+        gate.then(async () => {
+          wrappedHandle = await getDb();
+          await upsertDoc("quotes", {
+            id: DETACHED_ID,
+            name: "#172 detached write",
+            status: "draft",
+          });
+        })
+      );
+
+      // NAIVE shape — registered inside the unit, unwrapped.
+      naive = gate.then(async () => {
+        naiveHandle = await getDb();
+      });
+    });
+
+    ok(
+      txHandle !== null && txHandle !== pooled,
+      "#172 baseline: withTransaction really does swap getDb()'s handle for a transaction"
+    );
+
+    // The unit has committed. Only now let the detached work run.
+    release();
+    await wrapped;
+    await naive;
+
+    ok(
+      wrappedHandle === pooled,
+      "#172 work registered through outsideTransaction() resolves against the POOLED handle after the unit commits"
+    );
+    ok(
+      naiveHandle === txHandle,
+      "#172 the SAME work registered without the wrapper still reads the dead transaction — so the wrapper is load-bearing, not decoration"
+    );
+    ok(
+      !!(await getDoc169("quotes", DETACHED_ID)),
+      "#172 the detached write actually lands through the pooled handle after the commit"
+    );
+    ok(
+      !!(await getDoc169("quotes", UNIT_ID)),
+      "#172 the unit's own write still committed normally"
+    );
+  } finally {
+    await softDeleteDoc("quotes", DETACHED_ID);
+    await softDeleteDoc("quotes", UNIT_ID);
+  }
+}
+
+/* ====================================================================
+   #174 — `setStatus` throws for two unrelated reasons, and they must not
+   read the same.
+
+     - the APPROVAL GATE refusing a transition: a governance decision whose
+       sentence is written for the user and has to reach them verbatim;
+     - anything else (a TypeError in the spawn graph, a failed mint, a bad
+       row): a defect, whose message belongs in the operator's log and never
+       on a customer-facing screen.
+
+   Asserted as behaviour, not shape: a REAL refusal is produced by the real
+   store (an unapproved draft pushed to `won`), and the shared branch
+   `statusFailureMessage` is asked what a caller would show.
+
+   Fixtures are `TEST174:`-prefixed and torn down in `finally`, because this
+   may run against the one shared Neon instance, not a scratch DB.
+   ==================================================================== */
+import {
+  APPROVAL_GATE_REFUSAL,
+  isApprovalGateRefusal,
+  STATUS_CHANGE_FAILED,
+  statusFailureMessage,
+} from "../src/lib/stores/quotes";
+
+async function statusRefusalAsyncChecks(): Promise<void> {
+  const Q_GATE = "TEST174:unapproved";
+  /** What the shared branch sent to the operator's log. */
+  const logged: unknown[][] = [];
+  const realConsoleError = console.error;
+  try {
+    await upsertDoc("quotes", {
+      id: Q_GATE,
+      name: "#174 harness — never approved",
+      quoteType: "system",
+      status: "draft",
+      customer: "Test Customer #174",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+    });
+
+    // A real refusal from the real store — not a hand-built error.
+    let refusal: unknown = null;
+    try {
+      await setQuoteStatus169(Q_GATE, "won", "Test Harness");
+    } catch (e) {
+      refusal = e;
+    }
+    ok(refusal !== null, "#174 setStatus still refuses an unapproved draft -> won (the gate itself is unchanged)");
+    ok(isApprovalGateRefusal(refusal), "#174 the gate's refusal is recognised by isApprovalGateRefusal()");
+    const gate = requireApprovalToAdvance(null, "won");
+    const gateMsg = gate.ok ? "" : gate.error;
+    ok((refusal as Error).message === gateMsg, "#174 the refusal still carries the gate's own sentence, word for word");
+    ok((await getDoc169("quotes", Q_GATE))?.status === "draft", "#174 the refused quote did not move");
+
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+
+    // 1. The gate's message reaches the user verbatim, and is NOT logged as
+    //    a defect — it is a decision, not a fault.
+    ok(statusFailureMessage(refusal, "TEST174 gate") === gateMsg, "#174 a gate refusal is shown to the user verbatim");
+    ok(logged.length === 0, "#174 a governance refusal is not logged as a defect");
+
+    // 2. A defect: generic line for the user, real error for the operator.
+    const defect = new TypeError("TEST174: spawnFromQuote is not a function");
+    ok(!isApprovalGateRefusal(defect), "#174 a spawn defect is NOT recognised as a gate refusal");
+    const shown = statusFailureMessage(defect, "TEST174 defect");
+    ok(shown === STATUS_CHANGE_FAILED, "#174 a defect yields the generic user-facing line");
+    ok(!shown.includes("TEST174") && !shown.includes("spawnFromQuote"), "#174 the internal message never leaks to the user");
+    ok(logged.length === 1 && logged[0][1] === defect, "#174 the real error reaches console.error — logged, never swallowed");
+    ok(logged[0][0] === "TEST174 defect", "#174 the log line names the caller that failed");
+
+    // 3. A screen's own wording replaces the generic line for a defect, and
+    //    never overrides the gate's message.
+    const custom = "Couldn’t approve the repair quote — please try again.";
+    ok(statusFailureMessage(defect, "TEST174 defect-2", custom) === custom, "#174 a caller's own fallback wording is used for a defect");
+    ok(statusFailureMessage(refusal, "TEST174 gate-2", custom) === gateMsg, "#174 a caller's fallback never overrides the gate's message");
+
+    // 4. Identity is the brand — not the sentence, and not `instanceof`.
+    const impostor = new Error(gateMsg);
+    ok(!isApprovalGateRefusal(impostor), "#174 a plain Error carrying the same sentence is NOT a gate refusal — identity is never string-matched");
+    ok(statusFailureMessage(impostor, "TEST174 impostor") === STATUS_CHANGE_FAILED, "#174 ...so the impostor gets the generic line and is logged");
+    ok(logged.length === 3, "#174 exactly the three non-gate failures were logged (defect, defect-2, impostor)");
+    const otherCopy = Object.assign(new Error(gateMsg), {
+      approvalGateRefusal: "quotes/approval-gate-refused",
+    });
+    ok(isApprovalGateRefusal(otherCopy), "#174 a refusal minted by a SECOND instance of the quotes module still routes to the user — the brand crosses a boundary `instanceof` would not");
+    ok(statusFailureMessage(otherCopy, "TEST174 other-copy") === gateMsg, "#174 ...and its message is still shown verbatim");
+    ok(APPROVAL_GATE_REFUSAL === "quotes/approval-gate-refused", "#174 the brand is that exact string — the predicate compares it by value, so changing it is a breaking change");
+  } finally {
+    console.error = realConsoleError;
+    await softDeleteDoc("quotes", Q_GATE);
   }
 }

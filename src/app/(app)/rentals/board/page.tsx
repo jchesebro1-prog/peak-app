@@ -2,9 +2,11 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import {
   list as listBookings,
+  syncFromQuotes as syncBookingsFromQuotes,
   type EquipmentBooking,
   type BookingStatus,
 } from "@/lib/stores/equipment-bookings";
+import { safeSweep } from "@/lib/safe-sweep";
 import { list as listItems, type EquipmentItem } from "@/lib/stores/equipment-items";
 import { list as listLocations } from "@/lib/stores/equipment-locations";
 import { shortDate } from "@/lib/format";
@@ -40,8 +42,13 @@ const CSS = `
 `;
 
 export default async function BookingBoardPage() {
-  const [, bookings, items, locations] = await Promise.all([
-    requireUser(),
+  await requireUser();
+  // #173 (D227): the booking board is the only screen that reads bookings,
+  // so it is both the owning page and the scheduler for this type — one
+  // attachment covers both halves of the rule. /rentals is the equipment-item
+  // directory and never touches bookings, so it is deliberately not swept.
+  await safeSweep("equipment bookings", syncBookingsFromQuotes);
+  const [bookings, items, locations] = await Promise.all([
     listBookings(),
     listItems(),
     listLocations(),

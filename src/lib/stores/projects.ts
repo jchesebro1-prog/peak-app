@@ -67,7 +67,10 @@ export const STAGING_BUFFER = 7;
 /** Prototype fallback for window.Team.CURRENT (team.js default identity). */
 const DEFAULT_ACTOR = "Jeff Chesebro";
 
-const DISMISSED_BLOB_ID = "projects_dismissed";
+/** Blob id of the dismissed list. Exported so no other module — including
+ *  the test harness, which snapshots and restores the singleton — has to
+ *  restate the literal. */
+export const DISMISSED_BLOB_ID = "projects_dismissed";
 
 function now(): number {
   return Date.now();
@@ -331,7 +334,13 @@ export function normalizeProject(p: ProjectRecord, pipes: Pipelines): ProjectRec
 
 /* ---------- dismissed list (blob singleton "projects_dismissed") ---------- */
 
-async function dismissedQuoteIds(): Promise<string[]> {
+/**
+ * Quotes whose converted project was DELETED — the sweep (and, since #169,
+ * the per-quote creator reached from `quote-spawn.ts`) must never re-create
+ * them. Exported so the router can consult the list without a second module
+ * restating DISMISSED_BLOB_ID.
+ */
+export async function dismissedQuoteIds(): Promise<string[]> {
   const blob = await getBlob<{ ids: string[] }>(DISMISSED_BLOB_ID, { ids: [] });
   return Array.isArray(blob.ids) ? blob.ids : [];
 }

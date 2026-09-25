@@ -4975,3 +4975,213 @@ open. "+ Add" lives only in the expanded rail — adding a system while the list
 select a system the user cannot see. Deliberately not done here: restoring keyboard focus to the
 counterpart control after a toggle (the pressed button unmounts, so focus falls to <body>); it
 affects #164 equally and belongs in one fix for both rails.
+
+## D225. The spawn router honours deletions, survives a replay, and stays scoped to its own quote (#169–#171, 2026-09-24)
+
+`cfc00ad` shipped `spawnFromQuote` — create a quote's downstream record at the moment of the win, inside
+`setStatus`'s transaction. Thirty-one lines, and three defects. Each was verified against the shipped code, not
+inferred.
+
+**#169 — a deleted project came back.** The project branch called `createProjectFromQuote` unconditionally.
+Deleting a project created from a won quote records that quote in a dismissed list, which the page-load sweep has
+always honoured and the per-quote creator never did. Any later re-save of that quote's `won` status silently
+recreated what the user deleted. `dismissedQuoteIds()` is now exported and consulted before the project branch —
+exported rather than the blob id duplicated, so there is one source of truth.
+
+**#170 — re-approving an already-won quote created nothing.** The router returned early when `prevStatus === "won"`,
+which was survivable only because the four builder approve actions each called `createFromQuote` themselves. The
+same commit deleted all four. The real gate turned out to be a layer up: `setStatus` returns at
+`q.status === status` before the router is ever reached, so relaxing the router alone would have fixed nothing. The
+unchanged-status path now replays the spawn **and nothing else** — no write, no history entry, no revision, no #16
+assignment — and that contract is asserted, not just commented.
+
+**#171 — the consulting `lost` branch swept the whole book inside the transaction.** It delegated to
+`syncEngagementsFromQuotes()`, which lists every engagement and every quote and patches every engagement whose rule
+fires — other quotes' records, in this user's unit. One malformed row elsewhere blocked the status change the user
+asked for, and a rollback discarded legitimate repairs made for others. Now scoped to this quote through the
+existing pure rule `engagementSyncAction`, with all three write kinds going through one shared writer.
+
+**Two things deliberately kept from the shipped version** rather than "fixed": an unrecognised `quoteType` still
+routes to the project branch, because the CSV importer can mint `"service"` and `syncProjectsFromQuotes` expects it —
+an inert default would have silently stopped service quotes becoming projects. And the sweep keeps its
+`{created, skipped}` shape and per-quote `try`/`catch`.
+
+**One behaviour convergence, not a new rule:** applying the pure rule per-quote means a re-sent consulting quote now
+reopens a closed engagement at the status change instead of on the next page load. Both sweep call sites were page
+loads, so no end state is reachable now that was not reachable before — only sooner.
+
+**Recorded because it was nearly written down wrong:** no spawn opt-out was added for the CSV importer. The
+importer's `update` path matches quotes by name and customer across the whole book with no type filter, so a
+re-import can spawn repair jobs and rental bookings the shipped `update` path never created. The tombstone coverage
+in D227 is what has to catch that, because it sits where the importer's `setStatus` reaches it.
+
+**Left alone, on the record:** `startConversionAction` and `spawnServiceLinkedProject` still reach a quote-born
+project without consulting the dismissed list. Both are explicit, user-initiated actions where "convert" means what
+it says, and the UI only offers the first from a list that already filters. Noted so the choice is visible.
+
+## D226. `outsideTransaction` — detached work must not ride the caller's transaction (#172, 2026-09-24)
+
+`withTransaction` puts a `tx` in an `AsyncLocalStorage` that `getDb()` reads, which is what makes the whole ambient
+design work. It has a sharp edge: work *started* inside a unit but resolving **after** it commits still reads the
+dying `tx`, and its write throws "Transaction is closed" — into whatever catch the caller has.
+
+`outsideTransaction(fn)` runs `fn` with the ALS context exited, so anything it starts gets the pooled handle. It is
+for detached background work, and explicitly **not** a way to sneak a write past a rollback.
+
+Applied inside `queueLabelSync`, which covers all six call sites (comms, linking ×2, bridge ×3) rather than only the
+one that motivated it. The subtlety: a `.then()` continuation captures the context at **registration** time, so
+registering inside the exited scope is what matters, not where the promise resolves.
+
+**Honest scope:** this is preventative. `withTransaction` today exists only in `setStatus`, and nothing in its call
+closure reaches the Gmail path — so the silent dropped label sync was not yet reachable. It becomes reachable the
+first time a comms flow wraps a quote status change, which is exactly the kind of change nobody would think to audit
+for this. **Named behaviour change:** a sync queued inside a unit that later rolls back will now actually run, rather than
+throwing. Better, but different — and note this is a production-only property. On Neon the detached write takes a
+second pooled connection immediately and is genuinely independent of the unit; on dev PGlite, which serializes the
+whole process behind one connection, it simply waits, so the independence is not observable locally. "It behaved in
+dev" is not evidence about this one.
+
+## D227. A tombstone is coverage: the healing sweeps stop resurrecting deleted records (#173, 2026-09-24)
+
+`cfc00ad` deleted `syncFromQuotes()`/`createFromQuote()` from the four builder approve actions. New wins are
+transactional and fine. But wins that happened *before* it through the Estimator, Inbox or Home never swept, and the
+book-wide heal that used to run on any "Won" click went with it. `system` and `consulting` orphans still self-heal on
+page load; **the four service types had no repair path at all**, and their `syncFromQuotes` had zero callers.
+
+Each is now attached through `safeSweep` on the page that owns that record type **and on its scheduling page**. The
+scheduler is not decoration: a healed flame job is born `stage: "approved"`, which is precisely what the scheduling
+screen lists as awaiting a date — so the screen a dispatcher would check for the missing job was otherwise the one
+screen that could not create it. Bookings get `/rentals/board` only, which *is* the rentals scheduler; `/rentals` is
+the item directory and is deliberately not swept.
+
+**Reattaching a sweep to a page a delete redirects to is what makes tombstone-awareness mandatory,** not optional.
+These sweeps built "already covered" from `listDocs`, which excludes soft-deleted rows — so deleting an inspection
+and landing back on `/inspections` would have produced a fresh blank record with a new id. Delete would be
+destructive *and* ineffective. Coverage is now built with `includeDeleted`, and the per-quote creators too, because
+#170's replay reaches them. A trap worth recording: `listDocs` does not merge the `deleted` column onto the returned
+doc, so a tombstone handed back looks live — collect a `Set` of quote ids, never pass the docs around.
+
+**This reverses a documented intent.** `flame-jobs.ts` described re-creation after removal as deliberate prototype
+parity. That was written when the sweep ran on a win, not on every dashboard load. The comment is corrected.
+
+**Consequences, stated plainly:** a tombstone is coverage and there is no undelete UI — but it is not quite
+permanent. For `flame_jobs`, `repair_jobs` and `inspections`, `/api/sync/push` writes `deleted: false` on every
+update, so an offline device that edits a record the server has since tombstoned un-deletes it, after which the
+coverage set no longer holds that quote. Narrow, but it is a resurrection path guarded by neither mechanism.
+Projects are actually better protected here, because the dismissed list is a blob and never travels over sync —
+worth saying, since this entry otherwise presents the blob as the weaker legacy shape. Page load is
+serialized behind the sweep on seven screens. And the reattached sweeps are still read-then-insert with no
+uniqueness on `quoteId` — see #180.
+
+## D230. A policy refusal and a defect no longer look the same (#174, 2026-09-24)
+
+`setStatus` throws for two unrelated reasons: the approval gate refusing a transition, whose message is written for
+the user, and any defect in the spawn graph, which is not. Every caller rendered both identically, so a `TypeError`
+from a spawner was indistinguishable from a governance decision in production.
+
+`ApprovalGateRefused` now carries a brand field, and `isApprovalGateRefusal` reads that brand **by value rather than
+`instanceof`** — a server-action bundle split can hold a second copy of the module, and an identity miss would lose
+the gate's message, which is the one message that must reach the user verbatim. One shared
+`statusFailureMessage(e, where, fallback?)` sits next to it: gate message verbatim, otherwise `console.error` with
+the real error plus a generic line. Every caller uses it rather than carrying its own copy.
+
+The gate's wording and conditions are unchanged. The renewal path in the Inbox still swallows by design, but now
+logs the real error instead of dropping a defect silently. The Home stage sheet, which previously caught nothing at
+all, now stays open showing the reason instead of closing as though it had worked.
+## D228. Unlocated venues are fixed one at a time from a live worklist; the quote origin is an explicit choice (#175, 2026-09-24)
+
+- **The worklist is a query, not the run's memory.** It lists live venues with an address or city, no usable coordinates, and no `travelMiles` override, ordered case-insensitively by company then venue. The rule matches `estimateFromParts`, where only `travelMiles` counts as manual. Reasons from the current page's batch run are shown when known and never persisted, which avoids a schema change for a transient list.
+- **Three fixes, no town-centre shortcut** (Jeff declined it):
+  - **Retry** reuses `geocodeVenue()`, the same gates as the batch.
+  - **A human pick or pin bypasses the gates**, because a person chose the place. A pick never erases stored data: the street is replaced only by one carrying a house number, and blank fields keep their stored values. This stops a town-level suggestion from becoming a back-door town-centre fix.
+  - **Precision is reported.** A city-precision result says "town centre".
+- **The sidebar never writes `travelMiles`/`travelMin`.** The Companies "Route" button does, and that freezes travel as a manual override. Here travel stays live through the route cache, warmed at fix time.
+- **Writes** are one targeted `UPDATE … WHERE id AND NOT deleted RETURNING`. Zero rows means `gone`.
+- **Quote origin** is set explicitly per location: a pill plus *Use for quotes*. The implicit "first listed" fallback stays, but is labelled so it is visible. Calendar travel blocks still start from each person's "Based out of" office and fall back to the quote origin; per-appointment origins are a separate item.
+
+## D229. Directory drive times measure from the quote origin; a calendar trip can start anywhere (#176, 2026-09-24)
+
+- **One origin for the directories.** The Drive column uses the same rule as every quote: `quoteOrigin()`, `coordsOf()` and `estimateFromParts()` (manual > routed > auto > none). It reads only the route cache, and a straight-line estimate is marked `~`, so a directory page never calls OSRM. With no located quote origin, every cell is "—", even for manual overrides, so the column can't imply a distance from nowhere.
+- **Companies use the primary venue** (`primaryLoc`). Nearest-of-many was rejected: it makes the row's number depend on a venue the row doesn't name.
+- **Unlocated rows sort last in both directions.** "Farthest first" should not open with 200 unknowns.
+- **The calendar origin is chosen per appointment:** a typed address, then a saved location with coordinates, then the person's base ("Based out of", else the quote origin). A typed miss falls back to the base and says so in the block's description; it doesn't silently drop the block. The travel block runs in `after()` so a slow geocoder can't time out the save and invite a duplicate meeting. Edits still don't regenerate the block (D144).
+- **Numbering.** #175/#176 and D228/D229, not #169/#170 and D225/D226, which a parallel session claimed first.
+
+## D231. A discipline removed from Settings is kept on an existing quote unless someone unticks it (#155, 2026-09-24)
+
+The quote builder has always shown a discipline that is on the quote but gone from the live Settings vocabulary, and
+a recent change labelled it `<Name> (removed)`. The save action still intersected against the **live** list, so it was
+dropped on the next save whether or not the box was ticked.
+
+That combination is worse than either half alone: the label makes a silent behaviour visible without making it true —
+a checkbox that names itself "removed", looks tickable, and is discarded regardless. Two smaller things were wrong
+underneath it: the checkbox was `disabled`, so "untick it to remove it" was literally unreachable, and its tooltip
+said the opposite of what happened.
+
+Now `resolveDisciplines(posted, live, existing)` keeps a posted value when it is in the live vocabulary **or**
+already on this quote, and drops everything else. The checkbox is tickable and says so.
+
+**The hole that intersection existed to close stays closed.** It is there to stop a hand-crafted POST stashing an
+arbitrary discipline. The allowlist gained exactly one term — `existing`, read from the **stored quote**, never from
+the form — so a value in neither list is still refused, pinned by its own test.
+
+It lives in `src/lib/settings.ts` rather than beside the action, because a `"use server"` module can only export
+async functions and this needs to be a pure, directly-testable helper.
+
+## D232. `/schedule?view=timeline` gets one window, one ruler, and a noon anchor (#157, #154, 2026-09-24)
+
+The page stacked two grids that did not agree on what a date is. Consulting rendered `GanttGrid` over its own range
+as a percentage of that range; the Installs timeline computed its own `tlStart`/`tlDays`/`tlDayW` at a fixed
+pixel-per-day. Both padded identically, but from **different bar sets** — so the same horizontal offset in the two
+stacked sections was, in general, two different calendar dates, with no shared ruler to say so.
+
+Both sections now take one `{ start, end, dayWidth }` computed from the **union** of their bars, positioned as a
+percentage of that shared range inside one scroll container whose inner width is `days × dayWidth`. Percentage alone
+would have killed zoom and horizontal scroll; converting `GanttGrid` to fixed pixels would have dragged the
+engagement Schedule tab and the By-person view into the change for no benefit. The shared fixed inner width keeps
+`dayWidth` meaningful and makes zoom scale both sections together.
+
+**#154 came along with it, and the punch entry was wrong twice.** It said no fix was required because React
+self-heals a style-only hydration mismatch, and it framed the fix as a rendering-strategy change. The engineering
+spec said the columns must render identically; the spec is the later decision and governs — and the fix is two lines
+in one pure function, not a rewrite. The punch's *mechanism* was also off: `ganttRange` only ever ran on the server
+and its result is serialized, so the divergence was `GanttGrid` re-flooring those midnight boundaries client-side.
+Anchoring the range to local noon — the convention every other date in this app uses — gives that re-floor ±12h of
+slack. A side effect worth knowing: `?view=timeline` now has no #154 exposure at all, because it no longer renders a
+client grid; the fix still matters for `?view=people`.
+
+**Verified by measurement, not by eye:** ruler, consulting and install tracks all report `{left: 241, width: 12935}`;
+every bar sits an exact integer day offset from the shared week labels; the today band is one continuous line through
+both sections; and adding a scheduled engagement widened the install ruler from 131 to 143 weeks — the union working,
+which the old code could not have done.
+
+**Left deliberately:** the window is unbounded, so one garbage stored date yields a multi-decade grid, and per-day
+iteration makes that roughly three times the DOM cost of the old per-week loop. Clamping it would hide real
+long-lead work, which is worse.
+
+## D233. Spec fixtures are torn down by default, and teardown means removal, not a tombstone (#149, 2026-09-24)
+
+`scripts/test-review-and-spec.ts` wrote DB-backed fixtures that nothing deleted — a file-wide convention, not one
+test's oversight. Individual tests had been fixed by hand several times and the next author still had to remember.
+
+There is now one marker shape, `TEST<scope>:<slug>`, already the majority form in the file so the change is
+convention rather than churn; a `createFixture()` that registers for teardown at the moment of creation, so cleanup
+is the default; suite-level teardown in a `finally` so a mid-suite throw still cleans up; and
+`npm run test:sweep-fixtures` to repair a datadir after the fact — dry run by default, `--commit` to write, `--yes`
+additionally for a hosted target, and `--hard` refused on a hosted target under every flag combination.
+
+**The finding that makes this entry worth writing: teardown cannot soft-delete.** The first attempt did, and the
+suite passed at 2183 on the first run and failed with **21 errors** on the second against the same datadir. The
+spawn router is now tombstone-aware (D227) — a tombstone counts as coverage precisely so a deleted record is not
+recreated — so soft-deleted fixtures silently suppressed the spawns the next run was asserting. Fixture teardown
+removes rows outright.
+
+That interaction was invisible to every previous run of this suite, because each one got a fresh `mktemp -d`. Running
+twice against **one** datadir is what surfaced it, and is now the check that proves teardown works.
+## D235. Messy addresses get fallback lookups, gated by zip, only after the normal lookup misses (#185, 2026-09-24)
+
+- **The primary lookup is frozen.** It uses the same query and the same gates as before, so nothing that already geocodes changes, and every new rule is confined to fallbacks. A first version put the new cleanup into `cleanStreet`. Review showed that changed the first lookup's query, and a colon rule mangled real streets on it (`"100 Main St, Suite: 4"` → `"4"`).
+- **"Street + state + zip, no city" is the main fallback.** It was measured as the biggest win on real failures. Nominatim's free text often chokes on a postal city that differs from the OSM municipality, and on a typo'd city.
+- **Zip gate:** a same-zip hit is trusted over a mismatched city name, but not blindly. If the stated town resolves exactly, the hit must be within 25 mi of it, which guards against a mistyped zip matching the same street name elsewhere. If the town doesn't resolve (a typo), the zip alone decides. A fallback with no city and no zip is never accepted. The Portage County trap (D185) stays closed: city-only rows get no fallbacks.
+- **The town-centre cache now uses the cleaned city on the first lookup too.** `Rome (Sullivan)` and `Wisc. Dells` can resolve their centre for the existing 10-mile postal rule. This is a deliberate small widening of attempt-1 acceptance.
+- **The batch budget is worst-case aware** (`elapsed + 4 × (delay + 5 s) > budget` stops before starting a query; the first query always runs). A killed server action loses its skip list, which is how #166's stall happened.

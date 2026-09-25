@@ -15,9 +15,11 @@ import {
   timeAgo,
   dueLabel,
   RENEWAL_LEAD_DAYS,
+  syncFromQuotes as syncFlameJobsFromQuotes,
   type FlameJob,
   type FlameJobStage,
 } from "@/lib/stores/flame-jobs";
+import { safeSweep } from "@/lib/safe-sweep";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { FlameMap } from "./controls";
@@ -78,9 +80,15 @@ export default async function FlameTestsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, jobs, quotes, customers] = await Promise.all([
-    requireUser(),
-    searchParams,
+  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  // #173 (D227): the flame dashboard owns flame jobs, so it is where an
+  // orphaned win is repaired. cfc00ad moved spawning into setStatus and
+  // deleted this module's own syncFromQuotes call, which left every quote
+  // won earlier through the Estimator / Inbox / Home with no job and no
+  // path to one. Backfill BEFORE the read below so a healed job is on this
+  // render, not the next. Never inside a transaction — this is page load.
+  await safeSweep("flame jobs", async () => (await syncFlameJobsFromQuotes()).created);
+  const [jobs, quotes, customers] = await Promise.all([
     getAll(),
     allQuotes(),
     allCustomers(),

@@ -12,8 +12,10 @@ import {
   categoryMeta,
   jobCoords,
   stageMeta,
+  syncFromQuotes as syncRepairJobsFromQuotes,
   type RepairJobRecord,
 } from "@/lib/stores/repair-jobs";
+import { safeSweep } from "@/lib/safe-sweep";
 import { RepairsMap } from "../controls";
 import { scheduleRepair, unscheduleRepair } from "../actions";
 import { formatJobValue } from "@/lib/job-value";
@@ -59,12 +61,12 @@ export default async function RepairSchedulingPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, jobs, users] = await Promise.all([
-    requireUser(),
-    searchParams,
-    getAll(),
-    activeUsers(),
-  ]);
+  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  // #173 (D227): a healed repair job is born `stage: "approved"` — the
+  // "awaiting a date" column of this very screen. Sweep here too, or the
+  // dispatcher's screen is the one that cannot create the missing job.
+  await safeSweep("repair jobs (scheduler)", syncRepairJobsFromQuotes);
+  const [jobs, users] = await Promise.all([getAll(), activeUsers()]);
 
   const scheduleId = one(sp.schedule);
 
