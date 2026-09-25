@@ -46,10 +46,12 @@ import { getSite } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
+import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
+import { isGridLayer } from "@/lib/design/grid-scopes";
 import {
   GRID_CURTAIN_TYPES,
   GRID_FULLNESS,
@@ -86,12 +88,18 @@ export async function createGridAssemblyAction(input: {
   modelNumber: string;
   scope: string;
   members: Array<{ symbolId: string; qty: number; x: number; y: number }>;
-  /** #131 — optional symbol override for the new entry ("" = category default). */
+  /** Legacy #131 shape override, kept for back-compat callers ("" = category
+   *  default). Superseded by `icon` (#206) — a caller that sends both gets
+   *  `icon` (createGridAssembly clears `shape` when `icon` is set). */
   shape?: string;
+  /** Per-entry stock-symbol icon override (#206, "" = category default). */
+  icon?: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
   if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
+  if (input.icon && !isGridIconId(input.icon)) return { ok: false, error: "Unknown icon." };
+  if (input.scope && !isGridLayer(input.scope)) return { ok: false, error: "Unknown scope." };
   let assembly: Awaited<ReturnType<typeof createGridAssembly>>;
   try {
     assembly = await createGridAssembly({
@@ -101,6 +109,7 @@ export async function createGridAssemblyAction(input: {
       scope: input.scope,
       members: input.members,
       shape: isGridShape(input.shape) ? input.shape : null,
+      icon: isGridIconId(input.icon) ? input.icon : null,
       by: user.name,
     });
   } catch (error) {
@@ -391,20 +400,33 @@ export async function setPlacementCategoryAction(
 }
 
 /**
- * #131 (D154): set or clear the symbol override on ONE grid-catalog entry.
- * Per-entry, not per-placement — placements resolve their part live, so every
- * placed instance of the entry (on every design) redraws with the new shape.
+ * Stock symbols (spec 2026-09-25): set or clear ONE grid-catalog entry's
+ * icon and/or colour. Per-entry, not per-placement — placements resolve
+ * their part live, so every placed instance, on every design, redraws.
+ * Only the keys present change; "" clears that key back to the resolved
+ * default. Setting or clearing the icon also clears the legacy D154 `shape`
+ * (setGridSymbolLook). requireUser, the same gate as the #131 shape action.
  */
-export async function setSymbolShapeAction(
+export async function setSymbolLookAction(
   projectId: string,
   symbolId: string,
-  shape: string
+  look: { icon?: string; color?: string }
 ): Promise<Result> {
   await requireUser();
-  if (shape !== "" && !isGridShape(shape)) return { ok: false, error: "Unknown symbol." };
-  const s = await setGridSymbolShape(symbolId, shape === "" ? null : shape);
+  const patch: { icon?: string | null; color?: string | null } = {};
+  if (look.icon !== undefined) {
+    if (look.icon !== "" && !isGridIconId(look.icon)) return { ok: false, error: "Unknown icon." };
+    patch.icon = look.icon || null;
+  }
+  if (look.color !== undefined) {
+    if (look.color !== "" && !isHexColor(look.color)) return { ok: false, error: "Colour must be #rrggbb." };
+    patch.color = look.color ? look.color.toLowerCase() : null;
+  }
+  if (!("icon" in patch) && !("color" in patch)) return { ok: true };
+  const s = await setGridSymbolLook(symbolId, patch);
   if (!s) return { ok: false, error: "That part is not in the Grid library." };
   revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
   return { ok: true };
 }
 

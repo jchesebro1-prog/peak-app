@@ -48,6 +48,14 @@ export type GridLayer = GridScope | typeof UNSCOPED;
 /** Display order for every scope filter, layer list, and rollup. */
 export const GRID_LAYERS: GridLayer[] = [...GRID_SCOPES, UNSCOPED];
 
+/** Type guard for the six valid layer values — a server action taking a
+ *  free-text `scope` from a client validates against this before storing it
+ *  (final fix wave: an unvalidated scope like "constructor" reaching
+ *  `SCOPE_COLOR_KEY[e.gridScope]` used to throw — see grid-icons.ts). */
+export function isGridLayer(v: unknown): v is GridLayer {
+  return typeof v === "string" && (GRID_LAYERS as readonly string[]).includes(v);
+}
+
 /**
  * Catalog group -> Grid scope. The six beta groups fold onto four of Jeff's
  * five; Rigging has no group of its own (rigging hardware is trade-only in

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { setSettings } from "@/lib/settings";
-import { cleanGridCategoryShapes } from "@/lib/design/grid-symbols";
+import { cleanCategoryIcons, cleanSymbolColors } from "@/lib/design/grid-icons";
 import { cleanWireTypes, type WireType } from "@/lib/catalog-connect";
 import { PORT_RULES } from "@/lib/catalog-port-rules";
 import { applyRules } from "@/lib/catalog-port-apply";
@@ -13,32 +13,33 @@ import { applyRules } from "@/lib/catalog-port-apply";
  * (Admin), same enforcement as every other admin-only screen in the app.
  */
 
-/** Grid symbol per category (#131, D154) — FULL REPLACEMENT (the wireTypes
- *  idiom): the card posts every row; a category left off draws as a
- *  rectangle. Unknown shapes and blank categories are dropped; capped.
- *  settings.gridCategoryShapes is a whole-map replacement — a stored {}
- *  would drop EVERY category to "rect" (resolveCategoryShapes treats an
- *  empty object as "the whole truth", not "no overrides"). cleanGridCategoryShapes
- *  collapses an empty result to null instead, so resolveCategoryShapes falls
- *  back to the seed, same as a fresh install. That's the ONLY case that
- *  clears the key: "Restore defaults" followed by Save posts today's seed as
- *  an explicit dense map (never empty), so it writes that map verbatim —
- *  pinning today's values, not clearing the key (controller review, Task 10
- *  fix).
- *
- *  Moved here (Grid Settings build) from settings/actions.ts, where it sat
- *  orphaned after the card's home page stopped rendering it — same file,
- *  same behavior, new route. */
-export async function saveGridCategoryShapesAction(map: Record<string, string>) {
+/** Category icons (stock symbols, spec 2026-09-25) — a SPARSE patch merged
+ *  per category over DEFAULT_CATEGORY_ICONS (resolveCategoryIcons), unlike
+ *  the D154 whole-map gridCategoryShapes it replaces. The card posts only
+ *  rows that differ from the default; cleanCategoryIcons drops unknown ids
+ *  and blank keys, caps the map, and collapses empty to null (= defaults),
+ *  which is also what "Reset to defaults" posts. revalidatePath("/",
+ *  "layout") refreshes the Grid editor and riser along with this page. */
+export async function saveCategoryIconsAction(map: Record<string, string>) {
   await requirePerm("manage_users");
-  await setSettings({ gridCategoryShapes: cleanGridCategoryShapes(map) });
+  await setSettings({ gridCategoryIcons: cleanCategoryIcons(map) });
+  revalidatePath("/design/grid/settings");
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** Symbol colours (stock symbols) — sparse per swatch over
+ *  DEFAULT_SYMBOL_COLORS; known keys and #rrggbb only; empty → null. */
+export async function saveSymbolColorsAction(map: Record<string, string>) {
+  await requirePerm("manage_users");
+  await setSettings({ gridSymbolColors: cleanSymbolColors(map) });
   revalidatePath("/design/grid/settings");
   revalidatePath("/", "layout");
   return { ok: true as const };
 }
 
 /** Wire-type registry (punch #39) — FULL REPLACEMENT, same idiom as the
- *  card above: the editor posts every row, cleanWireTypes validates/caps/
+ *  D154 symbols card this page used to carry: the editor posts every row, cleanWireTypes validates/caps/
  *  drops the invalid ones, and an all-invalid save clears the key back to
  *  DEFAULT_WIRE_TYPES rather than storing an empty list. */
 export async function saveWireTypesAction(rows: WireType[]) {

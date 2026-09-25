@@ -9,7 +9,7 @@ import { saveWireTypesAction } from "./actions";
  * "Wire types" card (Grid Settings build) — admin editor for
  * `settings.wireTypes`, the registry `resolveWireTypes` feeds to Grid wiring
  * validation (canConnect / validateDeviceWire, lib/catalog-connect). Full-
- * replacement save, the same GridSymbolsCard/CustomerFieldsCard idiom used
+ * replacement save, the same CustomerFieldsCard idiom used
  * across Settings admin cards: seed rows from the server-resolved (already
  * defaulted) list once on mount, edit locally, post the whole list on Save.
  *
@@ -18,7 +18,7 @@ import { saveWireTypesAction } from "./actions";
  * than a multi-select — there are ~60 of them and a plain text field keeps
  * this card in scale with the rest of Grid Settings. Unknown tokens are
  * silently dropped by the server action's cleanWireTypes, same as an
- * unrecognized shape in the symbols card above.
+ * unknown icon id in the Category icons card.
  */
 
 type Row = {

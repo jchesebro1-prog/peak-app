@@ -110,6 +110,16 @@ export type AppSettingsData = {
    *  there; the card was dropped from Settings without a new home until
    *  this route). */
   gridCategoryShapes?: Record<string, import("@/lib/design/grid-symbols").GridShape>;
+  /** Stock symbols (spec 2026-09-25) — SPARSE per-category icon overrides
+   *  (category → grid-icons id) MERGED over DEFAULT_CATEGORY_ICONS by
+   *  resolveCategoryIcons; absent/null = the shipped defaults. Edited in
+   *  Design → Grid Settings → Category icons. gridCategoryShapes above is
+   *  now read only as a legacy fallback (symbolLook). */
+  gridCategoryIcons?: Record<string, string> | null;
+  /** Stock symbols — SPARSE colour overrides keyed by catalog group, trade
+   *  or "Other" (SYMBOL_COLOR_KEYS), merged over DEFAULT_SYMBOL_COLORS by
+   *  resolveSymbolColors. Edited in Design → Grid Settings → Symbol colours. */
+  gridSymbolColors?: Record<string, string> | null;
   /** Pipelines (spec 2026-09-24 §3) — FULL REPLACEMENT lists (the wireTypes
    *  idiom). resolvePipelines in lib/pipelines returns the Daylite seeds when
    *  absent or invalid. Edited in Settings → Pipelines. */

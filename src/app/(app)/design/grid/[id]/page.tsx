@@ -11,11 +11,11 @@ import { sitesForCompany } from "@/lib/identity/sites";
 import { num } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
-import { groupOf, resolveCategoryMap, tradeOf } from "@/lib/catalog-taxonomy";
+import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
-import { resolveCategoryShapes } from "@/lib/design/grid-symbols";
+import { gridSymbolEntry, symbolContext } from "@/lib/design/grid-icons";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
 import type { FabricOption } from "@/app/(app)/design/quick/engine";
@@ -116,22 +116,22 @@ export default async function GridEditorPage({
       id: s.id,
       sku: s.modelNumber || s.id,
       desc: s.name,
-      category: s.category || "Other",
       unit: p?.unit || "ea",
       list: p?.list || 0,
       cost: p?.cost || 0,
       ...(ports.length > 0 ? { ports } : {}),
       ...(p?.datasheetBlobKey ? { hasDatasheet: true } : {}),
-      ...(p ? { group: groupOf(p, categoryMap), trade: tradeOf(p, categoryMap) } : {}),
+      // Category, icon/colour/shape overrides, Grid scope and the pricing
+      // part's group/trade — the same builder the riser uses, so a device
+      // draws the same badge on both (final fix wave #3).
+      ...gridSymbolEntry(s, p, categoryMap),
       manufacturer: s.manufacturer,
       modelNumber: s.modelNumber,
-      gridScope: s.scope,
       symbolWidth: s.width,
       symbolHeight: s.height,
       kind: s.kind || "device",
       assemblyMembers: s.members,
       pricingPartId: s.pricingPartId,
-      shape: s.shape ?? null, // #131 per-entry override; category defaults ride separately
     };
   });
 
@@ -209,7 +209,7 @@ export default async function GridEditorPage({
       laborHoursPerDevice={laborHoursPerDevice}
       specHref={specHref}
       venues={venues}
-      categoryShapes={resolveCategoryShapes(settings.gridCategoryShapes)}
+      symbolCtx={symbolContext(settings)}
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
     />
