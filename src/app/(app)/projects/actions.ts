@@ -14,6 +14,8 @@ import {
   removeCrew,
   addNote,
   addTime,
+  removeNote,
+  removeTime,
   setSignoff,
   setProjectValue,
   signoffScopes,
@@ -286,6 +288,28 @@ export async function addTimeAction(formData: FormData): Promise<void> {
     projectErrorPath(id, formTab(formData, "overview"), "Couldn’t save that time entry — please try again.");
   }
   revalidatePath("/", "layout");
+}
+
+/** Delete one field note (soft delete — flags the embedded entry). Throws on
+ *  refusal; the ConfirmButton this feeds shows a thrown Error's message
+ *  inline (same convention as removeCustomerNoteAction, companies/actions.ts). */
+export async function removeNoteAction(projectId: string, noteId: string): Promise<{ ok: true }> {
+  await requireUser();
+  if (!projectId || !noteId) throw new Error("Nothing to delete.");
+  const p = await removeNote(projectId, noteId);
+  if (!p) throw new Error("That project could not be found.");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** Delete one time-log entry — see removeNoteAction above. */
+export async function removeTimeAction(projectId: string, entryId: string): Promise<{ ok: true }> {
+  await requireUser();
+  if (!projectId || !entryId) throw new Error("Nothing to delete.");
+  const p = await removeTime(projectId, entryId);
+  if (!p) throw new Error("That project could not be found.");
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 /* ---- tasks (#17) — office-side create/status/edit for the detail tasks card ---- */

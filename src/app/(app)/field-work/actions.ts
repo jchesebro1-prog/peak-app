@@ -7,6 +7,8 @@ import {
   getProject,
   addNote,
   addTime,
+  removeNote,
+  removeTime,
 } from "@/lib/stores/projects";
 import { createTask, setTaskStatus } from "@/lib/stores/tasks";
 
@@ -86,6 +88,41 @@ export async function logFieldTime(formData: FormData): Promise<void> {
   } catch (error) {
     console.error("logFieldTime failed", error);
     redirectFieldError("Couldn’t save that time entry — please try again.", formData);
+  }
+  revalidatePath("/", "layout");
+}
+
+/** Delete a field note (soft delete — flags the embedded entry, same as the
+ *  office-side removeNoteAction in projects/actions.ts). */
+export async function removeFieldNote(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const noteId = String(formData.get("noteId") || "");
+  if (!id || !noteId) return;
+  try {
+    if (!await removeNote(id, noteId)) {
+      redirectFieldError("That note could not be deleted — please refresh and try again.", formData);
+    }
+  } catch (error) {
+    console.error("removeFieldNote failed", error);
+    redirectFieldError("Couldn’t delete that note — please try again.", formData);
+  }
+  revalidatePath("/", "layout");
+}
+
+/** Delete a logged time entry — see removeFieldNote above. */
+export async function removeFieldTime(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const entryId = String(formData.get("entryId") || "");
+  if (!id || !entryId) return;
+  try {
+    if (!await removeTime(id, entryId)) {
+      redirectFieldError("That time entry could not be deleted — please refresh and try again.", formData);
+    }
+  } catch (error) {
+    console.error("removeFieldTime failed", error);
+    redirectFieldError("Couldn’t delete that time entry — please try again.", formData);
   }
   revalidatePath("/", "layout");
 }

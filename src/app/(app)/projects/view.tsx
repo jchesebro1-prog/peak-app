@@ -59,6 +59,7 @@ import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
 import SignaturePad from "@/components/signature-pad";
 import { ProjectValueEditor } from "@/components/project-value-editor";
+import { NoteDeleteButton } from "./note-delete-button";
 import { DeleteProjectButton } from "./delete-project-button";
 import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
@@ -1205,6 +1206,7 @@ function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRec
   }
   const projectTasks = taskRows.filter((task) => task.projectId === p.id);
   const doneTasks = projectTasks.filter((task) => task.status === "done").length;
+  const liveNotes = (p.notes || []).filter((n) => !n.deleted);
   const section = (title: string, children: React.ReactNode) => (
     <section style={{ border: "1px solid #e8ebf0", borderRadius: 12, padding: "13px 15px", background: "#fff" }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: "#6f7682", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 9 }}>{title}</div>
@@ -1233,8 +1235,8 @@ function HandoffPacketTab({ p, taskRows }: { p: ProjectRecord; taskRows: TaskRec
         const lines = scopeLines.get(scope) || [];
         return <div key={scope}><div style={{ fontSize: 12.5, fontWeight: 650, color: "#30343c", marginBottom: 4 }}>{scope}</div>{lines.length ? lines.map((line) => <div key={line.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "4px 0 4px 10px", fontSize: 12, color: "#5b616e" }}><span>{line.desc}</span><span style={{ fontFamily: "var(--font-mono)", color: "#8c919c" }}>{line.qty} {line.unit} · {line.status}</span></div>) : <div style={{ color: "#9aa0ab", fontSize: 12 }}>No procurement lines recorded.</div>}</div>;
       })}</div>)}
-      {section("Field progress", <>{row("Tasks", `${doneTasks} of ${projectTasks.length} complete`)}{row("Notes", `${p.notes.length} recorded`)}{p.signoff ? row("Customer acceptance", `Signed by ${p.signoff.name || "customer"} · ${fmtDateY(p.signoff.signedAt)}`) : row("Customer acceptance", "Pending")}</>)}
-      {p.notes.length > 0 && section("Recent notes", <div style={{ display: "grid", gap: 7 }}>{p.notes.slice(0, 8).map((note) => <div key={note.id} style={{ fontSize: 12.5, lineHeight: 1.45, color: "#3d424e" }}><span style={{ color: "#8c919c" }}>{firstName(note.by)} · {fmtDateY(note.at)} </span>{note.text}</div>)}</div>)}
+      {section("Field progress", <>{row("Tasks", `${doneTasks} of ${projectTasks.length} complete`)}{row("Notes", `${liveNotes.length} recorded`)}{p.signoff ? row("Customer acceptance", `Signed by ${p.signoff.name || "customer"} · ${fmtDateY(p.signoff.signedAt)}`) : row("Customer acceptance", "Pending")}</>)}
+      {liveNotes.length > 0 && section("Recent notes", <div style={{ display: "grid", gap: 7 }}>{liveNotes.slice(0, 8).map((note) => <div key={note.id} style={{ fontSize: 12.5, lineHeight: 1.45, color: "#3d424e" }}><span style={{ color: "#8c919c" }}>{firstName(note.by)} · {fmtDateY(note.at)} </span>{note.text}</div>)}</div>)}
       {section("Drawings & datasheets", <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.5 }}>Grid plan sheets, catalog datasheets, and the rough riser belong to the linked design package. Use the Grid client package action when a design is linked; missing assets are reported explicitly in that package index.</div>)}
     </div>
   );
@@ -1291,7 +1293,7 @@ function OverviewTab({
   const projectTasks = taskRows.filter((t) => t.projectId === p.id);
   const tasksDone = projectTasks.filter((t) => t.status === "done").length;
   const taskTotal = projectTasks.length;
-  const recentNotes = (p.notes || []).slice(0, 3);
+  const recentNotes = (p.notes || []).filter((n) => !n.deleted).slice(0, 3);
 
   return (
     <>
@@ -1399,12 +1401,13 @@ function OverviewTab({
               >
                 {initialsOf(n.by)}
               </span>
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 12.5, lineHeight: 1.4, color: "#3a3f4a" }}>{n.text}</div>
                 <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
                   {firstName(n.by)} · {timeAgo(n.at)}
                 </div>
               </div>
+              <NoteDeleteButton projectId={p.id} noteId={n.id} />
             </div>
           ))}
         </>

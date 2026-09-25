@@ -168,6 +168,10 @@ export type ProjectNote = {
   at: number;
   text: string;
   photo: string | null;
+  /** Soft-delete flag (Round 2 delete pass) — embedded in the project doc,
+   *  so removal marks the entry rather than removing the parent's own
+   *  softDeleteDoc tombstone. Absent/false = live. */
+  deleted?: boolean;
 };
 
 export type TimeLog = {
@@ -176,6 +180,8 @@ export type TimeLog = {
   date: number;
   hours: number;
   note: string;
+  /** Soft-delete flag — see ProjectNote.deleted. */
+  deleted?: boolean;
 };
 
 export type ProjectSignoff = {
@@ -1043,6 +1049,26 @@ export async function addTime(
       hours: parseFloat(String(hours)) || 0,
       note: note || "",
     });
+    p.updatedAt = now();
+    return p;
+  });
+}
+
+/** Soft-delete one field note (Round 2 delete pass) — flags the embedded
+ *  entry rather than splicing it, matching the studio-designs.ts blob
+ *  convention for items that live inside a larger record. */
+export async function removeNote(id: string, noteId: string): Promise<ProjectRecord | null> {
+  return patchDoc<ProjectRecord>("projects", id, (p) => {
+    p.notes = (p.notes || []).map((n) => (n.id === noteId ? { ...n, deleted: true } : n));
+    p.updatedAt = now();
+    return p;
+  });
+}
+
+/** Soft-delete one time-log entry — see removeNote above. */
+export async function removeTime(id: string, entryId: string): Promise<ProjectRecord | null> {
+  return patchDoc<ProjectRecord>("projects", id, (p) => {
+    p.timeLogs = (p.timeLogs || []).map((t) => (t.id === entryId ? { ...t, deleted: true } : t));
     p.updatedAt = now();
     return p;
   });
