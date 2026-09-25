@@ -384,7 +384,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
       [c.julyLeadsToRetire || 0, (n: number) => `${plural(n, "July lead is", "July leads are")} removed`],
       [c.junkCompaniesToRetire || 0, (n: number) => `${plural(n, "combined-name company is", "combined-name companies are")} retired (estimate — checked again after the import)`],
       [c.junkCompaniesKept || 0, (n: number) => `${plural(n, "combined-name company is", "combined-name companies are")} kept — something still uses ${n === 1 ? "it" : "them"}`],
-      [(c.julyEditedKept || 0) + (c.julyLeadsEditedKept || 0), (n: number) => `${plural(n, "edited July record is", "edited July records are")} left as is`],
+      [(c.julyEditedKept || 0) + (c.julyLeadsEditedKept || 0), (n: number) => `${plural(n, "July record", "July records")} edited or still used in Quartzite ${n === 1 ? "is" : "are"} left as is`],
       [c.julyUnmatchedKept || 0, (n: number) => `${plural(n, "July project matches", "July projects match")} no row in this file and ${n === 1 ? "stays" : "stay"}`],
     ] as Array<[number, (n: number) => string]>
   )
@@ -532,13 +532,14 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
               {preview.julyEdited.length > 0 && (
                 <details style={{ marginTop: 10 }}>
                   <summary style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", cursor: "pointer" }}>
-                    Edited in Quartzite — left as is · {fmt(preview.julyEdited.length)}
+                    Edited or in use in Quartzite — left as is · {fmt(preview.julyEdited.length)}
                   </summary>
                   <div style={{ ...scrollBox, maxHeight: 220, marginTop: 8, padding: "6px 10px" }}>
                     {preview.julyEdited.map((r) => (
                       <div key={r.id} style={{ fontSize: 12, padding: "3px 0", color: "#16181d" }}>
                         {r.name}{" "}
                         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#9aa0ab" }}>{r.id}</span>
+                        <span style={{ color: "#8c919c" }}> — {r.reason}</span>
                       </div>
                     ))}
                   </div>
@@ -708,7 +709,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                   {fin.state === "done" && (
                     <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.6 }}>
                       {plural(fin.result.julyLeadsRetired, "July lead", "July leads")} removed
-                      {fin.result.julyLeadsEditedKept > 0 && ` (${fmt(fin.result.julyLeadsEditedKept)} edited, kept)`} ·{" "}
+                      {fin.result.julyLeadsEditedKept > 0 && ` (${fmt(fin.result.julyLeadsEditedKept)} edited or in use, kept)`} ·{" "}
                       {plural(fin.result.junkCompaniesRetired, "combined-name company", "combined-name companies")} retired
                       {fin.result.junkCompaniesKept.length > 0 && (
                         <details style={{ marginTop: 6 }}>

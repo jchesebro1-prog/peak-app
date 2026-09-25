@@ -19,10 +19,9 @@
 
 import { and, eq, inArray, like, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
-import { softDeleteDocs } from "@/db/doc-store";
 import { DOC_TABLES, blobs, type CollectionName } from "@/db/doc-tables";
-import { appSettings, contacts, customerDomains, sites } from "@/db/schema";
-import { allCompanies, softDeleteCompanies } from "@/lib/identity/companies";
+import { appSettings, companies, contacts, customerDomains, sites } from "@/db/schema";
+import { allCompanies } from "@/lib/identity/companies";
 import { junkCompanyParts } from "./history";
 import { baseSiteId, norm } from "./ids";
 
@@ -94,26 +93,176 @@ export async function countLiveJulyProjects(): Promise<number> {
 }
 
 /* ---------------------------------------------------------------------------
+ * Reference scan — shared by July records and combined-name companies
+ * ------------------------------------------------------------------------- */
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** An id as a whole token: not part of a longer id (`st-co-x-1` ≠ `co-x`, `co-xy` ≠ `co-x`), but a `co-x|loc1` key still counts. */
+const tokenRe = (token: string) => new RegExp(`(?<![A-Za-z0-9_-])${escapeRe(token)}(?![A-Za-z0-9_-])`);
+
+/** Does `text` mention `id` as a whole id (see tokenRe)? Exported for the spec harness. */
+export function mentionsId(text: string, id: string): boolean {
+  return tokenRe(id).test(text);
+}
+
+/** "used by tasks T-1, notes N-2 (+3 more)" */
+function usedBy(where: string[]): string {
+  const shown = where.slice(0, 3).join(", ");
+  return `used by ${shown}${where.length > 3 ? ` (+${where.length - 3} more)` : ""}`;
+}
+
+/**
+ * Every live doc — in ANY doc table, plus the settings / blobs singletons —
+ * that mentions one of the tokens, attributed to the token's owner id. A
+ * fixed number of queries however many tokens: one per table, each a regex
+ * alternation of all the tokens (groups of 150, OR-ed, to stay inside
+ * Postgres's regex size limits) so each document's text is scanned once per
+ * group — a LIKE ANY of N patterns would scan it N times (heavy on the 37k-row
+ * catalog and the multi-MB plan sheets). The SQL match is a superset
+ * (substring); the JS token regex is the precise test.
+ *
+ * `skipSelf` ignores a doc whose own id IS the owner (every doc stores its
+ * id). `exclude` drops docs from the scan (the preview uses it for July
+ * records the same import will already have retired).
+ */
+async function findDocReferences(
+  tokenOwner: Map<string, string>,
+  opts: { skipSelf?: boolean; exclude?: Partial<Record<CollectionName, ReadonlySet<string>>> } = {}
+): Promise<Map<string, string[]>> {
+  const refs = new Map<string, string[]>();
+  const tokens = [...tokenOwner.keys()];
+  if (!tokens.length) return refs;
+  const db = await getDb();
+  const groups: string[] = [];
+  for (let i = 0; i < tokens.length; i += 150) groups.push(tokens.slice(i, i + 150).map(escapeRe).join("|"));
+  const mentions = (text: SQL) => sql`(${sql.join(groups.map((g) => sql`${text} ~ ${g}`), sql` or `)})`;
+
+  const tables = Object.entries(DOC_TABLES) as Array<[CollectionName, (typeof DOC_TABLES)[CollectionName]]>;
+  const [docHits, blobHits, settingHits] = await Promise.all([
+    Promise.all(
+      tables.map(async ([coll, t]) => {
+        const rows = await db
+          .select({ id: t.id, text: sql<string>`${t.doc}::text` })
+          .from(t)
+          .where(and(eq(t.deleted, false), mentions(sql`${t.doc}::text`)));
+        return rows.filter((r) => !opts.exclude?.[coll]?.has(r.id)).map((r) => ({ id: r.id, where: `${coll} ${r.id}`, text: r.text }));
+      })
+    ),
+    db.select({ id: blobs.id, text: sql<string>`${blobs.data}::text` }).from(blobs).where(mentions(sql`${blobs.data}::text`)),
+    db
+      .select({ id: appSettings.id, text: sql<string>`${appSettings.data}::text` })
+      .from(appSettings)
+      .where(mentions(sql`${appSettings.data}::text`)),
+  ]);
+  const hits = [
+    ...docHits.flat(),
+    ...blobHits.map((r) => ({ id: r.id, where: `blob ${r.id}`, text: r.text })),
+    ...settingHits.map((r) => ({ id: r.id, where: `settings ${r.id}`, text: r.text })),
+  ];
+  // Only tokens that occur in the text at all are regex-tested precisely.
+  for (const h of hits) {
+    const owners = new Set<string>();
+    for (const t of tokens) {
+      const owner = tokenOwner.get(t)!;
+      if (opts.skipSelf && h.id === owner) continue;
+      if (h.text.includes(t) && tokenRe(t).test(h.text)) owners.add(owner);
+    }
+    for (const o of owners) {
+      const list = refs.get(o);
+      if (list) list.push(h.where);
+      else refs.set(o, [h.where]);
+    }
+  }
+  return refs;
+}
+
+/**
+ * Task 12b fix — "untouched" timestamps don't see links from OTHER records (a
+ * task's projectId, a note's parent, an inbox thread's lead). Before any July
+ * project or lead is retired, this scan finds what still points at it; a hit
+ * keeps the record (treated like an edited one) with the reason. No
+ * relational table holds project or lead ids (schema.ts), so the doc tables
+ * and the singletons are the whole search space.
+ */
+export async function julyReferences(
+  ids: string[],
+  exclude?: Partial<Record<CollectionName, ReadonlySet<string>>>
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const refs = await findDocReferences(new Map(ids.map((id) => [id, id])), { skipSelf: true, exclude });
+  for (const [id, where] of refs) out.set(id, usedBy(where));
+  return out;
+}
+
+/**
+ * Soft-delete July records — re-checking every condition INSIDE the UPDATE
+ * (still live, still no daylite marker, still untouched) so a record edited
+ * after the preview/decision is never retired. Returns the ids actually
+ * retired. The row change matches softDeleteDoc (deleted, rev + 1,
+ * updatedAt/receivedAt; seq re-drawn by the update trigger).
+ */
+export async function retireUntouchedJuly(coll: "projects" | "leads", ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const db = await getDb();
+  const t = DOC_TABLES[coll];
+  const now = Date.now();
+  const done: string[] = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const rows = await db
+      .update(t)
+      .set({ deleted: true, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
+      .where(
+        and(
+          inArray(t.id, ids.slice(i, i + 500)),
+          eq(t.deleted, false),
+          sql`coalesce(${t.doc}->'source'->>'system', '') <> 'daylite'`,
+          sql`(case when jsonb_typeof(${t.doc}->'createdAt') = 'number' and jsonb_typeof(${t.doc}->'updatedAt') = 'number'
+                then (${t.doc}->>'updatedAt')::numeric - (${t.doc}->>'createdAt')::numeric < ${UNTOUCHED_MS}
+                else false end)`
+        )
+      )
+      .returning({ id: t.id });
+    done.push(...rows.map((r) => r.id));
+  }
+  return done;
+}
+
+/**
+ * The July leads finalize retires: live, untouched, and nothing else pointing
+ * at them (an inbox thread, a note, a quote…). Edited and referenced ones are
+ * kept; referenced ones carry the reason. Preview and finalize both use this.
+ */
+export async function julyLeadPlan(): Promise<{
+  retire: string[];
+  edited: string[];
+  referenced: Array<{ id: string; reason: string }>;
+}> {
+  const { untouched, edited } = await julyLeads();
+  const refs = await julyReferences(untouched);
+  return {
+    retire: untouched.filter((id) => !refs.has(id)),
+    edited,
+    referenced: untouched.filter((id) => refs.has(id)).map((id) => ({ id, reason: refs.get(id)! })),
+  };
+}
+
+/* ---------------------------------------------------------------------------
  * Combined-name companies (§4)
  * ------------------------------------------------------------------------- */
 
 export type JunkCompany = { id: string; name: string };
 export type JunkKept = JunkCompany & { reason: string };
 
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-/** An id as a whole token: not part of a longer id (`st-co-x-1` ≠ `co-x`), but a `co-x|loc1` key still counts. */
-const tokenRe = (token: string) => new RegExp(`(?<![A-Za-z0-9_-])${escapeRe(token)}(?![A-Za-z0-9_-])`);
-
 /**
- * Every live company whose name has a comma and is made entirely of OTHER
- * live companies' names (≥2), then — in a fixed handful of queries, however
- * many candidates — everything that still references each one:
+ * Every live, UNTOUCHED company whose name has a comma and is made entirely of
+ * OTHER live companies' names (≥2), then — in a fixed handful of queries,
+ * however many candidates — everything that still references each one:
  *   - a live contact whose home company it is;
  *   - a live venue other than its own auto base venue (`baseSiteId(id)`);
  *   - a customer_domains row;
  *   - any live doc, in ANY doc table, that mentions its id or its base
- *     venue's id (one query per table, all candidates at once), plus the
- *     settings / blobs singletons.
+ *     venue's id, plus the settings / blobs singletons (findDocReferences).
  * `exclude` drops docs from the scan — the preview uses it for July records
  * the same import will already have retired or replaced.
  */
@@ -131,6 +280,8 @@ export async function scanJunkCompanies(
   const candidates: JunkCompany[] = [];
   for (const c of all) {
     if (!c.name.includes(",")) continue;
+    // Someone edited it in Quartzite → not the July script's stub any more.
+    if (!(c.updatedAt - c.createdAt < UNTOUCHED_MS)) continue;
     const parts = junkCompanyParts(c.name, (n) => (idsByName.get(norm(n)) || []).some((id) => id !== c.id));
     if (parts) candidates.push({ id: c.id, name: c.name });
   }
@@ -180,57 +331,7 @@ export async function scanJunkCompanies(
   }
   for (const [co, n] of otherVenues) why(co, `${n} other venue${n === 1 ? "" : "s"}`);
 
-  const tokens = [...tokenOwner.keys()];
-  const matchers = tokens.map((t) => ({ owner: tokenOwner.get(t)!, re: tokenRe(t) }));
-  // A regex alternation of the tokens, so Postgres scans each document's
-  // text once per group (a LIKE ANY of N patterns scans it N times — heavy on the
-  // 37k-row catalog and the multi-MB plan sheets). A substring match is a
-  // superset; the JS token regex below is the precise test.
-  // Alternations are capped at 150 tokens each (OR-ed) to stay well inside
-  // Postgres's regex size limits however many stubs the book holds.
-  const groups: string[] = [];
-  for (let i = 0; i < tokens.length; i += 150) groups.push(tokens.slice(i, i + 150).map(escapeRe).join("|"));
-  const mentions = (text: SQL) => sql.join(groups.map((g) => sql`${text} ~ ${g}`), sql` or `);
-
-  // One query per doc table, every candidate at once.
-  const docRefs = new Map<string, string[]>();
-  const tables = Object.entries(DOC_TABLES) as Array<[CollectionName, (typeof DOC_TABLES)[CollectionName]]>;
-  const docHits = await Promise.all(
-    tables.map(async ([coll, t]) => {
-      const rows = await db
-        .select({ id: t.id, text: sql<string>`${t.doc}::text` })
-        .from(t)
-        .where(and(eq(t.deleted, false), sql`(${mentions(sql`${t.doc}::text`)})`));
-      return rows.filter((r) => !exclude[coll]?.has(r.id)).map((r) => ({ where: `${coll} ${r.id}`, text: r.text }));
-    })
-  );
-  const singletonHits = await Promise.all([
-    db
-      .select({ id: blobs.id, text: sql<string>`${blobs.data}::text` })
-      .from(blobs)
-      .where(mentions(sql`${blobs.data}::text`)),
-    db
-      .select({ id: appSettings.id, text: sql<string>`${appSettings.data}::text` })
-      .from(appSettings)
-      .where(mentions(sql`${appSettings.data}::text`)),
-  ]);
-  const hits = [
-    ...docHits.flat(),
-    ...singletonHits[0].map((r) => ({ where: `blob ${r.id}`, text: r.text })),
-    ...singletonHits[1].map((r) => ({ where: `settings ${r.id}`, text: r.text })),
-  ];
-  for (const h of hits) {
-    const owners = new Set(matchers.filter((m) => m.re.test(h.text)).map((m) => m.owner));
-    for (const co of owners) {
-      const list = docRefs.get(co);
-      if (list) list.push(h.where);
-      else docRefs.set(co, [h.where]);
-    }
-  }
-  for (const [co, where] of docRefs) {
-    const shown = where.slice(0, 3).join(", ");
-    why(co, `used by ${shown}${where.length > 3 ? ` (+${where.length - 3} more)` : ""}`);
-  }
+  for (const [co, where] of await findDocReferences(tokenOwner, { exclude })) why(co, usedBy(where));
 
   const retire: JunkCompany[] = [];
   const kept: JunkKept[] = [];
@@ -242,12 +343,31 @@ export async function scanJunkCompanies(
   return { retire, kept };
 }
 
-/** Soft-delete the scan's unreferenced stubs (and with them their base venues). */
+/**
+ * Soft-delete the scan's unreferenced stubs and their base venues. Venues go
+ * FIRST, so a failure between the two statements leaves a live company whose
+ * venue is already gone — still a candidate, so a retry finishes the job (the
+ * other order would strand a live base venue under a deleted company). Both
+ * UPDATEs re-check the company is still live and untouched.
+ */
 export async function retireJunkCompanies(retire: JunkCompany[]): Promise<void> {
-  await softDeleteCompanies(retire.map((c) => c.id));
-}
-
-/** Soft-delete the given July leads — the leads store's own remove() is softDeleteDoc. */
-export async function retireJulyLeads(ids: string[]): Promise<void> {
-  await softDeleteDocs("leads", ids);
+  const ids = retire.map((c) => c.id);
+  if (!ids.length) return;
+  const db = await getDb();
+  const t = Date.now();
+  const stillStub = (batch: string[]) =>
+    and(inArray(companies.id, batch), eq(companies.deleted, false), sql`${companies.updatedAt} - ${companies.createdAt} < ${UNTOUCHED_MS}`);
+  for (let i = 0; i < ids.length; i += 500) {
+    const batch = ids.slice(i, i + 500);
+    await db
+      .update(sites)
+      .set({ deleted: true, updatedAt: t })
+      .where(
+        and(
+          eq(sites.deleted, false),
+          inArray(sites.companyId, db.select({ id: companies.id }).from(companies).where(stillStub(batch)))
+        )
+      );
+    await db.update(companies).set({ deleted: true, updatedAt: t }).where(stillStub(batch));
+  }
 }

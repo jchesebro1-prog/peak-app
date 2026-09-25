@@ -350,6 +350,21 @@ Rules (code: `src/lib/daylite/history-commit.ts`, `src/lib/daylite/july-cleanup.
   any doc table (nor settings/blobs) references it or its base venue. Kept ones are
   listed with the reason. The reference scan is one query per table for all candidates.
 - July projects no row matches are counted in the preview and never removed.
+- **Fix 1 (review):**
+  - A service-call row never retires an id another install/order row has as its own id
+    (the July script collapsed same-name jobs into one project; the install overwrites it).
+  - A won quote replaces an untouched July record only when this upload's own
+    Cancelled/Abandoned/Deferred/duplicate row would retire it. Otherwise it links, as
+    Task 11 did, so an Opportunities-only import never reopens a finished job.
+  - Linking a won quote to an EDITED July record sets `quoteId` only: no stage move, no
+    value fill. The preview lists it as "Edited July record — linked to its sold quote".
+  - Before any July project or lead is retired, a batched scan of every doc table (plus
+    settings/blobs) looks for other records pointing at it. A hit keeps it, like an edited
+    record, with the reason. Overwrite-in-place is unaffected.
+  - Every retirement UPDATE re-checks live, no daylite marker and untouched in its WHERE.
+  - Company stubs must themselves be untouched (`updated_at − created_at < 60 s`). Their
+    venues are retired before the company, so a retry after a failure finishes the job.
+  - Kept July records are counted once per id.
 
 ## 5. UKN values
 

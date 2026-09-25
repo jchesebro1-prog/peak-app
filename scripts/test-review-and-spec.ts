@@ -109,6 +109,7 @@ import {
 } from "@/lib/consulting-files";
 import { companyId as dayliteCompanyId, projectId as dayliteProjectId, leadId as dayliteLeadId } from "@/lib/daylite/ids";
 import { parseTsv, classifyProject, planHistory, splitCompanies, junkCompanyParts, stripStage, toMs, staleLiveCompletedRepairs } from "@/lib/daylite/history";
+import { mentionsId } from "@/lib/daylite/july-cleanup";
 import {
   archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
   ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
@@ -7518,7 +7519,8 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
 \tService\t"ZJ Service Call"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"ZJ School"\t"Jeff Chesebro"\t
 \t\t"ZJ Edited Job"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
 \t\t"ZJ Cancelled Job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
-\t\t"ZJ Awarded Job"\tCancelled\tBasic Install\t\t\t1/1/25\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+\t\t"ZJ Awarded Job"\tCancelled\tBasic Install\t\t\t1/1/25\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\t\t"ZJ Noted Job"\tAbandoned\tBasic Install\t\t\t1/1/16\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
   const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
 \t\t"ZJ Done Install"\tWon\t\t\t"$12,000.00"\t\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
 \tDesign\t"ZJ Draft Quote"\tOpen\t\t\t"$2,000.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
@@ -7526,6 +7528,8 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
 
   const ids = {
     awarded: projectId("ZJ Awarded Job", "ZJ Church"),
+    noted: projectId("ZJ Noted Job", "ZJ Church"),
+    leadNoted: leadId("ZJ Threaded Lead", "ZJ Church"),
     done: projectId("ZJ Done Install", "ZJ Church"),
     multiNew: projectId("ZJ Multi Install", "ZJ Builder"),
     multiJuly: projectId("ZJ Multi Install", junk1),
@@ -7559,6 +7563,12 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
   // record is the won quote's project id — the quote replaces it (never a
   // retire-then-"was deleted" error).
   await julyProject(ids.awarded, "ZJ Awarded Job", "ZJ Church", "complete");
+  // Untouched by timestamps, but another record points at it: a note on the
+  // July project, an inbox thread on the July lead → both kept, with the reason.
+  await julyProject(ids.noted, "ZJ Noted Job", "ZJ Church", "complete");
+  await upsertDoc("notes", { id: "N-zj-noted", parentType: "project", parentId: ids.noted, text: "call the AD", at: T });
+  await upsertDoc("leads", mkLead({ id: ids.leadNoted, org: "ZJ Church", source: "existing", stage: "lost", customerId: companyId("ZJ Church"), createdAt: T }));
+  await upsertDoc("comms", { id: "TH-zj-noted", subject: "Re: bid", leadId: ids.leadNoted, messages: [] });
   await upsertDoc("leads", mkLead({ id: ids.leadA, org: "ZJ Church", source: "existing", stage: "won", customerId: companyId("ZJ Church"), createdAt: T }));
   await upsertDoc("leads", mkLead({ id: ids.leadB, org: junk1, source: "existing", stage: "lost", customerId: junk1Id, createdAt: T }));
   await upsertDoc("leads", mkLead({ id: ids.leadEdited, org: "ZJ Church", source: "existing", stage: "qualified", customerId: companyId("ZJ Church"), createdAt: T, updatedAt: T + 5 * 60_000 }));
@@ -7584,25 +7594,27 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
   ok(c.julyReplaced === 3, `daylite 12b: preview — 3 July projects replaced with full data (the done install in place, the multi-company one under its new id, the awarded job by its sold project) (${c.julyReplaced})`);
   ok(c.soldNewProject === 1 && pv.rows.find((r) => r.kind === "quote" && r.name === "ZJ Awarded Job")!.flags.some((f) => f.includes("replacing July record")), "daylite 12b: preview — the awarded quote makes its project over the July record");
   ok(c.julyMovedToRepairs === 1 && c.julyRetiredSkipped === 1, `daylite 12b: preview — 1 July service-call project moves to Repairs, 1 July cancelled job is removed (${c.julyMovedToRepairs}/${c.julyRetiredSkipped})`);
-  ok(c.julyEditedKept === 1 && pv.julyEdited.length === 1 && pv.julyEdited[0].id === ids.edited, "daylite 12b: preview — the edited July project is listed as left as is");
+  ok(c.julyEditedKept === 2 && pv.julyEdited.length === 2 && pv.julyEdited[0].id === ids.edited && pv.julyEdited[0].reason === "edited in Quartzite", "daylite 12b: preview — the edited July project is listed as left as is");
+  const notedRow = pv.julyEdited.find((r) => r.id === ids.noted);
+  ok(!!notedRow && notedRow.reason.includes("notes N-zj-noted"), `daylite 12b fix: preview — an untouched July project a note points at is kept, with the reason (${notedRow?.reason})`);
   ok(c.julyUnmatchedKept === 1, "daylite 12b: preview — a July project no row matches is counted, never removed");
-  ok(c.julyLeadsToRetire === 2 && c.julyLeadsEditedKept === 1, `daylite 12b: preview — 2 untouched July leads to remove, the edited one kept (${c.julyLeadsToRetire}/${c.julyLeadsEditedKept})`);
+  ok(c.julyLeadsToRetire === 2 && c.julyLeadsEditedKept === 2, `daylite 12b: preview — 2 untouched July leads to remove, the edited one kept (${c.julyLeadsToRetire}/${c.julyLeadsEditedKept})`);
   ok(c.junkCompaniesToRetire === 1, `daylite 12b: preview — the combined-name stub referenced only by superseded July records is estimated for retirement; the one a contact uses is not (${c.junkCompaniesToRetire})`);
   const multiRow = pv.rows.find((r) => r.id === ids.multiNew)!;
   ok(!!multiRow && multiRow.candidates.length === 2 && multiRow.company === "ZJ School", "daylite 12b: the stub's cell splits into its two real companies (pick pre-fills the non-contractor)");
   const doneRow = pv.rows.find((r) => r.id === ids.done)!;
   ok(!!doneRow && !doneRow.already && doneRow.flags.includes("replaces July import"), "daylite 12b: a row whose id holds an untouched July record is not 'already imported' — it replaces it");
-  ok(c.workItems === 8, `daylite 12b: the work list is 4 plan rows + 2 July retire rows + 2 quotes (${c.workItems})`);
+  ok(c.workItems === 9, `daylite 12b: the work list is 4 plan rows + 3 July retire rows + 2 quotes (${c.workItems})`);
 
   // ---- commit in two chunks ----
   const tasksBefore = (await allTasks()).length;
   const assignBefore = (await allAssignments()).length;
   const a = await commitHistory(P, O, {}, "Test Admin", { start: 0, end: 2 });
-  const b = await commitHistory(P, O, {}, "Test Admin", { start: 2, end: 8 });
+  const b = await commitHistory(P, O, {}, "Test Admin", { start: 2, end: 9 });
   const sum = (k: string) => (a.created[k] || 0) + (b.created[k] || 0);
-  ok(a.total === 8 && b.total === 8 && a.errors.length === 0 && b.errors.length === 0, "daylite 12b: two chunks, same total, no errors" + (a.errors.concat(b.errors).length ? " — " + a.errors.concat(b.errors).join("; ") : ""));
+  ok(a.total === 9 && b.total === 9 && a.errors.length === 0 && b.errors.length === 0, "daylite 12b: two chunks, same total, no errors" + (a.errors.concat(b.errors).length ? " — " + a.errors.concat(b.errors).join("; ") : ""));
   ok(
-    sum("julyReplaced") === 3 && sum("julyMovedToRepairs") === 1 && sum("julyRetiredSkipped") === 1 && sum("julyEditedKept") === 1,
+    sum("julyReplaced") === 3 && sum("julyMovedToRepairs") === 1 && sum("julyRetiredSkipped") === 1 && sum("julyEditedKept") === 2,
     `daylite 12b: commit counts match the preview (${sum("julyReplaced")}/${sum("julyMovedToRepairs")}/${sum("julyRetiredSkipped")}/${sum("julyEditedKept")})`
   );
   ok(sum("projects") === 2 && sum("repairs") === 1 && sum("quotes") === 2 && sum("soldNewProject") === 1, "daylite 12b: 2 projects written (1 over the July record), 1 repair, 2 quotes, 1 sold project");
@@ -7621,6 +7633,7 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
   ok(!liveProj.has(ids.cancelled) && allProj.some((p) => p.id === ids.cancelled), "daylite 12b: the July project for a Cancelled job is soft-deleted");
   ok(liveProj.has(ids.edited) && JSON.stringify(await getDoc("projects", ids.edited)) === editedBefore, "daylite 12b: the edited July project is left exactly as it was");
   ok(liveProj.has(ids.orphan), "daylite 12b: a July project no row matches stays");
+  ok(liveProj.has(ids.noted), "daylite 12b fix: the July project a note points at is not retired");
   const awarded = (await getDoc<PR & { quoteId: string | null }>("projects", ids.awarded))!;
   ok(!!awarded && awarded.source?.system === "daylite" && !!awarded.quoteId && awarded.value === 7000, "daylite 12b: the awarded job's July record is replaced by its sold project (linked to the quote), not retired by the Cancelled row");
 
@@ -7628,7 +7641,11 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
   const fin = await finalizeHistory(true, "Test Admin");
   const liveLeads = new Set((await listDocs("leads")).map((d) => d.id));
   const allLeads = new Set((await listDocs("leads", { includeDeleted: true })).map((d) => d.id));
-  ok(fin.julyLeadsRetired === 2 && fin.julyLeadsEditedKept === 1, `daylite 12b: finalize retires the 2 untouched July leads, keeps the edited one (${fin.julyLeadsRetired}/${fin.julyLeadsEditedKept})`);
+  ok(
+    fin.julyLeadsReferenced.length === 1 && fin.julyLeadsReferenced[0].id === ids.leadNoted && fin.julyLeadsReferenced[0].reason.includes("comms TH-zj-noted"),
+    "daylite 12b fix: a July lead an inbox thread points at is kept, with the reason"
+  );
+  ok(fin.julyLeadsRetired === 2 && fin.julyLeadsEditedKept === 2, `daylite 12b: finalize retires the 2 untouched July leads, keeps the edited one (${fin.julyLeadsRetired}/${fin.julyLeadsEditedKept})`);
   ok(!liveLeads.has(ids.leadA) && !liveLeads.has(ids.leadB) && allLeads.has(ids.leadA) && liveLeads.has(ids.leadEdited), "daylite 12b: July leads are soft-deleted; the edited lead stays live");
   ok(fin.junkCompaniesRetired === 1 && (await getCompany(junk1Id)) === null && (await getSite(baseSiteId(junk1Id))) === null, "daylite 12b: the unreferenced combined-name stub and its base venue are retired");
   const db = await getDb();
@@ -7653,6 +7670,88 @@ async function dayliteSupersedeAsyncChecks(): Promise<void> {
   ok((await listDocs("projects")).length === nProj, "daylite 12b: syncProjectsFromQuotes adds nothing after a superseding import");
 }
 
+/* ============ Task 12b fix 1: supersede never drops a job, reopens a finished one, or retires a referenced record (DB) ============ */
+async function dayliteSupersedeFixChecks(): Promise<void> {
+  const { previewHistory, commitHistory, finalizeHistory } = await import("@/lib/daylite/history-commit");
+  const { retireUntouchedJuly } = await import("@/lib/daylite/july-cleanup");
+  const { saveCompany, getCompany } = await import("@/lib/identity/companies");
+  const { companyId, projectId, repairId, leadId } = await import("@/lib/daylite/ids");
+  const { listDocs, upsertDoc, getDoc } = await import("@/db/doc-store");
+  const { loadPipelines } = await import("@/lib/pipelines-server");
+  const { buildProject } = await import("@/lib/stores/projects");
+  const { mkLead } = await import("@/lib/stores/leads");
+  const pipes = await loadPipelines();
+  const T = new Date(2026, 6, 16, 10).getTime();
+  type PR = { id: string; source?: { system?: string }; value: number; valueUnknown?: boolean; stage: string; quoteId: string | null; stageHistory: unknown[]; updatedAt: number };
+  const julyProject = async (name: string, raw: string, stage: string, edited = false) => {
+    const rec = buildProject(projectId(name, raw), { name, customer: raw, customerId: companyId(raw), owner: "Jeff Chesebro", stage: stage as never, startedAt: T, installStart: T, installEnd: null }, pipes, T);
+    if (edited) {
+      rec.updatedAt = T + 5 * 60_000;
+      rec.valueUnknown = true; // someone marked it UKN — a Task 11 link would fill it
+    }
+    await upsertDoc("projects", rec);
+    return rec;
+  };
+
+  // IMPORTANT 1 — a Service Call and an Install with the same name + company
+  // were ONE July project. In either file order the install overwrites it in
+  // place and the service call becomes a repair; nothing is dropped.
+  await julyProject("ZJ Shared A", "ZJ School", "complete");
+  await julyProject("ZJ Shared B", "ZJ School", "complete");
+  const P1 = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\tService\t"ZJ Shared A"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"ZJ School"\t"Jeff Chesebro"\t
+\t\t"ZJ Shared A"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ School"\t"Jeff Chesebro"\t
+\t\t"ZJ Shared B"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ School"\t"Jeff Chesebro"\t
+\tService\t"ZJ Shared B"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"ZJ School"\t"Jeff Chesebro"\t`;
+  const pv1 = await previewHistory(P1, "");
+  ok(pv1.counts.julyReplaced === 2 && pv1.counts.julyMovedToRepairs === 0, `daylite 12b fix: preview — a shared July record is replaced by its install, not moved to Repairs (${pv1.counts.julyReplaced}/${pv1.counts.julyMovedToRepairs})`);
+  // Chunk boundary between A's service call and A's install.
+  const r1a = await commitHistory(P1, "", {}, "Test Admin", { start: 0, end: 1 });
+  const r1b = await commitHistory(P1, "", {}, "Test Admin", { start: 1, end: 4 });
+  ok(r1a.errors.length + r1b.errors.length === 0 && (r1a.created.julyMovedToRepairs || 0) + (r1b.created.julyMovedToRepairs || 0) === 0, "daylite 12b fix: the repair row never retires an install row's id");
+  for (const n of ["ZJ Shared A", "ZJ Shared B"]) {
+    const proj = await getDoc<PR>("projects", projectId(n, "ZJ School"));
+    ok(!!proj && proj.source?.system === "daylite" && !!(await getDoc("repair_jobs", repairId(n, "ZJ School"))), `daylite 12b fix: ${n} — the install is live with full data AND the service call is a repair (${n.endsWith("A") ? "service row first" : "install row first"})`);
+  }
+
+  // IMPORTANT 2 — an Opportunities-only import: the won quote's project is an
+  // untouched COMPLETE July job. It links (Task 11), never replaced by a live one.
+  const doneJuly = await julyProject("ZJ OppsOnly Job", "ZJ Church", "complete");
+  // IMPORTANT 3 — an EDITED live July job with a won quote: link sets quoteId only.
+  const editedJuly = await julyProject("ZJ Edited Sold", "ZJ Church", "procurement", true);
+  const O2 = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\tBid\t"ZJ OppsOnly Job"\tOpen\t\t\t"$9,000.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\tBid\t"ZJ Edited Sold"\tOpen\t\t\t"$5,000.00"\tBID SPEC\t"8 • Final Invoice"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const pv2 = await previewHistory("", O2);
+  ok(pv2.counts.soldLinked === 2 && pv2.counts.soldNewProject === 0 && pv2.counts.julyReplaced === 0, `daylite 12b fix: Opps-only preview — both won quotes LINK their July projects, none replaced (${pv2.counts.soldLinked}/${pv2.counts.soldNewProject}/${pv2.counts.julyReplaced})`);
+  const edQ = pv2.rows.find((r) => r.kind === "quote" && r.name === "ZJ Edited Sold");
+  ok(!!edQ && edQ.flags.includes("Edited July record — linked to its sold quote") && pv2.julyEdited.some((r) => r.id === editedJuly.id && r.reason.includes("linked to its sold quote")), "daylite 12b fix: preview lists the edited July record as linked to its sold quote");
+  const r2 = await commitHistory("", O2, {}, "Test Admin");
+  ok(r2.errors.length === 0 && r2.created.soldLinked === 2, "daylite 12b fix: Opps-only commit links both" + (r2.errors.length ? " — " + r2.errors.join("; ") : ""));
+  const done2 = (await getDoc<PR>("projects", doneJuly.id))!;
+  ok(done2.stage === "complete" && !!done2.quoteId && done2.source?.system !== "daylite", `daylite 12b fix: an Opps-only import keeps the complete July job complete, linked to its quote (${done2.stage})`);
+  const ed2 = (await getDoc<PR>("projects", editedJuly.id))!;
+  ok(
+    !!ed2.quoteId && ed2.stage === editedJuly.stage && ed2.value === editedJuly.value && ed2.valueUnknown === editedJuly.valueUnknown && ed2.stageHistory.length === editedJuly.stageHistory.length,
+    "daylite 12b fix: linking an edited July record sets quoteId only — no stage move, no value, no history"
+  );
+
+  // Minor — the retirement UPDATE re-checks untouched itself (time of check).
+  const lateEdited = mkLead({ id: leadId("ZJ Late Edit", "ZJ Church"), org: "ZJ Church", source: "existing", stage: "lost", createdAt: T, updatedAt: T + 10 * 60_000 });
+  await upsertDoc("leads", lateEdited);
+  ok((await retireUntouchedJuly("leads", [lateEdited.id])).length === 0 && !!(await getDoc("leads", lateEdited.id)), "daylite 12b fix: the guarded retire UPDATE skips a lead edited after the decision");
+  const marked = await julyProject("ZJ Marked", "ZJ Church", "complete");
+  await upsertDoc("projects", { ...marked, source: { system: "daylite", importedAt: T } });
+  ok((await retireUntouchedJuly("projects", [marked.id])).length === 0, "daylite 12b fix: the guarded retire UPDATE never touches a history-import record");
+
+  // Minor — an EDITED combined-name company is not a stub candidate.
+  const editedJunk = "ZJ Builder, ZJ Church";
+  await saveCompany({ id: companyId(editedJunk), name: editedJunk, type: "", createdAt: T });
+  const fin = await finalizeHistory(false, "Test Admin");
+  ok(!!(await getCompany(companyId(editedJunk))) && !fin.junkCompaniesKept.some((k) => k.id === companyId(editedJunk)), "daylite 12b fix: a combined-name company edited since creation is not a candidate");
+  ok((await listDocs("leads")).some((d) => d.id === lateEdited.id), "daylite 12b fix: finalize without the Opportunities file retires no leads");
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -7673,6 +7772,7 @@ seeded()
   .then(() => dayliteCommitAsyncChecks())
   .then(() => dayliteChunkAsyncChecks())
   .then(() => dayliteSupersedeAsyncChecks())
+  .then(() => dayliteSupersedeFixChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -9578,6 +9678,14 @@ ok(
   );
   ok(jPlan.projects.find((p) => p.name === "ZJ Single")!.julyId === dayliteProjectId("ZJ Single", "Pardeeville Schools"), "daylite 12b: a one-company row's julyId equals its id");
   ok(jPlan.quotes[0].julyId === dayliteLeadId("ZJ Opp", "Camosy Construction, Some Rando Co"), "daylite 12b: an open opp's julyId is the July lead id (raw cell)");
+  ok(
+    mentionsId('{"customerId": "co-x"}', "co-x") &&
+      !mentionsId('{"customerId": "co-xy"}', "co-x") &&
+      !mentionsId('{"locationId": "st-co-x-1"}', "co-x") &&
+      mentionsId('{"key": "co-x|loc1"}', "co-x") &&
+      mentionsId('{"locationId": "st-co-x-1"}', "st-co-x-1"),
+    "daylite 12b fix: reference tokens match whole ids only — co-x ≠ co-xy ≠ st-co-x-1, but a co-x|loc1 key counts"
+  );
   ok(
     jPlan.julyRetire.length === 1 && jPlan.julyRetire[0].julyId === dayliteProjectId("ZJ Gone", "Pardeeville Schools") && jPlan.julyRetire[0].reason === "Abandoned",
     "daylite 12b: skipped rows list their July id once (the Deferred repeat dedupes); a skipped row whose July id a kept row owns (the Cancelled ZJ Single, the duplicate ZJ Multi) is not listed"

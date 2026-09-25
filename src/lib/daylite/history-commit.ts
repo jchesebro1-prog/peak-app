@@ -59,7 +59,6 @@ import {
 import {
   buildProject,
   normalizeProject,
-  removeProject,
   type ProjectNote,
   type ProjectRecord,
   type ProjectStageChange,
@@ -72,9 +71,10 @@ import {
   countLiveJulyProjects,
   isJulyRecord,
   isUntouched,
-  julyLeads,
-  retireJulyLeads,
+  julyLeadPlan,
+  julyReferences,
   retireJunkCompanies,
+  retireUntouchedJuly,
   scanJunkCompanies,
   type JunkKept,
 } from "./july-cleanup";
@@ -92,15 +92,15 @@ export type PreviewRow = {
   flags: string[];
 };
 
-/** A July record the import leaves alone because someone edited it in Quartzite. */
-export type JulyEditedRow = { id: string; name: string };
+/** A July record the import leaves alone — edited in Quartzite, or still used by another record. */
+export type JulyEditedRow = { id: string; name: string; reason: string };
 
 export type Preview = {
   counts: Record<string, number>;
   rows: PreviewRow[];
   needsPick: PreviewRow[];
   live: PreviewRow[];
-  /** Task 12b — "Edited in Quartzite — left as is". */
+  /** Task 12b — "Edited in Quartzite — left as is" (each with its reason). */
   julyEdited: JulyEditedRow[];
   stats: { valueConflicts: number; unmappedOppStages: Record<string, number> };
 };
@@ -132,9 +132,19 @@ type Ctx = {
   soldTargets: Set<string>;
   /** Project/order plan rows by id. */
   planById: Map<string, ProjectPlan>;
+  /** July ids a skipped Projects row retires (plan.julyRetire). */
+  retireIds: Set<string>;
+  /** Untouched July records another live record still points at → kept, with the reason. */
+  julyRefs: Map<string, string>;
+  /** The first work item that owns each July id — the one that counts it as kept. */
+  firstOwner: Map<string, number>;
 };
 
-async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
+/**
+ * `range` limits the July reference scan to the retire candidates of that
+ * slice of the work list (a commit chunk); the preview scans them all.
+ */
+async function loadContext(projectsTsv: string, oppsTsv: string, range?: { start: number; end: number }): Promise<Ctx> {
   const [companyRows, contactRows, users, pipes, projAll, repAll, quoteAll] = await Promise.all([
     allCompanies(),
     allContacts(),
@@ -165,7 +175,7 @@ async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
     knownCompany: (name) => companies.has(companyId(name)),
   });
 
-  return {
+  const ctx: Ctx = {
     plan,
     pipes,
     companies,
@@ -180,7 +190,33 @@ async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
     july,
     soldTargets: new Set(plan.quotes.filter((q) => q.status === "won").map(soldProjectId)),
     planById: new Map(plan.projects.filter((p) => p.kind !== "repair").map((p) => [p.id, p])),
+    retireIds: new Set(plan.julyRetire.map((r) => r.julyId)),
+    julyRefs: new Map(),
+    firstOwner: new Map(),
   };
+
+  // Which work item owns each July id first (projects, then retire rows).
+  const own = (i: number, id: string) => {
+    if (!ctx.firstOwner.has(id)) ctx.firstOwner.set(id, i);
+  };
+  plan.projects.forEach((p, i) => ownedJulyIds(ctx, p).forEach((id) => own(i, id)));
+  plan.julyRetire.forEach((r, j) => own(plan.projects.length + j, r.julyId));
+
+  // The untouched July records this run (or chunk) could retire: what else
+  // still points at them? One batched scan (./july-cleanup julyReferences).
+  const lo = range ? range.start : 0;
+  const hi = range ? range.end : Number.POSITIVE_INFINITY;
+  const candidates = new Set<string>();
+  plan.projects.forEach((p, i) => {
+    if (i < lo || i >= hi) return;
+    for (const id of ownedJulyIds(ctx, p)) if (retiresId(ctx, p, id)) candidates.add(id);
+  });
+  plan.julyRetire.forEach((r, j) => {
+    const i = plan.projects.length + j;
+    if (i >= lo && i < hi && !ctx.soldTargets.has(r.julyId)) candidates.add(r.julyId);
+  });
+  ctx.julyRefs = await julyReferences([...candidates].filter((id) => ctx.july.get(id)?.untouched));
+  return ctx;
 }
 
 /** A private copy of the mutable state, for the preview's dry run. */
@@ -280,9 +316,36 @@ function julyStateOf(ctx: Ctx, id: string): JulyState {
   return j ? (j.untouched ? "untouched" : "edited") : "none";
 }
 
+/**
+ * The July ids a Projects row answers for. A service call's July record is the
+ * project the July script made for it (its own RP-dl- id never is). An id that
+ * ANOTHER install/order row has as its own id belongs to that row — it
+ * overwrites the record in place — so this row neither retires nor keeps it
+ * (e.g. a Service Call and an Install with the same name and company, which
+ * the July script collapsed into one project).
+ */
+function ownedJulyIds(ctx: Ctx, p: ProjectPlan): string[] {
+  if (p.kind === "repair") return ctx.planById.has(p.julyId) ? [] : [p.julyId];
+  if (p.julyId !== p.id && ctx.planById.has(p.julyId)) return [p.id];
+  return [...new Set([p.id, p.julyId])];
+}
+
+/** Would this row soft-delete `id` (rather than overwrite it, or leave it to a won quote)? */
+function retiresId(ctx: Ctx, p: ProjectPlan, id: string): boolean {
+  return (p.kind === "repair" || id !== p.id) && !ctx.soldTargets.has(id);
+}
+
+/** Why a July record must stay as it is, or null. Overwriting in place keeps references valid. */
+function keptReason(ctx: Ctx, id: string, retiring: boolean): string | null {
+  const st = julyStateOf(ctx, id);
+  if (st === "edited") return "edited in Quartzite";
+  if (st === "untouched" && retiring) return ctx.julyRefs.get(id) ?? null;
+  return null;
+}
+
 type RowDecision = {
-  /** Edited July records this row owns — the row writes and retires nothing. */
-  edited: string[];
+  /** July records this row owns that must stay (edited, or still referenced) — the row writes and retires nothing. */
+  kept: Array<{ id: string; reason: string }>;
   /** Write the new record at the plan id (create, or overwrite an untouched July record). */
   write: boolean;
   /** The plan id holds an untouched July record the write replaces in place. */
@@ -292,17 +355,15 @@ type RowDecision = {
 };
 
 function decideProjectRow(ctx: Ctx, p: ProjectPlan): RowDecision {
-  // A repair's own id (RP-dl-) is never a July id; its July record is the
-  // project the July script made for the service call.
-  const own = p.kind === "repair" ? [p.julyId] : [...new Set([p.id, p.julyId])];
-  const edited = own.filter((id) => julyStateOf(ctx, id) === "edited");
-  if (edited.length) return { edited, write: false, overwritesJuly: false, retire: [] };
+  const own = ownedJulyIds(ctx, p);
+  const kept = own
+    .map((id) => ({ id, reason: keptReason(ctx, id, retiresId(ctx, p, id)) }))
+    .filter((k): k is { id: string; reason: string } => k.reason !== null);
+  if (kept.length) return { kept, write: false, overwritesJuly: false, retire: [] };
   const overwritesJuly = p.kind !== "repair" && julyStateOf(ctx, p.id) === "untouched";
   const write = overwritesJuly || !takenFor(ctx, p);
-  const retire = own.filter(
-    (id) => (p.kind === "repair" || id !== p.id) && julyStateOf(ctx, id) === "untouched" && !ctx.soldTargets.has(id)
-  );
-  return { edited: [], write, overwritesJuly, retire };
+  const retire = own.filter((id) => retiresId(ctx, p, id) && julyStateOf(ctx, id) === "untouched");
+  return { kept: [], write, overwritesJuly, retire };
 }
 
 /** State after a row's write / retirements (commit and the dry run alike). */
@@ -320,10 +381,11 @@ function noteRetired(ctx: Ctx, id: string): void {
   ctx.liveProjects.delete(id);
 }
 
-function decideRetireRow(ctx: Ctx, r: JulyRetire): "retire" | "edited" | "none" {
-  const st = julyStateOf(ctx, r.julyId);
-  if (st === "edited") return "edited";
-  return st === "untouched" && !ctx.soldTargets.has(r.julyId) ? "retire" : "none";
+function decideRetireRow(ctx: Ctx, r: JulyRetire): { kind: "retire" } | { kind: "kept"; reason: string } | { kind: "none" } {
+  if (ctx.soldTargets.has(r.julyId)) return { kind: "none" }; // a won quote replaces it
+  const reason = keptReason(ctx, r.julyId, true);
+  if (reason) return { kind: "kept", reason };
+  return julyStateOf(ctx, r.julyId) === "untouched" ? { kind: "retire" } : { kind: "none" };
 }
 
 /**
@@ -345,7 +407,11 @@ function soldMode(ctx: Ctx, q: QuotePlan): SoldMode {
   // commit will skip as already imported can't read as a link target here
   // (commit refuses it the same way: re-creating would resurrect that record).
   if (ctx.taken.projects.has(target) && !ctx.liveProjects.has(target)) return "blocked";
-  if (julyStateOf(ctx, target) === "untouched") return "replacesJuly";
+  // Only a July record this upload itself would retire (its Projects row is
+  // Cancelled/Abandoned/Deferred/duplicate) is replaced by the sold project.
+  // Anything else — an Opportunities-only import, a July job missing from the
+  // Projects export — links as Task 11 did, so a finished job stays finished.
+  if (julyStateOf(ctx, target) === "untouched" && ctx.retireIds.has(target)) return "replacesJuly";
   if (ctx.liveProjects.has(target)) return "linked";
   return "new";
 }
@@ -353,11 +419,11 @@ function soldMode(ctx: Ctx, q: QuotePlan): SoldMode {
 function projectPreviewRow(ctx: Ctx, p: ProjectPlan, picks: Record<string, string>): PreviewRow {
   const r = resolveCommon(ctx, p, picks);
   const d = decideProjectRow(ctx, p);
-  const already = !d.edited.length && !d.write;
+  const already = !d.kept.length && !d.write;
   const flags = [...r.flags];
   if (p.value == null) flags.push("UKN value");
-  if (d.edited.length) flags.push("edited in Quartzite — July record kept");
-  else if (d.overwritesJuly || d.retire.length) flags.push("replaces July import");
+  for (const k of d.kept) flags.push(`July record kept — ${k.reason}`);
+  if (!d.kept.length && (d.overwritesJuly || d.retire.length)) flags.push("replaces July import");
   if (already) flags.push("already imported");
   return {
     id: p.id,
@@ -385,7 +451,8 @@ function quotePreviewRow(
   const s = sold.get(q.id);
   if (q.status === "won" && s) {
     const { mode, target } = s;
-    if (mode === "linked") flags.push(`sold → links ${target}`);
+    if (mode === "linked" && julyStateOf(ctx, target) === "edited") flags.push("Edited July record — linked to its sold quote");
+    else if (mode === "linked") flags.push(`sold → links ${target}`);
     else if (mode === "new") flags.push(`sold → new project at ${q.projectStage}`);
     else if (mode === "replacesJuly") flags.push(`sold → new project at ${q.projectStage}, replacing July record ${target}`);
     else flags.push(`sold → project ${target} was deleted; not imported`);
@@ -416,21 +483,25 @@ function quotePreviewRow(
  */
 function dryRunJuly(ctx: Ctx): {
   counts: Record<string, number>;
+  keptIds: number;
   edited: JulyEditedRow[];
   sold: Map<string, { mode: SoldMode; target: string }>;
   superseded: Set<string>;
 } {
   const sim = cloneCtx(ctx);
   const counts = { julyReplaced: 0, julyMovedToRepairs: 0, julyRetiredSkipped: 0 };
+  const linked: JulyEditedRow[] = [];
   const edited = new Map<string, JulyEditedRow>();
   const superseded = new Set<string>();
   const sold = new Map<string, { mode: SoldMode; target: string }>();
-  const keepEdited = (id: string) => edited.set(id, { id, name: ctx.july.get(id)?.name ?? id });
+  const keep = (id: string, reason: string) => {
+    if (!edited.has(id)) edited.set(id, { id, name: ctx.july.get(id)?.name ?? id, reason });
+  };
 
   for (const p of ctx.plan.projects) {
     const d = decideProjectRow(sim, p);
-    if (d.edited.length) {
-      d.edited.forEach(keepEdited);
+    if (d.kept.length) {
+      d.kept.forEach((k) => keep(k.id, k.reason));
       continue;
     }
     if (d.overwritesJuly) {
@@ -446,8 +517,8 @@ function dryRunJuly(ctx: Ctx): {
   }
   for (const r of ctx.plan.julyRetire) {
     const d = decideRetireRow(sim, r);
-    if (d === "edited") keepEdited(r.julyId);
-    else if (d === "retire") {
+    if (d.kind === "kept") keep(r.julyId, d.reason);
+    else if (d.kind === "retire") {
       counts.julyRetiredSkipped++;
       superseded.add(r.julyId);
       noteRetired(sim, r.julyId);
@@ -458,6 +529,12 @@ function dryRunJuly(ctx: Ctx): {
     const mode = soldMode(sim, q);
     const target = soldTargetOf(sim, q);
     sold.set(q.id, { mode, target });
+    if (mode === "linked" && julyStateOf(sim, target) === "edited") {
+      // Listed too — its only change is the quote link (quoteId).
+      const e = edited.get(target);
+      if (e) e.reason += "; linked to its sold quote";
+      else linked.push({ id: target, name: ctx.july.get(target)?.name ?? target, reason: "Edited July record — linked to its sold quote" });
+    }
     if (mode === "replacesJuly") {
       counts.julyReplaced++;
       superseded.add(target);
@@ -468,7 +545,9 @@ function dryRunJuly(ctx: Ctx): {
       sim.july.delete(target);
     }
   }
-  return { counts, edited: [...edited.values()], sold, superseded };
+  // julyEditedKept counts the records rows keep (unique ids, as commit
+  // does); a quote-linked edited record no row owns is listed after them.
+  return { counts, keptIds: edited.size, edited: [...edited.values(), ...linked], sold, superseded };
 }
 
 /** Live July projects no row of this upload touches — reported, never removed. */
@@ -489,12 +568,12 @@ export async function previewHistory(projectsTsv: string, oppsTsv: string): Prom
   const { plan } = ctx;
   const july = dryRunJuly(ctx);
   const oppsIncluded = !!oppsTsv.trim();
-  const leads = oppsIncluded ? await julyLeads() : { untouched: [], edited: [] };
+  const leads = oppsIncluded ? await julyLeadPlan() : { retire: [], edited: [], referenced: [] };
   // The combined-name estimate: references from July records this import
   // replaces or retires don't count (they will be gone by finalize).
   const exclude: Partial<Record<CollectionName, ReadonlySet<string>>> = {
     projects: july.superseded,
-    leads: new Set(leads.untouched),
+    leads: new Set(leads.retire),
   };
   const junk = await scanJunkCompanies(exclude);
 
@@ -516,10 +595,10 @@ export async function previewHistory(projectsTsv: string, oppsTsv: string): Prom
     staleLiveCompletedRepairs: staleLiveCompletedRepairs(plan.projects, Date.now()),
     workItems: plan.projects.length + plan.julyRetire.length + plan.quotes.length,
     ...july.counts,
-    julyEditedKept: july.edited.length,
+    julyEditedKept: july.keptIds,
     julyUnmatchedKept: julyUnmatched(ctx),
-    julyLeadsToRetire: leads.untouched.length,
-    julyLeadsEditedKept: leads.edited.length,
+    julyLeadsToRetire: leads.retire.length,
+    julyLeadsEditedKept: leads.edited.length + leads.referenced.length,
     junkCompaniesToRetire: junk.retire.length,
     junkCompaniesKept: junk.kept.length,
   };
@@ -660,6 +739,15 @@ async function linkOrCreateSoldProject(
   if (existing) {
     if (existing.quoteId && existing.quoteId !== q.id)
       throw new Error(`project ${targetId} is already linked to quote ${existing.quoteId}`);
+    if (julyStateOf(ctx, targetId) === "edited") {
+      // An edited July record: the link is ALL this import changes on it — no
+      // normalize, no stage move, no value fill (controller decision, 12b fix).
+      await patchDoc<ProjectRecord>("projects", targetId, (doc) => {
+        doc.quoteId = q.id;
+        return doc;
+      });
+      return "linked";
+    }
     await patchDoc<ProjectRecord>("projects", targetId, (doc) => {
       normalizeProject(doc, ctx.pipes);
       doc.quoteId = q.id;
@@ -781,12 +869,19 @@ export async function commitHistory(
   by: string,
   range?: { start: number; end: number }
 ): Promise<CommitResult> {
-  const ctx = await loadContext(projectsTsv, oppsTsv);
+  const ctx = await loadContext(projectsTsv, oppsTsv, range);
   const { projects, julyRetire, quotes } = ctx.plan;
   const total = projects.length + julyRetire.length + quotes.length;
   const start = range ? Math.max(0, Math.floor(range.start) || 0) : 0;
   const end = range ? Math.min(total, Math.floor(range.end) || 0) : total;
   const slice = <T,>(list: T[], from: number): T[] => list.slice(Math.max(0, start - from), Math.max(0, end - from));
+  /** Work-list index of each item in this slice (for the kept-once count). */
+  const indexed = <T,>(list: T[], from: number): Array<[number, T]> =>
+    slice(list, from).map((item, k) => [from + Math.max(0, start - from) + k, item]);
+  const countKept = (i: number, id: string) => {
+    // Counted once, by the first work item that owns the id, whatever the chunking.
+    if (ctx.firstOwner.get(id) === i) created.julyEditedKept++;
+  };
   const importedAt = Date.now();
   const created: Record<string, number> = {
     projects: 0,
@@ -807,12 +902,13 @@ export async function commitHistory(
 
   // Projects/repairs/orders first, so a won quote below can link a project
   // written in this same run.
-  for (const p of slice(projects, 0)) {
+  for (const [i, p] of indexed(projects, 0)) {
     const d = decideProjectRow(ctx, p);
-    if (d.edited.length) {
-      // Someone edited the July record in Quartzite: leave it, and don't add
-      // a second record for the same job next to it.
-      created.julyEditedKept += d.edited.length;
+    if (d.kept.length) {
+      // Someone edited the July record in Quartzite, or another record still
+      // points at it: leave it, and don't add a second record for the same
+      // job next to it.
+      for (const k of d.kept) countKept(i, k.id);
       continue;
     }
     if (!d.write && !d.retire.length) {
@@ -840,7 +936,8 @@ export async function commitHistory(
       // never leaves the job with neither; a re-run finds the new record
       // taken and the July record still untouched, and just retires it.
       for (const id of d.retire) {
-        await removeProject(id);
+        // The UPDATE re-checks live + no marker + untouched (time of check).
+        if (!(await retireUntouchedJuly("projects", [id])).length) continue;
         noteRetired(ctx, id);
         created[p.kind === "repair" ? "julyMovedToRepairs" : "julyReplaced"]++;
       }
@@ -851,12 +948,12 @@ export async function commitHistory(
 
   // Skipped rows (Cancelled/Abandoned/Deferred/duplicate): retire their
   // untouched July record.
-  for (const r of slice(julyRetire, projects.length)) {
+  for (const [i, r] of indexed(julyRetire, projects.length)) {
     const d = decideRetireRow(ctx, r);
-    if (d === "edited") created.julyEditedKept++;
-    if (d !== "retire") continue;
+    if (d.kind === "kept") countKept(i, r.julyId);
+    if (d.kind !== "retire") continue;
     try {
-      await removeProject(r.julyId);
+      if (!(await retireUntouchedJuly("projects", [r.julyId])).length) continue;
       noteRetired(ctx, r.julyId);
       created.julyRetiredSkipped++;
     } catch (e) {
@@ -897,7 +994,10 @@ export async function commitHistory(
 
 export type FinalizeResult = {
   julyLeadsRetired: number;
+  /** Edited July leads plus those another record still points at. */
   julyLeadsEditedKept: number;
+  /** The July leads kept because another record points at them, with the reason. */
+  julyLeadsReferenced: Array<{ id: string; reason: string }>;
   junkCompaniesRetired: number;
   /** Combined-name stubs something still references — kept, with the reason. */
   junkCompaniesKept: JunkKept[];
@@ -916,11 +1016,13 @@ export async function finalizeHistory(oppsIncluded: boolean, by: string): Promis
   void by;
   let julyLeadsRetired = 0;
   let julyLeadsEditedKept = 0;
+  let julyLeadsReferenced: Array<{ id: string; reason: string }> = [];
   if (oppsIncluded) {
-    const leads = await julyLeads();
-    await retireJulyLeads(leads.untouched);
-    julyLeadsRetired = leads.untouched.length;
-    julyLeadsEditedKept = leads.edited.length;
+    const leads = await julyLeadPlan();
+    // Guarded UPDATE: a lead edited since the scan is not retired.
+    julyLeadsRetired = (await retireUntouchedJuly("leads", leads.retire)).length;
+    julyLeadsEditedKept = leads.edited.length + leads.referenced.length;
+    julyLeadsReferenced = leads.referenced;
   }
   // Runs last: a lead retired above no longer holds its stub company.
   const junk = await scanJunkCompanies();
@@ -928,6 +1030,7 @@ export async function finalizeHistory(oppsIncluded: boolean, by: string): Promis
   return {
     julyLeadsRetired,
     julyLeadsEditedKept,
+    julyLeadsReferenced,
     junkCompaniesRetired: junk.retire.length,
     junkCompaniesKept: junk.kept,
     julyProjectsRemaining: await countLiveJulyProjects(),

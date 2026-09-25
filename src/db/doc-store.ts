@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
@@ -178,25 +178,6 @@ export async function softDeleteDoc(
       receivedAt: Date.now(),
     })
     .where(eq(t.id, id));
-}
-
-/**
- * softDeleteDoc for many ids at once — the same row change (deleted, rev + 1,
- * updatedAt/receivedAt now; seq re-drawn by the update trigger) in one
- * UPDATE per 500 ids instead of one round trip per record. For bulk
- * retirement over a network database (Task 12b retires ~1,700 July leads).
- */
-export async function softDeleteDocs(coll: CollectionName, ids: string[]): Promise<void> {
-  if (!ids.length) return;
-  const db = await getDb();
-  const t = table(coll);
-  const now = Date.now();
-  for (let i = 0; i < ids.length; i += 500) {
-    await db
-      .update(t)
-      .set({ deleted: true, rev: sql`${t.rev} + 1`, updatedAt: now, receivedAt: now })
-      .where(inArray(t.id, ids.slice(i, i + 500)));
-  }
 }
 
 /**
