@@ -45,7 +45,7 @@ import { getSite } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolShape } from "@/lib/stores/grid-catalog";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
@@ -107,6 +107,19 @@ export async function createGridAssemblyAction(input: {
   }
   revalidatePath("/design/grid");
   return { ok: true, id: assembly.id };
+}
+
+export async function removeGridAssemblyAction(id: string): Promise<Result> {
+  await requireUser();
+  const r = await removeGridAssembly(id);
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: r.reason === "not-an-assembly" ? "Only assemblies you built can be deleted." : "That assembly could not be found.",
+    };
+  }
+  revalidatePath("/design/grid");
+  return { ok: true };
 }
 
 export async function saveGridIntakeAction(input: {
