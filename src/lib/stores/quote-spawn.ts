@@ -1,4 +1,5 @@
 import type { Quote, QuoteStatus } from "./quotes";
+import { isQuoteLockTimeout } from "@/db";
 
 export type SpawnFromQuoteOpts = {
   /**
@@ -37,33 +38,51 @@ export async function spawnFromQuote(
   prevStatus: QuoteStatus,
   opts: SpawnFromQuoteOpts = {}
 ): Promise<void> {
-  // Consulting is the one type whose lifecycle starts before the win —
-  // sending opens the engagement, winning advances it, losing closes it — so
-  // it is routed on every status, not just "won".
-  if (quote.quoteType === "consulting") {
-    await spawnConsulting(quote);
-    return;
-  }
-  if (quote.status !== "won") return;
-  // An optimisation, explicitly NOT the idempotence guarantee — every creator
-  // below dedupes on the quote id itself. `replayUnchanged` opts out of it.
-  if (prevStatus === "won" && !opts.replayUnchanged) return;
-  switch (quote.quoteType) {
-    case "flame_test":
-      await (await import("./flame-jobs")).createFromQuote(quote.id);
-      break;
-    case "repair":
-      await (await import("./repair-jobs")).createFromQuote(quote.id);
-      break;
-    case "inspection":
-      await (await import("./inspections")).createFromQuote(quote.id);
-      break;
-    case "rental":
-      await (await import("./equipment-bookings")).createFromQuote(quote.id);
-      break;
-    default:
-      await spawnProject(quote.id);
-      break;
+  try {
+    // Consulting is the one type whose lifecycle starts before the win —
+    // sending opens the engagement, winning advances it, losing closes it —
+    // so it is routed on every status, not just "won".
+    if (quote.quoteType === "consulting") {
+      await spawnConsulting(quote);
+      return;
+    }
+    if (quote.status !== "won") return;
+    // An optimisation, explicitly NOT the idempotence guarantee — every creator
+    // below dedupes on the quote id itself. `replayUnchanged` opts out of it.
+    if (prevStatus === "won" && !opts.replayUnchanged) return;
+    switch (quote.quoteType) {
+      case "flame_test":
+        await (await import("./flame-jobs")).createFromQuote(quote.id);
+        break;
+      case "repair":
+        await (await import("./repair-jobs")).createFromQuote(quote.id);
+        break;
+      case "inspection":
+        await (await import("./inspections")).createFromQuote(quote.id);
+        break;
+      case "rental":
+        await (await import("./equipment-bookings")).createFromQuote(quote.id);
+        break;
+      default:
+        await spawnProject(quote.id);
+        break;
+    }
+  } catch (e) {
+    // #180 review: this whole function runs inside setStatus's own
+    // transaction, so an uncaught throw here rolls the STATUS CHANGE back
+    // too — the user's win silently undoes itself. A wedged withQuoteLock
+    // (a healing sweep, or another re-approve, still holding the advisory
+    // lock past its timeout) must not do that: the record isn't lost, the
+    // next healing sweep (safeSweep-wrapped on every dashboard this quote
+    // type owns) creates it the moment it re-checks coverage. Scoped to
+    // ONLY the lock timeout — anything else is a real defect in the spawn
+    // graph and still propagates (and still rolls the win back), exactly
+    // as before.
+    if (!isQuoteLockTimeout(e)) throw e;
+    console.warn(
+      `spawnFromQuote: advisory lock timed out spawning for quote ${quote.id} (${quote.quoteType}) — the status change still committed; a healing sweep will create the record`,
+      e
+    );
   }
 }
 

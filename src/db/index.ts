@@ -125,8 +125,11 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Drizzle's `.execute()` comes back shaped differently per driver: PGlite
- *  wraps its rows in `{ rows: [...] }`, postgres-js's raw result is itself
- *  array-like. Tried directly against both in the regression harness. */
+ *  wraps its rows in `{ rows: [...] }` — confirmed directly against it in
+ *  the regression harness. postgres-js's raw result is array-like instead
+ *  (per the `postgres` library's own `RowList` docs/typings) — not
+ *  exercised against a real Postgres here, so this branch is read, not
+ *  tested; the `Array.isArray` fallback below is what it depends on. */
 function firstRow<T = Record<string, unknown>>(result: unknown): T | undefined {
   if (result && typeof result === "object" && "rows" in result) {
     return (result as { rows: T[] }).rows[0];
@@ -153,13 +156,37 @@ const QUOTE_LOCK_NAMESPACE = 180;
 const QUOTE_LOCK_POLL_MS = 100;
 const QUOTE_LOCK_TIMEOUT_MS = 10_000;
 
+export const QUOTE_LOCK_TIMEOUT = "db/quote-lock-timeout" as const;
+
 export class QuoteLockTimeoutError extends Error {
+  /**
+   * Read by `isQuoteLockTimeout`, deliberately in place of `instanceof` —
+   * same reasoning as `quotes.ts`'s `ApprovalGateRefused`/
+   * `isApprovalGateRefusal`: `setStatus` reaches this module's own
+   * `withQuoteLock` through `quote-spawn.ts`, itself reached via a dynamic
+   * `import()`, and Next splits server actions across route bundles — this
+   * module can legitimately exist twice in one process, which would fail an
+   * `instanceof` check across that boundary. A string compared by value
+   * crosses it intact.
+   */
+  readonly quoteLockTimeout = QUOTE_LOCK_TIMEOUT;
+  readonly quoteId: string;
   constructor(quoteId: string) {
     super(
       `withQuoteLock: timed out after ${QUOTE_LOCK_TIMEOUT_MS}ms waiting for the spawn lock on quote ${quoteId} — another request is still working on it.`
     );
     this.name = "QuoteLockTimeoutError";
+    this.quoteId = quoteId;
   }
+}
+
+/** True only for withQuoteLock's own timeout — structural on purpose, see above. */
+export function isQuoteLockTimeout(e: unknown): e is QuoteLockTimeoutError {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { quoteLockTimeout?: unknown }).quoteLockTimeout === QUOTE_LOCK_TIMEOUT
+  );
 }
 
 /**

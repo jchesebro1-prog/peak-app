@@ -9367,6 +9367,7 @@ seeded()
   .then(() => dayliteSupersedeFix2Checks())
   .then(() => dayliteFinalReviewAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
+  .then(() => quoteLockTimeoutCatchAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
   .then(() => quoteLockAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
@@ -12078,6 +12079,69 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
       "#169 teardown leaves no TEST169 id on the dismissed list"
     );
   }
+}
+
+/* ====================================================================
+   #180 review round 2, item 6 — a wedged withQuoteLock on the WIN path
+   must not roll back the status change itself.
+
+   spawnFromQuote runs inside setStatus's own transaction, so an uncaught
+   throw there rolls back the `patchDoc` status write that already ran —
+   the user's win silently undoes itself. A QuoteLockTimeoutError (a
+   healing sweep, or another re-approve, still holding the advisory lock
+   past its bounded wait) is exactly the kind of failure that must not do
+   that: the record isn't lost, the next healing sweep creates it once
+   coverage is re-checked.
+
+   PGlite in this harness is a SINGLE connection/session for the whole
+   process — `withQuoteLock`'s advisory lock is per-session-reentrant, so
+   a nested call for the same quote id from the SAME call stack succeeds
+   instantly rather than contending, and there is no second session
+   available to hold the lock open while another genuinely times out
+   waiting on it. A real timeout is not reproducible against PGlite without
+   either a second live connection or shrinking QUOTE_LOCK_TIMEOUT_MS
+   (a module-level const, not parameterised) — so this is the "unit check
+   on the catch" the review named as the fallback: the brand mechanism
+   (isQuoteLockTimeout) proven directly, and the catch/rethrow shape proven
+   by reading quote-spawn.ts's actual source, same idiom as the client-side
+   checks above.
+   ==================================================================== */
+async function quoteLockTimeoutCatchAsyncChecks(): Promise<void> {
+  const { QuoteLockTimeoutError, isQuoteLockTimeout } = await import("../src/db");
+
+  // 1. The brand mechanism itself — same "structural, not instanceof, not
+  //    string-matched" contract as ApprovalGateRefused/isApprovalGateRefusal.
+  const real = new QuoteLockTimeoutError("Q-test-180r2");
+  ok(isQuoteLockTimeout(real), "#180 review 2 (item 6): isQuoteLockTimeout recognises a real QuoteLockTimeoutError");
+  ok(real.quoteId === "Q-test-180r2", "#180 review 2 (item 6): the error carries the quote id it timed out on");
+  const impostor = new Error(real.message);
+  ok(
+    !isQuoteLockTimeout(impostor),
+    "#180 review 2 (item 6): a plain Error carrying the same message is NOT recognised — identity is never string-matched"
+  );
+  const otherCopy = Object.assign(new Error(real.message), { quoteLockTimeout: "db/quote-lock-timeout" });
+  ok(
+    isQuoteLockTimeout(otherCopy),
+    "#180 review 2 (item 6): a SECOND copy of this module's brand (e.g. across a dynamic-import boundary) still routes correctly — the string crosses it intact"
+  );
+
+  // 2. The catch/rethrow shape in the actual source — spawnFromQuote must
+  //    swallow (with a warning) ONLY a lock timeout, and rethrow anything
+  //    else exactly as before.
+  const quoteSpawnSrc = readFileSync(join(process.cwd(), "src/lib/stores/quote-spawn.ts"), "utf8");
+  const spawnFromQuoteBody = quoteSpawnSrc.slice(
+    quoteSpawnSrc.indexOf("export async function spawnFromQuote"),
+    quoteSpawnSrc.indexOf("/**", quoteSpawnSrc.indexOf("export async function spawnFromQuote") + 1)
+  );
+  ok(spawnFromQuoteBody.length > 0, "#180 review 2 (item 6) fixture: spawnFromQuote is still where the test expects it");
+  ok(
+    /if \(!isQuoteLockTimeout\(e\)\) throw e;/.test(spawnFromQuoteBody),
+    "#180 review 2 (item 6): spawnFromQuote rethrows anything that is NOT a lock timeout — this is not a blanket 'spawn failures never block a win' change"
+  );
+  ok(
+    /console\.warn\(/.test(spawnFromQuoteBody) && /the status change still committed/.test(spawnFromQuoteBody),
+    "#180 review 2 (item 6): a caught lock timeout is logged as a warning, saying the status change itself still committed"
+  );
 }
 
 /* ====================================================================
