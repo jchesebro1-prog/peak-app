@@ -5018,7 +5018,15 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(!wrong.ok && wrong.reason === "mismatch", "redeem: wrong verifier -> mismatch");
   const late = redeemHandoffCode(code, verifier, secret, now + HANDOFF_TTL_MS + 1);
   ok(!late.ok && late.reason === "expired", "redeem: past ttl -> expired");
-  const flipped = code.slice(0, -2) + (code.endsWith("A") ? "B" : "A") + code.slice(-1);
+  // Flip a character inside the IV segment (code[1]), not near a base64 group's
+  // trailing edge: the IV is a fixed 12 bytes -> 16 base64 chars with no
+  // padding, so every character there is fully significant. Flipping near the
+  // end of the code (the ciphertext segment) is flaky (#179) — when the
+  // ciphertext's byte length leaves a 1-byte tail, the last real base64 char
+  // before "==" padding only encodes that byte's top 2 bits, so ~1/4 of random
+  // ciphertexts pick an "A"/"B" substitute that decodes to the same bits,
+  // silently producing a *different but still-valid* code that still redeems.
+  const flipped = code[0] + (code[1] === "A" ? "B" : "A") + code.slice(2);
   ok(!redeemHandoffCode(flipped, verifier, secret, now).ok, "redeem: tampered code -> not ok");
   const otherKey = redeemHandoffCode(code, verifier, "another-secret", now);
   ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
