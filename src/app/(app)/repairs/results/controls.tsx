@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { completeRepair, reopenRepair } from "../actions";
+import { useRouter } from "next/navigation";
+import { completeRepair, reopenRepair, deleteRepairJobAction } from "../actions";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { ConfirmButton } from "@/components/confirm-button";
 import type {
   RepairJobRecord,
   RepairScopeItem,
@@ -40,6 +42,24 @@ const INPUT: React.CSSProperties = {
   padding: "10px 12px",
   outline: "none",
 };
+
+/** Header Delete control — soft deletes the job, then leaves the results
+ *  screen (there is nothing left here to show). */
+export function DeleteRepairButton({ jobId }: { jobId: string }) {
+  const router = useRouter();
+  return (
+    <ConfirmButton
+      label="Delete"
+      confirmLabel="Confirm delete"
+      onConfirm={async () => {
+        const res = await deleteRepairJobAction(jobId);
+        if (!res.ok) throw new Error(res.error);
+        router.push("/repairs/scheduling");
+        router.refresh();
+      }}
+    />
+  );
+}
 
 /**
  * Repair results-capture form — the offline-capable client half of the Repair

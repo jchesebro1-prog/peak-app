@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { priceRental } from "@/lib/pricing/rental";
+import { ChangeTypeControl } from "@/components/quote-flow-controls";
 import { saveRentalQuote, approveRentalQuote, checkRentalAvailabilityAction } from "./actions";
 import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 
@@ -40,7 +41,6 @@ export type BuilderOption = { key: string; label: string };
 export type BuilderLineInit = { itemId: string; locationId: string; qty: string };
 export type BuilderInitial = {
   editingId: string | null;
-  replaces?: string;
   customerId: string;
   quoteName: string;
   contactSel: string;
@@ -51,8 +51,10 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
-  /** Quote is already WON — Delete's confirm label says what stays behind. */
-  won: boolean;
+  /** Quote status — drives Change type (D205). "draft" when new. */
+  status: string;
+  /** #160 / D205 — the draft this new quote replaces; posted on the create save. */
+  replaces: string;
 };
 
 type BuilderLineRow = { key: string; itemId: string; locationId: string; qty: string };
@@ -156,7 +158,7 @@ export function QuoteBuilder({
   const [pending, startTransition] = useTransition();
 
   const editingId = initial.editingId;
-  const won = initial.won;
+  const won = initial.status === "won";
   const savedId = initial.savedId;
   const isApproved = initial.approved;
 
@@ -296,9 +298,9 @@ export function QuoteBuilder({
   function buildForm(): FormData {
     const fd = new FormData();
     fd.set("editingId", editingId || "");
-    fd.set("replaces", initial.replaces || "");
     fd.set("customerId", customerId);
     fd.set("quoteName", quoteName);
+    fd.set("replaces", editingId ? "" : initial.replaces);
     const c = selectedContact();
     fd.set("contactName", c?.name || "");
     fd.set("contactRole", c?.role || "");
@@ -378,6 +380,7 @@ export function QuoteBuilder({
             >
               Auto-priced
             </span>
+            {editingId && <ChangeTypeControl quoteId={editingId} status={initial.status} />}
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>
             Cheapest of day/week/month billing per line, live availability shown as you add gear.

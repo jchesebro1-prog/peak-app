@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
@@ -35,17 +34,23 @@ import {
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
+import { ChangeTypeControl } from "@/components/quote-flow-controls";
+import { wonEditMessage, type WonEditField } from "@/app/(app)/quotes/new/handoff";
 import type { DraftedLine } from "./ai-scope-modal";
 import {
   DISC_LABEL,
   type SuggestPart,
 } from "./estimator-data";
 import {
+  backSolveExtSell,
   computeCurtain,
   computeLabor,
   fmt,
+  foldLaborMobLines,
   lineMarginOf,
   makeLaborRate,
+  priceFromUnitSellEdit,
+  repriceAtMargin,
   repricedAtLineMargin,
   round2,
   short,
@@ -53,6 +58,7 @@ import {
   systemItemsRev,
   totals,
   vendorTotalSeed,
+  type LaborExtra,
 } from "./pricing";
 import type {
   CurtainDraft,
@@ -71,7 +77,7 @@ import type {
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { assemblyDescription } from "@/lib/fixture-assemblies";
-import { defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor, normalizeLaborMobs } from "./labor-defaults";
+import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
@@ -114,9 +120,13 @@ const CSS = `
 .est-field:focus { border-color: #c4c9d2 !important; outline: none; }
 .est-warm:focus { border-color: #e3cf94 !important; outline: none; }
 .est-secname:hover { border-color: #e4e7ec !important; }
+.est-title:hover { border-color: #4a4e56 !important; }
 .est-secname:focus { border-color: #c4c9d2 !important; background: #fff !important; outline: none; }
 .est-notefield:focus { border-color: #4a4e56 !important; outline: none; }
 .est-row:hover { background: #fafbff; }
+.est-actions { opacity: .4; transition: opacity .12s; }
+.est-row:hover .est-actions, .est-actions:focus-within { opacity: 1; }
+.est-action-btn:hover { background: #eef0f3 !important; }
 .est-x:hover { color: #d6584a !important; }
 .est-delsys:hover { color: #d6584a !important; }
 .est-sug:hover { background: #fff !important; }
@@ -433,11 +443,15 @@ export default function EstimatorClient({
   const [moveNotice, setMoveNotice] = useState<
     { ok: true; targetId: string; targetName: string } | { ok: false; error: string } | null
   >(null);
-  const [projectName, setProjectName] = useState(initial.projectName);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [locationId, setLocationId] = useState(initial.locationId);
   const [contactName, setContactName] = useState(initial.contactName);
+  // #160: the quote name is editable in the header (click-to-edit).
+  const [projectName, setProjectName] = useState(initial.projectName);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(initial.projectName);
+  const titleOpenRef = useRef(false);
   const [quoteNote, setQuoteNote] = useState(initial.quoteNote);
   const [assumptions, setAssumptions] = useState(initial.assumptions || "");
   const checkedAssumptions = useMemo(() => new Set(assumptions.split("\n").map((line) => line.trim()).filter(Boolean)), [assumptions]);
@@ -597,9 +611,16 @@ export default function EstimatorClient({
   const isBuild = !phone && mode === "build";
   const isPreview = phone || mode === "preview";
   const isInternal = true; // build mode is the internal view (prototype view: 'internal')
+  /* One shared line-item grid template — header, item rows and the freight
+     row all render off this SAME `cols` (section-card.tsx), so a column can
+     only drift out of alignment here. Item shrunk / numeric columns widened
+     (punch: raw-looking columns) so Unit sell's 92px input + margin% chip and
+     Ext sell's own input both have room; the ×/↑/↓ actions now share ONE
+     64px cell instead of three, which used to overflow the old 22px column
+     and wrap onto a second grid row. */
   const cols = isInternal
-    ? "minmax(190px,1fr) 112px 100px 100px 100px 22px"
-    : "minmax(190px,1fr) 112px 100px 100px 22px";
+    ? "minmax(150px,1.3fr) 104px 92px 136px 116px 64px"
+    : "minmax(150px,1.3fr) 104px 136px 116px 64px";
 
   /* ---------------- travel (seeded + fetched on demand, punch #89) ----------------
      `travel` used to carry an estimate for every customer AND venue in the
@@ -646,17 +667,51 @@ export default function EstimatorClient({
   /* ---------------- persistence ---------------- */
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
     if (!loadedId) return;
-    if (
-      status === "won" &&
-      ("customerId" in meta || "locationId" in meta || "contactName" in meta) &&
-      !window.confirm("This quote is won — its project/job keeps the old value. Change the quote anyway?")
-    ) return;
     const id = loadedId;
     startTransition(async () => {
       const r = await updateQuoteMetaAction(id, meta);
       // Customer/contact changes re-stamp the tier server-side (item 11).
       if (r && typeof r.tierMargin === "number") setTierMargin(r.tierMargin);
     });
+  };
+
+  const openTitle = () => {
+    titleOpenRef.current = true;
+    setTitleDraft(projectName);
+    setTitleEditing(true);
+  };
+  /** Enter/blur save, Esc reverts. The ref makes Enter-then-blur a single save. */
+  const closeTitle = (save: boolean) => {
+    if (!titleOpenRef.current) return;
+    titleOpenRef.current = false;
+    setTitleEditing(false);
+    const next = titleDraft.trim();
+    if (!save || !next || next === projectName) return;
+    setProjectName(next);
+    persistMeta({ name: next }); // no-op until the first save; doSave carries it then
+  };
+
+  /**
+   * Guards editing a won quote's customer/venue/contact (PUNCHLIST #178) — a
+   * won quote's project/job already keeps the OLD value, so changing these
+   * here would silently disagree with it. `@/components/quote-flow-controls`
+   * has a shared `useWonEditGuard` (D206) other quote builders use for this
+   * same warning, but it still calls window.confirm() under the hood — which
+   * returns false with NO dialog at all in this app's Capacitor shells, so
+   * the edit is refused with no explanation, exactly what #178 reports. The
+   * estimator uses its own inline two-step confirm instead (D127 pattern,
+   * settings-client.tsx): nothing changes, locally or on the server, until
+   * the user hits Change in the banner rendered next to "Prepared for"
+   * below. wonEditMessage/WonEditField (quotes/new/handoff.ts) keep its
+   * copy identical to the shared hook's.
+   */
+  const [wonMetaGuard, setWonMetaGuard] = useState<{ field: WonEditField; run: () => void } | null>(null);
+  const guardWonMeta = (field: WonEditField, run: () => void) => {
+    if (status === "won") {
+      setWonMetaGuard({ field, run });
+      return;
+    }
+    run();
   };
 
   const applySync = (r: ReviewSync) => {
@@ -683,8 +738,9 @@ export default function EstimatorClient({
     startTransition(async () => {
       try {
         const res = await saveQuoteAction(loadedId, {
-          replaces: initial.replaces,
           name: projectName,
+          // D205: only the create save retires the replaced draft.
+          replaces: loadedId ? "" : initial.replaces,
           customer: cname,
           customerId: customerId || null,
           locationId: locationId || null,
@@ -896,21 +952,27 @@ export default function EstimatorClient({
     const name = c ? c.name : custName;
     const pc = c ? c.contacts.find((ct) => ct.primary) || c.contacts[0] : undefined;
     const contact = pc ? pc.name : "";
-    setCustomerId(id || null);
-    setLocationId(locId);
-    setCustName(name);
-    setContactName(contact);
-    persistMeta({ customerId: id || null, locationId: locId, customer: name, contactName: contact });
-    reapplyAutoTrips(id || null, locId);
+    guardWonMeta("customer", () => {
+      setCustomerId(id || null);
+      setLocationId(locId);
+      setCustName(name);
+      setContactName(contact);
+      persistMeta({ customerId: id || null, locationId: locId, customer: name, contactName: contact });
+      reapplyAutoTrips(id || null, locId);
+    });
   };
   const pickVenue = (locId: string) => {
-    setLocationId(locId || null);
-    persistMeta({ locationId: locId || null });
-    reapplyAutoTrips(customerId, locId || null);
+    guardWonMeta("venue", () => {
+      setLocationId(locId || null);
+      persistMeta({ locationId: locId || null });
+      reapplyAutoTrips(customerId, locId || null);
+    });
   };
   const pickContact = (name: string) => {
-    setContactName(name || "");
-    persistMeta({ contactName: name || "" });
+    guardWonMeta("contact", () => {
+      setContactName(name || "");
+      persistMeta({ contactName: name || "" });
+    });
   };
   const onQuoteNote = (v: string) => {
     setQuoteNote(v);
@@ -935,14 +997,6 @@ export default function EstimatorClient({
     setInstallTimeframe(v);
     persistMeta({ installTimeframe: v });
   };
-  const onProjectName = (v: string) => {
-    setProjectName(v);
-    if (loadedId) persistMeta({ name: v });
-  };
-
-  const changeTypeHref = loadedId
-    ? `/quotes/new?replaces=${encodeURIComponent(loadedId)}&type=system${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}${locationId ? `&venue=${encodeURIComponent(locationId)}` : ""}${contactName ? `&contact=${encodeURIComponent(contactName)}` : ""}${projectName ? `&name=${encodeURIComponent(projectName)}` : ""}`
-    : "#";
 
   /* ---------------- sections & items ---------------- */
   const isExpanded = (id: string) => expanded[id] !== false;
@@ -959,12 +1013,12 @@ export default function EstimatorClient({
   const setItemPrice = (id: number, value: string) => {
     const price = Number(value.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(price) || price < 0) return;
-    patchItem(id, (it) => ({ ...it, price: round2(price), sellOverride: true, extSellOverride: undefined }));
+    patchItem(id, (it) => ({ ...it, ...priceFromUnitSellEdit(price) }));
   };
   const setItemExtSell = (id: number, value: string) => {
     const ext = Number(value.replace(/[$,\s]/g, ""));
     if (!Number.isFinite(ext) || ext < 0) return;
-    patchItem(id, (it) => ({ ...it, extSellOverride: round2(ext) }));
+    patchItem(id, (it) => ({ ...it, ...backSolveExtSell(ext, it.qty) }));
   };
   const moveItem = (secId: string, id: number, direction: -1 | 1) =>
     setSections((ss) => ss.map((s) => {
@@ -997,7 +1051,7 @@ export default function EstimatorClient({
     setSections((ss) =>
       ss.map((s) => ({
         ...s,
-        items: s.items.map((it) => ({ ...it, price: round2(it.cost / (1 - m)) })),
+        items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })),
       }))
     );
   };
@@ -1006,7 +1060,7 @@ export default function EstimatorClient({
     setSections((ss) =>
       ss.map((s) =>
         s.id === secId
-          ? { ...s, items: s.items.map((it) => ({ ...it, price: round2(it.cost / (1 - m)) })) }
+          ? { ...s, items: s.items.map((it) => ({ ...it, ...repriceAtMargin(it.cost, m) })) }
           : s
       )
     );
@@ -1097,10 +1151,13 @@ export default function EstimatorClient({
       ss.map((s) => (s.id === secId ? { ...s, items: [...s.items, ...items] } : s))
     );
 
+  /** #160: a catalog add carries its qty and keeps the picker OPEN (rapid-fire);
+   *  the panel closes only via its toggle or ×. */
   const addPart = (secId: string, cat: SuggestPart, qty = 1) => {
     const margin = tierMargin != null && tierMargin > 0 && tierMargin < 1 ? tierMargin : 0.3;
+    const n = Math.max(1, Math.floor(qty) || 1);
     pushItems(secId, [
-      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: Math.max(1, qty), unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
+      { id: nextId(), sku: cat.sku, desc: cat.desc, qty: n, unit: cat.unit, cost: cat.cost, price: cat.cost > 0 ? round2(cat.cost / (1 - margin)) : cat.price },
     ]);
   };
 
@@ -1257,10 +1314,9 @@ export default function EstimatorClient({
         // nor into the NEXT open of the same method on the same system — hence
         // the sequence number rather than a kind/secId comparison.
         if (openSeqRef.current !== seq) return;
-        setLaborDraft((draft) => ({
-          ...freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || ""),
-          mobs: normalizeLaborMobs(draft.mobs, est),
-        }));
+        setLaborDraft(
+          freshLabor(est, tierMargin, sections.find((section) => section.id === secId)?.name || "")
+        );
       });
     }
   };
@@ -1582,7 +1638,7 @@ export default function EstimatorClient({
   const resetAutoHrs = (field: "pmHrs" | "drfHrs", flag: "pmAuto" | "drfAuto") =>
     setLaborDraft((d) => ({ ...d, [field]: "", [flag]: true }));
   const addMob = () =>
-    setLaborDraft((d) => ({ ...d, mobs: [...d.mobs, laborMob(travelEstNow())] }));
+    setLaborDraft((d) => ({ ...d, mobs: d.mobs.concat([laborMob(travelEstNow())]) }));
   const removeMob = (idx: number) =>
     setLaborDraft((d) =>
       d.mobs.length <= 1 ? d : { ...d, mobs: d.mobs.filter((_, i) => i !== idx) }
@@ -1598,16 +1654,7 @@ export default function EstimatorClient({
       mobs: d.mobs.map((m, i) => {
         if (i !== idx) return m;
         if (val === "__custom__") return { ...m, nameCustom: true, name: "" };
-        const previous = mobDefaultsFor(m.name);
-        const untouched =
-          (previous ? m.people === previous.people && m.days === previous.days : m.people === "1" && m.days === "1");
-        const next = mobDefaultsFor(val);
-        return {
-          ...m,
-          name: val,
-          nameCustom: false,
-          ...(untouched && next ? { people: next.people, days: next.days } : {}),
-        };
+        return applyMobType(m, val);
       }),
     }));
   const useMobNameList = (idx: number) =>
@@ -1686,76 +1733,88 @@ export default function EstimatorClient({
     }));
   };
 
+  /** Display label / SKU prefix / customer-facing desc for a folded-out
+   *  extra that had nowhere to fold onto (see the `else` branch below). */
+  const LABOR_EXTRA_META: Record<string, { skuPrefix: string; desc: string }> = {
+    "shop & engineering": { skuPrefix: "LAB-SHOP-", desc: "Shop & engineering — PM, fabrication & drafting" },
+    "performance bonus": { skuPrefix: "LAB-BONUS-", desc: "Performance bonus — 5% of labor cost" },
+    allowance: { skuPrefix: "LAB-MISC-", desc: "Project allowance / misc" },
+  };
+
   const addLabor = (secId: string) => {
     const r = computeLabor(laborDraft, rate);
     if (r.totalCost <= 0) return;
     const discLabel = DISC_LABEL[r.disc] || r.disc;
     const price = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
-    const items: SpecItem[] = [];
-    r.mobs.forEach((m, i) => {
-      if (m.cost <= 0) return;
-      const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
-      const desc = label + " — " + discLabel;
-      const comment = (m.raw.comments || "").trim();
-      const internalNote = (m.raw.internalNote || "").trim();
-      const idN = nextId();
-      const skuN = nextId();
-      items.push({
-        id: idN,
-        sku: "LAB-" + r.disc + "-" + skuN,
-        desc,
-        qty: 1,
-        unit: "lot",
-        cost: round2(m.cost),
-        price: price(m.cost),
-        labor: true,
-        comment,
-        internalNote,
-        mob: { type: label, days: m.days, crew: m.people, discipline: discLabel },
-      });
-    });
+
+    // One line per mobilization (the modal's own subtitle promise) — shop &
+    // engineering, the misc allowance and the performance bonus (nearly
+    // always present: PM/drafting hours auto-compute from the crew, and the
+    // bonus is always 5% of cost) get FOLDED into the mobilization lines
+    // instead of tagging along as their own lines.
+    const activeMobs = r.mobs.map((m, i) => ({ m, i })).filter(({ m }) => m.cost > 0);
+    const extras: LaborExtra[] = [];
     if (r.shopCost > 0) {
-      const idN = nextId();
-      const skuN = nextId();
-      items.push({
-        id: idN,
-        sku: "LAB-SHOP-" + skuN,
-        desc: "Shop & engineering — PM, fabrication & drafting",
-        qty: 1,
-        unit: "lot",
-        cost: round2(r.shopCost),
-        price: price(r.shopCost),
-        labor: true,
-      });
-    }
-    if (r.misc > 0) {
-      const idN = nextId();
-      const skuN = nextId();
-      items.push({
-        id: idN,
-        sku: "LAB-MISC-" + skuN,
-        desc: "Project allowance / misc",
-        qty: 1,
-        unit: "lot",
-        cost: round2(r.misc),
-        price: price(r.misc),
-        labor: true,
-      });
+      const cost = round2(r.shopCost);
+      extras.push({ label: "shop & engineering", cost, price: price(cost) });
     }
     if (r.performanceBonus > 0) {
-      const idN = nextId();
-      const skuN = nextId();
-      items.push({
-        id: idN,
-        sku: "LAB-BONUS-" + skuN,
-        desc: "Performance bonus — 5% of labor cost",
-        qty: 1,
-        unit: "lot",
-        cost: round2(r.performanceBonus),
-        price: price(r.performanceBonus),
-        labor: true,
+      const cost = round2(r.performanceBonus);
+      extras.push({ label: "performance bonus", cost, price: price(cost) });
+    }
+    if (r.misc > 0) {
+      const cost = round2(r.misc);
+      extras.push({ label: "allowance", cost, price: price(cost) });
+    }
+
+    const items: SpecItem[] = [];
+
+    if (activeMobs.length > 0) {
+      const mobCosts = activeMobs.map(({ m }) => round2(m.cost));
+      const mobPrices = mobCosts.map((c) => price(c));
+      const folded = foldLaborMobLines(mobCosts, mobPrices, extras);
+      activeMobs.forEach(({ m, i }, idx) => {
+        const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
+        const desc = label + " — " + discLabel;
+        const comment = (m.raw.comments || "").trim();
+        const userNote = (m.raw.internalNote || "").trim();
+        const foldNote = folded[idx].internalNote;
+        const idN = nextId();
+        const skuN = nextId();
+        items.push({
+          id: idN,
+          sku: "LAB-" + r.disc + "-" + skuN,
+          desc,
+          qty: 1,
+          unit: "lot",
+          cost: folded[idx].cost,
+          price: folded[idx].price,
+          labor: true,
+          comment,
+          internalNote: userNote && foldNote ? userNote + " · " + foldNote : userNote || foldNote,
+          mob: { type: label, days: m.days, crew: m.people, discipline: discLabel },
+        });
+      });
+    } else if (extras.length) {
+      // No mobilization line to fold onto (every mobilization costs $0) —
+      // keep the extras as their own lines rather than dropping them.
+      extras.forEach((extra) => {
+        const meta = LABOR_EXTRA_META[extra.label];
+        const idN = nextId();
+        const skuN = nextId();
+        items.push({
+          id: idN,
+          sku: meta.skuPrefix + skuN,
+          desc: meta.desc,
+          qty: 1,
+          unit: "lot",
+          cost: extra.cost,
+          price: extra.price,
+          labor: true,
+        });
       });
     }
+
     if (items.length) pushItems(secId, items);
     closeInput(); // discards → reseeds freshLabor for this system
   };
@@ -1902,32 +1961,71 @@ export default function EstimatorClient({
           >
             <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
               <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 600,
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
+                {titleEditing ? (
                   <input
-                    value={projectName}
-                    onChange={(e) => onProjectName(e.target.value)}
-                    aria-label="Estimate name"
-                    style={{ background: "transparent", border: "1px solid transparent", color: "#fff", font: "inherit", width: "100%", minWidth: 140, outline: "none" }}
+                    autoFocus
+                    aria-label="Quote name"
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={() => closeTitle(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        closeTitle(true);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        closeTitle(false);
+                      }
+                    }}
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      fontFamily: "var(--font-ui)",
+                      color: "#fff",
+                      background: "#2b2e35",
+                      border: "1px solid #4a4e56",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      width: 340,
+                      maxWidth: "100%",
+                      outline: "none",
+                    }}
                   />
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#9aa0ab",
-                    fontFamily: "var(--font-mono)",
-                    marginTop: 2,
-                  }}
-                >
-                  {quoteId} · Rev {revNum}
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openTitle}
+                    title="Rename this quote"
+                    style={{
+                      display: "block",
+                      maxWidth: "100%",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      fontFamily: "var(--font-ui)",
+                      color: "#fff",
+                      background: "none",
+                      border: "1px dashed transparent",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      margin: "-3px -7px",
+                      cursor: "text",
+                      textAlign: "left",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    className="est-title"
+                  >
+                    {projectName}
+                  </button>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 2 }}>
+                  <span style={{ fontSize: 11, color: "#9aa0ab", fontFamily: "var(--font-mono)" }}>
+                    {quoteId} · Rev {revNum}
+                  </span>
+                  {loadedId && <ChangeTypeControl quoteId={loadedId} status={status} tone="dark" />}
                 </div>
               </div>
             </div>
@@ -1935,22 +2033,6 @@ export default function EstimatorClient({
               className="est-topright"
               style={{ display: "flex", alignItems: "center", gap: 22, flexShrink: 0 }}
             >
-              <Link
-                href={changeTypeHref}
-                aria-disabled={!loadedId || status !== "draft"}
-                onClick={(e) => {
-                  if (!loadedId || status !== "draft") e.preventDefault();
-                }}
-                title={status === "draft" ? "Start a replacement quote with a different type" : "Already sent — start a new quote instead."}
-                style={{
-                  fontSize: 11,
-                  color: loadedId && status === "draft" ? "#d9b8ff" : "#777d88",
-                  textDecoration: "none",
-                  pointerEvents: loadedId && status === "draft" ? "auto" : "none",
-                }}
-              >
-                Change type
-              </Link>
               <div style={{ textAlign: "right" }}>
                 <div
                   style={{
@@ -3141,6 +3223,66 @@ export default function EstimatorClient({
                         ))}
                       </select>
                     </>
+                  )}
+                  {wonMetaGuard && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: 7,
+                        marginTop: 2,
+                        padding: "7px 9px",
+                        fontSize: 11.5,
+                        lineHeight: 1.35,
+                        color: "#e3c26e",
+                        background: "#3a331d",
+                        border: "1px solid #55471f",
+                        borderRadius: 7,
+                      }}
+                    >
+                      <span style={{ flex: 1, minWidth: 140 }}>
+                        {wonEditMessage(wonMetaGuard.field)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const run = wonMetaGuard.run;
+                          setWonMetaGuard(null);
+                          run();
+                        }}
+                        style={{
+                          fontFamily: "var(--font-ui)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#16181d",
+                          background: "#e3c26e",
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "4px 9px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Change
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWonMetaGuard(null)}
+                        style={{
+                          fontFamily: "var(--font-ui)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#e3c26e",
+                          background: "transparent",
+                          border: "1px solid #55471f",
+                          borderRadius: 6,
+                          padding: "4px 9px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                   <span style={META_SUB}>category</span>
                   <input

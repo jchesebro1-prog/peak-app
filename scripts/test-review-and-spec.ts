@@ -147,12 +147,18 @@ import {
   venueKindFromCategory,
 } from "@/app/(app)/import/link";
 import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
+import { remove as removeCustomer, upsert as upsertCustomer } from "@/lib/stores/customers";
 // catalogPatch/templateCsv are pure (no store access, no DB) — see the note
 // on catalogPatch itself. commitImport/exportCsv are NOT — #145 D169 review
 // (Important 1) exercises the task_templates writer for real, DB-backed,
 // with cleanup (see asyncChecks()).
 import { catalogPatch, templateCsv as importTemplateCsv, commitImport, exportCsv } from "@/app/(app)/import/registry";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
+import {
+  EMPTY_MAP_FILTERS, filterMapPoints, groupPointsByCompany, hasActiveMapFilters, mapFilterOptions,
+  type CompanyMapPoint,
+} from "@/app/(app)/companies/map-filter";
+import { getCompanySummary } from "@/lib/company-summary";
 
 import {
   VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
@@ -202,8 +208,27 @@ import {
   isAllowedSheetMime,
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
-import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
+import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
+import {
+  backSolveExtSell,
+  computeLabor,
+  computeMob,
+  foldLaborMobLines,
+  lineExtSellOf,
+  lineMarginOf,
+  parseAddQty,
+  priceFromUnitSellEdit,
+  repriceAtMargin,
+  repricedAtLineMargin,
+  round2,
+  systemFreight,
+  systemFreightBase,
+  systemItemsCost,
+  systemItemsRev,
+  vendorTotalSeed,
+  type LaborExtra,
+  type RateFn,
+} from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -262,14 +287,237 @@ ok(disciplineForSystemTitle("Lighting control") === "LIG", "labor scope defaults
 ok(disciplineForSystemTitle("Video projection") === "AUD", "audio and video share one labor scope");
 ok(disciplineForSystemTitle("General conditions") === "OTH", "an unmatched system defaults to Other");
 const defaultMobs = defaultLaborMobs(null);
-ok(defaultMobs.length === 1 && defaultMobs[0]?.people === "1" && defaultMobs[0]?.days === "1", "labor opens with one mobilization");
+ok(defaultMobs.length === 1, "#161 labor opens with exactly one mobilization");
+ok(defaultMobs[0].name === "" && defaultMobs[0].people === "1" && defaultMobs[0].days === "1", "#161 the one opening row is a blank type at 1 person x 1 day");
+ok(
+  ["Site Visit", "Install", "Hang", "Commissioning", "Training"].map((n) => `${n}:${mobDefaultsFor(n).people}x${mobDefaultsFor(n).days}`).join("|") ===
+    "Site Visit:1x1|Install:4x5|Hang:2x3|Commissioning:2x3|Training:1x1",
+  "#161 the D136 values survive as per-type crew x day defaults"
+);
+const pickedInstall = applyMobType(defaultMobs[0], "Install");
+ok(pickedInstall.name === "Install" && pickedInstall.people === "4" && pickedInstall.days === "5", "#161 picking Install on an untouched blank row fills 4x5");
+const pickedHang = applyMobType(pickedInstall, "Hang");
+ok(pickedHang.people === "2" && pickedHang.days === "3", "#161 switching type on still-default numbers refills from the new type");
+const touched161 = applyMobType({ ...pickedInstall, people: "6" }, "Hang");
+ok(touched161.name === "Hang" && touched161.people === "6" && touched161.days === "5", "#161 numbers the user edited are never overwritten by a type pick");
+const custom161 = applyMobType({ ...laborMob(null, "Rig day"), nameCustom: true }, "Install");
+ok(custom161.people === "1" && custom161.days === "1", "#161 a custom-named row keeps its numbers when a type is picked");
+ok(applyMobType(defaultMobs[0], "Install").nameCustom === false, "#161 picking a listed type clears the custom flag");
+const installMob = laborMob(null, "Install", "4", "5");
 const testRate = ((sku: string) => ({ "RIG-LBR": 50, "RIG-OT": 75, "RIG-SUP": 75, "DRF-SUB": 50 }[sku] || 0)) as any;
-const day10 = computeMob({ ...defaultMobs[0], people: "4", days: "5", hoursPerDay: "10" }, "RIG", testRate);
+const day10 = computeMob({ ...installMob, hoursPerDay: "10" }, "RIG", testRate);
 ok(day10.reg === 160 && day10.otHrs === 40, "hours beyond 8 per day become crew overtime");
 ok(day10.supHrs === 40 && day10.regCost === 9000, "the first person is the supervisor within the crew, not an added worker");
-const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
+const laborCalc = computeLabor({ discipline: "RIG", margin: "30", mobs: [installMob], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "" }, testRate);
 ok(laborCalc.drfAutoHrs === 3.2, "drafting defaults to 2% of total regular hours");
 ok(laborCalc.performanceBonus === laborCalc.baseCost * 0.05, "labor adds a 5% performance bonus based on base cost");
+
+/* --- #160: quote intake → builder hand-off (pure) --- */
+import { builderPath, SERVICE_TYPES, BUILDER_BASE } from "@/app/(app)/quotes/new/types";
+import {
+  readHandoff, pickVenueId, pickContactName, seedVenueOn, intakeInitial, quoteServiceType, quoteEditPath,
+  quoteContactName, quoteLineCount, sameBuilder, canChangeType, replaceConfirmMessage, wonEditMessage,
+  systemQuoteName, CHANGE_TYPE_DISABLED_HINT,
+} from "@/app/(app)/quotes/new/handoff";
+{
+  const params160 = (href: string) => new URL(href, "http://x").searchParams;
+  for (const t of SERVICE_TYPES.map((s) => s.key)) {
+    const href = builderPath(t, "lakefront", { name: "Main Hall refit", venue: "lf2", contact: "Tom Reyes", replaces: "Q-2041", category: "Acoustics" });
+    const p = params160(href);
+    ok(href.startsWith(BUILDER_BASE[t] + "?"), `#160 builderPath(${t}) targets its builder`);
+    ok(p.get("customer") === "lakefront" && p.get("name") === "Main Hall refit" && p.get("contact") === "Tom Reyes" && p.get("replaces") === "Q-2041", `#160 builderPath(${t}) carries customer, name, contact and replaces`);
+    ok(t === "rental" ? !p.has("venue") : p.get("venue") === "lf2", `#160 builderPath(${t}) ${t === "rental" ? "drops venue (rental has none)" : "carries the venue id"}`);
+    ok(t === "custom" ? p.get("category") === "Acoustics" : !p.has("category"), `#160 builderPath(${t}) sends category only for custom`);
+  }
+  ok(builderPath("system", "lakefront") === "/estimator?customer=lakefront", "#160 builderPath with no options is unchanged");
+  ok(builderPath("repair", "") === "/repairs/quote", "#160 builderPath with no customer has no query string");
+  ok(!params160(builderPath("system", "c1", { name: "   " })).has("name"), "#160 a blank quote name is not forwarded");
+
+  const h = readHandoff({ customer: " lakefront ", name: ["Studio refit", "x"], venue: "lf2", contact: "Tom Reyes", replaces: "Q-2041", type: "repair", category: "" });
+  ok(h.customerId === "lakefront" && h.name === "Studio refit" && h.venueId === "lf2" && h.contactName === "Tom Reyes" && h.replaces === "Q-2041" && h.type === "repair", "#160 readHandoff trims and takes the first of repeated params");
+  ok(readHandoff({}).customerId === "" && readHandoff({}).replaces === "", "#160 readHandoff of nothing is all blanks");
+
+  const cust160 = {
+    id: "lakefront",
+    locations: [{ id: "lf1", primary: true }, { id: "lf2", primary: false }],
+    contacts: [{ name: "Dana Whitlock", primary: true }, { name: "Tom Reyes", primary: false }],
+  };
+  ok(pickVenueId(cust160, "lf2") === "lf2", "#160 a venue on the customer is honoured");
+  ok(pickVenueId(cust160, "nope") === "lf1", "#160 an unknown venue id falls back to the primary");
+  ok(pickVenueId(cust160, "nope", false) === "", "#160 without fallback an unknown venue id is blank");
+  ok(pickVenueId({ locations: [] }, "lf1") === "", "#160 a customer with no venues yields no venue");
+  ok(pickContactName(cust160, "Tom Reyes") === "Tom Reyes", "#160 a contact on the customer is honoured");
+  ok(pickContactName(cust160, "Stranger") === "Dana Whitlock", "#160 an unknown contact falls back to the primary");
+  ok(pickContactName(cust160, "Stranger", false) === "", "#160 without fallback an unknown contact is blank");
+  const on160 = seedVenueOn(cust160.locations, "lf2");
+  ok(on160.lf2 === true && on160.lf1 === false, "#160 a forwarded venue is the only venue switched on");
+  const onDefault160 = seedVenueOn(cust160.locations, "");
+  ok(onDefault160.lf1 === true && onDefault160.lf2 === false, "#160 with no forwarded venue the primary is on (unchanged rule)");
+  const onNoPrimary160 = seedVenueOn([{ id: "a", primary: false }, { id: "b", primary: false }], "zzz");
+  ok(onNoPrimary160.a === true && onNoPrimary160.b === false, "#160 no primary and an unknown venue → first venue on");
+
+  const dir160 = [{ id: "lakefront", name: "Lakefront PAC", type: "", locations: [{ id: "lf1", label: "Main Hall", city: "", state: "", primary: true }], contacts: [{ name: "Dana Whitlock", role: "", primary: true }] }];
+  const ii = intakeInitial({ type: "flame_test", category: "", customerId: "lakefront", venueId: "lf1", contactName: "Dana Whitlock", name: "Q name" }, dir160);
+  ok(ii.type === "flame_test" && ii.customerId === "lakefront" && ii.locationId === "lf1" && ii.contactName === "Dana Whitlock" && ii.name === "Q name", "#160 intakeInitial keeps a valid customer, venue and contact");
+  const bad = intakeInitial({ type: "bogus", category: "", customerId: "ghost", venueId: "lf1", contactName: "Dana Whitlock", name: "" }, dir160);
+  ok(bad.type === "system" && bad.customerId === "" && bad.locationId === "" && bad.contactName === "", "#160 intakeInitial ignores an unknown customer id (form starts blank) and an unknown type");
+  const badVenue = intakeInitial({ type: "repair", category: "", customerId: "lakefront", venueId: "zz", contactName: "Nobody", name: "" }, dir160);
+  ok(badVenue.customerId === "lakefront" && badVenue.locationId === "" && badVenue.contactName === "", "#160 intakeInitial drops a venue/contact that isn't on the customer");
+
+  ok(quoteServiceType({}) === "system" && quoteServiceType({ category: "Acoustics" }) === "custom" && quoteServiceType({ quoteType: "flame_test" }) === "flame_test", "#160 quoteServiceType maps estimator, custom and typed quotes");
+  ok(quoteServiceType({ quoteType: "weird" }) === "system", "#160 an unknown quoteType is treated as a system quote");
+  ok(quoteEditPath({ id: "Q-1", quoteType: "repair" }) === "/repairs/quote?id=Q-1" && quoteEditPath({ id: "Q-2" }) === "/estimator?id=Q-2", "#160 quoteEditPath opens each type in its own builder");
+  ok(quoteContactName({ contactName: "A" }) === "A" && quoteContactName({ contact: { name: "B" } }) === "B" && quoteContactName({}) === "", "#160 quoteContactName reads estimator and service contact shapes");
+  ok(quoteLineCount({ spec: { sections: [{ items: [1, 2] }, { items: [3] }] } }) === 3, "#160 estimator lines are counted across systems");
+  ok(quoteLineCount({ flameTest: { venues: [1, 2] } }) === 2 && quoteLineCount({ repair: { items: [1], parts: [1, 2] } }) === 3 && quoteLineCount({ rental: { lines: [1] } }) === 1 && quoteLineCount({ consulting: { scopes: [1, 2] } }) === 2, "#160 service quote lines are counted from their engine subdoc");
+  ok(quoteLineCount({}) === 0, "#160 a quote with no lines counts 0");
+  ok(sameBuilder("system", "custom") && sameBuilder("repair", "repair") && !sameBuilder("system", "repair"), "#160 system and custom share the Estimator, so switching between them is not a replace");
+  ok(canChangeType("draft") && !canChangeType("sent") && !canChangeType("won") && !canChangeType("lost"), "#160 Change type is drafts-only");
+  ok(CHANGE_TYPE_DISABLED_HINT === "Already sent — start a new quote instead.", "#160 disabled Change-type hint copy");
+  ok(replaceConfirmMessage("Q-2041", 12) === "Q-2041 and its 12 lines will be replaced. Continue?" && replaceConfirmMessage("Q-9", 1) === "Q-9 and its 1 line will be replaced. Continue?", "#160 replace confirm names the quote and its line count");
+  ok(wonEditMessage("venue") === "This quote is won — its project/job keeps the old venue. Change the quote anyway?", "#160 won-edit confirm copy");
+  ok(systemQuoteName("Lakefront PAC", "") === "Lakefront PAC — System" && systemQuoteName("Lakefront PAC", " Acoustics ") === "Lakefront PAC — Acoustics" && systemQuoteName("", "") === "New estimate", "#160 blank-name fallback for Estimator quotes");
+}
+
+/* --- #160: catalog rapid-add quantity box --- */
+ok(parseAddQty("4") === 4 && parseAddQty("12") === 12, "#160 the catalog qty box adds the typed quantity");
+ok(parseAddQty("") === 1 && parseAddQty("0") === 1 && parseAddQty("-3") === 1 && parseAddQty("abc") === 1, "#160 a blank, zero, negative or non-numeric qty adds 1");
+ok(parseAddQty("2.7") === 2, "#160 a fractional qty is floored to a whole unit");
+
+/* --- estimator labor fold + sell back-solve --- */
+
+// foldLaborMobLines: the pure fold itself, independent of computeLabor.
+const foldSingle = foldLaborMobLines(
+  [1000],
+  [1400],
+  [
+    { label: "shop & engineering", cost: 100, price: 140 },
+    { label: "performance bonus", cost: 55, price: 77 },
+  ]
+);
+ok(foldSingle.length === 1, "labor fold: one mobilization yields exactly one folded line");
+ok(foldSingle[0].cost === 1155 && foldSingle[0].price === 1617, "labor fold: a single mobilization absorbs every extra's cost and price exactly");
+ok(
+  foldSingle[0].internalNote === "Includes shop & engineering $100.00 · performance bonus $55.00",
+  "labor fold: the internal note itemizes each folded extra's dollar share"
+);
+
+const foldMulti = foldLaborMobLines([1000, 3000], [1300, 3900], [{ label: "allowance", cost: 100, price: 130 }]);
+ok(foldMulti.length === 2, "labor fold: keeps one folded line per mobilization");
+ok(foldMulti[0].cost === 1025 && foldMulti[0].price === 1332.5, "labor fold: the allowance splits proportionally to each mobilization's own cost");
+ok(foldMulti[1].cost === 3075 && foldMulti[1].price === 3997.5, "labor fold: the larger mobilization absorbs the larger dollar share");
+ok(
+  foldMulti.reduce((a, f) => a + f.cost, 0) === 4100 && foldMulti.reduce((a, f) => a + f.price, 0) === 5330,
+  "labor fold: folded totals exactly match the pre-fold mob+extras sum, to the cent"
+);
+
+const foldEven = foldLaborMobLines([0, 0], [0, 0], [{ label: "allowance", cost: 10, price: 10 }]);
+ok(foldEven[0].cost === 5 && foldEven[1].cost === 5, "labor fold: splits evenly across mobilizations when every mobilization costs $0");
+
+const foldThirds = foldLaborMobLines([1, 1, 1], [1, 1, 1], [{ label: "x", cost: 1, price: 1 }]);
+ok(
+  foldThirds[0].cost === 1.33 && foldThirds[1].cost === 1.33 && foldThirds[2].cost === 1.34,
+  "labor fold: the last mobilization absorbs the rounding remainder rather than a fixed one"
+);
+ok(
+  foldThirds.reduce((a, f) => a + f.cost, 0) === 4,
+  "labor fold: three equal mobilizations plus a $1 extra still sum to exactly $4"
+);
+ok(foldLaborMobLines([], [], [{ label: "x", cost: 1, price: 1 }]).length === 0, "labor fold: no mobilizations folds to no lines");
+
+// addLabor itself: computeLabor's real shop/bonus/allowance output, folded
+// the same way addLabor (estimator-client.tsx) folds it, must land on the
+// SAME totals a pre-fold caller would have gotten from one line per mob
+// plus separate shop/allowance/bonus lines — to the cent.
+const foldRate: RateFn = (sku: string) =>
+  ({
+    "RIG-LBR": 50,
+    "RIG-OT": 75,
+    "RIG-SUP": 60,
+    "SHP-PM": 65,
+    "SHP-IN": 45,
+    "DRF-SUB": 50,
+  }[sku] || 0);
+function foldFromDraft(draft: Parameters<typeof computeLabor>[0]) {
+  const r = computeLabor(draft, foldRate);
+  const priceAt = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
+  const activeMobs = r.mobs.filter((m) => m.cost > 0);
+  const mobCosts = activeMobs.map((m) => round2(m.cost));
+  const mobPrices = mobCosts.map((c) => priceAt(c));
+  const extras: LaborExtra[] = [];
+  if (r.shopCost > 0) extras.push({ label: "shop & engineering", cost: round2(r.shopCost), price: priceAt(round2(r.shopCost)) });
+  if (r.performanceBonus > 0) extras.push({ label: "performance bonus", cost: round2(r.performanceBonus), price: priceAt(round2(r.performanceBonus)) });
+  if (r.misc > 0) extras.push({ label: "allowance", cost: round2(r.misc), price: priceAt(round2(r.misc)) });
+  const oldCost = mobCosts.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.cost, 0);
+  const oldPrice = mobPrices.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.price, 0);
+  const folded = foldLaborMobLines(mobCosts, mobPrices, extras);
+  return { folded, oldCost, oldPrice };
+}
+
+const oneMobDraft = { discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "500" };
+const oneMobFold = foldFromDraft(oneMobDraft);
+ok(oneMobFold.folded.length === 1, "estimator labor: a single mobilization still yields exactly one line once shop/allowance/bonus fold in");
+ok(
+  oneMobFold.folded.reduce((a, f) => a + f.cost, 0) === oneMobFold.oldCost &&
+    oneMobFold.folded.reduce((a, f) => a + f.price, 0) === oneMobFold.oldPrice,
+  "estimator labor: folded cost/price match the old mob+shop+allowance+bonus line sum to the cent (with misc)"
+);
+
+const multiMobDraft = {
+  discipline: "RIG",
+  margin: "25",
+  mobs: [
+    { ...defaultMobs[0], name: "Site Visit", people: "3", days: "2" },
+    { ...defaultMobs[0], name: "Hang", people: "5", days: "4" },
+  ],
+  pmHrs: "",
+  pmAuto: true,
+  shopHrs: "8",
+  drfHrs: "",
+  drfAuto: true,
+  misc: "", // no allowance this time
+};
+const multiMobFold = foldFromDraft(multiMobDraft);
+ok(multiMobFold.folded.length === 2, "estimator labor: two mobilizations still yield two lines once shop/bonus fold in");
+ok(
+  multiMobFold.folded.reduce((a, f) => a + f.cost, 0) === multiMobFold.oldCost &&
+    multiMobFold.folded.reduce((a, f) => a + f.price, 0) === multiMobFold.oldPrice,
+  "estimator labor: folded cost/price match the old mob+shop+bonus line sum to the cent (without misc)"
+);
+
+// Unit sell / ext sell back-solve — each keeps the other in sync.
+const unitEdit = priceFromUnitSellEdit(199.999);
+ok(
+  unitEdit.price === 200 && unitEdit.sellOverride === true && unitEdit.extSellOverride === undefined,
+  "unit sell edit: rounds to the cent, flags the override, and clears any ext-sell override"
+);
+
+const extEdit = backSolveExtSell(100, 3);
+ok(Math.abs(extEdit.price - 100 / 3) < 1e-9, "ext sell edit: price back-solves to ext ÷ qty at full precision, not rounded to the cent");
+ok(extEdit.qty === 3 && extEdit.extSellOverride === undefined, "ext sell edit: qty is unchanged and the ext-sell override is cleared");
+ok(round2(extEdit.qty * extEdit.price) === 100, "ext sell edit: qty × the back-solved price reproduces the typed ext to the cent");
+
+const extEditFraction = backSolveExtSell(10, 3);
+ok(round2(extEditFraction.qty * extEditFraction.price) === 10, "ext sell edit: a non-integer division still reproduces the typed ext to the cent");
+
+const extEditZeroQty = backSolveExtSell(50, 0);
+ok(extEditZeroQty.qty === 1 && extEditZeroQty.price === 50, "ext sell edit: a qty of 0 is treated as 1 rather than dividing by zero");
+
+ok(
+  round2(lineExtSellOf({ qty: extEdit.qty, price: extEdit.price, extSellOverride: extEdit.extSellOverride })) === 100,
+  "ext sell edit: the shared lineExtSellOf helper reproduces the typed ext from the back-solved, full-precision price"
+);
+ok(
+  lineExtSellOf({ qty: 4, price: 10, extSellOverride: 999 }) === 999,
+  "lineExtSellOf: a manual extended-sell override still wins over qty × price (metrics.ts equipmentSold relies on this)"
+);
+
+// Margin slider / system Sell field reprice — must clear a standing ext-sell
+// override so a previously back-solved line follows the new margin too.
+const marginReprice = repriceAtMargin(70, 0.3);
+ok(marginReprice.price === round2(70 / 0.7) && marginReprice.extSellOverride === undefined, "margin reprice: clears a line's ext-sell override so it follows the new margin");
+const marginRepriceZero = repriceAtMargin(0, 0);
+ok(marginRepriceZero.price === 0 && marginRepriceZero.extSellOverride === undefined, "margin reprice: a $0 cost at 0% margin reprices to $0, still clearing the override");
 
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link
@@ -3280,6 +3528,7 @@ import {
   canAttestApproval,
   type QuoteReview,
 } from "@/lib/stores/quotes";
+import { create as createQuote160, get as getQuote160, remove as removeQuote160, setStatus as setStatus160, retireReplacedDraft, retireReplacedDraftSafely } from "@/lib/stores/quotes";
 
 function review(over: Partial<QuoteReview> = {}): QuoteReview {
   return {
@@ -8235,6 +8484,7 @@ seeded()
   .then(() => archiveAsyncChecks())
   .then(() => asyncChecks())
   .then(() => templateScheduleAsyncChecks())
+  .then(() => retireDraftAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
   .then(() => pipelinesServerAsyncChecks())
   .then(() => projectsPipelineAsyncChecks())
@@ -8250,7 +8500,9 @@ seeded()
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
+  .then(() => deletePartBAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -8546,6 +8798,77 @@ async function archiveAsyncChecks(): Promise<void> {
   const ci = toContactInput({ name: "Maria Lopez", role: "TD", email: "m@x.org", phone: "1", mobile: "2", primary: true });
   ok(ci.mobile === "2" && ci.phone === "1" && ci.role === "TD" && ci.primary, "#137 T2 toContactInput carries mobile");
   ok(toContactInput({ name: "S", role: "", email: "", primary: false }).mobile === undefined, "#137 T2 toContactInput: absent mobile stays undefined");
+}
+
+/* ======================================================================
+   Companies map — pure in-memory filtering for the map view's left rail
+   (Jeff's request: search + filters sidebar, filtered client-side over the
+   whole book — companies/map-filter.ts). No store access; a fixed fixture
+   of points exercises every filter dimension + the rail's list/option
+   helpers.
+   ====================================================================== */
+{
+  const pt = (over: Partial<CompanyMapPoint>): CompanyMapPoint => ({
+    companyId: "c1", locId: "l1", lat: 44, lng: -89, name: "Hortonville HS", type: "Education",
+    owner: "Alex Rivera", lifecycle: "customer", keywords: ["priority"], venueLabel: "Main Stage",
+    city: "Hortonville", state: "WI", driveMin: 40, driveMiles: 22, openValue: 0, quoteCount: 0, addedAt: 0,
+    ...over,
+  });
+  const points: CompanyMapPoint[] = [
+    pt({ companyId: "c1", locId: "l1" }),
+    pt({ companyId: "c1", locId: "l2", venueLabel: "Black Box", driveMin: 41 }),
+    pt({
+      companyId: "c2", locId: "l1", name: "Riverside Rep", type: "Performing arts", owner: "Jamie Chen",
+      lifecycle: "prospect", keywords: [], city: "Appleton", state: "WI", driveMin: 90, driveMiles: 55,
+      openValue: 4200, quoteCount: 1,
+    }),
+    pt({
+      companyId: "c3", locId: "l1", name: "Grace Worship Center", type: "Worship", owner: "",
+      lifecycle: "none", keywords: ["board-member"], city: "Neenah", state: "WI", driveMin: null, driveMiles: null,
+    }),
+  ];
+
+  ok(filterMapPoints(points, EMPTY_MAP_FILTERS, "Alex Rivera").length === 4, "companies map: no filters → every point passes");
+
+  const byQ = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, q: "appleton" }, "Alex Rivera");
+  ok(byQ.length === 1 && byQ[0].companyId === "c2", "companies map: search matches city, case-insensitive");
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, q: "black box" }, "Alex Rivera").length === 1, "companies map: search matches venue label");
+
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, type: "Worship" }, "Alex Rivera").length === 1, "companies map: type filter");
+
+  const mine = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, owner: "mine" }, "Alex Rivera");
+  ok(mine.length === 2 && mine.every((p) => p.companyId === "c1"), "companies map: owner 'mine' resolves against meName");
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, owner: "Jamie Chen" }, "Alex Rivera").length === 1, "companies map: owner filter by a specific teammate");
+
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, lifecycle: "none" }, "Alex Rivera").length === 1, "companies map: lifecycle filter, including the normalized 'none'");
+
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, tag: "board-member" }, "Alex Rivera").length === 1, "companies map: tag filter matches one of the point's keywords");
+
+  const near = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, drive: "60" }, "Alex Rivera");
+  ok(near.length === 2 && near.every((p) => p.companyId === "c1"), "companies map: drive-time bucket excludes farther/unlocated points");
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, drive: "120" }, "Alex Rivera").length === 3, "companies map: a looser drive bucket still excludes the unlocated (driveMin null) point");
+
+  const openOnly = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, hasOpenQuotes: true }, "Alex Rivera");
+  ok(openOnly.length === 1 && openOnly[0].companyId === "c2", "companies map: 'Has open quotes' keeps only openValue > 0");
+
+  const combo = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, type: "Education", owner: "mine", drive: "60" }, "Alex Rivera");
+  ok(combo.length === 2, "companies map: filters compose (AND), not just override each other");
+
+  ok(!hasActiveMapFilters(EMPTY_MAP_FILTERS), "companies map: the empty filter state reads inactive");
+  ok(hasActiveMapFilters({ ...EMPTY_MAP_FILTERS, q: "  x  " }), "companies map: a whitespace-padded query still reads active (trimmed check)");
+  ok(hasActiveMapFilters({ ...EMPTY_MAP_FILTERS, hasOpenQuotes: true }), "companies map: the open-quotes toggle alone reads active");
+
+  const grouped = groupPointsByCompany(points);
+  ok(grouped.length === 3, "companies map: groupPointsByCompany collapses c1's two venues to one row");
+  const c1Row = grouped.find((g) => g.companyId === "c1");
+  ok(!!c1Row && c1Row.venueCount === 2, "companies map: the collapsed row counts every venue");
+  ok(grouped.map((g) => g.name).join(",") === "Grace Worship Center,Hortonville HS,Riverside Rep", "companies map: rail list is name-sorted");
+
+  const opts = mapFilterOptions(points);
+  ok(opts.types.join(",") === "Education,Performing arts,Worship", "companies map: type options are unique + sorted, built from the FULL set");
+  ok(opts.tags.join(",") === "board-member,priority", "companies map: tag options are unique + sorted");
+  ok(opts.hasDriveData === true, "companies map: hasDriveData true when at least one point is located");
+  ok(mapFilterOptions(points.filter((p) => p.companyId === "c3")).hasDriveData === false, "companies map: hasDriveData false when every point in range is unlocated");
 }
 
 /* ======================================================================
@@ -11522,5 +11845,329 @@ async function deletePartAAsyncChecks(): Promise<void> {
     await Vendors.removeVendorProfile(id);
     ok((await Vendors.getVendorProfile(id)) === null, "delete/vendors: removeVendorProfile() — getVendorProfile() returns null");
     ok(!(await Vendors.allVendorProfiles()).some((p) => p.id === id), "delete/vendors: removeVendorProfile() — allVendorProfiles() no longer lists it");
+  }
+}
+
+/* ====== #160 / D205: Change type retires the replaced DRAFT only ======
+ * Writes only rows it creates and removes them in finally (D202). */
+async function retireDraftAsyncChecks(): Promise<void> {
+  const made: string[] = [];
+  try {
+    const draft = await createQuote160({ name: "#160 fixture draft", customer: "Spec fixture", owner: "spec" });
+    made.push(draft.id);
+    const replacement = await createQuote160({ name: "#160 fixture replacement", customer: "Spec fixture", owner: "spec" });
+    made.push(replacement.id);
+    const lost = await createQuote160({ name: "#160 fixture lost", customer: "Spec fixture", owner: "spec" });
+    made.push(lost.id);
+    await setStatus160(lost.id, "lost");
+
+    ok((await retireReplacedDraft(draft.id, draft.id)) === false, "#160 retireReplacedDraft never retires the quote being saved");
+    ok((await getQuote160(draft.id)) !== null, "#160 …and that quote is still there");
+    ok((await retireReplacedDraft(lost.id, replacement.id)) === false, "#160 retireReplacedDraft refuses a non-draft quote");
+    ok((await getQuote160(lost.id))?.status === "lost", "#160 …and the non-draft is untouched");
+    ok((await retireReplacedDraft("Q-DOES-NOT-EXIST-160", replacement.id)) === false, "#160 retireReplacedDraft no-ops on a missing id");
+    ok((await retireReplacedDraft("", replacement.id)) === false, "#160 retireReplacedDraft no-ops on a blank id");
+    ok((await retireReplacedDraft(draft.id, replacement.id)) === true, "#160 retireReplacedDraft retires a draft");
+    ok((await getQuote160(draft.id)) === null, "#160 the retired draft no longer loads (soft-deleted)");
+    ok((await retireReplacedDraft(draft.id, replacement.id)) === false, "#160 retiring twice is a no-op");
+
+    // I1 fixup: retireReplacedDraftSafely never throws, even on garbage input —
+    // the caller has already committed the replacement quote by the time it runs.
+    const safeDraft = await createQuote160({ name: "#160 fixture safe draft", customer: "Spec fixture", owner: "spec" });
+    made.push(safeDraft.id);
+    const safeReplacement = await createQuote160({ name: "#160 fixture safe replacement", customer: "Spec fixture", owner: "spec" });
+    made.push(safeReplacement.id);
+
+    ok((await retireReplacedDraftSafely({}, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on a non-string object");
+    ok((await retireReplacedDraftSafely(null, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on null");
+    ok((await retireReplacedDraftSafely(undefined, safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on undefined");
+    ok((await retireReplacedDraftSafely("   ", safeReplacement.id, "spec")) === false, "#160 retireReplacedDraftSafely returns false on a blank string");
+    ok((await retireReplacedDraftSafely(safeDraft.id, safeDraft.id, "spec")) === false, "#160 retireReplacedDraftSafely self-guards against retiring the quote being saved");
+    ok((await getQuote160(safeDraft.id)) !== null, "#160 …and that quote is still there");
+    ok((await retireReplacedDraftSafely(safeDraft.id, safeReplacement.id, "spec")) === true, "#160 retireReplacedDraftSafely retires a real draft");
+    ok((await getQuote160(safeDraft.id)) === null, "#160 …and it is gone afterward");
+  } finally {
+    for (const id of made) await removeQuote160(id);
+  }
+}
+
+/* ======================================================================
+   Companies map — getCompanySummary() (src/lib/company-summary.ts), the
+   pop-out panel's DB-backed data for one company. The customers store is
+   relational (companies/sites/contacts), not doc-store, so this fixture
+   goes through upsert()/remove() like every other companies test, with the
+   linked quote as a normal FIXTURE_MARKER row torn down by dropFixtures().
+   ====================================================================== */
+async function companyMapAsyncChecks(): Promise<void> {
+  const CID = fixtureId("CMAP", "company");
+  const QID = fixtureId("CMAP", "quote");
+  try {
+    await upsertCustomer({
+      id: CID,
+      name: "Test Map Co",
+      type: "Education",
+      lifecycle: "customer",
+      keywords: ["priority"],
+      phone: "555-0100",
+      website: "testmapco.org",
+      locations: [
+        { id: "v1", label: "Main Hall", city: "Appleton", state: "WI", lat: 44.26, lng: -88.4, primary: true, venueKind: "proscenium" },
+      ],
+      contacts: [{ name: "Sam Lead", role: "TD", email: "sam@test.org", phone: "555-0101", primary: true }],
+    });
+    await createFixture("quotes", {
+      id: QID,
+      name: "Test Map Quote",
+      quoteType: "system",
+      status: "sent",
+      customer: "Test Map Co",
+      customerId: CID,
+      locationId: null,
+      value: 5000,
+      owner: "Alex Rivera",
+    });
+
+    const s = await getCompanySummary(CID);
+    ok(!!s && s.name === "Test Map Co" && s.type === "Education", "getCompanySummary: resolves the company's name + type by id");
+    ok(!!s && s.lifecycleLabel === "Customer", "getCompanySummary: lifecycle label resolved from the stored lifecycle");
+    ok(!!s && s.phone === "555-0100" && s.website === "testmapco.org" && s.keywords.join(",") === "priority", "getCompanySummary: company-level phone/website/keywords carried through");
+    ok(!!s && !!s.primaryContact && s.primaryContact.name === "Sam Lead" && s.primaryContact.email === "sam@test.org", "getCompanySummary: primary contact resolved");
+    ok(!!s && s.venues.length === 1 && s.venues[0].label === "Main Hall" && s.venues[0].city === "Appleton", "getCompanySummary: venues carried through with city/state");
+    ok(!!s && s.openCount === 1 && s.openValueLabel === "$5,000", "getCompanySummary: a 'sent' quote rolls up into open value/count");
+    ok(!!s && s.recentQuotes.length === 1 && s.recentQuotes[0].id === QID && s.recentQuotes[0].status === "sent", "getCompanySummary: the linked quote appears in recentQuotes");
+    ok(!!s && s.owner === "Alex Rivera", "getCompanySummary: owner falls back to the linked quote's owner when the company has none stored");
+    ok(!!s && s.activeProjects.length === 0, "getCompanySummary: no projects yet -> activeProjects empty, not a throw");
+
+    const missing = await getCompanySummary("TEST-cmap-does-not-exist");
+    ok(missing === null, "getCompanySummary: an unknown id resolves to null rather than throwing");
+    const blank = await getCompanySummary("");
+    ok(blank === null, "getCompanySummary: an empty id resolves to null rather than throwing");
+  } finally {
+    await dropFixtures("CMAP");
+    await removeCustomer(CID);
+  }
+}
+
+/* ======================================================================
+   "Delete individual entries for everything" — part B (flame/repair jobs,
+   install projects, consulting engagements, site visits, recordings).
+
+   Flame/repair/inspection/project already had a store-level soft delete
+   AND tombstone-aware quote-spawn coverage before this change — proven
+   above by #169/#170/#173. This punch only ADDED action + UI for those
+   four (no store logic changed), so they get one light round trip each
+   here rather than re-deriving #169/#173's full matrix.
+
+   Consulting engagements had NEITHER a delete NOR tombstone-aware
+   coverage: `getEngagementByQuote` reads only live rows, so before this
+   change a re-approved quote (`ensureEngagementForQuote`) or the
+   `syncEngagementsFromQuotes` page-load sweep would read "no engagement"
+   for a deleted one and spawn a replacement. `coveredQuoteIds()`
+   (engagements.ts) closes that the same way flame-jobs.ts/repair-jobs.ts/
+   inspections.ts already did (#173/D227) — proven in full below, plus the
+   engagement delete's cascade to its own OPEN tasks.
+
+   Site visits and recordings are never quote-spawned or swept, so only
+   "delete -> gone from reads" applies to them (removeVisit's calendar
+   cleanup is a Google API call, not DB-provable here — see the UI code's
+   try/catch instead).
+
+   Every row here is `fixtureId("DELB", …)` / `createFixture()` (#149,
+   D233) or `registerFixture()`-registered right after mint, so the
+   suite-level teardown at the bottom of this file removes all of it —
+   no hand-rolled `finally` block needed. */
+import {
+  createProjectFromQuote as createProjectFromQuoteDelB,
+  syncProjectsFromQuotes as syncProjectsFromQuoteDelB,
+} from "../src/lib/stores/projects";
+import {
+  ensureEngagementForQuote as ensureEngagementForQuoteDelB,
+  syncEngagementsFromQuotes as syncEngagementsFromQuotesDelB,
+  getEngagement as getEngagementDelB,
+  removeEngagement,
+} from "../src/lib/stores/engagements";
+import { createTask as createTaskDelB, tasksForEngagement as tasksForEngagementDelB, getTask as getTaskDelB } from "../src/lib/stores/tasks";
+import { createVisit as createVisitDelB, getVisit as getVisitDelB, removeVisit } from "../src/lib/stores/site-visits";
+import { createRecording as createRecordingDelB, getRecording as getRecordingDelB, removeRecording } from "../src/lib/stores/recordings";
+
+async function deletePartBAsyncChecks(): Promise<void> {
+  const nowDelB = Date.now();
+  const baseQuoteDelB = (id: string, quoteType: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: `DELB harness ${quoteType} quote`,
+    quoteType,
+    status: "won",
+    customer: "Test Customer DELB",
+    customerId: null,
+    locationId: null,
+    value: 1000,
+    margin: 0,
+    source: "estimator",
+    owner: "Jeff Chesebro",
+    review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+    createdAt: nowDelB,
+    updatedAt: nowDelB,
+    history: [],
+    ...extra,
+  });
+
+  /* ---------------- flame test job ---------------- */
+  {
+    const Q = fixtureId("DELB", "flame-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "flame_test", {
+      flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] },
+    }));
+    const job = await flameCreate173(Q);
+    ok(!!job, "DELB flame: winning a quote spawns its job");
+    if (job) registerFixture("flame_jobs", job.id);
+    if (job) await flameRemove173(job.id);
+    ok(await flameByQuote(Q) === null, "DELB flame: the deleted job is gone from reads");
+    ok(await flameCreate173(Q) === null, "DELB flame: createFromQuote honours the tombstone (no resurrection on re-approve)");
+    await flameSync173();
+    ok(await flameByQuote(Q) === null, "DELB flame: the healing sweep does not resurrect the deleted job either");
+  }
+
+  /* ---------------- repair job ---------------- */
+  {
+    const Q = fixtureId("DELB", "repair-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "repair", {
+      repair: { title: "DELB repair", category: "other", venues: [{ id: null, label: "Main Stage" }] },
+    }));
+    const job = await createRepairFromQuote(Q);
+    ok(!!job, "DELB repair: winning a quote spawns its job");
+    if (job) registerFixture("repair_jobs", job.id);
+    if (job) await repairRemove173(job.id);
+    ok(await repairByQuote(Q) === null, "DELB repair: the deleted job is gone from reads");
+    ok(await createRepairFromQuote(Q) === null, "DELB repair: createFromQuote honours the tombstone");
+    await repairSync173();
+    ok(await repairByQuote(Q) === null, "DELB repair: the healing sweep does not resurrect the deleted job either");
+  }
+
+  /* ---------------- inspection (already had delete before this punch) ---------------- */
+  {
+    const Q = fixtureId("DELB", "inspection-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "inspection", {
+      inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] },
+    }));
+    const recs = (await createInspectionFromQuote(Q)) || [];
+    ok(recs.length === 1, "DELB inspection: winning a quote spawns its requested record");
+    for (const r of recs) registerFixture("inspections", r.id);
+    for (const r of recs) await inspectionRemove173(r.id);
+    ok((await inspectionsByQuote(Q)).length === 0, "DELB inspection: the deleted record is gone from reads");
+    ok(((await createInspectionFromQuote(Q)) || []).length === 0, "DELB inspection: createFromQuote honours the tombstone");
+    await inspectionSync173();
+    ok((await inspectionsByQuote(Q)).length === 0, "DELB inspection: the healing sweep does not resurrect it either");
+  }
+
+  /* ---------------- install project ---------------- */
+  {
+    const Q = fixtureId("DELB", "project-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "system"));
+    const dismissedBefore = await dismissedQuoteIds();
+    const p = await createProjectFromQuoteDelB(Q);
+    ok(!!p, "DELB project: winning a system quote spawns its project");
+    if (p) registerFixture("projects", p.id);
+    if (p) await removeProject(p.id);
+    ok(await getProjectByQuote(Q) === null, "DELB project: the deleted project is gone from reads");
+    ok(
+      (await dismissedQuoteIds()).includes(Q),
+      "DELB project: deleting a quote-born project records that quote on the dismissed list (#169)"
+    );
+    const resweep = await syncProjectsFromQuoteDelB();
+    ok(await getProjectByQuote(Q) === null, "DELB project: the healing sweep does not resurrect the deleted project");
+    ok(resweep.skipped !== undefined, "DELB project: the sweep returns its usual shape (sanity check, not a stub)");
+    // Blob singleton — put the snapshot back rather than editing in place
+    // (the #169 convention above), so this fixture's own entry doesn't
+    // linger on a list every other test's dismissedQuoteIds() reads.
+    await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
+  }
+
+  /* ---------------- consulting engagement (the store logic this punch
+     actually added — no delete AND no tombstone coverage existed before) */
+  {
+    const Q = fixtureId("DELB", "engagement-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "consulting"));
+    const eng = await ensureEngagementForQuoteDelB(Q, "awarded");
+    ok(!!eng, "DELB engagement: winning a consulting quote spawns its engagement");
+    if (!eng) return;
+    registerFixture("consulting_engagements", eng.id);
+
+    const me = { id: "u1", name: "Test Harness" };
+    const openTask = await createTaskDelB({ title: "DELB open task", engagementId: eng.id, status: "open" }, me);
+    const doneTask = await createTaskDelB({ title: "DELB done task", engagementId: eng.id, status: "done" }, me);
+    registerFixture("tasks", openTask.id);
+    registerFixture("tasks", doneTask.id);
+    ok((await tasksForEngagementDelB(eng.id)).length === 2, "DELB engagement fixture carries its two tasks (one open, one done)");
+
+    await removeEngagement(eng.id);
+    ok(await getEngagementDelB(eng.id) === null, "DELB engagement: the deleted engagement is gone from reads");
+    ok(await getTaskDelB(openTask.id) === null, "DELB engagement delete cascades to its OPEN task — soft-deleted too");
+    ok(!!(await getTaskDelB(doneTask.id)), "DELB engagement delete leaves its DONE task alone (history, not cascaded)");
+    ok(
+      (await tasksForEngagementDelB(eng.id)).length === 1,
+      "DELB tasksForEngagement now sees only the surviving done task"
+    );
+
+    // The actual gap this punch closed: a re-approve or the page-load
+    // sweep must not read "no engagement" and spawn a replacement.
+    const resurrected = await ensureEngagementForQuoteDelB(Q, "awarded");
+    ok(resurrected === null, "DELB engagement: ensureEngagementForQuote honours the tombstone (no resurrection on re-approve)");
+    ok(await getEngagementByQuote(Q) === null, "DELB engagement: still gone after the re-approve attempt");
+
+    await syncEngagementsFromQuotesDelB();
+    ok(await getEngagementByQuote(Q) === null, "DELB engagement: the page-load sweep does not resurrect the deleted engagement either");
+  }
+
+  /* ---------------- site visit (never spawned/swept — delete only) ---------------- */
+  {
+    const visit = await createVisitDelB({
+      customerId: null,
+      customer: "Test Customer DELB",
+      locationId: null,
+      venue: "Main Hall",
+      address: "123 Test St, Testville, WI",
+      contactName: "Test Contact",
+      contactEmail: "test@example.com",
+      contactPhone: "",
+      reason: "Site survey / measure",
+      startAt: null,
+      endAt: null,
+      notes: "",
+      assignedTo: "",
+      createdBy: "Test Harness",
+      engagementId: null,
+      stage: "requested",
+      leadId: null,
+      surveyId: null,
+      preferredTiming: "",
+    });
+    registerFixture("site_visits", visit.id);
+    ok(!!(await getVisitDelB(visit.id)), "DELB site visit: the fixture visit reads back before delete");
+    await removeVisit(visit.id);
+    ok(await getVisitDelB(visit.id) === null, "DELB site visit: the deleted visit is gone from reads");
+  }
+
+  /* ---------------- recording (never spawned/swept — delete only, audio untouched) ---------------- */
+  {
+    const rec = await createRecordingDelB({
+      parentKind: "site_visit",
+      parentId: fixtureId("DELB", "recording-parent"),
+      customerId: null,
+      customer: "Test Customer DELB",
+      locationId: null,
+      venue: "",
+      title: "DELB harness recording",
+      recordedByUserId: "u1",
+      recordedByName: "Test Harness",
+      startedAt: nowDelB,
+      endedAt: nowDelB + 60_000,
+      durationS: 60,
+      mime: "audio/mp4",
+      sizeBytes: 1024,
+    });
+    registerFixture("recordings", rec.id);
+    ok(!!(await getRecordingDelB(rec.id)), "DELB recording: the fixture recording reads back before delete");
+    await removeRecording(rec.id);
+    ok(await getRecordingDelB(rec.id) === null, "DELB recording: the deleted recording is gone from reads");
   }
 }

@@ -16,7 +16,7 @@ import {
 } from "@/lib/stores/repair-jobs";
 import { RecordingsStrip } from "@/components/recordings/recordings-strip";
 import { loadRecordingsStrip } from "../../recordings/data";
-import { ResultsForm } from "./controls";
+import { ResultsForm, DeleteRepairButton } from "./controls";
 
 export const metadata = { title: "Repair results — Quartzite-6" };
 
@@ -145,6 +145,9 @@ export default async function RepairResultsPage({
           {sm.label}
         </span>
         <RecordingsStrip parentKind="repair_job" parentId={job.id} recordings={strip.recordings} canRecord={strip.canRecord} />
+        <div style={{ marginLeft: "auto" }}>
+          <DeleteRepairButton jobId={job.id} />
+        </div>
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginBottom: 18 }}>
         {isCompleted

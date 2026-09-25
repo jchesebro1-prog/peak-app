@@ -156,6 +156,7 @@ export default async function RecordingDetailPage({ params }: { params: Promise<
         viewerId={detail.viewerId}
         krispConnected={detail.krispConnected}
         prefillTarget={detail.prefillTarget}
+        parentHref={detail.parentHref}
       />
     </div>
   );

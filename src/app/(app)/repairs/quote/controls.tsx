@@ -7,6 +7,7 @@ import type { CSSProperties } from "react";
 import { saveRepairQuote, approveRepairQuote } from "./actions";
 import { CustomerCombobox } from "@/components/customer-combobox";
 import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
+import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 
 /**
  * QuoteBuilder — the auto-priced repair estimator (repair twin of the
@@ -60,7 +61,6 @@ export type BuilderSource = {
 } | null;
 export type BuilderInitial = {
   editingId: string | null;
-  replaces?: string;
   customerId: string;
   quoteName: string;
   venueSel: Record<string, { on: boolean }>;
@@ -77,8 +77,10 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
-  /** Quote is already WON — Delete's confirm label says what stays behind. */
-  won: boolean;
+  /** Quote status — drives the won-edit confirm (D206) and Change type (D205). "draft" when new. */
+  status: string;
+  /** #160 / D205 — the draft this new quote replaces; posted on the create save. */
+  replaces: string;
 };
 
 /* ---------- inlined pure pricing (port of repair-engine.ts) ---------- */
@@ -324,9 +326,10 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [pending, startTransition] = useTransition();
+  const guardWon = useWonEditGuard(initial.status);
 
   const editingId = initial.editingId;
-  const won = initial.won;
+  const won = initial.status === "won";
   const savedId = initial.savedId;
   const isApproved = initial.approved;
   const source = initial.source;
@@ -368,6 +371,7 @@ export function QuoteBuilder({
   const contacts = customer?.contacts || [];
 
   function pickCustomer(id: string) {
+    if (id !== customerId && !guardWon("customer")) return;
     ensureVenueTravel(id);
     const c = customers.find((x) => x.id === id) || null;
     const locs = c?.locations || [];
@@ -392,6 +396,7 @@ export function QuoteBuilder({
     setSavedFlag(false);
   }
   function toggleVenue(locId: string) {
+    if (!guardWon("venue")) return;
     setVenueSel((prev) => {
       const cur = prev[locId] || { on: false };
       return { ...prev, [locId]: { on: !cur.on } };
@@ -465,9 +470,9 @@ export function QuoteBuilder({
   function buildForm(): FormData {
     const fd = new FormData();
     fd.set("editingId", editingId || "");
-    fd.set("replaces", initial.replaces || "");
     fd.set("customerId", customerId);
     fd.set("quoteName", quoteName);
+    fd.set("replaces", editingId ? "" : initial.replaces);
     const c = selectedContact();
     fd.set("contactName", c?.name || "");
     fd.set("contactRole", c?.role || "");
@@ -586,6 +591,7 @@ export function QuoteBuilder({
             >
               Auto-priced
             </span>
+            {editingId && <ChangeTypeControl quoteId={editingId} status={initial.status} />}
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>
             Auto-priced from labor hours, shared trip travel, and marked-up parts — never below
@@ -645,6 +651,7 @@ export function QuoteBuilder({
                 }))}
                 value={customerId}
                 onChange={pickCustomer}
+                canChange={() => guardWon("customer")}
                 placeholder="Search customer or venue…"
                 inputStyle={{ ...FIELD, fontWeight: 600 }}
               />
@@ -719,6 +726,7 @@ export function QuoteBuilder({
                 className="rpq-sel"
                 value={contactSel}
                 onChange={(e) => {
+                  if (!guardWon("contact")) return;
                   setContactSel(e.target.value);
                   dirty();
                 }}

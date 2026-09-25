@@ -9,6 +9,7 @@ import {
   unschedule as unscheduleJob,
   complete as completeJob,
   reopen as reopenJob,
+  remove as removeJob,
   DEFAULT_WARRANTY_MONTHS,
   type RepairCompletion,
 } from "@/lib/stores/repair-jobs";
@@ -106,4 +107,23 @@ export async function reopenRepair(formData: FormData): Promise<void> {
   if (!job) return;
   await reopenJob(id);
   revalidatePath("/", "layout");
+}
+
+/**
+ * Delete a repair job (soft delete — doc-store keeps a tombstone). Called
+ * directly from the results screen's Delete control, not a form action, so
+ * it never calls redirect() itself — the client navigates on success. A
+ * still-scheduled job's calendar hold (if any) is cleared best-effort first.
+ */
+export async function deleteRepairJobAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!id) return { ok: false, error: "Missing job id." };
+  const job = await get(id);
+  if (!job) return { ok: false, error: "That repair could not be found." };
+  if (job.stage === "scheduled") {
+    await removeServiceCalendar({ kind: "repair", id, assignedTo: job.assignedTo });
+  }
+  await removeJob(id);
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

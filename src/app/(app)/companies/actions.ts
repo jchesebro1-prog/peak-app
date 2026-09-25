@@ -15,6 +15,7 @@ import type { AddressHitVM, LocationInput, RouteVM, SaveCustomerInput } from "./
 import { LIFECYCLES } from "@/lib/identity/config";
 import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
 import { getSettings } from "@/lib/settings";
+import { getCompanySummary, type CompanySummary } from "@/lib/company-summary";
 
 /**
  * Customers mutations — thin wrappers over CustomerStore. The Customers screen
@@ -139,6 +140,14 @@ export async function routeLocationAction(loc: LocationInput): Promise<RouteVM> 
   if (routed) return { miles: routed.miles, minutes: routed.minutes, officeName };
   const est = await estimate(offices, { ...loc, ...coords, travelMiles: null, travelMin: null });
   return { miles: est.miles, minutes: est.minutes, officeName };
+}
+
+/** Companies map — the pop-out panel's data for one company (pin/list
+ *  click). requireUser() gates it like every other data read here; a
+ *  missing/deleted company reads as `null`, not a thrown 404. */
+export async function getCompanySummaryAction(id: string): Promise<CompanySummary | null> {
+  await requireUser();
+  return getCompanySummary(String(id || ""));
 }
 
 /* ---- customer portal access (IDEAS #47) ---- */

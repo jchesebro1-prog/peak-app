@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, patchDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import type { QuoteReview } from "@/lib/stores/quotes";
 import {
   approvalIsStale,
@@ -423,6 +423,25 @@ export async function patchEngagement(
   });
 }
 
+/**
+ * Delete a consulting engagement (soft delete — coveredQuoteIds() above
+ * keeps the quote-spawn create path and the reconciliation sweep from
+ * rebuilding it). Cascades to the engagement's OWN open tasks: a task's
+ * engagementId is one of the four nullable parent pointers (tasks.ts, D85)
+ * and a consulting task belongs only to its engagement — nothing else can
+ * re-parent it once the engagement is gone, so an open (not-yet-done) one
+ * left behind would be an orphaned to-do nobody can act on. Done tasks are
+ * left alone; they're historical record, not work still pending. Notes
+ * (notes.ts) are NOT touched — same "history outlives the record" call the
+ * rest of the app makes for a deleted parent's activity feed.
+ */
+export async function removeEngagement(id: string): Promise<void> {
+  const { tasksForEngagement, removeTask } = await import("./tasks");
+  const openTasks = (await tasksForEngagement(id)).filter((t) => t.status !== "done");
+  for (const t of openTasks) await removeTask(t.id);
+  await softDeleteDoc("consulting_engagements", id);
+}
+
 export type SetMilestonePhaseResult = { ok: true } | { ok: false; error: string };
 
 /**
@@ -564,6 +583,24 @@ export async function getEngagementByQuote(
   return hit ? normalizeEngagementRecord(hit) : null;
 }
 
+/**
+ * Quote ids already covered by an engagement, LIVE OR DELETED (the
+ * flame-jobs.ts / repair-jobs.ts / inspections.ts coveredQuoteIds idiom,
+ * #173/D227). getEngagementByQuote reads only live rows (right for the
+ * normal advance/close/reopen lookups), but that means it also reads a
+ * deleted engagement as "no engagement exists" — without this check,
+ * ensureEngagementForQuote and the syncEngagementsFromQuotes sweep would
+ * both treat that as license to spawn a brand-new one, resurrecting a
+ * record the user just deleted. Used ONLY as a create-gate; the
+ * advance/close/reopen branches already require a live `existing` row and
+ * are unaffected. */
+async function coveredQuoteIds(): Promise<Set<string>> {
+  const rows = await listDocs<ConsultingEngagement>("consulting_engagements", {
+    includeDeleted: true,
+  });
+  return new Set(rows.map((e) => e.quoteId).filter((id): id is string => !!id));
+}
+
 /** The engagement referencing this quote either as its source (quoteId) or
  *  as Peak's own bid on the spec (installQuoteId). Selected-quote lookups
  *  ONLY — full scan, same cost class as getEngagementByQuote; never call
@@ -598,6 +635,9 @@ export async function ensureEngagementForQuote(
     }
     return existing;
   }
+  // The user deleted the engagement this quote used to have — a re-approve
+  // (or the safety-net sweep below) must not silently rebuild it.
+  if ((await coveredQuoteIds()).has(quoteId)) return null;
   const q = await getDoc<QuoteLike>("quotes", quoteId);
   if (!q || q.quoteType !== "consulting") return null;
   const body = fromQuote(q, minStage);
@@ -676,6 +716,10 @@ export async function syncEngagementsFromQuotes(): Promise<{ created: number; sk
     byQuote.set(e.quoteId, e);
   }
   const quotes = await listDocs<QuoteLike>("quotes");
+  // Deleted-engagement tombstones (#173/D227 idiom) — a quote whose
+  // engagement the user deleted must not have it rebuilt by this
+  // page-load reconciliation sweep.
+  const covered = await coveredQuoteIds();
   let changed = 0;
   const skipped: string[] = [];
   for (const q of quotes) {
@@ -686,6 +730,7 @@ export async function syncEngagementsFromQuotes(): Promise<{ created: number; sk
       : null;
     const action = engagementSyncAction(String(q.status || ""), stage);
     if (!action) continue;
+    if (action.kind === "create" && covered.has(q.id)) continue;
     try {
       if (action.kind === "create") {
         const body = fromQuote(q, action.stage);

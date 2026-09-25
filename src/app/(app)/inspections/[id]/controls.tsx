@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from "react";
 import Link from "next/link";
 import type {
   InspectionRecord,
@@ -1374,9 +1374,7 @@ export default function InspectionEditor({
         )}
 
         <div style={{ marginTop: 22, display: "flex", justifyContent: "center" }}>
-          <form action={deleteInspection.bind(null, record.id)}>
-            <button type="submit" style={{ fontSize: 12.5, fontWeight: 600, color: "#b4543a", background: "transparent", border: "none", cursor: "pointer", padding: "8px 14px" }}>Delete this inspection</button>
-          </form>
+          <DeleteInspectionButton id={record.id} />
         </div>
       </div>
 
@@ -1454,6 +1452,43 @@ const miniBtn: CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5b616e"
 const photoImg: CSSProperties = { width: "100%", height: 130, objectFit: "cover", borderRadius: 9, border: "1px solid #e4e7ec", display: "block" };
 const photoDrop: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 7, height: 110, border: "1.5px dashed #dfe2e8", borderRadius: 9, cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#9aa0ab" };
 const photoClearBtn: CSSProperties = { position: "absolute", top: 6, right: 6, width: 26, height: 26, borderRadius: "50%", border: "none", background: "rgba(16,18,22,.66)", color: "#fff", fontSize: 14, cursor: "pointer" };
+
+/**
+ * Two-step arm/confirm around `deleteInspection`'s own `<form action>`
+ * (never `window.confirm`). deleteInspection redirects internally
+ * (server-action `redirect()` per Next's own guidance, must be called
+ * outside any try/catch) — kept as a real form submission rather than a
+ * ConfirmButton-style awaited call, so that redirect keeps working exactly
+ * as it does today; only the first click is gated.
+ */
+function DeleteInspectionButton({ id }: { id: string }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 5000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  const btnStyle: CSSProperties = { fontSize: 12.5, fontWeight: 600, color: "#b4543a", background: "transparent", border: "none", cursor: "pointer", padding: "8px 14px" };
+  if (!armed) {
+    return (
+      <button type="button" onClick={() => setArmed(true)} style={btnStyle}>
+        Delete this inspection
+      </button>
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <form action={deleteInspection.bind(null, id)}>
+        <button type="submit" style={{ ...btnStyle, background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 8 }}>
+          Confirm delete
+        </button>
+      </form>
+      <button type="button" onClick={() => setArmed(false)} style={{ ...btnStyle, color: "#5b616e" }}>
+        Cancel
+      </button>
+    </span>
+  );
+}
 
 function rubFilterChip(active: boolean, m: RubricRating | null): CSSProperties {
   const col = m || { ink: "#5b616e", soft: "#fff", bd: "#e4e7ec" };

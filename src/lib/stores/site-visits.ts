@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, patchDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { deriveVisitStage, requestStageFor, type VisitStage } from "@/lib/lead-thread";
 
 /**
@@ -209,6 +209,19 @@ export async function closeVisit(id: string): Promise<void> {
     d.stage = "done";
     d.updatedAt = Date.now();
   });
+}
+
+/**
+ * Delete a site visit (soft delete). Visits are never quote-spawned or
+ * swept by a reconciliation job (unlike flame/repair/inspection jobs), so
+ * there is no tombstone-coverage concern here — nothing recreates a
+ * deleted visit. Any Google Calendar event the visit mirrored
+ * (googleEventId, phase 2) is the caller's job to clear first, same
+ * separation the crew-booking removeBooking action keeps from
+ * projects.removeCrew (src/app/(app)/schedule/actions.ts).
+ */
+export async function removeVisit(id: string): Promise<void> {
+  await softDeleteDoc("site_visits", id);
 }
 
 /** Backfill the resolved customerId onto a lead-borne visit once its lead

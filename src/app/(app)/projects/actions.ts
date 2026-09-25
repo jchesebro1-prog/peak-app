@@ -18,6 +18,7 @@ import {
   setProjectValue,
   signoffScopes,
   createProjectFromQuote,
+  removeProject,
   type ProjectStage,
   type LineStatus,
   type DeliveryStatus,
@@ -373,4 +374,21 @@ export async function applyProjectTemplateAction(formData: FormData): Promise<{ 
     return { ok: false, error: error instanceof Error ? error.message : "Couldn’t apply that template — please try again." };
   }
   revalidatePath("/", "layout");
+}
+
+/**
+ * Delete a project/order (soft delete — removeProject records the source
+ * quote on the dismissed list so syncFromQuotes never re-creates it, #169).
+ * Called directly from the project view's Delete control, not a form
+ * action, so it never calls redirect() itself — the client navigates to
+ * the book on success.
+ */
+export async function removeProjectAction(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!id) return { ok: false, error: "Missing project id." };
+  const p = await getProject(id);
+  if (!p) return { ok: false, error: "That project could not be found." };
+  await removeProject(id);
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

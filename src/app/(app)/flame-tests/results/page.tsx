@@ -4,7 +4,7 @@ import { get, stageMeta, iso, msOf, fmtShort, fmtLong } from "@/lib/stores/flame
 import { activeUsers } from "@/lib/users";
 import { RecordingsStrip } from "@/components/recordings/recordings-strip";
 import { loadRecordingsStrip } from "../../recordings/data";
-import { ResultsEditor, type VenueInit } from "./controls";
+import { ResultsEditor, DeleteFlameJobButton, type VenueInit } from "./controls";
 
 export const metadata = { title: "Flame test results — Quartzite-6" };
 
@@ -157,6 +157,9 @@ export default async function FlameResultsPage({
             </Link>
           </div>
         )}
+        <div style={{ marginLeft: job.stage === "completed" ? 0 : "auto" }}>
+          <DeleteFlameJobButton jobId={job.id} />
+        </div>
       </div>
       <div style={{ fontSize: 13.5, color: "#8c919c", marginBottom: 18 }}>
         {job.stage === "completed"

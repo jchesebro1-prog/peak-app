@@ -38,6 +38,7 @@ import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import EditCustomerModal from "../edit-modal";
 import VenueQuickAdd from "../venue-quick-add";
+import { DeleteVisitButton } from "../delete-visit-button";
 import {
   ACCENT_INK,
   ACCENT_SOFT,
@@ -324,7 +325,7 @@ export default async function CustomerDetailPage({
               Edit
             </Link>
             <Link
-              href="/estimator"
+              href={`/quotes/new?customer=${encodeURIComponent(cust.id)}`}
               style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)", borderRadius: 8, padding: "10px 15px", textDecoration: "none" }}
             >
               + New quote
@@ -706,6 +707,9 @@ export default async function CustomerDetailPage({
                           {sm.label}
                         </span>
                         <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
+                        <span style={{ marginLeft: "auto" }}>
+                          <DeleteVisitButton id={v.id} />
+                        </span>
                       </div>
                       <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
                         {v.startAt != null

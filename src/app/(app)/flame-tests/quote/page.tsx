@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
+import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Flame test quote — Quartzite-6" };
@@ -47,10 +48,7 @@ export default async function FlameTestQuotePage({
 
   const editId = one(sp.id);
   const preCustomer = one(sp.customer);
-  const preName = one(sp.name);
-  const preVenue = one(sp.venue);
-  const preContact = one(sp.contact);
-  const replaces = one(sp.replaces);
+  const handoff = readHandoff(sp);
   const saved = one(sp.saved) === "1";
   const approved = one(sp.approved) === "1";
 
@@ -99,7 +97,6 @@ export default async function FlameTestQuotePage({
   /* ---- initial builder state (edit an existing quote, or preselect a customer) ---- */
   let initial: BuilderInitial = {
     editingId: null,
-    replaces,
     customerId: "",
     quoteName: "",
     venueSel: {},
@@ -108,7 +105,9 @@ export default async function FlameTestQuotePage({
     saved,
     approved,
     savedId: "",
-    won: false,
+    status: "draft",
+    replaces: "",
+    nameLocked: false,
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -135,7 +134,6 @@ export default async function FlameTestQuotePage({
     const wonAlready = editQuote.status === "won";
     initial = {
       editingId: editQuote.id,
-      replaces: "",
       customerId: cid,
       quoteName: editQuote.name || "",
       venueSel,
@@ -145,34 +143,35 @@ export default async function FlameTestQuotePage({
       approved: approved || wonAlready,
       // an existing quote always has a letter target
       savedId: editQuote.id,
-      won: wonAlready,
+      status: editQuote.status,
+      replaces: "",
+      nameLocked: false,
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;
     if (cust) {
       const locs = cust.locations;
+      const on = seedVenueOn(locs, handoff.venueId);
       const venueSel: BuilderInitial["venueSel"] = {};
       locs.forEach((l) => {
-        venueSel[l.id] = { on: preVenue ? l.id === preVenue : !!l.primary || locs.length === 1, curtains: "" };
+        venueSel[l.id] = { on: !!on[l.id], curtains: "" };
       });
-      if (locs.length && !locs.some((l) => venueSel[l.id]?.on)) {
-        venueSel[locs[0].id] = { ...venueSel[locs[0].id], on: true };
-      }
       const picked = locs.filter((l) => venueSel[l.id]?.on);
       const venueName = picked[0]?.label || locs[0]?.label || cust.name;
       const venueSuffix = picked.length > 1 ? ` + ${picked.length - 1} venue${picked.length === 2 ? "" : "s"}` : "";
-      const primary = cust.contacts.find((c) => c.name === preContact) || cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial = {
         editingId: null,
         customerId: cust.id,
-        quoteName: preName || `${venueName}${venueSuffix} — Flame Test ${new Date().getFullYear()}`,
+        quoteName: handoff.name || `${venueName}${venueSuffix} — Flame Test ${new Date().getFullYear()}`,
         venueSel,
-        contactSel: primary ? primary.name : "",
+        contactSel: pickContactName(cust, handoff.contactName),
         contactManual: "",
         saved: false,
         approved: false,
         savedId: "",
-        won: false,
+        status: "draft",
+        replaces: handoff.replaces,
+        nameLocked: !!handoff.name,
       };
     }
   }
