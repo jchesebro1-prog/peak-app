@@ -507,7 +507,7 @@ function DoctrineRow({
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 10 }}>
-        <button type="button" disabled={pending} onClick={save} className="pk-btn pk-btn-sm">
+        <button type="button" disabled={pending} onClick={save} className="pk-btn-accent" style={{ fontSize: 12, padding: "6px 12px" }}>
           {pending ? "Saving…" : "Save class"}
         </button>
         {saved && <span style={{ fontSize: 11.5, color: "#1f7a52" }}>Saved</span>}

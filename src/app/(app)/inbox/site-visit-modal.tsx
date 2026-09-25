@@ -212,7 +212,7 @@ export default function SiteVisitModal({
               {done}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-              <button className="pk-btn" onClick={onClose} style={{ fontSize: 12.5 }}>
+              <button className="pk-btn-accent" onClick={onClose} style={{ fontSize: 12.5 }}>
                 Done
               </button>
             </div>
@@ -307,7 +307,7 @@ export default function SiteVisitModal({
                 Cancel
               </button>
               <button
-                className="pk-btn"
+                className="pk-btn-accent"
                 onClick={submit}
                 disabled={pending || !reason}
                 style={{ fontSize: 12.5, opacity: pending ? 0.7 : 1 }}

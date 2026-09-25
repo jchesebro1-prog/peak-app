@@ -68,8 +68,8 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: 16, margin: "0 0 16px", flexWrap: "wrap" }}>
         <p style={{ margin: 0, color: "#707681", fontSize: 13, maxWidth: 640 }}>Build orderable fixtures from catalog parts. A default quantity of 0 keeps an item available without adding it automatically.</p>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="pk-btn" onClick={() => setAssemblies((all) => all.concat({ id: `fa-${Date.now().toString(36)}`, name: "New fixture assembly", components: [] }))}>+ New assembly</button>
-          <button className="pk-btn pk-btn-primary" disabled={pending} onClick={save}>{pending ? "Saving…" : saved ? "Saved" : "Save assemblies"}</button>
+          <button className="pk-btn-outline" onClick={() => setAssemblies((all) => all.concat({ id: `fa-${Date.now().toString(36)}`, name: "New fixture assembly", components: [] }))}>+ New assembly</button>
+          <button className="pk-btn-accent" disabled={pending} onClick={save}>{pending ? "Saving…" : saved ? "Saved" : "Save assemblies"}</button>
         </div>
       </div>
       {!assemblies.length && <div className="pk-card" style={{ padding: 28, color: "#777d88" }}>No sample assemblies are installed. Create the first assembly from your catalog.</div>}
@@ -77,7 +77,7 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
         <section key={assembly.id} className="pk-card" style={{ padding: 18, marginBottom: 16 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input aria-label="Assembly name" value={assembly.name} onChange={(event) => patch(assembly.id, { name: event.target.value })} style={{ ...input, fontWeight: 650, fontSize: 15 }} />
-            <button className="pk-btn" onClick={() => setAssemblies((all) => all.filter((item) => item.id !== assembly.id))}>Delete</button>
+            <button className="pk-btn-danger" onClick={() => setAssemblies((all) => all.filter((item) => item.id !== assembly.id))}>Delete</button>
           </div>
           <div style={{ marginTop: 6, fontSize: 11.5, color: "#8c919c" }}>{pricesNote(assembly.id)}</div>
           <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
@@ -89,9 +89,9 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
                 <input aria-label="Default quantity" type="number" min="0" step="1" value={component.defaultQty} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, defaultQty: Math.max(0, Number(event.target.value) || 0) } : item) })} style={input} />
                 <input aria-label="Power cable cost override" type="number" min="0" step="0.01" placeholder={component.role === "power" ? "catalog cost" : "—"} disabled={component.role !== "power"} value={component.costOverride ?? ""} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, costOverride: event.target.value === "" ? undefined : Math.max(0, Number(event.target.value) || 0) } : item) })} style={input} />
                 <div style={{ display: "flex", gap: 3 }}>
-                  <button aria-label="Move component up" className="pk-btn" disabled={index === 0} onClick={() => patch(assembly.id, { components: assembly.components.map((item, i, all) => i === index - 1 ? all[index] : i === index ? all[index - 1] : item) })}>↑</button>
-                  <button aria-label="Move component down" className="pk-btn" disabled={index === assembly.components.length - 1} onClick={() => patch(assembly.id, { components: assembly.components.map((item, i, all) => i === index + 1 ? all[index] : i === index ? all[index + 1] : item) })}>↓</button>
-                  <button aria-label="Remove component" className="pk-btn" onClick={() => patch(assembly.id, { components: assembly.components.filter((_, i) => i !== index) })}>×</button>
+                  <button aria-label="Move component up" className="pk-btn-outline" style={{ padding: "3px 9px", fontSize: 12, lineHeight: 1.2 }} disabled={index === 0} onClick={() => patch(assembly.id, { components: assembly.components.map((item, i, all) => i === index - 1 ? all[index] : i === index ? all[index - 1] : item) })}>↑</button>
+                  <button aria-label="Move component down" className="pk-btn-outline" style={{ padding: "3px 9px", fontSize: 12, lineHeight: 1.2 }} disabled={index === assembly.components.length - 1} onClick={() => patch(assembly.id, { components: assembly.components.map((item, i, all) => i === index + 1 ? all[index] : i === index ? all[index + 1] : item) })}>↓</button>
+                  <button aria-label="Remove component" className="pk-btn-outline" style={{ padding: "3px 9px", fontSize: 12, lineHeight: 1.2 }} onClick={() => patch(assembly.id, { components: assembly.components.filter((_, i) => i !== index) })}>×</button>
                 </div>
               </div>
             ))}
