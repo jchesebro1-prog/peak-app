@@ -2,7 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { commitHistory, previewHistory, type CommitResult, type Preview } from "@/lib/daylite/history-commit";
+import {
+  commitHistory,
+  finalizeHistory,
+  previewHistory,
+  type CommitResult,
+  type FinalizeResult,
+  type Preview,
+} from "@/lib/daylite/history-commit";
 
 /**
  * Daylite history import (Task 12) — the Import hub's server seam over
@@ -22,6 +29,7 @@ const MAX_CHUNK = 500;
 export type DaylitePreview = Omit<Preview, "rows">;
 export type PreviewResult = { ok: true; preview: DaylitePreview } | { ok: false; error: string };
 export type ChunkResult = ({ ok: true } & CommitResult) | { ok: false; error: string };
+export type FinalizeActionResult = ({ ok: true } & FinalizeResult) | { ok: false; error: string };
 
 function checkInput(projectsTsv: unknown, oppsTsv: unknown): { p: string; o: string } | string {
   const p = typeof projectsTsv === "string" ? projectsTsv : "";
@@ -40,7 +48,10 @@ export async function previewDayliteAction(projectsTsv: string, oppsTsv: string)
     // `rows` (every planned row) never goes to the browser — the page shows
     // counts, the pick rows and the live rows only.
     const full = await previewHistory(input.p, input.o);
-    return { ok: true, preview: { counts: full.counts, needsPick: full.needsPick, live: full.live, stats: full.stats } };
+    return {
+      ok: true,
+      preview: { counts: full.counts, needsPick: full.needsPick, live: full.live, julyEdited: full.julyEdited, stats: full.stats },
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -63,6 +74,23 @@ export async function commitDayliteChunkAction(
       if (typeof v === "string") cleanPicks[String(k).slice(0, 100)] = v.slice(0, 300);
   try {
     const res = await commitHistory(input.p, input.o, cleanPicks, user.name || user.email || "Daylite import", { start, end });
+    revalidatePath("/", "layout");
+    return { ok: true, ...res };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Task 12b — runs ONCE after the last chunk succeeds: retires the July leads
+ * (when the Opportunities file was imported) and then the combined-name
+ * company stubs nothing references any more. Idempotent, so the client's
+ * "Retry finalize" just calls it again.
+ */
+export async function finalizeDayliteAction(oppsIncluded: boolean): Promise<FinalizeActionResult> {
+  const user = await requirePerm("manage_users");
+  try {
+    const res = await finalizeHistory(oppsIncluded === true, user.name || user.email || "Daylite import");
     revalidatePath("/", "layout");
     return { ok: true, ...res };
   } catch (e) {

@@ -310,6 +310,47 @@ blank companies, the multi-company pickers, and live rows listed individually (�
 Jeff can eyeball them. Confirm writes; a result panel links to Projects / Repairs / Quotes
 filtered to `source: daylite`.
 
+### 4.6 Superseding the July import
+
+A real-file preview on a copy of the dev DB showed `scripts/import-daylite.ts` (July) is
+already in the data — 1,784 live `P-dl-*` projects (service calls and
+Cancelled/Abandoned/Deferred rows written as "complete" projects), 1,675 `L-dl-*` leads
+(one per opportunity), and stub companies for every raw Companies cell not in the book,
+including combined names like "C.D. Smith Construction, Muermann Engineering". Jeff
+decided (2026-09-24):
+
+1. **Replace** the July projects with the history import's full data.
+2. **Remove** the July leads made from opportunities.
+3. **Retire** the junk combined-name companies, in the same import.
+
+Rules (code: `src/lib/daylite/history-commit.ts`, `src/lib/daylite/july-cleanup.ts`):
+
+- **July record** = a live doc with a `P-dl-`/`L-dl-` id and no `source.system ===
+  "daylite"` marker (the history import always writes it; July never did).
+  **Untouched** = doc `updatedAt − createdAt < 60 s`. Only untouched July records are
+  replaced or removed; edited ones are left exactly as they are, listed in the preview as
+  "Edited in Quartzite — left as is", and their row writes nothing (no duplicate job).
+  Every removal is a soft delete (`deleted = true`) — recoverable.
+- **julyId** on every plan row = the id the July script gave it: `projectId(Name, RAW
+  Companies cell)` (projects/service calls), `leadId(Name, RAW cell)` (opps).
+- **Splitter:** the longest known run wins unless it decomposes fully into ≥2 known
+  shorter runs — then the parts win ("Sound Devices, LLC" stays one; the stubbed
+  combined name splits into its real companies).
+- **Per row (chunked commit, deterministic):** install/order with an untouched July
+  record at its own id → one upsert over it; at a different julyId → write the new record,
+  then soft-delete the July one; service call → write the repair, soft-delete the July
+  project; skipped row (Cancelled/Abandoned/Deferred/duplicate) → soft-delete its July
+  record (a July id a kept row owns is never in this list). A won quote whose project id
+  holds an untouched July record creates its sold project over it; that id is never
+  retired by the project phase. Work list order: projects → July retire rows → quotes.
+- **Finalize** (once, after the last chunk; idempotent; "Retry finalize"): soft-delete
+  every untouched July lead when the Opportunities file was imported, then retire each
+  live company whose comma name decomposes fully into ≥2 OTHER live companies — only if
+  no live contact, no venue but its own base venue, no email domain, and no live doc in
+  any doc table (nor settings/blobs) references it or its base venue. Kept ones are
+  listed with the reason. The reference scan is one query per table for all candidates.
+- July projects no row matches are counted in the preview and never removed.
+
 ## 5. UKN values
 
 - `valueUnknown?: boolean` on projects and repair jobs (value stays 0 in storage).
@@ -364,6 +405,5 @@ re-run gates.
 
 - **O1** — does BID SPEC have a stage before Collect Information (export numbers Create BID
   as 3)? If yes, add it as a `draft` stage in the seed; editable later regardless.
-- **O2** — production may already hold `P-dl-…` projects if the July script ever ran with
-  a Projects.csv. The preview's "already imported" count answers it; they are skipped,
-  not overwritten.
+- **O2** — resolved: the July import is in the data; the history import supersedes it —
+  see §4.6.

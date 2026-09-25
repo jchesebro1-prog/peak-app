@@ -107,8 +107,8 @@ import {
   engagementFolderPath, fileRefHref, fileRefKey, fileRefName, isOwnedBlobPathname, isValidDataRef, ownsEngagementFile, safeMime,
   type FileRef,
 } from "@/lib/consulting-files";
-import { companyId as dayliteCompanyId } from "@/lib/daylite/ids";
-import { parseTsv, classifyProject, planHistory, splitCompanies, stripStage, toMs, staleLiveCompletedRepairs } from "@/lib/daylite/history";
+import { companyId as dayliteCompanyId, projectId as dayliteProjectId, leadId as dayliteLeadId } from "@/lib/daylite/ids";
+import { parseTsv, classifyProject, planHistory, splitCompanies, junkCompanyParts, stripStage, toMs, staleLiveCompletedRepairs } from "@/lib/daylite/history";
 import {
   archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
   ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
@@ -7481,6 +7481,178 @@ async function dayliteChunkAsyncChecks(): Promise<void> {
   }
 }
 
+/* ============ Task 12b: superseding the July Daylite import (DB) ============ */
+async function dayliteSupersedeAsyncChecks(): Promise<void> {
+  const { previewHistory, commitHistory, finalizeHistory } = await import("@/lib/daylite/history-commit");
+  const { saveCompany, getCompany } = await import("@/lib/identity/companies");
+  const { saveContact } = await import("@/lib/identity/contacts");
+  const { saveSite, getSite } = await import("@/lib/identity/sites");
+  const { companyId, projectId, repairId, leadId, baseSiteId } = await import("@/lib/daylite/ids");
+  const { listDocs, upsertDoc, getDoc } = await import("@/db/doc-store");
+  const { loadPipelines } = await import("@/lib/pipelines-server");
+  const { mkLead } = await import("@/lib/stores/leads");
+  const { allTasks } = await import("@/lib/stores/tasks");
+  const { allAssignments } = await import("@/lib/stores/assignments");
+  const { getDb } = await import("@/db");
+  const { companies: companiesT, sites: sitesT } = await import("@/db/schema");
+  const { inArray } = await import("drizzle-orm");
+
+  // The book: three real companies, two combined-name stubs the July script
+  // made from multi-company cells (one with its auto base venue), and a real
+  // company whose name merely contains a comma.
+  for (const [name, type] of [["ZJ School", "School"], ["ZJ Builder", "General Contractor"], ["ZJ Church", "Church"], ["ZJ Sound, LLC", "Vendor"]] as const)
+    await saveCompany({ id: companyId(name), name, type });
+  const junk1 = "ZJ Builder, ZJ School";
+  const junk2 = "ZJ Church, ZJ School";
+  const junk1Id = companyId(junk1);
+  const junk2Id = companyId(junk2);
+  await saveCompany({ id: junk1Id, name: junk1, type: "" });
+  await saveCompany({ id: junk2Id, name: junk2, type: "" });
+  await saveSite({ id: baseSiteId(junk1Id), companyId: junk1Id, name: "", isPrimary: true, venueKind: "proscenium" });
+  // A contact still points at the second stub — it must be kept, with a reason.
+  await saveContact({ id: "ct-zj-keep", firstName: "Zed", lastName: "Keeper", homeCompanyId: junk2Id, title: "" });
+
+  const P = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"ZJ Done Install"\tDone\tInstallation\t"8 • Final Payment Received"\t\t10/21/11\t2/22/12\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\t\t"ZJ Multi Install"\tNew\tBasic Install\t"3 • Installation"\t\t4/1/26\t\t\t\t\t"ZJ Builder, ZJ School"\t"Jeff Chesebro"\t
+\tService\t"ZJ Service Call"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"ZJ School"\t"Jeff Chesebro"\t
+\t\t"ZJ Edited Job"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\t\t"ZJ Cancelled Job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\t\t"ZJ Awarded Job"\tCancelled\tBasic Install\t\t\t1/1/25\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"ZJ Done Install"\tWon\t\t\t"$12,000.00"\t\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\tDesign\t"ZJ Draft Quote"\tOpen\t\t\t"$2,000.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t
+\tBid\t"ZJ Awarded Job"\tOpen\t\t\t"$7,000.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+
+  const ids = {
+    awarded: projectId("ZJ Awarded Job", "ZJ Church"),
+    done: projectId("ZJ Done Install", "ZJ Church"),
+    multiNew: projectId("ZJ Multi Install", "ZJ Builder"),
+    multiJuly: projectId("ZJ Multi Install", junk1),
+    svcJuly: projectId("ZJ Service Call", "ZJ School"),
+    svcNew: repairId("ZJ Service Call", "ZJ School"),
+    edited: projectId("ZJ Edited Job", "ZJ Church"),
+    cancelled: projectId("ZJ Cancelled Job", "ZJ Church"),
+    orphan: projectId("ZJ Orphan", "ZJ Church"),
+    leadA: leadId("ZJ Done Install", "ZJ Church"),
+    leadB: leadId("ZJ Multi Install", junk1),
+    leadEdited: leadId("ZJ Old Lead", "ZJ Church"),
+  };
+
+  // Seed July-shaped records exactly as scripts/import-daylite.ts wrote them:
+  // createProject/mkLead, no source marker, createdAt === updatedAt.
+  const pipes = await loadPipelines();
+  const T = new Date(2026, 6, 15, 10).getTime();
+  const { buildProject } = await import("@/lib/stores/projects");
+  const julyProject = async (id: string, name: string, raw: string, stage: string, edited = false) => {
+    const rec = buildProject(id, { name, customer: raw, customerId: companyId(raw), owner: "Jeff Chesebro", stage: stage as never, startedAt: T, installStart: T, installEnd: null }, pipes, T);
+    if (edited) rec.updatedAt = T + 5 * 60_000;
+    await upsertDoc("projects", rec);
+  };
+  await julyProject(ids.done, "ZJ Done Install", "ZJ Church", "complete");
+  await julyProject(ids.multiJuly, "ZJ Multi Install", junk1, "procurement");
+  await julyProject(ids.svcJuly, "ZJ Service Call", "ZJ School", "complete");
+  await julyProject(ids.cancelled, "ZJ Cancelled Job", "ZJ Church", "complete");
+  await julyProject(ids.edited, "ZJ Edited Job", "ZJ Church", "complete", true);
+  await julyProject(ids.orphan, "ZJ Orphan", "ZJ Church", "complete");
+  // A Cancelled Projects row whose opp is still open at Awarded: its July
+  // record is the won quote's project id — the quote replaces it (never a
+  // retire-then-"was deleted" error).
+  await julyProject(ids.awarded, "ZJ Awarded Job", "ZJ Church", "complete");
+  await upsertDoc("leads", mkLead({ id: ids.leadA, org: "ZJ Church", source: "existing", stage: "won", customerId: companyId("ZJ Church"), createdAt: T }));
+  await upsertDoc("leads", mkLead({ id: ids.leadB, org: junk1, source: "existing", stage: "lost", customerId: junk1Id, createdAt: T }));
+  await upsertDoc("leads", mkLead({ id: ids.leadEdited, org: "ZJ Church", source: "existing", stage: "qualified", customerId: companyId("ZJ Church"), createdAt: T, updatedAt: T + 5 * 60_000 }));
+  const editedBefore = JSON.stringify(await getDoc("projects", ids.edited));
+
+  const colls = ["projects", "repair_jobs", "quotes", "leads"] as const;
+  const snapshot = async (): Promise<string> => {
+    const out: string[] = [];
+    for (const c of colls)
+      for (const d of await listDocs(c, { includeDeleted: true })) out.push(`${c}/${d.id}:${JSON.stringify(d).replace(/"nt-[a-z0-9]+"/g, '"nt-*"')}`);
+    const db = await getDb();
+    const cos = await db.select().from(companiesT).where(inArray(companiesT.id, [junk1Id, junk2Id, companyId("ZJ Sound, LLC")]));
+    const sts = await db.select().from(sitesT).where(inArray(sitesT.companyId, [junk1Id, junk2Id]));
+    out.push(JSON.stringify(cos.map((r) => [r.id, r.deleted]).sort()), JSON.stringify(sts.map((r) => [r.id, r.deleted]).sort()));
+    return out.sort().join("\n");
+  };
+
+  // ---- preview (read-only) ----
+  const s0 = await snapshot();
+  const pv = await previewHistory(P, O);
+  const c = pv.counts;
+  ok(await snapshot() === s0, "daylite 12b: preview writes nothing");
+  ok(c.julyReplaced === 3, `daylite 12b: preview — 3 July projects replaced with full data (the done install in place, the multi-company one under its new id, the awarded job by its sold project) (${c.julyReplaced})`);
+  ok(c.soldNewProject === 1 && pv.rows.find((r) => r.kind === "quote" && r.name === "ZJ Awarded Job")!.flags.some((f) => f.includes("replacing July record")), "daylite 12b: preview — the awarded quote makes its project over the July record");
+  ok(c.julyMovedToRepairs === 1 && c.julyRetiredSkipped === 1, `daylite 12b: preview — 1 July service-call project moves to Repairs, 1 July cancelled job is removed (${c.julyMovedToRepairs}/${c.julyRetiredSkipped})`);
+  ok(c.julyEditedKept === 1 && pv.julyEdited.length === 1 && pv.julyEdited[0].id === ids.edited, "daylite 12b: preview — the edited July project is listed as left as is");
+  ok(c.julyUnmatchedKept === 1, "daylite 12b: preview — a July project no row matches is counted, never removed");
+  ok(c.julyLeadsToRetire === 2 && c.julyLeadsEditedKept === 1, `daylite 12b: preview — 2 untouched July leads to remove, the edited one kept (${c.julyLeadsToRetire}/${c.julyLeadsEditedKept})`);
+  ok(c.junkCompaniesToRetire === 1, `daylite 12b: preview — the combined-name stub referenced only by superseded July records is estimated for retirement; the one a contact uses is not (${c.junkCompaniesToRetire})`);
+  const multiRow = pv.rows.find((r) => r.id === ids.multiNew)!;
+  ok(!!multiRow && multiRow.candidates.length === 2 && multiRow.company === "ZJ School", "daylite 12b: the stub's cell splits into its two real companies (pick pre-fills the non-contractor)");
+  const doneRow = pv.rows.find((r) => r.id === ids.done)!;
+  ok(!!doneRow && !doneRow.already && doneRow.flags.includes("replaces July import"), "daylite 12b: a row whose id holds an untouched July record is not 'already imported' — it replaces it");
+  ok(c.workItems === 8, `daylite 12b: the work list is 4 plan rows + 2 July retire rows + 2 quotes (${c.workItems})`);
+
+  // ---- commit in two chunks ----
+  const tasksBefore = (await allTasks()).length;
+  const assignBefore = (await allAssignments()).length;
+  const a = await commitHistory(P, O, {}, "Test Admin", { start: 0, end: 2 });
+  const b = await commitHistory(P, O, {}, "Test Admin", { start: 2, end: 8 });
+  const sum = (k: string) => (a.created[k] || 0) + (b.created[k] || 0);
+  ok(a.total === 8 && b.total === 8 && a.errors.length === 0 && b.errors.length === 0, "daylite 12b: two chunks, same total, no errors" + (a.errors.concat(b.errors).length ? " — " + a.errors.concat(b.errors).join("; ") : ""));
+  ok(
+    sum("julyReplaced") === 3 && sum("julyMovedToRepairs") === 1 && sum("julyRetiredSkipped") === 1 && sum("julyEditedKept") === 1,
+    `daylite 12b: commit counts match the preview (${sum("julyReplaced")}/${sum("julyMovedToRepairs")}/${sum("julyRetiredSkipped")}/${sum("julyEditedKept")})`
+  );
+  ok(sum("projects") === 2 && sum("repairs") === 1 && sum("quotes") === 2 && sum("soldNewProject") === 1, "daylite 12b: 2 projects written (1 over the July record), 1 repair, 2 quotes, 1 sold project");
+  ok((await allTasks()).length === tasksBefore && (await allAssignments()).length === assignBefore, "daylite 12b: superseding creates no tasks and no assignments");
+
+  type PR = { id: string; source?: { system?: string }; value: number; stage: string; customerId: string | null; createdAt: number };
+  const allProj = await listDocs<PR>("projects", { includeDeleted: true });
+  const liveProj = new Set((await listDocs("projects")).map((d) => d.id));
+  const done = allProj.find((p) => p.id === ids.done)!;
+  ok(liveProj.has(ids.done) && done.source?.system === "daylite" && done.value === 12000 && done.stage === "complete", "daylite 12b: the untouched July done install is overwritten in place with full data (daylite marker, won value)");
+  ok(allProj.filter((p) => p.id === ids.done).length === 1, "daylite 12b: one project for that job — same id, no duplicate");
+  const multi = allProj.find((p) => p.id === ids.multiNew);
+  ok(!!multi && liveProj.has(ids.multiNew) && multi.customerId === companyId("ZJ School"), "daylite 12b: the multi-company job is written at its new id under a real company");
+  ok(!liveProj.has(ids.multiJuly) && allProj.some((p) => p.id === ids.multiJuly), "daylite 12b: its July record (raw-cell id) is soft-deleted, not hard-deleted");
+  ok(!!(await getDoc("repair_jobs", ids.svcNew)) && !liveProj.has(ids.svcJuly) && allProj.some((p) => p.id === ids.svcJuly), "daylite 12b: the July service-call project is soft-deleted and the job lives in Repairs");
+  ok(!liveProj.has(ids.cancelled) && allProj.some((p) => p.id === ids.cancelled), "daylite 12b: the July project for a Cancelled job is soft-deleted");
+  ok(liveProj.has(ids.edited) && JSON.stringify(await getDoc("projects", ids.edited)) === editedBefore, "daylite 12b: the edited July project is left exactly as it was");
+  ok(liveProj.has(ids.orphan), "daylite 12b: a July project no row matches stays");
+  const awarded = (await getDoc<PR & { quoteId: string | null }>("projects", ids.awarded))!;
+  ok(!!awarded && awarded.source?.system === "daylite" && !!awarded.quoteId && awarded.value === 7000, "daylite 12b: the awarded job's July record is replaced by its sold project (linked to the quote), not retired by the Cancelled row");
+
+  // ---- finalize ----
+  const fin = await finalizeHistory(true, "Test Admin");
+  const liveLeads = new Set((await listDocs("leads")).map((d) => d.id));
+  const allLeads = new Set((await listDocs("leads", { includeDeleted: true })).map((d) => d.id));
+  ok(fin.julyLeadsRetired === 2 && fin.julyLeadsEditedKept === 1, `daylite 12b: finalize retires the 2 untouched July leads, keeps the edited one (${fin.julyLeadsRetired}/${fin.julyLeadsEditedKept})`);
+  ok(!liveLeads.has(ids.leadA) && !liveLeads.has(ids.leadB) && allLeads.has(ids.leadA) && liveLeads.has(ids.leadEdited), "daylite 12b: July leads are soft-deleted; the edited lead stays live");
+  ok(fin.junkCompaniesRetired === 1 && (await getCompany(junk1Id)) === null && (await getSite(baseSiteId(junk1Id))) === null, "daylite 12b: the unreferenced combined-name stub and its base venue are retired");
+  const db = await getDb();
+  ok((await db.select().from(companiesT).where(inArray(companiesT.id, [junk1Id]))).length === 1, "daylite 12b: the retired stub is a soft delete (row kept)");
+  const kept = fin.junkCompaniesKept.find((k) => k.id === junk2Id);
+  ok(!!kept && /contact/i.test(kept.reason) && !!(await getCompany(junk2Id)), `daylite 12b: a stub a contact still uses is kept, with the reason (${kept?.reason})`);
+  ok(!!(await getCompany(companyId("ZJ Sound, LLC"))) && !fin.junkCompaniesKept.some((k) => k.id === companyId("ZJ Sound, LLC")), "daylite 12b: a real comma name that isn't made of other companies is not a candidate");
+
+  // ---- re-run: nothing changes ----
+  const s1 = await snapshot();
+  const again = await commitHistory(P, O, {}, "Test Admin");
+  const fin2 = await finalizeHistory(true, "Test Admin");
+  ok(await snapshot() === s1, "daylite 12b: a re-run of commit + finalize changes nothing");
+  ok(
+    ["projects", "repairs", "quotes", "julyReplaced", "julyMovedToRepairs", "julyRetiredSkipped"].every((k) => (again.created[k] || 0) === 0) &&
+      again.errors.length === 0 && fin2.julyLeadsRetired === 0 && fin2.junkCompaniesRetired === 0,
+    "daylite 12b: the re-run retires and writes nothing new"
+  );
+  const ProjStore = await import("@/lib/stores/projects");
+  const nProj = (await listDocs("projects")).length;
+  await ProjStore.syncProjectsFromQuotes();
+  ok((await listDocs("projects")).length === nProj, "daylite 12b: syncProjectsFromQuotes adds nothing after a superseding import");
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -7500,6 +7672,7 @@ seeded()
   .then(() => moveStageRecordsAsyncChecks())
   .then(() => dayliteCommitAsyncChecks())
   .then(() => dayliteChunkAsyncChecks())
+  .then(() => dayliteSupersedeAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -9348,6 +9521,67 @@ ok(
     "daylite: stale live completed repairs — End Date over 12 months ago (or the Start Date commit falls back to), live, completed stage; not done, not scheduled, not dateless, not an install, not exactly a year"
   );
   ok(staleLiveCompletedRepairs([], staleNow) === 0, "daylite: no plans, no stale repairs");
+
+  // Task 12b §1: a combined-name company the July script stubbed ("A, B")
+  // is in the book as ONE company — but when it decomposes fully into ≥2
+  // real companies, the splitter takes the real ones.
+  const junkKnown = new Set([
+    "sound devices, llc", "sound devices",
+    "c.d. smith construction, muermann engineering", "c.d. smith construction", "muermann engineering",
+    "za co, zb co, zc co", "za co", "zb co", "zc co",
+  ]);
+  const jk = (n: string) => junkKnown.has(n.trim().toLowerCase());
+  ok(
+    JSON.stringify(splitCompanies("Sound Devices, LLC", jk)) === JSON.stringify(["Sound Devices, LLC"]),
+    "daylite 12b: 'Sound Devices, LLC' stays one company even when 'Sound Devices' is also known (LLC isn't a company)"
+  );
+  ok(
+    JSON.stringify(splitCompanies("C.D. Smith Construction, Muermann Engineering", jk)) === JSON.stringify(["C.D. Smith Construction", "Muermann Engineering"]),
+    "daylite 12b: a known combined-name stub that decomposes fully into two real companies splits into them"
+  );
+  ok(
+    JSON.stringify(splitCompanies("ZA Co, ZB Co, ZC Co", jk)) === JSON.stringify(["ZA Co", "ZB Co", "ZC Co"]),
+    "daylite 12b: a three-part combined-name stub splits into its three real companies"
+  );
+  ok(
+    JSON.stringify(splitCompanies("C.D. Smith Construction, Zed Unknown", (n) => jk(n) || n.toLowerCase() === "c.d. smith construction, zed unknown")) ===
+      JSON.stringify(["C.D. Smith Construction, Zed Unknown"]),
+    "daylite 12b: a known run that only PARTLY decomposes (a leftover piece) stays whole"
+  );
+  const junkSelf = (self: string) => (n: string) => n.trim().toLowerCase() !== self.toLowerCase() && jk(n);
+  ok(
+    JSON.stringify(junkCompanyParts("C.D. Smith Construction, Muermann Engineering", junkSelf("C.D. Smith Construction, Muermann Engineering"))) ===
+      JSON.stringify(["C.D. Smith Construction", "Muermann Engineering"]) &&
+      junkCompanyParts("Sound Devices, LLC", junkSelf("Sound Devices, LLC")) === null &&
+      junkCompanyParts("Muermann Engineering", junkSelf("Muermann Engineering")) === null,
+    "daylite 12b: junkCompanyParts — a comma name made only of other real companies is junk; 'Sound Devices, LLC' and a comma-free name are not"
+  );
+
+  // Task 12b: every plan row carries the id the JULY script gave the same row
+  // (raw Companies cell), and skipped rows' July ids are listed for retiring.
+  const jr = parseTsv(`\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"ZJ Multi"\tNew\tBasic Install\t\t\t\t\t\t\t\t"Camosy Construction, Deerfield School District"\t"Jeff Chesebro"\t
+\t\t"ZJ Single"\tDone\tBasic Install\t\t\t\t\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\t\t"ZJ Single"\tCancelled\tBasic Install\t\t\t\t\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\t\t"ZJ Gone"\tAbandoned\tBasic Install\t\t\t\t\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\t\t"ZJ Gone"\tDeferred\tBasic Install\t\t\t\t\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\t\t"ZJ Multi"\tNew\tBasic Install\t\t\t\t\t\t\t\t"Camosy Construction"\t"Jeff Chesebro"\t`);
+  const jPlan = planHistory({
+    projects: jr,
+    opportunities: parseTsv(`\tName\tState\tCompanies\t\n\t"ZJ Opp"\tOpen\t"Camosy Construction, Some Rando Co"\t`),
+    knownCompany: kn,
+  });
+  const jMulti = jPlan.projects.find((p) => p.name === "ZJ Multi")!;
+  ok(
+    jMulti.id === dayliteProjectId("ZJ Multi", "Camosy Construction") && jMulti.julyId === dayliteProjectId("ZJ Multi", "Camosy Construction, Deerfield School District"),
+    "daylite 12b: a multi-company row's julyId hashes the RAW cell; its new id the first resolved company"
+  );
+  ok(jPlan.projects.find((p) => p.name === "ZJ Single")!.julyId === dayliteProjectId("ZJ Single", "Pardeeville Schools"), "daylite 12b: a one-company row's julyId equals its id");
+  ok(jPlan.quotes[0].julyId === dayliteLeadId("ZJ Opp", "Camosy Construction, Some Rando Co"), "daylite 12b: an open opp's julyId is the July lead id (raw cell)");
+  ok(
+    jPlan.julyRetire.length === 1 && jPlan.julyRetire[0].julyId === dayliteProjectId("ZJ Gone", "Pardeeville Schools") && jPlan.julyRetire[0].reason === "Abandoned",
+    "daylite 12b: skipped rows list their July id once (the Deferred repeat dedupes); a skipped row whose July id a kept row owns (the Cancelled ZJ Single, the duplicate ZJ Multi) is not listed"
+  );
 }
 
 /* ====== #162 the writer (scratch datadir only) ====== */

@@ -25,10 +25,22 @@
  * exists — soft-deleted included, so a record Jeff deleted is not resurrected
  * by the upsert — is skipped and counted.
  *
+ * Superseding the July import (Task 12b, spec §4.6): scripts/import-daylite.ts
+ * already wrote cruder `P-dl-*` projects and `L-dl-*` leads. A July record
+ * NOBODY has touched (./july-cleanup isJulyRecord + isUntouched) is replaced
+ * per row — overwritten in place when the new id is the July id, otherwise
+ * soft-deleted once the new record exists (service calls move to Repairs;
+ * cancelled/abandoned/deferred/duplicate rows just retire theirs). An edited
+ * July record is left exactly as it is and the row writes nothing. Every
+ * decision reads only the plan and the current state of that row's own ids,
+ * so a chunk re-run is safe. `finalizeHistory` then retires the July leads
+ * and the combined-name company stubs once, after the last chunk.
+ *
  * Design spec: docs/superpowers/specs/2026-09-24-daylite-pipelines-and-history-import-design.md §4.
  */
 
 import { getDoc, listDocs, patchDoc, upsertDoc } from "@/db/doc-store";
+import type { CollectionName } from "@/db/doc-tables";
 import type { ContactRow } from "@/db/schema";
 import { allCompanies } from "@/lib/identity/companies";
 import { allContacts } from "@/lib/identity/contacts";
@@ -47,14 +59,25 @@ import {
 import {
   buildProject,
   normalizeProject,
+  removeProject,
   type ProjectNote,
   type ProjectRecord,
   type ProjectStageChange,
 } from "@/lib/stores/projects";
 import * as Repairs from "@/lib/stores/repair-jobs";
 import * as Quotes from "@/lib/stores/quotes";
-import { parseTsv, planHistory, staleLiveCompletedRepairs, type ProjectPlan, type QuotePlan } from "./history";
+import { parseTsv, planHistory, staleLiveCompletedRepairs, type JulyRetire, type ProjectPlan, type QuotePlan } from "./history";
 import { companyId, contactId, projectId } from "./ids";
+import {
+  countLiveJulyProjects,
+  isJulyRecord,
+  isUntouched,
+  julyLeads,
+  retireJulyLeads,
+  retireJunkCompanies,
+  scanJunkCompanies,
+  type JunkKept,
+} from "./july-cleanup";
 
 export type PreviewRow = {
   id: string;
@@ -69,11 +92,16 @@ export type PreviewRow = {
   flags: string[];
 };
 
+/** A July record the import leaves alone because someone edited it in Quartzite. */
+export type JulyEditedRow = { id: string; name: string };
+
 export type Preview = {
   counts: Record<string, number>;
   rows: PreviewRow[];
   needsPick: PreviewRow[];
   live: PreviewRow[];
+  /** Task 12b — "Edited in Quartzite — left as is". */
+  julyEdited: JulyEditedRow[];
   stats: { valueConflicts: number; unmappedOppStages: Record<string, number> };
 };
 
@@ -85,6 +113,8 @@ const IMPORT_ACTOR = "Daylite import";
 
 type CompanyInfo = { id: string; name: string; type: string };
 
+type JulyInfo = { untouched: boolean; name: string };
+
 type Ctx = {
   plan: ReturnType<typeof planHistory>;
   pipes: Pipelines;
@@ -95,8 +125,13 @@ type Ctx = {
   taken: { projects: Set<string>; repairs: Set<string>; quotes: Set<string> };
   /** Live (not deleted) project ids — link targets for won quotes. */
   liveProjects: Set<string>;
-  /** Project/order plan ids in this upload — link targets for won quotes. */
-  plannedProjects: Set<string>;
+  /** Live July-script projects (P-dl-*, no daylite source marker), by id. */
+  july: Map<string, JulyInfo>;
+  /** Won quotes' project ids — the project phase never retires a July record
+   *  there; the quote phase replaces it with the sold project instead. */
+  soldTargets: Set<string>;
+  /** Project/order plan rows by id. */
+  planById: Map<string, ProjectPlan>;
 };
 
 async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
@@ -118,7 +153,11 @@ async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
     const n = (u.name || "").trim();
     if (n && !usersByLc.has(n.toLowerCase())) usersByLc.set(n.toLowerCase(), n);
   }
-  const liveProjectIds = new Set((await listDocs("projects")).map((d) => d.id));
+  const liveProjectDocs = await listDocs("projects");
+  const liveProjectIds = new Set(liveProjectDocs.map((d) => d.id));
+  const july = new Map<string, JulyInfo>();
+  for (const d of liveProjectDocs)
+    if (isJulyRecord("P-dl-", d)) july.set(d.id, { untouched: isUntouched(d), name: String(d.name ?? "") });
 
   const plan = planHistory({
     projects: projectsTsv ? parseTsv(projectsTsv) : [],
@@ -138,7 +177,19 @@ async function loadContext(projectsTsv: string, oppsTsv: string): Promise<Ctx> {
       quotes: new Set(quoteAll.map((d) => d.id)),
     },
     liveProjects: liveProjectIds,
-    plannedProjects: new Set(plan.projects.filter((p) => p.kind !== "repair").map((p) => p.id)),
+    july,
+    soldTargets: new Set(plan.quotes.filter((q) => q.status === "won").map(soldProjectId)),
+    planById: new Map(plan.projects.filter((p) => p.kind !== "repair").map((p) => [p.id, p])),
+  };
+}
+
+/** A private copy of the mutable state, for the preview's dry run. */
+function cloneCtx(ctx: Ctx): Ctx {
+  return {
+    ...ctx,
+    taken: { projects: new Set(ctx.taken.projects), repairs: new Set(ctx.taken.repairs), quotes: new Set(ctx.taken.quotes) },
+    liveProjects: new Set(ctx.liveProjects),
+    july: new Map(ctx.july),
   };
 }
 
@@ -213,23 +264,100 @@ function soldProjectId(q: QuotePlan): string {
   return projectId(q.name, q.companyCandidates[0] || q.companyRaw || "");
 }
 
-type SoldMode = "linked" | "new" | "blocked";
+type SoldMode = "linked" | "new" | "replacesJuly" | "blocked";
+
+/* ---------------------------------------------------------------------------
+ * July supersede decisions (Task 12b) — one function each, used by the
+ * preview's dry run (on a cloned state) and by commit (on the live state), so
+ * both give the same answer. Each reads only the plan and the state of the
+ * row's own ids.
+ * ------------------------------------------------------------------------- */
+
+type JulyState = "none" | "untouched" | "edited";
+
+function julyStateOf(ctx: Ctx, id: string): JulyState {
+  const j = ctx.july.get(id);
+  return j ? (j.untouched ? "untouched" : "edited") : "none";
+}
+
+type RowDecision = {
+  /** Edited July records this row owns — the row writes and retires nothing. */
+  edited: string[];
+  /** Write the new record at the plan id (create, or overwrite an untouched July record). */
+  write: boolean;
+  /** The plan id holds an untouched July record the write replaces in place. */
+  overwritesJuly: boolean;
+  /** Untouched July records to soft-delete after the write. */
+  retire: string[];
+};
+
+function decideProjectRow(ctx: Ctx, p: ProjectPlan): RowDecision {
+  // A repair's own id (RP-dl-) is never a July id; its July record is the
+  // project the July script made for the service call.
+  const own = p.kind === "repair" ? [p.julyId] : [...new Set([p.id, p.julyId])];
+  const edited = own.filter((id) => julyStateOf(ctx, id) === "edited");
+  if (edited.length) return { edited, write: false, overwritesJuly: false, retire: [] };
+  const overwritesJuly = p.kind !== "repair" && julyStateOf(ctx, p.id) === "untouched";
+  const write = overwritesJuly || !takenFor(ctx, p);
+  const retire = own.filter(
+    (id) => (p.kind === "repair" || id !== p.id) && julyStateOf(ctx, id) === "untouched" && !ctx.soldTargets.has(id)
+  );
+  return { edited: [], write, overwritesJuly, retire };
+}
+
+/** State after a row's write / retirements (commit and the dry run alike). */
+function noteWritten(ctx: Ctx, p: ProjectPlan): void {
+  if (p.kind === "repair") {
+    ctx.taken.repairs.add(p.id);
+    return;
+  }
+  ctx.taken.projects.add(p.id);
+  ctx.liveProjects.add(p.id);
+  ctx.july.delete(p.id);
+}
+function noteRetired(ctx: Ctx, id: string): void {
+  ctx.july.delete(id);
+  ctx.liveProjects.delete(id);
+}
+
+function decideRetireRow(ctx: Ctx, r: JulyRetire): "retire" | "edited" | "none" {
+  const st = julyStateOf(ctx, r.julyId);
+  if (st === "edited") return "edited";
+  return st === "untouched" && !ctx.soldTargets.has(r.julyId) ? "retire" : "none";
+}
+
+/**
+ * The project a won quote belongs to. Normally soldProjectId(q); but when the
+ * Projects row for that job was kept as an EDITED July record under its raw-
+ * cell id (so the row wrote nothing at its new id), the quote links that
+ * record instead of creating a second project for the same job.
+ */
+function soldTargetOf(ctx: Ctx, q: QuotePlan): string {
+  const target = soldProjectId(q);
+  const row = ctx.planById.get(target);
+  if (row && row.julyId !== target && !ctx.taken.projects.has(target) && julyStateOf(ctx, row.julyId) === "edited") return row.julyId;
+  return target;
+}
 
 function soldMode(ctx: Ctx, q: QuotePlan): SoldMode {
-  const target = soldProjectId(q);
+  const target = soldTargetOf(ctx, q);
   // A soft-deleted project holds the id — checked FIRST, so a planned row that
   // commit will skip as already imported can't read as a link target here
   // (commit refuses it the same way: re-creating would resurrect that record).
   if (ctx.taken.projects.has(target) && !ctx.liveProjects.has(target)) return "blocked";
-  if (ctx.plannedProjects.has(target) || ctx.liveProjects.has(target)) return "linked";
+  if (julyStateOf(ctx, target) === "untouched") return "replacesJuly";
+  if (ctx.liveProjects.has(target)) return "linked";
   return "new";
 }
 
 function projectPreviewRow(ctx: Ctx, p: ProjectPlan, picks: Record<string, string>): PreviewRow {
   const r = resolveCommon(ctx, p, picks);
-  const already = takenFor(ctx, p);
+  const d = decideProjectRow(ctx, p);
+  const already = !d.edited.length && !d.write;
   const flags = [...r.flags];
   if (p.value == null) flags.push("UKN value");
+  if (d.edited.length) flags.push("edited in Quartzite — July record kept");
+  else if (d.overwritesJuly || d.retire.length) flags.push("replaces July import");
   if (already) flags.push("already imported");
   return {
     id: p.id,
@@ -245,15 +373,21 @@ function projectPreviewRow(ctx: Ctx, p: ProjectPlan, picks: Record<string, strin
   };
 }
 
-function quotePreviewRow(ctx: Ctx, q: QuotePlan, picks: Record<string, string>): PreviewRow {
+function quotePreviewRow(
+  ctx: Ctx,
+  q: QuotePlan,
+  picks: Record<string, string>,
+  sold: Map<string, { mode: SoldMode; target: string }>
+): PreviewRow {
   const r = resolveCommon(ctx, q, picks);
   const already = ctx.taken.quotes.has(q.id);
   const flags = [...r.flags];
-  if (q.status === "won") {
-    const mode = soldMode(ctx, q);
-    const target = soldProjectId(q);
+  const s = sold.get(q.id);
+  if (q.status === "won" && s) {
+    const { mode, target } = s;
     if (mode === "linked") flags.push(`sold → links ${target}`);
     else if (mode === "new") flags.push(`sold → new project at ${q.projectStage}`);
+    else if (mode === "replacesJuly") flags.push(`sold → new project at ${q.projectStage}, replacing July record ${target}`);
     else flags.push(`sold → project ${target} was deleted; not imported`);
   }
   if (already) flags.push("already imported");
@@ -275,9 +409,95 @@ function quotePreviewRow(ctx: Ctx, q: QuotePlan, picks: Record<string, string>):
  * Preview
  * ------------------------------------------------------------------------- */
 
+/**
+ * The July-supersede dry run: walk the same work list commit walks (projects
+ * → July retire rows → quotes) on a private copy of the state, with the same
+ * decision functions, and count what commit will do.
+ */
+function dryRunJuly(ctx: Ctx): {
+  counts: Record<string, number>;
+  edited: JulyEditedRow[];
+  sold: Map<string, { mode: SoldMode; target: string }>;
+  superseded: Set<string>;
+} {
+  const sim = cloneCtx(ctx);
+  const counts = { julyReplaced: 0, julyMovedToRepairs: 0, julyRetiredSkipped: 0 };
+  const edited = new Map<string, JulyEditedRow>();
+  const superseded = new Set<string>();
+  const sold = new Map<string, { mode: SoldMode; target: string }>();
+  const keepEdited = (id: string) => edited.set(id, { id, name: ctx.july.get(id)?.name ?? id });
+
+  for (const p of ctx.plan.projects) {
+    const d = decideProjectRow(sim, p);
+    if (d.edited.length) {
+      d.edited.forEach(keepEdited);
+      continue;
+    }
+    if (d.overwritesJuly) {
+      counts.julyReplaced++;
+      superseded.add(p.id);
+    }
+    if (d.write) noteWritten(sim, p);
+    for (const id of d.retire) {
+      counts[p.kind === "repair" ? "julyMovedToRepairs" : "julyReplaced"]++;
+      superseded.add(id);
+      noteRetired(sim, id);
+    }
+  }
+  for (const r of ctx.plan.julyRetire) {
+    const d = decideRetireRow(sim, r);
+    if (d === "edited") keepEdited(r.julyId);
+    else if (d === "retire") {
+      counts.julyRetiredSkipped++;
+      superseded.add(r.julyId);
+      noteRetired(sim, r.julyId);
+    }
+  }
+  for (const q of ctx.plan.quotes) {
+    if (q.status !== "won") continue;
+    const mode = soldMode(sim, q);
+    const target = soldTargetOf(sim, q);
+    sold.set(q.id, { mode, target });
+    if (mode === "replacesJuly") {
+      counts.julyReplaced++;
+      superseded.add(target);
+    }
+    if (mode === "new" || mode === "replacesJuly") {
+      sim.taken.projects.add(target);
+      sim.liveProjects.add(target);
+      sim.july.delete(target);
+    }
+  }
+  return { counts, edited: [...edited.values()], sold, superseded };
+}
+
+/** Live July projects no row of this upload touches — reported, never removed. */
+function julyUnmatched(ctx: Ctx): number {
+  const matched = new Set<string>(ctx.soldTargets);
+  for (const p of ctx.plan.projects) {
+    matched.add(p.julyId);
+    if (p.kind !== "repair") matched.add(p.id);
+  }
+  for (const r of ctx.plan.julyRetire) matched.add(r.julyId);
+  let n = 0;
+  for (const id of ctx.july.keys()) if (!matched.has(id)) n++;
+  return n;
+}
+
 export async function previewHistory(projectsTsv: string, oppsTsv: string): Promise<Preview> {
   const ctx = await loadContext(projectsTsv, oppsTsv);
   const { plan } = ctx;
+  const july = dryRunJuly(ctx);
+  const oppsIncluded = !!oppsTsv.trim();
+  const leads = oppsIncluded ? await julyLeads() : { untouched: [], edited: [] };
+  // The combined-name estimate: references from July records this import
+  // replaces or retires don't count (they will be gone by finalize).
+  const exclude: Partial<Record<CollectionName, ReadonlySet<string>>> = {
+    projects: july.superseded,
+    leads: new Set(leads.untouched),
+  };
+  const junk = await scanJunkCompanies(exclude);
+
   const counts: Record<string, number> = {
     doneInstalls: 0,
     liveInstalls: 0,
@@ -294,6 +514,14 @@ export async function previewHistory(projectsTsv: string, oppsTsv: string): Prom
     alreadyImported: 0,
     legacyOwners: 0,
     staleLiveCompletedRepairs: staleLiveCompletedRepairs(plan.projects, Date.now()),
+    workItems: plan.projects.length + plan.julyRetire.length + plan.quotes.length,
+    ...july.counts,
+    julyEditedKept: july.edited.length,
+    julyUnmatchedKept: julyUnmatched(ctx),
+    julyLeadsToRetire: leads.untouched.length,
+    julyLeadsEditedKept: leads.edited.length,
+    junkCompaniesToRetire: junk.retire.length,
+    junkCompaniesKept: junk.kept.length,
   };
   const rows: PreviewRow[] = [];
 
@@ -305,12 +533,10 @@ export async function previewHistory(projectsTsv: string, oppsTsv: string): Prom
     rows.push(projectPreviewRow(ctx, p, {}));
   }
   for (const q of plan.quotes) {
-    if (q.status === "won") {
-      const mode = soldMode(ctx, q);
-      if (mode === "linked") counts.soldLinked++;
-      else if (mode === "new") counts.soldNewProject++;
-    }
-    rows.push(quotePreviewRow(ctx, q, {}));
+    const s = july.sold.get(q.id);
+    if (s?.mode === "linked") counts.soldLinked++;
+    else if (s?.mode === "new" || s?.mode === "replacesJuly") counts.soldNewProject++;
+    rows.push(quotePreviewRow(ctx, q, {}, july.sold));
   }
   for (const r of rows) {
     if (!r.company) counts.noCompany++;
@@ -326,6 +552,7 @@ export async function previewHistory(projectsTsv: string, oppsTsv: string): Prom
     rows,
     needsPick: rows.filter((r) => r.candidates.length > 1),
     live: rows.filter((r) => r.kind !== "quote" && !r.done),
+    julyEdited: july.edited,
     stats: plan.stats,
   };
 }
@@ -414,7 +641,9 @@ async function writeRepair(p: ProjectPlan, r: Resolved, importedAt: number): Pro
 /**
  * A won quote's project: link the matching project (moving it forward to the
  * mapped stage when that is later and it isn't done — a direct patch with a
- * history entry, never setProjectStage), or create it with `quoteId` set.
+ * history entry, never setProjectStage), or create it with `quoteId` set. An
+ * untouched July record at that id is replaced by the created project (one
+ * upsert over it) — never linked, which would keep the July record's crude data.
  */
 async function linkOrCreateSoldProject(
   ctx: Ctx,
@@ -422,9 +651,12 @@ async function linkOrCreateSoldProject(
   r: Resolved,
   by: string,
   importedAt: number
-): Promise<"linked" | "new"> {
-  const targetId = soldProjectId(q);
-  const existing = await getDoc<ProjectRecord>("projects", targetId);
+): Promise<"linked" | "new" | "replacesJuly"> {
+  const mode = soldMode(ctx, q);
+  const targetId = soldTargetOf(ctx, q);
+  if (mode === "blocked") throw new Error(`project ${targetId} was deleted — not re-created`);
+  const existing = mode === "linked" ? await getDoc<ProjectRecord>("projects", targetId) : null;
+  if (mode === "linked" && !existing) throw new Error(`project ${targetId} was deleted — not re-created`);
   if (existing) {
     if (existing.quoteId && existing.quoteId !== q.id)
       throw new Error(`project ${targetId} is already linked to quote ${existing.quoteId}`);
@@ -449,7 +681,6 @@ async function linkOrCreateSoldProject(
     });
     return "linked";
   }
-  if (ctx.taken.projects.has(targetId)) throw new Error(`project ${targetId} was deleted — not re-created`);
   const pl = projectPipelineFor(ctx.pipes, { kind: "project" });
   const stage = resolveProjectStage(pl, "project", q.projectStage || firstStage(pl).id);
   const known = !!q.value && q.value > 0;
@@ -474,7 +705,9 @@ async function linkOrCreateSoldProject(
   }, ctx.pipes, importedAt);
   await upsertDoc<ProjectRecord>("projects", rec);
   ctx.taken.projects.add(targetId);
-  return "new";
+  ctx.liveProjects.add(targetId);
+  ctx.july.delete(targetId);
+  return mode;
 }
 
 /**
@@ -517,21 +750,29 @@ async function writeQuote(ctx: Ctx, q: QuotePlan, r: Resolved, importedAt: numbe
 }
 
 export type CommitResult = {
+  /**
+   * Records written per kind, plus the July-supersede tallies (Task 12b):
+   * julyReplaced (July projects overwritten in place or retired for a new
+   * record), julyMovedToRepairs, julyRetiredSkipped, julyEditedKept.
+   */
   created: Record<string, number>;
   skippedExisting: number;
   errors: string[];
-  /** Length of the whole work list (projects then quotes), whatever the range. */
+  /** Length of the whole work list (projects, July retire rows, quotes), whatever the range. */
   total: number;
 };
 
 /**
  * Write the plan. `range` (Task 12) processes only that slice of the work
- * list — the plan's projects/repairs/orders in order, then its quotes — so the
- * Import hub can commit in chunks that each fit a serverless function's time
- * limit. The list is rebuilt deterministically from the same inputs on every
- * call, and it is ordered projects → quotes, so any split still writes every
- * project before the won quotes that link it. Every id is deterministic and a
- * taken id is skipped, so a failed chunk is simply retried.
+ * list — the plan's projects/repairs/orders in order, then the July records of
+ * skipped rows to retire (Task 12b), then its quotes — so the Import hub can
+ * commit in chunks that each fit a serverless function's time limit. The list
+ * is rebuilt deterministically from the same inputs on every call, and it is
+ * ordered projects → retire rows → quotes, so any split still writes every
+ * project before the won quotes that link it, and a kept row supersedes its
+ * own July record before any retire row could. Every id is deterministic, a
+ * taken id is skipped and a superseded July record is no longer a July record,
+ * so a failed chunk is simply retried.
  */
 export async function commitHistory(
   projectsTsv: string,
@@ -541,10 +782,11 @@ export async function commitHistory(
   range?: { start: number; end: number }
 ): Promise<CommitResult> {
   const ctx = await loadContext(projectsTsv, oppsTsv);
-  const nProjects = ctx.plan.projects.length;
-  const total = nProjects + ctx.plan.quotes.length;
+  const { projects, julyRetire, quotes } = ctx.plan;
+  const total = projects.length + julyRetire.length + quotes.length;
   const start = range ? Math.max(0, Math.floor(range.start) || 0) : 0;
   const end = range ? Math.min(total, Math.floor(range.end) || 0) : total;
+  const slice = <T,>(list: T[], from: number): T[] => list.slice(Math.max(0, start - from), Math.max(0, end - from));
   const importedAt = Date.now();
   const created: Record<string, number> = {
     projects: 0,
@@ -553,6 +795,10 @@ export async function commitHistory(
     quotes: 0,
     soldLinked: 0,
     soldNewProject: 0,
+    julyReplaced: 0,
+    julyMovedToRepairs: 0,
+    julyRetiredSkipped: 0,
+    julyEditedKept: 0,
   };
   let skippedExisting = 0;
   const errors: string[] = [];
@@ -561,28 +807,64 @@ export async function commitHistory(
 
   // Projects/repairs/orders first, so a won quote below can link a project
   // written in this same run.
-  for (const p of ctx.plan.projects.slice(Math.min(start, nProjects), Math.max(0, Math.min(end, nProjects)))) {
-    if (takenFor(ctx, p)) {
+  for (const p of slice(projects, 0)) {
+    const d = decideProjectRow(ctx, p);
+    if (d.edited.length) {
+      // Someone edited the July record in Quartzite: leave it, and don't add
+      // a second record for the same job next to it.
+      created.julyEditedKept += d.edited.length;
+      continue;
+    }
+    if (!d.write && !d.retire.length) {
       skippedExisting++;
       continue;
     }
     try {
-      const r = resolveCommon(ctx, p, picks);
-      if (p.kind === "repair") {
-        await writeRepair(p, r, importedAt);
-        ctx.taken.repairs.add(p.id);
-        created.repairs++;
+      if (d.write) {
+        const r = resolveCommon(ctx, p, picks);
+        if (p.kind === "repair") {
+          await writeRepair(p, r, importedAt);
+          created.repairs++;
+        } else {
+          // Over an untouched July record this is the one upsert that
+          // replaces it in place — the same single-write builder path.
+          await writeProject(ctx, p, r, by, importedAt);
+          created[p.kind === "order" ? "orders" : "projects"]++;
+          if (d.overwritesJuly) created.julyReplaced++;
+        }
+        noteWritten(ctx, p);
       } else {
-        await writeProject(ctx, p, r, by, importedAt);
-        ctx.taken.projects.add(p.id);
-        created[p.kind === "order" ? "orders" : "projects"]++;
+        skippedExisting++;
+      }
+      // Retire the July record only once the new one exists, so a failure
+      // never leaves the job with neither; a re-run finds the new record
+      // taken and the July record still untouched, and just retires it.
+      for (const id of d.retire) {
+        await removeProject(id);
+        noteRetired(ctx, id);
+        created[p.kind === "repair" ? "julyMovedToRepairs" : "julyReplaced"]++;
       }
     } catch (e) {
       fail(p.id, p.name, e);
     }
   }
 
-  for (const q of ctx.plan.quotes.slice(Math.max(0, start - nProjects), Math.max(0, end - nProjects))) {
+  // Skipped rows (Cancelled/Abandoned/Deferred/duplicate): retire their
+  // untouched July record.
+  for (const r of slice(julyRetire, projects.length)) {
+    const d = decideRetireRow(ctx, r);
+    if (d === "edited") created.julyEditedKept++;
+    if (d !== "retire") continue;
+    try {
+      await removeProject(r.julyId);
+      noteRetired(ctx, r.julyId);
+      created.julyRetiredSkipped++;
+    } catch (e) {
+      fail(r.julyId, r.name, e);
+    }
+  }
+
+  for (const q of slice(quotes, projects.length + julyRetire.length)) {
     if (ctx.taken.quotes.has(q.id)) {
       skippedExisting++;
       continue;
@@ -596,6 +878,7 @@ export async function commitHistory(
       if (q.status === "won") {
         const mode = await linkOrCreateSoldProject(ctx, q, r, by, importedAt);
         created[mode === "linked" ? "soldLinked" : "soldNewProject"]++;
+        if (mode === "replacesJuly") created.julyReplaced++;
       }
       await writeQuote(ctx, q, r, importedAt);
       ctx.taken.quotes.add(q.id);
@@ -606,4 +889,47 @@ export async function commitHistory(
   }
 
   return { created, skippedExisting, errors, total };
+}
+
+/* ---------------------------------------------------------------------------
+ * Finalize (Task 12b) — once, after the last chunk
+ * ------------------------------------------------------------------------- */
+
+export type FinalizeResult = {
+  julyLeadsRetired: number;
+  julyLeadsEditedKept: number;
+  junkCompaniesRetired: number;
+  /** Combined-name stubs something still references — kept, with the reason. */
+  junkCompaniesKept: JunkKept[];
+  /** Live July projects left in the data (edited ones, and any no row matched). */
+  julyProjectsRemaining: number;
+};
+
+/**
+ * Retire the July leads (only when the Opportunities file was part of the
+ * import — they are the July version of those opportunities), then the
+ * combined-name company stubs nothing references any more. Soft deletes only;
+ * idempotent — a second call finds nothing left to retire. `by` is the admin
+ * who ran it (soft deletes carry no actor field today; kept for the seam).
+ */
+export async function finalizeHistory(oppsIncluded: boolean, by: string): Promise<FinalizeResult> {
+  void by;
+  let julyLeadsRetired = 0;
+  let julyLeadsEditedKept = 0;
+  if (oppsIncluded) {
+    const leads = await julyLeads();
+    await retireJulyLeads(leads.untouched);
+    julyLeadsRetired = leads.untouched.length;
+    julyLeadsEditedKept = leads.edited.length;
+  }
+  // Runs last: a lead retired above no longer holds its stub company.
+  const junk = await scanJunkCompanies();
+  await retireJunkCompanies(junk.retire);
+  return {
+    julyLeadsRetired,
+    julyLeadsEditedKept,
+    junkCompaniesRetired: junk.retire.length,
+    junkCompaniesKept: junk.kept,
+    julyProjectsRemaining: await countLiveJulyProjects(),
+  };
 }

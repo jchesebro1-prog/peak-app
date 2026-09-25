@@ -108,3 +108,20 @@ export async function softDeleteCompany(id: string): Promise<void> {
     .set({ deleted: true, updatedAt: t })
     .where(eq(sites.companyId, id));
 }
+
+/**
+ * softDeleteCompany for many ids at once — same effect (the companies and all
+ * their sites marked deleted), two UPDATEs per 500 ids instead of two per
+ * company. Used by the Daylite import's retirement of combined-name stubs
+ * (Task 12b), which can touch a few hundred rows over the network.
+ */
+export async function softDeleteCompanies(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const db = await getDb();
+  const t = Date.now();
+  for (let i = 0; i < ids.length; i += 500) {
+    const batch = ids.slice(i, i + 500);
+    await db.update(companies).set({ deleted: true, updatedAt: t }).where(inArray(companies.id, batch));
+    await db.update(sites).set({ deleted: true, updatedAt: t }).where(inArray(sites.companyId, batch));
+  }
+}

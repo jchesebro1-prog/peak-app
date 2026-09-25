@@ -17,7 +17,7 @@
  * §4.2 (Projects file), §4.3 (Opportunities file), §4.4 (Matching).
  */
 
-import { projectId, repairId, quoteId } from "./ids";
+import { projectId, repairId, quoteId, leadId } from "./ids";
 import { DEFAULT_QUOTE_PIPELINES, statusForQuoteStage, firstStage, type QuotePipeline } from "@/lib/pipelines";
 
 // ---------------------------------------------------------------------------
@@ -148,20 +148,35 @@ export function splitCompanies(cell: string, known: (name: string) => boolean): 
  * its unknown remainder on the plan (`companyUnmatched`) for the preview,
  * instead of silently dropping it the way `splitCompanies`'s public
  * candidates-only return does.
+ *
+ * Task 12b §1 — real companies beat combined-name stubs. The July script
+ * stubbed a company for every raw multi-company cell ("C.D. Smith
+ * Construction, Muermann Engineering"), so the whole cell is now "known".
+ * At each position the longest known run still wins UNLESS that run itself
+ * decomposes fully (no leftover piece) into ≥2 known shorter runs — then the
+ * decomposition is taken. "Sound Devices, LLC" stays one company because
+ * "LLC" is not a company.
  */
 function splitCompaniesDetailed(cell: string, known: (name: string) => boolean): { matched: string[]; unmatched: string[] } {
   const raw = (cell || "").trim();
   if (!raw) return { matched: [], unmatched: [] };
   const pieces = raw.split(",").map((p) => p.trim()).filter(Boolean);
+  return splitPieces(pieces, known);
+}
+
+function splitPieces(pieces: string[], known: (name: string) => boolean): { matched: string[]; unmatched: string[] } {
   const matched: string[] = [];
   const unmatched: string[] = [];
   let i = 0;
   while (i < pieces.length) {
     let ok = false;
     for (let len = pieces.length - i; len >= 1; len--) {
-      const candidate = pieces.slice(i, i + len).join(", ");
+      const run = pieces.slice(i, i + len);
+      const candidate = run.join(", ");
       if (known(candidate)) {
-        matched.push(candidate);
+        const parts = len > 1 ? decomposeRun(run, candidate, known) : null;
+        if (parts) matched.push(...parts);
+        else matched.push(candidate);
         i += len;
         ok = true;
         break;
@@ -170,6 +185,27 @@ function splitCompaniesDetailed(cell: string, known: (name: string) => boolean):
     if (!ok) { unmatched.push(pieces[i]); i += 1; }
   }
   return { matched, unmatched };
+}
+
+/** A known multi-piece run → its ≥2 known shorter runs, or null when any piece is left over. */
+function decomposeRun(run: string[], whole: string, known: (name: string) => boolean): string[] | null {
+  const wholeKey = whole.trim().toLowerCase();
+  const inner = splitPieces(run, (n) => n.trim().toLowerCase() !== wholeKey && known(n));
+  return inner.unmatched.length === 0 && inner.matched.length >= 2 ? inner.matched : null;
+}
+
+/**
+ * Task 12b §4 — is this company NAME a combined-name stub? Its comma pieces
+ * must decompose fully into ≥2 real companies (`known` must answer for the
+ * OTHER companies in the book only — never this one). Returns the parts, or
+ * null when the name is a single real company ("Sound Devices, LLC") or has
+ * no comma at all.
+ */
+export function junkCompanyParts(name: string, known: (name: string) => boolean): string[] | null {
+  const pieces = (name || "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (pieces.length < 2) return null;
+  const { matched, unmatched } = splitPieces(pieces, known);
+  return unmatched.length === 0 && matched.length >= 2 ? matched : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +354,10 @@ function resolveOppStage(
 export type ProjectPlan = {
   kind: "project" | "repair" | "order";
   id: string;
+  /** Task 12b — the id the July script (scripts/import-daylite.ts) gave this
+   *  row: projectId(Name, RAW Companies cell). Equals `id` for a one-company
+   *  install; differs on multi-company rows and for every service call. */
+  julyId: string;
   name: string;
   companyCandidates: string[];
   companyRaw?: string; // only set when companyCandidates is empty — the raw cell, for the preview
@@ -334,6 +374,8 @@ export type ProjectPlan = {
 
 export type QuotePlan = {
   id: string;
+  /** Task 12b — the July lead id for the same opp: leadId(Name, RAW Companies cell). */
+  julyId: string;
   name: string;
   companyCandidates: string[];
   companyRaw?: string;
@@ -346,6 +388,8 @@ export type QuotePlan = {
   value: number | null;
   projectStage?: string;
 };
+
+export type JulyRetire = { julyId: string; name: string; reason: string };
 
 // ---------------------------------------------------------------------------
 // planHistory
@@ -381,6 +425,13 @@ export function planHistory(input: {
   projects: ProjectPlan[];
   quotes: QuotePlan[];
   skipped: { projects: Record<string, number>; opportunities: Record<string, number> };
+  /**
+   * Task 12b — skipped Projects rows (Cancelled/Abandoned/Deferred/duplicate)
+   * whose July record should be retired: one entry per July id, first row
+   * wins, and never an id a KEPT row owns (as its id or its julyId) — that
+   * row supersedes the record itself, and retiring it first could strand it.
+   */
+  julyRetire: JulyRetire[];
   stats: { valueConflicts: number; unmappedOppStages: Record<string, number> };
 } {
   const { projects, opportunities, knownCompany } = input;
@@ -426,6 +477,7 @@ export function planHistory(input: {
     if (resolved.unmappedLabel !== undefined) bumpUnmappedOpp(resolved.unmappedLabel);
     const plan: QuotePlan = {
       id,
+      julyId: leadId(name, o["Companies"] || ""),
       name,
       companyCandidates: candidates,
       ...(raw !== undefined ? { companyRaw: raw } : {}),
@@ -453,20 +505,30 @@ export function planHistory(input: {
 
   // ---- Projects ----
   const projectPlans: ProjectPlan[] = [];
+  const skippedJuly: JulyRetire[] = [];
 
   for (const r of projects) {
+    const name = (r["Name"] || "").trim();
+    const julyId = projectId(name, r["Companies"] || "");
     const { bucket, reason } = classifyProject(r);
-    if (bucket === "skip") { bumpProject(reason || "Unknown"); continue; }
+    if (bucket === "skip") {
+      bumpProject(reason || "Unknown");
+      skippedJuly.push({ julyId, name, reason: reason || "Unknown" });
+      continue;
+    }
 
     const status = (r["Status"] || "").trim();
     const done = status.toLowerCase() === "done";
-    const name = (r["Name"] || "").trim();
     const { candidates, raw, unmatched } = companyFields(r["Companies"] || "", knownCompany);
     const companyForId = candidates[0] || raw || "";
 
     const kind: ProjectPlan["kind"] = bucket === "service" ? "repair" : bucket === "order" ? "order" : "project";
     const id = kind === "repair" ? repairId(name, companyForId) : projectId(name, companyForId);
-    if (seenProjectIds.has(id)) { bumpProject("duplicate"); continue; }
+    if (seenProjectIds.has(id)) {
+      bumpProject("duplicate");
+      skippedJuly.push({ julyId, name, reason: "duplicate" });
+      continue;
+    }
     seenProjectIds.add(id);
 
     const startRaw = toMs(r["Start Date"] || "");
@@ -491,6 +553,7 @@ export function planHistory(input: {
     projectPlans.push({
       kind,
       id,
+      julyId,
       name,
       companyCandidates: candidates,
       ...(raw !== undefined ? { companyRaw: raw } : {}),
@@ -506,10 +569,24 @@ export function planHistory(input: {
     });
   }
 
+  // July ids a kept row owns are superseded by that row, never retired here.
+  const owned = new Set<string>();
+  for (const p of projectPlans) {
+    owned.add(p.julyId);
+    if (p.kind !== "repair") owned.add(p.id);
+  }
+  const julyRetire: JulyRetire[] = [];
+  for (const s of skippedJuly) {
+    if (owned.has(s.julyId)) continue;
+    owned.add(s.julyId);
+    julyRetire.push(s);
+  }
+
   return {
     projects: projectPlans,
     quotes,
     skipped: { projects: skippedProjects, opportunities: skippedOpportunities },
+    julyRetire,
     stats: { valueConflicts, unmappedOppStages },
   };
 }

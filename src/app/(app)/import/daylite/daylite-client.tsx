@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import type { PreviewRow } from "@/lib/daylite/history-commit";
 import {
   commitDayliteChunkAction,
+  finalizeDayliteAction,
   previewDayliteAction,
   type ChunkResult,
   type DaylitePreview,
+  type FinalizeActionResult,
 } from "./actions";
 
 /**
@@ -18,6 +20,9 @@ import {
  * deterministic work list, so no single request runs long on Vercel + Neon;
  * a failed chunk leaves "Retry remaining", which resumes from the chunk that
  * failed (commit is idempotent — rows that did land are skipped).
+ *
+ * Task 12b: after the last chunk, one finalize call retires the July import's
+ * leads and combined-name company stubs (idempotent — "Retry finalize").
  */
 
 const ACCENT = "var(--accent)";
@@ -35,6 +40,10 @@ const MAX_BODY_BYTES = 1_180_000;
 type FileText = { name: string; text: string; bytes: number };
 type Acc = { created: Record<string, number>; skippedExisting: number; errors: string[] };
 type Phase = "idle" | "running" | "paused" | "done";
+type Finalize =
+  | { state: "idle" | "running" }
+  | { state: "done"; result: Extract<FinalizeActionResult, { ok: true }> }
+  | { state: "failed"; error: string };
 
 const card: React.CSSProperties = {
   background: "#fff",
@@ -120,8 +129,9 @@ const KIND_LABEL: Record<PreviewRow["kind"], string> = {
 export type StageLabels = Record<"project" | "order" | "repair", Record<string, string>>;
 const emptyAcc = (): Acc => ({ created: {}, skippedExisting: 0, errors: [] });
 
-/** Total work items = every planned project/repair/order + every open quote. */
+/** Total work items = every planned project/repair/order + July retire row + open quote. */
 function workTotal(c: Record<string, number>): number {
+  if (typeof c.workItems === "number") return c.workItems;
   return (
     (c.doneInstalls || 0) +
     (c.liveInstalls || 0) +
@@ -217,6 +227,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
   const [acc, setAcc] = useState<Acc>(emptyAcc);
   const [nextStart, setNextStart] = useState(0);
   const [commitErr, setCommitErr] = useState("");
+  const [fin, setFin] = useState<Finalize>({ state: "idle" });
 
   const running = phase === "running" || busy;
   const totalChars = (projects?.text.length ?? 0) + (opps?.text.length ?? 0);
@@ -230,6 +241,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
     setPreviewErr("");
     setPhase("idle");
     setCommitErr("");
+    setFin({ state: "idle" });
     const set = which === "projects" ? setProjects : setOpps;
     if (!f) {
       set(null);
@@ -256,6 +268,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
     setPreview(null);
     setPhase("idle");
     setCommitErr("");
+    setFin({ state: "idle" });
     try {
       const res = await previewDayliteAction(projects?.text ?? "", opps?.text ?? "");
       if (!res.ok) {
@@ -316,12 +329,39 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
       if (s >= total) break;
     }
     setPhase("done");
+    await finalize();
     router.refresh();
+  }
+
+  /** Once, after the last chunk: July leads + combined-name companies. */
+  async function finalize() {
+    setFin({ state: "running" });
+    let res: FinalizeActionResult;
+    try {
+      res = await finalizeDayliteAction(!!opps);
+    } catch {
+      res = { ok: false, error: "The connection dropped while finishing up." };
+    }
+    setFin(res.ok ? { state: "done", result: res } : { state: "failed", error: res.error });
+  }
+
+  async function retryFinalize() {
+    if (lockRef.current) return;
+    lockRef.current = true;
+    setBusy(true);
+    try {
+      await finalize();
+      router.refresh();
+    } finally {
+      lockRef.current = false;
+      setBusy(false);
+    }
   }
 
   function confirm() {
     if (lockRef.current) return;
     setAcc(emptyAcc());
+    setFin({ state: "idle" });
     setNextStart(0);
     setProgress({ done: 0, total: preview ? workTotal(preview.counts) : 0 });
     void runFrom(0, emptyAcc());
@@ -335,6 +375,21 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
       .sort((a, b) => b[1] - a[1]);
   const unmapped = Object.entries(preview?.stats.unmappedOppStages ?? {}).sort((a, b) => b[1] - a[1]);
   const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+  const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
+  const julyLines = (
+    [
+      [c.julyReplaced || 0, (n: number) => `${plural(n, "July project", "July projects")} will be replaced with full data`],
+      [c.julyMovedToRepairs || 0, (n: number) => `${plural(n, "July service-call project moves", "July service-call projects move")} to Repairs`],
+      [c.julyRetiredSkipped || 0, (n: number) => `${plural(n, "July record", "July records")} for cancelled, abandoned, deferred or duplicate jobs ${n === 1 ? "is" : "are"} removed`],
+      [c.julyLeadsToRetire || 0, (n: number) => `${plural(n, "July lead is", "July leads are")} removed`],
+      [c.junkCompaniesToRetire || 0, (n: number) => `${plural(n, "combined-name company is", "combined-name companies are")} retired (estimate — checked again after the import)`],
+      [c.junkCompaniesKept || 0, (n: number) => `${plural(n, "combined-name company is", "combined-name companies are")} kept — something still uses ${n === 1 ? "it" : "them"}`],
+      [(c.julyEditedKept || 0) + (c.julyLeadsEditedKept || 0), (n: number) => `${plural(n, "edited July record is", "edited July records are")} left as is`],
+      [c.julyUnmatchedKept || 0, (n: number) => `${plural(n, "July project matches", "July projects match")} no row in this file and ${n === 1 ? "stays" : "stay"}`],
+    ] as Array<[number, (n: number) => string]>
+  )
+    .filter(([n]) => n > 0)
+    .map(([n, text]) => text(n));
   const createdTotal = Object.entries(acc.created)
     .filter(([k]) => k === "projects" || k === "orders" || k === "repairs" || k === "quotes")
     .reduce((n, [, v]) => n + v, 0) + (acc.created.soldNewProject || 0);
@@ -457,6 +512,40 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
               </div>
             </div>
           </div>
+
+          {/* 2b — superseding the July import (Task 12b) */}
+          {julyLines.length > 0 && (
+            <div style={card}>
+              <div style={sectionLabel}>Replacing the July import</div>
+              <div style={{ fontSize: 12, color: "#8c919c", margin: "-2px 0 10px", lineHeight: 1.45 }}>
+                An earlier Daylite import (July) is already in the data. Records from it that nobody has edited since are
+                replaced or removed; anything edited in Quartzite is left as is.
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, color: "#16181d" }}>
+                {julyLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 8 }}>
+                Removed records are soft-deleted, not erased — they can be restored.
+              </div>
+              {preview.julyEdited.length > 0 && (
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ fontSize: 12.5, fontWeight: 600, color: "#5b616e", cursor: "pointer" }}>
+                    Edited in Quartzite — left as is · {fmt(preview.julyEdited.length)}
+                  </summary>
+                  <div style={{ ...scrollBox, maxHeight: 220, marginTop: 8, padding: "6px 10px" }}>
+                    {preview.julyEdited.map((r) => (
+                      <div key={r.id} style={{ fontSize: 12, padding: "3px 0", color: "#16181d" }}>
+                        {r.name}{" "}
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#9aa0ab" }}>{r.id}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
 
           {/* 3 — company picks */}
           {preview.needsPick.length > 0 && (
@@ -597,8 +686,14 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                         ["Sold quotes linked to a project", acc.created.soldLinked || 0],
                         ["Projects made for sold quotes", acc.created.soldNewProject || 0],
                         ["Skipped — already imported", acc.skippedExisting],
+                        ["July projects replaced", acc.created.julyReplaced || 0],
+                        ["July service calls moved to Repairs", acc.created.julyMovedToRepairs || 0],
+                        ["July records for skipped jobs removed", acc.created.julyRetiredSkipped || 0],
+                        ["Edited July records left as is", acc.created.julyEditedKept || 0],
                       ] as Array<[string, number]>
-                    ).map(([label, n]) => (
+                    )
+                      .filter(([label, n]) => n > 0 || (!label.startsWith("July") && !label.startsWith("Edited July")))
+                      .map(([label, n]) => (
                       <tr key={label}>
                         <td style={td}>{label}</td>
                         <td style={num}>{fmt(n)}</td>
@@ -606,6 +701,42 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                     ))}
                   </tbody>
                 </table>
+                <div style={{ marginTop: 12 }}>
+                  {fin.state === "running" && (
+                    <div style={{ fontSize: 12.5, color: "#5b616e" }}>Removing the July leads and combined-name companies…</div>
+                  )}
+                  {fin.state === "done" && (
+                    <div style={{ fontSize: 12.5, color: "#5b616e", lineHeight: 1.6 }}>
+                      {plural(fin.result.julyLeadsRetired, "July lead", "July leads")} removed
+                      {fin.result.julyLeadsEditedKept > 0 && ` (${fmt(fin.result.julyLeadsEditedKept)} edited, kept)`} ·{" "}
+                      {plural(fin.result.junkCompaniesRetired, "combined-name company", "combined-name companies")} retired
+                      {fin.result.junkCompaniesKept.length > 0 && (
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                            {plural(fin.result.junkCompaniesKept.length, "combined-name company", "combined-name companies")} kept
+                          </summary>
+                          <div style={{ ...scrollBox, maxHeight: 220, marginTop: 6, padding: "6px 10px" }}>
+                            {fin.result.junkCompaniesKept.map((k) => (
+                              <div key={k.id} style={{ fontSize: 12, padding: "3px 0" }}>
+                                {k.name} <span style={{ color: "#9aa0ab" }}>— {k.reason}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  )}
+                  {fin.state === "failed" && (
+                    <>
+                      <div style={errorBox}>
+                        Every row imported, but removing the July leads and combined-name companies failed: {fin.error}
+                      </div>
+                      <button type="button" onClick={() => void retryFinalize()} disabled={busy} style={{ ...primaryBtn(!busy), marginTop: 10 }}>
+                        Retry finalize
+                      </button>
+                    </>
+                  )}
+                </div>
                 {acc.errors.length > 0 && (
                   <details style={{ marginTop: 12 }}>
                     <summary style={{ fontSize: 12.5, fontWeight: 600, color: "#a0442b", cursor: "pointer" }}>
