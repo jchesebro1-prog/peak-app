@@ -3689,6 +3689,17 @@ import { qtyOwned as equipmentQtyOwned } from "../src/lib/stores/equipment-items
  * way is a faithful, isolated way to exercise the spawn without going
  * through the real quote builder UI/actions. Asserted inside asyncChecks(). */
 import { upsertDoc } from "../src/db/doc-store";
+/* #149 (D233): every DB-backed fixture in this file is named with
+ * `fixtureId()` and created with `createFixture()`, which registers it for
+ * teardown as it is written. The suite-level `finally` on the promise chain
+ * at the bottom of this file drops them, and then sweeps the whole database
+ * for anything else carrying the marker — so a mid-suite throw cleans up
+ * too, and a datadir survives being reused across runs. Tests that need
+ * their own rows gone BEFORE later tests run call `dropFixtures(<scope>)`
+ * in their own `finally`. See scripts/test-fixtures.ts. */
+import {
+  FIXTURE_MARKER, createFixture, dropFixtures, findFixtureDocs, fixtureId, hardSweepRefusal, sweepFixtures,
+} from "./test-fixtures";
 import { createFromQuote as createInspectionFromQuote, byQuote as inspectionsByQuote } from "../src/lib/stores/inspections";
 import { createFromQuote as createRepairFromQuote, byQuote as repairByQuote } from "../src/lib/stores/repair-jobs";
 import { getProject, getProjectByQuote, removeProject } from "../src/lib/stores/projects";
@@ -4652,8 +4663,13 @@ async function asyncChecks(): Promise<void> {
    *   2. Dedup via byQuote(): if that booking already exists, skip
    *      creating a duplicate, and derive expectations from qtyOwned()
    *      instead of hardcoding 8/5, so the assertions hold whether this is
-   *      the first run ever or the hundredth. */
-  const TEST_BOOKING_QUOTE_ID = "test-quote-task2-lifecycle";
+   *      the first run ever or the hundredth.
+   *
+   * #149: the quoteId now carries the fixture marker, so the booking this
+   * creates — whose own id is generated, not chosen here — is found and
+   * swept by teardown through its `quoteId`. Both branches above still
+   * stand: dedup is what keeps the test honest if teardown ever regresses. */
+  const TEST_BOOKING_QUOTE_ID = fixtureId(129, "booking-lifecycle");
   const TEST_WINDOW_START = new Date("2031-01-01T00:00:00Z").getTime();
   const TEST_WINDOW_END = TEST_WINDOW_START + 86400000;
 
@@ -4688,14 +4704,21 @@ async function asyncChecks(): Promise<void> {
    * written directly via doc-store is a faithful, isolated way to exercise
    * the spawn without the real quote builder UI/actions — createFromQuote()
    * reads the quote the same way (InspectionQuoteLike/RepairQuoteLike are
-   * deliberately minimal structural views, not the quotes.ts store). */
-  const TEST_INSPECTION_QUOTE_ID = "test-quote-punch13-inspection";
-  const TEST_REPAIR_QUOTE_ID = "test-quote-punch13-repair";
+   * deliberately minimal structural views, not the quotes.ts store).
+   *
+   * #149 (D233): this is the oldest fake-quote idiom in the file and the one
+   * that leaked — `test-quote-punch13-*` carried no marker, so nothing could
+   * find it afterwards. It is now `fixtureId()` + `createFixture()`, which
+   * registers each quote for teardown as it is written; the inspection,
+   * repair job and the two spawned projects follow it out through their
+   * `quoteId`. */
+  const TEST_INSPECTION_QUOTE_ID = fixtureId(13, "inspection-quote");
+  const TEST_REPAIR_QUOTE_ID = fixtureId(13, "repair-quote");
 
   {
     const priorInspections = await inspectionsByQuote(TEST_INSPECTION_QUOTE_ID);
     if (!priorInspections.length) {
-      await upsertDoc("quotes", {
+      await createFixture("quotes", {
         id: TEST_INSPECTION_QUOTE_ID,
         name: "PUNCHLIST #13 test inspection quote",
         quoteType: "inspection",
@@ -4732,7 +4755,7 @@ async function asyncChecks(): Promise<void> {
   {
     const priorRepair = await repairByQuote(TEST_REPAIR_QUOTE_ID);
     if (!priorRepair) {
-      await upsertDoc("quotes", {
+      await createFixture("quotes", {
         id: TEST_REPAIR_QUOTE_ID,
         name: "PUNCHLIST #13 test repair quote",
         quoteType: "repair",
@@ -4772,11 +4795,13 @@ async function asyncChecks(): Promise<void> {
    * task really land in the doc-store, then throws on the second — proving
    * `performCapture` deletes the first before rethrowing, and never writes
    * the note. Fixed test id + idempotency check since this writes to the
-   * real persistent dev DB, same as the #13 block above. */
-  const TEST_ROLLBACK_ENG_ID = "test-eng-punch145-rollback";
+   * real persistent dev DB, same as the #13 block above. #149: marked and
+   * registered like #13 — every assertion here proves the capture wrote
+   * nothing, so the engagement doc was the only row that leaked. */
+  const TEST_ROLLBACK_ENG_ID = fixtureId(145, "rollback-engagement");
   {
     if (!(await getEngagement(TEST_ROLLBACK_ENG_ID))) {
-      await upsertDoc("consulting_engagements", {
+      await createFixture("consulting_engagements", {
         id: TEST_ROLLBACK_ENG_ID,
         name: "PUNCHLIST #145 rollback test engagement",
         customer: "Test Customer #145",
@@ -6926,13 +6951,70 @@ async function writeBackAsyncChecks(): Promise<void> {
 ok((TABS as readonly string[]).includes("schedule"), "#145 schedule is a valid engagement tab (?tab= validation depends on it)");
 ok((TABS as readonly string[]).includes("activity"), "#145 activity is a valid engagement tab");
 
+/* #149 (D233): the sweep script's own safety rule. db-target's two flags
+ * (`--commit`, plus `--yes` for a hosted target) are pinned elsewhere in this
+ * file against requireHostedConfirmation; this is the rule the sweep script
+ * ADDS, and the reason it is a pure function is that a script whose job is
+ * deleting rows should have its refusal asserted rather than read. */
+ok(hardSweepRefusal({ hosted: false, hard: true }) === null, "#149 --hard is allowed on a local scratch datadir");
+ok(hardSweepRefusal({ hosted: true, hard: false }) === null, "#149 a hosted SOFT sweep is allowed — that is what --commit --yes is for");
+ok(
+  (hardSweepRefusal({ hosted: true, hard: true }) || "").includes("Refusing --hard"),
+  "#149 --hard against a hosted target is refused by no flag combination — offline clients need the tombstone"
+);
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
 // (equipment-items x3, "seeded surveys exist to migrate", "FS-1053 is
 // present in the seed"). One await here covers the whole chain rather than
 // sprinkling it in front of each function that happens to read seeded data.
+/* #149 (D233): the proof that teardown happens, and the only assertion in
+ * this file that is deliberately vacuous on a fresh datadir. `npm run
+ * test:specs` hands the suite a new `mktemp -d` every time, which is exactly
+ * why years of leaked fixtures went unnoticed — nobody ever looked at the
+ * datadir twice. Run the suite TWICE against one datadir and this check, at
+ * the head of the chain before anything has been written, sees whatever the
+ * previous run left behind. */
+async function fixtureLeakChecks(): Promise<void> {
+  const leaked = await findFixtureDocs();
+  ok(
+    leaked.length === 0,
+    `#149 this datadir starts with no live ${FIXTURE_MARKER}-marked fixture from a previous run` +
+      (leaked.length ? ` (found ${leaked.length}: ${leaked.slice(0, 8).map((e) => `${e.coll}/${e.id}`).join(", ")})` : "")
+  );
+}
+
+/** Suite-level teardown: registered fixtures first, then a registry-free
+ *  sweep for anything else carrying the marker (rows the code under test
+ *  spawned, and fixtures whose creator never registered them). Runs in a
+ *  `finally` so a mid-suite throw still cleans up, and never rethrows — a
+ *  teardown failure must not be reported as a test failure, only as noise
+ *  the next run's leak check will turn into a real FAIL.
+ *
+ *  Rows are REMOVED, not tombstoned. Soft delete looks more faithful and is
+ *  actively wrong here: the service creators and sweeps are deliberately
+ *  tombstone-aware (#173), so a tombstoned fixture makes the NEXT run on the
+ *  same datadir refuse to spawn — measured at 21 FAIL before this was fixed.
+ *  See scripts/test-fixtures.ts. */
+async function teardownFixtures(): Promise<void> {
+  try {
+    const dropped = await dropFixtures();
+    const swept = await sweepFixtures({ commit: true, mode: "hard" });
+    if (dropped || swept.length) {
+      console.log(`\n[fixtures] teardown: ${dropped} registered + ${swept.length} marked doc(s) removed`);
+    }
+  } catch (err) {
+    console.error(
+      `\n[fixtures] teardown FAILED — this datadir is now dirty. Clean it with:\n` +
+        `  PGLITE_PATH="${process.env.PGLITE_PATH}" npm run test:sweep-fixtures -- --commit --hard\n`,
+      err
+    );
+  }
+}
+
 seeded()
+  .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
   .then(() => writeBackAsyncChecks())
   .then(() => archiveAsyncChecks())
@@ -6943,6 +7025,9 @@ seeded()
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  // Before the report and before the `.catch`, so a thrown suite is torn
+  // down exactly like a passing one.
+  .finally(() => teardownFixtures())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
