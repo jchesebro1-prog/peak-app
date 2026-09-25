@@ -5295,6 +5295,31 @@ import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib
   ok(SYMBOL_COLOR_KEYS.every((k) => isGridIconId(COLOR_KEY_SAMPLE_ICON[k])), "#SYM: every colour swatch has a registered sample icon");
 }
 
+/* --- #SYM grid stock symbols — Task 5: client components stay on pure modules --- */
+{
+  const symClientFiles = [
+    "src/components/design/symbol-shape.tsx",
+    "src/components/design/icon-picker.tsx",
+    "src/app/(app)/design/grid/settings/symbol-colors-card.tsx",
+    "src/app/(app)/design/grid/settings/category-icons-card.tsx",
+    "src/app/(app)/design/grid/[id]/editor.tsx",
+    "src/app/(app)/design/grid/[id]/plan-legend.tsx",
+    "src/app/(app)/design/grid/[id]/symbol-look-panel.tsx",
+    "src/lib/design/grid-icons.ts",
+    "src/lib/design/grid-icons.generated.ts",
+  ];
+  for (const rel of symClientFiles) {
+    const src = readFileSync(join(process.cwd(), rel), "utf8");
+    const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
+    ok(valueImports.length === 0, `#SYM: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
+  }
+  const editorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  const riserSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
+  ok(!/shapeFor|GRID_SHAPES|categoryShapes/.test(editorSrc) && !/shapeFor|markerColor/.test(riserSrc),
+    "#SYM: the editor and riser resolve badges through symbolLook, not the D154 shapeFor/markerColor path");
+  ok(editorSrc.includes("<PlanLegend") && riserSrc.includes("legendRows("), "#SYM: plan legend + riser legend both draw from legendRows");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {

@@ -147,18 +147,6 @@ export async function removeGridAssembly(
   return { ok: true };
 }
 
-/** Set or clear (null) one entry's symbol override (#131). Returns null when
- *  the entry doesn't exist in the Grid library. */
-export async function setGridSymbolShape(
-  id: string,
-  shape: GridShape | null
-): Promise<GridSymbol | null> {
-  return patchDoc<GridSymbol>("grid_catalog", id, (d) => {
-    d.shape = shape;
-    d.updatedAt = Date.now();
-  });
-}
-
 /** Set or clear (null) one entry's stock-symbol icon and/or colour (spec
  *  2026-09-25). Only the keys present in `look` change. Setting or clearing
  *  `icon` also clears the legacy `shape`, so "Category default" really means

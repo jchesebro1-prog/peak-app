@@ -6,7 +6,7 @@ import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { riserGraph } from "@/lib/design/grid-riser";
-import { markerColor, shapeFor, type GridShape } from "@/lib/design/grid-symbols";
+import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import type { PartLite } from "@/lib/design/grid-bom";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
@@ -51,13 +51,16 @@ export default async function RiserPage({
   const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
   // #131: placements point at Grid-library entries (which carry the symbol
-  // override); pricing rows fill in anything not in the library so every
+  // overrides); pricing rows fill in anything not in the library so every
   // placement still resolves a description.
   const seen = new Set<string>();
   const parts: PartLite[] = [];
   for (const s of gridSymbols) {
     seen.add(s.id);
-    parts.push({ id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category || "Other", unit: "ea", list: 0, cost: 0, shape: s.shape ?? null });
+    parts.push({
+      id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category || "Other", unit: "ea", list: 0, cost: 0,
+      shape: s.shape ?? null, icon: s.icon ?? null, color: s.color ?? null, gridScope: s.scope,
+    });
   }
   for (const p of catalog) {
     if (seen.has(p.id)) continue;
@@ -70,23 +73,18 @@ export default async function RiserPage({
     parts,
     project.calibrations || []
   );
-  // Legend: one row per shape actually drawn, in first-seen order. Keyed on
-  // shape+category (not category alone) so a per-entry symbol override (one
-  // device drawn with a different glyph than its category default) gets its
-  // own row instead of being swallowed by whichever glyph was seen first for
-  // that category (#131 review).
-  const legend: Array<{ key: string; shape: GridShape; color: string; label: string }> = [];
-  for (const n of graph.nodes) {
-    for (const g of n.groups) {
-      const category = g.category || "Uncategorized";
-      const shape = shapeFor({ category: g.category, shape: g.shape }, settings);
-      const key = `${shape}|${category}`;
-      if (legend.some((l) => l.key === key)) continue;
-      const categoryDefault = shapeFor({ category: g.category }, settings);
-      const label = shape === categoryDefault ? category : `${category} — ${g.desc || g.partId}`;
-      legend.push({ key, shape, color: markerColor(g.category), label });
-    }
-  }
+  // Stock symbols (spec 2026-09-25): every group resolves its badge from
+  // the library entry behind it (icon/colour overrides, scope) through the
+  // same symbolLook the plan uses. Legend: one row per icon+colour actually
+  // drawn, first-seen order; an entry-level override gets its own row
+  // labelled "<category> — <desc>" (the #131 review rule).
+  const symCtx = symbolContext(settings);
+  const partById = new Map(parts.map((p) => [p.id, p]));
+  const entryOf = (g: { partId: string; category: string; shape: string | null; desc: string }): SymbolEntry & { desc: string } => {
+    const p = partById.get(g.partId);
+    return p ? { ...p, desc: g.desc || g.partId } : { category: g.category, shape: g.shape, desc: g.desc || g.partId };
+  };
+  const legend = legendRows(graph.nodes.flatMap((n) => n.groups.map(entryOf)), symCtx);
 
   // ---- layout: nodes as columns, edges as arcs underneath ----
   const COL_W = 216;
@@ -153,9 +151,10 @@ export default async function RiserPage({
                   ) : (
                     n.groups.map((g, gi) => {
                       const ly = PAD + HEAD_H + 8 + gi * LINE_H;
+                      const look = symbolLook(entryOf(g), symCtx);
                       return (
                         <g key={g.partId}>
-                          <SymbolShape shape={shapeFor({ category: g.category, shape: g.shape }, settings)} x={x + 19} y={ly} w={14} h={11} color={markerColor(g.category)} />
+                          <SymbolShape iconId={look.iconId} x={x + 19} y={ly} w={14} h={14} color={look.color} />
                           <text x={x + 30} y={ly + 4} fontSize={11.5} fill="#3d424e" style={{ fontFamily: "inherit" }}>
                             {g.qty}× {g.partId}
                           </text>
@@ -196,7 +195,7 @@ export default async function RiserPage({
               <span style={{ fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", fontSize: 10, color: "#9aa0ab", alignSelf: "center" }}>Legend</span>
               {legend.map((l) => (
                 <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <SymbolIcon shape={l.shape} color={l.color} size={14} />
+                  <SymbolIcon iconId={l.iconId} color={l.color} size={14} />
                   {l.label}
                 </span>
               ))}

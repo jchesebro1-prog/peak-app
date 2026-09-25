@@ -38,7 +38,8 @@ import {
   scopeOfPart,
   type GridLayer,
 } from "@/lib/design/grid-scopes";
-import { GRID_SHAPES, GRID_SHAPE_LABEL, markerColor, shapeFor, type GridShape } from "@/lib/design/grid-symbols";
+import { markerColor } from "@/lib/design/grid-symbols";
+import { legendRows, symbolLook, type SymbolContext, type SymbolLook } from "@/lib/design/grid-icons";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
@@ -62,7 +63,7 @@ import {
   removePlacementAction,
   removeSheetAction,
   setPlacementCategoryAction,
-  setSymbolShapeAction,
+  setSymbolLookAction,
   setVenueAction,
   linkLinesetDesignAction,
   createClientPackageAction,
@@ -77,6 +78,8 @@ import ScopePanel from "./scope-panel";
 import AssembliesPanel from "./assemblies-panel";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import OptionSwitcher from "./option-switcher";
+import PlanLegend from "./plan-legend";
+import SymbolLookPanel from "./symbol-look-panel";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -236,7 +239,7 @@ export default function GridEditor({
   specHref,
   venues,
   canCreate,
-  categoryShapes,
+  symbolCtx,
   activeOptionId,
   linesetDesigns,
   wireTypes,
@@ -262,8 +265,9 @@ export default function GridEditor({
   venues: Array<{ id: string; name: string }>;
   /** Gates delete — a Reviewer approves designs but has never made one. */
   canCreate: boolean;
-  /** Category → symbol defaults (#131), resolved server-side from settings. */
-  categoryShapes: Record<string, GridShape>;
+  /** Stock-symbol resolution context (spec 2026-09-25) — category icons,
+   *  colours and the category map, resolved server-side by symbolContext(). */
+  symbolCtx: SymbolContext;
   /** Resolved by page.tsx from ?option= — always a real option id. */
   activeOptionId: string;
   linesetDesigns: Array<{ id: string; name: string }>;
@@ -410,8 +414,13 @@ export default function GridEditor({
   const cal = sheet ? findCalibration(project.calibrations, sheet.id, page) : null;
 
   const partById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
-  /** shapeFor() takes a settings-shaped object; built once per prop change. */
-  const shapeSettings = useMemo(() => ({ gridCategoryShapes: categoryShapes }), [categoryShapes]);
+  /** Every part's resolved badge (icon + colour), computed once per prop
+   *  change — the plan re-renders on every drag step. */
+  const lookById = useMemo(() => new Map(parts.map((p) => [p.id, symbolLook(p, symbolCtx)])), [parts, symbolCtx]);
+  const lookOf = useCallback(
+    (part: PartLite | null | undefined): SymbolLook => (part && lookById.get(part.id)) || symbolLook(part, symbolCtx),
+    [lookById, symbolCtx]
+  );
   const filteredParts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return parts
@@ -513,6 +522,16 @@ export default function GridEditor({
   const visiblePlacements = useMemo(
     () => sheetPlacements.filter(placementVisible),
     [sheetPlacements, placementVisible]
+  );
+  /** Plan legend rows (stock symbols): one per icon+colour on this sheet.
+   *  Curtains draw their own drape glyph, not a badge, so they're left out. */
+  const planLegendRows = useMemo(
+    () =>
+      legendRows(
+        visiblePlacements.filter((pl) => !pl.curtain).map((pl) => partById.get(pl.partId) ?? { category: pl.category }),
+        symbolCtx
+      ),
+    [visiblePlacements, partById, symbolCtx]
   );
   const pageSpaces = useMemo(
     () => (project.spaces || []).filter((s) => s.sheetId === sheet?.id && s.page === page),
@@ -1003,10 +1022,11 @@ export default function GridEditor({
     else router.refresh();
   }
 
-  /** Persist a catalog ENTRY's symbol override (#131). "" clears it. */
-  async function saveSymbolShape(symbolId: string, shape: string) {
+  /** Persist a catalog ENTRY's icon/colour override (#131 → stock symbols).
+   *  Only the keys present change; "" clears that key. */
+  async function saveSymbolLook(symbolId: string, patch: { icon?: string; color?: string }) {
     setBusy(true);
-    const r = await setSymbolShapeAction(project.id, symbolId, shape);
+    const r = await setSymbolLookAction(project.id, symbolId, patch);
     setBusy(false);
     if (!r.ok) setErr(r.error);
     else router.refresh();
@@ -1345,7 +1365,7 @@ export default function GridEditor({
                       }}
                     >
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <SymbolIcon shape={shapeFor(p, shapeSettings)} color={markerColor(p.category)} size={16} />
+                        <SymbolIcon iconId={lookOf(p).iconId} color={lookOf(p).color} size={16} />
                         <strong style={{ fontSize: 11.5 }}>{p.desc}</strong>
                         <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
                       </span>
@@ -1626,33 +1646,25 @@ export default function GridEditor({
                 </div>
               )}
 
-              {/* Symbol (#131, D154) — the per-ENTRY override: every placed
-                  instance of this catalog entry redraws, on the plan and the
-                  riser. The category default itself lives in Settings. */}
+              {/* Symbol (#131 → stock symbols) — the per-ENTRY icon/colour
+                  override: every placed instance of this catalog entry
+                  redraws, on the plan and the riser. The category defaults
+                  live in Grid Settings. Keyed so a saved colour resets the
+                  panel's local draft. */}
               {selectedPart && (
-                <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #f0dcbb" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#5b616e" }}>
-                    <SymbolIcon shape={shapeFor(selectedPart, shapeSettings)} color={markerColor(selectedPart.category)} size={16} />
-                    <span style={{ flexShrink: 0 }}>Symbol</span>
-                    <select
-                      value={selectedPart.shape || ""}
-                      disabled={busy}
-                      onChange={(e) => saveSymbolShape(selectedPart.id, e.target.value)}
-                      aria-label="Symbol"
-                      style={{ ...INPUT, fontSize: 11.5, padding: "3px 6px" }}
-                    >
-                      <option value="">
-                        Category default ({GRID_SHAPE_LABEL[shapeFor({ category: selectedPart.category }, shapeSettings)]})
-                      </option>
-                      {GRID_SHAPES.map((s) => (
-                        <option key={s} value={s}>{GRID_SHAPE_LABEL[s]}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 3 }}>
-                    Applies to every placed {selectedPart.desc}.
-                  </div>
-                </div>
+                <SymbolLookPanel
+                  key={`${selectedPart.id}|${lookOf(selectedPart).color}`}
+                  desc={selectedPart.desc}
+                  look={lookOf(selectedPart)}
+                  base={symbolLook(
+                    { category: selectedPart.category, group: selectedPart.group, trade: selectedPart.trade, gridScope: selectedPart.gridScope },
+                    symbolCtx
+                  )}
+                  hasIcon={!!(selectedPart.icon || selectedPart.shape)}
+                  hasColor={!!selectedPart.color}
+                  busy={busy}
+                  onSave={(patch) => saveSymbolLook(selectedPart.id, patch)}
+                />
               )}
 
               {/* User-defined category (punch #48/#41) - open-ended by
@@ -2154,11 +2166,12 @@ export default function GridEditor({
                 )}
                 {visiblePlacements.map((pl) => {
                   const part = partById.get(pl.partId);
+                  // A seeded-but-unassigned placement (#38) has no part; its
+                  // own system-function category still picks a sensible badge.
+                  const look = part ? lookOf(part) : symbolLook({ category: pl.category }, symbolCtx);
                   // A curtain reads as its scope's color and a drape glyph, so
                   // a plan full of devices doesn't swallow it (#48/#49).
-                  const c = pl.curtain
-                    ? SCOPE_COLORS.Curtains
-                    : markerColor(part?.category || "");
+                  const c = pl.curtain ? SCOPE_COLORS.Curtains : look.color;
                   const x = pl.x * size.w;
                   const y = pl.y * size.h;
                   const on = pl.id === selected;
@@ -2190,21 +2203,22 @@ export default function GridEditor({
                             const h = part?.symbolHeight || 30;
                             return (
                               <>
-                                {/* #131: the shape replaces the bare rect; ring + label below are unchanged. */}
-                                <SymbolShape shape={shapeFor(part, shapeSettings)} x={x} y={y} w={w} h={h} color={c} />
+                                {/* Stock-symbol badge (spec 2026-09-25); ring + label below are unchanged. */}
+                                <SymbolShape iconId={look.iconId} x={x} y={y} w={w} h={h} color={c} />
                                 {part?.kind === "assembly" && (part.assemblyMembers || []).map((member) => {
                                   const child = partById.get(member.symbolId);
+                                  const childLook = lookOf(child);
                                   const cx = x + (member.x - 0.5) * w;
                                   const cy = y + (member.y - 0.5) * h;
                                   return (
                                     <SymbolShape
                                       key={member.symbolId}
-                                      shape={shapeFor(child, shapeSettings)}
+                                      iconId={childLook.iconId}
                                       x={cx}
                                       y={cy}
                                       w={10}
                                       h={8}
-                                      color={markerColor(child?.category || "Child")}
+                                      color={childLook.color}
                                       opacity={1}
                                     />
                                   );
@@ -2236,6 +2250,9 @@ export default function GridEditor({
                   />
                 )}
               </svg>
+
+              {/* plan legend (stock symbols) — every badge on this sheet */}
+              <PlanLegend rows={planLegendRows} />
 
               {/* curtain drop-in (punch #49) - anchored where it was dropped,
                   same on-canvas idiom as the calibration/space entry */}

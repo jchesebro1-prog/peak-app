@@ -46,7 +46,7 @@ import { getSite } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolLook, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
@@ -387,24 +387,6 @@ export async function setPlacementCategoryAction(
   await requireUser();
   const p = await setPlacementCategory(projectId, placementId, category || "");
   if (!p) return { ok: false, error: "Design not found." };
-  revalidatePath(editorPath(projectId));
-  return { ok: true };
-}
-
-/**
- * #131 (D154): set or clear the symbol override on ONE grid-catalog entry.
- * Per-entry, not per-placement — placements resolve their part live, so every
- * placed instance of the entry (on every design) redraws with the new shape.
- */
-export async function setSymbolShapeAction(
-  projectId: string,
-  symbolId: string,
-  shape: string
-): Promise<Result> {
-  await requireUser();
-  if (shape !== "" && !isGridShape(shape)) return { ok: false, error: "Unknown symbol." };
-  const s = await setGridSymbolShape(symbolId, shape === "" ? null : shape);
-  if (!s) return { ok: false, error: "That part is not in the Grid library." };
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }
