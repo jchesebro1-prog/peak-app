@@ -31,6 +31,11 @@ export type FieldDef = {
    *  claiming that column for some other field. */
   hidden?: boolean;
   kind?: FieldKind;
+  /** D240 — a number field that can hold an UNKNOWN value (a Daylite
+   *  project's UKN). A "UKN" cell (any case) coerces to the string "UKN"
+   *  instead of 0, so the writer can set `valueUnknown`; export writes the
+   *  same token back, so the column round-trips. */
+  allowUnknown?: boolean;
   aliases: string[];
   example?: string;
   options?: string[];
@@ -194,6 +199,9 @@ export function normalizeZip(v: unknown): string {
   return /^\d{4}$/.test(s) ? "0" + s : s;
 }
 
+/** The cell token for an unknown value (D240) — read by coerce, written by export. */
+export const UNKNOWN_VALUE = "UKN";
+
 export function coerce(field: FieldDef, v: unknown): string | number {
   const s = v == null ? "" : String(v).trim();
   // Optional coordinates must distinguish a blank cell from the real point
@@ -201,6 +209,7 @@ export function coerce(field: FieldDef, v: unknown): string | number {
   // preserve an existing location during export → import round trips.
   if (field.kind === "number") {
     if ((field.key === "lat" || field.key === "lng") && !s) return "";
+    if (field.allowUnknown && /^ukn$/i.test(s)) return UNKNOWN_VALUE;
     return toNum(s);
   }
   if (field.kind === "date") return toISO(s);

@@ -193,6 +193,13 @@ export const TASK_TEMPLATE: Record<string, TaskTemplateItem[]> = {
   delivered: SIGNOFF_ITEMS,
 };
 
+/** A stage's checklist, or none. Own keys only: stage ids are admin-editable
+ *  (Settings → Pipelines), so "constructor" / "__proto__" / "toString" must
+ *  not reach Object.prototype and hand expandTemplate a non-array. */
+export function templateForStage(stageId: string): TaskTemplateItem[] {
+  return Object.hasOwn(TASK_TEMPLATE, stageId) ? TASK_TEMPLATE[stageId] : [];
+}
+
 /* ---------- pure helpers (covered by test:specs) ---------- */
 
 export function isOverdue(t: Pick<TaskRecord, "dueAt" | "status">, nowMs: number): boolean {

@@ -251,7 +251,7 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "name", header: "Project Name", label: "Project name", required: true, aliases: ["name", "project", "project name", "title", "job"], example: "Stage Systems Package — Phase 1" },
       { key: "customer", header: "Customer", label: "Customer", aliases: ["customer", "company", "org", "account", "client"], example: "Lakefront Performing Arts Center" },
       { key: "kind", header: "Kind", label: "Kind", kind: "enum", options: ["project", "order"], aliases: ["kind", "type", "category"], example: "project" },
-      { key: "value", header: "Value", label: "Value", kind: "number", aliases: ["value", "amount", "total", "price", "contract"], example: "232160" },
+      { key: "value", header: "Value", label: "Value", kind: "number", allowUnknown: true, aliases: ["value", "amount", "total", "price", "contract"], example: "232160" },
       { key: "stage", header: "Stage", label: "Stage", kind: "text", aliases: ["stage", "status", "phase"], example: "Deposit/PO received" },
       { key: "targetDate", header: "Target Date", label: "Target date", kind: "date", aliases: ["target", "target date", "due", "due date", "install date", "complete by"], example: "2026-09-01" },
     ],

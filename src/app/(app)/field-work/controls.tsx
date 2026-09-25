@@ -14,6 +14,7 @@ import {
   logFieldTime,
 } from "./actions";
 import { saveThroughOutbox, type ServerSaveResult } from "@/lib/sync/save";
+import { yearAwareDate } from "@/lib/format";
 
 /* ============================================================
  * Field Work — job detail (client, offline-capable).
@@ -93,11 +94,8 @@ function timeAgo(ts: number | null | undefined): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function fmtDate(ts: number | null | undefined): string {
-  return ts
-    ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-    : "—";
-}
+/** Year-aware like stores/projects' fmtDate — one shared client-safe helper. */
+const fmtDate = (ts: number | null | undefined): string => yearAwareDate(ts);
 
 /** Prototype uid() — (prefix)+6 base36 chars (project.js). */
 function uid(p: string): string {

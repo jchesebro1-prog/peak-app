@@ -18,6 +18,20 @@ export function shortDate(ms: number | null | undefined): string {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/** "Feb 22" for a date in the current year, "Feb 22, 2012" otherwise — the
+ *  Daylite history import brings jobs back to 2005, and a year-less date on
+ *  one of those ("Closed Sep 14") reads as this year. Client-safe, so client
+ *  components share it with stores/projects' fmtDate. `nowTs` is for tests. */
+export function yearAwareDate(ms: number | null | undefined, nowTs: number = Date.now()): string {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== new Date(nowTs).getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
 export function fullDate(ms: number | null | undefined): string {
   if (!ms) return "—";
   return new Date(ms).toLocaleDateString("en-US", {

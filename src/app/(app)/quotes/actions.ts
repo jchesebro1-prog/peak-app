@@ -16,11 +16,13 @@ import {
 import { createQuoteClientPackage } from "@/lib/client-package-server";
 
 /**
- * Quote pipeline mutations — the QuoteStore calls the prototype makes from
- * the Estimator's top bar + review banner, surfaced on the Quotes list's
- * expanded row. FormData-shaped so the forms work without client JS; invalid
- * input is a silent no-op (the UI only renders legal actions, mirroring the
- * prototype's gates).
+ * The Quotes hub's form actions (quotes/page.tsx + controls.tsx): status
+ * buttons (setQuoteStatus), submit for review, the client package, and
+ * revision save/restore. FormData-shaped so the forms work without client
+ * JS; malformed input is a silent no-op, and a status the approval gate
+ * refuses redirects back with `statusError`. Daylite stage moves are not
+ * here — they live in estimator/actions (setQuoteStageAction /
+ * setQuotePipelineAction), next to the stage bar that calls them.
  */
 
 export async function setQuoteStatus(formData: FormData): Promise<void> {

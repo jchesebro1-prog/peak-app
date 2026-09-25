@@ -5266,6 +5266,8 @@ checklist once more.
 a **Value unknown** filter. The project detail gains a contract-value editor, and saving any value there clears the
 flag. Only the Daylite importer sets it. **Repairs have no value editor yet**, so an imported repair's UKN can't be
 filled from the app (punch #188); the "· N with unknown value" suffix is not yet on every total (#189).
+The Import hub's projects CSV writes an unknown value as the cell **UKN** and reads UKN (any case) back as unknown, so
+export → import round-trips; a blank Value cell still means $0.
 
 ## D241. The Daylite history import: what lands where (#187, 2026-09-24)
 
@@ -5283,9 +5285,12 @@ writes nothing until Confirm. Classification and mapping are pure (`src/lib/dayl
   **Open opportunities → system quotes** on the pipeline their Pipeline column names; won-stage ones link to (or
   create) **exactly one project per sold job**.
 - **No automation:** no spawn, no approval gate, no #16 task, no follow-ups; imported quotes are written directly,
-  not through `setStatus`.
-- **Chunked, idempotent commit:** the client posts 150-row chunks (server cap 500) so each fits a serverless time
-  limit; ids are deterministic, a taken id is skipped as "already imported", and a failed chunk is simply retried.
+  not through `setStatus`. They are history, not offers: the **customer portal never lists or accepts** a quote with
+  `source: "daylite"` (`isImportedHistoryQuote`, through `portalListsQuote` / `portalCanAcceptQuote`).
+- **Chunked, idempotent commit:** the client posts 150-row chunks (server cap 500) so each fits the page's 60 s
+  `maxDuration`; ids are deterministic, a taken id is skipped as "already imported", and a failed chunk is simply
+  retried. If any chunk reports row errors, finalize (which retires the July leads and companies) waits for Jeff:
+  the errors show with a **Finalize anyway** button.
 - **Ids.** `src/lib/daylite/ids.ts` is now the one copy of the name hashing (moved from `scripts/daylite-ids.ts`,
   which re-exports it). It adds **`RP-dl-…`** and **`Q-dl-…`** — a deviation from the `RP-4000` / `Q-2041` id formats,
   taken because an import id must be a pure function of the Daylite row to make re-runs idempotent.

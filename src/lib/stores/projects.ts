@@ -10,6 +10,7 @@ import {
 } from "@/db/doc-store";
 import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
+import { yearAwareDate } from "@/lib/format";
 import {
   DEFAULT_PIPELINES,
   PROJECT_TAG_RANK,
@@ -520,7 +521,8 @@ function stageAt(p: ProjectRecord, pipes: Pipelines): StageAt {
  * before/after stage + tag. No-op when the stage didn't change.
  *
  * - #17 template expansion: entering a stage adds its standard checklist once
- *   (coverage-key de-dup), whichever path moved the record there.
+ *   (coverage-key de-dup), whichever path moved the record there. Logged,
+ *   never thrown, like the Done hook.
  * - Done hook (Item 16 / punch #16): the first time a record lands on its
  *   pipeline's Done-tagged stage, mint the "walk the completed site" Home
  *   Queue assignment (moved here from signoffAction). A failed mint is logged,
@@ -529,10 +531,16 @@ function stageAt(p: ProjectRecord, pipes: Pipelines): StageAt {
  */
 async function afterStageChange(p: ProjectRecord, prev: StageAt, next: StageAt, by: string): Promise<void> {
   if (prev.stage === next.stage) return;
-  const { TASK_TEMPLATE, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
-  const existing = new Set((await tasksForProject(p.id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
-  for (const item of expandTemplate(TASK_TEMPLATE[next.stage] || [], p.id + ":" + next.stage, existing)) {
-    await createAutoTask({ ...item, projectId: p.id, title: item.title });
+  // Same contract as the Done hook below: the stage is already saved, so a
+  // checklist failure is logged, never surfaced as a failed stage update.
+  try {
+    const { templateForStage, expandTemplate, tasksForProject, createAutoTask } = await import("@/lib/stores/tasks");
+    const existing = new Set((await tasksForProject(p.id)).map((t) => t.coverageKey).filter(Boolean) as string[]);
+    for (const item of expandTemplate(templateForStage(next.stage), p.id + ":" + next.stage, existing)) {
+      await createAutoTask({ ...item, projectId: p.id, title: item.title });
+    }
+  } catch (error) {
+    console.error(`afterStageChange: ${next.stage} checklist for ${p.id} could not be created`, error);
   }
   if (prev.tag !== "done" && next.tag === "done") {
     const label = p.name || p.customer || p.id;
@@ -737,13 +745,14 @@ export async function createProjectFromQuote(quoteId: string): Promise<ProjectRe
  * project, not decide when to.
  *
  * Deliberately NOT a real install/order to progress:
- * - `stage: "complete"` from the start, never via setProjectStage() — so it
- *   never fires that function's own side effects (item-16 auto-tasks,
- *   TASK_TEMPLATE expansion), which are for real installs work a PM
- *   actually walks through, not a service job's shadow record.
- * - `stage !== "complete"` is exactly what Reports' Installs book filters
- *   on (reports/page.tsx's `book`), so a "complete"-from-birth record can
- *   never inflate an active-pipeline rollup.
+ * - Born on the order pipeline's Done-tagged stage, never moved there via
+ *   setProjectStage() — so it never fires that function's post-transition
+ *   hook (the #16 completion follow-up, TASK_TEMPLATE expansion), which is
+ *   for real installs work a PM actually walks through, not a service job's
+ *   shadow record.
+ * - The Installs book and every open/active rollup (lib/dashboard/metrics.ts)
+ *   filter on the Done tag (isDone / isActive), so a done-from-birth record
+ *   can never inflate an active-pipeline rollup.
  * - `value: 0`, not copied from the quote — the real dollar figure already
  *   lives on the quote/inspection/repair record; carrying it here too would
  *   double-count revenue in anything that sums ProjectRecord.value.
@@ -1144,15 +1153,11 @@ export function timeAgo(ts: number | null | undefined): string {
 
 /** "Feb 22" for a date in the current year, "Feb 22, 2012" otherwise — the
  *  Daylite history import brings jobs back to 2005, and a year-less date on
- *  one of those ("Closed Sep 14") reads as this year. `nowTs` is for tests. */
+ *  one of those ("Closed Sep 14") reads as this year. The logic lives in
+ *  lib/format's client-safe yearAwareDate (Field Work's client controls use
+ *  it directly). `nowTs` is for tests. */
 export function fmtDate(ts: number | null | undefined, nowTs: number = now()): string {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(d.getFullYear() !== new Date(nowTs).getFullYear() ? { year: "numeric" } : {}),
-  });
+  return yearAwareDate(ts, nowTs);
 }
 
 export function fmtDateY(ts: number | null | undefined): string {

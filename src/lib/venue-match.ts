@@ -12,10 +12,12 @@
  * Self-contained: this module's only import is the pure pipelines module
  * (no @/db, no store), so it stays client-safe and testable. Project "open"
  * is no longer a fixed stage list — a project pipeline's stages carry
- * arbitrary ids, so open = not on the pipeline's Done-tagged stage (isDone).
+ * arbitrary ids, so open = not on the pipeline's Done-tagged stage, read
+ * from the RECORD (isOpenProject → isDone: its stamped stageMeta, else its
+ * own kind + pipeline), never from a stage id alone.
  */
 
-import { isDone, DEFAULT_PIPELINES } from "@/lib/pipelines";
+import { isDone, type StageMeta } from "@/lib/pipelines";
 
 export type VenueHistoryKind =
   | "quote"
@@ -80,7 +82,7 @@ export function quoteDeepLink(quoteType: string, id: string): string {
 
 /** Open (not-closed) stage/status values per kind. Visits are time-based, handled by the caller.
  *  Projects are NOT here — a project pipeline's stage ids are admin-editable, so "open" is
- *  decided by the pipeline tag (isDone), not a fixed list. See isOpenStage below. */
+ *  decided by the record's pipeline tag (isOpenProject below), not a fixed list. */
 const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit" | "project">, readonly string[]> = {
   quote: ["draft", "sent"],
   // Six-stage consulting lifecycle (spec §1, D123) — every stage but
@@ -94,9 +96,24 @@ const OPEN_STAGES: Record<Exclude<VenueHistoryKind, "visit" | "project">, readon
   survey: ["requested", "scheduled", "onsite"],
 };
 
-export function isOpenStage(kind: Exclude<VenueHistoryKind, "visit">, stage: string): boolean {
-  if (kind === "project") return !isDone({ kind: "project", stage }, DEFAULT_PIPELINES);
+export function isOpenStage(kind: Exclude<VenueHistoryKind, "visit" | "project">, stage: string): boolean {
   return OPEN_STAGES[kind].includes(stage);
+}
+
+/**
+ * A project (or order) is open unless its stage carries the Done tag. Reads
+ * the record's stamped `stageMeta` (the store stamps it against the
+ * CONFIGURED pipelines on every read) and falls back to its own kind +
+ * pipelineId — so an order, or a Settings-renamed Done stage, is judged by
+ * its own pipeline, never by the default install one.
+ */
+export function isOpenProject(p: {
+  kind?: string | null;
+  pipelineId?: string | null;
+  stage?: string | null;
+  stageMeta?: StageMeta | null;
+}): boolean {
+  return !isDone(p);
 }
 
 export function sortHistoryDesc(rows: VenueHistoryRow[]): VenueHistoryRow[] {

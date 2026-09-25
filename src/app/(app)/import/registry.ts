@@ -14,7 +14,7 @@ import * as Surveys from "@/lib/stores/surveys";
 import * as Quotes from "@/lib/stores/quotes";
 import * as Projects from "@/lib/stores/projects";
 import { loadPipelines } from "@/lib/pipelines-server";
-import { DEFAULT_PIPELINES, firstStage, projectPipelineFor, type Pipelines } from "@/lib/pipelines";
+import { DEFAULT_PIPELINES, projectPipelineFor, resolveProjectStage, type Pipelines } from "@/lib/pipelines";
 import * as Catalog from "@/lib/stores/catalog";
 import * as Equipment from "@/lib/stores/equipment-items";
 import * as TaskTemplates from "@/lib/stores/task-templates";
@@ -23,7 +23,7 @@ import type { Role } from "@/lib/team";
 import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import { mergedConsultingPhases } from "@/lib/stores/engagements";
 import { getTypeMeta, IMPORT_TYPE_KEYS, type ImportTypeMeta } from "./types";
-import { norm, isoToMs, visibleColumns, type FieldDef, type PreparedRow } from "./parse";
+import { norm, isoToMs, visibleColumns, UNKNOWN_VALUE, type FieldDef, type PreparedRow } from "./parse";
 import { baseVenueKind } from "@/lib/identity/venue-defaults";
 import {
   matchContact,
@@ -1021,17 +1021,23 @@ const WRITERS: Record<string, Writer> = {
       const kind = pick(v.kind, ["project", "order"] as const, "project");
       // Stage is free text (Settings → Pipelines makes stage ids/labels
       // admin-editable, so there's no fixed enum to import against) — match
-      // case-insensitively against the kind's pipeline stage id OR label;
-      // unmatched or blank rows land on the pipeline's first stage.
+      // case-insensitively against the kind's pipeline stage id OR label,
+      // then through resolveProjectStage (a legacy key: "install" →
+      // Installation, "complete" → the Done stage); anything else, or a blank
+      // cell, lands on the pipeline's first stage.
       const pl = projectPipelineFor(ctx.pipes ?? DEFAULT_PIPELINES, { kind });
       const raw = str(v.stage).trim().toLowerCase();
       const matched = raw ? pl.stages.find((s) => s.id.toLowerCase() === raw || s.label.toLowerCase() === raw) : null;
+      // D240: a "UKN" Value cell (what export writes for an unknown value)
+      // imports as unknown, never as $0.
+      const unknown = v.value === UNKNOWN_VALUE;
       await Projects.createProject({
         name: str(v.name),
         customer: str(v.customer),
         kind,
-        value: num(v.value),
-        stage: (matched || firstStage(pl)).id,
+        value: unknown ? 0 : num(v.value),
+        ...(unknown ? { valueUnknown: true } : {}),
+        stage: matched ? matched.id : resolveProjectStage(pl, kind, raw),
         ...(targetMs ? { targetDate: targetMs } : {}),
       });
       cache.push({ name: str(v.name) });
@@ -1042,7 +1048,8 @@ const WRITERS: Record<string, Writer> = {
         name: p.name || "",
         customer: p.customer || "",
         kind: p.kind || "",
-        value: p.value || 0,
+        // D240: unknown stays unknown — "UKN", which the importer reads back.
+        value: p.valueUnknown ? UNKNOWN_VALUE : p.value || 0,
         stage: p.stageMeta?.label ?? p.stage ?? "",
         targetDate: p.targetDate ? isoOf(p.targetDate) : "",
       }));

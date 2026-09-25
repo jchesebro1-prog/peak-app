@@ -23,6 +23,7 @@ import {
   engagementMatchesVenue,
   quoteDeepLink,
   isOpenStage,
+  isOpenProject,
   sortHistoryDesc,
   type VenueHistoryRow,
 } from "./venue-match";
@@ -132,7 +133,7 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
   for (const p of projects.filter((r) => docMatchesVenue(r, companyId, locId))) {
     rows.push({
       id: p.id, kind: "project", title: p.name || p.id, subtitle: "Project",
-      ts: p.updatedAt, status: p.stageMeta?.label ?? p.stage, open: isOpenStage("project", p.stage),
+      ts: p.updatedAt, status: p.stageMeta?.label ?? p.stage, open: isOpenProject(p),
       href: "/projects?id=" + encodeURIComponent(p.id),
     });
   }

@@ -1503,6 +1503,7 @@ import {
   engagementMatchesVenue,
   quoteDeepLink,
   isOpenStage,
+  isOpenProject,
 } from "@/lib/venue-match";
 
 const NOW = 1_800_000_000_000;
@@ -1579,7 +1580,31 @@ ok(quoteDeepLink("flame_test", "Q-1") === "/flame-tests/quote?id=Q-1", "flame qu
 ok(quoteDeepLink("consulting", "Q-2") === "/design/engagements/quote?id=Q-2", "consulting quote deep-links to the engagements quote builder");
 ok(quoteDeepLink("system", "Q-3") === "/estimator?id=Q-3", "a system quote deep-links to the estimator");
 
-ok(isOpenStage("project", "installation") === true && isOpenStage("project", "complete") === false, "project open = any stage but complete");
+ok(
+  isOpenProject({ kind: "project", stage: "installation" }) === true && isOpenProject({ kind: "project", stage: "complete" }) === false,
+  "project open = any stage but the Done-tagged one (unstamped record → its own pipeline)"
+);
+// Final review item 5: the RECORD's stamped stageMeta decides, not the default install pipeline.
+// A Settings-renamed Done stage ("wrapped-up") is unknown to the seeds, so a stage-id-only
+// check against DEFAULT_PIPELINES falls to the first stage and called it open.
+ok(
+  isOpenProject({
+    kind: "project", pipelineId: "install", stage: "wrapped-up",
+    stageMeta: { pipelineId: "install", tag: "done", label: "Wrapped up", index: 6, count: 7 },
+  }) === false,
+  "venue history: a project on a Settings-renamed Done stage reads closed (stamped stageMeta wins)"
+);
+ok(
+  isOpenProject({
+    kind: "order", pipelineId: "order", stage: "complete",
+    stageMeta: { pipelineId: "order", tag: "done", label: "Complete", index: 3, count: 4 },
+  }) === false && isOpenProject({ kind: "order", stage: "delivered" }) === true,
+  "venue history: an order is judged by the order pipeline (Complete closed, Delivered & accepted open)"
+);
+ok(
+  isOpenProject({ kind: "project", stage: "complete", stageMeta: { pipelineId: "install", tag: "closeout", label: "Invoice", index: 5, count: 7 } }) === true,
+  "venue history: the stamped tag outranks a stage id that would read done on the seeds"
+);
 ok(isOpenStage("inspection", "onsite") === true, "inspection onsite counts as open work (the 4th stage)");
 ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === true, "quote open = draft or sent");
 
@@ -7962,6 +7987,185 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
   const r6 = await commitHistory(P4, "", {}, "Test Admin", { start: 0.7, end: 99.2 });
   ok(r6.total === 2 && r6.errors.length === 0 && r6.skippedExisting === 1 && r6.created.julyEditedKept === 1, "daylite 12b fix2: a fractional, past-the-end range is floored and clamped once (scan and slice agree)");
 }
+
+/* ============ #187 final whole-branch review fixes ============
+ * Pure checks run at top level; the DB checks live in
+ * dayliteFinalReviewAsyncChecks() on the promise chain. Fixtures are
+ * `TEST187:`-marked (fixtureId / createFixture, D233) so the suite-level
+ * teardown drops them — and the sweep catches what a quote spawns. */
+import { registerFixture } from "./test-fixtures";
+import { templateForStage } from "../src/lib/stores/tasks";
+import { yearAwareDate } from "../src/lib/format";
+import { exportObjectsFor } from "@/app/(app)/import/registry";
+
+// Item 2 — imported Daylite quotes never reach the customer portal.
+{
+  const base = { customerId: "c-portal", status: "sent" as const, source: "estimator", portalAcceptance: null };
+  ok(QuoteStore.isImportedHistoryQuote({ source: "daylite" }) && !QuoteStore.isImportedHistoryQuote({ source: "estimator" }), "#187 review 2: isImportedHistoryQuote is the source === daylite marker");
+  ok(QuoteStore.portalListsQuote(base, "c-portal") && QuoteStore.portalCanAcceptQuote(base, "c-portal"), "#187 review 2: a sent team quote is listed and acceptable (baseline)");
+  ok(!QuoteStore.portalListsQuote({ ...base, source: "daylite" }, "c-portal"), "#187 review 2: a Daylite quote is never listed in the portal");
+  ok(!QuoteStore.portalCanAcceptQuote({ ...base, source: "daylite" }, "c-portal"), "#187 review 2: a sent Daylite quote can never be accepted from the portal");
+  ok(!QuoteStore.portalListsQuote({ ...base, status: "won", source: "daylite" }, "c-portal"), "#187 review 2: a won Daylite quote is not listed either");
+  ok(!QuoteStore.portalListsQuote({ ...base, status: "draft" }, "c-portal") && QuoteStore.portalListsQuote({ ...base, status: "draft", source: "portal-self-serve" }, "c-portal"), "#187 review 2: internal drafts stay hidden; the customer's own self-serve drafts stay listed");
+  ok(!QuoteStore.portalListsQuote(base, "c-other") && !QuoteStore.portalCanAcceptQuote(base, ""), "#187 review 2: tenant scoping is unchanged (another customer, or no grant customer, sees nothing)");
+  ok(!QuoteStore.portalCanAcceptQuote({ ...base, portalAcceptance: { at: 1, by: "Pat", byEmail: "p@x" } }, "c-portal"), "#187 review 2: an already-accepted quote cannot be accepted twice");
+  const portalPage = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8");
+  const portalActions = readFileSync(join(process.cwd(), "src/app/portal/actions.ts"), "utf8");
+  ok(/\.filter\(\(q\) => portalListsQuote\(q, cid\)\)/.test(portalPage) && /portalCanAcceptQuote\(q, cid\)/.test(portalPage), "#187 review 2: the portal page lists and offers Accept through the shared rules");
+  ok(/if \(q && portalCanAcceptQuote\(q, session\.customerId\)\)/.test(portalActions), "#187 review 2: acceptPortalQuote refuses by the same rule (a Daylite quote id posted by hand is a no-op)");
+}
+
+// Item 4 — row errors hold finalize until Jeff chooses.
+{
+  const dl = readFileSync(join(process.cwd(), "src/app/(app)/import/daylite/daylite-client.tsx"), "utf8");
+  ok(/if \(sum\.errors\.length > 0\) setFin\(\{ state: "held" \}\);\s*else await finalize\(\);/.test(dl), "#187 review 4: finalize runs automatically only when no chunk reported a row error");
+  ok(/fin\.state === "held"/.test(dl) && dl.includes("Finalize anyway") && dl.includes("Finalize removes the July leads"), "#187 review 4: held state shows the errors, a Finalize anyway button and the one-line explanation");
+}
+
+// Item 6 — a Settings stage named like an Object.prototype key has no checklist and cannot throw.
+ok(
+  ["constructor", "__proto__", "toString", "hasOwnProperty"].every((id) => Array.isArray(templateForStage(id)) && templateForStage(id).length === 0),
+  "#187 review 6: templateForStage reads own keys only — constructor / __proto__ / toString get no checklist"
+);
+ok(templateForStage("installation").length > 0 && templateForStage("deposit").length === 0, "#187 review 6: real stages keep their checklist; a stage with none stays empty");
+
+// Item 9 — Field Work's date shares the year-aware formatter.
+{
+  const nowTs = new Date(2026, 8, 24, 12).getTime();
+  ok(yearAwareDate(new Date(2012, 1, 22, 12).getTime(), nowTs) === "Feb 22, 2012" && yearAwareDate(new Date(2026, 1, 22, 12).getTime(), nowTs) === "Feb 22", "#187 review 9: yearAwareDate shows the year only outside the current year");
+  ok(yearAwareDate(null) === "—", "#187 review 9: no date renders a dash");
+  const fw = readFileSync(join(process.cwd(), "src/app/(app)/field-work/controls.tsx"), "utf8");
+  ok(fw.includes("yearAwareDate(ts)") && !/toLocaleDateString\("en-US", \{ month: "short", day: "numeric" \}\)\s*:\s*"—"/.test(fw), "#187 review 9: Field Work's install window uses the shared year-aware formatter, not its own copy");
+}
+
+async function dayliteFinalReviewAsyncChecks(): Promise<void> {
+  const Q = QuoteStore;
+  const approved = { state: "approved", reviewer: "Jeff Chesebro", submittedBy: "Test", submittedAt: 1, decidedBy: "Jeff Chesebro", decidedAt: 2, note: "", method: "in-app" };
+  const unreviewed = { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null };
+  const seed = (id: string, extra: Record<string, unknown>) =>
+    createFixture("quotes", {
+      id, name: `#187 review ${id}`, quoteType: "system", status: "draft", customer: "Test Customer #187",
+      customerId: null, locationId: null, value: 1000, margin: 0, source: "estimator", owner: "Jeff Chesebro",
+      pipelineId: "estimate-design", stage: "design", review: unreviewed,
+      createdAt: Date.now(), updatedAt: Date.now(), history: [], ...extra,
+    } as never);
+  const projectsFor = async (quoteId: string) => (await listDocs169("projects")).filter((p) => p.quoteId === quoteId).length;
+  const soldFor = async (quoteId: string) =>
+    (await listDocs169("assignments")).filter(
+      (a) => a.source === "auto: quote won (#16)" && ((a.link as { id?: string } | null)?.id || "") === quoteId
+    ).length;
+
+  /* Item 3 — setQuoteStage into the won stage runs the real won transition, once. */
+  {
+    const WON = fixtureId(187, "stage-won");
+    await seed(WON, { review: approved });
+    const moved = await Q.setQuoteStage(WON, "acceptance", "Test Harness");
+    ok(moved?.status === "won" && moved.stage === "acceptance", `#187 review 3: setQuoteStage to Acceptance makes the quote won, on Acceptance (${moved?.status}/${moved?.stage})`);
+    ok((await projectsFor(WON)) === 1, "#187 review 3: the won stage move spawns exactly one project");
+    ok((await soldFor(WON)) === 1, "#187 review 3: ...and exactly one \"Install sold\" assignment");
+    await Q.setQuoteStage(WON, "acceptance", "Test Harness");
+    ok((await projectsFor(WON)) === 1 && (await soldFor(WON)) === 1, "#187 review 3: a repeat move to the same stage adds no second project or assignment");
+
+    const GATE = fixtureId(187, "stage-gate");
+    await seed(GATE, {});
+    const before = await Q.get(GATE);
+    let refusal: unknown = null;
+    try {
+      await Q.setQuoteStage(GATE, "acceptance", "Test Harness");
+    } catch (e) {
+      refusal = e;
+    }
+    const after = await Q.get(GATE);
+    ok(isApprovalGateRefusal(refusal), "#187 review 3: moving an unapproved quote to its won stage throws the approval gate's refusal");
+    ok(after?.status === "draft" && after.stage === "design", `#187 review 3: the refused move leaves status and stage as they were (${after?.status}/${after?.stage})`);
+    ok((after?.history || []).length === (before?.history || []).length && after?.updatedAt === before?.updatedAt, "#187 review 3: the rolled-back transaction wrote nothing (no history row, no updatedAt bump)");
+    ok((await projectsFor(GATE)) === 0 && (await soldFor(GATE)) === 0, "#187 review 3: the refused move spawned no project and no assignment");
+  }
+
+  /* Item 6 — a Settings stage whose id is "constructor" is harmless. */
+  {
+    const before = await loadPipelines();
+    const install = before.project.find((pl) => pl.id === "install")!;
+    const withCtor = {
+      ...install,
+      stages: [...install.stages.slice(0, 3), { id: "constructor", label: "Constructor", tag: "backlog" as const }, ...install.stages.slice(3)],
+    };
+    const saved = await savePipelines({ project: before.project.map((pl) => (pl.id === "install" ? withCtor : pl)) });
+    const PID = fixtureId(187, "ctor-stage");
+    const logged: unknown[][] = [];
+    const realConsoleError = console.error;
+    try {
+      ok(saved.ok, "#187 review 6 setup: a stage with id \"constructor\" saves");
+      registerFixture("projects", PID);
+      await ProjStore.createProject({ id: PID, name: "#187 review constructor stage" });
+      console.error = (...args: unknown[]) => { logged.push(args); };
+      let threw: unknown = null;
+      let moved: Awaited<ReturnType<typeof ProjStore.setProjectStage>> = null;
+      try {
+        moved = await ProjStore.setProjectStage(PID, "constructor", "Test Harness");
+      } catch (e) {
+        threw = e;
+      }
+      console.error = realConsoleError;
+      ok(threw === null && moved?.stage === "constructor", `#187 review 6: moving a project onto a stage named "constructor" succeeds (${String(threw)})`);
+      ok(logged.length === 0, "#187 review 6: ...with nothing to log — the lookup no longer reaches Object.prototype");
+      const keys = (await tasksForProject(PID)).map((t) => t.coverageKey || "");
+      ok(!keys.some((k) => k.includes(":constructor:")), "#187 review 6: ...and no checklist is expanded for it");
+    } finally {
+      console.error = realConsoleError;
+      await savePipelines({ project: before.project, quote: before.quote, defaultQuotePipelineId: before.defaultQuotePipelineId });
+    }
+  }
+
+  /* Item 7 — the projects CSV: legacy stage keys resolve, and UKN round-trips. */
+  {
+    const ptype = getTypeMeta("projects");
+    if (!ptype) throw new Error("#187 review 7 setup: projects import type not registered");
+    const rowsFor = (csv: string) => {
+      const parsed = parseImportCsv(csv);
+      if (!parsed.ok) throw new Error("#187 review 7 setup: csv did not parse — " + parsed.error);
+      return prepareRows(parsed.rows, autoMap(parsed.headers, ptype.fields), ptype.fields).rows;
+    };
+    const N_LEGACY = "TEST187:csv legacy install";
+    const N_UKN = "TEST187:csv ukn";
+    const N_RT = "TEST187:csv ukn round trip";
+    const N_BLANK = "TEST187:csv blank stage";
+    const byName = async (n: string) => (await ProjStore.getAllProjects()).find((p) => p.name === n);
+    const res = await commitImport(
+      "projects",
+      rowsFor([
+        "Project Name,Kind,Value,Stage",
+        `${N_LEGACY},project,5000,install`,
+        `${N_UKN},project,UKN,Scheduled`,
+        `${N_BLANK},order,12,`,
+      ].join("\n")),
+      "create",
+      { effectiveAt: Date.now() }
+    );
+    const legacy = await byName(N_LEGACY);
+    const ukn = await byName(N_UKN);
+    const blank = await byName(N_BLANK);
+    for (const p of [legacy, ukn, blank]) if (p) registerFixture("projects", p.id);
+    ok(res.created === 3 && res.errored === 0, `#187 review 7: three project rows import (${res.created}/${res.errored})`);
+    ok(legacy?.stage === "installation", `#187 review 7: a legacy "install" stage cell lands on Installation (${legacy?.stage})`);
+    ok(ukn?.stage === "scheduled", "#187 review 7: a stage label still matches first");
+    ok(blank?.stage === "order-materials", "#187 review 7: a blank stage cell lands on the kind's first stage");
+    ok(ukn?.valueUnknown === true && ukn.value === 0, "#187 review 7: a UKN Value cell imports as valueUnknown, never $0 known");
+    ok(legacy?.valueUnknown !== true && legacy?.value === 5000, "#187 review 7: a numeric Value cell stays a known value");
+
+    const exported = (await exportObjectsFor("projects")).find((o) => o.name === N_UKN);
+    ok(exported?.value === "UKN", `#187 review 7: export writes an unknown value as "UKN" (${exported?.value})`);
+    ok((await exportObjectsFor("projects")).find((o) => o.name === N_LEGACY)?.value === 5000, "#187 review 7: export writes a known value as its number");
+    const csvOut = await exportCsv("projects");
+    const header = csvOut.split("\n")[0];
+    const line = csvOut.split("\n").find((l) => l.includes(N_UKN));
+    ok(!!line && /(^|,)UKN(,|$)/.test(line), "#187 review 7: the exported CSV line carries the UKN cell");
+    const again = await commitImport("projects", rowsFor([header, line!.replace(N_UKN, N_RT)].join("\n")), "create", { effectiveAt: Date.now() });
+    const rt = await byName(N_RT);
+    if (rt) registerFixture("projects", rt.id);
+    ok(again.created === 1 && rt?.valueUnknown === true && rt.stage === "scheduled", "#187 review 7: export → import round-trips valueUnknown (and the stage label)");
+  }
+}
 /* #149 (D233): the sweep script's own safety rule. db-target's two flags
  * (`--commit`, plus `--yes` for a hosted target) are pinned elsewhere in this
  * file against requireHostedConfirmation; this is the rule the sweep script
@@ -8041,6 +8245,7 @@ seeded()
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
   .then(() => dayliteSupersedeFix2Checks())
+  .then(() => dayliteFinalReviewAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
