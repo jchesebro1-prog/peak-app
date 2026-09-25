@@ -3,6 +3,7 @@
  * Peak/* labels on its Gmail thread. Never blocks the Peak write: every
  * failure is logged and the next sync pass reconciles.
  */
+import { outsideTransaction } from "@/db";
 import { getDoc, listDocs, patchDoc } from "@/db/doc-store";
 import type { CommThread } from "@/lib/stores/comms";
 import { GMAIL_MODIFY_SCOPE, gmailEnabled } from "./config";
@@ -136,12 +137,23 @@ let syncChain: Promise<void> = Promise.resolve();
 export function queueLabelSync(threadId: string): void {
   if (pendingSyncs.has(threadId)) return;
   pendingSyncs.add(threadId);
-  syncChain = syncChain
-    .then(() => {
-      pendingSyncs.delete(threadId);
-      return syncPeakLabels(threadId);
-    })
-    .catch(() => {});
+  // #172: register the chain link with the caller's transaction context
+  // EXITED. A hook site may be running inside `withTransaction` (quotes'
+  // `setStatus` already is), and a `.then()` continuation captures the async
+  // context at registration — so without this the sync, which runs long after
+  // that unit commits, would read the dead transaction handle out of
+  // `getDb()` and throw "Transaction is closed" straight into the
+  // `.catch(() => {})` below. The label would silently never sync. This is
+  // the right place for the wrapper rather than any one call site: every hook
+  // (comms, linking, bridge) funnels through here.
+  outsideTransaction(() => {
+    syncChain = syncChain
+      .then(() => {
+        pendingSyncs.delete(threadId);
+        return syncPeakLabels(threadId);
+      })
+      .catch(() => {});
+  });
 }
 
 /** Test hook — number of thread syncs currently queued or in flight. */

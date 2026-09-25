@@ -14,6 +14,7 @@ import {
   sweepIndexesEngagement,
   type ConsultingScope,
   type EngagementStage,
+  type EngagementSyncAction,
   type ManualFee,
 } from "@/lib/consulting-stages";
 
@@ -608,13 +609,61 @@ export async function ensureEngagementForQuote(
   );
 }
 
-/** Consulting quotes → engagements (fifth sync in the on-win fan-out, AND
- *  the loadConsultingData safety net — estimator/inbox status paths never
- *  run syncs, mirroring syncProjectsFromQuotes-on-load). Applies the pure
- *  engagementSyncAction rules per quote: sent/won create (proposal_sent /
- *  awarded), won advances a proposal_sent record to awarded, lost closes a
- *  still-proposal_sent record with a "Proposal lost" decision entry.
- *  Idempotent throughout. Returns the number of records touched. */
+/**
+ * Apply ONE already-decided `engagementSyncAction` to ONE existing engagement
+ * row (#171). Everything except `create`, which needs a quote row to build
+ * from (`fromQuote`) and is reached differently by each caller.
+ *
+ * Two callers share it so neither owns a private copy of the rules OR of the
+ * "Proposal lost" decision copy: the full-collection sweep below, and
+ * `quote-spawn.ts`'s per-quote consulting branch, which used to delegate the
+ * close/reopen cases to that sweep purely to borrow this wording — dragging a
+ * two-scan, N-patch reconciliation of every OTHER quote's engagement into the
+ * current user's `setStatus` transaction.
+ *
+ * `quoteId` is the quote whose status decided the action — it is named in the
+ * decision entry, so passing the wrong one mislabels the record.
+ */
+export async function applyEngagementStageAction(
+  action: Extract<
+    NonNullable<EngagementSyncAction>,
+    { kind: "advance" | "close" | "reopen" }
+  >,
+  engagementId: string,
+  quoteId: string
+): Promise<void> {
+  if (action.kind === "close") {
+    await patchEngagement(engagementId, (d) => {
+      d.status = "closed";
+      d.decisions.unshift({
+        id: uid("dc-"),
+        at: Date.now(),
+        by: "System",
+        decision: "Proposal lost",
+        context: `Consulting quote ${quoteId} was marked lost while this engagement was still at Proposal sent.`,
+      });
+    });
+    return;
+  }
+  // "advance" (→ awarded) and "reopen" (→ proposal_sent) are both a plain
+  // stage overwrite; only "close" above needs the decision entry.
+  await patchEngagement(engagementId, (d) => {
+    d.status = action.stage;
+  });
+}
+
+/** Consulting quotes → engagements (the loadConsultingData safety net —
+ *  estimator/inbox status paths never run syncs, mirroring
+ *  syncProjectsFromQuotes-on-load). Applies the pure engagementSyncAction
+ *  rules per quote: sent/won create (proposal_sent / awarded), won advances
+ *  a proposal_sent record to awarded, lost closes a still-proposal_sent
+ *  record with a "Proposal lost" decision entry. Idempotent throughout.
+ *  Returns the number of records touched.
+ *
+ *  NOT the on-win path any more (#171): a single quote's status change
+ *  spawns through `spawnFromQuote`, which acts on that one quote's
+ *  engagement. This stays a whole-collection page-load reconciliation, so it
+ *  must never be called from inside a transaction. */
 export async function syncEngagementsFromQuotes(): Promise<{ created: number; skipped: string[] }> {
   const engagements = await listDocs<ConsultingEngagement>(
     "consulting_engagements"
@@ -647,23 +696,10 @@ export async function syncEngagementsFromQuotes(): Promise<{ created: number; sk
           (id) => ({ ...body, id })
         );
         byQuote.set(q.id, rec);
-      } else if (action.kind === "advance" || action.kind === "reopen") {
-        // "advance" (→ awarded) and "reopen" (→ proposal_sent) are both a
-        // plain stage overwrite; only "close" below needs the decision entry.
-        await patchEngagement(existing!.id, (d) => {
-          d.status = action.stage;
-        });
       } else {
-        await patchEngagement(existing!.id, (d) => {
-          d.status = "closed";
-          d.decisions.unshift({
-            id: uid("dc-"),
-            at: Date.now(),
-            by: "System",
-            decision: "Proposal lost",
-            context: `Consulting quote ${q.id} was marked lost while this engagement was still at Proposal sent.`,
-          });
-        });
+        // advance / close / reopen — the shared per-row writer above, so this
+        // sweep and the per-quote spawn path can never drift apart.
+        await applyEngagementStageAction(action, existing!.id, q.id);
       }
       changed++;
     } catch (error) {

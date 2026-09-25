@@ -122,3 +122,37 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
     (tx) => transactionStore.run(tx, fn)
   );
 }
+
+/**
+ * Run `fn` with the ambient transaction context EXITED (#172).
+ *
+ * `getDb()` reads an AsyncLocalStorage that `withTransaction` sets, so every
+ * store call made inside a unit transparently gets the transaction handle.
+ * That is right for work the unit is waiting on — and wrong for work merely
+ * *started* inside it. A promise chain kicked off in the unit but resolving
+ * after it commits still reads the same context, and by then the handle is
+ * dead: the query throws "Transaction is closed". When the detached work
+ * swallows its own errors (the `void (async …)().catch(() => {})` kickoff
+ * shape), the write silently never happens — no row, and nothing the caller
+ * can see.
+ *
+ * Wrap the KICKOFF in this. A `.then()` continuation captures the async
+ * context at REGISTRATION time, not at resolution, so registering inside the
+ * exited scope is what matters — where the promise later settles is
+ * irrelevant. Anything `fn` starts therefore resolves against the pooled
+ * handle.
+ *
+ * Scope: detached/background work that must not ride the caller's
+ * transaction (Gmail label mirroring, cache warming, telemetry). It is
+ * explicitly **not** a way to sneak a write past a rollback — a write made
+ * through the pooled handle commits on its own and survives the surrounding
+ * unit rolling back. If a write belongs to the unit, leave it in the unit.
+ *
+ * The caller must never AWAIT what this starts from inside the unit. On dev
+ * PGlite there is one connection: a pooled query issued while the caller's
+ * transaction is still open waits for that transaction to finish, so awaiting
+ * it from inside the transaction deadlocks. Detached means detached.
+ */
+export function outsideTransaction<T>(fn: () => T): T {
+  return transactionStore.exit(fn);
+}

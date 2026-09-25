@@ -17,7 +17,7 @@ import {
 } from "@/lib/stores/leads";
 import type { ConsultingQuotePayload } from "@/lib/stores/engagements";
 import { scopesTotal, type ConsultingScope } from "@/lib/consulting-stages";
-import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
+import { getSettings, mergedConsultingDisciplines, resolveDisciplines } from "@/lib/settings";
 
 /**
  * Consulting proposal mutations (#35 rebuild over the D90 lightweight
@@ -110,18 +110,6 @@ async function persist(formData: FormData): Promise<string | null> {
     getSettings(),
   ]);
   if (!architectRecord || !venueRecord) return null;
-  // #145 D165 — treat the posted disciplines as untrusted (same allowlist
-  // idiom as cleanLocationId below): only a discipline actually in the
-  // live vocabulary survives, so a hand-crafted POST can't stash an
-  // arbitrary string onto the quote (and, at spawn, the engagement).
-  const liveDisciplines = new Set(mergedConsultingDisciplines(settings.consultingDisciplines));
-  const cleanDisciplines = Array.from(
-    new Set(
-      (Array.isArray(postedDisciplines) ? postedDisciplines : [])
-        .map((d) => String(d ?? "").trim().toLowerCase())
-        .filter((d) => liveDisciplines.has(d))
-    )
-  );
   const custName = (await nameFor(customerId)) || architectRecord.name || "";
   const venueCustomer = (await nameFor(venueCustomerId)) || venueRecord.name || "";
   const cleanLocationId = (venueRecord.locations || []).some((l) => l.id === locationId)
@@ -135,6 +123,19 @@ async function persist(formData: FormData): Promise<string | null> {
   // rides along; fees are superseded by scopes (revisions hold the history).
   const prior = editingId ? await getQuote(editingId) : null;
   const priorPay = (prior?.consulting || null) as ConsultingQuotePayload | null;
+
+  // #145 D165 / #155 D231 — treat the posted disciplines as untrusted (same
+  // allowlist idiom as cleanLocationId above), but allow through anything
+  // already saved on THIS quote as well as the live vocabulary: a discipline
+  // an admin deleted from Settings is kept until the user unticks it (the
+  // builder renders it as "<Name> (removed)"), while a value in neither list
+  // is still refused, so a hand-crafted POST can't stash an arbitrary string
+  // onto the quote (and, at spawn, the engagement).
+  const cleanDisciplines = resolveDisciplines(
+    postedDisciplines,
+    mergedConsultingDisciplines(settings.consultingDisciplines),
+    priorPay?.disciplines || []
+  );
 
   const consulting: ConsultingQuotePayload = {
     scope: priorPay?.scope || "",

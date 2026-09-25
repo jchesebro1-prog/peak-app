@@ -41,9 +41,19 @@ import { flameJobsSeed } from "@/db/seeds/flame-jobs";
  *   level now, so those fields and hooks are dropped.
  * - `window.Team.CURRENT` owner fallback becomes the caller-supplied
  *   partial.owner; the prototype's final 'Jeff Chesebro' fallback is kept.
- * - remove() is a soft delete (doc-store semantics). Like the prototype's
- *   hard remove, a removed job's quote becomes eligible for re-creation by
- *   syncFromQuotes (the tombstone is excluded from the live list).
+ * - remove() is a soft delete (doc-store semantics), and a removed job's
+ *   quote is NOT eligible for re-creation (#173, D227). The prototype's
+ *   hard remove did let the next sweep rebuild the job, and this file used
+ *   to call that deliberate parity — but the prototype swept only when
+ *   someone clicked "Won", so the rebuild was a rare, explicit act. The
+ *   sweep now runs on every flame dashboard and scheduler load, and the
+ *   delete UI returns to exactly those screens, so keeping parity would
+ *   mean a delete that undoes itself before the operator sees the list.
+ *   `coveredQuoteIds()` therefore reads the tombstones too, and both the
+ *   sweep and createFromQuote treat a deleted job as "this quote is
+ *   handled" — the same rule projects.ts already applies through its
+ *   dismissed list (#169). Re-creating one is a deliberate act: re-approve
+ *   the quote after undeleting, or make the job by hand.
  * - venueCoords()/jobCoords() resolve the coords embedded on each venue
  *   (fromQuote copies them from the customer record at creation, same as
  *   the prototype). The prototype's render-time CustomerStore/Geo.geocode
@@ -437,13 +447,33 @@ export async function create(partial: Partial<FlameJob> = {}): Promise<FlameJob>
 }
 
 /**
+ * Every quote id that already has a job — INCLUDING soft-deleted ones
+ * (#173). `listDocs` hides tombstones by default, so a sweep built on the
+ * live list re-creates whatever the user just deleted; and because
+ * `listDocs` does not merge the `deleted` column onto the doc it hands
+ * back, a tombstoned row is indistinguishable from a live one. Only the
+ * quote ids are collected, so nothing downstream can mistake a tombstone
+ * for a job.
+ */
+async function coveredQuoteIds(): Promise<Set<string>> {
+  const rows = await listDocs<FlameJob>("flame_jobs", { includeDeleted: true });
+  const out = new Set<string>();
+  for (const j of rows) if (j.quoteId) out.add(j.quoteId);
+  return out;
+}
+
+/**
  * Make the job for one accepted flame-test quote (idempotent — returns the
- * existing job if the quote already has one; null when the quote is missing
- * or not a flame-test quote).
+ * existing job if the quote already has one; null when the quote is missing,
+ * not a flame-test quote, or its job was deleted).
  */
 export async function createFromQuote(qid: string): Promise<FlameJob | null> {
   const existing = await byQuote(qid);
   if (existing) return existing;
+  // #173: no live job, but a deleted one still means this quote is handled.
+  // Reached on every re-approval of an already-won quote since #170, so the
+  // per-quote creator needs the same tombstone rule as the sweep below.
+  if ((await coveredQuoteIds()).has(qid)) return null;
   const q = await getDoc<QuoteDoc>("quotes", qid);
   if (!q || q.quoteType !== "flame_test") return null;
   return create(await fromQuote(q));
@@ -452,13 +482,12 @@ export async function createFromQuote(qid: string): Promise<FlameJob | null> {
 /**
  * Scan accepted (won) flame-test quotes and create any job not made yet.
  * Returns how many jobs were created.
+ *
+ * Page-load backfill only (flame dashboard + scheduler) — never call it
+ * inside a transaction; it walks two whole collections.
  */
 export async function syncFromQuotes(): Promise<{ created: number; skipped: string[] }> {
-  const jobs = await listDocs<FlameJob>("flame_jobs");
-  const have: Record<string, boolean> = {};
-  jobs.forEach((j) => {
-    if (j.quoteId) have[j.quoteId] = true;
-  });
+  const have = await coveredQuoteIds();
   const quotes = await listDocs<QuoteDoc>("quotes");
   const won = quotes.filter(
     (q) => q.quoteType === "flame_test" && q.status === "won"
@@ -466,7 +495,7 @@ export async function syncFromQuotes(): Promise<{ created: number; skipped: stri
   let made = 0;
   const skipped: string[] = [];
   for (const q of won) {
-    if (have[q.id]) continue;
+    if (have.has(q.id)) continue;
     try {
       const rec = await fromQuote(q);
       const t = now();
@@ -476,7 +505,7 @@ export async function syncFromQuotes(): Promise<{ created: number; skipped: stri
         createdAt: t,
         updatedAt: t,
       }));
-      have[q.id] = true;
+      have.add(q.id);
       made++;
     } catch (error) {
       skipped.push(q.id);

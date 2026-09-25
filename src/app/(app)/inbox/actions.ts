@@ -51,6 +51,7 @@ import { withEmailSignature } from "@/lib/email-signature";
 import {
   byRenewalOf,
   setStatus as setQuoteStatus,
+  statusFailureMessage,
 } from "@/lib/stores/quotes";
 import {
   get as getFlameJob,
@@ -397,10 +398,19 @@ async function completeRenewalOutreach(
     // turn a successful send into a thrown-exception failure here. Swallow
     // and leave the quote in draft; the team still sees it needs approval
     // before it can actually go out.
+    //
+    // #174: still swallowed for the user — but no longer silent. The shared
+    // branch logs anything that is NOT the approval gate's own refusal, so a
+    // spawn defect on this path leaves a stack in the operator's log instead
+    // of disappearing. The returned sentence is deliberately unused: nothing
+    // on this code path has a screen to show it on.
     try {
       await setQuoteStatus(quote.id, "sent");
-    } catch {
-      /* no-op — see comment above */
+    } catch (e) {
+      statusFailureMessage(
+        e,
+        "inbox/actions completeRenewalOutreach: renewal quote -> sent failed after the email was already sent"
+      );
     }
   }
 }

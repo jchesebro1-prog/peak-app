@@ -609,6 +609,95 @@ export function resolveStatusGate(
 }
 
 /**
+ * The brand carried by the approval gate's own refusal (#174). A plain
+ * string, compared by value — see `ApprovalGateRefused` for why not
+ * `instanceof`.
+ */
+export const APPROVAL_GATE_REFUSAL = "quotes/approval-gate-refused" as const;
+
+/**
+ * The approval gate refusing a transition (#174).
+ *
+ * `setStatus` throws for two unrelated reasons, and before this class both
+ * were a bare `Error`, so no caller could tell them apart:
+ *
+ *   1. THIS — the gate declining to advance an unapproved quote. A
+ *      governance decision whose sentence (`requireApprovalToAdvance`'s) is
+ *      written FOR the user and must reach them verbatim.
+ *   2. Any defect below the gate — a TypeError in the spawn graph, an id
+ *      mint that outlasts its retry budget, a bad row. That message is for
+ *      the operator's log; rendering it on a screen tells the user their
+ *      quote was "refused" when in fact the app broke.
+ *
+ * Same shape as the codebase's other typed errors (`DriveApiError`,
+ * `KrispApiError`): an Error subclass, a `name`, and the one extra field
+ * that matters.
+ */
+export class ApprovalGateRefused extends Error {
+  /**
+   * The marker `isApprovalGateRefusal` actually reads, deliberately in place
+   * of `instanceof`. `instanceof` compares constructor identity, and this
+   * module can legitimately exist TWICE in one process — Next splits server
+   * actions across route bundles, and `setStatus` itself reaches
+   * `quote-spawn` through a dynamic `import()`. An error minted by one copy
+   * fails `instanceof` against the other, which would misroute the gate's
+   * own message to the generic line: the precise failure this punch exists
+   * to stop. A string compared by value crosses that boundary intact.
+   */
+  readonly approvalGateRefusal = APPROVAL_GATE_REFUSAL;
+  /** Which gated transition was refused — "send" (→ sent) or "won". */
+  readonly action: ApprovalGateAction;
+  constructor(action: ApprovalGateAction, message: string) {
+    super(message);
+    this.name = "ApprovalGateRefused";
+    this.action = action;
+  }
+}
+
+/**
+ * True only for the gate's own refusal. Structural on purpose (see the brand
+ * above); an `Error` that merely carries the same sentence is NOT recognised,
+ * so nothing can impersonate a governance decision by string.
+ */
+export function isApprovalGateRefusal(e: unknown): e is ApprovalGateRefused {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { approvalGateRefusal?: unknown }).approvalGateRefusal === APPROVAL_GATE_REFUSAL
+  );
+}
+
+/** What a user sees when `setStatus` failed for a reason that is not theirs. */
+export const STATUS_CHANGE_FAILED =
+  "Couldn’t apply that status change — the error has been logged. Please try again.";
+
+/**
+ * The one branch every `setStatus` caller shares (#174): what do we SHOW?
+ *
+ * - the approval gate's refusal → its own message, verbatim, because that
+ *   sentence was written for the user and names what they must do;
+ * - anything else → `fallback` (a generic line), and the real error goes to
+ *   `console.error` with `where` so the operator still gets the stack. Never
+ *   swallowed, never rendered.
+ *
+ * Exported here, next to the predicate, so the eight-plus call sites cannot
+ * drift into eight slightly different renderings of the same decision —
+ * which is exactly how a spawn defect came to look like a policy refusal.
+ *
+ * `where` is the log label (caller + what it was doing); `fallback` lets a
+ * screen keep its own wording ("Couldn’t approve the repair quote…").
+ */
+export function statusFailureMessage(
+  e: unknown,
+  where: string,
+  fallback: string = STATUS_CHANGE_FAILED
+): string {
+  if (isApprovalGateRefusal(e)) return e.message;
+  console.error(where, e);
+  return fallback;
+}
+
+/**
  * Move through the pipeline; stamps history [{at, from, to}]. No-op write when unchanged.
  *
  * Sending also cuts an automatic revision (item 24 decision A) — that snapshot
@@ -636,9 +725,33 @@ export async function setStatus(
   return withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
-  if (!q || q.status === status) return q;
+  if (!q) return null;
+  if (q.status === status) {
+    // #170: nothing to transition, but the downstream record may still be
+    // MISSING. This early return is the layer that actually gated the bug —
+    // `spawnFromQuote` was never reached at all. The four service builder
+    // screens persist their quote, call setStatus(id, "won") and then act;
+    // cfc00ad deleted the `createFromQuote`/`syncFromQuotes` calls they used
+    // to make for themselves, so re-approving an ALREADY-won quote created
+    // nothing anywhere. Replaying the spawn repairs that. No write, no
+    // history entry, no revision and no #16 assignment happen here — those
+    // belong to a real transition, and a no-op re-save must stay a no-op
+    // everywhere except this one idempotent repair. The approval gate is
+    // deliberately not consulted either: no status is being advanced, and
+    // every creator the replay reaches dedupes on the quote id, so the cost
+    // when the record already exists is one read. That "nothing else happens"
+    // claim is load-bearing and is pinned by test: the #170 `system-replay`
+    // fixture (a type that DOES fire the #16 assignment) asserts history,
+    // updatedAt, revisions and the assignments table are all untouched.
+    const { spawnFromQuote } = await import("./quote-spawn");
+    await spawnFromQuote(q, q.status, { replayUnchanged: true });
+    return q;
+  }
   const gate = resolveStatusGate(status, q.review, opts);
-  if (!gate.ok) throw new Error(gate.error);
+  // #174: a TYPED refusal. The gate is the only throw here whose message is
+  // meant for the user; everything below this line that throws is a defect,
+  // and callers tell the two apart with `statusFailureMessage`.
+  if (!gate.ok) throw new ApprovalGateRefused(status === "won" ? "won" : "send", gate.error);
   const result = await patchDoc<Quote>("quotes", id, (doc) => {
     const t = Date.now();
     doc.history = doc.history || [];
@@ -652,10 +765,11 @@ export async function setStatus(
 
   // Punch #16 (D14x): an install sale notifies the company as a Home Queue
   // task, not email — see PUNCHLIST.md #16 for the five findings against an
-  // automated send. The early-return above (`q.status === status`) means
-  // this only runs the moment a quote actually transitions INTO "won", never
-  // on a no-op re-save of an already-won quote. Scoped to the quote types
-  // that actually become an Installs project (mirrors syncProjectsFromQuotes'
+  // automated send. The unchanged-status branch above returns before reaching
+  // here, so this only runs the moment a quote actually transitions INTO
+  // "won", never on a no-op re-save of an already-won quote (#170's spawn
+  // replay is deliberately the only thing that branch does). Scoped to the
+  // quote types that actually become an Installs project (mirrors syncProjectsFromQuotes'
   // own exclusion list) — flame-test/repair/inspection/consulting wins run
   // their own service workflows and dashboards, so an "install sold" task
   // for those would be noise. There is no separate PM role (D87) — `owner`

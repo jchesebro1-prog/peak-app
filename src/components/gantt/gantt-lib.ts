@@ -24,6 +24,76 @@ export function snapToDay(ms: number): number {
   return d.getTime();
 }
 
+/**
+ * Local NOON of the calendar day containing `ms` (#154, D232) — the anchor
+ * every date this app writes already uses (`new Date(v + "T12:00:00")` in
+ * every `<input type="date">` handler). Noon matters because a window
+ * computed on the server is *serialized* and then re-floored in the
+ * browser by `snapToDay`/`dayColumns`, which are local-calendar-day based
+ * by design (D166): a boundary at local MIDNIGHT on a UTC server is 7pm of
+ * the PREVIOUS day in America/Chicago, so the whole grid shifts a full
+ * calendar day on hydration. A boundary at noon has ±12h of slack, which
+ * covers every US zone (UTC-4 … UTC-10) against a UTC deployment.
+ */
+export function localNoon(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(12, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Shift by whole LOCAL calendar days (`setDate`), never by adding raw
+ *  86400000ms — a DST transition makes a local day 23 or 25 hours long, and
+ *  `dayColumns` below already walks this way for exactly that reason. */
+function addLocalDays(ms: number, n: number): number {
+  const d = new Date(ms);
+  d.setDate(d.getDate() + n);
+  return d.getTime();
+}
+
+/** Local noon of the Sunday that starts the week containing `ms`. */
+function noonOfWeekStart(ms: number): number {
+  const d = new Date(localNoon(ms));
+  d.setDate(d.getDate() - d.getDay()); // week starts Sunday
+  return d.getTime();
+}
+
+/** One visible window shared by every section of a timeline: the date range
+ *  plus the px-per-day scale the sections lay out at (`0` = "no fixed
+ *  scale", for a grid that simply fills its container). */
+export type GanttWindow = { start: number; end: number; dayWidth: number };
+
+/**
+ * A sensible visible window for a bar set (#145 D172, reworked for #157 /
+ * #154 under D232): the full extent of the given bars padded to whole
+ * weeks, unioned with `nowTs` so an all-past, all-future or empty bar set
+ * still shows a window containing today rather than a degenerate range.
+ *
+ * Callers that stack more than one section on a page pass the UNION of
+ * every section's bars and hand the one result to all of them — that is
+ * what makes a given x-position mean the same date in each (#157). Both
+ * boundaries land on local noon (#154, see `localNoon`), and the padding
+ * moves by whole local days so a window spanning a DST transition doesn't
+ * drift an hour and floor onto the wrong day.
+ */
+export function ganttWindow(
+  bars: Array<{ startAt: number; dueAt: number }>,
+  nowTs: number,
+  dayWidth = 0
+): GanttWindow {
+  const anchor = localNoon(nowTs);
+  let lo = anchor,
+    hi = anchor;
+  bars.forEach((b) => {
+    lo = Math.min(lo, b.startAt);
+    hi = Math.max(hi, b.dueAt);
+  });
+  return {
+    start: noonOfWeekStart(addLocalDays(lo, -3)),
+    end: addLocalDays(noonOfWeekStart(addLocalDays(hi, 10)), 7),
+    dayWidth,
+  };
+}
+
 export function dayColumns(startAt: number, endAt: number): number[] {
   const out: number[] = [];
   const s = snapToDay(startAt);

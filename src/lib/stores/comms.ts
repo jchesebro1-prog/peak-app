@@ -1,3 +1,4 @@
+import { outsideTransaction } from "@/db";
 import {
   getDoc,
   insertWithPrefixedId,
@@ -1560,10 +1561,20 @@ export function hasIncoming(): boolean {
  *  logged inside syncPeakLabels itself; the outer catch only guards the
  *  import/dynamic-dispatch machinery. */
 function queuePeakLabelSync(threadId: string): void {
-  void (async () => {
-    const { queueLabelSync } = await import("@/lib/gmail/label-sync");
-    queueLabelSync(threadId);
-  })().catch(() => {});
+  // #172: the kickoff is detached — it outlives any transaction the caller is
+  // in, and its `.catch(() => {})` would swallow the "Transaction is closed"
+  // that a dying ambient handle produces. `outsideTransaction` exits the ALS
+  // context so the dynamic import AND everything it starts run against the
+  // pooled handle. `queueLabelSync` wraps itself the same way (that is what
+  // covers the linking.ts / bridge.ts hook sites too); this is the same guard
+  // one frame earlier, so the async IIFE itself can never inherit the
+  // transaction either.
+  outsideTransaction(() => {
+    void (async () => {
+      const { queueLabelSync } = await import("@/lib/gmail/label-sync");
+      queueLabelSync(threadId);
+    })().catch(() => {});
+  });
 }
 
 export async function setStatus(
