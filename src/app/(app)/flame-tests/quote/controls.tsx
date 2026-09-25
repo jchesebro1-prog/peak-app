@@ -349,9 +349,10 @@ export function QuoteBuilder({
         return next;
       });
       dirty();
-      const loc = locations.find((l) => l.id === locId);
-      if (loc && !venueSel[locId]?.on && !quoteNameManual.current)
-        setQuoteName(`${loc.label} ${new Date().getFullYear()}`);
+      // #177: the venue-name update above (inside setVenueSel, via automaticQuoteName)
+      // is the single source of truth for the auto name. A second setQuoteName here
+      // used to build its own "<Venue> <year>" string — a different format than
+      // automaticQuoteName's "<Venue> — Flame Test <year>" — and clobber it.
     };
     if (!wonGuard.guard("venue", apply)) return;
     apply();

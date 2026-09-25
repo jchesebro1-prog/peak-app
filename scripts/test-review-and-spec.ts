@@ -9280,6 +9280,37 @@ async function teardownFixtures(): Promise<void> {
   }
 }
 
+/* ====================================================================
+   #177 — the flame builder's toggleVenue must not clobber automaticQuoteName's
+   gated update with a second, differently-formatted setQuoteName call.
+   Client component (no server round trip for this bug), so — same idiom as
+   the #187 review's client-source checks above — proven by inspecting the
+   built source rather than mounting React. ==================================================================== */
+{
+  const flameControlsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"),
+    "utf8"
+  );
+  const toggleVenueBody = flameControlsSrc.slice(
+    flameControlsSrc.indexOf("function toggleVenue"),
+    flameControlsSrc.indexOf("function setCurtains")
+  );
+  ok(toggleVenueBody.length > 0, "#177 fixture: toggleVenue is still where the test expects it");
+  const setQuoteNameCalls = toggleVenueBody.match(/setQuoteName\(/g) || [];
+  ok(
+    setQuoteNameCalls.length === 1,
+    "#177 toggleVenue calls setQuoteName exactly once — no second call clobbering the gated update"
+  );
+  ok(
+    /if \(!quoteNameManual\.current\) setQuoteName\(automaticQuoteName\(customer, next\)\)/.test(toggleVenueBody),
+    "#177 toggleVenue's one name update is gated on quoteNameManual.current and calls automaticQuoteName() — the same helper pickCustomer uses, not a hand-built string"
+  );
+  ok(
+    !/\$\{loc\.label\} \$\{new Date\(\)\.getFullYear\(\)\}/.test(toggleVenueBody),
+    "#177 the old ungated \"<Venue> <year>\" string — a different format than automaticQuoteName's \"<Venue> — Flame Test <year>\" — is gone from toggleVenue"
+  );
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
