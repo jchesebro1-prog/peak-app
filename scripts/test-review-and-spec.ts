@@ -9335,6 +9335,7 @@ seeded()
   .then(() => quoteLockAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  .then(() => refusedAdvanceAsyncChecks())
   .then(() => venueCalendarAsyncChecks())
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
@@ -12589,6 +12590,96 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   } finally {
     console.error = realConsoleError;
     await softDeleteDoc("quotes", Q_GATE);
+  }
+}
+
+/* ====================================================================
+   #181 — the Estimator's doSave must adopt the id the server returns even
+   when the requested status advance was refused, and must surface the
+   refusal through the shared actionError banner. Client component (no
+   server round trip for this half of the bug), so — same idiom as the
+   #187 review's client-source checks — proven by inspecting the built
+   source rather than mounting React. The matching DB-backed proof (create +
+   refused advance -> id usable for update, not a second create) is
+   refusedAdvanceAsyncChecks() just below.
+   ==================================================================== */
+{
+  const estimatorClientSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"),
+    "utf8"
+  );
+  const doSaveBody = estimatorClientSrc.slice(
+    estimatorClientSrc.indexOf("const doSave = ()"),
+    estimatorClientSrc.indexOf("const changeStatus = (v: QuoteStatus)")
+  );
+  ok(doSaveBody.length > 0, "#181 fixture: doSave is still where the test expects it");
+  ok(
+    !/if \(res\.ok && res\.id\)/.test(doSaveBody),
+    "#181 doSave no longer gates id-adoption on res.ok — a refused status advance still returns a real, saved id"
+  );
+  ok(
+    /if \(res\.id\) \{[\s\S]*?setLoadedId\(res\.id\)/.test(doSaveBody),
+    "#181 doSave adopts loadedId whenever the server returns an id, regardless of ok"
+  );
+  ok(
+    /setActionError\(res\.error \|\|/.test(doSaveBody),
+    "#181 doSave surfaces the gate's own refusal message through the shared actionError banner instead of silently discarding it"
+  );
+}
+
+/* ====================================================================
+   #181 — a refused status advance on a create save must not strand the
+   client without the id the server already made.
+
+   saveQuoteAction's create branch (Estimator) mints the quote FIRST, then
+   attempts the requested status advance — a refusal must still leave a
+   real, usable id, so the client's next Save (now routed through `update`,
+   once it adopts `res.id` regardless of `res.ok` — see the doSave source
+   check near the top of this file) never mints a second quote for the same
+   draft. Exercised here at the store layer directly, in the same sequence
+   saveQuoteAction's create branch runs (create() then setStatus()), because
+   requireUser() throws outside a request scope (same constraint noted at
+   #145/#174 above — the "use server" action itself can't be called from
+   this harness). The gate refused here is the exact one statusRefusalAsync
+   Checks just above exercises: a fresh "system" quote has no approval on
+   record, so advancing straight to "won" is always refused.
+
+   Fixtures are `TEST181:`-prefixed and torn down in `finally`.
+   ==================================================================== */
+async function refusedAdvanceAsyncChecks(): Promise<void> {
+  const Q_ESTIMATOR = "TEST181:estimator-refused-advance";
+  try {
+    const created181 = await QuoteStore.create({
+      id: Q_ESTIMATOR,
+      name: "#181 harness — refused advance on create",
+      quoteType: "system",
+      status: "draft",
+      customer: "Test Customer #181",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+    let advanceRefused = false;
+    try {
+      await QuoteStore.setStatus(created181.id, "won");
+    } catch {
+      advanceRefused = true;
+    }
+    ok(advanceRefused, "#181 fixture: the requested advance is refused, same as a real unapproved create-save");
+    const afterRefusal = await QuoteStore.get(created181.id);
+    ok(
+      !!afterRefusal && afterRefusal.id === Q_ESTIMATOR,
+      "#181 the quote the create branch minted is still there with a real id — this is what saveQuoteAction's res.id returns even when res.ok is false"
+    );
+    ok(afterRefusal?.status === "draft", "#181 the refused advance did not change the quote's status");
+
+    // The fixed client adopts res.id and sends it as loadedId on the next
+    // Save — i.e. the retry becomes update(id, …), never a second create().
+    await QuoteStore.update(created181.id, { name: "#181 harness — retried after refusal" });
+    const survivors181 = (await QuoteStore.getAll()).filter((q) => q.name.startsWith("#181 harness"));
+    ok(survivors181.length === 1, "#181 refused advance -> no second quote: retrying with the adopted id updates the same row rather than minting a new one");
+    ok(survivors181[0]?.id === Q_ESTIMATOR, "#181 the single surviving quote is the one the create branch originally minted");
+  } finally {
+    await softDeleteDoc("quotes", Q_ESTIMATOR);
   }
 }
 

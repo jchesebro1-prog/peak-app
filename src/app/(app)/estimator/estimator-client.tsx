@@ -756,7 +756,13 @@ export default function EstimatorClient({
           mobs,
           vendorQuotes,
         });
-        if (res.ok && res.id) {
+        // #181: adopt the id whenever the server hands one back, even when
+        // `ok` is false — the create branch mints the quote FIRST and only
+        // then attempts the requested status advance, so a refused advance
+        // still returns a real, saved id. Gating adoption on `res.ok` left
+        // `loadedId` unset, so the next Save took the create path again and
+        // minted a second quote for the same draft.
+        if (res.id) {
           setLoadedId(res.id);
           setQuoteId(res.id);
           // The server may have moved attachments into Blob storage — take its
@@ -772,9 +778,16 @@ export default function EstimatorClient({
           if (res.pipelineId) setPipelineId(res.pipelineId);
           if (res.stage) setStage(res.stage);
         }
-        setJustSaved(true);
-        if (savedTimer.current) clearTimeout(savedTimer.current);
-        savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+        if (res.ok) {
+          setActionError(null);
+          setJustSaved(true);
+          if (savedTimer.current) clearTimeout(savedTimer.current);
+          savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+        } else {
+          // The gate's own message (statusFailureMessage, D230) — the quote
+          // itself saved; only the requested status advance was refused.
+          setActionError(res.error || "That save did not go through — nothing was written.");
+        }
       } catch (e) {
         /* #143 re-review: a save that THROWS — a rejected request body, a
            dropped connection — used to be indistinguishable from a save that
