@@ -451,6 +451,71 @@ async function AdminBody({ sp }: { sp: Record<string, string | string[] | undefi
           );
         })}
 
+        {/* Daylite history — its own two-file flow (import tab only) */}
+        {tab === "import" && (
+          <div
+            className="im-card"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              background: "#fff",
+              border: "1px solid #ececf0",
+              borderRadius: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,.04)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ padding: "16px 16px 0", flex: 1 }}>
+              <span
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#fff",
+                  background: "#4a5a7a",
+                }}
+              >
+                DL
+              </span>
+              <div style={{ fontSize: 14.5, fontWeight: 600, marginTop: 12, letterSpacing: "-.01em" }}>
+                Daylite history
+              </div>
+              <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4, lineHeight: 1.5, minHeight: 36 }}>
+                Past and live projects, service calls and open quotes from Daylite’s Projects and Opportunities
+                exports.
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "13px 16px", marginTop: 6 }}>
+              <Link
+                href="/import/daylite"
+                className="im-linkbtn"
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: ACCENT,
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  textDecoration: "none",
+                }}
+              >
+                <span style={{ fontSize: 13, lineHeight: 1 }}>↑</span> Import
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* pricing / estimating-rules export (export tab only) */}
         {tab === "export" && (
           <div

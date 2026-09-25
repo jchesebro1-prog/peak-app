@@ -53,7 +53,7 @@ import {
 } from "@/lib/stores/projects";
 import * as Repairs from "@/lib/stores/repair-jobs";
 import * as Quotes from "@/lib/stores/quotes";
-import { parseTsv, planHistory, type ProjectPlan, type QuotePlan } from "./history";
+import { parseTsv, planHistory, staleLiveCompletedRepairs, type ProjectPlan, type QuotePlan } from "./history";
 import { companyId, contactId, projectId } from "./ids";
 
 export type PreviewRow = {
@@ -293,6 +293,7 @@ export async function previewHistory(projectsTsv: string, oppsTsv: string): Prom
     needsPick: 0,
     alreadyImported: 0,
     legacyOwners: 0,
+    staleLiveCompletedRepairs: staleLiveCompletedRepairs(plan.projects, Date.now()),
   };
   const rows: PreviewRow[] = [];
 
@@ -515,13 +516,35 @@ async function writeQuote(ctx: Ctx, q: QuotePlan, r: Resolved, importedAt: numbe
   await upsertDoc<Quotes.Quote>("quotes", doc);
 }
 
+export type CommitResult = {
+  created: Record<string, number>;
+  skippedExisting: number;
+  errors: string[];
+  /** Length of the whole work list (projects then quotes), whatever the range. */
+  total: number;
+};
+
+/**
+ * Write the plan. `range` (Task 12) processes only that slice of the work
+ * list — the plan's projects/repairs/orders in order, then its quotes — so the
+ * Import hub can commit in chunks that each fit a serverless function's time
+ * limit. The list is rebuilt deterministically from the same inputs on every
+ * call, and it is ordered projects → quotes, so any split still writes every
+ * project before the won quotes that link it. Every id is deterministic and a
+ * taken id is skipped, so a failed chunk is simply retried.
+ */
 export async function commitHistory(
   projectsTsv: string,
   oppsTsv: string,
   picks: Record<string, string>,
-  by: string
-): Promise<{ created: Record<string, number>; skippedExisting: number; errors: string[] }> {
+  by: string,
+  range?: { start: number; end: number }
+): Promise<CommitResult> {
   const ctx = await loadContext(projectsTsv, oppsTsv);
+  const nProjects = ctx.plan.projects.length;
+  const total = nProjects + ctx.plan.quotes.length;
+  const start = range ? Math.max(0, Math.floor(range.start) || 0) : 0;
+  const end = range ? Math.min(total, Math.floor(range.end) || 0) : total;
   const importedAt = Date.now();
   const created: Record<string, number> = {
     projects: 0,
@@ -538,7 +561,7 @@ export async function commitHistory(
 
   // Projects/repairs/orders first, so a won quote below can link a project
   // written in this same run.
-  for (const p of ctx.plan.projects) {
+  for (const p of ctx.plan.projects.slice(Math.min(start, nProjects), Math.max(0, Math.min(end, nProjects)))) {
     if (takenFor(ctx, p)) {
       skippedExisting++;
       continue;
@@ -559,7 +582,7 @@ export async function commitHistory(
     }
   }
 
-  for (const q of ctx.plan.quotes) {
+  for (const q of ctx.plan.quotes.slice(Math.max(0, start - nProjects), Math.max(0, end - nProjects))) {
     if (ctx.taken.quotes.has(q.id)) {
       skippedExisting++;
       continue;
@@ -582,5 +605,5 @@ export async function commitHistory(
     }
   }
 
-  return { created, skippedExisting, errors };
+  return { created, skippedExisting, errors, total };
 }

@@ -68,6 +68,8 @@ const ROUTES = [
   "/import/export?type=contacts&kind=template",
   "/import/export?type=venues",
   "/import/export?type=venues&kind=template",
+  // Daylite history import (Task 12) — two-file preview + chunked confirm.
+  "/import/daylite",
   "/catalog",
   "/estimating-rules",
   "/inspections",

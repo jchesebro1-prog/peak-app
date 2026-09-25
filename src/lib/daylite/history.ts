@@ -513,3 +513,31 @@ export function planHistory(input: {
     stats: { valueConflicts, unmappedOppStages },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Preview warnings
+// ---------------------------------------------------------------------------
+
+/**
+ * Live service calls that Daylite still has open at a completed stage
+ * ("Service Completed" / "Invoice Sent") with an End Date more than 12 months
+ * before `now`. Commit imports them as completed repairs whose completedAt is
+ * the End Date (falling back to the Start Date, same as commit), and because
+ * they are live rather than done they stay in the warranty follow-ups — as
+ * lapsed warranties. The preview warns with this count so Jeff can close them
+ * in Daylite first. The cutoff is the same calendar day a year back, local
+ * time: an End Date exactly a year ago is not yet "more than" 12 months.
+ */
+export function staleLiveCompletedRepairs(plans: ProjectPlan[], now: number): number {
+  const cutoff = new Date(now);
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  const limit = cutoff.getTime();
+  let n = 0;
+  for (const p of plans) {
+    if (p.kind !== "repair" || p.done || p.stage !== "completed") continue;
+    const at = p.endedAt ?? p.startedAt;
+    if (at != null && at < limit) n++;
+  }
+  return n;
+}

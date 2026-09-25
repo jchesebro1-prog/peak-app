@@ -108,7 +108,7 @@ import {
   type FileRef,
 } from "@/lib/consulting-files";
 import { companyId as dayliteCompanyId } from "@/lib/daylite/ids";
-import { parseTsv, classifyProject, planHistory, splitCompanies, stripStage, toMs } from "@/lib/daylite/history";
+import { parseTsv, classifyProject, planHistory, splitCompanies, stripStage, toMs, staleLiveCompletedRepairs } from "@/lib/daylite/history";
 import {
   archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
   ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
@@ -7394,6 +7394,93 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok(!!oldQ && oldQ.owner === "" && oldQ.legacyOwner === "Old Timer" && oldQ.status === "draft" && oldQ.stage === "design" && oldQ.value === 2000, "daylite commit: a single-write quote keeps an unmatched owner unassigned (no Jeff default) + legacyOwner");
 }
 
+/* ============ Task 12: chunked Daylite commit == one full commit (DB) ============ */
+async function dayliteChunkAsyncChecks(): Promise<void> {
+  const { previewHistory, commitHistory } = await import("@/lib/daylite/history-commit");
+  const { saveCompany } = await import("@/lib/identity/companies");
+  const { companyId } = await import("@/lib/daylite/ids");
+  const { getDb } = await import("@/db");
+  const { inArray } = await import("drizzle-orm");
+  const { listDocs } = await import("@/db/doc-store");
+
+  for (const [name, type] of [["ZK School", "School"], ["ZK Builder", "General Contractor"], ["ZK Church", "Church"]] as const)
+    await saveCompany({ id: companyId(name), name, type });
+
+  // Projects → repairs/orders → quotes, with won quotes that link a project
+  // written in an EARLIER chunk and one that makes its own project, a company
+  // pick, and one stale live completed service call for the preview warning.
+  const P = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"ZK Done Install"\tDone\tInstallation\t"8 • Final Payment Received"\t\t10/21/11\t2/22/12\t\t\t"Ann Lee"\t"ZK Church"\t"Jeff Chesebro"\t
+\t\t"ZK Live Install"\tNew\tBasic Install\t"3 • Installation"\t\t4/1/26\t\t\t\t\t"ZK Builder, ZK School"\t"Jeff Chesebro"\t
+\tService\t"ZK Stale Service"\tNew\tService Call\t"3 • Service Completed"\t\t1/5/20\t2/1/20\t\t\t\t"ZK School"\t"Mike Mundth"\t
+\tService\t"ZK Done Service"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"ZK School"\t"Jeff Chesebro"\t
+\t\t"ZK Cable Order"\tDone\tCustom Cables\t\t\t3/1/24\t3/9/24\t\t\t\t"ZK School"\t"Jeff Chesebro"\t`;
+  const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"ZK Done Install"\tWon\t\t\t"$12,000.00"\t\t\t\t\t\t"ZK Church"\t"Jeff Chesebro"\t
+\tBid\t"ZK Live Install"\tOpen\t\t\t"$30,000.00"\tBID SPEC\t"8 • Final Invoice"\t\t\t\t"ZK Builder, ZK School"\t"Jeff Chesebro"\t
+\tBid\t"ZK New Sold Job"\tOpen\t\t\t"$9,500.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"ZK School"\t"Jeff Chesebro"\t
+\tDesign\t"ZK Draft Quote"\tOpen\t\t\t"$2,000.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZK Church"\t"Jeff Chesebro"\t`;
+  const pv = await previewHistory(P, O);
+  // Override the default (ZK School, the non-contractor) on every pick row.
+  const picks = Object.fromEntries(pv.needsPick.map((r) => [r.id, "ZK Builder"]));
+  ok(pv.needsPick.length === 2, "daylite chunk: the two-company install and its opp need a pick");
+  ok(pv.counts.staleLiveCompletedRepairs === 1, "daylite chunk: preview counts one stale live completed service call");
+
+  const colls = ["projects", "repair_jobs", "quotes"] as const;
+  const snapshot = async (): Promise<Record<string, string>> => {
+    const out: Record<string, string> = {};
+    for (const c of colls)
+      for (const d of await listDocs(c, { includeDeleted: true }))
+        // A project note id is random ("nt-xxxxxx"); everything else must match.
+        out[`${c}/${d.id}`] = JSON.stringify(d).replace(/"nt-[a-z0-9]+"/g, '"nt-*"');
+    return out;
+  };
+  const hardDelete = async (keys: string[]) => {
+    const db = await getDb();
+    for (const c of colls) {
+      const ids = keys.filter((k) => k.startsWith(c + "/")).map((k) => k.slice(c.length + 1));
+      if (ids.length) await db.delete(DOC_TABLES[c]).where(inArray(DOC_TABLES[c].id, ids));
+    }
+  };
+
+  const realNow = Date.now;
+  const FIXED = new Date(2026, 8, 24, 12).getTime();
+  Date.now = () => FIXED;
+  try {
+    const base = await snapshot();
+    const full = await commitHistory(P, O, picks, "Test Admin");
+    const afterFull = await snapshot();
+    const fullKeys = Object.keys(afterFull).filter((k) => !(k in base)).sort();
+    ok(full.errors.length === 0 && full.total === 8 && fullKeys.length === 9, `daylite chunk: full commit writes 9 docs (8 work items + the sold job's new project) (${fullKeys.length}, total ${full.total}, errors ${full.errors.join("; ")})`);
+    await hardDelete(fullKeys);
+    ok(Object.keys(await snapshot()).length === Object.keys(base).length, "daylite chunk: the full run's docs are removed before the chunked run");
+
+    // Split after the 3rd work item: the quotes (items 5-7) land in the
+    // second chunk and must link a project the first chunk wrote.
+    const a = await commitHistory(P, O, picks, "Test Admin", { start: 0, end: 3 });
+    const b = await commitHistory(P, O, picks, "Test Admin", { start: 3, end: 8 });
+    const afterChunks = await snapshot();
+    const chunkKeys = Object.keys(afterChunks).filter((k) => !(k in base)).sort();
+    ok(a.total === 8 && b.total === 8 && a.errors.length === 0 && b.errors.length === 0, "daylite chunk: every chunk reports the same total, no errors");
+    const sum = (k: string) => (a.created[k] || 0) + (b.created[k] || 0);
+    ok(
+      Object.keys(full.created).every((k) => sum(k) === full.created[k]) && a.skippedExisting + b.skippedExisting === full.skippedExisting,
+      "daylite chunk: chunk created/skipped counts add up to the full run's"
+    );
+    ok(
+      JSON.stringify(chunkKeys) === JSON.stringify(fullKeys) && chunkKeys.every((k) => afterChunks[k] === afterFull[k]),
+      "daylite chunk: two ranges write exactly the same docs as one full commit" +
+        (chunkKeys.find((k) => afterChunks[k] !== afterFull[k]) ? ` — first diff: ${chunkKeys.find((k) => afterChunks[k] !== afterFull[k])}` : "")
+    );
+    const again = await commitHistory(P, O, picks, "Test Admin", { start: 3, end: 150 });
+    ok(again.skippedExisting === 5 && Object.values(again.created).every((n) => n === 0), "daylite chunk: a retried chunk is idempotent; an end past total is clamped");
+    const empty = await commitHistory(P, O, picks, "Test Admin", { start: 8, end: 158 });
+    ok(empty.total === 8 && empty.skippedExisting === 0 && Object.values(empty.created).every((n) => n === 0), "daylite chunk: a range past the end does nothing");
+  } finally {
+    Date.now = realNow;
+  }
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -7412,6 +7499,7 @@ seeded()
   .then(() => quotesPipelineAsyncChecks())
   .then(() => moveStageRecordsAsyncChecks())
   .then(() => dayliteCommitAsyncChecks())
+  .then(() => dayliteChunkAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -9239,6 +9327,27 @@ ok(
   const dupeRows = parseTsv(P).slice(0, 1).concat(parseTsv(P).slice(0, 1));
   const dupePlan = planHistory({ projects: dupeRows, opportunities: [], knownCompany: kn });
   ok(dupePlan.projects.length === 1 && dupePlan.skipped.projects["duplicate"] === 1, "daylite: a repeated project row keeps the first plan and counts the rest as duplicate, never a colliding id");
+
+  // Task 12: live service calls sitting at a completed stage with an old End
+  // Date import as completed repairs and read as lapsed warranties — the
+  // preview warns with a count. "More than 12 months" before a fixed now.
+  const SP = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\tService\t"ZS Old Open"\tNew\tService Call\t"3 • Service Completed"\t\t1/5/20\t2/1/20\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS Old Invoiced Open"\tNew\tService Call\t"4 • Invoice Sent"\t\t1/5/20\t9/23/25\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS Exactly A Year"\tNew\tService Call\t"4 • Invoice Sent"\t\t1/5/20\t9/24/25\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS Recent Open"\tNew\tService Call\t"4 • Invoice Sent"\t\t1/5/26\t8/1/26\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS Old Done"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS Old Scheduled"\tNew\tService Call\t"2 • Service Scheduled"\t\t1/5/19\t1/20/19\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS Start Only"\tNew\tService Call\t"3 • Service Completed"\t\t1/5/19\t\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\tService\t"ZS No Dates"\tNew\tService Call\t"3 • Service Completed"\t\t\t\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t
+\t\t"ZS Old Install"\tNew\tBasic Install\t"3 • Installation"\t\t1/5/19\t1/20/19\t\t\t\t"Pardeeville Schools"\t"Jeff Chesebro"\t`;
+  const stalePlan = planHistory({ projects: parseTsv(SP), opportunities: [], knownCompany: kn });
+  const staleNow = new Date(2026, 8, 24, 12).getTime();
+  ok(
+    staleLiveCompletedRepairs(stalePlan.projects, staleNow) === 3,
+    "daylite: stale live completed repairs — End Date over 12 months ago (or the Start Date commit falls back to), live, completed stage; not done, not scheduled, not dateless, not an install, not exactly a year"
+  );
+  ok(staleLiveCompletedRepairs([], staleNow) === 0, "daylite: no plans, no stale repairs");
 }
 
 /* ====== #162 the writer (scratch datadir only) ====== */
