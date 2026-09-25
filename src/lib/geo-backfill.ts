@@ -285,24 +285,47 @@ export function precisionOf(row: { address?: string | null }): GeocodePrecision 
 export const POSTAL_CITY_RADIUS_MI = 10;
 
 /**
- * Is a street-level hit within POSTAL_CITY_RADIUS_MI of the venue's stated
- * town centre? The centre is looked up once per town per run (cached in
- * `centres`), paced like every other Nominatim call, and must itself pass the
- * exact city gate — an unresolvable or mismatched town means "no".
+ * How far a hit accepted ONLY because its zip matches (D235 item 4 — a
+ * fallback attempt drops or typo's the city on purpose) may still sit from
+ * the venue's stated town centre before that's untrustworthy anyway. A
+ * five-digit zip can span a wide or oddly-shaped area, so this is looser
+ * than POSTAL_CITY_RADIUS_MI, but a hit two counties over sharing a zip only
+ * by coincidence still needs to be caught.
  */
+export const ZIP_GATE_MAX_MI = 25;
+
+/**
+ * The venue's stated town centre, looked up once per town per run (cached in
+ * `centres`) and paced like every other Nominatim call. Always keyed on the
+ * CLEANED city (D235 fix round 1) — a structured city search chokes on the
+ * same noise cleanCity() strips ("Rome (Sullivan)", "Wisc. Dells"), so a
+ * fallback attempt's search must not hand it the raw text. Must itself pass
+ * the exact city gate — an unresolvable or mismatched town means null.
+ */
+async function townCentreFor(
+  city: string | null | undefined,
+  state: string | null | undefined,
+  centres: Map<string, GeoSearchHit | null>,
+  delayMs: number
+): Promise<GeoSearchHit | null> {
+  const cleaned = cleanCity(city);
+  const key = `${cleaned.toLowerCase()}|${(state || "").trim().toLowerCase()}`;
+  if (!centres.has(key)) {
+    await sleep(delayMs);
+    const [c] = await searchCity(cleaned, state, { limit: 1 });
+    centres.set(key, c && samePlace(cleaned, c.city) ? c : null);
+  }
+  return centres.get(key) ?? null;
+}
+
+/** Is a street-level hit within POSTAL_CITY_RADIUS_MI of the venue's stated town centre? */
 async function nearStatedTown(
   hit: GeoSearchHit,
   row: { city?: string | null; state?: string | null },
   centres: Map<string, GeoSearchHit | null>,
   delayMs: number
 ): Promise<boolean> {
-  const key = `${(row.city || "").trim().toLowerCase()}|${(row.state || "").trim().toLowerCase()}`;
-  if (!centres.has(key)) {
-    await sleep(delayMs);
-    const [c] = await searchCity(row.city, row.state, { limit: 1 });
-    centres.set(key, c && samePlace(row.city, c.city) ? c : null);
-  }
-  const centre = centres.get(key);
+  const centre = await townCentreFor(row.city, row.state, centres, delayMs);
   const d = centre ? haversineMiles(hit, centre) : null;
   return d != null && d <= POSTAL_CITY_RADIUS_MI;
 }
@@ -359,24 +382,33 @@ async function gateHit(
     return { ok: false, reason: "state-mismatch", got: `${hit.city}, ${hit.state}` };
 
   const cityForCompare = opts?.cityForCompare ?? row.city;
+  const cityText = (cityForCompare || "").trim();
   // D235 zip gate: a fallback query dropped the city on purpose (a typo or a
   // postal/OSM city disagreement is exactly why attempt 1 failed), so a hit
-  // whose zip matches the row's is accepted even though the city text does not.
+  // whose zip matches the row's is a candidate even though the city text does
+  // not — item 4 below still checks it isn't a same-zip coincidence far away.
   const zipMatches = !!(opts?.zip5 && hit.zip && hit.zip.slice(0, 5) === opts.zip5);
 
   // Second gate: the right state is not the right place ("Portage" -> Portage
   // County, "LaCrosse" -> Town of Baraboo, both in Wisconsin). Require the
   // resolved city to BE the stated city — except a street-level hit within
   // POSTAL_CITY_RADIUS_MI of the stated town's centre, because a mailing city
-  // is postal, not municipal (Old Sauk Rd, Middleton is filed under Madison) —
-  // or, for a fallback attempt, a matching zip.
-  if (
-    (cityForCompare || "").trim() &&
-    !samePlace(cityForCompare, hit.city) &&
-    !zipMatches &&
-    !(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))
-  )
-    return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+  // is postal, not municipal (Old Sauk Rd, Middleton is filed under Madison).
+  if (cityText && !samePlace(cityForCompare, hit.city)) {
+    if (zipMatches) {
+      // D235 item 4: a matching zip earns the benefit of the doubt UNLESS the
+      // stated town resolves to somewhere the hit plainly isn't — a shared
+      // zip code can span a wide area, so "same zip" alone isn't proof once
+      // we can actually check against a real centre. An unresolvable stated
+      // town (a typo Nominatim also can't place) still gets the zip alone.
+      const centre = await townCentreFor(row.city, row.state, ctx.townCentres, ctx.delayMs);
+      const d = centre ? haversineMiles(hit, centre) : null;
+      if (d != null && d > ZIP_GATE_MAX_MI)
+        return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+    } else if (!(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))) {
+      return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+    }
+  }
 
   return { ok: true };
 }

@@ -383,6 +383,21 @@ async function main() {
     assert.ok(!h.ok, "a degenerate fallback street is not geocoded via fallback");
     assert.equal(calls - callsBeforeH, 1, "only attempt 1's request is made; fallbacks are skipped");
 
+    // #185 item 4: the zip gate must not wave through a hit that's merely in
+    // the same zip as the row but nowhere near the stated town. "Middleton"
+    // resolves to a real centre (registered above); the no-city fallback's
+    // hit shares the row's zip but sits 100+ miles away in "FarTown" — reject.
+    const ctxM = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "500 far zip dr, wi 53562",
+      hit: { lat: 44.5, lng: -91.0, city: "FarTown", state: "Wisconsin", zip: "53562" },
+    });
+    const m = await geocodeVenue(
+      { address: "500 Far Zip Dr", city: "Middleton", state: "WI", zip: "53562" },
+      ctxM
+    );
+    assert.ok(!m.ok, "a same-zip hit far from the resolvable stated-town centre is rejected");
+
     console.log("PASS geo-backfill: geocodeVenue fallback chain");
   }
 
