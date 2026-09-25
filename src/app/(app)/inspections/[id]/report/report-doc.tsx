@@ -206,7 +206,6 @@ export function InspectionReportSheets({
   );
   const foot = <div style={footStyle}>{footerText}</div>;
   const letterhead = (
-    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={logoDark || peakLetterhead.src}
       alt={companyName}
@@ -713,7 +712,6 @@ export function InspectionReportSheets({
       {isCompact && (
         <div className="rp-sheet" style={{ ...sheet, padding: "1in 0.9in", alignItems: "stretch", textAlign: "center", justifyContent: "space-between" }}>
           <div style={{ position: "relative", zIndex: 1 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={logoDark || peakLetterhead.src}
               alt={companyName}

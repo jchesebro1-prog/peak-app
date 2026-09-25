@@ -66,7 +66,7 @@ export default async function RentalQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, customerDocs, items, locations, settings] = await Promise.all([
+  const [, sp, customerDocs, items, locations, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
@@ -180,7 +180,6 @@ export default async function RentalQuotePage({
       locations={locations.map((l) => ({ id: l.id, name: l.name }))}
       categories={CATEGORIES.map((c) => ({ key: c, label: CATEGORY_LABEL[c] }))}
       initial={initial}
-      me={user.name}
       accent={settings.accent || "#7b3f8a"}
       />
     </>

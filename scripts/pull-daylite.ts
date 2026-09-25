@@ -131,7 +131,7 @@ function toCsv(records: Record<string, unknown>[]): string {
   if (!records.length) return "";
   const keys: string[] = [];
   const seen = new Set<string>();
-  for (const r of records) for (const k of Object.keys(r)) if (!seen.has(k)) (seen.add(k), keys.push(k));
+  for (const r of records) for (const k of Object.keys(r)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
   const esc = (v: unknown): string => {
     if (v === null || v === undefined) return "";
     const s = typeof v === "object" ? JSON.stringify(v) : String(v);

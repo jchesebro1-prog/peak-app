@@ -10,7 +10,7 @@
  *
  * Prints nothing that identifies the connection — safe to paste back.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import postgres from "postgres";
 

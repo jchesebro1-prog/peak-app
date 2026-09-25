@@ -130,7 +130,6 @@ export function QuoteBuilder({
   locations,
   categories,
   initial,
-  me,
   accent,
 }: {
   customers: BuilderCustomer[];
@@ -138,7 +137,6 @@ export function QuoteBuilder({
   locations: BuilderLocation[];
   categories: BuilderOption[];
   initial: BuilderInitial;
-  me: string;
   accent: string;
 }) {
   const [customerId, setCustomerId] = useState(initial.customerId);

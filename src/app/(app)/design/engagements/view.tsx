@@ -76,12 +76,6 @@ const TAB_LABEL: Record<TabKey, string> = {
   documents: "Documents",
 };
 
-const REVIEW_TONE: Record<string, string> = {
-  none: "gray",
-  in_review: "orange",
-  approved: "green",
-  changes: "red",
-};
 const REVIEW_LABEL: Record<string, string> = {
   none: "No review",
   in_review: "In review",

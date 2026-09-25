@@ -18,7 +18,6 @@ import {
   STAGING_BUFFER,
   signoffScopes,
   type ProjectRecord,
-  type ProjectStage,
   type ProjectKind,
   type LineStatus,
   type DeliveryStatus,
@@ -1186,7 +1185,7 @@ function ProjectDetail({
         )}
         {curTab === "timeline" && <TimelineTab p={p} isOrder={isOrder} />}
         {curTab === "packet" && <HandoffPacketTab p={p} taskRows={taskRows} />}
-        {curTab === "signoff" && <SignoffTab p={p} meta={meta} pipeline={pipeline} initialsOf={initialsOf} />}
+        {curTab === "signoff" && <SignoffTab p={p} meta={meta} pipeline={pipeline} />}
       </div>
     </>
   );
@@ -2076,12 +2075,10 @@ function SignoffTab({
   p,
   meta,
   pipeline,
-  initialsOf,
 }: {
   p: ProjectRecord;
   meta: StageMeta;
   pipeline: ProjectPipeline;
-  initialsOf: (n: string) => string;
 }) {
   const so = p.signoff;
   const scopes = signoffScopes(p);

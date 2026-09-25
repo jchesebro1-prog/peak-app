@@ -1111,7 +1111,7 @@ export default async function SchedulePage({
                       ))}
                     </div>
 
-                    {roster.map((person, rowIndex) => {
+                    {roster.map((person) => {
                       const mine = bookings.filter((b) => b.person === person.name);
                       const pk = packs[person.name] || { map: {}, n: 1 };
                       const barTop = (tk: number) =>
