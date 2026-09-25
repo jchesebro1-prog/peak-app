@@ -19,7 +19,7 @@ Today `/design/assemblies` shows two tabs over two unrelated record types (D156/
   option boxes data/power/mounting/accessories), `price = cost`, requires light engine + lens, refuses missing catalog
   parts, `manage_users` only. Consumed by nothing outside its own screen.
 
-The result is **one record type, one form, one tab ("Fixtures")**, used everywhere assemblies are used today.
+The result is **one record type, one form, one list ("Assemblies": fixtures + systems)**, used everywhere assemblies are used today.
 
 ## 2. Decisions (from the brainstorm)
 
@@ -29,10 +29,15 @@ The result is **one record type, one form, one tab ("Fixtures")**, used everywhe
    consumed by Estimator, Quick Design and Grid.
 3. **Box lines carry a default qty.** Qty ≥ 1 = included when the fixture is placed; **qty 0 = compatible optional
    add-on**, offered (off by default) in the Estimator / Quick Design / Grid.
-4. **Required:** label + light engine. Lens optional. A catalog part that no longer exists shows a warning and prices
+4. **Required:** label + light engine (fixture); label + scope + at least one part (system). Lens optional. A catalog part that no longer exists shows a warning and prices
    as missing but **does not block save**.
 5. **Permission:** anyone signed in (`requireUser()`); every save stamps `updatedAt` / `updatedBy`.
 6. **Storage:** one doc-store collection; existing records convert **keeping their ids** (`fa-…` and `SA-…`).
+7. **Two types, one builder** (added 2026-09-25, from the Grid brainstorm): "New assembly" asks **Fixture** or
+   **System**. Fixture = the form above. System = label, description, **scope** (Lighting, Controls, Audio, Video,
+   Rigging, Curtains, Acoustical, Pit, Other) and **one parts list** with the same line logic (qty, 0 = optional, cost
+   override, reorder). Used for bundles such as "Digital mixer, DSP & amplifiers", "Video processor & switcher",
+   "Distro system"; the Grid Equipment map points at them.
 
 ## 3. Data
 
@@ -41,9 +46,12 @@ table, no SQL migration. Record shape (`FixtureRecord`, `src/lib/stores/fixtures
 `FixtureSubassembly`'s module; the old export names stay as aliases so older readers compile):
 
 ```
-{ id, kind: "fixture", label, description,
+{ id, kind: "fixture" | "system", label, description,
+  scope?,                                          // system only
+  // fixture only:
   lightEngineSku, lensSku | null, lamp?, position?, circuit?,
-  lines: Record<"data"|"power"|"mounting"|"accessories", FixtureLine[]>,
+  lines: Record<"data"|"power"|"mounting"|"accessories", FixtureLine[]>,   // fixture
+  parts?: FixtureLine[],                                                      // system
   snapshot?: { cost, price, pricedAt },            // build-time, for the "was $X" badge
   createdAt, createdBy, updatedAt, updatedBy,
   legacy?: { from: "assembly"|"subassembly" } }
@@ -71,7 +79,7 @@ for a missing part.
 ## 4. Pricing (pure, `src/lib/fixture-assemblies.ts`)
 
 `resolveFixture(record, catalog)`:
-- Parts = light engine (qty 1), lens (qty 1, if any), then every box line.
+- Parts = fixture: light engine (qty 1), lens (qty 1, if any), then every box line; system: its parts list.
 - For each part: `cost = costOverride ?? catalog.cost`, `sell = catalog.price` (the Assemblies rule); missing part →
   `found: false`, contributes 0, warning shown.
 - **Included total** = Σ over parts with qty ≥ 1 of `qty × cost` / `qty × sell`. Optional (qty 0) lines are listed with
@@ -85,14 +93,16 @@ for a missing part.
   line is unchanged in shape (`sku: fixture.id`, description, aggregate cost/price, `components[]`).
 - **Quick Design** (5 buckets) and **Grid** scope panel / intake: pick fixtures instead of assemblies; included parts
   only (optional add-ons are an Estimator-level choice).
-- **Accessory graph** (Part documents, `syncAccessoryLinks`): scope `fixture:<id>`; parent = light engine SKU;
+- **Grid Equipment map** (`2026-09-25-grid-equipment-map-and-auto-intake-design.md`): map cells may point at any
+  fixture or system assembly.
+- **Accessory graph** (fixtures only; Part documents, `syncAccessoryLinks`): scope `fixture:<id>`; parent = light engine SKU;
   accessories = lens + every box line (included or optional); the per-line **"has its own datasheet"** toggle lives on
   each line in this form. The part-documents branch's `assembly:<id>` / `subassembly:<id>` scopes are re-synced to the
   single scope and their old rows soft-deleted.
 
 ## 6. What the user sees
 
-- `/design/assemblies` → one **Fixtures** view (the `?tab=` switch goes; `?tab=subassemblies` and
+- `/design/assemblies` → one **Assemblies** view listing fixtures and systems, with a Fixture/System filter (the `?tab=` switch goes; `?tab=subassemblies` and
   `/design/subassemblies` keep redirecting to it).
 - The form (§2.1) with, per box line: part, qty (0 labelled "optional"), cost override, ↑/↓, ×, and the datasheet
   coverage chip/toggle. Footer: live included cost and sell + "prices as of…". Saved list below: Edit, delete via
@@ -110,5 +120,5 @@ tsc, eslint (baseline), test:specs, regressions harness, test:smoke, `next build
 
 ## 8. Out of scope
 
-Non-fixture assemblies (racks, panels); per-quote editing of the fixture record itself; margin rules beyond the
+Per-quote editing of the fixture record itself; margin rules beyond the
 catalog's sell price.
