@@ -15566,3 +15566,134 @@ import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDo
   ok(blobPathBelongsTo("part-docs/PD-abcdef123456/a_b-Xy12.pdf", "PD-abcdef123456"), "part docs ids: a suffixed pathname under the id belongs to it");
   ok(!blobPathBelongsTo("part-docs/PD-other123456/a.pdf", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/../x", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/sub/x.pdf", "PD-abcdef123456"), "part docs ids: another document's path, traversal and nesting are refused");
 }
+
+/* ======================================================================
+   Part documents (#DOC) — Task 2: the coverage rule, the quoted-parts
+   counter, the filename matcher and the kind guesser. All pure.
+   ====================================================================== */
+import {
+  buildCoverageIndex, slotCoverage, slotSatisfied, coveredLabel, collapseList, datasheetSatisfiedSkus, urlKindOf,
+  COVERED_COLLAPSE,
+} from "@/lib/part-docs/coverage";
+import { quoteLineSkus, quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
+import { buildFilenameIndex, matchFileName, guessKind, normalizeFileName, MIN_MATCH_KEY } from "@/lib/part-docs/filename-match";
+import type { PartDocument as PdDoc, PartDocumentLink as PdLink, PartAccessoryLink as PdAcc } from "@/lib/part-docs/types";
+
+{
+  const doc = (id: string, kind: "datasheet" | "specsheet", file: boolean, url: string | null = null): PdDoc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1,
+    blobKey: file ? `part-docs/${id}/${id}.pdf` : null, sourceUrl: url, source: file ? "upload" : "davinci",
+    uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const link = (partSku: string, d: PdDoc): PdLink => ({ id: `L-${partSku}-${d.id}`, partSku, documentId: d.id, kind: d.kind, createdAt: 1, createdBy: "t" });
+  const acc = (parentSku: string, accessorySku: string, ownDatasheet = false): PdAcc => ({ id: `A-${parentSku}-${accessorySku}`, parentSku, accessorySku, source: "assembly", ownDatasheet });
+
+  const F1 = doc("PD-fix1aaaaaaa", "datasheet", true);
+  const F2 = doc("PD-fix2aaaaaaa", "datasheet", true);
+  const LENS = doc("PD-lensaaaaaaa", "datasheet", true);
+  const LINK = doc("PD-linkaaaaaaa", "datasheet", false, "https://example.com/x.pdf");
+  const SPEC = doc("PD-specaaaaaaa", "specsheet", true);
+  const index = buildCoverageIndex({
+    documents: [F1, F2, LENS, LINK, SPEC],
+    links: [link("FIX1", F1), link("FIX1", SPEC), link("FIX2", F2), link("LENSOWN", LENS), link("LINKY", LINK), link("FIX1", F1)],
+    accessoryLinks: [
+      acc("FIX1", "LENS"), acc("FIX2", "LENS"), acc("FIX1", "CLAMP"), acc("FIX1", "LENSOWN"),
+      acc("FIX1", "OPTOUT", true), acc("NODOC", "ORPHAN"), acc("FIX1", "FIX1"),
+    ],
+    parts: [
+      { sku: "NN", docNotNeeded: { datasheet: true } },
+      { sku: "URLONLY", docs: [{ kind: "datasheet", url: "https://etc.example/ds.pdf" }, { kind: "manual", url: "https://etc.example/m.pdf" }] },
+      { sku: "GUIDE", productMetadata: { datasheets: [{ kind: "guide-spec", sourceUrl: "https://mfr.example/guide.docx" }] } },
+      { sku: "LINKY", docs: [{ kind: "datasheet", url: "https://example.com/x.pdf" }] },
+    ],
+  });
+
+  // 1. own
+  const own = slotCoverage(index, "FIX1", "datasheet");
+  ok(own.state === "own" && own.docs.length === 1, "part docs coverage: an own file is 'own' (a duplicate link row counts once)");
+  ok(slotCoverage(index, "FIX1", "specsheet").state === "own", "part docs coverage: kinds are independent slots");
+  // 2. not needed
+  ok(slotCoverage(index, "NN", "datasheet").state === "not-needed", "part docs coverage: a not-needed mark satisfies its kind");
+  ok(slotCoverage(index, "NN", "specsheet").state === "missing", "part docs coverage: …and only its kind");
+  // 3. covered
+  const lens = slotCoverage(index, "LENS", "datasheet");
+  ok(lens.state === "covered" && lens.parents.join(",") === "FIX1,FIX2" && lens.docs.length === 2, "part docs coverage: an accessory is covered by every parent's own datasheet, N = distinct parent documents");
+  ok(slotCoverage(index, "LENSOWN", "datasheet").state === "own", "part docs coverage: an accessory's own file wins over coverage");
+  ok(slotCoverage(index, "OPTOUT", "datasheet").state === "missing", "part docs coverage: an ownDatasheet pair never covers");
+  ok(slotCoverage(index, "ORPHAN", "datasheet").state === "missing", "part docs coverage: a parent without a file covers nothing");
+  ok(slotCoverage(index, "CLAMP", "specsheet").state === "covered", "part docs coverage: spec sheets ride the same graph");
+  ok(slotCoverage(index, "FIX1", "datasheet").state === "own" && !index.parentsOf.has("FIX1"), "part docs coverage: a self-link is dropped");
+  // context
+  const inQuote = slotCoverage(index, "LENS", "datasheet", new Set(["LENS", "FIX2"]));
+  ok(inQuote.state === "covered" && inQuote.parents.join(",") === "FIX2", "part docs coverage: in a quote only parents on that quote cover");
+  ok(slotCoverage(index, "LENS", "datasheet", new Set(["LENS"])).state === "missing", "part docs coverage: an accessory quoted without any fixture is not covered on that quote");
+  // 4. link only
+  const urlOnly = slotCoverage(index, "URLONLY", "datasheet");
+  ok(urlOnly.state === "link-only" && urlOnly.urls.join(",") === "https://etc.example/ds.pdf", "part docs coverage: a catalog datasheet URL is link-only (a manual is not)");
+  ok(slotCoverage(index, "GUIDE", "specsheet").state === "link-only", "part docs coverage: a Guide Spec URL feeds the spec-sheet slot");
+  const linky = slotCoverage(index, "LINKY", "datasheet");
+  ok(linky.state === "link-only" && linky.docs.length === 1 && linky.urls.length === 0, "part docs coverage: a URL already on a linked document is not listed twice");
+  // 5. missing
+  ok(slotCoverage(index, "NOTHING", "datasheet").state === "missing", "part docs coverage: nothing at all is missing");
+  // helpers
+  ok(slotSatisfied(own) && slotSatisfied(lens) && !slotSatisfied(urlOnly) && !slotSatisfied({ state: "missing" }), "part docs coverage: own/covered satisfy, link-only/missing do not");
+  ok(slotSatisfied({ state: "not-needed" }), "part docs coverage: not-needed satisfies");
+  const sat = datasheetSatisfiedSkus(index, ["FIX1", "LENS", "URLONLY", "NN", "NOTHING"]);
+  ok([...sat].sort().join(",") === "FIX1,LENS,NN", "part docs coverage: datasheetSatisfiedSkus applies the rule, link-only excluded");
+  ok(COVERED_COLLAPSE === 5, "part docs coverage: the covered list collapses above 5");
+  const c = collapseList([1, 2, 3, 4, 5, 6, 7]);
+  ok(c.shown.length === 5 && c.more === 2 && collapseList([1, 2]).more === 0, "part docs coverage: collapseList shows 5 and counts the rest");
+  ok(coveredLabel(1, "datasheet") === "Covered on 1 fixture datasheet" && coveredLabel(3, "specsheet") === "Covered on 3 fixture spec sheets", "part docs coverage: the covered label pluralizes");
+  ok(urlKindOf("cut-sheet") === "datasheet" && urlKindOf("guide-spec") === "specsheet" && urlKindOf("manual") === null, "part docs coverage: URL kinds map to slots");
+}
+
+{
+  ok(quoteLineSkus({ sections: [{ kind: "labor", items: [{ sku: "LAB" }] }, { items: [{ sku: "A" }, { sku: "A" }, { sku: "MOB", labor: true }, { sku: " B " }] }] }).join(",") === "A,B", "part docs quoted: labor sections and labor lines are skipped, SKUs are distinct and trimmed");
+  ok(quoteLineSkus({ kind: "grid", lines: [{ sku: "G1" }, {}] }).join(",") === "G1", "part docs quoted: the Grid's flat lines count");
+  ok(quoteLineSkus(null).length === 0 && quoteLineSkus("junk").length === 0, "part docs quoted: junk yields nothing");
+
+  const catalog = new Set(["A", "B", "C", "G", "S"]);
+  const stats = quotedPartStats(
+    {
+      quotes: [
+        { updatedAt: 100, status: "lost", spec: { sections: [{ items: [{ sku: "A" }, { sku: "B" }] }] } },
+        { createdAt: 300, spec: { sections: [{ items: [{ sku: "A" }, { sku: "A" }, { sku: "NOT-IN-CATALOG" }] }] } },
+        { updatedAt: 1, spec: { kind: "grid", lines: [{ sku: "C" }] } },
+      ],
+      gridProjects: [
+        { placements: [{ partId: "G" }, { partId: "G" }, { partId: "A" }, { partId: "CURT", curtain: { type: "Border" } }] },
+        { placements: [{ partId: "G" }] },
+      ],
+      generated: [{ bom: [{ sku: "S" }] }, { rows: [{ row: { sku: "S" } }, { row: { sku: "S" } }] }],
+    },
+    (sku) => catalog.has(sku)
+  );
+  ok(stats.get("A")?.quotes === 2 && stats.get("A")?.lastQuotedAt === 300, "part docs quoted: quotes of any status count once each; lastQuotedAt is the newest");
+  ok(stats.get("A")?.grid === 1 && stats.get("G")?.grid === 2 && stats.get("G")?.quotes === 0, "part docs quoted: Grid placements count once per project");
+  ok(stats.get("S")?.bidSpecs === 2, "part docs quoted: both bid-spec shapes count, once per spec");
+  ok(!stats.has("NOT-IN-CATALOG") && !stats.has("CURT"), "part docs quoted: only catalog parts, never a curtain placement");
+  const ranked = rankQuotedParts(stats.values()).map((s) => s.sku);
+  ok(ranked.join(",") === "A,B,C,G,S", "part docs quoted: most-quoted first, then Grid/bid-spec use, then SKU");
+}
+
+{
+  const idx = buildFilenameIndex([
+    { sku: "ETC:S4LED-S3-LUSTR", manufacturerModelNumber: "S4LED S3 Lustr" },
+    { sku: "ETC:S4LED", manufacturerPartNumber: "7460A1001" },
+    { sku: "450" },
+    { sku: "DUP-A", manufacturerPartNumber: "SHARED-99" },
+    { sku: "DUP-B", manufacturerPartNumber: "SHARED-99" },
+  ]);
+  ok(MIN_MATCH_KEY === 4 && !idx.keys.has("450"), "part docs filenames: keys under 4 characters are never indexed");
+  ok(normalizeFileName("folder/S4LED-S3 Lustr_Datasheet.pdf") === "S4LEDS3LUSTRDATASHEET", "part docs filenames: path, extension and punctuation are dropped");
+  const long = matchFileName("S4LED-S3-Lustr_Datasheet.pdf", idx);
+  ok(long.confidence === "high" && long.skus.join(",") === "ETC:S4LED-S3-LUSTR", "part docs filenames: the longest match wins over a shorter prefix");
+  const pn = matchFileName("7460A1001 spec.pdf", idx);
+  ok(pn.confidence === "high" && pn.skus.join(",") === "ETC:S4LED", "part docs filenames: a MFR P/N matches");
+  const amb = matchFileName("shared_99.pdf", idx);
+  ok(amb.confidence === "ambiguous" && amb.skus.join(",") === "DUP-A,DUP-B", "part docs filenames: one key on two parts is ambiguous");
+  ok(matchFileName("brochure.pdf", idx).confidence === "none", "part docs filenames: nothing found is none");
+  ok(guessKind("S4LED Guide Spec.pdf") === "specsheet" && guessKind("x-specification.PDF") === "specsheet", "part docs kind: spec/guide/specification → spec sheet");
+  ok(guessKind("anything.docx") === "specsheet" && guessKind("anything.DOC") === "specsheet", "part docs kind: Word → spec sheet");
+  ok(guessKind("S4LED Datasheet.pdf") === "datasheet", "part docs kind: everything else → datasheet");
+}
