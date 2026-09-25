@@ -80,7 +80,7 @@ import {
   toDateInput as vendorToDateInput,
 } from "@/app/(app)/vendors/dates";
 import { FIELD_COLLECTIONS } from "@/lib/sync/engine";
-import { canRecord, mergedConsultingDisciplines, phaseWeightsFor } from "@/lib/settings";
+import { canRecord, mergedConsultingDisciplines, phaseWeightsFor, resolveDisciplines } from "@/lib/settings";
 import {
   blankAudio, blankKrisp, isArchivable, mergeActionItems, needsKrispCheck, normalizeRecording,
   recordingParentLabel, recordingStatusChip,
@@ -7437,6 +7437,38 @@ ok(TEMPLATE_RECORD_LABEL.consulting === "Consulting", "#145 the consulting kind 
 /* phase weights + disciplines merge like every other settings list */
 ok(mergedConsultingDisciplines([]).join(",") === "rigging,curtain,lighting,av", "#145 disciplines default to the four intake groups");
 ok(mergedConsultingDisciplines(["rigging", " AV "]).join(",") === "rigging,AV", "#145 a stored discipline list overrides wholesale and is trimmed");
+
+/* #155 D231 — the save-side discipline rule. A discipline already on the
+ * quote is KEPT unless the user unticks it (the "(removed)" checkbox at
+ * quote/controls.tsx:468 now means what it says), while the allowlist that
+ * stops a forged POST stashing an arbitrary string is untouched: a value in
+ * neither the live vocabulary nor already on this quote is still refused. */
+const live155 = ["rigging", "curtain", "lighting", "av"];
+ok(
+  resolveDisciplines(["rigging", "acoustics"], live155, ["rigging", "acoustics"]).join(",") === "rigging,acoustics",
+  "#155 a discipline removed from Settings but still ticked on the quote survives a save"
+);
+ok(
+  !resolveDisciplines(["rigging"], live155, ["rigging", "acoustics"]).includes("acoustics"),
+  "#155 unticking a removed discipline does remove it"
+);
+ok(
+  resolveDisciplines(["rigging", "pyrotechnics"], live155, ["rigging", "acoustics"]).join(",") === "rigging",
+  "#155 a discipline in neither the live vocabulary nor on the quote is still refused (forged POST)"
+);
+ok(
+  resolveDisciplines(["rigging", "av"], live155, ["rigging"]).join(",") === "rigging,av",
+  "#155 a live discipline ticked for the first time is added"
+);
+ok(
+  resolveDisciplines(["  Acoustics  ", "acoustics", ""], live155, ["acoustics"]).join(",") === "acoustics",
+  "#155 posted disciplines are trimmed, lowercased, blank-stripped and de-duplicated"
+);
+ok(
+  resolveDisciplines("not-an-array", live155, ["acoustics"]).length === 0 &&
+    resolveDisciplines(["rigging"], live155, null).join(",") === "rigging",
+  "#155 a non-array payload resolves to nothing and a create (no existing quote) keeps the plain allowlist"
+);
 const pw145 = phaseWeightsFor({ "Design Development": 6 }, ["Assessment", "Design Development"]);
 ok(pw145[0].weight === 1 && pw145[1].weight === 6, "#145 phaseWeightsFor defaults an unweighted phase to 1 and honours a stored weight");
 ok(pw145[0].name === "Assessment" && typeof pw145[0].phaseId === "string" && pw145[0].phaseId.length > 0, "#145 phaseWeightsFor carries a stable id per phase name");
