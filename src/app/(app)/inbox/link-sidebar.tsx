@@ -1,15 +1,18 @@
 "use client";
 
 /**
- * #96 §2 / #123 / #124 — the reader's link sidebar, top to bottom:
- *   1. Work     — WorkLinkCard (#123): link chip + picker + "+ New quote"
- *   2. Customer — one card per resolution state (linked / suggested /
- *                 ambiguous / unknown), unchanged from #96
- *   3. Venue    — (#124) only once linked: the customer's venues + quick-add
- *   4. Quick add — contacts + venues once a customer is in play
+ * #96 §2 / #123 / #124 / #125 — the reader's link sidebar, top to bottom:
+ *   1. Work         — WorkLinkCard (#123): link chip + picker + "+ New quote"
+ *   2. Customer     — one card per resolution state (linked / suggested /
+ *                     ambiguous / unknown), unchanged from #96
+ *   3. Venue        — (#124) only once linked: the customer's venues + quick-add
+ *   4. Linking from — (#125) which message's addresses drive linking
+ *   5. Quick add    — contacts + venues once a customer is in play
  *
  * Everything here is display + server-action calls on a server-built
- * ReaderVM: no fetching, no env, no store imports.
+ * ReaderVM: no fetching, no env, no store imports. The sender shown and
+ * remembered (senderName/senderEmail) is the picked identity message's
+ * address (vm.identity), else the thread contact.
  */
 
 import { useState, useTransition } from "react";
@@ -24,6 +27,7 @@ import {
   releaseDomainAction,
   quickAddCustomerAction,
   quickAddVenueAction,
+  setIdentityMessageAction,
   setThreadSiteAction,
 } from "./link-actions";
 import WorkLinkCard from "./work-link-card";
@@ -54,14 +58,23 @@ export default function LinkSidebar({
   // "on contact" pick for the remembered address — "" = new contact; a
   // value is an existing contact's display name (vm.contactOptions)
   const [contactName, setContactName] = useState("");
+
+  // #125 — the party this thread links from: the picked message's address,
+  // else the thread contact. vm.senderDomain already follows the same rule.
+  const senderName = vm.identity?.name || vm.contactName;
+  const senderEmail = vm.identity?.email || vm.contactEmail;
+  const identityMsg = vm.identityMessageId
+    ? vm.messages.find((m) => m.id === vm.identityMessageId) || null
+    : null;
+
   const [newCustomer, setNewCustomer] = useState<QuickAddValues["customer"]>({
     name: "",
     type: CUSTOMER_TYPES[0] || "",
   });
   const [newContact, setNewContact] = useState<QuickAddValues["contact"]>({
-    name: vm.contactName,
+    name: senderName,
     role: "",
-    email: vm.contactEmail,
+    email: senderEmail,
     phone: "",
   });
   const [newVenue, setNewVenue] = useState<QuickAddValues["venue"]>({
@@ -106,7 +119,7 @@ export default function LinkSidebar({
       : "");
   const canClaim = !vm.senderIsPublicDomain;
   const domainTag = <span style={MONO}>@{vm.senderDomain}</span>;
-  const emailTag = <span style={MONO}>{vm.contactEmail}</span>;
+  const emailTag = <span style={MONO}>{senderEmail}</span>;
 
   // withPicker=false on the linked card's "Wrong customer?" — its
   // contactOptions belong to the customer being left, not the new one.
@@ -448,7 +461,7 @@ export default function LinkSidebar({
       {vm.resolution === "unknown" && (
         <div style={CARD}>
           <div style={H}>Not linked</div>
-          {!vm.contactEmail ? (
+          {!senderEmail ? (
             <div style={BODY}>No sender address — link this thread to a customer.</div>
           ) : canClaim ? (
             <div style={BODY}>
@@ -472,7 +485,7 @@ export default function LinkSidebar({
           </div>
           {pickId && pickId !== "__new" && (
             <>
-              {vm.contactEmail && rememberRow(<>Remember {emailTag} on a contact</>)}
+              {senderEmail && rememberRow(<>Remember {emailTag} on a contact</>)}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
                 <button
                   style={PRIMARY}
@@ -496,7 +509,7 @@ export default function LinkSidebar({
           )}
           {pickId === "__new" && (
             <div style={{ marginTop: 10 }}>
-              {vm.contactEmail && rememberRow(<>Remember {emailTag} on a contact</>)}
+              {senderEmail && rememberRow(<>Remember {emailTag} on a contact</>)}
               <div style={{ marginTop: 8 }}>
                 <EntityQuickAdd
                   kind="customer"
@@ -512,8 +525,8 @@ export default function LinkSidebar({
                     run(() =>
                       quickAddCustomerAction({
                         ...newCustomer,
-                        senderName: vm.contactName,
-                        senderEmail: vm.contactEmail,
+                        senderName,
+                        senderEmail,
                         remember,
                         threadId: vm.id,
                       })
@@ -521,6 +534,40 @@ export default function LinkSidebar({
                   }
                 />
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- linking from (#125) — which message's addresses drive linking ---- */}
+      {vm.isEmail && vm.messages.length > 0 && (
+        <div style={CARD}>
+          <div style={H}>Linking from</div>
+          <select
+            value={vm.identityMessageId || ""}
+            disabled={pending}
+            onChange={(e) => {
+              setError(null);
+              run(() => setIdentityMessageAction(vm.id, e.target.value || null));
+            }}
+            style={SELECT}
+          >
+            <option value="">Thread contact — {vm.contactName}</option>
+            {[...vm.messages].reverse().map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.author} · {m.out ? "out" : "in"} · {m.time}
+              </option>
+            ))}
+          </select>
+          {identityMsg && vm.identity && (
+            <div style={{ ...MUTED, marginTop: 6 }}>
+              Linking from: <b>{vm.identity.name || vm.identity.email}</b>,{" "}
+              {identityMsg.out ? "out" : "in"}, {identityMsg.time}
+              {vm.identity.name ? (
+                <>
+                  {" "}· <span style={MONO}>{vm.identity.email}</span>
+                </>
+              ) : null}
             </div>
           )}
         </div>
@@ -593,9 +640,9 @@ export default function LinkSidebar({
                     () => quickAddContactAction({ customerId: targetCustomerId, ...newContact }),
                     () =>
                       setNewContact({
-                        name: vm.contactName,
+                        name: senderName,
                         role: "",
-                        email: vm.contactEmail,
+                        email: senderEmail,
                         phone: "",
                       })
                   )

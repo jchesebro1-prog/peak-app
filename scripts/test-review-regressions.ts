@@ -2051,6 +2051,44 @@ async function main() {
     assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, null, "#124 setThreadSite(null) clears");
   }
 
+  // #125 — identity source: setIdentityMessage re-resolves from the picked
+  // message's address, and a re-sweep keeps that pick.
+  {
+    const { setIdentityMessage } = await import("@/lib/gmail/linking");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3id", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: true, archived: false,
+      customerId: null, customer: "", contactName: "New Person", contactEmail: "np@r3unknown.org",
+      subject: "Forwarded quote", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [
+        { id: "m1", at: r3now - 3000, direction: "in", channel: "email", author: "New Person", body: "x", fromEmail: "np@r3unknown.org" },
+        { id: "m2", at: r3now - 2000, direction: "out", channel: "email", author: "Jeff Chesebro", body: "y", to: "Someone <someone@rosebrand.example.com>" },
+        { id: "m3", at: r3now - 1000, direction: "in", channel: "email", author: "Brenda Gauchel", body: "z", fromEmail: "brenda.t96@lakefront.k12.mn.us" },
+      ],
+      createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    // inbound → its From; Brenda is a live contact of lakefront → links directly
+    await setIdentityMessage("C-r3id", "m3");
+    let r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, "m3", "#125 setIdentityMessage stamps the picked message");
+    assert.equal(r3t?.resolution, "linked", "#125 an inbound identity message resolves from its From (contact → linked)");
+    assert.equal(r3t?.customerId, "lakefront", "#125 …and links the thread");
+    // a re-sweep over the (now irrelevant) domain keeps the picked message and changes nothing
+    await resweepThreads({ domain: "r3unknown.org" });
+    r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, "m3", "#125 re-sweep keeps the picked identity message");
+    assert.equal(r3t?.customerId, "lakefront", "#125 re-sweep never downgrades an identity-linked thread");
+    // back to the thread contact: a linked thread keeps its customer (never downgraded)
+    await setIdentityMessage("C-r3id", null);
+    r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, null, "#125 clearing the identity message falls back to the thread contact");
+    assert.equal(r3t?.customerId, "lakefront", "#125 clearing never downgrades a linked thread");
+    await setIdentityMessage("C-r3id", "no-such-message");
+    r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, null, "#125 an unknown message id is treated as null");
+    assert.equal(await setIdentityMessage("C-r3-no-such-thread", "m1"), null, "#125 unknown thread → null");
+  }
+
   console.log("review regression checks passed");
 }
 

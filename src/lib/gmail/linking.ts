@@ -2,7 +2,7 @@
  * #96 — wires the pure resolver to real data and stamps threads. Backfill and
  * re-sweep live here too (Task 4).
  */
-import { listDocs, patchDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc } from "@/db/doc-store";
 import { contactByEmail, contactsByEmails } from "@/lib/identity/lookup";
 import {
   contactsForCompany,
@@ -20,6 +20,7 @@ import { domainOf, isPublicDomain } from "./config";
 import { claimDomain, customersForDomain, customersForDomains } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
 import { quoteNameFromSubject } from "@/lib/inbox-links";
+import { resolveAddressFor } from "@/lib/inbox-identity";
 
 export async function resolveForThread(email: string): Promise<Resolution> {
   return resolveSender(email, {
@@ -82,7 +83,7 @@ export function applyResweepPatch(d: CommThread, next: CommThread): boolean {
 
 function matchesFilter(t: CommThread, f?: { email?: string; domain?: string }): boolean {
   if (!f) return true;
-  const e = (t.contactEmail || "").toLowerCase();
+  const e = resolveAddressFor(t); // #125 — the picked identity message, else the counterpart
   if (f.email && e !== f.email.toLowerCase()) return false;
   if (f.domain && domainOf(e) !== f.domain.toLowerCase()) return false;
   return true;
@@ -103,10 +104,10 @@ export async function resweepThreads(
       !(t.customerId && t.resolution === "linked") &&
       !(onlyAccountKey && t.gmailAccountKey !== onlyAccountKey) &&
       matchesFilter(t, filter) &&
-      !!t.contactEmail
+      !!resolveAddressFor(t)
   );
   if (!candidates.length) return 0;
-  const addresses = candidates.map((t) => (t.contactEmail || "").trim().toLowerCase());
+  const addresses = candidates.map((t) => resolveAddressFor(t));
   const [contactHits, domainOwners] = await Promise.all([
     contactsByEmails(addresses),
     customersForDomains(addresses.map(domainOf)),
@@ -117,7 +118,7 @@ export async function resweepThreads(
   };
   let changed = 0;
   for (const t of candidates) {
-    const r = await resolveSender(t.contactEmail || "", lookups);
+    const r = await resolveSender(resolveAddressFor(t), lookups);
     const before = JSON.stringify([t.customerId, t.resolution, t.suggestedCustomerId, t.candidates]);
     const next = { ...t };
     await applyResolution(next, r);
@@ -299,4 +300,38 @@ export async function setThreadSite(
   return patchDoc<CommThread>("comms", threadId, (d) => {
     d.siteId = siteId || null;
   });
+}
+
+/** #125 — pick which message's addresses drive resolution, then re-resolve
+ *  this one thread from that address. An unknown message id clears the pick.
+ *  Never downgrades a linked thread (applyResweepPatch's guards); a fresh
+ *  identity resets "Not them" because the old dismissal was about the old
+ *  party's suggestion. */
+export async function setIdentityMessage(
+  threadId: string,
+  messageId: string | null
+): Promise<CommThread | null> {
+  const t = await getDoc<CommThread>("comms", threadId);
+  if (!t) return null;
+  const id =
+    messageId && (t.messages || []).some((m) => m.id === messageId) ? messageId : null;
+  const probe: CommThread = { ...t, identityMessageId: id, suggestionDismissed: false };
+  const address = resolveAddressFor(probe);
+  const next: CommThread = { ...probe };
+  await applyResolution(
+    next,
+    address ? await resolveForThread(address) : ({ kind: "unknown" } as const)
+  );
+  let linkedNow = false;
+  const res = await patchDoc<CommThread>("comms", threadId, (d) => {
+    d.identityMessageId = id;
+    d.suggestionDismissed = false;
+    if (applyResweepPatch(d, next)) linkedNow = d.resolution === "linked" && !!d.customerId;
+  });
+  if (linkedNow) {
+    // Lazy import — same reason as resweepThreads (label-sync ↔ linking cycle).
+    const { queueLabelSync } = await import("./label-sync");
+    queueLabelSync(threadId);
+  }
+  return res;
 }

@@ -21,6 +21,7 @@ import {
 } from "@/lib/gmail/config";
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
 import { customersForDomain } from "@/lib/gmail/domains";
+import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 import {
   boxMeta,
   callsCount,
@@ -700,7 +701,11 @@ export default async function InboxPage({
     const linkedCustomer = resolvedCid
       ? customers.find((c) => c.id === resolvedCid) || null
       : null;
-    const senderDomain = domainOf(sel.contactEmail || "");
+    // #125 — the address that drives linking: the picked identity message's,
+    // else the counterpart (same rule resolveCustomerId / resweep use).
+    const identity = identityAddressFor(sel);
+    const senderEmailLc = resolveAddressFor(sel);
+    const senderDomain = domainOf(senderEmailLc);
     const senderIsPublicDomain = !senderDomain || isPublicDomain(senderDomain);
     // One query, only when a customer is linked and the domain is claimable
     // — drives the linked card's "Emails from @domain link here · Stop".
@@ -727,7 +732,6 @@ export default async function InboxPage({
           (ct) => domainOf(ct.email || "") === senderDomain
         ).length
       : 0;
-    const senderEmailLc = (sel.contactEmail || "").trim().toLowerCase();
     // #124 — the linked customer's venues: value = CustomerLocation.id, the
     // id the quote intake's locationId uses.
     const siteOptions: Opt[] = (linkedCustomer?.locations || [])
@@ -844,6 +848,8 @@ export default async function InboxPage({
       customerCard,
       siteId,
       siteOptions,
+      identityMessageId: sel.identityMessageId ?? null,
+      identity,
       customerOptions: customers
         .map((c) => ({ value: c.id, label: c.name }))
         .sort((a, b) => a.label.localeCompare(b.label)),

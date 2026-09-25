@@ -229,6 +229,10 @@ export type ReaderVM = {
   siteId: string | null;
   /** #124 — the linked customer's venues, for the sidebar's Venue select. */
   siteOptions: Opt[];
+  /** #125 — identity source: which message's addresses drive resolution and
+   *  quick-add; null = the thread contact (today's behaviour). */
+  identityMessageId: string | null;
+  identity: { messageId: string; name: string; email: string } | null;
   /** every customer, for the pickers */
   customerOptions: Opt[];
   /** #122 — the same companies split into "Customers" / "Vendors" optgroups

@@ -33,6 +33,7 @@ import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
 import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inbox-links";
+import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -2955,7 +2956,7 @@ ok(addressFromHit({ street: "123 Main St", title: "Overture Center" }) === "123 
 ok(addressFromHit({ street: "", title: "Overture Center" }) === "Overture Center", "#32: POI without street falls back to display title");
 
 /* ============ Task 3 — inbox conversation participants (#42) ============ */
-import { participantsFor, deriveStatus } from "@/lib/stores/comms";
+import { participantsFor, deriveStatus, type CommMessage, type CommThread } from "@/lib/stores/comms";
 const msgsThread = (authors: Array<string | undefined>): any => ({
   messages: authors.map((author, i) => ({
     id: `m${i}`, at: i, direction: "in", channel: "email", author: author || "", body: "",
@@ -9250,6 +9251,38 @@ import {
   ok(quoteNameFromSubject("RE: re: FW: hello") === "hello", "quoteNameFromSubject strips repeated prefixes case-insensitively");
   ok(quoteNameFromSubject("") === "Untitled estimate" && quoteNameFromSubject("(no subject)") === "Untitled estimate", "quoteNameFromSubject falls back");
   ok(quoteNameFromSubject("Rental for spring musical") === "Rental for spring musical", "quoteNameFromSubject leaves a plain subject alone");
+}
+
+/* ---- Inbox round 3 (#125) — identity source ---- */
+{
+  const r3msgs: CommMessage[] = [
+    { id: "m1", at: 1, direction: "in", channel: "email", author: "Brenda Gauchel", body: "", fromEmail: "brenda@lakefront.k12.mn.us" },
+    { id: "m2", at: 2, direction: "out", channel: "email", author: "Jeff Chesebro", body: "", to: "AP Clerk <AP@Lakefront.K12.MN.US>, brenda@lakefront.k12.mn.us" },
+    { id: "m3", at: 3, direction: "in", channel: "email", author: "Chris Hale", body: "", fromEmail: "Chris.Hale@Architects.com" },
+    { id: "m4", at: 4, direction: "out", channel: "email", author: "Jeff Chesebro", body: "" },
+    { id: "m5", at: 5, direction: "in", channel: "email", author: "Legacy Import", body: "" },
+  ];
+  const r3base: Pick<CommThread, "identityMessageId" | "messages" | "contactEmail" | "contactName"> = {
+    identityMessageId: null,
+    messages: r3msgs,
+    contactEmail: "Brenda@Lakefront.k12.mn.us",
+    contactName: "Brenda Gauchel",
+  };
+  ok(identityAddressFor(r3base) === null, "identityAddressFor: no identity message → null");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "nope" }) === null, "identityAddressFor: missing id → null");
+  const r3in = identityAddressFor({ ...r3base, identityMessageId: "m3" });
+  ok(r3in?.email === "chris.hale@architects.com" && r3in.name === "Chris Hale" && r3in.messageId === "m3", "identityAddressFor: inbound → its From, lowercased");
+  const r3out = identityAddressFor({ ...r3base, identityMessageId: "m2" });
+  ok(r3out?.email === "ap@lakefront.k12.mn.us" && r3out.name === "AP Clerk", "identityAddressFor: outbound → first recipient of To");
+  const r3outNoTo = identityAddressFor({ ...r3base, identityMessageId: "m4" });
+  ok(r3outNoTo?.email === "brenda@lakefront.k12.mn.us" && r3outNoTo.name === "Brenda Gauchel", "identityAddressFor: outbound without stored recipients → thread contact");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "m5" })?.email === "brenda@lakefront.k12.mn.us", "identityAddressFor: legacy inbound without fromEmail → thread contact");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "m4", contactEmail: "" }) === null, "identityAddressFor: nothing to read → null");
+  ok(resolveAddressFor(r3base) === "brenda@lakefront.k12.mn.us", "resolveAddressFor: counterpart by default (lowercased)");
+  ok(resolveAddressFor({ ...r3base, identityMessageId: "m3" }) === "chris.hale@architects.com", "resolveAddressFor: identity message wins");
+  ok(resolveAddressFor({ ...r3base, contactEmail: "" }) === "", "resolveAddressFor: no address → empty string");
+  ok(firstRecipient(" , Nobody <>, Someone <s@x.org>")?.email === "s@x.org", "firstRecipient: skips empty parts");
+  ok(firstRecipient("") === null && firstRecipient(undefined) === null, "firstRecipient: empty → null");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

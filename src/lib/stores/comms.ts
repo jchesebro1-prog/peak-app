@@ -224,6 +224,12 @@ export type CommMessage = {
   /** Optional record link for this specific message; the thread link remains
    * the broad CRM context. */
   link?: CommLink | null;
+  /** #125 — the addresses this message actually carried, stamped by the
+   *  Gmail bridge on import. `fromEmail` is lowercased; `to` is the raw To
+   *  header ("Name <a@b>, c@d"). Absent on app-sent and pre-#125 messages —
+   *  readers fall back to the thread's contactEmail (see lib/inbox-identity). */
+  fromEmail?: string;
+  to?: string;
 };
 
 export type CommDraft = {
@@ -294,6 +300,10 @@ export type CommThread = {
    *  linked customer. Cleared whenever customerId changes to a different
    *  customer (linkThread / applyResweepPatch / Peak label removal). */
   siteId?: string | null;
+  /** #125 — identity source: the message whose addresses drive resolution
+   *  and quick-add (inbound → its From; outbound → its first recipient).
+   *  null/absent = today's behaviour, the thread counterpart. */
+  identityMessageId?: string | null;
 };
 
 function mid(n: number): string {
@@ -1666,7 +1676,9 @@ export async function resolveCustomerId(
 ): Promise<string | null> {
   if (!t) return null;
   if (t.customerId) return t.customerId;
-  const email = (t.contactEmail || "").trim().toLowerCase();
+  // #125 — the picked identity message's address, else the counterpart.
+  const { resolveAddressFor } = await import("@/lib/inbox-identity");
+  const email = resolveAddressFor(t);
   if (!email) return null;
   const { contactByEmail } = await import("@/lib/identity/lookup");
   const hit = await contactByEmail(email);

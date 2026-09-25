@@ -20,7 +20,14 @@ import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
 import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
 import { domainOf, isPublicDomain } from "@/lib/gmail/config";
-import { linkThread, rememberAddress, resweepThreads, setThreadSite } from "@/lib/gmail/linking";
+import {
+  linkThread,
+  rememberAddress,
+  resweepThreads,
+  setIdentityMessage,
+  setThreadSite,
+} from "@/lib/gmail/linking";
+import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -46,16 +53,20 @@ export async function linkThreadToCustomerAction(
   if (!t) return { ok: false, error: "Thread not found." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
 
+  // #125 — the picked identity message's address, else the thread contact.
+  const sender = identityAddressFor(t);
+  const senderEmail = resolveAddressFor(t);
+  const senderName = sender?.name || t.contactName;
   let contactId = opts.contactId ?? null;
-  if (opts.remember && t.contactEmail) {
-    const nameForContact = (opts.contactName || "").trim() || t.contactName;
-    contactId = await rememberAddress(customerId, t.contactEmail, nameForContact, contactId, {
+  if (opts.remember && senderEmail) {
+    const nameForContact = (opts.contactName || "").trim() || senderName;
+    contactId = await rememberAddress(customerId, senderEmail, nameForContact, contactId, {
       id: me.id,
       name: me.name,
     });
   }
-  if (opts.claimDomain && t.contactEmail) {
-    const d = domainOf(t.contactEmail);
+  if (opts.claimDomain && senderEmail) {
+    const d = domainOf(senderEmail);
     if (d && !isPublicDomain(d)) {
       await claimDomain(d, customerId, "manual", me.name);
       await resweepThreads({ domain: d });
@@ -245,6 +256,23 @@ export async function setThreadSiteAction(threadId: string, siteId: string | nul
   }
   if (!t.customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
   await setThreadSite(threadId, clean);
+  revalidate();
+  return { ok: true };
+}
+
+/** #125 — "Linking from" picker: which message's addresses drive resolution
+ *  and quick-add. null = the thread contact. Re-resolves this one thread. */
+export async function setIdentityMessageAction(
+  threadId: string,
+  messageId: string | null
+): Promise<R> {
+  const me = await requireUser();
+  const t = await getThread(threadId);
+  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const id = (messageId || "").trim() || null;
+  if (id && !(t.messages || []).some((m) => m.id === id))
+    return { ok: false, error: "That message isn't on this thread." };
+  await setIdentityMessage(threadId, id);
   revalidate();
   return { ok: true };
 }
