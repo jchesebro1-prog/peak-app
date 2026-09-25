@@ -469,6 +469,36 @@ export async function listSheets(projectId: string): Promise<GridSheet[]> {
     .filter((s): s is GridSheet => Boolean(s));
 }
 
+/**
+ * Remove one sheet from the project's display order. Refuses when any LIVE
+ * placement/space/route still references it — those would otherwise paint
+ * against a background that's no longer reachable. Deliberately does NOT
+ * softDeleteDoc the `grid_sheets` record: it stays a normal, readable doc
+ * (dropped only from `sheetIds`), so an older GridRevision that still lists
+ * this sheet in its own `sheetIds` — restoreRevision never touches sheetIds,
+ * by design (see restoreRevision above) — can still resolve it by id through
+ * getDoc/the /api/grid-sheets/<id> proxy. Hard-deleting the doc or its blob
+ * would break that resolution the moment an old revision was restored.
+ */
+export async function removeSheet(
+  projectId: string,
+  sheetId: string
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "no-such-sheet" | "in-use" }> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, reason: "not-found" };
+  if (!(project.sheetIds || []).includes(sheetId)) return { ok: false, reason: "no-such-sheet" };
+  const inUse =
+    (project.placements || []).some((pl) => pl.sheetId === sheetId) ||
+    (project.spaces || []).some((sp) => sp.sheetId === sheetId) ||
+    (project.routes || []).some((r) => r.sheetId === sheetId);
+  if (inUse) return { ok: false, reason: "in-use" };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.sheetIds = (p.sheetIds || []).filter((id) => id !== sheetId);
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, reason: "not-found" };
+}
+
 export async function addPlacement(
   projectId: string,
   input: { sheetId: string; page: number; x: number; y: number; partId: string; optionId: string; by: string }

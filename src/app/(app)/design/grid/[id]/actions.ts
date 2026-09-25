@@ -20,6 +20,7 @@ import {
   removePlacement,
   removeProject,
   removeRoute,
+  removeSheet,
   removeSpace,
   renameOption,
   renameProject,
@@ -487,6 +488,29 @@ export async function removeSpaceAction(
   await requireUser();
   const p = await removeSpace(projectId, spaceId);
   if (!p) return { ok: false, error: "Design not found." };
+  revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/** Delete a plan sheet from the editor's sheet list (D116's doc stays put —
+ *  see removeSheet, grid-projects.ts — so an older revision can still
+ *  resolve it). Refuses while a placement/space/route on the LIVE design
+ *  still references it. */
+export async function removeSheetAction(
+  projectId: string,
+  sheetId: string
+): Promise<Result> {
+  await requireUser();
+  const r = await removeSheet(projectId, sheetId);
+  if (!r.ok) {
+    return {
+      ok: false,
+      error:
+        r.reason === "in-use"
+          ? "This sheet still has devices, spaces, or wires on it — remove those first."
+          : "That sheet could not be found.",
+    };
+  }
   revalidatePath(editorPath(projectId));
   return { ok: true };
 }
