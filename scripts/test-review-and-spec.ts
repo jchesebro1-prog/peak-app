@@ -5264,6 +5264,34 @@ async function asyncChecks(): Promise<void> {
       created.category === "Uncategorized" && created.unit === "ea",
       "#81 create still applies its own defaults for absent columns"
     );
+
+    /* ---- #204: a price-only Import-hub catalog import must not zero MAP ----
+     * `v.mapPrice` is a "number"-kind field, so `coerce()` turns an absent
+     * column OR a blank cell into the number 0 (never `undefined`) — the same
+     * shape prepareRows gives Cost above. */
+    const storedWithMap = { ...stored, mapPrice: 1699 };
+    ok(
+      noCost.rows[0].values.mapPrice === 0,
+      "#204 an absent MAP column prepares as 0 — same shape as an absent Cost column"
+    );
+    ok(
+      catalogPatch(noCost.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === undefined,
+      "#204 an absent MAP column omits the key entirely (mergeUpsert then preserves the stored MAP)"
+    );
+    const blankMap = prepOf(
+      ["Part Number,Description,List Price,MAP", "S4LED-S2,Source Four LED Series 2,1999.00,"].join("\n")
+    );
+    ok(
+      catalogPatch(blankMap.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === undefined,
+      "#204 a blank MAP cell also omits the key rather than zeroing the stored MAP"
+    );
+    const realMap = prepOf(
+      ["Part Number,Description,List Price,MAP", "S4LED-S2,Source Four LED Series 2,1999.00,1750.00"].join("\n")
+    );
+    ok(
+      catalogPatch(realMap.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === 1750,
+      "#204 a MAP value the sheet does carry still sets it"
+    );
   }
 
   /* --- specs: catalog import columns --- */
