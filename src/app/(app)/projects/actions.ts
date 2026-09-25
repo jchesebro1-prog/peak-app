@@ -247,7 +247,10 @@ export async function startConversionAction(formData: FormData): Promise<void> {
   if (!quoteId) return;
   let p;
   try {
-    p = await createProjectFromQuote(quoteId);
+    // #180: this is the explicit "convert a pending quote" action — it has
+    // always meant to override a prior dismiss, so it opts out of the
+    // dismissed-list check createProjectFromQuote now applies by default.
+    p = await createProjectFromQuote(quoteId, { skipDismissed: true });
   } catch (error) {
     console.error("startConversionAction: project mint failed", error);
     redirect("/projects?err=" + encodeURIComponent("Couldn’t start the project — please try again."));

@@ -1277,7 +1277,10 @@ export async function createFromQuote(
     // record under a new id.
     if ((await coveredQuoteIds()).has(qid)) return [];
     const q = await getDoc<InspectionQuoteLike>("quotes", qid);
-    if (!q || q.quoteType !== "inspection") return null;
+    // #180: re-read fresh under the lock — a sweep's `won` filter runs on a
+    // snapshot taken before the lock, so a quote marked lost (or otherwise
+    // moved on) between that snapshot and now must not spawn a record.
+    if (!q || q.quoteType !== "inspection" || q.status !== "won") return null;
     const insp = q.inspection || {};
     const level = levelMeta(insp.level).key;
     // Identity core (D85): composed from relational rows via the store seam.

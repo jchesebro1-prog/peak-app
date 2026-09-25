@@ -12287,13 +12287,37 @@ async function sweepHealingAsyncChecks(): Promise<void> {
    not just the return value (two calls resolving to "the same job" proves
    nothing if the insert underneath still wrote two rows).
 
+   Review round 2 (2026-09-25) adds:
+   - A direct assertion that withQuoteLock genuinely holds a Postgres
+     advisory lock (pg_locks) while its callback runs — PGlite serializes
+     concurrent transactions on its single connection regardless, so every
+     race check above would still pass even if the lock call were a no-op;
+     this checks the mechanism, not just its effect.
+   - The same race + tombstone coverage extended to projects
+     (createProjectFromQuote/syncProjectsFromQuotes) and consulting
+     engagements (ensureEngagementForQuote/syncEngagementsFromQuotes),
+     which had the identical read-then-insert shape and were unlocked.
+   - A real win racing the SWEEP (not just two sweep-shaped calls racing
+     each other) for projects and engagements.
+
    Fixtures are `TEST180:`-prefixed and torn down in `finally`, same
    convention as #173's sweepHealingAsyncChecks just above.
    ====================================================================== */
+import { withQuoteLock } from "../src/db";
+import { sql } from "drizzle-orm";
+import {
+  ensureEngagementForQuote,
+  syncEngagementsFromQuotes,
+  // `removeEngagement` is already imported (unaliased) further down by
+  // deletePartBAsyncChecks's import block — reused here rather than
+  // re-declared, since ES module imports of the same name in one file
+  // collide even across separate `import` statements.
+} from "../src/lib/stores/engagements";
+
 async function quoteLockAsyncChecks(): Promise<void> {
   const PRE = "TEST180:";
   const rowsFor = async (
-    coll: "flame_jobs" | "repair_jobs" | "inspections" | "equipment_bookings",
+    coll: "flame_jobs" | "repair_jobs" | "inspections" | "equipment_bookings" | "projects" | "consulting_engagements",
     quoteId: string
   ) => (await listDocs169(coll, { includeDeleted: true })).filter((d) => d.quoteId === quoteId);
 
@@ -12342,9 +12366,40 @@ async function quoteLockAsyncChecks(): Promise<void> {
   const Q_REPAIR = `${PRE}repair-race`;
   const Q_INSP = `${PRE}insp-race`;
   const Q_RENTAL = `${PRE}rental-race`;
-  const QUOTE_IDS = [Q_FLAME, Q_FLAME_DEL, Q_REPAIR, Q_INSP, Q_RENTAL];
+  const Q_PROJECT = `${PRE}project-race`;
+  const Q_PROJECT_DEL = `${PRE}project-race-deleted`;
+  const Q_ENGAGEMENT = `${PRE}engagement-race`;
+  const Q_ENGAGEMENT_DEL = `${PRE}engagement-race-deleted`;
+  const Q_STALE = `${PRE}flame-marked-lost-mid-race`;
+  const QUOTE_IDS = [
+    Q_FLAME, Q_FLAME_DEL, Q_REPAIR, Q_INSP, Q_RENTAL,
+    Q_PROJECT, Q_PROJECT_DEL, Q_ENGAGEMENT, Q_ENGAGEMENT_DEL,
+    Q_STALE,
+  ];
+  // createProjectFromQuote (#180) checks the dismissed list fresh — the
+  // project-deletion tombstone test below exercises exactly that, so the
+  // blob singleton gets the same snapshot/restore convention as #169's own
+  // dismissed-list tests (put the snapshot back, don't edit in place).
+  const dismissedBefore = await dismissedQuoteIds();
 
   try {
+    /* ---------------- withQuoteLock genuinely holds an advisory lock ---------------- */
+    // Local dynamic import: `getDb` is already imported (unaliased) further
+    // down by outsideTransactionAsyncChecks's static import — a SECOND
+    // top-level `import { getDb }` would collide with it.
+    const { getDb: getDbForLockProbe } = await import("../src/db");
+    await withQuoteLock(`${PRE}lock-held-probe`, async () => {
+      const db = await getDbForLockProbe();
+      const locks = await db.execute(
+        sql`select 1 from pg_locks where locktype='advisory' and pid=pg_backend_pid()`
+      );
+      const rows = (locks as unknown as { rows?: unknown[] }).rows ?? (Array.isArray(locks) ? locks : []);
+      ok(
+        rows.length === 1,
+        "#180 withQuoteLock genuinely holds a Postgres advisory lock while its callback runs (pg_locks shows exactly one row) — proves the mechanism, not just its effect, since PGlite would serialize the race checks below even with a no-op lock"
+      );
+    });
+
     /* ---------------- #180: concurrent race -> exactly one job ---------------- */
     await seedWon(Q_FLAME, "flame_test", FLAME_BODY);
     const [f1, f2] = await Promise.all([flameCreate173(Q_FLAME), flameCreate173(Q_FLAME)]);
@@ -12385,13 +12440,73 @@ async function quoteLockAsyncChecks(): Promise<void> {
     ok(b1.length === 1 && b2.length === 1, "#180 rental: both racing calls see the single booking, not two");
     ok(b1[0]?.id === b2[0]?.id, "#180 rental: the two racing calls returned the identical booking");
     ok((await rowsFor("equipment_bookings", Q_RENTAL)).length === 1, "#180 rental: exactly one booking row exists for the raced quote");
+
+    /* ---------------- projects: a real win racing the SWEEP -> exactly one ----------------
+     * `quoteType` deliberately omitted from seedWon's extra (defaults to
+     * undefined -> the "system"/install branch createProjectFromQuote and
+     * syncProjectsFromQuotes both target). syncProjectsFromQuotes() is a
+     * book-wide scan (same NOTE as sweepHealingAsyncChecks above) — running
+     * it concurrently with a direct win call for this ONE fixture quote is
+     * the "concurrent sweep plus a win" shape the review asked for. */
+    await seedWon(Q_PROJECT, "system");
+    const [winP, sweepP] = await Promise.all([
+      ProjStore.createProjectFromQuote(Q_PROJECT),
+      ProjStore.syncProjectsFromQuotes(),
+    ]);
+    ok(!!winP, "#180 project: the direct win call resolved with a project");
+    ok(sweepP.created >= 0, "#180 project: the racing sweep completed without throwing");
+    ok((await rowsFor("projects", Q_PROJECT)).length === 1, "#180 project: exactly one project row exists for the quote a win raced against a sweep");
+
+    /* ---- a project already deleted (dismissed, #169) before the race stays deleted ---- */
+    await seedWon(Q_PROJECT_DEL, "system");
+    const projectToDelete = await ProjStore.createProjectFromQuote(Q_PROJECT_DEL);
+    ok(!!projectToDelete, "#180 project fixture: the to-be-deleted quote gets its project first");
+    if (projectToDelete) await removeProject(projectToDelete.id);
+    const [wp1, wp2] = await Promise.all([
+      ProjStore.createProjectFromQuote(Q_PROJECT_DEL),
+      ProjStore.createProjectFromQuote(Q_PROJECT_DEL),
+    ]);
+    ok(wp1 === null && wp2 === null, "#180 project: a raced re-check still honours the #169 dismissed-list tombstone — neither concurrent call resurrects the deleted project");
+    ok((await rowsFor("projects", Q_PROJECT_DEL)).length === 1, "#180 project: still exactly one (tombstoned) row after the race — no second row appeared");
+
+    /* ---------------- engagements: a real win racing the SWEEP -> exactly one ---------------- */
+    await seedWon(Q_ENGAGEMENT, "consulting", { consulting: {} });
+    const [winE, sweepE] = await Promise.all([
+      ensureEngagementForQuote(Q_ENGAGEMENT, "awarded"),
+      syncEngagementsFromQuotes(),
+    ]);
+    ok(!!winE, "#180 engagement: the direct win call resolved with an engagement");
+    ok(sweepE.created >= 0, "#180 engagement: the racing sweep completed without throwing");
+    ok((await rowsFor("consulting_engagements", Q_ENGAGEMENT)).length === 1, "#180 engagement: exactly one engagement row exists for the quote a win raced against a sweep");
+
+    /* ---- an engagement already deleted before the race stays deleted ---- */
+    await seedWon(Q_ENGAGEMENT_DEL, "consulting", { consulting: {} });
+    const engToDelete = await ensureEngagementForQuote(Q_ENGAGEMENT_DEL, "awarded");
+    ok(!!engToDelete, "#180 engagement fixture: the to-be-deleted quote gets its engagement first");
+    if (engToDelete) await removeEngagement(engToDelete.id);
+    const [we1, we2] = await Promise.all([
+      ensureEngagementForQuote(Q_ENGAGEMENT_DEL, "awarded"),
+      ensureEngagementForQuote(Q_ENGAGEMENT_DEL, "awarded"),
+    ]);
+    ok(we1 === null && we2 === null, "#180 engagement: a raced re-check still honours the tombstone (#173/D250 idiom) — neither concurrent call resurrects the deleted engagement");
+    ok((await rowsFor("consulting_engagements", Q_ENGAGEMENT_DEL)).length === 1, "#180 engagement: still exactly one (tombstoned) row after the race — no second row appeared");
+
+    /* ---------------- #180 review: a stale sweep snapshot must not spawn for a quote since marked lost ---------------- */
+    await seedWon(Q_STALE, "flame_test", FLAME_BODY);
+    await upsertDoc("quotes", { ...(await getDoc169("quotes", Q_STALE))!, status: "lost" });
+    const staleResult = await flameCreate173(Q_STALE);
+    ok(staleResult === null, "#180 flame: createFromQuote re-checks status fresh under the lock — a quote since marked lost is refused even though the caller's own snapshot said 'won'");
+    ok((await rowsFor("flame_jobs", Q_STALE)).length === 0, "#180 flame: no job was written for the quote that moved on");
   } finally {
-    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings"] as const) {
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "consulting_engagements"] as const) {
       for (const d of await listDocs169(coll)) {
         if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
       }
     }
     for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+    // Blob singleton — put the snapshot back rather than editing in place
+    // (same convention as #169's own dismissed-list tests).
+    await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
   }
 }
 

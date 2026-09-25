@@ -72,14 +72,12 @@ export async function spawnFromQuote(
  * the user already deleted the one it made (#169).
  *
  * Deleting a quote-born project records that quote on the dismissed list
- * (`removeProject` → `dismissedQuoteIds`, projects.ts), and the page-load
- * sweep `syncProjectsFromQuotes` has always honoured it — but the per-quote
- * creator `createProjectFromQuote` never has. That was harmless while the
- * creator was only reachable from the Projects "convert a pending quote"
- * flow, which never operates on a dismissed quote; routing every win through
- * it silently resurrected a project the user had deleted. The check lives
- * here rather than inside `createProjectFromQuote` so the explicit convert
- * action still means what it says.
+ * (`removeProject` → `dismissedQuoteIds`, projects.ts). `createProjectFromQuote`
+ * (#180) now checks it itself, fresh, inside its advisory lock — so this
+ * caller just needs to leave the check ENABLED (the default), rather than
+ * pre-checking a stale snapshot here and racing the lock. The explicit
+ * "convert a pending quote" flow (Projects screen) is the one caller that
+ * means to override a dismiss, and passes `{ skipDismissed: true }` for it.
  *
  * That is a claim about the dismissed BLOB only: it is a projects-only
  * mechanism, no other spawner has one, and minting a second dismissed list
@@ -92,9 +90,9 @@ export async function spawnFromQuote(
  * re-approval replay.
  */
 async function spawnProject(quoteId: string): Promise<void> {
-  const { createProjectFromQuote, dismissedQuoteIds } = await import("./projects");
-  if ((await dismissedQuoteIds()).includes(quoteId)) return;
-  // Idempotent on getProjectByQuote(quoteId).
+  const { createProjectFromQuote } = await import("./projects");
+  // Idempotent on getProjectByQuote(quoteId); dismissed-list + status
+  // re-checked fresh under the lock (#180).
   await createProjectFromQuote(quoteId);
 }
 

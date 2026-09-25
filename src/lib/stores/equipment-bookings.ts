@@ -164,7 +164,10 @@ export async function createFromQuote(quoteId: string): Promise<EquipmentBooking
     // #173: no live booking, but a deleted one still means this quote is handled.
     if ((await coveredQuoteIds()).has(quoteId)) return [];
     const q = await getDoc<RentalQuoteLike>("quotes", quoteId);
-    if (!q || q.quoteType !== "rental" || !q.rental) return [];
+    // #180: re-read fresh under the lock — a sweep's `won` filter runs on a
+    // snapshot taken before the lock, so a quote marked lost (or otherwise
+    // moved on) between that snapshot and now must not spawn a booking.
+    if (!q || q.quoteType !== "rental" || q.status !== "won" || !q.rental) return [];
     const created: EquipmentBooking[] = [];
     for (const line of q.rental.lines) {
       created.push(

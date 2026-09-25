@@ -124,26 +124,87 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   );
 }
 
+/** Drizzle's `.execute()` comes back shaped differently per driver: PGlite
+ *  wraps its rows in `{ rows: [...] }`, postgres-js's raw result is itself
+ *  array-like. Tried directly against both in the regression harness. */
+function firstRow<T = Record<string, unknown>>(result: unknown): T | undefined {
+  if (result && typeof result === "object" && "rows" in result) {
+    return (result as { rows: T[] }).rows[0];
+  }
+  if (Array.isArray(result)) return result[0] as T;
+  return undefined;
+}
+
+/** Advisory-lock namespace for `withQuoteLock` (#180) — the `classid` half
+ *  of the two-argument `pg_advisory_xact_lock(classid, key)` form. Without
+ *  it, a lock taken here shares Postgres's single 64-bit advisory-lock
+ *  keyspace with anything else in the app that ever takes one; the
+ *  namespace makes that collision impossible rather than merely unlikely.
+ *  Picked to be this punch item's own number — there's no registry, just
+ *  "don't reuse it for something unrelated." */
+const QUOTE_LOCK_NAMESPACE = 180;
+/** `hashtext(quoteId)` inside the namespace is still only a 32-bit hash, so
+ *  two DIFFERENT quote ids CAN collide onto the same key. That is why the
+ *  doc comment below no longer claims different keys "never contend" — a
+ *  collision only costs an unrelated pair of quotes an unnecessary wait
+ *  (their spawns serialize instead of running concurrently); it can never
+ *  cause two spawns for the same quote to both proceed, which is the only
+ *  thing correctness depends on here. */
+const QUOTE_LOCK_POLL_MS = 100;
+const QUOTE_LOCK_TIMEOUT_MS = 10_000;
+
+export class QuoteLockTimeoutError extends Error {
+  constructor(quoteId: string) {
+    super(
+      `withQuoteLock: timed out after ${QUOTE_LOCK_TIMEOUT_MS}ms waiting for the spawn lock on quote ${quoteId} — another request is still working on it.`
+    );
+    this.name = "QuoteLockTimeoutError";
+  }
+}
+
 /**
  * Run `fn` inside a transaction holding a Postgres advisory lock scoped to
- * `key` (#180). The quote→job/project spawners are read-then-insert with no
- * unique DB constraint to lean on — the link lives in `doc.quoteId` inside a
- * jsonb column, so nothing at the DB layer stops two concurrent callers from
- * both deciding a quote is uncovered and each inserting a record for it. An
- * advisory lock needs no such constraint (and no migration): it is a plain
- * Postgres session/transaction primitive, held for the life of the
- * transaction and released automatically on commit or rollback, so a second
- * caller for the SAME key simply blocks until the first is done, then
- * re-reads coverage and (correctly) finds nothing left to do. Different keys
- * never contend. Nesting inside an already-open transaction (e.g. a real win
- * inside `setStatus`) joins it via `withTransaction`, so the lock is held for
- * that outer transaction's whole lifetime — exactly what should serialize
- * against a healing sweep racing the same quote.
+ * `quoteId` (#180). The quote→job/project spawners are read-then-insert
+ * with no unique DB constraint to lean on — the link lives in
+ * `doc.quoteId` inside a jsonb column, so nothing at the DB layer stops two
+ * concurrent callers from both deciding a quote is uncovered and each
+ * inserting a record for it. An advisory lock needs no such constraint
+ * (and no migration): it is a plain Postgres session/transaction
+ * primitive, held for the life of the transaction and released
+ * automatically on commit or rollback, so a second caller for the SAME
+ * quote simply waits until the first is done, then re-reads coverage and
+ * (correctly) finds nothing left to do. Nesting inside an already-open
+ * transaction (e.g. a real win inside `setStatus`) joins it via
+ * `withTransaction`, so the lock is held for that outer transaction's
+ * whole lifetime — exactly what should serialize against a healing sweep
+ * racing the same quote.
+ *
+ * Waits in bounded polls (`pg_try_advisory_xact_lock`, non-blocking, every
+ * `QUOTE_LOCK_POLL_MS`) rather than blocking indefinitely on
+ * `pg_advisory_xact_lock` — a caller stuck behind a genuinely wedged
+ * holder (a transaction that never commits) should fail loudly
+ * (`QuoteLockTimeoutError`, already caught by `safeSweep` on every sweep
+ * caller) instead of hanging the request — or, on PGlite's single
+ * connection, the whole process. Deliberately NOT `SET LOCAL
+ * lock_timeout`: that is transaction-scoped session state, and this
+ * function's transaction can be the OUTER one a real win runs inside
+ * (`setStatus`) — a `SET LOCAL` here would leak into whatever else that
+ * same caller's transaction does after the lock is acquired, silently
+ * handing an unrelated later statement a `lock_timeout` it never asked
+ * for.
  */
 export async function withQuoteLock<T>(quoteId: string, fn: () => Promise<T>): Promise<T> {
   return withTransaction(async () => {
     const db = await getDb();
-    await db.execute(sql`select pg_advisory_xact_lock(hashtext(${quoteId}))`);
+    const deadline = Date.now() + QUOTE_LOCK_TIMEOUT_MS;
+    for (;;) {
+      const result = await db.execute(
+        sql`select pg_try_advisory_xact_lock(${QUOTE_LOCK_NAMESPACE}, hashtext(${quoteId})) as got`
+      );
+      if (firstRow<{ got: boolean }>(result)?.got) break;
+      if (Date.now() >= deadline) throw new QuoteLockTimeoutError(quoteId);
+      await new Promise((resolve) => setTimeout(resolve, QUOTE_LOCK_POLL_MS));
+    }
     return fn();
   });
 }

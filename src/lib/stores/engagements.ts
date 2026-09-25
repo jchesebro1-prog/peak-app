@@ -1,4 +1,5 @@
 import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import type { QuoteReview } from "@/lib/stores/quotes";
 import {
   approvalIsStale,
@@ -616,37 +617,54 @@ export async function getEngagementForQuoteRef(
   return hit ? normalizeEngagementRecord(hit) : null;
 }
 
-/** Idempotently make sure a consulting quote has its engagement, born at
- *  least at `minStage` (spec §1 spawn model): sent → proposal_sent, won →
- *  awarded. An existing engagement only ever ADVANCES proposal_sent →
- *  awarded — a stage a human moved past proposal_sent is never touched.
- *  (Same idempotence contract as the old createFromQuote it replaces.) */
+/**
+ * Idempotently make sure a consulting quote has its engagement, born at
+ * least at `minStage` (spec §1 spawn model): sent → proposal_sent, won →
+ * awarded. An existing engagement only ever ADVANCES proposal_sent →
+ * awarded — a stage a human moved past proposal_sent is never touched.
+ * (Same idempotence contract as the old createFromQuote it replaces.)
+ *
+ * #180: the whole check-then-insert (and the advance) runs under an
+ * advisory lock keyed on the quote id (`withQuoteLock`), so a healing sweep
+ * racing another sweep or a live re-approval for the SAME quote serializes
+ * instead of minting a duplicate engagement. The caller's `minStage` can be
+ * stale — the sweep derives it from a quote list read before the lock was
+ * acquired — so the quote is re-read here and its target stage is
+ * RE-DERIVED from that fresh read via the same pure `engagementSyncAction`
+ * the sweep uses; a `minStage` that no longer matches the quote's current
+ * status (e.g. it was since marked lost, or is still only "sent" when
+ * "awarded" was requested) is refused rather than trusted.
+ */
 export async function ensureEngagementForQuote(
   quoteId: string,
   minStage: "proposal_sent" | "awarded"
 ): Promise<ConsultingEngagement | null> {
-  const existing = await getEngagementByQuote(quoteId);
-  if (existing) {
-    if (minStage === "awarded" && existing.status === "proposal_sent") {
-      await patchEngagement(existing.id, (d) => {
-        d.status = "awarded";
-      });
-      return getEngagement(existing.id);
+  return withQuoteLock(quoteId, async () => {
+    const existing = await getEngagementByQuote(quoteId);
+    const q = await getDoc<QuoteLike>("quotes", quoteId);
+    const freshAction = q ? engagementSyncAction(String(q.status || ""), null) : null;
+    const freshStage = freshAction?.kind === "create" ? freshAction.stage : null;
+    if (existing) {
+      if (minStage === "awarded" && freshStage === "awarded" && existing.status === "proposal_sent") {
+        await patchEngagement(existing.id, (d) => {
+          d.status = "awarded";
+        });
+        return getEngagement(existing.id);
+      }
+      return existing;
     }
-    return existing;
-  }
-  // The user deleted the engagement this quote used to have — a re-approve
-  // (or the safety-net sweep below) must not silently rebuild it.
-  if ((await coveredQuoteIds()).has(quoteId)) return null;
-  const q = await getDoc<QuoteLike>("quotes", quoteId);
-  if (!q || q.quoteType !== "consulting") return null;
-  const body = fromQuote(q, minStage);
-  return insertWithPrefixedId<ConsultingEngagement>(
-    "consulting_engagements",
-    "CE",
-    1000,
-    (id) => ({ ...body, id })
-  );
+    if (!q || q.quoteType !== "consulting" || freshStage !== minStage) return null;
+    // The user deleted the engagement this quote used to have — a re-approve
+    // (or the safety-net sweep below) must not silently rebuild it.
+    if ((await coveredQuoteIds()).has(quoteId)) return null;
+    const body = fromQuote(q, minStage);
+    return insertWithPrefixedId<ConsultingEngagement>(
+      "consulting_engagements",
+      "CE",
+      1000,
+      (id) => ({ ...body, id })
+    );
+  });
 }
 
 /**
@@ -730,23 +748,28 @@ export async function syncEngagementsFromQuotes(): Promise<{ created: number; sk
       : null;
     const action = engagementSyncAction(String(q.status || ""), stage);
     if (!action) continue;
+    // `covered` is only a fast-path skip from one snapshot — the correctness
+    // guard is ensureEngagementForQuote's advisory lock + fresh re-read
+    // (#180), not this check.
     if (action.kind === "create" && covered.has(q.id)) continue;
     try {
       if (action.kind === "create") {
-        const body = fromQuote(q, action.stage);
-        const rec = await insertWithPrefixedId<ConsultingEngagement>(
-          "consulting_engagements",
-          "CE",
-          1000,
-          (id) => ({ ...body, id })
-        );
-        byQuote.set(q.id, rec);
+        // Routes through the same locked, tombstone-aware, status-rechecking
+        // path the real win path uses (quote-spawn.ts's spawnConsulting) —
+        // #180. A null means the fresh re-read under the lock found nothing
+        // left to do (already covered, tombstoned, or the quote's status
+        // moved on since this loop's snapshot) — not a change.
+        const rec = await ensureEngagementForQuote(q.id, action.stage);
+        if (rec) {
+          byQuote.set(q.id, rec);
+          changed++;
+        }
       } else {
         // advance / close / reopen — the shared per-row writer above, so this
         // sweep and the per-quote spawn path can never drift apart.
         await applyEngagementStageAction(action, existing!.id, q.id);
+        changed++;
       }
-      changed++;
     } catch (error) {
       skipped.push(q.id);
       console.error(`syncEngagementsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);

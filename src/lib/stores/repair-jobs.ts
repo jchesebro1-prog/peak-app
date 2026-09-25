@@ -661,7 +661,10 @@ export async function createFromQuote(qid: string): Promise<RepairJobRecord | nu
     // #173: no live job, but a deleted one still means this quote is handled.
     if ((await coveredQuoteIds()).has(qid)) return null;
     const q = await getDoc<RepairQuoteLike>("quotes", qid);
-    if (!q || q.quoteType !== "repair") return null;
+    // #180: re-read fresh under the lock — a sweep's `won` filter runs on a
+    // snapshot taken before the lock, so a quote marked lost (or otherwise
+    // moved on) between that snapshot and now must not spawn a job.
+    if (!q || q.quoteType !== "repair" || q.status !== "won") return null;
     return create(await fromQuote(q));
   });
 }
