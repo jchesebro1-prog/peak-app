@@ -1,5 +1,6 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
 import { partText, type SpecSection } from "@/lib/specs/sections";
+import { hasPrintableSpec } from "@/lib/specs/articles";
 
 /* ------------------------------------------------------------------ *
  * Bid-spec matching + assembly (D94).
@@ -13,17 +14,13 @@ import { partText, type SpecSection } from "@/lib/specs/sections";
  * row is unresolved.
  * ------------------------------------------------------------------ */
 
-/** Spec fields carried on a catalog part (D94). Stored on the catalog doc
- *  itself rather than a parallel collection so a part and its spec language
- *  can never drift apart or orphan each other. */
-export type PartSpecFields = {
-  /** SpecSection id this part's Part 2 text belongs under. */
-  specSectionId?: string;
-  /** PART 2 — PRODUCTS paragraph(s) for this part. */
-  specBody?: string;
-  /** Ordering hint within the section; ties break on SKU. */
-  specSort?: number;
-};
+/** Spec fields carried on a catalog part (D94, extended by D-SPEC). Declared on
+ *  CatalogPart itself now — this alias is kept so the D94 call sites read the
+ *  same. */
+export type PartSpecFields = Pick<
+  CatalogPart,
+  "specArticleId" | "specSectionId" | "specTitle" | "specBody" | "specSameAs" | "specSort" | "specState" | "specSource"
+>;
 
 export type SpecCatalogPart = CatalogPart & PartSpecFields;
 
@@ -96,7 +93,7 @@ export function matchBom(rows: BomRow[], catalog: SpecCatalogPart[]): MatchRepor
         row,
         part: direct,
         candidates: [],
-        bucket: direct.specBody?.trim() ? "ready" : "no-spec",
+        bucket: hasPrintableSpec(direct) ? "ready" : "no-spec",
       };
     }
     const candidates = catalog

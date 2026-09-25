@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { apiEnvelope, authorizeDisplaysRequest, catalogEtag, decodeDisplaysCursor, displayTimestamp, displaysRateHeaders, displaysRateLimit, encodeDisplaysCursor, isAfterDisplaysCursor, publicCatalogPart, unauthorizedMessage } from "@/lib/displays-api";
 import type { SpecCatalogPart } from "@/lib/bid-spec";
+import { allSections } from "@/lib/stores/spec-sections";
+import { allArticles } from "@/lib/stores/spec-articles";
 
 export async function GET(req: Request) {
   try {
@@ -22,6 +24,8 @@ export async function GET(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid cursor." }, { status: 400, headers: displaysRateHeaders(rate) });
   }
+  const [sections, articles] = await Promise.all([allSections(), allArticles()]);
+  const lib = { sections, articles };
   const parts = (await listCatalog()) as SpecCatalogPart[];
   const etag = catalogEtag(parts);
   if (req.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { etag, ...displaysRateHeaders(rate) } });
@@ -32,7 +36,7 @@ export async function GET(req: Request) {
     .sort((a, b) => displayTimestamp(b) - displayTimestamp(a) || a.id.localeCompare(b.id))
     .filter((part) => !cursor || isAfterDisplaysCursor(part, cursor));
   const page = filteredParts.slice(0, limit);
-  const data = page.map(publicCatalogPart);
+  const data = page.map((p) => publicCatalogPart(p, lib));
   const nextCursor = page.length === limit && page.at(-1) ? encodeDisplaysCursor(page.at(-1)!) : null;
   return NextResponse.json(apiEnvelope(data, { count: data.length, nextCursor, readOnly: true }), {
     headers: { etag, "cache-control": "private, max-age=60", "x-api-read-only": "true", ...displaysRateHeaders(rate) },

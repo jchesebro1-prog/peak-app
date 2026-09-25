@@ -12,6 +12,10 @@ import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { runCatalogImport } from "./import";
 import { parsePortsField, serializePorts } from "@/lib/catalog-ports";
 import type { Port } from "@/lib/catalog-connect";
+import { validateSameAs, optionalPartFields } from "./part-form";
+import { articleIdForPart } from "@/lib/specs/articles";
+import { allArticles } from "@/lib/stores/spec-articles";
+import { allSections } from "@/lib/stores/spec-sections";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -98,9 +102,7 @@ export async function upsertPart(formData: FormData): Promise<void> {
     list: num(formData.get("list")),
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,
-    manufacturerPartNumber: String(formData.get("manufacturerPartNumber") || "").trim() || undefined,
-    manufacturerModelNumber: String(formData.get("manufacturerModelNumber") || "").trim() || undefined,
-    mapPrice: formData.has("mapPrice") ? num(formData.get("mapPrice")) : undefined,
+    ...optionalPartFields(formData),
     note: String(formData.get("note") || "").trim() || undefined,
     ...(ports ? { ports } : {}),
   });
@@ -284,5 +286,66 @@ export async function setPriceListEffectiveAction(mfr: string, at: number | null
   if (at != null && (!Number.isFinite(at) || at <= 0)) return { ok: false, error: "Enter a valid date." };
   await setPriceListEffective(key, at);
   revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Write a part's canonical spec fields (Task 13's panel). Saving here is the
+ * review step: whatever the row's provenance was, a human has now read it,
+ * so it becomes "authored" — the only state that ever prints (D-SPEC-6).
+ */
+export async function writePartSpecFieldsAction(input: {
+  sku: string;
+  specArticleId?: string;
+  specTitle?: string;
+  specBody?: string;
+  specSameAs?: string;
+  specSort?: number;
+}): Promise<Result> {
+  const user = await requirePerm("create"); // returns the user — no second requireUser()
+  const sku = String(input.sku || "").trim();
+  if (!sku) return { ok: false, error: "A part is required." };
+  const part = await getPart(sku);
+  if (!part) return { ok: false, error: `Part ${sku} not found.` };
+
+  const sameAs = String(input.specSameAs || "").trim();
+  const sameAsError = validateSameAs(sku, sameAs, sameAs ? await getPart(sameAs) : null);
+  if (sameAsError) return { ok: false, error: sameAsError };
+
+  const [articles, sections] = await Promise.all([allArticles(), allSections()]);
+  const articleId = String(input.specArticleId || "").trim();
+  if (articleId && !articles.some((a) => a.id === articleId)) {
+    return { ok: false, error: "That article no longer exists — pick another." };
+  }
+  // D-SPEC-5 mirror: D94's assemble groups by specSectionId, so keep it equal
+  // to the section of the article this part will actually print under
+  // (explicit, else category default, else adopted legacy pointer). When
+  // nothing resolves, leave the stored specSectionId alone.
+  const effective = articleIdForPart({ ...part, specArticleId: articleId || undefined }, articles, sections);
+  const mirrorSectionId = articles.find((a) => a.id === effective)?.sectionId;
+
+  try {
+    // mergeUpsert, never upsert: the part carries ports, trade, pricing and
+    // datasheet fields this action knows nothing about.
+    await mergeUpsert(sku, {
+      specArticleId: articleId || undefined,
+      ...(mirrorSectionId ? { specSectionId: mirrorSectionId } : {}),
+      specTitle: String(input.specTitle || "").trim() || undefined,
+      specBody: String(input.specBody || ""),
+      specSameAs: sameAs || undefined,
+      specSort: Number(input.specSort) || undefined,
+      // Saving here is the review step: whatever the row's provenance was, a
+      // human has now read it, so it becomes authored.
+      specState: "authored",
+      specSource: "authored",
+      specUpdatedAt: Date.now(),
+      specUpdatedBy: user.name,
+    });
+  } catch (e) {
+    console.error("writePartSpecFieldsAction", e);
+    return { ok: false, error: "Could not save the spec text. Try again." };
+  }
+  revalidatePath("/catalog");
+  revalidatePath("/design/specs/library");
   return { ok: true };
 }

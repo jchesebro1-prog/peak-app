@@ -1908,6 +1908,34 @@ async function main() {
     assert((await SpecCurtainTemplates.seedStarterCurtainTemplates("Seed")) === 0, "curtain templates: seeding twice writes nothing");
   }
 
+  /* --- specs: part spec fields + legacy adoption --- */
+  {
+    const { get: getPart, upsert, mergeUpsert } = await import("@/lib/stores/catalog");
+    const { createSection } = await import("@/lib/stores/spec-sections");
+    const { createArticle } = await import("@/lib/stores/spec-articles");
+    const { adoptAllLegacySpecPointers } = await import("@/lib/specs/legacy-pointers");
+
+    await upsert({ sku: "SPEC-1", desc: "Profile fixture", category: "Fixtures", unit: "ea", list: 100, cost: 50, mfr: "ETC", manufacturerPartNumber: "7060A", mapPrice: 90, ports: [{ kind: "dmx", n: 1 }] } as never);
+    // The action's body minus the session gate (requirePerm cannot run here — :1046-1048).
+    await mergeUpsert("SPEC-1", { specArticleId: "ar-fix", specTitle: "LED PROFILE FIXTURE", specBody: "Basis of Design: ETC ColorSource Spot", specState: "authored", specSource: "authored", specUpdatedAt: Date.now(), specUpdatedBy: "Tester" });
+    const after = await getPart("SPEC-1");
+    assert(after?.specTitle === "LED PROFILE FIXTURE" && after?.specState === "authored", "part spec: the fields land");
+    assert(!!after?.ports?.length, "part spec: mergeUpsert left ports alone");
+    assert(after?.list === 100 && after?.cost === 50 && after?.mapPrice === 90 && after?.manufacturerPartNumber === "7060A", "part spec: pricing and manufacturer numbers are untouched");
+
+    const sec = await createSection({ number: "99 01 13", title: "Legacy Adoption Test", by: "Tester" });
+    const art = await createArticle({ sectionId: sec.id, title: "Legacy Instruments" }, "Tester");
+    await upsert({ sku: "LEG-1", desc: "Legacy one", category: "X", unit: "ea", list: 1, cost: 1, productMetadata: { specSection: "99-01-13", specArticle: "legacy instruments" } } as never);
+    await upsert({ sku: "LEG-2", desc: "Legacy two", category: "X", unit: "ea", list: 1, cost: 1, specArticleId: "ar-authored", productMetadata: { specArticle: "Legacy Instruments" } } as never);
+    const first = await adoptAllLegacySpecPointers();
+    const leg1 = await getPart("LEG-1");
+    assert(leg1?.specSectionId === sec.id && leg1?.specArticleId === art.id, "legacy: resolvable Displays text lands in the canonical pointers");
+    assert(leg1?.productMetadata?.specSection === "99-01-13", "legacy: the Displays text itself is kept");
+    assert((await getPart("LEG-2"))?.specArticleId === "ar-authored", "legacy: adoption never overwrites a canonical value");
+    assert(first.adopted >= 1, "legacy: the first run reports what it adopted");
+    assert((await adoptAllLegacySpecPointers()).adopted === 0, "legacy: a second run writes nothing");
+  }
+
   console.log("review regression checks passed");
 }
 

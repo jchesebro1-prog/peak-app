@@ -771,6 +771,26 @@ function PartFormModal({
                 ))}
               </datalist>
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13, marginBottom: 4 }}>
+              <div>
+                {label("MFR P/N")}
+                <input
+                  name="manufacturerPartNumber"
+                  defaultValue={part?.manufacturerPartNumber ?? ""}
+                  placeholder="7060A"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                {label("MFR M/N")}
+                <input
+                  name="manufacturerModelNumber"
+                  defaultValue={part?.manufacturerModelNumber ?? ""}
+                  placeholder="7060A"
+                  style={inputStyle}
+                />
+              </div>
+            </div>
             <div style={{ marginTop: 13, marginBottom: 4 }}>
               {label("Note")}
               <input name="note" defaultValue={part?.note || ""} placeholder="e.g. verify price" style={inputStyle} />

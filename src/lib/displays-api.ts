@@ -3,6 +3,12 @@ import { requireUser } from "@/lib/session";
 import type { CatalogPart } from "@/lib/stores/catalog";
 import type { PartSpecFields } from "@/lib/bid-spec";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { hasPrintableSpec, type SpecCategoryArticle } from "@/lib/specs/articles";
+import type { SpecSection } from "@/lib/specs/sections";
+
+/** Sections + articles the Displays API needs to resolve canonical ids to the
+ *  printable CSI number / title it has always returned (D-SPEC-5). */
+export type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[] };
 
 /**
  * Read-only Displays Manager boundary. A deployment may provide a dedicated
@@ -17,13 +23,15 @@ export async function authorizeDisplaysRequest(req: Request): Promise<void> {
   await requireUser();
 }
 
-function publicProductMetadata(part: CatalogPart) {
+function publicProductMetadata(part: CatalogPart & PartSpecFields, lib?: SpecLookup) {
   const metadata = part.productMetadata;
   if (!metadata) return null;
+  const section = part.specSectionId ? lib?.sections.find((s) => s.id === part.specSectionId) : undefined;
+  const article = part.specArticleId ? lib?.articles.find((a) => a.id === part.specArticleId) : undefined;
   return {
     productFamily: metadata.productFamily || null,
-    specSection: metadata.specSection || null,
-    specArticle: metadata.specArticle || null,
+    specSection: section?.number || metadata.specSection || null,
+    specArticle: article?.title || metadata.specArticle || null,
     specLanguageKey: metadata.specLanguageKey || null,
     researchStatus: metadata.researchStatus || null,
     source: metadata.source
@@ -51,7 +59,7 @@ function publicProductMetadata(part: CatalogPart) {
   };
 }
 
-export function publicCatalogPart(part: CatalogPart & PartSpecFields) {
+export function publicCatalogPart(part: CatalogPart & PartSpecFields, lib?: SpecLookup) {
   return {
     id: part.id,
     sku: part.sku,
@@ -67,8 +75,10 @@ export function publicCatalogPart(part: CatalogPart & PartSpecFields) {
     datasheets: part.datasheetName
       ? [{ name: part.datasheetName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` }]
       : (part.productMetadata?.datasheets || []).map((file) => ({ name: file.fileName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` })),
-    productMetadata: publicProductMetadata(part),
-    spec: part.specBody?.trim() ? { sectionId: part.specSectionId || null, body: part.specBody.trim() } : null,
+    productMetadata: publicProductMetadata(part, lib),
+    spec: hasPrintableSpec(part)
+      ? { sectionId: part.specSectionId || null, articleId: part.specArticleId || null, title: part.specTitle || null, body: part.specBody!.trim() }
+      : null,
     updatedAt: part.updatedAt ?? null,
     pricedAt: part.pricedAt ?? null,
   };

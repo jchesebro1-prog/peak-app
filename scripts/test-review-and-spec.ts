@@ -290,9 +290,13 @@ import {
 import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
 import {
   normalizeCategoryKey, normalizeArticle, articleIdForPart, resolveSameAs, specStateOf,
+  hasPrintableSpec, csiKey, resolveSectionRef, resolveArticleRef, adoptLegacySpecPointers,
   type SpecCategoryArticle, type SpecPartLike,
 } from "@/lib/specs/articles";
 import { STARTER_TEMPLATES, templateId, scaffoldFrom } from "@/lib/stores/spec-templates";
+import { validateSameAs, optionalPartFields } from "@/app/(app)/catalog/part-form";
+import { publicCatalogPart } from "@/lib/displays-api";
+import { buildClientPackageManifest } from "@/lib/client-package";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -12730,4 +12734,95 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(scaffold.split("\n").length === fixtures.headings.length, "templates: the scaffold is one line per heading");
   ok(scaffold.startsWith("Basis of Design:"), "templates: the scaffold labels each line with its heading");
   ok(!scaffold.includes("  "), "templates: the scaffold is flat — the author indents what belongs deeper");
+}
+
+/* --- specs: draft gating (D-SPEC-6) --- */
+{
+  ok(hasPrintableSpec({ specBody: "Text.", specState: "authored" }), "gating: authored text prints");
+  ok(hasPrintableSpec({ specBody: "Text." }), "gating: a D94 body with no state prints");
+  ok(!hasPrintableSpec({ specBody: "Text.", specState: "draft" }), "gating: a draft never prints");
+  ok(!hasPrintableSpec({ specBody: "   " }) && !hasPrintableSpec(null), "gating: blank or absent never prints");
+
+  const drafty = { id: "DRAFTY", sku: "DRAFTY", desc: "Draft part", category: "Lighting", unit: "ea", list: 1, cost: 1, specSectionId: "ss-g", specBody: "Text.", specState: "draft" as const };
+  const authd = { id: "AUTHD", sku: "AUTHD", desc: "Authored part", category: "Lighting", unit: "ea", list: 1, cost: 1, specSectionId: "ss-g", specBody: "Text.", specState: "authored" as const };
+  const gated = matchBom([{ sku: "DRAFTY", desc: "x", qty: 1 }, { sku: "AUTHD", desc: "y", qty: 1 }], [drafty, authd] as any[]);
+  ok(gated.rows[0].bucket === "no-spec", "gating: matchBom files a draft as no-spec, never ready");
+  ok(gated.rows[1].bucket === "ready", "gating: matchBom still files authored text as ready");
+  ok(!gated.finalizable, "gating: a draft blocks finalize like a missing spec");
+
+  ok(publicCatalogPart(drafty as never).spec === null, "gating: the Displays API publishes no spec for a draft");
+  const pub = publicCatalogPart(
+    { ...authd, specArticleId: "ar-g", productMetadata: { specSection: "legacy text" } } as never,
+    { sections: [{ id: "ss-g", number: "26 55 61", title: "Fixtures", sort: 1, part1: [], part3: [], part2Style: "paragraphs", quantities: "drawings", updatedAt: 1, updatedBy: "t" }],
+      articles: [{ id: "ar-g", sectionId: "ss-g", sort: 1, title: "LED Fixtures", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" }] }
+  );
+  ok(pub.spec?.body === "Text." && pub.spec?.articleId === "ar-g", "displays: authored text publishes with its canonical pointers");
+  ok(pub.productMetadata?.specSection === "26 55 61", "displays: specSection reads the canonical section's number over the legacy text");
+  ok(pub.productMetadata?.specArticle === "LED Fixtures", "displays: specArticle reads the canonical article's title");
+
+  const manifest = buildClientPackageManifest(
+    { id: "GRD-T", name: "T", createdAt: 1, quoteId: null,
+      options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
+      placements: [{ id: "gp-a", optionId: "opt-a", partId: "DRAFTY" }, { id: "gp-b", optionId: "opt-a", partId: "AUTHD" }] } as never,
+    [drafty, authd] as never,
+    "opt-a"
+  );
+  ok(manifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "DRAFTY"), "gating: the client package reports a draft as a missing spec");
+  ok(!manifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "AUTHD"), "gating: an authored part is not a spec gap");
+}
+
+/* --- specs: legacy Displays pointers (D-SPEC-5) --- */
+{
+  const secs = [
+    { id: "ss-a", number: "11 61 13", title: "A", sort: 1, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+    { id: "ss-b", number: "26 55 61", title: "B", sort: 2, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+    { id: "ss-d1", number: "27 41 16", title: "Dup 1", sort: 3, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+    { id: "ss-d2", number: "27-41-16", title: "Dup 2", sort: 4, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+  ];
+  const arts = [
+    { id: "ar-a", sectionId: "ss-a", sort: 1, title: "Stage Lighting Instruments", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" },
+    { id: "ar-b", sectionId: "ss-b", sort: 1, title: "Stage Lighting Instruments", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" },
+    { id: "ar-c", sectionId: "ss-b", sort: 2, title: "Fixtures", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" },
+  ];
+  ok(csiKey("11-61-13") === csiKey("116113"), "legacy: CSI numbers compare without punctuation");
+  ok(resolveSectionRef("11 61 13", secs) === "ss-a", "legacy: a CSI number resolves to its one section");
+  ok(resolveSectionRef("ss-b", secs) === "ss-b", "legacy: a section id resolves to itself");
+  ok(resolveSectionRef("27 41 16", secs) === null, "legacy: a number two sections share never guesses");
+  ok(resolveSectionRef("Stage stuff", secs) === null, "legacy: unresolvable text resolves to nothing");
+  ok(resolveArticleRef("stage lighting instruments", arts, null) === null, "legacy: a title in two sections is ambiguous without a section");
+  ok(resolveArticleRef("Stage Lighting Instruments", arts, "ss-a") === "ar-a", "legacy: the section narrows the title");
+
+  const both = adoptLegacySpecPointers({ sku: "L1", productMetadata: { specSection: "11 61 13", specArticle: "Stage Lighting Instruments" } }, arts, secs);
+  ok(both.specSectionId === "ss-a" && both.specArticleId === "ar-a", "legacy: section and article both adopt");
+  ok(
+    Object.keys(adoptLegacySpecPointers({ sku: "L2", specSectionId: "ss-b", specArticleId: "ar-c", productMetadata: { specSection: "11 61 13", specArticle: "Stage Lighting Instruments" } }, arts, secs)).length === 0,
+    "legacy: a canonical value is never overwritten"
+  );
+  const onlyArt = adoptLegacySpecPointers({ sku: "L3", productMetadata: { specArticle: "Fixtures" } }, arts, secs);
+  ok(onlyArt.specArticleId === "ar-c" && onlyArt.specSectionId === "ss-b", "legacy: an adopted article mirrors its section");
+  ok(Object.keys(adoptLegacySpecPointers({ sku: "L4", productMetadata: { specSection: "Stage stuff" } }, arts, secs)).length === 0, "legacy: unresolvable text stays legacy");
+  ok(
+    Object.keys(adoptLegacySpecPointers({ sku: "L5", productMetadata: { specSection: "11 61 13", specArticle: "Stage Lighting Instruments" }, ...both }, arts, secs)).length === 0,
+    "legacy: adopting twice is a no-op"
+  );
+  ok(articleIdForPart({ sku: "L6", productMetadata: { specArticle: "Fixtures" } }, arts, secs) === "ar-c", "legacy: articleIdForPart adopts at read time");
+  ok(articleIdForPart({ sku: "L7", specArticleId: "ar-a", productMetadata: { specArticle: "Fixtures" } }, arts, secs) === "ar-a", "legacy: an explicit article beats the legacy text");
+}
+
+/* --- specs: part form + same-as --- */
+{
+  ok(validateSameAs("A", "", null) === null, "same-as: blank is fine");
+  ok((validateSameAs("A", "a", null) || "").includes("itself"), "same-as: a part cannot point at itself");
+  ok((validateSameAs("A", "NOPE", null) || "").includes("NOPE"), "same-as: a missing target is named");
+  ok((validateSameAs("A", "B", { sku: "B", specSameAs: "C" }) || "").includes("pointer"), "same-as: pointing at a pointer is refused");
+  ok(validateSameAs("A", "B", { sku: "B" }) === null, "same-as: pointing at a part with text is fine");
+
+  const fd = new FormData();
+  fd.set("sku", "X");
+  ok(Object.keys(optionalPartFields(fd)).length === 0, "part form: unsubmitted manufacturer numbers and MAP stay out of the patch");
+  fd.set("manufacturerPartNumber", " 7060A ");
+  fd.set("manufacturerModelNumber", "");
+  const o = optionalPartFields(fd);
+  ok(o.manufacturerPartNumber === "7060A", "part form: a submitted P/N is trimmed");
+  ok("manufacturerModelNumber" in o && o.manufacturerModelNumber === undefined, "part form: a submitted blank M/N clears it");
 }

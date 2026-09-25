@@ -138,6 +138,38 @@ export type CatalogPart = {
    *  `settings.priceListEffective` date covers those (lib/catalog-books
    *  effectivePriceDate). */
   pricedAt?: number;
+
+  /* --- Specs module (D-SPEC). All additive JSONB, no migration. ---
+   * These are the ONE canonical set (D-SPEC-5). productMetadata.specSection /
+   * .specArticle (Displays API, 2e284665) are legacy free text, adopted into
+   * specSectionId / specArticleId only when they resolve — see
+   * adoptLegacySpecPointers in src/lib/specs/articles.ts. A table-style Part 2
+   * prints manufacturerModelNumber → manufacturerPartNumber → sku as the
+   * model; there is no separate model field (D-SPEC-8). */
+  /** The Part 2 category article this part's entry prints under. Replaces
+   *  D94's specSectionId as the placement pointer. */
+  specArticleId?: string;
+  /** D94's pointer. Still read as a fallback. Written only as a MIRROR of the
+   *  effective article's section (so D94's assemble, which groups by it,
+   *  keeps placing the part) and by legacy-pointer adoption. */
+  specSectionId?: string;
+  /** Generic name printed as the entry heading, e.g. "COLOR MIXING LIGHT
+   *  EMITTING DIODE PROFILE FIXTURE". */
+  specTitle?: string;
+  /** Outline text — see src/lib/specs/outline.ts for the convention. */
+  specBody?: string;
+  /** SKU whose specTitle/specBody/specArticleId this part reuses. One hop. */
+  specSameAs?: string;
+  /** Order within the article. */
+  specSort?: number;
+  /** draft = imported and not yet reviewed. Only "authored" text ever
+   *  prints, anywhere (hasPrintableSpec). No state + a body = a D94 part,
+   *  which counts as authored. */
+  specState?: "authored" | "draft";
+  /** Provenance: "authored", "seed:northhs-2026-07-30", "skill:<date>". */
+  specSource?: string;
+  specUpdatedAt?: number;
+  specUpdatedBy?: string;
 };
 
 /** All parts (port of window.MASTER_CATALOG reads). */

@@ -15,6 +15,7 @@ import { getEngagement } from "@/lib/stores/engagements";
 import { allSections, createSection, seedStarterSections, updateSection } from "@/lib/stores/spec-sections";
 import { saveGeneratedSpec } from "@/lib/stores/generated-specs";
 import { toArticles } from "@/lib/specs/sections";
+import { hasPrintableSpec } from "@/lib/specs/articles";
 
 /**
  * Bid-spec generator actions (D94). The catalog is the spec library: a
@@ -86,7 +87,7 @@ export async function remapRowAction(
           ...r,
           part,
           candidates: [],
-          bucket: part.specBody?.trim() ? ("ready" as const) : ("no-spec" as const),
+          bucket: hasPrintableSpec(part) ? ("ready" as const) : ("no-spec" as const),
         }
       : r
   );
@@ -100,14 +101,23 @@ export async function writePartSpecAction(
   specSectionId: string,
   specBody: string
 ): Promise<Result> {
-  await requireUser();
+  const user = await requireUser();
   const body = String(specBody || "").trim();
   if (!body) return { ok: false, error: "The spec paragraph is empty." };
   if (!specSectionId) return { ok: false, error: "Pick the section this product belongs in." };
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const part = catalog.find((p) => p.sku === sku);
   if (!part) return { ok: false, error: `No catalog part with SKU ${sku}.` };
-  await upsertPart({ ...part, specSectionId, specBody: body } as SpecCatalogPart);
+  await upsertPart({
+    ...part,
+    specSectionId,
+    specBody: body,
+    // An inline D94 write is a human writing the text — the review step.
+    specState: "authored",
+    specSource: "authored",
+    specUpdatedAt: Date.now(),
+    specUpdatedBy: user.name,
+  } as SpecCatalogPart);
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -126,6 +136,21 @@ export async function saveSpecAction(input: {
     return {
       ok: false,
       error: `${unresolved.length} item${unresolved.length === 1 ? "" : "s"} still need a spec or an explicit waive.`,
+    };
+  }
+  // A part can be demoted to draft (Task 14's importer) between match and
+  // save — re-read the catalog rather than trust the client-sent bucket.
+  const stored = new Map(((await listCatalog()) as SpecCatalogPart[]).map((p) => [p.sku.toLowerCase(), p]));
+  const nowMissing = input.rows.filter((r) => {
+    if (r.waived || !r.part) return false;
+    const part = stored.get(r.part.sku.toLowerCase());
+    return !hasPrintableSpec(part);
+  });
+  if (nowMissing.length) {
+    const n = nowMissing.length;
+    return {
+      ok: false,
+      error: `${n} item${n === 1 ? "" : "s"} no longer ha${n === 1 ? "s" : "ve"} approved spec text — re-run the match.`,
     };
   }
   const sections = await allSections();

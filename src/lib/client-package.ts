@@ -1,6 +1,7 @@
 import type { SpecCatalogPart, BomRow } from "@/lib/bid-spec";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import type { GridProject, GridPlacement } from "@/lib/stores/grid-projects";
+import { hasPrintableSpec } from "@/lib/specs/articles";
 
 export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec";
 
@@ -100,8 +101,8 @@ export function buildClientPackageManifest(
             blobKey: part.productMetadata.datasheets.find((file) => file.blobKey)!.blobKey!,
           }
         : null;
-    const spec = part.specSectionId && part.specBody?.trim()
-      ? { sectionId: part.specSectionId, body: part.specBody.trim() }
+    const spec = part.specSectionId && hasPrintableSpec(part)
+      ? { sectionId: part.specSectionId, body: part.specBody!.trim() }
       : null;
 
     items.push({

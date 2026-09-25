@@ -35,6 +35,7 @@ export type SpecPartLike = {
   specBody?: string;
   specSameAs?: string;
   specState?: "authored" | "draft";
+  productMetadata?: LegacySpecMetadata;
 };
 
 export type PartSpecState = "authored" | "same-as" | "draft" | "missing";
@@ -82,6 +83,76 @@ export function normalizeArticle(raw: unknown): SpecCategoryArticle {
   };
 }
 
+/* --- Legacy Displays metadata (D-SPEC-5) --- */
+
+/** What commit 2e284665 stored under productMetadata: free text, not ids. */
+export type LegacySpecMetadata = { specSection?: string; specArticle?: string };
+
+/** "11 61 13", "116113" and "11-61-13" are one CSI number. */
+export function csiKey(s: string): string {
+  return String(s || "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+/** A live section id, or a CSI number matching exactly ONE live section. */
+export function resolveSectionRef(ref: string | undefined, sections: SpecSection[]): string | null {
+  const r = String(ref || "").trim();
+  if (!r) return null;
+  if (sections.some((s) => s.id === r)) return r;
+  const key = csiKey(r);
+  if (!key) return null;
+  const hits = sections.filter((s) => csiKey(s.number) === key);
+  return hits.length === 1 ? hits[0].id : null;
+}
+
+/** A live article id, or a title matching exactly ONE live article — inside
+ *  `sectionId` when one is known. Ambiguity never guesses. */
+export function resolveArticleRef(
+  ref: string | undefined,
+  articles: SpecCategoryArticle[],
+  sectionId: string | null
+): string | null {
+  const r = String(ref || "").trim();
+  if (!r) return null;
+  if (articles.some((a) => a.id === r)) return r;
+  const key = normalizeCategoryKey(r);
+  const pool = sectionId ? articles.filter((a) => a.sectionId === sectionId) : articles;
+  const hits = pool.filter((a) => normalizeCategoryKey(a.title) === key);
+  return hits.length === 1 ? hits[0].id : null;
+}
+
+/**
+ * The canonical pointers the legacy metadata would FILL on this part. Never
+ * returns a key the part already holds (so it cannot overwrite an authored
+ * value, and applying its result twice is a no-op). `{}` = nothing to adopt.
+ */
+export function adoptLegacySpecPointers(
+  part: SpecPartLike,
+  articles: SpecCategoryArticle[],
+  sections: SpecSection[]
+): { specSectionId?: string; specArticleId?: string } {
+  const md = part.productMetadata || {};
+  const out: { specSectionId?: string; specArticleId?: string } = {};
+  let sectionId =
+    part.specSectionId && sections.some((s) => s.id === part.specSectionId) ? part.specSectionId : null;
+  if (!part.specSectionId) {
+    const s = resolveSectionRef(md.specSection, sections);
+    if (s) {
+      out.specSectionId = s;
+      sectionId = s;
+    }
+  }
+  if (!part.specArticleId) {
+    const a = resolveArticleRef(md.specArticle, articles, sectionId);
+    if (a) {
+      out.specArticleId = a;
+      if (!part.specSectionId && !out.specSectionId) {
+        out.specSectionId = articles.find((x) => x.id === a)!.sectionId;
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Which article a part belongs under. Explicit pointer, then the category
  * default, then D94's section pointer resolved to that section's first
@@ -93,6 +164,9 @@ export function articleIdForPart(
   articles: SpecCategoryArticle[],
   sections: SpecSection[]
 ): string | null {
+  // D-SPEC-5: legacy Displays text fills absent canonical pointers at read
+  // time, so the panel, coverage and Phase B are right before any write runs.
+  part = { ...part, ...adoptLegacySpecPointers(part, articles, sections) };
   if (part.specArticleId) {
     return articles.some((a) => a.id === part.specArticleId) ? part.specArticleId : null;
   }
@@ -131,6 +205,16 @@ export function resolveSameAs(part: SpecPartLike, bySku: Map<string, SpecPartLik
   return { target, error: null };
 }
 
+/** THE print predicate (D-SPEC-6). Only authored text prints; a draft is
+ *  missing. A D94 part with a body and no specState predates drafts and
+ *  counts as authored. Every consumer that used to test `specBody?.trim()`
+ *  calls this instead. */
+export function hasPrintableSpec(
+  p: { specBody?: string; specState?: "authored" | "draft" } | null | undefined
+): boolean {
+  return !!p && !!(p.specBody || "").trim() && p.specState !== "draft";
+}
+
 export function specStateOf(part: SpecPartLike, bySku: Map<string, SpecPartLike>): PartSpecState {
   if ((part.specSameAs || "").trim()) {
     const { target, error } = resolveSameAs(part, bySku);
@@ -138,5 +222,5 @@ export function specStateOf(part: SpecPartLike, bySku: Map<string, SpecPartLike>
     return specStateOf(target, bySku) === "authored" ? "same-as" : "missing";
   }
   if (!(part.specBody || "").trim()) return "missing";
-  return part.specState === "draft" ? "draft" : "authored";
+  return hasPrintableSpec(part) ? "authored" : "draft";
 }
