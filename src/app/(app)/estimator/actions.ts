@@ -17,6 +17,7 @@ import {
   setQuoteStage,
   setQuotePipeline,
   statusFailureMessage,
+  STAGE_LABEL,
   STAGES,
   submitForReview,
   update,
@@ -121,6 +122,14 @@ export type SavePayload = {
   value: number;
   margin: number;
   status: QuoteStatus;
+  /** #180 review — the status this tab last received FROM THE SERVER (a
+   *  page load, or a prior save/status-change response), never touched by
+   *  an optimistic local update. `status` above is what the user currently
+   *  sees, which can differ from this for two different reasons — a
+   *  genuine, not-yet-confirmed change THIS tab made, or a stale tab that
+   *  hasn't heard about a change made ELSEWHERE. saveQuoteAction tells them
+   *  apart by also comparing against the server's actual current status. */
+  baseStatus: QuoteStatus;
   sections: SpecSection[];
   mobs: SpecMob[];
   /** Always sent in full (#143) — the stored list is replaced, so removing a
@@ -357,9 +366,22 @@ export async function saveQuoteAction(
     // before (or instead of) changeStatus's own setStatusAction call — the
     // "use server" action is also callable directly, bypassing the client
     // dropdown's own transition rules entirely.
-    if (q && payload.status !== prior?.status) {
+    //
+    // #180 review 2: `payload.status !== prior?.status` alone compares the
+    // requested value against the server's CURRENT status — but a STALE tab
+    // (open since before someone else changed the quote elsewhere) sends
+    // its own old `payload.status`, which now also differs from the current
+    // status, purely because the world moved on, not because this tab's
+    // user touched anything. That demoted won→sent, re-won a lost quote, or
+    // demoted sent→draft from nothing more than saving a note. The genuine
+    // signal is `payload.baseStatus`: the status THIS tab last received
+    // from the server. A real, intentional change only exists when the
+    // user's current value differs from that AND nobody else has moved the
+    // quote since — i.e. the server's current status still equals what this
+    // tab last saw.
+    if (q && payload.status !== payload.baseStatus && prior?.status === payload.baseStatus) {
       try {
-        q = await setStatus(loadedId, payload.status);
+        q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
       } catch (e) {
         // Same split as the create branch below: the gate's refusal is the
         // user's to read (#174); the field edits above are still saved.
@@ -368,6 +390,14 @@ export async function saveQuoteAction(
           "estimator/actions saveQuoteAction: setStatus on an existing quote threw"
         );
       }
+    } else if (q && payload.status !== prior?.status) {
+      // Either this tab is stale (prior.status !== baseStatus — someone
+      // else changed it since this tab last synced) or its own "change" was
+      // never a real one to begin with. Leave status untouched — `q` from
+      // update() above already carries the CURRENT server status, since
+      // update() never writes that field — and say so: the other edits in
+      // this save DID go through, only the status shown was out of date.
+      statusError = `This quote's status changed elsewhere since you last saw it — it's "${STAGE_LABEL[q.status]}", not "${STAGE_LABEL[payload.status]}". Your other edits saved; the status shown here has been refreshed.`;
     }
   } else {
     // #62 gave every mint a retry budget; `insertWithPrefixedId` THROWS once an
@@ -414,7 +444,10 @@ export async function saveQuoteAction(
       // #174: the gate's refusal is the user's to read; a spawn defect is
       // not, and used to arrive here looking exactly the same.
       try {
-        q = await setStatus(created.id, payload.status);
+        // #180 review: `?? q` so a null result (defensive; setStatus only
+        // returns null for an unrecognised status or a missing doc, neither
+        // reachable here) never erases the update() result already in `q`.
+        q = (await setStatus(created.id, payload.status, user.name)) ?? q;
       } catch (e) {
         statusError = statusFailureMessage(
           e,
@@ -648,7 +681,7 @@ export async function setStatusAction(
   id: string,
   status: QuoteStatus
 ): Promise<ReviewSync> {
-  await requireUser();
+  const user = await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
   // Punch #60 (D84 hole): marking a quote WON or SENT requires an approval
   // record — in-app or attested. Every other stage transition stays open to
@@ -672,7 +705,7 @@ export async function setStatusAction(
     }
   }
   try {
-    await setStatus(id, status);
+    await setStatus(id, status, user.name);
   } catch (e) {
     const cur = await get(id);
     return {

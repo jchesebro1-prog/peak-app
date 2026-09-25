@@ -9342,8 +9342,25 @@ async function teardownFixtures(): Promise<void> {
   );
   ok(loadedIdBranch.length > 0, "#180 review fixture: saveQuoteAction's update (loadedId) branch is still where the test expects it");
   ok(
-    /payload\.status !== prior\?\.status/.test(loadedIdBranch) && /setStatus\(loadedId, payload\.status\)/.test(loadedIdBranch),
-    "#180 review: the update branch routes a CHANGED status through the gated setStatus(), not the raw update() merge"
+    /setStatus\(loadedId, payload\.status, user\.name\)/.test(loadedIdBranch),
+    "#180 review: the update branch routes a CHANGED status through the gated setStatus(), not the raw update() merge, and stamps it with the real signed-in user (review round 2, item 4)"
+  );
+  ok(
+    /q = \(await setStatus\(loadedId, payload\.status, user\.name\)\) \?\? q;/.test(loadedIdBranch),
+    "#180 review round 2 (item 4): a null setStatus result never erases the update() result already in q"
+  );
+  // Review round 2, item 1: the genuine-change condition must compare the
+  // requested status against `baseStatus` (what THIS tab last received from
+  // the server), not just against the server's current status — otherwise a
+  // stale tab's own stale value "differing from current" reads as an
+  // intentional change and moves status nobody asked for.
+  ok(
+    /payload\.status !== payload\.baseStatus && prior\?\.status === payload\.baseStatus/.test(loadedIdBranch),
+    "#180 review round 2: a status change only applies when it differs from what THIS tab last saw (baseStatus) AND nobody else has moved the quote since (prior.status === baseStatus)"
+  );
+  ok(
+    /else if \(q && payload\.status !== prior\?\.status\)/.test(loadedIdBranch),
+    "#180 review round 2: the stale/no-op case is its own branch — status is left untouched, not silently merged into the genuine-change path"
   );
 }
 
@@ -9376,6 +9393,7 @@ seeded()
   .then(() => statusRefusalAsyncChecks())
   .then(() => refusedAdvanceAsyncChecks())
   .then(() => estimatorUpdateStatusGateAsyncChecks())
+  .then(() => staleStatusOnSaveAsyncChecks())
   .then(() => venueCalendarAsyncChecks())
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
@@ -13218,6 +13236,153 @@ async function estimatorUpdateStatusGateAsyncChecks(): Promise<void> {
     );
   } finally {
     await softDeleteDoc("quotes", Q);
+  }
+}
+
+/* ====================================================================
+   #180 review round 2 — a STALE tab must not move status just because its
+   own (equally stale) local value differs from the server's CURRENT one.
+
+   `payload.status !== prior?.status` alone (the round-1 fix) compares the
+   requested value against the server's live status — but a tab open since
+   before someone else changed the quote sends ITS OWN old value, which now
+   also differs from current, purely because the world moved on. That
+   demoted won→sent, re-won a lost quote, or demoted sent→draft from
+   nothing more than saving a note in a stale tab.
+
+   The fix adds `payload.baseStatus` — the status the client last received
+   FROM THE SERVER, never touched by an optimistic local update — and only
+   treats it as a genuine, intentional change when `payload.status !==
+   payload.baseStatus` (the user's current value really differs from what
+   they last saw) AND `prior.status === payload.baseStatus` (nobody else
+   has moved the quote since). Otherwise status is left alone and the
+   server's current value is returned so the client resyncs.
+
+   requireUser() throws outside a request scope, so saveQuoteAction itself
+   can't be called from this harness (same constraint as the checks above).
+   `wouldApply` below is a literal copy of the condition the source-check
+   above pins to actions.ts's real code — this proves the DB behaves
+   correctly when driven the way that code drives it, for all four
+   scenarios the review named plus the by-stamping half of item 4 (item 4's
+   `?? q` half has no separate DB behavior to assert — it only prevents
+   discarding an already-good `q`, which every scenario below already
+   exercises by reading the quote back afterward).
+   ==================================================================== */
+async function staleStatusOnSaveAsyncChecks(): Promise<void> {
+  const PRE = "TEST180r2:";
+  type QS = "draft" | "sent" | "won" | "lost";
+  const QUOTE_IDS: string[] = [];
+
+  /** buildQuote hardcodes a fresh create() to "draft" regardless of any
+   *  `status` in the partial — every non-draft fixture status below is
+   *  reached by a real setStatus transition after creating, same as the
+   *  app itself would. */
+  const seedDraft = (id: string) =>
+    QuoteStore.create({
+      id,
+      name: "#180 review 2 harness",
+      quoteType: "system",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+
+  const wouldApply = (payloadStatus: QS, baseStatus: QS, priorStatus: QS | undefined) =>
+    payloadStatus !== baseStatus && priorStatus === baseStatus;
+
+  try {
+    /* ---- A: a stale "sent" over "won" leaves it won ---- */
+    const qa = `${PRE}a`;
+    QUOTE_IDS.push(qa);
+    await seedDraft(qa);
+    await QuoteStore.setStatus(qa, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const priorA = await QuoteStore.get(qa);
+    // A passive stale tab: it never touched the dropdown, so its payload
+    // equals its own baseStatus ("sent") — both stale relative to "won".
+    ok(
+      !wouldApply("sent", "sent", priorA?.status),
+      "#180 review 2: a passive stale tab (payload === baseStatus === 'sent') against a current 'won' quote is never treated as a genuine change"
+    );
+    if (wouldApply("sent", "sent", priorA?.status)) await QuoteStore.setStatus(qa, "sent", "Test User");
+    ok(
+      (await QuoteStore.get(qa))?.status === "won",
+      "#180 review 2: a stale 'sent' over 'won' leaves it won"
+    );
+
+    /* ---- B: a stale "draft" over "sent" leaves it sent ---- */
+    const qb = `${PRE}b`;
+    QUOTE_IDS.push(qb);
+    await seedDraft(qb);
+    await QuoteStore.setStatus(qb, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const priorB = await QuoteStore.get(qb);
+    ok(
+      !wouldApply("draft", "draft", priorB?.status),
+      "#180 review 2: a passive stale tab (payload === baseStatus === 'draft') against a current 'sent' quote is never treated as a genuine change"
+    );
+    ok(
+      (await QuoteStore.get(qb))?.status === "sent",
+      "#180 review 2: a stale 'draft' over 'sent' leaves it sent"
+    );
+
+    /* ---- C: stale "won" over "lost" does not re-win or spawn ---- */
+    const qc = `${PRE}c`;
+    QUOTE_IDS.push(qc);
+    await seedDraft(qc);
+    // The legitimate won transition below DOES spawn a project (it's a real
+    // win, through the real gated setStatus) — that's expected and correct,
+    // and happens before any "stale save" is simulated. The assertion this
+    // scenario cares about is that the STALE SAVE ATTEMPT below adds no
+    // SECOND spawn, not that none exists at all.
+    await QuoteStore.setStatus(qc, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    await QuoteStore.setStatus(qc, "lost", "Test Harness"); // "lost" is ungated
+    const projectsBeforeStaleAttemptC = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === qc).length;
+    const priorC = await QuoteStore.get(qc);
+    ok(
+      !wouldApply("won", "won", priorC?.status),
+      "#180 review 2: a stale tab still showing 'won' against a now-'lost' quote is never treated as a genuine change"
+    );
+    ok(
+      (await QuoteStore.get(qc))?.status === "lost",
+      "#180 review 2: stale 'won' over 'lost' does not re-win it"
+    );
+    const spawnedProjectsC = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === qc);
+    ok(
+      spawnedProjectsC.length === projectsBeforeStaleAttemptC,
+      "#180 review 2: the stale 'won' save attempt spawns nothing NEW — setStatus (and so spawnFromQuote) was never even attempted for it"
+    );
+
+    /* ---- D: a genuine change still goes through the real approval gate ---- */
+    const qd = `${PRE}d`;
+    QUOTE_IDS.push(qd);
+    await seedDraft(qd);
+    const priorD = await QuoteStore.get(qd);
+    ok(
+      wouldApply("won", "draft", priorD?.status),
+      "#180 review 2: a genuine change (payload differs from baseStatus, and prior still equals baseStatus) IS treated as real"
+    );
+    let refusedD = false;
+    try {
+      await QuoteStore.setStatus(qd, "won", "Test User");
+    } catch {
+      refusedD = true;
+    }
+    ok(
+      refusedD,
+      "#180 review 2: the genuine change still goes through the real approval gate — a fresh draft has no approval, so 'won' is refused rather than silently let through because it was 'genuine'"
+    );
+
+    /* ---- item 4: setStatus is called with the real signed-in user, not the DEFAULT_ACTOR fallback ---- */
+    const qe = `${PRE}e-by-stamp`;
+    QUOTE_IDS.push(qe);
+    await seedDraft(qe);
+    await QuoteStore.setStatus(qe, "sent", "Alex Reviewer", { bypassApprovalGate: "engine-owned-flow" });
+    const revsE = await QuoteStore.quoteRevisions(qe);
+    ok(
+      revsE.length > 0 && revsE[revsE.length - 1]?.by === "Alex Reviewer",
+      `#180 review 2 (item 4): the "sent" revision is stamped with the real actor passed to setStatus, not the DEFAULT_ACTOR fallback (is "${revsE[revsE.length - 1]?.by}")`
+    );
+  } finally {
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
   }
 }
 

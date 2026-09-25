@@ -384,6 +384,14 @@ export default function EstimatorClient({
   const [loadedId, setLoadedId] = useState(initial.loadedId);
   const [quoteId, setQuoteId] = useState(initial.quoteId);
   const [status, setStatus] = useState<QuoteStatus>(initial.status);
+  /** #180 review 2 — the status this tab last received FROM THE SERVER
+   *  (page load, or a confirmed save/status-change response). `status`
+   *  above also updates OPTIMISTICALLY (changeStatus/changeStage set it
+   *  before their server round trip resolves); this one only ever moves on
+   *  a server-confirmed value, so saveQuoteAction can tell a genuine
+   *  in-flight change apart from a stale tab that never heard about a
+   *  change made elsewhere. */
+  const [baseStatus, setBaseStatus] = useState<QuoteStatus>(initial.status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
   /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
      changes it), so it stays a plain const rather than state. */
@@ -720,7 +728,12 @@ export default function EstimatorClient({
 
   const applySync = (r: ReviewSync) => {
     if (r.review) setReview(r.review);
-    if (r.status) setStatus(r.status);
+    // Server-confirmed — this is what makes baseStatus trustworthy for the
+    // next save's stale-tab check (#180 review 2).
+    if (r.status) {
+      setStatus(r.status);
+      setBaseStatus(r.status);
+    }
   };
 
   /** Same idea as applySync, for the Daylite stage bar's StageSync (Task 6) —
@@ -728,7 +741,10 @@ export default function EstimatorClient({
    *  underneath when the tag changes), so all four fields sync together. */
   const applyStageSync = (r: StageSync) => {
     if (r.review) setReview(r.review);
-    if (r.status) setStatus(r.status);
+    if (r.status) {
+      setStatus(r.status);
+      setBaseStatus(r.status);
+    }
     if (r.pipelineId) setPipelineId(r.pipelineId);
     if (r.stage) setStage(r.stage);
   };
@@ -757,6 +773,9 @@ export default function EstimatorClient({
           value: t.grand,
           margin: t.margin,
           status,
+          // #180 review 2 — what this tab last confirmed from the server,
+          // so the action can tell a genuine change from a stale tab.
+          baseStatus,
           sections,
           mobs,
           vendorQuotes,
@@ -776,7 +795,14 @@ export default function EstimatorClient({
           setRevNum(res.revNum);
           setRevDateMs(res.updatedAt);
           if (res.review) setReview(res.review);
-          if (res.status) setStatus(res.status);
+          // Server-confirmed either way (ok or refused/stale) — this IS the
+          // resync: whether the requested status applied, was refused, or
+          // was left alone because this tab was stale, res.status is always
+          // what the server actually has now (#180 review 2).
+          if (res.status) {
+            setStatus(res.status);
+            setBaseStatus(res.status);
+          }
           // Daylite stage bar (Task 6) — a brand-new quote has no pipeline
           // until this first save creates it; pick it up immediately so the
           // bar shows the right stage highlighted without another round trip.
