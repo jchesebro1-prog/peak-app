@@ -16080,3 +16080,47 @@ import {
   ok(memberCoverageLabel(cov[pairKey("S4LED", "CLAMP")]) === "Has its own datasheet — none attached yet", "part docs assemblies: the own-datasheet toggle opts the member out");
   ok(memberCoverageLabel(cov[pairKey("S4LED", "NEW")]) === "Save to link it to the fixture" && !cov[pairKey("S4LED", "NEW")].linked, "part docs assemblies: an unsaved member is not linked yet");
 }
+
+/* ======================================================================
+   Part documents (#DOC) — Task 10: the DaVinci accessory graph in the
+   extract, and the pre-fill plan. Pure.
+   ====================================================================== */
+import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
+{
+  const LIBDOC = {
+    ...LIB162,
+    constants: {
+      ...LIB162.constants,
+      productClassifications: [{ productClassificationId: "PC-P", text: "Product" }, { productClassificationId: "PC-A", text: "Accessory" }],
+    },
+    types: [
+      { ...LIB162.types[0], typeInformation: { ...LIB162.types[0].typeInformation, productClassificationId: "PC-P" },
+        accessories: [{ typeId: "TY-LENS", maxQuantity: 2, userDefinable: true }, { typeId: "TY-LENS", maxQuantity: 2, userDefinable: true }, { typeId: "TY-X", maxQuantity: 1, userDefinable: false }, { typeId: "TY-GHOST", maxQuantity: 1 }] },
+      LIB162.types[1],
+      // A lens tube: no ports, no documents — dropped from records, kept for the graph.
+      { typeId: "TY-LENS", typeInformation: { displayName: "19 deg lens tube", categoryId: "C-1", manufacturerId: "M-ETC", productClassificationId: "PC-A" },
+        partInformation: { generatorData: { lookupData: [{ modelNumber: "419LT", partNumber: "7060A1017" }] } }, documents: [], ports: [], accessories: [] },
+    ],
+  };
+  const ex = extractLibrary(LIBDOC);
+  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#DOC extract: records still drop contentless types");
+  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#DOC extract: accessory links are kept once, never to the internal category or an unknown type");
+  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#DOC extract: both ends carry classification and normalized model numbers");
+  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#DOC extract: the parent is described too; the excluded type is not");
+  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#DOC extract: a library with no accessories yields an empty graph");
+
+  const allowEtc = (m: string) => m === "ETC" || m === "High End Systems";
+  const plan = planDavinciPrefill(ex, [{ sku: "ETC:CSPAR" }, { sku: "CSPAR" }, { sku: "419LT" }, { sku: "ETC:7060A1017" }, { sku: "UNRELATED" }], allowEtc);
+  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#DOC prefill: one document per English datasheet URL (the reissued duplicate is one)");
+  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#DOC prefill: the document links to every Peak SKU of the type");
+  ok(
+    plan.accessoryPairs.map((p) => `${p.parentSku}>${p.accessorySku}x${p.maxQty}`).sort().join(",") ===
+      "CSPAR>419LTx2,CSPAR>ETC:7060A1017x2,ETC:CSPAR>419LTx2,ETC:CSPAR>ETC:7060A1017x2",
+    "#DOC prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
+  );
+  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#DOC prefill: the report counts matched types and pairs");
+  const gated = planDavinciPrefill(ex, [{ sku: "CSPAR" }, { sku: "419LT" }], () => false);
+  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#DOC prefill: the manufacturer gate refuses every record");
+  const noLens = planDavinciPrefill(ex, [{ sku: "CSPAR" }], allowEtc);
+  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#DOC prefill: a link with no Peak part on one end writes nothing");
+}

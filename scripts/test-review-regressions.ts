@@ -2506,6 +2506,37 @@ async function main() {
     assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "subassembly:SA-sync"), "part docs graph: a subassembly's links are outside the assemblies prefix and survive");
   }
 
+  /* --- part documents (#DOC): DaVinci pre-fill apply is idempotent --- */
+  {
+    const { applyPrefill, davinciDocumentId } = await import("@/lib/part-docs/davinci-apply");
+    const Docs = await import("@/lib/stores/part-documents");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const url = "https://etc.example/prefill-ds.pdf";
+    const plan = {
+      libraryTimestamp: "t",
+      documents: [{ url, label: "CSPAR Datasheet", typeId: "TY-1", skus: ["PF-CSPAR", "PF-CSPAR2"] }],
+      accessoryPairs: [{ parentSku: "PF-CSPAR", accessorySku: "PF-LENS", maxQty: 2, sourceRef: "TY-1" }],
+      stats: { parts: 3, typesMatched: 2, documents: 1, documentLinks: 2, accessoryPairs: 1, accessoryLinksUnmatched: 0 },
+    };
+    const first = await applyPrefill(plan, "DaVinci pre-fill");
+    assert.deepEqual(first, { documentsCreated: 1, linksCreated: 2, accessoryWritten: 1, accessoryRemoved: 0 }, "part docs prefill: documents, links and the graph are written");
+    const doc = await Docs.getDocument(davinciDocumentId(url));
+    assert(doc && doc.source === "davinci" && doc.blobKey === null && doc.sourceUrl === url && doc.language === "en" && doc.title === "CSPAR Datasheet", "part docs prefill: a link-only DaVinci document — nothing downloaded");
+    assert.deepEqual(await applyPrefill(plan, "DaVinci pre-fill"), { documentsCreated: 0, linksCreated: 0, accessoryWritten: 0, accessoryRemoved: 0 }, "part docs prefill: a second run writes nothing");
+    await Docs.detachDocument(doc!.id, "PF-CSPAR2");
+    await applyPrefill(plan, "DaVinci pre-fill");
+    assert(!(await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-CSPAR2"), "part docs prefill: a human's detach survives a re-run");
+    const dropped = await applyPrefill({ ...plan, accessoryPairs: [] }, "DaVinci pre-fill");
+    assert.equal(dropped.accessoryRemoved, 1, "part docs prefill: a pair ETC dropped from the library is removed");
+    assert(!(await Acc.allAccessoryLinks()).some((l) => l.source === "davinci" && l.accessorySku === "PF-LENS"), "part docs prefill: …from the live graph");
+
+    const fetchedUrl = "https://etc.example/already-fetched.pdf";
+    const fetched = await Docs.createDocument({ kind: "datasheet", fileName: "f.pdf", contentType: "application/pdf", size: 5, blobKey: "part-docs/x/f.pdf", sourceUrl: fetchedUrl, source: "fetch", by: "Jeff" });
+    await applyPrefill({ ...plan, documents: [{ url: fetchedUrl, label: "F", typeId: "TY-2", skus: ["PF-F"] }] }, "DaVinci pre-fill");
+    assert.equal(await Docs.getDocument(davinciDocumentId(fetchedUrl)), null, "part docs prefill: a URL someone already fetched gets no second document");
+    assert((await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-F" && l.documentId === fetched!.id), "part docs prefill: …the part is linked to the fetched one instead");
+  }
+
   console.log("review regression checks passed");
 }
 

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/session";
+import { requirePerm, requireUser } from "@/lib/session";
 import { blobEnabled } from "@/lib/blob";
 import { searchDocs } from "@/db/doc-store";
 import { get as getPart, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
@@ -13,6 +13,7 @@ import {
   getDocument,
   replaceDocumentFile,
 } from "@/lib/stores/part-documents";
+import { applyPrefill, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
@@ -279,4 +280,21 @@ export async function searchPartsAction(q: string): Promise<DocActionResult<{ hi
     .slice(0, 20)
     .map(hitOf);
   return { ok: true, hits };
+}
+
+/** Admin: write the DaVinci pre-fill (link-only ETC datasheets + the ETC
+ *  accessory graph). Idempotent — a second click writes nothing new. The
+ *  same write as `npm run part-docs:davinci -- --apply --commit`. */
+export async function prefillFromDavinciAction(): Promise<DocActionResult<{ summary: string }>> {
+  const user = await requirePerm("manage_users");
+  const plan = await planPrefillFromDavinci();
+  const r = await applyPrefill(plan, user.name);
+  revalidate();
+  return {
+    ok: true,
+    summary:
+      `${r.documentsCreated} new datasheet link${r.documentsCreated === 1 ? "" : "s"}, ${r.linksCreated} part link${r.linksCreated === 1 ? "" : "s"}, ` +
+      `${r.accessoryWritten} accessory link${r.accessoryWritten === 1 ? "" : "s"} written, ${r.accessoryRemoved} removed ` +
+      `(${plan.stats.typesMatched} DaVinci types matched ${plan.stats.parts} ETC parts).`,
+  };
 }

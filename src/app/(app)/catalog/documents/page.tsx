@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { blobEnabled } from "@/lib/blob";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
@@ -16,6 +17,7 @@ import {
   type DocumentRow,
 } from "@/lib/part-docs/views";
 import DocumentsClient from "./documents-client";
+import DavinciPrefillButton from "./davinci-prefill-button";
 
 export const metadata = { title: "Datasheets — Quartzite-6" };
 export const dynamic = "force-dynamic";
@@ -35,7 +37,7 @@ const PAGE = 200;
  * every collection per request; everything below is single-pass Maps.
  */
 export default async function DocumentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  const [user, sp] = await Promise.all([requireUser(), searchParams]);
   const [parts, quotes, gridProjects, generated] = await Promise.all([listCatalog(), allQuotes(), listProjects(), allGeneratedSpecs()]);
   const state = await loadPartDocsState(parts);
 
@@ -77,6 +79,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {can("manage_users", user.roles) && <DavinciPrefillButton />}
           <Link href="/catalog/documents/upload" className="pk-btn-accent" style={{ textDecoration: "none" }}>Upload many</Link>
         </div>
       </div>
