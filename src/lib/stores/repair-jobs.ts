@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import { get as getCustomerDoc } from "./customers";
 
 /**
@@ -650,19 +651,29 @@ async function coveredQuoteIds(): Promise<Set<string>> {
   return out;
 }
 
+/** #180: check-then-insert runs under an advisory lock keyed on the quote id
+ *  (`withQuoteLock`), so a healing sweep racing another sweep or a live
+ *  re-approval for the SAME quote serializes instead of minting two jobs. */
 export async function createFromQuote(qid: string): Promise<RepairJobRecord | null> {
-  const existing = await byQuote(qid);
-  if (existing) return existing;
-  // #173: no live job, but a deleted one still means this quote is handled.
-  if ((await coveredQuoteIds()).has(qid)) return null;
-  const q = await getDoc<RepairQuoteLike>("quotes", qid);
-  if (!q || q.quoteType !== "repair") return null;
-  return create(await fromQuote(q));
+  return withQuoteLock(qid, async () => {
+    const existing = await byQuote(qid);
+    if (existing) return existing;
+    // #173: no live job, but a deleted one still means this quote is handled.
+    if ((await coveredQuoteIds()).has(qid)) return null;
+    const q = await getDoc<RepairQuoteLike>("quotes", qid);
+    // #180: re-read fresh under the lock — a sweep's `won` filter runs on a
+    // snapshot taken before the lock, so a quote marked lost (or otherwise
+    // moved on) between that snapshot and now must not spawn a job.
+    if (!q || q.quoteType !== "repair" || q.status !== "won") return null;
+    return create(await fromQuote(q));
+  });
 }
 
 /** Scan accepted (won) repair quotes and create any job not made yet.
  *  Returns the number of jobs created. Page-load backfill only (repairs
- *  dashboard + scheduler) — never call it inside a transaction. */
+ *  dashboard + scheduler) — never call it inside a transaction. Per-quote
+ *  creation routes through `createFromQuote` (#180) so its advisory lock
+ *  guards concurrent sweeps/approvals; `have` is only a fast-path skip. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<RepairQuoteLike>("quotes");
   const have = await coveredQuoteIds();
@@ -670,9 +681,9 @@ export async function syncFromQuotes(): Promise<number> {
   for (const q of quotes) {
     if (q.quoteType !== "repair" || q.status !== "won") continue;
     if (have.has(q.id)) continue;
-    await create(await fromQuote(q));
+    const rec = await createFromQuote(q.id);
     have.add(q.id);
-    made++;
+    if (rec) made++;
   }
   return made;
 }
@@ -744,6 +755,14 @@ export async function remove(id: string): Promise<void> {
   await softDeleteDoc("repair_jobs", id);
 }
 
+/** Set a repair job's dollar value by hand — the "fill it in later" path for
+ *  a Daylite-imported repair that landed with no known value (#188, mirrors
+ *  setProjectValue in stores/projects.ts). Always clears valueUnknown, even
+ *  when re-editing an already-known value. */
+export async function setRepairValue(id: string, value: number): Promise<RepairJobRecord | null> {
+  return update(id, { value, valueUnknown: false });
+}
+
 /* ---------- worklists ---------- */
 
 /** The `source` the Daylite history import writes on every repair it creates
@@ -757,11 +776,57 @@ export function dayliteImportSource(done: boolean): RepairSource {
 /** A repair imported as Daylite HISTORY (done in Daylite) — a years-old
  *  completion whose warranty lapsed long ago. Kept out of the warranty
  *  follow-up worklist; still a completed job everywhere else (stats, lists,
- *  the customer record). A live imported repair behaves like any other. */
+ *  the customer record). See `isLapsedLiveImport` below for the LIVE
+ *  counterpart (#192) — a live imported repair with an unlapsed warranty
+ *  still behaves like any other. */
 export function isImportedHistory(rec: Pick<RepairJobRecord, "source"> | null | undefined): boolean {
   const s = rec?.source;
   const h = dayliteImportSource(true);
   return !!s && s.kind === h.kind && s.refId === h.refId && s.label === h.label;
+}
+
+/** A repair imported as Daylite LIVE (still open there) — dayliteImportSource's
+ *  other marker. */
+function isImportedLive(rec: Pick<RepairJobRecord, "source"> | null | undefined): boolean {
+  const s = rec?.source;
+  const h = dayliteImportSource(false);
+  return !!s && s.kind === h.kind && s.refId === h.refId && s.label === h.label;
+}
+
+/**
+ * #192 — a Daylite service call that's still *New* there (imported LIVE,
+ * ordinary open work) can still land at a completed/invoiced Daylite stage
+ * (Service Completed / Invoice Sent — SERVICE_STAGE_MAP's "completed"
+ * bucket) carrying its old Daylite End Date as `completedAt`
+ * (history-commit.ts's writeRepair sets completedAt off the stage, not the
+ * Daylite Status). If that warranty window has already fully run out, the
+ * record reads as an already-lapsed warranty the moment it's imported —
+ * fifteen-year-old Daylite bookkeeping, not a live warranty issue. Owner
+ * decision: treat it as history too, same as a done-in-Daylite import — kept
+ * off the warranty follow-up worklist, still a completed repair everywhere
+ * else. A live import whose warranty hasn't lapsed yet (a genuinely recent
+ * completion) still gets its follow-up: this only fires once the warranty
+ * has actually run out. Pure — reads no clock but the one passed in.
+ */
+export function isLapsedLiveImport(
+  rec: Pick<RepairJobRecord, "source" | "stage" | "completedAt" | "warrantyMonths"> | null | undefined,
+  nowMs: number = now()
+): boolean {
+  if (!rec || rec.stage !== "completed" || !isImportedLive(rec)) return false;
+  if (rec.completedAt == null) return false;
+  const expiresAt = rec.completedAt + (rec.warrantyMonths ?? DEFAULT_WARRANTY_MONTHS) * MONTH;
+  return expiresAt < nowMs;
+}
+
+/** Kept out of warranty follow-ups altogether: Daylite-imported history
+ *  (#187/D241) or a Daylite-imported live record whose warranty has already
+ *  lapsed, which is effectively the same thing (#192). Still a completed
+ *  repair everywhere else (stats, lists, the customer record). */
+export function excludedFromWarrantyFollowUps(
+  rec: Pick<RepairJobRecord, "source" | "stage" | "completedAt" | "warrantyMonths"> | null | undefined,
+  nowMs: number = now()
+): boolean {
+  return isImportedHistory(rec) || isLapsedLiveImport(rec, nowMs);
 }
 
 export type WarrantyFollowUpRow = RepairJobRecord & { _warranty: WarrantyStatus };
@@ -772,7 +837,7 @@ export async function warrantyFollowUps(
 ): Promise<WarrantyFollowUpRow[]> {
   const all = await listDocs<RepairJobRecord>("repair_jobs");
   let rows = all
-    .filter((j) => j.stage === "completed" && !isImportedHistory(j))
+    .filter((j) => j.stage === "completed" && !excludedFromWarrantyFollowUps(j))
     .map((j) => ({ ...j, _warranty: warrantyStatus(j) }));
   if (opts.dueOnly)
     rows = rows.filter(

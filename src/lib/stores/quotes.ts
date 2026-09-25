@@ -11,6 +11,7 @@ import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
 import { withTransaction } from "@/db";
 import { loadPipelines } from "@/lib/pipelines-server";
+import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import {
   carriesPipeline,
   firstStage,
@@ -53,6 +54,59 @@ export const STAGE_LABEL: Record<QuoteStatus, string> = {
   won: "Won",
   lost: "Lost",
 };
+
+/**
+ * What saveQuoteAction's update (loadedId) branch should do about a
+ * possibly-changed `status`, given three values: what the payload asked
+ * for, what the client tab last received from the server (`baseStatus`),
+ * and what the row's status actually is right now (`currentStatus` — read
+ * AFTER the field-only update() write, since that never touches status).
+ *
+ * A pure decision function (review round 3, item 1/4) — pulled out of the
+ * "use server" action specifically so it's callable from a plain test
+ * harness (requireUser() throws outside a request scope, so
+ * saveQuoteAction itself can't be) without re-implementing its condition
+ * as a copy that can silently drift from the real one.
+ *
+ * - "apply": the payload really differs from what this tab last saw, AND
+ *   nobody else has moved the quote since (currentStatus still equals
+ *   baseStatus) — a genuine, intentional change. The caller should attempt
+ *   the gated setStatus().
+ * - "unchanged": payload already matches the current status — nothing to do.
+ * - "stalePassive": the payload never differed from baseStatus (the user
+ *   never touched the status control in this tab) but the current status
+ *   does — someone else moved it elsewhere. Not a failure of anything this
+ *   save asked for: the caller should leave status untouched and surface an
+ *   informational notice, not an error.
+ * - "staleConflict": the user DID mean to change status in this tab, but
+ *   the quote moved on under them first. The caller should leave status
+ *   untouched and surface an error — the requested change could not be
+ *   honoured against stale data (the other field edits still saved).
+ */
+export type SaveStatusDecision =
+  | { kind: "apply" }
+  | { kind: "unchanged" }
+  | { kind: "stalePassive"; notice: string }
+  | { kind: "staleConflict"; error: string };
+
+export function resolveSaveStatusChange(
+  payloadStatus: QuoteStatus,
+  baseStatus: QuoteStatus,
+  currentStatus: QuoteStatus
+): SaveStatusDecision {
+  if (payloadStatus === currentStatus) return { kind: "unchanged" };
+  if (payloadStatus !== baseStatus && currentStatus === baseStatus) return { kind: "apply" };
+  if (payloadStatus === baseStatus) {
+    return {
+      kind: "stalePassive",
+      notice: `This quote's status changed elsewhere while you had it open — it's now "${STAGE_LABEL[currentStatus]}". Your edits saved normally.`,
+    };
+  }
+  return {
+    kind: "staleConflict",
+    error: `This quote's status changed elsewhere since you last saw it — it's "${STAGE_LABEL[currentStatus]}", not "${STAGE_LABEL[payloadStatus]}". Your other edits saved; the status shown here has been refreshed.`,
+  };
+}
 
 const DAY = 86400000;
 
@@ -847,19 +901,14 @@ export async function setStatus(
   // here, so this only runs the moment a quote actually transitions INTO
   // "won", never on a no-op re-save of an already-won quote (#170's spawn
   // replay is deliberately the only thing that branch does). Scoped to the
-  // quote types that actually become an Installs project (mirrors syncProjectsFromQuotes'
-  // own exclusion list) — flame-test/repair/inspection/consulting wins run
-  // their own service workflows and dashboards, so an "install sold" task
-  // for those would be noise. There is no separate PM role (D87) — `owner`
-  // is the only reliably-present assignee at this hook point.
-  if (
-    result &&
-    status === "won" &&
-    q.quoteType !== "flame_test" &&
-    q.quoteType !== "repair" &&
-    q.quoteType !== "inspection" &&
-    q.quoteType !== "consulting"
-  ) {
+  // quote types that actually become an Installs project — the SAME shared
+  // list projects.ts's three exclusion checks use (PROJECT_EXCLUDED_QUOTE_TYPES,
+  // review round-3: rental was missing here too, independently of the same
+  // gap in projects.ts) — flame-test/repair/inspection/consulting/rental
+  // wins run their own service workflows and dashboards, so an "install
+  // sold" task for those would be noise. There is no separate PM role
+  // (D87) — `owner` is the only reliably-present assignee at this hook point.
+  if (result && status === "won" && !isProjectExcludedQuoteType(q.quoteType)) {
     await createAssignment({
       title: `Install sold — reach out: ${result.name || result.customer || id}`,
       assignee: result.owner || DEFAULT_ACTOR,

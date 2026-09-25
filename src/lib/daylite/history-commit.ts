@@ -85,6 +85,10 @@ export type PreviewRow = {
   name: string;
   company: string | null;
   candidates: string[];
+  /** The Companies cell verbatim (#190) — shown next to the needs-a-pick
+   *  picker so Jeff sees what Daylite actually held, not just the names
+   *  matched out of it. */
+  companiesRaw: string;
   stage: string;
   done: boolean;
   value: number | null;
@@ -446,6 +450,7 @@ function projectPreviewRow(ctx: Ctx, p: ProjectPlan, picks: Record<string, strin
     name: p.name,
     company: r.company?.name ?? null,
     candidates: p.companyCandidates,
+    companiesRaw: p.companiesCellRaw,
     stage: p.stage,
     done: p.done,
     value: p.value,
@@ -479,6 +484,7 @@ function quotePreviewRow(
     name: q.name,
     company: r.company?.name ?? null,
     candidates: q.companyCandidates,
+    companiesRaw: q.companiesCellRaw,
     stage: q.stage,
     done: false,
     value: q.value,

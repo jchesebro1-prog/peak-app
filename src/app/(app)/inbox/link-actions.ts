@@ -10,7 +10,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { patchDoc } from "@/db/doc-store";
-import { get as getThread } from "@/lib/stores/comms";
+import { get as getThread, resolveCustomerId, visibleTo } from "@/lib/stores/comms";
 import type { CommThread } from "@/lib/stores/comms";
 import { get as getCustomer, contactsForId } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
@@ -19,8 +19,16 @@ import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
 import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
-import { domainOf, isPublicDomain } from "@/lib/gmail/config";
-import { linkThread, rememberAddress, resweepThreads } from "@/lib/gmail/linking";
+import { domainOf, isPublicDomain, personalKey } from "@/lib/gmail/config";
+import { getConnectionInfo } from "@/lib/gmail/connections";
+import {
+  linkThread,
+  rememberAddress,
+  resweepThreads,
+  setIdentityMessage,
+  setThreadSite,
+} from "@/lib/gmail/linking";
+import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
@@ -46,16 +54,24 @@ export async function linkThreadToCustomerAction(
   if (!t) return { ok: false, error: "Thread not found." };
   if (!(await getCustomer(customerId))) return { ok: false, error: "Customer not found." };
 
+  // #125 — the picked identity message's address, else the thread contact.
+  // I follow-up review — selfEmail = the signed-in user's own connected
+  // mailbox address, so an outbound identity message's first recipient
+  // skips a self-CC instead of remembering our own address on the customer.
+  const myConn = await getConnectionInfo(personalKey(me.id));
+  const sender = identityAddressFor(t, myConn?.address);
+  const senderEmail = resolveAddressFor(t, myConn?.address);
+  const senderName = sender?.name || t.contactName;
   let contactId = opts.contactId ?? null;
-  if (opts.remember && t.contactEmail) {
-    const nameForContact = (opts.contactName || "").trim() || t.contactName;
-    contactId = await rememberAddress(customerId, t.contactEmail, nameForContact, contactId, {
+  if (opts.remember && senderEmail) {
+    const nameForContact = (opts.contactName || "").trim() || senderName;
+    contactId = await rememberAddress(customerId, senderEmail, nameForContact, contactId, {
       id: me.id,
       name: me.name,
     });
   }
-  if (opts.claimDomain && t.contactEmail) {
-    const d = domainOf(t.contactEmail);
+  if (opts.claimDomain && senderEmail) {
+    const d = domainOf(senderEmail);
     if (d && !isPublicDomain(d)) {
       await claimDomain(d, customerId, "manual", me.name);
       await resweepThreads({ domain: d });
@@ -171,17 +187,24 @@ export async function quickAddContactAction(input: {
 /** Link sidebar's "new venue" quick-add — appends a location to the
  *  customer through the SAME path the Companies screen and guided quote
  *  intake use (saveCustomerAction), never the legacy name-keyed
- *  setLocations blob. */
+ *  setLocations blob. Returns the new site's directory id; with `threadId`
+ *  (the Venue card's "+ New venue", #124) it also links that venue to the
+ *  thread, adopting the customer first if the thread had none stored. */
 export async function quickAddVenueAction(input: {
   customerId: string;
   label: string;
   city: string;
   state: string;
-}): Promise<R> {
-  await requireUser();
+  threadId?: string;
+}): Promise<{ ok: true; siteId: string | null } | { ok: false; error: string }> {
+  const me = await requireUser();
   const existing = await getCustomer(input.customerId);
   if (!existing) return { ok: false, error: "Customer not found." };
+  const thread = input.threadId ? await getThread(input.threadId) : null;
+  if (input.threadId && (!thread || !visibleTo(thread, me.name)))
+    return { ok: false, error: "Thread not found." };
 
+  const beforeIds = new Set((existing.locations || []).map((l) => l.id).filter(Boolean));
   const locations: LocationInput[] = (existing.locations || []).map(toLocationInput);
   locations.push({
     label: (input.label || "").trim() || "Venue",
@@ -208,6 +231,57 @@ export async function quickAddVenueAction(input: {
     contacts,
   });
   if (!res.ok) return { ok: false, error: "Couldn't save that venue." };
+
+  const after = await getCustomer(existing.id);
+  const added = (after?.locations || []).find((l) => !!l.id && !beforeIds.has(l.id));
+  const siteId = added?.id || null;
+  // I review — a thread already linked to a DIFFERENT customer never gets
+  // this venue stamped on it; the venue card only ever offers venues on the
+  // thread's own linked customer, so a mismatch here means the thread
+  // changed customer between render and submit, not a legitimate request.
+  if (thread && siteId && (!thread.customerId || thread.customerId === existing.id)) {
+    if (!thread.customerId) await linkThread(thread.id, existing.id, thread.resolvedContactId ?? null);
+    await setThreadSite(thread.id, siteId);
+  }
+  revalidate();
+  return { ok: true, siteId };
+}
+
+/** #124 — Venue card: stamp (or clear) the thread's venue. The venue must
+ *  be one of the linked customer's own locations; a thread that only
+ *  resolved read-time (needsAdopt) adopts the customer first so siteId
+ *  never exists without a stored customerId. */
+export async function setThreadSiteAction(threadId: string, siteId: string | null): Promise<R> {
+  const me = await requireUser();
+  const t = await getThread(threadId);
+  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const customerId = t.customerId || (await resolveCustomerId(t));
+  if (!customerId) return { ok: false, error: "Link a customer first." };
+  const clean = (siteId || "").trim() || null;
+  if (clean) {
+    const c = await getCustomer(customerId);
+    if (!(c?.locations || []).some((l) => l.id === clean))
+      return { ok: false, error: "That venue isn't on this customer." };
+  }
+  if (!t.customerId) await linkThread(threadId, customerId, t.resolvedContactId ?? null);
+  await setThreadSite(threadId, clean);
+  revalidate();
+  return { ok: true };
+}
+
+/** #125 — "Linking from" picker: which message's addresses drive resolution
+ *  and quick-add. null = the thread contact. Re-resolves this one thread. */
+export async function setIdentityMessageAction(
+  threadId: string,
+  messageId: string | null
+): Promise<R> {
+  const me = await requireUser();
+  const t = await getThread(threadId);
+  if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
+  const id = (messageId || "").trim() || null;
+  if (id && !(t.messages || []).some((m) => m.id === id))
+    return { ok: false, error: "That message isn't on this thread." };
+  await setIdentityMessage(threadId, id);
   revalidate();
   return { ok: true };
 }

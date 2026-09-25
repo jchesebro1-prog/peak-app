@@ -69,11 +69,13 @@ export const INSTALLS_RENDERERS = {
   },
   "to-be-billed": async (ctx) => {
     const f = await forecast(ctx);
-    return tile("To be billed", money(f.toBill), `next ${HORIZON} mo`);
+    const sub = `next ${HORIZON} mo` + (f.toBillUnknownCount ? ` · ${f.toBillUnknownCount} with unknown value` : "");
+    return tile("To be billed", money(f.toBill), sub);
   },
   "expected-collected": async (ctx) => {
     const f = await forecast(ctx);
-    return tile("Expected collected", money(f.collected), "net-30 basis", "green");
+    const sub = "net-30 basis" + (f.collectedUnknownCount ? ` · ${f.collectedUnknownCount} with unknown value` : "");
+    return tile("Expected collected", money(f.collected), sub, "green");
   },
   "book-margin": async (ctx) => {
     const f = await forecast(ctx);

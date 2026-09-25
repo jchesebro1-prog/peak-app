@@ -20,6 +20,7 @@ import { modifyThread } from "./api";
 import { getConnectionInfo, listCachedLabels } from "./connections";
 import { GMAIL_MODIFY_SCOPE, type MailboxKey, userIdOfKey } from "./config";
 import { linkThread, rememberAddress } from "./linking";
+import { resolveAddressFor } from "@/lib/inbox-identity";
 import { desiredPeakLabels, parsePeakLabel, type PeakCommand } from "./peak-labels";
 import { ensureLabelId } from "./label-sync";
 
@@ -174,8 +175,18 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
         const c = await findCustomerBySanitizedName(cmd.name);
         if (c) {
           await linkThread(t.id, c.id);
-          if (t.contactEmail) {
-            await rememberAddress(c.id, t.contactEmail, t.contactName, null, {
+          // I review — the picked identity message's address (#125) when
+          // one is set, else the thread contact; a Peak/Customers label
+          // applied on a multi-party or forwarded thread must remember the
+          // SAME address the sidebar is showing, not always the counterpart.
+          // selfEmail = this mailbox's own connected address (`conn`,
+          // already fetched above for the modify-scope check) — the I
+          // follow-up review: firstRecipient skips it on an outbound
+          // identity message so a self-CC never gets remembered as the
+          // customer's own contact address.
+          const identityEmail = resolveAddressFor(t, conn?.address);
+          if (identityEmail) {
+            await rememberAddress(c.id, identityEmail, t.contactName, null, {
               id: userIdOfKey(key) || "u1",
               name: "Gmail label",
             });
@@ -196,7 +207,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           {
             org: t.customer || t.contactName,
             contact: t.contactName,
-            email: t.contactEmail,
+            email: resolveAddressFor(t, conn?.address),
             source: "manual",
             message: t.subject,
             customerId: t.customerId,
@@ -235,6 +246,7 @@ export async function interpretLabelEvents(key: MailboxKey, events: GmailLabelEv
           d.customerId = null;
           d.customer = "";
           d.resolution = "unknown";
+          d.siteId = null; // #124 — no customer, no venue
         });
         applied++;
       }

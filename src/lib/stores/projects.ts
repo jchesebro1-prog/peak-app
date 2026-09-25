@@ -8,9 +8,11 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import { createAssignment } from "@/lib/stores/assignments";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { yearAwareDate } from "@/lib/format";
+import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import {
   DEFAULT_PIPELINES,
   PROJECT_TAG_RANK,
@@ -720,25 +722,50 @@ function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
   };
 }
 
-/** Convert a specific won quote into a project/order — idempotent (port of createFromQuote). */
-export async function createProjectFromQuote(quoteId: string): Promise<ProjectRecord | null> {
-  const existing = await getProjectByQuote(quoteId);
-  if (existing) return existing;
-  const q = await getDoc<QuoteLike>("quotes", quoteId);
-  if (!q || q.quoteType === "flame_test" || q.quoteType === "consulting") return null;
-  const p = await createProject(fromQuote(q, await loadPipelines()));
+/**
+ * Convert a specific won quote into a project/order — idempotent (port of
+ * createFromQuote).
+ *
+ * #180: the whole check-then-insert runs under an advisory lock keyed on the
+ * quote id (`withQuoteLock`), so a healing sweep racing another sweep or a
+ * live re-approval for the SAME quote serializes instead of minting a
+ * duplicate project. `q` and the dismissed list are both re-read fresh
+ * *inside* the lock rather than trusted from a caller's snapshot, so a
+ * quote a concurrent action since dismissed (#169) or marked lost cannot
+ * spawn a project here — see #180's status-recheck requirement.
+ *
+ * Always honours the dismissed list, including from the Projects screen's
+ * explicit "convert this pending quote" action (`startConversionAction`).
+ * An earlier version let that one caller pass an option to skip this check,
+ * on the theory that a person re-converting a quote they'd dismissed meant
+ * it — dropped in review: `pendingConversions` already hides a dismissed
+ * quote from that screen entirely, so the only way to reach this with a
+ * dismissed id was a hand-crafted POST, and a bypass reachable that way is
+ * a way to resurrect a project the user deliberately deleted (#169).
+ */
+export async function createProjectFromQuote(
+  quoteId: string
+): Promise<ProjectRecord | null> {
+  return withQuoteLock(quoteId, async () => {
+    const existing = await getProjectByQuote(quoteId);
+    if (existing) return existing;
+    if ((await dismissedQuoteIds()).includes(quoteId)) return null;
+    const q = await getDoc<QuoteLike>("quotes", quoteId);
+    if (!q || q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) return null;
+    const p = await createProject(fromQuote(q, await loadPipelines()));
 
-  // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
-  // Unassigned until the project-roles model exists (D87: assign-by-role later).
-  const { createAutoTask } = await import("@/lib/stores/tasks");
-  await createAutoTask({
-    coverageKey: `item16:sold:${p.id}`,
-    title: `Sold — kickoff call for ${p.name}`,
-    projectId: p.id, quoteId: p.quoteId, section: "Follow-up",
-    dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
+    // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
+    // Unassigned until the project-roles model exists (D87: assign-by-role later).
+    const { createAutoTask } = await import("@/lib/stores/tasks");
+    await createAutoTask({
+      coverageKey: `item16:sold:${p.id}`,
+      title: `Sold — kickoff call for ${p.name}`,
+      projectId: p.id, quoteId: p.quoteId, section: "Follow-up",
+      dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
+    });
+
+    return p;
   });
-
-  return p;
 }
 
 /**
@@ -812,45 +839,25 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   let made = 0;
   const skipped: string[] = [];
-  const pipes = await loadPipelines();
-  const { createAutoTask } = await import("@/lib/stores/tasks");
   for (const q of quotes) {
     // Only install/system quotes become Projects. Repair and inspection wins
     // spawn their OWN records (repair-jobs / inspections syncs) — before this
     // filter they ALSO minted phantom Projects that polluted the Projects
     // list, Schedule, and Field Work (PUNCHLIST #13 bug). Consulting wins
-    // spawn ConsultingEngagements (engagements sync, D90) — same rule.
-    if (
-      q.status !== "won" ||
-      q.quoteType === "flame_test" ||
-      q.quoteType === "repair" ||
-      q.quoteType === "inspection" ||
-      q.quoteType === "consulting"
-    )
-      continue;
+    // spawn ConsultingEngagements (engagements sync, D90) — same rule. Rental
+    // wins spawn equipment bookings — same rule again (review round 3).
+    if (q.status !== "won" || isProjectExcludedQuoteType(q.quoteType)) continue;
+    // `haveQ`/`skip` are only a fast-path skip built from one snapshot, not
+    // the correctness guard — createProjectFromQuote (#180) re-reads both
+    // the live project and the dismissed list fresh, under its advisory
+    // lock, before it will insert.
     if (haveQ.has(q.id) || skip.includes(q.id)) continue;
     try {
-      const body = fromQuote(q, pipes);
-      const rec = await insertWithPrefixedId<ProjectRecord>(
-        "projects",
-        body.kind === "order" ? "S" : "P",
-        body.kind === "order" ? 4000 : 3000,
-        (id) => ({ ...body, id })
-      );
-      const id = rec.id;
-      haveQ.add(q.id);
-      made++;
-
-      // Item 16 (task-first): a sold install spawns the PM kickoff follow-up.
-      // Unassigned until the project-roles model exists (D87: assign-by-role
-      // later). Deterministic coverageKey makes double-hooking alongside
-      // createProjectFromQuote's own call harmless (createAutoTask no-ops).
-      await createAutoTask({
-        coverageKey: `item16:sold:${id}`,
-        title: `Sold — kickoff call for ${body.name}`,
-        projectId: id, quoteId: body.quoteId, section: "Follow-up",
-        dueAt: Date.now() + 7 * DAY, // kickoff within a week of sale; overdue then nags the bell (unassigned until roles model, D87)
-      });
+      const rec = await createProjectFromQuote(q.id);
+      if (rec) {
+        haveQ.add(q.id);
+        made++;
+      }
     } catch (error) {
       skipped.push(q.id);
       console.error(`syncProjectsFromQuotes: skipped ${q.id} during page-load reconciliation`, error);
@@ -859,7 +866,16 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
   return { created: made, skipped };
 }
 
-/** Won quotes that have not been converted yet — the "ready to start" strip (port of pendingConversions). */
+/**
+ * Won quotes that have not been converted yet — the "ready to start" strip.
+ *
+ * #180 review: this exclusion list must match createProjectFromQuote's own
+ * refusal list EXACTLY (both now read PROJECT_EXCLUDED_QUOTE_TYPES), or a
+ * quote type that function refuses (and so createProjectFromQuote returns
+ * null for) still shows up here with a "Start" button that silently does
+ * nothing when clicked. It was missing repair/inspection/rental at
+ * various points — see project-quote-types.ts for the one shared list.
+ */
 export async function pendingConversions(): Promise<QuoteLike[]> {
   const skip = await dismissedQuoteIds();
   const have = new Set<string>();
@@ -868,8 +884,7 @@ export async function pendingConversions(): Promise<QuoteLike[]> {
     .filter(
       (q) =>
         q.status === "won" &&
-        q.quoteType !== "flame_test" &&
-        q.quoteType !== "consulting" &&
+        !isProjectExcludedQuoteType(q.quoteType) &&
         !have.has(q.id) &&
         !skip.includes(q.id)
     )

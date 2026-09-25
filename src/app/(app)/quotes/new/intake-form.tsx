@@ -21,11 +21,16 @@ export default function QuoteIntakeForm({
   customers,
   initial,
   replacing,
+  threadId,
 }: {
   customers: IntakeCustomer[];
   initial: IntakeInitial;
   replacing: IntakeReplacing | null;
+  /** #123 — set when opened from the Inbox's "+ New quote"; the intake
+   *  mints the draft quote, links the thread and returns to the Inbox. */
+  threadId?: string;
 }) {
+  const fromThread = !!threadId;
   const [type, setType] = useState<ServiceType>(initial.type);
   // #110: the user-named category behind the trailing "Custom category" card.
   const [category, setCategory] = useState(initial.category);
@@ -57,6 +62,10 @@ export default function QuoteIntakeForm({
   });
 
   const [error, setError] = useState("");
+  // I4 review — the thread this intake was opened from already links
+  // something else; offers "Open it" / an explicit "Create another" confirm
+  // rather than silently overwriting that link.
+  const [linkedElsewhere, setLinkedElsewhere] = useState<{ label: string; href: string } | null>(null);
   const [pending, startTransition] = useTransition();
   // #178 — window.confirm() silently returns false with no dialog in this
   // app's Capacitor shells, so the old `!window.confirm(...)` check just
@@ -143,9 +152,10 @@ export default function QuoteIntakeForm({
     doSubmit();
   }
 
-  function doSubmit() {
+  function doSubmit(confirmReplaceLink?: boolean) {
     setConfirmReplace(false);
     setError("");
+    if (!confirmReplaceLink) setLinkedElsewhere(null);
     const payload: IntakeSubmit = {
       type,
       category: type === "custom" ? category.trim() : "",
@@ -166,11 +176,16 @@ export default function QuoteIntakeForm({
       newContactRole: newContact.role,
       newContactEmail: newContact.email,
       newContactPhone: newContact.phone,
+      threadId: threadId || undefined,
+      confirmReplaceLink,
     };
     startTransition(async () => {
       const res = await createQuoteIntakeAction(payload);
       // A successful call redirect()s server-side and never returns here.
-      if (res && !res.ok) setError(res.error);
+      if (res && !res.ok) {
+        if ("linkedElsewhere" in res) setLinkedElsewhere({ label: res.linkedElsewhere.label, href: res.linkedElsewhere.href });
+        else setError(res.error);
+      }
     });
   }
 
@@ -185,7 +200,9 @@ export default function QuoteIntakeForm({
       <p style={{ fontSize: 13, color: "#8c919c", margin: "0 0 22px" }}>
         {replacing
           ? `Pick the new type for ${replacing.id}. It is replaced when the new quote is first saved.`
-          : "Pick who this is for, then jump straight into the builder."}
+          : fromThread
+            ? "Pick who this is for. A draft quote is created, linked to the email thread, and you land back on the thread."
+            : "Pick who this is for, then jump straight into the builder."}
       </p>
 
       {/* ---- service category ---- */}
@@ -400,6 +417,60 @@ export default function QuoteIntakeForm({
         </div>
       )}
 
+      {/* I4 review — the thread already links something that isn't an
+          inbox-minted draft for this customer; never overwritten silently. */}
+      {linkedElsewhere && (
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            background: "#fdf8ee",
+            border: "1px solid #f0e2bd",
+            borderRadius: 9,
+            padding: "10px 13px",
+            fontSize: 12.5,
+            color: "#8a6d1f",
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 200 }}>
+            This thread is already linked to <strong>{linkedElsewhere.label}</strong>.
+          </span>
+          <Link
+            href={linkedElsewhere.href}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#8a6d1f",
+              textDecoration: "underline",
+            }}
+          >
+            Open it
+          </Link>
+          <button
+            type="button"
+            onClick={() => doSubmit(true)}
+            disabled={pending}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#fff",
+              background: "#b4863a",
+              border: "none",
+              borderRadius: 6,
+              padding: "5px 11px",
+              cursor: pending ? "default" : "pointer",
+            }}
+          >
+            Create another
+          </button>
+        </div>
+      )}
+
       {confirmReplace && replacing && (
         <div
           style={{
@@ -421,7 +492,7 @@ export default function QuoteIntakeForm({
           </span>
           <button
             type="button"
-            onClick={doSubmit}
+            onClick={() => doSubmit()}
             style={{
               fontFamily: "var(--font-ui)",
               fontSize: 11.5,
@@ -469,7 +540,13 @@ export default function QuoteIntakeForm({
           cursor: !canSubmit || pending ? "default" : "pointer",
         }}
       >
-        {pending ? "Setting up…" : replacing && sameBuilder(type, replacing.type) ? `Back to ${replacing.id} →` : "Continue to builder →"}
+        {pending
+          ? "Setting up…"
+          : replacing && sameBuilder(type, replacing.type)
+            ? `Back to ${replacing.id} →`
+            : fromThread
+              ? "Create quote & link thread"
+              : "Continue to builder →"}
       </button>
     </div>
   );

@@ -17,6 +17,7 @@ import {
   setQuoteStage,
   setQuotePipeline,
   statusFailureMessage,
+  resolveSaveStatusChange,
   STAGES,
   submitForReview,
   update,
@@ -121,6 +122,14 @@ export type SavePayload = {
   value: number;
   margin: number;
   status: QuoteStatus;
+  /** #180 review — the status this tab last received FROM THE SERVER (a
+   *  page load, or a prior save/status-change response), never touched by
+   *  an optimistic local update. `status` above is what the user currently
+   *  sees, which can differ from this for two different reasons — a
+   *  genuine, not-yet-confirmed change THIS tab made, or a stale tab that
+   *  hasn't heard about a change made ELSEWHERE. saveQuoteAction tells them
+   *  apart by also comparing against the server's actual current status. */
+  baseStatus: QuoteStatus;
   sections: SpecSection[];
   mobs: SpecMob[];
   /** Always sent in full (#143) — the stored list is replaced, so removing a
@@ -148,6 +157,11 @@ export type SaveResult = {
   /** Set on `ok: false` when the record was created but a requested status
    *  transition was refused (punch #60: setStatus's approval gate). */
   error?: string;
+  /** Set on `ok: true` (review round 3) — an informational note the user
+   *  should see even though nothing failed: a stale tab's status display
+   *  was refreshed because someone else moved it elsewhere, but this save
+   *  never asked to change status itself, so it's not an error. */
+  notice?: string;
 };
 
 export type ReviewSync = {
@@ -300,6 +314,10 @@ export async function saveQuoteAction(
   payload: SavePayload
 ): Promise<SaveResult> {
   const user = await requireUser();
+  // `status` is deliberately NOT one of these fields — see the loadedId
+  // branch below (security review, 2026-09-25): quotes.update() is an
+  // unguarded field merge with no approval gate, no history stamp, and no
+  // spawnFromQuote trigger, so a status change must never ride it.
   const patch: QuotePatch = {
     name: payload.name,
     customer: payload.customer,
@@ -313,12 +331,12 @@ export async function saveQuoteAction(
     category: (payload.category || "").trim(),
     value: payload.value,
     margin: payload.margin,
-    status: payload.status,
     source: "estimator",
     spec: { sections: payload.sections, mobs: payload.mobs },
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
+  let statusNotice: string | undefined;
   /* #143: keep only the vendor quotes something still references. Deleting a
      system, or moving one to another estimate, would otherwise strand its
      record — and its attachment — on this document forever.
@@ -346,6 +364,47 @@ export async function saveQuoteAction(
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
+    // Security review (2026-09-25), D84/punch #60: a changed status can only
+    // reach the DB through the gated setStatus() path — the approval gate,
+    // status history and spawnFromQuote all live there, and `update()`
+    // above deliberately never carries `status` (see `patch`'s own comment).
+    // Reachable here whenever Save fires with a changed status dropdown
+    // before (or instead of) changeStatus's own setStatusAction call — the
+    // "use server" action is also callable directly, bypassing the client
+    // dropdown's own transition rules entirely.
+    //
+    // #180 review 2/3: whether (and how) to act on a possibly-changed
+    // status is `resolveSaveStatusChange` (quotes.ts) — a pure function so
+    // it's testable directly (this "use server" file can't be called from
+    // a plain test harness) and so this file carries no copy of the
+    // condition that could drift from what's actually tested. Compared
+    // against `q.status` (just returned by update() above), not the
+    // `prior` read from the top of this function — prior is a snapshot
+    // taken before the vendor-quote pruning and the update() call, so using
+    // it here would reopen a narrower version of the exact same staleness
+    // gap `baseStatus` exists to close.
+    if (q) {
+      const decision = resolveSaveStatusChange(payload.status, payload.baseStatus, q.status);
+      if (decision.kind === "apply") {
+        try {
+          q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
+        } catch (e) {
+          // Same split as the create branch below: the gate's refusal is
+          // the user's to read (#174); the field edits above are still saved.
+          statusError = statusFailureMessage(
+            e,
+            "estimator/actions saveQuoteAction: setStatus on an existing quote threw"
+          );
+        }
+      } else if (decision.kind === "stalePassive") {
+        // Nothing this save asked for was refused — the other field edits
+        // succeeded normally, so this stays ok:true with an informational
+        // notice, not an error.
+        statusNotice = decision.notice;
+      } else if (decision.kind === "staleConflict") {
+        statusError = decision.error;
+      }
+    }
   } else {
     // #62 gave every mint a retry budget; `insertWithPrefixedId` THROWS once an
     // id collision outlasts it (doc-store.ts). Rare, but this is a save button —
@@ -391,7 +450,10 @@ export async function saveQuoteAction(
       // #174: the gate's refusal is the user's to read; a spawn defect is
       // not, and used to arrive here looking exactly the same.
       try {
-        q = await setStatus(created.id, payload.status);
+        // #180 review: `?? q` so a null result (defensive; setStatus only
+        // returns null for an unrecognised status or a missing doc, neither
+        // reachable here) never erases the update() result already in `q`.
+        q = (await setStatus(created.id, payload.status, user.name)) ?? q;
       } catch (e) {
         statusError = statusFailureMessage(
           e,
@@ -417,6 +479,7 @@ export async function saveQuoteAction(
     stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
     ...(statusError ? { error: statusError } : {}),
+    ...(statusNotice ? { notice: statusNotice } : {}),
   };
 }
 
@@ -625,7 +688,7 @@ export async function setStatusAction(
   id: string,
   status: QuoteStatus
 ): Promise<ReviewSync> {
-  await requireUser();
+  const user = await requireUser();
   if (!id || !STAGES.includes(status)) return { ok: false, review: null, status: null };
   // Punch #60 (D84 hole): marking a quote WON or SENT requires an approval
   // record — in-app or attested. Every other stage transition stays open to
@@ -649,7 +712,7 @@ export async function setStatusAction(
     }
   }
   try {
-    await setStatus(id, status);
+    await setStatus(id, status, user.name);
   } catch (e) {
     const cur = await get(id);
     return {

@@ -273,7 +273,13 @@ export function catalogPatch(
     ...(mfr ? { mfr } : {}),
     ...(str(v.manufacturerPartNumber) ? { manufacturerPartNumber: str(v.manufacturerPartNumber) } : {}),
     ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
-    ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
+    // #204 — `v.mapPrice` is a coerced "number" field (see parse.ts's
+    // `coerce`), so an absent column or a blank cell both land here as the
+    // number 0, never `undefined`; `v.mapPrice !== undefined` was therefore
+    // always true and a price-only import zeroed every part's MAP. Match
+    // the file's own preserve-when-absent pattern for a numeric field: only
+    // write the key when the row actually carried a value.
+    ...(num(v.mapPrice) ? { mapPrice: num(v.mapPrice) } : {}),
     ...(hasMetadata ? { productMetadata: metadata } : {}),
     // #205 fix wave item 4 — when Spec Section and Spec Article both
     // resolve but disagree, the ARTICLE's own section wins (the mirror

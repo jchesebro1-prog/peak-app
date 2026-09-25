@@ -1,5 +1,9 @@
 /* ------------------------------------------------------------------ *
- * The Grid — device symbols (#131, D154). Pure and dependency-free like
+ * The Grid — device symbols (#131, D154). SUPERSEDED as the primary look
+ * by the stock symbols in ./grid-icons (spec 2026-09-25): the eight shapes
+ * below survive as registered legacy icons (LEGACY_SHAPE_ICON) so an old
+ * per-entry `shape` or stored gridCategoryShapes still draws what it meant;
+ * markerColor still colours wire routes. Pure and dependency-free like
  * its siblings (grid-bom, grid-scopes): the editor, the riser page, the
  * Settings card and the spec harness all import it, and nothing here may
  * touch the doc-store.
@@ -79,13 +83,15 @@ export function shapeFor(
   return "rect";
 }
 
-/** The "clean or null" step `saveGridCategoryShapesAction` persists: trim
+/** The "clean or null" step for a legacy `gridCategoryShapes` save: trim
  *  and cap category keys, drop unknown shapes and blank categories, cap at
  *  60 entries — and collapse an empty result to `null` rather than `{}`,
  *  since a stored `{}` is itself a whole-truth map (every category falls
  *  back to "rect") while `null` is "absent" and resolves through
- *  resolveCategoryShapes to a fresh copy of the seed. Pure and
- *  session-free so the regression harness can pin it directly. */
+ *  resolveCategoryShapes to a fresh copy of the seed. No admin action posts
+ *  through here any more (stock symbols, spec 2026-09-25, replaced the
+ *  D154 shapes card with Category icons/Symbol colours) — kept pure and
+ *  session-free because the regression harness still pins it directly. */
 export function cleanGridCategoryShapes(
   map: Record<string, string> | null | undefined
 ): Record<string, GridShape> | null {

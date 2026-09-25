@@ -17,3 +17,25 @@ export function withEmailSignature(body: string, person: SignaturePerson): strin
     .filter((line): line is string => !!line);
   return lines.length ? `${text}\n\n--\n${lines.join("\n")}` : text;
 }
+
+/**
+ * I2 (Inbox round 3 review) — the #127 per-user signature REPLACES this
+ * legacy footer, it doesn't stack with it. `signatureHandled` is true
+ * whenever the composer's #127 flow ran for this send (the account has a
+ * signature configured, so the composer seeded/offered it — whatever the
+ * final body is, kept or stripped via the toggle, is final): the legacy
+ * footer is skipped outright, so a #127 user can never end up with two
+ * footers and a toggled-off #127 user can never have this old one sneak
+ * back in behind their back. Only when signatureHandled is falsy (no #127
+ * signature configured at all — the composer never touched the body) does
+ * the legacy footer still apply, exactly as before. Pure: both server
+ * actions (replyAction, composeSendAction) call this instead of
+ * withEmailSignature directly, so the rule lives in one tested place.
+ */
+export function applyOutboundSignature(
+  body: string,
+  signatureHandled: boolean | undefined,
+  person: SignaturePerson
+): string {
+  return signatureHandled ? body : withEmailSignature(body, person);
+}

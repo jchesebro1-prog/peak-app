@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MessageVM, Opt, ReaderVM } from "./types";
 import {
@@ -9,7 +9,6 @@ import {
   logNoteAction,
   reopenAction,
   replyAction,
-  setLinkAction,
   setMessageLinkAction,
   setStatusAction,
   unarchiveAction,
@@ -17,18 +16,12 @@ import {
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
+import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
 type Mode = "reply" | "replyAll" | "forward";
-
-const LINK_TYPE_OPTIONS: Opt[] = [
-  { value: "quote", label: "Quote" },
-  { value: "survey", label: "Survey" },
-  { value: "inspection", label: "Inspection" },
-  { value: "project", label: "Project" },
-];
 
 /* ---- conversation (Gmail-style) ------------------------------------------
  * Gmail shows the newest message open and everything before it as one-line
@@ -393,6 +386,7 @@ export default function ThreadReader({
   rosterOptions,
   onClose,
   onAfterSend,
+  signature,
 }: {
   vm: ReaderVM | null;
   variant: "pane" | "overlay";
@@ -400,6 +394,8 @@ export default function ThreadReader({
   onClose?: () => void;
   /** keeps the replied thread selected (prototype kept selectedId) */
   onAfterSend?: (id: string) => void;
+  /** #127 — seeded below a "-- " line on Reply / Reply all / Forward */
+  signature: string;
 }) {
   const router = useRouter();
 
@@ -411,6 +407,19 @@ export default function ThreadReader({
   const [cBody, setCBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [attachNote, setAttachNote] = useState("");
+  // #127 — the composer body; on open the caret sits ABOVE the seeded
+  // signature. I review — only when "To" is already filled (Reply/Reply
+  // all, once vm.contactEmail resolved one): Forward opens with "To" blank
+  // for the user to pick a recipient, which needs their attention first —
+  // stealing focus into the body would bury it.
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!mode || !bodyRef.current || !cTo.trim()) return;
+    bodyRef.current.focus();
+    bodyRef.current.setSelectionRange(0, 0);
+    // cTo read once per mode-open, not on every keystroke in the To field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
   // D76 — schedule-site-visit modal
   const [visitOpen, setVisitOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -419,10 +428,6 @@ export default function ThreadReader({
   const [logDir, setLogDir] = useState<"in" | "out" | null>(null);
   const [logBody, setLogBody] = useState("");
   const [loggingNote, setLoggingNote] = useState(false);
-
-  // link picker
-  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
-  const [linkType, setLinkType] = useState("quote");
 
   if (!vm) {
     return (
@@ -476,7 +481,13 @@ export default function ThreadReader({
       setCCc("");
       setShowCc(false);
       setCSubject(/^fwd:/i.test(vm.subject) ? vm.subject : "Fwd: " + vm.subject);
-      setCBody("\n\n---------- Forwarded ----------\nFrom: " + vm.forwardFrom + "\n\n" + quote);
+      setCBody(
+        withSignature(
+          "\n\n---------- Forwarded ----------\nFrom: " + vm.forwardFrom + "\n\n" + quote,
+          signature,
+          "add"
+        )
+      );
       setAttachNote("");
     } else {
       setMode(m);
@@ -484,7 +495,7 @@ export default function ThreadReader({
       setCCc(m === "replyAll" ? vm.boxAddress : "");
       setShowCc(m === "replyAll");
       setCSubject(/^re:/i.test(vm.subject) ? vm.subject : "Re: " + vm.subject);
-      setCBody("");
+      setCBody(withSignature("", signature, "add"));
       setAttachNote("");
     }
   };
@@ -503,7 +514,10 @@ export default function ThreadReader({
     if (!b || sending) return;
     setSending(true);
     try {
-      await replyAction(vm.id, b);
+      // I2 — the #127 flow ran (and gets the final say on the body,
+      // signature kept or stripped) whenever this account has a signature
+      // configured; the server skips its own legacy footer in that case.
+      await replyAction(vm.id, b, !!signature);
       closeComposer();
       if (onAfterSend) onAfterSend(vm.id);
       else router.refresh();
@@ -529,160 +543,15 @@ export default function ThreadReader({
     }
   };
 
-  const sendReady = cBody.trim().length > 0 && cTo.trim().length > 0;
+  // #127 — a signature alone (nothing typed above it) is not a real message
+  const sendReady = stripSignature(cBody, signature).trim().length > 0 && cTo.trim().length > 0;
+  const sigOn = hasSignature(cBody);
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
-  const linkRecOptions = linkPickerOpen
-    ? vm.linkOptions[(linkType as keyof ReaderVM["linkOptions"]) || "quote"] || []
-    : [];
 
-  // #96 §2 — the "+ Link to work" chip + picker. Lives in the sidebar's
-  // Work section (see LinkSidebar children); kept here so its state and the
-  // adopt-on-pick behaviour stay with the reader.
-  const linkWork = (
-    <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {vm.link && (
-          <>
-            <a
-              href={vm.link.href}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                minWidth: 0,
-                textDecoration: "none",
-                fontSize: 11.5,
-                fontWeight: 600,
-                color: "#3a3f4a",
-                background: "#f4f5f7",
-                border: "1px solid #e8eaee",
-                borderRadius: 8,
-                padding: "6px 10px",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: ".04em",
-                  textTransform: "uppercase",
-                  color: "#fff",
-                  background: vm.link.color,
-                  padding: "2px 6px",
-                  borderRadius: 5,
-                  flexShrink: 0,
-                }}
-              >
-                {vm.link.kindLabel}
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {vm.link.label}
-              </span>
-            </a>
-            <button
-              onClick={async () => {
-                await setLinkAction(vm.id, null);
-                router.refresh();
-              }}
-              title="Remove link"
-              style={{
-                width: 26,
-                height: 26,
-                flexShrink: 0,
-                borderRadius: 7,
-                border: "1px solid #e4e7ec",
-                background: "#fff",
-                color: "#aab0bb",
-                fontSize: 14,
-                lineHeight: 1,
-                cursor: "pointer",
-              }}
-            >
-              ×
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => setLinkPickerOpen(!linkPickerOpen)}
-          style={{
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: ACCENT_INK,
-            background: ACCENT_SOFT,
-            border: `1px solid ${ACCENT_SOFT}`,
-            borderRadius: 8,
-            padding: "6px 10px",
-            cursor: "pointer",
-            fontFamily: "var(--font-ui)",
-          }}
-        >
-          {vm.link ? "Change link" : "+ Link to work"}
-        </button>
-      </div>
-      {linkPickerOpen && (
-        <>
-          {vm.resolvedCustomerId ? (
-            <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab", lineHeight: 1.45 }}>
-              Showing{" "}
-              <span style={{ fontWeight: 600, color: "#5b616e" }}>{vm.resolvedCustomerName}</span>
-              &apos;s quotes, surveys, inspections &amp; projects.
-            </div>
-          ) : (
-            <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab", lineHeight: 1.45 }}>
-              Link this thread to a customer first and their records will show here.
-            </div>
-          )}
-          <div style={{ display: "grid", gap: 8, marginTop: 9 }}>
-            <select
-              value={linkType}
-              onChange={(e) => setLinkType(e.target.value)}
-              style={linkSelectStyle}
-            >
-              {LINK_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value=""
-              onChange={async (e) => {
-                const id = e.target.value;
-                if (!id) return;
-                const opt = linkRecOptions.find((o) => o.value === id);
-                await setLinkAction(
-                  vm.id,
-                  { type: linkType, id, label: opt ? opt.label : id },
-                  vm.needsAdopt && vm.resolvedCustomerId
-                    ? {
-                        customerId: vm.resolvedCustomerId,
-                        customer: vm.resolvedCustomerName,
-                      }
-                    : null
-                );
-                setLinkPickerOpen(false);
-                router.refresh();
-              }}
-              style={linkSelectStyle}
-            >
-              <option value="">Select a record…</option>
-              {linkRecOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </>
-      )}
-    </>
-  );
-  const sidebar = (
-    <LinkSidebar vm={vm} variant={variant}>
-      {linkWork}
-    </LinkSidebar>
-  );
+  // #96 §2 / #123 — the link sidebar now owns the "+ Link to work" picker
+  // itself (WorkLinkCard, rendered first inside LinkSidebar).
+  const sidebar = <LinkSidebar vm={vm} variant={variant} />;
 
   return (
     <div style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column" }}>
@@ -1083,6 +952,7 @@ export default function ThreadReader({
                 />
               </FieldRow>
               <textarea
+                ref={bodyRef}
                 value={cBody}
                 onChange={(e) => setCBody(e.target.value)}
                 placeholder="Write your message…"
@@ -1147,6 +1017,25 @@ export default function ThreadReader({
                   <PaperclipIcon size={14} />
                   Attach
                 </button>
+                {signature && (
+                  <button
+                    onClick={() => setCBody(withSignature(cBody, signature, sigOn ? "strip" : "add"))}
+                    aria-pressed={sigOn}
+                    title={sigOn ? "Remove your signature from this message" : "Add your signature below a -- line"}
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      color: sigOn ? ACCENT_INK : "#5b616e",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 4,
+                      fontFamily: "var(--font-ui)",
+                    }}
+                  >
+                    {sigOn ? "Remove signature" : "Add signature"}
+                  </button>
+                )}
                 <span style={{ flex: 1 }} />
                 <button
                   onClick={closeComposer}
@@ -1267,19 +1156,6 @@ export default function ThreadReader({
     </div>
   );
 }
-
-const linkSelectStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  fontFamily: "var(--font-ui)",
-  fontSize: 12.5,
-  color: "#16181d",
-  border: "1px solid #e4e7ec",
-  borderRadius: 8,
-  padding: "8px 10px",
-  background: "#fff",
-  cursor: "pointer",
-};
 
 const rootStyle: React.CSSProperties = {
   display: "flex",

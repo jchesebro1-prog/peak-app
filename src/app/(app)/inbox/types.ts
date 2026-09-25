@@ -3,6 +3,7 @@
  * components. All colors/labels are precomputed server-side because the
  * comms store (db-backed) can never be imported into a client bundle.
  */
+import type { LinkWorkType } from "@/lib/inbox-links";
 
 export type Opt = { value: string; label: string };
 
@@ -95,10 +96,14 @@ export type ThreadRowVM = {
   /** count of messages[] on the underlying thread; badge hidden when <= 1 */
   msgCount: number;
   messagePreviews: Array<{ author: string; time: string; snippet: string; out: boolean }>;
-  /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author */
+  /** unique message authors beyond a single-author thread, e.g. "Jeff, Sarah +1"; "" when <= 1 author.
+   *  Kept for the search haystack / drafts row; the row's displayed name is primaryName below. */
   participants: string;
-  /** Compact last-responder context for scanning a busy thread list. */
-  lastResponder: string;
+  /** #128 — author of the newest message that isn't me (drafts: the "To: …"
+   *  line); falls back to the counterpart when every message is mine */
+  primaryName: string;
+  /** #128 — Gmail-style "Brenda, me (3)"; "" on drafts */
+  chain: string;
   subject: string;
   snippet: string;
   time: string;
@@ -181,7 +186,7 @@ export type ReaderVM = {
   /** thread.customerId is empty but the contact email resolved a customer —
    *  picking a record also adopts the customer onto the thread */
   needsAdopt: boolean;
-  linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
+  linkOptions: Record<LinkWorkType, Opt[]>;
   /** Schedule-site-visit modal data (D76) — present when a customer resolved. */
   visit: {
     venues: Array<{ id: string; label: string; address: string; primary: boolean }>;
@@ -222,6 +227,16 @@ export type ReaderVM = {
     /** the customer's contact whose email matches the sender, "" if none */
     contactName: string;
   } | null;
+  /** #124 — the thread's linked venue (a CustomerLocation.id of the linked
+   *  customer; null when it isn't among siteOptions any more, e.g. removed
+   *  from the customer, or the customer changed). */
+  siteId: string | null;
+  /** #124 — the linked customer's venues, for the sidebar's Venue select. */
+  siteOptions: Opt[];
+  /** #125 — identity source: which message's addresses drive resolution and
+   *  quick-add; null = the thread contact (today's behaviour). */
+  identityMessageId: string | null;
+  identity: { messageId: string; name: string; email: string } | null;
   /** every customer, for the pickers */
   customerOptions: Opt[];
   /** #122 — the same companies split into "Customers" / "Vendors" optgroups

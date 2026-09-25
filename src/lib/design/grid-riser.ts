@@ -53,6 +53,10 @@ export function riserGraph(
     x: number;
     y: number;
     partId: string;
+    /** User-defined placement category (punch #48) — the plan's own
+     *  fallback for a seeded-but-unassigned placement with no linked part
+     *  (#38); the riser now reads it the same way (final fix wave #3). */
+    category?: string | null;
     /** Curtain drop-ins (punch #49) are goods, not signal devices - they have
      *  no ports and terminate no wire, so they are left off the one-line. */
     curtain?: unknown;
@@ -78,7 +82,13 @@ export function riserGraph(
     const part = partById.get(pl.partId);
     const g = node.groups.find((x) => x.partId === pl.partId);
     if (g) g.qty += 1;
-    else node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: 1, category: part?.category || "", shape: part?.shape ?? null });
+    else {
+      // No linked part (a seeded-but-unassigned placement, #38): fall back
+      // to the placement's own category, the same as the plan does
+      // (editor.tsx symbolLook({ category: pl.category }, …)).
+      const category = part?.category || pl.category || "";
+      node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: 1, category, shape: part?.shape ?? null });
+    }
   }
 
   // Wires → edges between the spaces their endpoints land in.

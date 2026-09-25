@@ -195,6 +195,9 @@ async function recordMessage(
     gmailThreadId: p.gmailThreadId,
     gmailMessageId: p.messageId || undefined,
     gmailLabelIds: p.labelIds.length ? p.labelIds : undefined,
+    // #125 — keep the addresses so a picked identity message can be resolved
+    fromEmail: p.from.email || undefined,
+    to: p.to || undefined,
   };
 
   // attach to an existing thread sharing the Gmail thread id

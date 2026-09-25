@@ -15,6 +15,10 @@ export type Handoff = {
   contactName: string;
   name: string;
   replaces: string;
+  /** #123 — the Inbox thread this intake was opened from ("+ New quote"),
+   *  read straight off the URL (lib/inbox-links newQuoteHref); not
+   *  validated against the directory the way customer/venue/contact are. */
+  threadId: string;
 };
 
 const first = (v: string | string[] | undefined): string => ((Array.isArray(v) ? v[0] : v) ?? "").trim();
@@ -29,6 +33,7 @@ export function readHandoff(sp: SP): Handoff {
     contactName: first(sp.contact),
     name: first(sp.name),
     replaces: first(sp.replaces),
+    threadId: first(sp.thread),
   };
 }
 

@@ -32,6 +32,12 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
+import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inbox-links";
+import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { clampListWidth, parseListWidth, parseSideCollapsed, LIST_WIDTH_DEFAULT } from "@/lib/inbox-layout";
+import { hasSignature, normalizeSignature, signatureBlock, withSignature, SIGNATURE_MAX } from "@/lib/inbox-signature";
+import { applyOutboundSignature, withEmailSignature } from "@/lib/email-signature";
+import { rowName } from "@/lib/inbox-rows";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -2152,7 +2158,7 @@ ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === tru
 
 /* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
  *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
-import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit } from "@/lib/dashboard/metrics";
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast } from "@/lib/dashboard/metrics";
 const metricsProjects = [
   { kind: "project", stage: "scheduled" },
   { kind: "project", stage: "deposit" },
@@ -2185,6 +2191,34 @@ const uknProfit = projectedProfit(uknProjects);
 ok(uknProfit.value === 500, `#UKN: projectedProfit's open-book value ignores the unknown project's stray $900 (got ${uknProfit.value})`);
 ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is margin × the known value only (got ${uknProfit.profit})`);
 ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-value project in its book");
+
+// installsForecast's toBill/collected sums (#189) — "To be billed" and
+// "Expected collected" already exclude UKN records via knownValue; the
+// widgets need a count of what's being excluded so a mostly-unknown horizon
+// doesn't read as a small real number.
+const nowT189 = Date.now();
+const f189 = installsForecast(
+  [
+    { kind: "project", stage: "deposit", value: 1000, margin: 0.3, targetDate: nowT189 + 10 * DAY },
+    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: 0.3, targetDate: nowT189 + 20 * DAY },
+  ] as unknown as Parameters<typeof installsForecast>[0],
+  [],
+  nowT189,
+  12
+);
+ok(f189.toBill === 1000, `#189: toBill sums only the known-value project landing in the horizon (got ${f189.toBill})`);
+ok(f189.toBillUnknownCount === 1, "#189: toBillUnknownCount counts the UKN project the to-be-billed sum is silently excluding");
+const f189collected = installsForecast(
+  [
+    { kind: "project", stage: "deposit", value: 800, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+  ] as unknown as Parameters<typeof installsForecast>[0],
+  [],
+  nowT189,
+  12
+);
+ok(f189collected.collected === 800, `#189: collected sums only the known-value project (got ${f189collected.collected})`);
+ok(f189collected.collectedUnknownCount === 1, "#189: collectedUnknownCount counts the UKN project the expected-collected sum is silently excluding");
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });
@@ -2954,7 +2988,7 @@ ok(addressFromHit({ street: "123 Main St", title: "Overture Center" }) === "123 
 ok(addressFromHit({ street: "", title: "Overture Center" }) === "Overture Center", "#32: POI without street falls back to display title");
 
 /* ============ Task 3 — inbox conversation participants (#42) ============ */
-import { participantsFor, deriveStatus } from "@/lib/stores/comms";
+import { participantsFor, deriveStatus, type CommMessage, type CommThread } from "@/lib/stores/comms";
 const msgsThread = (authors: Array<string | undefined>): any => ({
   messages: authors.map((author, i) => ({
     id: `m${i}`, at: i, direction: "in", channel: "email", author: author || "", body: "",
@@ -5018,7 +5052,15 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(!wrong.ok && wrong.reason === "mismatch", "redeem: wrong verifier -> mismatch");
   const late = redeemHandoffCode(code, verifier, secret, now + HANDOFF_TTL_MS + 1);
   ok(!late.ok && late.reason === "expired", "redeem: past ttl -> expired");
-  const flipped = code.slice(0, -2) + (code.endsWith("A") ? "B" : "A") + code.slice(-1);
+  // Flip a character inside the IV segment (code[1]), not near a base64 group's
+  // trailing edge: the IV is a fixed 12 bytes -> 16 base64 chars with no
+  // padding, so every character there is fully significant. Flipping near the
+  // end of the code (the ciphertext segment) is flaky (#179) — when the
+  // ciphertext's byte length leaves a 1-byte tail, the last real base64 char
+  // before "==" padding only encodes that byte's top 2 bits, so ~1/4 of random
+  // ciphertexts pick an "A"/"B" substitute that decodes to the same bits,
+  // silently producing a *different but still-valid* code that still redeems.
+  const flipped = code[0] + (code[1] === "A" ? "B" : "A") + code.slice(2);
   ok(!redeemHandoffCode(flipped, verifier, secret, now).ok, "redeem: tampered code -> not ok");
   const otherKey = redeemHandoffCode(code, verifier, "another-secret", now);
   ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
@@ -5115,6 +5157,340 @@ ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("sp
   "#131: glyph paths are deterministic and distinct per shape");
 ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
 ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
+
+/* --- #206 grid stock symbols (spec 2026-09-25) — Task 1: the Tabler icon generator --- */
+import {
+  buildIcons as symBuildIcons, generateFromPackage as symGenerate, parseTablerSvg as symParse, validatePicks as symValidatePicks,
+  GENERATED_MODULE_PATH as SYM_MODULE_PATH, LICENSE_PATH as SYM_LICENSE_PATH,
+} from "./grid-icons-gen";
+
+{
+  const els = symParse(
+    '<svg viewBox="0 0 24 24" class="icon"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M4 4h16" class="x" /><circle cx="12" cy="12" r="1" fill="currentColor" /></svg>'
+  );
+  ok(els.length === 2, "#206 gen: the invisible 24x24 bounding path is skipped");
+  ok(JSON.stringify(els[0]) === '{"t":"path","a":{"d":"M4 4h16"}}', "#206 gen: only geometry attributes survive (class dropped)");
+  ok(JSON.stringify(els[1]) === '{"t":"circle","a":{"cx":"12","cy":"12","r":"1"},"fill":true}', "#206 gen: a currentColor fill is kept as fill:true");
+
+  const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test(String(e)); } };
+  const pick = (id: string, tabler: string) => ({ tabler, id, label: id, tags: ["A", "a", " "] });
+  ok(symValidatePicks([pick("x", "a")])[0].tags.join(",") === "a", "#206 gen: tags are trimmed, lower-cased and de-duplicated");
+  ok(throws(() => symValidatePicks([pick("x", "a"), pick("x", "b")]), /duplicate id/), "#206 gen: duplicate ids are refused");
+  ok(throws(() => symValidatePicks([pick("x", "a"), pick("y", "a")]), /duplicate tabler/), "#206 gen: a Tabler icon is picked at most once");
+  ok(throws(() => symValidatePicks([pick("shape-rect", "a")]), /bad id/), "#206 gen: shape-* ids are reserved for the legacy shapes");
+  ok(throws(() => symValidatePicks([pick("Bad Id", "a")]), /bad id/), "#206 gen: ids are kebab-case");
+  ok(throws(() => symBuildIcons([pick("x", "nope-1"), pick("y", "nope-2")], () => null), /nope-1, nope-2/),
+    "#206 gen: every missing Tabler name is reported at once");
+
+  const first = symGenerate(process.cwd());
+  const second = symGenerate(process.cwd());
+  ok(first.module === second.module && first.license === second.license, "#206 gen: two runs are byte-identical");
+  ok(first.count >= 60 && first.count <= 100, `#206 gen: 60–100 curated icons (got ${first.count})`);
+  ok(first.count === symValidatePicks(JSON.parse(readFileSync(join(process.cwd(), "scripts/grid-icon-picks.json"), "utf8"))).length,
+    "#206 gen: every pick exists in the installed @tabler/icons outline set (none dropped)");
+  ok(readFileSync(join(process.cwd(), SYM_MODULE_PATH), "utf8") === first.module,
+    "#206 gen: the committed grid-icons.generated.ts is current (npm run icons:grid)");
+  const lic = readFileSync(join(process.cwd(), SYM_LICENSE_PATH), "utf8");
+  ok(lic === first.license && lic.includes("MIT License") && lic.includes(`Tabler Icons ${first.version}`),
+    "#206 gen: LICENSES/tabler-icons.txt is written, current, and names the version");
+}
+
+/* --- #206 grid stock symbols — Task 2: registry, defaults, resolution, clean --- */
+import {
+  DEFAULT_CATEGORY_ICONS, DEFAULT_SYMBOL_COLORS, GENERIC_ICON_ID, GRID_ICONS, LEGACY_SHAPE_ICON, MAX_CATEGORY_ICONS, SYMBOL_COLOR_KEYS,
+  cleanCategoryIcons, cleanSymbolColors, contrastOnWhite, darken, gridSymbolEntry, iconById, isGridIconId, isHexColor, legendRows,
+  resolveCategoryIcons, resolveSymbolColors, searchIcons, symbolContext, symbolLook,
+} from "@/lib/design/grid-icons";
+import { DEFAULT_CATEGORY_MAP as SYM_CATEGORY_MAP } from "@/lib/catalog-taxonomy";
+import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
+
+{
+  const ctx = symbolContext({});
+  ok(new Set(GRID_ICONS.map((i) => i.id)).size === GRID_ICONS.length, "#206: icon ids are unique across Tabler picks + legacy shapes");
+  ok(GRID_ICONS.filter((i) => i.source === "legacy").length === 8 && isGridIconId("shape-diamond"), "#206: the eight D154 shapes are registered icons");
+  ok(Object.values(LEGACY_SHAPE_ICON).every(isGridIconId) && Object.keys(LEGACY_SHAPE_ICON).length === GRID_SHAPES.length,
+    "#206: every legacy shape alias resolves to a registered icon");
+  ok(Object.entries(DEFAULT_CATEGORY_ICONS).every(([, v]) => isGridIconId(v)), "#206: every default category icon is registered");
+  ok(Object.keys(SYM_CATEGORY_MAP).every((c) => c in DEFAULT_CATEGORY_ICONS), "#206: defaults cover every DEFAULT_CATEGORY_MAP category");
+  ok(["Cameras", "Video", "Speakers", "Lighting", "Control", "Fixture", "Rigging", "Assembly"].every((c) => c in DEFAULT_CATEGORY_ICONS),
+    "#206: defaults cover the live Grid library categories");
+  ok(isGridIconId(GENERIC_ICON_ID) && iconById("no-such-icon").id === GENERIC_ICON_ID && iconById(null).id === GENERIC_ICON_ID,
+    "#206: unknown ids fall back to the generic device icon");
+  ok(GRID_ICONS.every((i) => i.els.length > 0), "#206: no icon renders blank");
+
+  ok(SYMBOL_COLOR_KEYS.length === 10 && new Set(Object.values(DEFAULT_SYMBOL_COLORS)).size === 10, "#206: 10 distinct default swatches");
+  ok(SYMBOL_COLOR_KEYS.every((k) => isHexColor(DEFAULT_SYMBOL_COLORS[k]) && contrastOnWhite(DEFAULT_SYMBOL_COLORS[k]) >= 3),
+    "#206: every default colour has >= 3:1 contrast against the white glyph");
+  ok(Math.abs(contrastOnWhite("#ffffff") - 1) < 1e-9 && contrastOnWhite("#000000") > 20, "#206: contrastOnWhite sanity");
+  ok(darken("#d55e00", 0.25) === "#a04700" && darken("#ffffff", 0) === "#ffffff", "#206: darken scales each channel");
+
+  // icon resolution: entry icon > legacy entry shape > category > legacy stored category shape > generic
+  const legacyCtx = symbolContext({ gridCategoryShapes: { "Mystery Box": "hexagon", Speakers: "circle" } });
+  ok(symbolLook({ category: "Speakers", icon: "horn", shape: "camera" }, legacyCtx).iconId === "horn", "#206: the entry icon wins");
+  ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).iconId === "shape-camera", "#206: a legacy entry shape beats the category icon");
+  ok(symbolLook({ category: "Speakers" }, legacyCtx).iconId === "speaker", "#206: the category icon beats a stored legacy category shape");
+  ok(symbolLook({ category: "mystery box" }, legacyCtx).iconId === "shape-hexagon", "#206: a stored legacy category shape is the last category fallback (case-insensitive)");
+  ok(symbolLook({ category: "Mystery Box" }, ctx).iconId === GENERIC_ICON_ID && symbolLook(null, ctx).iconId === GENERIC_ICON_ID,
+    "#206: nothing matched → the generic device (the old seed is NOT consulted)");
+  ok(symbolLook({ category: "Speakers", icon: "not-real" }, ctx).iconId === "speaker", "#206: an unknown entry icon falls through");
+  ok(symbolLook({ category: "  track " }, ctx).iconId === "track", "#206: category match is trimmed + case-insensitive");
+  ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).shape === "camera" && symbolLook({ category: "Mystery Box" }, legacyCtx).shape === "hexagon" &&
+     symbolLook({ category: "Track" }, ctx).shape === "rect", "#206: .shape keeps the D154 answer for back-compat callers");
+
+  // colour resolution: entry > group > trade > scope > Other
+  ok(symbolLook({ category: "Speakers", color: "#123456" }, ctx).color === "#123456", "#206: the entry colour wins");
+  ok(symbolLook({ category: "Speakers", color: "red" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers, "#206: a malformed entry colour is ignored");
+  ok(symbolLook({ category: "Fixtures" }, ctx).color === DEFAULT_SYMBOL_COLORS.Fixtures, "#206: a grouped category takes its group colour");
+  ok(symbolLook({ category: "Track" }, ctx).color === DEFAULT_SYMBOL_COLORS.Rigging && symbolLook({ category: "Racks" }, ctx).color === DEFAULT_SYMBOL_COLORS.AV,
+    "#206: trade-only categories take their trade colour");
+  ok(symbolLook({ category: "Video Controls" }, ctx).color === DEFAULT_SYMBOL_COLORS["Video Controls"], "#206: identity group entries resolve");
+  ok(symbolLook({ category: "Video", gridScope: "Video" }, ctx).color === DEFAULT_SYMBOL_COLORS.AV &&
+     symbolLook({ category: "Fixture", gridScope: "Lighting" }, ctx).color === DEFAULT_SYMBOL_COLORS.Lighting,
+    "#206: an unmapped Grid category falls back to its Grid scope's colour");
+  ok(symbolLook({ category: "Mystery Box" }, ctx).color === DEFAULT_SYMBOL_COLORS.Other, "#206: unmapped, unscoped → Other grey");
+  ok(symbolLook({ category: "Mystery Box", group: "Speakers" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers &&
+     symbolLook({ category: "Mystery Box", trade: "Rigging" }, ctx).color === DEFAULT_SYMBOL_COLORS.Rigging,
+    "#206: a server-resolved group/trade on the entry is honoured");
+  ok(symbolLook({ category: "Track" }, symbolContext({ gridSymbolColors: { Rigging: "#000000" } })).color === "#000000", "#206: stored colours apply");
+  ok(symbolLook({ category: "Track" }, symbolContext({ catalogCategoryMap: { Track: { trade: "AV" } } })).color === DEFAULT_SYMBOL_COLORS.AV,
+    "#206: the admin category map decides the trade");
+  ok(!symbolLook({ category: "Track" }, ctx).overridden && symbolLook({ category: "Track", color: "#000000" }, ctx).overridden, "#206: overridden flag");
+
+  // resolve + clean
+  const merged = resolveCategoryIcons({ speakers: "horn", "New Cat": "wifi", Track: "nope" });
+  ok(merged.speakers === "horn" && !("Speakers" in merged) && merged["New Cat"] === "wifi" && merged.Track === "track" && merged.Racks === "rack",
+    "#206: resolveCategoryIcons merges per category (case-insensitive replace; bad ids ignored; untouched defaults kept)");
+  ok(resolveCategoryIcons(null) !== resolveCategoryIcons(null) && JSON.stringify(resolveCategoryIcons(undefined)) === JSON.stringify(DEFAULT_CATEGORY_ICONS),
+    "#206: resolveCategoryIcons — absent → a fresh copy of the defaults");
+  ok(resolveSymbolColors({ AV: "#ABCDEF", Bogus: "#000000", Rigging: "blue" }).AV === "#abcdef" &&
+     resolveSymbolColors({ Rigging: "blue" }).Rigging === DEFAULT_SYMBOL_COLORS.Rigging, "#206: resolveSymbolColors validates keys and hex");
+  ok(cleanCategoryIcons({}) === null && cleanCategoryIcons({ " ": "wifi", X: "nope" }) === null, "#206: cleanCategoryIcons — nothing valid → null");
+  ok(JSON.stringify(cleanCategoryIcons({ "  Speakers  ": "horn" })) === '{"Speakers":"horn"}', "#206: cleanCategoryIcons trims keys");
+  ok(Object.keys(cleanCategoryIcons({ ["x".repeat(80)]: "wifi" }) || {})[0].length === 60, "#206: cleanCategoryIcons caps key length at 60");
+  const many: Record<string, string> = {};
+  for (let i = 0; i < MAX_CATEGORY_ICONS + 25; i++) many[`Cat ${i}`] = "wifi";
+  ok(Object.keys(cleanCategoryIcons(many) || {}).length === MAX_CATEGORY_ICONS, "#206: cleanCategoryIcons caps the map size");
+  ok(cleanSymbolColors({ Bogus: "#000000", AV: "blue" }) === null && JSON.stringify(cleanSymbolColors({ AV: "#ABCDEF" })) === '{"AV":"#abcdef"}',
+    "#206: cleanSymbolColors keeps known keys + #rrggbb only, lower-cased; empty → null");
+
+  // search
+  ok(searchIcons("").length === GRID_ICONS.length, "#206: an empty search lists everything");
+  ok(searchIcons("Speaker")[0].id === "speaker", "#206: searchIcons finds by label (case-insensitive), label-prefix first");
+  ok(searchIcons("loudspeaker").some((i) => i.id === "speaker"), "#206: searchIcons finds by tag");
+  ok(searchIcons("rack")[0].id === "rack" && searchIcons("zzzz-nothing").length === 0, "#206: searchIcons ranking + empty result");
+  ok(searchIcons("wall station").map((i) => i.id).join(",") === "switch", "#206: multi-token queries AND their tokens");
+  ok(searchIcons("", 5).length === 5, "#206: searchIcons honours its limit");
+
+  // legend
+  const rows = legendRows([
+    { category: "Speakers", desc: "A" }, { category: "Speakers", desc: "B" }, { category: "Speakers", icon: "horn", desc: "Horn X" }, { category: "Track", desc: "T" },
+  ], ctx);
+  ok(rows.length === 3 && rows[0].label === "Speakers" && rows[1].label === "Speakers — Horn X" && rows[2].label === "Track",
+    "#206: legendRows — one row per icon+colour; an override is labelled with its entry");
+}
+
+/* --- #206 grid stock symbols — final fix wave (opus whole-branch review, c40a4f48..fe36ae4d) --- */
+{
+  const ctx = symbolContext({});
+
+  // Item 2: a stored legacy category shape of "rect" is ignored (the old
+  // 8-shape card always wrote it, never a real admin choice); any other
+  // stored legacy shape is still honoured.
+  const legacyRectCtx = symbolContext({ gridCategoryShapes: { "Custom Cat": "rect", "Custom Speaker": "speaker" } });
+  ok(symbolLook({ category: "Custom Cat" }, legacyRectCtx).iconId === GENERIC_ICON_ID,
+    "#206 final fix wave: a stored legacy category shape of \"rect\" is ignored — falls to the generic device, not shape-rect");
+  ok(symbolLook({ category: "Custom Speaker" }, legacyRectCtx).iconId === "shape-speaker",
+    "#206 final fix wave: any other stored legacy category shape (e.g. speaker) is still honoured");
+
+  // Item 4a: a gridScope value that only exists on Object.prototype (e.g.
+  // "constructor") never confuses the scope→colour lookup — Object.hasOwn
+  // guards it instead of a bare bracket lookup (which used to hand back
+  // Object.prototype.constructor and crash `darken()` downstream).
+  ok(symbolLook({ category: "Mystery Box", gridScope: "constructor" }, ctx).color === DEFAULT_SYMBOL_COLORS.Other,
+    "#206 final fix wave: an inherited-prototype gridScope value like \"constructor\" resolves to Other, never throws");
+
+  // Item 3: gridSymbolEntry — the one builder page.tsx and riser/page.tsx
+  // both use, so the same Grid-symbol part draws the same badge on either.
+  // The Grid symbol's own category ("Mystery Box", not in the catalog
+  // category map) deliberately disagrees with its linked pricing part's
+  // category ("Fixtures") — the scenario that actually diverged: the plan
+  // resolved group/trade from the PART's category (via groupOf/tradeOf),
+  // while the riser, having no `p` at all, could only ever fall through to
+  // the Grid-scope colour.
+  const gse = gridSymbolEntry(
+    { category: "Mystery Box", scope: "Lighting", shape: null, icon: null, color: null },
+    { category: "Fixtures" },
+    SYM_CATEGORY_MAP
+  );
+  ok(gse.category === "Mystery Box" && gse.gridScope === "Lighting" && gse.group === "Fixtures" && gse.trade === "Lighting",
+    "#206 final fix wave: gridSymbolEntry resolves group/trade from the live pricing part's own category, like page.tsx used to alone");
+  const gseNoPart = gridSymbolEntry(
+    { category: "Mystery Box", scope: "Lighting", shape: null, icon: null, color: null },
+    undefined,
+    SYM_CATEGORY_MAP
+  );
+  ok(gseNoPart.group === null && gseNoPart.trade === null,
+    "#206 final fix wave: gridSymbolEntry — no live pricing part → no group/trade (the riser used to always take this path)");
+  ok(symbolLook(gse, ctx).color === DEFAULT_SYMBOL_COLORS.Fixtures && symbolLook(gseNoPart, ctx).color === DEFAULT_SYMBOL_COLORS.Lighting,
+    "#206 final fix wave: with the pricing part's group the colour matches the plan (Fixtures); without one it falls only to the Grid-scope colour — exactly the plan/riser divergence #3 fixed");
+
+  // legendRows dedupes by id (or its symbol-relevant fields) before
+  // resolving a look — same output either way, just resolved once per
+  // distinct entry instead of once per placement.
+  const idRows = legendRows(
+    [
+      { id: "p1", category: "Speakers", desc: "A" },
+      { id: "p1", category: "Speakers", desc: "A" },
+      { id: "p2", category: "Speakers", icon: "horn", desc: "Horn X" },
+    ],
+    ctx
+  );
+  ok(idRows.length === 2 && idRows[0].label === "Speakers" && idRows[1].label === "Speakers — Horn X",
+    "#206 final fix wave: legendRows dedupes repeated entries by id before resolving a look; output unchanged");
+
+  // Item 3 (second half): a placement with no linked part falls back to
+  // its own category on the riser, same as the plan (editor.tsx
+  // symbolLook({ category: pl.category }, …)).
+  const ghostGraph = riserGraph(
+    [{ sheetId: "sh1", page: 1, x: 0.1, y: 0.1, partId: "ghost-part-id", category: "Ghost Category" }],
+    [],
+    [],
+    [],
+    []
+  );
+  const ghostNode = ghostGraph.nodes.find((n) => n.spaceId === null);
+  ok(ghostNode?.groups[0]?.category === "Ghost Category",
+    "#206 final fix wave: riserGraph falls back to the placement's own category when no part resolves it, same as the plan");
+
+  // Item 4a: createGridAssemblyAction validates `scope` server-side.
+  ok(symIsGridLayer("Lighting") && symIsGridLayer("Unscoped") && !symIsGridLayer("constructor") && !symIsGridLayer(""),
+    "#206 final fix wave: isGridLayer — the six valid Grid scopes only, nothing inherited from Object.prototype");
+  const gridActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"),
+    "utf8"
+  );
+  ok(gridActionsSrc.includes("isGridLayer(input.scope)"),
+    "#206 final fix wave: createGridAssemblyAction validates scope server-side with isGridLayer");
+
+  // Item 1: arrow keys inside the IconPicker nudge the selected plan
+  // device — source-level, since the property under test is "this
+  // keydown never reaches the window listener", not observable from a
+  // pure function. Both halves of the fix must be present.
+  const iconPickerSrc = readFileSync(join(process.cwd(), "src/components/design/icon-picker.tsx"), "utf8");
+  const gridNavStart = iconPickerSrc.indexOf("ArrowRight: 1");
+  const gridNavEnd = iconPickerSrc.indexOf("focusCell(i + step)", gridNavStart);
+  const gridNavBlock = gridNavStart >= 0 && gridNavEnd > gridNavStart ? iconPickerSrc.slice(gridNavStart, gridNavEnd) : "";
+  ok(gridNavBlock.includes("e.preventDefault();") && gridNavBlock.includes("e.stopPropagation();"),
+    "#206 final fix wave: the IconPicker grid's arrow-key handler stops propagation after preventDefault");
+  ok(iconPickerSrc.includes("triggerRef.current?.focus();") && iconPickerSrc.includes('wrap.addEventListener("focusout"'),
+    "#206 final fix wave: the IconPicker returns focus to its trigger on close and closes on a Tab that leaves the panel");
+  ok(iconPickerSrc.includes("tabIndex={i === effectiveActiveCell ? 0 : -1}"),
+    "#206 final fix wave: the IconPicker's icon grid is a roving-tabindex single tab stop");
+  const gridEditorFixWaveSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"),
+    "utf8"
+  );
+  ok(gridEditorFixWaveSrc.includes("if (e.defaultPrevented) return;") &&
+     gridEditorFixWaveSrc.includes('t?.closest(\'[role="dialog"], [data-no-nudge]\')'),
+    "#206 final fix wave: the editor's arrow-key nudge bails when a dialog already handled the key");
+
+  // Curtain drape colour: the Curtains group's resolved colour (admin-
+  // editable in Grid Settings), not the old hard-coded scope-hash swatch.
+  ok(gridEditorFixWaveSrc.includes("symbolCtx.colors.Curtains") && !/pl\.curtain \? SCOPE_COLORS\.Curtains/.test(gridEditorFixWaveSrc),
+    "#206 final fix wave: a dropped curtain draws the resolved Curtains colour, not the hard-coded SCOPE_COLORS hash");
+
+  // Item 2 (second half): the Category icons card previews/resets against
+  // the SAME resolver as the plan, not the static defaultIconFor() map.
+  const categoryIconsCardSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/design/grid/settings/category-icons-card.tsx"),
+    "utf8"
+  );
+  ok(categoryIconsCardSrc.includes("resolveCategoryIcons(null)") && categoryIconsCardSrc.includes("symbolLook({ category, gridScope }, baseCtx)"),
+    "#206 final fix wave: the Category icons card's row baseline is symbolLook over a stored-override-free context, matching the plan");
+  ok(categoryIconsCardSrc.includes("Object.hasOwn(overrides, r.category)"),
+    "#206 final fix wave: the Category icons card reads a row's override with Object.hasOwn, not `in`/bracket access (a category named e.g. \"constructor\" would otherwise read Object.prototype)");
+
+  // Both builders resolve a Grid-symbol part's badge through the one
+  // shared builder.
+  const gridPlanPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
+  const gridRiserPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
+  ok(gridPlanPageSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridRiserPageSrc.includes("gridSymbolEntry(s, p, categoryMap)"),
+    "#206 final fix wave: the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry");
+}
+
+/* --- #206 grid stock symbols — Task 3: the badge renderer --- */
+import { createElement as symH } from "react";
+import { renderToStaticMarkup as symRender } from "react-dom/server";
+import { SymbolIcon as SymIcon, SymbolShape as SymShape, glyphMetrics as symGlyph } from "@/components/design/symbol-shape";
+
+{
+  const html = symRender(symH("svg", null, symH(SymShape, { iconId: "speaker", x: 10, y: 20, w: 44, h: 30, color: "#008060" })));
+  ok(html.includes('data-icon="speaker"') && html.includes('fill="#008060"') && html.includes(`stroke="${darken("#008060")}"`),
+    "#206 render: a badge in the resolved colour with a darker edge");
+  ok(html.includes('stroke="#fff"') && html.includes('stroke-linecap="round"') && !html.includes("<image"),
+    "#206 render: white round-capped glyph, pure SVG");
+  ok((html.match(/<path /g) || []).length === iconById("speaker").els.length, "#206 render: every glyph element is drawn");
+  const legacy = symRender(symH("svg", null, symH(SymShape, { shape: "diamond", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
+  ok(legacy.includes('data-icon="shape-diamond"'), "#206 render: the legacy `shape` prop still works (via its alias)");
+  const blank = symRender(symH("svg", null, symH(SymShape, { iconId: "nope", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
+  ok(blank.includes(`data-icon="${GENERIC_ICON_ID}"`), "#206 render: an unknown icon draws the generic device");
+  const filled = symRender(symH("svg", null, symH(SymShape, { iconId: "outlet", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
+  ok(filled.includes('fill="#fff"'), "#206 render: Tabler's filled dots stay filled");
+  ok(symRender(symH(SymIcon, { iconId: "camera", color: "#0072b2", size: 16, title: "Camera" })).includes("<title>Camera</title>"),
+    "#206 render: SymbolIcon is a self-contained titled <svg>");
+  const small = symGlyph(12, 12);
+  const big = symGlyph(44, 30);
+  ok(big.strokeWidth === 2 && small.strokeWidth > 2 && small.strokeWidth <= 3 && small.scale * small.strokeWidth >= 0.8,
+    "#206 render: stroke stays legible from 12px palette badges up to plan markers");
+}
+
+/* --- #206 grid stock symbols — Task 4: Grid Settings rows --- */
+import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib/design/grid-icons";
+
+{
+  const rows = symbolCategoryRows({
+    catalogCategories: ["Fabric", "Labor", "  Widgets ", "widgets", "Track", ""],
+    grid: [{ category: "Video", scope: "Video" }, { category: "Gizmos", scope: "Lighting" }],
+    stored: { "Stored Only": "wifi", speakers: "horn" },
+    taxonomy: ["Track", "Pipe"],
+  });
+  const names = rows.map((r) => r.category);
+  ok(!names.some((n) => /^(fabric|labor)$/i.test(n)), "#206 rows: Fabric and Labor never get an icon row");
+  ok(names.filter((n) => n.toLowerCase() === "widgets").length === 1 && names.includes("Widgets"),
+    "#206 rows: de-duplicated trimmed + case-insensitively, first spelling wins");
+  ok(names.includes("Stored Only") && names.includes("Gizmos") && names.includes("Pipe") && names.includes("Speakers") && !names.includes("speakers"),
+    "#206 rows: stored, Grid, taxonomy and default categories all appear (a default's spelling beats a stored one)");
+  ok(names.join("|") === [...names].sort((a, b) => a.localeCompare(b)).join("|") && !names.includes(""), "#206 rows: sorted, no blank row");
+  ok(rows.find((r) => r.category === "Video")?.gridScope === "Video" && rows.find((r) => r.category === "Track")?.gridScope === null,
+    "#206 rows: a Grid category carries its scope for the preview colour");
+  ok(defaultIconFor(" speakers ") === "speaker" && defaultIconFor("Nope") === GENERIC_ICON_ID, "#206: defaultIconFor");
+  ok(SYMBOL_COLOR_KEYS.every((k) => isGridIconId(COLOR_KEY_SAMPLE_ICON[k])), "#206: every colour swatch has a registered sample icon");
+}
+
+/* --- #206 grid stock symbols — Task 5: client components stay on pure modules --- */
+{
+  const symClientFiles = [
+    "src/components/design/symbol-shape.tsx",
+    "src/components/design/icon-picker.tsx",
+    "src/app/(app)/design/grid/settings/symbol-colors-card.tsx",
+    "src/app/(app)/design/grid/settings/category-icons-card.tsx",
+    "src/app/(app)/design/grid/[id]/editor.tsx",
+    "src/app/(app)/design/grid/[id]/plan-legend.tsx",
+    "src/app/(app)/design/grid/[id]/symbol-look-panel.tsx",
+    "src/lib/design/grid-icons.ts",
+    "src/lib/design/grid-icons.generated.ts",
+  ];
+  for (const rel of symClientFiles) {
+    const src = readFileSync(join(process.cwd(), rel), "utf8");
+    const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
+    ok(valueImports.length === 0, `#206: ${rel} imports no VALUE from @/lib/stores or @/db${valueImports.length ? ` (found: ${String(valueImports[0]).slice(0, 80)})` : ""}`);
+  }
+  const editorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  const riserSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
+  ok(!/shapeFor|GRID_SHAPES|categoryShapes/.test(editorSrc) && !/shapeFor|markerColor/.test(riserSrc),
+    "#206: the editor and riser resolve badges through symbolLook, not the D154 shapeFor/markerColor path");
+  ok(editorSrc.includes("<PlanLegend") && riserSrc.includes("legendRows("), "#206: plan legend + riser legend both draw from legendRows");
+}
 
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
@@ -5255,6 +5631,34 @@ async function asyncChecks(): Promise<void> {
     ok(
       created.category === "Uncategorized" && created.unit === "ea",
       "#81 create still applies its own defaults for absent columns"
+    );
+
+    /* ---- #204: a price-only Import-hub catalog import must not zero MAP ----
+     * `v.mapPrice` is a "number"-kind field, so `coerce()` turns an absent
+     * column OR a blank cell into the number 0 (never `undefined`) — the same
+     * shape prepareRows gives Cost above. */
+    const storedWithMap = { ...stored, mapPrice: 1699 };
+    ok(
+      noCost.rows[0].values.mapPrice === 0,
+      "#204 an absent MAP column prepares as 0 — same shape as an absent Cost column"
+    );
+    ok(
+      catalogPatch(noCost.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === undefined,
+      "#204 an absent MAP column omits the key entirely (mergeUpsert then preserves the stored MAP)"
+    );
+    const blankMap = prepOf(
+      ["Part Number,Description,List Price,MAP", "S4LED-S2,Source Four LED Series 2,1999.00,"].join("\n")
+    );
+    ok(
+      catalogPatch(blankMap.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === undefined,
+      "#204 a blank MAP cell also omits the key rather than zeroing the stored MAP"
+    );
+    const realMap = prepOf(
+      ["Part Number,Description,List Price,MAP", "S4LED-S2,Source Four LED Series 2,1999.00,1750.00"].join("\n")
+    );
+    ok(
+      catalogPatch(realMap.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === 1750,
+      "#204 a MAP value the sheet does carry still sets it"
     );
   }
 
@@ -8189,6 +8593,10 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok(c.soldLinked === 1 && c.soldNewProject === 1, "daylite commit: preview — one won quote links the Deerfield install, one (Big Foot) will create its project");
   ok(c.valued === 2 && c.ukn === 4, "daylite commit: preview — 2 valued jobs, 4 UKN");
   ok(c.needsPick === 2 && pv.needsPick.some((r) => r.id === ids.dfd), "daylite commit: preview — the Deerfield install (and its opp) need a company pick");
+  ok(
+    pv.needsPick.every((r) => r.companiesRaw === "Camosy Construction, Deerfield School District"),
+    "#190: every needs-a-pick preview row carries the raw Daylite Companies cell next to its candidates, not just the matched names"
+  );
   const dfdRow = pv.rows.find((r) => r.id === ids.dfd)!;
   ok(dfdRow.company === "Deerfield School District", "daylite commit: the pick pre-fills the first non-contractor company, not Camosy (General Contractor)");
   ok(!dfdRow.flags.some((f) => f.startsWith("contact not on file")), "daylite commit: Pat Doe matches the seeded contact at the default company");
@@ -8323,6 +8731,88 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok((await ProjStore.getProject(zz.del)) === null, "daylite commit: the deleted project stays deleted");
   const oldQ = await QuoteStore.get(zz.oldQ);
   ok(!!oldQ && oldQ.owner === "" && oldQ.legacyOwner === "Old Timer" && oldQ.status === "draft" && oldQ.stage === "design" && oldQ.value === 2000, "daylite commit: a single-write quote keeps an unmatched owner unassigned (no Jeff default) + legacyOwner");
+}
+
+/**
+ * ============ #188: repair job value editor (DB) ============
+ *
+ * Repair jobs had no value editor, so an imported repair's UKN couldn't be
+ * filled in (mirrors setProjectValue, D240).
+ */
+async function repairValueEditorAsyncChecks(): Promise<void> {
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+
+  const uknRpId = fixtureId(188, "ukn-repair");
+  await createFixture("repair_jobs", Repairs.buildRepairJob(uknRpId, {
+    customer: "TEST188 UKN Repair", value: 900, valueUnknown: true,
+  }, Date.now()));
+  const uknRp = await Repairs.get(uknRpId);
+  ok(!!uknRp && uknRp.valueUnknown === true && knownValue(uknRp) === 0, "#188: a repair created with valueUnknown starts flagged, and knownValue ignores its stray $900");
+  const filledRp = await Repairs.setRepairValue(uknRpId, 4200);
+  ok(filledRp?.value === 4200, "#188: setRepairValue saves the new value");
+  ok(filledRp?.valueUnknown === false, "#188: setRepairValue clears valueUnknown");
+  ok(knownValue(filledRp!) === 4200, "#188: knownValue now counts the filled-in repair at its real value");
+}
+
+/**
+ * ============ #192: a live-but-lapsed Daylite import reads as history for
+ * warranty follow-ups ============
+ *
+ * A Daylite service call that's still *New* there (imported LIVE — ordinary
+ * open work) can still land at a completed/invoiced Daylite stage (Service
+ * Completed / Invoice Sent) with an old End Date, because writeRepair sets
+ * `completedAt` off the mapped app stage, not the Daylite Status. Before this
+ * fix it read as an already-lapsed warranty and flooded the follow-up
+ * worklist with fifteen-year-old Daylite bookkeeping. Owner decision: treat
+ * it as history too, once the warranty has actually run out — never for a
+ * genuinely recent completion, and never for an ordinary (non-Daylite)
+ * completed repair, whose expired warranty is real and must keep showing.
+ */
+async function warrantyLapsedLiveAsyncChecks(): Promise<void> {
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+
+  const DAY = 86400000;
+  const tenYearsAgo = Date.now() - 10 * 365 * DAY;
+  const lastMonth = Date.now() - 20 * DAY;
+
+  // ---- pure predicate, no DB ----
+  const liveOld = { source: Repairs.dayliteImportSource(false), stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+  const liveRecent = { source: Repairs.dayliteImportSource(false), stage: "completed" as const, completedAt: lastMonth, warrantyMonths: 12 };
+  const liveScheduled = { source: Repairs.dayliteImportSource(false), stage: "scheduled" as const, completedAt: null, warrantyMonths: 12 };
+  const doneOld = { source: Repairs.dayliteImportSource(true), stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+  const ordinaryOld = { source: { kind: "direct" as const, label: "Created directly" }, stage: "completed" as const, completedAt: tenYearsAgo, warrantyMonths: 12 };
+
+  ok(Repairs.isLapsedLiveImport(liveOld), "#192: a live Daylite import at Completed whose warranty has fully run out reads as a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(liveRecent), "#192: a live Daylite import whose warranty hasn't run out yet is NOT a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(liveScheduled), "#192: a live Daylite import that isn't at Completed is never a lapsed live import");
+  ok(!Repairs.isLapsedLiveImport(doneOld), "#192: a done-in-Daylite import is isImportedHistory's case, not isLapsedLiveImport's");
+  ok(!Repairs.isLapsedLiveImport(ordinaryOld), "#192: an ordinary (non-Daylite) old completed repair is never flagged — its expired warranty is real, not import noise");
+
+  ok(Repairs.excludedFromWarrantyFollowUps(liveOld), "#192: excludedFromWarrantyFollowUps covers the lapsed-live case");
+  ok(Repairs.excludedFromWarrantyFollowUps(doneOld), "#192: excludedFromWarrantyFollowUps still covers the #187 done-history case");
+  ok(!Repairs.excludedFromWarrantyFollowUps(liveRecent), "#192: excludedFromWarrantyFollowUps leaves a genuinely recent live completion alone");
+  ok(!Repairs.excludedFromWarrantyFollowUps(ordinaryOld), "#192: excludedFromWarrantyFollowUps never hides a real (non-Daylite) expired warranty");
+
+  // ---- integration: the worklist itself (DB) ----
+  const lapsedId = fixtureId(192, "lapsed-live");
+  const okId = fixtureId(192, "ordinary-lapsed");
+  const t = Date.now();
+  await createFixture("repair_jobs", Repairs.buildRepairJob(lapsedId, {
+    customer: "TEST192 Lapsed Live", stage: "completed", completedAt: tenYearsAgo, warrantyMonths: 12,
+    source: Repairs.dayliteImportSource(false),
+  }, t));
+  await createFixture("repair_jobs", Repairs.buildRepairJob(okId, {
+    customer: "TEST192 Ordinary Lapsed", stage: "completed", completedAt: tenYearsAgo, warrantyMonths: 12,
+    source: { kind: "direct", label: "Created directly" },
+  }, t));
+
+  const all = await Repairs.warrantyFollowUps();
+  const due = await Repairs.warrantyFollowUps({ dueOnly: true });
+  ok(!all.some((r) => r.id === lapsedId) && !due.some((r) => r.id === lapsedId), "#192: a live-but-lapsed Daylite import stays out of the warranty follow-up worklist");
+  ok(all.some((r) => r.id === okId) && due.some((r) => r.id === okId), "#192: an ordinary completed repair with the same lapsed warranty still shows up — the fix targets the Daylite artifact, not old warranties in general");
+  ok((await Repairs.getAll()).some((r) => r.id === lapsedId && r.stage === "completed"), "#192: the excluded record still counts as a completed repair everywhere else");
 }
 
 /* ============ Task 12: chunked Daylite commit == one full commit (DB) ============ */
@@ -9230,6 +9720,171 @@ import {
   ok(resolveRedirectHop("http://[not-a-valid-ipv6", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a malformed absolute Location is refused, not thrown");
 }
 
+/* ---- Inbox round 3 (#123) — work links ---- */
+{
+  ok(LINK_TYPE_OPTIONS.some((o) => o.value === "lead" && o.label === "Lead"), "LINK_TYPE_OPTIONS lists lead");
+  ok(LINK_TYPE_OPTIONS.map((o) => o.value).join(",") === "quote,lead,survey,inspection,project", "LINK_TYPE_OPTIONS order: quote first, lead second");
+  ok(
+    newQuoteHref({ threadId: "C-1032", customerId: "lakefront", contactName: "Brenda Gauchel" }) ===
+      "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032",
+    "newQuoteHref: every prefill, thread last"
+  );
+  ok(newQuoteHref({ threadId: "C-1032", customerId: null, contactName: "" }) === "/quotes/new?thread=C-1032", "newQuoteHref: unlinked thread carries only thread=");
+  ok(
+    newQuoteHref({ threadId: "C-1032", customerId: "lakefront", contactName: "Brenda Gauchel", siteId: "loc1" }) ===
+      "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&venue=loc1&thread=C-1032",
+    "newQuoteHref: #124 a linked venue rides along as venue="
+  );
+  ok(quoteNameFromSubject("Re: Fwd: Curtain quote for the PAC") === "Curtain quote for the PAC", "quoteNameFromSubject strips Re:/Fwd: prefixes");
+  ok(quoteNameFromSubject("RE: re: FW: hello") === "hello", "quoteNameFromSubject strips repeated prefixes case-insensitively");
+  ok(quoteNameFromSubject("") === "Untitled estimate" && quoteNameFromSubject("(no subject)") === "Untitled estimate", "quoteNameFromSubject falls back");
+  ok(quoteNameFromSubject("Rental for spring musical") === "Rental for spring musical", "quoteNameFromSubject leaves a plain subject alone");
+}
+
+/* ---- Inbox round 3 (#125) — identity source ---- */
+{
+  const r3msgs: CommMessage[] = [
+    { id: "m1", at: 1, direction: "in", channel: "email", author: "Brenda Gauchel", body: "", fromEmail: "brenda@lakefront.k12.mn.us" },
+    { id: "m2", at: 2, direction: "out", channel: "email", author: "Jeff Chesebro", body: "", to: "AP Clerk <AP@Lakefront.K12.MN.US>, brenda@lakefront.k12.mn.us" },
+    { id: "m3", at: 3, direction: "in", channel: "email", author: "Chris Hale", body: "", fromEmail: "Chris.Hale@Architects.com" },
+    { id: "m4", at: 4, direction: "out", channel: "email", author: "Jeff Chesebro", body: "" },
+    { id: "m5", at: 5, direction: "in", channel: "email", author: "Legacy Import", body: "" },
+  ];
+  const r3base: Pick<CommThread, "identityMessageId" | "messages" | "contactEmail" | "contactName"> = {
+    identityMessageId: null,
+    messages: r3msgs,
+    contactEmail: "Brenda@Lakefront.k12.mn.us",
+    contactName: "Brenda Gauchel",
+  };
+  ok(identityAddressFor(r3base) === null, "identityAddressFor: no identity message → null");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "nope" }) === null, "identityAddressFor: missing id → null");
+  const r3in = identityAddressFor({ ...r3base, identityMessageId: "m3" });
+  ok(r3in?.email === "chris.hale@architects.com" && r3in.name === "Chris Hale" && r3in.messageId === "m3", "identityAddressFor: inbound → its From, lowercased");
+  const r3out = identityAddressFor({ ...r3base, identityMessageId: "m2" });
+  ok(r3out?.email === "ap@lakefront.k12.mn.us" && r3out.name === "AP Clerk", "identityAddressFor: outbound → first recipient of To");
+  const r3outNoTo = identityAddressFor({ ...r3base, identityMessageId: "m4" });
+  ok(r3outNoTo?.email === "brenda@lakefront.k12.mn.us" && r3outNoTo.name === "Brenda Gauchel", "identityAddressFor: outbound without stored recipients → thread contact");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "m5" })?.email === "brenda@lakefront.k12.mn.us", "identityAddressFor: legacy inbound without fromEmail → thread contact");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "m4", contactEmail: "" }) === null, "identityAddressFor: nothing to read → null");
+  ok(resolveAddressFor(r3base) === "brenda@lakefront.k12.mn.us", "resolveAddressFor: counterpart by default (lowercased)");
+  ok(resolveAddressFor({ ...r3base, identityMessageId: "m3" }) === "chris.hale@architects.com", "resolveAddressFor: identity message wins");
+  ok(resolveAddressFor({ ...r3base, contactEmail: "" }) === "", "resolveAddressFor: no address → empty string");
+  ok(firstRecipient(" , Nobody <>, Someone <s@x.org>")?.email === "s@x.org", "firstRecipient: skips empty parts");
+  ok(firstRecipient("") === null && firstRecipient(undefined) === null, "firstRecipient: empty → null");
+  // I review — internal addresses (the company domain, and the mailbox's
+  // own address when passed) are never the thread's counterpart.
+  ok(
+    firstRecipient("Jeff Chesebro <jeff@peaksystemsgroup.com>, AP Clerk <ap@lakefront.k12.mn.us>")?.email === "ap@lakefront.k12.mn.us",
+    "firstRecipient: skips a @peaksystemsgroup.com self-CC ahead of the real recipient"
+  );
+  ok(
+    firstRecipient("jeff@peaksystemsgroup.com, sarah@peaksystemsgroup.com") === null,
+    "firstRecipient: every address internal → null, not a false match"
+  );
+  ok(
+    firstRecipient("jeff@example.com, ap@lakefront.k12.mn.us", "jeff@example.com")?.email === "ap@lakefront.k12.mn.us",
+    "firstRecipient: selfEmail skips the mailbox's own address even off the hardcoded domain"
+  );
+}
+
+/* ---- Inbox round 3 (#126) — pane layout clamp/parse ---- */
+{
+  ok(clampListWidth(100) === 300, "clampListWidth: below the minimum → the minimum");
+  ok(clampListWidth(900) === 620, "clampListWidth: above the maximum → the maximum");
+  ok(clampListWidth(undefined) === LIST_WIDTH_DEFAULT && clampListWidth(null) === LIST_WIDTH_DEFAULT, "clampListWidth: nothing → the default");
+  ok(clampListWidth(Number.NaN) === LIST_WIDTH_DEFAULT, "clampListWidth: garbage → the default");
+  ok(clampListWidth(400.6) === 401, "clampListWidth: whole pixels");
+  ok(parseListWidth("500") === 500, "parseListWidth: a stored value round-trips");
+  ok(parseListWidth("9999") === 620, "parseListWidth: an out-of-range stored value is clamped");
+  ok(parseListWidth("garbage") === LIST_WIDTH_DEFAULT && parseListWidth(null) === LIST_WIDTH_DEFAULT && parseListWidth("") === LIST_WIDTH_DEFAULT, "parseListWidth: bad/absent → the default");
+  ok(parseSideCollapsed("1") === true, "parseSideCollapsed: '1' → collapsed");
+  ok(parseSideCollapsed("0") === false && parseSideCollapsed(null) === false && parseSideCollapsed("garbage") === false, "parseSideCollapsed: anything else → not collapsed");
+}
+
+/* ---- Inbox round 3 (#127) — signature block ---- */
+{
+  const sig = "Jeff Chesebro\nPeak Systems Group";
+  ok(signatureBlock("") === "" && signatureBlock("  \n ") === "", "signatureBlock: empty → no block");
+  ok(signatureBlock(" " + sig + "\r\n") === "\n\n-- \n" + sig, "signatureBlock: '\\n\\n-- \\n' + trimmed, CRLF normalised");
+  ok(withSignature("", sig, "add") === "\n\n-- \n" + sig, "add: the reply/new seed is the bare block (cursor stays above it)");
+  ok(withSignature("Thanks!", sig, "add") === "Thanks!\n\n-- \n" + sig, "add: appends below the text");
+  ok(withSignature("Thanks!\n\n-- \n" + sig, sig, "add") === "Thanks!\n\n-- \n" + sig, "add: idempotent");
+  ok(withSignature("Thanks!", "", "add") === "Thanks!", "add: no signature configured → untouched");
+  ok(withSignature("\n\n-- \n" + sig, sig, "strip") === "", "strip: the bare seed → empty");
+  ok(withSignature("Thanks!\n\n-- \n" + sig, sig, "strip") === "Thanks!", "strip: exact block removed, text above untouched");
+  ok(withSignature("Thanks!\n\n-- \nJeff (edited)", sig, "strip") === "Thanks!", "strip: an edited signature still goes by the -- separator");
+  ok(withSignature("Thanks!", sig, "strip") === "Thanks!", "strip: nothing to strip → untouched");
+  const fwd = "\n\n---------- Forwarded ----------\nFrom: Brenda\n\n> hi";
+  ok(withSignature(fwd, sig, "add") === "\n\n-- \n" + sig + fwd, "add: forward keeps the forwarded block, signature above it");
+  ok(withSignature("\n\n-- \n" + sig + fwd, sig, "strip") === fwd, "strip: forward gives the forwarded block back");
+  ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the Forward marker");
+  // I review — a multi-paragraph signature (its own internal blank line)
+  // used to get truncated at that internal blank line once edited, instead
+  // of stripping the whole thing.
+  const multiSig = "Jeff Chesebro\n\nPeak Systems Group\n(218) 555-0100";
+  const multiSigEdited = "Jeff C.\n\nPeak Systems Group\n(218) 555-0100"; // name trimmed — no longer an exact substring match
+  ok(withSignature("Thanks!\n\n-- \n" + multiSig, multiSig, "strip") === "Thanks!", "strip: exact multi-paragraph signature removed whole");
+  ok(withSignature("Thanks!\n\n-- \n" + multiSigEdited, multiSig, "strip") === "Thanks!", "strip: an EDITED multi-paragraph signature is removed whole, not cut at its own internal blank line");
+  ok(withSignature("\n\n-- \n" + multiSigEdited + fwd, multiSig, "strip") === fwd, "strip: …and a forwarded block after an edited multi-paragraph signature still survives");
+  ok(hasSignature("x\n-- \ny") && !hasSignature("x\n--\ny") && !hasSignature("x -- y"), "hasSignature: the exact '\\n-- \\n' separator");
+  ok(normalizeSignature("a".repeat(2500)).length === SIGNATURE_MAX, "normalizeSignature caps at SIGNATURE_MAX");
+}
+
+/* ---- Inbox round 3 review (I2) — #127 signature replaces the legacy footer ---- */
+{
+  const person = { name: "Jeff Chesebro", email: "jeff@peaksystemsgroup.com" };
+  // No #127 signature configured (signatureHandled falsy) → legacy footer, as before.
+  ok(
+    applyOutboundSignature("Hi Brenda,\nThanks!", undefined, person) === withEmailSignature("Hi Brenda,\nThanks!", person),
+    "applyOutboundSignature: no #127 signature → the legacy footer still applies"
+  );
+  ok(
+    applyOutboundSignature("Hi Brenda,\nThanks!", false, person) === withEmailSignature("Hi Brenda,\nThanks!", person),
+    "applyOutboundSignature: signatureHandled === false → same as undefined"
+  );
+  // signatureHandled: the #127 flow ran — legacy is skipped outright, body untouched either way.
+  const withSig = "Hi Brenda,\nThanks!\n\n-- \nJeff Chesebro\nPeak Systems Group";
+  ok(applyOutboundSignature(withSig, true, person) === withSig, "applyOutboundSignature: #127 signature kept → sent verbatim, no legacy footer stacked on top");
+  const stripped = "Hi Brenda,\nThanks!";
+  ok(applyOutboundSignature(stripped, true, person) === stripped, "applyOutboundSignature: #127 signature toggled OFF → no footer at all, legacy never fills the gap");
+  // A body that already carries the #127 block, run through applyOutboundSignature,
+  // never picks up a second (legacy) footer — the structural guarantee I2 asked for,
+  // not just withEmailSignature's own same-body double-append guard.
+  ok(
+    (applyOutboundSignature(withSig, true, person).match(/\n--/g) || []).length === 1,
+    "applyOutboundSignature: exactly one footer marker — never two"
+  );
+}
+
+/* ---- Inbox round 3 (#128) — row name: last responder, Gmail-style chain ---- */
+{
+  const M = (id: string, at: number, direction: "in" | "out", author: string): CommMessage =>
+    ({ id, at, direction, channel: "email", author, body: "" });
+  const T = (messages: CommMessage[]) => ({ messages, contactName: "Brenda Gauchel", customer: "Lakefront ISD" });
+  const me = "Jeff Chesebro";
+  const r3a = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", me)]));
+  ok(r3a.primary === "Brenda Gauchel" && r3a.secondary === "Brenda, me (2)", "rowName: my reply is ignored — Brenda stays primary; chain 'Brenda, me (2)'");
+  const r3b = rowName(T([M("1", 1, "out", me)]));
+  ok(r3b.primary === "Brenda Gauchel" && r3b.secondary === "me", "rowName: all mine → counterpart, chain 'me'");
+  const r3c = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "in", "Chris Hale"), M("3", 3, "out", me)]));
+  ok(r3c.primary === "Chris Hale" && r3c.secondary === "Brenda, Chris, me (3)", "rowName: newest non-me author wins; chain in first-seen order");
+  const r3d = rowName(T([M("2", 5, "in", "Late Reply"), M("1", 1, "in", "Early Bird")]));
+  ok(r3d.primary === "Late Reply" && r3d.secondary === "Early, Late (2)", "rowName: newest by `at`, not array order");
+  const r3e = rowName(T([M("1", 1, "in", "Brenda Gauchel")]));
+  ok(r3e.primary === "Brenda Gauchel" && r3e.secondary === "", "rowName: I3 review — a single author matching the primary name is redundant, hidden");
+  const r3f = rowName(T([]));
+  ok(r3f.primary === "Brenda Gauchel" && r3f.secondary === "", "rowName: no messages → counterpart, empty chain");
+  const r3g = rowName({ messages: [], contactName: "", customer: "" });
+  ok(r3g.primary === "Customer", "rowName: nothing known → 'Customer'");
+  const r3h = rowName({ messages: [M("1", 1, "out", me)], contactName: "", customer: "Lakefront ISD" });
+  ok(r3h.primary === "Lakefront ISD", "rowName: counterpart falls back to the customer name");
+  // I3 review — "me" is direction === "out", never a name match: the Inbox
+  // is personal-only (one mailbox per signed-in user), so an outbound
+  // message is me whatever display name Gmail happened to stamp on it.
+  const r3i = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", "Jeff C. (Peak Systems Group)")]));
+  ok(r3i.primary === "Brenda Gauchel" && r3i.secondary === "Brenda, me (2)", "rowName: an outbound message is me by DIRECTION, whatever its stamped author name says");
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -9280,6 +9935,100 @@ async function teardownFixtures(): Promise<void> {
   }
 }
 
+/* ====================================================================
+   #177 — the flame builder's toggleVenue must not clobber automaticQuoteName's
+   gated update with a second, differently-formatted setQuoteName call.
+   Client component (no server round trip for this bug), so — same idiom as
+   the #187 review's client-source checks above — proven by reading the raw
+   .tsx source rather than mounting React. ==================================================================== */
+{
+  const flameControlsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"),
+    "utf8"
+  );
+  const toggleVenueBody = flameControlsSrc.slice(
+    flameControlsSrc.indexOf("function toggleVenue"),
+    flameControlsSrc.indexOf("function setCurtains")
+  );
+  ok(toggleVenueBody.length > 0, "#177 fixture: toggleVenue is still where the test expects it");
+  const setQuoteNameCalls = toggleVenueBody.match(/setQuoteName\(/g) || [];
+  ok(
+    setQuoteNameCalls.length === 1,
+    "#177 toggleVenue calls setQuoteName exactly once — no second call clobbering the gated update"
+  );
+  ok(
+    /if \(!quoteNameManual\.current\) setQuoteName\(automaticQuoteName\(customer, next\)\)/.test(toggleVenueBody),
+    "#177 toggleVenue's one name update is gated on quoteNameManual.current and calls automaticQuoteName() — the same helper pickCustomer uses, not a hand-built string"
+  );
+  ok(
+    !/\$\{loc\.label\} \$\{new Date\(\)\.getFullYear\(\)\}/.test(toggleVenueBody),
+    "#177 the old ungated \"<Venue> <year>\" string — a different format than automaticQuoteName's \"<Venue> — Flame Test <year>\" — is gone from toggleVenue"
+  );
+}
+
+/* ====================================================================
+   Security review (2026-09-25), D84/punch #60 — saveQuoteAction's shared
+   `patch` object must never carry a `status` key (quotes.update() has no
+   approval gate), and its update (loadedId) branch must route a CHANGED
+   status through the gated setStatus() path instead. Server action, but
+   the same raw-source idiom as the client checks above applies just as
+   well — proven by reading actions.ts directly rather than calling the
+   "use server" function (requireUser() throws outside a request scope).
+   The matching DB-backed proof (a non-approver's "won" is refused, status
+   unchanged) is estimatorUpdateStatusGateAsyncChecks() further down.
+   ==================================================================== */
+{
+  const estimatorActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/estimator/actions.ts"),
+    "utf8"
+  );
+  const patchBody = estimatorActionsSrc.slice(
+    estimatorActionsSrc.indexOf("const patch: QuotePatch = {"),
+    estimatorActionsSrc.indexOf("let q: Quote | null = null;")
+  );
+  ok(patchBody.length > 0, "#180 review fixture: saveQuoteAction's shared patch object is still where the test expects it");
+  ok(
+    !/status:\s*payload\.status/.test(patchBody),
+    "#180 review: saveQuoteAction's shared patch never carries payload.status — quotes.update() has no approval gate, no history stamp and no spawn trigger"
+  );
+  const loadedIdBranch = estimatorActionsSrc.slice(
+    estimatorActionsSrc.indexOf("if (loadedId) {"),
+    estimatorActionsSrc.indexOf("} else {")
+  );
+  ok(loadedIdBranch.length > 0, "#180 review fixture: saveQuoteAction's update (loadedId) branch is still where the test expects it");
+  ok(
+    /setStatus\(loadedId, payload\.status, user\.name\)/.test(loadedIdBranch),
+    "#180 review: the update branch routes a CHANGED status through the gated setStatus(), not the raw update() merge, and stamps it with the real signed-in user (review round 2, item 4)"
+  );
+  ok(
+    /q = \(await setStatus\(loadedId, payload\.status, user\.name\)\) \?\? q;/.test(loadedIdBranch),
+    "#180 review round 2 (item 4): a null setStatus result never erases the update() result already in q"
+  );
+  // Review round 2, item 1 / round 3, item 4 (test rework): the
+  // genuine-vs-stale decision must be delegated to the real, exported,
+  // pure `resolveSaveStatusChange` (quotes.ts) — not a re-implemented
+  // condition living only in this file, and not compared against the
+  // early `prior` read (round 3: that reopens a narrower version of the
+  // same staleness gap `baseStatus` exists to close). The DB-backed proof
+  // that resolveSaveStatusChange itself is correct is
+  // staleStatusOnSaveAsyncChecks() further down, calling the real
+  // function directly.
+  ok(
+    /resolveSaveStatusChange\(payload\.status, payload\.baseStatus, q\.status\)/.test(loadedIdBranch),
+    "#180 review round 3: the update branch delegates the genuine-vs-stale decision to the real resolveSaveStatusChange(), passing q.status (post-update), not the early prior read"
+  );
+  ok(
+    !/prior\?\.status/.test(loadedIdBranch),
+    "#180 review round 3: the update branch no longer compares against the early `prior` snapshot at all"
+  );
+  ok(
+    /decision\.kind === "apply"/.test(loadedIdBranch) &&
+      /decision\.kind === "stalePassive"/.test(loadedIdBranch) &&
+      /decision\.kind === "staleConflict"/.test(loadedIdBranch),
+    "#180 review round 3: all three actionable decision kinds are handled — apply, stalePassive (ok:true + notice) and staleConflict (error)"
+  );
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -9294,20 +10043,31 @@ seeded()
   .then(() => quotesPipelineAsyncChecks())
   .then(() => moveStageRecordsAsyncChecks())
   .then(() => dayliteCommitAsyncChecks())
+  .then(() => repairValueEditorAsyncChecks())
+  .then(() => warrantyLapsedLiveAsyncChecks())
   .then(() => dayliteChunkAsyncChecks())
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
   .then(() => dayliteSupersedeFix2Checks())
   .then(() => dayliteFinalReviewAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
+  .then(() => installSoldExcludesRentalAsyncChecks())
+  .then(() => quoteLockTimeoutCatchAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
+  .then(() => pendingConversionsAsyncChecks())
+  .then(() => quoteLockAsyncChecks())
+  .then(() => engagementSweepStaleSnapshotAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  .then(() => refusedAdvanceAsyncChecks())
+  .then(() => estimatorUpdateStatusGateAsyncChecks())
+  .then(() => staleStatusOnSaveAsyncChecks())
   .then(() => venueCalendarAsyncChecks())
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   .then(() => deleteRound2AsyncChecks())
+  .then(() => gridSymbolLookAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -11331,6 +12091,10 @@ ok(
   ok(svc.stage === "scheduled" && !svc.done && svc.value === null, "daylite: live service call → scheduled repair, UKN");
   const dfd = plan.projects.find((p) => p.name.startsWith("DEERFIELD"))!;
   ok(dfd.stage === "installation" && dfd.companyCandidates.length === 2, "daylite: live install stage + two company candidates");
+  ok(
+    dfd.companiesCellRaw === "Camosy Construction, Deerfield School District",
+    "#190: companiesCellRaw is the Companies cell verbatim, not just the names matched out of it"
+  );
   ok(plan.skipped.projects["Cancelled"] === 1, "daylite: cancelled skipped, filed under skipped.projects");
   ok(plan.skipped.opportunities["Lost"] === 1, "daylite: a Lost opp is skipped, filed under skipped.opportunities");
   const bf = plan.quotes.find((q) => q.name.startsWith("BIG FOOT"))!;
@@ -12011,6 +12775,125 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
 }
 
 /* ====================================================================
+   #180 review round 4, item 1 — the #16 "Install sold" task gate
+   (quotes.ts's setStatus) excluded only flame_test/repair/inspection/
+   consulting, so every won RENTAL quote spawned an "Install sold — reach
+   out" task too, even though rentals spawn equipment bookings, not an
+   Installs project. Fixed by having quotes.ts's gate and projects.ts's
+   three exclusion checks all import ONE shared
+   PROJECT_EXCLUDED_QUOTE_TYPES (project-quote-types.ts) instead of each
+   carrying its own inline list — the four had drifted independently
+   before (rental was missing from all of them at various points).
+
+   Proven with a REAL draft->won transition (setStatus, not a copied
+   condition) on a rental quote, contrasted against the SAME transition on
+   a system quote (which SHOULD still get the task) — the positive case is
+   what keeps the negative assertion from being vacuous.
+   ==================================================================== */
+async function installSoldExcludesRentalAsyncChecks(): Promise<void> {
+  const PRE = "TEST180r4:";
+  const Q_SYSTEM = `${PRE}system`;
+  const Q_RENTAL = `${PRE}rental`;
+  const QUOTE_IDS = [Q_SYSTEM, Q_RENTAL];
+  const assignmentsFor = async (quoteId: string) =>
+    (await listDocs169("assignments")).filter(
+      (a) => ((a.link as { id?: string } | null)?.id || "") === quoteId
+    );
+  const seedDraft = (id: string, quoteType: string) =>
+    QuoteStore.create({
+      id,
+      name: `#180 review 4 (item 1) — ${quoteType}`,
+      quoteType,
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+  try {
+    await seedDraft(Q_SYSTEM, "system");
+    await seedDraft(Q_RENTAL, "rental");
+    await QuoteStore.setStatus(Q_SYSTEM, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    await QuoteStore.setStatus(Q_RENTAL, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    ok(
+      (await assignmentsFor(Q_SYSTEM)).length === 1,
+      "#180 review 4 (item 1) fixture: a real draft->won transition on a SYSTEM quote still creates the 'Install sold' assignment — the positive case"
+    );
+    ok(
+      (await assignmentsFor(Q_RENTAL)).length === 0,
+      "#180 review 4 (item 1): a real draft->won transition on a RENTAL quote creates NO 'Install sold' assignment"
+    );
+  } finally {
+    for (const a of await listDocs169("assignments")) {
+      const link = a.link as { id?: string } | null;
+      if (typeof link?.id === "string" && link.id.startsWith(PRE)) await softDeleteDoc("assignments", a.id);
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
+/* ====================================================================
+   #180 review round 2, item 6 — a wedged withQuoteLock on the WIN path
+   must not roll back the status change itself.
+
+   spawnFromQuote runs inside setStatus's own transaction, so an uncaught
+   throw there rolls back the `patchDoc` status write that already ran —
+   the user's win silently undoes itself. A QuoteLockTimeoutError (a
+   healing sweep, or another re-approve, still holding the advisory lock
+   past its bounded wait) is exactly the kind of failure that must not do
+   that: the record isn't lost, the next healing sweep creates it once
+   coverage is re-checked.
+
+   PGlite in this harness is a SINGLE connection/session for the whole
+   process — `withQuoteLock`'s advisory lock is per-session-reentrant, so
+   a nested call for the same quote id from the SAME call stack succeeds
+   instantly rather than contending, and there is no second session
+   available to hold the lock open while another genuinely times out
+   waiting on it. A real timeout is not reproducible against PGlite without
+   either a second live connection or shrinking QUOTE_LOCK_TIMEOUT_MS
+   (a module-level const, not parameterised) — so this is the "unit check
+   on the catch" the review named as the fallback: the brand mechanism
+   (isQuoteLockTimeout) proven directly, and the catch/rethrow shape proven
+   by reading quote-spawn.ts's actual source, same idiom as the client-side
+   checks above.
+   ==================================================================== */
+async function quoteLockTimeoutCatchAsyncChecks(): Promise<void> {
+  const { QuoteLockTimeoutError, isQuoteLockTimeout } = await import("../src/db");
+
+  // 1. The brand mechanism itself — same "structural, not instanceof, not
+  //    string-matched" contract as ApprovalGateRefused/isApprovalGateRefusal.
+  const real = new QuoteLockTimeoutError("Q-test-180r2");
+  ok(isQuoteLockTimeout(real), "#180 review 2 (item 6): isQuoteLockTimeout recognises a real QuoteLockTimeoutError");
+  ok(real.quoteId === "Q-test-180r2", "#180 review 2 (item 6): the error carries the quote id it timed out on");
+  const impostor = new Error(real.message);
+  ok(
+    !isQuoteLockTimeout(impostor),
+    "#180 review 2 (item 6): a plain Error carrying the same message is NOT recognised — identity is never string-matched"
+  );
+  const otherCopy = Object.assign(new Error(real.message), { quoteLockTimeout: "db/quote-lock-timeout" });
+  ok(
+    isQuoteLockTimeout(otherCopy),
+    "#180 review 2 (item 6): a SECOND copy of this module's brand (e.g. across a dynamic-import boundary) still routes correctly — the string crosses it intact"
+  );
+
+  // 2. The catch/rethrow shape in the actual source — spawnFromQuote must
+  //    swallow (with a warning) ONLY a lock timeout, and rethrow anything
+  //    else exactly as before.
+  const quoteSpawnSrc = readFileSync(join(process.cwd(), "src/lib/stores/quote-spawn.ts"), "utf8");
+  const spawnFromQuoteBody = quoteSpawnSrc.slice(
+    quoteSpawnSrc.indexOf("export async function spawnFromQuote"),
+    quoteSpawnSrc.indexOf("/**", quoteSpawnSrc.indexOf("export async function spawnFromQuote") + 1)
+  );
+  ok(spawnFromQuoteBody.length > 0, "#180 review 2 (item 6) fixture: spawnFromQuote is still where the test expects it");
+  ok(
+    /if \(!isQuoteLockTimeout\(e\)\) throw e;/.test(spawnFromQuoteBody),
+    "#180 review 2 (item 6): spawnFromQuote rethrows anything that is NOT a lock timeout — this is not a blanket 'spawn failures never block a win' change"
+  );
+  ok(
+    /console\.warn\(/.test(spawnFromQuoteBody) && /the status change still committed/.test(spawnFromQuoteBody),
+    "#180 review 2 (item 6): a caught lock timeout is logged as a warning, saying the status change itself still committed"
+  );
+}
+
+/* ====================================================================
    #173 — the four service sweeps heal, and only heal (D227).
 
    `cfc00ad` moved spawning into `setStatus` and deleted the four builder
@@ -12241,6 +13124,553 @@ async function sweepHealingAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
+   #180 — concurrent-safe quote spawning (the healing sweeps).
+
+   Two concurrent createFromQuote() calls for the SAME won quote — the shape
+   of two simultaneous dashboard loads, or a double-clicked sweep Retry —
+   must mint exactly one job/record/booking, not two; and a job already
+   deleted before the race must stay deleted even when raced. The fix
+   (withQuoteLock, an advisory-lock-scoped transaction in src/db/index.ts) is
+   proven directly against each service store's createFromQuote — the same
+   function both the healing sweeps (above) and the real per-quote win path
+   call — by firing it twice with Promise.all and checking the ROW COUNT,
+   not just the return value (two calls resolving to "the same job" proves
+   nothing if the insert underneath still wrote two rows).
+
+   Review round 2 (2026-09-25) adds:
+   - A direct assertion that withQuoteLock genuinely holds a Postgres
+     advisory lock (pg_locks) while its callback runs — PGlite serializes
+     concurrent transactions on its single connection regardless, so every
+     race check above would still pass even if the lock call were a no-op;
+     this checks the mechanism, not just its effect.
+   - The same race + tombstone coverage extended to projects
+     (createProjectFromQuote/syncProjectsFromQuotes) and consulting
+     engagements (ensureEngagementForQuote/syncEngagementsFromQuotes),
+     which had the identical read-then-insert shape and were unlocked.
+   - A real win racing the SWEEP (not just two sweep-shaped calls racing
+     each other) for projects and engagements.
+
+   Fixtures are `TEST180:`-prefixed and torn down in `finally`, same
+   convention as #173's sweepHealingAsyncChecks just above.
+   ====================================================================== */
+/* ====================================================================
+   #180 review round 2, items 2 & 3 — the Projects "ready to start" strip
+   and its convert action.
+
+   Item 2: `createProjectFromQuote`'s `skipDismissed` escape hatch is gone.
+   It existed for `startConversionAction` on the theory that a person
+   re-converting a dismissed quote meant it — but `pendingConversions`
+   already hides a dismissed quote from that screen entirely, so the only
+   way to reach the action with a dismissed id was a hand-crafted POST, and
+   an opt-out reachable that way could resurrect a project the user
+   deliberately deleted (#169). Proven by the source no longer containing
+   the option (there is nothing left to prove behaviourally that the
+   #180-round-1 dismissed-list tombstone check doesn't already cover, since
+   there is no longer any parameter to bypass it with).
+
+   Item 3: `pendingConversions` must exclude EXACTLY the quote types
+   `createProjectFromQuote` refuses — it was missing repair/inspection at
+   one point (they spawn their own records; createProjectFromQuote has
+   refused them since #13), so a won repair/inspection quote showed a
+   "Start" button that silently did nothing. `startConversionAction` must
+   also say so instead of falling through silently when
+   createProjectFromQuote returns null.
+
+   Review round 4, item 1: both now read the ONE shared
+   PROJECT_EXCLUDED_QUOTE_TYPES (project-quote-types.ts) instead of each
+   carrying its own inline list, which is what makes "exactly matches"
+   structurally guaranteed rather than something that has to be
+   re-verified by hand every time a type is added — this source check now
+   confirms they both import the shared list, not that they happen to
+   repeat the same four names.
+   ==================================================================== */
+async function pendingConversionsAsyncChecks(): Promise<void> {
+  // Source checks — same raw-source idiom as the client checks above,
+  // applied to two plain server modules.
+  const projectsSrc = readFileSync(join(process.cwd(), "src/lib/stores/projects.ts"), "utf8");
+  ok(
+    !/skipDismissed/.test(projectsSrc),
+    "#180 review 2 (item 2): skipDismissed is gone from projects.ts entirely — createProjectFromQuote always honours the dismissed list"
+  );
+  ok(
+    /import \{ isProjectExcludedQuoteType \} from "@\/lib\/project-quote-types";/.test(projectsSrc),
+    "#180 review 4 (item 1): projects.ts imports the ONE shared exclusion list rather than carrying its own"
+  );
+  const createBody = projectsSrc.slice(
+    projectsSrc.indexOf("export async function createProjectFromQuote"),
+    projectsSrc.indexOf("/**\n * PUNCHLIST #13")
+  );
+  const syncBody = projectsSrc.slice(
+    projectsSrc.indexOf("export async function syncProjectsFromQuotes"),
+    projectsSrc.indexOf("export async function pendingConversions")
+  );
+  const pendingBody = projectsSrc.slice(
+    projectsSrc.indexOf("export async function pendingConversions"),
+    projectsSrc.indexOf("/* ---------- procurement")
+  );
+  ok(pendingBody.length > 0, "#180 review 2 (item 3) fixture: pendingConversions is still where the test expects it");
+  ok(
+    /isProjectExcludedQuoteType\(q\.quoteType\)/.test(createBody) &&
+      /isProjectExcludedQuoteType\(q\.quoteType\)/.test(syncBody) &&
+      /isProjectExcludedQuoteType\(q\.quoteType\)/.test(pendingBody),
+    "#180 review 4 (item 1): createProjectFromQuote, syncProjectsFromQuotes and pendingConversions all gate on the SAME shared isProjectExcludedQuoteType() call — they cannot drift apart independently the way they did before"
+  );
+
+  const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/projects/actions.ts"), "utf8");
+  ok(
+    !/skipDismissed/.test(actionsSrc),
+    "#180 review 2 (item 2): startConversionAction no longer opts out of the dismissed-list check"
+  );
+  const startConversionBody = actionsSrc.slice(
+    actionsSrc.indexOf("export async function startConversionAction"),
+    actionsSrc.indexOf("/* ---- field-side mutations")
+  );
+  ok(startConversionBody.length > 0, "#180 review 2 (item 3) fixture: startConversionAction is still where the test expects it");
+  ok(
+    /if \(p\) redirect\(/.test(startConversionBody) && /redirect\(\s*"\/projects\?err=/.test(startConversionBody),
+    "#180 review 2 (item 3): startConversionAction redirects with a clear error when createProjectFromQuote returns null, instead of falling through silently"
+  );
+
+  // DB-backed: a won repair/inspection quote never shows up as a pending
+  // conversion, while a won install/system quote does; and
+  // createProjectFromQuote genuinely refuses the two of them directly.
+  const PRE = "TEST180r2:pc-";
+  const QUOTE_IDS: string[] = [];
+  const seedWon = (id: string, quoteType: string) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#180 review 2 (items 2/3) ${quoteType}`,
+      quoteType,
+      status: "won",
+      customer: "Test Customer",
+      customerId: null,
+      locationId: null,
+      value: 500,
+      margin: 0,
+      source: "estimator",
+      owner: "Test Harness",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+    });
+  try {
+    const qSystem = `${PRE}system`;
+    const qRepair = `${PRE}repair`;
+    const qInspection = `${PRE}inspection`;
+    QUOTE_IDS.push(qSystem, qRepair, qInspection);
+    await seedWon(qSystem, "system");
+    await seedWon(qRepair, "repair");
+    await seedWon(qInspection, "inspection");
+
+    const pending = await ProjStore.pendingConversions();
+    const pendingIds = new Set(pending.map((q) => q.id));
+    ok(pendingIds.has(qSystem), "#180 review 2 (item 3): a won install/system quote still shows as a pending conversion");
+    ok(!pendingIds.has(qRepair), "#180 review 2 (item 3): a won repair quote no longer shows a dead 'Start' button");
+    ok(!pendingIds.has(qInspection), "#180 review 2 (item 3): a won inspection quote no longer shows a dead 'Start' button");
+
+    ok(
+      (await ProjStore.createProjectFromQuote(qRepair)) === null,
+      "#180 review 2 (item 3): createProjectFromQuote genuinely refuses a repair quote (confirms the exclusion list actually matches)"
+    );
+    ok(
+      (await ProjStore.createProjectFromQuote(qInspection)) === null,
+      "#180 review 2 (item 3): createProjectFromQuote genuinely refuses an inspection quote"
+    );
+  } finally {
+    for (const d of await listDocs169("projects")) {
+      if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc("projects", d.id);
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
+import { withQuoteLock } from "../src/db";
+import { sql } from "drizzle-orm";
+import { spawnConsulting } from "../src/lib/stores/quote-spawn";
+import {
+  ensureEngagementForQuote,
+  syncEngagementsFromQuotes,
+  // `removeEngagement` is already imported (unaliased) further down by
+  // deletePartBAsyncChecks's import block — reused here rather than
+  // re-declared, since ES module imports of the same name in one file
+  // collide even across separate `import` statements.
+} from "../src/lib/stores/engagements";
+
+async function quoteLockAsyncChecks(): Promise<void> {
+  const PRE = "TEST180:";
+  const rowsFor = async (
+    coll: "flame_jobs" | "repair_jobs" | "inspections" | "equipment_bookings" | "projects" | "consulting_engagements",
+    quoteId: string
+  ) => (await listDocs169(coll, { includeDeleted: true })).filter((d) => d.quoteId === quoteId);
+
+  const seedWon = (id: string, quoteType: string, extra: Record<string, unknown> = {}) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#180 harness ${quoteType} quote`,
+      quoteType,
+      status: "won",
+      customer: "Test Customer #180",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+      ...extra,
+    });
+
+  const FLAME_BODY = { flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] } };
+  const REPAIR_BODY = { repair: { title: "#180 repair", category: "other", venues: [{ id: null, label: "Main Stage" }] } };
+  const INSP_BODY = {
+    inspection: {
+      level: "l1",
+      venues: [
+        { id: null, label: "Venue A", lineSets: 4 },
+        { id: null, label: "Venue B", lineSets: 6 },
+      ],
+    },
+  };
+  const RENTAL_BODY = {
+    rental: {
+      lines: [{
+        itemId: `${PRE}item`, locationId: `${PRE}loc`, qty: 1,
+        startDate: Date.UTC(2027, 2, 1), endDate: Date.UTC(2027, 2, 3), rate: 40,
+      }],
+    },
+  };
+
+  const Q_FLAME = `${PRE}flame-race`;
+  const Q_FLAME_DEL = `${PRE}flame-race-deleted`;
+  const Q_REPAIR = `${PRE}repair-race`;
+  const Q_INSP = `${PRE}insp-race`;
+  const Q_RENTAL = `${PRE}rental-race`;
+  const Q_PROJECT = `${PRE}project-race`;
+  const Q_PROJECT_DEL = `${PRE}project-race-deleted`;
+  const Q_ENGAGEMENT = `${PRE}engagement-race`;
+  const Q_ENGAGEMENT_DEL = `${PRE}engagement-race-deleted`;
+  const Q_STALE = `${PRE}flame-marked-lost-mid-race`;
+  const QUOTE_IDS = [
+    Q_FLAME, Q_FLAME_DEL, Q_REPAIR, Q_INSP, Q_RENTAL,
+    Q_PROJECT, Q_PROJECT_DEL, Q_ENGAGEMENT, Q_ENGAGEMENT_DEL,
+    Q_STALE,
+  ];
+  // createProjectFromQuote (#180) checks the dismissed list fresh — the
+  // project-deletion tombstone test below exercises exactly that, so the
+  // blob singleton gets the same snapshot/restore convention as #169's own
+  // dismissed-list tests (put the snapshot back, don't edit in place).
+  const dismissedBefore = await dismissedQuoteIds();
+
+  try {
+    /* ---------------- withQuoteLock genuinely holds an advisory lock ---------------- */
+    // Local dynamic import: `getDb` is already imported (unaliased) further
+    // down by outsideTransactionAsyncChecks's static import — a SECOND
+    // top-level `import { getDb }` would collide with it.
+    const { getDb: getDbForLockProbe } = await import("../src/db");
+    await withQuoteLock(`${PRE}lock-held-probe`, async () => {
+      const db = await getDbForLockProbe();
+      const locks = await db.execute(
+        sql`select 1 from pg_locks where locktype='advisory' and pid=pg_backend_pid()`
+      );
+      const rows = (locks as unknown as { rows?: unknown[] }).rows ?? (Array.isArray(locks) ? locks : []);
+      ok(
+        rows.length === 1,
+        "#180 withQuoteLock genuinely holds a Postgres advisory lock while its callback runs (pg_locks shows exactly one row) — proves the mechanism, not just its effect, since PGlite would serialize the race checks below even with a no-op lock"
+      );
+    });
+
+    /* ---------------- #180: concurrent race -> exactly one job ---------------- */
+    await seedWon(Q_FLAME, "flame_test", FLAME_BODY);
+    const [f1, f2] = await Promise.all([flameCreate173(Q_FLAME), flameCreate173(Q_FLAME)]);
+    ok(!!f1 && !!f2, "#180 flame: both concurrent createFromQuote calls resolved with a job");
+    ok(!!f1 && !!f2 && f1.id === f2.id, "#180 flame: both concurrent calls returned the SAME job, not two different ones");
+    ok((await rowsFor("flame_jobs", Q_FLAME)).length === 1, "#180 flame: exactly one job row exists for the raced quote (the read-then-insert bug would write two)");
+
+    /* ---- a job already deleted before the race stays deleted under a race ---- */
+    await seedWon(Q_FLAME_DEL, "flame_test", FLAME_BODY);
+    const toDelete = await flameCreate173(Q_FLAME_DEL);
+    ok(!!toDelete, "#180 flame fixture: the to-be-deleted quote gets its job first");
+    if (toDelete) await flameRemove173(toDelete.id);
+    const [g1, g2] = await Promise.all([flameCreate173(Q_FLAME_DEL), flameCreate173(Q_FLAME_DEL)]);
+    ok(g1 === null && g2 === null, "#180 flame: a raced re-check still honours the #173 tombstone — neither concurrent call resurrects the deleted job");
+    ok((await rowsFor("flame_jobs", Q_FLAME_DEL)).length === 1, "#180 flame: still exactly one (tombstoned) row after the race — no second row appeared");
+
+    /* ---------------- repairs ---------------- */
+    await seedWon(Q_REPAIR, "repair", REPAIR_BODY);
+    const [r1, r2] = await Promise.all([createRepairFromQuote(Q_REPAIR), createRepairFromQuote(Q_REPAIR)]);
+    ok(!!r1 && !!r2 && r1.id === r2.id, "#180 repair: a concurrent create/sweep race yields exactly one job, not two");
+    ok((await rowsFor("repair_jobs", Q_REPAIR)).length === 1, "#180 repair: exactly one job row exists for the raced quote");
+
+    /* ---------------- inspections (multi-record per quote + linked project) ---------------- */
+    await seedWon(Q_INSP, "inspection", INSP_BODY);
+    const [i1, i2] = await Promise.all([createInspectionFromQuote(Q_INSP), createInspectionFromQuote(Q_INSP)]);
+    ok(!!i1 && !!i2 && i1.length === 2 && i2.length === 2, "#180 inspection: both racing calls see the same two venue records, not four");
+    ok(
+      !!i1 && !!i2 && i1.map((r) => r.id).sort().join() === i2.map((r) => r.id).sort().join(),
+      "#180 inspection: the two racing calls returned the identical record set, not two different pairs"
+    );
+    ok((await rowsFor("inspections", Q_INSP)).length === 2, "#180 inspection: exactly two rows exist (one per venue) — the race did not double them to four");
+    const raceProjectRows = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === Q_INSP);
+    ok(raceProjectRows.length === 1, "#180 inspection: the linked project the race also spawns is not duplicated either");
+
+    /* ---------------- rentals (multi-record per quote) ---------------- */
+    await seedWon(Q_RENTAL, "rental", RENTAL_BODY);
+    const [b1, b2] = await Promise.all([bookingCreate173(Q_RENTAL), bookingCreate173(Q_RENTAL)]);
+    ok(b1.length === 1 && b2.length === 1, "#180 rental: both racing calls see the single booking, not two");
+    ok(b1[0]?.id === b2[0]?.id, "#180 rental: the two racing calls returned the identical booking");
+    ok((await rowsFor("equipment_bookings", Q_RENTAL)).length === 1, "#180 rental: exactly one booking row exists for the raced quote");
+
+    /* ---------------- projects: a real win racing the SWEEP -> exactly one ----------------
+     * `quoteType` deliberately omitted from seedWon's extra (defaults to
+     * undefined -> the "system"/install branch createProjectFromQuote and
+     * syncProjectsFromQuotes both target). syncProjectsFromQuotes() is a
+     * book-wide scan (same NOTE as sweepHealingAsyncChecks above) — running
+     * it concurrently with a direct win call for this ONE fixture quote is
+     * the "concurrent sweep plus a win" shape the review asked for. */
+    await seedWon(Q_PROJECT, "system");
+    const [winP, sweepP] = await Promise.all([
+      ProjStore.createProjectFromQuote(Q_PROJECT),
+      ProjStore.syncProjectsFromQuotes(),
+    ]);
+    ok(!!winP, "#180 project: the direct win call resolved with a project");
+    ok(sweepP.created >= 0, "#180 project: the racing sweep completed without throwing");
+    ok((await rowsFor("projects", Q_PROJECT)).length === 1, "#180 project: exactly one project row exists for the quote a win raced against a sweep");
+
+    /* ---- a project already deleted (dismissed, #169) before the race stays deleted ---- */
+    await seedWon(Q_PROJECT_DEL, "system");
+    const projectToDelete = await ProjStore.createProjectFromQuote(Q_PROJECT_DEL);
+    ok(!!projectToDelete, "#180 project fixture: the to-be-deleted quote gets its project first");
+    if (projectToDelete) await removeProject(projectToDelete.id);
+    const [wp1, wp2] = await Promise.all([
+      ProjStore.createProjectFromQuote(Q_PROJECT_DEL),
+      ProjStore.createProjectFromQuote(Q_PROJECT_DEL),
+    ]);
+    ok(wp1 === null && wp2 === null, "#180 project: a raced re-check still honours the #169 dismissed-list tombstone — neither concurrent call resurrects the deleted project");
+    ok((await rowsFor("projects", Q_PROJECT_DEL)).length === 1, "#180 project: still exactly one (tombstoned) row after the race — no second row appeared");
+
+    /* ---------------- engagements: a real win racing the SWEEP -> exactly one ---------------- */
+    await seedWon(Q_ENGAGEMENT, "consulting", { consulting: {} });
+    const [winE, sweepE] = await Promise.all([
+      ensureEngagementForQuote(Q_ENGAGEMENT, "awarded"),
+      syncEngagementsFromQuotes(),
+    ]);
+    ok(!!winE, "#180 engagement: the direct win call resolved with an engagement");
+    ok(sweepE.created >= 0, "#180 engagement: the racing sweep completed without throwing");
+    ok((await rowsFor("consulting_engagements", Q_ENGAGEMENT)).length === 1, "#180 engagement: exactly one engagement row exists for the quote a win raced against a sweep");
+
+    /* ---- an engagement already deleted before the race stays deleted ---- */
+    await seedWon(Q_ENGAGEMENT_DEL, "consulting", { consulting: {} });
+    const engToDelete = await ensureEngagementForQuote(Q_ENGAGEMENT_DEL, "awarded");
+    ok(!!engToDelete, "#180 engagement fixture: the to-be-deleted quote gets its engagement first");
+    if (engToDelete) await removeEngagement(engToDelete.id);
+    const [we1, we2] = await Promise.all([
+      ensureEngagementForQuote(Q_ENGAGEMENT_DEL, "awarded"),
+      ensureEngagementForQuote(Q_ENGAGEMENT_DEL, "awarded"),
+    ]);
+    ok(we1 === null && we2 === null, "#180 engagement: a raced re-check still honours the tombstone (#173/D250 idiom) — neither concurrent call resurrects the deleted engagement");
+    ok((await rowsFor("consulting_engagements", Q_ENGAGEMENT_DEL)).length === 1, "#180 engagement: still exactly one (tombstoned) row after the race — no second row appeared");
+
+    /* ---------------- #180 review: a stale sweep snapshot must not spawn for a quote since marked lost ---------------- */
+    await seedWon(Q_STALE, "flame_test", FLAME_BODY);
+    await upsertDoc("quotes", { ...(await getDoc169("quotes", Q_STALE))!, status: "lost" });
+    const staleResult = await flameCreate173(Q_STALE);
+    ok(staleResult === null, "#180 flame: createFromQuote re-checks status fresh under the lock — a quote since marked lost is refused even though the caller's own snapshot said 'won'");
+    ok((await rowsFor("flame_jobs", Q_STALE)).length === 0, "#180 flame: no job was written for the quote that moved on");
+  } finally {
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "consulting_engagements"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+    // Blob singleton — put the snapshot back rather than editing in place
+    // (same convention as #169's own dismissed-list tests).
+    await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
+  }
+}
+
+/* ====================================================================
+   #180 review round 2, item 5 — source check: syncEngagementsFromQuotes'
+   advance/close/reopen branch must re-read the quote fresh under a lock
+   before writing, not just trust the pre-loop snapshot the way the create
+   branch used to before #180 round 1. The matching DB-backed proof is
+   engagementSweepStaleSnapshotAsyncChecks() just below.
+   ==================================================================== */
+{
+  const engagementsSrc = readFileSync(
+    join(process.cwd(), "src/lib/stores/engagements.ts"),
+    "utf8"
+  );
+  const syncBody = engagementsSrc.slice(
+    engagementsSrc.indexOf("export async function syncEngagementsFromQuotes"),
+    engagementsSrc.indexOf("/* ---------- manual projects")
+  );
+  ok(syncBody.length > 0, "#180 review 2 (item 5) fixture: syncEngagementsFromQuotes is still where the test expects it");
+  const elseBranch = syncBody.slice(syncBody.indexOf("} else {"));
+  ok(
+    /withQuoteLock\(q\.id, async \(\) => \{/.test(elseBranch),
+    "#180 review 2 (item 5): the advance/close/reopen branch runs under an advisory lock keyed on the quote"
+  );
+  ok(
+    /const freshQ = await getDoc<QuoteLike>\("quotes", q\.id\)/.test(elseBranch) &&
+      /const freshEng = await getEngagementByQuote\(q\.id\)/.test(elseBranch),
+    "#180 review round 3 (item 5): it re-reads BOTH the quote and the engagement fresh under the lock, not just the quote"
+  );
+  ok(
+    /const freshAction = engagementSyncAction\(String\(freshQ\.status \|\| ""\), freshStage\)/.test(elseBranch),
+    "#180 review round 3 (item 5): the action is RECOMPUTED from the fresh reads via the same pure engagementSyncAction the sweep's own snapshot pass uses — never the stale snapshot's `action`"
+  );
+  ok(
+    /freshAction\.kind === "create"/.test(elseBranch) && /ensureEngagementForQuote\(q\.id, freshAction\.stage\)/.test(elseBranch),
+    "#180 review round 3 (item 5): if the fresh recompute says 'create' (the engagement vanished in the gap), it routes through the same locked, tombstone-aware creator, not a bare insert"
+  );
+}
+
+/* ======================================================================
+   #180 review round 2/3, item 5 (and item 2) — syncEngagementsFromQuotes'
+   advance/close/reopen branch used to act on `existing`/`action`, both
+   derived from the loop's PRE-LOOP snapshot, with no lock guarding the gap
+   between that snapshot and a given row's turn. Round 2 added a lock but
+   only re-checked the QUOTE's fresh status against the snapshot; round 3
+   goes further — it re-reads BOTH the quote and the engagement fresh and
+   RECOMPUTES the action via the same pure engagementSyncAction, so a
+   change to the ENGAGEMENT itself (not just the quote) in that gap is
+   never overwritten either. Item 2 is the other half: the LIVE win path
+   (spawnConsulting, quote-spawn.ts) used to write through
+   applyEngagementStageAction with NO lock at all, so the sweep's lock
+   never actually contended with it — two independent locks on the same
+   quote only serialize callers that BOTH take one. spawnConsulting is now
+   locked too (exported specifically so it's callable here for real).
+
+   Review round 3, item 4 (test rework): the earlier version of this check
+   reimplemented the lock+fresh-read+write sequence as a local copy. Every
+   assertion below instead calls the REAL exported functions —
+   syncEngagementsFromQuotes, QuoteStore.setStatus (which itself reaches
+   the now-locked spawnConsulting on the real win path) and spawnConsulting
+   directly — never a re-implementation of engagements.ts's own logic.
+   ====================================================================== */
+async function engagementSweepStaleSnapshotAsyncChecks(): Promise<void> {
+  const PRE = "TEST180r2:eng-";
+  const QUOTE_IDS: string[] = [];
+  /** Flips the quote's status DIRECTLY in the doc store, bypassing
+   *  setStatus() entirely — so it never runs spawnFromQuote/spawnConsulting,
+   *  which would advance the engagement itself, on the REAL win path, before
+   *  this test ever gets to exercise the SWEEP. This is the same "orphan"
+   *  shape sweepHealingAsyncChecks' own seedWon() creates above: a quote
+   *  whose status changed by a path other than setStatus, exactly what the
+   *  healing sweeps exist to reconcile. */
+  const forceStatus = async (id: string, status: string) => {
+    const doc = await getDoc169<{ id: string } & Record<string, unknown>>("quotes", id);
+    if (!doc) throw new Error(`forceStatus: ${id} not found`);
+    await upsertDoc("quotes", { ...doc, status });
+  };
+  const seedOrphanSent = async (id: string, label: string) => {
+    await QuoteStore.create({
+      id,
+      name: `#180 review (item 5) — ${label}`,
+      quoteType: "consulting",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+      consulting: {},
+    });
+    await forceStatus(id, "sent");
+    await syncEngagementsFromQuotes();
+  };
+  try {
+    /* ---- happy path: still advances proposal_sent -> awarded when the quote stays won ---- */
+    const qHappy = `${PRE}happy`;
+    QUOTE_IDS.push(qHappy);
+    await seedOrphanSent(qHappy, "happy path");
+    const engBefore = await getEngagementByQuote(qHappy);
+    ok(engBefore?.status === "proposal_sent", `#180 review (item 5) fixture: the engagement is at proposal_sent before the win (is ${engBefore?.status})`);
+    // won -> the sweep's "advance" branch should move it to awarded.
+    await forceStatus(qHappy, "won");
+    await syncEngagementsFromQuotes();
+    const engAfter = await getEngagementByQuote(qHappy);
+    ok(engAfter?.status === "awarded", `#180 review (item 5): the sweep still advances proposal_sent -> awarded for a quote that stays won (is ${engAfter?.status})`);
+
+    /* ---- a REAL live-path close is not disturbed by a later real sweep pass ---- */
+    const qClose = `${PRE}close`;
+    QUOTE_IDS.push(qClose);
+    await seedOrphanSent(qClose, "live close");
+    // Real transition — "lost" is ungated — reaches spawnFromQuote ->
+    // spawnConsulting for real, which (item 2) now runs under the lock.
+    await QuoteStore.setStatus(qClose, "lost", "Test Harness");
+    const engClosed = await getEngagementByQuote(qClose);
+    ok(
+      engClosed?.status === "closed" && engClosed.decisions.length === 1 && engClosed.decisions[0]?.decision === "Proposal lost",
+      `#180 review (item 2): the real win path (setStatus -> spawnFromQuote -> spawnConsulting) closes the engagement with its "Proposal lost" decision (status ${engClosed?.status}, decisions ${engClosed?.decisions.length})`
+    );
+    // A real sweep pass afterwards must not reopen, re-close (a second
+    // decision entry) or otherwise disturb the already-correct engagement —
+    // engagementSyncAction("lost", "closed") has no defined case, so a
+    // fresh recompute correctly does nothing.
+    await syncEngagementsFromQuotes();
+    const engClosedAfterSweep = await getEngagementByQuote(qClose);
+    ok(
+      engClosedAfterSweep?.status === "closed" && engClosedAfterSweep.decisions.length === 1,
+      `#180 review (item 5): a real sweep pass after the live close leaves it untouched — still closed, still exactly one decision entry (status ${engClosedAfterSweep?.status}, decisions ${engClosedAfterSweep?.decisions.length})`
+    );
+
+    /* ---- spawnConsulting called directly (the review's explicit alternative) reopens correctly ---- */
+    const qReopen = `${PRE}reopen`;
+    QUOTE_IDS.push(qReopen);
+    await seedOrphanSent(qReopen, "reopen");
+    await QuoteStore.setStatus(qReopen, "lost", "Test Harness"); // real close first
+    const closedForReopen = await QuoteStore.get(qReopen);
+    ok(closedForReopen?.status === "lost", "#180 review (item 5) fixture: the reopen-scenario quote is lost before the direct spawnConsulting call");
+    // Simulate the re-send that reopens it — engagementSyncAction("sent",
+    // "closed") = reopen — by calling the real exported spawnConsulting
+    // directly with the quote object it would receive on that transition,
+    // rather than going through setStatus's own approval gate for "sent".
+    await spawnConsulting({ ...(closedForReopen as QuoteStore.Quote), status: "sent" });
+    const engReopened = await getEngagementByQuote(qReopen);
+    ok(
+      engReopened?.status === "proposal_sent",
+      `#180 review (item 5): spawnConsulting, called directly, reopens a closed engagement back to proposal_sent (is ${engReopened?.status})`
+    );
+
+    /* ---- real concurrency: the live path and the sweep racing the SAME quote settle on exactly one correct, un-duplicated result ----
+     * Both sides push toward the SAME target here (advance proposal_sent ->
+     * awarded), so the correct final state is deterministic regardless of
+     * which one wins the lock first: whichever runs second re-reads fresh
+     * under the lock, finds the engagement already awarded, and does
+     * nothing (engagementSyncAction("won", "awarded") has no defined
+     * case). That "does nothing the second time" IS the property under
+     * test — without the lock, both could independently decide "advance"
+     * and either double-patch or (for the create case elsewhere) double-insert. */
+    const qRace = `${PRE}race`;
+    QUOTE_IDS.push(qRace);
+    await seedOrphanSent(qRace, "race");
+    await forceStatus(qRace, "won"); // orphaned won, same shape as the happy path above
+    const [, sweepResult] = await Promise.all([
+      QuoteStore.setStatus(qRace, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" }), // real, locked, live advance
+      syncEngagementsFromQuotes(), // real, locked, fresh-recompute sweep
+    ]);
+    ok(sweepResult.skipped.length === 0, "#180 review (item 5): the racing sweep pass reported no per-row errors");
+    const raceRows = (await listDocs169("consulting_engagements", { includeDeleted: true })).filter((e) => e.quoteId === qRace);
+    ok(raceRows.length === 1, `#180 review (item 2/5): exactly one engagement row exists for the raced quote — no duplicate from the race (found ${raceRows.length})`);
+    const engRaceFinal = await getEngagementByQuote(qRace);
+    ok(
+      engRaceFinal?.status === "awarded",
+      `#180 review (item 2/5): whichever of the live advance or the sweep's own advance ran first, the lock serializes them onto the SAME correct final state — awarded, not double-applied (is ${engRaceFinal?.status})`
+    );
+  } finally {
+    for (const coll of ["consulting_engagements"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
+/* ======================================================================
    #172 — detached work must not ride the caller's transaction.
 
    `getDb()` reads an AsyncLocalStorage that `withTransaction` sets, so work
@@ -12435,6 +13865,340 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   } finally {
     console.error = realConsoleError;
     await softDeleteDoc("quotes", Q_GATE);
+  }
+}
+
+/* ====================================================================
+   #181 — the Estimator's doSave must adopt the id the server returns even
+   when the requested status advance was refused, and must surface the
+   refusal through the shared actionError banner. Client component (no
+   server round trip for this half of the bug), so — same idiom as the
+   #187 review's client-source checks — proven by reading the raw .tsx
+   source rather than mounting React. The matching DB-backed proof (create +
+   refused advance -> id usable for update, not a second create) is
+   refusedAdvanceAsyncChecks() just below.
+   ==================================================================== */
+{
+  const estimatorClientSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"),
+    "utf8"
+  );
+  const doSaveBody = estimatorClientSrc.slice(
+    estimatorClientSrc.indexOf("const doSave = ()"),
+    estimatorClientSrc.indexOf("const changeStatus = (v: QuoteStatus)")
+  );
+  ok(doSaveBody.length > 0, "#181 fixture: doSave is still where the test expects it");
+  ok(
+    !/if \(res\.ok && res\.id\)/.test(doSaveBody),
+    "#181 doSave no longer gates id-adoption on res.ok — a refused status advance still returns a real, saved id"
+  );
+  ok(
+    /if \(res\.id\) \{[\s\S]*?setLoadedId\(res\.id\)/.test(doSaveBody),
+    "#181 doSave adopts loadedId whenever the server returns an id, regardless of ok"
+  );
+  ok(
+    /setActionError\(res\.error \|\|/.test(doSaveBody),
+    "#181 doSave surfaces the gate's own refusal message through the shared actionError banner instead of silently discarding it"
+  );
+}
+
+/* ====================================================================
+   #181 — a refused status advance on a create save must not strand the
+   client without the id the server already made.
+
+   saveQuoteAction's create branch (Estimator) mints the quote FIRST, then
+   attempts the requested status advance — a refusal must still leave a
+   real, usable id, so the client's next Save (now routed through `update`,
+   once it adopts `res.id` regardless of `res.ok` — see the doSave source
+   check near the top of this file) never mints a second quote for the same
+   draft. Exercised here at the store layer directly, in the same sequence
+   saveQuoteAction's create branch runs (create() then setStatus()), because
+   requireUser() throws outside a request scope (same constraint noted at
+   #145/#174 above — the "use server" action itself can't be called from
+   this harness). The gate refused here is the exact one statusRefusalAsync
+   Checks just above exercises: a fresh "system" quote has no approval on
+   record, so advancing straight to "won" is always refused.
+
+   Fixtures are `TEST181:`-prefixed and torn down in `finally`.
+   ==================================================================== */
+async function refusedAdvanceAsyncChecks(): Promise<void> {
+  const Q_ESTIMATOR = "TEST181:estimator-refused-advance";
+  try {
+    const created181 = await QuoteStore.create({
+      id: Q_ESTIMATOR,
+      name: "#181 harness — refused advance on create",
+      quoteType: "system",
+      status: "draft",
+      customer: "Test Customer #181",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+    let advanceRefused = false;
+    try {
+      await QuoteStore.setStatus(created181.id, "won");
+    } catch {
+      advanceRefused = true;
+    }
+    ok(advanceRefused, "#181 fixture: the requested advance is refused, same as a real unapproved create-save");
+    const afterRefusal = await QuoteStore.get(created181.id);
+    ok(
+      !!afterRefusal && afterRefusal.id === Q_ESTIMATOR,
+      "#181 the quote the create branch minted is still there with a real id — this is what saveQuoteAction's res.id returns even when res.ok is false"
+    );
+    ok(afterRefusal?.status === "draft", "#181 the refused advance did not change the quote's status");
+
+    // The fixed client adopts res.id and sends it as loadedId on the next
+    // Save — i.e. the retry becomes update(id, …), never a second create().
+    await QuoteStore.update(created181.id, { name: "#181 harness — retried after refusal" });
+    const survivors181 = (await QuoteStore.getAll()).filter((q) => q.name.startsWith("#181 harness"));
+    ok(survivors181.length === 1, "#181 refused advance -> no second quote: retrying with the adopted id updates the same row rather than minting a new one");
+    ok(survivors181[0]?.id === Q_ESTIMATOR, "#181 the single surviving quote is the one the create branch originally minted");
+  } finally {
+    await softDeleteDoc("quotes", Q_ESTIMATOR);
+  }
+}
+
+/* ====================================================================
+   Security review (2026-09-25), D84/punch #60 — saveQuoteAction's UPDATE
+   path (an existing quote, loadedId truthy) used to write `payload.status`
+   straight through quotes.update(), an unguarded Object.assign with no
+   approval gate, no status history and no spawnFromQuote trigger. Reachable
+   by clicking Save before a refused changeStatus round trip returns, or by
+   calling the "use server" action directly (it is not a client-only door).
+
+   The fix: `patch` (actions.ts) no longer carries a `status` key at all: a
+   changed status on the update path now routes through the SAME gated
+   `setStatus()` the create branch and changeStatus/setStatusAction already
+   use. requireUser() throws outside a request scope, so saveQuoteAction
+   itself can't be called from this harness (same constraint noted at
+   #145/#174/#181 above) — this reproduces the exact sequence the fixed
+   update branch runs: update() the fields (no status), then setStatus()
+   only when the payload's status differs from what was stored.
+   ==================================================================== */
+async function estimatorUpdateStatusGateAsyncChecks(): Promise<void> {
+  const Q = "TEST180:estimator-update-status-bypass";
+  try {
+    const created = await QuoteStore.create({
+      id: Q,
+      name: "#180 review — update-path status bypass",
+      quoteType: "system",
+      status: "draft",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+    const prior = await QuoteStore.get(created.id);
+    // The fixed action's field-only patch — no `status` key, same as
+    // actions.ts's `patch` object after this review.
+    await QuoteStore.update(created.id, { name: "Renamed by a non-approver's Save" });
+    let refused = false;
+    if ("won" !== prior?.status) {
+      try {
+        await QuoteStore.setStatus(created.id, "won");
+      } catch {
+        refused = true;
+      }
+    }
+    ok(
+      refused,
+      "#180 review: a non-approver's status 'won' on the update path is refused by the SAME gated setStatus() the fixed action now routes through"
+    );
+    const after = await QuoteStore.get(created.id);
+    ok(
+      after?.status === "draft",
+      "#180 review: the quote's stored status is unchanged after a non-approver's update carried status 'won' — the old bug would have let it through"
+    );
+    ok(
+      after?.name === "Renamed by a non-approver's Save",
+      "#180 review: the field-only patch (name) still applies normally — only status is gated, not the whole save"
+    );
+  } finally {
+    await softDeleteDoc("quotes", Q);
+  }
+}
+
+/* ====================================================================
+   #180 review round 2 — a STALE tab must not move status just because its
+   own (equally stale) local value differs from the server's CURRENT one.
+
+   `payload.status !== prior?.status` alone (the round-1 fix) compares the
+   requested value against the server's live status — but a tab open since
+   before someone else changed the quote sends ITS OWN old value, which now
+   also differs from current, purely because the world moved on. That
+   demoted won→sent, re-won a lost quote, or demoted sent→draft from
+   nothing more than saving a note in a stale tab.
+
+   The fix adds `payload.baseStatus` — the status the client last received
+   FROM THE SERVER, never touched by an optimistic local update — and only
+   treats it as a genuine, intentional change when `payload.status !==
+   payload.baseStatus` (the user's current value really differs from what
+   they last saw) AND `prior.status === payload.baseStatus` (nobody else
+   has moved the quote since). Otherwise status is left alone and the
+   server's current value is returned so the client resyncs.
+
+   requireUser() throws outside a request scope, so saveQuoteAction itself
+   can't be called from this harness (same constraint as the checks above).
+   `wouldApply` below is a literal copy of the condition the source-check
+   above pins to actions.ts's real code — this proves the DB behaves
+   correctly when driven the way that code drives it, for all four
+   scenarios the review named plus the by-stamping half of item 4 (item 4's
+   `?? q` half has no separate DB behavior to assert — it only prevents
+   discarding an already-good `q`, which every scenario below already
+   exercises by reading the quote back afterward).
+   ==================================================================== */
+/* ====================================================================
+   Review round 3, item 4 (test rework) — the earlier version of this
+   check reimplemented saveQuoteAction's genuine-change condition as a
+   local `wouldApply` copy. saveQuoteAction itself now delegates that
+   decision to `resolveSaveStatusChange` (quotes.ts), a pure function
+   exported specifically so it can be called for real here — every
+   assertion below calls THAT function directly, not a copy of its logic.
+   ==================================================================== */
+async function staleStatusOnSaveAsyncChecks(): Promise<void> {
+  const PRE = "TEST180r2:";
+  const QUOTE_IDS: string[] = [];
+
+  /** buildQuote hardcodes a fresh create() to "draft" regardless of any
+   *  `status` in the partial — every non-draft fixture status below is
+   *  reached by a real setStatus transition after creating, same as the
+   *  app itself would. */
+  const seedDraft = (id: string) =>
+    QuoteStore.create({
+      id,
+      name: "#180 review 2 harness",
+      quoteType: "system",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+    });
+
+  try {
+    /* ---- A: a stale "sent" over "won" leaves it won ---- */
+    const qa = `${PRE}a`;
+    QUOTE_IDS.push(qa);
+    await seedDraft(qa);
+    await QuoteStore.setStatus(qa, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const currentA = (await QuoteStore.get(qa))!.status;
+    // A passive stale tab: it never touched the dropdown, so its payload
+    // equals its own baseStatus ("sent") — both stale relative to "won".
+    const decisionA = QuoteStore.resolveSaveStatusChange("sent", "sent", currentA);
+    ok(
+      decisionA.kind === "stalePassive",
+      `#180 review 2: a passive stale tab (payload === baseStatus === 'sent') against a current 'won' quote resolves to stalePassive, not apply (is "${decisionA.kind}")`
+    );
+    ok(
+      decisionA.kind === "stalePassive" && decisionA.notice.includes("Won"),
+      "#180 review 2: the stalePassive notice names the quote's actual current status"
+    );
+    if (decisionA.kind === "apply") await QuoteStore.setStatus(qa, "sent", "Test User");
+    ok(
+      (await QuoteStore.get(qa))?.status === "won",
+      "#180 review 2: a stale 'sent' over 'won' leaves it won"
+    );
+
+    /* ---- B: a stale "draft" over "sent" leaves it sent ---- */
+    const qb = `${PRE}b`;
+    QUOTE_IDS.push(qb);
+    await seedDraft(qb);
+    await QuoteStore.setStatus(qb, "sent", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const currentB = (await QuoteStore.get(qb))!.status;
+    const decisionB = QuoteStore.resolveSaveStatusChange("draft", "draft", currentB);
+    ok(
+      decisionB.kind === "stalePassive",
+      `#180 review 2: a passive stale tab (payload === baseStatus === 'draft') against a current 'sent' quote resolves to stalePassive (is "${decisionB.kind}")`
+    );
+    if (decisionB.kind === "apply") await QuoteStore.setStatus(qb, "draft", "Test User");
+    ok(
+      (await QuoteStore.get(qb))?.status === "sent",
+      "#180 review 2: a stale 'draft' over 'sent' leaves it sent"
+    );
+
+    /* ---- C: stale "won" over "lost" does not re-win or spawn ---- */
+    const qc = `${PRE}c`;
+    QUOTE_IDS.push(qc);
+    await seedDraft(qc);
+    // The legitimate won transition below DOES spawn a project (it's a real
+    // win, through the real gated setStatus) — that's expected and correct,
+    // and happens before any "stale save" is simulated. The assertion this
+    // scenario cares about is that the STALE SAVE ATTEMPT below adds no
+    // SECOND spawn, not that none exists at all.
+    await QuoteStore.setStatus(qc, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    await QuoteStore.setStatus(qc, "lost", "Test Harness"); // "lost" is ungated
+    const projectsBeforeStaleAttemptC = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === qc).length;
+    const currentC = (await QuoteStore.get(qc))!.status;
+    const decisionC = QuoteStore.resolveSaveStatusChange("won", "won", currentC);
+    ok(
+      decisionC.kind === "stalePassive",
+      `#180 review 2: a stale tab still showing 'won' against a now-'lost' quote resolves to stalePassive, not apply (is "${decisionC.kind}")`
+    );
+    if (decisionC.kind === "apply") await QuoteStore.setStatus(qc, "won", "Test User");
+    ok(
+      (await QuoteStore.get(qc))?.status === "lost",
+      "#180 review 2: stale 'won' over 'lost' does not re-win it"
+    );
+    const spawnedProjectsC = (await listDocs169("projects", { includeDeleted: true })).filter((p) => p.quoteId === qc);
+    ok(
+      spawnedProjectsC.length === projectsBeforeStaleAttemptC,
+      "#180 review 2: the stale 'won' save attempt spawns nothing NEW — setStatus (and so spawnFromQuote) was never even attempted for it"
+    );
+
+    /* ---- D: a genuine change still goes through the real approval gate ---- */
+    const qd = `${PRE}d`;
+    QUOTE_IDS.push(qd);
+    await seedDraft(qd);
+    const currentD = (await QuoteStore.get(qd))!.status;
+    const decisionD = QuoteStore.resolveSaveStatusChange("won", "draft", currentD);
+    ok(
+      decisionD.kind === "apply",
+      `#180 review 2: a genuine change (payload differs from baseStatus, and current still equals baseStatus) resolves to apply (is "${decisionD.kind}")`
+    );
+    let refusedD = false;
+    try {
+      await QuoteStore.setStatus(qd, "won", "Test User");
+    } catch {
+      refusedD = true;
+    }
+    ok(
+      refusedD,
+      "#180 review 2: the genuine change still goes through the real approval gate — a fresh draft has no approval, so 'won' is refused rather than silently let through because it was 'genuine'"
+    );
+
+    /* ---- E: a genuine but conflicting change (user meant it, but the quote moved on) is a staleConflict ---- */
+    const qe = `${PRE}e-conflict`;
+    QUOTE_IDS.push(qe);
+    await seedDraft(qe);
+    await QuoteStore.setStatus(qe, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" });
+    const currentE = (await QuoteStore.get(qe))!.status;
+    // This tab last saw "draft" (baseStatus) and the user genuinely typed
+    // "sent" — but the quote is ALREADY "won" by the time this save lands.
+    const decisionE = QuoteStore.resolveSaveStatusChange("sent", "draft", currentE);
+    ok(
+      decisionE.kind === "staleConflict",
+      `#180 review 3: payload differs from baseStatus AND current differs from baseStatus too — a real but conflicting attempt resolves to staleConflict, not apply (is "${decisionE.kind}")`
+    );
+    ok(
+      decisionE.kind === "staleConflict" && decisionE.error.includes("Won") && decisionE.error.includes("Sent"),
+      "#180 review 3: the staleConflict error names both the quote's actual current status and what the (refused) payload asked for"
+    );
+
+    /* ---- F: identical status is simply unchanged — no decision to make ---- */
+    ok(
+      QuoteStore.resolveSaveStatusChange("draft", "draft", "draft").kind === "unchanged",
+      "#180 review 3: payload/baseStatus/current all equal resolves to unchanged"
+    );
+
+    /* ---- item 4: setStatus is called with the real signed-in user, not the DEFAULT_ACTOR fallback ---- */
+    const qf = `${PRE}f-by-stamp`;
+    QUOTE_IDS.push(qf);
+    await seedDraft(qf);
+    await QuoteStore.setStatus(qf, "sent", "Alex Reviewer", { bypassApprovalGate: "engine-owned-flow" });
+    const revsF = await QuoteStore.quoteRevisions(qf);
+    ok(
+      revsF.length > 0 && revsF[revsF.length - 1]?.by === "Alex Reviewer",
+      `#180 review 2 (item 4): the "sent" revision is stamped with the real actor passed to setStatus, not the DEFAULT_ACTOR fallback (is "${revsF[revsF.length - 1]?.by}")`
+    );
+  } finally {
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
   }
 }
 
@@ -13760,4 +15524,30 @@ async function deleteRound2AsyncChecks(): Promise<void> {
       }
     }
   }
+}
+
+/* #206 grid stock symbols — Task 3: GridSymbol icon/colour round-trip. */
+async function gridSymbolLookAsyncChecks(): Promise<void> {
+  const GridCat = await import("../src/lib/stores/grid-catalog");
+  const symbols = await GridCat.listGridSymbols("Test Harness");
+  const device = symbols.find((s) => s.kind !== "assembly");
+  ok(!!device, "#206 store setup: the grid library has a device to build from");
+  if (!device) return;
+  const asm = await GridCat.createGridAssembly({
+    name: "SYM test assembly", manufacturer: "", modelNumber: "", scope: "Lighting",
+    members: [{ symbolId: device.id, qty: 1, x: 0.5, y: 0.5 }], shape: "hexagon", by: "Test Harness",
+  });
+  registerFixture("grid_catalog", asm.id);
+
+  const colourOnly = await GridCat.setGridSymbolLook(asm.id, { color: "#123456" });
+  ok(colourOnly?.color === "#123456" && colourOnly?.shape === "hexagon" && !colourOnly?.icon,
+    "#206 store: a colour-only patch leaves icon and legacy shape alone");
+  const withIcon = await GridCat.setGridSymbolLook(asm.id, { icon: "horn" });
+  ok(withIcon?.icon === "horn" && withIcon?.shape === null && withIcon?.color === "#123456",
+    "#206 store: setting an icon clears the legacy shape and keeps the colour");
+  const reread = await GridCat.getGridSymbol(asm.id);
+  ok(reread?.icon === "horn" && reread?.color === "#123456", "#206 store: icon + colour round-trip through the doc-store");
+  const cleared = await GridCat.setGridSymbolLook(asm.id, { icon: null, color: null });
+  ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
+  ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
 }

@@ -10,6 +10,7 @@ import {
   complete as completeJob,
   reopen as reopenJob,
   remove as removeJob,
+  setRepairValue,
   DEFAULT_WARRANTY_MONTHS,
   type RepairCompletion,
 } from "@/lib/stores/repair-jobs";
@@ -106,6 +107,48 @@ export async function reopenRepair(formData: FormData): Promise<void> {
   const job = await get(id);
   if (!job) return;
   await reopenJob(id);
+  revalidatePath("/", "layout");
+}
+
+/** Set a repair job's dollar value by hand — the "fill it in later" path for
+ *  a Daylite-imported repair that landed as UKN (#188, mirrors
+ *  setProjectValueAction in projects/actions.ts). Accepts currency-ish input
+ *  ("$4,200", "4200"); empty or unparseable input is refused. Saving always
+ *  clears valueUnknown. */
+export async function setRepairValueAction(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  if (!id) return;
+  const cleaned = String(formData.get("value") || "").replace(/[^0-9.-]/g, "");
+  const value = cleaned === "" ? NaN : Number(cleaned);
+  if (!Number.isFinite(value) || value < 0) {
+    redirect("/repairs/results?job=" + encodeURIComponent(id) + "&err=" + encodeURIComponent("Enter a valid job value."));
+  }
+  const job = await get(id);
+  if (!job) return;
+  // redirect() throws to signal Next's router, so the store call — the only
+  // thing that can genuinely fail — stays alone in the try; a redirect
+  // triggered inside it must never be swallowed by this catch.
+  let saved: Awaited<ReturnType<typeof setRepairValue>> = null;
+  try {
+    saved = await setRepairValue(id, value);
+  } catch (error) {
+    console.error("setRepairValueAction failed", error);
+    redirect(
+      "/repairs/results?job=" +
+        encodeURIComponent(id) +
+        "&err=" +
+        encodeURIComponent("Couldn’t save the job value — please try again.")
+    );
+  }
+  if (!saved) {
+    redirect(
+      "/repairs/results?job=" +
+        encodeURIComponent(id) +
+        "&err=" +
+        encodeURIComponent("That repair could not be updated — please refresh and try again.")
+    );
+  }
   revalidatePath("/", "layout");
 }
 

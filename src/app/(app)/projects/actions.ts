@@ -254,6 +254,22 @@ export async function startConversionAction(formData: FormData): Promise<void> {
   }
   revalidatePath("/", "layout");
   if (p) redirect("/projects/" + encodeURIComponent(p.id));
+  // #180 review: createProjectFromQuote returns null (not a throw) whenever
+  // the quote isn't eligible for a NEW conversion — dismissed, not actually
+  // won, or an excluded type (flame_test/repair/inspection/consulting/
+  // rental, PROJECT_EXCLUDED_QUOTE_TYPES in project-quote-types.ts). It does
+  // NOT return null for a quote already converted by someone else — that
+  // path returns the EXISTING project instead (truthy), which the redirect
+  // just above already sends the user to, so "already converted" was never
+  // a real reason to reach this line (round-3 review fix — the old message
+  // claimed it could be). This used to fall through silently: the button
+  // did nothing and nobody was told why.
+  redirect(
+    "/projects?err=" +
+      encodeURIComponent(
+        "That quote can't become a project — it may have been dismissed, or isn't an eligible install/system quote."
+      )
+  );
 }
 
 /* ---- field-side mutations (Field Work reuses these; provided per contract) ---- */
