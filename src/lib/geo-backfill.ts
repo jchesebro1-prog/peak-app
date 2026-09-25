@@ -146,80 +146,94 @@ function addressableRows(rows: SiteRow[]): SiteRow[] {
  * letter ("STE G") — so a street NAMED "Room Rd" or "Floor St" survives.
  * Wisconsin grid addresses ("W185 S8750 Racine Ave.") pass through untouched.
  *
- * #185/D235, measured against the 170 real production failures (2026-09-24):
- * three more shapes of noise, stripped in this order —
- *  - a parenthesised aside ("(see const. site address under comments)",
- *    "(Across From Pizza Ranch On Hwy 12)") is a note to a human, never part
- *    of a mailing address a geocoder could resolve.
- *  - text pasted ahead of a real address with a colon separator ("Blaines
- *    home address:, 1523 Harvest Lane") — keep only what follows the LAST
- *    colon, since that's where the actual street starts.
- *  - a bare box/mail-drop/building number with no "P.O." ("Box 231", "Mail
- *    Drop 3248", "Building 401") is exactly as unresolvable as a P.O. box or
- *    a suite, just spelled without the marker the existing rules key on.
- *    Run AFTER the P.O.-box rule below, not before it — "P.O. Box 615" must
- *    still be consumed as one unit by that rule, or this one would strip
- *    only "Box 615" and leave a dangling "P.O.".
+ * #185/D235 fix round 1: this function is byte-identical to its pre-#185
+ * behaviour (git show 6b5c23d) — attempt 1 of geocodeVenue's lookup must stay
+ * exactly what it was before this punch. The extra cleanup #185 measured
+ * against the 170 real production failures (parenthesised asides, a pasted
+ * label before a colon, bare box/mail-drop/building numbers) moved into
+ * fallbackStreet() below, which is used ONLY by attempts 2–3.
  */
 export function cleanStreet(street: string | null | undefined): string {
-  let s = (street || "").replace(/\([^)]*\)/g, " ");
-  const lastColon = s.lastIndexOf(":");
-  if (lastColon !== -1) s = s.slice(lastColon + 1);
-  return s
+  return (street || "")
     .replace(/,?\s*\b(p\.?\s*o\.?|post\s+office)\s*box\s*[\w-]*/gi, "")
-    .replace(/,?\s*\b(mail\s*drop|box)\s*#?\s*\d+\b/gi, "")
-    .replace(/,?\s*\bbuilding\s+\d+\w*/gi, "")
     .replace(
       /,?\s*\b(suite|ste|apt|apartment|unit|floor|fl|room|rm|bldg)\b\.?\s*#?\s*(?:[\w-]*\d[\w-]*|[a-z])\b/gi,
       ""
     )
     .replace(/,?\s*#\s*[\w-]+/g, "")
-    .replace(/\s{2,}/g, " ")
-    .replace(/^[\s,]+|[\s,]+$/g, "")
+    .replace(/[\s,]+$/, "")
     .trim();
 }
 
 /**
- * Street text with a pasted "<City>, <ST> <zip>" tail and any leading label
- * removed. Used ONLY by geocodeVenue's fallback lookup (below) — never by
- * the primary query, which must stay byte-identical to today.
+ * Street text with the label/aside noise #185 measured, a pasted
+ * "<City>, <ST> <zip>" tail, and any leading label removed. Used ONLY by
+ * geocodeVenue's fallback lookup (below) — never by the primary query
+ * (cleanStreet above), which must stay byte-identical to before #185.
  *
- * #185/D235: a chunk of the 170 real misses carry the street as one long
- * pasted string — the zip/state already baked in ("...Stevens Point, WI
- * 54482"), the city repeated right after the street name with no comma
- * ("...Stevens Point"), or a label/venue name ahead of the real house number
- * ("TSL Clark Street Campus (Grades 5 to 8) 303 Clark Street"). Each is
- * stripped only when it's unambiguous:
- *  - the trailing ", ST zip" is a fixed shape, safe to always strip.
- *  - the trailing city copy must match the venue's OWN stated city, so this
- *    never eats a street that legitimately ends in a place name.
+ * #185/D235 fix round 1: three shapes of noise are cleaned up here, BEFORE
+ * handing off to cleanStreet() for the suite/PO-box rules it already knows —
+ *  - a parenthesised aside ("(see const. site address under comments)",
+ *    "(Across From Pizza Ranch On Hwy 12)") is a note to a human, never part
+ *    of a mailing address a geocoder could resolve.
+ *  - text pasted ahead of a real address with a colon separator. Cut at the
+ *    LAST colon only when what follows it has a digit and what precedes it
+ *    does not ("Blaines home address:, 1523 Harvest Lane" — the street is
+ *    obviously what comes after); otherwise just drop the colon character
+ *    itself and let cleanStreet's suite rule have a shot at what's left
+ *    ("100 Main St, Suite: 4" -> "100 Main St, Suite 4" -> "100 Main St").
+ *  - a bare box/mail-drop/building number with no "P.O." ("Box 231", "Mail
+ *    Drop 3248", "Building 401") is exactly as unresolvable as a P.O. box or
+ *    a suite, just spelled without the marker cleanStreet keys on. Run AFTER
+ *    cleanStreet, which has already consumed a real "P.O. Box 615" as one
+ *    unit — this rule only ever sees what that one left behind.
+ *
+ * Then, same as before #185:
+ *  - the trailing ", ST zip" is a fixed shape, safe to always strip (word-
+ *    bounded, so "...Stre" + "et 53703" can't misread as a state code).
+ *  - the trailing city copy must match the venue's OWN stated city AT A WORD
+ *    BOUNDARY, so this never eats a street that merely ends in the same
+ *    letters as the city ("100 Jerome" with city "Rome" stays "100 Jerome").
  *  - the leading label is only dropped when what's in front of the house
  *    number has no digit of its own (so a real second address doesn't get
  *    merged) and doesn't end in a road word ("Highway 51 North" is the
- *    street; "51 North" is not "the street with the road name removed").
+ *    street; "51 North" is not "the street with the road name removed" —
+ *    same for Wisconsin's CTH/STH/USH/Trunk/CR/SR route abbreviations).
  */
 export function fallbackStreet(street: string | null | undefined, city: string | null | undefined): string {
-  let t = cleanStreet(street);
+  let raw = (street || "").replace(/\([^)]*\)/g, " ");
+  const lastColon = raw.lastIndexOf(":");
+  if (lastColon !== -1) {
+    const before = raw.slice(0, lastColon);
+    const after = raw.slice(lastColon + 1);
+    raw = /\d/.test(after) && !/\d/.test(before) ? after : before + after;
+  }
+
+  let t = cleanStreet(raw)
+    .replace(/,?\s*\b(mail\s*drop|box)\s*#?\s*\d+\b/gi, "")
+    .replace(/,?\s*\bbuilding\s+\d+\w*/gi, "");
   if (!t) return t;
 
   // A pasted "<ST> <zip>" tail.
-  t = t.replace(/,?\s*[A-Za-z]{2}\s+\d{5}(-\d{4})?\s*$/, "");
+  t = t.replace(/,?\s*\b[A-Za-z]{2}\s+\d{5}(-\d{4})?\s*$/, "");
 
-  // A pasted copy of the venue's own stated city, right at the end.
+  // A pasted copy of the venue's own stated city, right at the end, only at
+  // a word boundary (or the very start of what's left).
   const c = (city || "").trim();
   if (c) {
     const escaped = c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    t = t.replace(new RegExp(`,?\\s*${escaped}\\s*,?\\s*$`, "i"), "");
+    t = t.replace(new RegExp(`(?:^|[\\s,])${escaped}\\s*,?\\s*$`, "i"), "");
   }
 
   // A label ahead of the real house number/street, e.g. an organization name
-  // or a parenthetical aside cleanStreet already turned into plain text.
+  // or a parenthetical aside already turned into plain text above.
   const labeled = t.match(
     /^(.*?)(?:^|[\s,])((?:[NSEWM]\d+\s*)?\d+[A-Za-z]?(?:-[A-Za-z0-9]+)?(?:\s+1\/2)?)\s+([A-Za-z].*)$/
   );
   if (labeled) {
     const [, label, houseNum, rest] = labeled;
-    const endsInRoadWord = /\b(highway|hwy|route|rte|rt|county|cty|co|state|us|road|rd|interstate)\.?\s*$/i;
+    const endsInRoadWord =
+      /\b(highway|hwy|route|rte|rt|county|cty|co|state|us|road|rd|interstate|cth|sth|ush|trunk|cr|sr)\.?\s*$/i;
     if (label && !/\d/.test(label) && !endsInRoadWord.test(label)) t = `${houseNum} ${rest}`;
   }
 

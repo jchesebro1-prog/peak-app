@@ -114,21 +114,30 @@ async function main() {
   assert.equal(cleanStreet("100 Floral Ave"), "100 Floral Ave");
   assert.equal(cleanStreet("200 Main St Suite A"), "200 Main St");
   assert.equal(cleanStreet("Hwy 12 #3"), "Hwy 12");
-  // #185: parenthesised asides, a pasted label before a colon, and bare
-  // box/mail-drop/building numbers (no "P.O.") are noise the same way suites
-  // and PO boxes already are.
-  assert.equal(
-    cleanStreet("120 East Lake Park Place, (see const. site address under comments)"),
-    "120 East Lake Park Place"
-  );
-  assert.equal(cleanStreet("1142 Pine Street (Across From Pizza Ranch On Hwy 12)"), "1142 Pine Street");
-  assert.equal(cleanStreet("Blaines home address:, 1523 Harvest Lane"), "1523 Harvest Lane");
-  assert.equal(cleanStreet("110 Main St.  Box 231"), "110 Main St.");
-  assert.equal(cleanStreet("600 Highland Ave.  Mail Drop 3248"), "600 Highland Ave.");
-  assert.equal(cleanStreet("500 E Veterans, Building 401"), "500 E Veterans");
   console.log("PASS geo-backfill: cleanStreet");
 
   /* ---- #185: fallbackStreet / cleanCity — only used by the fallback lookup ---- */
+  // Moved from cleanStreet (fix round 1, item 2): attempt 1's query must stay
+  // byte-identical to before #185, so parenthesised asides, a pasted label
+  // before a colon, and bare box/mail-drop/building numbers are cleaned up
+  // only in the fallback street, never in cleanStreet itself.
+  assert.equal(
+    fallbackStreet("120 East Lake Park Place, (see const. site address under comments)", "X"),
+    "120 East Lake Park Place"
+  );
+  assert.equal(fallbackStreet("1142 Pine Street (Across From Pizza Ranch On Hwy 12)", "X"), "1142 Pine Street");
+  assert.equal(fallbackStreet("Blaines home address:, 1523 Harvest Lane", "Reedsburg"), "1523 Harvest Lane");
+  assert.equal(fallbackStreet("110 Main St.  Box 231", "X"), "110 Main St.");
+  assert.equal(fallbackStreet("600 Highland Ave.  Mail Drop 3248", "X"), "600 Highland Ave.");
+  assert.equal(fallbackStreet("500 E Veterans, Building 401", "X"), "500 E Veterans");
+  // The tightened colon rule (item 2): cut at the last colon only when the
+  // text after it has a digit and the text before it does not; otherwise
+  // remove only the colon character, so the suite rule still gets a shot.
+  assert.equal(fallbackStreet("100 Main St, Suite: 4", "X"), "100 Main St");
+  assert.ok(
+    fallbackStreet("100 Main St Loading Dock: Rear", "X").includes("100 Main St"),
+    "a colon with no digit after it must not eat the real street"
+  );
   assert.equal(
     fallbackStreet("New Heights Lutheran Parish (NEW NAME), 1705 Center Street", "Black Earth"),
     "1705 Center Street"
@@ -146,6 +155,24 @@ async function main() {
   assert.equal(fallbackStreet("Old Highway 51", "X"), "Old Highway 51", "no street word after the number — untouched");
   assert.equal(fallbackStreet("W185 S8750 Racine Ave.", "Muskego"), "W185 S8750 Racine Ave.");
   assert.equal(fallbackStreet("2302 International Drive", "Madison"), "2302 International Drive");
+  // Minors (item 6): a trailing-city strip must not eat a place name that's
+  // merely a SUBSTRING of the street's last word ("Jerome" ends in "rome").
+  assert.equal(fallbackStreet("100 Jerome", "Rome"), "100 Jerome", "'Rome' inside 'Jerome' is not a city match");
+  // Minors (item 6): the trailing state+zip strip needs a word boundary, or
+  // "Stre" + "et 53703" reads as a fake two-letter state code.
+  assert.equal(
+    fallbackStreet("100 Main Street 53703", "X"),
+    "100 Main Street 53703",
+    "no state+zip in this string — must not chew into 'Street'"
+  );
+  // Minors (item 6): WI county/state trunk highway abbreviations are road
+  // words too, same as "highway"/"county"/"road".
+  assert.equal(fallbackStreet("CTH 100 Lakeview", "X"), "CTH 100 Lakeview", "cth — road word, untouched");
+  assert.equal(fallbackStreet("Sth 51 South", "X"), "Sth 51 South", "sth — road word, untouched");
+  assert.equal(fallbackStreet("Ush 12 East", "X"), "Ush 12 East", "ush — road word, untouched");
+  assert.equal(fallbackStreet("Trunk 51 North", "X"), "Trunk 51 North", "trunk — road word, untouched");
+  assert.equal(fallbackStreet("Cr 20 Valley", "X"), "Cr 20 Valley", "cr — road word, untouched");
+  assert.equal(fallbackStreet("Sr 33 Ridge", "X"), "Sr 33 Ridge", "sr — road word, untouched");
   assert.equal(cleanCity("Rome (Sullivan)"), "Rome");
   assert.equal(cleanCity("Wisc. Dells"), "Wisconsin Dells");
   assert.equal(cleanCity("Stevens Point,"), "Stevens Point");
