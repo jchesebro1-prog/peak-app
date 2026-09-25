@@ -107,6 +107,8 @@ import {
   engagementFolderPath, fileRefHref, fileRefKey, fileRefName, isOwnedBlobPathname, isValidDataRef, ownsEngagementFile, safeMime,
   type FileRef,
 } from "@/lib/consulting-files";
+import { companyId as dayliteCompanyId } from "@/lib/daylite/ids";
+import { parseTsv, classifyProject, planHistory, splitCompanies, stripStage, toMs } from "@/lib/daylite/history";
 import {
   archiveDateStamp, archiveFileName, archiveFolderKey, archiveRecordings, archiveSafeName, extForMime,
   ARCHIVE_MAX_PER_RUN, ARCHIVE_MIN_AGE_MS, ARCHIVE_SKIP_NO_SCOPE, ARCHIVE_SKIP_NOT_CONFIGURED, ARCHIVE_SKIP_NOT_CONNECTED,
@@ -8943,6 +8945,53 @@ ok(buildIndexWithStats([rec162({ typeId: "A" })]).collisions === 0, "#162 an unc
     console.error = realError;
     console.log = realLog;
   }
+}
+
+/* ====== Task 10: pure Daylite history classifier (src/lib/daylite/history.ts) ====== */
+ok(
+  dayliteCompanyId("Sisters of St. Francis") === "co-100iojm",
+  "daylite: companyId('Sisters of St. Francis') is pinned to the pre-move value — any drift in norm()/hash() fails loudly"
+);
+{
+  const P = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"Sisters of St. Francis Dubuque, IA - BID"\tDone\tInstallation\t"8 • Final Payment Received"\t\t10/21/11\t2/22/12\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
+\tService\t"SERVICE CALL:  Pardeeville Gym - Audio Issues"\tNew\tService Call\t"2 • Service Scheduled"\t\t3/2/26\t\t\t\t\t"Pardeeville Schools"\t"Mike Mundth"\t
+\t\t"DEERFIELD HS - Gym AV BID"\tNew\tBasic Install\t"3 • Installation"\t\t4/1/26\t\t\t\t"Pat Doe"\t"Camosy Construction, Deerfield School District"\t"Isaac Mittlesteadt"\t
+\t\t"Old job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"X"\t"Y"\t`;
+  const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"Sisters of St. Francis Dubuque, IA - BID"\tWon\t\t\t"$48,200.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
+\tBid\t"BIG FOOT HS WALWORTH - Auditorium AV Upgrades"\tOpen\t\t\t"$84,500.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\tDesign\t"AL RINGLING - Lighting"\tOpen\t\t\t"$122,475.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"Al Ringling Theatre"\t"Jeff Chesebro"\t`;
+  const known = new Set(["sisters of st. francis", "pardeeville schools", "camosy construction", "deerfield school district", "big foot high school", "al ringling theatre", "sound devices, llc"]);
+  const kn = (n: string) => known.has(n.trim().toLowerCase());
+  const rows = parseTsv(P);
+  ok(rows.length === 4 && rows[0]["Name"] === "Sisters of St. Francis Dubuque, IA - BID", "daylite: TSV parse keeps quoted commas");
+  ok(classifyProject(rows[3]).bucket === "skip" && classifyProject(rows[1]).bucket === "service" && classifyProject(rows[0]).bucket === "install", "daylite: classify");
+  ok(stripStage("8 • Final Payment Received") === "final payment received", "daylite: stripStage");
+  ok(stripStage("8 – Final Payment Received") === "final payment received" && stripStage("8 — Final Payment Received") === "final payment received", "daylite: en-dash and em-dash normalize the same as a hyphen before lookup");
+  ok(new Date(toMs("2/22/12")!).getFullYear() === 2012, "daylite: 2-digit years are 20xx");
+  ok(toMs("not a date") === null && toMs("") === null, "daylite: an invalid date string returns null, never NaN");
+  ok(splitCompanies("Camosy Construction, Deerfield School District", kn).length === 2, "daylite: multi-company split");
+  ok(splitCompanies("Sound Devices, LLC", kn).length === 1, "daylite: a comma inside one company name is not a split");
+  const plan = planHistory({ projects: rows, opportunities: parseTsv(O), knownCompany: kn });
+  const sis = plan.projects.find((p) => p.name.startsWith("Sisters"))!;
+  ok(sis.kind === "project" && sis.done && sis.stage === "complete" && sis.value === 48200, "daylite: done install valued from its won opp");
+  ok(sis.endedAt !== null && new Date(sis.endedAt).getMonth() === 1, "daylite: closed on the End Date");
+  const svc = plan.projects.find((p) => p.kind === "repair")!;
+  ok(svc.stage === "scheduled" && !svc.done && svc.value === null, "daylite: live service call → scheduled repair, UKN");
+  const dfd = plan.projects.find((p) => p.name.startsWith("DEERFIELD"))!;
+  ok(dfd.stage === "installation" && dfd.companyCandidates.length === 2, "daylite: live install stage + two company candidates");
+  ok(plan.skipped["Cancelled"] === 1, "daylite: cancelled skipped");
+  const bf = plan.quotes.find((q) => q.name.startsWith("BIG FOOT"))!;
+  ok(bf.pipelineId === "bid-spec" && bf.stage === "awarded" && bf.status === "won" && bf.projectStage === "deposit" && bf.value === 84500, "daylite: awarded open opp → won quote + project at Deposit");
+  const al = plan.quotes.find((q) => q.name.startsWith("AL RINGLING"))!;
+  ok(al.pipelineId === "estimate-design" && al.stage === "design" && al.status === "draft", "daylite: design-stage opp → draft quote");
+  ok(!plan.quotes.some((q) => q.name.startsWith("Sisters")), "daylite: won opps are value-only, not quotes");
+
+  // Duplicate name+company rows must not collide silently — the first wins, the rest are counted.
+  const dupeRows = parseTsv(P).slice(0, 1).concat(parseTsv(P).slice(0, 1));
+  const dupePlan = planHistory({ projects: dupeRows, opportunities: [], knownCompany: kn });
+  ok(dupePlan.projects.length === 1 && dupePlan.skipped["duplicate"] === 1, "daylite: a repeated project row keeps the first plan and counts the rest as duplicate, never a colliding id");
 }
 
 /* ====== #162 the writer (scratch datadir only) ====== */
