@@ -39,7 +39,11 @@ const RB_META: Record<string, { bg: string; bd: string; ink: string; icon: strin
   changes: { bg: "#fcefe9", bd: "#f0d6cd", ink: "#b4543a", icon: "↩", title: "Changes requested" },
 };
 
-const GRID = "30px minmax(0,1fr) 200px 120px 96px 92px";
+// PUNCHLIST #200: the Status track was 96px — a user-editable stage label
+// (Settings → Pipelines) can run to "Presentation/Delivery" (~160px) and
+// overlap the Value column since StatusPill had no width cap. Widened to
+// 132px and StatusPill now caps + ellipsizes instead of overflowing.
+const GRID = "30px minmax(0,1fr) 200px 120px 132px 92px";
 
 /** Service quote-type badges (system quotes stay unbadged). */
 const TYPE_BADGE: Record<
@@ -655,9 +659,14 @@ export default async function QuotesPage({
                   {shortMoney(q.value || 0)}
                 </div>
                 <div
-                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0, minWidth: 0, maxWidth: "100%" }}
                 >
-                  <StatusPill tone={QUOTE_STATUS_TONE[q.status] || "gray"} minWidth={64}>
+                  <StatusPill
+                    tone={QUOTE_STATUS_TONE[q.status] || "gray"}
+                    minWidth={64}
+                    maxWidth="100%"
+                    title={quoteStagePillLabel(pipes, q, STAGE_LABEL[q.status] || STAGE_LABEL.draft)}
+                  >
                     {quoteStagePillLabel(pipes, q, STAGE_LABEL[q.status] || STAGE_LABEL.draft)}
                   </StatusPill>
                   {rMeta && (
