@@ -463,3 +463,9 @@ export function fmtTime(min: number | null | undefined): string {
   if (h <= 0) return m + "m";
   return m ? h + "h " + m + "m" : h + "h";
 }
+
+/** #160 — the catalog picker's per-row qty box: a whole number ≥ 1; anything else adds 1. */
+export function parseAddQty(v: string): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}

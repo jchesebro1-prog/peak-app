@@ -950,18 +950,41 @@ export async function remove(id: string): Promise<void> {
 }
 
 /**
- * Retire the draft that a user is replacing with a quote of another type.
- * This is deliberately checked at the moment the replacement is first saved:
- * backing out of the new builder must leave the original draft intact, and a
- * sent/won/lost quote must never be silently removed.
+ * #160 / D205 — "Change type" on a draft. The replacement's builder calls this
+ * on its FIRST save (create path only), so backing out of the new builder
+ * leaves the old draft untouched. Status is re-checked here, server-side: a
+ * quote that was sent in another tab after the intake opened is never deleted.
+ * Soft delete (remove()), not a `lost` mark — that would skew win-rate reports.
  */
-export async function retireReplacedDraft(id: string): Promise<boolean> {
-  const clean = (id || "").trim();
-  if (!clean) return false;
-  const q = await get(clean);
-  if (!q || q.status !== "draft") return false;
-  await remove(clean);
+export async function retireReplacedDraft(id: string, replacementId?: string | null): Promise<boolean> {
+  const oldId = (id || "").trim();
+  if (!oldId || oldId === (replacementId || "").trim()) return false;
+  const old = await get(oldId);
+  if (!old || old.status !== "draft") return false;
+  await remove(oldId);
   return true;
+}
+
+/**
+ * I1 fixup — a never-throw wrapper for `retireReplacedDraft`, for every quote
+ * builder's create path. By the time this runs the replacement quote already
+ * exists in the DB; if it threw, the caller's server action would reject, the
+ * client would think the save itself failed (never setting `loadedId`), and
+ * the next Save would duplicate the quote. So any failure here — a bad
+ * `replaces` value, a DB error — is swallowed and logged instead.
+ */
+export async function retireReplacedDraftSafely(
+  replaces: unknown,
+  replacementId: string,
+  tag: string
+): Promise<boolean> {
+  if (typeof replaces !== "string" || !replaces.trim()) return false;
+  try {
+    return await retireReplacedDraft(replaces, replacementId);
+  } catch (e) {
+    console.error(`[${tag}] retiring replaced draft failed:`, e);
+    return false;
+  }
 }
 
 /* ---- review & approval workflow ---- */

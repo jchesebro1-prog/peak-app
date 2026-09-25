@@ -96,50 +96,48 @@ export function isServiceType(v: string | null | undefined): v is ServiceType {
   return !!v && SERVICE_TYPES.some((s) => s.key === v);
 }
 
-/** Where each service type's builder lives, matching NewQuoteMenu's six hrefs.
- *  `category` only applies to the "custom" type (#110): it rides to the
- *  Estimator as ?category= and is seeded onto the new quote. */
-export type BuilderPathOptions = {
+/** Where each service type's builder lives, matching NewQuoteMenu's six hrefs
+ *  ("custom" is a system quote with a user-named category, #110). */
+export const BUILDER_BASE: Record<ServiceType, string> = {
+  system: "/estimator",
+  custom: "/estimator",
+  flame_test: "/flame-tests/quote",
+  repair: "/repairs/quote",
+  inspection: "/inspections/quote",
+  consulting: "/design/engagements/quote",
+  rental: "/rentals/quote",
+};
+
+export type BuilderPathOpts = {
+  /** #110 — only sent for the "custom" type. */
+  category?: string;
+  /** #160 — optional quote name; blank → the builder's own auto-name. */
   name?: string;
+  /** #160 — customer location id; never sent to rental (no venue concept). */
   venue?: string;
+  /** #160 — contact NAME (contacts have no id). */
   contact?: string;
+  /** #160 / D205 — the draft this new quote replaces (Change type). */
   replaces?: string;
 };
 
-export function builderPath(
-  type: ServiceType,
-  customerId: string,
-  categoryOrOptions?: string | BuilderPathOptions,
-  options?: BuilderPathOptions
-): string {
-  const category = typeof categoryOrOptions === "string" ? categoryOrOptions : undefined;
-  const opts = typeof categoryOrOptions === "object" ? categoryOrOptions : options;
-  const params: string[] = [];
-  if (customerId) params.push("customer=" + encodeURIComponent(customerId));
-  if (opts?.name?.trim()) params.push("name=" + encodeURIComponent(opts.name.trim()));
-  if (type !== "rental" && opts?.venue?.trim()) params.push("venue=" + encodeURIComponent(opts.venue.trim()));
-  if (opts?.contact?.trim()) params.push("contact=" + encodeURIComponent(opts.contact.trim()));
-  if (opts?.replaces?.trim()) params.push("replaces=" + encodeURIComponent(opts.replaces.trim()));
-  const qs = params.length ? "?" + params.join("&") : "";
-  switch (type) {
-    case "system":
-      return "/estimator" + qs;
-    case "custom": {
-      const cat = (category || "").trim();
-      if (!cat) return "/estimator" + qs;
-      return "/estimator" + (qs ? qs + "&" : "?") + "category=" + encodeURIComponent(cat);
-    }
-    case "flame_test":
-      return "/flame-tests/quote" + qs;
-    case "repair":
-      return "/repairs/quote" + qs;
-    case "inspection":
-      return "/inspections/quote" + qs;
-    case "consulting":
-      return "/design/engagements/quote" + qs;
-    case "rental":
-      return "/rentals/quote" + qs;
-  }
+/** The builder URL for a NEW quote, pre-seeded from the intake (#160). Each
+ *  builder reads these back with readHandoff() and applies them to a new quote
+ *  only. */
+export function builderPath(type: ServiceType, customerId: string, opts: BuilderPathOpts = {}): string {
+  const p = new URLSearchParams();
+  const put = (k: string, v: string | undefined) => {
+    const t = (v || "").trim();
+    if (t) p.set(k, t);
+  };
+  put("customer", customerId);
+  if (type === "custom") put("category", opts.category);
+  put("name", opts.name);
+  if (type !== "rental") put("venue", opts.venue);
+  put("contact", opts.contact);
+  put("replaces", opts.replaces);
+  const qs = p.toString();
+  return BUILDER_BASE[type] + (qs ? "?" + qs : "");
 }
 
 export type IntakeLocation = {
@@ -172,8 +170,10 @@ export type IntakeSubmit = {
   type: ServiceType;
   /** User-named quote category — only read when `type` is "custom" (#110). */
   category?: string;
-  name?: string;
-  replaces?: string;
+  /** #160 — optional quote name; "" → the builder's auto-name. */
+  name: string;
+  /** #160 / D205 — the draft this intake replaces ("Change type"); "" otherwise. */
+  replaces: string;
   customerMode: "pick" | "new";
   customerId: string;
   newCustomerName: string;

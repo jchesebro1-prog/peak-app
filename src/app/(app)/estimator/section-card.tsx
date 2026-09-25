@@ -1056,7 +1056,7 @@ export default function SectionCard(p: SectionCardProps) {
                 inside this panel rather than beside it. */}
             {p.catalogOpen && (
               <>
-                <CatalogPicker onAdd={p.onAddPart} />
+                <CatalogPicker onAdd={p.onAddPart} onClose={handleToggleCatalog} />
                 <div style={{ marginTop: 11, background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "15px 16px" }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase" }}>Import catalog parts from CSV</div>
                   <div style={{ marginTop: 5, fontSize: 12, color: "#777d88" }}>Batch-add parts instead of picking them one at a time. For a catalog part a SKU and quantity are enough: description, unit, cost, and sell come from the catalog unless the file gives its own. A row with no SKU lands as a custom part and needs a description, unit cost, unit sell, and an optional product link.</div>

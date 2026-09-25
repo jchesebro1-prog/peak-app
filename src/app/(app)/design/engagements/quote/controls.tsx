@@ -5,6 +5,7 @@ import Link from "next/link";
 import { saveConsultingQuote } from "./actions";
 import { money } from "@/lib/format";
 import { CustomerCombobox } from "@/components/customer-combobox";
+import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 
 /**
  * Consulting proposal builder (#35 rebuild, spec §1). Structured scopes
@@ -92,7 +93,7 @@ export function ConsultingQuoteBuilder({
   disciplineMenu,
   assumptionsMenu,
   initial,
-  preCustomerId,
+  pre,
   justSaved,
 }: {
   customers: BuilderCustomer[];
@@ -102,25 +103,27 @@ export function ConsultingQuoteBuilder({
   /** Merged assumptions library (Settings-editable, DRAFT default seed). */
   assumptionsMenu: string[];
   initial: BuilderInitial | null;
-  preCustomerId: string;
+  pre: { customerId: string; venueId: string; contactName: string; name: string; replaces: string };
   justSaved: boolean;
 }) {
   const [customerId, setCustomerId] = useState(
-    initial?.customerId || preCustomerId || ""
+    initial?.customerId || pre.customerId || ""
   );
   const architect = customers.find((c) => c.id === customerId) || null;
   const [venueCustomerId, setVenueCustomerId] = useState(
-    initial?.venueCustomerId || initial?.customerId || preCustomerId || ""
+    initial?.venueCustomerId || initial?.customerId || pre.customerId || ""
   );
   const venueCustomer = customers.find((c) => c.id === venueCustomerId) || null;
 
-  const [quoteName, setQuoteName] = useState(initial?.name || "");
-  const [quoteNameEdited, setQuoteNameEdited] = useState(!!initial?.name);
-  const [locationId, setLocationId] = useState(initial?.locationId || "");
-  const [contactName, setContactName] = useState(initial?.contactName || "");
-  const [contactRole, setContactRole] = useState(initial?.contactRole || "");
-  const [contactEmail, setContactEmail] = useState(initial?.contactEmail || "");
+  const preContact = !initial ? customers.find((c) => c.id === pre.customerId)?.contacts.find((c) => c.name === pre.contactName) : undefined;
+  const [quoteName, setQuoteName] = useState(initial?.name || pre.name || "");
+  const [quoteNameEdited, setQuoteNameEdited] = useState(!!initial?.name || !!pre.name);
+  const [locationId, setLocationId] = useState(initial?.locationId || pre.venueId || "");
+  const [contactName, setContactName] = useState(initial?.contactName || preContact?.name || "");
+  const [contactRole, setContactRole] = useState(initial?.contactRole || preContact?.role || "");
+  const [contactEmail, setContactEmail] = useState(initial?.contactEmail || preContact?.email || "");
   const [terms, setTerms] = useState(initial?.terms || "");
+  const guardWon = useWonEditGuard(initial?.status || "draft");
 
   /* ---- structured scopes (#35) ---- */
   const [scopeRows, setScopeRows] = useState<ScopeRow[]>(
@@ -210,6 +213,7 @@ export function ConsultingQuoteBuilder({
         >
           Fee-based
         </span>
+        {initial && <ChangeTypeControl quoteId={initial.id} status={initial.status} />}
         {initial && (
           <Link href="/quotes" style={{ fontSize: 12.5, color: "var(--accent)" }}>
             Manage status &amp; review in Quotes →
@@ -229,6 +233,7 @@ export function ConsultingQuoteBuilder({
 
       <form action={saveConsultingQuote}>
         {initial && <input type="hidden" name="editingId" value={initial.id} />}
+        {!initial && pre.replaces && <input type="hidden" name="replaces" value={pre.replaces} />}
         <input type="hidden" name="customerId" value={customerId} />
         <input type="hidden" name="venueCustomerId" value={venueCustomerId} />
         <input type="hidden" name="locationId" value={locationId} />
@@ -246,6 +251,7 @@ export function ConsultingQuoteBuilder({
             searchText: c.contacts.map((x) => `${x.name} ${x.email}`).join(" "),
           }))}
           value={customerId}
+          canChange={() => guardWon("customer")}
           onChange={(id) => { setCustomerId(id); if (!quoteNameEdited) setQuoteName([customers.find((c) => c.id === id)?.name, venueCustomer?.locations.find((l) => l.id === locationId)?.label || venueCustomer?.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }}
           placeholder="Search architect or billed customer…"
           inputStyle={INPUT}
@@ -260,6 +266,7 @@ export function ConsultingQuoteBuilder({
             searchText: c.locations.map((l) => l.label).join(" "),
           }))}
           value={venueCustomerId}
+          canChange={() => guardWon("venue")}
           onChange={(id) => {
             setVenueCustomerId(id);
             setLocationId("");
@@ -272,7 +279,7 @@ export function ConsultingQuoteBuilder({
         {venueCustomer && venueCustomer.locations.length > 0 && (
           <>
             <label style={LBL}>Venue site</label>
-            <select value={locationId} onChange={(e) => { setLocationId(e.target.value); if (!quoteNameEdited) setQuoteName([architect?.name, venueCustomer.locations.find((l) => l.id === e.target.value)?.label || venueCustomer.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }} style={INPUT}>
+            <select value={locationId} onChange={(e) => { if (!guardWon("venue")) return; setLocationId(e.target.value); if (!quoteNameEdited) setQuoteName([architect?.name, venueCustomer.locations.find((l) => l.id === e.target.value)?.label || venueCustomer.name, "Consulting", String(new Date().getFullYear())].filter(Boolean).join(" - ")); }} style={INPUT}>
               <option value="">— none —</option>
               {venueCustomer.locations.map((l) => (
                 <option key={l.id} value={l.id}>{l.label}</option>
@@ -295,7 +302,7 @@ export function ConsultingQuoteBuilder({
           <input
             name="contactName"
             value={contactName}
-            onChange={(e) => pickContact(e.target.value)}
+            onChange={(e) => { if (!guardWon("contact")) return; pickContact(e.target.value); }}
             placeholder="Name"
             list="consulting-contacts"
             style={INPUT}
