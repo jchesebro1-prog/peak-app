@@ -6,7 +6,8 @@ import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { riserGraph } from "@/lib/design/grid-riser";
-import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
+import { gridSymbolEntry, legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
+import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import type { PartLite } from "@/lib/design/grid-bom";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
@@ -50,16 +51,23 @@ export default async function RiserPage({
 
   const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
+  const categoryMap = resolveCategoryMap(settings.catalogCategoryMap);
   // #131: placements point at Grid-library entries (which carry the symbol
   // overrides); pricing rows fill in anything not in the library so every
   // placement still resolves a description.
+  const pricingById = new Map(catalog.map((p) => [p.id, p]));
   const seen = new Set<string>();
   const parts: PartLite[] = [];
   for (const s of gridSymbols) {
     seen.add(s.id);
+    const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
     parts.push({
-      id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category || "Other", unit: "ea", list: 0, cost: 0,
-      shape: s.shape ?? null, icon: s.icon ?? null, color: s.color ?? null, gridScope: s.scope,
+      id: s.id, sku: s.modelNumber || s.id, desc: s.name, unit: "ea", list: 0, cost: 0,
+      // Same builder the plan uses (final fix wave #3) — group/trade came
+      // from the pricing part before this fix only on the plan, so a device
+      // coloured by its catalog group there fell back to the coarser Grid-
+      // scope colour (or grey) here.
+      ...gridSymbolEntry(s, p, categoryMap),
     });
   }
   for (const p of catalog) {

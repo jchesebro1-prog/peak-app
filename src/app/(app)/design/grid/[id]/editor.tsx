@@ -39,7 +39,7 @@ import {
   type GridLayer,
 } from "@/lib/design/grid-scopes";
 import { markerColor } from "@/lib/design/grid-symbols";
-import { legendRows, symbolLook, type SymbolContext, type SymbolLook } from "@/lib/design/grid-icons";
+import { legendRows, symbolLook, type SymbolContext, type SymbolEntry, type SymbolLook } from "@/lib/design/grid-icons";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
@@ -524,15 +524,21 @@ export default function GridEditor({
     [sheetPlacements, placementVisible]
   );
   /** Plan legend rows (stock symbols): one per icon+colour on this sheet.
-   *  Curtains draw their own drape glyph, not a badge, so they're left out. */
-  const planLegendRows = useMemo(
-    () =>
-      legendRows(
-        visiblePlacements.filter((pl) => !pl.curtain).map((pl) => partById.get(pl.partId) ?? { category: pl.category }),
-        symbolCtx
-      ),
-    [visiblePlacements, partById, symbolCtx]
-  );
+   *  Curtains draw their own drape glyph, not a badge, so they're left out.
+   *  Deduped by part id (or, for a seeded-but-unassigned placement with no
+   *  part, by category) before handing entries to legendRows — a plan
+   *  repeats the same fixture dozens of times, and legendRows only needs to
+   *  see each distinct entry once (final fix wave). */
+  const planLegendRows = useMemo(() => {
+    const distinct = new Map<string, SymbolEntry & { desc?: string | null }>();
+    for (const pl of visiblePlacements) {
+      if (pl.curtain) continue;
+      const part = partById.get(pl.partId);
+      const key = part ? `id:${part.id}` : `cat:${pl.category ?? ""}`;
+      if (!distinct.has(key)) distinct.set(key, part ?? { category: pl.category });
+    }
+    return legendRows([...distinct.values()], symbolCtx);
+  }, [visiblePlacements, partById, symbolCtx]);
   const pageSpaces = useMemo(
     () => (project.spaces || []).filter((s) => s.sheetId === sheet?.id && s.page === page),
     [project.spaces, sheet?.id, page]
@@ -701,9 +707,14 @@ export default function GridEditor({
     if (!selectedPlacement) return;
     if (pending || curtainAt || calDraft || drag || spaceDrawing || wireDrawing) return;
     const onKey = (e: KeyboardEvent) => {
+      // A dialog (e.g. the IconPicker) that already handled this key — or
+      // any element opted out with data-no-nudge — owns the arrow keys;
+      // don't also move the selected plan device underneath it.
+      if (e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      if (t?.closest('[role="dialog"], [data-no-nudge]')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const step = e.shiftKey ? NUDGE_FAST : NUDGE;
       const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
@@ -2169,9 +2180,12 @@ export default function GridEditor({
                   // A seeded-but-unassigned placement (#38) has no part; its
                   // own system-function category still picks a sensible badge.
                   const look = part ? lookOf(part) : symbolLook({ category: pl.category }, symbolCtx);
-                  // A curtain reads as its scope's color and a drape glyph, so
-                  // a plan full of devices doesn't swallow it (#48/#49).
-                  const c = pl.curtain ? SCOPE_COLORS.Curtains : look.color;
+                  // A curtain reads as the Curtains group's resolved colour
+                  // (final fix wave, so an admin's Grid Settings colour edit
+                  // reaches curtains too — not the old hard-coded hash swatch)
+                  // and a drape glyph, so a plan full of devices doesn't
+                  // swallow it (#48/#49).
+                  const c = pl.curtain ? symbolCtx.colors.Curtains : look.color;
                   const x = pl.x * size.w;
                   const y = pl.y * size.h;
                   const on = pl.id === selected;

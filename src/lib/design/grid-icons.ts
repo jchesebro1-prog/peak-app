@@ -15,7 +15,9 @@
 import {
   GROUPS,
   GROUP_TRADES,
+  groupOf,
   TRADES,
+  tradeOf,
   resolveCategoryMap,
   type CatalogGroup,
   type CategoryMap,
@@ -305,6 +307,39 @@ export type SymbolEntry = {
   gridScope?: string | null;
 };
 
+/** Grid-symbol → SymbolEntry fields (category, icon, colour, shape, Grid
+ *  scope, catalog group/trade) — the ONE builder the plan (page.tsx) and
+ *  the riser (riser/page.tsx) both use for a Grid-library entry, so the
+ *  same device draws the same badge everywhere (final fix wave #3: the
+ *  riser used to omit group/trade entirely, so a device coloured by its
+ *  catalog group on the plan fell back to the coarser Grid-scope colour —
+ *  or grey — on the riser). `p` is the entry's live pricing part, when
+ *  `pricingPartId` still resolves to one; group/trade are null without it,
+ *  same as `groupOf`/`tradeOf` treat any other unpriced part. */
+export function gridSymbolEntry(
+  s: { category: string; scope: string; shape?: GridShape | null; icon?: string | null; color?: string | null },
+  p: { category: string; trade?: string } | null | undefined,
+  categoryMap: CategoryMap
+): {
+  category: string;
+  icon: string | null;
+  color: string | null;
+  shape: GridShape | null;
+  gridScope: string;
+  group: CatalogGroup | null;
+  trade: Trade | null;
+} {
+  return {
+    category: s.category || "Other",
+    icon: s.icon ?? null,
+    color: s.color ?? null,
+    shape: s.shape ?? null,
+    gridScope: s.scope,
+    group: p ? groupOf(p, categoryMap) : null,
+    trade: p ? tradeOf(p, categoryMap) : null,
+  };
+}
+
 /** Grid scope (grid-scopes GRID_SCOPES) → colour key. */
 const SCOPE_COLOR_KEY: Record<string, SymbolColorKey> = {
   Lighting: "Lighting",
@@ -339,7 +374,13 @@ const isTrade = (v: unknown): v is Trade => typeof v === "string" && (TRADES as 
 
 export function symbolLook(entry: SymbolEntry | null | undefined, ctx: SymbolContext): SymbolLook {
   const e = entry || {};
-  const legacyCat = lookup(ctx.legacyCategoryShapes, e.category);
+  // The old 8-shape card always stored an explicit "rect" for every custom
+  // category — it was never a real choice, just the old implicit default —
+  // so a stored "rect" is ignored here exactly like no stored value at all;
+  // any other stored shape (e.g. "speaker") is still honoured as the D154
+  // fallback the spec's resolution order calls for.
+  const legacyCatRaw = lookup(ctx.legacyCategoryShapes, e.category);
+  const legacyCat = legacyCatRaw === "rect" ? undefined : legacyCatRaw;
   const shape: GridShape = isGridShape(e.shape) ? e.shape : isGridShape(legacyCat) ? legacyCat : "rect";
 
   let iconId: string;
@@ -358,7 +399,7 @@ export function symbolLook(entry: SymbolEntry | null | undefined, ctx: SymbolCon
     const m: CategoryMapEntry | undefined = lookup(ctx.categoryMap, e.category);
     const group = isGroup(e.group) ? e.group : m?.group ?? null;
     const trade = isTrade(e.trade) ? e.trade : m?.trade ?? (group ? GROUP_TRADES[group] : null);
-    const scopeKey = e.gridScope ? SCOPE_COLOR_KEY[e.gridScope] : undefined;
+    const scopeKey = e.gridScope && Object.hasOwn(SCOPE_COLOR_KEY, e.gridScope) ? SCOPE_COLOR_KEY[e.gridScope] : undefined;
     color = group ? ctx.colors[group] : trade ? ctx.colors[trade] : scopeKey ? ctx.colors[scopeKey] : ctx.colors.Other;
   }
 
@@ -372,16 +413,29 @@ export type LegendRow = { key: string; iconId: string; color: string; label: str
 
 /** One row per distinct icon+colour actually drawn, first-seen order. An
  *  entry whose look differs from its category default is labelled
- *  "<category> — <desc>" (the #131 riser rule), otherwise just the category. */
+ *  "<category> — <desc>" (the #131 riser rule), otherwise just the category.
+ *  A real plan repeats the same part dozens of times, so `symbolLook` is
+ *  resolved once per DISTINCT entry (keyed by `id` when a caller has one,
+ *  e.g. a PartLite — otherwise by its symbol-relevant fields) and reused for
+ *  every repeat, rather than once per placement (final fix wave). */
 export function legendRows(
-  entries: Array<SymbolEntry & { desc?: string | null }>,
+  entries: Array<SymbolEntry & { id?: string | null; desc?: string | null }>,
   ctx: SymbolContext
 ): LegendRow[] {
   const rows: LegendRow[] = [];
+  const seenBadges = new Set<string>();
+  const lookCache = new Map<string, SymbolLook>();
   for (const e of entries) {
-    const look = symbolLook(e, ctx);
+    const identity =
+      e.id ?? `${e.category ?? ""}|${e.icon ?? ""}|${e.color ?? ""}|${e.shape ?? ""}|${e.group ?? ""}|${e.trade ?? ""}|${e.gridScope ?? ""}`;
+    let look = lookCache.get(identity);
+    if (!look) {
+      look = symbolLook(e, ctx);
+      lookCache.set(identity, look);
+    }
     const key = `${look.iconId}|${look.color}`;
-    if (rows.some((r) => r.key === key)) continue;
+    if (seenBadges.has(key)) continue;
+    seenBadges.add(key);
     const category = (e.category || "").trim() || "Uncategorized";
     const base = symbolLook({ category: e.category, group: e.group, trade: e.trade, gridScope: e.gridScope }, ctx);
     const differs = base.iconId !== look.iconId || base.color !== look.color;

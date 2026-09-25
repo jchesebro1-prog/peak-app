@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { defaultIconFor, symbolLook, type SymbolCategoryRow, type SymbolContext } from "@/lib/design/grid-icons";
+import { resolveCategoryIcons, symbolLook, type SymbolCategoryRow, type SymbolContext } from "@/lib/design/grid-icons";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { IconPicker } from "@/components/design/icon-picker";
 import { saveCategoryIconsAction } from "./actions";
@@ -15,19 +15,19 @@ import { saveCategoryIconsAction } from "./actions";
  * shipped default are posted (settings.gridCategoryIcons merges per
  * category), so new defaults keep appearing after an admin edits one.
  * "Reset to defaults" clears the key; ↺ on a row returns just that row.
+ *
+ * A row's "default" — what the ↺ button returns to and what an untouched
+ * row previews — is computed with the SAME resolver the plan uses
+ * (`symbolLook` over `{category, gridScope}`), against a context whose
+ * `categoryIcons` has every stored `gridCategoryIcons` override removed.
+ * `defaultIconFor`'s static map alone would disagree with the plan for a
+ * category whose real fallback runs through a legacy `gridCategoryShapes`
+ * entry (final fix wave #2) — the row would show one glyph while the plan
+ * drew another, and picking the row's own displayed "default" wouldn't
+ * actually clear anything.
  */
 
 const norm = (s: string) => s.trim().toLowerCase();
-
-/** Stored overrides re-keyed onto the rows' spellings (trimmed, case-insensitive). */
-function initialOverrides(rows: SymbolCategoryRow[], stored: Record<string, string> | null): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(stored || {})) {
-    const row = rows.find((r) => norm(r.category) === norm(k));
-    if (row && v !== defaultIconFor(row.category)) out[row.category] = v;
-  }
-  return out;
-}
 
 export function CategoryIconsCard({
   rows,
@@ -39,7 +39,24 @@ export function CategoryIconsCard({
   ctx: SymbolContext;
 }) {
   const router = useRouter();
-  const saved = useMemo(() => initialOverrides(rows, stored), [rows, stored]);
+  // Same legacy-shape fallback and colours as `ctx`, but with every stored
+  // per-category icon override removed — what the plan would draw if this
+  // admin had never touched Category icons at all.
+  const baseCtx = useMemo<SymbolContext>(() => ({ ...ctx, categoryIcons: resolveCategoryIcons(null) }), [ctx]);
+  const baseIconFor = useCallback(
+    (category: string, gridScope: string | null) => symbolLook({ category, gridScope }, baseCtx).iconId,
+    [baseCtx]
+  );
+  const rowByCategory = useMemo(() => new Map(rows.map((r) => [r.category, r])), [rows]);
+
+  const saved = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(stored || {})) {
+      const row = rows.find((r) => norm(r.category) === norm(k));
+      if (row && v !== baseIconFor(row.category, row.gridScope)) out[row.category] = v;
+    }
+    return out;
+  }, [rows, stored, baseIconFor]);
   const [overrides, setOverrides] = useState<Record<string, string>>(saved);
   const [filter, setFilter] = useState("");
   const [pending, startTransition] = useTransition();
@@ -55,7 +72,8 @@ export function CategoryIconsCard({
     setError(null);
     setOverrides((o) => {
       const next = { ...o };
-      if (!iconId || iconId === defaultIconFor(category)) delete next[category];
+      const gridScope = rowByCategory.get(category)?.gridScope ?? null;
+      if (!iconId || iconId === baseIconFor(category, gridScope)) delete next[category];
       else next[category] = iconId;
       return next;
     });
@@ -126,9 +144,10 @@ export function CategoryIconsCard({
           style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, border: "1px solid #e4e7ec", borderRadius: 8, padding: "7px 10px", width: "100%", maxWidth: 320, marginBottom: 10, outline: "none" }}
         />
         {shown.map((r) => {
-          const iconId = overrides[r.category] ?? defaultIconFor(r.category);
+          const hasOverride = Object.hasOwn(overrides, r.category);
+          const iconId = hasOverride ? overrides[r.category] : baseIconFor(r.category, r.gridScope);
           const color = symbolLook({ category: r.category, gridScope: r.gridScope }, ctx).color;
-          const custom = r.category in overrides;
+          const custom = hasOverride;
           return (
             <div key={r.category} style={{ display: "grid", gridTemplateColumns: "28px minmax(0, 1fr) auto 30px", gap: 9, alignItems: "center", marginBottom: 7 }}>
               <SymbolIcon iconId={iconId} color={color} size={20} />

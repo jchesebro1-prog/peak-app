@@ -11,6 +11,13 @@ import { SymbolIcon } from "./symbol-shape";
  * by id, label and tag) over a grid of badges drawn in `color`. Keyboard:
  * Tab into the search box, ↓ to the grid, arrows move, Enter/Space picks,
  * Escape closes. Imports only pure modules (grid-icons, symbol-shape).
+ *
+ * Final fix wave: focus returns to the trigger button on pick/Escape (it
+ * would otherwise land on `<body>`, since the picked/escaped element
+ * unmounts with the panel); the panel also closes on a Tab that leaves it,
+ * not just an outside click; and the icon grid is one tab stop (roving
+ * tabindex — the active cell is the current icon, or the first result),
+ * arrows move it, matching a standard listbox/grid pattern.
  */
 
 const COLS = 8;
@@ -36,10 +43,24 @@ export function IconPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  // Roving tabindex (one tab stop in the grid): null means "no explicit
+  // pick yet" — the active cell follows the current icon (or the first
+  // result) as the query changes. Arrow navigation (focusCell) sets an
+  // explicit index; opening/closing goes back to null. Derived during
+  // render, not reset from an effect, so a query edit never needs a
+  // synchronous setState-in-effect (react-hooks/set-state-in-effect).
+  const [activeCell, setActiveCell] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const results = useMemo(() => searchIcons(q), [q]);
   const current = iconById(value);
+  const effectiveActiveCell = results.length
+    ? Math.min(
+        activeCell ?? Math.max(0, results.findIndex((i) => i.id === value)),
+        results.length - 1
+      )
+    : 0;
 
   useEffect(() => {
     if (!open) return;
@@ -50,26 +71,55 @@ export function IconPicker({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // Close on a Tab that leaves the panel (forward past the grid, or
+  // backward before the search box) — not just an outside click.
+  useEffect(() => {
+    if (!open) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (!next || !wrap.contains(next)) setOpen(false);
+    };
+    wrap.addEventListener("focusout", onFocusOut);
+    return () => wrap.removeEventListener("focusout", onFocusOut);
+  }, [open]);
+
   const focusCell = (i: number) => {
     const cells = gridRef.current?.querySelectorAll<HTMLButtonElement>("button[data-cell]");
     if (!cells || !cells.length) return;
-    cells[Math.max(0, Math.min(cells.length - 1, i))].focus();
+    const at = Math.max(0, Math.min(cells.length - 1, i));
+    setActiveCell(at);
+    cells[at].focus();
+  };
+
+  const setPanelOpen = (next: boolean) => {
+    setOpen(next);
+    setActiveCell(null); // fresh default next time the panel's contents show
+  };
+
+  const close = () => {
+    setPanelOpen(false);
+    setQ("");
+    // The picked/escaped element unmounts with the panel — return focus to
+    // the trigger instead of letting it fall back to <body>.
+    triggerRef.current?.focus();
   };
 
   const pick = (id: string) => {
     onChange(id);
-    setOpen(false);
-    setQ("");
+    close();
   };
 
   return (
     <div ref={wrapRef} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-label={`${label}: ${current.label}`}
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setPanelOpen(!open)}
         style={{
           display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: "var(--font-ui)",
           border: "1px solid #e4e7ec", borderRadius: 8, padding: "4px 8px", background: "#fff",
@@ -87,7 +137,7 @@ export function IconPicker({
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.stopPropagation();
-              setOpen(false);
+              close();
             }
           }}
           style={{
@@ -118,8 +168,7 @@ export function IconPicker({
               type="button"
               onClick={() => {
                 onClear();
-                setOpen(false);
-                setQ("");
+                close();
               }}
               style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "transparent", border: "none", cursor: "pointer", padding: "0 0 8px" }}
             >
@@ -136,6 +185,11 @@ export function IconPicker({
               const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: COLS, ArrowUp: -COLS }[e.key];
               if (step === undefined) return;
               e.preventDefault();
+              // Don't let the arrow key escape the picker: the editor's
+              // window-level nudge listener (grid/[id]/editor.tsx) would
+              // otherwise also move the selected plan device underneath
+              // this dialog.
+              e.stopPropagation();
               focusCell(i + step);
             }}
             style={{ display: "grid", gridTemplateColumns: `repeat(${COLS}, 1fr)`, gap: 4, maxHeight: 220, overflowY: "auto" }}
@@ -149,6 +203,10 @@ export function IconPicker({
                 aria-selected={icon.id === value}
                 title={icon.label}
                 aria-label={icon.label}
+                // Roving tabindex: only the active cell is a tab stop —
+                // arrows move it (focusCell), Tab leaves the grid entirely.
+                tabIndex={i === effectiveActiveCell ? 0 : -1}
+                onFocus={() => setActiveCell(i)}
                 onClick={() => pick(icon.id)}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center", padding: 3, borderRadius: 7, cursor: "pointer",

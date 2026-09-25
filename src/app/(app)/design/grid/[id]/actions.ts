@@ -51,6 +51,7 @@ import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
 import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
+import { isGridLayer } from "@/lib/design/grid-scopes";
 import {
   GRID_CURTAIN_TYPES,
   GRID_FULLNESS,
@@ -98,6 +99,7 @@ export async function createGridAssemblyAction(input: {
   if (!input.name.trim()) return { ok: false, error: "Name the assembly." };
   if (!input.members.length) return { ok: false, error: "Choose at least one child symbol." };
   if (input.icon && !isGridIconId(input.icon)) return { ok: false, error: "Unknown icon." };
+  if (input.scope && !isGridLayer(input.scope)) return { ok: false, error: "Unknown scope." };
   let assembly: Awaited<ReturnType<typeof createGridAssembly>>;
   try {
     assembly = await createGridAssembly({

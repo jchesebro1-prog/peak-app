@@ -64,7 +64,7 @@ export default function SymbolLookPanel({
         )}
         {hasColor && !changed && (
           <button type="button" disabled={busy} onClick={() => onSave({ color: "" })} style={{ fontSize: 11, fontWeight: 600, color: "#5b616e", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
-            Use the group colour
+            Use the default colour
           </button>
         )}
       </div>
