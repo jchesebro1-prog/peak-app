@@ -5156,10 +5156,11 @@ import {
 /* --- #206 grid stock symbols — Task 2: registry, defaults, resolution, clean --- */
 import {
   DEFAULT_CATEGORY_ICONS, DEFAULT_SYMBOL_COLORS, GENERIC_ICON_ID, GRID_ICONS, LEGACY_SHAPE_ICON, MAX_CATEGORY_ICONS, SYMBOL_COLOR_KEYS,
-  cleanCategoryIcons, cleanSymbolColors, contrastOnWhite, darken, iconById, isGridIconId, isHexColor, legendRows,
+  cleanCategoryIcons, cleanSymbolColors, contrastOnWhite, darken, gridSymbolEntry, iconById, isGridIconId, isHexColor, legendRows,
   resolveCategoryIcons, resolveSymbolColors, searchIcons, symbolContext, symbolLook,
 } from "@/lib/design/grid-icons";
 import { DEFAULT_CATEGORY_MAP as SYM_CATEGORY_MAP } from "@/lib/catalog-taxonomy";
+import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
 
 {
   const ctx = symbolContext({});
@@ -5244,6 +5245,135 @@ import { DEFAULT_CATEGORY_MAP as SYM_CATEGORY_MAP } from "@/lib/catalog-taxonomy
   ], ctx);
   ok(rows.length === 3 && rows[0].label === "Speakers" && rows[1].label === "Speakers — Horn X" && rows[2].label === "Track",
     "#206: legendRows — one row per icon+colour; an override is labelled with its entry");
+}
+
+/* --- #206 grid stock symbols — final fix wave (opus whole-branch review, c40a4f48..fe36ae4d) --- */
+{
+  const ctx = symbolContext({});
+
+  // Item 2: a stored legacy category shape of "rect" is ignored (the old
+  // 8-shape card always wrote it, never a real admin choice); any other
+  // stored legacy shape is still honoured.
+  const legacyRectCtx = symbolContext({ gridCategoryShapes: { "Custom Cat": "rect", "Custom Speaker": "speaker" } });
+  ok(symbolLook({ category: "Custom Cat" }, legacyRectCtx).iconId === GENERIC_ICON_ID,
+    "#206 final fix wave: a stored legacy category shape of \"rect\" is ignored — falls to the generic device, not shape-rect");
+  ok(symbolLook({ category: "Custom Speaker" }, legacyRectCtx).iconId === "shape-speaker",
+    "#206 final fix wave: any other stored legacy category shape (e.g. speaker) is still honoured");
+
+  // Item 4a: a gridScope value that only exists on Object.prototype (e.g.
+  // "constructor") never confuses the scope→colour lookup — Object.hasOwn
+  // guards it instead of a bare bracket lookup (which used to hand back
+  // Object.prototype.constructor and crash `darken()` downstream).
+  ok(symbolLook({ category: "Mystery Box", gridScope: "constructor" }, ctx).color === DEFAULT_SYMBOL_COLORS.Other,
+    "#206 final fix wave: an inherited-prototype gridScope value like \"constructor\" resolves to Other, never throws");
+
+  // Item 3: gridSymbolEntry — the one builder page.tsx and riser/page.tsx
+  // both use, so the same Grid-symbol part draws the same badge on either.
+  // The Grid symbol's own category ("Mystery Box", not in the catalog
+  // category map) deliberately disagrees with its linked pricing part's
+  // category ("Fixtures") — the scenario that actually diverged: the plan
+  // resolved group/trade from the PART's category (via groupOf/tradeOf),
+  // while the riser, having no `p` at all, could only ever fall through to
+  // the Grid-scope colour.
+  const gse = gridSymbolEntry(
+    { category: "Mystery Box", scope: "Lighting", shape: null, icon: null, color: null },
+    { category: "Fixtures" },
+    SYM_CATEGORY_MAP
+  );
+  ok(gse.category === "Mystery Box" && gse.gridScope === "Lighting" && gse.group === "Fixtures" && gse.trade === "Lighting",
+    "#206 final fix wave: gridSymbolEntry resolves group/trade from the live pricing part's own category, like page.tsx used to alone");
+  const gseNoPart = gridSymbolEntry(
+    { category: "Mystery Box", scope: "Lighting", shape: null, icon: null, color: null },
+    undefined,
+    SYM_CATEGORY_MAP
+  );
+  ok(gseNoPart.group === null && gseNoPart.trade === null,
+    "#206 final fix wave: gridSymbolEntry — no live pricing part → no group/trade (the riser used to always take this path)");
+  ok(symbolLook(gse, ctx).color === DEFAULT_SYMBOL_COLORS.Fixtures && symbolLook(gseNoPart, ctx).color === DEFAULT_SYMBOL_COLORS.Lighting,
+    "#206 final fix wave: with the pricing part's group the colour matches the plan (Fixtures); without one it falls only to the Grid-scope colour — exactly the plan/riser divergence #3 fixed");
+
+  // legendRows dedupes by id (or its symbol-relevant fields) before
+  // resolving a look — same output either way, just resolved once per
+  // distinct entry instead of once per placement.
+  const idRows = legendRows(
+    [
+      { id: "p1", category: "Speakers", desc: "A" },
+      { id: "p1", category: "Speakers", desc: "A" },
+      { id: "p2", category: "Speakers", icon: "horn", desc: "Horn X" },
+    ],
+    ctx
+  );
+  ok(idRows.length === 2 && idRows[0].label === "Speakers" && idRows[1].label === "Speakers — Horn X",
+    "#206 final fix wave: legendRows dedupes repeated entries by id before resolving a look; output unchanged");
+
+  // Item 3 (second half): a placement with no linked part falls back to
+  // its own category on the riser, same as the plan (editor.tsx
+  // symbolLook({ category: pl.category }, …)).
+  const ghostGraph = riserGraph(
+    [{ sheetId: "sh1", page: 1, x: 0.1, y: 0.1, partId: "ghost-part-id", category: "Ghost Category" }],
+    [],
+    [],
+    [],
+    []
+  );
+  const ghostNode = ghostGraph.nodes.find((n) => n.spaceId === null);
+  ok(ghostNode?.groups[0]?.category === "Ghost Category",
+    "#206 final fix wave: riserGraph falls back to the placement's own category when no part resolves it, same as the plan");
+
+  // Item 4a: createGridAssemblyAction validates `scope` server-side.
+  ok(symIsGridLayer("Lighting") && symIsGridLayer("Unscoped") && !symIsGridLayer("constructor") && !symIsGridLayer(""),
+    "#206 final fix wave: isGridLayer — the six valid Grid scopes only, nothing inherited from Object.prototype");
+  const gridActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"),
+    "utf8"
+  );
+  ok(gridActionsSrc.includes("isGridLayer(input.scope)"),
+    "#206 final fix wave: createGridAssemblyAction validates scope server-side with isGridLayer");
+
+  // Item 1: arrow keys inside the IconPicker nudge the selected plan
+  // device — source-level, since the property under test is "this
+  // keydown never reaches the window listener", not observable from a
+  // pure function. Both halves of the fix must be present.
+  const iconPickerSrc = readFileSync(join(process.cwd(), "src/components/design/icon-picker.tsx"), "utf8");
+  const gridNavStart = iconPickerSrc.indexOf("ArrowRight: 1");
+  const gridNavEnd = iconPickerSrc.indexOf("focusCell(i + step)", gridNavStart);
+  const gridNavBlock = gridNavStart >= 0 && gridNavEnd > gridNavStart ? iconPickerSrc.slice(gridNavStart, gridNavEnd) : "";
+  ok(gridNavBlock.includes("e.preventDefault();") && gridNavBlock.includes("e.stopPropagation();"),
+    "#206 final fix wave: the IconPicker grid's arrow-key handler stops propagation after preventDefault");
+  ok(iconPickerSrc.includes("triggerRef.current?.focus();") && iconPickerSrc.includes('wrap.addEventListener("focusout"'),
+    "#206 final fix wave: the IconPicker returns focus to its trigger on close and closes on a Tab that leaves the panel");
+  ok(iconPickerSrc.includes("tabIndex={i === effectiveActiveCell ? 0 : -1}"),
+    "#206 final fix wave: the IconPicker's icon grid is a roving-tabindex single tab stop");
+  const gridEditorFixWaveSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"),
+    "utf8"
+  );
+  ok(gridEditorFixWaveSrc.includes("if (e.defaultPrevented) return;") &&
+     gridEditorFixWaveSrc.includes('t?.closest(\'[role="dialog"], [data-no-nudge]\')'),
+    "#206 final fix wave: the editor's arrow-key nudge bails when a dialog already handled the key");
+
+  // Curtain drape colour: the Curtains group's resolved colour (admin-
+  // editable in Grid Settings), not the old hard-coded scope-hash swatch.
+  ok(gridEditorFixWaveSrc.includes("symbolCtx.colors.Curtains") && !/pl\.curtain \? SCOPE_COLORS\.Curtains/.test(gridEditorFixWaveSrc),
+    "#206 final fix wave: a dropped curtain draws the resolved Curtains colour, not the hard-coded SCOPE_COLORS hash");
+
+  // Item 2 (second half): the Category icons card previews/resets against
+  // the SAME resolver as the plan, not the static defaultIconFor() map.
+  const categoryIconsCardSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/design/grid/settings/category-icons-card.tsx"),
+    "utf8"
+  );
+  ok(categoryIconsCardSrc.includes("resolveCategoryIcons(null)") && categoryIconsCardSrc.includes("symbolLook({ category, gridScope }, baseCtx)"),
+    "#206 final fix wave: the Category icons card's row baseline is symbolLook over a stored-override-free context, matching the plan");
+  ok(categoryIconsCardSrc.includes("Object.hasOwn(overrides, r.category)"),
+    "#206 final fix wave: the Category icons card reads a row's override with Object.hasOwn, not `in`/bracket access (a category named e.g. \"constructor\" would otherwise read Object.prototype)");
+
+  // Both builders resolve a Grid-symbol part's badge through the one
+  // shared builder.
+  const gridPlanPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
+  const gridRiserPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
+  ok(gridPlanPageSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridRiserPageSrc.includes("gridSymbolEntry(s, p, categoryMap)"),
+    "#206 final fix wave: the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry");
 }
 
 /* --- #206 grid stock symbols — Task 3: the badge renderer --- */
@@ -13721,32 +13851,6 @@ async function deletePartBAsyncChecks(): Promise<void> {
    Fixtures are `fixtureId("DELR2", …)` / `registerFixture()`-registered
    right after mint, so the suite-level teardown removes all of it.
    ====================================================================== */
-/* #206 grid stock symbols — Task 3: GridSymbol icon/colour round-trip. */
-async function gridSymbolLookAsyncChecks(): Promise<void> {
-  const GridCat = await import("../src/lib/stores/grid-catalog");
-  const symbols = await GridCat.listGridSymbols("Test Harness");
-  const device = symbols.find((s) => s.kind !== "assembly");
-  ok(!!device, "#206 store setup: the grid library has a device to build from");
-  if (!device) return;
-  const asm = await GridCat.createGridAssembly({
-    name: "SYM test assembly", manufacturer: "", modelNumber: "", scope: "Lighting",
-    members: [{ symbolId: device.id, qty: 1, x: 0.5, y: 0.5 }], shape: "hexagon", by: "Test Harness",
-  });
-  registerFixture("grid_catalog", asm.id);
-
-  const colourOnly = await GridCat.setGridSymbolLook(asm.id, { color: "#123456" });
-  ok(colourOnly?.color === "#123456" && colourOnly?.shape === "hexagon" && !colourOnly?.icon,
-    "#206 store: a colour-only patch leaves icon and legacy shape alone");
-  const withIcon = await GridCat.setGridSymbolLook(asm.id, { icon: "horn" });
-  ok(withIcon?.icon === "horn" && withIcon?.shape === null && withIcon?.color === "#123456",
-    "#206 store: setting an icon clears the legacy shape and keeps the colour");
-  const reread = await GridCat.getGridSymbol(asm.id);
-  ok(reread?.icon === "horn" && reread?.color === "#123456", "#206 store: icon + colour round-trip through the doc-store");
-  const cleared = await GridCat.setGridSymbolLook(asm.id, { icon: null, color: null });
-  ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
-  ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
-}
-
 async function deleteRound2AsyncChecks(): Promise<void> {
   const meDelR2 = { id: "u1", name: "Test Harness" };
 
@@ -13991,4 +14095,30 @@ async function deleteRound2AsyncChecks(): Promise<void> {
       }
     }
   }
+}
+
+/* #206 grid stock symbols — Task 3: GridSymbol icon/colour round-trip. */
+async function gridSymbolLookAsyncChecks(): Promise<void> {
+  const GridCat = await import("../src/lib/stores/grid-catalog");
+  const symbols = await GridCat.listGridSymbols("Test Harness");
+  const device = symbols.find((s) => s.kind !== "assembly");
+  ok(!!device, "#206 store setup: the grid library has a device to build from");
+  if (!device) return;
+  const asm = await GridCat.createGridAssembly({
+    name: "SYM test assembly", manufacturer: "", modelNumber: "", scope: "Lighting",
+    members: [{ symbolId: device.id, qty: 1, x: 0.5, y: 0.5 }], shape: "hexagon", by: "Test Harness",
+  });
+  registerFixture("grid_catalog", asm.id);
+
+  const colourOnly = await GridCat.setGridSymbolLook(asm.id, { color: "#123456" });
+  ok(colourOnly?.color === "#123456" && colourOnly?.shape === "hexagon" && !colourOnly?.icon,
+    "#206 store: a colour-only patch leaves icon and legacy shape alone");
+  const withIcon = await GridCat.setGridSymbolLook(asm.id, { icon: "horn" });
+  ok(withIcon?.icon === "horn" && withIcon?.shape === null && withIcon?.color === "#123456",
+    "#206 store: setting an icon clears the legacy shape and keeps the colour");
+  const reread = await GridCat.getGridSymbol(asm.id);
+  ok(reread?.icon === "horn" && reread?.color === "#123456", "#206 store: icon + colour round-trip through the doc-store");
+  const cleared = await GridCat.setGridSymbolLook(asm.id, { icon: null, color: null });
+  ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
+  ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
 }
