@@ -9,9 +9,11 @@ import {
   seedLibrarySectionsAction,
 } from "../actions";
 
-/** Mirrors the catalog importer's 1 MB cap in spirit — a library file
- *  carries four small collections, so 5 MB is generous headroom. */
-const MAX_LIBRARY_IMPORT_BYTES = 5 * 1_048_576;
+/** The file goes through a Server Action capped at 1200kb in next.config.ts,
+ *  so this guard sits safely below it (headroom for the action's other
+ *  arguments and encoding) and our message always wins over Next's. A real
+ *  library is a few hundred KB. */
+const MAX_LIBRARY_IMPORT_BYTES = 1_000_000;
 
 /**
  * Task 8 — client bits for the Specs library index: the inline "+ Add
@@ -140,7 +142,7 @@ export function ImportExportLibraryControls() {
     e.target.value = "";
     if (!file) return;
     if (file.size > MAX_LIBRARY_IMPORT_BYTES) {
-      setErr(`That file is too large — the library import limit is 5 MB.`);
+      setErr("That file is too large — the library import limit is 1 MB.");
       setMsg("");
       return;
     }
