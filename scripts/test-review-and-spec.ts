@@ -3189,6 +3189,25 @@ import {
   ok(pj[2].ts === T3 && pj[3].ts === T1, "#21: NEWEST-FIRST ProjectNote order passes through untouched — the loader sorts by ts");
   ok(pj[2].kind === "project-note" && pj[0].kind === "project-stage", "#21: project row kinds");
 
+  // a soft-deleted project note (deleted:true — the field-notes delete
+  // portion) must never surface in the customer Activity feed.
+  const pjWithDeleted = projectFeedRows(
+    {
+      id: "P-3002",
+      name: "DELR2 feed-rows test project",
+      stageHistory: [],
+      notes: [
+        { id: "nt-live", at: T1, by: "Jeff Chesebro", text: "Still live" },
+        { id: "nt-gone", at: T2, by: "Jeff Chesebro", text: "Deleted note", deleted: true },
+      ],
+    },
+    DEFAULT_PIPELINES
+  );
+  ok(
+    pjWithDeleted.length === 1 && pjWithDeleted[0].id === "project:P-3002:note:nt-live",
+    "DELR2: projectFeedRows skips a deleted:true project note — only the live one reaches the customer feed"
+  );
+
   // notes — the real record rows
   const nr = noteFeedRows({ id: "N-7001", at: T2, by: "Jeff Chesebro", text: "Board approved the budget" });
   ok(nr.length === 1 && nr[0].kind === "note" && nr[0].title === "Board approved the budget", "#21: note rows title the full text (the UI clamps display)");
