@@ -18,7 +18,7 @@ import {
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
 import { activeUsers } from "@/lib/users";
-import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
+import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, removeTask as removeTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
 import { applyTaskTemplate } from "@/lib/stores/task-templates";
 
 /**
@@ -221,6 +221,15 @@ export async function updateDesignTaskAction(formData: FormData) {
   }
   if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
   await updateTaskStore(taskId, patch);
+  revalidatePath("/design/designs");
+}
+
+/** Delete a design task (soft delete). */
+export async function removeDesignTaskAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  if (!taskId) return;
+  await removeTaskStore(taskId);
   revalidatePath("/design/designs");
 }
 

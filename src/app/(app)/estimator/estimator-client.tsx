@@ -9,6 +9,7 @@ import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import {
   addQuoteTaskAction,
+  removeQuoteTaskAction,
   applyQuoteTemplateAction,
   approveReviewAction,
   attestApprovalAction,
@@ -2930,6 +2931,7 @@ export default function EstimatorClient({
                         addAction={addQuoteTaskAction}
                         setStatusAction={setQuoteTaskStatusAction}
                         updateAction={updateQuoteTaskAction}
+                        removeAction={removeQuoteTaskAction}
                         defaultSection="Review"
                       />
                     </>

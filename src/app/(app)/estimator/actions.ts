@@ -77,6 +77,7 @@ import {
   createTask,
   setTaskStatus as setTaskStatusStore,
   updateTask as updateTaskStore,
+  removeTask as removeTaskStore,
   STATUSES as TASK_STATUSES,
   type TaskStatus,
 } from "@/lib/stores/tasks";
@@ -1219,6 +1220,17 @@ export async function updateQuoteTaskAction(formData: FormData) {
   }
   if (formData.has("notes")) patch.notes = String(formData.get("notes") || "");
   await updateTaskStore(taskId, patch);
+  revalidatePath("/", "layout");
+}
+
+/** Delete a quote task (soft delete). Parent-agnostic like set-status/update
+ *  above — only ever touches taskId — but kept as its own per-route wrapper
+ *  for the same "use server" convention as the rest of this file. */
+export async function removeQuoteTaskAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  if (!taskId) return;
+  await removeTaskStore(taskId);
   revalidatePath("/", "layout");
 }
 
