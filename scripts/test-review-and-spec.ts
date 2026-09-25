@@ -5153,6 +5153,99 @@ import {
     "#SYM gen: LICENSES/tabler-icons.txt is written, current, and names the version");
 }
 
+/* --- #SYM grid stock symbols — Task 2: registry, defaults, resolution, clean --- */
+import {
+  DEFAULT_CATEGORY_ICONS, DEFAULT_SYMBOL_COLORS, GENERIC_ICON_ID, GRID_ICONS, LEGACY_SHAPE_ICON, MAX_CATEGORY_ICONS, SYMBOL_COLOR_KEYS,
+  cleanCategoryIcons, cleanSymbolColors, contrastOnWhite, darken, iconById, isGridIconId, isHexColor, legendRows,
+  resolveCategoryIcons, resolveSymbolColors, searchIcons, symbolContext, symbolLook,
+} from "@/lib/design/grid-icons";
+import { DEFAULT_CATEGORY_MAP as SYM_CATEGORY_MAP } from "@/lib/catalog-taxonomy";
+
+{
+  const ctx = symbolContext({});
+  ok(new Set(GRID_ICONS.map((i) => i.id)).size === GRID_ICONS.length, "#SYM: icon ids are unique across Tabler picks + legacy shapes");
+  ok(GRID_ICONS.filter((i) => i.source === "legacy").length === 8 && isGridIconId("shape-diamond"), "#SYM: the eight D154 shapes are registered icons");
+  ok(Object.values(LEGACY_SHAPE_ICON).every(isGridIconId) && Object.keys(LEGACY_SHAPE_ICON).length === GRID_SHAPES.length,
+    "#SYM: every legacy shape alias resolves to a registered icon");
+  ok(Object.entries(DEFAULT_CATEGORY_ICONS).every(([, v]) => isGridIconId(v)), "#SYM: every default category icon is registered");
+  ok(Object.keys(SYM_CATEGORY_MAP).every((c) => c in DEFAULT_CATEGORY_ICONS), "#SYM: defaults cover every DEFAULT_CATEGORY_MAP category");
+  ok(["Cameras", "Video", "Speakers", "Lighting", "Control", "Fixture", "Rigging", "Assembly"].every((c) => c in DEFAULT_CATEGORY_ICONS),
+    "#SYM: defaults cover the live Grid library categories");
+  ok(isGridIconId(GENERIC_ICON_ID) && iconById("no-such-icon").id === GENERIC_ICON_ID && iconById(null).id === GENERIC_ICON_ID,
+    "#SYM: unknown ids fall back to the generic device icon");
+  ok(GRID_ICONS.every((i) => i.els.length > 0), "#SYM: no icon renders blank");
+
+  ok(SYMBOL_COLOR_KEYS.length === 10 && new Set(Object.values(DEFAULT_SYMBOL_COLORS)).size === 10, "#SYM: 10 distinct default swatches");
+  ok(SYMBOL_COLOR_KEYS.every((k) => isHexColor(DEFAULT_SYMBOL_COLORS[k]) && contrastOnWhite(DEFAULT_SYMBOL_COLORS[k]) >= 3),
+    "#SYM: every default colour has >= 3:1 contrast against the white glyph");
+  ok(Math.abs(contrastOnWhite("#ffffff") - 1) < 1e-9 && contrastOnWhite("#000000") > 20, "#SYM: contrastOnWhite sanity");
+  ok(darken("#d55e00", 0.25) === "#a04700" && darken("#ffffff", 0) === "#ffffff", "#SYM: darken scales each channel");
+
+  // icon resolution: entry icon > legacy entry shape > category > legacy stored category shape > generic
+  const legacyCtx = symbolContext({ gridCategoryShapes: { "Mystery Box": "hexagon", Speakers: "circle" } });
+  ok(symbolLook({ category: "Speakers", icon: "horn", shape: "camera" }, legacyCtx).iconId === "horn", "#SYM: the entry icon wins");
+  ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).iconId === "shape-camera", "#SYM: a legacy entry shape beats the category icon");
+  ok(symbolLook({ category: "Speakers" }, legacyCtx).iconId === "speaker", "#SYM: the category icon beats a stored legacy category shape");
+  ok(symbolLook({ category: "mystery box" }, legacyCtx).iconId === "shape-hexagon", "#SYM: a stored legacy category shape is the last category fallback (case-insensitive)");
+  ok(symbolLook({ category: "Mystery Box" }, ctx).iconId === GENERIC_ICON_ID && symbolLook(null, ctx).iconId === GENERIC_ICON_ID,
+    "#SYM: nothing matched → the generic device (the old seed is NOT consulted)");
+  ok(symbolLook({ category: "Speakers", icon: "not-real" }, ctx).iconId === "speaker", "#SYM: an unknown entry icon falls through");
+  ok(symbolLook({ category: "  track " }, ctx).iconId === "track", "#SYM: category match is trimmed + case-insensitive");
+  ok(symbolLook({ category: "Speakers", shape: "camera" }, legacyCtx).shape === "camera" && symbolLook({ category: "Mystery Box" }, legacyCtx).shape === "hexagon" &&
+     symbolLook({ category: "Track" }, ctx).shape === "rect", "#SYM: .shape keeps the D154 answer for back-compat callers");
+
+  // colour resolution: entry > group > trade > scope > Other
+  ok(symbolLook({ category: "Speakers", color: "#123456" }, ctx).color === "#123456", "#SYM: the entry colour wins");
+  ok(symbolLook({ category: "Speakers", color: "red" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers, "#SYM: a malformed entry colour is ignored");
+  ok(symbolLook({ category: "Fixtures" }, ctx).color === DEFAULT_SYMBOL_COLORS.Fixtures, "#SYM: a grouped category takes its group colour");
+  ok(symbolLook({ category: "Track" }, ctx).color === DEFAULT_SYMBOL_COLORS.Rigging && symbolLook({ category: "Racks" }, ctx).color === DEFAULT_SYMBOL_COLORS.AV,
+    "#SYM: trade-only categories take their trade colour");
+  ok(symbolLook({ category: "Video Controls" }, ctx).color === DEFAULT_SYMBOL_COLORS["Video Controls"], "#SYM: identity group entries resolve");
+  ok(symbolLook({ category: "Video", gridScope: "Video" }, ctx).color === DEFAULT_SYMBOL_COLORS.AV &&
+     symbolLook({ category: "Fixture", gridScope: "Lighting" }, ctx).color === DEFAULT_SYMBOL_COLORS.Lighting,
+    "#SYM: an unmapped Grid category falls back to its Grid scope's colour");
+  ok(symbolLook({ category: "Mystery Box" }, ctx).color === DEFAULT_SYMBOL_COLORS.Other, "#SYM: unmapped, unscoped → Other grey");
+  ok(symbolLook({ category: "Mystery Box", group: "Speakers" }, ctx).color === DEFAULT_SYMBOL_COLORS.Speakers &&
+     symbolLook({ category: "Mystery Box", trade: "Rigging" }, ctx).color === DEFAULT_SYMBOL_COLORS.Rigging,
+    "#SYM: a server-resolved group/trade on the entry is honoured");
+  ok(symbolLook({ category: "Track" }, symbolContext({ gridSymbolColors: { Rigging: "#000000" } })).color === "#000000", "#SYM: stored colours apply");
+  ok(symbolLook({ category: "Track" }, symbolContext({ catalogCategoryMap: { Track: { trade: "AV" } } })).color === DEFAULT_SYMBOL_COLORS.AV,
+    "#SYM: the admin category map decides the trade");
+  ok(!symbolLook({ category: "Track" }, ctx).overridden && symbolLook({ category: "Track", color: "#000000" }, ctx).overridden, "#SYM: overridden flag");
+
+  // resolve + clean
+  const merged = resolveCategoryIcons({ speakers: "horn", "New Cat": "wifi", Track: "nope" });
+  ok(merged.speakers === "horn" && !("Speakers" in merged) && merged["New Cat"] === "wifi" && merged.Track === "track" && merged.Racks === "rack",
+    "#SYM: resolveCategoryIcons merges per category (case-insensitive replace; bad ids ignored; untouched defaults kept)");
+  ok(resolveCategoryIcons(null) !== resolveCategoryIcons(null) && JSON.stringify(resolveCategoryIcons(undefined)) === JSON.stringify(DEFAULT_CATEGORY_ICONS),
+    "#SYM: resolveCategoryIcons — absent → a fresh copy of the defaults");
+  ok(resolveSymbolColors({ AV: "#ABCDEF", Bogus: "#000000", Rigging: "blue" }).AV === "#abcdef" &&
+     resolveSymbolColors({ Rigging: "blue" }).Rigging === DEFAULT_SYMBOL_COLORS.Rigging, "#SYM: resolveSymbolColors validates keys and hex");
+  ok(cleanCategoryIcons({}) === null && cleanCategoryIcons({ " ": "wifi", X: "nope" }) === null, "#SYM: cleanCategoryIcons — nothing valid → null");
+  ok(JSON.stringify(cleanCategoryIcons({ "  Speakers  ": "horn" })) === '{"Speakers":"horn"}', "#SYM: cleanCategoryIcons trims keys");
+  ok(Object.keys(cleanCategoryIcons({ ["x".repeat(80)]: "wifi" }) || {})[0].length === 60, "#SYM: cleanCategoryIcons caps key length at 60");
+  const many: Record<string, string> = {};
+  for (let i = 0; i < MAX_CATEGORY_ICONS + 25; i++) many[`Cat ${i}`] = "wifi";
+  ok(Object.keys(cleanCategoryIcons(many) || {}).length === MAX_CATEGORY_ICONS, "#SYM: cleanCategoryIcons caps the map size");
+  ok(cleanSymbolColors({ Bogus: "#000000", AV: "blue" }) === null && JSON.stringify(cleanSymbolColors({ AV: "#ABCDEF" })) === '{"AV":"#abcdef"}',
+    "#SYM: cleanSymbolColors keeps known keys + #rrggbb only, lower-cased; empty → null");
+
+  // search
+  ok(searchIcons("").length === GRID_ICONS.length, "#SYM: an empty search lists everything");
+  ok(searchIcons("Speaker")[0].id === "speaker", "#SYM: searchIcons finds by label (case-insensitive), label-prefix first");
+  ok(searchIcons("loudspeaker").some((i) => i.id === "speaker"), "#SYM: searchIcons finds by tag");
+  ok(searchIcons("rack")[0].id === "rack" && searchIcons("zzzz-nothing").length === 0, "#SYM: searchIcons ranking + empty result");
+  ok(searchIcons("wall station").map((i) => i.id).join(",") === "switch", "#SYM: multi-token queries AND their tokens");
+  ok(searchIcons("", 5).length === 5, "#SYM: searchIcons honours its limit");
+
+  // legend
+  const rows = legendRows([
+    { category: "Speakers", desc: "A" }, { category: "Speakers", desc: "B" }, { category: "Speakers", icon: "horn", desc: "Horn X" }, { category: "Track", desc: "T" },
+  ], ctx);
+  ok(rows.length === 3 && rows[0].label === "Speakers" && rows[1].label === "Speakers — Horn X" && rows[2].label === "Track",
+    "#SYM: legendRows — one row per icon+colour; an override is labelled with its entry");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
