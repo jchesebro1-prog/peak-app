@@ -760,6 +760,11 @@ export async function convert(
   // on the Base tier; existing-customer leads pick up their real tier.
   const { resolveTier } = await import("@/lib/pricing-tiers");
   const tier = await resolveTier(customerId, l.contact || null);
+  // Pipeline (spec §3.4): a converted lead's quote enters the default quote pipeline at its first stage.
+  const { loadPipelines } = await import("@/lib/pipelines-server");
+  const { quotePipelineFor, firstStage } = await import("@/lib/pipelines");
+  const pipes = await loadPipelines();
+  const pl = quotePipelineFor(pipes, { pipelineId: pipes.defaultQuotePipelineId });
   const t = now();
   const quote = await insertWithPrefixedId("quotes", "Q", 2041, (id) => ({
     id,
@@ -790,6 +795,8 @@ export async function convert(
     createdAt: t,
     updatedAt: t,
     history: [{ at: t, to: "draft" }],
+    pipelineId: pl.id,
+    stage: firstStage(pl).id,
   }));
   const quoteId = quote.id;
 

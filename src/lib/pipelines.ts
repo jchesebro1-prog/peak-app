@@ -258,3 +258,24 @@ export function quoteStageForStatus(pl: QuotePipeline, status: string, currentSt
   if (cur && cur.tag === status) return cur.id;
   return firstStageWithTag(pl, status as QuoteTag)?.id || (cur ? cur.id : firstStage(pl).id);
 }
+
+/**
+ * Normalize-on-read for quotes (spec §3.4). A system quote always reads with a pipeline and,
+ * unless it is lost with no stage recorded, a stage whose tag matches its status: a stored
+ * stage whose tag agrees with the status is kept; anything else (pre-pipeline doc, stage
+ * renamed away, a writer that set status without going through setStatus) snaps to the
+ * status's first stage. Lost keeps whatever valid stage it died in. Service quotes are
+ * returned untouched — they carry no pipeline.
+ */
+export function normalizeQuotePipeline<Q extends { quoteType?: string | null; status: string; pipelineId?: string | null; stage?: string | null }>(
+  q: Q,
+  pipes: Pipelines
+): Q {
+  if (!carriesPipeline(q.quoteType)) return q;
+  const pl = quotePipelineFor(pipes, q);
+  q.pipelineId = pl.id;
+  const stage = quoteStageForStatus(pl, q.status, q.stage);
+  if (stage) q.stage = stage;
+  else delete q.stage;
+  return q;
+}

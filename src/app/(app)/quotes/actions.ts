@@ -6,6 +6,8 @@ import { requireUser } from "@/lib/session";
 import {
   get,
   setStatus,
+  setQuoteStage,
+  setQuotePipeline,
   submitForReview,
   addQuoteRevision,
   restoreQuoteRevision,
@@ -51,6 +53,39 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   // setStatus is the single atomic quote-transition seam. It performs the
   // type-specific spawn inside the same transaction, so no caller can forget
   // downstream work or leave a won quote half-materialized.
+  revalidatePath("/", "layout");
+}
+
+/**
+ * Move a system quote to a pipeline stage (spec §3.4). A stage in another status runs
+ * setStatus underneath, so the approval gate can refuse it exactly like the Send / Won
+ * buttons — caught and surfaced the same way (`?statusError=` on the `back` view).
+ */
+export async function setQuoteStageAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const id = String(formData.get("id") || "");
+  const stage = String(formData.get("stage") || "");
+  const back = String(formData.get("back") || "/quotes");
+  if (!id || !stage) return;
+  let q: Awaited<ReturnType<typeof setQuoteStage>>;
+  try {
+    q = await setQuoteStage(id, stage, user.name);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "That stage change was refused.";
+    redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent(msg));
+  }
+  if (!q) return;
+  revalidatePath("/", "layout");
+}
+
+/** Switch a draft system quote to another quote pipeline (lands on its first stage). */
+export async function setQuotePipelineAction(formData: FormData): Promise<void> {
+  await requireUser();
+  const id = String(formData.get("id") || "");
+  const pipelineId = String(formData.get("pipelineId") || "");
+  if (!id || !pipelineId) return;
+  const q = await setQuotePipeline(id, pipelineId);
+  if (!q) return;
   revalidatePath("/", "layout");
 }
 

@@ -7028,6 +7028,71 @@ async function projectsPipelineAsyncChecks(): Promise<void> {
   }
 }
 
+/* ============ PIPELINES (Daylite stages) — quotes carry a pipeline stage (Task 5, spec §3.4) ============ */
+import * as QuoteStore from "@/lib/stores/quotes";
+
+async function quotesPipelineAsyncChecks(): Promise<void> {
+  const Q = QuoteStore;
+  {
+    const q = await Q.create({ name: "pl-quote", customer: "Test" });
+    ok(q.pipelineId === "estimate-design" && q.stage === "first-contact", "quotes: a new system quote starts at First Contact");
+    const d = await Q.setQuoteStage(q.id, "design", "Test");
+    ok(d?.stage === "design" && d.status === "draft", "quotes: same-tag stage move keeps status");
+    let refused = false;
+    try { await Q.setQuoteStage(q.id, "presentation", "Test"); } catch { refused = true; }
+    const afterRefusal = await Q.get(q.id);
+    ok(refused && afterRefusal?.stage === "design" && afterRefusal.status === "draft", "quotes: moving to a Sent stage hits the approval gate like the Send button");
+    const s = await Q.setStatus(q.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    ok(s?.stage === "presentation", "quotes: status sent snaps the stage to Presentation/Delivery");
+    ok((s?.history || []).every((h) => h.to !== undefined) && (s?.history || []).length === 2, "quotes: a status write pushes one history row, nothing extra for the stage");
+    ok(!(await Q.setQuoteStage(q.id, "nope", "Test")), "quotes: an unknown stage id is refused");
+    const back = await Q.setQuoteStage(q.id, "design", "Test");
+    ok(back?.stage === "design" && back.status === "draft", "quotes: a stage move into a Draft stage runs setStatus back to draft");
+    await Q.setStatus(q.id, "lost", "Test");
+    ok((await Q.get(q.id))?.stage === "design", "quotes: lost leaves the stage where the deal died");
+    ok(!(await Q.setQuoteStage(q.id, "first-contact", "Test")), "quotes: stage moves are refused while lost");
+
+    const flame = await Q.create({ name: "pl-flame", quoteType: "flame_test" });
+    ok(!flame.pipelineId && !flame.stage, "quotes: service quotes carry no pipeline");
+    ok(!(await Q.setQuoteStage(flame.id, "design")), "quotes: stage moves on a non-pipeline quote are refused");
+    ok(!(await Q.setQuotePipeline(flame.id, "bid-spec")), "quotes: pipeline switch on a non-pipeline quote is refused");
+
+    // pipeline switch — draft only, lands on the new pipeline's first stage
+    const b = await Q.create({ name: "pl-bid", customer: "Test" });
+    await Q.setQuoteStage(b.id, "design", "Test");
+    const sw = await Q.setQuotePipeline(b.id, "bid-spec");
+    ok(sw?.pipelineId === "bid-spec" && sw.stage === "collect-info", "quotes: switching estimate-design → bid-spec lands on Collect Information");
+    ok(!(await Q.setQuotePipeline(b.id, "nope")), "quotes: switching to an unknown pipeline is refused");
+    const bs = await Q.setStatus(b.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    ok(bs?.stage === "bid-sent", "quotes: status snaps within the quote's own pipeline");
+    ok(!(await Q.setQuotePipeline(b.id, "estimate-design")) && (await Q.get(b.id))?.pipelineId === "bid-spec", "quotes: pipeline switch is refused once sent");
+
+    // normalize-on-read: a pre-pipeline doc reads with a pipeline + a stage matching its status
+    await upsertDoc("quotes", { ...q, id: "Q-pl-legacy", status: "won", pipelineId: undefined, stage: undefined } as never);
+    const leg = await Q.get("Q-pl-legacy");
+    ok(leg?.pipelineId === "estimate-design" && leg.stage === "acceptance", "quotes: a pre-pipeline won quote reads at Acceptance");
+    const legAll = (await Q.getAll()).find((x) => x.id === "Q-pl-legacy");
+    ok(legAll?.stage === "acceptance", "quotes: getAll normalizes too");
+    await upsertDoc("quotes", { ...q, id: "Q-pl-legacy-lost", status: "lost", pipelineId: undefined, stage: undefined } as never);
+    const lostLeg = await Q.get("Q-pl-legacy-lost");
+    ok(lostLeg?.pipelineId === "estimate-design" && !lostLeg.stage, "quotes: a pre-pipeline lost quote reads with no stage");
+    ok(Q.normalizeQuotePipeline<{ quoteType: string; status: string; stage?: string | null }>({ quoteType: "repair", status: "draft" }, DEFAULT_PIPELINES).stage === undefined, "quotes: normalize leaves service quotes alone");
+
+    for (const id of [q.id, flame.id, b.id, "Q-pl-legacy", "Q-pl-legacy-lost"]) await Q.remove(id);
+  }
+  // lead → quote conversion writes the pipeline onto the stored doc (not only on read)
+  {
+    const Leads = await import("@/lib/stores/leads");
+    const { getDoc } = await import("@/db/doc-store");
+    const lead = await Leads.create({ org: "pl-lead Org", contact: "Pat" }, "Test");
+    const res = await Leads.convert(lead.id, {}, "Test");
+    const raw = res?.quoteId ? await getDoc<{ id: string; pipelineId?: string; stage?: string }>("quotes", res.quoteId) : null;
+    ok(raw?.pipelineId === "estimate-design" && raw.stage === "first-contact", "quotes: a converted lead's quote is stored at First Contact");
+    if (res?.quoteId) await Q.remove(res.quoteId);
+    await Leads.remove(lead.id);
+  }
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -7043,6 +7108,7 @@ seeded()
   .then(() => davinciWriterAsyncChecks())
   .then(() => pipelinesServerAsyncChecks())
   .then(() => projectsPipelineAsyncChecks())
+  .then(() => quotesPipelineAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);

@@ -10,6 +10,17 @@ import { quotesSeed } from "@/db/seeds/quotes";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
 import { withTransaction } from "@/db";
+import { loadPipelines } from "@/lib/pipelines-server";
+import {
+  carriesPipeline,
+  firstStage,
+  normalizeQuotePipeline,
+  quotePipelineFor,
+  quoteStageForStatus,
+  statusForQuoteStage,
+} from "@/lib/pipelines";
+
+export { normalizeQuotePipeline };
 
 /**
  * QuoteStore — server port of app/store.js (localStorage key rss_pipeline_v2).
@@ -148,6 +159,12 @@ export type Quote = {
   createdAt: number;
   updatedAt: number;
   history: QuoteHistoryEntry[];
+  /** Daylite quote pipeline (spec §3.4) — system quotes only; absent on service
+   *  quotes. Settings-editable; normalize-on-read fills it for pre-pipeline docs. */
+  pipelineId?: string | null;
+  /** Stage id within `pipelineId`. Its tag IS the status (lock-step via setStatus /
+   *  setQuoteStage); a lost quote keeps the stage it died in. */
+  stage?: string | null;
   /** Append-only priced snapshots (punch item 24). Absent on pre-D84 quotes. */
   revisions?: QuoteRevision[];
 };
@@ -323,12 +340,14 @@ export { approvedReviewLine, type ApprovedReviewLike } from "@/lib/review-line";
 
 /** All quotes, newest activity first (port of getAll). */
 export async function getAll(): Promise<Quote[]> {
-  const list = await listDocs<Quote>("quotes");
+  const [list, pipes] = await Promise.all([listDocs<Quote>("quotes"), loadPipelines()]);
+  for (const q of list) normalizeQuotePipeline(q, pipes);
   return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 export async function get(id: string): Promise<Quote | null> {
-  return getDoc<Quote>("quotes", id);
+  const q = await getDoc<Quote>("quotes", id);
+  return q ? normalizeQuotePipeline(q, await loadPipelines()) : null;
 }
 
 /** The live (not lost) renewal quote already minted for a completed job /
@@ -346,6 +365,11 @@ export async function byRenewalOf(recordId: string): Promise<Quote | null> {
 /** Create a new quote; returns the created record. Id: Q-#### from base 2041. */
 export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
   const t = Date.now();
+  const quoteType = partial.quoteType || "system";
+  // System quotes enter their pipeline at its first stage (spec §3.4); a caller-chosen
+  // pipeline is honoured when it exists, else the Settings default.
+  const pipes = carriesPipeline(quoteType) ? await loadPipelines() : null;
+  const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
   const build = (id: string): Quote => ({
     id,
     name: partial.name || "Untitled estimate",
@@ -365,7 +389,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     tierMargin: partial.tierMargin ?? null,
     status: "draft",
     source: partial.source || "quick",
-    quoteType: partial.quoteType || "system",
+    quoteType,
     category: partial.category || "",
     flameTest: partial.flameTest || null,
     repair: partial.repair || null,
@@ -381,6 +405,7 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
     createdAt: t,
     updatedAt: t,
     history: [{ at: t, to: "draft" }],
+    ...(pl ? { pipelineId: pl.id, stage: firstStage(pl).id } : {}),
   });
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
   // the prior upsert semantics.
@@ -639,11 +664,19 @@ export async function setStatus(
   if (!q || q.status === status) return q;
   const gate = resolveStatusGate(status, q.review, opts);
   if (!gate.ok) throw new Error(gate.error);
+  // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
+  const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
   const result = await patchDoc<Quote>("quotes", id, (doc) => {
     const t = Date.now();
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
     doc.status = status;
+    if (pipes && carriesPipeline(doc.quoteType)) {
+      const pl = quotePipelineFor(pipes, doc);
+      doc.pipelineId = pl.id;
+      const stage = quoteStageForStatus(pl, status, doc.stage);
+      if (stage) doc.stage = stage;
+    }
     if (status === "sent") {
       pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
     }
@@ -683,6 +716,58 @@ export async function setStatus(
   }
   return result;
   });
+}
+
+/**
+ * Move a system quote to a pipeline stage (spec §3.4). The stage's tag IS the status:
+ * when it differs from the current status this runs the real `setStatus` — approval
+ * gate, history, revision-on-send, "Install sold" assignment and spawn all fire exactly
+ * as the status buttons do, and a gate refusal THROWS (the stage stays put). Then the
+ * chosen stage overwrites the one setStatus snapped to. A same-tag move is a plain
+ * stage write. Returns null (refused) for service quotes, a stage outside the quote's
+ * pipeline, or a lost quote — lost re-enters the pipeline only via the status buttons.
+ */
+export async function setQuoteStage(
+  id: string,
+  stageId: string,
+  by?: string | null
+): Promise<Quote | null> {
+  // One transaction: the status transition (and its spawn) and the chosen stage commit together.
+  return withTransaction(async () => {
+    const q = await get(id);
+    if (!q || !carriesPipeline(q.quoteType) || q.status === "lost") return null;
+    const pl = quotePipelineFor(await loadPipelines(), q);
+    const tag = statusForQuoteStage(pl, stageId);
+    if (!tag) return null;
+    if (tag !== q.status) {
+      const moved = await setStatus(id, tag, by);
+      if (!moved || moved.status !== tag) return moved ? get(id) : null;
+    }
+    const res = await patchDoc<Quote>("quotes", id, (doc) => {
+      doc.pipelineId = pl.id;
+      doc.stage = stageId;
+      doc.updatedAt = Date.now();
+    });
+    return res ? get(id) : null;
+  });
+}
+
+/**
+ * Switch a system quote to another quote pipeline — only while it is a draft (a sent
+ * or won quote's stage carries contractual meaning). Lands on the new pipeline's first
+ * stage. Returns null (refused) otherwise or for an unknown pipeline id.
+ */
+export async function setQuotePipeline(id: string, pipelineId: string): Promise<Quote | null> {
+  const q = await get(id);
+  if (!q || !carriesPipeline(q.quoteType) || q.status !== "draft") return null;
+  const pl = (await loadPipelines()).quote.find((p) => p.id === pipelineId);
+  if (!pl) return null;
+  const res = await patchDoc<Quote>("quotes", id, (doc) => {
+    doc.pipelineId = pl.id;
+    doc.stage = firstStage(pl).id;
+    doc.updatedAt = Date.now();
+  });
+  return res ? get(id) : null;
 }
 
 /**
