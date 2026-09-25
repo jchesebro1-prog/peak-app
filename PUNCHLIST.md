@@ -7882,10 +7882,22 @@ raw Companies cell next to the picker.
 
 ## 191. Time the Daylite import on production during Jeff's first real run — OPEN
 
-**Found while building #187.** The real-file run was measured on a local PGlite copy (27.4 s end to end). Production
-is Neon over the network, one write per record, in 150-row chunks under a 300 s function limit. Watch the first real
-run's chunk timings (Vercel logs); if a chunk nears the limit, lower the client chunk size in
-`src/app/(app)/import/daylite/daylite-client.tsx`.
+**Found while building #187.** The real-file run was measured on a local PGlite copy: preview 19 s, the chunked
+commit 13.8 s in total (about 1 s per 150-row chunk), finalize about 13.6 s. Production is Neon over the network, one
+write per record, and every call on `/import/daylite` runs under a **60 s** function limit (`maxDuration = 60`, like
+every other route, because Fluid compute is not confirmed). The gate is the first real run's **preview and chunk
+timings on Neon** (Vercel function logs for the page's server actions), with finalize watched too, since it is also
+one call.
+
+- **A chunk nears 60 s:** lower `CHUNK` in `src/app/(app)/import/daylite/daylite-client.tsx`. Each chunk's July
+  reference scan already covers only that chunk's ids.
+- **The preview nears 60 s:** it is the one call that loads everything and scans every July candidate's references
+  plus the combined-name companies. Try it with one file at a time first (Projects, then Opportunities; each run
+  skips what is already imported). If that is still close, move the reference and junk-company scans out of the
+  preview into their own call, or confirm Fluid compute on the Vercel project and raise `maxDuration` in
+  `src/app/(app)/import/daylite/page.tsx`.
+- **Finalize nears 60 s:** split it into two calls, July leads first, then the combined-name companies. Both halves
+  are idempotent, so "Retry finalize" still works.
 
 ---
 

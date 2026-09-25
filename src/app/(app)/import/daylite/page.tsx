@@ -10,13 +10,15 @@ export const metadata = { title: "Daylite history — Quartzite-6" };
 /**
  * Route segment config applies to every Server Action invoked from this page
  * (node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/
- * 02-route-segment-config/maxDuration.md → "Server Actions"). The client
- * already commits in chunks of 150 rows, each well inside 60s against Neon;
- * 300 is headroom for a slow chunk, not the plan. On Vercel, a value above
- * the plan's ceiling is clamped/refused at deploy (Hobby without Fluid
- * compute tops out at 60s).
+ * 02-route-segment-config/maxDuration.md → "Server Actions"). 60s, like every
+ * other route here: Fluid compute is not confirmed on the Vercel project, and
+ * without it 60s is the ceiling. The client commits in chunks of 150 work
+ * items and each chunk's July reference scan covers only that chunk's ids;
+ * the real files' whole run was 27.4s end to end on local PGlite (preview
+ * 19s), so a chunk sits far under 60s. The preview is the one call that
+ * reads everything — PUNCHLIST #191 times both on Neon during the first run.
  */
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 export default async function DayliteImportPage() {
   await requirePerm("manage_users");

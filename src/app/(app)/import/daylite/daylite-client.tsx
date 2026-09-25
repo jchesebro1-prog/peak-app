@@ -23,6 +23,9 @@ import {
  *
  * Task 12b: after the last chunk, one finalize call retires the July import's
  * leads and combined-name company stubs (idempotent — "Retry finalize").
+ * When any chunk reported row errors, finalize is held back: the errors show
+ * with a "Finalize anyway" button, so Jeff can fix and re-run first (a row
+ * that failed may be one whose July lead or company finalize would remove).
  */
 
 const ACCENT = "var(--accent)";
@@ -41,7 +44,7 @@ type FileText = { name: string; text: string; bytes: number };
 type Acc = { created: Record<string, number>; skippedExisting: number; errors: string[] };
 type Phase = "idle" | "running" | "paused" | "done";
 type Finalize =
-  | { state: "idle" | "running" }
+  | { state: "idle" | "running" | "held" }
   | { state: "done"; result: Extract<FinalizeActionResult, { ok: true }> }
   | { state: "failed"; error: string };
 
@@ -329,7 +332,10 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
       if (s >= total) break;
     }
     setPhase("done");
-    await finalize();
+    // Row errors: hold finalize until Jeff chooses (fix + Run again, or
+    // Finalize anyway) — finalize retires July data a failed row may need.
+    if (sum.errors.length > 0) setFin({ state: "held" });
+    else await finalize();
     router.refresh();
   }
 
@@ -704,6 +710,19 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                   </tbody>
                 </table>
                 <div style={{ marginTop: 12 }}>
+                  {fin.state === "held" && (
+                    <>
+                      <div style={errorBox}>
+                        {plural(acc.errors.length, "row", "rows")} didn’t import (listed below), so the July leads and
+                        combined-name companies have not been removed yet. Finalize removes the July leads and the
+                        combined-name companies nothing uses — fix the cause and run the import again first, or finalize
+                        anyway.
+                      </div>
+                      <button type="button" onClick={() => void retryFinalize()} disabled={busy} style={{ ...primaryBtn(!busy), marginTop: 10 }}>
+                        Finalize anyway
+                      </button>
+                    </>
+                  )}
                   {fin.state === "running" && (
                     <div style={{ fontSize: 12.5, color: "#5b616e" }}>Removing the July leads and combined-name companies…</div>
                   )}
@@ -742,7 +761,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                   )}
                 </div>
                 {acc.errors.length > 0 && (
-                  <details style={{ marginTop: 12 }}>
+                  <details open={fin.state === "held"} style={{ marginTop: 12 }}>
                     <summary style={{ fontSize: 12.5, fontWeight: 600, color: "#a0442b", cursor: "pointer" }}>
                       {fmt(acc.errors.length)} row{acc.errors.length === 1 ? "" : "s"} didn’t import
                     </summary>
