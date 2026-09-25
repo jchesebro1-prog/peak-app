@@ -3,8 +3,9 @@ import { getSettings } from "@/lib/settings";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { activeUsers, getUser } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
-import { followUpCount } from "@/lib/stores/leads";
+import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
+import { signatureFor } from "@/lib/stores/signatures";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
@@ -21,6 +22,8 @@ import {
 } from "@/lib/gmail/config";
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
 import { customersForDomain } from "@/lib/gmail/domains";
+import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { rowName } from "@/lib/inbox-rows";
 import {
   boxMeta,
   callsCount,
@@ -166,6 +169,7 @@ function tagFor(m: CommMessage): string {
 
 const LINK_KIND_COLOR: Record<string, string> = {
   quote: "var(--accent)",
+  lead: "#c85a3c",
   survey: "#1f7a52",
   inspection: "#7b3f8a",
   project: "#b4543a",
@@ -175,6 +179,7 @@ const LINK_KIND_COLOR: Record<string, string> = {
 function linkHref(link: { type: string; id: string }): string {
   const id = encodeURIComponent(link.id);
   if (link.type === "quote") return `/quotes?id=${id}`;
+  if (link.type === "lead") return `/leads?lead=${id}`;
   if (link.type === "survey") return `/venue-assessments?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
   if (link.type === "project") return `/projects`;
@@ -263,6 +268,7 @@ export default async function InboxPage({
   // Read up front (punch #42): threadsIn's opts.crmMode needs the resolved
   // value, so it can't sit in the Promise.all below alongside threadsIn itself.
   const crmMode = await crmModeOn(me);
+  const signature = await signatureFor(me); // #127
 
   /* ---- parallel loads ---- */
   const [
@@ -470,6 +476,9 @@ export default async function InboxPage({
     });
     const snip = snippet(t);
     const cat = categoryMeta(t.category);
+    // #128 — drafts keep the "To: …" line as their name (rowName's "last
+    // responder ignoring me" makes no sense on a message that hasn't sent).
+    const who = isDrafts ? null : rowName(t);
     return {
       id: t.id,
       unread,
@@ -494,7 +503,8 @@ export default async function InboxPage({
         out: m.direction === "out",
       })),
       participants: participantsFor(t),
-      lastResponder: (t.messages || []).at(-1)?.author || t.contactName || "Unknown",
+      primaryName: who ? who.primary : nm,
+      chain: who ? who.secondary : "",
       subject: t.subject || "(no subject)",
       snippet: snip,
       time: timeAgo(t.updatedAt),
@@ -614,6 +624,7 @@ export default async function InboxPage({
     );
     let linkOptions: ReaderVM["linkOptions"] = {
       quote: [],
+      lead: [],
       survey: [],
       inspection: [],
       project: [],
@@ -623,11 +634,12 @@ export default async function InboxPage({
     let quotes: Awaited<ReturnType<typeof allQuotes>> = [];
     let projects: Awaited<ReturnType<typeof getAllProjects>> = [];
     if (resolvedCid) {
-      const [q, surveys, inspections, p] = await Promise.all([
+      const [q, surveys, inspections, p, leads] = await Promise.all([
         allQuotes(),
         allSurveys(),
         allInspections(),
         getAllProjects(),
+        allLeads(),
       ]);
       quotes = q;
       projects = p;
@@ -639,6 +651,9 @@ export default async function InboxPage({
               nameToId.get((q.customer || "").toLowerCase()) === resolvedCid
           )
           .map((q) => ({ value: q.id, label: `${q.id} · ${q.name || "Quote"}` })),
+        lead: leads
+          .filter((l) => l.customerId === resolvedCid && l.stage !== "won" && l.stage !== "lost")
+          .map((l) => ({ value: l.id, label: `${l.id} · ${l.org || l.contact || "Lead"}` })),
         survey: surveys
           .filter((s) => s.customerId === resolvedCid)
           .map((s) => ({
@@ -693,7 +708,15 @@ export default async function InboxPage({
     const linkedCustomer = resolvedCid
       ? customers.find((c) => c.id === resolvedCid) || null
       : null;
-    const senderDomain = domainOf(sel.contactEmail || "");
+    // #125 — the address that drives linking: the picked identity message's,
+    // else the counterpart (same rule resolveCustomerId / resweep use).
+    // I follow-up review — myAddress (resolved above, the same
+    // best-known-address chain the box header uses) as selfEmail: an
+    // outbound identity message's first recipient skips a self-CC to this
+    // mailbox instead of reading it as the thread's counterpart.
+    const identity = identityAddressFor(sel, myAddress);
+    const senderEmailLc = resolveAddressFor(sel, myAddress);
+    const senderDomain = domainOf(senderEmailLc);
     const senderIsPublicDomain = !senderDomain || isPublicDomain(senderDomain);
     // One query, only when a customer is linked and the domain is claimable
     // — drives the linked card's "Emails from @domain link here · Stop".
@@ -720,7 +743,18 @@ export default async function InboxPage({
           (ct) => domainOf(ct.email || "") === senderDomain
         ).length
       : 0;
-    const senderEmailLc = (sel.contactEmail || "").trim().toLowerCase();
+    // #124 — the linked customer's venues: value = CustomerLocation.id, the
+    // id the quote intake's locationId uses.
+    const siteOptions: Opt[] = (linkedCustomer?.locations || [])
+      .filter((l) => !!l.id)
+      .map((l) => ({
+        value: l.id as string,
+        label: [l.label || "Venue", [l.city, l.state].filter(Boolean).join(", ")]
+          .filter(Boolean)
+          .join(" — "),
+      }));
+    const siteId =
+      sel.siteId && siteOptions.some((o) => o.value === sel.siteId) ? sel.siteId : null;
     const customerCard: ReaderVM["customerCard"] = linkedCustomer
       ? {
           id: linkedCustomer.id,
@@ -823,6 +857,10 @@ export default async function InboxPage({
         : null,
       candidates: resolution === "ambiguous" ? candidates : [],
       customerCard,
+      siteId,
+      siteOptions,
+      identityMessageId: sel.identityMessageId ?? null,
+      identity,
       customerOptions: customers
         .map((c) => ({ value: c.id, label: c.name }))
         .sort((a, b) => a.label.localeCompare(b.label)),
@@ -987,6 +1025,7 @@ export default async function InboxPage({
             initialLog={initialLog}
             categoryOptions={CATEGORIES}
             crmMode={crmMode}
+            signature={signature}
           />
         </div>
       </div>

@@ -224,6 +224,12 @@ export type CommMessage = {
   /** Optional record link for this specific message; the thread link remains
    * the broad CRM context. */
   link?: CommLink | null;
+  /** #125 — the addresses this message actually carried, stamped by the
+   *  Gmail bridge on import. `fromEmail` is lowercased; `to` is the raw To
+   *  header ("Name <a@b>, c@d"). Absent on app-sent and pre-#125 messages —
+   *  readers fall back to the thread's contactEmail (see lib/inbox-identity). */
+  fromEmail?: string;
+  to?: string;
 };
 
 export type CommDraft = {
@@ -290,6 +296,14 @@ export type CommThread = {
    *  (add/remove) for this thread. Echo-suppression stamp; unset until the
    *  first successful sync. */
   peakLabelsAppliedAt?: number;
+  /** #124 — the linked venue: a CustomerLocation.id (directory id) of the
+   *  linked customer. Cleared whenever customerId changes to a different
+   *  customer (linkThread / applyResweepPatch / Peak label removal). */
+  siteId?: string | null;
+  /** #125 — identity source: the message whose addresses drive resolution
+   *  and quick-add (inbound → its From; outbound → its first recipient).
+   *  null/absent = today's behaviour, the thread counterpart. */
+  identityMessageId?: string | null;
 };
 
 function mid(n: number): string {
@@ -1387,7 +1401,10 @@ export async function updateDraft(
 /** Send a draft: promote its fields onto the thread, drop out of Drafts
  *  (status leaves 'draft'), land in Sent via the outbound message — the
  *  prototype's simulated send. Delivery runs through deliverMessage(). */
-export async function sendDraft(id: string): Promise<CommThread | null> {
+/** #128 review (I3) — `me` threads through to addMessage's author, same as
+ *  reply()/logNoteAction/compose(); without it every sent draft stamped
+ *  DEFAULT_USER regardless of who actually sent it. */
+export async function sendDraft(id: string, me?: string): Promise<CommThread | null> {
   const t = await get(id);
   if (!t) return null;
   const d = t.draft || {};
@@ -1403,6 +1420,7 @@ export async function sendDraft(id: string): Promise<CommThread | null> {
     channel: "email",
     body: d.body || "",
     attachments: d.attachments,
+    me,
   });
 }
 
@@ -1662,7 +1680,15 @@ export async function resolveCustomerId(
 ): Promise<string | null> {
   if (!t) return null;
   if (t.customerId) return t.customerId;
-  const email = (t.contactEmail || "").trim().toLowerCase();
+  // #125 — the picked identity message's address, else the counterpart.
+  // I follow-up review — no selfEmail here: this store-level helper has no
+  // "current user"/mailbox in hand (it's called from many contexts, some
+  // read-only render paths with no connection lookup budget), and comms.ts
+  // deliberately never imports gmail/connections — keeping the domain-only
+  // fallback (INTERNAL_DOMAIN) rather than adding a Gmail-account query to
+  // every call site of what is otherwise a plain data-store function.
+  const { resolveAddressFor } = await import("@/lib/inbox-identity");
+  const email = resolveAddressFor(t);
   if (!email) return null;
   const { contactByEmail } = await import("@/lib/identity/lookup");
   const hit = await contactByEmail(email);

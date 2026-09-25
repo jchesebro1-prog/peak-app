@@ -32,6 +32,12 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
+import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inbox-links";
+import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { clampListWidth, parseListWidth, parseSideCollapsed, LIST_WIDTH_DEFAULT } from "@/lib/inbox-layout";
+import { hasSignature, normalizeSignature, signatureBlock, withSignature, SIGNATURE_MAX } from "@/lib/inbox-signature";
+import { applyOutboundSignature, withEmailSignature } from "@/lib/email-signature";
+import { rowName } from "@/lib/inbox-rows";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -2982,7 +2988,7 @@ ok(addressFromHit({ street: "123 Main St", title: "Overture Center" }) === "123 
 ok(addressFromHit({ street: "", title: "Overture Center" }) === "Overture Center", "#32: POI without street falls back to display title");
 
 /* ============ Task 3 — inbox conversation participants (#42) ============ */
-import { participantsFor, deriveStatus } from "@/lib/stores/comms";
+import { participantsFor, deriveStatus, type CommMessage, type CommThread } from "@/lib/stores/comms";
 const msgsThread = (authors: Array<string | undefined>): any => ({
   messages: authors.map((author, i) => ({
     id: `m${i}`, at: i, direction: "in", channel: "email", author: author || "", body: "",
@@ -9378,6 +9384,171 @@ import {
   ok(resolveRedirectHop("//127.0.0.1/x", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a protocol-relative Location to a private host is refused");
   ok(resolveRedirectHop("file:///etc/passwd", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location switching to file: is refused");
   ok(resolveRedirectHop("http://[not-a-valid-ipv6", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a malformed absolute Location is refused, not thrown");
+}
+
+/* ---- Inbox round 3 (#123) — work links ---- */
+{
+  ok(LINK_TYPE_OPTIONS.some((o) => o.value === "lead" && o.label === "Lead"), "LINK_TYPE_OPTIONS lists lead");
+  ok(LINK_TYPE_OPTIONS.map((o) => o.value).join(",") === "quote,lead,survey,inspection,project", "LINK_TYPE_OPTIONS order: quote first, lead second");
+  ok(
+    newQuoteHref({ threadId: "C-1032", customerId: "lakefront", contactName: "Brenda Gauchel" }) ===
+      "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032",
+    "newQuoteHref: every prefill, thread last"
+  );
+  ok(newQuoteHref({ threadId: "C-1032", customerId: null, contactName: "" }) === "/quotes/new?thread=C-1032", "newQuoteHref: unlinked thread carries only thread=");
+  ok(
+    newQuoteHref({ threadId: "C-1032", customerId: "lakefront", contactName: "Brenda Gauchel", siteId: "loc1" }) ===
+      "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&venue=loc1&thread=C-1032",
+    "newQuoteHref: #124 a linked venue rides along as venue="
+  );
+  ok(quoteNameFromSubject("Re: Fwd: Curtain quote for the PAC") === "Curtain quote for the PAC", "quoteNameFromSubject strips Re:/Fwd: prefixes");
+  ok(quoteNameFromSubject("RE: re: FW: hello") === "hello", "quoteNameFromSubject strips repeated prefixes case-insensitively");
+  ok(quoteNameFromSubject("") === "Untitled estimate" && quoteNameFromSubject("(no subject)") === "Untitled estimate", "quoteNameFromSubject falls back");
+  ok(quoteNameFromSubject("Rental for spring musical") === "Rental for spring musical", "quoteNameFromSubject leaves a plain subject alone");
+}
+
+/* ---- Inbox round 3 (#125) — identity source ---- */
+{
+  const r3msgs: CommMessage[] = [
+    { id: "m1", at: 1, direction: "in", channel: "email", author: "Brenda Gauchel", body: "", fromEmail: "brenda@lakefront.k12.mn.us" },
+    { id: "m2", at: 2, direction: "out", channel: "email", author: "Jeff Chesebro", body: "", to: "AP Clerk <AP@Lakefront.K12.MN.US>, brenda@lakefront.k12.mn.us" },
+    { id: "m3", at: 3, direction: "in", channel: "email", author: "Chris Hale", body: "", fromEmail: "Chris.Hale@Architects.com" },
+    { id: "m4", at: 4, direction: "out", channel: "email", author: "Jeff Chesebro", body: "" },
+    { id: "m5", at: 5, direction: "in", channel: "email", author: "Legacy Import", body: "" },
+  ];
+  const r3base: Pick<CommThread, "identityMessageId" | "messages" | "contactEmail" | "contactName"> = {
+    identityMessageId: null,
+    messages: r3msgs,
+    contactEmail: "Brenda@Lakefront.k12.mn.us",
+    contactName: "Brenda Gauchel",
+  };
+  ok(identityAddressFor(r3base) === null, "identityAddressFor: no identity message → null");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "nope" }) === null, "identityAddressFor: missing id → null");
+  const r3in = identityAddressFor({ ...r3base, identityMessageId: "m3" });
+  ok(r3in?.email === "chris.hale@architects.com" && r3in.name === "Chris Hale" && r3in.messageId === "m3", "identityAddressFor: inbound → its From, lowercased");
+  const r3out = identityAddressFor({ ...r3base, identityMessageId: "m2" });
+  ok(r3out?.email === "ap@lakefront.k12.mn.us" && r3out.name === "AP Clerk", "identityAddressFor: outbound → first recipient of To");
+  const r3outNoTo = identityAddressFor({ ...r3base, identityMessageId: "m4" });
+  ok(r3outNoTo?.email === "brenda@lakefront.k12.mn.us" && r3outNoTo.name === "Brenda Gauchel", "identityAddressFor: outbound without stored recipients → thread contact");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "m5" })?.email === "brenda@lakefront.k12.mn.us", "identityAddressFor: legacy inbound without fromEmail → thread contact");
+  ok(identityAddressFor({ ...r3base, identityMessageId: "m4", contactEmail: "" }) === null, "identityAddressFor: nothing to read → null");
+  ok(resolveAddressFor(r3base) === "brenda@lakefront.k12.mn.us", "resolveAddressFor: counterpart by default (lowercased)");
+  ok(resolveAddressFor({ ...r3base, identityMessageId: "m3" }) === "chris.hale@architects.com", "resolveAddressFor: identity message wins");
+  ok(resolveAddressFor({ ...r3base, contactEmail: "" }) === "", "resolveAddressFor: no address → empty string");
+  ok(firstRecipient(" , Nobody <>, Someone <s@x.org>")?.email === "s@x.org", "firstRecipient: skips empty parts");
+  ok(firstRecipient("") === null && firstRecipient(undefined) === null, "firstRecipient: empty → null");
+  // I review — internal addresses (the company domain, and the mailbox's
+  // own address when passed) are never the thread's counterpart.
+  ok(
+    firstRecipient("Jeff Chesebro <jeff@peaksystemsgroup.com>, AP Clerk <ap@lakefront.k12.mn.us>")?.email === "ap@lakefront.k12.mn.us",
+    "firstRecipient: skips a @peaksystemsgroup.com self-CC ahead of the real recipient"
+  );
+  ok(
+    firstRecipient("jeff@peaksystemsgroup.com, sarah@peaksystemsgroup.com") === null,
+    "firstRecipient: every address internal → null, not a false match"
+  );
+  ok(
+    firstRecipient("jeff@example.com, ap@lakefront.k12.mn.us", "jeff@example.com")?.email === "ap@lakefront.k12.mn.us",
+    "firstRecipient: selfEmail skips the mailbox's own address even off the hardcoded domain"
+  );
+}
+
+/* ---- Inbox round 3 (#126) — pane layout clamp/parse ---- */
+{
+  ok(clampListWidth(100) === 300, "clampListWidth: below the minimum → the minimum");
+  ok(clampListWidth(900) === 620, "clampListWidth: above the maximum → the maximum");
+  ok(clampListWidth(undefined) === LIST_WIDTH_DEFAULT && clampListWidth(null) === LIST_WIDTH_DEFAULT, "clampListWidth: nothing → the default");
+  ok(clampListWidth(Number.NaN) === LIST_WIDTH_DEFAULT, "clampListWidth: garbage → the default");
+  ok(clampListWidth(400.6) === 401, "clampListWidth: whole pixels");
+  ok(parseListWidth("500") === 500, "parseListWidth: a stored value round-trips");
+  ok(parseListWidth("9999") === 620, "parseListWidth: an out-of-range stored value is clamped");
+  ok(parseListWidth("garbage") === LIST_WIDTH_DEFAULT && parseListWidth(null) === LIST_WIDTH_DEFAULT && parseListWidth("") === LIST_WIDTH_DEFAULT, "parseListWidth: bad/absent → the default");
+  ok(parseSideCollapsed("1") === true, "parseSideCollapsed: '1' → collapsed");
+  ok(parseSideCollapsed("0") === false && parseSideCollapsed(null) === false && parseSideCollapsed("garbage") === false, "parseSideCollapsed: anything else → not collapsed");
+}
+
+/* ---- Inbox round 3 (#127) — signature block ---- */
+{
+  const sig = "Jeff Chesebro\nPeak Systems Group";
+  ok(signatureBlock("") === "" && signatureBlock("  \n ") === "", "signatureBlock: empty → no block");
+  ok(signatureBlock(" " + sig + "\r\n") === "\n\n-- \n" + sig, "signatureBlock: '\\n\\n-- \\n' + trimmed, CRLF normalised");
+  ok(withSignature("", sig, "add") === "\n\n-- \n" + sig, "add: the reply/new seed is the bare block (cursor stays above it)");
+  ok(withSignature("Thanks!", sig, "add") === "Thanks!\n\n-- \n" + sig, "add: appends below the text");
+  ok(withSignature("Thanks!\n\n-- \n" + sig, sig, "add") === "Thanks!\n\n-- \n" + sig, "add: idempotent");
+  ok(withSignature("Thanks!", "", "add") === "Thanks!", "add: no signature configured → untouched");
+  ok(withSignature("\n\n-- \n" + sig, sig, "strip") === "", "strip: the bare seed → empty");
+  ok(withSignature("Thanks!\n\n-- \n" + sig, sig, "strip") === "Thanks!", "strip: exact block removed, text above untouched");
+  ok(withSignature("Thanks!\n\n-- \nJeff (edited)", sig, "strip") === "Thanks!", "strip: an edited signature still goes by the -- separator");
+  ok(withSignature("Thanks!", sig, "strip") === "Thanks!", "strip: nothing to strip → untouched");
+  const fwd = "\n\n---------- Forwarded ----------\nFrom: Brenda\n\n> hi";
+  ok(withSignature(fwd, sig, "add") === "\n\n-- \n" + sig + fwd, "add: forward keeps the forwarded block, signature above it");
+  ok(withSignature("\n\n-- \n" + sig + fwd, sig, "strip") === fwd, "strip: forward gives the forwarded block back");
+  ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the Forward marker");
+  // I review — a multi-paragraph signature (its own internal blank line)
+  // used to get truncated at that internal blank line once edited, instead
+  // of stripping the whole thing.
+  const multiSig = "Jeff Chesebro\n\nPeak Systems Group\n(218) 555-0100";
+  const multiSigEdited = "Jeff C.\n\nPeak Systems Group\n(218) 555-0100"; // name trimmed — no longer an exact substring match
+  ok(withSignature("Thanks!\n\n-- \n" + multiSig, multiSig, "strip") === "Thanks!", "strip: exact multi-paragraph signature removed whole");
+  ok(withSignature("Thanks!\n\n-- \n" + multiSigEdited, multiSig, "strip") === "Thanks!", "strip: an EDITED multi-paragraph signature is removed whole, not cut at its own internal blank line");
+  ok(withSignature("\n\n-- \n" + multiSigEdited + fwd, multiSig, "strip") === fwd, "strip: …and a forwarded block after an edited multi-paragraph signature still survives");
+  ok(hasSignature("x\n-- \ny") && !hasSignature("x\n--\ny") && !hasSignature("x -- y"), "hasSignature: the exact '\\n-- \\n' separator");
+  ok(normalizeSignature("a".repeat(2500)).length === SIGNATURE_MAX, "normalizeSignature caps at SIGNATURE_MAX");
+}
+
+/* ---- Inbox round 3 review (I2) — #127 signature replaces the legacy footer ---- */
+{
+  const person = { name: "Jeff Chesebro", email: "jeff@peaksystemsgroup.com" };
+  // No #127 signature configured (signatureHandled falsy) → legacy footer, as before.
+  ok(
+    applyOutboundSignature("Hi Brenda,\nThanks!", undefined, person) === withEmailSignature("Hi Brenda,\nThanks!", person),
+    "applyOutboundSignature: no #127 signature → the legacy footer still applies"
+  );
+  ok(
+    applyOutboundSignature("Hi Brenda,\nThanks!", false, person) === withEmailSignature("Hi Brenda,\nThanks!", person),
+    "applyOutboundSignature: signatureHandled === false → same as undefined"
+  );
+  // signatureHandled: the #127 flow ran — legacy is skipped outright, body untouched either way.
+  const withSig = "Hi Brenda,\nThanks!\n\n-- \nJeff Chesebro\nPeak Systems Group";
+  ok(applyOutboundSignature(withSig, true, person) === withSig, "applyOutboundSignature: #127 signature kept → sent verbatim, no legacy footer stacked on top");
+  const stripped = "Hi Brenda,\nThanks!";
+  ok(applyOutboundSignature(stripped, true, person) === stripped, "applyOutboundSignature: #127 signature toggled OFF → no footer at all, legacy never fills the gap");
+  // A body that already carries the #127 block, run through applyOutboundSignature,
+  // never picks up a second (legacy) footer — the structural guarantee I2 asked for,
+  // not just withEmailSignature's own same-body double-append guard.
+  ok(
+    (applyOutboundSignature(withSig, true, person).match(/\n--/g) || []).length === 1,
+    "applyOutboundSignature: exactly one footer marker — never two"
+  );
+}
+
+/* ---- Inbox round 3 (#128) — row name: last responder, Gmail-style chain ---- */
+{
+  const M = (id: string, at: number, direction: "in" | "out", author: string): CommMessage =>
+    ({ id, at, direction, channel: "email", author, body: "" });
+  const T = (messages: CommMessage[]) => ({ messages, contactName: "Brenda Gauchel", customer: "Lakefront ISD" });
+  const me = "Jeff Chesebro";
+  const r3a = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", me)]));
+  ok(r3a.primary === "Brenda Gauchel" && r3a.secondary === "Brenda, me (2)", "rowName: my reply is ignored — Brenda stays primary; chain 'Brenda, me (2)'");
+  const r3b = rowName(T([M("1", 1, "out", me)]));
+  ok(r3b.primary === "Brenda Gauchel" && r3b.secondary === "me", "rowName: all mine → counterpart, chain 'me'");
+  const r3c = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "in", "Chris Hale"), M("3", 3, "out", me)]));
+  ok(r3c.primary === "Chris Hale" && r3c.secondary === "Brenda, Chris, me (3)", "rowName: newest non-me author wins; chain in first-seen order");
+  const r3d = rowName(T([M("2", 5, "in", "Late Reply"), M("1", 1, "in", "Early Bird")]));
+  ok(r3d.primary === "Late Reply" && r3d.secondary === "Early, Late (2)", "rowName: newest by `at`, not array order");
+  const r3e = rowName(T([M("1", 1, "in", "Brenda Gauchel")]));
+  ok(r3e.primary === "Brenda Gauchel" && r3e.secondary === "", "rowName: I3 review — a single author matching the primary name is redundant, hidden");
+  const r3f = rowName(T([]));
+  ok(r3f.primary === "Brenda Gauchel" && r3f.secondary === "", "rowName: no messages → counterpart, empty chain");
+  const r3g = rowName({ messages: [], contactName: "", customer: "" });
+  ok(r3g.primary === "Customer", "rowName: nothing known → 'Customer'");
+  const r3h = rowName({ messages: [M("1", 1, "out", me)], contactName: "", customer: "Lakefront ISD" });
+  ok(r3h.primary === "Lakefront ISD", "rowName: counterpart falls back to the customer name");
+  // I3 review — "me" is direction === "out", never a name match: the Inbox
+  // is personal-only (one mailbox per signed-in user), so an outbound
+  // message is me whatever display name Gmail happened to stamp on it.
+  const r3i = rowName(T([M("1", 1, "in", "Brenda Gauchel"), M("2", 2, "out", "Jeff C. (Peak Systems Group)")]));
+  ok(r3i.primary === "Brenda Gauchel" && r3i.secondary === "Brenda, me (2)", "rowName: an outbound message is me by DIRECTION, whatever its stamped author name says");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

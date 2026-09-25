@@ -37,6 +37,16 @@ import { FolderGlyph, PencilIcon, PhoneIcon, RefreshIcon } from "./icons";
 import ThreadList, { type HeaderCheck, type RowActions } from "./thread-list";
 import CommandBar, { type BulkHandlers } from "./command-bar";
 import { isModeDefaultSort } from "./sort-defaults";
+import {
+  clampListWidth,
+  LIST_WIDTH_DEFAULT,
+  LIST_WIDTH_KEY,
+  LIST_WIDTH_MAX,
+  LIST_WIDTH_MIN,
+  parseListWidth,
+  parseSideCollapsed,
+  SIDE_COLLAPSED_KEY,
+} from "@/lib/inbox-layout";
 import type { FolderId, MailboxId } from "@/lib/stores/comms";
 import ThreadReader from "./thread-reader";
 import ComposeModal from "./compose-modal";
@@ -91,6 +101,7 @@ export default function InboxShell({
   // state below) so the toggle flips instantly instead of waiting on the
   // server action + revalidate.
   crmMode: initialCrmMode,
+  signature,
 }: {
   box: string;
   folder: string;
@@ -112,21 +123,103 @@ export default function InboxShell({
   // Punch #42: per-user Inbox/CRM mode pref (waiting-first sort opt-in),
   // resolved server-side from the current user.
   crmMode: boolean;
+  /** #127 — the signed-in user's email signature ("" when none) */
+  signature: string;
 }) {
   const router = useRouter();
-  const [sideCollapsed, setSideCollapsed] = useState(false);
-  const [listWidth, setListWidth] = useState(392);
+  // #126 — both remembered per browser (localStorage), hydration-safe: the
+  // shell renders with the same defaults the server would (collapsed=false,
+  // width=392), then a mount-time effect applies whatever was stored —
+  // same pattern as the estimator's collapsible rails (META_OPEN_KEY /
+  // SIDE_OPEN_KEY in estimator-client.tsx).
+  const [sideCollapsed, setSideCollapsedState] = useState(false);
+  const [listWidth, setListWidthState] = useState(LIST_WIDTH_DEFAULT);
+  useEffect(() => {
+    // queueMicrotask — a callback boundary, not a direct setState in the
+    // effect body (react-hooks/set-state-in-effect flags the latter as a
+    // cascading-render smell). This does NOT run before the initial paint —
+    // useEffect itself already fires after the browser has painted the
+    // server-matching defaults — it only adds a microtask's worth of extra
+    // delay on top of that, same one-frame correction the estimator's
+    // synchronous version (META_OPEN_KEY/SIDE_OPEN_KEY) always accepted.
+    queueMicrotask(() => {
+      try {
+        if (parseSideCollapsed(window.localStorage.getItem(SIDE_COLLAPSED_KEY))) setSideCollapsedState(true);
+      } catch {
+        /* storage unavailable (private mode, blocked) — stay expanded */
+      }
+    });
+  }, []);
+  useEffect(() => {
+    queueMicrotask(() => {
+      try {
+        const storedWidth = parseListWidth(window.localStorage.getItem(LIST_WIDTH_KEY));
+        if (storedWidth !== LIST_WIDTH_DEFAULT) setListWidthState(storedWidth);
+      } catch {
+        /* storage unavailable (private mode, blocked) — stay at the default width */
+      }
+    });
+  }, []);
+  const setSideCollapsed = useCallback((next: boolean) => {
+    setSideCollapsedState(next);
+    try {
+      window.localStorage.setItem(SIDE_COLLAPSED_KEY, next ? "1" : "0");
+    } catch {
+      /* the collapse still applies for this page view */
+    }
+  }, []);
+  const setListWidth = useCallback((next: number) => {
+    const clamped = clampListWidth(next);
+    setListWidthState(clamped);
+    try {
+      window.localStorage.setItem(LIST_WIDTH_KEY, String(clamped));
+    } catch {
+      /* the width still applies for this page view */
+    }
+  }, []);
   const beginListResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = listWidth;
-    const move = (e: PointerEvent) => setListWidth(Math.max(300, Math.min(620, startWidth + e.clientX - startX)));
-    const stop = () => {
+    // Live visual feedback while dragging, without hitting storage on every
+    // pointermove — the persisted write happens once, on release.
+    const move = (e: PointerEvent) => setListWidthState(clampListWidth(startWidth + e.clientX - startX));
+    const stop = (e: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      setListWidth(clampListWidth(startWidth + e.clientX - startX));
+    };
+    // I review — a cancelled gesture (the OS interrupts the drag — an edge
+    // swipe, an alert, losing pointer capture) never fired "pointerup"
+    // before, leaking the two window listeners and leaving the width
+    // un-persisted at wherever the last pointermove left it. Reverts to the
+    // pre-drag width instead of keeping the interrupted, never-saved value.
+    const cancel = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      setListWidthState(startWidth);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
+  };
+  const LIST_WIDTH_STEP = 16;
+  const onListResizeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setListWidth(listWidth - LIST_WIDTH_STEP);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setListWidth(listWidth + LIST_WIDTH_STEP);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setListWidth(LIST_WIDTH_MIN);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setListWidth(LIST_WIDTH_MAX);
+    }
   };
 
   // prototype tracked window width for pane/overlay behavior
@@ -626,7 +719,7 @@ export default function InboxShell({
       >
         <button
           type="button"
-          onClick={() => setSideCollapsed((v) => !v)}
+          onClick={() => setSideCollapsed(!sideCollapsed)}
           title={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
           aria-label={sideCollapsed ? "Expand mailbox menu" : "Collapse mailbox menu"}
           style={{ alignSelf: "flex-end", margin: "8px 8px 0", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", cursor: "pointer", width: 28, height: 26, flexShrink: 0 }}
@@ -1003,9 +1096,24 @@ export default function InboxShell({
 
       <div
         role="separator"
+        aria-orientation="vertical"
         aria-label="Resize message list"
+        aria-valuenow={listWidth}
+        aria-valuemin={LIST_WIDTH_MIN}
+        aria-valuemax={LIST_WIDTH_MAX}
+        tabIndex={0}
+        title="Resize message list — drag, or focus and use the arrow keys"
         onPointerDown={beginListResize}
-        style={{ width: 6, flexShrink: 0, cursor: "col-resize", background: "#f0f1f4", borderRight: "1px solid #e4e7ec", borderLeft: "1px solid #e4e7ec" }}
+        onKeyDown={onListResizeKeyDown}
+        style={{
+          width: 6,
+          flexShrink: 0,
+          cursor: "col-resize",
+          background: "#f0f1f4",
+          borderRight: "1px solid #e4e7ec",
+          borderLeft: "1px solid #e4e7ec",
+          outline: "none",
+        }}
       />
 
       {/* ===== reading pane (desktop) ===== */}
@@ -1020,6 +1128,7 @@ export default function InboxShell({
           variant="pane"
           rosterOptions={rosterOptions}
           onAfterSend={selectThread}
+          signature={signature}
         />
       </div>
 
@@ -1059,6 +1168,7 @@ export default function InboxShell({
               rosterOptions={rosterOptions}
               onClose={closeOverlay}
               onAfterSend={selectThread}
+              signature={signature}
             />
           </div>
         </>
@@ -1071,6 +1181,7 @@ export default function InboxShell({
           fromOptions={fromOptions}
           customers={customers}
           contactEmails={contactEmails}
+          signature={signature}
           onClose={() => setCompose(null)}
           onSaved={(mailbox) => {
             setCompose(null);

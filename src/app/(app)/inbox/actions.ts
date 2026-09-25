@@ -47,7 +47,7 @@ import { nameFor } from "@/lib/stores/customers";
 import type { LabelOpt } from "./types";
 import { setCrmMode } from "@/lib/stores/notif-prefs";
 import { getUser } from "@/lib/users";
-import { withEmailSignature } from "@/lib/email-signature";
+import { applyOutboundSignature } from "@/lib/email-signature";
 import {
   byRenewalOf,
   setStatus as setQuoteStatus,
@@ -323,12 +323,15 @@ export async function setMessageLinkAction(
 
 /* ---- reader: reply / forward / call log ---- */
 
-export async function replyAction(id: string, body: string) {
+/** `signatureHandled` — see email-signature.ts applyOutboundSignature's doc
+ *  comment for the full #127-vs-legacy-footer rule (I2, round-3 review). */
+export async function replyAction(id: string, body: string, signatureHandled?: boolean) {
   const user = await requireUser();
   const b = (body || "").trim();
   if (!b) return { ok: false as const };
   const profile = await getUser(user.id);
-  await reply(id, { body: withEmailSignature(b, profile || { name: user.name, email: user.email }), me: user.name });
+  const out = applyOutboundSignature(b, signatureHandled, profile || { name: user.name, email: user.email });
+  await reply(id, { body: out, me: user.name });
   revalidate();
   return { ok: true as const };
 }
@@ -363,6 +366,9 @@ export type ComposePayload = {
   body: string;
   customerId: string;
   contactName: string;
+  /** I2 (Inbox round 3 review) — true whenever the #127 composer flow ran
+   *  for this send; see replyAction's doc comment for the full rule. */
+  signatureHandled?: boolean;
 };
 
 /**
@@ -419,7 +425,7 @@ export async function composeSendAction(d: ComposePayload) {
   const user = await requireUser();
   const me = user.name;
   const profile = await getUser(user.id);
-  const body = withEmailSignature(d.body || "", profile || { name: me, email: user.email });
+  const body = applyOutboundSignature(d.body || "", d.signatureHandled, profile || { name: me, email: user.email });
   if (!(d.to || "").trim() || !((d.subject || "").trim() || (d.body || "").trim())) {
     return { ok: false as const, id: null };
   }
@@ -427,7 +433,7 @@ export async function composeSendAction(d: ComposePayload) {
   let id: string | null = null;
   if (d.id) {
     await updateDraft(d.id, { to: d.to, cc: d.cc, subject: d.subject, body });
-    const rec = await sendDraft(d.id);
+    const rec = await sendDraft(d.id, me);
     id = rec ? rec.id : d.id;
     await completeRenewalOutreach(id, me);
   } else {

@@ -15,6 +15,8 @@ import { createKrispClient, KrispAuthError, KrispApiError } from "@/lib/krisp/cl
 import { deleteKrispConnection, saveKrispConnection } from "@/lib/krisp/connections";
 import { setDashboardOverride } from "@/lib/stores/notif-prefs";
 import type { DashboardOverride } from "@/lib/dashboard-layout";
+import { setSignature } from "@/lib/stores/signatures";
+import { SIGNATURE_MAX } from "@/lib/inbox-signature";
 
 /**
  * Personal account actions. Notification prefs are stored per user NAME
@@ -104,6 +106,17 @@ export async function connectKrispAction(apiKey: string) {
   }
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** #127 — the signed-in user's own email signature (plain text). */
+export async function saveSignatureAction(text: string) {
+  const me = await requireUser();
+  const raw = typeof text === "string" ? text : "";
+  if (raw.length > SIGNATURE_MAX)
+    return { ok: false as const, error: `Keep it under ${SIGNATURE_MAX.toLocaleString()} characters.` };
+  const signature = await setSignature(raw, me.name);
+  revalidatePath("/", "layout");
+  return { ok: true as const, signature };
 }
 
 /** Disconnect = delete the row (spec §1.2). Only ever the signed-in user's own. */

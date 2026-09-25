@@ -15,6 +15,8 @@ import OfficePicker from "./office-picker";
 import KrispCard, { type KrispCardInfo } from "./krisp-card";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import { getDashboardOverride } from "@/lib/stores/notif-prefs";
+import SignatureCard from "./signature-card";
+import { signatureFor } from "@/lib/stores/signatures";
 
 export const metadata = { title: "Account settings — Quartzite-6" };
 
@@ -25,10 +27,11 @@ export default async function AccountPage() {
 
   // D144 — "Based out of" (self-service; Settings -> Team's admin form
   // edits the same users.officeId field but needs manage_users).
-  const [settings, myRow, dashboardOverride] = await Promise.all([
+  const [settings, myRow, dashboardOverride, signature] = await Promise.all([
     getSettings(),
     getUser(user.id),
     getDashboardOverride(user.name),
+    signatureFor(user.name),
   ]);
   const officeOptions = settings.offices.map((o) => ({ id: o.id, name: o.name }));
   const myOfficeId = myRow?.officeId || "";
@@ -156,6 +159,9 @@ export default async function AccountPage() {
 
       {/* ---- to-do notifications ---- */}
       <NotifControls rows={rows} />
+
+      {/* ---- email signature (#127) ---- */}
+      <SignatureCard initial={signature} />
 
       {/* ---- my mailbox (C7 — self-serve Gmail connect) ---- */}
       <div className="pk-card" style={{ padding: "17px 18px", marginTop: 20 }}>

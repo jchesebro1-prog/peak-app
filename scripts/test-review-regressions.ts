@@ -1984,6 +1984,298 @@ async function main() {
     assert(!(await Curtains.allCurtainTemplates()).some((t) => t.title === "Should not land"), "library io: a skipped curtain template never overwrites the Border template");
   }
 
+  // #123/I1/I4 review — "+ New quote" from a thread: mint the draft with the
+  // right per-type shape, link the thread, adopt the customer, idempotent
+  // on a repeat call, and never silently overwrite a different link.
+  {
+    const { linkThreadToNewQuote } = await import("@/lib/gmail/linking");
+    const { get: getQuoteDoc } = await import("@/lib/stores/quotes");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3quote", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Re: Fwd: Curtain quote for the PAC", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    const r3flameInput = {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: "loc1", locationLabel: "Auditorium",
+      contactName: "Brenda Gauchel", contactRole: "Director", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      quoteType: "flame_test", category: "", owner: "Tester",
+    };
+    const r3made = await linkThreadToNewQuote("C-r3quote", r3flameInput);
+    assert.ok(r3made.ok, "#123 linkThreadToNewQuote mints on the first call");
+    if (!r3made.ok) throw new Error("unreachable");
+    assert.ok(r3made.quoteId.startsWith("Q-"), "#123 …a Q- id");
+    assert.equal(r3made.reused, false, "#123 …freshly minted, not reused");
+    const r3q = await getQuoteDoc(r3made.quoteId);
+    assert.equal(r3q?.customerId, "lakefront", "#123 the draft carries the intake's customer");
+    assert.equal(r3q?.locationId, "loc1", "#123 …and venue (system-shape top-level locationId)");
+    assert.equal(r3q?.contactName, "Brenda Gauchel", "#123 …and contact (system-shape top-level contactName)");
+    assert.equal(r3q?.quoteType, "flame_test", "#123 …and quote type");
+    assert.equal(r3q?.source, "inbox", "#123 source is inbox");
+    assert.equal(r3q?.status, "draft", "#123 the quote starts as a draft");
+    assert.equal(r3q?.name, "Curtain quote for the PAC", "#123 name comes from the subject when none was given, prefixes stripped");
+    // I1 — flame-tests/quote/page.tsx reads top-level `contact` and
+    // `flameTest.venues[].{id,label}` to reconstruct its editor state.
+    const r3ft = r3q?.flameTest as { venues?: Array<{ id?: string; label?: string }> } | null;
+    assert.deepEqual(r3ft?.venues, [{ id: "loc1", label: "Auditorium" }], "#123/I1 flameTest.venues carries the thread's venue id+label");
+    assert.deepEqual(r3q?.contact, { name: "Brenda Gauchel", role: "Director", email: "brenda.t96@lakefront.k12.mn.us" }, "#123/I1 the flame builder's contact object is seeded, not just contactName");
+    const r3qt = await getDoc<CommThread>("comms", "C-r3quote");
+    assert.equal(r3qt?.link?.type, "quote", "#123 the thread links to a quote");
+    assert.equal(r3qt?.link?.id, r3made.quoteId, "#123 …the minted one");
+    assert.equal(r3qt?.link?.label, `${r3made.quoteId} · Curtain quote for the PAC`, "#123 label matches the picker's format");
+    assert.equal(r3qt?.customerId, "lakefront", "#123 an unlinked thread adopts the intake's customer");
+    assert.equal(r3qt?.resolution, "linked", "#123 …and reads as linked");
+
+    // I4 — a repeat mint for the SAME customer is idempotent: hands back the
+    // same draft instead of minting a second one (double submit, a second
+    // tab, the back button); the new call's own `name` is never applied —
+    // the existing draft's identity wins outright.
+    const r3again = await linkThreadToNewQuote("C-r3quote", { ...r3flameInput, name: "Ignored — reused" });
+    assert.ok(r3again.ok, "#123/I4 the repeat call still succeeds");
+    if (!r3again.ok) throw new Error("unreachable");
+    assert.equal(r3again.quoteId, r3made.quoteId, "#123/I4 …the SAME quote id — no duplicate minted");
+    assert.equal(r3again.reused, true, "#123/I4 …flagged as reused");
+    assert.equal((await getQuoteDoc(r3again.quoteId))?.name, "Curtain quote for the PAC", "#123/I4 the reused draft's name is untouched by the new call's input");
+
+    // I4 — the thread now links a LEAD instead: refused outright...
+    await patchDoc<CommThread>("comms", "C-r3quote", (d) => {
+      d.link = { type: "lead", id: "L-9001", label: "L-9001 · Some Lead" };
+    });
+    const r3blocked = await linkThreadToNewQuote("C-r3quote", r3flameInput);
+    assert.ok(!r3blocked.ok && r3blocked.reason === "linked-elsewhere", "#123/I4 a thread linked to something else refuses to mint over it");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3quote"))?.link?.type, "lead", "#123/I4 …the existing link is untouched");
+    // ...but an explicit confirm mints a NEW draft and takes over the link.
+    const r3confirmed = await linkThreadToNewQuote("C-r3quote", r3flameInput, { confirmReplace: true });
+    assert.ok(r3confirmed.ok, "#123/I4 confirmReplace mints anyway");
+    if (!r3confirmed.ok) throw new Error("unreachable");
+    assert.notEqual(r3confirmed.quoteId, r3made.quoteId, "#123/I4 …a genuinely NEW draft, not the one from before the lead link");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3quote"))?.link?.id, r3confirmed.quoteId, "#123/I4 …and the thread now points at it");
+
+    assert.deepEqual(
+      await linkThreadToNewQuote("C-r3-no-such-thread", { customerId: "lakefront", customer: "x", locationId: null, contactName: "", quoteType: "system", category: "", owner: "Tester" }),
+      { ok: false, reason: "not-found" },
+      "#123 unknown thread → not-found, nothing minted"
+    );
+  }
+
+  // I1 — the other service types read a different shape than flame_test's;
+  // rentals have no venue concept at all, consulting needs venueCustomerId.
+  {
+    const { linkThreadToNewQuote } = await import("@/lib/gmail/linking");
+    const { get: getQuoteDoc } = await import("@/lib/stores/quotes");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3rental", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us",
+      subject: "Rental for spring musical", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    const r3rental = await linkThreadToNewQuote("C-r3rental", {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: "loc1", locationLabel: "Auditorium",
+      contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us", quoteType: "rental", category: "", owner: "Tester",
+    });
+    assert.ok(r3rental.ok, "#123/I1 rental mints");
+    if (!r3rental.ok) throw new Error("unreachable");
+    const r3rq = await getQuoteDoc(r3rental.quoteId);
+    assert.equal(r3rq?.locationId, null, "#123/I1 rentals/quote/page.tsx never reads a venue — locationId stays null even though one was forwarded");
+    assert.deepEqual(r3rq?.contact, { name: "Tom Reyes", role: "", email: "tom@lakefront.k12.mn.us" }, "#123/I1 …but the contact still carries over");
+
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3consult", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us",
+      subject: "Consulting scope", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    const r3consult = await linkThreadToNewQuote("C-r3consult", {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: null,
+      contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us", quoteType: "consulting", category: "", owner: "Tester",
+    });
+    assert.ok(r3consult.ok, "#123/I1 consulting mints");
+    if (!r3consult.ok) throw new Error("unreachable");
+    const r3cq = await getQuoteDoc(r3consult.quoteId);
+    const r3consulting = r3cq?.consulting as { venueCustomerId?: string; venueCustomer?: string } | null;
+    assert.equal(r3consulting?.venueCustomerId, "lakefront", "#123/I1 design/engagements/quote/page.tsx requires venueCustomerId — seeded to the billed customer absent a distinct venue");
+    assert.equal(r3consulting?.venueCustomer, "Lakefront ISD", "#123/I1 …with its display name alongside");
+  }
+
+  // I4 follow-up review — threadQuoteLinkStatus is the decision
+  // createQuoteIntakeAction now checks BEFORE saveCustomerAction
+  // (quotes/new/actions.ts, right after the thread validity check, well
+  // before any customer/venue/contact write) instead of only inside
+  // linkThreadToNewQuote after the save already ran. createQuoteIntakeAction
+  // itself is session-gated (requireUser()) and can't be called from this
+  // harness — this pins the extracted decision function directly, which is
+  // what the action's early-exit relies on for correctness.
+  {
+    const { threadQuoteLinkStatus, linkThreadToNewQuote } = await import("@/lib/gmail/linking");
+    const r3now = Date.now();
+
+    // No link at all → clear, free to proceed.
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3status-clear", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Fresh thread", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    let statusThread = await getDoc<CommThread>("comms", "C-r3status-clear");
+    assert.deepEqual(await threadQuoteLinkStatus(statusThread!, "lakefront"), { kind: "clear" }, "threadQuoteLinkStatus: no link → clear");
+    assert.deepEqual(await threadQuoteLinkStatus(statusThread!, null), { kind: "clear" }, "threadQuoteLinkStatus: no link, no candidate customer either → still clear");
+
+    // Linked to an inbox draft for a DIFFERENT customer than the candidate → conflict.
+    const madeForOther = await linkThreadToNewQuote("C-r3status-clear", {
+      customerId: "rose-brand", customer: "Rose Brand", locationId: null, contactName: "", quoteType: "system", category: "", owner: "Tester",
+    });
+    assert.ok(madeForOther.ok, "fixture: minted a draft for rose-brand");
+    statusThread = await getDoc<CommThread>("comms", "C-r3status-clear");
+    assert.equal(statusThread?.link?.type, "quote", "fixture: thread now links that draft");
+    const conflictStatus = await threadQuoteLinkStatus(statusThread!, "lakefront");
+    assert.ok(conflictStatus.kind === "conflict" && conflictStatus.link.id === statusThread!.link!.id, "threadQuoteLinkStatus: an inbox draft for a DIFFERENT customer is a conflict, not a reuse");
+
+    // Same thread, candidate customer MATCHES the draft's own customer → reuse.
+    const reuseStatus = await threadQuoteLinkStatus(statusThread!, "rose-brand");
+    assert.ok(reuseStatus.kind === "reuse" && reuseStatus.quoteId === statusThread!.link!.id, "threadQuoteLinkStatus: the SAME customer as the linked draft → reuse");
+
+    // "new customer" mode (candidateCustomerId: null) can never reuse — even
+    // though a customer-picking retry against rose-brand would have reused.
+    assert.equal((await threadQuoteLinkStatus(statusThread!, null)).kind, "conflict", "threadQuoteLinkStatus: no candidate customer (creatingCustomer) never reads as reuse, always conflict when a link exists");
+
+    // A thread linked to a LEAD (never a quote at all) → always conflict,
+    // whatever the candidate customer is — this is the exact "linked-elsewhere"
+    // shape createQuoteIntakeAction now catches before ever calling
+    // saveCustomerAction, so a refusal here strands nothing.
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3status-lead", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: "lakefront", customer: "Lakefront ISD", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Already a lead", channel: "email", status: "waiting_us", assignedTo: "", link: { type: "lead", id: "L-9002", label: "L-9002 · Some Lead" },
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "linked",
+    });
+    const leadThread = await getDoc<CommThread>("comms", "C-r3status-lead");
+    const leadStatus = await threadQuoteLinkStatus(leadThread!, "lakefront");
+    assert.ok(leadStatus.kind === "conflict" && leadStatus.link.type === "lead" && leadStatus.link.id === "L-9002", "threadQuoteLinkStatus: a lead link is always a conflict, matching customer or not");
+  }
+
+  // #124 — siteId follows the customer: setThreadSite stamps it, a re-link
+  // to the same customer keeps it, a different customer clears it.
+  {
+    const { setThreadSite } = await import("@/lib/gmail/linking");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3site", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: "lakefront", customer: "Lakefront ISD", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Venue", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "linked",
+    });
+    await setThreadSite("C-r3site", "loc1");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, "loc1", "#124 setThreadSite stamps siteId");
+    await linkThread("C-r3site", "lakefront");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, "loc1", "#124 re-linking the same customer keeps the venue");
+    await linkThread("C-r3site", "rose-brand");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, null, "#124 linking a different customer clears the venue");
+    await setThreadSite("C-r3site", "loc2");
+    await setThreadSite("C-r3site", null);
+    assert.equal((await getDoc<CommThread>("comms", "C-r3site"))?.siteId, null, "#124 setThreadSite(null) clears");
+  }
+
+  // #125 — identity source: setIdentityMessage re-resolves from the picked
+  // message's address, and a re-sweep keeps that pick.
+  {
+    const { setIdentityMessage } = await import("@/lib/gmail/linking");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3id", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: true, archived: false,
+      customerId: null, customer: "", contactName: "New Person", contactEmail: "np@r3unknown.org",
+      subject: "Forwarded quote", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [
+        { id: "m1", at: r3now - 3000, direction: "in", channel: "email", author: "New Person", body: "x", fromEmail: "np@r3unknown.org" },
+        { id: "m2", at: r3now - 2000, direction: "out", channel: "email", author: "Jeff Chesebro", body: "y", to: "Someone <someone@rosebrand.example.com>" },
+        { id: "m3", at: r3now - 1000, direction: "in", channel: "email", author: "Brenda Gauchel", body: "z", fromEmail: "brenda.t96@lakefront.k12.mn.us" },
+      ],
+      createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    // inbound → its From; Brenda is a live contact of lakefront → links directly
+    await setIdentityMessage("C-r3id", "m3");
+    let r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, "m3", "#125 setIdentityMessage stamps the picked message");
+    assert.equal(r3t?.resolution, "linked", "#125 an inbound identity message resolves from its From (contact → linked)");
+    assert.equal(r3t?.customerId, "lakefront", "#125 …and links the thread");
+    // a re-sweep over the (now irrelevant) domain keeps the picked message and changes nothing
+    await resweepThreads({ domain: "r3unknown.org" });
+    r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, "m3", "#125 re-sweep keeps the picked identity message");
+    assert.equal(r3t?.customerId, "lakefront", "#125 re-sweep never downgrades an identity-linked thread");
+    // back to the thread contact: a linked thread keeps its customer (never downgraded)
+    await setIdentityMessage("C-r3id", null);
+    r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, null, "#125 clearing the identity message falls back to the thread contact");
+    assert.equal(r3t?.customerId, "lakefront", "#125 clearing never downgrades a linked thread");
+    await setIdentityMessage("C-r3id", "no-such-message");
+    r3t = await getDoc<CommThread>("comms", "C-r3id");
+    assert.equal(r3t?.identityMessageId, null, "#125 an unknown message id is treated as null");
+    assert.equal(await setIdentityMessage("C-r3-no-such-thread", "m1"), null, "#125 unknown thread → null");
+  }
+
+  // #127 — the signature round-trips through its own blob, one key per user,
+  // merged atomically (setBlob) so it never disturbs another user's row.
+  {
+    const { setSignature, signatureFor } = await import("@/lib/stores/signatures");
+    const { withSignature: withSig } = await import("@/lib/inbox-signature");
+    const r3sig = await setSignature("  Jeff Chesebro\r\nPeak Systems Group\n(218) 555-0100  \n", "Sig Tester");
+    assert.equal(r3sig, "Jeff Chesebro\nPeak Systems Group\n(218) 555-0100", "#127 setSignature normalises line endings and trims");
+    assert.equal(await signatureFor("Sig Tester"), r3sig, "#127 signatureFor round-trips");
+    assert.ok(withSig("", r3sig, "add").includes("\n-- \n"), "#127 the composer seed carries the -- separator");
+    await setSignature("Someone Else's sig", "Other Tester");
+    assert.equal(await signatureFor("Sig Tester"), r3sig, "#127 a second user's signature never overwrites the first (per-key merge)");
+    assert.equal((await setSignature("x".repeat(2500), "Sig Tester")).length, 2000, "#127 the store caps at 2,000 chars");
+    await setSignature("", "Sig Tester");
+    assert.equal(await signatureFor("Sig Tester"), "", "#127 an empty signature clears to ''");
+    assert.equal(await signatureFor("Other Tester"), "Someone Else's sig", "#127 clearing one user's signature leaves another's alone");
+    assert.equal(await signatureFor("Nobody Here"), "", "#127 no row → empty signature");
+  }
+
+  // #128 review (I3) — sendDraft threads `me` through to the sent message's
+  // author instead of always stamping DEFAULT_USER, and rowName() (pure,
+  // already covered by test:specs) reads the result by DIRECTION so a
+  // mismatched Gmail display name on the outbound message still reads as me.
+  {
+    const { sendDraft, get: getThreadDoc, DEFAULT_USER } = await import("@/lib/stores/comms");
+    const { rowName } = await import("@/lib/inbox-rows");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3senddraft", mailbox: "personal", mailboxUser: "Sarah Ops", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Draft to send", channel: "email", status: "draft", assignedTo: "", link: null,
+      draft: { to: "brenda.t96@lakefront.k12.mn.us", subject: "Draft to send", body: "Hi Brenda" },
+      messages: [{ id: "m1", at: r3now - 1000, direction: "in", channel: "email", author: "Brenda Gauchel", body: "hello", fromEmail: "brenda.t96@lakefront.k12.mn.us" }],
+      createdAt: r3now, updatedAt: r3now,
+    });
+    await sendDraft("C-r3senddraft", "Sarah Ops");
+    let r3t = await getThreadDoc("C-r3senddraft");
+    const r3sent = (r3t?.messages || []).at(-1);
+    assert.equal(r3sent?.author, "Sarah Ops", "#128 review: sendDraft(id, me) stamps the real sender, not the DEFAULT_USER fallback");
+
+    // No `me` passed — still falls back to DEFAULT_USER (existing behaviour,
+    // not a regression: every real caller passes the signed-in user's name).
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3senddraft2", mailbox: "personal", mailboxUser: DEFAULT_USER, unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Draft to send 2", channel: "email", status: "draft", assignedTo: "", link: null,
+      draft: { to: "brenda.t96@lakefront.k12.mn.us", subject: "Draft to send 2", body: "Hi again" },
+      messages: [], createdAt: r3now, updatedAt: r3now,
+    });
+    await sendDraft("C-r3senddraft2");
+    r3t = await getThreadDoc("C-r3senddraft2");
+    assert.equal((r3t?.messages || []).at(-1)?.author, DEFAULT_USER, "#128 review: sendDraft with no `me` still falls back to DEFAULT_USER");
+
+    // The Gmail bridge can stamp an outbound message's author with whatever
+    // display name the account had at send time — rowName must still read it
+    // as "me" via direction, not by matching that name against anything.
+    r3t = await getThreadDoc("C-r3senddraft");
+    const r3row = rowName(r3t!);
+    assert.equal(r3row.primary, "Brenda Gauchel", "#128 review: the sent reply (author 'Sarah Ops') doesn't become primary — the inbound message still does, since the outbound one is me by direction");
+    assert.equal(r3row.secondary, "Brenda, me (2)", "#128 review: …and collapses into the 'me' chain slot regardless of its stamped author name");
+  }
+
   console.log("review regression checks passed");
 }
 

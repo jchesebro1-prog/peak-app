@@ -637,7 +637,7 @@ function Row({
               color: unread ? "#16181d" : "#26292f",
             }}
           >
-            {r.participants || r.name}
+            {r.primaryName}
           </span>
           {r.msgCount > 1 && (
             <button
@@ -698,9 +698,15 @@ function Row({
         >
           {r.snippet}
         </span>
-        {r.msgCount > 1 && r.lastResponder && (
-          <span style={{ display: "block", fontSize: 10.5, color: "#b0b5bf", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            Last reply: {r.lastResponder}
+        {/* #128 — Gmail-style "Brenda, me (3)". rowName() itself already
+            blanks `chain` when it would just repeat primaryName (a single-
+            author thread) — see the I3 review fix in lib/inbox-rows.ts. */}
+        {r.chain && (
+          <span
+            title={r.chain}
+            style={{ display: "block", fontSize: 10.5, color: "#b0b5bf", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          >
+            {r.chain}
           </span>
         )}
         {r.labels.length > 0 && (
