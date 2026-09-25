@@ -18,25 +18,32 @@ Every task's requirements implicitly include this section.
 
 - **D89 — no AI in the app.** Nothing in this module calls a model. Text is authored by a human or imported from a file a human reviewed. There is no `ANTHROPIC_API_KEY` anywhere in the tree and this plan must not add one.
 - **D94 — the completeness rule stands.** A part with no approved spec language blocks finalize; the match report is the guarantee. Product language lives on the catalog part.
-- **Only `specState: "authored"` ever prints.** `draft` is treated exactly like missing.
+- **Only `specState: "authored"` ever prints — everywhere.** `draft` is treated exactly like missing, in this module AND in every consumer that already reads `specBody` (D94 `matchBom`, the D94 engagement actions, the Displays API, the Grid client package). Task 6 routes all of them through one pure predicate, `hasPrintableSpec()` (owner decision, 2026-09-25).
 - **D141 — hand-written idempotent migrations.** `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE OR REPLACE TRIGGER`. A new `docTable()` gets no `_seq_bump` trigger unless the migration creates one, and without it pull-sync's `WHERE seq > cursor` goes blind.
 - **Outline convention (spec §2).** Plain text, one item per line, two spaces per level, a tab counts as one level. Labels by depth: `A.` `1.` `a.` `1)` `a)`. Depth beyond the fifth level clamps to the fifth and raises a warning. Blank lines are ignored. A line already starting with a label such as `A. ` or `1. ` has it stripped. Inside a product entry the product letter consumes the first level, so a body's top level prints as `1.`; inside a Part 1 or Part 3 article it prints as `A.`.
 - **Article numbering is `1.1` / `2.1` / `3.1`**, never D94's `2.01`.
-- **Permissions.** Reads call `requireUser()`. Every library, template, curtain-template or part-spec write calls `requirePerm("create")`. (The existing D94 actions gate on `requireUser()` only; leave them alone — changing them is out of scope for this phase.)
-- **Catalog writes go through `Catalog.mergeUpsert(sku, patch)`, never `upsert`.** `upsert` replaces the whole document and will silently wipe `ports`, `trade`, datasheet fields and spec fields. See the warning comment at `src/lib/stores/catalog.ts:30-36`.
+- **Permissions.** Reads call `requireUser()`. Every library, template, curtain-template or part-spec write calls `requirePerm("create")` — which returns the `SessionUser`, so never call `requireUser()` a second time after it. (The existing D94 actions gate on `requireUser()` only; leave their **permission gates** alone — changing them is out of scope for this phase. The one sanctioned change to those actions is draft gating, Task 6 Step 6.)
+- **Catalog writes go through `mergeUpsert(sku, patch)`, never `upsert`.** `upsert` replaces the whole document and will silently wipe `ports`, `trade`, datasheet fields and spec fields. See the warning comment at `src/lib/stores/catalog.ts:191-206`. `src/app/(app)/catalog/actions.ts` uses named imports (`get as getPart`, `upsert`, `mergeUpsert`, `remove as removePart`) — there is no `Catalog` namespace in that file.
+- **Destructive UI uses the shared `ConfirmButton`** (`src/components/confirm-button.tsx`) — never `window.confirm`. Its `onConfirm` must `throw new Error(r.error)` when an action returns `{ ok: false }`; the button catches the throw and renders the message beside itself (`confirm-button.tsx:60-66`, rendered at `:90`). Returning the result without throwing swallows the refusal.
+- **One set of spec fields on a catalog part.** The canonical pointers are `CatalogPart.specSectionId` / `specArticleId` (Task 6). The Displays-API research metadata from commit 2e284665 (`productMetadata.specSection` / `.specArticle`) is *legacy input*: it is adopted into the canonical fields only when it resolves to exactly one live record, it never overwrites a canonical value, and it is never deleted. See Task 6 Step 5 and Task 14.
 - **Timestamps are epoch-ms numbers.** Never `Date` objects, never ISO strings in stored documents.
 - **Design tokens.** `pk-*` component classes and the CSS variables in `src/app/globals.css`. Accent is user-configurable and arrives as `--accent`; never hardcode an accent-coloured pixel.
 - **Dev DB is single-process.** Never leave a `tsx` script running; check `ps aux | grep tsx` before starting a dev server. Never point a script at `.data/pglite` — use `PGLITE_PATH=$(mktemp -d)`.
-- **Gates.** Every task ends green on `npx tsc --noEmit -p .` and `npx tsx scripts/test-review-and-spec.ts`. The branch ends green on those plus `npm run test:smoke`, `npx next build`, `npx eslint`, and `npx drizzle-kit generate` reporting "No schema changes".
+- **Gates.** Every task ends green on `npx tsc --noEmit -p .` and `npm run test:specs`. (Never run `npx tsx scripts/test-review-and-spec.ts` bare: the harness refuses to run without `PGLITE_PATH`, and the npm script supplies a throwaway one.) The branch ends green on those plus `npm run test:smoke`, `npx next build`, `npx eslint`, and `npx drizzle-kit generate` reporting "No schema changes".
+- **Numbering placeholders.** D161 and #142 are taken. This plan writes `D-SPEC-1`, `D-SPEC-2`, … for its decision entries and `#SPEC` for its punch item; the lead renumbers at merge time. Code comments say `D-SPEC` (see `src/db/doc-tables.ts:92-94`, `drizzle/0025_spec_library.sql:1`, `src/lib/specs/outline.ts:2`).
 
-## Decisions this plan takes (log them in Task 13)
+## Decisions this plan takes (log them in Task 15)
 
-These are deviations from, or refinements of, the approved spec. Each gets a `DECISIONS.md` entry under **D161**.
+These are deviations from, or refinements of, the approved spec. Each gets its own `DECISIONS.md` entry, `D-SPEC-1` … `D-SPEC-8`, in the order below.
 
 1. **The `spec-library` JSON import/export does NOT go through the Import hub.** Spec §4 asks for a `spec-library` import type there. The hub is strictly columnar — `parse.ts`'s header comment says so, the only file input accepts `.xlsx/.xlsm`, and every other path is the CSV paste box (see recon §5). A four-collection library document is not a table. It lands instead as **Export library / Import library** controls on `/design/specs/library`, reading and writing the same JSON shape the spec describes, so the `spec-writer` skill's output still loads unchanged. The *catalog* spec columns stay in the hub exactly as specified, because those are rows.
 2. **`/design/specs` redirects to `/design/specs/library` in Phase A.** The Generated list is Phase B; a nav entry pointing at an empty placeholder is worse than one pointing at the screen that does something.
-3. **Starter templates seed outside the demo-data flag.** `DEMO_COLLECTIONS` is `Object.keys(DOC_TABLES)` (`src/db/seed-data.ts:145-147`), so the go-live reset wipes every doc collection including `spec_templates`. The starter formulas are configuration, not demo data, so `seedIfEmpty()` calls an idempotent `seedStarterTemplates()` regardless of the demo flag, and the Templates screen carries a **Restore starter templates** button for after a go-live reset.
+3. **Starter templates seed outside the demo-data flag, on every environment.** `DEMO_COLLECTIONS` is `Object.keys(DOC_TABLES)` (`src/db/seed-data.ts:148-150`), so the go-live reset wipes every doc collection including `spec_templates`. The starter formulas are configuration, not demo data. `seedIfEmpty()` only runs on local dev, so it is not enough on its own (owner decision, 2026-09-25): every read path that needs the formulas (the Templates screen, the part editor's Spec panel, the library export) calls an idempotent `ensureStarterTemplates()`, which seeds only when the collection holds no live formula at all. The dev `seedIfEmpty()` hook stays, and the Templates screen keeps its **Restore starter templates** button.
 4. **Spec fields are declared on `CatalogPart` itself**, and `PartSpecFields` in `src/lib/bid-spec.ts` becomes a `Pick<>` of those, so `SpecCatalogPart` stays assignable and every existing D94 call site keeps compiling.
+5. **One set of spec pointers (owner decision, 2026-09-25).** Commit 2e284665 (Displays API) added `productMetadata.specSection` / `.specArticle` / `.specLanguageKey` as free text, such as `"11 61 13"` and `"Stage Lighting Instruments"`. This plan's `specSectionId` / `specArticleId` are the canonical fields. The legacy text is adopted into them (Task 6 Step 5) only when it resolves to exactly one live section or article. Adoption happens at read time inside `articleIdForPart`, so it needs no write. It is persisted by an idempotent **Adopt legacy pointers** button that fills absent canonical fields and never overwrites one. The import hub's `Spec Section` / `Spec Article` columns become the canonical `specSectionId` / `specArticleId` columns under the same headers (Task 14). The Displays API reads the canonical fields and falls back to legacy text only where no canonical value exists. `specLanguageKey` has no canonical counterpart; it stays research metadata, untouched. No DB migration, because the fields are doc-store JSON.
+6. **Drafts are gated everywhere, not just in this module (owner decision, 2026-09-25).** `matchBom`, `remapRowAction`, `saveSpecAction`, the Displays API and the client-package manifest all read through `hasPrintableSpec()`. A D94 inline write (`writePartSpecAction`) counts as the review step and stamps `authored`.
+7. **The part editor's Spec panel shows for anyone with `create`** (owner decision, 2026-09-25), unlike the admin-only datasheet control beside it. Every write stays `requirePerm("create")`.
+8. **No `model` field.** `CatalogPart.manufacturerModelNumber` (import column `MFR M/N`) already is the manufacturer's model number. A table-style Part 2 prints `manufacturerModelNumber`, then `manufacturerPartNumber`, then the SKU. The part modal gains inputs for both manufacturer numbers, which fixes the existing bug where every modal save wiped them.
 
 ---
 
@@ -64,6 +71,8 @@ These are deviations from, or refinements of, the approved spec. Each gets a `DE
 | `src/app/(app)/design/specs/templates/[key]/page.tsx` | One template's editor. |
 | `src/app/(app)/design/specs/templates/editor.tsx` | Client template editor. |
 | `src/app/(app)/catalog/spec-panel.tsx` | Client Spec panel for the part modal. |
+| `src/app/(app)/catalog/part-form.ts` | Pure. `validateSameAs` and `optionalPartFields` — testable halves of the catalog actions (a `"use server"` file may only export async functions). |
+| `src/lib/specs/legacy-pointers.ts` | Server. `adoptAllLegacySpecPointers(by)` — the one-shot, idempotent write of decision 5. |
 | `drizzle/0025_spec_library.sql` | The three new tables, idempotent. |
 | `drizzle/meta/0025_snapshot.json` | Chained snapshot. |
 
@@ -72,21 +81,26 @@ These are deviations from, or refinements of, the approved spec. Each gets a `DE
 | File | Change |
 |------|--------|
 | `src/db/doc-tables.ts` | Three `docTable()` registrations + `DOC_TABLES` entries. |
-| `src/db/seed-data.ts` | Call `seedStarterTemplates()` from `seedIfEmpty()`. |
-| `src/lib/stores/spec-sections.ts` | `SpecArticle`, `part1`/`part3` as articles with legacy-string reads, `part2Style`, `quantities`, article CRUD helpers. |
-| `src/lib/bid-spec.ts` | `PartSpecFields` becomes a `Pick<CatalogPart>`; `assemble`/`renderSpecHtml` read Part 1/Part 3 as articles. |
-| `src/lib/bid-spec-docx.ts` | Same article read. |
-| `src/lib/stores/catalog.ts` | `CatalogPart` gains `model?` and the eight spec fields. |
-| `src/app/(app)/catalog/page.tsx` | `model` input in the part form; mount `<SpecPanel>` beside `<PartDatasheetControl>`. |
-| `src/app/(app)/catalog/actions.ts` | `upsertPart` carries `model`; new `writePartSpecFieldsAction`. |
+| `src/db/seed-data.ts` | Call `seedStarterTemplates()` from `seedIfEmpty()` (dynamic import). |
+| `src/lib/stores/spec-sections.ts` | `SpecArticle`, `part1`/`part3` as articles with legacy-string reads, `part2Style`, `quantities`, `removeSection`, tombstone-aware starter seeding. |
+| `src/lib/bid-spec.ts` | `PartSpecFields` becomes a `Pick<CatalogPart>`; `assemble` flattens Part 1/Part 3 articles; `matchBom` gates drafts. |
+| `src/lib/bid-spec-docx.ts` | No change expected — it reads the assembled (string) parts. |
+| `src/lib/stores/catalog.ts` | `CatalogPart` gains the spec fields (no `model` — decision 8). |
+| `src/lib/stores/generated-specs.ts` | `allGeneratedSpecs()` for the coverage table. |
+| `src/lib/displays-api.ts`, `src/app/api/v1/displays/**/route.ts` | Read canonical spec fields; draft gating. |
+| `src/lib/client-package.ts` | Draft gating. |
+| `src/app/(app)/design/engagements/spec/actions.ts` | `updateSectionAction` compiles against articles; draft gating in `remapRowAction`/`saveSpecAction`; `writePartSpecAction` stamps authored. |
+| `src/app/(app)/catalog/page.tsx` | Manufacturer P/N + M/N inputs in the part form; mount `<SpecPanel>` inside the form beside `<PartDatasheetControl>`. |
+| `src/app/(app)/catalog/actions.ts` | `upsertPart` stops wiping fields the form did not submit; new `writePartSpecFieldsAction`. |
+| `src/app/(app)/catalog/import.ts` | Price-book `Spec Section`/`Spec Article` resolve to the canonical pointers when they can. |
 | `src/lib/design/grid-bom.ts` | `GridCurtain.color?`. |
-| `src/app/(app)/design/grid/[id]/curtain-drop.tsx` | Optional Colour field. |
-| `src/app/(app)/import/types.ts` | Seven new `catalog` columns. |
-| `src/app/(app)/import/registry.ts` | Write those columns through `catalogPatch`. |
+| `src/app/(app)/design/grid/[id]/curtain-drop.tsx`, `src/app/(app)/design/grid/[id]/actions.ts` | Optional Colour field, carried through `placeCurtainAction`. |
+| `src/app/(app)/import/types.ts` | Canonical spec columns (two re-keyed under their existing headers, five new). |
+| `src/app/(app)/import/registry.ts` | Write those columns through `catalogPatch`; export them. |
 | `src/components/nav/nav-data.ts` | `specs` entry + `activeKeyFor` exception. |
-| `scripts/test-review-and-spec.ts` | New assertion blocks per task. |
+| `scripts/test-review-and-spec.ts` | New assertion blocks per task; `DESIGN_CHILDREN` gains `specs`. |
 | `scripts/smoke-routes.ts` | The module's GET routes. |
-| `DECISIONS.md`, `PUNCHLIST.md` | D161 and #142. |
+| `DECISIONS.md`, `PUNCHLIST.md` | `D-SPEC-1`…`D-SPEC-8` and `#SPEC` (placeholders — the lead renumbers). |
 
 ---
 
@@ -214,7 +228,7 @@ import {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx tsx scripts/test-review-and-spec.ts`
+Run: `npm run test:specs`
 Expected: the run aborts before printing any PASS/FAIL with `Cannot find module '@/lib/specs/outline'` (the harness is one file with a single import block at the top, so a missing module is a resolution error, not a FAIL line).
 
 - [ ] **Step 3: Write the implementation**
@@ -223,7 +237,7 @@ Create `src/lib/specs/outline.ts`:
 
 ```ts
 /**
- * The Specs module's text engine (Phase A, D161).
+ * The Specs module's text engine (Phase A, D-SPEC).
  *
  * Bodies in the spec library are plain text, one item per line, indented two
  * spaces per level (a tab counts as one level). This module is the ONLY place
@@ -424,7 +438,7 @@ export function substitutePlaceholders(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx tsx scripts/test-review-and-spec.ts`
+Run: `npm run test:specs`
 Expected: every new `outline:` line prints PASS, the run ends `ALL PASSED`, exit 0.
 
 - [ ] **Step 5: Typecheck**
@@ -458,9 +472,9 @@ git commit -m "feat(specs): the outline engine — indented text to labelled lin
 In `src/db/doc-tables.ts`, immediately after the `vendorProfiles` line (see recon §2 — the existing `specSections` / `generatedSpecs` lines are around 78-79 and `vendorProfiles` around 91), add:
 
 ```ts
-export const specArticles = docTable("spec_articles"); // Specs module (D161) — Part 2 category articles: manufacturers + the "A. General" clause; migration 0025_spec_library
-export const specTemplates = docTable("spec_templates"); // Specs module (D161) — per-category authoring formulas (headings + guidance + a worked example); migration 0025_spec_library
-export const specCurtainTemplates = docTable("spec_curtain_templates"); // Specs module (D161) — one document per Grid curtain type; migration 0025_spec_library
+export const specArticles = docTable("spec_articles"); // Specs module (D-SPEC) — Part 2 category articles: manufacturers + the "A. General" clause; migration 0025_spec_library
+export const specTemplates = docTable("spec_templates"); // Specs module (D-SPEC) — per-category authoring formulas (headings + guidance + a worked example); migration 0025_spec_library
+export const specCurtainTemplates = docTable("spec_curtain_templates"); // Specs module (D-SPEC) — one document per Grid curtain type; migration 0025_spec_library
 ```
 
 and in the `DOC_TABLES` object, after `vendor_profiles`:
@@ -478,7 +492,7 @@ Do **not** add them to `SYNCABLE_COLLECTIONS` — like `spec_sections` and `gene
 Create `drizzle/0025_spec_library.sql`. Copy `drizzle/0024_vendor_profiles.sql` column-for-column three times. Idempotent per D141 — `IF NOT EXISTS` on the table and both indexes, `CREATE OR REPLACE TRIGGER` for the `_seq_bump`:
 
 ```sql
--- Specs module (D161), Phase A — the three new library collections.
+-- Specs module (D-SPEC), Phase A — the three new library collections.
 --
 -- Hand-rewritten from the generated DDL so it is idempotent per D141: this
 -- file runs against a shared Neon database that more than one branch's build
@@ -587,7 +601,8 @@ git commit -m "feat(specs): spec_articles, spec_templates and spec_curtain_templ
 - Create: `src/lib/specs/sections.ts` (pure)
 - Modify: `src/lib/stores/spec-sections.ts`
 - Modify: `src/lib/bid-spec.ts` (two lines — the import and `assemble`'s `part1`/`part3`)
-- Modify: `src/lib/bid-spec-docx.ts` (only if it reads `section.part1`/`part3` directly — check with `grep -n 'part1\|part3' src/lib/bid-spec-docx.ts`)
+- Modify: `src/app/(app)/design/engagements/spec/actions.ts` (`updateSectionAction`, lines 165-172 — see Step 5)
+- No change: `src/lib/bid-spec-docx.ts` reads the *assembled* sections, whose `part1`/`part3` stay strings; `src/lib/client-package-server.ts` never reads a section's parts. Both keep working unchanged.
 - Test: `scripts/test-review-and-spec.ts`
 
 **Interfaces:**
@@ -612,7 +627,7 @@ git commit -m "feat(specs): spec_articles, spec_templates and spec_curtain_templ
   export function partText(articles: SpecArticle[]): string;
   export function newArticleId(): string;
   ```
-  `src/lib/stores/spec-sections.ts` re-exports every one of those types so existing `import type { SpecSection } from "@/lib/stores/spec-sections"` lines keep working, and adds `getSection(id)`.
+  `src/lib/stores/spec-sections.ts` re-exports every one of those types so existing `import type { SpecSection } from "@/lib/stores/spec-sections"` lines keep working, and adds `getSection(id)` and `removeSection(id)` (soft delete — the owner asked for a delete on every record; Task 8 wraps it in a refusing action, Task 9 surfaces it).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -667,7 +682,7 @@ Append:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx tsx scripts/test-review-and-spec.ts`
+Run: `npm run test:specs`
 Expected: aborts with `Cannot find module '@/lib/specs/sections'`.
 
 - [ ] **Step 3: Write the pure module**
@@ -676,7 +691,7 @@ Create `src/lib/specs/sections.ts`:
 
 ```ts
 /**
- * Section shape for the Specs module (D161), split out of the store so it
+ * Section shape for the Specs module (D-SPEC), split out of the store so it
  * stays pure: `src/lib/bid-spec.ts` runs inside a client component
  * (`design/engagements/spec/generator.tsx` calls `matchBom`), so it cannot
  * import anything at runtime that reaches the database.
@@ -788,7 +803,7 @@ export function partText(articles: SpecArticle[]): string {
 Replace the body of `src/lib/stores/spec-sections.ts` below its header comment with:
 
 ```ts
-import { getDoc, listDocs, patchDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import {
   normalizeSection,
   type RawSpecSection,
@@ -864,10 +879,23 @@ export async function updateSection(
   });
 }
 
-/** Idempotent — safe to call from the library screen's "add the starter sections" button. */
+/** Soft delete. The refusal rules (parts or articles still pointing here)
+ *  live in the action, which can read the catalog; the store just deletes. */
+export async function removeSection(id: string): Promise<void> {
+  await softDeleteDoc("spec_sections", id);
+}
+
+/**
+ * Idempotent — safe to call from the library screen's "add the starter
+ * sections" button. Tombstone-aware: a section id is random, so re-creating
+ * a starter someone deliberately deleted would mint a NEW id and quietly
+ * undo their delete. A starter number present on any record, live OR
+ * soft-deleted, is skipped (`listDocs(..., { includeDeleted: true })`).
+ * Someone who really wants a deleted starter back adds it by hand.
+ */
 export async function seedStarterSections(by: string): Promise<number> {
-  const existing = await allSections();
-  const have = new Set(existing.map((s) => s.number));
+  const everything = await listDocs<RawSpecSection>("spec_sections", { includeDeleted: true });
+  const have = new Set(everything.map((s) => String(s.number || "").trim()));
   let made = 0;
   for (const s of STARTER_SECTIONS) {
     if (have.has(s.number)) continue;
@@ -889,12 +917,39 @@ import { partText, type SpecSection } from "@/lib/specs/sections";
     out.push({ number: s.number, title: s.title, part1: partText(s.part1), part3: partText(s.part3), parts });
 ```
 
-Run `grep -n 'part1\|part3\|spec-sections' src/lib/bid-spec-docx.ts src/app/\(app\)/design/engagements/spec/*.tsx src/app/\(app\)/design/engagements/spec/*.ts` and apply the same `partText(...)` treatment anywhere else a `SpecSection`'s part is used as a string. `AssembledSection.part1` stays `string` — nothing downstream of `assemble` changes in this phase.
+`AssembledSection.part1` stays `string` — nothing downstream of `assemble` changes in this phase. **Do not** use `partText` anywhere else.
+
+The one other caller that breaks is `updateSectionAction` in `src/app/(app)/design/engagements/spec/actions.ts:165-172`: it types `part1?: string; part3?: string` and passes them straight to `updateSection`, which now wants `SpecArticle[]`, so tsc fails. It has **no callers** (`grep -rn updateSectionAction src` finds only its definition — Task 8's new action gets a distinct name). Keep its string-typed signature and convert at the boundary, so a legacy string still lands as one untitled article:
+
+```ts
+import { toArticles } from "@/lib/specs/sections";
+// …
+export async function updateSectionAction(
+  id: string,
+  patch: { number?: string; title?: string; sort?: number; part1?: string; part3?: string }
+): Promise<Result> {
+  const user = await requireUser();
+  const { part1, part3, ...rest } = patch;
+  await updateSection(
+    id,
+    {
+      ...rest,
+      ...(part1 !== undefined ? { part1: toArticles(part1) } : {}),
+      ...(part3 !== undefined ? { part3: toArticles(part3) } : {}),
+    },
+    user.name
+  );
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+```
+
+(Deleting it would also compile; converting keeps the D94 file's public surface unchanged, which is the smaller diff.) Its `requireUser()` gate stays — see Global Constraints.
 
 - [ ] **Step 6: Run the tests and typecheck**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
 npx tsc --noEmit -p .
 ```
 Expected: `ALL PASSED` including every new `sections:` line, and tsc exit 0. The pre-existing `/* --- assembly --- */` block must still pass — if its fixture builds a section with string parts, it is exercising exactly the legacy path this task added, so leave it as it is.
@@ -902,7 +957,7 @@ Expected: `ALL PASSED` including every new `sections:` line, and tsc exit 0. The
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/lib/specs/sections.ts src/lib/stores/spec-sections.ts src/lib/bid-spec.ts src/lib/bid-spec-docx.ts scripts/test-review-and-spec.ts
+git add src/lib/specs/sections.ts src/lib/stores/spec-sections.ts src/lib/bid-spec.ts "src/app/(app)/design/engagements/spec/actions.ts" scripts/test-review-and-spec.ts
 git commit -m "feat(specs): sections carry titled Part 1/Part 3 articles, a Part 2 style and a quantities policy"
 ```
 
@@ -1020,7 +1075,7 @@ Append:
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `npx tsx scripts/test-review-and-spec.ts` — aborts with `Cannot find module '@/lib/specs/articles'`.
+Run: `npm run test:specs` — aborts with `Cannot find module '@/lib/specs/articles'`.
 
 - [ ] **Step 3: Write the pure module**
 
@@ -1030,7 +1085,7 @@ Create `src/lib/specs/articles.ts`:
 import type { SpecSection } from "@/lib/specs/sections";
 
 /**
- * Part 2 category articles (D161) — "2.1 Stage Drapes", "2.3 Packaged Hoists".
+ * Part 2 category articles (D-SPEC) — "2.1 Stage Drapes", "2.3 Packaged Hoists".
  * Each opens with an "A. General" clause carrying the acceptable-manufacturers
  * list, then the products that landed in the BOM print as B., C., D…
  *
@@ -1175,10 +1230,12 @@ Note the recursion in `specStateOf` terminates: `resolveSameAs` returns a target
 
 - [ ] **Step 4: Write the store**
 
+`listDocs` / `getDoc` are declared `<T extends Doc = Doc>` (`src/db/doc-store.ts:24`, `:32`, `:71`), so `<unknown>` does not compile — read as `Doc` and let `normalizeArticle` shape it. The same applies to both stores in Task 5.
+
 Create `src/lib/stores/spec-articles.ts`:
 
 ```ts
-import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, patchDoc, softDeleteDoc, upsertDoc, type Doc } from "@/db/doc-store";
 import { normalizeArticle, type SpecCategoryArticle } from "@/lib/specs/articles";
 
 export type { SpecCategoryArticle };
@@ -1188,14 +1245,14 @@ function uid(): string {
 }
 
 export async function allArticles(): Promise<SpecCategoryArticle[]> {
-  const list = await listDocs<unknown>("spec_articles");
+  const list = await listDocs<Doc>("spec_articles");
   return list
     .map(normalizeArticle)
     .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title));
 }
 
 export async function getArticle(id: string): Promise<SpecCategoryArticle | null> {
-  const raw = await getDoc<unknown>("spec_articles", id);
+  const raw = await getDoc<Doc>("spec_articles", id);
   return raw ? normalizeArticle(raw) : null;
 }
 
@@ -1233,7 +1290,7 @@ export async function deleteArticle(id: string): Promise<void> {
 - [ ] **Step 5: Run the tests, typecheck, commit**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
 npx tsc --noEmit -p .
 git add src/lib/specs/articles.ts src/lib/stores/spec-articles.ts scripts/test-review-and-spec.ts
 git commit -m "feat(specs): Part 2 category articles — store plus explicit/category/legacy resolution and same-as rules"
@@ -1266,6 +1323,7 @@ git commit -m "feat(specs): Part 2 category articles — store plus explicit/cat
   export async function saveTemplate(input, by): Promise<SpecTemplate>;
   export async function deleteTemplate(id: string): Promise<void>;
   export async function seedStarterTemplates(by?: string): Promise<number>;  // idempotent, by key
+  export async function ensureStarterTemplates(by?: string): Promise<number>; // seeds formulas/curtain templates only when that collection is EMPTY
   export const STARTER_TEMPLATES: Array<Omit<SpecTemplate, "id" | "updatedAt" | "updatedBy">>;
 
   export type SpecCurtainTemplate = {
@@ -1311,12 +1369,18 @@ In `scripts/test-review-regressions.ts` (this one has a database — it boots PG
 ```ts
 /* --- specs: template + curtain-template stores --- */
 {
-  const made = await SpecTemplates.seedStarterTemplates("Seed");
-  assert(made === SpecTemplates.STARTER_TEMPLATES.length, "templates: the first seed writes every starter");
-  const again = await SpecTemplates.seedStarterTemplates("Seed");
-  assert(again === 0, "templates: seeding twice writes nothing");
+  // getDb() awaits the dev auto-seed, which has ALREADY run
+  // seedStarterTemplates() by the time this block executes — so the first
+  // call here legitimately returns 0. Assert the end state, not the count.
+  await SpecTemplates.seedStarterTemplates("Seed");
   const all = await SpecTemplates.allTemplates();
-  assert(all.length === SpecTemplates.STARTER_TEMPLATES.length, "templates: the collection holds exactly the starters");
+  const ids = new Set(all.map((t) => t.id));
+  assert(
+    SpecTemplates.STARTER_TEMPLATES.every((t) => ids.has(SpecTemplates.templateId(t.key))),
+    "templates: after seeding, the collection holds every starter"
+  );
+  assert((await SpecTemplates.seedStarterTemplates("Seed")) === 0, "templates: seeding again writes nothing");
+  assert((await SpecTemplates.ensureStarterTemplates("Seed")) === 0, "templates: ensure is a no-op on a collection that already holds formulas");
 
   await SpecTemplates.saveTemplate({ key: "Fixtures", title: "Lighting Fixture", headings: [{ label: "X", guidance: "Y" }], rules: "R", example: "E" }, "Jeff");
   const edited = await SpecTemplates.getTemplate(SpecTemplates.templateId("Fixtures"));
@@ -1324,8 +1388,9 @@ In `scripts/test-review-regressions.ts` (this one has a database — it boots PG
   assert((await SpecTemplates.allTemplates()).length === all.length, "templates: saving an existing key adds no row");
   assert((await SpecTemplates.seedStarterTemplates("Seed")) === 0, "templates: re-seeding never overwrites an edited formula");
 
-  const curtains = await SpecCurtainTemplates.seedStarterCurtainTemplates("Seed");
-  assert(curtains === 4, "curtain templates: one starter per Grid curtain type");
+  await SpecCurtainTemplates.seedStarterCurtainTemplates("Seed");
+  const curtainIds = new Set((await SpecCurtainTemplates.allCurtainTemplates()).map((t) => t.id));
+  assert(["Border", "Leg", "Draw", "Full"].every((t) => curtainIds.has(t as never)), "curtain templates: one starter per Grid curtain type is present");
   const leg = await SpecCurtainTemplates.getCurtainTemplate("Leg");
   assert(!!leg && leg.id === "Leg", "curtain templates: the id is the curtain type");
   assert(!!leg && ["0", "50", "75", "100"].every((k) => !!leg.fullnessClauses[k as "0"]), "curtain templates: all four fullness clauses ship");
@@ -1334,12 +1399,19 @@ In `scripts/test-review-regressions.ts` (this one has a database — it boots PG
 }
 ```
 
-Add the two imports to that harness's import block (`import * as SpecTemplates from "@/lib/stores/spec-templates";` and the curtain equivalent), following whatever namespace-import style the surrounding lines use.
+`scripts/test-review-regressions.ts` has no namespace imports and pulls store modules in **inside** the block with a dynamic import (e.g. `:795` `const { get: getPart, mergeUpsert } = await import("@/lib/stores/catalog");`). Open the block the same way:
+
+```ts
+  const SpecTemplates = await import("@/lib/stores/spec-templates");
+  const SpecCurtainTemplates = await import("@/lib/stores/spec-curtain-templates");
+```
+
+The harness's `assert` is `node:assert/strict`'s default export, which is callable as `assert(cond, msg)`.
 
 - [ ] **Step 2: Run both to verify they fail**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
 PGLITE_PATH=$(mktemp -d) npx tsx scripts/test-review-regressions.ts
 ```
 Expected: both abort on the missing modules. Check `ps aux | grep tsx` afterwards and kill anything still alive.
@@ -1349,10 +1421,10 @@ Expected: both abort on the missing modules. Check `ps aux | grep tsx` afterward
 Create `src/lib/stores/spec-templates.ts`:
 
 ```ts
-import { getDoc, listDocs, upsertDoc, softDeleteDoc } from "@/db/doc-store";
+import { getDoc, listDocs, upsertDoc, softDeleteDoc, type Doc } from "@/db/doc-store";
 
 /**
- * Authoring formulas (D161). A template is not spec text — it is the shape of
+ * Authoring formulas (D-SPEC). A template is not spec text — it is the shape of
  * a spec entry for one kind of product: which headings to write, what to pull
  * from the cut sheet for each, and the phrasing rules. "Insert template" in
  * the part editor writes the headings as a scaffold into an empty body, and
@@ -1505,12 +1577,12 @@ export const STARTER_TEMPLATES: Array<Omit<SpecTemplate, "id" | "updatedAt" | "u
 ];
 
 export async function allTemplates(): Promise<SpecTemplate[]> {
-  const list = await listDocs<unknown>("spec_templates");
+  const list = await listDocs<Doc>("spec_templates");
   return list.map(normalize).sort((a, b) => a.key.localeCompare(b.key));
 }
 
 export async function getTemplate(id: string): Promise<SpecTemplate | null> {
-  const raw = await getDoc<unknown>("spec_templates", id);
+  const raw = await getDoc<Doc>("spec_templates", id);
   return raw ? normalize(raw) : null;
 }
 
@@ -1544,6 +1616,24 @@ export async function seedStarterTemplates(by = "Peak"): Promise<number> {
   }
   return made;
 }
+
+/**
+ * Owner decision (2026-09-25): the formulas auto-seed when empty on ANY
+ * environment — `seedIfEmpty()` only runs on local dev, and a hosted database
+ * (or one after a go-live reset) would otherwise show an empty Templates
+ * screen and an empty "Insert template" row. Seeds a collection only when it
+ * holds no live record at all, so deleting one formula does not bring it
+ * back; deleting every formula does (the Restore button is the explicit path).
+ * Called from read paths (server components), so it must not call
+ * revalidatePath. Cheap on the hot path: one listDocs per collection.
+ */
+export async function ensureStarterTemplates(by = "Peak"): Promise<number> {
+  const { allCurtainTemplates, seedStarterCurtainTemplates } = await import("@/lib/stores/spec-curtain-templates");
+  let made = 0;
+  if ((await allTemplates()).length === 0) made += await seedStarterTemplates(by);
+  if ((await allCurtainTemplates()).length === 0) made += await seedStarterCurtainTemplates(by);
+  return made;
+}
 ```
 
 - [ ] **Step 4: Write the curtain-template store**
@@ -1551,11 +1641,11 @@ export async function seedStarterTemplates(by = "Peak"): Promise<number> {
 Create `src/lib/stores/spec-curtain-templates.ts`:
 
 ```ts
-import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, upsertDoc, type Doc } from "@/db/doc-store";
 import { GRID_CURTAIN_TYPES, type GridCurtainType } from "@/lib/design/grid-bom";
 
 /**
- * One template per Grid curtain type (D161). The Grid mints SKU "CURTAIN" for
+ * One template per Grid curtain type (D-SPEC). The Grid mints SKU "CURTAIN" for
  * every curtain, so a curtain row can never match a catalog part — it resolves
  * to its type's template instead, and the placement's own configuration fills
  * the slots. The specimen's seven drape entries collapse into these four types
@@ -1631,12 +1721,12 @@ export const STARTER_CURTAIN_TEMPLATES: Array<Omit<SpecCurtainTemplate, "updated
 ];
 
 export async function allCurtainTemplates(): Promise<SpecCurtainTemplate[]> {
-  const list = await listDocs<unknown>("spec_curtain_templates");
+  const list = await listDocs<Doc>("spec_curtain_templates");
   return list.map(normalize).sort((a, b) => a.sort - b.sort || a.id.localeCompare(b.id));
 }
 
 export async function getCurtainTemplate(type: GridCurtainType): Promise<SpecCurtainTemplate | null> {
-  const raw = await getDoc<unknown>("spec_curtain_templates", type);
+  const raw = await getDoc<Doc>("spec_curtain_templates", type);
   return raw ? normalize(raw) : null;
 }
 
@@ -1664,21 +1754,23 @@ export async function seedStarterCurtainTemplates(by = "Peak"): Promise<number> 
 
 - [ ] **Step 5: Seed the formulas on every database**
 
-In `src/db/seed-data.ts`, inside `seedIfEmpty(db)` and **after** the settings row is ensured, add:
+In `src/db/seed-data.ts`, inside `seedIfEmpty(db)` and **after** the settings row is ensured, add — using the file's own dynamic-import idiom (see `:200`, `const { convertCustomersToIdentity } = await import("@/lib/identity/convert");`), not a top-of-file import: the store modules import `@/db/doc-store` → `@/db`, and `@/db` (`src/db/index.ts:90`) loads this file lazily on open, so a static import would pull the stores into module init:
 
 ```ts
   // The starter formulas are configuration, not demo data: DEMO_COLLECTIONS is
   // Object.keys(DOC_TABLES), so the go-live reset wipes spec_templates too.
   // Both seeds are idempotent by key, so this is safe on every open.
+  const { seedStarterTemplates } = await import("@/lib/stores/spec-templates");
+  const { seedStarterCurtainTemplates } = await import("@/lib/stores/spec-curtain-templates");
   await seedStarterTemplates();
   await seedStarterCurtainTemplates();
 ```
-with the two imports at the top of the file. Do **not** add either collection to `DEMO_SEEDS` — that array only runs when demo data is on.
+Do **not** add either collection to `DEMO_SEEDS` — that array only runs when demo data is on. This dev hook stays; hosted environments get their formulas from `ensureStarterTemplates()`, which Task 10 (Templates screen), Task 11 (`exportLibrary`) and Task 13 (catalog page load) call.
 
 - [ ] **Step 6: Run both harnesses, typecheck, commit**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
 PGLITE_PATH=$(mktemp -d) npx tsx scripts/test-review-regressions.ts
 npx tsc --noEmit -p .
 ps aux | grep tsx   # must be empty
@@ -1692,29 +1784,60 @@ git commit -m "feat(specs): authoring formulas and per-type curtain templates, s
 
 **Files:**
 - Modify: `src/lib/stores/catalog.ts` (the `CatalogPart` type only)
-- Modify: `src/lib/bid-spec.ts` (`PartSpecFields` becomes a `Pick<>`)
-- Modify: `src/app/(app)/catalog/actions.ts` (`model` on `upsertPart`; new `writePartSpecFieldsAction`)
-- Modify: `src/app/(app)/catalog/page.tsx` (a `model` input in the part form)
-- Test: `scripts/test-review-regressions.ts`
+- Modify: `src/lib/specs/articles.ts` (`hasPrintableSpec`, the legacy-pointer resolvers, read-time adoption in `articleIdForPart`)
+- Modify: `src/lib/bid-spec.ts` (`PartSpecFields` becomes a `Pick<>`; `matchBom` draft gate at `:99`)
+- Create: `src/app/(app)/catalog/part-form.ts` (pure: `validateSameAs`, `optionalPartFields`)
+- Modify: `src/app/(app)/catalog/actions.ts` (`upsertPart` at `:69-107` stops wiping unsubmitted fields; new `writePartSpecFieldsAction`)
+- Modify: `src/app/(app)/catalog/page.tsx` (Manufacturer P/N + M/N inputs in `PartFormModal`)
+- Create: `src/lib/specs/legacy-pointers.ts` (server — the one-shot adoption write)
+- Modify: `src/app/(app)/design/engagements/spec/actions.ts` (draft gating at `:88`, `:97-111`, and in `saveSpecAction`)
+- Modify: `src/lib/displays-api.ts` (`:71` and the metadata block), `src/app/api/v1/displays/specs/route.ts` (`:23`), `src/app/api/v1/displays/specs/[id]/route.ts` (`:16`), `src/app/api/v1/displays/catalog/route.ts`, `src/app/api/v1/displays/catalog/[sku]/route.ts`
+- Modify: `src/lib/client-package.ts` (`:103`)
+- Test: `scripts/test-review-and-spec.ts` (pure) and `scripts/test-review-regressions.ts` (database)
 
 **Interfaces:**
-- Consumes: `PartSpecState` and the resolution helpers from Task 4.
-- Produces: `CatalogPart` with `model?` and the eight spec fields; `writePartSpecFieldsAction(input): Promise<Result>` for Task 11's panel.
+- Consumes: `PartSpecState`, `articleIdForPart` and `normalizeCategoryKey` from Task 4.
+- Produces:
+  ```ts
+  // CatalogPart gains the spec fields below — NO `model` (decision 8).
+  // src/lib/specs/articles.ts — PURE additions
+  export function hasPrintableSpec(p: { specBody?: string; specState?: "authored" | "draft" } | null | undefined): boolean;
+  export type LegacySpecMetadata = { specSection?: string; specArticle?: string };
+  export function csiKey(s: string): string;
+  export function resolveSectionRef(ref: string | undefined, sections: SpecSection[]): string | null;
+  export function resolveArticleRef(ref: string | undefined, articles: SpecCategoryArticle[], sectionId: string | null): string | null;
+  export function adoptLegacySpecPointers(part: SpecPartLike, articles: SpecCategoryArticle[], sections: SpecSection[]): { specSectionId?: string; specArticleId?: string };
+  // SpecPartLike gains `productMetadata?: LegacySpecMetadata`.
+  // src/app/(app)/catalog/part-form.ts — PURE
+  export function validateSameAs(sku: string, sameAs: string, target: { sku: string; specSameAs?: string } | null): string | null;
+  export function optionalPartFields(fd: FormData): { manufacturerPartNumber?: string; manufacturerModelNumber?: string; mapPrice?: number };
+  // src/lib/specs/legacy-pointers.ts — server
+  export async function adoptAllLegacySpecPointers(): Promise<{ adopted: number; unresolved: number }>;
+  // src/app/(app)/catalog/actions.ts
+  export async function writePartSpecFieldsAction(input): Promise<Result>; // for Task 13's panel
+  // src/lib/displays-api.ts
+  export type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[] };
+  export function publicCatalogPart(part: CatalogPart & PartSpecFields, lib?: SpecLookup): …;
+  ```
 
 - [ ] **Step 1: Declare the fields**
 
 In `src/lib/stores/catalog.ts`, add to the `CatalogPart` type (keep each field's comment — these are the only documentation an importer or a future reader gets):
 
 ```ts
-  /** Manufacturer model number. Catalog SKUs are Peak's own ids, so the
-   *  table-style Model column needs the real one; it falls back to the SKU. */
-  model?: string;
-
-  /* --- Specs module (D161). All additive JSONB, no migration. --- */
+  /* --- Specs module (D-SPEC). All additive JSONB, no migration. ---
+   * These are the ONE canonical set (D-SPEC-5). productMetadata.specSection /
+   * .specArticle (Displays API, 2e284665) are legacy free text, adopted into
+   * specSectionId / specArticleId only when they resolve — see
+   * adoptLegacySpecPointers in src/lib/specs/articles.ts. A table-style Part 2
+   * prints manufacturerModelNumber → manufacturerPartNumber → sku as the
+   * model; there is no separate model field (D-SPEC-8). */
   /** The Part 2 category article this part's entry prints under. Replaces
-   *  D94's specSectionId, which is still read as a fallback. */
+   *  D94's specSectionId as the placement pointer. */
   specArticleId?: string;
-  /** D94's pointer, kept so old parts still resolve. Never written again. */
+  /** D94's pointer. Still read as a fallback. Written only as a MIRROR of the
+   *  effective article's section (so D94's assemble, which groups by it,
+   *  keeps placing the part) and by legacy-pointer adoption. */
   specSectionId?: string;
   /** Generic name printed as the entry heading, e.g. "COLOR MIXING LIGHT
    *  EMITTING DIODE PROFILE FIXTURE". */
@@ -1725,8 +1848,9 @@ In `src/lib/stores/catalog.ts`, add to the `CatalogPart` type (keep each field's
   specSameAs?: string;
   /** Order within the article. */
   specSort?: number;
-  /** draft = imported from the skill and not yet reviewed. Only "authored"
-   *  text ever prints. */
+  /** draft = imported and not yet reviewed. Only "authored" text ever
+   *  prints, anywhere (hasPrintableSpec). No state + a body = a D94 part,
+   *  which counts as authored. */
   specState?: "authored" | "draft";
   /** Provenance: "authored", "seed:northhs-2026-07-30", "skill:<date>". */
   specSource?: string;
@@ -1734,10 +1858,10 @@ In `src/lib/stores/catalog.ts`, add to the `CatalogPart` type (keep each field's
   specUpdatedBy?: string;
 ```
 
-In `src/lib/bid-spec.ts`, replace the `PartSpecFields` declaration with a `Pick<>` so `SpecCatalogPart = CatalogPart & PartSpecFields` stays assignable and every existing call site keeps compiling:
+In `src/lib/bid-spec.ts`, replace the `PartSpecFields` declaration (`:16-26`) with a `Pick<>` so `SpecCatalogPart = CatalogPart & PartSpecFields` stays assignable and every existing call site keeps compiling:
 
 ```ts
-/** Spec fields carried on a catalog part (D94, extended by D161). Declared on
+/** Spec fields carried on a catalog part (D94, extended by D-SPEC). Declared on
  *  CatalogPart itself now — this alias is kept so the D94 call sites read the
  *  same. */
 export type PartSpecFields = Pick<
@@ -1746,15 +1870,70 @@ export type PartSpecFields = Pick<
 >;
 ```
 
-- [ ] **Step 2: Carry `model` through the part form**
+- [ ] **Step 2: Stop the part modal wiping what it never showed**
 
-In `src/app/(app)/catalog/actions.ts`, add `model` to `upsertPart`'s `mergeUpsert` patch alongside `mfr` (the action is at `catalog/actions.ts:38-55`; its comment at 30-36 explains why the patch must stay a merge). In `src/app/(app)/catalog/page.tsx`'s `PartFormModal`, add a **Model** text input beside the existing Manufacturer input, `name="model"`, `defaultValue={part?.model ?? ""}`.
+Existing bug, fixed here because it is the same class as the spec-field hazard. `upsertPart` (`src/app/(app)/catalog/actions.ts:69-107`; its contract comment is `:44-67`) writes `manufacturerPartNumber`, `manufacturerModelNumber` and `mapPrice` on every save. `PartFormModal` (`catalog/page.tsx:593-881`) has no input for any of the three, so `formData.get(...)` is null. The first two are written as `undefined`, and `mapPrice` is written as `undefined` whenever the field is absent (`:103`). mergeUpsert treats an explicit `undefined` as "clear", so every modal save wipes all three.
+
+Create `src/app/(app)/catalog/part-form.ts` (pure — a `"use server"` file may only export async functions, and the harness cannot call session-gated actions, see `scripts/test-review-regressions.ts:1046-1048`):
+
+```ts
+/**
+ * Pure halves of catalog/actions.ts, so the harness can test them.
+ */
+
+function num(v: FormDataEntryValue | null): number {
+  const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * Fields the part modal may or may not render. A key the form did NOT submit
+ * stays out of the patch, so mergeUpsert keeps the stored value; a submitted
+ * blank clears it (an explicit undefined wins in mergeUpsert). Same rule
+ * upsertPart already applies to `ports`.
+ */
+export function optionalPartFields(fd: FormData): {
+  manufacturerPartNumber?: string;
+  manufacturerModelNumber?: string;
+  mapPrice?: number;
+} {
+  const text = (k: string) => String(fd.get(k) || "").trim() || undefined;
+  const out: { manufacturerPartNumber?: string; manufacturerModelNumber?: string; mapPrice?: number } = {};
+  if (fd.has("manufacturerPartNumber")) out.manufacturerPartNumber = text("manufacturerPartNumber");
+  if (fd.has("manufacturerModelNumber")) out.manufacturerModelNumber = text("manufacturerModelNumber");
+  if (fd.has("mapPrice")) out.mapPrice = num(fd.get("mapPrice"));
+  return out;
+}
+
+/** The same-as rules the Spec panel's save enforces. null = fine. */
+export function validateSameAs(
+  sku: string,
+  sameAs: string,
+  target: { sku: string; specSameAs?: string } | null
+): string | null {
+  const want = String(sameAs || "").trim();
+  if (!want) return null;
+  if (want.toUpperCase() === String(sku || "").trim().toUpperCase()) return "A part cannot be the same spec as itself.";
+  if (!target) return `Same spec as ${want} — no such part.`;
+  if ((target.specSameAs || "").trim()) {
+    return `${want} is itself a "same spec as" pointer — point at the part that holds the text.`;
+  }
+  return null;
+}
+```
+
+In `upsertPart`, replace the three lines `manufacturerPartNumber: …`, `manufacturerModelNumber: …` and `mapPrice: …` (`:101-103`) with one spread, `...optionalPartFields(formData),`, and import it from `./part-form`. In `PartFormModal`, add two text inputs beside the Manufacturer input (`:765-773`, the `label("Manufacturer")` block): **MFR P/N** (`name="manufacturerPartNumber"`, `defaultValue={part?.manufacturerPartNumber ?? ""}`) and **MFR M/N** (`name="manufacturerModelNumber"`, `defaultValue={part?.manufacturerModelNumber ?? ""}`), labelled with the same headers the import hub uses. Do not add a MAP input — the modal does not own MAP; preserve-when-omitted keeps it.
 
 - [ ] **Step 3: Add the spec write action**
 
-Append to `src/app/(app)/catalog/actions.ts`, following that file's existing `Result` idiom:
+Append to `src/app/(app)/catalog/actions.ts`. The file uses named imports (`get as getPart`, `mergeUpsert`, …) and its own `type Result` (`:16`) — there is no `Catalog` namespace:
 
 ```ts
+import { validateSameAs, optionalPartFields } from "./part-form";
+import { articleIdForPart } from "@/lib/specs/articles";
+import { allArticles } from "@/lib/stores/spec-articles";
+import { allSections } from "@/lib/stores/spec-sections";
+// …
 export async function writePartSpecFieldsAction(input: {
   sku: string;
   specArticleId?: string;
@@ -1763,30 +1942,34 @@ export async function writePartSpecFieldsAction(input: {
   specSameAs?: string;
   specSort?: number;
 }): Promise<Result> {
-  await requirePerm("create");
+  const user = await requirePerm("create"); // returns the user — no second requireUser()
   const sku = String(input.sku || "").trim();
   if (!sku) return { ok: false, error: "A part is required." };
-  const part = await Catalog.get(sku);
+  const part = await getPart(sku);
   if (!part) return { ok: false, error: `Part ${sku} not found.` };
 
   const sameAs = String(input.specSameAs || "").trim();
-  if (sameAs && sameAs.toUpperCase() === sku.toUpperCase()) {
-    return { ok: false, error: "A part cannot be the same spec as itself." };
-  }
-  if (sameAs) {
-    const target = await Catalog.get(sameAs);
-    if (!target) return { ok: false, error: `Same spec as ${sameAs} — no such part.` };
-    if ((target.specSameAs || "").trim()) {
-      return { ok: false, error: `${sameAs} is itself a "same spec as" pointer — point at the part that holds the text.` };
-    }
-  }
+  const sameAsError = validateSameAs(sku, sameAs, sameAs ? await getPart(sameAs) : null);
+  if (sameAsError) return { ok: false, error: sameAsError };
 
-  const user = await requireUser();
+  const [articles, sections] = await Promise.all([allArticles(), allSections()]);
+  const articleId = String(input.specArticleId || "").trim();
+  if (articleId && !articles.some((a) => a.id === articleId)) {
+    return { ok: false, error: "That article no longer exists — pick another." };
+  }
+  // D-SPEC-5 mirror: D94's assemble groups by specSectionId, so keep it equal
+  // to the section of the article this part will actually print under
+  // (explicit, else category default, else adopted legacy pointer). When
+  // nothing resolves, leave the stored specSectionId alone.
+  const effective = articleIdForPart({ ...part, specArticleId: articleId || undefined }, articles, sections);
+  const mirrorSectionId = articles.find((a) => a.id === effective)?.sectionId;
+
   try {
     // mergeUpsert, never upsert: the part carries ports, trade, pricing and
     // datasheet fields this action knows nothing about.
-    await Catalog.mergeUpsert(sku, {
-      specArticleId: String(input.specArticleId || "").trim() || undefined,
+    await mergeUpsert(sku, {
+      specArticleId: articleId || undefined,
+      ...(mirrorSectionId ? { specSectionId: mirrorSectionId } : {}),
       specTitle: String(input.specTitle || "").trim() || undefined,
       specBody: String(input.specBody || ""),
       specSameAs: sameAs || undefined,
@@ -1808,49 +1991,330 @@ export async function writePartSpecFieldsAction(input: {
 }
 ```
 
-Check the surrounding file for the exact names of the `Catalog` namespace import, `Result`, `requirePerm`, `requireUser` and `revalidatePath`, and match them.
+(`optionalPartFields` is imported for Step 2's `upsertPart` change; merge the two import lines.)
 
-- [ ] **Step 4: Write the regression assertions**
+- [ ] **Step 4: One set of spec pointers — adopt the Displays metadata (owner decision 1, D-SPEC-5)**
 
-In `scripts/test-review-regressions.ts`:
+**The mapping.** Commit 2e284665 stores free text under `productMetadata`. It arrives from the price-book importer (`catalog/import.ts:59-60`) or the import hub (`import/registry.ts:190-197`).
+
+| Legacy field | Example value | Canonical target | Rule |
+|---|---|---|---|
+| `productMetadata.specSection` | `"11 61 13"` | `specSectionId` | Adopt when the value is a live section **id**, or a CSI number matching exactly **one** live section. Compare with `csiKey`, which drops everything but letters and digits, so `"11-61-13"` = `"116113"`. |
+| `productMetadata.specArticle` | `"Stage Lighting Instruments"` | `specArticleId` | Adopt when the value is a live article **id**, or a title (case- and whitespace-insensitive) matching exactly **one** live article. The search is restricted to the part's section when that is known (canonical, or adopted in the same pass). An adopted article with no section also fills `specSectionId` with that article's section (the mirror). |
+| `productMetadata.specLanguageKey` | `"lighting.instrument"` | none | Research tag with no canonical counterpart. It stays in `productMetadata`, untouched. |
+
+Invariants: adoption only **fills an absent** canonical key. It never overwrites one, so an authored value always wins. It never deletes the legacy text. Running it twice is a no-op. Ambiguity never guesses: two sections sharing a number, or one title in two sections with no section known, adopt nothing.
+
+Add to `src/lib/specs/articles.ts` (pure). On `SpecPartLike` add `productMetadata?: LegacySpecMetadata;` — `CatalogPart.productMetadata` (`CatalogProductMetadata`) is structurally assignable, so no call site needs a cast:
 
 ```ts
-/* --- specs: part spec fields --- */
-{
-  await Catalog.upsert({ sku: "SPEC-1", desc: "Profile fixture", category: "Fixtures", unit: "ea", list: 100, cost: 50, mfr: "ETC", ports: [{ kind: "dmx", n: 1 }] } as never);
-  const before = await Catalog.get("SPEC-1");
-  assert(!!before?.ports?.length, "part spec: the fixture starts with ports");
+/* --- Legacy Displays metadata (D-SPEC-5) --- */
 
-  const r = await writePartSpecFieldsAction({ sku: "SPEC-1", specArticleId: "ar-fix", specTitle: "LED PROFILE FIXTURE", specBody: "Basis of Design: ETC ColorSource Spot" });
-  assert(r.ok, "part spec: the write succeeds");
-  const after = await Catalog.get("SPEC-1");
-  assert(after?.specTitle === "LED PROFILE FIXTURE", "part spec: the title lands");
-  assert(after?.specState === "authored" && after?.specSource === "authored", "part spec: saving stamps authored");
-  assert(!!after?.specUpdatedAt && !!after?.specUpdatedBy, "part spec: saving stamps who and when");
-  assert(!!after?.ports?.length, "part spec: mergeUpsert left ports alone");
-  assert(after?.list === 100 && after?.cost === 50, "part spec: mergeUpsert left pricing alone");
+/** What commit 2e284665 stored under productMetadata: free text, not ids. */
+export type LegacySpecMetadata = { specSection?: string; specArticle?: string };
 
-  const self = await writePartSpecFieldsAction({ sku: "SPEC-1", specSameAs: "SPEC-1" });
-  assert(!self.ok, "part spec: a part cannot be the same spec as itself");
-  const missing = await writePartSpecFieldsAction({ sku: "SPEC-1", specSameAs: "NOPE" });
-  assert(!missing.ok, "part spec: same-as to a missing SKU is refused at the action boundary");
+/** "11 61 13", "116113" and "11-61-13" are one CSI number. */
+export function csiKey(s: string): string {
+  return String(s || "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
 
-  await Catalog.upsert({ sku: "SPEC-2", desc: "Second", category: "Fixtures", unit: "ea", list: 1, cost: 1 } as never);
-  await writePartSpecFieldsAction({ sku: "SPEC-2", specSameAs: "SPEC-1" });
-  const chain = await writePartSpecFieldsAction({ sku: "SPEC-1", specSameAs: "SPEC-2" });
-  assert(!chain.ok, "part spec: pointing at a pointer is refused");
+/** A live section id, or a CSI number matching exactly ONE live section. */
+export function resolveSectionRef(ref: string | undefined, sections: SpecSection[]): string | null {
+  const r = String(ref || "").trim();
+  if (!r) return null;
+  if (sections.some((s) => s.id === r)) return r;
+  const key = csiKey(r);
+  if (!key) return null;
+  const hits = sections.filter((s) => csiKey(s.number) === key);
+  return hits.length === 1 ? hits[0].id : null;
+}
+
+/** A live article id, or a title matching exactly ONE live article — inside
+ *  `sectionId` when one is known. Ambiguity never guesses. */
+export function resolveArticleRef(
+  ref: string | undefined,
+  articles: SpecCategoryArticle[],
+  sectionId: string | null
+): string | null {
+  const r = String(ref || "").trim();
+  if (!r) return null;
+  if (articles.some((a) => a.id === r)) return r;
+  const key = normalizeCategoryKey(r);
+  const pool = sectionId ? articles.filter((a) => a.sectionId === sectionId) : articles;
+  const hits = pool.filter((a) => normalizeCategoryKey(a.title) === key);
+  return hits.length === 1 ? hits[0].id : null;
+}
+
+/**
+ * The canonical pointers the legacy metadata would FILL on this part. Never
+ * returns a key the part already holds (so it cannot overwrite an authored
+ * value, and applying its result twice is a no-op). `{}` = nothing to adopt.
+ */
+export function adoptLegacySpecPointers(
+  part: SpecPartLike,
+  articles: SpecCategoryArticle[],
+  sections: SpecSection[]
+): { specSectionId?: string; specArticleId?: string } {
+  const md = part.productMetadata || {};
+  const out: { specSectionId?: string; specArticleId?: string } = {};
+  let sectionId =
+    part.specSectionId && sections.some((s) => s.id === part.specSectionId) ? part.specSectionId : null;
+  if (!part.specSectionId) {
+    const s = resolveSectionRef(md.specSection, sections);
+    if (s) {
+      out.specSectionId = s;
+      sectionId = s;
+    }
+  }
+  if (!part.specArticleId) {
+    const a = resolveArticleRef(md.specArticle, articles, sectionId);
+    if (a) {
+      out.specArticleId = a;
+      if (!part.specSectionId && !out.specSectionId) {
+        out.specSectionId = articles.find((x) => x.id === a)!.sectionId;
+      }
+    }
+  }
+  return out;
 }
 ```
 
-If the harness runs without a signed-in user, `requirePerm` will redirect — follow whatever the surrounding regression blocks already do to call a permission-gated action (grep the file for `requirePerm` or for an existing action call), and if there is no precedent, call `Catalog.mergeUpsert` directly in the assertions and cover the action's validation branches by exporting a pure `validateSameAs(sku, sameAs, target)` helper from the actions file's sibling module instead. State in your report which route you took and why.
+Make `articleIdForPart` adopt at read time. The first line of its body becomes:
 
-- [ ] **Step 5: Run, typecheck, commit**
+```ts
+  // D-SPEC-5: legacy Displays text fills absent canonical pointers at read
+  // time, so the panel, coverage and Phase B are right before any write runs.
+  part = { ...part, ...adoptLegacySpecPointers(part, articles, sections) };
+```
+
+Every Task 4 assertion still holds, because none of those fixtures carries `productMetadata`.
+
+Create `src/lib/specs/legacy-pointers.ts` (server). This is the one-shot write, which Task 8 exposes as an **Adopt legacy pointers** button:
+
+```ts
+import { list as listCatalog, mergeUpsert } from "@/lib/stores/catalog";
+import { allSections } from "@/lib/stores/spec-sections";
+import { allArticles } from "@/lib/stores/spec-articles";
+import { adoptLegacySpecPointers } from "@/lib/specs/articles";
+
+/**
+ * D-SPEC-5, persisted. Fills absent canonical pointers from the Displays
+ * metadata so readers that do not adopt at read time (the Displays API, D94's
+ * assemble, the catalog export) see ids. Idempotent: a second run writes
+ * nothing. Never overwrites a canonical value and never deletes the legacy
+ * text. mergeUpsert stamps `updatedAt` on the parts it touches (correct — the
+ * Displays cursor should see them change); `pricedAt` does not move.
+ */
+export async function adoptAllLegacySpecPointers(): Promise<{ adopted: number; unresolved: number }> {
+  const [parts, sections, articles] = await Promise.all([listCatalog(), allSections(), allArticles()]);
+  let adopted = 0;
+  let unresolved = 0;
+  for (const p of parts) {
+    const md = p.productMetadata;
+    if (!md?.specSection && !md?.specArticle) continue;
+    const patch = adoptLegacySpecPointers(p, articles, sections);
+    if (Object.keys(patch).length) {
+      await mergeUpsert(p.sku, patch);
+      adopted++;
+    }
+    const after = { ...p, ...patch };
+    if ((md.specSection && !after.specSectionId) || (md.specArticle && !after.specArticleId)) unresolved++;
+  }
+  return { adopted, unresolved };
+}
+```
+
+**The Displays API reads the canonical fields.** In `src/lib/displays-api.ts`:
+
+- Export `type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[] }`, using type-only imports from `@/lib/specs/sections` and `@/lib/specs/articles`. Give `publicCatalogPart(part, lib?: SpecLookup)` and `publicProductMetadata(part, lib?)` an optional second parameter.
+- In `publicProductMetadata`, emit `specSection` as the CSI **number** of `part.specSectionId` (from `lib.sections`), falling back to `metadata.specSection`. Emit `specArticle` as the **title** of `part.specArticleId` (from `lib.articles`), falling back to `metadata.specArticle`. The response keeps the same keys and value kinds, so the external contract does not change, and the legacy text shows only where no canonical pointer exists. `specLanguageKey` is unchanged.
+- The `spec` object (`:71`) becomes `hasPrintableSpec(part) ? { sectionId: part.specSectionId || null, articleId: part.specArticleId || null, title: part.specTitle || null, body: part.specBody!.trim() } : null`. The fields are additive; `sectionId` and `body` keep their meaning.
+- In all four v1 routes (`displays/specs/route.ts`, `displays/specs/[id]/route.ts`, `displays/catalog/route.ts`, `displays/catalog/[sku]/route.ts`), load `const [sections, articles] = await Promise.all([allSections(), allArticles()])` after the auth and rate-limit checks. Call `publicCatalogPart(p, { sections, articles })`. **Replace `page.map(publicCatalogPart)` with `page.map((p) => publicCatalogPart(p, lib))`.** Passing the function directly would hand `map`'s index in as `lib`.
+- `src/app/api/displays/catalog/route.ts` (the pre-v1 route) passes `productMetadata` through verbatim and prints no spec body. Leave it alone and note that in the report.
+
+- [ ] **Step 5: Gate drafts in every existing consumer (owner decision 2, D-SPEC-6)**
+
+This overrides "leave the D94 actions alone" **for draft gating only**. Their `requireUser()` permission gates stay as they are.
+
+Add the predicate to `src/lib/specs/articles.ts` (pure — `bid-spec.ts` runs inside the client component `generator.tsx`, and `articles.ts` imports only a type from `sections.ts`):
+
+```ts
+/** THE print predicate (D-SPEC-6). Only authored text prints; a draft is
+ *  missing. A D94 part with a body and no specState predates drafts and
+ *  counts as authored. Every consumer that used to test `specBody?.trim()`
+ *  calls this instead. */
+export function hasPrintableSpec(
+  p: { specBody?: string; specState?: "authored" | "draft" } | null | undefined
+): boolean {
+  return !!p && !!(p.specBody || "").trim() && p.specState !== "draft";
+}
+```
+
+and make `specStateOf`'s last two lines read it, so the two can never disagree:
+
+```ts
+  if (!(part.specBody || "").trim()) return "missing";
+  return hasPrintableSpec(part) ? "authored" : "draft";
+```
+
+Then change each consumer:
+
+| File:line | Today | Change to |
+|---|---|---|
+| `src/lib/bid-spec.ts:99` (`matchBom`) | `direct.specBody?.trim() ? "ready" : "no-spec"` | `hasPrintableSpec(direct) ? "ready" : "no-spec"` |
+| `src/app/(app)/design/engagements/spec/actions.ts:88` (`remapRowAction`) | `part.specBody?.trim() ? … "ready" : … "no-spec"` | `hasPrintableSpec(part) ? … : …` |
+| same file `:97-111` (`writePartSpecAction`) | writes `specSectionId` + `specBody` only | Keep the `requireUser()` gate but capture it (`const user = await requireUser();`). Add `specState: "authored", specSource: "authored", specUpdatedAt: Date.now(), specUpdatedBy: user.name` to the object at `:109`. An inline D94 write is a human writing the text, which is the review step. Without this, a draft part edited in the generator would stay `no-spec` forever. |
+| same file, `saveSpecAction` (after the `unresolved` check) | trusts the client-sent `rows[].bucket` | Re-read the catalog: `const stored = new Map(((await listCatalog()) as SpecCatalogPart[]).map((p) => [p.sku.toLowerCase(), p]));`. Then refuse when any non-waived row's stored part fails `hasPrintableSpec`, with the error ``${n} item${n === 1 ? "" : "s"} no longer ha${n === 1 ? "s" : "ve"} approved spec text — re-run the match.``. A part can be demoted to draft (Task 14's importer) between match and save. |
+| `src/lib/displays-api.ts:71` | `part.specBody?.trim() ? {…} : null` | `hasPrintableSpec(part) ? {…} : null` (Step 4's shape) |
+| `src/app/api/v1/displays/specs/route.ts:23` | `.filter((part) => !!part.specBody?.trim())` | `.filter((part) => hasPrintableSpec(part))` |
+| `src/app/api/v1/displays/specs/[id]/route.ts:16` | `if (!part?.specBody?.trim())` → 404 | `if (!hasPrintableSpec(part))` → 404 |
+| `src/lib/client-package.ts:103` | `part.specSectionId && part.specBody?.trim()` | `part.specSectionId && hasPrintableSpec(part)`. The `body` at `:104` becomes `part.specBody!.trim()`. A draft is now a `missing-spec` gap. |
+
+`assemble` (`bid-spec.ts:165`) already skips everything but `bucket === "ready"`, and the bucket now comes from `hasPrintableSpec`. Leave it.
+
+- [ ] **Step 6: Write the tests**
+
+In `scripts/test-review-and-spec.ts` (pure). Add the imports to the top block: `hasPrintableSpec, csiKey, resolveSectionRef, resolveArticleRef, adoptLegacySpecPointers` join Task 4's `@/lib/specs/articles` import. Also add `import { validateSameAs, optionalPartFields } from "@/app/(app)/catalog/part-form";`, `import { publicCatalogPart } from "@/lib/displays-api";` and `import { buildClientPackageManifest } from "@/lib/client-package";`. `matchBom` is already imported at `:10`.
+
+```ts
+/* --- specs: draft gating (D-SPEC-6) --- */
+{
+  ok(hasPrintableSpec({ specBody: "Text.", specState: "authored" }), "gating: authored text prints");
+  ok(hasPrintableSpec({ specBody: "Text." }), "gating: a D94 body with no state prints");
+  ok(!hasPrintableSpec({ specBody: "Text.", specState: "draft" }), "gating: a draft never prints");
+  ok(!hasPrintableSpec({ specBody: "   " }) && !hasPrintableSpec(null), "gating: blank or absent never prints");
+
+  const drafty = { id: "DRAFTY", sku: "DRAFTY", desc: "Draft part", category: "Lighting", unit: "ea", list: 1, cost: 1, specSectionId: "ss-g", specBody: "Text.", specState: "draft" as const };
+  const authd = { id: "AUTHD", sku: "AUTHD", desc: "Authored part", category: "Lighting", unit: "ea", list: 1, cost: 1, specSectionId: "ss-g", specBody: "Text.", specState: "authored" as const };
+  const gated = matchBom([{ sku: "DRAFTY", desc: "x", qty: 1 }, { sku: "AUTHD", desc: "y", qty: 1 }], [drafty, authd] as any[]);
+  ok(gated.rows[0].bucket === "no-spec", "gating: matchBom files a draft as no-spec, never ready");
+  ok(gated.rows[1].bucket === "ready", "gating: matchBom still files authored text as ready");
+  ok(!gated.finalizable, "gating: a draft blocks finalize like a missing spec");
+
+  ok(publicCatalogPart(drafty as never).spec === null, "gating: the Displays API publishes no spec for a draft");
+  const pub = publicCatalogPart(
+    { ...authd, specArticleId: "ar-g", productMetadata: { specSection: "legacy text" } } as never,
+    { sections: [{ id: "ss-g", number: "26 55 61", title: "Fixtures", sort: 1, part1: [], part3: [], part2Style: "paragraphs", quantities: "drawings", updatedAt: 1, updatedBy: "t" }],
+      articles: [{ id: "ar-g", sectionId: "ss-g", sort: 1, title: "LED Fixtures", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" }] }
+  );
+  ok(pub.spec?.body === "Text." && pub.spec?.articleId === "ar-g", "displays: authored text publishes with its canonical pointers");
+  ok(pub.productMetadata?.specSection === "26 55 61", "displays: specSection reads the canonical section's number over the legacy text");
+  ok(pub.productMetadata?.specArticle === "LED Fixtures", "displays: specArticle reads the canonical article's title");
+
+  const manifest = buildClientPackageManifest(
+    { id: "GRD-T", name: "T", createdAt: 1, quoteId: null,
+      options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
+      placements: [{ id: "gp-a", optionId: "opt-a", partId: "DRAFTY" }, { id: "gp-b", optionId: "opt-a", partId: "AUTHD" }] } as never,
+    [drafty, authd] as never,
+    "opt-a"
+  );
+  ok(manifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "DRAFTY"), "gating: the client package reports a draft as a missing spec");
+  ok(!manifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "AUTHD"), "gating: an authored part is not a spec gap");
+}
+
+/* --- specs: legacy Displays pointers (D-SPEC-5) --- */
+{
+  const secs = [
+    { id: "ss-a", number: "11 61 13", title: "A", sort: 1, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+    { id: "ss-b", number: "26 55 61", title: "B", sort: 2, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+    { id: "ss-d1", number: "27 41 16", title: "Dup 1", sort: 3, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+    { id: "ss-d2", number: "27-41-16", title: "Dup 2", sort: 4, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
+  ];
+  const arts = [
+    { id: "ar-a", sectionId: "ss-a", sort: 1, title: "Stage Lighting Instruments", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" },
+    { id: "ar-b", sectionId: "ss-b", sort: 1, title: "Stage Lighting Instruments", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" },
+    { id: "ar-c", sectionId: "ss-b", sort: 2, title: "Fixtures", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" },
+  ];
+  ok(csiKey("11-61-13") === csiKey("116113"), "legacy: CSI numbers compare without punctuation");
+  ok(resolveSectionRef("11 61 13", secs) === "ss-a", "legacy: a CSI number resolves to its one section");
+  ok(resolveSectionRef("ss-b", secs) === "ss-b", "legacy: a section id resolves to itself");
+  ok(resolveSectionRef("27 41 16", secs) === null, "legacy: a number two sections share never guesses");
+  ok(resolveSectionRef("Stage stuff", secs) === null, "legacy: unresolvable text resolves to nothing");
+  ok(resolveArticleRef("stage lighting instruments", arts, null) === null, "legacy: a title in two sections is ambiguous without a section");
+  ok(resolveArticleRef("Stage Lighting Instruments", arts, "ss-a") === "ar-a", "legacy: the section narrows the title");
+
+  const both = adoptLegacySpecPointers({ sku: "L1", productMetadata: { specSection: "11 61 13", specArticle: "Stage Lighting Instruments" } }, arts, secs);
+  ok(both.specSectionId === "ss-a" && both.specArticleId === "ar-a", "legacy: section and article both adopt");
+  ok(
+    Object.keys(adoptLegacySpecPointers({ sku: "L2", specSectionId: "ss-b", specArticleId: "ar-c", productMetadata: { specSection: "11 61 13", specArticle: "Stage Lighting Instruments" } }, arts, secs)).length === 0,
+    "legacy: a canonical value is never overwritten"
+  );
+  const onlyArt = adoptLegacySpecPointers({ sku: "L3", productMetadata: { specArticle: "Fixtures" } }, arts, secs);
+  ok(onlyArt.specArticleId === "ar-c" && onlyArt.specSectionId === "ss-b", "legacy: an adopted article mirrors its section");
+  ok(Object.keys(adoptLegacySpecPointers({ sku: "L4", productMetadata: { specSection: "Stage stuff" } }, arts, secs)).length === 0, "legacy: unresolvable text stays legacy");
+  ok(
+    Object.keys(adoptLegacySpecPointers({ sku: "L5", productMetadata: { specSection: "11 61 13", specArticle: "Stage Lighting Instruments" }, ...both }, arts, secs)).length === 0,
+    "legacy: adopting twice is a no-op"
+  );
+  ok(articleIdForPart({ sku: "L6", productMetadata: { specArticle: "Fixtures" } }, arts, secs) === "ar-c", "legacy: articleIdForPart adopts at read time");
+  ok(articleIdForPart({ sku: "L7", specArticleId: "ar-a", productMetadata: { specArticle: "Fixtures" } }, arts, secs) === "ar-a", "legacy: an explicit article beats the legacy text");
+}
+
+/* --- specs: part form + same-as --- */
+{
+  ok(validateSameAs("A", "", null) === null, "same-as: blank is fine");
+  ok((validateSameAs("A", "a", null) || "").includes("itself"), "same-as: a part cannot point at itself");
+  ok((validateSameAs("A", "NOPE", null) || "").includes("NOPE"), "same-as: a missing target is named");
+  ok((validateSameAs("A", "B", { sku: "B", specSameAs: "C" }) || "").includes("pointer"), "same-as: pointing at a pointer is refused");
+  ok(validateSameAs("A", "B", { sku: "B" }) === null, "same-as: pointing at a part with text is fine");
+
+  const fd = new FormData();
+  fd.set("sku", "X");
+  ok(Object.keys(optionalPartFields(fd)).length === 0, "part form: unsubmitted manufacturer numbers and MAP stay out of the patch");
+  fd.set("manufacturerPartNumber", " 7060A ");
+  fd.set("manufacturerModelNumber", "");
+  const o = optionalPartFields(fd);
+  ok(o.manufacturerPartNumber === "7060A", "part form: a submitted P/N is trimmed");
+  ok("manufacturerModelNumber" in o && o.manufacturerModelNumber === undefined, "part form: a submitted blank M/N clears it");
+}
+```
+
+The client-package fixture passes `as never`, as the grid-options block does (`:4625`). If `buildClientPackageManifest` needs another project field to run, add that field rather than weakening the assertion.
+
+In `scripts/test-review-regressions.ts` (database). Use the harness's dynamic-import idiom inside the block:
+
+```ts
+/* --- specs: part spec fields + legacy adoption --- */
+{
+  const { get: getPart, upsert, mergeUpsert } = await import("@/lib/stores/catalog");
+  const { createSection } = await import("@/lib/stores/spec-sections");
+  const { createArticle } = await import("@/lib/stores/spec-articles");
+  const { adoptAllLegacySpecPointers } = await import("@/lib/specs/legacy-pointers");
+
+  await upsert({ sku: "SPEC-1", desc: "Profile fixture", category: "Fixtures", unit: "ea", list: 100, cost: 50, mfr: "ETC", manufacturerPartNumber: "7060A", mapPrice: 90, ports: [{ kind: "dmx", n: 1 }] } as never);
+  // The action's body minus the session gate (requirePerm cannot run here — :1046-1048).
+  await mergeUpsert("SPEC-1", { specArticleId: "ar-fix", specTitle: "LED PROFILE FIXTURE", specBody: "Basis of Design: ETC ColorSource Spot", specState: "authored", specSource: "authored", specUpdatedAt: Date.now(), specUpdatedBy: "Tester" });
+  const after = await getPart("SPEC-1");
+  assert(after?.specTitle === "LED PROFILE FIXTURE" && after?.specState === "authored", "part spec: the fields land");
+  assert(!!after?.ports?.length, "part spec: mergeUpsert left ports alone");
+  assert(after?.list === 100 && after?.cost === 50 && after?.mapPrice === 90 && after?.manufacturerPartNumber === "7060A", "part spec: pricing and manufacturer numbers are untouched");
+
+  const sec = await createSection({ number: "99 01 13", title: "Legacy Adoption Test", by: "Tester" });
+  const art = await createArticle({ sectionId: sec.id, title: "Legacy Instruments" }, "Tester");
+  await upsert({ sku: "LEG-1", desc: "Legacy one", category: "X", unit: "ea", list: 1, cost: 1, productMetadata: { specSection: "99-01-13", specArticle: "legacy instruments" } } as never);
+  await upsert({ sku: "LEG-2", desc: "Legacy two", category: "X", unit: "ea", list: 1, cost: 1, specArticleId: "ar-authored", productMetadata: { specArticle: "Legacy Instruments" } } as never);
+  const first = await adoptAllLegacySpecPointers();
+  const leg1 = await getPart("LEG-1");
+  assert(leg1?.specSectionId === sec.id && leg1?.specArticleId === art.id, "legacy: resolvable Displays text lands in the canonical pointers");
+  assert(leg1?.productMetadata?.specSection === "99-01-13", "legacy: the Displays text itself is kept");
+  assert((await getPart("LEG-2"))?.specArticleId === "ar-authored", "legacy: adoption never overwrites a canonical value");
+  assert(first.adopted >= 1, "legacy: the first run reports what it adopted");
+  assert((await adoptAllLegacySpecPointers()).adopted === 0, "legacy: a second run writes nothing");
+}
+```
+
+- [ ] **Step 7: Run, typecheck, commit**
 
 ```bash
+npm run test:specs
 PGLITE_PATH=$(mktemp -d) npx tsx scripts/test-review-regressions.ts
 npx tsc --noEmit -p .
-git add src/lib/stores/catalog.ts src/lib/bid-spec.ts src/app/\(app\)/catalog/actions.ts src/app/\(app\)/catalog/page.tsx scripts/test-review-regressions.ts
-git commit -m "feat(specs): catalog parts carry model and their own approved spec language"
+ps aux | grep tsx   # must be empty
+git add src/lib/stores/catalog.ts src/lib/specs/articles.ts src/lib/specs/legacy-pointers.ts src/lib/bid-spec.ts \
+  "src/app/(app)/catalog/part-form.ts" "src/app/(app)/catalog/actions.ts" "src/app/(app)/catalog/page.tsx" \
+  "src/app/(app)/design/engagements/spec/actions.ts" src/lib/displays-api.ts src/app/api/v1/displays src/lib/client-package.ts \
+  scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
+git commit -m "feat(specs): parts carry one canonical set of spec fields; drafts never print anywhere"
 ```
 
 ---
@@ -1861,6 +2325,7 @@ git commit -m "feat(specs): catalog parts carry model and their own approved spe
 - Create: `src/lib/specs/curtains.ts` (pure)
 - Modify: `src/lib/design/grid-bom.ts` (one optional field on `GridCurtain`)
 - Modify: `src/app/(app)/design/grid/[id]/curtain-drop.tsx` (one optional input)
+- Modify: `src/app/(app)/design/grid/[id]/actions.ts` (`placeCurtainAction`, `:294-350` — carry `color` through its whitelist)
 - Test: `scripts/test-review-and-spec.ts`
 
 **Interfaces:**
@@ -1932,7 +2397,7 @@ import { fullnessKey, curtainGroupKey, fillCurtainTemplate } from "@/lib/specs/c
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails.** `npx tsx scripts/test-review-and-spec.ts` — aborts on the missing module.
+- [ ] **Step 2: Run to verify it fails.** `npm run test:specs` — aborts on the missing module.
 
 - [ ] **Step 3: Add the colour to the placement**
 
@@ -2020,14 +2485,22 @@ export function fillCurtainTemplate(
 
 - [ ] **Step 5: Offer the colour in the curtain modal**
 
-In `src/app/(app)/design/grid/[id]/curtain-drop.tsx`, add an optional **Color** text input to the form, placed after the fabric picker and before the confirm row, labelled `Color (optional)` with placeholder `Black`. Carry its value into the object the component passes to `onConfirm`, as `color: value.trim() || undefined`. Leave every existing field, the fullness picker and the pricing preview untouched — nothing about the BOM or a curtain's price may change in this task. Verify by reading `editor.tsx`'s `<CurtainDrop` call site (around line 2169) that `onConfirm`'s parameter type flows from `GridCurtain`, so the new field needs no separate prop plumbing; if it does not, widen the callback's type rather than casting.
+In `src/app/(app)/design/grid/[id]/curtain-drop.tsx`, add an optional **Color** text input to the form, placed after the fabric picker and before the confirm row, labelled `Color (optional)` with placeholder `Black`. Carry its value into the draft the component passes to `onConfirm`, as `color: value.trim() || undefined`. Leave every existing field, the fullness picker and the pricing preview untouched — nothing about the BOM or a curtain's price may change in this task. `onConfirm` is typed `(curtain: GridCurtain) => void` (`curtain-drop.tsx:69`), so once Step 3 adds `color?` to `GridCurtain` the field flows to the `<CurtainDrop` call site (`editor.tsx:2230`) with no prop plumbing.
+
+**The server drops it unless you carry it.** `placeCurtainAction` (`src/app/(app)/design/grid/[id]/actions.ts:294-350`) whitelists the curtain's fields twice: its `input.curtain` type (`:301-308`) and the `GridCurtain` it builds (`:334-341`). Add `color?: string;` to the input type, and add one line to the built object:
+
+```ts
+    color: (c.color || "").trim().slice(0, 40) || undefined,
+```
+
+(40 characters matches the `category` clamp at `:348`.) The editor's `dropCurtain` (`editor.tsx:1009-1024`) already passes the whole `GridCurtain` through, so nothing else changes on the client.
 
 - [ ] **Step 6: Run, typecheck, commit**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
 npx tsc --noEmit -p .
-git add src/lib/specs/curtains.ts src/lib/design/grid-bom.ts src/app/\(app\)/design/grid/\[id\]/curtain-drop.tsx scripts/test-review-and-spec.ts
+git add src/lib/specs/curtains.ts src/lib/design/grid-bom.ts "src/app/(app)/design/grid/[id]/curtain-drop.tsx" "src/app/(app)/design/grid/[id]/actions.ts" scripts/test-review-and-spec.ts
 git commit -m "feat(specs): curtain templates fill from the placement, which now carries an optional colour"
 ```
 
@@ -2045,7 +2518,9 @@ git commit -m "feat(specs): curtain templates fill from the placement, which now
 - Consumes: the four stores from Tasks 3-5.
 - Produces: the server actions every later screen calls.
 
-**Idiom to follow:** `src/app/(app)/vendors/page.tsx` (server component: `requireUser()`, parallel `Promise.all` loads, `searchParams` awaited) and `src/app/(app)/vendors/[id]/overview-tab.tsx` (client: `useTransition`, `run()` helper, `{ok:false}` rendered as an error line under the control). Read both before writing.
+**Idiom to follow:** `src/app/(app)/vendors/page.tsx` (server component: `requireUser()`, parallel `Promise.all` loads, `searchParams` awaited) and `src/app/(app)/vendors/[id]/overview-tab.tsx` (client: `const [pending, start] = useTransition()`, `{ok:false}` rendered as an error line under the control). There is no shared `run()` helper: `overview-tab.tsx:62` defines `run` as a **local closure** over `start` that clears the error, awaits the action, sets the error on `{ok:false}` and `router.refresh()`es on success. Write the same local closure in each client component that needs one. Read both files before writing.
+
+**Names.** `src/app/(app)/design/engagements/spec/actions.ts` (D94) already exports `createSectionAction`, `updateSectionAction` and `seedSectionsAction`. Two server-action modules with the same export names compile, but they make every import and every stack trace ambiguous. This module's section actions are therefore `createLibrarySectionAction`, `saveLibrarySectionAction`, `seedLibrarySectionsAction` and `removeLibrarySectionAction`. The article, template and curtain names below collide with nothing.
 
 - [ ] **Step 1: The redirect**
 
@@ -2077,6 +2552,8 @@ import * as Sections from "@/lib/stores/spec-sections";
 import * as Articles from "@/lib/stores/spec-articles";
 import * as Templates from "@/lib/stores/spec-templates";
 import * as Curtains from "@/lib/stores/spec-curtain-templates";
+import { list as listCatalog } from "@/lib/stores/catalog";
+import { adoptAllLegacySpecPointers } from "@/lib/specs/legacy-pointers";
 import type { SpecArticle, SpecPart2Style, SpecQuantities } from "@/lib/specs/sections";
 
 type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
@@ -2086,7 +2563,7 @@ function revalidate(sectionId?: string) {
   if (sectionId) revalidatePath(`/design/specs/library/${sectionId}`);
 }
 
-export async function createSectionAction(input: { number: string; title: string; sort?: number }): Promise<Result<{ id: string }>> {
+export async function createLibrarySectionAction(input: { number: string; title: string; sort?: number }): Promise<Result<{ id: string }>> {
   const user = await requirePerm("create");
   const number = String(input.number || "").trim();
   const title = String(input.title || "").trim();
@@ -2097,12 +2574,12 @@ export async function createSectionAction(input: { number: string; title: string
     revalidate();
     return { ok: true, id: rec.id };
   } catch (e) {
-    console.error("createSectionAction", e);
+    console.error("createLibrarySectionAction", e);
     return { ok: false, error: "Could not create the section. Try again." };
   }
 }
 
-export async function updateSectionAction(
+export async function saveLibrarySectionAction(
   id: string,
   patch: { number?: string; title?: string; sort?: number; part1?: SpecArticle[]; part3?: SpecArticle[]; part2Style?: SpecPart2Style; quantities?: SpecQuantities }
 ): Promise<Result> {
@@ -2113,12 +2590,16 @@ export async function updateSectionAction(
     revalidate(id);
     return { ok: true };
   } catch (e) {
-    console.error("updateSectionAction", e);
+    console.error("saveLibrarySectionAction", e);
     return { ok: false, error: "Could not save the section. Try again." };
   }
 }
 
-export async function seedSectionsAction(): Promise<Result<{ made: number }>> { /* Sections.seedStarterSections, same shape */ }
+export async function seedLibrarySectionsAction(): Promise<Result<{ made: number }>> { /* Sections.seedStarterSections, same shape */ }
+
+export async function removeLibrarySectionAction(id: string): Promise<Result> { /* Sections.removeSection — refuses first, see below */ }
+
+export async function adoptLegacyPointersAction(): Promise<Result<{ adopted: number; unresolved: number }>> { /* adoptAllLegacySpecPointers() (Task 6), same shape; revalidate() + revalidatePath("/catalog") */ }
 
 export async function createArticleAction(input: { sectionId: string; title: string; sort?: number }): Promise<Result<{ id: string }>> { /* Articles.createArticle */ }
 
@@ -2138,15 +2619,17 @@ export async function seedTemplatesAction(): Promise<Result<{ made: number }>> {
 export async function saveCurtainTemplateAction(input: { id: string; articleId: string; sort: number; title: string; body: string; fullnessClauses: Record<string, string>; hang: string; defaultColor: string }): Promise<Result> { /* Curtains.saveCurtainTemplate */ }
 ```
 
-Write out every one of the stubbed bodies in full, each exactly like `createSectionAction`: validate the required strings, wrap the store call in try/catch, `console.error` with the action's name, return a plain-English error, `revalidate()` the affected paths on success. `deleteArticleAction` additionally refuses when any catalog part still points at the article:
+Write out every one of the stubbed bodies in full, each exactly like `createLibrarySectionAction`: validate the required strings, wrap the store call in try/catch, `console.error` with the action's name, return a plain-English error, `revalidate()` the affected paths on success. `deleteArticleAction` additionally refuses when any catalog part still points at the article:
 
 ```ts
-  const parts = await Catalog.list();
+  const parts = await listCatalog();
   const used = parts.filter((p) => p.specArticleId === id);
   if (used.length) {
     return { ok: false, error: `${used.length} part${used.length === 1 ? "" : "s"} still print under this article — move them first.` };
   }
 ```
+
+`removeLibrarySectionAction` (the delete the owner asked for on every record — Task 3's `removeSection`) refuses the same way, checking two things before it deletes. First, any catalog part whose `specSectionId` is this section: report the count, as in `${n} part${n === 1 ? "" : "s"} still print in this section — move them first.`. Second, any category article under it (`Articles.articlesForSection(id)`): `This section still holds ${n} Part 2 article${n === 1 ? "" : "s"} — delete or move them first.`. Only when both counts are zero does it call `Sections.removeSection(id)`, `revalidate()`, and return `{ ok: true }`. Task 9 surfaces it through `ConfirmButton`.
 
 - [ ] **Step 3: The library index**
 
@@ -2169,12 +2652,13 @@ export default async function SpecLibraryPage({ searchParams }: { searchParams: 
 It renders, in this order:
 
 1. A page header: `Spec library`, a one-line explainer (`Sections, the Part 2 articles inside them, and which catalog parts have approved language.`), and links to **Templates** (`/design/specs/templates`) and **Import / Export** (Task 11's controls).
-2. A **Sections** table — number, title, how many Part 1 and Part 3 articles it has, its Part 2 style, its quantities policy, and how many category articles sit under it. Each row links to `/design/specs/library/<id>`. Above it, an **+ Add section** inline form (number, title, sort) calling `createSectionAction`, and, only when there are no sections at all, an **Add the starter sections** button calling `seedSectionsAction`.
+2. A **Sections** table — number, title, how many Part 1 and Part 3 articles it has, its Part 2 style, its quantities policy, and how many category articles sit under it. Each row links to `/design/specs/library/<id>`. Above it, an **+ Add section** inline form (number, title, sort) calling `createLibrarySectionAction`, and, only when there are no sections at all, an **Add the starter sections** button calling `seedLibrarySectionsAction`.
 3. A **Part 2 articles** table grouped by section — article title, the number it will print as (`2.1`, `2.2`… computed from its position in its section's `sort` order), its manufacturers joined with `·`, its category keys as chips, and a count of parts that resolve to it. Each row links to its section editor.
 4. Task 12's coverage table (leave a clearly-marked mount point; that task fills it).
 5. Task 11's import/export controls (same).
+6. A **Displays metadata** card, rendered only while at least one part carries legacy `productMetadata.specSection`/`.specArticle` text with no canonical pointer. Compute the count on the page from the `parts` already loaded. It explains in one line that these are research pointers from the Displays API that have not been linked to the library yet (the panel and coverage already read them), and offers an **Adopt legacy pointers** button calling `adoptLegacyPointersAction`. The button reports `Linked 12 parts · 3 left as text (no single matching section or article).`. It is idempotent: it only fills canonical pointers that are empty, so clicking it twice is harmless (D-SPEC-5).
 
-`controls.tsx` is `"use client"` and holds the add-section form and the seed button. Use `useTransition`, disable the control while pending, and render `{ok:false}`'s `error` as a line under the form — never a toast, never a silent failure. Follow `src/app/(app)/vendors/controls.tsx` for the exact shape.
+`controls.tsx` is `"use client"` and holds the add-section form, the seed button and the adopt button. Use `useTransition`, disable the control while pending, and render `{ok:false}`'s `error` as a line under the form — never a toast, never a silent failure. Follow `src/app/(app)/vendors/controls.tsx` for the exact shape.
 
 - [ ] **Step 4: Verify by hand**
 
@@ -2201,7 +2685,7 @@ git commit -m "feat(specs): the Specs module shell — library index, section an
 - Create: `src/app/(app)/design/specs/library/[sectionId]/editor.tsx`
 
 **Interfaces:**
-- Consumes: `updateSectionAction`, `createArticleAction`, `updateArticleAction`, `deleteArticleAction` (Task 8); `renderBody` / `outlineToText` (Task 1).
+- Consumes: `saveLibrarySectionAction`, `removeLibrarySectionAction`, `createArticleAction`, `updateArticleAction`, `deleteArticleAction` (Task 8); `renderBody` / `outlineToText` (Task 1); `ConfirmButton` (`src/components/confirm-button.tsx`).
 - Produces: nothing new.
 
 - [ ] **Step 1: The server component**
@@ -2210,12 +2694,23 @@ git commit -m "feat(specs): the Specs module shell — library index, section an
 
 - [ ] **Step 2: The client editor**
 
-`editor.tsx` is `"use client"` and has four regions:
+`editor.tsx` is `"use client"` and has four regions plus the section delete:
 
-1. **Header card** — number, title and sort as inputs; two selects, `Part 2 style` (`paragraphs` / `table`) and `Quantities` (`drawings` — "per drawings and schedules" — / `inline` — "printed on each entry"); a **Save** button calling `updateSectionAction`. Each select carries a one-line explainer beneath it; a reviewer must be able to tell what the choice does without opening the spec.
-2. **Part 1 — General** and **Part 3 — Execution**: an ordered list of articles, each a title input (placeholder `SUBMITTALS`) and a body textarea (`rows={8}`, monospace via the `pk-mono` class so indentation is legible). Controls per article: move up, move down, remove. An **+ Add article** button appends `{ id: newArticleId(), title: "", body: "" }`. The whole array is sent on **Save** through `updateSectionAction(id, { part1 })` — the editor owns the array; there is no per-article endpoint.
+1. **Header card** — number, title and sort as inputs; two selects, `Part 2 style` (`paragraphs` / `table`) and `Quantities` (`drawings` — "per drawings and schedules" — / `inline` — "printed on each entry"); a **Save** button calling `saveLibrarySectionAction`. Each select carries a one-line explainer beneath it; a reviewer must be able to tell what the choice does without opening the spec.
+2. **Part 1 — General** and **Part 3 — Execution**: an ordered list of articles, each a title input (placeholder `SUBMITTALS`) and a body textarea (`rows={8}`, monospace via the `pk-mono` class so indentation is legible). Controls per article: move up, move down, remove. **Remove** is a `ConfirmButton` (`label="Remove"`, `confirmLabel="Remove article"`) whose `onConfirm` drops the article from local state. The removal only persists on **Save**, but a titled article with a long body is too much to lose to one stray click. An **+ Add article** button appends `{ id: newArticleId(), title: "", body: "" }`. The whole array is sent on **Save** through `saveLibrarySectionAction(id, { part1 })` — the editor owns the array; there is no per-article endpoint.
 3. **Live preview** beside each body: run `renderBody(body, { context: "article", placeholders: { section: { number, title }, manufacturers: [], articles: [] } })`, render `outlineToText(lines, "  ")` in a `<pre>`, and list `warnings` beneath it in the muted style. Recompute on change with `useMemo` — this is pure and cheap, no debounce needed.
-4. **Part 2 — category articles**: one card per article with title, sort, a manufacturers editor (one per line in a textarea, split on newline, blanks dropped), a category-keys editor (comma-separated), and a `general` body textarea with its own preview, this time passing `manufacturers` so `{{manufacturers}}` renders. Each card's **Save** calls `updateArticleAction`; **Remove** calls `deleteArticleAction` and surfaces the "parts still print under this article" refusal verbatim.
+4. **Part 2 — category articles**: one card per article with title, sort, a manufacturers editor (one per line in a textarea, split on newline, blanks dropped), a category-keys editor (comma-separated), and a `general` body textarea with its own preview, this time passing `manufacturers` so `{{manufacturers}}` renders. Each card's **Save** calls `updateArticleAction`. **Remove** is a `ConfirmButton` whose `onConfirm` is:
+
+   ```tsx
+   async () => {
+     const r = await deleteArticleAction(article.id);
+     if (!r.ok) throw new Error(r.error); // ConfirmButton renders the thrown message — "3 parts still print under this article — move them first."
+     router.refresh();
+   }
+   ```
+
+   Returning `r` without throwing would swallow the refusal (Global Constraints).
+5. **Delete section** — a `ConfirmButton` in the header card (`label="Delete section"`, `confirmLabel="Delete this section"`), calling `removeLibrarySectionAction(section.id)` with the same throw-on-`{ok:false}` shape. It surfaces Task 8's two refusals verbatim: parts still in the section, or Part 2 articles still under it. On success, `router.push("/design/specs/library")`.
 
 State rule, learned from PUNCHLIST #141: do **not** key this component on `section.updatedAt`. Seed `useState` from props once, and after a successful save call `router.refresh()` without discarding the user's in-progress edits in the other regions.
 
@@ -2242,7 +2737,7 @@ git commit -m "feat(specs): section editor — titled Part 1/Part 3 articles, st
 
 - [ ] **Step 1: The list**
 
-`templates/page.tsx` — `requireUser()`, `Templates.allTemplates()` and `Curtains.allCurtainTemplates()` in one `Promise.all`. Renders a table of formulas (key, title, heading count, whether an example is written, when and by whom it was last saved), each linking to `/design/specs/templates/<id>`; then a second table of the four curtain templates, each linking to `/design/specs/templates/curtain-<type>`. A **Restore starter templates** button calls `seedTemplatesAction` and reports `made` ("Added 6 formulas" / "Everything was already there") — this is the after-a-go-live-reset path, so say plainly that it never overwrites an edited formula.
+`templates/page.tsx` — `requireUser()`, then `await Templates.ensureStarterTemplates()` (owner decision 4 — a hosted database, or one after a go-live reset, never shows an empty screen; it writes only when a collection holds no live record, and it must not call `revalidatePath` from render), then `Templates.allTemplates()` and `Curtains.allCurtainTemplates()` in one `Promise.all`. Renders a table of formulas (key, title, heading count, whether an example is written, when and by whom it was last saved), each linking to `/design/specs/templates/<id>`; then a second table of the four curtain templates, each linking to `/design/specs/templates/curtain-<type>`. A **Restore starter templates** button calls `seedTemplatesAction` and reports `made` ("Added 6 formulas" / "Everything was already there") — this is the after-a-go-live-reset path, so say plainly that it never overwrites an edited formula.
 
 - [ ] **Step 2: The editor**
 
@@ -2250,8 +2745,8 @@ git commit -m "feat(specs): section editor — titled Part 1/Part 3 articles, st
 
 `editor.tsx` has two exported components:
 
-- `<TemplateEditor template={...} />` — key (read-only once created, because the id is its slug and the route depends on it), title, an ordered heading list (label + guidance per row, add/remove/move), a `rules` textarea and an `example` textarea with a live `parseOutline(example, "entry")` preview — an example is a product entry, so it must preview as `1.`, `a.`, not `A.`. Save calls `saveTemplateAction`.
-- `<CurtainTemplateEditor template={...} articles={...} />` — title, the article picker (`articleId`, from the Part 2 articles across all sections, so a curtain entry knows where it prints), sort, the body textarea, the four fullness clauses, `hang`, `defaultColor`. Beneath the body, a **Preview with a sample curtain** block calling `fillCurtainTemplate(template, sample, "22oz Velour")` with `sample = { type, name: "Sample " + type, widthFt: 10, heightFt: 24, fullnessPct: 50, fabricSku: "SAMPLE" }`, then `parseOutline(body, "entry")`. Any slot left unfilled shows up as literal `{{…}}` in that preview, which is the point. Save calls `saveCurtainTemplateAction`.
+- `<TemplateEditor template={...} />` — key (read-only once created, because the id is its slug and the route depends on it), title, an ordered heading list (label + guidance per row, add/remove/move), a `rules` textarea and an `example` textarea with a live `parseOutline(example, "entry")` preview — an example is a product entry, so it must preview as `1.`, `a.`, not `A.`. Save calls `saveTemplateAction`. A **Delete formula** `ConfirmButton` (`confirmLabel="Delete this formula"`) calls `deleteTemplateAction(template.id)`. It throws `new Error(r.error)` on `{ok:false}` so the button shows the message, and on success does `router.push("/design/specs/templates")`. `deleteTemplateAction` exists from Task 8 but had no UI until now. The page says, under the button, that **Restore starter templates** brings a deleted starter formula back.
+- `<CurtainTemplateEditor template={...} articles={...} />` — title, the article picker (`articleId`, from the Part 2 articles across all sections, so a curtain entry knows where it prints), sort, the body textarea, the four fullness clauses, `hang`, `defaultColor`. Beneath the body, a **Preview with a sample curtain** block calling `fillCurtainTemplate(template, sample, "22oz Velour")` with `sample = { type, name: "Sample " + type, widthFt: 10, heightFt: 24, fullnessPct: 50, fabricSku: "SAMPLE" }`, then `parseOutline(body, "entry")`. Any slot left unfilled shows up as literal `{{…}}` in that preview, which is the point. Save calls `saveCurtainTemplateAction`. There is **no** delete here, by design: there is exactly one curtain template per `GRID_CURTAIN_TYPES` entry, the Grid resolves every curtain of that type through it, and Task 8 defines no curtain delete action.
 
 - [ ] **Step 3: Verify, typecheck, commit**
 
@@ -2291,6 +2786,8 @@ export async function exportLibrary(): Promise<SpecLibraryFile>;
 export function parseLibraryFile(text: string): { file: SpecLibraryFile | null; error: string | null };
 export async function importLibrary(file: SpecLibraryFile, by: string): Promise<{
   sections: number; articles: number; templates: number; curtainTemplates: number;
+  /** Curtain templates whose id is not a GRID_CURTAIN_TYPES entry — refused, never coerced. */
+  skipped: number;
 }>;
 ```
 
@@ -2299,6 +2796,12 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
 ```ts
 /* --- specs: library import/export --- */
 {
+  // The harness's dynamic-import idiom (see Task 5):
+  const Sections = await import("@/lib/stores/spec-sections");
+  const Articles = await import("@/lib/stores/spec-articles");
+  const Curtains = await import("@/lib/stores/spec-curtain-templates");
+  const { exportLibrary, parseLibraryFile, importLibrary } = await import("@/lib/specs/library-io");
+
   await Sections.createSection({ number: "11 61 43", title: "Stage Curtains", sort: 10, by: "Jeff" });
   const [sec] = await Sections.allSections();
   await Articles.createArticle({ sectionId: sec.id, title: "Theatrical Stage Drapes", manufacturers: ["Rose Brand"], categoryKeys: ["Curtains"], general: "A. General" }, "Jeff");
@@ -2324,16 +2827,37 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
   const edited = { ...round.file!, sections: round.file!.sections.map((s) => ({ ...s, title: "Renamed" })) };
   await importLibrary(edited, "Jeff");
   assert((await Sections.allSections())[0].title === "Renamed", "library io: an import overwrites the record it matches by id");
+
+  // Catalog parts point at articles by id (specArticleId), so an import must
+  // keep the file's ids — a fresh id would orphan every part that pointed at it.
+  const fromFile = { ...file.articles[0], id: "ar-from-file", title: "Imported Drapes" };
+  await importLibrary({ ...round.file!, articles: [fromFile] }, "Jeff");
+  const kept = await Articles.getArticle("ar-from-file");
+  assert(kept?.title === "Imported Drapes", "library io: an imported article keeps the id the file gave it");
+  await importLibrary({ ...round.file!, articles: [{ ...fromFile, title: "Imported Drapes v2" }] }, "Jeff");
+  assert((await Articles.allArticles()).filter((a) => a.id === "ar-from-file").length === 1, "library io: re-importing an article updates it in place");
+  assert((await Articles.getArticle("ar-from-file"))?.title === "Imported Drapes v2", "library io: the re-import's text wins");
+
+  const junkCurtain = await importLibrary({ ...round.file!, curtainTemplates: [{ ...round.file!.curtainTemplates[0], id: "Valance" as never, title: "Should not land" }] }, "Jeff");
+  assert(junkCurtain.skipped === 1, "library io: a curtain template for an unknown Grid type is skipped");
+  assert(!(await Curtains.allCurtainTemplates()).some((t) => t.title === "Should not land"), "library io: a skipped curtain template never overwrites the Border template");
 }
 ```
 
 - [ ] **Step 2: Write the module**
 
-`exportLibrary()` reads all four collections in one `Promise.all` and returns the object above.
+`exportLibrary()` first `await ensureStarterTemplates()` (owner decision 4: the file handed to the `spec-writer` skill must carry the formulas even on a hosted database that was never dev-seeded), then reads all four collections in one `Promise.all` and returns the object above.
 
 `parseLibraryFile(text)` `JSON.parse`es inside a try/catch, checks `kind === "peak-spec-library"` and `version === 1`, checks each of the four keys is an array (missing arrays default to `[]` — a skill-produced file may carry only articles), and returns `{file, error}`. It never throws.
 
-`importLibrary(file, by)` upserts each record by its own id: sections through `Sections.updateSection` when `getSection(id)` finds one and `upsertDoc` otherwise, articles through `Articles.updateArticle`/`createArticle` the same way, templates through `Templates.saveTemplate` (already keyed by slug, so idempotent), curtain templates through `Curtains.saveCurtainTemplate` (keyed by type). Every record gets `updatedBy: by` and a fresh `updatedAt`. It returns the four counts. **It never deletes** — an import adds and updates, so a partial file from the skill cannot destroy the library.
+`importLibrary(file, by)` upserts each record **under the id the file gives it**:
+
+- **Sections:** `Sections.updateSection` when `getSection(id)` finds one; otherwise `upsertDoc("spec_sections", normalizeSection({ ...rec, updatedAt: Date.now(), updatedBy: by }))`.
+- **Articles:** the same shape, and **never** through `createArticle`, which mints a new id. A new id would break every catalog part's `specArticleId` link to that article and duplicate the article on every re-import. Use `Articles.updateArticle` when `getArticle(id)` finds one, and otherwise `upsertDoc("spec_articles", normalizeArticle({ ...rec, updatedAt: Date.now(), updatedBy: by }))`. Skip a record whose normalized `id` or `sectionId` is empty; count it as skipped.
+- **Templates:** `Templates.saveTemplate`, which is already keyed by slug and so idempotent.
+- **Curtain templates:** `Curtains.saveCurtainTemplate`, keyed by type. First **skip** any record whose `id` is not in `GRID_CURTAIN_TYPES`. The store's `normalize` coerces an unknown id to `GRID_CURTAIN_TYPES[0]` (`"Border"`), so an unknown type would otherwise silently overwrite the Border template.
+
+Every record gets `updatedBy: by` and a fresh `updatedAt`. It returns the four counts plus `skipped`. `upsertDoc` revives a soft-deleted id (its `onConflictDoUpdate` sets `deleted: false` — `src/db/doc-store.ts:83`). Re-importing a file therefore restores a record someone deleted, and that is the point of importing a whole library. **It never deletes** — an import adds and updates, so a partial file from the skill cannot destroy the library.
 
 - [ ] **Step 3: Wire the export route and the two controls**
 
@@ -2343,7 +2867,7 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
 In `actions.ts`, add:
 
 ```ts
-export async function importLibraryAction(text: string): Promise<Result<{ sections: number; articles: number; templates: number; curtainTemplates: number }>> {
+export async function importLibraryAction(text: string): Promise<Result<{ sections: number; articles: number; templates: number; curtainTemplates: number; skipped: number }>> {
   const user = await requirePerm("create");
   const { file, error } = parseLibraryFile(text);
   if (!file) return { ok: false, error: error || "That file is not a Peak spec library." };
@@ -2358,7 +2882,7 @@ export async function importLibraryAction(text: string): Promise<Result<{ sectio
 }
 ```
 
-In `controls.tsx`, add an **Import / Export** card: an `Export library` link to `/api/spec-library`, and an `Import library` control — a `<input type="file" accept="application/json,.json">` that reads the file with `await file.text()` in the browser and passes the string to `importLibraryAction`, then reports `Imported 5 sections, 12 articles, 6 formulas, 4 curtain templates.` or the error. Size-guard the read at 5 MB with a clear message, mirroring the catalog importer's 1 MB cap in spirit (`src/lib/catalog-import-guard.ts`).
+In `controls.tsx`, add an **Import / Export** card: an `Export library` link to `/api/spec-library`, and an `Import library` control — a `<input type="file" accept="application/json,.json">` that reads the file with `await file.text()` in the browser and passes the string to `importLibraryAction`, then reports `Imported 5 sections, 12 articles, 6 formulas, 4 curtain templates.` (plus `· 1 skipped` when `skipped > 0`) or the error. Size-guard the read at 5 MB with a clear message, mirroring the catalog importer's 1 MB cap in spirit (`src/lib/catalog-import-guard.ts`).
 
 - [ ] **Step 4: Run, typecheck, commit**
 
@@ -2377,10 +2901,14 @@ git commit -m "feat(specs): export and import the whole library as one JSON file
 - Create: `src/app/(app)/design/specs/coverage.ts` (pure)
 - Modify: `src/app/(app)/design/specs/library/page.tsx` (load the three sources, mount the table)
 - Modify: `src/app/(app)/design/specs/library/controls.tsx` (the filter controls)
+- Modify: `src/lib/stores/generated-specs.ts` (add `allGeneratedSpecs()` — only `specsForEngagement`, `getGeneratedSpec` and `saveGeneratedSpec` exist today)
 - Test: `scripts/test-review-and-spec.ts`
 
 **Interfaces:**
 ```ts
+// src/lib/stores/generated-specs.ts
+export async function allGeneratedSpecs(): Promise<GeneratedSpec[]>; // listDocs<GeneratedSpec>("generated_specs"), newest first
+// src/app/(app)/design/specs/coverage.ts
 export const ON_BOM_WINDOW_MS: number;          // 90 days
 export type CoverageState = "authored" | "same-as" | "draft" | "missing";
 export type CoverageRow = {
@@ -2394,8 +2922,17 @@ export function skusOnBomSince(
   since: number
 ): Set<string>;
 /** What coverage needs off a catalog part — a superset of SpecPartLike, so a
- *  real CatalogPart is structurally assignable with no cast. */
-export type CoveragePart = SpecPartLike & { desc?: string; datasheetName?: string };
+ *  real CatalogPart is structurally assignable with no cast. A datasheet is
+ *  any of: a Peak-uploaded PDF (`datasheetName`), a manufacturer datasheet
+ *  link from DaVinci (#162, `docs[].kind === "datasheet"`), or a researched
+ *  datasheet/cut sheet on the Displays metadata (`productMetadata.datasheets`). */
+export type CoveragePart = SpecPartLike & {
+  desc?: string;
+  datasheetName?: string;
+  docs?: Array<{ kind: string }>;
+  productMetadata?: { datasheets?: Array<{ kind: string }> };
+};
+export function hasDatasheet(p: CoveragePart): boolean;
 export function coverageRows(
   parts: CoveragePart[],
   articles: SpecCategoryArticle[],
@@ -2408,7 +2945,7 @@ export function filterCoverage(rows, f: { articleId?: string; state?: CoverageSt
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-import { skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, ON_BOM_WINDOW_MS } from "@/app/(app)/design/specs/coverage";
+import { skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, hasDatasheet, ON_BOM_WINDOW_MS } from "@/app/(app)/design/specs/coverage";
 ```
 
 (Check how the harness imports other files that live under `src/app` — `scripts/test-review-and-spec.ts` already imports route-folder modules such as the import hub's `link.ts`; copy that path style exactly.)
@@ -2452,6 +2989,10 @@ import { skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, ON_BOM
     { sku: "P4", desc: "Pointer", category: "Fixtures", specSameAs: "P1" },
     { sku: "P5", desc: "Unmapped", category: "Nothing" },
   ];
+  ok(hasDatasheet({ sku: "D1", docs: [{ kind: "datasheet" }] }), "coverage: a DaVinci datasheet link counts as a datasheet");
+  ok(!hasDatasheet({ sku: "D2", docs: [{ kind: "manual" }] }), "coverage: a manual alone is not a datasheet");
+  ok(hasDatasheet({ sku: "D3", productMetadata: { datasheets: [{ kind: "cut-sheet" }] } }), "coverage: a researched cut sheet counts");
+  ok(!hasDatasheet({ sku: "D4", productMetadata: { datasheets: [{ kind: "guide-spec" }] } }), "coverage: a guide spec alone is not a datasheet");
   const rows = coverageRows(parts as never, articles, sections, new Set(["P1", "P3"]));
   ok(rows.length === 5, "coverage: every part gets a row, mapped or not");
   ok(rows.find((r) => r.sku === "P1")!.state === "authored", "coverage: an authored part reads authored");
@@ -2480,22 +3021,22 @@ import { skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, ON_BOM
 
 `skusOnBomSince` unions three passes: quotes whose `updatedAt ?? createdAt ?? 0` is `>= since` contribute `skusFromQuoteSpec(q.spec)`; grid projects in the window contribute every non-blank `placements[].partId`; generated specs in the window contribute `bom[].sku` (the D94 shape) and `rows[].row.sku` (Phase B's). Returns a `Set<string>`.
 
-`coverageRows` maps every catalog part through `articleIdForPart(part, articles, sections)` and `specStateOf(part, bySku)` from Task 4, where `bySku` is built once from `parts`.
+`coverageRows` maps every catalog part through `articleIdForPart(part, articles, sections)` (which adopts legacy Displays pointers at read time — Task 6) and `specStateOf(part, bySku)` from Task 4, where `bySku` is built once from `parts`. `hasDatasheet(p)` is `!!p.datasheetName || (p.docs ?? []).some((d) => d.kind === "datasheet") || (p.productMetadata?.datasheets ?? []).some((d) => d.kind === "datasheet" || d.kind === "cut-sheet")`, and `CoverageRow.hasDatasheet` is its result.
 
 `filterCoverage` applies, in order: `articleId` (exact, `null` matching only when the filter asks for the literal string `"none"`), `state` (skipped when `"all"` or absent), `onBomOnly`, `datasheetOnly`, then `q` as a case-insensitive substring over `sku + " " + desc`.
 
 - [ ] **Step 3: Mount it**
 
-In `library/page.tsx`, extend the `Promise.all` with `Quotes.list()`, `GridProjects.list()` and the generated-specs list (grep for the existing list helpers on each store; do not reach into `listDocs` directly from a page). Compute `onBom = skusOnBomSince({...}, Date.now() - ON_BOM_WINDOW_MS)` and `rows = coverageRows(...)`, read the filters from `searchParams` (`article`, `state`, `bom`, `datasheet`, `q`), and render a table: SKU (linking to `/catalog?sku=<sku>` so the part opens where it is edited — check the catalog page actually honours a `sku` query param, and if it does not, link to `/catalog` and say so in your report), description, article, state chip, "on a BOM" tick, datasheet tick. Cap the rendered rows at 300 with a "showing 300 of N — narrow the filters" line; the catalog is ~10.7k rows and this table must never try to render all of them.
+In `library/page.tsx`, extend the `Promise.all` with `getAll()` from `@/lib/stores/quotes` (`quotes.ts:372` — there is no `list()`), `listProjects()` from `@/lib/stores/grid-projects` (`grid-projects.ts:235`), and the new `allGeneratedSpecs()`. Do not reach into `listDocs` directly from a page. Compute `onBom = skusOnBomSince({...}, Date.now() - ON_BOM_WINDOW_MS)` and `rows = coverageRows(...)`, read the filters from `searchParams` (`article`, `state`, `bom`, `datasheet`, `q`), and render a table with these columns: SKU, description, article, state chip, an "on a BOM" tick and a datasheet tick. The SKU links to `/catalog?edit=<encodeURIComponent(sku)>`, which opens the part modal where the Spec panel lives (`catalog/page.tsx:74` reads `sp.edit`; there is no `sku` param). Cap the rendered rows at 300 with a "showing 300 of N — narrow the filters" line; the catalog is ~10.7k rows and this table must never try to render all of them.
 
 The filter controls go in `controls.tsx` as a `SearchFilterBar` (`src/components/search/search-filter-bar.tsx`) so the search box and the dropdowns share one line, per #121 — that component exists precisely for this.
 
 - [ ] **Step 4: Run, typecheck, commit**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
 npx tsc --noEmit -p .
-git add src/app/\(app\)/design/specs scripts/test-review-and-spec.ts
+git add src/app/\(app\)/design/specs src/lib/stores/generated-specs.ts scripts/test-review-and-spec.ts
 git commit -m "feat(specs): per-article coverage table with on-a-BOM and datasheet filters"
 ```
 
@@ -2505,14 +3046,22 @@ git commit -m "feat(specs): per-article coverage table with on-a-BOM and datashe
 
 **Files:**
 - Create: `src/app/(app)/catalog/spec-panel.tsx`
-- Modify: `src/app/(app)/catalog/page.tsx` (load articles + templates; mount the panel)
+- Modify: `src/app/(app)/catalog/page.tsx` (load articles + sections + templates; mount the panel)
 
 **Interfaces:**
-- Consumes: `writePartSpecFieldsAction` (Task 6), `articleIdForPart` / `specStateOf` (Task 4), `renderBody` (Task 1), `scaffoldFrom` (Task 5).
+- Consumes: `writePartSpecFieldsAction` (Task 6), `articleIdForPart` / `specStateOf` (Task 4), `renderBody` (Task 1), `scaffoldFrom` / `ensureStarterTemplates` (Task 5).
 
 - [ ] **Step 1: Pass the data down**
 
-`catalog/page.tsx` is already a server component. Add `Articles.allArticles()`, `Sections.allSections()` and `Templates.allTemplates()` to its existing parallel load, and pass them into `PartFormModal`. Keep the payload small: map articles to `{ id, title, sectionNumber, manufacturers }` and templates to `{ id, key, headings }` before they cross into the client component — the full records carry text no panel renders.
+`catalog/page.tsx` is already a server component. Add three loads to the **existing** `Promise.all` at `:46-54` (don't start a second one): `allArticles()`, `allSections()`, and `ensureStarterTemplates().then(() => allTemplates())`. The last one is owner decision 4: the "Insert template" row must never be empty on a hosted database. Beside `isAdmin` at `:55`, add `const canCreate = can("create", user.roles);`; `can` is already imported at `:3`.
+
+Pass the following into `PartFormModal` (rendered at `:486-493`):
+- `canCreate`.
+- The articles, mapped to `{ id, title, sectionNumber, manufacturers }`.
+- The templates, mapped to `{ id, key, headings }`.
+- `defaultArticleId`: `editingPart ? articleIdForPart({ ...editingPart, specArticleId: undefined }, articles, sections) : null`.
+
+Computing the default on the server keeps the client payload small, because the full article and section records carry text no panel renders. It also means the panel never needs `categoryKeys` or the legacy Displays metadata in order to show "the category default resolves to …".
 
 - [ ] **Step 2: The panel**
 
@@ -2525,13 +3074,17 @@ export default function SpecPanel({ part, articles, templates }: {
           specState?: "authored" | "draft"; specSource?: string; specUpdatedAt?: number; specUpdatedBy?: string };
   articles: Array<{ id: string; title: string; sectionNumber: string; manufacturers: string[] }>;
   templates: Array<{ id: string; key: string; headings: Array<{ label: string; guidance: string }> }>;
+  /** Server-computed: what the part resolves to with no explicit article
+   *  (category default, else an adopted legacy Displays pointer, else D94's
+   *  section). null = nothing resolves. */
+  defaultArticleId: string | null;
 })
 ```
 
 Controls, top to bottom:
 
 1. **State line** — a chip reading `Authored`, `Draft — not printing yet`, `Same spec as <SKU>` or `No spec language`, with `specSource` and `specUpdatedBy`/`specUpdatedAt` beside it when present. A draft says plainly that the match report treats it as missing until it is saved here.
-2. **Article** — a `<select>` of the articles, each option labelled `<sectionNumber> · <title>`, plus a first option `— default from category —` whose value is `""`. When the part has no explicit `specArticleId`, show which article the category default resolves to (`articleIdForPart` with `specArticleId` blanked) as helper text beneath.
+2. **Article** — a `<select>` of the articles, each option labelled `<sectionNumber> · <title>`, plus a first option `— default from category —` whose value is `""`. When the part has no explicit `specArticleId`, show which article `defaultArticleId` names as helper text beneath (or "nothing resolves — pick one" when it is null).
 3. **Entry title** — text input, placeholder `COLOR MIXING LIGHT EMITTING DIODE PROFILE FIXTURE`.
 4. **Same spec as** — text input for a SKU. When non-empty, disable the body textarea and say `This part prints <SKU>'s text.`
 5. **Body** — a `pk-mono` textarea, `rows={14}`. When it is empty, an **Insert template** row of buttons, one per template, that writes `scaffoldFrom(t)` into the body. Preselect the button whose `key` matches the part's `category` case-insensitively.
@@ -2543,21 +3096,25 @@ Do **not** key the panel on `specUpdatedAt` (PUNCHLIST #141). Seed state from pr
 
 - [ ] **Step 3: Mount it**
 
-In `PartFormModal` (`catalog/page.tsx:569-785`), directly after the existing `PartDatasheetControl` block (`:741-745`), add a matching block with the same `isAdmin && editing && part` gate:
+In `PartFormModal` (`catalog/page.tsx:593-881`), directly after the existing `PartDatasheetControl` block (`:837-841`), add a matching block. The gate is **`canCreate`**, not `isAdmin` (owner decision 3). The datasheet control stays admin-only because it writes Peak's own blob storage. The spec write is gated by `requirePerm("create")` inside `writePartSpecFieldsAction`.
 
 ```tsx
-{isAdmin && editing && part && (
+{canCreate && editing && part && (
   <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-    <SpecPanel part={part} articles={specArticles} templates={specTemplates} />
+    <SpecPanel part={part} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
   </div>
 )}
 ```
 
-The panel lives **outside** the `<form action={upsertPart}>` element (or its Save must not be a submit button), because `upsertPart` is a `FormData` action that redirects, and the spec write is a separate action with its own error surface. Verify by reading the JSX which element the datasheet control sits inside, and match it — the datasheet control has exactly this constraint and already solves it.
+The panel sits **inside** the `<form action={upsertPart}>` (`:700`), exactly as the datasheet control does. That form element is the modal's scroll container (`overflowY: "auto"`), so mounting outside it would put the panel below the fold and outside the scroll. `upsertPart` is a `FormData` action that redirects, so the panel must never submit it or feed it:
+
+- every `<button>` in the panel is `type="button"`, including Save, Insert template and the template buttons;
+- no panel input, select or textarea has a `name`, so nothing leaks into `upsertPart`'s `FormData`. Note that `specSort` must not become a stray `name="specSort"`;
+- every single-line `<input>` gets `onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}`, so Enter in the title, same-as or sort box never submits the part form (Enter in the body `<textarea>` is a newline and needs nothing).
 
 - [ ] **Step 4: Verify by hand**
 
-With `npm run dev`, open `/catalog`, edit a part, write a two-level body, confirm the preview numbers it `1.` / `a.` (entry context, not `A.`), insert a template into an empty body, set **Same spec as** to a SKU that is itself a pointer and confirm the refusal shows, then save and reload and confirm the chip reads `Authored`.
+With `npm run dev`, open `/catalog` as a user with `create` but not `manage_users` (an Estimator), confirm the Spec panel shows and the datasheet control does not; press Enter in the entry-title box and confirm the modal does not submit; edit a part, write a two-level body, confirm the preview numbers it `1.` / `a.` (entry context, not `A.`), insert a template into an empty body, set **Same spec as** to a SKU that is itself a pointer and confirm the refusal shows, then save and reload and confirm the chip reads `Authored`.
 
 - [ ] **Step 5: Typecheck and commit**
 
@@ -2572,85 +3129,217 @@ git commit -m "feat(specs): the part editor's Spec panel — article, title, bod
 ### Task 14: The catalog importer carries spec columns
 
 **Files:**
-- Modify: `src/app/(app)/import/types.ts` (seven new `catalog` fields)
-- Modify: `src/app/(app)/import/registry.ts` (`catalogPatch` writes them)
+- Modify: `src/app/(app)/import/types.ts` (the `catalog` type at `:259-289`, fields `:269-288`: two re-keyed columns, five new ones)
+- Modify: `src/app/(app)/import/registry.ts` (`catalogPatch` at `:179-238`, the catalog writer at `:1059-1087`, its exporter at `:1088-1112`)
+- Modify: `src/app/(app)/catalog/import.ts` (the price-book importer's `Spec Section`/`Spec Article` at `:58-79`)
 - Test: `scripts/test-review-and-spec.ts`
 
 **Interfaces:**
-- Consumes: nothing new; `mergeUpsert` already preserves untouched fields, which is exactly why a spec import cannot disturb pricing and a price re-import cannot disturb spec text.
+- Consumes: `resolveSectionRef` / `resolveArticleRef` (Task 6), `allSections` / `allArticles` (Tasks 3-4). `mergeUpsert` already preserves untouched fields, which is exactly why a spec import cannot disturb pricing and a price re-import cannot disturb spec text — **provided the patch never carries a spec key the row did not actually supply** (Step 2).
+- Produces: `catalogPatch(v, ex, sku, opts?: { now?: number; by?: string; specLib?: SpecLookup })` — the fourth parameter is optional so the existing pure assertions (`scripts/test-review-and-spec.ts:4925-4954`) keep compiling unchanged. `SpecLookup` is Task 6's type from `@/lib/displays-api`; import it as a type, or declare the same `{ sections; articles }` shape locally.
 
-- [ ] **Step 1: Declare the columns**
+- [ ] **Step 1: Declare the columns — one set, no duplicates (D-SPEC-5)**
 
-In `src/app/(app)/import/types.ts`, append to the `"catalog"` type's `fields` array (the type is at `types.ts:255-273`), matching the surrounding `FieldDef` style and giving each a generous alias list:
-
-```ts
-  { key: "model", header: "Model", label: "Model number", kind: "text", aliases: ["model", "model number", "model no", "mfr model", "manufacturer model", "part number", "part no"], example: "CSSPOT" },
-  { key: "spec_article", header: "Spec Article", label: "Spec article", kind: "text", aliases: ["spec article", "spec_article", "article", "spec article id"], example: "ar-fixtures" },
-  { key: "spec_title", header: "Spec Title", label: "Spec entry title", kind: "text", aliases: ["spec title", "spec_title", "entry title", "generic name"], example: "COLOR MIXING LED PROFILE FIXTURE" },
-  { key: "spec_body", header: "Spec Body", label: "Spec text", kind: "text", aliases: ["spec body", "spec_body", "spec text", "specification"], example: "Basis of Design: ETC ColorSource Spot" },
-  { key: "spec_same_as", header: "Spec Same As", label: "Same spec as SKU", kind: "text", aliases: ["spec same as", "spec_same_as", "same spec as", "same as"], example: "CS-SPOT-1" },
-  { key: "spec_state", header: "Spec State", label: "Spec state", kind: "enum", options: ["authored", "draft"], aliases: ["spec state", "spec_state", "state"], example: "draft" },
-  { key: "spec_source", header: "Spec Source", label: "Spec source", kind: "text", aliases: ["spec source", "spec_source", "source"], example: "skill:2026-09-22" },
-```
-
-None of them is `hidden` — the template and the export must carry them, because "export → hand to the skill → re-import" is the whole authoring loop.
-
-Mention in the type's `blurb` that `Spec Body` is multi-line: a quoted CSV cell keeps its newlines and its interior indentation (`parse.ts`'s `parseCsv` is a real quoted-CSV state machine), but leading and trailing whitespace on the outermost edges is trimmed.
-
-- [ ] **Step 2: Write them**
-
-In `registry.ts`, extend `catalogPatch(v, ex, sku)` (`:162-177`). Follow its existing `num(v.x) || num(ex.x)` idiom for the shape, but note the semantics these fields need:
+In `src/app/(app)/import/types.ts`, the catalog type already has three Displays-API columns from commit 2e284665 (`:280-282`): `specSection` ("Spec Section"), `specArticle` ("Spec Article") and `specLanguageKey`. Per owner decision 1, the first two **become** the canonical pointer columns. Keep their headers, so every existing file and template still maps. Re-key them, and do not add a second pair:
 
 ```ts
-  // Spec columns (D161). A column absent from the file must not blank the
-  // field — this is the same "column absent vs. empty" limitation catalogPatch
-  // already documents for pricing, and it matters more here: a price
-  // re-import must never wipe authored spec text.
-  ...(v.model !== undefined ? { model: str(v.model) || undefined } : {}),
-  ...(v.spec_article !== undefined ? { specArticleId: str(v.spec_article) || undefined } : {}),
-  ...(v.spec_title !== undefined ? { specTitle: str(v.spec_title) || undefined } : {}),
-  ...(v.spec_body !== undefined ? { specBody: String(v.spec_body ?? "") } : {}),
-  ...(v.spec_same_as !== undefined ? { specSameAs: str(v.spec_same_as) || undefined } : {}),
-  ...(v.spec_state !== undefined ? { specState: str(v.spec_state) === "authored" ? "authored" : "draft" } : {}),
-  ...(v.spec_source !== undefined ? { specSource: str(v.spec_source) || undefined } : {}),
-  ...(v.spec_body !== undefined || v.spec_title !== undefined ? { specUpdatedAt: ctx.effectiveAt ?? Date.now() } : {}),
+      { key: "specSectionId", header: "Spec Section", label: "Spec section", aliases: ["spec section", "specification section", "csi section", "spec section id"], example: "11 61 43" },
+      { key: "specArticleId", header: "Spec Article", label: "Spec article", aliases: ["spec article", "specification article", "csi article", "spec article id"], example: "ar-drapes or Theatrical Stage Drapes" },
 ```
 
-Read the real signature before writing this — `catalogPatch` may not currently receive `ctx`; if it does not, thread the timestamp the same way `WRITERS.catalog` already threads `pricedAt` rather than calling `Date.now()` inside a pure patch builder. **An imported row without an explicit `spec_state` lands as `draft`**, per spec §4: unreviewed text must not print.
+`specLanguageKey` stays exactly as it is, as research metadata with no canonical counterpart. Append the five new columns after `sourceDocumentDate`. Keys are camelCase like every other catalog key. There is **no `model` column**: `MFR M/N` (`manufacturerModelNumber`) already is the model number, and the proposed `model`/`part number` aliases collide with `sku`'s.
 
-- [ ] **Step 3: Assert the column contract**
+```ts
+      { key: "specTitle", header: "Spec Title", label: "Spec entry title", aliases: ["spec title", "spec entry title", "spec heading"], example: "COLOR MIXING LED PROFILE FIXTURE" },
+      { key: "specBody", header: "Spec Body", label: "Spec text", aliases: ["spec body", "spec text", "specification text"], example: "Basis of Design: ETC ColorSource Spot" },
+      { key: "specSameAs", header: "Spec Same As", label: "Same spec as SKU", aliases: ["spec same as", "same spec as"], example: "CS-SPOT-1" },
+      { key: "specState", header: "Spec State", label: "Spec state", kind: "enum", options: ["authored", "draft"], aliases: ["spec state", "spec status"], example: "draft" },
+      { key: "specSource", header: "Spec Source", label: "Spec source", aliases: ["spec source", "spec provenance"], example: "skill:2026-09-22" },
+```
+
+Keep the aliases specific. `autoMap`'s second pass (`parse.ts:248-266`) fuzzy-matches with "contains" in **both** directions, so a bare alias such as `state`, `source`, `article`, `title` or `same as` would let an unrelated vendor column claim a spec field. A spec field claimed that way can demote authored text to draft. Even with specific aliases, a vendor sheet whose header is exactly `Title` fuzzy-matches `specTitle` through its `"spectitle"` candidate. The import preview's mapping step is where a human catches that; say so in the blurb.
+
+None of the new columns is `hidden`. The template and the export must carry them, because "export → hand to the skill → re-import" is the whole authoring loop. Extend the type's `blurb` to say three things. `Spec Body` is multi-line: a quoted CSV cell keeps its newlines and its interior indentation (`parseCsv` is a real quoted-CSV state machine), but `coerce()` trims the outermost edges (`parse.ts:206`). A row that changes spec text lands as a draft. And a blank spec cell never clears stored text; clearing is done in the part editor.
+
+- [ ] **Step 2: Write them without the wipe bug**
+
+**The wipe bug the first draft of this step had.** `prepareRows` sets **every** field on every row, and turns an absent column into `""` (`parse.ts:298-301`: `const v = idx != null && idx >= 0 ? raw[idx] : ""; values[f.key] = coerce(f, v);`). So `v.specBody !== undefined` is always true. A price-only re-import would blank every `specBody` and demote every part to draft. Use the file's own `str(v.x) ? {…} : {}` idiom (`registry.ts:42`, used at `:231-233`) for every spec key, so a blank cell and an absent column both mean "leave it alone".
+
+Add to `registry.ts`'s imports: `import { resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";`, `import { allSections } from "@/lib/stores/spec-sections";`, `import { allArticles } from "@/lib/stores/spec-articles";` and `import type { SpecLookup } from "@/lib/displays-api";`. The file already imports the `Catalog` namespace (`:18`) and `norm` (`:26`).
+
+Give `catalogPatch` an optional fourth parameter and replace the three legacy-metadata lines for the pointers (`:190-191` and `:195-196`; the `specLanguageKey` lines stay):
+
+```ts
+export function catalogPatch(
+  v: Values,
+  ex: Record<string, unknown> | null,
+  sku: string,
+  opts: { now?: number; by?: string; specLib?: SpecLookup } = {}
+): Partial<Omit<Catalog.CatalogPart, "id" | "sku">> {
+  // … existing body down to the metadata block …
+
+  // D-SPEC-5: "Spec Section" / "Spec Article" are the canonical pointer
+  // columns. A value that resolves — a live id, or a CSI number / title that
+  // matches exactly one live record — sets the canonical pointer (an explicit
+  // import value is an instruction, so it may replace a stored pointer). One
+  // that does not resolve is kept as legacy Displays text in productMetadata,
+  // exactly as 2e284665's columns stored it, so no imported value is lost.
+  const secRef = str(v.specSectionId);
+  const artRef = str(v.specArticleId);
+  const lib = opts.specLib;
+  const secId = lib ? resolveSectionRef(secRef, lib.sections) : null;
+  const artId = lib ? resolveArticleRef(artRef, lib.articles, secId ?? (str(e.specSectionId) || null)) : null;
+  if (secRef && !secId) { metadata.specSection = secRef; hasMetadata = true; }
+  if (artRef && !artId) { metadata.specArticle = artRef; hasMetadata = true; }
+  const artSection = artId ? lib!.articles.find((a) => a.id === artId)!.sectionId : null;
+
+  // Spec text. A column absent from the file — or a blank cell — must not
+  // blank the field (prepareRows turns both into ""), and a price re-import
+  // must never wipe authored spec text.
+  const body = str(v.specBody);
+  const title = str(v.specTitle);
+  const changed = (!!body && body !== str(e.specBody)) || (!!title && title !== str(e.specTitle));
+  const explicit = str(v.specState);
+  // Only a row that carries text sets a state. An explicit column wins; with
+  // no explicit state, CHANGED text lands as draft (spec §4 — unreviewed text
+  // must not print) and unchanged text keeps its state, so export → re-import
+  // of untouched rows never demotes authored parts.
+  const state =
+    body || title
+      ? explicit === "authored" || explicit === "draft"
+        ? explicit
+        : changed
+          ? "draft"
+          : undefined
+      : undefined;
+```
+
+and add to the returned object, beside the existing `...(hasMetadata ? …)` line:
+
+```ts
+    ...(secId ? { specSectionId: secId } : artSection ? { specSectionId: artSection } : {}),
+    ...(artId ? { specArticleId: artId } : {}),
+    ...(title ? { specTitle: title } : {}),
+    ...(body ? { specBody: body } : {}),
+    ...(str(v.specSameAs) ? { specSameAs: str(v.specSameAs) } : {}),
+    ...(str(v.specSource) ? { specSource: str(v.specSource) } : {}),
+    ...(state ? { specState: state } : {}),
+    ...(changed ? { specUpdatedAt: opts.now ?? Date.now(), specUpdatedBy: opts.by || "import" } : {}),
+```
+
+Note `artSection` is the mirror rule from Task 6: an article pointer also carries its section, because D94's `assemble` groups by `specSectionId`.
+
+**The writer supplies `now`, `by` and `specLib`, not `ctx.effectiveAt`.** `effectiveAt` is the price list's effective date and has nothing to do with when spec text changed. `catalogPatch` has no `ctx` (`:179-183`). In the catalog writer (`:1059-1087`), load the library once per commit, memoised on the commit context:
+
+```ts
+const SPEC_LIB = new WeakMap<CommitContext, Promise<SpecLookup>>();
+function specLibFor(ctx: CommitContext): Promise<SpecLookup> {
+  let p = SPEC_LIB.get(ctx);
+  if (!p) {
+    p = Promise.all([allSections(), allArticles()]).then(([sections, articles]) => ({ sections, articles }));
+    SPEC_LIB.set(ctx, p);
+  }
+  return p;
+}
+```
+
+Both `create` and `update` then call `catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: await specLibFor(ctx) })`.
+
+**The exporter must emit the canonical columns** (`:1088-1112`), or export → skill → re-import breaks. `exportCsv` writes `o[f.key]` for every visible field (`:1402-1410`). Rename the two existing keys and add the five new ones:
+
+```ts
+        // D-SPEC-5: the canonical id when there is one (it re-imports exactly);
+        // otherwise the legacy Displays text, which re-imports as legacy text.
+        specSectionId: p.specSectionId || p.productMetadata?.specSection || "",
+        specArticleId: p.specArticleId || p.productMetadata?.specArticle || "",
+        specLanguageKey: p.productMetadata?.specLanguageKey || "",
+        // …
+        specTitle: p.specTitle || "",
+        specBody: p.specBody || "",
+        specSameAs: p.specSameAs || "",
+        // Deliberately blank. The state is a review stamp, not data: a file
+        // that has left Peak comes back unreviewed. With the column blank,
+        // Step 2's rule keeps untouched rows' state and lands edited rows as
+        // draft. Emitting "authored" would let a skill-edited row print
+        // unreviewed text.
+        specState: "",
+        specSource: p.specSource || "",
+```
+
+**The price-book importer** (`src/app/(app)/catalog/import.ts:58-79`, fed by `catalog/parse.ts`'s `specSection`/`specArticle` aliases) gets the same resolution. It is the other path that writes Displays text. Load `allSections()` + `allArticles()` once before the loop in `runCatalogImport`. For each row, put the canonical `specSectionId`/`specArticleId` (with the mirror) in the `mergeUpsert` patch when `resolveSectionRef`/`resolveArticleRef` resolve. Otherwise keep today's `productMetadata.specSection`/`.specArticle` spread (`:59-60`) unchanged. It writes no spec text, so it never touches `specState`.
+
+- [ ] **Step 3: Assert the column contract and the wipe fix**
+
+The harness already imports `IMPORT_TYPES` (`:130`), `prepareRows`/`autoMap` (`:131-137`) and `catalogPatch` (`:155`). Add `norm` to the `@/app/(app)/import/parse` import.
 
 ```ts
 /* --- specs: catalog import columns --- */
 {
   const cat = IMPORT_TYPES.find((t) => t.key === "catalog")!;
   const keys = cat.fields.map((f) => f.key);
-  for (const k of ["model", "spec_article", "spec_title", "spec_body", "spec_same_as", "spec_state", "spec_source"]) {
-    ok(keys.includes(k), `catalog import: the ${k} column exists`);
-  }
-  ok(cat.fields.filter((f) => f.key.startsWith("spec_") || f.key === "model").every((f) => !f.hidden), "catalog import: every spec column is advertised in the template and the export");
-  ok(cat.fields.find((f) => f.key === "spec_state")!.options?.join(",") === "authored,draft", "catalog import: spec_state is an enum of exactly the two states");
-  const aliases = cat.fields.flatMap((f) => f.aliases.map((a) => a.toLowerCase()));
-  ok(new Set(aliases).size === aliases.length, "catalog import: no two catalog columns claim the same alias");
+  const SPEC_KEYS = ["specSectionId", "specArticleId", "specTitle", "specBody", "specSameAs", "specState", "specSource"];
+  for (const k of SPEC_KEYS) ok(keys.includes(k), `catalog import: the ${k} column exists`);
+  ok(!keys.includes("specSection") && !keys.includes("specArticle") && !keys.includes("model"), "catalog import: one set of pointer columns, and no model column");
+  ok(
+    cat.fields.find((f) => f.key === "specSectionId")!.header === "Spec Section" &&
+      cat.fields.find((f) => f.key === "specArticleId")!.header === "Spec Article",
+    "catalog import: the canonical pointers keep the headers existing files already use"
+  );
+  ok(cat.fields.filter((f) => SPEC_KEYS.includes(f.key)).every((f) => !f.hidden), "catalog import: every spec column is advertised in the template and the export");
+  ok(cat.fields.find((f) => f.key === "specState")!.options?.join(",") === "authored,draft", "catalog import: specState is an enum of exactly the two states");
+
+  // Scoped to the spec columns: the pre-existing catalog fields already repeat
+  // aliases among themselves (family, series, model number), which is not
+  // this task's to fix.
+  const candsOf = (f: { header: string; label: string; key: string; aliases?: string[] }) =>
+    [f.header, f.label, f.key, ...(f.aliases || [])].map(norm).filter(Boolean);
+  const others = new Set(cat.fields.filter((f) => !SPEC_KEYS.includes(f.key)).flatMap(candsOf));
+  const mine = cat.fields.filter((f) => SPEC_KEYS.includes(f.key)).flatMap((f) => [...new Set(candsOf(f))]);
+  ok(mine.every((a) => !others.has(a)), "catalog import: no spec column claims a header or alias another catalog column owns");
+  ok(new Set(mine).size === mine.length, "catalog import: no two spec columns claim the same alias");
+
+  // The wipe bug: a price-only row must carry no spec key at all.
+  const lib = {
+    sections: [{ id: "ss-i", number: "11 61 43", title: "Curtains", sort: 1, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" }],
+    articles: [{ id: "ar-i", sectionId: "ss-i", sort: 1, title: "Theatrical Stage Drapes", manufacturers: [], general: "", categoryKeys: [], updatedAt: 1, updatedBy: "t" }],
+  };
+  const stored = { sku: "SP-1", desc: "Drape", category: "Curtains", unit: "ea", list: 10, cost: 5, mfr: "Rose Brand", specBody: "Authored text.", specState: "authored" };
+  const priceOnly = prepareRows([["SP-1", "12"]], autoMap(["SKU", "List Price"], cat.fields), cat.fields);
+  const pricePatch = catalogPatch(priceOnly.rows[0].values, stored, "SP-1", { now: 1, specLib: lib });
+  ok(SPEC_KEYS.every((k) => !(k in pricePatch)), "catalog import: a price-only row carries no spec key, so it cannot wipe or demote");
+
+  const withText = prepareRows([["SP-1", "New text."]], autoMap(["SKU", "Spec Body"], cat.fields), cat.fields);
+  const textPatch = catalogPatch(withText.rows[0].values, stored, "SP-1", { now: 7, by: "Jeff", specLib: lib });
+  ok(textPatch.specBody === "New text." && textPatch.specState === "draft" && textPatch.specUpdatedAt === 7, "catalog import: changed text lands as draft, stamped by the writer's clock");
+  const same = prepareRows([["SP-1", "Authored text."]], autoMap(["SKU", "Spec Body"], cat.fields), cat.fields);
+  ok(!("specState" in catalogPatch(same.rows[0].values, stored, "SP-1", { specLib: lib })), "catalog import: re-importing unchanged text keeps its state");
+
+  const ptr = prepareRows([["SP-1", "11-61-43", "theatrical stage drapes"]], autoMap(["SKU", "Spec Section", "Spec Article"], cat.fields), cat.fields);
+  const ptrPatch = catalogPatch(ptr.rows[0].values, stored, "SP-1", { specLib: lib });
+  ok(ptrPatch.specSectionId === "ss-i" && ptrPatch.specArticleId === "ar-i", "catalog import: Spec Section / Spec Article resolve to the canonical pointers");
+  const legacy = prepareRows([["SP-1", "Stage Lighting Instruments"]], autoMap(["SKU", "Spec Article"], cat.fields), cat.fields);
+  const legacyPatch = catalogPatch(legacy.rows[0].values, stored, "SP-1", { specLib: lib });
+  ok(!("specArticleId" in legacyPatch) && legacyPatch.productMetadata?.specArticle === "Stage Lighting Instruments", "catalog import: an unresolvable Spec Article is kept as legacy text, never dropped");
 }
 ```
 
-Use whatever the harness already imports for the import types (grep for `IMPORT_TYPES` in `scripts/test-review-and-spec.ts` — the #137 work added assertions there and the import name is already in the file).
+If `prepareRows`' `rows[i].values` is named differently, match the existing catalogPatch assertions at `:4898-4960`, which build rows the same way.
 
 - [ ] **Step 4: Round-trip it by hand**
 
 ```bash
 npm run dev
 ```
-Download the catalog template from `/import`, confirm the seven columns are present, paste back two rows — one with a multi-line quoted `Spec Body`, one with only `SKU` and `List` — and confirm on commit that the first lands as `draft` with its indentation intact and that the second leaves the first row's spec text alone.
+Download the catalog template from `/import` and confirm the seven spec columns are present, with `Spec Section` and `Spec Article` each appearing **once**. Paste back two rows: one with a multi-line quoted `Spec Body`, and one with only `SKU` and `List`. On commit, confirm the first lands as `draft` with its indentation intact, and that the second leaves the first row's spec text **and state** alone. Export the catalog, re-import the file unchanged, and confirm no authored part turned into a draft.
 
 - [ ] **Step 5: Run, typecheck, commit**
 
 ```bash
-npx tsx scripts/test-review-and-spec.ts
+npm run test:specs
+PGLITE_PATH=$(mktemp -d) npx tsx scripts/test-review-regressions.ts   # the #133/#137 catalog import blocks at :795-930 must stay green
 npx tsc --noEmit -p .
-git add src/app/\(app\)/import/types.ts src/app/\(app\)/import/registry.ts scripts/test-review-and-spec.ts
-git commit -m "feat(specs): the catalog importer carries model and the spec columns, landing unreviewed rows as drafts"
+git add "src/app/(app)/import/types.ts" "src/app/(app)/import/registry.ts" "src/app/(app)/catalog/import.ts" scripts/test-review-and-spec.ts
+git commit -m "feat(specs): the catalog importer carries the canonical spec columns, landing changed text as drafts"
 ```
 
 ---
@@ -2659,24 +3348,50 @@ git commit -m "feat(specs): the catalog importer carries model and the spec colu
 
 **Files:**
 - Modify: `src/components/nav/nav-data.ts`
+- Modify: `scripts/test-review-and-spec.ts` (the Design nav assertions at `:1510-1545`)
 - Modify: `scripts/smoke-routes.ts`
 - Modify: `DECISIONS.md`, `PUNCHLIST.md`, `AGENTS.md`
 
 - [ ] **Step 1: The nav entry**
 
-In `src/components/nav/nav-data.ts`, add to the DESIGN group's `children` (at `nav-data.ts:79-96`), after `The Grid`:
+In `src/components/nav/nav-data.ts`, add to the DESIGN group's `children` (`nav-data.ts:87-98`), after `The Grid` (the `designs` key, `:95`):
 
 ```ts
       { key: "specs", label: "Specs", href: "/design/specs" },
 ```
 
-`activeKeyFor` (`:113-157`) maps the **first path segment only**, so `/design/specs` would otherwise light up `designoverview`. Add an explicit exception beside the existing `/design/assemblies` one (`:118-121`):
+`activeKeyFor` (`:118`) maps the **first path segment only**, so `/design/specs` would otherwise light up `designoverview`. Add an explicit exception directly below the existing `/design/assemblies` one (`:124-126`):
 
 ```ts
   if (pathname.startsWith("/design/specs")) return "specs";
 ```
 
 Do not touch the `/design/engagements` fallthrough — that Consulting pill has never lit on its own pages and fixing it is a separate change with its own blast radius.
+
+**The harness pins the Design children.** `scripts/test-review-and-spec.ts:1538-1545` asserts the exact `DESIGN_CHILDREN` array, so adding `specs` fails it. A parallel branch also adds a "Grid Settings" child after "The Grid", and the lead reconciles the two at merge. Write the check so it tolerates that: it asserts that `specs` is present and positioned per this plan, not the whole array. Replace the exact-equality `ok(...)` with:
+
+```ts
+const DESIGN_CHILDREN = [
+  "designoverview", "engagements", "designs",
+  "lineset", "assemblies", "motors",
+];
+const designKeys = designGroup && designGroup.kind === "group" ? designGroup.children.map((c) => c.key) : [];
+const inOrder = DESIGN_CHILDREN.map((k) => designKeys.indexOf(k));
+ok(
+  inOrder.every((i) => i >= 0) && inOrder.every((i, n) => n === 0 || i > inOrder[n - 1]),
+  `Design keeps [${DESIGN_CHILDREN.join(", ")}] in order (other children may sit between them)`
+);
+ok(
+  designKeys.includes("specs") &&
+    designKeys.indexOf("specs") > designKeys.indexOf("designs") &&
+    designKeys.indexOf("specs") < designKeys.indexOf("lineset"),
+  "Design carries Specs after The Grid and before the Lineset Builder"
+);
+ok(activeKeyFor("/design/specs") === "specs" && activeKeyFor("/design/specs/library") === "specs",
+  "/design/specs/* lights the Specs child, not the Design overview");
+```
+
+Keep the comment block above it (`:1529-1537`), and add one line to it: `specs` joined in the Specs module (D-SPEC); the check became order-tolerant so parallel additions don't collide.
 
 - [ ] **Step 2: Smoke routes**
 
@@ -2695,26 +3410,26 @@ and to `DYNAMIC_ROUTES` — pick a section id that the starter sections actually
   { route: "/design/specs/templates/curtain-Leg" },        // the starter curtain template
 ```
 
-Confirm `checkRoute` follows redirects (read its implementation); if it does not, give `/design/specs` a `reject` the way `/design/grid/GRD-5001` does, or drop it and note why in your report.
+The harness follows redirects: see the `/design/fixtures` entry's comment at `smoke-routes.ts:107`, and `looksLikeErrorPage` judges the *final* path. So `/design/specs` needs **no** `reject`. It passes as long as the redirect lands on a 200 library page, not on `/login` or a 5xx.
 
-- [ ] **Step 3: D161**
+- [ ] **Step 3: D-SPEC-1 … D-SPEC-8**
 
-Append to `DECISIONS.md`, following the house heading style (`## D161. <one-line summary> (<punch ref>, 2026-09-22)`) and the length of the recent entries (D156-D160 are the models). It must cover, each in its own short paragraph:
+D161 and #142 are taken. Write **placeholder** numbers — the lead renumbers at merge time. Append to `DECISIONS.md`, following the house heading style (`## D-SPEC-1. <one-line summary> (#SPEC, <date>)`) and the length of the recent entries (D245-D250 are the models). There is one entry per numbered item in "Decisions this plan takes" above, `D-SPEC-1` … `D-SPEC-8` in that order, and each entry states its reason. Entries 5-8 must carry: the exact legacy→canonical mapping table and its invariants from Task 6 Step 4, plus the import-column aliasing and the blank-`Spec State` export rule from Task 14; the full list of gated consumers from Task 6 Step 5; the `create` visibility of the Spec panel; and why there is no `model` field. `D-SPEC-1`'s body additionally covers, each in its own short paragraph:
 
 - The module and its anchor: the library lives under `/design/specs`; product language lives on the catalog part; only `authored` text prints.
 - The outline convention verbatim, and that article numbers are `1.1`/`2.1`/`3.1`, superseding D94's `2.01` for anything this module renders.
 - `specSameAs` resolves one hop; a chain or a cycle reports "no spec" naming the target, because following chains would make a spec's provenance unknowable from the part alone.
 - Category articles and the resolution order (explicit → category default → legacy `specSectionId` → nothing), and that a category default is a pre-placement, not language.
 - Imported rows land as `draft` and are gated until someone opens the part and saves; the seed rows are the exception and land `authored` because they came from a finished bid document a human signed off on.
-- The four deviations from "Decisions this plan takes" above, each with its reason: the library JSON lives on the library screen rather than the Import hub (the hub is columnar); `/design/specs` redirects until Phase B; starter templates seed outside the demo flag because the go-live reset wipes every doc collection; and the spec fields are declared on `CatalogPart` itself.
+- Pointers to `D-SPEC-2` … `D-SPEC-8` (the redirect, starter seeding on every environment, fields on `CatalogPart`, one set of spec pointers, drafts gated everywhere, the panel's `create` visibility, no `model` field), so a reader landing on the module entry finds them.
 - Explicitly out of scope for Phase A, so a later reader does not think it was missed: the generator, the four doors, docx/zip output, the `spec-writer` skill and the North HS seed — all Phase B and C of the same spec.
 
-- [ ] **Step 4: #142**
+- [ ] **Step 4: #SPEC**
 
-Append to `PUNCHLIST.md`:
+Append to `PUNCHLIST.md` (placeholder number — the lead renumbers):
 
 ```
-## 142. Specs module — Phase A (library) — DONE 2026-09-22 (D161)
+## SPEC. Specs module — Phase A (library) — DONE <date> (D-SPEC-1…D-SPEC-8)
 ```
 with a paragraph naming what shipped, and a short **Still open** list: Phase B (generator, four doors, docx per section, zip, print view) and Phase C (the `spec-writer` skill and the North HS seed), plus any Minor a reviewer carried during this branch.
 
@@ -2725,8 +3440,8 @@ In `AGENTS.md`, extend the phase list with a Specs-module line in the same voice
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/components/nav/nav-data.ts scripts/smoke-routes.ts DECISIONS.md PUNCHLIST.md AGENTS.md
-git commit -m "feat(specs): Specs in the DESIGN nav, smoke routes, D161 and #142"
+git add src/components/nav/nav-data.ts scripts/smoke-routes.ts scripts/test-review-and-spec.ts DECISIONS.md PUNCHLIST.md AGENTS.md
+git commit -m "feat(specs): Specs in the DESIGN nav, smoke routes, D-SPEC decisions and the #SPEC punch entry"
 ```
 
 ---
@@ -2738,7 +3453,7 @@ Run all six on the branch HEAD before the whole-branch review. Report real numbe
 ```bash
 ps aux | grep tsx                                   # must be empty first
 npx tsc --noEmit -p .                               # 0 errors
-npx tsx scripts/test-review-and-spec.ts             # ALL PASSED, note the PASS count
+npm run test:specs                                  # ALL PASSED, note the PASS count
 PGLITE_PATH=$(mktemp -d) npx tsx scripts/test-review-regressions.ts
 npm run test:smoke                                  # ALL PASSED, incl. the new routes
 npx next build                                      # exit 0

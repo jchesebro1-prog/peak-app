@@ -1,4 +1,4 @@
--- Specs module (D161), Phase A — the three new library collections.
+-- Specs module (D-SPEC), Phase A — the three new library collections.
 --
 -- Hand-rewritten from the generated DDL so it is idempotent per D141: this
 -- file runs against a shared Neon database that more than one branch's build
