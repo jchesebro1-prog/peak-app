@@ -168,7 +168,12 @@ export default function SpecPanel({
         sku: part.sku,
         specArticleId: articleId || undefined,
         specTitle: title,
-        specBody: body,
+        // When same-as is set the textarea is disabled and `body` is stale
+        // (it still holds whatever was typed before same-as was set, or the
+        // last-loaded stored body) — omit the key entirely so
+        // writePartSpecFieldsAction leaves the stored specBody untouched
+        // rather than overwriting it with this stale value.
+        ...(sameAsTrimmed ? {} : { specBody: body }),
         specSameAs: sameAs,
         specSort: Number.isFinite(n) ? n : undefined,
       });
@@ -260,7 +265,12 @@ export default function SpecPanel({
           onKeyDown={noEnter}
           placeholder="e.g. CL-HB3"
         />
-        {sameAsTrimmed && <div style={EXPLAIN}>This part prints {sameAsTrimmed}&apos;s text.</div>}
+        {sameAsTrimmed && (
+          <div style={EXPLAIN}>
+            Recorded — in Phase A this part still prints its own body below; the same-as link takes effect once
+            Phase B&apos;s assembly reads it.
+          </div>
+        )}
       </div>
 
       <div style={{ marginBottom: 13 }}>

@@ -173,7 +173,7 @@ export function substitutePlaceholders(
   for (const raw of String(body || "").split(/\r?\n/)) {
     const lead = /^[ \t]*/.exec(raw)?.[0] ?? "";
     const solo = SOLO_RE.exec(raw.trim());
-    if (solo && solo[1] in lists) {
+    if (solo && Object.hasOwn(lists, solo[1])) {
       const items = lists[solo[1]] ?? [];
       if (!items.length) {
         warnings.push(`{{${solo[1]}}} had no values — the line was dropped.`);
@@ -185,7 +185,7 @@ export function substitutePlaceholders(
     }
     out.push(
       raw.replace(ANY_RE, (whole, key: string) => {
-        if (key in lists) {
+        if (Object.hasOwn(lists, key)) {
           const items = lists[key] ?? [];
           if (!items.length) {
             warnings.push(`{{${key}}} had no values — printed as written.`);
@@ -193,7 +193,7 @@ export function substitutePlaceholders(
           }
           return items.join(", ");
         }
-        if (key in scalars) {
+        if (Object.hasOwn(scalars, key)) {
           const v = scalars[key];
           if (v == null || v === "") {
             warnings.push(`{{${key}}} has no value yet — printed as written.`);

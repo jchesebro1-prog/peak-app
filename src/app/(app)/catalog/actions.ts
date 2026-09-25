@@ -292,7 +292,7 @@ export async function setPriceListEffectiveAction(mfr: string, at: number | null
 /**
  * Write a part's canonical spec fields (Task 13's panel). Saving here is the
  * review step: whatever the row's provenance was, a human has now read it,
- * so it becomes "authored" — the only state that ever prints (D-SPEC-6).
+ * so it becomes "authored" — the only state that ever prints (D259).
  */
 export async function writePartSpecFieldsAction(input: {
   sku: string;
@@ -317,7 +317,7 @@ export async function writePartSpecFieldsAction(input: {
   if (articleId && !articles.some((a) => a.id === articleId)) {
     return { ok: false, error: "That article no longer exists — pick another." };
   }
-  // D-SPEC-5 mirror: D94's assemble groups by specSectionId, so keep it equal
+  // D258 mirror: D94's assemble groups by specSectionId, so keep it equal
   // to the section of the article this part will actually print under
   // (explicit, else category default, else adopted legacy pointer). When
   // nothing resolves, leave the stored specSectionId alone.
@@ -331,7 +331,13 @@ export async function writePartSpecFieldsAction(input: {
       specArticleId: articleId || undefined,
       ...(mirrorSectionId ? { specSectionId: mirrorSectionId } : {}),
       specTitle: String(input.specTitle || "").trim() || undefined,
-      specBody: String(input.specBody || ""),
+      // mergeUpsert treats a key's mere PRESENCE (even `undefined`) as "the
+      // caller owns this field, overwrite it" — only a key's ABSENCE leaves
+      // the stored value alone. The panel omits specBody entirely from its
+      // request when same-as is set (its textarea is disabled/stale then),
+      // so mirror that here: omit the key rather than writing "" over a
+      // stored body the caller never actually edited.
+      ...(input.specBody !== undefined ? { specBody: String(input.specBody) } : {}),
       specSameAs: sameAs || undefined,
       specSort: specSortValue(input.specSort),
       // Saving here is the review step: whatever the row's provenance was, a

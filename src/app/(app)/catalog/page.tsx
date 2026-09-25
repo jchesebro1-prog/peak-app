@@ -918,7 +918,12 @@ function PartFormModal({
                 writePartSpecFieldsAction. */}
             {canCreate && editing && part && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-                <SpecPanel part={part} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
+                {/* key={part.sku}: PartFormModal is reused across parts without
+                    remounting (no key at its own call site), so without this
+                    key SpecPanel's local editor state would carry over from
+                    the previously-edited part into this one — a latent
+                    cross-part write. Force a fresh instance per part. */}
+                <SpecPanel key={part.sku} part={part} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
               </div>
             )}
 
