@@ -1936,6 +1936,54 @@ async function main() {
     assert((await adoptAllLegacySpecPointers()).adopted === 0, "legacy: a second run writes nothing");
   }
 
+  /* --- specs: library import/export --- */
+  {
+    const Sections = await import("@/lib/stores/spec-sections");
+    const Articles = await import("@/lib/stores/spec-articles");
+    const Curtains = await import("@/lib/stores/spec-curtain-templates");
+    const { exportLibrary, parseLibraryFile, importLibrary } = await import("@/lib/specs/library-io");
+
+    await Sections.createSection({ number: "11 61 43", title: "Stage Curtains", sort: 10, by: "Jeff" });
+    const [sec] = await Sections.allSections();
+    await Articles.createArticle({ sectionId: sec.id, title: "Theatrical Stage Drapes", manufacturers: ["Rose Brand"], categoryKeys: ["Curtains"], general: "A. General" }, "Jeff");
+
+    const file = await exportLibrary();
+    assert(file.kind === "peak-spec-library" && file.version === 1, "library io: the export is stamped and versioned");
+    assert(file.sections.length >= 1 && file.articles.length >= 1, "library io: the export carries sections and articles");
+    assert(file.templates.length > 0, "library io: the export carries the formulas");
+
+    const round = parseLibraryFile(JSON.stringify(file));
+    assert(!!round.file && round.error === null, "library io: an exported file parses back");
+    assert(parseLibraryFile("not json").error !== null, "library io: junk is an error, not a throw");
+    assert(parseLibraryFile(JSON.stringify({ kind: "something-else" })).error !== null, "library io: a foreign file is refused by kind");
+    assert(parseLibraryFile(JSON.stringify({ ...file, version: 99 })).error !== null, "library io: an unknown version is refused");
+
+    const counts = await importLibrary(round.file!, "Jeff");
+    assert(counts.sections >= 1, "library io: importing reports what it wrote");
+    const after = await Sections.allSections();
+    assert(after.length === file.sections.length, "library io: re-importing the same file creates no duplicate section");
+    const afterArticles = await Articles.allArticles();
+    assert(afterArticles.length === file.articles.length, "library io: re-importing creates no duplicate article");
+
+    const edited = { ...round.file!, sections: round.file!.sections.map((s) => ({ ...s, title: "Renamed" })) };
+    await importLibrary(edited, "Jeff");
+    assert((await Sections.allSections())[0].title === "Renamed", "library io: an import overwrites the record it matches by id");
+
+    // Catalog parts point at articles by id (specArticleId), so an import must
+    // keep the file's ids — a fresh id would orphan every part that pointed at it.
+    const fromFile = { ...file.articles[0], id: "ar-from-file", title: "Imported Drapes" };
+    await importLibrary({ ...round.file!, articles: [fromFile] }, "Jeff");
+    const kept = await Articles.getArticle("ar-from-file");
+    assert(kept?.title === "Imported Drapes", "library io: an imported article keeps the id the file gave it");
+    await importLibrary({ ...round.file!, articles: [{ ...fromFile, title: "Imported Drapes v2" }] }, "Jeff");
+    assert((await Articles.allArticles()).filter((a) => a.id === "ar-from-file").length === 1, "library io: re-importing an article updates it in place");
+    assert((await Articles.getArticle("ar-from-file"))?.title === "Imported Drapes v2", "library io: the re-import's text wins");
+
+    const junkCurtain = await importLibrary({ ...round.file!, curtainTemplates: [{ ...round.file!.curtainTemplates[0], id: "Valance" as never, title: "Should not land" }] }, "Jeff");
+    assert(junkCurtain.skipped === 1, "library io: a curtain template for an unknown Grid type is skipped");
+    assert(!(await Curtains.allCurtainTemplates()).some((t) => t.title === "Should not land"), "library io: a skipped curtain template never overwrites the Border template");
+  }
+
   console.log("review regression checks passed");
 }
 

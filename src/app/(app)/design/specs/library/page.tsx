@@ -5,7 +5,7 @@ import * as Articles from "@/lib/stores/spec-articles";
 import * as Templates from "@/lib/stores/spec-templates";
 import * as Catalog from "@/lib/stores/catalog";
 import { articleIdForPart, type SpecCategoryArticle } from "@/lib/specs/articles";
-import { AddSectionForm, AdoptLegacyPointersButton, SeedStarterSectionsButton } from "./controls";
+import { AddSectionForm, AdoptLegacyPointersButton, ImportExportLibraryControls, SeedStarterSectionsButton } from "./controls";
 
 /**
  * Task 8 — the Specs library index: the Sections table (with the inline
@@ -187,7 +187,7 @@ export default async function SpecLibraryPage({
       {/* Task 12 mounts the coverage table here. */}
 
       <div id="import-export">
-        {/* Task 11 mounts the import/export controls here. */}
+        <ImportExportLibraryControls />
       </div>
 
       {legacyUnlinkedParts.length > 0 && (

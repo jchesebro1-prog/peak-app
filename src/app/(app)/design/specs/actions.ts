@@ -8,6 +8,7 @@ import * as Templates from "@/lib/stores/spec-templates";
 import * as Curtains from "@/lib/stores/spec-curtain-templates";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { adoptAllLegacySpecPointers } from "@/lib/specs/legacy-pointers";
+import { importLibrary, parseLibraryFile } from "@/lib/specs/library-io";
 import type { SpecArticle, SpecPart2Style, SpecQuantities } from "@/lib/specs/sections";
 import type { SpecCurtainTemplate } from "@/lib/stores/spec-curtain-templates";
 import { GRID_CURTAIN_TYPES, type GridCurtainType } from "@/lib/design/grid-bom";
@@ -270,5 +271,21 @@ export async function saveCurtainTemplateAction(input: {
   } catch (e) {
     console.error("saveCurtainTemplateAction", e);
     return { ok: false, error: "Could not save the curtain template. Try again." };
+  }
+}
+
+export async function importLibraryAction(text: string): Promise<
+  Result<{ sections: number; articles: number; templates: number; curtainTemplates: number; skipped: number }>
+> {
+  const user = await requirePerm("create");
+  const { file, error } = parseLibraryFile(text);
+  if (!file) return { ok: false, error: error || "That file is not a Peak spec library." };
+  try {
+    const counts = await importLibrary(file, user.name);
+    revalidate();
+    return { ok: true, ...counts };
+  } catch (e) {
+    console.error("importLibraryAction", e);
+    return { ok: false, error: "Could not import the library. Nothing was changed after the last record it reported." };
   }
 }
