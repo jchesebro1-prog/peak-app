@@ -317,6 +317,15 @@ export const ZIP_GATE_MAX_MI = 25;
  * same noise cleanCity() strips ("Rome (Sullivan)", "Wisc. Dells"), so a
  * fallback attempt's search must not hand it the raw text. Must itself pass
  * the exact city gate — an unresolvable or mismatched town means null.
+ *
+ * #185 fix round 2, item 4d (D235): this cleans the city unconditionally,
+ * which also improves ATTEMPT 1's own postal-city check (nearStatedTown() is
+ * called with the row's raw city — see the "second gate" in gateHit() —  and
+ * that call lands here regardless of which attempt it came from). A venue
+ * whose stated city itself needs cleanCity()'s help ("Wisc. Dells", a
+ * parenthesised aside) now gets a resolvable centre on attempt 1 too, not
+ * only on the fallback attempts that already pass a pre-cleaned city in.
+ * Deliberate, not a regression: keep it.
  */
 async function townCentreFor(
   city: string | null | undefined,

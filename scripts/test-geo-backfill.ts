@@ -445,6 +445,23 @@ async function main() {
     assert.ok(!h.ok, "a degenerate fallback street is not geocoded via fallback");
     assert.equal(calls - callsBeforeH, 1, "only attempt 1's request is made; fallbacks are skipped");
 
+    // Fix round 2, item 4b: the degenerate-street guard's other two branches.
+    // A fallback street with no digit at all (a name with nothing house-
+    // number-shaped left in it) can't be a better query than attempt 1.
+    const ctxH2 = newGeocodeCtx(0);
+    const callsBeforeH2 = calls;
+    const h2 = await geocodeVenue({ address: "Main Street", city: "Somewhereville", state: "WI" }, ctxH2);
+    assert.ok(!h2.ok, "a fallback street with no digit is not geocoded via fallback");
+    assert.equal(calls - callsBeforeH2, 1, "no digit — fallbacks are skipped");
+
+    // A fallback street with digits but no real street-name text (no run of
+    // two letters — just a bare house-number fragment) is equally useless.
+    const ctxH3 = newGeocodeCtx(0);
+    const callsBeforeH3 = calls;
+    const h3 = await geocodeVenue({ address: "100", city: "Somewhereville", state: "WI" }, ctxH3);
+    assert.ok(!h3.ok, "a fallback street with digits but no street-name text is not geocoded via fallback");
+    assert.equal(calls - callsBeforeH3, 1, "no two-letter street-name text — fallbacks are skipped");
+
     // #185 item 4: the zip gate must not wave through a hit that's merely in
     // the same zip as the row but nowhere near the stated town. "Middleton"
     // resolves to a real centre (registered above); the no-city fallback's
