@@ -445,6 +445,12 @@ export default function EstimatorClient({
   const [attestOpen, setAttestOpen] = useState(false);
   const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  /** #180 review 3 — an informational note from the server that isn't a
+   *  failure: e.g. a stale tab's status display was refreshed because
+   *  someone else moved it elsewhere, even though this save succeeded and
+   *  never asked to change status itself. Shown alongside "Saved ✓", not
+   *  in place of it, and never implies anything went wrong. */
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   /** True while changeStatus/changeStage's own gated setStatusAction/
    *  setQuoteStageAction round trip is in flight (security review,
    *  2026-09-25) — disables Save so a click landing in that window can't
@@ -811,12 +817,16 @@ export default function EstimatorClient({
         }
         if (res.ok) {
           setActionError(null);
+          // #180 review 3 — a stale tab's status got silently refreshed;
+          // shown alongside "Saved ✓", never implying the save failed.
+          setActionNotice(res.notice || null);
           setJustSaved(true);
           if (savedTimer.current) clearTimeout(savedTimer.current);
           savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
         } else {
           // The gate's own message (statusFailureMessage, D230) — the quote
           // itself saved; only the requested status advance was refused.
+          setActionNotice(null);
           setActionError(res.error || "That save did not go through — nothing was written.");
         }
       } catch (e) {
@@ -2452,6 +2462,44 @@ export default function EstimatorClient({
                   fontSize: 12.5,
                   fontWeight: 600,
                   color: "#9a2f22",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  flexShrink: 0,
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* informational save notice (#180 review 3) — a stale tab's
+              status got refreshed, but nothing this save asked for failed */}
+          {!actionError && actionNotice && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "9px 22px",
+                background: "#eef3fb",
+                borderBottom: "1px solid #cddaf0",
+                color: "#2b4a7a",
+                fontSize: 12.5,
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              <span>{actionNotice}</span>
+              <button
+                type="button"
+                onClick={() => setActionNotice(null)}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "#2b4a7a",
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",

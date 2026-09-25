@@ -17,7 +17,7 @@ import {
   setQuoteStage,
   setQuotePipeline,
   statusFailureMessage,
-  STAGE_LABEL,
+  resolveSaveStatusChange,
   STAGES,
   submitForReview,
   update,
@@ -157,6 +157,11 @@ export type SaveResult = {
   /** Set on `ok: false` when the record was created but a requested status
    *  transition was refused (punch #60: setStatus's approval gate). */
   error?: string;
+  /** Set on `ok: true` (review round 3) — an informational note the user
+   *  should see even though nothing failed: a stale tab's status display
+   *  was refreshed because someone else moved it elsewhere, but this save
+   *  never asked to change status itself, so it's not an error. */
+  notice?: string;
 };
 
 export type ReviewSync = {
@@ -331,6 +336,7 @@ export async function saveQuoteAction(
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
+  let statusNotice: string | undefined;
   /* #143: keep only the vendor quotes something still references. Deleting a
      system, or moving one to another estimate, would otherwise strand its
      record — and its attachment — on this document forever.
@@ -367,37 +373,37 @@ export async function saveQuoteAction(
     // "use server" action is also callable directly, bypassing the client
     // dropdown's own transition rules entirely.
     //
-    // #180 review 2: `payload.status !== prior?.status` alone compares the
-    // requested value against the server's CURRENT status — but a STALE tab
-    // (open since before someone else changed the quote elsewhere) sends
-    // its own old `payload.status`, which now also differs from the current
-    // status, purely because the world moved on, not because this tab's
-    // user touched anything. That demoted won→sent, re-won a lost quote, or
-    // demoted sent→draft from nothing more than saving a note. The genuine
-    // signal is `payload.baseStatus`: the status THIS tab last received
-    // from the server. A real, intentional change only exists when the
-    // user's current value differs from that AND nobody else has moved the
-    // quote since — i.e. the server's current status still equals what this
-    // tab last saw.
-    if (q && payload.status !== payload.baseStatus && prior?.status === payload.baseStatus) {
-      try {
-        q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
-      } catch (e) {
-        // Same split as the create branch below: the gate's refusal is the
-        // user's to read (#174); the field edits above are still saved.
-        statusError = statusFailureMessage(
-          e,
-          "estimator/actions saveQuoteAction: setStatus on an existing quote threw"
-        );
+    // #180 review 2/3: whether (and how) to act on a possibly-changed
+    // status is `resolveSaveStatusChange` (quotes.ts) — a pure function so
+    // it's testable directly (this "use server" file can't be called from
+    // a plain test harness) and so this file carries no copy of the
+    // condition that could drift from what's actually tested. Compared
+    // against `q.status` (just returned by update() above), not the
+    // `prior` read from the top of this function — prior is a snapshot
+    // taken before the vendor-quote pruning and the update() call, so using
+    // it here would reopen a narrower version of the exact same staleness
+    // gap `baseStatus` exists to close.
+    if (q) {
+      const decision = resolveSaveStatusChange(payload.status, payload.baseStatus, q.status);
+      if (decision.kind === "apply") {
+        try {
+          q = (await setStatus(loadedId, payload.status, user.name)) ?? q;
+        } catch (e) {
+          // Same split as the create branch below: the gate's refusal is
+          // the user's to read (#174); the field edits above are still saved.
+          statusError = statusFailureMessage(
+            e,
+            "estimator/actions saveQuoteAction: setStatus on an existing quote threw"
+          );
+        }
+      } else if (decision.kind === "stalePassive") {
+        // Nothing this save asked for was refused — the other field edits
+        // succeeded normally, so this stays ok:true with an informational
+        // notice, not an error.
+        statusNotice = decision.notice;
+      } else if (decision.kind === "staleConflict") {
+        statusError = decision.error;
       }
-    } else if (q && payload.status !== prior?.status) {
-      // Either this tab is stale (prior.status !== baseStatus — someone
-      // else changed it since this tab last synced) or its own "change" was
-      // never a real one to begin with. Leave status untouched — `q` from
-      // update() above already carries the CURRENT server status, since
-      // update() never writes that field — and say so: the other edits in
-      // this save DID go through, only the status shown was out of date.
-      statusError = `This quote's status changed elsewhere since you last saw it — it's "${STAGE_LABEL[q.status]}", not "${STAGE_LABEL[payload.status]}". Your other edits saved; the status shown here has been refreshed.`;
     }
   } else {
     // #62 gave every mint a retry budget; `insertWithPrefixedId` THROWS once an
@@ -473,6 +479,7 @@ export async function saveQuoteAction(
     stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
     ...(statusError ? { error: statusError } : {}),
+    ...(statusNotice ? { notice: statusNotice } : {}),
   };
 }
 
