@@ -5,6 +5,7 @@ import {
   get,
   iso,
   msOf,
+  money,
   fmtShort,
   fmtLong,
   stageMeta,
@@ -14,8 +15,12 @@ import {
   warrantyMonthsOf,
   DEFAULT_WARRANTY_MONTHS,
 } from "@/lib/stores/repair-jobs";
+import { formatJobValue } from "@/lib/job-value";
 import { RecordingsStrip } from "@/components/recordings/recordings-strip";
 import { loadRecordingsStrip } from "../../recordings/data";
+import { ProjectValueEditor } from "@/components/project-value-editor";
+import ActionError from "@/components/action-error";
+import { setRepairValueAction } from "../actions";
 import { ResultsForm, DeleteRepairButton } from "./controls";
 
 export const metadata = { title: "Repair results — Quartzite-6" };
@@ -34,6 +39,7 @@ export default async function RepairResultsPage({
   const [, sp, users] = await Promise.all([requireUser(), searchParams, activeUsers()]);
   const jobId = one(sp.job);
   const saved = one(sp.saved) === "1";
+  const err = one(sp.err);
   const job = jobId ? await get(jobId) : null;
 
   if (!job) {
@@ -155,6 +161,8 @@ export default async function RepairResultsPage({
           : "Record the work performed on site. Saving completes the repair and starts its warranty window."}
       </div>
 
+      <ActionError message={err} />
+
       {/* summary card */}
       <div
         style={{
@@ -226,6 +234,33 @@ export default async function RepairResultsPage({
             </div>
             <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>
               {job.assignedTo || "Unassigned"}
+            </div>
+          </div>
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: "#9aa0ab",
+                letterSpacing: ".05em",
+                textTransform: "uppercase",
+              }}
+            >
+              Value
+            </div>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>
+              {/* #188 — the Daylite-imported UKN "fill in later" editor, ported
+                  from the project overview (ProjectValueEditor is generic:
+                  id/value/valueUnknown/display/action). Remounts to display
+                  mode on a successful save via the value+flag key. */}
+              <ProjectValueEditor
+                key={job.value + "-" + String(!!job.valueUnknown)}
+                id={job.id}
+                value={job.value}
+                valueUnknown={!!job.valueUnknown}
+                display={formatJobValue(job, money)}
+                action={setRepairValueAction}
+              />
             </div>
           </div>
         </div>

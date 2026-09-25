@@ -744,6 +744,14 @@ export async function remove(id: string): Promise<void> {
   await softDeleteDoc("repair_jobs", id);
 }
 
+/** Set a repair job's dollar value by hand — the "fill it in later" path for
+ *  a Daylite-imported repair that landed with no known value (#188, mirrors
+ *  setProjectValue in stores/projects.ts). Always clears valueUnknown, even
+ *  when re-editing an already-known value. */
+export async function setRepairValue(id: string, value: number): Promise<RepairJobRecord | null> {
+  return update(id, { value, valueUnknown: false });
+}
+
 /* ---------- worklists ---------- */
 
 /** The `source` the Daylite history import writes on every repair it creates

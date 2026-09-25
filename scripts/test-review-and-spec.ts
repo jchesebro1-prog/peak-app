@@ -8357,6 +8357,28 @@ async function dayliteCommitAsyncChecks(): Promise<void> {
   ok(!!oldQ && oldQ.owner === "" && oldQ.legacyOwner === "Old Timer" && oldQ.status === "draft" && oldQ.stage === "design" && oldQ.value === 2000, "daylite commit: a single-write quote keeps an unmatched owner unassigned (no Jeff default) + legacyOwner");
 }
 
+/**
+ * ============ #188: repair job value editor (DB) ============
+ *
+ * Repair jobs had no value editor, so an imported repair's UKN couldn't be
+ * filled in (mirrors setProjectValue, D240).
+ */
+async function repairValueEditorAsyncChecks(): Promise<void> {
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { fixtureId, createFixture } = await import("./test-fixtures");
+
+  const uknRpId = fixtureId(188, "ukn-repair");
+  await createFixture("repair_jobs", Repairs.buildRepairJob(uknRpId, {
+    customer: "TEST188 UKN Repair", value: 900, valueUnknown: true,
+  }, Date.now()));
+  const uknRp = await Repairs.get(uknRpId);
+  ok(!!uknRp && uknRp.valueUnknown === true && knownValue(uknRp) === 0, "#188: a repair created with valueUnknown starts flagged, and knownValue ignores its stray $900");
+  const filledRp = await Repairs.setRepairValue(uknRpId, 4200);
+  ok(filledRp?.value === 4200, "#188: setRepairValue saves the new value");
+  ok(filledRp?.valueUnknown === false, "#188: setRepairValue clears valueUnknown");
+  ok(knownValue(filledRp!) === 4200, "#188: knownValue now counts the filled-in repair at its real value");
+}
+
 /* ============ Task 12: chunked Daylite commit == one full commit (DB) ============ */
 async function dayliteChunkAsyncChecks(): Promise<void> {
   const { previewHistory, commitHistory } = await import("@/lib/daylite/history-commit");
@@ -9326,6 +9348,7 @@ seeded()
   .then(() => quotesPipelineAsyncChecks())
   .then(() => moveStageRecordsAsyncChecks())
   .then(() => dayliteCommitAsyncChecks())
+  .then(() => repairValueEditorAsyncChecks())
   .then(() => dayliteChunkAsyncChecks())
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
