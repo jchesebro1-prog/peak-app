@@ -13,10 +13,16 @@ import { SymbolIcon } from "@/components/design/symbol-shape";
 import { saveGridCategoryShapesAction } from "./actions";
 
 /**
- * Admin "Grid symbols" card (#131, D154) — the CustomerFieldsCard idiom:
- * seeded from the server-resolved map, whole-map save, sorted ONCE on mount.
- * One row per catalog category → shape; anything not listed draws as a
- * rectangle; a symbol set on a single Grid entry wins over its category.
+ * "Symbol shapes by category" card (#131, D154) — the CustomerFieldsCard
+ * idiom: seeded from the server-resolved map, whole-map save, sorted ONCE on
+ * mount. One row per catalog category → shape; anything not listed draws as
+ * a rectangle; a symbol set on a single Grid entry wins over its category.
+ *
+ * Moved here from Settings → Admin (Grid settings build) — the card shipped
+ * under Settings → Admin, was dropped from that page (settings/page.tsx
+ * commit 2855d84) when Settings split into Company/Admin sections, and sat
+ * orphaned (unreferenced, still type-checking) until this route gave it a
+ * home that actually matches what it configures: The Grid.
  *
  * Rows merge two sources (Task 10 controller review): the resolved defaults
  * map (`shapes` — seeded or stored, from resolveCategoryShapes) and the

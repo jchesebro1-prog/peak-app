@@ -25,7 +25,6 @@ import {
   validateFieldDefs,
   type CustomFieldDef,
 } from "@/lib/customer-fields";
-import { cleanGridCategoryShapes } from "@/lib/design/grid-symbols";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
@@ -320,25 +319,6 @@ export async function saveConsultingDisciplinesAction(disciplines: string[]) {
     )
   ).slice(0, 20);
   await setSettings({ consultingDisciplines: clean });
-  revalidatePath("/", "layout");
-  return { ok: true as const };
-}
-
-/** Grid symbol per category (#131, D154) — FULL REPLACEMENT (the wireTypes
- *  idiom): the card posts every row; a category left off draws as a
- *  rectangle. Unknown shapes and blank categories are dropped; capped.
- *  settings.gridCategoryShapes is a whole-map replacement — a stored {}
- *  would drop EVERY category to "rect" (resolveCategoryShapes treats an
- *  empty object as "the whole truth", not "no overrides"). cleanGridCategoryShapes
- *  collapses an empty result to null instead, so resolveCategoryShapes falls
- *  back to the seed, same as a fresh install. That's the ONLY case that
- *  clears the key: "Restore defaults" followed by Save posts today's seed as
- *  an explicit dense map (never empty), so it writes that map verbatim —
- *  pinning today's values, not clearing the key (controller review, Task 10
- *  fix). */
-export async function saveGridCategoryShapesAction(map: Record<string, string>) {
-  await requirePerm("manage_users");
-  await setSettings({ gridCategoryShapes: cleanGridCategoryShapes(map) });
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

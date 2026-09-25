@@ -90,7 +90,8 @@ const ROUTES = [
   "/reports",
   "/reviews",
   "/settings",
-  "/settings?section=admin", // #131 Grid symbols card lives here
+  "/settings?section=admin",
+  "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
   "/inbox",
   "/inbox?view=unmatched",
   "/queue",

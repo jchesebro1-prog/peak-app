@@ -42,7 +42,7 @@ import { GRID_SHAPES, GRID_SHAPE_LABEL, markerColor, shapeFor, type GridShape } 
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
-import { validateDeviceWire } from "@/lib/catalog-connect";
+import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
@@ -237,6 +237,7 @@ export default function GridEditor({
   categoryShapes,
   activeOptionId,
   linesetDesigns,
+  wireTypes,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -264,6 +265,11 @@ export default function GridEditor({
   /** Resolved by page.tsx from ?option= — always a real option id. */
   activeOptionId: string;
   linesetDesigns: Array<{ id: string; name: string }>;
+  /** Admin-edited wire-type registry (Design → Grid Settings), resolved
+   *  server-side — resolveWireTypes(settings.wireTypes). Used for the
+   *  client-side canConnect() pre-check only; addRouteAction re-derives the
+   *  same registry server-side as the authority. */
+  wireTypes: WireType[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -844,7 +850,7 @@ export default function GridEditor({
             // the same thing against the live catalog before persisting. A
             // device missing ports never reaches this branch, so the
             // un-migrated catalog is never blocked (Task 4 binding behavior).
-            const result = validateDeviceWire(fromPart!, toPart!);
+            const result = validateDeviceWire(fromPart!, toPart!, wireTypes);
             if (!result.ok) {
               setErr(`Wire refused — ${result.reason}: ${fromPlacement.partId} → ${toPlacement.partId} share no compatible port.`);
               return;

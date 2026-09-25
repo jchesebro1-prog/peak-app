@@ -1061,6 +1061,7 @@ import {
   CONNECTION_TYPES,
   DEFAULT_WIRE_TYPES,
   resolveWireTypes,
+  cleanWireTypes,
   canConnect,
   compatibleWireTypes,
   type Port,
@@ -1123,6 +1124,36 @@ ok(resolveWireTypes() !== DEFAULT_WIRE_TYPES, "connect: resolveWireTypes with no
 ok(JSON.stringify(resolveWireTypes()) === JSON.stringify(DEFAULT_WIRE_TYPES), "connect: resolveWireTypes with no stored value is equal in content to the defaults");
 const storedWireTypes = [{ id: "custom", label: "Custom", connectionTypes: ["Edison"] }];
 ok(resolveWireTypes(storedWireTypes) === storedWireTypes, "connect: resolveWireTypes returns the stored array when provided");
+
+/* --- cleanWireTypes (Grid Settings build) — the whole-list save behind the
+ *  Wire types card, same full-replacement idiom as cleanGridCategoryShapes. */
+const cleanedGood = cleanWireTypes([
+  { id: "cat6", label: "Cat6", connectionTypes: ["HDMI", "  ", "not-a-real-type"], dollarsPerFt: 0.5, interchangeable: true },
+]);
+ok(
+  !!cleanedGood && cleanedGood.length === 1 && cleanedGood[0].id === "cat6" &&
+    JSON.stringify(cleanedGood[0].connectionTypes) === JSON.stringify(["HDMI"]),
+  "cleanWireTypes: keeps a valid row, drops an unrecognized connectionType and blank entries"
+);
+ok(cleanedGood?.[0].dollarsPerFt === 0.5 && cleanedGood?.[0].interchangeable === true,
+  "cleanWireTypes: keeps a valid dollarsPerFt and interchangeable:true");
+ok(cleanWireTypes([{ id: "x", label: "X", connectionTypes: ["nonsense-type"] }]) === null,
+  "cleanWireTypes: a row left with zero known connectionTypes is dropped entirely, collapsing to null");
+ok(cleanWireTypes([]) === null, "cleanWireTypes: an empty list collapses to null (falls back to DEFAULT_WIRE_TYPES), same as cleanGridCategoryShapes");
+ok(cleanWireTypes(null) === null && cleanWireTypes(undefined) === null, "cleanWireTypes: null/undefined input is safe and collapses to null");
+const dupeIds = cleanWireTypes([
+  { id: "cat6", label: "First", connectionTypes: ["HDMI"] },
+  { id: "cat6", label: "Second", connectionTypes: ["SDI/BNC"] },
+]);
+ok(!!dupeIds && dupeIds.length === 1 && dupeIds[0].label === "First",
+  "cleanWireTypes: a duplicate id keeps the first occurrence, drops the rest");
+ok(cleanWireTypes([{ id: "noname", connectionTypes: ["HDMI"] }])?.[0].label === "noname",
+  "cleanWireTypes: a blank label falls back to the id, same as the symbols card's category default");
+const roundTrip = cleanWireTypes(DEFAULT_WIRE_TYPES);
+ok(!!roundTrip && JSON.stringify(roundTrip) === JSON.stringify(DEFAULT_WIRE_TYPES),
+  "cleanWireTypes: round-trips DEFAULT_WIRE_TYPES unchanged — every shipped row is already valid");
+ok(JSON.stringify(resolveWireTypes(cleanWireTypes(DEFAULT_WIRE_TYPES) ?? undefined)) === JSON.stringify(DEFAULT_WIRE_TYPES),
+  "cleanWireTypes -> resolveWireTypes round trip: saving the defaults verbatim resolves back to the defaults");
 
 
 /* --- Task 4: validateDeviceWire — grid device-wire compatibility gate (#39) --- */
@@ -1554,6 +1585,45 @@ ok(matchRule({
 })?.id !== "speaker-70v",
   "ruleset: a networked amplifier described only as '...POE+ AMP' does not get a 70V speaker input");
 
+/* --- buildPortRuleReport (Grid Settings build) — the shared computation
+ *  behind both `npm run ports:rules` and the Grid Settings "Port rules
+ *  review" card, on synthetic fixture parts so this test never touches a
+ *  database. Covers: a real match, an already-ported part skipped, and a
+ *  part matched by nothing. */
+import { buildPortRuleReport, type PortReportPart } from "@/lib/catalog-port-report";
+
+const reportFixture: PortReportPart[] = [
+  // Matches "amplifier" and has no ports yet — counted as a hit.
+  { sku: "FIX:AMP1", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC", hasPorts: false },
+  // Same rule, second match, so the rule's hit count is 2 and its sample list
+  // has more than one entry.
+  { sku: "FIX:AMP2", desc: "8 Channel power amp for touring rigs", category: "Audio", mfr: "QSC", hasPorts: false },
+  // Would match "amplifier" too, but already has ports — must be skipped
+  // (hand edits win) and counted under alreadyPorted, not as a hit.
+  { sku: "FIX:AMP3", desc: "RU 4 Channel ENERGY STAR amplifier", category: "Audio", mfr: "QSC", hasPorts: true },
+  // A bare model number with no usable prose — counted under noDesc, never a hit.
+  { sku: "FIX:MODELISH", desc: "2039611", category: "Audio", mfr: "EAW", hasPorts: false },
+  // A physical accessory — the accessory layer claims it; counted separately
+  // from both hits and "matched by nothing".
+  { sku: "FIX:BRACKET", desc: "Mounting bracket for speaker", category: "Audio", mfr: "QSC", hasPorts: false },
+  // Real prose, no rule fires on it — "matched by nothing".
+  { sku: "FIX:MYSTERY", desc: "A perfectly ordinary widget with no port shape rule", category: "Widgets", mfr: "Acme", hasPorts: false },
+];
+const fixtureReport = buildPortRuleReport(reportFixture);
+const ampRow = fixtureReport.rows.find((r) => r.rule.id === "amplifier");
+ok(!!ampRow && ampRow.hits.map((h) => h.sku).sort().join(",") === "FIX:AMP1,FIX:AMP2",
+  "buildPortRuleReport: the amplifier rule matches both un-ported amplifiers and only those two");
+ok(fixtureReport.alreadyPorted === 1, "buildPortRuleReport: the already-ported amplifier is counted under alreadyPorted, not as a hit");
+ok(fixtureReport.noDesc === 1, "buildPortRuleReport: a bare model-number description is counted under noDesc");
+ok(fixtureReport.accessoryRows.map((h) => h.sku).join(",") === "FIX:BRACKET",
+  "buildPortRuleReport: an accessory match is bucketed separately from hits and unmatched");
+ok(fixtureReport.unmatched.map((h) => h.sku).join(",") === "FIX:MYSTERY",
+  "buildPortRuleReport: real prose with no matching rule is bucketed as unmatched (\"matched by nothing\")");
+const emptyRuleRow = fixtureReport.rows.find((r) => r.hits.length === 0);
+ok(!!emptyRuleRow, "buildPortRuleReport: a rule with zero hits is still present in `rows` (so the UI can render its own \"matches nothing\")");
+ok(fixtureReport.rows.every((r) => !r.rule.accessory),
+  "buildPortRuleReport: `rows` never includes the accessory rule itself (only proposal-bearing rules)");
+
 /* --- annotation geometry (D95) --- */
 import { bounds, hitTest, cloudPath, polyPath, isDragTool } from "@/lib/annotations";
 import type { Annotation } from "@/lib/annotations";
@@ -1656,6 +1726,10 @@ ok(activeKeyFor("/design/assemblies") === "assemblies",
   "#130 /design/assemblies lights the Assembly Builder child");
 ok(activeKeyFor("/design/subassemblies") === "assemblies",
   "#130 the old Subassemblies path lights the Assembly Builder child too");
+ok(activeKeyFor("/design/grid/settings") === "gridsettings",
+  "Grid settings build: /design/grid/settings lights its own gridsettings key");
+ok(activeKeyFor("/design/grid/abc123") === "designoverview",
+  "a Grid editor id (not literally \"settings\") still falls through to designoverview");
 ok(NAV.some((e) => e.kind === "group" && e.key === "design"),
   "Design exists as a nav group");
 ok(!NAV.some((e) => e.kind === "link" && e.key === "consulting"),
@@ -1671,9 +1745,11 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * Grid" and the standalone index it pointed at is gone. "steel" and
  * "fixtures" moved to the KNOWLEDGE group (#136). */
 /* "subassemblies" left the group when it became a tab of the Assembly
- * Builder (#130) — /design/subassemblies redirects there. */
+ * Builder (#130) — /design/subassemblies redirects there. "gridsettings"
+ * joined after "designs" (Grid settings build) — Grid symbols, port rules,
+ * wire types, and install labor now live at /design/grid/settings. */
 const DESIGN_CHILDREN = [
-  "designoverview", "engagements", "designs",
+  "designoverview", "engagements", "designs", "gridsettings",
   "lineset", "assemblies", "motors",
 ];
 ok(
@@ -1804,11 +1880,11 @@ ok(
   SETTINGS_SECTIONS.map((s) => s.key).join(",") === "company,admin",
   "Settings exposes company and admin sections in order",
 );
-ok(ADMIN_SCREENS.length === 4, "Admin lists exactly four screens");
+ok(ADMIN_SCREENS.length === 5, "Admin lists exactly five screens (Grid settings build added Grid Settings)");
 ok(
   ADMIN_SCREENS.map((s) => s.href).join(",") ===
-    "/templates,/estimating-rules,/task-templates,/import",
-  "Admin links Templates, Estimating Rules, Task Templates, Import — by their own routes",
+    "/templates,/estimating-rules,/task-templates,/import,/design/grid/settings",
+  "Admin links Templates, Estimating Rules, Task Templates, Import, Grid Settings — by their own routes",
 );
 
 // ---- General dissolution (D99): the group is gone ----
