@@ -5369,3 +5369,58 @@ deleted so two mappings can't drift.
   are Jeff-editable, and a derived abbreviation of an arbitrary label would be wrong more often than long.
 - **The import result panel links plain `/projects`**, not a list filtered to `source: daylite` as the spec said —
   the Projects list has no source filter, and adding one only for this panel wasn't worth a new filter axis.
+
+## D244. Labor overhead folds into the mobilization lines instead of riding as its own lines (#193, 2026-09-25)
+
+Shop & engineering, the 5% performance bonus and the misc allowance used to be separate estimate lines. Jeff asked
+that one click of Add labor produce one line per mobilization, so their cost and sell are split across the
+mobilization lines in proportion to each one's own cost (evenly if every mobilization costs $0), the last line
+absorbing rounding. Totals are unchanged to the cent; the breakdown lives in each line's internal note. If every
+mobilization costs $0 the extras still become their own lines rather than being dropped. The last line also absorbs
+the cent-level gap between the lines and the modal's single-rounded Price · ext, capped so a real mismatch is never
+papered over. Taken without asking — easy to reverse if Jeff wants the overhead visible as separate lines again.
+
+## D245. Typing ext. sell back-solves unit sell; the override field is retired for new edits (#194, 2026-09-25)
+
+An edited ext. sell now sets `price = ext ÷ qty` at full precision and clears `extSellOverride`, so one number (unit
+sell) drives the line and qty, margin and system repricing all keep working. Rejected: keeping the override and
+back-filling unit sell (two sources of truth that disagree after any qty change). Existing saved overrides are
+still honoured by `lineExtSellOf` until the line is edited — no data migration.
+
+## D246. Venue calendars live in keyed blobs, not a `sites` column (#196, 2026-09-25)
+
+One `app_settings` blob per venue, id `venue_calendar:<locationId>` (the id scheduled records already carry),
+through `getBlob`/`setBlob` — the studio-designs / portal-grants precedent. Chosen to ship without a migration
+against the one Neon database every environment shares, and because `writeRecord` rewrites every `sites` row on each
+customer save and would silently drop a new column unless carried forward. Each writer patches only the keys it
+owns (`windows` vs the feed's `icsWindows`/`icsFetchedAt`/`icsAttemptAt`/`icsError`), so a background feed refresh
+can't clobber a window someone just added. Move it to a column or table if a query ever needs to span venues.
+
+## D247. The venue-availability check warns and never blocks (#196, 2026-09-25)
+
+A client's calendar is advisory — a feed can be stale, a blocked slot can be the very event Peak is booked for, and
+the PM may have confirmed by phone. Every scheduler shows the check and saves regardless. Blocked overlap →
+"blocked"; if the venue lists any open windows and the booking isn't fully inside them → "outside the venue's open
+times". Date-only pickers check the whole local day.
+
+## D248. The companies map filters in the browser over every located venue (#197, 2026-09-25)
+
+Map mode ships all ~1,300 located venues once and filters in memory, rather than round-tripping each filter through
+the URL like the list view: a server re-render hands Leaflet a new pin array and would reset the user's pan/zoom on
+every keystroke. The list view's URL filters seed the rail's initial state. The selected company is not in the URL
+for the same reason; its panel loads through a server action.
+
+## D249. One shared two-step ConfirmButton; every delete is soft (#198, 2026-09-25)
+
+`src/components/confirm-button.tsx` replaces the per-screen hand-rolled arm/confirm and every remaining
+`window.confirm()` (#178 — suppressed in the Capacitor shells, D96/D127). All new deletes are soft (`deleted` flag /
+tombstone), so any of them can be recovered from the database. Linked records are not cascaded except an
+engagement's open tasks, which belong to nothing else. A customer note can be deleted only by its author or an
+admin, enforced in the action, not just the UI.
+
+## D250. Consulting engagements are tombstone-aware like projects (#198, 2026-09-25)
+
+`getEngagementByQuote` read live rows only, so deleting an engagement meant the next re-approve or
+`syncEngagementsFromQuotes` sweep rebuilt it. `coveredQuoteIds()` in `stores/engagements.ts` now reads with
+`includeDeleted: true` (the #169 project idiom) and gates both create paths. Consequence: re-winning a quote whose
+engagement was deliberately deleted does not bring the engagement back — same as projects.

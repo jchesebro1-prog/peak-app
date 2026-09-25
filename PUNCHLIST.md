@@ -7635,7 +7635,7 @@ last touched it.
 **Ask:** gate it like `:336`, and have it call `automaticQuoteName()` rather than building its own string. Nothing
 already saved changes.
 
-## 178. Four live `window.confirm()` sites, in an app whose own decision log says it throws silently — OPEN
+## 178. Four live `window.confirm()` sites, in an app whose own decision log says it throws silently — DONE 2026-09-25 (D249)
 
 **Reported:** 2026-09-24. Verified on `main`.
 
@@ -7660,6 +7660,13 @@ It works in a desktop browser; nobody has checked it in the shells.
 
 **Ask:** adopt the inline pattern D127 already established in `settings-client.tsx`, or retire the D96 claim from
 the decision log — but the two states should not coexist.
+
+**Done 2026-09-25.** All four, plus two more the #160 branch brought in (the shared `useWonEditGuard` hook used by the
+flame/repair/inspection/consulting builders, and the intake form's Change-type "this replaces draft …" prompt), now
+confirm inline: destructive ones through the shared `ConfirmButton` (D249), the won-quote edit guard and the
+Change-type replace as an inline "Change it / Cancel" and "Continue / Cancel" notice. `git grep window.confirm src`
+finds only comments. Known limit: on a won quote, starting a second guarded edit before answering the first replaces
+the first prompt; the first edit is simply not applied.
 
 ## 179. `redeem: tampered code -> not ok` is a ~1% flake in the spec harness — OPEN
 
@@ -7938,3 +7945,168 @@ Invoice Sent imports as a live `completed` repair with its old End Date. The imp
 semantics (only done-in-Daylite repairs are excluded from warranty follow-ups), so these can land on the warranty
 follow-up worklist as already lapsed. Decide with Jeff: flag them in the preview, exclude them as history, or leave
 them for the team to close out.
+
+---
+
+## 193. Estimator — one "Add labor" click adds one line per mobilization — DONE 2026-09-25 (D244)
+
+**Reported:** 2026-09-24 (Jeff, again after #161): "The Labor input needs to only do a single mobilization not
+multiple when clicking the button." #161 made the modal *open* with one mobilization, but its **Add labor** button
+still pushed up to four lines for that one mobilization: the mobilization, "Shop & engineering — PM, fabrication &
+drafting" (nearly always present, since PM/drafting hours auto-compute from the crew), "Performance bonus — 5% of
+labor cost" (always) and an optional "Project allowance / misc".
+
+**Done.** `addLabor` now emits exactly one line per mobilization. Shop & engineering, the bonus and the allowance
+are folded into the mobilization line(s) — cost and sell, split in proportion to each mobilization's own cost,
+the last line absorbing rounding — and the breakdown is written to the line's internal note ("Includes shop &
+engineering $1,440.00 · performance bonus $522.00"), which never reaches the customer document. Totals are
+identical to the old multi-line output. The line also matches the modal's **Price · ext** to the cent: the modal
+rounds its total once and each line rounds its own share, so a one-mobilization Install used to read $15,659.99 on
+the line against $15,660.00 in the modal; the last line now absorbs that drift (bounded, so a real mismatch is never
+hidden). Pure helper: `foldLaborMobLines` in `estimator/pricing.ts`.
+
+This branch also lands the owner-approved `feat/quote-intake-flow` (#160/#161, D205–D207), which had never been
+merged — see the merge commit.
+
+---
+
+## 194. Estimator — editing unit sell or ext. sell moves every other number — DONE 2026-09-25 (D245)
+
+**Reported:** 2026-09-24 (Jeff): "When manually adjusting the individual and ext sell the other numbers need to
+adjust to what is manually entered."
+
+**Cause:** typing an ext. sell only stored an `extSellOverride` — unit sell never changed, so unit × qty stopped
+equalling ext, a later qty change did nothing to ext, and the system margin slider / Sell field (which reprice
+`price`) skipped overridden lines. Both inputs were uncontrolled with no `key`, so after one edit they showed stale
+numbers. The dashboard's equipment-sold metric ignored overrides entirely.
+
+**Done.** Editing unit sell sets the price and clears any override; editing ext. sell back-solves unit sell as
+ext ÷ qty (full precision, so qty × price reproduces the typed ext; qty 0 is treated as 1). Margin, system and quote
+totals follow. The slider and system Sell clear overrides on the lines they reprice; both inputs are keyed on their
+values so they refresh; `lib/dashboard/metrics.ts` uses `lineExtSellOf`. Saved quotes that carry an old override
+render the same totals until edited. Verified in the browser: ext 700 on qty 4 at $100 cost → unit sell 175, 43%.
+
+---
+
+## 195. Estimator — the line-item columns — DONE 2026-09-25
+
+**Reported:** 2026-09-24 (Jeff): "clean up the columns and make it look a little less raw and more organized …
+shrink the item column and allow for more room for the other columns."
+
+**Also a bug:** the grid had 6 columns but each item row rendered 8 cells (×, ↑ and ↓ were separate), so ↑/↓ wrapped
+onto a second grid row under Item and Qty.
+
+**Done.** One shared template for header, rows and freight (`minmax(150px,1.3fr) 104px 92px 136px 116px 64px`);
+×/↑/↓ share one actions cell, subdued until row hover; numeric columns right-aligned in tabular figures; long item
+names clamp to two lines with the full name on hover. Verified at 1440×900 with both side rails open.
+
+---
+
+## 196. Venue calendars — a client's availability on the venue, checked while scheduling — DONE 2026-09-25 (D246, D247)
+
+**Reported:** 2026-09-24 (Jeff): "a format for the PM to add a client's calendar to their venue. So that way if you
+try to schedule something to the venue it pops up their calendar to confirm they actually have availability …
+either a url, csv, or just manually adding open time and blocked time. For the csv provide an example download."
+
+**Done.** A **Venue calendar** card on every venue page (`/venues/<id>#calendar`, linked as "Calendar" from each
+venue row on the company record) with three sources:
+- **Calendar feed URL** — any iCal/webcal link (Google's and Outlook's "secret address in iCal format"). Fetched
+  server-side, refreshed when older than 6 h, a failing feed retried at most every 30 min.
+- **CSV** — `type,start,end,label`; type `open`/`blocked` (synonyms accepted), dates `YYYY-MM-DD` (all-day,
+  inclusive end), `YYYY-MM-DD HH:MM` or Excel-style `M/D/YYYY h:mm AM`. Live preview with row errors, append or
+  replace the previous import, and a **Download example CSV**.
+- **Manual** — add an open or blocked window (all-day or timed) with a label; remove with a two-step confirm.
+
+A 14-day strip and a 60-day upcoming list show all three sources together.
+
+**Scheduling check.** Picking a date in the flame-test, inspection and repair schedulers, the crew-board booking
+popover and the Inbox site-visit modal now shows that venue's week with blocked/open bars and one line:
+"✓ open", "⚠ Venue is blocked: Dress rehearsal (Sep 28)", "⚠ Outside the venue's open times", or "No venue calendar
+on file · Add one". It warns and never blocks the save (D247). `/calendar` events carry no venue, so they aren't
+checked.
+
+**Engine:** `src/lib/venue-availability.ts` (pure — ICS incl. TZID, all-day, folded lines, RRULE
+DAILY/WEEKLY/MONTHLY/YEARLY with COUNT/UNTIL/BYDAY/EXDATE; CSV; `checkAvailability`). Fetch:
+`src/lib/venue-calendar-fetch.ts` — http(s)/webcal only; every redirect hop re-validated; the host's DNS answers
+must all be public (loopback, RFC 1918, CGNAT, link-local incl. 169.254.169.254, IPv6 ULA/link-local and
+v4-mapped refused); 5 s timeout covering the body; 2 MB cap enforced while streaming.
+
+Verified in the browser: a blocked Sep 28 on Lakefront's Main Hall → the repair scheduler warns on Sep 28.
+
+---
+
+## 197. Companies map — search + filter rail on the left, company panel on the right — DONE 2026-09-25 (D248)
+
+**Reported:** 2026-09-24 (Jeff): "add a search bar with filters on a side bar that can be hidden on the left and on
+the right have a pop out side bar of the client when you select it."
+
+**Done.** `/companies?view=map`:
+- **Left rail** (collapses to a slim tab, remembered per browser): instant search over name, venue, city, state
+  and tags; type chips, owner, lifecycle, tag, drive time (≤30/60/120 min) and "Has open quotes"; a count and a
+  clickable result list that flies the map to the company. Filters from the list view carry into the map.
+- **Right panel** (non-modal — the map stays usable; Esc closes): type, owner, lifecycle, phone, website, tags,
+  primary contact, venues with drive time (click to fly there), open quotes with value, active projects, recent
+  activity, **Open company** and **+ New quote**.
+- Pan/zoom survive filtering (the map fits once); phones get a Filters overlay and a bottom-sheet panel.
+
+Loads every located venue once (~1,300) and filters in the browser. New `getCompanySummaryAction` +
+`src/lib/company-summary.ts`. `LeafletMap` gained optional `onPinClick`/`selected`/`fitMode`/`focus`; every other
+map is unchanged. Verified in the browser.
+
+---
+
+## 198. Delete individual entries for everything — DONE 2026-09-25 (D249, D250)
+
+**Reported:** 2026-09-24 (Jeff): "We need the ability to delete individual entries for everything."
+
+**Before:** about ten of ~30 record types had a delete button, most fired on one click, and leads, flame/repair
+jobs, projects, tasks and notes had a store delete with no way to reach it.
+
+**Done.** Every delete is a soft delete behind the new shared two-step `ConfirmButton`
+(`src/components/confirm-button.tsx`: Delete → Confirm delete / Cancel, auto-disarms after 5 s or on Esc, shows a
+refusal inline).
+
+| Record | Where |
+|---|---|
+| Leads | lead drawer footer, worklist row |
+| Quotes (all types) | Quotes hub row detail, Estimator toolbar, every service/consulting/rental builder header — a won quote's confirm says its project/jobs stay |
+| Flame-test and repair jobs | results screen header |
+| Install projects | project header |
+| Consulting engagements | engagement header — also removes its open tasks; notes and Drive files stay |
+| Site visits | visit-requests queue, company Site visits card |
+| Recordings | recording page (the audio in Drive/Blob is kept) |
+| Tasks | the Estimator's and the Designs dashboard's task cards (project tasks keep their own list, unchanged) |
+| Customer notes | activity feed — author or admin only, never system notes (enforced on the server) |
+| Catalog parts | part drawer (admin) |
+| Equipment items and locations | Rentals — refused while the item has a committed booking |
+| Vendor profiles | vendor Overview, Danger zone |
+
+Already-existing one-click deletes now confirm first: company, person, contact/venue rows in the company editor,
+inspection, venue assessment, studio design, task-template set, office, Home stage-sheet quote.
+
+**Nothing comes back.** Won quotes auto-spawn jobs, and healing sweeps re-create missing ones. Flame, repair,
+inspection and project coverage was already tombstone-aware (#169/#173). **Engagements were not** — a deleted one
+would have been rebuilt by the next re-approve or `syncEngagementsFromQuotes`; now covered (D250). A deleted quote
+can't be resurrected by a builder save (updates read live rows only). All pinned by spec checks.
+
+**Still without a per-record delete** (not reached tonight): project tasks inside a project, review snapshots
+(frozen approval copies — probably right to leave), individual estimating-rate rows, equipment bookings (cancel is
+their lifecycle), spec sections / generated specs, Grid symbols and assemblies, client packages. Say which of these
+matter and they're a small follow-up each.
+
+---
+
+## 199. Settings — the Grid symbols card (#131) is unreachable — OPEN
+
+**Found during the 2026-09-25 cleanup.** `settings/grid-symbols-card.tsx` (per-category Grid symbol defaults, #131,
+46c321d) has no importer. `2855d84` ("Clarify company and admin settings ownership") removed it from
+`settings-client.tsx` along with its `gridCategoryShapes`/`gridLiveCategories` props, and nothing re-homed it. The
+file was kept, not deleted. **Ask Jeff:** was dropping it intended? If not, re-add it under Settings → Admin.
+
+---
+
+## 200. Quotes hub — a long stage pill overlaps the Value column — OPEN
+
+**Found during browser verification 2026-09-25.** On `/quotes` at 1440 px, "Presentation/Delivery" overflows the
+Status column onto the row's Value ("$17…"). Predates this branch (the hub's row grid is unchanged apart from the
+new Delete in the expanded detail). Widen the status column or let the pill wrap.
