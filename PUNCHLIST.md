@@ -7628,3 +7628,24 @@ The block now runs in `after()` (next/server), so saving an appointment never wa
 - eslint: 124 problems / 0 errors, same as origin/main at 6b5c23d
 
 **Jeff's step after deploy:** Settings → Admin → **Geocode addresses**. It only re-tries unlocated venues, then warms routes from the quote origin.
+
+---
+
+## 186. Buttons with dead CSS classes rendered as plain text — DONE 2026-09-24
+
+**Found while building #175.** `globals.css` defines only three button classes: `pk-btn-accent` (primary), `pk-btn-outline` (secondary) and `pk-btn-danger` (destructive). `pk-btn`, `pk-btn-primary`, `pk-btn-sm` and `pk-btn-quiet` exist nowhere, so any button using them rendered as unstyled text. #175 fixed the Settings travel-time card. The rest were in three screens, fixed as follows:
+- **Design → Assembly Builder:**
+  - *+ New assembly* → outline
+  - *Save assemblies* → accent
+  - *Delete* → danger
+  - the ↑ ↓ × component buttons → compact outline
+- **Estimating Rules:** the six *Save class* buttons → compact accent
+- **Inbox → site-visit modal:** *Done* and *Save & send invite* → accent. The *Cancel* next to them was already outline.
+
+Only class names changed, plus a compact inline size where the dead `pk-btn-sm` or icon buttons implied one. `git grep` now finds no dead button class anywhere in `src/`.
+
+**Verification:**
+- **Browser, on the worktree dev server:** computed styles confirm accent, outline and danger on the Assembly Builder and on all six Save class buttons.
+- **Not checked in the browser:** the site-visit modal. It needs a connected Gmail to open, and its change is the same one-class swap.
+
+**Gates:** tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors (same as origin/main at b1c375e).
