@@ -12531,9 +12531,15 @@ async function deletePartBAsyncChecks(): Promise<void> {
      - removeSheet must refuse while a live placement/space/route still
        references the sheet, succeed once nothing does, and — because it
        deliberately never softDeleteDoc's the grid_sheets record itself —
-       an OLDER revision that still lists the sheet must still be able to
-       resolve it after restoreRevision brings that placement back
-       (restoreRevision never touches sheetIds, by design).
+       an OLDER revision that still references the sheet must be able to
+       fully resolve it again after a restore: restoreRevision re-adds any
+       removed sheet the restored placements/spaces/routes reference back
+       onto sheetIds (it still leaves an UNREFERENCED removed sheet alone —
+       sheets are never orphaned by a restore, but they also aren't forced
+       back onto the live list just because an old snapshot happened to
+       carry them).
+   A companion check lives with the #21 customer-feed-rows spec above:
+   projectFeedRows() must skip a deleted:true project note.
    Fixtures are `fixtureId("DELR2", …)` / `registerFixture()`-registered
    right after mint, so the suite-level teardown removes all of it.
    ====================================================================== */
@@ -12762,8 +12768,8 @@ async function deleteRound2AsyncChecks(): Promise<void> {
         ok(restored.ok === true, "DELR2 grid sheets: restoreRevision succeeds");
         proj = await GridProj2.getProject(gp.id);
         ok(
-          !(proj?.sheetIds || []).includes(sheetA.id),
-          "DELR2 grid sheets: restore deliberately does NOT bring sheetIds back (sheets are never orphaned by a restore)"
+          !!(proj?.sheetIds || []).includes(sheetA.id),
+          "DELR2 grid sheets: restore RE-ADDS a removed sheet the restored placements/spaces/routes reference — it is not left orphaned"
         );
         ok(
           !!(proj?.placements || []).some((pl) => pl.sheetId === sheetA.id),
@@ -12772,7 +12778,11 @@ async function deleteRound2AsyncChecks(): Promise<void> {
         const stillResolves = await getDoc169("grid_sheets", sheetA.id);
         ok(
           !!stillResolves,
-          "DELR2 grid sheets: the removed sheet's own doc still resolves by id — an old revision's placement is never left pointing at nothing"
+          "DELR2 grid sheets: the removed sheet's own doc was never deleted by removeSheet — it still resolves by id once restored"
+        );
+        ok(
+          (await GridProj2.listSheets(gp.id)).some((s) => s.id === sheetA.id),
+          "DELR2 grid sheets: the re-added sheet is visible again in listSheets() — not just sheetIds"
         );
       }
     }
