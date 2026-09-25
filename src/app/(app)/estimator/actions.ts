@@ -666,8 +666,9 @@ export async function setStatusAction(
 export async function setQuoteStageAction(id: string, stageId: string): Promise<StageSync> {
   const user = await requireUser();
   if (!id || !stageId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
+  let q: Awaited<ReturnType<typeof setQuoteStage>>;
   try {
-    await setQuoteStage(id, stageId, user.name);
+    q = await setQuoteStage(id, stageId, user.name);
   } catch (e) {
     const cur = await get(id);
     return {
@@ -677,6 +678,22 @@ export async function setQuoteStageAction(id: string, stageId: string): Promise<
       pipelineId: cur?.pipelineId ?? null,
       stage: cur?.stage ?? null,
       error: e instanceof Error ? e.message : "That stage change was refused.",
+    };
+  }
+  // setQuoteStage also refuses by returning null (no throw) — a stage id
+  // outside the quote's pipeline, a lost quote, or a non-pipeline quote (see
+  // its own doc comment). Left unchecked, this used to fall through to
+  // stageSyncOf(id), which reads the UNCHANGED doc and reports ok:true — the
+  // bar would silently revert to its old stage with no error banner.
+  if (!q) {
+    const cur = await get(id);
+    return {
+      ok: false,
+      status: cur?.status ?? null,
+      review: cur?.review ?? null,
+      pipelineId: cur?.pipelineId ?? null,
+      stage: cur?.stage ?? null,
+      error: "That stage isn't available for this quote — refresh and try again.",
     };
   }
   refresh();

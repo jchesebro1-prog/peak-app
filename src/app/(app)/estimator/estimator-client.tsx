@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
 import { approvedReviewLine } from "@/lib/review-line";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
-import { carriesPipeline, stageById } from "@/lib/pipelines";
+import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import {
   addQuoteTaskAction,
   applyQuoteTemplateAction,
@@ -785,6 +785,12 @@ export default function EstimatorClient({
     const prevPipelineId = pipelineId;
     const prevStage = stage;
     setPipelineId(pid);
+    // Optimistic: setQuotePipeline always lands on the new pipeline's first
+    // stage (never keeps the old one) — mirror that here too, so a chevron
+    // stays highlighted through the round trip instead of the bar going
+    // blank until applyStageSync's real value comes back.
+    const target = pipelines.quote.find((p) => p.id === pid);
+    if (target) setStage(firstStage(target).id);
     startTransition(async () => {
       const r = await setQuotePipelineAction(id, pid);
       if (!r.ok) {
