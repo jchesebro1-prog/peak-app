@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
-import { create as createQuote, update as updateQuote, setStatus, retireReplacedDraft } from "@/lib/stores/quotes";
+import {
+  create as createQuote,
+  update as updateQuote,
+  setStatus,
+  statusFailureMessage,
+  retireReplacedDraft,
+} from "@/lib/stores/quotes";
 import { get as getEquipmentItem } from "@/lib/stores/equipment-items";
 import { availableQty } from "@/lib/stores/equipment-bookings";
 import { priceRental } from "@/lib/pricing/rental";
@@ -158,8 +164,16 @@ export async function approveRentalQuote(formData: FormData): Promise<void> {
     }
     await setStatus(id, "won", undefined, { bypassApprovalGate: "engine-owned-flow" });
   } catch (error) {
-    console.error("approveRentalQuote: quote approval failed", error);
-    quoteFailure(formData, "Couldn’t approve the rental quote — please try again.");
+    // #174: the one shared branch, with this screen's own wording as the
+    // fallback. Everything landing here today IS a defect — the call above
+    // passes `bypassApprovalGate: "engine-owned-flow"`, so the approval gate
+    // cannot refuse it — and it is logged as one. If that bypass is ever
+    // dropped, the gate's own sentence reaches the user instead of being
+    // flattened into "please try again".
+    quoteFailure(
+      formData,
+      statusFailureMessage(error, "approveRentalQuote: quote approval failed", "Couldn’t approve the rental quote — please try again.")
+    );
   }
   // accept -> mark won, which spawns confirmed equipment bookings. Bypasses
   // the punch #60 approval gate: this screen IS the approval, same reasoning

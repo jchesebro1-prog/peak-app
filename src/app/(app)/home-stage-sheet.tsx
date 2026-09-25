@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { removeQuoteAction, setQuoteStatusAction } from "./home-actions";
 
 /**
@@ -44,12 +44,22 @@ export default function HomeStageSheet({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  /** #174: the server action now reports WHY a move failed — the approval
+   *  gate's own sentence, or a generic line for a defect (which is logged
+   *  server-side). Either way the sheet stays open with the reason visible
+   *  instead of the move silently doing nothing. */
+  const [error, setError] = useState<string | null>(null);
 
   const close = () => router.replace(closeHref, { scroll: false });
 
   const move = (status: string) =>
     startTransition(async () => {
-      await setQuoteStatusAction(quote.id, status);
+      setError(null);
+      const res = await setQuoteStatusAction(quote.id, status);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
       router.replace(closeHref, { scroll: false });
       router.refresh();
     });
@@ -180,6 +190,23 @@ export default function HomeStageSheet({
               );
             })}
           </div>
+          {error && (
+            <div
+              role="alert"
+              style={{
+                marginTop: 10,
+                fontSize: 12.5,
+                lineHeight: 1.45,
+                color: "#b4543a",
+                background: "#f9ece8",
+                border: "1px solid #f0d6cd",
+                borderRadius: 9,
+                padding: "9px 11px",
+              }}
+            >
+              {error}
+            </div>
+          )}
         </div>
 
         <div

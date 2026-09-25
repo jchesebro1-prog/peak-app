@@ -14,6 +14,7 @@ import {
   requestChanges,
   requireApprovalToAdvance,
   setStatus,
+  statusFailureMessage,
   STAGES,
   submitForReview,
   update,
@@ -356,10 +357,15 @@ export async function saveQuoteAction(
       // only succeed for "lost" — and "won"/"sent" would always be refused.
       // Catch rather than let a raw exception blow up an otherwise-successful
       // save: the quote stays created (in draft), just not advanced.
+      // #174: the gate's refusal is the user's to read; a spawn defect is
+      // not, and used to arrive here looking exactly the same.
       try {
         q = await setStatus(created.id, payload.status);
       } catch (e) {
-        statusError = e instanceof Error ? e.message : "That status change was refused.";
+        statusError = statusFailureMessage(
+          e,
+          "estimator/actions saveQuoteAction: setStatus on a newly created quote threw"
+        );
       }
     }
     q = q || created;
@@ -612,7 +618,10 @@ export async function setStatusAction(
       ok: false,
       review: cur?.review ?? null,
       status: cur?.status ?? null,
-      error: e instanceof Error ? e.message : "That status change was refused.",
+      // #174: with the pre-check above, a refusal reaching here is nearly
+      // impossible — so what this backstop actually catches is a DEFECT, and
+      // it must read (and log) as one rather than as a policy refusal.
+      error: statusFailureMessage(e, `estimator/actions setStatusAction(${status}): setStatus threw`),
     };
   }
   refresh();
@@ -694,7 +703,8 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
       ok: false,
       review: cur?.review ?? null,
       status: cur?.status ?? null,
-      error: e instanceof Error ? e.message : "That status change was refused.",
+      // #174: same backstop, same reasoning as setStatusAction above.
+      error: statusFailureMessage(e, "estimator/actions sendToCustomerAction: setStatus(sent) threw"),
     };
   }
   refresh();

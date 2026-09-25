@@ -6864,6 +6864,7 @@ seeded()
   .then(() => quoteSpawnAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
+  .then(() => statusRefusalAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);
@@ -9473,5 +9474,108 @@ async function outsideTransactionAsyncChecks(): Promise<void> {
   } finally {
     await softDeleteDoc("quotes", DETACHED_ID);
     await softDeleteDoc("quotes", UNIT_ID);
+  }
+}
+
+/* ====================================================================
+   #174 — `setStatus` throws for two unrelated reasons, and they must not
+   read the same.
+
+     - the APPROVAL GATE refusing a transition: a governance decision whose
+       sentence is written for the user and has to reach them verbatim;
+     - anything else (a TypeError in the spawn graph, a failed mint, a bad
+       row): a defect, whose message belongs in the operator's log and never
+       on a customer-facing screen.
+
+   Asserted as behaviour, not shape: a REAL refusal is produced by the real
+   store (an unapproved draft pushed to `won`), and the shared branch
+   `statusFailureMessage` is asked what a caller would show.
+
+   Fixtures are `TEST174:`-prefixed and torn down in `finally`, because this
+   may run against the one shared Neon instance, not a scratch DB.
+   ==================================================================== */
+import {
+  APPROVAL_GATE_REFUSAL,
+  isApprovalGateRefusal,
+  STATUS_CHANGE_FAILED,
+  statusFailureMessage,
+} from "../src/lib/stores/quotes";
+
+async function statusRefusalAsyncChecks(): Promise<void> {
+  const Q_GATE = "TEST174:unapproved";
+  /** What the shared branch sent to the operator's log. */
+  const logged: unknown[][] = [];
+  const realConsoleError = console.error;
+  try {
+    await upsertDoc("quotes", {
+      id: Q_GATE,
+      name: "#174 harness — never approved",
+      quoteType: "system",
+      status: "draft",
+      customer: "Test Customer #174",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+    });
+
+    // A real refusal from the real store — not a hand-built error.
+    let refusal: unknown = null;
+    try {
+      await setQuoteStatus169(Q_GATE, "won", "Test Harness");
+    } catch (e) {
+      refusal = e;
+    }
+    ok(refusal !== null, "#174 setStatus still refuses an unapproved draft -> won (the gate itself is unchanged)");
+    ok(isApprovalGateRefusal(refusal), "#174 the gate's refusal is recognised by isApprovalGateRefusal()");
+    const gate = requireApprovalToAdvance(null, "won");
+    const gateMsg = gate.ok ? "" : gate.error;
+    ok((refusal as Error).message === gateMsg, "#174 the refusal still carries the gate's own sentence, word for word");
+    ok((await getDoc169("quotes", Q_GATE))?.status === "draft", "#174 the refused quote did not move");
+
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+
+    // 1. The gate's message reaches the user verbatim, and is NOT logged as
+    //    a defect — it is a decision, not a fault.
+    ok(statusFailureMessage(refusal, "TEST174 gate") === gateMsg, "#174 a gate refusal is shown to the user verbatim");
+    ok(logged.length === 0, "#174 a governance refusal is not logged as a defect");
+
+    // 2. A defect: generic line for the user, real error for the operator.
+    const defect = new TypeError("TEST174: spawnFromQuote is not a function");
+    ok(!isApprovalGateRefusal(defect), "#174 a spawn defect is NOT recognised as a gate refusal");
+    const shown = statusFailureMessage(defect, "TEST174 defect");
+    ok(shown === STATUS_CHANGE_FAILED, "#174 a defect yields the generic user-facing line");
+    ok(!shown.includes("TEST174") && !shown.includes("spawnFromQuote"), "#174 the internal message never leaks to the user");
+    ok(logged.length === 1 && logged[0][1] === defect, "#174 the real error reaches console.error — logged, never swallowed");
+    ok(logged[0][0] === "TEST174 defect", "#174 the log line names the caller that failed");
+
+    // 3. A screen's own wording replaces the generic line for a defect, and
+    //    never overrides the gate's message.
+    const custom = "Couldn’t approve the repair quote — please try again.";
+    ok(statusFailureMessage(defect, "TEST174 defect-2", custom) === custom, "#174 a caller's own fallback wording is used for a defect");
+    ok(statusFailureMessage(refusal, "TEST174 gate-2", custom) === gateMsg, "#174 a caller's fallback never overrides the gate's message");
+
+    // 4. Identity is the brand — not the sentence, and not `instanceof`.
+    const impostor = new Error(gateMsg);
+    ok(!isApprovalGateRefusal(impostor), "#174 a plain Error carrying the same sentence is NOT a gate refusal — identity is never string-matched");
+    ok(statusFailureMessage(impostor, "TEST174 impostor") === STATUS_CHANGE_FAILED, "#174 ...so the impostor gets the generic line and is logged");
+    ok(logged.length === 3, "#174 exactly the three non-gate failures were logged (defect, defect-2, impostor)");
+    const otherCopy = Object.assign(new Error(gateMsg), {
+      approvalGateRefusal: "quotes/approval-gate-refused",
+    });
+    ok(isApprovalGateRefusal(otherCopy), "#174 a refusal minted by a SECOND instance of the quotes module still routes to the user — the brand crosses a boundary `instanceof` would not");
+    ok(statusFailureMessage(otherCopy, "TEST174 other-copy") === gateMsg, "#174 ...and its message is still shown verbatim");
+    ok(APPROVAL_GATE_REFUSAL === "quotes/approval-gate-refused", "#174 the brand is that exact string — the predicate compares it by value, so changing it is a breaking change");
+  } finally {
+    console.error = realConsoleError;
+    await softDeleteDoc("quotes", Q_GATE);
   }
 }

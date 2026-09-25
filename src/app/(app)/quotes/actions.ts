@@ -9,6 +9,7 @@ import {
   submitForReview,
   addQuoteRevision,
   restoreQuoteRevision,
+  statusFailureMessage,
   STAGES,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
@@ -38,13 +39,19 @@ export async function setQuoteStatus(formData: FormData): Promise<void> {
   // required. setStatus() now enforces the approval gate itself and THROWS
   // on refusal; catch it here and send the user back with a clear message
   // instead of letting a raw exception 500 the page.
+  //
+  // #174: the gate is not the only thing that throws down there — a defect in
+  // the spawn graph does too, and this used to show the user its raw message
+  // as though the business had refused them. statusFailureMessage() is the
+  // single shared branch: the gate's sentence verbatim, anything else logged
+  // and shown as the generic line.
   let q: Awaited<ReturnType<typeof setStatus>>;
   try {
     // The actor is passed through so the automatic on-send revision is
     // attributed to whoever sent it (item 24).
     q = await setStatus(id, status as QuoteStatus, user.name);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "That status change was refused.";
+    const msg = statusFailureMessage(e, "quotes/actions setQuoteStatus: setStatus threw");
     redirect(back + (back.includes("?") ? "&" : "?") + "statusError=" + encodeURIComponent(msg));
   }
   if (!q) return;
