@@ -211,9 +211,12 @@ import {
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
 import {
   backSolveExtSell,
+  buildLaborItems,
   computeLabor,
   computeMob,
+  customerLines,
   foldLaborMobLines,
+  isLaborOverheadItem,
   lineExtSellOf,
   lineMarginOf,
   parseAddQty,
@@ -226,10 +229,9 @@ import {
   systemItemsCost,
   systemItemsRev,
   vendorTotalSeed,
-  type LaborExtra,
   type RateFn,
 } from "@/app/(app)/estimator/pricing";
-import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
+import type { SpecItem, SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -430,11 +432,15 @@ const foldTarget = foldLaborMobLines([9000], [12857.14], [{ label: "shop & engin
 ok(foldTarget[0].price === 15660, "labor fold: with the modal total passed, the single line equals it to the cent (15660, not 15659.99)");
 ok(foldLaborMobLines([9000], [12857.14], [{ label: "b", cost: 450, price: 642.85 }], 99999).map((l) => l.price)[0] === round2(12857.14 + 642.85), "labor fold: a target far from the lines' sum (not rounding drift) is ignored");
 
-// addLabor itself: computeLabor's real shop/bonus/allowance output, folded
-// the same way addLabor (estimator-client.tsx) folds it, must land on the
-// SAME totals a pre-fold caller would have gotten from one line per mob
-// plus separate shop/allowance/bonus lines — to the cent.
-const foldRate: RateFn = (sku: string) =>
+// buildLaborItems (pricing.ts): the pure line-building half of addLabor
+// (estimator-client.tsx). Reverted back to separate lines, off a recent
+// change that had folded them together (owner request: "I like
+// setting the shop and engineering as separate lines ... and the bonus") —
+// one line per mobilization, plus shop & engineering / allowance /
+// performance bonus as their OWN separate lines when present, each tagged
+// laborOverhead. foldLaborMobLines is unchanged; it now backs customerLines
+// below instead (the CUSTOMER-document-only fold).
+const laborBuildRate: RateFn = (sku: string) =>
   ({
     "RIG-LBR": 50,
     "RIG-OT": 75,
@@ -443,29 +449,42 @@ const foldRate: RateFn = (sku: string) =>
     "SHP-IN": 45,
     "DRF-SUB": 50,
   }[sku] || 0);
-function foldFromDraft(draft: Parameters<typeof computeLabor>[0]) {
-  const r = computeLabor(draft, foldRate);
-  const priceAt = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
-  const activeMobs = r.mobs.filter((m) => m.cost > 0);
-  const mobCosts = activeMobs.map((m) => round2(m.cost));
-  const mobPrices = mobCosts.map((c) => priceAt(c));
-  const extras: LaborExtra[] = [];
-  if (r.shopCost > 0) extras.push({ label: "shop & engineering", cost: round2(r.shopCost), price: priceAt(round2(r.shopCost)) });
-  if (r.performanceBonus > 0) extras.push({ label: "performance bonus", cost: round2(r.performanceBonus), price: priceAt(round2(r.performanceBonus)) });
-  if (r.misc > 0) extras.push({ label: "allowance", cost: round2(r.misc), price: priceAt(round2(r.misc)) });
-  const oldCost = mobCosts.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.cost, 0);
-  const oldPrice = mobPrices.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.price, 0);
-  const folded = foldLaborMobLines(mobCosts, mobPrices, extras);
-  return { folded, oldCost, oldPrice };
+function expectedLaborLineCount(r: ReturnType<typeof computeLabor>): number {
+  return (
+    r.mobs.filter((m) => m.cost > 0).length +
+    (r.shopCost > 0 ? 1 : 0) +
+    (r.misc > 0 ? 1 : 0) +
+    (r.performanceBonus > 0 ? 1 : 0)
+  );
+}
+function idGenFrom(start: number) {
+  let n = start;
+  return () => n++;
 }
 
 const oneMobDraft = { discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "500" };
-const oneMobFold = foldFromDraft(oneMobDraft);
-ok(oneMobFold.folded.length === 1, "estimator labor: a single mobilization still yields exactly one line once shop/allowance/bonus fold in");
+const oneMobR = computeLabor(oneMobDraft, laborBuildRate);
+const oneMobItems = buildLaborItems(oneMobR, "Rigging", idGenFrom(1));
 ok(
-  oneMobFold.folded.reduce((a, f) => a + f.cost, 0) === oneMobFold.oldCost &&
-    oneMobFold.folded.reduce((a, f) => a + f.price, 0) === oneMobFold.oldPrice,
-  "estimator labor: folded cost/price match the old mob+shop+allowance+bonus line sum to the cent (with misc)"
+  oneMobItems.length === expectedLaborLineCount(oneMobR) && oneMobItems.length > 1,
+  "buildLaborItems: one mobilization plus its shop/allowance/bonus overhead land as that many SEPARATE lines, not folded into one"
+);
+ok(oneMobItems.filter((it) => it.mob).length === 1, "buildLaborItems: exactly one line carries the mob field (the mobilization line)");
+ok(
+  oneMobItems.some((it) => it.laborOverhead === "shop" && it.sku.startsWith("LAB-SHOP-") && it.desc === "Shop & engineering — PM, fabrication & drafting"),
+  "buildLaborItems: shop & engineering is its own LAB-SHOP- line tagged laborOverhead:'shop', the older separate-line desc restored"
+);
+ok(
+  oneMobItems.some((it) => it.laborOverhead === "misc" && it.sku.startsWith("LAB-MISC-") && it.desc === "Project allowance / misc"),
+  "buildLaborItems: the allowance is its own LAB-MISC- line tagged laborOverhead:'misc', the older separate-line desc restored"
+);
+ok(
+  oneMobItems.some((it) => it.laborOverhead === "bonus" && it.sku.startsWith("LAB-BONUS-") && it.desc === "Performance bonus — 5% of labor cost"),
+  "buildLaborItems: the performance bonus is its own LAB-BONUS- line tagged laborOverhead:'bonus', the older separate-line desc restored"
+);
+ok(
+  round2(oneMobItems.reduce((a, it) => a + it.price, 0)) === round2(oneMobR.totalPrice),
+  "buildLaborItems: the separate lines' prices still sum to the modal's rounded 'Price · ext' total to the cent"
 );
 
 const multiMobDraft = {
@@ -482,13 +501,140 @@ const multiMobDraft = {
   drfAuto: true,
   misc: "", // no allowance this time
 };
-const multiMobFold = foldFromDraft(multiMobDraft);
-ok(multiMobFold.folded.length === 2, "estimator labor: two mobilizations still yield two lines once shop/bonus fold in");
+const multiMobR = computeLabor(multiMobDraft, laborBuildRate);
+const multiMobItems = buildLaborItems(multiMobR, "Rigging", idGenFrom(1));
 ok(
-  multiMobFold.folded.reduce((a, f) => a + f.cost, 0) === multiMobFold.oldCost &&
-    multiMobFold.folded.reduce((a, f) => a + f.price, 0) === multiMobFold.oldPrice,
-  "estimator labor: folded cost/price match the old mob+shop+bonus line sum to the cent (without misc)"
+  multiMobItems.length === expectedLaborLineCount(multiMobR) && multiMobItems.filter((it) => it.mob).length === 2,
+  "buildLaborItems: two mobilizations still yield two separate mob lines once shop/bonus are added as their own lines"
 );
+ok(multiMobItems.some((it) => it.laborOverhead === "misc") === false, "buildLaborItems: no allowance line when misc is blank");
+ok(
+  round2(multiMobItems.reduce((a, it) => a + it.price, 0)) === round2(multiMobR.totalPrice),
+  "buildLaborItems: two-mob total still matches the modal's rounded total to the cent (no misc this time)"
+);
+
+const zeroMobDraft = { discipline: "RIG", margin: "20", mobs: [{ ...defaultMobs[0], people: "0", days: "1" }], pmHrs: "2", pmAuto: false, shopHrs: "0", drfHrs: "0", drfAuto: false, misc: "150" };
+const zeroMobR = computeLabor(zeroMobDraft, laborBuildRate);
+const zeroMobItems = buildLaborItems(zeroMobR, "Rigging", idGenFrom(1));
+ok(
+  zeroMobItems.every((it) => !it.mob) && zeroMobItems.length === expectedLaborLineCount(zeroMobR),
+  "buildLaborItems: every mobilization costing $0 still emits the overhead lines with nothing to attach a mob field to"
+);
+
+/* --- customerLines (pricing.ts): the CUSTOMER document's own labor fold ---
+ * Owner request: shop & engineering / performance bonus / allowance stay as
+ * separate lines in the estimate (buildLaborItems above) but must never
+ * appear on the customer-facing document — their sell folds into a home
+ * line instead, so the section's displayed total is unchanged. */
+let clId = 1;
+const clNextId = () => clId++;
+function mobItem(mobCost: number, mobPrice: number, name: string): SpecItem {
+  const id = clNextId();
+  return {
+    id,
+    sku: "LAB-RIG-" + id,
+    desc: name + " — Rigging",
+    qty: 1,
+    unit: "lot",
+    cost: mobCost,
+    price: mobPrice,
+    labor: true,
+    mob: { type: name, days: 1, crew: 1, discipline: "Rigging" },
+  };
+}
+function overheadItem(kind: "shop" | "bonus" | "misc", price: number, legacySkuOnly = false): SpecItem {
+  const id = clNextId();
+  const skuPrefix = kind === "shop" ? "LAB-SHOP-" : kind === "bonus" ? "LAB-BONUS-" : "LAB-MISC-";
+  return {
+    id,
+    sku: skuPrefix + id,
+    desc: kind === "shop" ? "Shop & engineering — PM, fabrication & drafting" : kind === "bonus" ? "Performance bonus — 5% of labor cost" : "Project allowance / misc",
+    qty: 1,
+    unit: "lot",
+    cost: price,
+    price,
+    labor: true,
+    ...(legacySkuOnly ? {} : { laborOverhead: kind }),
+  };
+}
+const sumCL = (rows: ReturnType<typeof customerLines>) => round2(rows.reduce((a, r) => a + r.ext, 0));
+
+// one mob + shop + bonus -> folds onto the single mob line.
+const mobShopBonusSec: EstimatorSpecSection = {
+  id: "s1", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+  items: [mobItem(1000, 1400, "Install"), overheadItem("shop", 140), overheadItem("bonus", 77)],
+};
+const mobShopBonusCL = customerLines(mobShopBonusSec);
+ok(mobShopBonusCL.length === 1 && !!mobShopBonusCL[0].item, "customerLines: one mob + shop + bonus folds down to exactly one customer-facing row (the mob line)");
+ok(sumCL(mobShopBonusCL) === 1400 + 140 + 77, "customerLines: that one row's ext equals the sum of all three original sells");
+ok(sumCL(mobShopBonusCL) === round2(systemItemsRev(mobShopBonusSec)), "customerLines: the folded total matches the section's own systemItemsRev — nothing gained or lost");
+
+// two mobs proportional split sums exactly.
+const twoMobSec: EstimatorSpecSection = {
+  id: "s2", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+  items: [mobItem(1000, 1300, "Site Visit"), mobItem(3000, 3900, "Hang"), overheadItem("misc", 130)],
+};
+const twoMobCL = customerLines(twoMobSec);
+ok(twoMobCL.length === 2 && twoMobCL.every((r) => !!r.item), "customerLines: two mobs + one overhead line still show as two customer rows, not three");
+ok(sumCL(twoMobCL) === round2(systemItemsRev(twoMobSec)), "customerLines: two-mob proportional split still sums exactly to the section total");
+
+// overhead without a mob line but with another labor line.
+const otherLaborSec: EstimatorSpecSection = {
+  id: "s3", name: "General labor", kind: "materials", mfr: "", freightPct: 0,
+  items: [
+    { id: clNextId(), sku: "LAB-CUSTOM-1", desc: "Standby crew", qty: 1, unit: "lot", cost: 500, price: 700, labor: true },
+    overheadItem("shop", 140),
+  ],
+};
+const otherLaborCL = customerLines(otherLaborSec);
+ok(otherLaborCL.length === 1 && !!otherLaborCL[0].item, "customerLines: with no mobilization line, overhead folds into the section's other labor line instead");
+ok(sumCL(otherLaborCL) === 700 + 140, "customerLines: folded onto the other labor line, the ext still sums to both sells exactly");
+
+// overhead with no labor lines at all -> neutral combined row.
+const noLaborSec: EstimatorSpecSection = {
+  id: "s4", name: "Odd section", kind: "materials", mfr: "", freightPct: 0,
+  items: [{ id: clNextId(), sku: "ETC-1", desc: "Fixture", qty: 2, unit: "ea", cost: 100, price: 150 }, overheadItem("bonus", 77)],
+};
+const noLaborCL = customerLines(noLaborSec);
+ok(noLaborCL.length === 2, "customerLines: with no labor line to fold onto, the overhead becomes its own neutral combined row alongside the untouched material line");
+const combinedRow = noLaborCL.find((r) => !r.item);
+ok(!!combinedRow && "desc" in combinedRow && combinedRow.desc === "Project management, engineering & shop", "customerLines: the neutral row is titled generically and never names the bonus");
+ok(!!combinedRow && combinedRow.ext === 77, "customerLines: the neutral row still carries the full overhead amount — never dropped");
+
+// legacy SKU-only overhead lines (no laborOverhead flag) are still detected.
+const legacySec: EstimatorSpecSection = {
+  id: "s5", name: "Rigging", kind: "materials", mfr: "", freightPct: 0,
+  items: [mobItem(1000, 1400, "Install"), overheadItem("shop", 140, true), overheadItem("bonus", 77, true)],
+};
+ok(legacySec.items.every((it) => !it.laborOverhead), "customerLines test setup: the legacy fixture really has no laborOverhead flag");
+ok(
+  isLaborOverheadItem({ labor: true, sku: "LAB-SHOP-9" }) === true &&
+    isLaborOverheadItem({ labor: true, sku: "LAB-BONUS-9" }) === true &&
+    isLaborOverheadItem({ labor: true, sku: "LAB-MISC-9" }) === true &&
+    isLaborOverheadItem({ labor: true, sku: "LAB-RIG-9" }) === false &&
+    isLaborOverheadItem({ labor: false, sku: "LAB-SHOP-9" }) === false,
+  "isLaborOverheadItem: matches only labor lines with the SHOP/BONUS/MISC sku prefix — a mobilization sku (LAB-RIG-/LIG-/AUD-/VID-/OTH-) or a non-labor line never does"
+);
+const legacyCL = customerLines(legacySec);
+ok(legacyCL.length === 1 && sumCL(legacyCL) === 1400 + 140 + 77, "customerLines: an older flag-less quote's LAB-SHOP-/LAB-BONUS- lines are still detected and folded by SKU prefix alone");
+
+// non-labor lines are untouched; option lines are excluded, same as everywhere else.
+const mixedSec: EstimatorSpecSection = {
+  id: "s6", name: "Mixed", kind: "materials", mfr: "", freightPct: 0,
+  items: [
+    { id: clNextId(), sku: "ETC-1", desc: "Fixture", qty: 2, unit: "ea", cost: 100, price: 150 },
+    { id: clNextId(), sku: "ETC-2", desc: "Optional upgrade", qty: 1, unit: "ea", cost: 50, price: 80, option: true },
+    mobItem(1000, 1400, "Install"),
+    overheadItem("shop", 140),
+  ],
+};
+const mixedCL = customerLines(mixedSec);
+ok(mixedCL.length === 2, "customerLines: option lines are excluded (same as the rest of the customer document) and the material line is left exactly as-is");
+ok(
+  mixedCL.some((r) => r.item && r.item.sku === "ETC-1" && r.ext === 300),
+  "customerLines: a plain material line's ext is untouched by the labor fold"
+);
+
 
 // Unit sell / ext sell back-solve — each keeps the other in sync.
 const unitEdit = priceFromUnitSellEdit(199.999);

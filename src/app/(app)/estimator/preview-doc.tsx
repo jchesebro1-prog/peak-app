@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import letterhead from "./peak-letterhead.jpg";
-import { fmt, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
+import { customerLines, fmt, lineExtSellOf, systemFreight, systemItemsRev, type QuoteTotals } from "./pricing";
 import type { PaymentTerms, SpecItem, SpecSection, VendorQuote } from "./types";
 
 /**
@@ -151,7 +151,25 @@ export default function PreviewDoc(p: PreviewProps) {
                   ext: fmt(visible.reduce((a, it) => a + lineExtSellOf(it), 0)),
                 },
               ]
-            : visible.map((it) => {
+            : /* Never the shop & engineering / performance-bonus / allowance
+                 lines themselves — customerLines folds their sell into the
+                 mobilization line(s) (or another labor line, or a neutral
+                 combined row) so the section subtotal is unchanged but those
+                 categories never appear by name (owner request). */
+              customerLines(sec).map((cl) => {
+                if (!cl.item) {
+                  return {
+                    key: "labor-overhead-combined",
+                    desc: cl.desc,
+                    comment: "",
+                    showComment: false,
+                    sub: [] as { key: string; qty: number; unit: string; text: string }[],
+                    qty: "" as string | number,
+                    unit: "",
+                    ext: fmt(cl.ext),
+                  };
+                }
+                const it = cl.item;
                 /* #143: a vendor quote shows as one line reading
                    "Vendor · Quote no. — Description", or, set to Itemized, the
                    same line with its material descriptions underneath and the
@@ -184,7 +202,7 @@ export default function PreviewDoc(p: PreviewProps) {
                       : [],
                   qty: it.qty as string | number,
                   unit: it.unit,
-                  ext: fmt(lineExtSellOf(it)),
+                  ext: fmt(cl.ext),
                 };
               }),
       };

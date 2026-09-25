@@ -43,10 +43,10 @@ import {
 } from "./estimator-data";
 import {
   backSolveExtSell,
+  buildLaborItems,
   computeCurtain,
   computeLabor,
   fmt,
-  foldLaborMobLines,
   lineMarginOf,
   makeLaborRate,
   priceFromUnitSellEdit,
@@ -58,7 +58,6 @@ import {
   systemItemsRev,
   totals,
   vendorTotalSeed,
-  type LaborExtra,
 } from "./pricing";
 import type {
   CurtainDraft,
@@ -1733,88 +1732,19 @@ export default function EstimatorClient({
     }));
   };
 
-  /** Display label / SKU prefix / customer-facing desc for a folded-out
-   *  extra that had nowhere to fold onto (see the `else` branch below). */
-  const LABOR_EXTRA_META: Record<string, { skuPrefix: string; desc: string }> = {
-    "shop & engineering": { skuPrefix: "LAB-SHOP-", desc: "Shop & engineering — PM, fabrication & drafting" },
-    "performance bonus": { skuPrefix: "LAB-BONUS-", desc: "Performance bonus — 5% of labor cost" },
-    allowance: { skuPrefix: "LAB-MISC-", desc: "Project allowance / misc" },
-  };
-
   const addLabor = (secId: string) => {
     const r = computeLabor(laborDraft, rate);
     if (r.totalCost <= 0) return;
     const discLabel = DISC_LABEL[r.disc] || r.disc;
-    const price = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
-
-    // One line per mobilization (the modal's own subtitle promise) — shop &
-    // engineering, the misc allowance and the performance bonus (nearly
-    // always present: PM/drafting hours auto-compute from the crew, and the
-    // bonus is always 5% of cost) get FOLDED into the mobilization lines
-    // instead of tagging along as their own lines.
-    const activeMobs = r.mobs.map((m, i) => ({ m, i })).filter(({ m }) => m.cost > 0);
-    const extras: LaborExtra[] = [];
-    if (r.shopCost > 0) {
-      const cost = round2(r.shopCost);
-      extras.push({ label: "shop & engineering", cost, price: price(cost) });
-    }
-    if (r.performanceBonus > 0) {
-      const cost = round2(r.performanceBonus);
-      extras.push({ label: "performance bonus", cost, price: price(cost) });
-    }
-    if (r.misc > 0) {
-      const cost = round2(r.misc);
-      extras.push({ label: "allowance", cost, price: price(cost) });
-    }
-
-    const items: SpecItem[] = [];
-
-    if (activeMobs.length > 0) {
-      const mobCosts = activeMobs.map(({ m }) => round2(m.cost));
-      const mobPrices = mobCosts.map((c) => price(c));
-      const folded = foldLaborMobLines(mobCosts, mobPrices, extras, r.totalPrice);
-      activeMobs.forEach(({ m, i }, idx) => {
-        const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
-        const desc = label + " — " + discLabel;
-        const comment = (m.raw.comments || "").trim();
-        const userNote = (m.raw.internalNote || "").trim();
-        const foldNote = folded[idx].internalNote;
-        const idN = nextId();
-        const skuN = nextId();
-        items.push({
-          id: idN,
-          sku: "LAB-" + r.disc + "-" + skuN,
-          desc,
-          qty: 1,
-          unit: "lot",
-          cost: folded[idx].cost,
-          price: folded[idx].price,
-          labor: true,
-          comment,
-          internalNote: userNote && foldNote ? userNote + " · " + foldNote : userNote || foldNote,
-          mob: { type: label, days: m.days, crew: m.people, discipline: discLabel },
-        });
-      });
-    } else if (extras.length) {
-      // No mobilization line to fold onto (every mobilization costs $0) —
-      // keep the extras as their own lines rather than dropping them.
-      extras.forEach((extra) => {
-        const meta = LABOR_EXTRA_META[extra.label];
-        const idN = nextId();
-        const skuN = nextId();
-        items.push({
-          id: idN,
-          sku: meta.skuPrefix + skuN,
-          desc: meta.desc,
-          qty: 1,
-          unit: "lot",
-          cost: extra.cost,
-          price: extra.price,
-          labor: true,
-        });
-      });
-    }
-
+    // One line per mobilization, plus shop & engineering / allowance /
+    // performance bonus as their own lines when present — reverted back to
+    // that shape off a recent change that had folded them together (owner
+    // request: "I like setting the shop and engineering as separate lines
+    // ... and the bonus"). The customer document still never shows them:
+    // `customerLines` (pricing.ts) folds their sell into the mobilization
+    // line(s) for display only. buildLaborItems is the pure line-building
+    // half, kept in pricing.ts for testability.
+    const items = buildLaborItems(r, discLabel, nextId);
     if (items.length) pushItems(secId, items);
     closeInput(); // discards → reseeds freshLabor for this system
   };

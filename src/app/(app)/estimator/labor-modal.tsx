@@ -10,7 +10,11 @@ import { ACCENT_INK, ACCENT_SOFT, addBtnStyle, ConfigModal, LBL, LBL5, segBtn, S
  * Labor configurator — discipline scope (rate set from catalog category
  * 'Labor'), one line per mobilization (crew/days/OT, local vs travel with
  * mileage/lodging/per-diem, supervisor, lift), shop & engineering hours with
- * auto PM/drafting defaults, misc allowance and margin.
+ * auto PM/drafting defaults, misc allowance and margin. addLabor
+ * (estimator-client.tsx) adds shop & engineering / the allowance /
+ * performance bonus as their own separate lines too — internal-estimate
+ * only; the customer document folds their sell into the mobilization line(s)
+ * (see `customerLines`, pricing.ts).
  */
 
 const MOBFIELD: CSSProperties = {
@@ -174,7 +178,12 @@ export default function LaborModal({
       icon="⏱"
       iconSize={15}
       title="Configure labor"
-      sub={<>Adds to {secName} · one line per mobilization</>}
+      sub={
+        <>
+          Adds to {secName} · one line per mobilization, plus shop &amp; engineering and bonus lines
+          (internal — the customer sees them folded into labor)
+        </>
+      }
       onClose={onClose}
       footerLeft={
         <div style={{ display: "flex", alignItems: "center", gap: 22 }}>

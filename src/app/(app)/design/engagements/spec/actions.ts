@@ -28,7 +28,7 @@ type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
 type QuoteSpecDoc = {
   id: string;
   spec?: {
-    sections?: Array<{ items?: Array<{ sku?: string; desc?: string; qty?: number; option?: boolean }> }>;
+    sections?: Array<{ items?: Array<{ sku?: string; desc?: string; qty?: number; option?: boolean; labor?: boolean }> }>;
     lines?: Array<{ sku?: string; desc?: string; qty?: number }>;
   };
 };
@@ -46,8 +46,10 @@ export async function bomFromQuoteAction(quoteId: string): Promise<Result<{ bom:
   };
   for (const sec of q.spec?.sections || []) {
     for (const it of sec.items || []) {
-      // Optional-scope lines are not part of the base bid.
-      if (it.option) continue;
+      // Optional-scope lines are not part of the base bid; labor lines
+      // (mobilizations, shop & engineering, allowance, performance bonus)
+      // aren't equipment and don't belong in the bid-spec BOM either.
+      if (it.option || it.labor) continue;
       push(it.sku, it.desc, it.qty);
     }
   }

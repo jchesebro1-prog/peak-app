@@ -57,6 +57,14 @@ export type SpecItem = {
   /** Optional vendor/product page for this material. */
   link?: string;
   mob?: SpecMob;
+  /** Marks a labor line as shop & engineering / performance-bonus / misc-
+   *  allowance overhead (owner request): the internal estimate keeps it as
+   *  its own editable line, but the CUSTOMER document never shows it — its
+   *  sell folds into the mobilization line(s) instead (see `customerLines`
+   *  in pricing.ts). Older quotes built during the brief window when these
+   *  folded into the mobilization line predate this flag; `isLaborOverheadItem`
+   *  also recognizes their LAB-SHOP-/LAB-BONUS-/LAB-MISC- SKU prefixes. */
+  laborOverhead?: "shop" | "bonus" | "misc";
   /** Orderable component detail for a catalog-backed fixture assembly. */
   components?: Array<{ sku: string; label: string; role: AssemblyRole; qty: number; unit: string; cost: number; price: number }>;
   /** Links this line to its VendorQuote record (#143) — one priced line per
