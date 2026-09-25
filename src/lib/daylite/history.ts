@@ -18,6 +18,7 @@
  */
 
 import { projectId, repairId, quoteId } from "./ids";
+import { DEFAULT_QUOTE_PIPELINES, statusForQuoteStage, firstStage, type QuotePipeline } from "@/lib/pipelines";
 
 // ---------------------------------------------------------------------------
 // TSV parsing
@@ -138,25 +139,37 @@ function parseMoney(raw: string): number {
  * cell as `companyRaw` for the preview).
  */
 export function splitCompanies(cell: string, known: (name: string) => boolean): string[] {
+  return splitCompaniesDetailed(cell, known).matched;
+}
+
+/**
+ * Same greedy longest-run algorithm as `splitCompanies`, but also returns the
+ * leftover pieces that matched nothing — so a partially-known cell can keep
+ * its unknown remainder on the plan (`companyUnmatched`) for the preview,
+ * instead of silently dropping it the way `splitCompanies`'s public
+ * candidates-only return does.
+ */
+function splitCompaniesDetailed(cell: string, known: (name: string) => boolean): { matched: string[]; unmatched: string[] } {
   const raw = (cell || "").trim();
-  if (!raw) return [];
+  if (!raw) return { matched: [], unmatched: [] };
   const pieces = raw.split(",").map((p) => p.trim()).filter(Boolean);
-  const result: string[] = [];
+  const matched: string[] = [];
+  const unmatched: string[] = [];
   let i = 0;
   while (i < pieces.length) {
-    let matched = false;
+    let ok = false;
     for (let len = pieces.length - i; len >= 1; len--) {
       const candidate = pieces.slice(i, i + len).join(", ");
       if (known(candidate)) {
-        result.push(candidate);
+        matched.push(candidate);
         i += len;
-        matched = true;
+        ok = true;
         break;
       }
     }
-    if (!matched) i += 1;
+    if (!ok) { unmatched.push(pieces[i]); i += 1; }
   }
-  return result;
+  return { matched, unmatched };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +208,7 @@ export const PROJECT_STAGE_MAP: Record<string, string> = {
   "acceptance": "initial-contact",
   "assigned": "initial-contact",
   "discussions/walk-thru with ec": "initial-contact",
+  "walk-thru with ec": "initial-contact",
 
   "scheduled": "scheduled",
   "scheduled/installation": "scheduled",
@@ -227,65 +241,74 @@ export const SERVICE_STAGE_MAP: Record<string, "approved" | "scheduled" | "compl
 // Opportunities: stage map
 // ---------------------------------------------------------------------------
 
-/** Stripped Open-opp stage label → pipeline + quote stage (spec §4.3). */
-export const OPP_STAGE_MAP: Record<
-  string,
-  { pipelineId: "estimate-design" | "bid-spec"; stage: string; projectStage?: string }
-> = {
-  // Estimate/Design
-  "": { pipelineId: "estimate-design", stage: "first-contact" },
-  "first contact": { pipelineId: "estimate-design", stage: "first-contact" },
-  "design": { pipelineId: "estimate-design", stage: "design" },
-  "creation": { pipelineId: "estimate-design", stage: "design" },
-  "presentation": { pipelineId: "estimate-design", stage: "presentation" },
-  "delivery": { pipelineId: "estimate-design", stage: "presentation" },
-  "presentation/delivery": { pipelineId: "estimate-design", stage: "presentation" },
-  "acceptance": { pipelineId: "estimate-design", stage: "acceptance", projectStage: "deposit" },
-  "down payment": { pipelineId: "estimate-design", stage: "acceptance", projectStage: "equipment-ordered" },
-  "equipment ordered": { pipelineId: "estimate-design", stage: "acceptance", projectStage: "equipment-ordered" },
-
-  // BID SPEC
-  "collect information": { pipelineId: "bid-spec", stage: "collect-info" },
-  "create bid": { pipelineId: "bid-spec", stage: "create-bid" },
-  "bid sent": { pipelineId: "bid-spec", stage: "bid-sent" },
-  "awarded": { pipelineId: "bid-spec", stage: "awarded", projectStage: "deposit" },
-  "purchase order received": { pipelineId: "bid-spec", stage: "awarded", projectStage: "equipment-ordered" },
-  "order product": { pipelineId: "bid-spec", stage: "awarded", projectStage: "equipment-ordered" },
-  "install": { pipelineId: "bid-spec", stage: "awarded", projectStage: "installation" },
-  "final invoice": { pipelineId: "bid-spec", stage: "awarded", projectStage: "invoice" },
+/**
+ * Stripped Open-opp stage label → quote stage, keyed per pipeline (spec §4.3).
+ * The pipeline itself is decided from the row's own Pipeline column, never
+ * from which pipeline's map a label happens to live in — see
+ * `pipelineIdFromRaw`/`resolveOppStage` below.
+ */
+export const OPP_STAGE_MAP: Record<"estimate-design" | "bid-spec", Record<string, { stage: string; projectStage?: string }>> = {
+  "estimate-design": {
+    "": { stage: "first-contact" },
+    "first contact": { stage: "first-contact" },
+    "design": { stage: "design" },
+    "creation": { stage: "design" },
+    "presentation": { stage: "presentation" },
+    "delivery": { stage: "presentation" },
+    "presentation/delivery": { stage: "presentation" },
+    "acceptance": { stage: "acceptance", projectStage: "deposit" },
+    "down payment": { stage: "acceptance", projectStage: "equipment-ordered" },
+    "equipment ordered": { stage: "acceptance", projectStage: "equipment-ordered" },
+  },
+  "bid-spec": {
+    "collect information": { stage: "collect-info" },
+    "create bid": { stage: "create-bid" },
+    "bid sent": { stage: "bid-sent" },
+    "awarded": { stage: "awarded", projectStage: "deposit" },
+    "purchase order received": { stage: "awarded", projectStage: "equipment-ordered" },
+    "order product": { stage: "awarded", projectStage: "equipment-ordered" },
+    "install": { stage: "awarded", projectStage: "installation" },
+    "final invoice": { stage: "awarded", projectStage: "invoice" },
+  },
 };
 
-const WON_OPP_STAGES = new Set(["acceptance", "awarded"]);
-const SENT_OPP_STAGES = new Set(["presentation", "bid-sent"]);
-const FIRST_OPP_STAGE: Record<"estimate-design" | "bid-spec", string> = {
-  "estimate-design": "first-contact",
-  "bid-spec": "collect-info",
+const QUOTE_PIPELINE_BY_ID: Record<"estimate-design" | "bid-spec", QuotePipeline> = {
+  "estimate-design": DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "estimate-design")!,
+  "bid-spec": DEFAULT_QUOTE_PIPELINES.find((p) => p.id === "bid-spec")!,
 };
 
+/** spec §4.3: Estimate/Design → estimate-design, BID SPEC → bid-spec, blank/unknown → estimate-design. */
 function pipelineIdFromRaw(pipelineRaw: string): "estimate-design" | "bid-spec" {
   const p = (pipelineRaw || "").trim().toLowerCase();
-  return p === "bid spec" ? "bid-spec" : "estimate-design"; // blank/unknown → estimate-design rules
+  return p === "bid spec" ? "bid-spec" : "estimate-design";
 }
 
+/**
+ * Resolves the row's pipeline FIRST from its own Pipeline column, then looks
+ * the stripped stage label up in THAT pipeline's map only — a label that
+ * belongs to the other pipeline (e.g. "Acceptance" on a BID SPEC row) is
+ * unmapped, not silently reassigned to the pipeline it happens to name.
+ * Status is derived from the resolved stage's own tag in the seeded quote
+ * pipeline (src/lib/pipelines.ts), the single source of truth for which
+ * stages count as sent/won — not a second, hand-kept set here.
+ */
 function resolveOppStage(
   pipelineRaw: string,
   stageRaw: string
-): { pipelineId: "estimate-design" | "bid-spec"; stage: string; status: "draft" | "sent" | "won"; projectStage?: string } {
-  const key = stripStage(stageRaw);
-  const mapped = OPP_STAGE_MAP[key];
-  if (mapped) {
-    const status: "draft" | "sent" | "won" = WON_OPP_STAGES.has(mapped.stage)
-      ? "won"
-      : SENT_OPP_STAGES.has(mapped.stage)
-        ? "sent"
-        : "draft";
-    return mapped.projectStage
-      ? { pipelineId: mapped.pipelineId, stage: mapped.stage, status, projectStage: mapped.projectStage }
-      : { pipelineId: mapped.pipelineId, stage: mapped.stage, status };
-  }
-  // Unknown stage → the pipeline's first stage, draft.
+): { pipelineId: "estimate-design" | "bid-spec"; stage: string; status: "draft" | "sent" | "won"; projectStage?: string; unmappedLabel?: string } {
   const pid = pipelineIdFromRaw(pipelineRaw);
-  return { pipelineId: pid, stage: FIRST_OPP_STAGE[pid], status: "draft" };
+  const pl = QUOTE_PIPELINE_BY_ID[pid];
+  const key = stripStage(stageRaw);
+  const mapped = OPP_STAGE_MAP[pid][key];
+  if (mapped) {
+    const status = (statusForQuoteStage(pl, mapped.stage) ?? "draft") as "draft" | "sent" | "won";
+    return mapped.projectStage
+      ? { pipelineId: pid, stage: mapped.stage, status, projectStage: mapped.projectStage }
+      : { pipelineId: pid, stage: mapped.stage, status };
+  }
+  // Unknown stage (or a label that belongs to the other pipeline) → this
+  // pipeline's first stage, draft, counted in stats.unmappedOppStages.
+  return { pipelineId: pid, stage: firstStage(pl).id, status: "draft", unmappedLabel: key };
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +321,7 @@ export type ProjectPlan = {
   name: string;
   companyCandidates: string[];
   companyRaw?: string; // only set when companyCandidates is empty — the raw cell, for the preview
+  companyUnmatched?: string[]; // set when SOME pieces matched and some didn't — the leftover, for the preview
   people: string[];
   owner: string;
   done: boolean;
@@ -313,6 +337,7 @@ export type QuotePlan = {
   name: string;
   companyCandidates: string[];
   companyRaw?: string;
+  companyUnmatched?: string[];
   people: string[];
   owner: string;
   pipelineId: string;
@@ -330,9 +355,13 @@ function splitPeople(cell: string): string[] {
   return (cell || "").split(", ").map((p) => p.trim()).filter(Boolean);
 }
 
-function companyFields(cell: string, knownCompany: (name: string) => boolean): { candidates: string[]; raw?: string } {
-  const candidates = splitCompanies(cell, knownCompany);
-  return candidates.length === 0 ? { candidates, raw: (cell || "").trim() } : { candidates };
+function companyFields(
+  cell: string,
+  knownCompany: (name: string) => boolean
+): { candidates: string[]; raw?: string; unmatched?: string[] } {
+  const { matched, unmatched } = splitCompaniesDetailed(cell, knownCompany);
+  if (matched.length === 0) return { candidates: matched, raw: (cell || "").trim() };
+  return unmatched.length > 0 ? { candidates: matched, unmatched } : { candidates: matched };
 }
 
 /**
@@ -352,13 +381,15 @@ export function planHistory(input: {
   projects: ProjectPlan[];
   quotes: QuotePlan[];
   skipped: { projects: Record<string, number>; opportunities: Record<string, number> };
-  stats: { valueConflicts: number };
+  stats: { valueConflicts: number; unmappedOppStages: Record<string, number> };
 } {
   const { projects, opportunities, knownCompany } = input;
   const skippedProjects: Record<string, number> = {};
   const skippedOpportunities: Record<string, number> = {};
   const bumpProject = (k: string) => { skippedProjects[k] = (skippedProjects[k] || 0) + 1; };
   const bumpOpportunity = (k: string) => { skippedOpportunities[k] = (skippedOpportunities[k] || 0) + 1; };
+  const unmappedOppStages: Record<string, number> = {};
+  const bumpUnmappedOpp = (label: string) => { unmappedOppStages[label] = (unmappedOppStages[label] || 0) + 1; };
   const seenProjectIds = new Set<string>();
   const seenQuoteIds = new Set<string>();
 
@@ -370,7 +401,7 @@ export function planHistory(input: {
     const state = (o["State"] || "").trim();
     const stateLc = state.toLowerCase();
     const name = (o["Name"] || "").trim();
-    const { candidates, raw } = companyFields(o["Companies"] || "", knownCompany);
+    const { candidates, raw, unmatched } = companyFields(o["Companies"] || "", knownCompany);
     const companyForId = candidates[0] || raw || "";
     const value = parseMoney(o["Value"] || "");
 
@@ -392,11 +423,13 @@ export function planHistory(input: {
     seenQuoteIds.add(id);
 
     const resolved = resolveOppStage(o["Pipeline"] || "", o["Stage"] || "");
+    if (resolved.unmappedLabel !== undefined) bumpUnmappedOpp(resolved.unmappedLabel);
     const plan: QuotePlan = {
       id,
       name,
       companyCandidates: candidates,
       ...(raw !== undefined ? { companyRaw: raw } : {}),
+      ...(unmatched && unmatched.length > 0 ? { companyUnmatched: unmatched } : {}),
       people: splitPeople(o["People"] || ""),
       owner: o["Owner"] || "",
       pipelineId: resolved.pipelineId,
@@ -428,7 +461,7 @@ export function planHistory(input: {
     const status = (r["Status"] || "").trim();
     const done = status.toLowerCase() === "done";
     const name = (r["Name"] || "").trim();
-    const { candidates, raw } = companyFields(r["Companies"] || "", knownCompany);
+    const { candidates, raw, unmatched } = companyFields(r["Companies"] || "", knownCompany);
     const companyForId = candidates[0] || raw || "";
 
     const kind: ProjectPlan["kind"] = bucket === "service" ? "repair" : bucket === "order" ? "order" : "project";
@@ -461,6 +494,7 @@ export function planHistory(input: {
       name,
       companyCandidates: candidates,
       ...(raw !== undefined ? { companyRaw: raw } : {}),
+      ...(unmatched && unmatched.length > 0 ? { companyUnmatched: unmatched } : {}),
       people: splitPeople(r["People"] || ""),
       owner: r["Owner"] || "",
       done,
@@ -476,6 +510,6 @@ export function planHistory(input: {
     projects: projectPlans,
     quotes,
     skipped: { projects: skippedProjects, opportunities: skippedOpportunities },
-    stats: { valueConflicts },
+    stats: { valueConflicts, unmappedOppStages },
   };
 }

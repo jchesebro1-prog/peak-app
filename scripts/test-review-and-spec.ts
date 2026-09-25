@@ -8958,18 +8958,25 @@ ok(
 \tService\t"SERVICE CALL:  Pardeeville Gym - Audio Issues"\tNew\tService Call\t"2 • Service Scheduled"\t\t3/2/26\t\t\t\t\t"Pardeeville Schools"\t"Mike Mundth"\t
 \t\t"DEERFIELD HS - Gym AV BID"\tNew\tBasic Install\t"3 • Installation"\t\t4/1/26\t\t\t\t"Pat Doe"\t"Camosy Construction, Deerfield School District"\t"Isaac Mittlesteadt"\t
 \t\t"Old job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"X"\t"Y"\t
-\t\t"St. John's Luth – Montello"\tNew\tBasic Install\t\t\t5/1/26\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t`;
+\t\t"St. John's Luth – Montello"\tNew\tBasic Install\t\t\t5/1/26\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
+\t\t"TEST HS - Partial Company Match"\tNew\tBasic Install\t\t\t6/1/26\t\t\t\t\t"Camosy Construction, Some Rando Co"\t"Jeff Chesebro"\t`;
   const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
 \t\t"Sisters of St. Francis Dubuque, IA - BID"\tWon\t\t\t"$48,200.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
 \tBid\t"BIG FOOT HS WALWORTH - Auditorium AV Upgrades"\tOpen\t\t\t"$84,500.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
 \tDesign\t"AL RINGLING - Lighting"\tOpen\t\t\t"$122,475.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"Al Ringling Theatre"\t"Jeff Chesebro"\t
 \tBid\t"Random Lost Opp"\tLost\t\t\t"$10,000.00"\tBID SPEC\t"1 • Collect Information"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
 \t\t"ST JOHNS LUTH  MONTELLO"\tWon\t\t\t"$15,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
-\t\t"St John's Luth. Montello!!"\tWon\t\t\t"$5,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t`;
+\t\t"St John's Luth. Montello!!"\tWon\t\t\t"$5,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
+\tBid\t"MISMATCHED PIPELINE TEST"\tOpen\t\t\t"$1,000.00"\tBID SPEC\t"4 • Acceptance"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t`;
   const known = new Set(["sisters of st. francis", "pardeeville schools", "camosy construction", "deerfield school district", "big foot high school", "al ringling theatre", "sound devices, llc"]);
   const kn = (n: string) => known.has(n.trim().toLowerCase());
   const rows = parseTsv(P);
-  ok(rows.length === 5 && rows[0]["Name"] === "Sisters of St. Francis Dubuque, IA - BID", "daylite: TSV parse keeps quoted commas");
+  ok(rows.length === 6 && rows[0]["Name"] === "Sisters of St. Francis Dubuque, IA - BID", "daylite: TSV parse keeps quoted commas");
+  const crlfQuoted = parseTsv(`Name\tVal\r\n"He said ""hi"""\tok\r\n`);
+  ok(
+    crlfQuoted.length === 1 && crlfQuoted[0]["Name"] === 'He said "hi"' && crlfQuoted[0]["Val"] === "ok",
+    "daylite: parseTsv unescapes a doubled quote and handles CRLF line endings"
+  );
   ok(classifyProject(rows[3]).bucket === "skip" && classifyProject(rows[1]).bucket === "service" && classifyProject(rows[0]).bucket === "install", "daylite: classify");
   ok(stripStage("8 • Final Payment Received") === "final payment received", "daylite: stripStage");
   ok(stripStage("8 – Final Payment Received") === "final payment received" && stripStage("8 — Final Payment Received") === "final payment received", "daylite: en-dash and em-dash normalize the same as a hyphen before lookup");
@@ -8999,6 +9006,28 @@ ok(
   const sjl = plan.projects.find((p) => p.name.startsWith("St. John"))!;
   ok(sjl.value === 15000, "daylite: loose punctuation-blind name match finds the Won opp value despite apostrophe/dash/case/spacing differences");
   ok(plan.stats.valueConflicts === 1, "daylite: two Won opps sharing one loose key count as one value conflict, resolved to the larger value");
+
+  // Pipeline comes from the row's own Pipeline column, not from whichever
+  // pipeline's map a label happens to live in: "4 • Acceptance" is an
+  // Estimate/Design label, but this row says Pipeline "BID SPEC" — it must
+  // land on bid-spec's first stage as unmapped, never silently resolve as
+  // Estimate/Design's Acceptance/won.
+  const mismatched = plan.quotes.find((q) => q.name.startsWith("MISMATCHED"))!;
+  ok(
+    mismatched.pipelineId === "bid-spec" && mismatched.stage === "collect-info" && mismatched.status === "draft",
+    "daylite: an Estimate/Design stage label on a BID SPEC row resolves to bid-spec's own first stage, not the other pipeline's mapping"
+  );
+  ok(plan.stats.unmappedOppStages["acceptance"] === 1, "daylite: the cross-pipeline label is counted in stats.unmappedOppStages");
+
+  // A Companies cell with some known and some unknown pieces keeps the
+  // unknown remainder for the preview instead of silently dropping it.
+  const partial = plan.projects.find((p) => p.name.startsWith("TEST HS"))!;
+  ok(
+    partial.companyCandidates.length === 1 &&
+      partial.companyCandidates[0] === "Camosy Construction" &&
+      JSON.stringify(partial.companyUnmatched) === JSON.stringify(["Some Rando Co"]),
+    "daylite: a partially-known Companies cell keeps the known candidate and the unknown remainder separately"
+  );
 
   // Duplicate name+company rows must not collide silently — the first wins, the rest are counted.
   const dupeRows = parseTsv(P).slice(0, 1).concat(parseTsv(P).slice(0, 1));
