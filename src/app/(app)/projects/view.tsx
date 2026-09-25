@@ -49,6 +49,7 @@ import {
   addTaskAction,
   setTaskStatusAction,
   updateTaskAction,
+  removeTaskAction,
   applyProjectTemplateAction,
   setProjectValueAction,
 } from "./actions";
@@ -1372,6 +1373,7 @@ function OverviewTab({
           addAction={addTaskAction}
           setStatusAction={setTaskStatusAction}
           updateAction={updateTaskAction}
+          removeAction={removeTaskAction}
         />
       </div>
 

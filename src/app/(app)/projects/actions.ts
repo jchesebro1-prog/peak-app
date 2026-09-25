@@ -28,6 +28,7 @@ import {
   getTask,
   setTaskStatus,
   updateTask,
+  removeTask,
   STATUSES,
   type TaskStatus,
 } from "@/lib/stores/tasks";
@@ -356,6 +357,17 @@ export async function updateTaskAction(formData: FormData) {
     console.error("updateTaskAction failed", error);
     projectErrorPath(projectId, formTab(formData, "overview"), "Couldn’t update that task — please try again.");
   }
+  revalidatePath("/", "layout");
+}
+
+/** Delete a project task (soft delete). Parent-agnostic like set-status/update
+ *  above — only ever touches taskId — mirroring removeQuoteTaskAction
+ *  (estimator/actions.ts) and removeDesignTaskAction (design/designs/actions.ts). */
+export async function removeTaskAction(formData: FormData) {
+  await requireUser();
+  const taskId = String(formData.get("taskId") || "");
+  if (!taskId) return;
+  await removeTask(taskId);
   revalidatePath("/", "layout");
 }
 
