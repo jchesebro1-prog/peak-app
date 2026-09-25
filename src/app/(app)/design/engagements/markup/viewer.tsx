@@ -21,7 +21,6 @@ import {
   MEASURE_UNITS,
   measureLength,
   type MeasureUnit,
-  pageDistance,
   polyPath,
   type Point,
   TOOL_ICON,

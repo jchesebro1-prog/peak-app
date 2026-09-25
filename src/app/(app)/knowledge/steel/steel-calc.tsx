@@ -21,7 +21,6 @@ const card: React.CSSProperties = { background: "#fff", border: "1px solid #ecec
 const label: React.CSSProperties = { fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4, display: "block" };
 const field: React.CSSProperties = { width: "100%", border: "1px solid #dfe2e8", borderRadius: 8, padding: "8px 10px", fontSize: 13.5, fontFamily: "inherit", background: "#fff", boxSizing: "border-box" };
 const grid = (min = 130): React.CSSProperties => ({ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`, gap: 12 });
-const btn: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: 9, padding: "9px 16px", cursor: "pointer" };
 const th: React.CSSProperties = { textAlign: "left", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9aa0ab", padding: "6px 10px", borderBottom: "1px solid #eef0f3" };
 const td: React.CSSProperties = { fontSize: 13, padding: "7px 10px", borderBottom: "1px solid #f4f5f7" };
 const tag = (ok: boolean): React.CSSProperties => ({ display: "inline-block", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 5, color: ok ? "#1f7a52" : "#b4543a", background: ok ? "#eaf6ef" : "#f7e9e5" });

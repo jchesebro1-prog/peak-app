@@ -6,7 +6,7 @@ import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
 import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
 import { allVisits } from "@/lib/stores/site-visits";
-import type { QueueItem, QueueSource } from "@/lib/queue-types";
+import type { QueueItem } from "@/lib/queue-types";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.

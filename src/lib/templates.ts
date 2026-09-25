@@ -63,9 +63,6 @@ const TAX_NOTE =
 const NFPA705_QUOTE =
   "NFPA 705 §1.1.1: This recommended practice provides guidance to enforcement officials for the field application of an open flame to textiles and films that have been in use in the field or for which reliable laboratory data are not available.";
 
-const RIGGING_STANDARDS_QUOTE =
-  "A rigging inspection checks every accessible component of the system — anything that leaves the ground — against current federal regulations and theatrical industry standards (OSHA, NFPA, ANSI E1). Every finding is documented in a written report, sorted Urgent / Necessary / Basic, with photographs and recommended corrections.";
-
 /* ------------------------------ the registry ---------------------------- */
 
 export const TEMPLATES: TemplateDef[] = [

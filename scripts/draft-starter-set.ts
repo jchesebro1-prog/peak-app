@@ -43,7 +43,7 @@ import {
   p, consolePorts, wingPorts, dimmerRackPorts, conventionalFixturePorts, ledFixturePorts,
   ptzCameraPorts, encoderDecoderPorts, sdiCardPorts, captureOnlyPorts, matrixPorts,
   hdbasetMatrixPorts, extenderKitPorts, splitterPorts, passiveSpeakerPorts,
-  seventyVSpeakerPorts, poweredSpeakerPorts, mixerAllInOnePorts, mixSurfacePorts,
+  poweredSpeakerPorts, mixerAllInOnePorts, mixSurfacePorts,
   mixRackPorts, mechanicalPorts, motorHoistPorts,
 } from "../src/lib/catalog-port-shapes";
 

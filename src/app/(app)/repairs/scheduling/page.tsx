@@ -11,7 +11,6 @@ import {
   priorityMeta,
   categoryMeta,
   jobCoords,
-  stageMeta,
   syncFromQuotes as syncRepairJobsFromQuotes,
   type RepairJobRecord,
 } from "@/lib/stores/repair-jobs";
