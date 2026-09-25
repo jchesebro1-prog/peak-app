@@ -17,10 +17,12 @@ import {
   timeAgo,
   jobCoords,
   WARRANTY_LEAD_DAYS,
+  syncFromQuotes as syncRepairJobsFromQuotes,
   type RepairJobRecord,
   type RepairStageKey,
   type WarrantyFollowUpRow,
 } from "@/lib/stores/repair-jobs";
+import { safeSweep } from "@/lib/safe-sweep";
 import { RepairsMap } from "./controls";
 
 export const metadata = { title: "Repairs — Quartzite-6" };
@@ -67,9 +69,12 @@ export default async function RepairsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, jobs, warrantyDue, flaggedAll] = await Promise.all([
-    requireUser(),
-    searchParams,
+  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  // #173 (D227): the repairs dashboard owns repair jobs — the repair path
+  // for a quote won before cfc00ad moved spawning into setStatus. Runs
+  // before the reads so a healed job lands on this render.
+  await safeSweep("repair jobs", syncRepairJobsFromQuotes);
+  const [jobs, warrantyDue, flaggedAll] = await Promise.all([
     getAll(),
     warrantyFollowUps({ dueOnly: true }),
     flaggedFromInspections(),

@@ -8,8 +8,10 @@ import {
   msOf,
   fmtShort,
   money,
+  syncFromQuotes as syncFlameJobsFromQuotes,
   type FlameJob,
 } from "@/lib/stores/flame-jobs";
+import { safeSweep } from "@/lib/safe-sweep";
 import { activeUsers } from "@/lib/users";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { FlameMap } from "../controls";
@@ -54,7 +56,13 @@ const CSS = `
 `;
 
 export default async function FlameSchedulingPage() {
-  const [, jobs, roster] = await Promise.all([requireUser(), getAll(), activeUsers()]);
+  await requireUser();
+  // #173 (D227): a healed job is born `stage: "approved"` — exactly what
+  // this screen lists as awaiting a date. Without the sweep here, the one
+  // screen a dispatcher checks for a missing job is the one screen that
+  // cannot create it.
+  await safeSweep("flame jobs (scheduler)", async () => (await syncFlameJobsFromQuotes()).created);
+  const [jobs, roster] = await Promise.all([getAll(), activeUsers()]);
 
   const identity = new Map(roster.map((u) => [u.name, { color: u.color, initials: u.initials }]));
   const initialsOf = (n: string) => identity.get(n)?.initials || deriveInitials(n || "");

@@ -1239,18 +1239,36 @@ export async function byQuote(qid: string): Promise<InspectionRecord[]> {
   return list.filter((r) => r.quoteId === qid);
 }
 
+/** Every quote id that already spawned record(s) — INCLUDING soft-deleted
+ *  ones (#173). `remove()` is a soft delete and `listDocs` hides tombstones,
+ *  so coverage built on the live list re-spawns a deleted inspection on the
+ *  next /inspections load. `listDocs` does not merge the `deleted` column
+ *  onto the doc it returns, so only the quote ids are collected — a
+ *  tombstoned record must never be handed on as a live one. */
+async function coveredQuoteIds(): Promise<Set<string>> {
+  const rows = await listDocs<InspectionRecord>("inspections", { includeDeleted: true });
+  const out = new Set<string>();
+  for (const r of rows) if (r.quoteId) out.add(r.quoteId);
+  return out;
+}
+
 /**
  * Spawn the `requested` inspection record(s) for one accepted inspection
  * quote — ONE RECORD PER QUOTED VENUE (an inspection record is per-venue;
  * the quote prices the venues as one shared trip). Idempotent: returns the
  * existing records when the quote already spawned; null when the quote is
- * missing or not an inspection quote.
+ * missing or not an inspection quote; empty when its records were deleted.
  */
 export async function createFromQuote(
   qid: string
 ): Promise<InspectionRecord[] | null> {
   const existing = await byQuote(qid);
   if (existing.length) return existing;
+  // #173: no live record, but a deleted one still means this quote is
+  // handled — `deleteInspection` redirects straight to /inspections, which
+  // sweeps, so without this the delete button silently re-spawns a blank
+  // record under a new id.
+  if ((await coveredQuoteIds()).has(qid)) return [];
   const q = await getDoc<InspectionQuoteLike>("quotes", qid);
   if (!q || q.quoteType !== "inspection") return null;
   const insp = q.inspection || {};
@@ -1316,22 +1334,19 @@ export async function createFromQuote(
 }
 
 /** Scan accepted (won) inspection quotes and spawn any records not made yet.
- *  Returns the number of records created. */
+ *  Returns the number of records created. Page-load backfill only
+ *  (inspection inbox + scheduler) — never call it inside a transaction. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<InspectionQuoteLike>("quotes");
-  const recs = await listDocs<InspectionRecord>("inspections");
-  const have: Record<string, boolean> = {};
-  recs.forEach((r) => {
-    if (r.quoteId) have[r.quoteId] = true;
-  });
+  const have = await coveredQuoteIds();
   let made = 0;
   for (const q of quotes) {
     if (q.quoteType !== "inspection" || q.status !== "won") continue;
-    if (have[q.id]) continue;
+    if (have.has(q.id)) continue;
     try {
       const out = await createFromQuote(q.id);
       if (out && out.length) {
-        have[q.id] = true;
+        have.add(q.id);
         made += out.length;
       }
     } catch (error) {

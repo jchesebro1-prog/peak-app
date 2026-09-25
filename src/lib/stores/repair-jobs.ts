@@ -623,29 +623,41 @@ export async function create(
   return insertWithPrefixedId<RepairJobRecord>("repair_jobs", "RP", 4000, build);
 }
 
+/** Every quote id that already has a job — INCLUDING soft-deleted ones
+ *  (#173). `remove()` is a soft delete and `listDocs` hides tombstones, so
+ *  a coverage map built on the live list re-creates the job the user just
+ *  deleted the moment the repairs dashboard or scheduler reloads. `listDocs`
+ *  does not merge the `deleted` column onto the returned doc either, so only
+ *  the quote ids are kept — a tombstone must never be handed on as a job. */
+async function coveredQuoteIds(): Promise<Set<string>> {
+  const rows = await listDocs<RepairJobRecord>("repair_jobs", { includeDeleted: true });
+  const out = new Set<string>();
+  for (const j of rows) if (j.quoteId) out.add(j.quoteId);
+  return out;
+}
+
 export async function createFromQuote(qid: string): Promise<RepairJobRecord | null> {
   const existing = await byQuote(qid);
   if (existing) return existing;
+  // #173: no live job, but a deleted one still means this quote is handled.
+  if ((await coveredQuoteIds()).has(qid)) return null;
   const q = await getDoc<RepairQuoteLike>("quotes", qid);
   if (!q || q.quoteType !== "repair") return null;
   return create(await fromQuote(q));
 }
 
 /** Scan accepted (won) repair quotes and create any job not made yet.
- *  Returns the number of jobs created. */
+ *  Returns the number of jobs created. Page-load backfill only (repairs
+ *  dashboard + scheduler) — never call it inside a transaction. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<RepairQuoteLike>("quotes");
-  const jobs = await listDocs<RepairJobRecord>("repair_jobs");
-  const have: Record<string, boolean> = {};
-  jobs.forEach((j) => {
-    if (j.quoteId) have[j.quoteId] = true;
-  });
+  const have = await coveredQuoteIds();
   let made = 0;
   for (const q of quotes) {
     if (q.quoteType !== "repair" || q.status !== "won") continue;
-    if (have[q.id]) continue;
+    if (have.has(q.id)) continue;
     await create(await fromQuote(q));
-    have[q.id] = true;
+    have.add(q.id);
     made++;
   }
   return made;

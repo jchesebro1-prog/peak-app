@@ -13,9 +13,11 @@ import {
   dueLabel,
   timeAgo,
   RENEWAL_LEAD_DAYS,
+  syncFromQuotes as syncInspectionsFromQuotes,
   type InspectionRecord,
   type InspectionStageKey,
 } from "@/lib/stores/inspections";
+import { safeSweep } from "@/lib/safe-sweep";
 import { getAll as allQuotes, type Quote } from "@/lib/stores/quotes";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { coordsOf } from "@/lib/geo";
@@ -102,9 +104,14 @@ export default async function InspectionsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, records, quotes, customers] = await Promise.all([
-    requireUser(),
-    searchParams,
+  const [, sp] = await Promise.all([requireUser(), searchParams]);
+  // #173 (D227): the inspection inbox owns inspection records — the repair
+  // path for a quote won before cfc00ad. `deleteInspection` redirects HERE,
+  // which is why the sweep's coverage map had to become tombstone-aware
+  // first: otherwise deleting a record from a still-won quote re-spawns a
+  // blank one under a new id on the very next render.
+  await safeSweep("inspections", syncInspectionsFromQuotes);
+  const [records, quotes, customers] = await Promise.all([
     getAll(),
     allQuotes(),
     allCustomers(),

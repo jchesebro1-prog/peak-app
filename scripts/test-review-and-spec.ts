@@ -6862,6 +6862,7 @@ seeded()
   .then(() => templateScheduleAsyncChecks())
   .then(() => davinciWriterAsyncChecks())
   .then(() => quoteSpawnAsyncChecks())
+  .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
@@ -9147,6 +9148,236 @@ async function quoteSpawnAsyncChecks(): Promise<void> {
       (await dismissedQuoteIds()).every((i) => !i.startsWith(PRE)),
       "#169 teardown leaves no TEST169 id on the dismissed list"
     );
+  }
+}
+
+/* ====================================================================
+   #173 — the four service sweeps heal, and only heal (D227).
+
+   `cfc00ad` moved spawning into `setStatus` and deleted the four builder
+   approve actions' own `syncFromQuotes()`/`createFromQuote()` calls, which
+   left `syncFromQuotes` in flame-jobs / repair-jobs / inspections /
+   equipment-bookings with zero callers — so a quote won EARLIER through
+   the Estimator, Inbox or Home had no record and no path to one. The
+   sweeps are reattached on each type's owning page and its scheduler.
+
+   Reattaching them makes the deletion question urgent, so both directions
+   are pinned per store:
+
+     (a) a soft-deleted record is NOT re-created by the sweep — the
+         coverage map reads `{ includeDeleted: true }`, because the delete
+         UI returns to exactly the screens that now sweep;
+     (b) a won quote that never had a record STILL gets one — the whole
+         point of the reattachment, and the half a tombstone fix could
+         quietly break.
+
+   The per-quote creators carry rule (a) too: #170 made re-approving an
+   already-won quote reach them, and their `byQuote` dedupe is equally
+   tombstone-blind.
+
+   NOTE: a sweep is book-wide by nature, so these calls also reconcile any
+   genuinely orphaned won quote in the datadir (a throwaway `mktemp -d`
+   under `npm run test:specs`). Every assertion below is scoped to the
+   `TEST173:` fixtures, and teardown re-queries by that prefix.
+   ==================================================================== */
+import {
+  syncFromQuotes as flameSync173,
+  createFromQuote as flameCreate173,
+  remove as flameRemove173,
+} from "../src/lib/stores/flame-jobs";
+import {
+  syncFromQuotes as repairSync173,
+  remove as repairRemove173,
+} from "../src/lib/stores/repair-jobs";
+import {
+  syncFromQuotes as inspectionSync173,
+  remove as inspectionRemove173,
+} from "../src/lib/stores/inspections";
+import {
+  syncFromQuotes as bookingSync173,
+  createFromQuote as bookingCreate173,
+} from "../src/lib/stores/equipment-bookings";
+
+async function sweepHealingAsyncChecks(): Promise<void> {
+  const PRE = "TEST173:";
+  const Q_FLAME_HEAL = `${PRE}flame-heal`;
+  const Q_FLAME_GONE = `${PRE}flame-deleted`;
+  const Q_REPAIR_HEAL = `${PRE}repair-heal`;
+  const Q_REPAIR_GONE = `${PRE}repair-deleted`;
+  const Q_INSP_HEAL = `${PRE}inspection-heal`;
+  const Q_INSP_GONE = `${PRE}inspection-deleted`;
+  const Q_RENTAL_HEAL = `${PRE}rental-heal`;
+  const Q_RENTAL_GONE = `${PRE}rental-deleted`;
+  const QUOTE_IDS = [
+    Q_FLAME_HEAL, Q_FLAME_GONE, Q_REPAIR_HEAL, Q_REPAIR_GONE,
+    Q_INSP_HEAL, Q_INSP_GONE, Q_RENTAL_HEAL, Q_RENTAL_GONE,
+  ];
+
+  /** Won straight into the collection, never through `setStatus` — that is
+   *  precisely the state the sweep exists for: a win that happened on a
+   *  path which never spawned anything. */
+  const seedWon = (id: string, quoteType: string, extra: Record<string, unknown> = {}) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#173 harness ${quoteType} quote`,
+      quoteType,
+      status: "won",
+      customer: "Test Customer #173",
+      customerId: null,
+      locationId: null,
+      value: 1000,
+      margin: 0,
+      source: "estimator",
+      owner: "Jeff Chesebro",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+      ...extra,
+    });
+
+  /** Rows for one quote INCLUDING tombstones — a re-creation shows up here
+   *  as a second row even though the live list stays empty, which is the
+   *  difference between "not re-created" and "re-created then re-hidden". */
+  const rowsFor = async (coll: "flame_jobs" | "repair_jobs" | "inspections" | "equipment_bookings", quoteId: string) =>
+    (await listDocs169(coll, { includeDeleted: true })).filter((d) => d.quoteId === quoteId);
+
+  const FLAME_BODY = { flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] } };
+  const REPAIR_BODY = { repair: { title: "#173 repair", category: "other", venues: [{ id: null, label: "Main Stage" }] } };
+  const INSP_BODY = { inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] } };
+  const RENTAL_BODY = {
+    rental: {
+      lines: [{
+        itemId: `${PRE}item`, locationId: `${PRE}loc`, qty: 2,
+        startDate: Date.UTC(2027, 0, 4), endDate: Date.UTC(2027, 0, 8), rate: 25,
+      }],
+    },
+  };
+
+  try {
+    /* ---------------- flame tests ---------------- */
+    await seedWon(Q_FLAME_HEAL, "flame_test", FLAME_BODY);
+    await seedWon(Q_FLAME_GONE, "flame_test", FLAME_BODY);
+    const flameGone = await flameCreate173(Q_FLAME_GONE);
+    ok(!!flameGone, "#173 flame fixture: the to-be-deleted quote gets its job first");
+    if (flameGone) await flameRemove173(flameGone.id);
+    ok(await flameByQuote(Q_FLAME_GONE) === null, "#173 flame: the deleted job is gone from the live list");
+    ok(await flameByQuote(Q_FLAME_HEAL) === null, "#173 flame: the orphaned won quote starts with no job");
+
+    await flameSync173();
+    ok(
+      await flameByQuote(Q_FLAME_GONE) === null,
+      "#173 flame sweep does NOT re-create a deleted job"
+    );
+    ok(
+      (await rowsFor("flame_jobs", Q_FLAME_GONE)).length === 1,
+      "#173 flame sweep writes no second row for the deleted job (tombstones counted)"
+    );
+    ok(
+      !!(await flameByQuote(Q_FLAME_HEAL)),
+      "#173 flame sweep still heals a won quote that never had a job"
+    );
+    ok(
+      await flameCreate173(Q_FLAME_GONE) === null,
+      "#173 flame createFromQuote honours the tombstone too (the #170 replay reaches it)"
+    );
+
+    /* ---------------- repairs ---------------- */
+    await seedWon(Q_REPAIR_HEAL, "repair", REPAIR_BODY);
+    await seedWon(Q_REPAIR_GONE, "repair", REPAIR_BODY);
+    const repairGone = await createRepairFromQuote(Q_REPAIR_GONE);
+    ok(!!repairGone, "#173 repair fixture: the to-be-deleted quote gets its job first");
+    if (repairGone) await repairRemove173(repairGone.id);
+    ok(await repairByQuote(Q_REPAIR_GONE) === null, "#173 repair: the deleted job is gone from the live list");
+    ok(await repairByQuote(Q_REPAIR_HEAL) === null, "#173 repair: the orphaned won quote starts with no job");
+
+    await repairSync173();
+    ok(
+      await repairByQuote(Q_REPAIR_GONE) === null,
+      "#173 repair sweep does NOT re-create a deleted job"
+    );
+    ok(
+      (await rowsFor("repair_jobs", Q_REPAIR_GONE)).length === 1,
+      "#173 repair sweep writes no second row for the deleted job (tombstones counted)"
+    );
+    ok(
+      !!(await repairByQuote(Q_REPAIR_HEAL)),
+      "#173 repair sweep still heals a won quote that never had a job"
+    );
+    ok(
+      await createRepairFromQuote(Q_REPAIR_GONE) === null,
+      "#173 repair createFromQuote honours the tombstone too"
+    );
+
+    /* ---------------- inspections ----------------
+     * The load-bearing case: `deleteInspection` soft-deletes and redirects
+     * to /inspections, which now sweeps. */
+    await seedWon(Q_INSP_HEAL, "inspection", INSP_BODY);
+    await seedWon(Q_INSP_GONE, "inspection", INSP_BODY);
+    const inspGone = await createInspectionFromQuote(Q_INSP_GONE);
+    ok(!!inspGone && inspGone.length === 1, "#173 inspection fixture: the to-be-deleted quote gets its record first");
+    for (const r of inspGone || []) await inspectionRemove173(r.id);
+    ok((await inspectionsByQuote(Q_INSP_GONE)).length === 0, "#173 inspection: the deleted record is gone from the live list");
+    ok((await inspectionsByQuote(Q_INSP_HEAL)).length === 0, "#173 inspection: the orphaned won quote starts with no record");
+
+    await inspectionSync173();
+    ok(
+      (await inspectionsByQuote(Q_INSP_GONE)).length === 0,
+      "#173 inspection sweep does NOT re-create a deleted record"
+    );
+    ok(
+      (await rowsFor("inspections", Q_INSP_GONE)).length === 1,
+      "#173 inspection sweep writes no second row for the deleted record (tombstones counted)"
+    );
+    ok(
+      (await inspectionsByQuote(Q_INSP_HEAL)).length === 1,
+      "#173 inspection sweep still heals a won quote that never had a record"
+    );
+    ok(
+      (await createInspectionFromQuote(Q_INSP_GONE) || []).length === 0,
+      "#173 inspection createFromQuote honours the tombstone too"
+    );
+
+    /* ---------------- rentals ----------------
+     * The board cancels rather than deletes today, so the tombstone is
+     * written straight through doc-store — the shape a sync-pushed delete
+     * from the offline outbox lands in. */
+    await seedWon(Q_RENTAL_HEAL, "rental", RENTAL_BODY);
+    await seedWon(Q_RENTAL_GONE, "rental", RENTAL_BODY);
+    const bookingGone = await bookingsByQuote(Q_RENTAL_GONE);
+    ok(bookingGone.length === 0, "#173 rental fixture starts with no booking");
+    await bookingSync173();
+    const bookingMade = await bookingsByQuote(Q_RENTAL_GONE);
+    ok(bookingMade.length === 1, "#173 rental sweep heals a won quote that never had a booking");
+    ok(
+      (await bookingsByQuote(Q_RENTAL_HEAL)).length === 1,
+      "#173 rental sweep heals every orphaned won quote in one pass, not just the first"
+    );
+    for (const b of bookingMade) await softDeleteDoc("equipment_bookings", b.id);
+    ok((await bookingsByQuote(Q_RENTAL_GONE)).length === 0, "#173 rental: the deleted booking is gone from the live list");
+
+    await bookingSync173();
+    ok(
+      (await bookingsByQuote(Q_RENTAL_GONE)).length === 0,
+      "#173 rental sweep does NOT re-create a deleted booking"
+    );
+    ok(
+      (await rowsFor("equipment_bookings", Q_RENTAL_GONE)).length === 1,
+      "#173 rental sweep writes no second row for the deleted booking (tombstones counted)"
+    );
+    ok(
+      (await bookingCreate173(Q_RENTAL_GONE)).length === 0,
+      "#173 rental createFromQuote honours the tombstone too"
+    );
+  } finally {
+    // Fixed prefix, re-queried by that prefix rather than by local
+    // variables, so a mid-test throw still cleans up everything.
+    for (const coll of ["projects", "flame_jobs", "repair_jobs", "inspections", "equipment_bookings", "tasks"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
   }
 }
 
