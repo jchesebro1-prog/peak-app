@@ -123,6 +123,8 @@ export async function replaceDocumentFileAction(input: {
   const user = await requireUser();
   const doc = await getDocument(input.documentId);
   if (!doc) return { ok: false, error: "That document no longer exists." };
+  // verifyUploadedBlob's refuse() deletes the pathname, so a live or historical file of this document must never reach it.
+  if (input.blobPathname === doc.blobKey || (doc.history || []).some((h) => h.blobKey === input.blobPathname)) return { ok: false, error: "That file is already on this document." };
   const checked = await verifyUploadedBlob({ ...input, kind: doc.kind });
   if (!checked.ok) return checked;
   await replaceDocumentFile(doc.id, checked.file, user.name);
