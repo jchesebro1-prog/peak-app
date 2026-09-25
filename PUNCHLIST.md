@@ -8191,3 +8191,30 @@ bookings (cancel is their lifecycle), history logs. Spec sections get their dele
 MAP from the row even when the file has no MAP column, so a price-list import that only carries cost/list zeroes every
 part's MAP. Fix with the file's own `str(v.x) ? {...} : {}` preserve-when-absent pattern.
 
+## SPEC. Specs module — Phase A (library) — DONE 2026-09-25 (D-SPEC-1…D-SPEC-8)
+
+**Shipped.** The library half of the Specs module: three new doc-store collections (`spec_articles`,
+`spec_templates`, `spec_curtain_templates`) alongside an upgraded `spec_sections` (titled Part 1/Part 3 articles, a
+Part 2 style, a quantities policy); a pure outline text engine (`src/lib/specs/outline.ts`) that every renderer goes
+through; canonical spec fields on `CatalogPart` (`specSectionId`/`specArticleId`/`specTitle`/`specBody`/`specSameAs`/
+`specSort`/`specState`/`specSource`/`specUpdatedAt`/`specUpdatedBy`), written only through `mergeUpsert`; a Spec
+panel in the catalog part editor with a live outline preview, visible to anyone with `create`; the library index
+(sections, their articles, a per-article coverage table) and its editors under `/design/specs/library`; a formula/
+curtain-template library under `/design/specs/templates`, seeded with eight starter formulas and four starter
+curtain templates that auto-seed on any environment when the collection is empty; **Export library** / **Import
+library** JSON round-trip (outside the columnar Import hub); the catalog importer (both the Import hub and the
+price-book importer) carrying the same seven spec columns, exact-header-only, landing changed text as `draft` and
+gating it everywhere a spec prints — including the external Displays API, which now reads canonical pointers first
+and adopts (never overwrites) the pre-existing Displays research metadata from commit 2e284665; a one-shot **Adopt
+legacy pointers** button for the parts that predate read-time adoption; soft-deletes on spec sections (refusing
+while any part or article still points at one); and a live nav entry (Design → Specs) plus smoke coverage for the
+library, the template list, and one starter formula and one starter curtain template. Full decision record in
+`DECISIONS.md` D-SPEC-1…D-SPEC-8.
+
+**Still open.** Phase B: the generator (assembling a full spec from a project's BOM), the four doors (however a
+spec gets entered — see the build spec), docx-per-section output, zip output, and a print view. Phase C: the
+`spec-writer` skill and loading the North HS spec as a worked seed. Also open from this branch: **#204** (a
+price-only Import-hub catalog import resets MAP to $0 — found while amending this plan, unrelated to spec fields,
+fix already scoped) and any Minor a reviewer carried during the branch (see the per-task reports in
+`.superpowers/sdd/task-*-report.md`).
+

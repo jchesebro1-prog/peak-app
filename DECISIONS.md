@@ -5447,3 +5447,136 @@ matches and still skips parts that already have ports, the same safety as the CL
 project's sheet list — the `grid_sheets` doc and its file are kept, because revisions store `sheetIds`. Restoring a
 revision re-adds any sheet its items reference, so a restore brings back exactly what the revision had.
 
+## D-SPEC-1. The Specs module ships as a library first; JSON import/export bypasses the Import hub (#SPEC, 2026-09-25)
+
+The module lives under `/design/specs`. Product language — the actual clauses that print in a bid spec — lives on
+the catalog part (`specTitle`/`specBody`), not on the article or the section; the library holds sections, Part 2
+category articles and reusable formula/curtain templates, and only `specState: "authored"` text ever prints. A
+`draft` is treated exactly like missing, everywhere.
+
+The build spec (§4) asks for a `spec-library` import type in the Import hub. It doesn't get one: `parse.ts`'s header
+comment says the hub is strictly columnar, its only file input accepts `.xlsx`/`.xlsm`, and every other path is the
+CSV paste box. A four-collection library document (sections + articles + templates + curtain templates) is not a
+table. It lands instead as **Export library** / **Import library** controls on `/design/specs/library`, reading and
+writing the same JSON shape the spec describes, so the `spec-writer` skill's output (Phase C) still loads unchanged.
+The *catalog* spec columns (Task 14) stay in the Import hub exactly as specified, because those are rows.
+
+The outline convention (spec §2), verbatim: plain text, one item per line, two spaces per level, a tab counts as
+one level. Labels by depth: `A.` `1.` `a.` `1)` `a)`. Depth beyond the fifth level clamps to the fifth and raises a
+warning. Blank lines are ignored. A line already starting with a label such as `A. ` or `1. ` has it stripped.
+Inside a product entry the product letter consumes the first level, so a body's top level prints as `1.`; inside a
+Part 1 or Part 3 article it prints as `A.`. Article numbers are `1.1` / `2.1` / `3.1` — this supersedes D94's `2.01`
+for anything this module renders.
+
+`specSameAs` resolves **one hop**. A part pointing at another part's spec language prints that target's text; a
+chain (A → B → C) or a cycle (A → B → A) resolves to nothing and reports "no spec", naming the target it couldn't
+follow through — because following chains would make a spec's provenance unknowable from the part alone.
+
+A part's Part 2 article resolves in this order: an **explicit** `specArticleId`, else the **category default**
+(the part's catalog category mapped to an article), else a **legacy** `specSectionId` (the section's first article,
+for records that predate articles), else nothing. A category default is a **pre-placement** — it tells the panel
+and the coverage table where a part probably belongs — not language; it never substitutes for authored text.
+
+Rows landed by the catalog importer (Task 14) land as `draft` and are gated (they print nowhere, including the
+external Displays API) until someone opens the part and saves — an explicit review step. The one exception is the
+starter library's own seed rows, which land `authored`: they came from a finished bid document a human already
+signed off on, so re-review would be theater.
+
+The rest of this plan's decisions: `D-SPEC-2` (the `/design/specs` redirect), `D-SPEC-3` (starter templates
+auto-seed on every environment), `D-SPEC-4` (spec fields on `CatalogPart`), `D-SPEC-5` (one set of spec pointers),
+`D-SPEC-6` (drafts gated everywhere), `D-SPEC-7` (the Spec panel's `create` visibility), `D-SPEC-8` (no `model`
+field).
+
+Explicitly **out of scope for Phase A**, so a later reader does not think it was missed: the generator, the four
+doors, docx-per-section and zip output, the print view, the `spec-writer` skill and the North HS seed — all Phase B
+and Phase C of the same spec (`docs/superpowers/specs/2026-09-21-spec-from-bom-module-design.md`).
+
+## D-SPEC-2. `/design/specs` redirects to `/design/specs/library` in Phase A (#SPEC, 2026-09-25)
+
+The Generated list (the list of assembled, printable specs) is Phase B — it doesn't exist yet. A nav entry that
+points at an empty placeholder page is worse than one that points at the screen that already does something. The
+redirect is a two-line `page.tsx`; Phase B replaces the file with the real index and the redirect goes away.
+
+## D-SPEC-3. Starter templates auto-seed on every environment, with a Restore button (#SPEC, 2026-09-25)
+
+`DEMO_COLLECTIONS` is `Object.keys(DOC_TABLES)` (`src/db/seed-data.ts:148-150`), so the `Clear demo data (go-live)`
+reset wipes every doc collection including `spec_templates` — but the eight starter formulas and four starter
+curtain templates are configuration, not demo data, and a hosted database that was never dev-seeded needs them too.
+The local-only `seedIfEmpty()` hook isn't enough on its own for that case (owner decision, 2026-09-25): every read
+path that needs the formulas — the Templates screen, the part editor's Spec panel, and the library export (so the
+`spec-writer` skill's Phase-C input always carries them) — calls the idempotent `ensureStarterTemplates()`, which
+seeds only when the collection holds no live formula at all. The dev `seedIfEmpty()` hook stays for local
+convenience, and the Templates screen keeps its **Restore starter templates** button for recovering after a
+deliberate wipe.
+
+## D-SPEC-4. Spec fields are declared on `CatalogPart` itself (#SPEC, 2026-09-25)
+
+`specArticleId`, `specSectionId`, `specTitle`, `specBody`, `specSameAs`, `specSort`, `specState`, `specSource`,
+`specUpdatedAt` and `specUpdatedBy` are additive JSONB fields on `CatalogPart`, written only through
+`mergeUpsert(sku, patch)` (never `upsert`, which would silently wipe `ports`/`trade`/datasheet fields). `bid-spec.ts`'s
+`PartSpecFields` becomes a `Pick<CatalogPart, …>` over those ten fields, so `SpecCatalogPart` stays assignable and
+every existing D94 call site keeps compiling with no changes. No DB migration is needed — the fields are doc-store
+JSON.
+
+## D-SPEC-5. One set of spec pointers — legacy Displays metadata adopts into the canonical fields (#SPEC, 2026-09-25)
+
+Commit 2e284665 (the Displays API) had already added `productMetadata.specSection` / `.specArticle` /
+`.specLanguageKey` as free text (e.g. `"11 61 13"`, `"Stage Lighting Instruments"`). Rather than carry two competing
+sets of spec fields, the owner chose **one**: this plan's `specSectionId` / `specArticleId` are canonical, and the
+legacy text is adopted into them, never the reverse.
+
+| Legacy field | Example | Canonical target | Rule |
+|---|---|---|---|
+| `productMetadata.specSection` | `"11 61 13"` | `specSectionId` | Adopted when the value is a live section **id**, or a CSI number matching exactly **one** live section (compared via `csiKey`, which drops everything but letters/digits, so `"11-61-13"` = `"116113"`). |
+| `productMetadata.specArticle` | `"Stage Lighting Instruments"` | `specArticleId` | Adopted when the value is a live article **id**, or a title (case-/whitespace-insensitive) matching exactly **one** live article, searched within the part's section when known. An adopted article with no known section also fills `specSectionId` with that article's own section (the mirror invariant). |
+| `productMetadata.specLanguageKey` | `"lighting.instrument"` | — | Research tag with no canonical counterpart; stays in `productMetadata`, untouched. |
+
+Invariants: adoption only **fills an absent** canonical key — it never overwrites one, so an authored value always
+wins. It never deletes the legacy text. Running it twice is a no-op. Ambiguity never guesses: two sections sharing a
+number, or one title matching in two sections with no section known, adopt nothing. Adoption happens at **read
+time** inside `articleIdForPart` (so the panel, the coverage table and Phase B are always right, with no write
+required) and is additionally persisted by an idempotent **Adopt legacy pointers** button
+(`adoptAllLegacySpecPointers`) for readers that don't adopt at read time (the Displays API's ETag, D94's `assemble`,
+the catalog exporter).
+
+The Import hub's `Spec Section` / `Spec Article` columns become **aliases** of the canonical `specSectionId` /
+`specArticleId` columns under the same headers (Task 14) — there are no duplicate columns. All seven spec columns
+map by **exact header only** (`exactOnly` on their `FieldDef`s); the hub's normal fuzzy "contains" pass is skipped
+for them, because a vendor sheet's `Title`/`Text`/`Heading`/`State` column would otherwise silently overwrite and
+demote authored text across the ~37,400-part catalog. The catalog exporter always emits `Spec State` **blank**, even
+for an authored part — state is a gate on import (see D-SPEC-6), not a fact worth exporting, and a blank column
+means "don't change this part's state" on re-import rather than accidentally re-authoring or re-drafting rows the
+sheet doesn't actually carry text for.
+
+## D-SPEC-6. Drafts are gated everywhere, not just in this module (#SPEC, 2026-09-25)
+
+"Only `specState: "authored"` ever prints" (D94's completeness rule) is enforced by one pure predicate,
+`hasPrintableSpec()` (`src/lib/specs/articles.ts`), in every consumer that used to test `specBody?.trim()` alone —
+this overrides "leave the D94 actions alone" for draft gating only; their `requireUser()` permission gates are
+unchanged. The full list of gated consumers: `matchBom` (`src/lib/bid-spec.ts`), `remapRowAction` and
+`saveSpecAction` (`src/app/(app)/design/engagements/spec/actions.ts` — `saveSpecAction` re-reads the catalog at save
+time and refuses if a part was demoted to draft between match and save), `writePartSpecAction` (same file — an
+inline D94 write now stamps `specState: "authored"`, since a human writing the text there **is** the review step),
+`publicProductMetadata`/`publicCatalogPart`/the `spec` object in `src/lib/displays-api.ts`, all four v1 Displays
+routes (`/api/v1/displays/specs`, `/specs/[id]`, `/catalog`, `/catalog/[sku]`), and `buildClientPackageManifest`
+(`src/lib/client-package.ts`, where a draft is now a `missing-spec` gap). `assemble` (`bid-spec.ts`) needed no
+change — it already only accepts `bucket === "ready"`, and that bucket is now sourced from `hasPrintableSpec`
+everywhere it's set. The pre-v1 `/api/displays/catalog` route is left alone; it prints no spec body at all.
+
+## D-SPEC-7. The part editor's Spec panel is visible to anyone with `create` (#SPEC, 2026-09-25)
+
+Unlike the admin-only datasheet control beside it, the Spec panel (`src/app/(app)/catalog/spec-panel.tsx`) shows for
+any user who can `create` — spec authoring is estimating/design work, not an admin function. Every write it makes
+still calls `requirePerm("create")` on the server; the visibility gate and the write gate are the same permission,
+so there's no UI showing controls a save would then refuse.
+
+## D-SPEC-8. No `model` field on `CatalogPart` (#SPEC, 2026-09-25)
+
+`CatalogPart.manufacturerModelNumber` (import column `MFR M/N`, already written by `upsertPart`) already **is** the
+manufacturer's model number — a new `model` field would just be a second name for the same fact, and the import
+hub's alias resolution would have to arbitrate between them. A table-style Part 2 prints `manufacturerModelNumber`,
+then `manufacturerPartNumber`, then the SKU, falling through only when a field is blank. Building this module
+surfaced (and fixed, Task 6) a pre-existing bug in the part modal: it had no `manufacturerPartNumber` /
+`manufacturerModelNumber` inputs, so `upsertPart` wrote `undefined` for both on every save, silently wiping them —
+the modal now has both inputs, and `upsertPart` only patches a field the form actually submitted.
+

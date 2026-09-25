@@ -93,6 +93,7 @@ export const NAV: NavEntry[] = [
        * (D108), chosen at creation. The standalone Grid index is gone — a
        * Grid project can no longer exist independent of a design record. */
       { key: "designs", label: "The Grid", href: "/design/designs" },
+      { key: "specs", label: "Specs", href: "/design/specs" },
       { key: "gridsettings", label: "Grid Settings", href: "/design/grid/settings" },
       { key: "lineset", label: "Lineset Builder", href: "/design/lineset" },
       { key: "assemblies", label: "Assembly Builder", href: "/design/assemblies" },
@@ -129,6 +130,10 @@ export function activeKeyFor(pathname: string): string {
   // generic "/design" → designoverview fallback below, which every other
   // /design/* route (including /design/grid/<id>, the editor) still uses.
   if (pathname.startsWith("/design/grid/settings")) return "gridsettings";
+  // Specs (D-SPEC): same reason as the two exceptions above — the generic
+  // /design → designoverview fallback below would otherwise light every
+  // /design/specs/* route as the Design overview tab.
+  if (pathname.startsWith("/design/specs")) return "specs";
   const seg = "/" + (pathname.split("/")[1] || "");
   const map: Record<string, string> = {
     "/queue": "queue",

@@ -1798,15 +1798,28 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
 /* "subassemblies" left the group when it became a tab of the Assembly
  * Builder (#130) — /design/subassemblies redirects there. "gridsettings"
  * joined after "designs" (Grid settings build) — Grid symbols, port rules,
- * wire types, and install labor now live at /design/grid/settings. */
+ * wire types, and install labor now live at /design/grid/settings. "specs"
+ * joined the Specs module (D-SPEC) between "designs" and "lineset" — the
+ * check became order-tolerant below so parallel additions (like
+ * "gridsettings") don't collide with it on an exact-array assertion. */
 const DESIGN_CHILDREN = [
-  "designoverview", "engagements", "designs", "gridsettings",
+  "designoverview", "engagements", "designs",
   "lineset", "assemblies", "motors",
 ];
+const designKeys = designGroup && designGroup.kind === "group" ? designGroup.children.map((c) => c.key) : [];
+const inOrder = DESIGN_CHILDREN.map((k) => designKeys.indexOf(k));
 ok(
-  !!designGroup && designGroup.kind === "group" &&
-    JSON.stringify(designGroup.children.map((c) => c.key)) === JSON.stringify(DESIGN_CHILDREN),
-  `Design's children are exactly [${DESIGN_CHILDREN.join(", ")}]`);
+  inOrder.every((i) => i >= 0) && inOrder.every((i, n) => n === 0 || i > inOrder[n - 1]),
+  `Design keeps [${DESIGN_CHILDREN.join(", ")}] in order (other children may sit between them)`
+);
+ok(
+  designKeys.includes("specs") &&
+    designKeys.indexOf("specs") > designKeys.indexOf("designs") &&
+    designKeys.indexOf("specs") < designKeys.indexOf("lineset"),
+  "Design carries Specs after The Grid and before the Lineset Builder"
+);
+ok(activeKeyFor("/design/specs") === "specs" && activeKeyFor("/design/specs/library") === "specs",
+  "/design/specs/* lights the Specs child, not the Design overview");
 
 /* --- Knowledge & Information tab (#136) --- */
 ok(designRedirect("/design/steel", {}) === "/knowledge/steel",

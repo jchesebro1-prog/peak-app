@@ -208,6 +208,21 @@ See `.env.example`.
     Daylite project/opportunity history (`src/lib/daylite/`) and
     supersedes the July script, which now imports identity only.
     Remaining: Jeff's production run (#191), follow-ups #188–#192, O1.
+13. 🚧 **Specs module** (#SPEC, D-SPEC-1–D-SPEC-8) — Phase A (library) done:
+    a pure outline text engine (`src/lib/specs/outline.ts`); three new
+    collections (`spec_articles`, `spec_templates`, `spec_curtain_templates`)
+    alongside an upgraded `spec_sections`; canonical spec fields on
+    `CatalogPart` written only through `mergeUpsert`, adopting (never
+    overwriting) the pre-existing Displays research metadata; a Spec panel
+    in the catalog part editor, visible to anyone with `create`, with a live
+    outline preview; the library index + section/template editors under
+    `/design/specs`; starter formulas and curtain templates that auto-seed
+    on any environment; library JSON export/import outside the columnar
+    Import hub; and the catalog importer carrying the same spec columns,
+    exact-header-only, gating drafts everywhere a spec prints, including the
+    external Displays API. Phase B (the generator, the four doors, docx/zip
+    output, a print view) and Phase C (the `spec-writer` skill, the North HS
+    seed) remain. Decisions D-SPEC-1–D-SPEC-8; punch item #SPEC.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
