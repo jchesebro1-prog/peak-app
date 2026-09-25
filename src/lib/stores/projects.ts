@@ -1142,10 +1142,17 @@ export function timeAgo(ts: number | null | undefined): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function fmtDate(ts: number | null | undefined): string {
-  return ts
-    ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-    : "—";
+/** "Feb 22" for a date in the current year, "Feb 22, 2012" otherwise — the
+ *  Daylite history import brings jobs back to 2005, and a year-less date on
+ *  one of those ("Closed Sep 14") reads as this year. `nowTs` is for tests. */
+export function fmtDate(ts: number | null | undefined, nowTs: number = now()): string {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() !== new Date(nowTs).getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 export function fmtDateY(ts: number | null | undefined): string {

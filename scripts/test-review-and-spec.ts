@@ -2569,6 +2569,16 @@ ok(BOARD_PIPELINES.find((p) => p.id === "order")!.stages.map((s) => s.id).join("
   ok(boardProjects(mix).length === 2, "#19: boardProjects keeps kind === project only");
 }
 ok(dueChipLabel(true, -3, "Jul 20") === "Closed Jul 20", "#19: done cards read Closed <date>");
+{
+  // fmtDate shows the year only when it differs from the current one (Daylite history goes back to 2005).
+  const nowTs = new Date(2026, 8, 24, 12).getTime();
+  const pFmtDate = ProjStore.fmtDate; // static import (hoisted) further down this file
+  ok(pFmtDate(new Date(2026, 1, 22, 12).getTime(), nowTs) === "Feb 22", "fmtDate: a current-year date has no year");
+  ok(pFmtDate(new Date(2012, 1, 22, 12).getTime(), nowTs) === "Feb 22, 2012", "fmtDate: a past-year date carries its year");
+  ok(pFmtDate(new Date(2027, 0, 5, 12).getTime(), nowTs) === "Jan 5, 2027", "fmtDate: a next-year date carries its year");
+  ok(pFmtDate(null, nowTs) === "—" && pFmtDate(0, nowTs) === "—", "fmtDate: no date renders a dash");
+  ok(dueChipLabel(true, 0, pFmtDate(new Date(2012, 8, 14, 12).getTime(), nowTs)) === "Closed Sep 14, 2012", "fmtDate: an old job's Closed chip shows the year");
+}
 ok(dueChipLabel(false, -3, "") === "3d overdue", "#19: past-due cards read Nd overdue");
 ok(dueChipLabel(false, 0, "") === "Due today", "#19: due-today wording preserved");
 ok(dueChipLabel(false, 12, "") === "Due in 12d", "#19: future cards read Due in Nd");
