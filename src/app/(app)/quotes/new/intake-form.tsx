@@ -58,6 +58,12 @@ export default function QuoteIntakeForm({
 
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  // #178 — window.confirm() silently returns false with no dialog in this
+  // app's Capacitor shells, so the old `!window.confirm(...)` check just
+  // silently swallowed the submit. Two-step inline confirm instead: the
+  // first Continue click shows the notice below, a second click (its own
+  // "Continue" button) actually submits.
+  const [confirmReplace, setConfirmReplace] = useState(false);
 
   const selectedCustomer = customerMode === "pick" ? customers.find((c) => c.id === customerId) || null : null;
   const locations = selectedCustomer?.locations || [];
@@ -130,9 +136,15 @@ export default function QuoteIntakeForm({
     if (!canSubmit || pending) return;
     // D205: a different builder means a NEW quote; the old draft goes on its
     // first save. Same builder → the server just reopens the old quote.
-    if (replacing && !sameBuilder(type, replacing.type) && !window.confirm(replaceConfirmMessage(replacing.id, replacing.lines))) {
+    if (replacing && !sameBuilder(type, replacing.type) && !confirmReplace) {
+      setConfirmReplace(true);
       return;
     }
+    doSubmit();
+  }
+
+  function doSubmit() {
+    setConfirmReplace(false);
     setError("");
     const payload: IntakeSubmit = {
       type,
@@ -185,7 +197,10 @@ export default function QuoteIntakeForm({
             <Fragment key={s.key}>
               <button
                 type="button"
-                onClick={() => setType(s.key)}
+                onClick={() => {
+                  setType(s.key);
+                  setConfirmReplace(false);
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -382,6 +397,62 @@ export default function QuoteIntakeForm({
           }}
         >
           {error}
+        </div>
+      )}
+
+      {confirmReplace && replacing && (
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            background: "#fdf8ee",
+            border: "1px solid #f0e2bd",
+            borderRadius: 9,
+            padding: "10px 13px",
+            fontSize: 12.5,
+            color: "#8a6d1f",
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 200 }}>
+            {replaceConfirmMessage(replacing.id, replacing.lines)}
+          </span>
+          <button
+            type="button"
+            onClick={doSubmit}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#fff",
+              background: "#b4863a",
+              border: "none",
+              borderRadius: 6,
+              padding: "5px 11px",
+              cursor: "pointer",
+            }}
+          >
+            Continue
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmReplace(false)}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#8a6d1f",
+              background: "none",
+              border: "1px solid #f0e2bd",
+              borderRadius: 6,
+              padding: "5px 11px",
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
         </div>
       )}
 

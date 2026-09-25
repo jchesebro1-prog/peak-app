@@ -326,7 +326,7 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [pending, startTransition] = useTransition();
-  const guardWon = useWonEditGuard(initial.status);
+  const wonGuard = useWonEditGuard(initial.status);
 
   const editingId = initial.editingId;
   const won = initial.status === "won";
@@ -371,7 +371,8 @@ export function QuoteBuilder({
   const contacts = customer?.contacts || [];
 
   function pickCustomer(id: string) {
-    if (id !== customerId && !guardWon("customer")) return;
+    // Gated entirely by CustomerCombobox's canChange below — it only calls
+    // onChange (this function) once the won-quote guard has cleared.
     ensureVenueTravel(id);
     const c = customers.find((x) => x.id === id) || null;
     const locs = c?.locations || [];
@@ -396,12 +397,15 @@ export function QuoteBuilder({
     setSavedFlag(false);
   }
   function toggleVenue(locId: string) {
-    if (!guardWon("venue")) return;
-    setVenueSel((prev) => {
-      const cur = prev[locId] || { on: false };
-      return { ...prev, [locId]: { on: !cur.on } };
-    });
-    dirty();
+    const apply = () => {
+      setVenueSel((prev) => {
+        const cur = prev[locId] || { on: false };
+        return { ...prev, [locId]: { on: !cur.on } };
+      });
+      dirty();
+    };
+    if (!wonGuard.guard("venue", apply)) return;
+    apply();
   }
   function setScopeItem(i: number, val: string) {
     setScopeItems((prev) => prev.map((s, j) => (j === i ? val : s)));
@@ -651,7 +655,7 @@ export function QuoteBuilder({
                 }))}
                 value={customerId}
                 onChange={pickCustomer}
-                canChange={() => guardWon("customer")}
+                canChange={(id) => wonGuard.guard("customer", () => pickCustomer(id))}
                 placeholder="Search customer or venue…"
                 inputStyle={{ ...FIELD, fontWeight: 600 }}
               />
@@ -726,9 +730,13 @@ export function QuoteBuilder({
                 className="rpq-sel"
                 value={contactSel}
                 onChange={(e) => {
-                  if (!guardWon("contact")) return;
-                  setContactSel(e.target.value);
-                  dirty();
+                  const val = e.target.value;
+                  const apply = () => {
+                    setContactSel(val);
+                    dirty();
+                  };
+                  if (!wonGuard.guard("contact", apply)) return;
+                  apply();
                 }}
                 style={{ ...FIELD, cursor: "pointer" }}
               >
@@ -755,6 +763,7 @@ export function QuoteBuilder({
                 <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 6 }}>{contactMeta}</div>
               )}
             </div>
+            {wonGuard.prompt}
           </div>
 
           {hasCustomer ? (
