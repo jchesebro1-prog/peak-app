@@ -11,10 +11,12 @@ import type {
 import { matchAssignee, routePrefill, summarySectionKey, normalizeActionTitle } from "@/lib/krisp/derive";
 import { StatusChip } from "@/components/recordings/status-chip";
 import { EmptyState } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { PrefillTarget } from "../data";
 import {
   acceptActionItemAction,
   checkRecordingAction,
+  deleteRecordingAction,
   dismissActionItemAction,
   insertPrefillAction,
   postFeedNoteAction,
@@ -134,6 +136,7 @@ export default function DetailClient({
   viewerId,
   krispConnected,
   prefillTarget,
+  parentHref,
 }: {
   rec: RecordingRecord;
   chip: RecordingStatusChip;
@@ -141,6 +144,7 @@ export default function DetailClient({
   viewerId: string | null;
   krispConnected: boolean;
   prefillTarget: PrefillTarget | null;
+  parentHref: string;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("summary");
@@ -232,6 +236,17 @@ export default function DetailClient({
         )}
         {polling && <span style={{ fontSize: 11, color: "#9aa0ab" }}>Auto-checking every 20 s</span>}
         {err && <span style={{ fontSize: 12, color: "#a0442b" }}>{err}</span>}
+        <span style={{ flex: 1 }} />
+        <ConfirmButton
+          label="Delete"
+          confirmLabel="Confirm delete"
+          onConfirm={async () => {
+            const res = await deleteRecordingAction(rec.id);
+            if (!res.ok) throw new Error(res.error);
+            router.push(parentHref);
+            router.refresh();
+          }}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid #eef0f3", paddingBottom: 10, marginBottom: 16 }}>
