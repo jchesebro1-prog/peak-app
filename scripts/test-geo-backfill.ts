@@ -369,6 +369,20 @@ async function main() {
     assert.deepEqual(e, { ok: false, reason: "no-hit" });
     assert.equal(calls - callsBeforeE, 1, "city precision makes exactly one request, no fallback");
 
+    // #185 item 3: a degenerate fallback street (empty, or after cleanup has
+    // no digit / no real street-name text) must skip the fallbacks entirely
+    // rather than burn two more requests on a query that can't improve on
+    // attempt 1 — here the "address" field is really just the city restated,
+    // so fallbackStreet strips it down to "".
+    const ctxH = newGeocodeCtx(0);
+    const callsBeforeH = calls;
+    const h = await geocodeVenue(
+      { address: "Stevens Point, WI 54481", city: "Stevens Point", state: "WI", zip: "54481" },
+      ctxH
+    );
+    assert.ok(!h.ok, "a degenerate fallback street is not geocoded via fallback");
+    assert.equal(calls - callsBeforeH, 1, "only attempt 1's request is made; fallbacks are skipped");
+
     console.log("PASS geo-backfill: geocodeVenue fallback chain");
   }
 

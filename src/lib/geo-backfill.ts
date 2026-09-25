@@ -439,6 +439,13 @@ export async function geocodeVenue(
   const zip = (row.zip || "").trim();
   const zip5 = zip.match(/^\d{5}/)?.[0];
 
+  // #185 item 3: a fallback street that's empty, has no digit, or has no
+  // real street-name text (two consecutive letters — a bare direction letter
+  // or house-number fragment doesn't count) can't resolve to anything better
+  // than attempt 1 already tried. Skip straight to reporting attempt 1's
+  // failure rather than spending two more Nominatim requests on it.
+  if (!street2 || !/\d/.test(street2) || !/[A-Za-z]{2}/.test(street2)) return attempt1;
+
   // ATTEMPT 2 — the same postal order as geocodeQuery(), but with the pasted
   // label/city/zip tail stripped from the street and the city cleaned up.
   // Skipped when that leaves nothing to gain over attempt 1.
