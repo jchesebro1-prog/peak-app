@@ -17,6 +17,11 @@ import { allVendorProfiles, vendorCompanies } from "@/lib/stores/vendors";
 import { claimOwnerByKey, resolveCatalogOwner } from "@/lib/vendor-status";
 import { CatalogOwnerCard } from "./catalog-owner-card";
 import PortsEditor from "./ports-editor";
+import SpecPanel, { type SpecPanelArticle, type SpecPanelTemplate } from "./spec-panel";
+import { allArticles } from "@/lib/stores/spec-articles";
+import { allSections } from "@/lib/stores/spec-sections";
+import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
+import { articleIdForPart } from "@/lib/specs/articles";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 
@@ -43,16 +48,24 @@ export default async function CatalogPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, parts, settings, users, profiles, vendorCos] = await Promise.all([
-    requireUser(),
-    searchParams,
-    list(),
-    getSettings(),
-    activeUsers(),
-    allVendorProfiles(),
-    vendorCompanies(),
-  ]);
+  const [user, sp, parts, settings, users, profiles, vendorCos, specArticleDocs, specSections, specTemplateDocs] =
+    await Promise.all([
+      requireUser(),
+      searchParams,
+      list(),
+      getSettings(),
+      activeUsers(),
+      allVendorProfiles(),
+      vendorCompanies(),
+      allArticles(),
+      allSections(),
+      // Owner decision 4 — the "Insert template" row must never be empty on
+      // a hosted database: seed the starter formulas when the collection is
+      // empty before reading it back.
+      ensureStarterTemplates().then(() => allTemplates()),
+    ]);
   const isAdmin = can("manage_users", user.roles);
+  const canCreate = can("create", user.roles);
   const catalogOwner = resolveCatalogOwner(settings.catalogOwner, users);
   const vendorNameById = new Map(vendorCos.map((c) => [c.id, c.name]));
   // A soft-deleted vendor's profile keeps its claims (#122 I1) — count only
@@ -152,6 +165,28 @@ export default async function CatalogPage({
   // partError now opens the form on its own so the banner (and an empty
   // form for the new-part case) always shows.
   const showForm = isNew || !!editingPart || !!partError;
+
+  // Spec panel data (Task 13) — computed on the server so the client payload
+  // stays small: the panel never needs categoryKeys or the legacy Displays
+  // metadata to show "the category default resolves to …".
+  const specSectionNumberById = new Map(specSections.map((s) => [s.id, s.number]));
+  const specArticles: SpecPanelArticle[] = specArticleDocs.map((a) => ({
+    id: a.id,
+    title: a.title,
+    sectionNumber: specSectionNumberById.get(a.sectionId) ?? "",
+    manufacturers: a.manufacturers,
+  }));
+  const specTemplates: SpecPanelTemplate[] = specTemplateDocs.map((t) => ({
+    id: t.id,
+    key: t.key,
+    headings: t.headings,
+  }));
+  // Explicit pointer stripped: what this part resolves to if the panel's
+  // Article select is cleared (category default, else an adopted legacy
+  // Displays pointer, else D94's section) — see articleIdForPart.
+  const defaultArticleId = editingPart
+    ? articleIdForPart({ ...editingPart, specArticleId: undefined }, specArticleDocs, specSections)
+    : null;
 
   return (
     <div className="pk-content">
@@ -489,6 +524,10 @@ export default async function CatalogPage({
           categories={categories}
           manufacturers={manufacturers.filter((m) => m !== UNSPEC)}
           isAdmin={isAdmin}
+          canCreate={canCreate}
+          specArticles={specArticles}
+          specTemplates={specTemplates}
+          defaultArticleId={defaultArticleId}
           error={partError}
         />
       )}
@@ -596,6 +635,10 @@ function PartFormModal({
   categories,
   manufacturers,
   isAdmin,
+  canCreate,
+  specArticles,
+  specTemplates,
+  defaultArticleId,
   error,
 }: {
   part: CatalogPart | null;
@@ -606,6 +649,14 @@ function PartFormModal({
   /** Datasheet attach/replace/remove (punch #39, Task 5) is admin-gated —
    *  same convention as the Categories & trades card. */
   isAdmin: boolean;
+  /** Task 13 — the Spec panel shows for anyone who can `create` (owner
+   *  decision 3), not admin-only like the datasheet control above, because
+   *  the datasheet control writes Peak's own blob storage and the spec
+   *  write is gated by requirePerm("create") inside the action itself. */
+  canCreate: boolean;
+  specArticles: SpecPanelArticle[];
+  specTemplates: SpecPanelTemplate[];
+  defaultArticleId: string | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
 }) {
@@ -857,6 +908,17 @@ function PartFormModal({
             {isAdmin && editing && part && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
                 <PartDatasheetControl sku={part.sku} datasheetName={part.datasheetName} />
+              </div>
+            )}
+
+            {/* Spec panel (Task 13) — the article, entry title, same-as
+                pointer, outline body and a live preview of how it prints.
+                Gated on canCreate, not isAdmin (owner decision 3): the write
+                itself is enforced by requirePerm("create") inside
+                writePartSpecFieldsAction. */}
+            {canCreate && editing && part && (
+              <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
+                <SpecPanel part={part} articles={specArticles} templates={specTemplates} defaultArticleId={defaultArticleId} />
               </div>
             )}
 
