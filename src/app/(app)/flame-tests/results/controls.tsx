@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { completeFlameTest } from "../actions";
+import { useRouter } from "next/navigation";
+import { completeFlameTest, deleteFlameJobAction } from "../actions";
 import { saveThroughOutbox } from "@/lib/sync/save";
+import { ConfirmButton } from "@/components/confirm-button";
 import type {
   FlameJob,
   FlameJobResults,
@@ -16,6 +18,25 @@ function msOfIso(s: string): number | null {
   const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
   if (!m) return null;
   return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+}
+
+/** Header Delete control — soft deletes the job, then leaves the results
+ *  screen (there is nothing left here to show). Kept separate from
+ *  ResultsEditor so the header can render it before the form. */
+export function DeleteFlameJobButton({ jobId }: { jobId: string }) {
+  const router = useRouter();
+  return (
+    <ConfirmButton
+      label="Delete"
+      confirmLabel="Confirm delete"
+      onConfirm={async () => {
+        const res = await deleteFlameJobAction(jobId);
+        if (!res.ok) throw new Error(res.error);
+        router.push("/flame-tests/scheduling");
+        router.refresh();
+      }}
+    />
+  );
 }
 
 export type VenueInit = {
