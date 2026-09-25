@@ -9370,6 +9370,7 @@ seeded()
   .then(() => quoteLockTimeoutCatchAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
   .then(() => quoteLockAsyncChecks())
+  .then(() => engagementSweepStaleSnapshotAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
   .then(() => refusedAdvanceAsyncChecks())
@@ -12409,6 +12410,7 @@ import { sql } from "drizzle-orm";
 import {
   ensureEngagementForQuote,
   syncEngagementsFromQuotes,
+  applyEngagementStageAction,
   // `removeEngagement` is already imported (unaliased) further down by
   // deletePartBAsyncChecks's import block — reused here rather than
   // re-declared, since ES module imports of the same name in one file
@@ -12608,6 +12610,156 @@ async function quoteLockAsyncChecks(): Promise<void> {
     // Blob singleton — put the snapshot back rather than editing in place
     // (same convention as #169's own dismissed-list tests).
     await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
+  }
+}
+
+/* ====================================================================
+   #180 review round 2, item 5 — source check: syncEngagementsFromQuotes'
+   advance/close/reopen branch must re-read the quote fresh under a lock
+   before writing, not just trust the pre-loop snapshot the way the create
+   branch used to before #180 round 1. The matching DB-backed proof is
+   engagementSweepStaleSnapshotAsyncChecks() just below.
+   ==================================================================== */
+{
+  const engagementsSrc = readFileSync(
+    join(process.cwd(), "src/lib/stores/engagements.ts"),
+    "utf8"
+  );
+  const syncBody = engagementsSrc.slice(
+    engagementsSrc.indexOf("export async function syncEngagementsFromQuotes"),
+    engagementsSrc.indexOf("/* ---------- manual projects")
+  );
+  ok(syncBody.length > 0, "#180 review 2 (item 5) fixture: syncEngagementsFromQuotes is still where the test expects it");
+  const elseBranch = syncBody.slice(syncBody.indexOf("} else {"));
+  ok(
+    /withQuoteLock\(q\.id, async \(\) => \{/.test(elseBranch),
+    "#180 review 2 (item 5): the advance/close/reopen branch runs under an advisory lock keyed on the quote"
+  );
+  ok(
+    /await getDoc<QuoteLike>\("quotes", q\.id\)/.test(elseBranch) &&
+      /!== String\(q\.status \|\| ""\)/.test(elseBranch),
+    "#180 review 2 (item 5): it re-reads the quote fresh and compares against the loop snapshot's status before writing"
+  );
+}
+
+/* ======================================================================
+   #180 review round 2, item 5 — syncEngagementsFromQuotes' advance/close/
+   reopen branch acted on `existing`/`action`, both derived from the loop's
+   PRE-LOOP snapshot (the engagement map and the quote list are each read
+   once, before iterating), with no lock guarding the gap between that
+   snapshot and a given row's turn. The fix re-reads the quote fresh under
+   a lock keyed on it right before writing, and skips (does not write) if
+   its status no longer matches what the snapshot said.
+
+   The "create" branch already goes through ensureEngagementForQuote, which
+   re-reads and re-derives everything fresh under the SAME lock (#180 round
+   1) — this item is specifically about the OTHER three actions, which
+   still wrote through the shared `applyEngagementStageAction` with no such
+   guard.
+
+   Proof, two ways:
+   - The happy path really still works: syncEngagementsFromQuotes(), run
+     for real, still advances a proposal_sent engagement to awarded when
+     the quote is (and stays) won.
+   - The guard itself: this harness can't force a real interleaving inside
+     one sweep call, so the exact guard the source now contains (a fresh
+     getDoc under withQuoteLock, compared against the snapshot's status,
+     skipping the write on a mismatch) is exercised directly with the SAME
+     exported primitives engagements.ts uses — not a re-implementation, the
+     real withQuoteLock/getDoc/applyEngagementStageAction — for the case
+     the review named: the quote moved on (won → lost) between the
+     snapshot and the write.
+   ====================================================================== */
+async function engagementSweepStaleSnapshotAsyncChecks(): Promise<void> {
+  const PRE = "TEST180r2:eng-";
+  const QUOTE_IDS: string[] = [];
+  /** Flips the quote's status DIRECTLY in the doc store, bypassing
+   *  setStatus() entirely — so it never runs spawnFromQuote/spawnConsulting,
+   *  which would advance the engagement itself, on the REAL win path, before
+   *  this test ever gets to exercise the SWEEP. This is the same "orphan"
+   *  shape sweepHealingAsyncChecks' own seedWon() creates above: a quote
+   *  whose status changed by a path other than setStatus, exactly what the
+   *  healing sweeps exist to reconcile. */
+  const forceStatus = async (id: string, status: string) => {
+    const doc = await getDoc169<{ id: string } & Record<string, unknown>>("quotes", id);
+    if (!doc) throw new Error(`forceStatus: ${id} not found`);
+    await upsertDoc("quotes", { ...doc, status });
+  };
+  try {
+    /* ---- happy path: still advances proposal_sent -> awarded when the quote stays won ---- */
+    const qHappy = `${PRE}happy`;
+    QUOTE_IDS.push(qHappy);
+    const created1 = await QuoteStore.create({
+      id: qHappy,
+      name: "#180 review 2 (item 5) — sweep happy path",
+      quoteType: "consulting",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+      consulting: {},
+    });
+    ok(!!created1, "#180 review 2 (item 5) fixture: the consulting quote fixture was created");
+    await forceStatus(qHappy, "sent");
+    await syncEngagementsFromQuotes();
+    const engBefore = await getEngagementByQuote(qHappy);
+    ok(engBefore?.status === "proposal_sent", `#180 review 2 (item 5) fixture: the engagement is at proposal_sent before the win (is ${engBefore?.status})`);
+    // won -> the sweep's "advance" branch should move it to awarded.
+    await forceStatus(qHappy, "won");
+    await syncEngagementsFromQuotes();
+    const engAfter = await getEngagementByQuote(qHappy);
+    ok(engAfter?.status === "awarded", `#180 review 2 (item 5): the sweep still advances proposal_sent -> awarded for a quote that stays won (is ${engAfter?.status})`);
+
+    /* ---- the guard: a quote that moved on between the snapshot and the write must not be acted on ---- */
+    const qStale = `${PRE}stale`;
+    QUOTE_IDS.push(qStale);
+    await QuoteStore.create({
+      id: qStale,
+      name: "#180 review 2 (item 5) — sweep stale snapshot",
+      quoteType: "consulting",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+      consulting: {},
+    });
+    await forceStatus(qStale, "sent");
+    await syncEngagementsFromQuotes();
+    const engStaleBefore = await getEngagementByQuote(qStale);
+    ok(engStaleBefore?.status === "proposal_sent", "#180 review 2 (item 5) fixture: the stale-scenario engagement starts at proposal_sent");
+    await forceStatus(qStale, "won");
+    // Simulates a sweep loop that snapshotted the quote as "won" (deciding
+    // action = advance) — and then, before this row's turn, someone moved
+    // it on to "lost". The fix re-reads fresh inside the lock and must
+    // refuse to write against the stale "won" snapshot.
+    await forceStatus(qStale, "lost");
+    const snapshotAction: import("../src/lib/consulting-stages").EngagementSyncAction = { kind: "advance", stage: "awarded" };
+    const applied = await withQuoteLock(qStale, async () => {
+      const freshQ = await getDoc169("quotes", qStale);
+      if (!freshQ || String((freshQ as { status?: unknown }).status || "") !== "won") return false;
+      await applyEngagementStageAction(snapshotAction, engStaleBefore!.id, qStale);
+      return true;
+    });
+    ok(applied === false, "#180 review 2 (item 5): the fresh re-read under the lock sees the quote moved on ('lost', not the snapshot's 'won') and refuses to act");
+    const engStaleAfter = await getEngagementByQuote(qStale);
+    ok(
+      engStaleAfter?.status === "proposal_sent",
+      `#180 review 2 (item 5): the engagement is untouched by the stale write attempt — still proposal_sent, not incorrectly advanced to awarded (is ${engStaleAfter?.status})`
+    );
+    // A subsequent real sweep pass, reading everything fresh, does the
+    // RIGHT thing for the quote's actual current status ("lost" + still
+    // proposal_sent -> close), proving the skip didn't strand the record.
+    await syncEngagementsFromQuotes();
+    const engStaleFinal = await getEngagementByQuote(qStale);
+    ok(
+      engStaleFinal?.status === "closed",
+      `#180 review 2 (item 5): the next real sweep pass correctly closes it once it reads the quote's true current status (is ${engStaleFinal?.status})`
+    );
+  } finally {
+    for (const coll of ["consulting_engagements"] as const) {
+      for (const d of await listDocs169(coll)) {
+        if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc(coll, d.id);
+      }
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
   }
 }
 

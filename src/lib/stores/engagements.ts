@@ -765,10 +765,24 @@ export async function syncEngagementsFromQuotes(): Promise<{ created: number; sk
           changed++;
         }
       } else {
-        // advance / close / reopen — the shared per-row writer above, so this
-        // sweep and the per-quote spawn path can never drift apart.
-        await applyEngagementStageAction(action, existing!.id, q.id);
-        changed++;
+        // advance / close / reopen — #180 review: `existing` and `action`
+        // both came from this loop's PRE-LOOP snapshot (the engagement map
+        // and the quote list were each read once, before iterating), with
+        // no lock guarding the gap between that snapshot and this row's
+        // turn. Re-read the quote fresh under a lock keyed on it, and skip
+        // (don't write) if its status moved on since the snapshot — a live
+        // edit, a re-approve, or another sweep pass may have already
+        // handled it, or made this action stale (e.g. the quote is back to
+        // "lost" and no longer merits an "advance"). The write itself still
+        // goes through the same shared per-row writer the per-quote spawn
+        // path uses, so the two can never drift apart.
+        const applied = await withQuoteLock(q.id, async () => {
+          const freshQ = await getDoc<QuoteLike>("quotes", q.id);
+          if (!freshQ || String(freshQ.status || "") !== String(q.status || "")) return false;
+          await applyEngagementStageAction(action, existing!.id, q.id);
+          return true;
+        });
+        if (applied) changed++;
       }
     } catch (error) {
       skipped.push(q.id);
