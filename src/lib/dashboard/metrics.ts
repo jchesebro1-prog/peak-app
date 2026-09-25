@@ -8,6 +8,7 @@ import type { ProjectRecord } from "@/lib/stores/projects";
 import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { RangeKey } from "./registry";
 import { isActive, isBacklog, isDone, projectTag, type ProjectTag } from "@/lib/pipelines";
+import { knownValue, unknownCount } from "@/lib/job-value";
 
 export const DAY = 86_400_000;
 
@@ -97,12 +98,15 @@ export function backlogProjects(projects: ProjectRecord[]): ProjectRecord[] {
   return projects.filter((p) => isBacklog(p)).sort(byTarget);
 }
 
-/** "Project profit" v1 (decision 9): projected, value × margin over the open book. */
-export function projectedProfit(projects: ProjectRecord[]): { value: number; profit: number; margin: number } {
+/** "Project profit" v1 (decision 9): projected, value × margin over the open
+ *  book. A Daylite-imported project with an unknown value (Task 9)
+ *  contributes 0 to both value and profit — it never appears in this book's
+ *  dollar totals, only in `unknownCount` so a widget can flag it. */
+export function projectedProfit(projects: ProjectRecord[]): { value: number; profit: number; margin: number; unknownCount: number } {
   const book = projects.filter((p) => !isDone(p));
-  const value = sumValue(book);
-  const profit = book.reduce((s, p) => s + (p.value || 0) * (p.margin || 0), 0);
-  return { value, profit, margin: value ? profit / value : 0 };
+  const value = book.reduce((s, p) => s + knownValue(p), 0);
+  const profit = book.reduce((s, p) => s + knownValue(p) * (p.margin || 0), 0);
+  return { value, profit, margin: value ? profit / value : 0, unknownCount: unknownCount(book) };
 }
 
 /* ---- equipment sold ---- */
@@ -175,13 +179,16 @@ export function installsForecast(
   upcoming: ProjectRecord[];
   timeline: ProjectRecord[];
   windowMs: number;
+  /** Count of `book` records with an unknown value (Task 9) — they
+   *  contribute 0 to every dollar figure above. */
+  unknownValueCount: number;
 } {
   const H = horizonMonths;
   const windowMs = H * 30 * DAY;
   const horizonEnd = now + windowMs;
   const book = projects.filter((p) => !isDone(p) && (p.targetDate == null || p.targetDate <= horizonEnd));
-  const totalValue = sumValue(book);
-  const blended = totalValue ? book.reduce((a, p) => a + (p.value || 0) * (p.margin || 0), 0) / totalValue : 0;
+  const totalValue = book.reduce((s, p) => s + knownValue(p), 0);
+  const blended = totalValue ? book.reduce((a, p) => a + knownValue(p) * (p.margin || 0), 0) / totalValue : 0;
   const cost = Math.round(totalValue * (1 - blended));
 
   // Full value billed at landing (targetDate), collected net-30 after.
@@ -199,9 +206,9 @@ export function installsForecast(
     let collected = 0;
     book.forEach((p) => {
       const land = p.targetDate || 0;
-      if (land >= lo && land < hi) billed += p.value || 0;
+      if (land >= lo && land < hi) billed += knownValue(p);
       const coll = land + 30 * DAY;
-      if (coll >= lo && coll < hi) collected += p.value || 0;
+      if (coll >= lo && coll < hi) collected += knownValue(p);
     });
     msPoints.forEach((m) => {
       if (m.targetDate >= lo && m.targetDate < hi) billed += m.amount || 0;
@@ -211,22 +218,25 @@ export function installsForecast(
     buckets.push({ start: lo, billed, collected });
   }
   const toBill =
-    sumValue(book.filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd)) +
+    book.filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd).reduce((s, p) => s + knownValue(p), 0) +
     msPoints.filter((m) => m.targetDate >= now).reduce((a, m) => a + (m.amount || 0), 0);
   const collected =
-    sumValue(book.filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd)) +
+    book.filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd).reduce((s, p) => s + knownValue(p), 0) +
     msPoints.filter((m) => m.targetDate + 30 * DAY >= now && m.targetDate + 30 * DAY <= horizonEnd).reduce((a, m) => a + (m.amount || 0), 0);
 
   const stageMap = new Map<string, { value: number; count: number; tag: ProjectTag }>();
   book.forEach((p) => {
     const label = p.stageMeta?.label ?? p.stage;
     const e = stageMap.get(label) || { value: 0, count: 0, tag: projectTag(p) };
-    e.value += p.value || 0;
+    e.value += knownValue(p);
     e.count += 1;
     stageMap.set(label, e);
   });
   const byStage = [...stageMap.entries()].map(([stage, e]) => ({ stage, tag: e.tag, count: e.count, value: e.value }));
 
   const timeline = [...book].sort((a, b) => (a.targetDate || 0) - (b.targetDate || 0));
-  return { book, totalValue, blended, cost, buckets, bucketMs, toBill, collected, byStage, upcoming: timeline.slice(0, 6), timeline, windowMs };
+  return {
+    book, totalValue, blended, cost, buckets, bucketMs, toBill, collected, byStage,
+    upcoming: timeline.slice(0, 6), timeline, windowMs, unknownValueCount: unknownCount(book),
+  };
 }

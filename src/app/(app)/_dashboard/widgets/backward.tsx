@@ -4,6 +4,7 @@ import { fmtDate, type ProjectRecord } from "@/lib/stores/projects";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { dashHref } from "@/lib/dashboard/registry";
 import { backlogProjects, equipmentSold, openProjects, periodBounds, projectedProfit, salesMetrics } from "@/lib/dashboard/metrics";
+import { formatJobValue } from "@/lib/job-value";
 import { ChartCard, MonoBadge, initialsOf } from "../charts";
 import { tile } from "./tile";
 
@@ -26,7 +27,7 @@ function ProjectList({ title, sub, rows, empty }: { title: string; sub: string; 
             <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
             <div style={{ fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>{p.customer} · {p.targetDate ? `target ${fmtDate(p.targetDate)}` : "no target"}</div>
           </div>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600 }}>{money(p.value)}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600 }}>{formatJobValue(p, money)}</span>
         </Link>
       ))}
       {rows.length === 0 && <div style={{ padding: "22px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>{empty}</div>}
@@ -46,7 +47,8 @@ export const BACKWARD_RENDERERS = {
 
   "projected-profit": async (ctx) => {
     const pp = projectedProfit(await ctx.data.projects());
-    return tile("Projected profit", money(pp.profit), `${Math.round(pp.margin * 100)}% of ${money(pp.value)} open book`, "green");
+    const sub = `${Math.round(pp.margin * 100)}% of ${money(pp.value)} open book` + (pp.unknownCount ? ` · ${pp.unknownCount} with unknown value` : "");
+    return tile("Projected profit", money(pp.profit), sub, "green");
   },
 
   "open-projects": async (ctx) => (

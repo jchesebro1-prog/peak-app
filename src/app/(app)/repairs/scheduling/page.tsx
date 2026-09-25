@@ -16,6 +16,7 @@ import {
 } from "@/lib/stores/repair-jobs";
 import { RepairsMap } from "../controls";
 import { scheduleRepair, unscheduleRepair } from "../actions";
+import { formatJobValue } from "@/lib/job-value";
 
 export const metadata = { title: "Repair scheduler — Quartzite-6" };
 
@@ -211,7 +212,7 @@ export default async function RepairSchedulingPage({
             </div>
             {approvedJobs.map((j) => {
               const pm = priorityMeta(j.priority);
-              const detail = [j.venue, categoryMeta(j.category).short, money(j.value)]
+              const detail = [j.venue, categoryMeta(j.category).short, formatJobValue(j, money)]
                 .filter(Boolean)
                 .join(" · ");
               return (

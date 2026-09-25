@@ -1582,13 +1582,39 @@ ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === tru
 
 /* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
  *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
-import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects } from "@/lib/dashboard/metrics";
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit } from "@/lib/dashboard/metrics";
 const metricsProjects = [
   { kind: "project", stage: "scheduled" },
   { kind: "project", stage: "deposit" },
 ] as any;
 ok(metricsOpenProjects(metricsProjects).length === 1, "#43: openProjects keeps only the scheduled-tag record");
 ok(metricsBacklogProjects(metricsProjects).length === 1, "#43: backlogProjects keeps only the backlog-tag record");
+
+/* --- Task 9: UKN unknown job values (job-value.ts) — a Daylite-imported
+ *  project/repair whose dollar value wasn't known at the source is flagged
+ *  valueUnknown, renders "UKN" instead of $0, and stays out of every sum. --- */
+import { isValueUnknown, knownValue, formatJobValue, unknownCount } from "@/lib/job-value";
+ok(isValueUnknown({ value: 500, valueUnknown: true }) === true, "#UKN: isValueUnknown reads the flag");
+ok(isValueUnknown({ value: 500 }) === false, "#UKN: isValueUnknown is false when the flag is absent");
+ok(knownValue({ value: 500, valueUnknown: true }) === 0, "#UKN: knownValue is 0 for a flagged record, even though `value` carries a number");
+ok(knownValue({ value: 500 }) === 500, "#UKN: knownValue passes an unflagged record's value through");
+ok(knownValue({ valueUnknown: true }) === 0, "#UKN: knownValue is 0 for a flagged record with no `value` at all");
+ok(formatJobValue({ value: 0, valueUnknown: true }, String) === "UKN", "#UKN: formatJobValue renders UKN, never $0, for a flagged record");
+ok(formatJobValue({ value: 500 }, String) === "500", "#UKN: formatJobValue passes an unflagged record through its formatter");
+ok(unknownCount([{ valueUnknown: true }, { valueUnknown: false }, { value: 1 }]) === 1, "#UKN: unknownCount counts only the flagged records");
+
+// projectedProfit (dashboard/metrics.ts) — one known $500 project + one
+// imported project flagged valueUnknown with a stray $900 on it. The
+// unknown one must contribute nothing to value or profit; the book totals
+// exactly the known project.
+const uknProjects = [
+  { kind: "project", stage: "scheduled", value: 500, margin: 0.5 },
+  { kind: "project", stage: "scheduled", value: 900, valueUnknown: true, margin: 0.5 },
+] as any;
+const uknProfit = projectedProfit(uknProjects);
+ok(uknProfit.value === 500, `#UKN: projectedProfit's open-book value ignores the unknown project's stray $900 (got ${uknProfit.value})`);
+ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is margin × the known value only (got ${uknProfit.profit})`);
+ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-value project in its book");
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });

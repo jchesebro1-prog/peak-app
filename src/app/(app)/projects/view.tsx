@@ -37,6 +37,7 @@ import {
   type ProjectTag,
   type StageMeta,
 } from "@/lib/pipelines";
+import { isValueUnknown, knownValue, formatJobValue, unknownCount } from "@/lib/job-value";
 import {
   setStageAction,
   cycleLineAction,
@@ -240,12 +241,19 @@ export function ProjectsView({
     (p.customerId && custById.get(p.customerId)) || p.customer || "—";
 
   const active = projects.filter((p) => !isDone(p, pipelines));
-  const activeValue = active.reduce((a, p) => a + (p.value || 0), 0);
+  const activeValue = active.reduce((a, p) => a + knownValue(p), 0);
+  const activeUnknown = unknownCount(active);
   const atRisk = active.filter((p) => riskFlags(p).length);
   const installing = projects.filter((p) => isOnSite(p, pipelines));
+  const valueUnknown = projects.filter(isValueUnknown);
 
   const stats = [
-    { label: "Active", value: String(active.length), sub: shortMoney(activeValue) + " in delivery", color: "#16181d" },
+    {
+      label: "Active",
+      value: String(active.length),
+      sub: shortMoney(activeValue) + " in delivery" + (activeUnknown ? " · " + activeUnknown + " with unknown value" : ""),
+      color: "#16181d",
+    },
     { label: "In install", value: String(installing.length), sub: "crews on site", color: "#16181d" },
     {
       label: "At risk",
@@ -267,6 +275,7 @@ export function ProjectsView({
     orders: projects.filter((p) => p.kind === "order").length,
     complete: projects.filter((p) => isDone(p, pipelines)).length,
     all: projects.length,
+    "value-unknown": valueUnknown.length,
   };
   const filterDefs: Array<[string, string]> = [
     ["active", "Active"],
@@ -274,12 +283,15 @@ export function ProjectsView({
     ["orders", "Orders"],
     ["complete", "Complete"],
     ["all", "All"],
+    // Only shown once real (Daylite-imported) records need it (Task 9).
+    ...(counts["value-unknown"] > 0 ? [["value-unknown", "Value unknown"] as [string, string]] : []),
   ];
 
   let listSrc = projects;
   if (filter === "active") listSrc = active;
   else if (filter === "risk") listSrc = atRisk;
   else if (filter === "orders") listSrc = projects.filter((p) => p.kind === "order");
+  else if (filter === "value-unknown") listSrc = valueUnknown;
   // The "complete" URL key stays; it means "on a Done-tagged stage".
   else if (filter === "complete") listSrc = projects.filter((p) => isDone(p, pipelines));
 
@@ -316,8 +328,8 @@ export function ProjectsView({
     col: p.stage,
     title: p.name,
     sub: custName(p),
-    value: p.value || 0,
-    valueLabel: shortMoney(p.value),
+    value: knownValue(p),
+    valueLabel: formatJobValue(p, shortMoney),
     chips: [],
     owner: p.owner ? { initials: idLookup.initialsOf(p.owner), color: idLookup.colorOf(p.owner) } : null,
     ownerTitle: p.owner || "Unassigned",
@@ -953,7 +965,7 @@ function ProjectDetail({
             </div>
             <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-.01em", marginTop: 8 }}>{p.name}</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 3 }}>
-              {custName} · PM {firstName(p.owner)} · {money(p.value)}
+              {custName} · PM {firstName(p.owner)} · {formatJobValue(p, money)}
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -1257,8 +1269,8 @@ function OverviewTab({
   });
   cards.push({
     label: isOrder ? "Order value" : "Contract",
-    value: shortMoney(p.value),
-    sub: p.margin ? Math.round(p.margin * 100) + "% margin" : "",
+    value: formatJobValue(p, shortMoney),
+    sub: p.valueUnknown ? "imported — value not on file" : p.margin ? Math.round(p.margin * 100) + "% margin" : "",
   });
 
   const projectTasks = taskRows.filter((t) => t.projectId === p.id);

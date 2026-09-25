@@ -64,7 +64,7 @@ export function one(v: string | string[] | undefined): string {
 
 /** "complete" stays the URL value (bookmarks, deep links) but means "on the
  *  pipeline's Done-tagged stage" — view.tsx filters it with `isDone`. */
-const FILTERS = ["active", "risk", "orders", "complete", "all"];
+const FILTERS = ["active", "risk", "orders", "complete", "all", "value-unknown"];
 export function normFilter(v: string): string {
   return FILTERS.includes(v) ? v : "active";
 }

@@ -4,6 +4,7 @@ import { DEFAULT_PIPELINES, PROJECT_TAG_META, PROJECT_TAG_RANK, projectStageMeta
 import type { MapPin } from "@/components/map/LeafletMap";
 import type { WidgetCtx, WidgetRenderer } from "@/lib/dashboard/context";
 import { installsForecast } from "@/lib/dashboard/metrics";
+import { knownValue, formatJobValue } from "@/lib/job-value";
 import { ReportsMap } from "../../reports/controls";
 import {
   ACCENT,
@@ -63,7 +64,8 @@ const stageRows = (f: Awaited<ReturnType<typeof forecast>>) =>
 export const INSTALLS_RENDERERS = {
   "backlog-value": async (ctx) => {
     const f = await forecast(ctx);
-    return tile("Backlog value", money(f.totalValue), `${f.book.length} open`);
+    const sub = `${f.book.length} open` + (f.unknownValueCount ? ` · ${f.unknownValueCount} with unknown value` : "");
+    return tile("Backlog value", money(f.totalValue), sub);
   },
   "to-be-billed": async (ctx) => {
     const f = await forecast(ctx);
@@ -183,7 +185,7 @@ export const INSTALLS_RENDERERS = {
               </div>
             </div>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600 }}>
-              {money(p.value)}
+              {formatJobValue(p, money)}
             </span>
           </div>
         ))}
@@ -268,7 +270,7 @@ export const INSTALLS_RENDERERS = {
                   }}
                 >
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600, color: "#fff" }}>
-                    {moneyK(p.value || 0)}
+                    {formatJobValue(p, moneyK)}
                   </span>
                 </div>
               </div>
@@ -308,7 +310,7 @@ export const INSTALLS_RENDERERS = {
   "project-locations": async (ctx) => {
     const [f, customers] = await Promise.all([forecast(ctx), ctx.data.customers()]);
     const custIndex = new Map(customers.map((c) => [c.id, c.locations || []]));
-    const mapMax = Math.max(1, ...f.book.map((p) => p.value || 0));
+    const mapMax = Math.max(1, ...f.book.map((p) => knownValue(p)));
     const pins: MapPin[] = f.book
       .map((p): MapPin | null => {
         const c = coordsOf(p, custIndex);
@@ -319,8 +321,8 @@ export const INSTALLS_RENDERERS = {
           lng: c.lng,
           color: stg(p).color,
           label: p.name,
-          sub: `${p.customer} · ${money(p.value)} · ${stg(p).label}`,
-          size: 13 + Math.round(((p.value || 0) / mapMax) * 10),
+          sub: `${p.customer} · ${formatJobValue(p, money)} · ${stg(p).label}`,
+          size: 13 + Math.round((knownValue(p) / mapMax) * 10),
         };
       })
       .filter((x): x is MapPin => x !== null);

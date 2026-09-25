@@ -109,6 +109,8 @@ export type RepairJobRecord = {
   locationId: string | null;
   venue: string;
   value: number;
+  /** Imported record whose value wasn't known at the source (Task 9). */
+  valueUnknown?: boolean;
   category: RepairCategoryKey;
   priority: RepairPriorityKey;
   title: string;

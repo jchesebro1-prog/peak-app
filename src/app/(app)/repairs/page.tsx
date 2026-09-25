@@ -22,6 +22,7 @@ import {
   type WarrantyFollowUpRow,
 } from "@/lib/stores/repair-jobs";
 import { RepairsMap } from "./controls";
+import { formatJobValue } from "@/lib/job-value";
 
 export const metadata = { title: "Repairs — Quartzite-6" };
 
@@ -691,7 +692,7 @@ export default async function RepairsPage({
                       textAlign: "right",
                     }}
                   >
-                    {money(r.value)}
+                    {formatJobValue(r, money)}
                   </span>
                   <span style={{ textAlign: "right" }}>
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>

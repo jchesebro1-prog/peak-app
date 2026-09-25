@@ -13,6 +13,7 @@ import { VISIT_STAGE_META } from "@/lib/lead-thread";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { isDone } from "@/lib/pipelines";
+import { formatJobValue } from "@/lib/job-value";
 import { getAll as getAllSurveys, stageMeta as surveyStageMeta } from "@/lib/stores/surveys";
 import { byCustomer as commsByCustomer, snippet as commSnippet, statusMeta as commStatusMeta } from "@/lib/stores/comms";
 import {
@@ -518,7 +519,7 @@ export default async function CustomerDetailPage({
                     {p.name || p.id}
                   </span>
                   <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-                    {p.id} · {p.kind === "order" ? "Sales order" : "Project"} · {money(p.value)}
+                    {p.id} · {p.kind === "order" ? "Sales order" : "Project"} · {formatJobValue(p, money)}
                   </span>
                 </span>
                 <span style={{ fontSize: 9.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
