@@ -70,9 +70,29 @@ export default async function CustomersPage({
   };
 
   /* ---- per-customer activity rollups (quotes / projects live by id|name) ---- */
-  const quotesFor = (id: string, name: string) =>
-    quotes.filter((qt) => (qt.customerId ? qt.customerId === id : !!name && qt.customer === name));
-  const projectsFor = (id: string) => projects.filter((p) => p.customerId === id);
+  const quotesById = new Map<string, typeof quotes>();
+  const quotesByName = new Map<string, typeof quotes>();
+  for (const qt of quotes) {
+    const key = qt.customerId || qt.customer;
+    if (!key) continue;
+    const idx = qt.customerId ? quotesById : quotesByName;
+    const list = idx.get(key);
+    if (list) list.push(qt);
+    else idx.set(key, [qt]);
+  }
+  // Concatenation loses the original interleaving; callers only sum, count, and sort by `at`.
+  const quotesFor = (id: string, name: string) => [
+    ...(quotesById.get(id) ?? []),
+    ...(name ? quotesByName.get(name) ?? [] : []),
+  ];
+  const projectsByCustomer = new Map<string, typeof projects>();
+  for (const p of projects) {
+    if (p.customerId == null) continue;
+    const list = projectsByCustomer.get(p.customerId);
+    if (list) list.push(p);
+    else projectsByCustomer.set(p.customerId, [p]);
+  }
+  const projectsFor = (id: string) => projectsByCustomer.get(id) ?? [];
 
   const rollup = (id: string, name: string) => {
     const qs = quotesFor(id, name);
