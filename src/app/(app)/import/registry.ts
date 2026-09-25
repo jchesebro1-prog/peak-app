@@ -59,6 +59,17 @@ function pick<T extends string>(v: unknown, opts: readonly T[], fb: T): T {
   return (opts as readonly string[]).indexOf(s) >= 0 ? (s as T) : fb;
 }
 
+/** D-SPEC fix wave (Task 14, item 3) — true for a string shaped like a spec
+ *  section/article id ("ss-…" / "ar-…", see spec-sections.ts / spec-articles.ts
+ *  `uid()`). An import value in this shape that fails to resolve is a DEAD
+ *  pointer to a section/article that no longer exists, not legacy free text —
+ *  writing it into productMetadata would round-trip through export and come
+ *  back as the same unresolvable id forever. A real CSI number ("11 61 43")
+ *  or a real legacy title ("Theatrical Stage Drapes") never matches this. */
+function looksLikeSpecId(s: string): boolean {
+  return /^(ss|ar)-/.test(s);
+}
+
 export type ImportMode = "skip" | "update" | "create";
 
 export type ImportResult = {
@@ -234,8 +245,11 @@ export function catalogPatch(
   const lib = opts.specLib;
   const secId = lib ? resolveSectionRef(secRef, lib.sections) : null;
   const artId = lib ? resolveArticleRef(artRef, lib.articles, secId ?? (str(e.specSectionId) || null)) : null;
-  if (secRef && !secId) { metadata.specSection = secRef; hasMetadata = true; }
-  if (artRef && !artId) { metadata.specArticle = artRef; hasMetadata = true; }
+  // D-SPEC fix wave item 3 — an unresolved ref shaped like a dead pointer id
+  // is dropped, never written as legacy text (it would just come back as the
+  // same unresolvable id on the next export → re-import).
+  if (secRef && !secId && !looksLikeSpecId(secRef)) { metadata.specSection = secRef; hasMetadata = true; }
+  if (artRef && !artId && !looksLikeSpecId(artRef)) { metadata.specArticle = artRef; hasMetadata = true; }
   const artSection = artId ? lib!.articles.find((a) => a.id === artId)!.sectionId : null;
 
   // Spec text. A column absent from the file — or a blank cell — must not
@@ -244,7 +258,10 @@ export function catalogPatch(
   const body = str(v.specBody);
   const title = str(v.specTitle);
   const changed = (!!body && body !== str(e.specBody)) || (!!title && title !== str(e.specTitle));
-  const explicit = str(v.specState);
+  // D-SPEC fix wave item 7 — matched case-insensitively ("Authored"/"DRAFT"
+  // etc.), trimmed by str() above; the canonical lowercase value is what's
+  // stored either way.
+  const explicit = str(v.specState).toLowerCase();
   // Only a row that carries text sets a state. An explicit column wins; with
   // no explicit state, CHANGED text lands as draft (spec §4 — unreviewed text
   // must not print) and unchanged text keeps its state, so export → re-import
@@ -269,7 +286,11 @@ export function catalogPatch(
     ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
     ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
     ...(hasMetadata ? { productMetadata: metadata } : {}),
-    ...(secId ? { specSectionId: secId } : artSection ? { specSectionId: artSection } : {}),
+    // D-SPEC fix wave item 4 — when Spec Section and Spec Article both
+    // resolve but disagree, the ARTICLE's own section wins (the mirror
+    // invariant D94's assemble relies on: it groups by specSectionId, and an
+    // article must group under its real section, not a stale/mistyped one).
+    ...(artSection ? { specSectionId: artSection } : secId ? { specSectionId: secId } : {}),
     ...(artId ? { specArticleId: artId } : {}),
     ...(title ? { specTitle: title } : {}),
     ...(body ? { specBody: body } : {}),
@@ -682,6 +703,14 @@ function specLibFor(ctx: CommitContext): Promise<SpecLookup> {
     SPEC_LIB.set(ctx, p);
   }
   return p;
+}
+
+/** D-SPEC fix wave (Task 14, item 5) — most catalog commits are pure price
+ *  files with no Spec Section/Article column mapped at all; loading the
+ *  section+article library for every one of those (37,400-part catalog)
+ *  would be pure waste. Only a row that actually carries a pointer needs it. */
+function needsSpecLib(v: Values): boolean {
+  return !!(str(v.specSectionId) || str(v.specArticleId));
 }
 
 const WRITERS: Record<string, Writer> = {
@@ -1127,7 +1156,7 @@ const WRITERS: Record<string, Writer> = {
       // row written just before it.
       const ex = cache.find((p) => ci(p.sku, v.sku)) || null;
       const sku = ex ? str(ex.sku) : str(v.sku);
-      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: await specLibFor(ctx) });
+      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined });
       // mergeUpsert is the same entry point scripts/import-catalog.ts uses —
       // it preserves fields a price sheet doesn't carry (ports, trade, spec
       // text, datasheet attachments) when a SKU is re-imported. pricedAt
@@ -1140,11 +1169,20 @@ const WRITERS: Record<string, Writer> = {
     // the catalog update path dedupes through `find` alone and reads only ctx.
     update: async (ex, v, _cache, ctx) => {
       const sku = str(ex.sku);
-      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: await specLibFor(ctx) });
+      const patch = catalogPatch(v, ex, sku, { now: Date.now(), by: ctx.me?.name, specLib: needsSpecLib(v) ? await specLibFor(ctx) : undefined });
       await Catalog.mergeUpsert(sku, patch, { pricedAt: ctx.effectiveAt });
     },
     exportObjects: async () => {
-      const list = await Catalog.list();
+      const [list, sections, articles] = await Promise.all([Catalog.list(), allSections(), allArticles()]);
+      // D-SPEC fix wave item 3 — a stored specSectionId/specArticleId can be a
+      // DEAD pointer (the section/article it names was deleted). Exporting a
+      // dead id verbatim round-trips it straight back into productMetadata's
+      // legacy text on re-import (ids look nothing like real legacy text, but
+      // the importer has no way to tell), so it must resolve against the LIVE
+      // library first: canonical id when it still resolves, else the legacy
+      // text, else blank.
+      const liveSectionIds = new Set(sections.map((s) => s.id));
+      const liveArticleIds = new Set(articles.map((a) => a.id));
       return list.map((p) => ({
         sku: p.sku || "",
         desc: p.desc || "",
@@ -1159,8 +1197,8 @@ const WRITERS: Record<string, Writer> = {
         productFamily: p.productMetadata?.productFamily || "",
         // D-SPEC-5: the canonical id when there is one (it re-imports exactly);
         // otherwise the legacy Displays text, which re-imports as legacy text.
-        specSectionId: p.specSectionId || p.productMetadata?.specSection || "",
-        specArticleId: p.specArticleId || p.productMetadata?.specArticle || "",
+        specSectionId: (p.specSectionId && liveSectionIds.has(p.specSectionId) ? p.specSectionId : "") || p.productMetadata?.specSection || "",
+        specArticleId: (p.specArticleId && liveArticleIds.has(p.specArticleId) ? p.specArticleId : "") || p.productMetadata?.specArticle || "",
         specLanguageKey: p.productMetadata?.specLanguageKey || "",
         researchStatus: p.productMetadata?.researchStatus || "",
         manufacturerUrl: p.productMetadata?.source?.manufacturerUrl || "",

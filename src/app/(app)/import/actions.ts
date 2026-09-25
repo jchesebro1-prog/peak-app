@@ -40,7 +40,7 @@ import { commitCatalogImport } from "./catalog-commit";
  * file with no price column (#133, D156).
  */
 export async function importRecords(formData: FormData): Promise<void> {
-  await requirePerm("manage_users");
+  const me = await requirePerm("manage_users");
   const key = String(formData.get("type") || "");
   const text = String(formData.get("text") || "");
   const modeRaw = String(formData.get("mode") || "skip");
@@ -72,11 +72,11 @@ export async function importRecords(formData: FormData): Promise<void> {
   let res: ImportResult;
   if (key === "catalog") {
     const priced = (mapping.list ?? -1) >= 0 || (mapping.cost ?? -1) >= 0;
-    const out = await commitCatalogImport({ rows, mode, effectiveAt, priced });
+    const out = await commitCatalogImport({ rows, mode, effectiveAt, priced, me });
     if (!out.ok) redirect(`${backTo}&err=${encodeURIComponent(out.error)}`);
     res = out.res;
   } else {
-    res = await commitImport(key, rows, mode, { effectiveAt });
+    res = await commitImport(key, rows, mode, { effectiveAt, me });
   }
 
   revalidatePath("/", "layout");

@@ -29,6 +29,15 @@ export type CatalogImportInput = {
 
 export type CatalogImportResult = { ok: true; imported: number; mfr: string } | { ok: false; error: string };
 
+/** D-SPEC fix wave (Task 14, item 3) — true for a string shaped like a spec
+ *  section/article id ("ss-…" / "ar-…"). Mirrors the same-named helper in
+ *  ../import/registry.ts: an unresolved ref in this shape is a DEAD pointer,
+ *  not legacy free text, and must never be written into productMetadata's
+ *  legacy text (it would just round-trip back as the same dead id). */
+function looksLikeSpecId(s: string): boolean {
+  return /^(ss|ar)-/.test(s);
+}
+
 export async function runCatalogImport(input: CatalogImportInput): Promise<CatalogImportResult> {
   const size = checkSize(input.bytes);
   if (!size.ok) return { ok: false, error: size.error };
@@ -58,8 +67,15 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   const bySku = new Map<string, CatalogPart>(catalog.map((p) => [p.id, p]));
   // D-SPEC-5: the price-book importer writes the same canonical pointers the
   // Import hub's catalogPatch does. Loaded once for the whole file, not once
-  // per row.
-  const [specSections, specArticles] = await Promise.all([allSections(), allArticles()]);
+  // per row — and (fix wave item 5) not at all for the common price-only
+  // file, which carries neither column: the ~37,400-part catalog makes that
+  // load pure waste on every price re-import.
+  const needsSpecLib = valid.some((r) => r.specSection || r.specArticle);
+  let specSections: Awaited<ReturnType<typeof allSections>> = [];
+  let specArticles: Awaited<ReturnType<typeof allArticles>> = [];
+  if (needsSpecLib) {
+    [specSections, specArticles] = await Promise.all([allSections(), allArticles()]);
+  }
   const priced = parsed.hasList || parsed.hasCost;
   for (const r of valid) {
     const isNew = !existing.has(r.sku);
@@ -70,9 +86,11 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
     const productMetadata: CatalogProductMetadata = {
       // A resolved pointer is canonical (handled below) and never also
       // stored as legacy Displays text; an unresolved one is kept exactly as
-      // 2e284665's columns stored it, so no imported value is lost.
-      ...(r.specSection && !secId ? { specSection: r.specSection } : {}),
-      ...(r.specArticle && !artId ? { specArticle: r.specArticle } : {}),
+      // 2e284665's columns stored it, so no imported value is lost — UNLESS
+      // it's shaped like a dead pointer id, which is dropped instead of
+      // being written as legacy text (fix wave item 3; see looksLikeSpecId).
+      ...(r.specSection && !secId && !looksLikeSpecId(r.specSection) ? { specSection: r.specSection } : {}),
+      ...(r.specArticle && !artId && !looksLikeSpecId(r.specArticle) ? { specArticle: r.specArticle } : {}),
       ...(r.researchStatus === "researched" || r.researchStatus === "needs-review" ? { researchStatus: r.researchStatus } : {}),
       ...((r.manufacturerUrl || r.sourceDocumentName || r.sourceDocumentDate)
         ? {
@@ -105,7 +123,10 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
         ...(parsed.hasMap || isNew ? { mapPrice: r.mapPrice || null } : {}),
         ...(Object.keys(productMetadata).length ? { productMetadata } : {}),
-        ...(secId ? { specSectionId: secId } : artSection ? { specSectionId: artSection } : {}),
+        // Fix wave item 4 — when Spec Section and Spec Article both resolve
+        // but disagree, the ARTICLE's own section wins (same mirror rule as
+        // the Import hub's catalogPatch).
+        ...(artSection ? { specSectionId: artSection } : secId ? { specSectionId: secId } : {}),
         ...(artId ? { specArticleId: artId } : {}),
       },
       { pricedAt: input.effectiveAt }

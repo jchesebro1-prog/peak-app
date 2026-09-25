@@ -24,6 +24,11 @@ export type CatalogCommitInput = {
   /** Did the file map a List or a Cost column? A file without one confirmed
    *  no price, so it never re-dates a book (final review item 3). */
   priced: boolean;
+  /** D-SPEC fix wave (Task 14, item 2) — the signed-in user, threaded into
+   *  `specUpdatedBy` so an edited row is stamped with who imported it rather
+   *  than the generic "import" fallback. Optional: the regression harness
+   *  drives this session-free. */
+  me?: { name: string };
 };
 
 export type CatalogCommitResult =
@@ -50,7 +55,7 @@ export async function commitCatalogImport(input: CatalogCommitInput): Promise<Ca
     return { ...r, values: { ...r.values, mfr: spelling.get(mfrKey(mfr)) ?? mfr } };
   });
 
-  const res = await commitImport("catalog", rows, input.mode, { effectiveAt: input.effectiveAt });
+  const res = await commitImport("catalog", rows, input.mode, { effectiveAt: input.effectiveAt, me: input.me });
 
   // D156 — the file's effective date is each manufacturer's price-list date
   // (it confirms that manufacturer's unchanged rows too). Stamped per

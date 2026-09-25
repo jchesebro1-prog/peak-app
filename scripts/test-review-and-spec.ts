@@ -239,6 +239,12 @@ import type { DavinciExtract, DavinciRecord } from "@/lib/davinci/types";
 import { requireHostedConfirmation } from "./db-target";
 import { planEnrichment, applyEnrichment } from "@/lib/catalog-davinci-apply";
 import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
+// D-SPEC fix wave (Task 14) — DB-backed exporter / price-book-importer /
+// specUpdatedBy checks below need a real section+article to resolve against
+// and the price-book importer entry point itself.
+import { runCatalogImport } from "@/app/(app)/catalog/import";
+import { createSection } from "@/lib/stores/spec-sections";
+import { createArticle } from "@/lib/stores/spec-articles";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
@@ -5042,6 +5048,145 @@ async function asyncChecks(): Promise<void> {
     const legacy = prepareRows([["SP-1", "Stage Lighting Instruments"]], autoMap(["SKU", "Spec Article"], cat.fields), cat.fields);
     const legacyPatch = catalogPatch(legacy.rows[0].values, stored, "SP-1", { specLib: lib });
     ok(!("specArticleId" in legacyPatch) && legacyPatch.productMetadata?.specArticle === "Stage Lighting Instruments", "catalog import: an unresolvable Spec Article is kept as legacy text, never dropped");
+
+    /* --- D-SPEC fix wave (opus review of 9fedee19..a7ec23c4) --- */
+
+    // Item 1 — exact-header-only spec columns. A Shopify/vendor sheet's own
+    // Title/Text/Heading/State columns must never fuzzy-claim a spec field;
+    // the canonical "Spec …" headers still map.
+    const shopifyMap = autoMap(["SKU", "Title", "Body (HTML)", "Vendor", "Variant Price"], cat.fields);
+    ok(SPEC_KEYS.every((k) => shopifyMap[k] === -1), "catalog import fix wave: a Shopify-shaped header row (SKU/Title/Body (HTML)/Vendor/Variant Price) maps no spec field");
+    const bareMap = autoMap(["SKU", "Text", "Heading", "State"], cat.fields);
+    ok(bareMap.specBody === -1 && bareMap.specTitle === -1 && bareMap.specState === -1, "catalog import fix wave: bare Text/Heading/State headers map no spec field");
+    const canonicalMap = autoMap(["SKU", "Spec Section", "Spec Article", "Spec Title", "Spec Body", "Spec Same As", "Spec State", "Spec Source"], cat.fields);
+    ok(SPEC_KEYS.every((k) => canonicalMap[k] >= 0), "catalog import fix wave: the canonical Spec … headers still map exactly");
+
+    // Item 2/8 — a price-only row's patch also carries no productMetadata or
+    // specUpdatedAt/By keys (SPEC_KEYS above doesn't cover these).
+    ok(!("productMetadata" in pricePatch) && !("specUpdatedAt" in pricePatch) && !("specUpdatedBy" in pricePatch), "catalog import fix wave: a price-only row's patch also carries no productMetadata or specUpdatedAt/By keys");
+
+    // Item 7/8 — an explicit Spec State wins over the changed-text-lands-as-
+    // draft default, and matches case-insensitively.
+    const explicitWins = prepareRows([["SP-1", "New text.", "authored"]], autoMap(["SKU", "Spec Body", "Spec State"], cat.fields), cat.fields);
+    ok(catalogPatch(explicitWins.rows[0].values, stored, "SP-1", { specLib: lib }).specState === "authored", "catalog import fix wave: an explicit Spec State of 'authored' wins over the changed-text-lands-as-draft default");
+    const caseInsensitive = prepareRows([["SP-1", "New text.", "DRAFT"]], autoMap(["SKU", "Spec Body", "Spec State"], cat.fields), cat.fields);
+    ok(catalogPatch(caseInsensitive.rows[0].values, stored, "SP-1", { specLib: lib }).specState === "draft", "catalog import fix wave: Spec State matches case-insensitively (DRAFT, Authored, …)");
+
+    // Item 8 — a title-only change also lands as draft.
+    const titleOnly = prepareRows([["SP-1", "New Title"]], autoMap(["SKU", "Spec Title"], cat.fields), cat.fields);
+    const titlePatch = catalogPatch(titleOnly.rows[0].values, stored, "SP-1", { specLib: lib });
+    ok(titlePatch.specTitle === "New Title" && titlePatch.specState === "draft", "catalog import fix wave: a title-only change also lands as draft");
+
+    // Item 3 — an unresolvable ref shaped like a dead pointer id ("ss-…") is
+    // dropped outright, never written into productMetadata as legacy text.
+    const deadPtr = prepareRows([["SP-1", "ss-doesnotexist"]], autoMap(["SKU", "Spec Section"], cat.fields), cat.fields);
+    const deadPatch = catalogPatch(deadPtr.rows[0].values, stored, "SP-1", { specLib: lib });
+    ok(!("specSectionId" in deadPatch) && !("productMetadata" in deadPatch), "catalog import fix wave: an unresolvable id-shaped Spec Section pointer is dropped, never written as legacy text");
+
+    // Item 4 — when Spec Section and Spec Article both resolve but disagree,
+    // the ARTICLE's own section wins (the D94 assemble mirror invariant). An
+    // explicit article ID resolves on its own id (resolveArticleRef's first
+    // branch) regardless of the sectionId hint, which is exactly how the two
+    // pointers can disagree in practice — a title lookup, by contrast, is
+    // scoped to the Spec Section's own articles and could never conflict.
+    const otherSection = { id: "ss-other", number: "26 09 61", title: "Lighting Controls", sort: 2, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" };
+    const libConflict = { sections: [...lib.sections, otherSection], articles: lib.articles };
+    const conflict = prepareRows([["SP-1", "26-09-61", "ar-i"]], autoMap(["SKU", "Spec Section", "Spec Article"], cat.fields), cat.fields);
+    const conflictPatch = catalogPatch(conflict.rows[0].values, stored, "SP-1", { specLib: libConflict });
+    ok(conflictPatch.specSectionId === "ss-i" && conflictPatch.specArticleId === "ar-i", "catalog import fix wave: when Spec Section and Spec Article disagree, the article's own section wins");
+  }
+
+  /* --- specs: catalog import fix wave — DB-backed (exporter, specUpdatedBy,
+   * the price-book importer's own resolution). See scripts/test-fixtures.ts
+   * for the TEST<scope>: marker / createFixture / registerFixture / teardown
+   * convention (#149, D233). */
+  {
+    const SEC = await createSection({ number: "31 41 59", title: fixtureId("SPEC14FIX", "section"), by: "Fix wave test" });
+    registerFixture("spec_sections", SEC.id);
+    const ART = await createArticle({ sectionId: SEC.id, title: fixtureId("SPEC14FIX", "article") }, "Fix wave test");
+    registerFixture("spec_articles", ART.id);
+
+    // Item 3 (export side) — canonical over legacy when both are present;
+    // a dead specSectionId/specArticleId pointer (no live section/article)
+    // is never exported as an id; specState always exports blank, even for
+    // an authored part (the state is a review stamp, not exportable data).
+    const skuCanonical = fixtureId("SPEC14FIX", "export-canonical");
+    await upsertPart({
+      id: skuCanonical, sku: skuCanonical, desc: "Fix-wave export test A", category: "Other", unit: "ea", list: 10, cost: 5,
+      specSectionId: SEC.id,
+      productMetadata: { specSection: "Some Legacy Section Text" },
+      specState: "authored",
+    });
+    registerFixture("catalog_parts", skuCanonical);
+
+    const skuDead = fixtureId("SPEC14FIX", "export-dead-pointer");
+    await upsertPart({
+      id: skuDead, sku: skuDead, desc: "Fix-wave export test B", category: "Other", unit: "ea", list: 10, cost: 5,
+      specSectionId: "ss-doesnotexist000",
+      specArticleId: "ar-doesnotexist000",
+    });
+    registerFixture("catalog_parts", skuDead);
+
+    const skuLegacyOnly = fixtureId("SPEC14FIX", "export-legacy-fallback");
+    await upsertPart({
+      id: skuLegacyOnly, sku: skuLegacyOnly, desc: "Fix-wave export test C", category: "Other", unit: "ea", list: 10, cost: 5,
+      productMetadata: { specSection: "Legacy Text Only" },
+    });
+    registerFixture("catalog_parts", skuLegacyOnly);
+
+    const exported = await exportObjectsFor("catalog");
+    const rowCanonical = exported.find((r) => r.sku === skuCanonical);
+    ok(rowCanonical?.specSectionId === SEC.id, "catalog export fix wave: a live specSectionId pointer exports as the canonical id, not the legacy productMetadata text");
+    ok(rowCanonical?.specState === "", "catalog export fix wave: specState always exports blank, even for an authored part");
+    const rowDead = exported.find((r) => r.sku === skuDead);
+    ok(rowDead?.specSectionId === "" && rowDead?.specArticleId === "", "catalog export fix wave: a dead specSectionId/specArticleId pointer (no live section/article) is never exported as an id");
+    const rowLegacyOnly = exported.find((r) => r.sku === skuLegacyOnly);
+    ok(rowLegacyOnly?.specSectionId === "Legacy Text Only", "catalog export fix wave: legacy productMetadata text still exports when there is no canonical pointer");
+
+    // Item 2 — commitImport threads ctx.me into specUpdatedBy instead of the
+    // generic "import" fallback.
+    const skuUpdatedBy = fixtureId("SPEC14FIX", "spec-updated-by");
+    await upsertPart({ id: skuUpdatedBy, sku: skuUpdatedBy, desc: "Fix-wave specUpdatedBy test", category: "Other", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", skuUpdatedBy);
+    const catType = IMPORT_TYPES.find((t) => t.key === "catalog")!;
+    // Manufacturer is a required column at the prepareRows level (independent
+    // of catalogPatch's own preserve-when-absent merge against the existing
+    // record) — omitting it would make the row invalid before it ever reaches
+    // the writer.
+    const updatedByRows = prepareRows([[skuUpdatedBy, "Acme", "New body text."]], autoMap(["SKU", "Manufacturer", "Spec Body"], catType.fields), catType.fields);
+    const updatedByRes = await commitImport("catalog", updatedByRows.rows, "update", { effectiveAt: Date.now(), me: { name: "Fix Wave Tester" } });
+    ok(updatedByRes.updated === 1, "catalog import fix wave: the specUpdatedBy row commits via commitImport");
+    const partUpdatedBy = await getPart(skuUpdatedBy);
+    ok(partUpdatedBy?.specUpdatedBy === "Fix Wave Tester", "catalog import fix wave: commitImport threads ctx.me into specUpdatedBy instead of the 'import' fallback");
+
+    // The price-book importer (catalog/import.ts) gets the same resolve /
+    // unresolved-kept-as-legacy contract as the Import hub's catalogPatch.
+    const SEC2 = await createSection({ number: "27 27 27", title: fixtureId("SPEC14FIX", "pb-section"), by: "Fix wave test" });
+    registerFixture("spec_sections", SEC2.id);
+    const ART2 = await createArticle({ sectionId: SEC2.id, title: "Fix Wave PB Article" }, "Fix wave test");
+    registerFixture("spec_articles", ART2.id);
+
+    // One file, one manufacturer, two rows — checkManufacturer's "no-overlap"
+    // guard refuses a SECOND file for a manufacturer that already has parts
+    // on file when the new file shares no SKU with what's there (a real
+    // wrong-manufacturer catch, #132), so the resolve case and the
+    // unresolved-kept-as-legacy case are exercised in the same commit rather
+    // than two separate calls against a brand-new manufacturer.
+    const pbMfr = fixtureId("SPEC14FIX", "pb-mfr");
+    const skuResolve = fixtureId("SPEC14FIX", "pb-resolve");
+    const skuLegacyRow = fixtureId("SPEC14FIX", "pb-legacy");
+    const csv =
+      `SKU,Description,Category,Unit,Spec Section,Spec Article\n` +
+      `${skuResolve},Fix wave PB resolve test,Other,ea,27-27-27,Fix Wave PB Article\n` +
+      `${skuLegacyRow},Fix wave PB legacy test,Other,ea,,Some Unmatched Legacy Article\n`;
+    const res = await runCatalogImport({ mfr: pbMfr, text: csv, bytes: Buffer.byteLength(csv, "utf8"), effectiveAt: Date.now(), defaultCategory: "Other" });
+    registerFixture("catalog_parts", skuResolve);
+    registerFixture("catalog_parts", skuLegacyRow);
+    ok(res.ok && res.imported === 2, "catalog price-book import fix wave: both rows commit");
+    const partResolve = await getPart(skuResolve);
+    ok(partResolve?.specSectionId === SEC2.id && partResolve?.specArticleId === ART2.id, "catalog price-book import fix wave: Spec Section/Article resolve to the canonical pointers");
+    const partLegacyRow = await getPart(skuLegacyRow);
+    ok(!partLegacyRow?.specArticleId && partLegacyRow?.productMetadata?.specArticle === "Some Unmatched Legacy Article", "catalog price-book import fix wave: an unresolvable Spec Article is kept as legacy text, never dropped");
   }
 
   /* --- Rentals module, Task 1: equipment items + locations data layer ---

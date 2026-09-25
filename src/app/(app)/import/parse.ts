@@ -36,6 +36,15 @@ export type FieldDef = {
    *  instead of 0, so the writer can set `valueUnknown`; export writes the
    *  same token back, so the column round-trips. */
   allowUnknown?: boolean;
+  /** D-SPEC fix wave (Task 14) — this field is claimed ONLY by an exact
+   *  (normalized) match against its header/label/key/aliases (autoMap pass
+   *  1). It never enters pass 2's fuzzy "contains" match. Without this, a
+   *  vendor/Shopify column whose header is exactly "Title", "Text",
+   *  "Heading" or "State" fuzzy-matches a spec column's alias (e.g. "Title"
+   *  is a substring of "spectitle") and can overwrite + demote authored spec
+   *  text across the whole catalog — the read-only import preview can't
+   *  prevent it, so safety is enforced here instead. */
+  exactOnly?: boolean;
   aliases: string[];
   example?: string;
   options?: string[];
@@ -246,7 +255,7 @@ export function autoMap(headers: string[], fields: FieldDef[]): Record<string, n
     }
   });
   fields.forEach((f) => {
-    if (map[f.key] >= 0) return;
+    if (map[f.key] >= 0 || f.exactOnly) return;
     const cands = candsOf(f).filter((c) => c.length >= 4);
     // A "<thing> Label N" column describes another column; it never holds the
     // value. Daylite exports Phone Label 1 BEFORE Phone 1 and Email Label 1
