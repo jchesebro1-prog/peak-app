@@ -7329,7 +7329,7 @@ D199-D200 (D198 skipped — see the D199 entry in DECISIONS.md).
 
 ---
 
-## 160. Quote intake flow — company "+ New quote", searchable customer, name/rename, change type, catalog rapid-add — OPEN
+## 160. Quote intake flow — company "+ New quote", searchable customer, name/rename, change type, catalog rapid-add — DONE 2026-09-24 (D205, D206)
 
 **Reported:** 2026-09-23 (Jeff's practice run). From a company, "+ New quote" didn't pick the
 company, didn't offer type or name, and the quote couldn't be renamed from "New estimate".
@@ -7348,9 +7348,32 @@ catalog rows get a qty box, picker stays open, "✓ Added" confirm.
 Spec: `docs/superpowers/specs/2026-09-23-quote-intake-and-estimator-flow-design.md`.
 Decisions to log on build: D205, D206.
 
+**Shipped 2026-09-24 (ac573d7):** `quotes/new/handoff.ts` carries the pure intake→builder
+hand-off (customer/venue/contact/name/replaces); `builderPath`'s new options-object signature
+forwards them to all six builders, which seed venue/contact/name from the hand-off, warn on
+won-quote customer/venue/contact edits, and expose drafts-only "Change type" (disabled with
+"Already sent — start a new quote instead." once sent). `retireReplacedDraft` soft-deletes the
+old draft, and — after a final-review fix — every create path now goes through the never-throw
+`retireReplacedDraftSafely`, so a retire failure never blocks or duplicates a save. The Estimator
+title is click-to-edit; the catalog picker gained the per-row qty box, "✓ Added" toast, and stays
+open. Two scope calls from the plan: rental has no won-edit confirm because its Save is already
+locked once won, and system↔custom is not a replace — both build in the Estimator, so switching
+between them reopens the same quote. Gates: tsc 0; test:specs 2118 PASS / 0 FAIL (baseline 2032);
+test:review:regressions passed; test:smoke ALL PASSED; eslint 0 errors, no new warnings. Task 10's
+browser click-through passed all 9 steps on a scratch datadir, and a post-merge re-check
+(hand-off seeding, rapid-add, Change type → repair save retires the old draft) passed.
+
+A parallel, lighter implementation of #160/#161 had also landed on main (89812b7, f3ea6c7); per
+Jeff this branch's implementation superseded it in merge 30ec3c4. f3ea6c7's legacy-labor
+normalization was dropped as unreachable (labor drafts always open fresh) and because it
+regressed the #89 travel-estimate seeding; b5fc8fa's plain-input estimator title was likewise
+dropped in favor of the click-to-edit title above (a blank edit no longer clears the name).
+Pre-existing on main and not fixed here: the consulting quote create-failure redirect in
+`design/engagements/quote/actions.ts` builds its URL without `?`, so the error banner doesn't show.
+
 ---
 
-## 161. Estimator Labor opens with one mobilization; the five presets become per-type defaults — OPEN
+## 161. Estimator Labor opens with one mobilization; the five presets become per-type defaults — DONE 2026-09-24 (D207)
 
 **Reported:** 2026-09-23 (Jeff). "The Labor input needs to only do a single mobilization not
 multiple when clicking the button." Clarified: the D136 values (Site Visit 1×1, Install 4×5,
@@ -7359,6 +7382,13 @@ Hang 2×3, Commissioning 2×3, Training 1×1) are crew-size × days defaults per
 **Fix:** `defaultLaborMobs` (`estimator/labor-defaults.ts:45`) returns one blank row; picking a
 type fills people/days from the lookup only while they're untouched. Supersedes D136's opening
 rows. Same spec as #160. Decision to log on build: D207.
+
+**Shipped 2026-09-24 (c1fa844):** `estimator/labor-defaults.ts` now opens Labor with one blank
+row (Select type…, 1 × 1); `applyMobType` fills a row's people/days from the D136 lookup only
+while the row's numbers still equal the previous type's defaults, leaving user-typed numbers and
+custom-named rows alone. "+ Add mobilization" still adds exactly one row. Gates: tsc 0; test:specs
+2118 PASS / 0 FAIL (baseline 2032); test:review:regressions passed; test:smoke ALL PASSED; eslint
+0 errors, no new warnings.
 
 ---
 

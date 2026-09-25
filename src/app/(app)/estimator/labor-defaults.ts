@@ -1,16 +1,25 @@
 import type { MobDraft, TravelLite } from "./types";
 
-export const MOB_DEFAULTS = {
-  "Site Visit": ["1", "1"],
-  Install: ["4", "5"],
-  Hang: ["2", "3"],
-  Commissioning: ["2", "3"],
-  Training: ["1", "1"],
-} as const;
+/**
+ * Crew-size × days defaults per mobilization type. D136 opened Labor with
+ * these five as pre-filled rows; D207 (#161, Jeff 2026-09-23) made them what
+ * they were meant to be — the numbers a type pick fills in.
+ */
+export const MOB_DEFAULTS: Record<string, { people: string; days: string }> = {
+  "Site Visit": { people: "1", days: "1" },
+  Install: { people: "4", days: "5" },
+  Hang: { people: "2", days: "3" },
+  Commissioning: { people: "2", days: "3" },
+  Training: { people: "1", days: "1" },
+};
 
-export function mobDefaultsFor(name: string): { people: string; days: string } | null {
-  const pair = MOB_DEFAULTS[name as keyof typeof MOB_DEFAULTS];
-  return pair ? { people: pair[0], days: pair[1] } : null;
+const BLANK_MOB = { people: "1", days: "1" } as const;
+
+const isListedType = (name: string) => Object.prototype.hasOwnProperty.call(MOB_DEFAULTS, name);
+
+/** The defaults for a type; a blank or unknown name is 1 × 1. */
+export function mobDefaultsFor(name: string): { people: string; days: string } {
+  return isListedType(name) ? MOB_DEFAULTS[name] : { ...BLANK_MOB };
 }
 
 export function disciplineForSystemTitle(title: string): "RIG" | "LIG" | "AUD" | "OTH" {
@@ -47,26 +56,23 @@ export function laborMob(
   };
 }
 
+/** Labor opens with ONE blank mobilization (D207) — "+ Add mobilization" adds more. */
 export function defaultLaborMobs(travel: TravelLite | null): MobDraft[] {
   return [laborMob(travel)];
 }
 
 /**
- * Removes only the old untouched five-row seed. Real multi-mobilization work
- * is preserved, including a user who changed any crew/day value or label.
+ * Picking a type from the "Select type…" list. People/days are refilled from
+ * the new type's defaults ONLY while they still equal the previous type's
+ * defaults (1 × 1 for a blank row) — anything the user typed is kept. A row
+ * that carried a custom name has no "previous default", so it keeps its numbers.
  */
-export function normalizeLaborMobs(mobs: MobDraft[], travel: TravelLite | null = null): MobDraft[] {
-  const legacy = [
-    ["Site Visit", "1", "1"],
-    ["Install", "4", "5"],
-    ["Hang", "2", "3"],
-    ["Commissioning", "2", "3"],
-    ["Training", "1", "1"],
-  ] as const;
-  if (mobs.length !== legacy.length) return mobs;
-  const untouched = mobs.every((m, i) => {
-    const [name, people, days] = legacy[i];
-    return m.name === name && m.people === people && m.days === days && !m.nameCustom;
-  });
-  return untouched ? [laborMob(travel)] : mobs;
+export function applyMobType(m: MobDraft, name: string): MobDraft {
+  const wasCustom = m.nameCustom || (!!m.name && !isListedType(m.name));
+  const prev = wasCustom ? null : mobDefaultsFor(m.name);
+  const untouched = !!prev && m.people === prev.people && m.days === prev.days;
+  const next: MobDraft = { ...m, name, nameCustom: false };
+  if (!untouched) return next;
+  const d = mobDefaultsFor(name);
+  return { ...next, people: d.people, days: d.days };
 }

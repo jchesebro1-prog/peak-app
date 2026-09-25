@@ -19,6 +19,7 @@ import { getFixtureRates } from "@/lib/stores/pricing";
 import { blobEnabled } from "@/lib/blob";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
+import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import EstimatorClient from "./estimator-client";
 import type {
@@ -114,6 +115,7 @@ async function initialFrom(
       tierMargin: null,
       sections: null,
       vendorQuotes: [],
+      replaces: "",
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -171,6 +173,7 @@ async function initialFrom(
     tierMargin: q.tierMargin ?? null,
     sections,
     vendorQuotes: vendorQuotesOf(q),
+    replaces: "",
   };
 }
 
@@ -183,15 +186,12 @@ export default async function EstimatorPage({
   const sp = await searchParams;
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-  // Guided intake hand-off (quotes/new): only applies to a fresh builder —
-  // an explicit ?id= always wins.
-  const preCustomer = rawId ? undefined : one(sp.customer);
+  // Guided intake hand-off (quotes/new, #160): only applies to a fresh
+  // builder — an explicit ?id= always wins.
+  const handoff = rawId ? null : readHandoff(sp);
+  const preCustomer = handoff?.customerId || undefined;
   // #110: the intake's "Custom category" card hands its name over the same way.
-  const preCategory = rawId ? undefined : one(sp.category);
-  const preName = rawId ? undefined : one(sp.name);
-  const preVenue = rawId ? undefined : one(sp.venue);
-  const preContact = rawId ? undefined : one(sp.contact);
-  const replaces = rawId ? undefined : one(sp.replaces);
+  const preCategory = handoff?.category || undefined;
 
   /* ---- Scope draft source (S12/D83 — rules-based): resolve the linked
      survey/inspection. ?surveyId= / ?inspectionId= links the source; we
@@ -272,24 +272,25 @@ export default async function EstimatorPage({
   }));
 
   const initial = await initialFrom(q, customers, user.name);
-  initial.replaces = replaces || null;
 
-  // Seed the customer/venue/contact picked in the guided intake screen
-  // (quotes/new) — venue/contact default to the customer's primary, same
-  // as repairs/quote's preCustomer handling.
+  // Seed the customer/venue/contact picked in the guided intake (quotes/new).
+  // A venue/contact not on the customer falls back to its primary (#160).
   if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer);
     if (cust) {
-      const prim = cust.locations.find((l) => l.primary) || cust.locations[0] || null;
-      const primaryContact = cust.contacts.find((c) => c.primary) || cust.contacts[0] || null;
       initial.customerId = cust.id;
       initial.custName = cust.name;
-      initial.locationId = cust.locations.some((l) => l.id === preVenue) ? preVenue || null : prim?.id || null;
-      initial.contactName = cust.contacts.some((c) => c.name === preContact) ? preContact || "" : primaryContact?.name || "";
-      initial.projectName = preName?.trim() || `${cust.name} — ${preCategory?.trim() || "System"}`;
+      initial.locationId = pickVenueId(cust, handoff?.venueId || "") || null;
+      initial.contactName = pickContactName(cust, handoff?.contactName || "");
     }
   }
   if (preCategory && preCategory.trim()) initial.category = preCategory.trim();
+  if (handoff) {
+    // #160: the intake's optional name, else "<Customer> — System" (or
+    // "— <category>") instead of the old static "New estimate".
+    initial.projectName = handoff.name || (initial.customerId ? systemQuoteName(initial.custName, initial.category) : initial.projectName);
+    initial.replaces = handoff.replaces;
+  }
 
   /* ---- travel estimate for the LOADED quote only (E3/E4, punch #89) ----
      This used to build an entry for every customer AND every venue in the

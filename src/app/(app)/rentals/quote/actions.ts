@@ -9,7 +9,7 @@ import {
   update as updateQuote,
   setStatus,
   statusFailureMessage,
-  retireReplacedDraft,
+  retireReplacedDraftSafely,
 } from "@/lib/stores/quotes";
 import { get as getEquipmentItem } from "@/lib/stores/equipment-items";
 import { availableQty } from "@/lib/stores/equipment-bookings";
@@ -67,9 +67,9 @@ function daysBetween(startDate: number, endDate: number): number {
 async function persist(formData: FormData): Promise<string | null> {
   const user = await requireUser();
   const editingId = String(formData.get("editingId") || "");
-  const replaces = String(formData.get("replaces") || "").trim();
   const customerId = String(formData.get("customerId") || "");
   const quoteName = String(formData.get("quoteName") || "").trim();
+  const replaces = String(formData.get("replaces") || "").trim();
   const contactName = String(formData.get("contactName") || "").trim();
   const contactRole = String(formData.get("contactRole") || "").trim();
   const contactEmail = String(formData.get("contactEmail") || "").trim();
@@ -134,7 +134,12 @@ async function persist(formData: FormData): Promise<string | null> {
   };
 
   const q = editingId ? await updateQuote(editingId, payload) : await createQuote(payload);
-  if (!editingId && q && replaces) await retireReplacedDraft(replaces);
+  // D205: first save of a "Change type" replacement retires the old draft.
+  // The new quote already exists, so a failed retire is logged, never thrown —
+  // a throw would read as "nothing was written" and a re-save would duplicate.
+  if (!editingId && q) {
+    await retireReplacedDraftSafely(replaces, q.id, "rentals quote");
+  }
   return (q && q.id) || editingId || null;
 }
 

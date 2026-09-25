@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
+import { CustomerCombobox } from "@/components/customer-combobox";
 import EntityQuickAdd, { INPUT, LABEL, type QuickAddValues } from "@/components/entity-quick-add";
 import { createQuoteIntakeAction } from "./actions";
+import { replaceConfirmMessage, sameBuilder, type IntakeInitial, type IntakeReplacing } from "./handoff";
 import { SERVICE_TYPES, type IntakeCustomer, type IntakeSubmit, type ServiceType } from "./types";
-import { CustomerCombobox } from "@/components/customer-combobox";
 
 const ADD_NEW = "__add_new__";
 const SKIP = "__skip__";
@@ -18,43 +19,36 @@ function locationLine(l: IntakeCustomer["locations"][number]): string {
 
 export default function QuoteIntakeForm({
   customers,
-  initialType,
-  initialCustomerId = "",
-  initialName = "",
-  initialVenueId = "",
-  initialContactName = "",
-  initialReplaces = "",
+  initial,
+  replacing,
 }: {
   customers: IntakeCustomer[];
-  initialType: ServiceType;
-  initialCustomerId?: string;
-  initialName?: string;
-  initialVenueId?: string;
-  initialContactName?: string;
-  initialReplaces?: string;
+  initial: IntakeInitial;
+  replacing: IntakeReplacing | null;
 }) {
-  const [type, setType] = useState<ServiceType>(initialType);
+  const [type, setType] = useState<ServiceType>(initial.type);
   // #110: the user-named category behind the trailing "Custom category" card.
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState(initial.category);
+  // #160: optional quote name — blank lets the builder auto-name.
+  const [name, setName] = useState(initial.name);
 
-  const [customerMode, setCustomerMode] = useState<"pick" | "new">(initialCustomerId ? "pick" : "pick");
-  const [customerId, setCustomerId] = useState(initialCustomerId);
-  const [quoteName, setQuoteName] = useState(initialName);
+  const [customerMode, setCustomerMode] = useState<"pick" | "new">("pick");
+  const [customerId, setCustomerId] = useState(initial.customerId);
   const [newCustomer, setNewCustomer] = useState<QuickAddValues["customer"]>({
     name: "",
     type: CUSTOMER_TYPES[0] || "",
   });
 
-  const [locationMode, setLocationMode] = useState<"pick" | "new" | "skip">(initialVenueId ? "pick" : "skip");
-  const [locationId, setLocationId] = useState(initialVenueId);
+  const [locationMode, setLocationMode] = useState<"pick" | "new" | "skip">(initial.locationId ? "pick" : "skip");
+  const [locationId, setLocationId] = useState(initial.locationId);
   const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>({
     label: "",
     city: "",
     state: "",
   });
 
-  const [contactMode, setContactMode] = useState<"pick" | "new" | "skip">(initialContactName ? "pick" : "skip");
-  const [contactName, setContactName] = useState(initialContactName);
+  const [contactMode, setContactMode] = useState<"pick" | "new" | "skip">(initial.contactName ? "pick" : "skip");
+  const [contactName, setContactName] = useState(initial.contactName);
   const [newContact, setNewContact] = useState<QuickAddValues["contact"]>({
     name: "",
     role: "",
@@ -71,6 +65,25 @@ export default function QuoteIntakeForm({
   // A customer is "in play" once one is picked or a new one is being named —
   // that's when the venue/contact steps make sense to show at all.
   const hasCustomerContext = customerMode === "new" || !!customerId;
+
+  // #160: the shared typeahead replaces the search box + closed <select>
+  // pair, which filtered options nobody could see. Venue city and contact
+  // names are searchable too.
+  const customerOptions = useMemo(
+    () =>
+      customers.map((c) => ({
+        id: c.id,
+        name: c.name,
+        detail:
+          [c.type, c.locations.map((l) => l.label).filter(Boolean).slice(0, 3).join(" · ")].filter(Boolean).join(" — ") ||
+          undefined,
+        searchText: [
+          ...c.locations.map((l) => `${l.label} ${l.city} ${l.state}`),
+          ...c.contacts.map((ct) => ct.name),
+        ].join(" "),
+      })),
+    [customers]
+  );
 
   function pickCustomer(id: string) {
     if (id === ADD_NEW) {
@@ -115,12 +128,17 @@ export default function QuoteIntakeForm({
 
   function submit() {
     if (!canSubmit || pending) return;
+    // D205: a different builder means a NEW quote; the old draft goes on its
+    // first save. Same builder → the server just reopens the old quote.
+    if (replacing && !sameBuilder(type, replacing.type) && !window.confirm(replaceConfirmMessage(replacing.id, replacing.lines))) {
+      return;
+    }
     setError("");
     const payload: IntakeSubmit = {
       type,
       category: type === "custom" ? category.trim() : "",
-      name: quoteName.trim(),
-      replaces: initialReplaces,
+      name: name.trim(),
+      replaces: replacing?.id || "",
       customerMode,
       customerId,
       newCustomerName: newCustomer.name,
@@ -146,14 +164,16 @@ export default function QuoteIntakeForm({
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
-      <Link href="/quotes" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>
-        ← Quotes
+      <Link href={replacing ? replacing.editPath : "/quotes"} style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>
+        {replacing ? `← Back to ${replacing.id}` : "← Quotes"}
       </Link>
       <h1 style={{ fontSize: 21, fontWeight: 700, color: "#16181d", margin: "6px 0 3px" }}>
-        New quote
+        {replacing ? "Change quote type" : "New quote"}
       </h1>
       <p style={{ fontSize: 13, color: "#8c919c", margin: "0 0 22px" }}>
-        Pick who this is for, then jump straight into the builder.
+        {replacing
+          ? `Pick the new type for ${replacing.id}. It is replaced when the new quote is first saved.`
+          : "Pick who this is for, then jump straight into the builder."}
       </p>
 
       {/* ---- service category ---- */}
@@ -239,29 +259,27 @@ export default function QuoteIntakeForm({
 
       {/* ---- customer ---- */}
       <label style={LABEL}>Customer</label>
-      <CustomerCombobox
-        options={customers.map((c) => ({
-          id: c.id,
-          name: c.name,
-          detail: c.locations[0] ? locationLine(c.locations[0]) : undefined,
-          searchText: [...c.locations.map((l) => `${l.label} ${l.city} ${l.state}`), ...c.contacts.map((c) => c.name)].join(" "),
-        }))}
-        value={customerMode === "new" ? "" : customerId}
-        onChange={pickCustomer}
-      />
-      {customerMode === "pick" && !customerId && (
-        <button type="button" onClick={() => setCustomerMode("new")} style={{ ...inlineLinkStyle, marginTop: 8 }}>
-          + Add new customer…
-        </button>
+      {customerMode === "pick" ? (
+        <>
+          <CustomerCombobox
+            options={customerOptions}
+            value={customerId}
+            onChange={(id) => pickCustomer(id)}
+            placeholder="Search customers, venues or contacts…"
+            inputStyle={INPUT}
+          />
+          <button type="button" onClick={() => pickCustomer(ADD_NEW)} style={{ ...inlineLinkStyle, marginTop: 7 }}>
+            + Add new customer…
+          </button>
+        </>
+      ) : (
+        <EntityQuickAdd
+          kind="customer"
+          value={newCustomer}
+          onChange={setNewCustomer}
+          onCancel={() => pickCustomer("")}
+        />
       )}
-      {customerMode === "new" && (
-        <div style={{ marginTop: 8 }}>
-          <EntityQuickAdd kind="customer" value={newCustomer} onChange={setNewCustomer} />
-        </div>
-      )}
-
-      <label style={LABEL}>Quote name <span style={{ color: "#aab0bb", textTransform: "none", letterSpacing: 0 }}>· optional</span></label>
-      <input value={quoteName} onChange={(e) => setQuoteName(e.target.value)} placeholder="Leave blank to name it automatically" style={INPUT} />
 
       {/* ---- venue (skippable) ---- */}
       <label style={LABEL}>Venue</label>
@@ -342,6 +360,15 @@ export default function QuoteIntakeForm({
         </div>
       )}
 
+      {/* ---- quote name (optional, #160) ---- */}
+      <label style={LABEL}>Quote name</label>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Optional — leave blank to name it automatically"
+        style={INPUT}
+      />
+
       {error && (
         <div
           style={{
@@ -371,7 +398,7 @@ export default function QuoteIntakeForm({
           cursor: !canSubmit || pending ? "default" : "pointer",
         }}
       >
-        {pending ? "Setting up…" : "Continue to builder →"}
+        {pending ? "Setting up…" : replacing && sameBuilder(type, replacing.type) ? `Back to ${replacing.id} →` : "Continue to builder →"}
       </button>
     </div>
   );

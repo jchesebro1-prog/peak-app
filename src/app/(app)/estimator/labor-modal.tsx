@@ -257,7 +257,6 @@ export default function LaborModal({
         <button
           type="button"
           onClick={onAddMob}
-          disabled={false}
           style={{
             fontFamily: "var(--font-ui)",
             fontSize: 12,
@@ -268,7 +267,6 @@ export default function LaborModal({
             borderRadius: 7,
             padding: "6px 11px",
             cursor: "pointer",
-            opacity: 1,
           }}
         >
           + Add mobilization

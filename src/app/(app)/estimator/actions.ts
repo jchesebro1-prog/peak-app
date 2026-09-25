@@ -10,9 +10,9 @@ import {
   create,
   get,
   getAll,
-  retireReplacedDraft,
   requestChanges,
   requireApprovalToAdvance,
+  retireReplacedDraftSafely,
   setStatus,
   setQuoteStage,
   setQuotePipeline,
@@ -38,7 +38,6 @@ import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
-import type { SuggestPart } from "./estimator-data";
 import { totals } from "./pricing";
 import { activeUsers } from "@/lib/users";
 
@@ -107,7 +106,6 @@ type QuoteExtras = {
 type QuotePatch = Partial<Quote> & QuoteExtras;
 
 export type SavePayload = {
-  replaces?: string | null;
   name: string;
   customer: string;
   customerId: string | null;
@@ -127,6 +125,8 @@ export type SavePayload = {
   /** Always sent in full (#143) — the stored list is replaced, so removing a
    *  vendor quote in the builder actually removes it from the doc. */
   vendorQuotes: VendorQuote[];
+  /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
+  replaces?: string;
 };
 
 export type SaveResult = {
@@ -381,7 +381,6 @@ export async function saveQuoteAction(
       category: (payload.category || "").trim(),
       vendorQuotes: storedVendorQuotes,
     } as QuotePatch);
-    if (payload.replaces) await retireReplacedDraft(payload.replaces);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
       // new quote can never already carry an approval record, so this can
@@ -400,6 +399,8 @@ export async function saveQuoteAction(
       }
     }
     q = q || created;
+    // D205: the replaced draft goes only once its replacement exists.
+    await retireReplacedDraftSafely(payload.replaces, created.id, "estimator");
   }
   refresh();
   return {
@@ -564,7 +565,6 @@ export async function moveSystemToEstimateAction(
 export async function updateQuoteMetaAction(
   id: string,
   meta: {
-    name?: string;
     customerId?: string | null;
     locationId?: string | null;
     customer?: string;
@@ -573,6 +573,7 @@ export async function updateQuoteMetaAction(
     assumptions?: string;
     installTimeframe?: string;
     category?: string;
+    name?: string;
   }
 ): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
   await requireUser();
@@ -583,7 +584,6 @@ export async function updateQuoteMetaAction(
   // bypassing the permission-gated review actions below. Approval/status/price
   // changes have their own checked mutators (approveReviewAction, setStatus…).
   const patch: QuotePatch = {};
-  if (typeof meta.name === "string") patch.name = meta.name.trim();
   if ("customerId" in meta) patch.customerId = meta.customerId;
   if ("locationId" in meta) patch.locationId = meta.locationId;
   if (typeof meta.customer === "string") patch.customer = meta.customer;
@@ -592,6 +592,8 @@ export async function updateQuoteMetaAction(
   if (typeof meta.assumptions === "string") patch.assumptions = meta.assumptions;
   if (typeof meta.installTimeframe === "string") patch.installTimeframe = meta.installTimeframe.trim();
   if (typeof meta.category === "string") patch.category = meta.category.trim();
+  // #160: the click-to-edit Estimator title. Blank never clears a name.
+  if (typeof meta.name === "string" && meta.name.trim()) patch.name = meta.name.trim();
 
   // Item 11 (D87): a customer/contact change re-resolves the pricing tier
   // SERVER-side (never trusted from the client) and re-stamps the quote.
@@ -1097,34 +1099,6 @@ export async function resolveCatalogSkusAction(
     if (hit) out[requested] = hit;
   }
   return out;
-}
-
-/**
- * Catalog-backed quick-add suggestions for a section (PUNCHLIST #14, decision
- * B — replaces the hardcoded SUGGEST/GENERIC_SUGGEST arrays, which listed
- * SKUs that mostly didn't exist in the real catalog). Exact match (trimmed,
- * case-insensitive) on `mfr` — sections now carry an editable manufacturer,
- * so this only returns anything once one is set. Empty input -> empty
- * result rather than an unfiltered top-N, matching decision B's spirit: a
- * real, validated suggestion or nothing, never a guess.
- */
-export async function suggestPartsForMfr(mfr: string, limit = 4): Promise<SuggestPart[]> {
-  await requireUser();
-  const m = (mfr || "").trim().toLowerCase();
-  if (!m) return [];
-
-  const parts = await catalogList();
-  return parts
-    .filter((p) => (p.mfr || "").trim().toLowerCase() === m)
-    .sort((a, b) => (a.desc || "").localeCompare(b.desc || ""))
-    .slice(0, Math.max(1, limit))
-    .map((p) => ({
-      sku: p.sku,
-      desc: p.desc,
-      cost: p.cost || 0,
-      price: p.list || 0,
-      unit: p.unit || "ea",
-    }));
 }
 
 /* ---------------- travel, on demand (punch #89) ----------------

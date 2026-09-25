@@ -7,10 +7,11 @@ import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { getAllProjects } from "@/lib/stores/projects";
 import { coordsOf } from "@/lib/geo";
 import { Avatar } from "@/components/ui";
-import type { MapPin } from "@/components/map/LeafletMap";
-import { CustomersMap, FilterBar } from "./controls";
+import { FilterBar } from "./controls";
+import { CompanyMapClient } from "./map-client";
+import type { CompanyMapFilters, CompanyMapPoint } from "./map-filter";
 import EditCustomerModal from "./edit-modal";
-import { cityState, custLocation, mono, moneyK, typeColor } from "./lib";
+import { custLocation, mono, moneyK } from "./lib";
 import { getSettings } from "@/lib/settings";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { travelForPoints } from "@/lib/travel-bulk";
@@ -69,9 +70,29 @@ export default async function CustomersPage({
   };
 
   /* ---- per-customer activity rollups (quotes / projects live by id|name) ---- */
-  const quotesFor = (id: string, name: string) =>
-    quotes.filter((qt) => (qt.customerId ? qt.customerId === id : !!name && qt.customer === name));
-  const projectsFor = (id: string) => projects.filter((p) => p.customerId === id);
+  const quotesById = new Map<string, typeof quotes>();
+  const quotesByName = new Map<string, typeof quotes>();
+  for (const qt of quotes) {
+    const key = qt.customerId || qt.customer;
+    if (!key) continue;
+    const idx = qt.customerId ? quotesById : quotesByName;
+    const list = idx.get(key);
+    if (list) list.push(qt);
+    else idx.set(key, [qt]);
+  }
+  // Concatenation loses the original interleaving; callers only sum, count, and sort by `at`.
+  const quotesFor = (id: string, name: string) => [
+    ...(quotesById.get(id) ?? []),
+    ...(name ? quotesByName.get(name) ?? [] : []),
+  ];
+  const projectsByCustomer = new Map<string, typeof projects>();
+  for (const p of projects) {
+    if (p.customerId == null) continue;
+    const list = projectsByCustomer.get(p.customerId);
+    if (list) list.push(p);
+    else projectsByCustomer.set(p.customerId, [p]);
+  }
+  const projectsFor = (id: string) => projectsByCustomer.get(id) ?? [];
 
   const rollup = (id: string, name: string) => {
     const qs = quotesFor(id, name);
@@ -155,26 +176,66 @@ export default async function CustomersPage({
     ...roster.map((p) => ({ value: p.name, label: p.name === me.name ? p.name + " (me)" : p.name })),
   ];
 
-  /* ---- map pins ---- */
-  const pins: MapPin[] = [];
-  filtered.forEach(({ c }) => {
-    (c.locations || []).forEach((l) => {
-      const co = coordsOf(l);
-      if (!co) return;
-      pins.push({
-        id: c.id + (l.id || ""),
-        lat: co.lat,
-        lng: co.lng,
-        color: typeColor(c.type),
-        label: c.name,
-        sub: [l.label, cityState(l)].filter(Boolean).join(" · "),
-        href: `/companies/${encodeURIComponent(c.id)}`,
-      });
-    });
-  });
-
   const hasCustomers = customers.length > 0;
   const mapMode = view === "map";
+
+  /* ---- map mode (Jeff's request, D-none): a slim VM for EVERY located
+   *  venue of EVERY company — never the URL-filtered `filtered`/`sorted`
+   *  above — shipped once to CompanyMapClient, which filters ~1,300 points
+   *  in memory on every rail keystroke. List mode is untouched by this. */
+  const mapPoints: CompanyMapPoint[] = [];
+  let initialMapFilters: CompanyMapFilters = {
+    q: "",
+    type: "all",
+    owner: "all",
+    lifecycle: "all",
+    tag: "all",
+    drive: "",
+    hasOpenQuotes: false,
+  };
+  if (mapMode) {
+    rows.forEach(({ c, openValue, quoteCount, owner }) => {
+      const d = travel.byId.get(c.id);
+      const hasDrive = !!d && d.source !== "none" && d.miles != null;
+      (c.locations || []).forEach((l) => {
+        const co = coordsOf(l);
+        if (!co) return;
+        mapPoints.push({
+          companyId: c.id,
+          locId: l.id || "",
+          lat: co.lat,
+          lng: co.lng,
+          name: c.name,
+          type: c.type || "",
+          owner,
+          lifecycle: c.lifecycle || "none",
+          keywords: c.keywords || [],
+          venueLabel: l.label || "",
+          city: l.city || "",
+          state: l.state || "",
+          driveMin: hasDrive ? d!.minutes : null,
+          driveMiles: hasDrive ? d!.miles : null,
+          openValue,
+          quoteCount,
+          addedAt: c.createdAt ?? 0,
+        });
+      });
+    });
+    // Carry over the filters list mode already has an equivalent control
+    // for, so following "Map" from a filtered directory keeps the view
+    // consistent (spec: "Map from a filtered list keeps the filters"). The
+    // rail's other controls (lifecycle/tag/drive/open-quotes) have no list-
+    // mode URL param to inherit and start unset.
+    initialMapFilters = {
+      q,
+      type: typeParam,
+      owner: scope || "all",
+      lifecycle: "all",
+      tag: "all",
+      drive: "",
+      hasOpenQuotes: false,
+    };
+  }
 
   const mapBtn = (
     <Link
@@ -205,7 +266,7 @@ export default async function CustomersPage({
             <div style={{ display: "flex", alignItems: "baseline", gap: 9, minWidth: 0 }}>
               <span style={{ fontSize: 15, fontWeight: 600 }}>Company map</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "#9aa0ab", whiteSpace: "nowrap" }}>
-                {pins.length} located venues
+                {mapPoints.length} located venues
               </span>
             </div>
             <Link
@@ -215,7 +276,7 @@ export default async function CustomersPage({
               Close map
             </Link>
           </div>
-          <CustomersMap pins={pins} />
+          <CompanyMapClient points={mapPoints} initialFilters={initialMapFilters} meName={me.name} ownerOptions={ownerOptions} />
         </div>
       ) : (
         <div className="pk-content" style={{ maxWidth: 760, margin: "0 auto" }}>

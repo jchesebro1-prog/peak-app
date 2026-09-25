@@ -2,8 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
-import { claimVisit, getVisit, releaseVisit, scheduleVisit } from "@/lib/stores/site-visits";
+import { claimVisit, getVisit, releaseVisit, removeVisit, scheduleVisit } from "@/lib/stores/site-visits";
 import { dispatchVisitInvite, type InviteStatus } from "@/lib/visit-invite";
+import { gmailEnabled, hasCalendarScope, personalKey } from "@/lib/gmail/config";
+import { getConnectionInfo } from "@/lib/gmail/connections";
+import { allUsers } from "@/lib/users";
 
 /**
  * #34 visit-queue mutations — the LEAD claim model (claimLeadAction:
@@ -35,6 +38,48 @@ export async function releaseVisitAction(id: string) {
   await releaseVisit(id);
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** The person's opted-in calendar key, or null (mirrors schedule/actions.ts's
+ *  private calendarKeyFor — kept a separate copy since that one is a
+ *  scheduler-popover file this punch intentionally stays out of). */
+async function calendarKeyFor(person: string): Promise<string | null> {
+  if (!gmailEnabled() || !person) return null;
+  const user = (await allUsers()).find((u) => u.name === person);
+  if (!user) return null;
+  const key = personalKey(user.id);
+  const info = await getConnectionInfo(key);
+  return info && hasCalendarScope(info.scope) ? key : null;
+}
+
+/**
+ * Delete a site visit. If it mirrored a direct Google Calendar event
+ * (googleEventId, phase 2 — not yet written anywhere, but the field is
+ * live), that event is removed best-effort first; a calendar failure never
+ * blocks the delete. Called directly (not a form action) so the client
+ * navigates/refreshes on success.
+ */
+export async function removeVisitAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireUser();
+  if (!id) return { ok: false, error: "Missing visit id." };
+  const v = await getVisit(id);
+  if (!v) return { ok: false, error: "That visit could not be found." };
+  if (v.googleEventId) {
+    try {
+      const key = await calendarKeyFor(v.assignedTo);
+      if (key) {
+        const { deleteEvent } = await import("@/lib/google/calendar");
+        await deleteEvent(key, v.googleEventId);
+      }
+    } catch (error) {
+      console.error("[site-visits] calendar delete failed:", id, error);
+    }
+  }
+  await removeVisit(id);
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 export async function scheduleVisitAction(

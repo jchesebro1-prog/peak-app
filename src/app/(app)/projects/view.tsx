@@ -59,6 +59,7 @@ import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
 import SignaturePad from "@/components/signature-pad";
 import { ProjectValueEditor } from "@/components/project-value-editor";
+import { DeleteProjectButton } from "./delete-project-button";
 import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
 import { boardProjects, dueChipLabel } from "./board-lib";
@@ -970,9 +971,12 @@ function ProjectDetail({
               {custName} · PM {firstName(p.owner)} · {formatJobValue(p, money)}
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600, color: dueColor }}>{dueBig}</div>
-            <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 2 }}>{dueSub}</div>
+          <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600, color: dueColor }}>{dueBig}</div>
+              <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 2 }}>{dueSub}</div>
+            </div>
+            <DeleteProjectButton id={p.id} backHref={backHref} />
           </div>
         </div>
 

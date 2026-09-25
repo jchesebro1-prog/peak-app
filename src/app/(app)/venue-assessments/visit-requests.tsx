@@ -4,7 +4,8 @@ import type { CSSProperties } from "react";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { claimVisitAction, releaseVisitAction, scheduleVisitAction } from "./visit-actions";
+import { claimVisitAction, releaseVisitAction, removeVisitAction, scheduleVisitAction } from "./visit-actions";
+import { ConfirmButton } from "@/components/confirm-button";
 
 /**
  * #34 — the open-visit queue rows above the survey cards. Unclaimed rows
@@ -174,6 +175,13 @@ function VisitRequestRow({ row }: { row: VisitRequestVM }) {
             </button>
           </div>
         )}
+        <ConfirmButton
+          label="Delete"
+          confirmLabel="Confirm"
+          className="pk-btn-danger"
+          style={{ fontSize: 11, padding: "6px 10px" }}
+          onConfirm={() => run(() => removeVisitAction(row.id))}
+        />
       </div>
       {err && <div style={{ fontSize: 11.5, color: "#b4543a", fontWeight: 600, marginTop: 6 }}>{err}</div>}
     </div>

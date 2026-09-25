@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import { deletePersonAction, savePersonAction } from "./actions";
 import type { ChannelInputVM, CompanyOptionVM, SavePersonInput } from "./types";
+import { ConfirmButton } from "@/components/confirm-button";
 
 /**
  * New / Edit person modal (identity core, D85). A person is one row for
@@ -287,13 +288,14 @@ export default function EditPersonModal({
         {/* footer */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "15px 22px", borderTop: "1px solid #f0f1f4", flexShrink: 0 }}>
           {mode === "edit" ? (
-            <button
-              onClick={del}
+            <ConfirmButton
+              label="Delete person"
+              confirmLabel="Confirm delete"
               disabled={busy}
+              className=""
               style={{ fontSize: 12.5, fontWeight: 600, color: "#b03a2e", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
-            >
-              Delete person
-            </button>
+              onConfirm={del}
+            />
           ) : (
             <span />
           )}

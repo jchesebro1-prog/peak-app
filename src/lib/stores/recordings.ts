@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, patchDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
 
 /**
  * Recordings (Krisp recordings spec §1.1 —
@@ -385,6 +385,20 @@ export async function createRecording(input: CreateRecordingInput): Promise<Reco
       updatedAt: at,
     })
   );
+}
+
+/**
+ * Delete a recording (soft delete — the RECORD only). Deliberately does not
+ * touch the audio: Blob storage (audio.blobPathname) or the Drive archive
+ * (audio.driveFileId) are left exactly as they are — Krisp import/transcript
+ * state is likewise untouched, since a poller catching a still-"importing"
+ * row mid-delete must not error, it should just find the tombstone on its
+ * next read and stop. Nothing spawns or sweeps recordings from another
+ * record, so there is no tombstone-coverage concern here (unlike the
+ * flame/repair/inspection job stores).
+ */
+export async function removeRecording(id: string): Promise<void> {
+  await softDeleteDoc("recordings", id);
 }
 
 /* ---------- mutations (each bumps updatedAt) ---------- */

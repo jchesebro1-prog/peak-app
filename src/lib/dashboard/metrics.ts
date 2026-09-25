@@ -9,6 +9,7 @@ import type { ConsultingEngagement } from "@/lib/stores/engagements";
 import type { RangeKey } from "./registry";
 import { isActive, isBacklog, isDone, projectTag, type ProjectTag } from "@/lib/pipelines";
 import { knownValue, unknownCount } from "@/lib/job-value";
+import { lineExtSellOf } from "@/app/(app)/estimator/pricing";
 
 export const DAY = 86_400_000;
 
@@ -114,7 +115,15 @@ export function projectedProfit(projects: ProjectRecord[]): { value: number; pro
 type SpecLike = {
   sections?: Array<{
     kind?: string;
-    items?: Array<{ sku?: string; desc?: string; qty?: number; price?: number; labor?: boolean; option?: boolean }>;
+    items?: Array<{
+      sku?: string;
+      desc?: string;
+      qty?: number;
+      price?: number;
+      extSellOverride?: number;
+      labor?: boolean;
+      option?: boolean;
+    }>;
   }>;
 };
 
@@ -139,7 +148,9 @@ export function equipmentSold(
         const sku = it.sku || "";
         const category = (sku && partCategory(sku)) || "Uncategorized";
         const qty = it.qty || 0;
-        const value = qty * (it.price || 0);
+        // Honor a manual extended-sell override (punch: unit/ext sell edits
+        // keep each other in sync) instead of always recomputing qty × price.
+        const value = lineExtSellOf({ qty, price: it.price || 0, extSellOverride: it.extSellOverride });
         const c = cats.get(category) || { value: 0, qty: 0, items: new Map() };
         c.value += value;
         c.qty += qty;

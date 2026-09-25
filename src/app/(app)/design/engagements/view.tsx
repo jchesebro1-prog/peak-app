@@ -32,6 +32,7 @@ import {
   linkInstallQuoteAction,
   linkVisitAction,
   removeDocumentAction,
+  removeEngagementAction,
   removeMilestoneAction,
   removePhaseAction,
   setArchitectAction,
@@ -50,6 +51,7 @@ import {
 } from "./actions";
 import { approvalIsStale } from "@/lib/consulting-review";
 import { Card, EmptyState, KpiTile, Mono, PageHeader, Pill, StatusPill } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm-button";
 import { money } from "@/lib/format";
 import { NewEngagementModal } from "./new-engagement-modal";
 import { ActivityTab, type ActivityPerson } from "./activity-tab";
@@ -435,6 +437,17 @@ function EngagementDetail({
             <option key={s.key} value={s.key}>{s.label}</option>
           ))}
         </select>
+        <span style={{ flex: 1 }} />
+        <ConfirmButton
+          label="Delete"
+          confirmLabel="Confirm delete"
+          onConfirm={async () => {
+            const res = await removeEngagementAction(eng.id);
+            if (!res.ok) throw new Error(res.error);
+            router.push("/design/engagements");
+            router.refresh();
+          }}
+        />
       </div>
       <div style={{ fontSize: 12.5, color: "#5b616e", display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
         <span>{eng.customer}</span>
