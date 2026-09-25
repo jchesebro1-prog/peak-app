@@ -41,7 +41,6 @@ export function CatalogControls({
 }) {
   const router = useRouter();
   const [text, setText] = useState(q);
-  const first = useRef(true);
 
   const push = (over: { q?: string; sort?: string }) => {
     const qs = new URLSearchParams();
@@ -57,10 +56,7 @@ export function CatalogControls({
 
   // debounce the search input
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    if (text.trim() === q.trim()) return;
     const t = setTimeout(() => push({ q: text }), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
