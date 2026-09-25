@@ -15,6 +15,7 @@ import {
   addNote,
   addTime,
   setSignoff,
+  setProjectValue,
   signoffScopes,
   createProjectFromQuote,
   type ProjectStage,
@@ -117,6 +118,32 @@ export async function setLinePoAction(formData: FormData): Promise<void> {
   } catch (error) {
     console.error("setLinePoAction failed", error);
     projectErrorPath(id, formTab(formData, "procurement"), "Couldn’t save that PO number — please try again.");
+  }
+  revalidatePath("/", "layout");
+}
+
+/** Set a project's contract value by hand — the "fill it in later" path for
+ *  a Daylite-imported record that landed with no known value (Task 9
+ *  follow-up). Accepts currency-ish input ("$86,400", "86400") from the
+ *  overview's inline editor; empty or unparseable input is refused like the
+ *  file's other guarded writes. Saving always clears valueUnknown
+ *  (setProjectValue's job), even when re-editing an already-known value. */
+export async function setProjectValueAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const id = str(formData, "id");
+  if (!id) return;
+  const cleaned = str(formData, "value").replace(/[^0-9.-]/g, "");
+  const value = cleaned === "" ? NaN : Number(cleaned);
+  if (!Number.isFinite(value) || value < 0) {
+    projectErrorPath(id, formTab(formData, "overview"), "Enter a valid contract value.");
+  }
+  try {
+    if (!await setProjectValue(id, value, user.name)) {
+      projectErrorPath(id, formTab(formData, "overview"), "That project could not be updated — please refresh and try again.");
+    }
+  } catch (error) {
+    console.error("setProjectValueAction failed", error);
+    projectErrorPath(id, formTab(formData, "overview"), "Couldn’t save the contract value — please try again.");
   }
   revalidatePath("/", "layout");
 }

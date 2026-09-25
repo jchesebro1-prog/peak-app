@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import type { TaskTemplateSetRecord } from "@/lib/stores/task-templates";
 import { firstName, deriveInitials, fallbackColor } from "@/lib/team";
@@ -51,12 +51,14 @@ import {
   setTaskStatusAction,
   updateTaskAction,
   applyProjectTemplateAction,
+  setProjectValueAction,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
 import SignaturePad from "@/components/signature-pad";
+import { ProjectValueEditor } from "@/components/project-value-editor";
 import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM } from "@/components/board/types";
 import { boardProjects, dueChipLabel } from "./board-lib";
@@ -1254,7 +1256,7 @@ function OverviewTab({
   templateSets: TaskTemplateSetRecord[];
 }) {
   const risks = riskFlags(p);
-  const cards: Array<{ label: string; value: string; sub: string }> = [];
+  const cards: Array<{ label: string; value: ReactNode; sub: string }> = [];
   cards.push({ label: "Target", value: fmtDate(p.targetDate), sub: isOrder ? "delivery" : "install ready" });
   if (!isOrder)
     cards.push({
@@ -1269,7 +1271,16 @@ function OverviewTab({
   });
   cards.push({
     label: isOrder ? "Order value" : "Contract",
-    value: formatJobValue(p, shortMoney),
+    value: (
+      <ProjectValueEditor
+        key={p.value + "-" + String(!!p.valueUnknown)}
+        id={p.id}
+        value={p.value}
+        valueUnknown={!!p.valueUnknown}
+        display={formatJobValue(p, shortMoney)}
+        action={setProjectValueAction}
+      />
+    ),
     sub: p.valueUnknown ? "imported — value not on file" : p.margin ? Math.round(p.margin * 100) + "% margin" : "",
   });
 

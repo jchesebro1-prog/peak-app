@@ -435,6 +435,40 @@ export async function updateProject(
 }
 
 /**
+ * Task 9 follow-up (#UKN "fill it in later") — set a Daylite-imported
+ * project's contract value by hand and clear `valueUnknown` so it drops out
+ * of the value-unknown filter/worklist and starts counting in every total
+ * (knownValue). A narrow, guarded patch — NOT the unguarded updateProject(),
+ * which would let a caller silently reintroduce valueUnknown or touch fields
+ * this form has no business changing. Leaves an audit note (like addNote)
+ * only when the record actually was unknown, so a routine value correction
+ * on an already-known project doesn't spam the notes feed.
+ */
+export async function setProjectValue(
+  id: string,
+  value: number,
+  by: string = DEFAULT_ACTOR
+): Promise<ProjectRecord | null> {
+  return patchDoc<ProjectRecord>("projects", id, (p) => {
+    const wasUnknown = !!p.valueUnknown;
+    p.value = value;
+    p.valueUnknown = false;
+    if (wasUnknown) {
+      p.notes = Array.isArray(p.notes) ? p.notes : [];
+      p.notes.unshift({
+        id: uid("nt-"),
+        by,
+        at: now(),
+        text: `Contract value set to $${value.toLocaleString("en-US")} (was imported without a known value).`,
+        photo: null,
+      });
+    }
+    p.updatedAt = now();
+    return p;
+  });
+}
+
+/**
  * Port of remove(): a converted-then-deleted project adds its quoteId to the
  * dismissed list so syncFromQuotes never re-creates it. Soft delete.
  */

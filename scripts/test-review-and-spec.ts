@@ -7036,6 +7036,17 @@ async function projectsPipelineAsyncChecks(): Promise<void> {
     const svc = await P.spawnServiceLinkedProject({ id: "Q-pl-svc", name: "svc" } as never, "repair");
     ok(svc.pipelineId === "order" && svc.stage === "complete", "projects: service-linked record is born at order/complete");
 
+    // Task 9 follow-up (#UKN "fill it in later") — a Daylite-imported project
+    // with an unknown value, filled in by hand via setProjectValue.
+    const uknP = await P.createProject({ name: "pl-test UKN", value: 900, valueUnknown: true });
+    ok(uknP.valueUnknown === true, "#UKN: a project created with valueUnknown starts flagged");
+    ok(knownValue(uknP) === 0, "#UKN: knownValue is 0 for a freshly-imported unknown-value project, even with a stray $900 on it");
+    const filled = await P.setProjectValue(uknP.id, 1234, "Test");
+    ok(filled?.value === 1234, "#UKN: setProjectValue saves the new value");
+    ok(filled?.valueUnknown === false, "#UKN: setProjectValue clears valueUnknown");
+    ok(knownValue(filled!) === 1234, "#UKN: knownValue now counts the filled-in project at its real value");
+    await P.removeProject(uknP.id);
+
     for (const id of [a.id, o.id, "P-legacy-1", svc.id]) await P.removeProject(id);
   }
   // One post-transition hook: every path into Done mints the #16 follow-up once; auto-moves expand checklists.
