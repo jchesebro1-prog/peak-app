@@ -5018,7 +5018,15 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(!wrong.ok && wrong.reason === "mismatch", "redeem: wrong verifier -> mismatch");
   const late = redeemHandoffCode(code, verifier, secret, now + HANDOFF_TTL_MS + 1);
   ok(!late.ok && late.reason === "expired", "redeem: past ttl -> expired");
-  const flipped = code.slice(0, -2) + (code.endsWith("A") ? "B" : "A") + code.slice(-1);
+  // Flip a character inside the IV segment (code[1]), not near a base64 group's
+  // trailing edge: the IV is a fixed 12 bytes -> 16 base64 chars with no
+  // padding, so every character there is fully significant. Flipping near the
+  // end of the code (the ciphertext segment) is flaky (#179) — when the
+  // ciphertext's byte length leaves a 1-byte tail, the last real base64 char
+  // before "==" padding only encodes that byte's top 2 bits, so ~1/4 of random
+  // ciphertexts pick an "A"/"B" substitute that decodes to the same bits,
+  // silently producing a *different but still-valid* code that still redeems.
+  const flipped = code[0] + (code[1] === "A" ? "B" : "A") + code.slice(2);
   ok(!redeemHandoffCode(flipped, verifier, secret, now).ok, "redeem: tampered code -> not ok");
   const otherKey = redeemHandoffCode(code, verifier, "another-secret", now);
   ok(!otherKey.ok && otherKey.reason === "malformed", "redeem: different secret -> malformed");
@@ -5255,6 +5263,34 @@ async function asyncChecks(): Promise<void> {
     ok(
       created.category === "Uncategorized" && created.unit === "ea",
       "#81 create still applies its own defaults for absent columns"
+    );
+
+    /* ---- #204: a price-only Import-hub catalog import must not zero MAP ----
+     * `v.mapPrice` is a "number"-kind field, so `coerce()` turns an absent
+     * column OR a blank cell into the number 0 (never `undefined`) — the same
+     * shape prepareRows gives Cost above. */
+    const storedWithMap = { ...stored, mapPrice: 1699 };
+    ok(
+      noCost.rows[0].values.mapPrice === 0,
+      "#204 an absent MAP column prepares as 0 — same shape as an absent Cost column"
+    );
+    ok(
+      catalogPatch(noCost.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === undefined,
+      "#204 an absent MAP column omits the key entirely (mergeUpsert then preserves the stored MAP)"
+    );
+    const blankMap = prepOf(
+      ["Part Number,Description,List Price,MAP", "S4LED-S2,Source Four LED Series 2,1999.00,"].join("\n")
+    );
+    ok(
+      catalogPatch(blankMap.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === undefined,
+      "#204 a blank MAP cell also omits the key rather than zeroing the stored MAP"
+    );
+    const realMap = prepOf(
+      ["Part Number,Description,List Price,MAP", "S4LED-S2,Source Four LED Series 2,1999.00,1750.00"].join("\n")
+    );
+    ok(
+      catalogPatch(realMap.rows[0].values, storedWithMap, "S4LED-S2").mapPrice === 1750,
+      "#204 a MAP value the sheet does carry still sets it"
     );
   }
 
