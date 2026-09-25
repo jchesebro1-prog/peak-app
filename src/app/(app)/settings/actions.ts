@@ -413,7 +413,17 @@ export async function geocodeBatchAction(input?: {
     };
   }
 
-  const r = await backfillVenueCoords({ limit, dryRun: false, skipQueries: skip });
+  // #185 fix round 2, item 1: the budget is worst-case aware — a query only
+  // starts when elapsed + 4*(delayMs + FETCH_TIMEOUT_MS) <= budgetMs, since a
+  // single failing building row can cost that much if every one of its four
+  // requests (search + town-centre lookup + two fallback searches) hangs for
+  // the full 5s fetch timeout. At the default delayMs (1100ms, geo-backfill.ts
+  // GEOCODE_DELAY_MS) that worst case is 4*(1100+5000) = 24,400ms per query.
+  // 45,000ms keeps the total under this route's 60s maxDuration (see
+  // page.tsx) with 10s+ of headroom for the request/response and
+  // revalidation: a query starts only while elapsed <= 45,000 - 24,400 =
+  // 20,600ms, and any query that does start is guaranteed to finish by 45s.
+  const r = await backfillVenueCoords({ limit, dryRun: false, skipQueries: skip, budgetMs: 45_000 });
   revalidatePath("/", "layout");
   return {
     ok: true as const,

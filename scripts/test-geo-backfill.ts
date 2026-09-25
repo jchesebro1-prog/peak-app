@@ -18,10 +18,18 @@ import { getDb } from "@/db";
 import { companies, geoCache, sites } from "@/db/schema";
 import { seedIfEmpty } from "@/db/seed-data";
 import { setSettings } from "@/lib/settings";
-import { backfillVenueCoords, cleanStreet, geocodeVenue, newGeocodeCtx, warmRoutes } from "@/lib/geo-backfill";
+import {
+  backfillVenueCoords,
+  cleanCity,
+  cleanStreet,
+  fallbackStreet,
+  geocodeVenue,
+  newGeocodeCtx,
+  warmRoutes,
+} from "@/lib/geo-backfill";
 import { listUnlocatedVenues, locateVenue } from "@/lib/venue-locate";
 
-type Hit = { lat: number; lng: number; city: string; state: string; road?: string };
+type Hit = { lat: number; lng: number; city: string; state: string; road?: string; zip?: string };
 
 /** Nominatim answers keyed by a predicate on the decoded URL. */
 const nominatim: Array<{ when: (u: URL) => boolean; hit: Hit }> = [];
@@ -43,7 +51,13 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
             category: "building",
             name: "",
             display_name: `${m.hit.city}, ${m.hit.state}`,
-            address: { house_number: "1", road: m.hit.road || "Road", city: m.hit.city, state: m.hit.state },
+            address: {
+              house_number: "1",
+              road: m.hit.road || "Road",
+              city: m.hit.city,
+              state: m.hit.state,
+              ...(m.hit.zip ? { postcode: m.hit.zip } : {}),
+            },
           },
         ]
       : [];
@@ -101,6 +115,87 @@ async function main() {
   assert.equal(cleanStreet("200 Main St Suite A"), "200 Main St");
   assert.equal(cleanStreet("Hwy 12 #3"), "Hwy 12");
   console.log("PASS geo-backfill: cleanStreet");
+
+  /* ---- #185: fallbackStreet / cleanCity — only used by the fallback lookup ---- */
+  // Moved from cleanStreet (fix round 1, item 2): attempt 1's query must stay
+  // byte-identical to before #185, so parenthesised asides, a pasted label
+  // before a colon, and bare box/mail-drop/building numbers are cleaned up
+  // only in the fallback street, never in cleanStreet itself.
+  assert.equal(
+    fallbackStreet("120 East Lake Park Place, (see const. site address under comments)", "X"),
+    "120 East Lake Park Place"
+  );
+  assert.equal(fallbackStreet("1142 Pine Street (Across From Pizza Ranch On Hwy 12)", "X"), "1142 Pine Street");
+  assert.equal(fallbackStreet("Blaines home address:, 1523 Harvest Lane", "Reedsburg"), "1523 Harvest Lane");
+  assert.equal(fallbackStreet("110 Main St.  Box 231", "X"), "110 Main St.");
+  assert.equal(fallbackStreet("600 Highland Ave.  Mail Drop 3248", "X"), "600 Highland Ave.");
+  assert.equal(fallbackStreet("500 E Veterans, Building 401", "X"), "500 E Veterans");
+  // Minors (fix round 2, item 4a): a "#" between the box word and its number
+  // must not survive as an orphaned "Box" once cleanStreet's generic bare-#
+  // stripper (which runs first) has already eaten the digits.
+  assert.equal(fallbackStreet("110 Main St. Box #231", "Reedsburg"), "110 Main St.");
+  // The tightened colon rule (item 2): cut at the last colon only when the
+  // text after it has a digit and the text before it does not; otherwise
+  // remove only the colon character, so the suite rule still gets a shot.
+  assert.equal(fallbackStreet("100 Main St, Suite: 4", "X"), "100 Main St");
+  assert.ok(
+    fallbackStreet("100 Main St Loading Dock: Rear", "X").includes("100 Main St"),
+    "a colon with no digit after it must not eat the real street"
+  );
+  assert.equal(
+    fallbackStreet("New Heights Lutheran Parish (NEW NAME), 1705 Center Street", "Black Earth"),
+    "1705 Center Street"
+  );
+  assert.equal(
+    fallbackStreet("TSL Clark Street Campus (Grades 5 to 8) 303 Clark Street", "Watertown"),
+    "303 Clark Street"
+  );
+  assert.equal(
+    fallbackStreet("3317 Business Park Drive Stevens Point, WI 54482", "Stevens Point"),
+    "3317 Business Park Drive"
+  );
+  assert.equal(fallbackStreet("7 S Dewey St  Eau Claire, WI 54701", "Eau Claire"), "7 S Dewey St");
+  assert.equal(fallbackStreet("Highway 51 North", "X"), "Highway 51 North", "road word — untouched");
+  assert.equal(fallbackStreet("Old Highway 51", "X"), "Old Highway 51", "no street word after the number — untouched");
+  assert.equal(fallbackStreet("W185 S8750 Racine Ave.", "Muskego"), "W185 S8750 Racine Ave.");
+  assert.equal(fallbackStreet("2302 International Drive", "Madison"), "2302 International Drive");
+  // Minors (item 6): a trailing-city strip must not eat a place name that's
+  // merely a SUBSTRING of the street's last word ("Jerome" ends in "rome").
+  assert.equal(fallbackStreet("100 Jerome", "Rome"), "100 Jerome", "'Rome' inside 'Jerome' is not a city match");
+  // Minors (item 6): the trailing state+zip strip needs a word boundary, or
+  // "Stre" + "et 53703" reads as a fake two-letter state code.
+  assert.equal(
+    fallbackStreet("100 Main Street 53703", "X"),
+    "100 Main Street 53703",
+    "no state+zip in this string — must not chew into 'Street'"
+  );
+  // Fix round 2, item 3: the trailing state+zip strip must only fire when the
+  // two-letter code IS a real US state abbreviation. "St" and "Dr" are street
+  // words, not states, so a trailing "<street word> <zip>" must survive whole
+  // — this used to strip all the way to "100 Main" / drop "Oak Dr" entirely.
+  assert.equal(
+    fallbackStreet("100 Main St 53703", "X"),
+    "100 Main St 53703",
+    "'St' is not a real state code — must never become '100 Main'"
+  );
+  assert.equal(
+    fallbackStreet("123 Oak Dr 53590", "X"),
+    "123 Oak Dr 53590",
+    "'Dr' is not a real state code — 'Oak Dr' must survive"
+  );
+  // Minors (item 6): WI county/state trunk highway abbreviations are road
+  // words too, same as "highway"/"county"/"road".
+  assert.equal(fallbackStreet("CTH 100 Lakeview", "X"), "CTH 100 Lakeview", "cth — road word, untouched");
+  assert.equal(fallbackStreet("Sth 51 South", "X"), "Sth 51 South", "sth — road word, untouched");
+  assert.equal(fallbackStreet("Ush 12 East", "X"), "Ush 12 East", "ush — road word, untouched");
+  assert.equal(fallbackStreet("Trunk 51 North", "X"), "Trunk 51 North", "trunk — road word, untouched");
+  assert.equal(fallbackStreet("Cr 20 Valley", "X"), "Cr 20 Valley", "cr — road word, untouched");
+  assert.equal(fallbackStreet("Sr 33 Ridge", "X"), "Sr 33 Ridge", "sr — road word, untouched");
+  assert.equal(cleanCity("Rome (Sullivan)"), "Rome");
+  assert.equal(cleanCity("Wisc. Dells"), "Wisconsin Dells");
+  assert.equal(cleanCity("Stevens Point,"), "Stevens Point");
+  assert.equal(cleanCity("Madison"), "Madison");
+  console.log("PASS geo-backfill: fallbackStreet / cleanCity");
 
   /* ---- 1. the runner must get PAST failures, not re-ask them forever ---- */
   // Twelve dead addresses first (more than one batch), then five good ones.
@@ -176,6 +271,49 @@ async function main() {
   );
   console.log("PASS geo-backfill: postal-city distance gate");
 
+  /* ---- 3b. backfillVenueCoords: the budget is WORST-CASE aware (#185 fix round 2, item 1) ---- */
+  // The worst case for one in-flight query is 4 * (delayMs + FETCH_TIMEOUT_MS)
+  // — a search + a town-centre lookup + two fallback searches, each capped by
+  // the fetch timeout. Checked BEFORE starting each query (never mid-query),
+  // so with delayMs 0 that worst case is 4*5000=20000ms: any budgetMs well
+  // under that stops the run after the first query regardless of how fast the
+  // stubbed fetch actually answers — no artificial latency needed, and the
+  // test no longer depends on the scratch DB's setup speed to trip the clock.
+  {
+    await db.delete(sites);
+    for (let i = 0; i < 3; i++)
+      await insertSite(`st-budget-${i}`, { address: `${i + 1} Budget Way`, city: `Budgetville${i}`, state: "WI" });
+    for (let i = 0; i < 3; i++)
+      nominatim.push({
+        when: (u) => q(u).includes(`${i + 1} budget way`),
+        hit: { lat: 43 + i / 10, lng: -89, city: `Budgetville${i}`, state: "Wisconsin" },
+      });
+    const rBudget = await backfillVenueCoords({ limit: 10, dryRun: true, delayMs: 0, budgetMs: 100 });
+    assert.equal(
+      rBudget.queriesIssued,
+      1,
+      `the worst-case check must stop the run after the first query (issued ${rBudget.queriesIssued})`
+    );
+    assert.equal(
+      rBudget.remaining,
+      2,
+      "unstarted queries are counted toward remaining, same as a limit cutoff"
+    );
+    console.log("PASS geo-backfill: backfillVenueCoords budget is worst-case aware");
+  }
+
+  /* ---- 3c. backfillVenueCoords: the FIRST query always runs, even with budgetMs: 1 ---- */
+  {
+    const r1 = await backfillVenueCoords({ limit: 10, dryRun: true, delayMs: 0, budgetMs: 1 });
+    assert.equal(
+      r1.queriesIssued,
+      1,
+      "done === 0 bypasses the budget check, so the very first query always runs — guaranteed progress"
+    );
+    assert.equal(r1.remaining, 2);
+    console.log("PASS geo-backfill: backfillVenueCoords first query always runs even with budgetMs: 1");
+  }
+
   /* ---- 4. warmRoutes must also get past failed routes ---- */
   await setSettings({
     offices: [{ id: "o1", name: "Reedsburg", city: "Reedsburg", state: "WI", lat: 43.532, lng: -90.003, quoteDefault: true }],
@@ -221,6 +359,227 @@ async function main() {
     const town = await geocodeVenue({ address: "P.O. Box 615", city: "Reedsburg", state: "WI" }, ctx);
     assert.ok(town.ok && town.precision === "city");
     console.log("PASS geo-backfill: geocodeVenue single-venue outcomes");
+  }
+
+  /* ---- 5b. geocodeVenue: fallback chain for messy addresses (#185, D235) ---- */
+  {
+    // Attempt 1 gets no hit; the no-city fallback ("<street>, WI <zip>")
+    // finds it. The stated city ("Madison") happens to match the hit anyway.
+    const ctxA = newGeocodeCtx(0);
+    const callsBeforeA = calls;
+    nominatim.push({
+      when: (u) => q(u) === "6911 mangrove lane, wi 53713",
+      hit: { lat: 43.05, lng: -89.4, city: "Madison", state: "Wisconsin", zip: "53713" },
+    });
+    const a = await geocodeVenue({ address: "6911 Mangrove Lane", city: "Madison", state: "WI", zip: "53713" }, ctxA);
+    assert.ok(a.ok && a.precision === "building", "no-city fallback finds the building");
+    assert.equal(calls - callsBeforeA, 2, "attempt 1 (miss) + attempt 3 (no-city hit); attempt 2 is identical to attempt 1 and skipped");
+
+    // Typo city ("Sun Prarie" vs OSM's "Sun Prairie"): attempt 1 misses,
+    // attempt 3's hit disagrees on city text but the zip gate accepts it.
+    const ctxB = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "3467 capitol dr., wi 53590",
+      hit: { lat: 43.18, lng: -89.21, city: "Sun Prairie", state: "Wisconsin", zip: "53590" },
+    });
+    const b = await geocodeVenue(
+      { address: "3467 Capitol Dr.", city: "Sun Prarie", state: "WI", zip: "53590" },
+      ctxB
+    );
+    assert.ok(b.ok, "typo city accepted via the zip gate");
+
+    // The zip gate does not over-accept: attempt 1 itself hits the wrong
+    // town (city-mismatch), and the no-city fallback's hit is in yet another
+    // town whose zip is merely ADJACENT to the row's (53590 vs the row's
+    // 53591, not equal) — a strict equality check must reject it, and the
+    // reported reason is attempt 1's own ("reports stay meaningful").
+    const ctxC = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "1 typo trail, sun prarie, wi 53591",
+      hit: { lat: 45.0, lng: -91.0, city: "FarAway", state: "Wisconsin", zip: "53590" },
+    });
+    nominatim.push({
+      when: (u) => q(u) === "1 typo trail, wi 53591",
+      hit: { lat: 44.0, lng: -90.0, city: "Elsewhere", state: "Wisconsin", zip: "53590" },
+    });
+    const c = await geocodeVenue({ address: "1 Typo Trail", city: "Sun Prarie", state: "WI", zip: "53591" }, ctxC);
+    assert.ok(
+      !c.ok && c.reason === "city-mismatch" && c.got === "FarAway, WI",
+      "every attempt fails; an adjacent-but-different zip does not satisfy the zip gate"
+    );
+
+    // A label address: attempt 1 (full street text) misses; attempt 2 (the
+    // label stripped by fallbackStreet, city included) hits.
+    const ctxD = newGeocodeCtx(0);
+    const callsBeforeD = calls;
+    nominatim.push({
+      when: (u) => q(u) === "303 clark street, watertown, wi 53094",
+      hit: { lat: 43.19, lng: -88.72, city: "Watertown", state: "Wisconsin", zip: "53094" },
+    });
+    const d = await geocodeVenue(
+      { address: "TSL Clark Street Campus (Grades 5 to 8) 303 Clark Street", city: "Watertown", state: "WI", zip: "53094" },
+      ctxD
+    );
+    assert.ok(d.ok, "label stripped by attempt 2 finds the building");
+    assert.equal(calls - callsBeforeD, 2, "attempt 1 (miss) + attempt 2 (hit); attempt 3 never runs");
+
+    // City-precision rows are untouched by the fallback chain: a stubbed
+    // miss still reports no-hit and costs exactly one request.
+    const ctxE = newGeocodeCtx(0);
+    const callsBeforeE = calls;
+    const e = await geocodeVenue({ address: "", city: "Nowheretown", state: "WI", zip: "53000" }, ctxE);
+    assert.deepEqual(e, { ok: false, reason: "no-hit" });
+    assert.equal(calls - callsBeforeE, 1, "city precision makes exactly one request, no fallback");
+
+    // #185 item 3: a degenerate fallback street (empty, or after cleanup has
+    // no digit / no real street-name text) must skip the fallbacks entirely
+    // rather than burn two more requests on a query that can't improve on
+    // attempt 1 — here the "address" field is really just the city restated,
+    // so fallbackStreet strips it down to "".
+    const ctxH = newGeocodeCtx(0);
+    const callsBeforeH = calls;
+    const h = await geocodeVenue(
+      { address: "Stevens Point, WI 54481", city: "Stevens Point", state: "WI", zip: "54481" },
+      ctxH
+    );
+    assert.ok(!h.ok, "a degenerate fallback street is not geocoded via fallback");
+    assert.equal(calls - callsBeforeH, 1, "only attempt 1's request is made; fallbacks are skipped");
+
+    // Fix round 2, item 4b: the degenerate-street guard's other two branches.
+    // A fallback street with no digit at all (a name with nothing house-
+    // number-shaped left in it) can't be a better query than attempt 1.
+    const ctxH2 = newGeocodeCtx(0);
+    const callsBeforeH2 = calls;
+    const h2 = await geocodeVenue({ address: "Main Street", city: "Somewhereville", state: "WI" }, ctxH2);
+    assert.ok(!h2.ok, "a fallback street with no digit is not geocoded via fallback");
+    assert.equal(calls - callsBeforeH2, 1, "no digit — fallbacks are skipped");
+
+    // A fallback street with digits but no real street-name text (no run of
+    // two letters — just a bare house-number fragment) is equally useless.
+    const ctxH3 = newGeocodeCtx(0);
+    const callsBeforeH3 = calls;
+    const h3 = await geocodeVenue({ address: "100", city: "Somewhereville", state: "WI" }, ctxH3);
+    assert.ok(!h3.ok, "a fallback street with digits but no street-name text is not geocoded via fallback");
+    assert.equal(calls - callsBeforeH3, 1, "no two-letter street-name text — fallbacks are skipped");
+
+    // #185 item 4: the zip gate must not wave through a hit that's merely in
+    // the same zip as the row but nowhere near the stated town. "Middleton"
+    // resolves to a real centre (registered above); the no-city fallback's
+    // hit shares the row's zip but sits 100+ miles away in "FarTown" — reject.
+    const ctxM = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "500 far zip dr, wi 53562",
+      hit: { lat: 44.5, lng: -91.0, city: "FarTown", state: "Wisconsin", zip: "53562" },
+    });
+    const m = await geocodeVenue(
+      { address: "500 Far Zip Dr", city: "Middleton", state: "WI", zip: "53562" },
+      ctxM
+    );
+    assert.ok(!m.ok, "a same-zip hit far from the resolvable stated-town centre is rejected");
+
+    // Minors (fix round 2, item 4c): the positive counterpart of the above —
+    // a zip-matched fallback hit that IS within ZIP_GATE_MAX_MI of a
+    // resolvable stated centre is accepted, not just rejected when far.
+    const ctxM2 = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "500 near zip dr, wi 53562",
+      hit: { lat: 43.15, lng: -89.46, city: "NearTown", state: "Wisconsin", zip: "53562" },
+    });
+    const m2 = await geocodeVenue(
+      { address: "500 Near Zip Dr", city: "Middleton", state: "WI", zip: "53562" },
+      ctxM2
+    );
+    assert.ok(m2.ok, "a same-zip hit close to the resolvable stated-town centre is accepted");
+
+    // #185 fix round 2, item 2: a fallback attempt must be tied to a PLACE —
+    // the "require the zip when there's no city" rule keys on "this is a
+    // fallback attempt" (an explicit `fallback: true` gate option), not on
+    // whether the row happens to carry a zip. Before this fix, a fallback
+    // attempt whose cleaned city AND row zip were both empty fell through
+    // every check in gateHit() and was accepted unconditionally — a row with
+    // no city and no zip must never be geocoded off a fallback guess.
+    const ctxN = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "123 main st, wi",
+      hit: { lat: 46.6, lng: -90.9, city: "Ashland", state: "Wisconsin" },
+    });
+    const n = await geocodeVenue({ address: "123 Main St", city: "(Unknown)", state: "WI", zip: "" }, ctxN);
+    assert.ok(!n.ok, "no city and no zip on a fallback attempt must never be accepted");
+
+    // #185 item 5: with nothing to compare a city against (the stated city
+    // cleans to ""), a fallback attempt must fall back to the zip alone —
+    // never accept unconditionally just because there's no city text.
+    const ctxI = newGeocodeCtx(0);
+    const callsBeforeI = calls;
+    nominatim.push({
+      when: (u) => q(u) === "42 blank city rd, wi 53020",
+      hit: { lat: 45.5, lng: -92.5, city: "SomeTown", state: "Wisconsin", zip: "53099" },
+    });
+    const i1 = await geocodeVenue(
+      { address: "42 Blank City Rd", city: "(Unknown)", state: "WI", zip: "53020" },
+      ctxI
+    );
+    assert.deepEqual(i1, { ok: false, reason: "no-hit" }, "no city to gate on and a mismatched zip is rejected");
+    // Minors (item 6): attempt 3's query here is identical to attempt 2's
+    // (both drop the city, same zip) — it must be skipped, not re-requested.
+    assert.equal(calls - callsBeforeI, 2, "q3 identical to q2 is skipped, not re-requested");
+
+    const ctxJ = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "43 blank city rd, wi 53021",
+      hit: { lat: 45.5, lng: -92.5, city: "SomeTown", state: "Wisconsin", zip: "53021" },
+    });
+    const j1 = await geocodeVenue(
+      { address: "43 Blank City Rd", city: "(Unknown)", state: "WI", zip: "53021" },
+      ctxJ
+    );
+    assert.ok(j1.ok, "no city to gate on but a matching zip is accepted");
+
+    // Minors (item 6): attempt 1 success makes exactly ONE request — no
+    // fallback query is ever issued when the very first lookup already
+    // clears the gates.
+    const ctxG = newGeocodeCtx(0);
+    const callsBeforeG = calls;
+    nominatim.push({
+      when: (u) => q(u) === "1 clean st, cleantown, wi",
+      hit: { lat: 43.2, lng: -89.9, city: "Cleantown", state: "Wisconsin" },
+    });
+    const g = await geocodeVenue({ address: "1 Clean St", city: "Cleantown", state: "WI" }, ctxG);
+    assert.ok(g.ok);
+    assert.equal(calls - callsBeforeG, 1, "attempt 1 success makes exactly one request");
+
+    // Minors (item 6): a zip+4 row's zip5 (the first five digits) matches a
+    // hit whose postcode is the plain five-digit form.
+    const ctxK = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "60 plus four ln, wi 53592",
+      hit: { lat: 44.9, lng: -91.3, city: "FarCity", state: "Wisconsin", zip: "53592" },
+    });
+    const k = await geocodeVenue(
+      { address: "60 Plus Four Ln", city: "PlusFourTown", state: "WI", zip: "53592-1234" },
+      ctxK
+    );
+    assert.ok(k.ok, "a zip+4 row's zip5 matches a plain five-digit hit zip");
+
+    // Minors (item 6): the zip gate only applies to fallback attempts 2-3 —
+    // attempt 1 must not short-circuit-accept just because its own hit
+    // happens to share the row's zip while disagreeing on city. Prove it by
+    // making both attempt 1 AND the no-city fallback fail, so the venue
+    // stays unlocated even though attempt 1's hit had a matching zip.
+    const ctxF = newGeocodeCtx(0);
+    const callsBeforeF = calls;
+    nominatim.push({
+      when: (u) => q(u) === "50 elm st, alpha, wi 53000",
+      hit: { lat: 46.0, lng: -92.0, city: "Beta", state: "Wisconsin", zip: "53000" },
+    });
+    const f = await geocodeVenue({ address: "50 Elm St", city: "Alpha", state: "WI", zip: "53000" }, ctxF);
+    assert.ok(!f.ok, "a same-zip, wrong-city attempt-1 hit is not accepted on attempt 1 alone");
+    assert.ok(
+      calls - callsBeforeF > 1,
+      "the zip gate is inactive on attempt 1 — it doesn't short-circuit; fallbacks still run"
+    );
+
+    console.log("PASS geo-backfill: geocodeVenue fallback chain");
   }
 
   /* ---- 6. worklist query ---- */
