@@ -14,6 +14,7 @@ import { list as listCatalog, upsert as upsertPart } from "@/lib/stores/catalog"
 import { getEngagement } from "@/lib/stores/engagements";
 import { allSections, createSection, seedStarterSections, updateSection } from "@/lib/stores/spec-sections";
 import { saveGeneratedSpec } from "@/lib/stores/generated-specs";
+import { toArticles } from "@/lib/specs/sections";
 
 /**
  * Bid-spec generator actions (D94). The catalog is the spec library: a
@@ -167,7 +168,16 @@ export async function updateSectionAction(
   patch: { number?: string; title?: string; sort?: number; part1?: string; part3?: string }
 ): Promise<Result> {
   const user = await requireUser();
-  await updateSection(id, patch, user.name);
+  const { part1, part3, ...rest } = patch;
+  await updateSection(
+    id,
+    {
+      ...rest,
+      ...(part1 !== undefined ? { part1: toArticles(part1) } : {}),
+      ...(part3 !== undefined ? { part3: toArticles(part3) } : {}),
+    },
+    user.name
+  );
   revalidatePath("/", "layout");
   return { ok: true };
 }

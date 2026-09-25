@@ -1,5 +1,5 @@
 import type { CatalogPart } from "@/lib/stores/catalog";
-import type { SpecSection } from "@/lib/stores/spec-sections";
+import { partText, type SpecSection } from "@/lib/specs/sections";
 
 /* ------------------------------------------------------------------ *
  * Bid-spec matching + assembly (D94).
@@ -186,7 +186,7 @@ export function assemble(
       const sb = rowB?.part?.specSort ?? 0;
       return sa - sb || a.sku.localeCompare(b.sku);
     });
-    out.push({ number: s.number, title: s.title, part1: s.part1, part3: s.part3, parts });
+    out.push({ number: s.number, title: s.title, part1: partText(s.part1), part3: partText(s.part3), parts });
   }
 
   return {

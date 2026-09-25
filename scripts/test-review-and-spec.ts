@@ -287,6 +287,7 @@ import {
   renderBody,
   MAX_OUTLINE_DEPTH,
 } from "@/lib/specs/outline";
+import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -875,7 +876,7 @@ ok(report(waived).finalizable, "finalizable once every row is ready or waived");
 /* --- assembly --- */
 const spec = assemble(
   rep.rows.map((r, i) => i === 1 ? { ...r, waived: true, waiveReason: "owner-furnished" } : r) as MatchedRow[],
-  [{ id: "ss-light", number: "26 55 61", title: "Theatrical Lighting Fixtures", sort: 40, part1: "Scope of work.", part3: "Install per manufacturer.", updatedAt: 0, updatedBy: "t" }],
+  [{ id: "ss-light", number: "26 55 61", title: "Theatrical Lighting Fixtures", sort: 40, part1: "Scope of work.", part3: "Install per manufacturer.", updatedAt: 0, updatedBy: "t" }] as never,
   { projectName: "Test PAC", customer: "Test District", engagementId: "CE-1001", preparedBy: "Jeff", date: Date.now() }
 );
 ok(spec.sections.length === 1, "assembles one section from the ready row");
@@ -12609,4 +12610,43 @@ async function deletePartBAsyncChecks(): Promise<void> {
 
   const entry = renderBody("Top\n  Sub", { context: "entry" });
   ok(entry.lines[0].label === "1." && entry.lines[1].label === "a.", "outline: renderBody honours the entry context");
+}
+
+/* --- specs: sections --- */
+{
+  const legacy = normalizeSection({
+    id: "ss-1", number: "11 61 23", title: "Stage Curtains", sort: 10,
+    part1: "Scope of this section.\nSubmit shop drawings.",
+    part3: "", updatedAt: 1, updatedBy: "Jeff",
+  } as never);
+  ok(Array.isArray(legacy.part1), "sections: a legacy string part1 reads as an array");
+  ok(legacy.part1.length === 1, "sections: a legacy string is exactly one article");
+  ok(legacy.part1[0].title === "", "sections: the legacy article is untitled");
+  ok(legacy.part1[0].body.includes("Submit shop drawings"), "sections: the legacy text survives verbatim");
+  ok(legacy.part3.length === 0, "sections: an empty legacy string is no articles at all");
+  ok(legacy.part2Style === "paragraphs", "sections: part2Style defaults to paragraphs");
+  ok(legacy.quantities === "drawings", "sections: quantities defaults to drawings");
+
+  const modern = normalizeSection({
+    id: "ss-2", number: "26 09 61", title: "Controls", sort: 20,
+    part1: [{ id: "sa-1", title: "SECTION INCLUDES", body: "Dimming." }],
+    part3: [], part2Style: "table", quantities: "inline",
+    updatedAt: 2, updatedBy: "Jeff",
+  } as never);
+  ok(modern.part1[0].title === "SECTION INCLUDES", "sections: an article array passes through");
+  ok(modern.part2Style === "table" && modern.quantities === "inline", "sections: stored style and quantities survive");
+
+  const junk = normalizeSection({ id: "ss-3", number: "x", title: "y", sort: 0, part2Style: "nonsense", quantities: 7 } as never);
+  ok(junk.part2Style === "paragraphs" && junk.quantities === "drawings", "sections: an unknown style falls back to the default");
+  ok(junk.part1.length === 0 && junk.part3.length === 0, "sections: a missing part is no articles");
+
+  ok(toArticles(undefined).length === 0, "sections: toArticles(undefined) is empty");
+  ok(toArticles("   ").length === 0, "sections: a whitespace-only legacy string is empty");
+
+  ok(
+    partText([{ id: "a", title: "SUBMITTALS", body: "One." }, { id: "b", title: "", body: "Two." }]) ===
+      "SUBMITTALS\nOne.\n\nTwo.",
+    "sections: partText flattens titled and untitled articles for the D94 renderer"
+  );
+  ok(partText([]) === "", "sections: partText of no articles is the empty string");
 }
