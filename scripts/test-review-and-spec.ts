@@ -209,7 +209,26 @@ import {
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob, mobDefaultsFor } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob, lineMarginOf, parseAddQty, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
+import {
+  backSolveExtSell,
+  computeLabor,
+  computeMob,
+  foldLaborMobLines,
+  lineExtSellOf,
+  lineMarginOf,
+  parseAddQty,
+  priceFromUnitSellEdit,
+  repriceAtMargin,
+  repricedAtLineMargin,
+  round2,
+  systemFreight,
+  systemFreightBase,
+  systemItemsCost,
+  systemItemsRev,
+  vendorTotalSeed,
+  type LaborExtra,
+  type RateFn,
+} from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -364,6 +383,141 @@ import {
 ok(parseAddQty("4") === 4 && parseAddQty("12") === 12, "#160 the catalog qty box adds the typed quantity");
 ok(parseAddQty("") === 1 && parseAddQty("0") === 1 && parseAddQty("-3") === 1 && parseAddQty("abc") === 1, "#160 a blank, zero, negative or non-numeric qty adds 1");
 ok(parseAddQty("2.7") === 2, "#160 a fractional qty is floored to a whole unit");
+
+/* --- estimator labor fold + sell back-solve --- */
+
+// foldLaborMobLines: the pure fold itself, independent of computeLabor.
+const foldSingle = foldLaborMobLines(
+  [1000],
+  [1400],
+  [
+    { label: "shop & engineering", cost: 100, price: 140 },
+    { label: "performance bonus", cost: 55, price: 77 },
+  ]
+);
+ok(foldSingle.length === 1, "labor fold: one mobilization yields exactly one folded line");
+ok(foldSingle[0].cost === 1155 && foldSingle[0].price === 1617, "labor fold: a single mobilization absorbs every extra's cost and price exactly");
+ok(
+  foldSingle[0].internalNote === "Includes shop & engineering $100.00 · performance bonus $55.00",
+  "labor fold: the internal note itemizes each folded extra's dollar share"
+);
+
+const foldMulti = foldLaborMobLines([1000, 3000], [1300, 3900], [{ label: "allowance", cost: 100, price: 130 }]);
+ok(foldMulti.length === 2, "labor fold: keeps one folded line per mobilization");
+ok(foldMulti[0].cost === 1025 && foldMulti[0].price === 1332.5, "labor fold: the allowance splits proportionally to each mobilization's own cost");
+ok(foldMulti[1].cost === 3075 && foldMulti[1].price === 3997.5, "labor fold: the larger mobilization absorbs the larger dollar share");
+ok(
+  foldMulti.reduce((a, f) => a + f.cost, 0) === 4100 && foldMulti.reduce((a, f) => a + f.price, 0) === 5330,
+  "labor fold: folded totals exactly match the pre-fold mob+extras sum, to the cent"
+);
+
+const foldEven = foldLaborMobLines([0, 0], [0, 0], [{ label: "allowance", cost: 10, price: 10 }]);
+ok(foldEven[0].cost === 5 && foldEven[1].cost === 5, "labor fold: splits evenly across mobilizations when every mobilization costs $0");
+
+const foldThirds = foldLaborMobLines([1, 1, 1], [1, 1, 1], [{ label: "x", cost: 1, price: 1 }]);
+ok(
+  foldThirds[0].cost === 1.33 && foldThirds[1].cost === 1.33 && foldThirds[2].cost === 1.34,
+  "labor fold: the last mobilization absorbs the rounding remainder rather than a fixed one"
+);
+ok(
+  foldThirds.reduce((a, f) => a + f.cost, 0) === 4,
+  "labor fold: three equal mobilizations plus a $1 extra still sum to exactly $4"
+);
+ok(foldLaborMobLines([], [], [{ label: "x", cost: 1, price: 1 }]).length === 0, "labor fold: no mobilizations folds to no lines");
+
+// addLabor itself: computeLabor's real shop/bonus/allowance output, folded
+// the same way addLabor (estimator-client.tsx) folds it, must land on the
+// SAME totals a pre-fold caller would have gotten from one line per mob
+// plus separate shop/allowance/bonus lines — to the cent.
+const foldRate: RateFn = (sku: string) =>
+  ({
+    "RIG-LBR": 50,
+    "RIG-OT": 75,
+    "RIG-SUP": 60,
+    "SHP-PM": 65,
+    "SHP-IN": 45,
+    "DRF-SUB": 50,
+  }[sku] || 0);
+function foldFromDraft(draft: Parameters<typeof computeLabor>[0]) {
+  const r = computeLabor(draft, foldRate);
+  const priceAt = (c: number) => (r.margin < 1 ? round2(c / (1 - r.margin)) : c);
+  const activeMobs = r.mobs.filter((m) => m.cost > 0);
+  const mobCosts = activeMobs.map((m) => round2(m.cost));
+  const mobPrices = mobCosts.map((c) => priceAt(c));
+  const extras: LaborExtra[] = [];
+  if (r.shopCost > 0) extras.push({ label: "shop & engineering", cost: round2(r.shopCost), price: priceAt(round2(r.shopCost)) });
+  if (r.performanceBonus > 0) extras.push({ label: "performance bonus", cost: round2(r.performanceBonus), price: priceAt(round2(r.performanceBonus)) });
+  if (r.misc > 0) extras.push({ label: "allowance", cost: round2(r.misc), price: priceAt(round2(r.misc)) });
+  const oldCost = mobCosts.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.cost, 0);
+  const oldPrice = mobPrices.reduce((a, c) => a + c, 0) + extras.reduce((a, e) => a + e.price, 0);
+  const folded = foldLaborMobLines(mobCosts, mobPrices, extras);
+  return { folded, oldCost, oldPrice };
+}
+
+const oneMobDraft = { discipline: "RIG", margin: "30", mobs: [{ ...defaultMobs[0], people: "4", days: "5" }], pmHrs: "", pmAuto: true, shopHrs: "", drfHrs: "", drfAuto: true, misc: "500" };
+const oneMobFold = foldFromDraft(oneMobDraft);
+ok(oneMobFold.folded.length === 1, "estimator labor: a single mobilization still yields exactly one line once shop/allowance/bonus fold in");
+ok(
+  oneMobFold.folded.reduce((a, f) => a + f.cost, 0) === oneMobFold.oldCost &&
+    oneMobFold.folded.reduce((a, f) => a + f.price, 0) === oneMobFold.oldPrice,
+  "estimator labor: folded cost/price match the old mob+shop+allowance+bonus line sum to the cent (with misc)"
+);
+
+const multiMobDraft = {
+  discipline: "RIG",
+  margin: "25",
+  mobs: [
+    { ...defaultMobs[0], name: "Site Visit", people: "3", days: "2" },
+    { ...defaultMobs[0], name: "Hang", people: "5", days: "4" },
+  ],
+  pmHrs: "",
+  pmAuto: true,
+  shopHrs: "8",
+  drfHrs: "",
+  drfAuto: true,
+  misc: "", // no allowance this time
+};
+const multiMobFold = foldFromDraft(multiMobDraft);
+ok(multiMobFold.folded.length === 2, "estimator labor: two mobilizations still yield two lines once shop/bonus fold in");
+ok(
+  multiMobFold.folded.reduce((a, f) => a + f.cost, 0) === multiMobFold.oldCost &&
+    multiMobFold.folded.reduce((a, f) => a + f.price, 0) === multiMobFold.oldPrice,
+  "estimator labor: folded cost/price match the old mob+shop+bonus line sum to the cent (without misc)"
+);
+
+// Unit sell / ext sell back-solve — each keeps the other in sync.
+const unitEdit = priceFromUnitSellEdit(199.999);
+ok(
+  unitEdit.price === 200 && unitEdit.sellOverride === true && unitEdit.extSellOverride === undefined,
+  "unit sell edit: rounds to the cent, flags the override, and clears any ext-sell override"
+);
+
+const extEdit = backSolveExtSell(100, 3);
+ok(Math.abs(extEdit.price - 100 / 3) < 1e-9, "ext sell edit: price back-solves to ext ÷ qty at full precision, not rounded to the cent");
+ok(extEdit.qty === 3 && extEdit.extSellOverride === undefined, "ext sell edit: qty is unchanged and the ext-sell override is cleared");
+ok(round2(extEdit.qty * extEdit.price) === 100, "ext sell edit: qty × the back-solved price reproduces the typed ext to the cent");
+
+const extEditFraction = backSolveExtSell(10, 3);
+ok(round2(extEditFraction.qty * extEditFraction.price) === 10, "ext sell edit: a non-integer division still reproduces the typed ext to the cent");
+
+const extEditZeroQty = backSolveExtSell(50, 0);
+ok(extEditZeroQty.qty === 1 && extEditZeroQty.price === 50, "ext sell edit: a qty of 0 is treated as 1 rather than dividing by zero");
+
+ok(
+  round2(lineExtSellOf({ qty: extEdit.qty, price: extEdit.price, extSellOverride: extEdit.extSellOverride })) === 100,
+  "ext sell edit: the shared lineExtSellOf helper reproduces the typed ext from the back-solved, full-precision price"
+);
+ok(
+  lineExtSellOf({ qty: 4, price: 10, extSellOverride: 999 }) === 999,
+  "lineExtSellOf: a manual extended-sell override still wins over qty × price (metrics.ts equipmentSold relies on this)"
+);
+
+// Margin slider / system Sell field reprice — must clear a standing ext-sell
+// override so a previously back-solved line follows the new margin too.
+const marginReprice = repriceAtMargin(70, 0.3);
+ok(marginReprice.price === round2(70 / 0.7) && marginReprice.extSellOverride === undefined, "margin reprice: clears a line's ext-sell override so it follows the new margin");
+const marginRepriceZero = repriceAtMargin(0, 0);
+ok(marginRepriceZero.price === 0 && marginRepriceZero.extSellOverride === undefined, "margin reprice: a $0 cost at 0% margin reprices to $0, still clearing the override");
 
 /* --- Estimator material/vendor quote CSV --- */
 const materialCsv = parseMaterialCsv(`sku,description,quantity,unit,unit_cost,unit_sell,link

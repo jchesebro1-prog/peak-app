@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { SuggestPart } from "./estimator-data";
-import { fmt, lineExtSellOf, marginColor, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
+import { fmt, lineExtSellOf, marginColor, round2, systemFreight, systemItemsCost, systemItemsRev } from "./pricing";
 import type { CustomDraft, QuoteLite, SpecSection, VendorQuote } from "./types";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import CatalogPicker from "./catalog-picker";
@@ -50,6 +50,23 @@ const PORTAL_FIELD: CSSProperties = {
   borderRadius: 7,
   padding: "8px 9px",
   background: "#fff",
+};
+
+/** One icon button inside a line item's actions cell (↑ / ↓ / ×). */
+const ACTION_BTN: CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "none",
+  background: "transparent",
+  borderRadius: 4,
+  color: "#aab0bb",
+  fontSize: 13,
+  lineHeight: 1,
+  cursor: "pointer",
+  padding: 0,
 };
 
 export type SectionCardProps = {
@@ -585,27 +602,29 @@ export default function SectionCard(p: SectionCardProps) {
           )}
 
           <div style={{ overflowX: "auto" }}>
-            {/* column header */}
+            {/* column header — the SAME `cols` template as the item rows and
+                the freight row below, so a column can only drift out of
+                alignment in one place. */}
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: cols,
                 gap: 10,
-                padding: "8px 20px",
+                padding: "9px 20px",
                 fontSize: 10,
                 fontWeight: 600,
                 color: "#aab0bb",
                 textTransform: "uppercase",
-                letterSpacing: ".04em",
+                letterSpacing: ".05em",
                 borderTop: "1px solid #f3f4f7",
                 alignItems: "center",
               }}
             >
               <span>Item</span>
               <span style={{ textAlign: "center" }}>Qty</span>
-              {isInternal && <span style={{ textAlign: "right" }}>Unit cost</span>}
-              <span style={{ textAlign: "right" }}>Unit sell</span>
-              <span style={{ textAlign: "right" }}>Ext. sell</span>
+              {isInternal && <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit cost</span>}
+              <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Unit sell</span>
+              <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>Ext. sell</span>
               <span></span>
             </div>
 
@@ -639,6 +658,8 @@ export default function SectionCard(p: SectionCardProps) {
                     ? `/api/vendor-quote-attachments/${encodeURIComponent(p.savedQuoteId)}/${encodeURIComponent(vq.id)}`
                     : null)
                 : null;
+              const ext = lineExtSellOf(it);
+              const lineMargin = ext > 0 ? (ext - it.qty * it.cost) / ext : 0;
               return (
                 <div
                   key={it.id}
@@ -647,14 +668,23 @@ export default function SectionCard(p: SectionCardProps) {
                     display: "grid",
                     gridTemplateColumns: cols,
                     gap: 10,
-                    padding: "11px 20px",
+                    padding: "12px 20px",
                     fontSize: 13,
                     alignItems: "center",
                     borderTop: "1px solid #f5f6f8",
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ lineHeight: 1.3 }}>
+                    <div
+                      title={lineDesc}
+                      style={{
+                        lineHeight: 1.3,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
                       {lineDesc}
                       {it.link && (
                         <a href={it.link} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="Open product link" style={{ display: "inline-flex", marginLeft: 7, color: "var(--accent)", textDecoration: "none", fontSize: 12 }}>↗</a>
@@ -932,6 +962,7 @@ export default function SectionCard(p: SectionCardProps) {
                     <span
                       style={{
                         fontFamily: "var(--font-mono)",
+                        fontVariantNumeric: "tabular-nums",
                         textAlign: "right",
                         color: "#aab0bb",
                         fontSize: 12,
@@ -940,47 +971,46 @@ export default function SectionCard(p: SectionCardProps) {
                       {fmt(it.cost)}
                     </span>
                   )}
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
                     <input
+                      key={it.price + "|" + ext}
                       className="est-input"
-                      defaultValue={String(it.price)}
+                      defaultValue={String(round2(it.price))}
                       onBlur={(e) => p.onSetPrice(it.id, e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                       aria-label={`Unit sell for ${it.desc}`}
-                      style={{ width: 76, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e" }}
+                      style={{ width: "100%", maxWidth: 92, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 11.5, color: "#5b616e" }}
                     />
-                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: marginColor(lineExtSellOf(it) > 0 ? (lineExtSellOf(it) - it.qty * it.cost) / lineExtSellOf(it) : 0) }}>
-                      {lineExtSellOf(it) > 0 ? Math.round(((lineExtSellOf(it) - it.qty * it.cost) / lineExtSellOf(it)) * 100) : 0}%
+                    <span title="Line margin" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 10, color: marginColor(lineMargin), flexShrink: 0 }}>
+                      {ext > 0 ? Math.round(lineMargin * 100) : 0}%
                     </span>
                   </div>
                   <input
+                    key={it.price + "|" + ext}
                     className="est-input"
-                    defaultValue={String(lineExtSellOf(it))}
+                    defaultValue={String(round2(ext))}
                     onBlur={(e) => p.onSetExtSell(it.id, e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                     aria-label={`Extended sell for ${it.desc}`}
-                    style={{ width: 88, height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", fontWeight: 600 }}
+                    style={{ width: "100%", boxSizing: "border-box", height: 24, textAlign: "right", border: "1px solid #e4e7ec", borderRadius: 6, fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 11.5, color: "#5b616e", fontWeight: 600 }}
                   />
-                  <button
-                    type="button"
-                    className="est-x"
-                    onClick={() => p.onRemoveItem(it.id)}
-                    title="Remove"
-                    style={{
-                      width: 22,
-                      height: 22,
-                      border: "none",
-                      background: "transparent",
-                      color: "#c4c9d2",
-                      fontSize: 15,
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    ×
-                  </button>
-                  <button type="button" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={{ border: "none", background: "transparent", color: "#aab0bb", cursor: "pointer", padding: 0 }}>↑</button>
-                  <button type="button" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={{ border: "none", background: "transparent", color: "#aab0bb", cursor: "pointer", padding: 0 }}>↓</button>
+                  {/* One actions cell instead of three separate grid columns —
+                      ×/↑/↓ used to spill past the old 22px column and wrap
+                      onto a second grid row. Subdued until the row is
+                      hovered so the numbers read first. */}
+                  <div className="est-actions" style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 1 }}>
+                    <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, -1)} title="Move line up" style={ACTION_BTN}>↑</button>
+                    <button type="button" className="est-action-btn" onClick={() => p.onMoveItem(it.id, 1)} title="Move line down" style={ACTION_BTN}>↓</button>
+                    <button
+                      type="button"
+                      className="est-x est-action-btn"
+                      onClick={() => p.onRemoveItem(it.id)}
+                      title="Remove"
+                      style={{ ...ACTION_BTN, color: "#c4c9d2", fontSize: 15 }}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -1006,6 +1036,7 @@ export default function SectionCard(p: SectionCardProps) {
                 <span
                   style={{
                     fontFamily: "var(--font-mono)",
+                    fontVariantNumeric: "tabular-nums",
                     textAlign: "right",
                     fontWeight: 600,
                     color: "#5b616e",
