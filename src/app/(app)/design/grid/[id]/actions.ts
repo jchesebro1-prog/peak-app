@@ -46,10 +46,11 @@ import { getSite } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolShape } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolLook, setGridSymbolShape } from "@/lib/stores/grid-catalog";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
+import { isGridIconId, isHexColor } from "@/lib/design/grid-icons";
 import {
   GRID_CURTAIN_TYPES,
   GRID_FULLNESS,
@@ -405,6 +406,37 @@ export async function setSymbolShapeAction(
   const s = await setGridSymbolShape(symbolId, shape === "" ? null : shape);
   if (!s) return { ok: false, error: "That part is not in the Grid library." };
   revalidatePath(editorPath(projectId));
+  return { ok: true };
+}
+
+/**
+ * Stock symbols (spec 2026-09-25): set or clear ONE grid-catalog entry's
+ * icon and/or colour. Per-entry, not per-placement — placements resolve
+ * their part live, so every placed instance, on every design, redraws.
+ * Only the keys present change; "" clears that key back to the resolved
+ * default. Setting or clearing the icon also clears the legacy D154 `shape`
+ * (setGridSymbolLook). requireUser, the same gate as the #131 shape action.
+ */
+export async function setSymbolLookAction(
+  projectId: string,
+  symbolId: string,
+  look: { icon?: string; color?: string }
+): Promise<Result> {
+  await requireUser();
+  const patch: { icon?: string | null; color?: string | null } = {};
+  if (look.icon !== undefined) {
+    if (look.icon !== "" && !isGridIconId(look.icon)) return { ok: false, error: "Unknown icon." };
+    patch.icon = look.icon || null;
+  }
+  if (look.color !== undefined) {
+    if (look.color !== "" && !isHexColor(look.color)) return { ok: false, error: "Colour must be #rrggbb." };
+    patch.color = look.color ? look.color.toLowerCase() : null;
+  }
+  if (!("icon" in patch) && !("color" in patch)) return { ok: true };
+  const s = await setGridSymbolLook(symbolId, patch);
+  if (!s) return { ok: false, error: "That part is not in the Grid library." };
+  revalidatePath(editorPath(projectId));
+  revalidatePath(`${editorPath(projectId)}/riser`);
   return { ok: true };
 }
 

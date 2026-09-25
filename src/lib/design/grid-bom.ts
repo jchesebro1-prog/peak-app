@@ -60,6 +60,10 @@ export type PartLite = {
   /** Per-entry symbol override (#131) — resolved through shapeFor() with the
    *  category defaults; absent = use the category default. */
   shape?: GridShape | null;
+  /** Per-entry stock-symbol overrides (spec 2026-09-25) — resolved through
+   *  symbolLook() in lib/design/grid-icons; absent = the resolved defaults. */
+  icon?: string | null;
+  color?: string | null;
   kind?: "device" | "assembly";
   assemblyMembers?: Array<{ symbolId: string; qty: number; x: number; y: number }>;
   pricingPartId?: string | null;

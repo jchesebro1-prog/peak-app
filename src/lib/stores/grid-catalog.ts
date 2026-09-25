@@ -26,9 +26,14 @@ export type GridSymbol = {
   height: number;
   ports: Port[];
   pricingPartId?: string | null;
-  /** Per-entry symbol override (#131, D154). Absent/null = the category
-   *  default from settings.gridCategoryShapes (see lib/design/grid-symbols). */
+  /** Legacy per-entry D154 shape (#131). Still honoured as a fallback by
+   *  symbolLook (lib/design/grid-icons): `icon` below wins over it. */
   shape?: GridShape | null;
+  /** Per-entry stock-symbol overrides (spec 2026-09-25). `icon` is a
+   *  grid-icons id and wins over `shape`; `color` is "#rrggbb" and wins over
+   *  the group/trade colour. Absent/null = the resolved defaults. */
+  icon?: string | null;
+  color?: string | null;
   kind?: "device" | "assembly";
   members?: GridAssemblyMember[];
   createdBy: string;
@@ -150,6 +155,26 @@ export async function setGridSymbolShape(
 ): Promise<GridSymbol | null> {
   return patchDoc<GridSymbol>("grid_catalog", id, (d) => {
     d.shape = shape;
+    d.updatedAt = Date.now();
+  });
+}
+
+/** Set or clear (null) one entry's stock-symbol icon and/or colour (spec
+ *  2026-09-25). Only the keys present in `look` change. Setting or clearing
+ *  `icon` also clears the legacy `shape`, so "Category default" really means
+ *  the category icon and not a stale D154 shape. Returns null when the entry
+ *  doesn't exist in the Grid library. Validation is the caller's job
+ *  (setSymbolLookAction) — this is a plain patch. */
+export async function setGridSymbolLook(
+  id: string,
+  look: { icon?: string | null; color?: string | null }
+): Promise<GridSymbol | null> {
+  return patchDoc<GridSymbol>("grid_catalog", id, (d) => {
+    if ("icon" in look) {
+      d.icon = look.icon ?? null;
+      d.shape = null;
+    }
+    if ("color" in look) d.color = look.color ?? null;
     d.updatedAt = Date.now();
   });
 }

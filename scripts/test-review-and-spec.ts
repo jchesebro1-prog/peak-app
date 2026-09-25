@@ -5246,6 +5246,32 @@ import { DEFAULT_CATEGORY_MAP as SYM_CATEGORY_MAP } from "@/lib/catalog-taxonomy
     "#SYM: legendRows — one row per icon+colour; an override is labelled with its entry");
 }
 
+/* --- #SYM grid stock symbols — Task 3: the badge renderer --- */
+import { createElement as symH } from "react";
+import { renderToStaticMarkup as symRender } from "react-dom/server";
+import { SymbolIcon as SymIcon, SymbolShape as SymShape, glyphMetrics as symGlyph } from "@/components/design/symbol-shape";
+
+{
+  const html = symRender(symH("svg", null, symH(SymShape, { iconId: "speaker", x: 10, y: 20, w: 44, h: 30, color: "#008060" })));
+  ok(html.includes('data-icon="speaker"') && html.includes('fill="#008060"') && html.includes(`stroke="${darken("#008060")}"`),
+    "#SYM render: a badge in the resolved colour with a darker edge");
+  ok(html.includes('stroke="#fff"') && html.includes('stroke-linecap="round"') && !html.includes("<image"),
+    "#SYM render: white round-capped glyph, pure SVG");
+  ok((html.match(/<path /g) || []).length === iconById("speaker").els.length, "#SYM render: every glyph element is drawn");
+  const legacy = symRender(symH("svg", null, symH(SymShape, { shape: "diamond", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
+  ok(legacy.includes('data-icon="shape-diamond"'), "#SYM render: the legacy `shape` prop still works (via its alias)");
+  const blank = symRender(symH("svg", null, symH(SymShape, { iconId: "nope", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
+  ok(blank.includes(`data-icon="${GENERIC_ICON_ID}"`), "#SYM render: an unknown icon draws the generic device");
+  const filled = symRender(symH("svg", null, symH(SymShape, { iconId: "outlet", x: 0, y: 0, w: 44, h: 30, color: "#000000" })));
+  ok(filled.includes('fill="#fff"'), "#SYM render: Tabler's filled dots stay filled");
+  ok(symRender(symH(SymIcon, { iconId: "camera", color: "#0072b2", size: 16, title: "Camera" })).includes("<title>Camera</title>"),
+    "#SYM render: SymbolIcon is a self-contained titled <svg>");
+  const small = symGlyph(12, 12);
+  const big = symGlyph(44, 30);
+  ok(big.strokeWidth === 2 && small.strokeWidth > 2 && small.strokeWidth <= 3 && small.scale * small.strokeWidth >= 0.8,
+    "#SYM render: stroke stays legible from 12px palette badges up to plan markers");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
@@ -9438,6 +9464,7 @@ seeded()
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   .then(() => deleteRound2AsyncChecks())
+  .then(() => gridSymbolLookAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -13646,6 +13673,32 @@ async function deletePartBAsyncChecks(): Promise<void> {
    Fixtures are `fixtureId("DELR2", …)` / `registerFixture()`-registered
    right after mint, so the suite-level teardown removes all of it.
    ====================================================================== */
+/* #SYM grid stock symbols — Task 3: GridSymbol icon/colour round-trip. */
+async function gridSymbolLookAsyncChecks(): Promise<void> {
+  const GridCat = await import("../src/lib/stores/grid-catalog");
+  const symbols = await GridCat.listGridSymbols("Test Harness");
+  const device = symbols.find((s) => s.kind !== "assembly");
+  ok(!!device, "#SYM store setup: the grid library has a device to build from");
+  if (!device) return;
+  const asm = await GridCat.createGridAssembly({
+    name: "SYM test assembly", manufacturer: "", modelNumber: "", scope: "Lighting",
+    members: [{ symbolId: device.id, qty: 1, x: 0.5, y: 0.5 }], shape: "hexagon", by: "Test Harness",
+  });
+  registerFixture("grid_catalog", asm.id);
+
+  const colourOnly = await GridCat.setGridSymbolLook(asm.id, { color: "#123456" });
+  ok(colourOnly?.color === "#123456" && colourOnly?.shape === "hexagon" && !colourOnly?.icon,
+    "#SYM store: a colour-only patch leaves icon and legacy shape alone");
+  const withIcon = await GridCat.setGridSymbolLook(asm.id, { icon: "horn" });
+  ok(withIcon?.icon === "horn" && withIcon?.shape === null && withIcon?.color === "#123456",
+    "#SYM store: setting an icon clears the legacy shape and keeps the colour");
+  const reread = await GridCat.getGridSymbol(asm.id);
+  ok(reread?.icon === "horn" && reread?.color === "#123456", "#SYM store: icon + colour round-trip through the doc-store");
+  const cleared = await GridCat.setGridSymbolLook(asm.id, { icon: null, color: null });
+  ok(cleared?.icon === null && cleared?.color === null, "#SYM store: null clears both back to the defaults");
+  ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#SYM store: an unknown entry returns null");
+}
+
 async function deleteRound2AsyncChecks(): Promise<void> {
   const meDelR2 = { id: "u1", name: "Test Harness" };
 
