@@ -1,7 +1,7 @@
 import { getDoc, listDocs, upsertDoc, softDeleteDoc, type Doc } from "@/db/doc-store";
 
 /**
- * Authoring formulas (D-SPEC). A template is not spec text — it is the shape of
+ * Authoring formulas (#205). A template is not spec text — it is the shape of
  * a spec entry for one kind of product: which headings to write, what to pull
  * from the cut sheet for each, and the phrasing rules. "Insert template" in
  * the part editor writes the headings as a scaffold into an empty body, and

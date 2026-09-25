@@ -1,5 +1,5 @@
 /**
- * The Specs module's text engine (Phase A, D-SPEC).
+ * The Specs module's text engine (Phase A, #205).
  *
  * Bodies in the spec library are plain text, one item per line, indented two
  * spaces per level (a tab counts as one level). This module is the ONLY place

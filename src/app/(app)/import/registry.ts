@@ -234,7 +234,7 @@ export function catalogPatch(
   const lib = opts.specLib;
   const secId = lib ? resolveSectionRef(secRef, lib.sections) : null;
   const artId = lib ? resolveArticleRef(artRef, lib.articles, secId ?? (str(e.specSectionId) || null)) : null;
-  // D-SPEC fix wave item 3 — an unresolved ref shaped like a dead pointer id
+  // #205 fix wave item 3 — an unresolved ref shaped like a dead pointer id
   // is dropped, never written as legacy text (it would just come back as the
   // same unresolvable id on the next export → re-import).
   if (secRef && !secId && !looksLikeSpecId(secRef)) { metadata.specSection = secRef; hasMetadata = true; }
@@ -247,7 +247,7 @@ export function catalogPatch(
   const body = str(v.specBody);
   const title = str(v.specTitle);
   const changed = (!!body && body !== str(e.specBody)) || (!!title && title !== str(e.specTitle));
-  // D-SPEC fix wave item 7 — matched case-insensitively ("Authored"/"DRAFT"
+  // #205 fix wave item 7 — matched case-insensitively ("Authored"/"DRAFT"
   // etc.), trimmed by str() above; the canonical lowercase value is what's
   // stored either way.
   const explicit = str(v.specState).toLowerCase();
@@ -275,7 +275,7 @@ export function catalogPatch(
     ...(str(v.manufacturerModelNumber) ? { manufacturerModelNumber: str(v.manufacturerModelNumber) } : {}),
     ...(v.mapPrice !== undefined ? { mapPrice: num(v.mapPrice) } : {}),
     ...(hasMetadata ? { productMetadata: metadata } : {}),
-    // D-SPEC fix wave item 4 — when Spec Section and Spec Article both
+    // #205 fix wave item 4 — when Spec Section and Spec Article both
     // resolve but disagree, the ARTICLE's own section wins (the mirror
     // invariant D94's assemble relies on: it groups by specSectionId, and an
     // article must group under its real section, not a stale/mistyped one).
@@ -694,7 +694,7 @@ function specLibFor(ctx: CommitContext): Promise<SpecLookup> {
   return p;
 }
 
-/** D-SPEC fix wave (Task 14, item 5) — most catalog commits are pure price
+/** #205 fix wave (Task 14, item 5) — most catalog commits are pure price
  *  files with no Spec Section/Article column mapped at all; loading the
  *  section+article library for every one of those (37,400-part catalog)
  *  would be pure waste. Only a row that actually carries a pointer needs it. */
@@ -1163,7 +1163,7 @@ const WRITERS: Record<string, Writer> = {
     },
     exportObjects: async () => {
       const [list, sections, articles] = await Promise.all([Catalog.list(), allSections(), allArticles()]);
-      // D-SPEC fix wave item 3 — a stored specSectionId/specArticleId can be a
+      // #205 fix wave item 3 — a stored specSectionId/specArticleId can be a
       // DEAD pointer (the section/article it names was deleted). Exporting a
       // dead id verbatim round-trips it straight back into productMetadata's
       // legacy text on re-import (ids look nothing like real legacy text, but

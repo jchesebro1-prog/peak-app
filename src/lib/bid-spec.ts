@@ -14,7 +14,7 @@ import { hasPrintableSpec } from "@/lib/specs/articles";
  * row is unresolved.
  * ------------------------------------------------------------------ */
 
-/** Spec fields carried on a catalog part (D94, extended by D-SPEC). Declared on
+/** Spec fields carried on a catalog part (D94, extended by #205). Declared on
  *  CatalogPart itself now — this alias is kept so the D94 call sites read the
  *  same. */
 export type PartSpecFields = Pick<

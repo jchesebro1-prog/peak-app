@@ -1,7 +1,7 @@
 import type { SpecSection } from "@/lib/specs/sections";
 
 /**
- * Part 2 category articles (D-SPEC) — "2.1 Stage Drapes", "2.3 Packaged Hoists".
+ * Part 2 category articles (#205) — "2.1 Stage Drapes", "2.3 Packaged Hoists".
  * Each opens with an "A. General" clause carrying the acceptable-manufacturers
  * list, then the products that landed in the BOM print as B., C., D…
  *
@@ -45,7 +45,7 @@ export function normalizeCategoryKey(key: string): string {
   return String(key || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-/** D-SPEC fix wave (Task 14, item 3) — true for a string shaped like a spec
+/** #205 fix wave (Task 14, item 3) — true for a string shaped like a spec
  *  section/article id ("ss-…" / "ar-…", the lowercase prefixes `uid()` mints
  *  for spec_sections/spec_articles — see spec-sections.ts / spec-articles.ts).
  *  An import value in this shape that fails to resolve is a DEAD pointer to a

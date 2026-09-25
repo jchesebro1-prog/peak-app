@@ -241,7 +241,7 @@ import type { DavinciExtract, DavinciRecord } from "@/lib/davinci/types";
 import { requireHostedConfirmation } from "./db-target";
 import { planEnrichment, applyEnrichment } from "@/lib/catalog-davinci-apply";
 import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
-// D-SPEC fix wave (Task 14) — DB-backed exporter / price-book-importer /
+// #205 fix wave (Task 14) — DB-backed exporter / price-book-importer /
 // specUpdatedBy checks below need a real section+article to resolve against
 // and the price-book importer entry point itself.
 import { runCatalogImport } from "@/app/(app)/catalog/import";
@@ -1802,7 +1802,7 @@ const designGroup = NAV.find((e) => e.kind === "group" && e.key === "design");
  * Builder (#130) — /design/subassemblies redirects there. "gridsettings"
  * joined after "designs" (Grid settings build) — Grid symbols, port rules,
  * wire types, and install labor now live at /design/grid/settings. "specs"
- * joined the Specs module (D-SPEC) between "designs" and "lineset" — the
+ * joined the Specs module (#205) between "designs" and "lineset" — the
  * check became order-tolerant below so parallel additions (like
  * "gridsettings") don't collide with it on an exact-array assertion. */
 const DESIGN_CHILDREN = [
@@ -5306,7 +5306,7 @@ async function asyncChecks(): Promise<void> {
     const legacyPatch = catalogPatch(legacy.rows[0].values, stored, "SP-1", { specLib: lib });
     ok(!("specArticleId" in legacyPatch) && legacyPatch.productMetadata?.specArticle === "Stage Lighting Instruments", "catalog import: an unresolvable Spec Article is kept as legacy text, never dropped");
 
-    /* --- D-SPEC fix wave (opus review of 9fedee19..a7ec23c4) --- */
+    /* --- #205 fix wave (opus review of 9fedee19..a7ec23c4) --- */
 
     // Item 1 — exact-header-only spec columns. A Shopify/vendor sheet's own
     // Title/Text/Heading/State columns must never fuzzy-claim a spec field;

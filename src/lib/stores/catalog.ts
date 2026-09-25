@@ -139,7 +139,7 @@ export type CatalogPart = {
    *  effectivePriceDate). */
   pricedAt?: number;
 
-  /* --- Specs module (D-SPEC). All additive JSONB, no migration. ---
+  /* --- Specs module (#205). All additive JSONB, no migration. ---
    * These are the ONE canonical set (D258). productMetadata.specSection /
    * .specArticle (Displays API, 2e284665) are legacy free text, adopted into
    * specSectionId / specArticleId only when they resolve — see

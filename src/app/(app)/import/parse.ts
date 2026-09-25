@@ -36,7 +36,7 @@ export type FieldDef = {
    *  instead of 0, so the writer can set `valueUnknown`; export writes the
    *  same token back, so the column round-trips. */
   allowUnknown?: boolean;
-  /** D-SPEC fix wave (Task 14) — this field is claimed ONLY by an exact
+  /** #205 fix wave (Task 14) — this field is claimed ONLY by an exact
    *  (normalized) match against its header/label/key/aliases (autoMap pass
    *  1). It never enters pass 2's fuzzy "contains" match. Without this, a
    *  vendor/Shopify column whose header is exactly "Title", "Text",

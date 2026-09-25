@@ -130,7 +130,7 @@ export function activeKeyFor(pathname: string): string {
   // generic "/design" → designoverview fallback below, which every other
   // /design/* route (including /design/grid/<id>, the editor) still uses.
   if (pathname.startsWith("/design/grid/settings")) return "gridsettings";
-  // Specs (D-SPEC): same reason as the two exceptions above — the generic
+  // Specs (#205): same reason as the two exceptions above — the generic
   // /design → designoverview fallback below would otherwise light every
   // /design/specs/* route as the Design overview tab.
   if (pathname.startsWith("/design/specs")) return "specs";

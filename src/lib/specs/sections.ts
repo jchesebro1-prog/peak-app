@@ -1,5 +1,5 @@
 /**
- * Section shape for the Specs module (D-SPEC), split out of the store so it
+ * Section shape for the Specs module (#205), split out of the store so it
  * stays pure: `src/lib/bid-spec.ts` runs inside a client component
  * (`design/engagements/spec/generator.tsx` calls `matchBom`), so it cannot
  * import anything at runtime that reaches the database.

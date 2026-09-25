@@ -24,7 +24,7 @@ export type CatalogCommitInput = {
   /** Did the file map a List or a Cost column? A file without one confirmed
    *  no price, so it never re-dates a book (final review item 3). */
   priced: boolean;
-  /** D-SPEC fix wave (Task 14, item 2) — the signed-in user, threaded into
+  /** #205 fix wave (Task 14, item 2) — the signed-in user, threaded into
    *  `specUpdatedBy` so an edited row is stamped with who imported it rather
    *  than the generic "import" fallback. Optional: the regression harness
    *  drives this session-free. */

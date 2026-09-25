@@ -92,8 +92,8 @@ const ROUTES = [
   "/settings",
   "/settings?section=admin",
   "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
-  "/design/specs/library", // Specs module (D-SPEC) — the library index
-  "/design/specs/templates", // Specs module (D-SPEC) — the template list
+  "/design/specs/library", // Specs module (#205) — the library index
+  "/design/specs/templates", // Specs module (#205) — the template list
   "/inbox",
   "/inbox?view=unmatched",
   "/queue",
@@ -194,7 +194,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
   { route: "/rentals/quote?customer=lakefront&contact=Tom+Reyes&name=Smoke+rental&replaces=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
-  // Specs module (D-SPEC): /design/specs redirects to the library (Phase A —
+  // Specs module (#205): /design/specs redirects to the library (Phase A —
   // the Generated list is Phase B), so it needs no reject — the harness
   // follows the redirect and judges the final /design/specs/library page.
   { route: "/design/specs" },

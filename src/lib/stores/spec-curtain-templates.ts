@@ -2,7 +2,7 @@ import { getDoc, listDocs, upsertDoc, type Doc } from "@/db/doc-store";
 import { GRID_CURTAIN_TYPES, type GridCurtainType } from "@/lib/design/grid-bom";
 
 /**
- * One template per Grid curtain type (D-SPEC). The Grid mints SKU "CURTAIN" for
+ * One template per Grid curtain type (#205). The Grid mints SKU "CURTAIN" for
  * every curtain, so a curtain row can never match a catalog part — it resolves
  * to its type's template instead, and the placement's own configuration fills
  * the slots. The specimen's seven drape entries collapse into these four types
