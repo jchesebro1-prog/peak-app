@@ -343,6 +343,20 @@ export function stateAbbr(name: string | null | undefined): string {
   return name.length === 2 ? name.toUpperCase() : "";
 }
 
+/**
+ * The real two-letter US state/territory codes, built from STATE_ABBR's own
+ * values so it can never drift from the table above. #185 fix round 2 item 3:
+ * geo-backfill's fallbackStreet() used to strip ANY trailing "<XX> <zip>",
+ * which silently ate a street word that happens to be two letters ("St",
+ * "Dr") followed by a bare zip elsewhere in the text — this is the set that
+ * lets it check the code is a real state before stripping.
+ */
+const US_STATE_ABBR_CODES = new Set(Object.values(STATE_ABBR));
+
+export function isUsStateAbbr(code: string | null | undefined): boolean {
+  return !!code && US_STATE_ABBR_CODES.has(code.toUpperCase());
+}
+
 type NominatimAddress = {
   house_number?: string;
   road?: string;

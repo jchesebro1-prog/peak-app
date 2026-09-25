@@ -39,6 +39,7 @@ import {
   FETCH_TIMEOUT_MS,
   haversineMiles,
   hasCoords,
+  isUsStateAbbr,
   officesFromSettings,
   quoteOrigin,
   route,
@@ -210,13 +211,27 @@ export function fallbackStreet(street: string | null | undefined, city: string |
     raw = /\d/.test(after) && !/\d/.test(before) ? after : before + after;
   }
 
+  // Fix round 2, item 4a: normalize "Box #231" / "Mail Drop #3248" /
+  // "Building #401" to the un-hashed form BEFORE cleanStreet runs. cleanStreet
+  // has its own generic bare-"#code" stripper (for "100 Main St #4") that
+  // would otherwise eat the digits here first and leave the box/mail-drop/
+  // building word orphaned with nothing for the regex below to match.
+  raw = raw.replace(/\b(mail\s*drop|box|building)\s*#\s*(\d)/gi, "$1 $2");
+
   let t = cleanStreet(raw)
     .replace(/,?\s*\b(mail\s*drop|box)\s*#?\s*\d+\b/gi, "")
     .replace(/,?\s*\bbuilding\s+\d+\w*/gi, "");
   if (!t) return t;
 
-  // A pasted "<ST> <zip>" tail.
-  t = t.replace(/,?\s*\b[A-Za-z]{2}\s+\d{5}(-\d{4})?\s*$/, "");
+  // A pasted "<ST> <zip>" tail — but ONLY when the two-letter code is a real
+  // US state abbreviation (fix round 2, item 3). Before this check, ANY
+  // trailing "<XX> <zip>" was stripped, so a street ending in a two-letter
+  // street word followed by a bare zip elsewhere in the address ("100 Main
+  // St 53703", "123 Oak Dr 53590") silently lost real street text ("St",
+  // "Oak Dr") that happened to look like a state code but isn't one.
+  t = t.replace(/,?\s*\b([A-Za-z]{2})\s+(\d{5})(-\d{4})?\s*$/, (m, code: string) =>
+    isUsStateAbbr(code) ? "" : m
+  );
 
   // A pasted copy of the venue's own stated city, right at the end, only at
   // a word boundary (or the very start of what's left).

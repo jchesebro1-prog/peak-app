@@ -130,6 +130,10 @@ async function main() {
   assert.equal(fallbackStreet("110 Main St.  Box 231", "X"), "110 Main St.");
   assert.equal(fallbackStreet("600 Highland Ave.  Mail Drop 3248", "X"), "600 Highland Ave.");
   assert.equal(fallbackStreet("500 E Veterans, Building 401", "X"), "500 E Veterans");
+  // Minors (fix round 2, item 4a): a "#" between the box word and its number
+  // must not survive as an orphaned "Box" once cleanStreet's generic bare-#
+  // stripper (which runs first) has already eaten the digits.
+  assert.equal(fallbackStreet("110 Main St. Box #231", "Reedsburg"), "110 Main St.");
   // The tightened colon rule (item 2): cut at the last colon only when the
   // text after it has a digit and the text before it does not; otherwise
   // remove only the colon character, so the suite rule still gets a shot.
@@ -164,6 +168,20 @@ async function main() {
     fallbackStreet("100 Main Street 53703", "X"),
     "100 Main Street 53703",
     "no state+zip in this string — must not chew into 'Street'"
+  );
+  // Fix round 2, item 3: the trailing state+zip strip must only fire when the
+  // two-letter code IS a real US state abbreviation. "St" and "Dr" are street
+  // words, not states, so a trailing "<street word> <zip>" must survive whole
+  // — this used to strip all the way to "100 Main" / drop "Oak Dr" entirely.
+  assert.equal(
+    fallbackStreet("100 Main St 53703", "X"),
+    "100 Main St 53703",
+    "'St' is not a real state code — must never become '100 Main'"
+  );
+  assert.equal(
+    fallbackStreet("123 Oak Dr 53590", "X"),
+    "123 Oak Dr 53590",
+    "'Dr' is not a real state code — 'Oak Dr' must survive"
   );
   // Minors (item 6): WI county/state trunk highway abbreviations are road
   // words too, same as "highway"/"county"/"road".
