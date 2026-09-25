@@ -10203,6 +10203,60 @@ import {
   ok(!/^\s*import\s/m.test(trvSrc), "#TRV: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
 }
 
+/* --- #TRV engines: drive mode unchanged vs before (hard-coded pre-change
+   figures), fly mode equals the hand-computed spec formula. All fixtures use
+   the no-coords estimate branch (trip = one-way × 2) so every number is exact. --- */
+import { computeEstimate as trvRepairEstimate } from "@/lib/repair-engine";
+import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engine";
+{
+  const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
+
+  // ---- flame (1 person) ----
+  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
+  const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
+  const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
+  ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.total, 575 / (1 - 0.3)),
+    "#TRV flame: a $500 drive prices exactly as before (575 cost → 821.43)");
+  ok(fd.trip.mode === "drive" && !("flight" in fd.trip) && fd.travel?.total === fd.trip.total && fd.rawCost === fd.trip.total + fd.testingSubtotal,
+    "#TRV flame: drive mode prices trip.total itself (bit-for-bit)");
+  const ff = computeFlameQuote({ venues: [flameFar] }, flameRates);
+  ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.total, 2515 / (1 - 0.3)),
+    "#TRV flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
+  ok(ff.trip.flight?.crew === 1 && ff.trip.flight?.nights === 2 && ff.trip.flight?.tripDays === 3,
+    "#TRV flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
+  const ffDrive = computeFlameQuote({ venues: [flameFar], travel: { mode: "drive" } }, flameRates);
+  ok(ffDrive.trip.mode === "drive" && ffDrive.rawCost === 2950, "#TRV flame: forced Drive over the threshold prices the 2,200 drive");
+  const fdFly = computeFlameQuote({ venues: [flameNear], travel: { mode: "fly" } }, flameRates);
+  ok(fdFly.trip.mode === "fly" && fdFly.travel?.total === 1480 && fdFly.rawCost === 1555, "#TRV flame: forced Fly under the threshold (1 night) = 1,480 travel");
+  const ffCrew2 = computeFlameQuote({ venues: [flameFar] }, { ...flameRates, flyCrew: 2 });
+  ok(ffCrew2.travel?.total === 2810, "#TRV flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
+
+  // ---- repair (default crew 2) ----
+  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
+  ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.total, 607.5 / (1 - 0.3)) && rd.trip.mode === "drive",
+    "#TRV repair: a $307.50 drive prices exactly as before (607.50 service cost)");
+  const rf = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24 }, repairRates);
+  ok(rf.trip.mode === "fly" && rf.trip.flight?.crew === 2 && rf.travel?.total === 3305 && rf.serviceCost === 5105 && near(rf.total, 5105 / (1 - 0.3)),
+    "#TRV repair: 24 crew-hours far away fly 2 people — 3,305 travel + 1,800 labor");
+  const rf3 = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3 }, repairRates);
+  ok(rf3.trip.flight?.crew === 3 && rf3.travel?.total === 4290, "#TRV repair: a crew of 3 on the quote flies 3 (never fewer than the priced crew)");
+  const rfe = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, emergency: true }, repairRates);
+  ok(rfe.laborCost === 2700 && rfe.trip.flight?.travelLabor === 1200, "#TRV repair: emergency multiplies on-site labor only — travel labor stays at the base $75");
+  const rfOverride = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, travel: { mode: "drive" } }, repairRates);
+  ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#TRV repair: forced Drive keeps the drive");
+
+  // ---- inspection (1 person) ----
+  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
+  ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.total, 832.5 / (1 - 0.3)) && idr.trip.mode === "drive",
+    "#TRV inspection: a $307.50 drive prices exactly as before (832.50 cost)");
+  const ifl = trvInspectionEstimate({ venues: [{ id: "trv-i2", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 }] }, inspRates);
+  ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.total, 2665 / (1 - 0.3)),
+    "#TRV inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())

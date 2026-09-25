@@ -1,5 +1,14 @@
 import { getBlob, setBlob } from "@/db/doc-store";
-import { REPAIR_RATE_DEFAULTS } from "@/lib/stores/pricing";
+import { REPAIR_RATE_DEFAULTS, getTravelRates } from "@/lib/stores/pricing";
+import {
+  FLY_CREW_DEFAULTS,
+  planTravel,
+  withMode,
+  type FlyRates,
+  type TravelOverride,
+  type TravelPlan,
+  type TripMode,
+} from "@/lib/travel-plan";
 
 export { REPAIR_RATE_DEFAULTS };
 
@@ -22,6 +31,10 @@ export { REPAIR_RATE_DEFAULTS };
  *   4. Parts — Σ(qty × cost), marked up to the parts margin:
  *      partsSell = partsCost ÷ (1 − partsMargin).
  *   5. Total = serviceSell + partsSell.
+ *   6. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
+ *      whose drive cost reaches the threshold prices as flights for at least
+ *      the quote's crew (default repair_rates.flyCrew); travel-day labor bills
+ *      at the base labor rate, like drive time. Drive mode is unchanged.
  *
  * The prototype's window.Geo routing is injected via an optional GeoAdapter;
  * without one, tripTravel uses the prototype's estimate fallback
@@ -36,6 +49,7 @@ export type RepairRates = {
   margin: number; // points on labor + travel
   emergencyMult: number; // labor-rate multiplier for emergency / after-hours work
   travelRoundMin: number; // round total travel time up to the nearest N minutes
+  flyCrew?: number; // default crew when the trip flies (FLY_CREW_DEFAULTS.repair when absent)
 };
 
 const RATES_BLOB_ID = "repair_rates"; // rss_repair_rates_v1
@@ -194,6 +208,10 @@ export type RepairEstimateOptions = {
   laborHours?: number | string | null;
   parts?: RepairPartInput[];
   emergency?: boolean;
+  /** Crew on the job (laborHours is already crew-hours) — the flying crew is never smaller. */
+  crewSize?: number | string | null;
+  /** Per-quote travel override (Auto · Drive · Fly, crew, nights, airfare). */
+  travel?: TravelOverride | null;
   /** Optional routing service (prototype's window.Geo). */
   geo?: GeoAdapter | null;
 };
@@ -204,7 +222,10 @@ export type RepairEstimate = {
   laborRate: number;
   laborCost: number;
   emergency: boolean;
-  trip: TripTravel;
+  /** The drive numbers (trip.total is always the DRIVE cost) + mode/flight. */
+  trip: TripTravel & TripMode;
+  /** The travel plan — travel.total is the figure the quote prices. */
+  travel: TravelPlan;
   serviceCost: number;
   serviceSellRaw: number;
   serviceSell: number;
@@ -223,7 +244,8 @@ export type RepairEstimate = {
 /** Pure port of compute(opts) with the rates passed in explicitly. */
 export function computeEstimate(
   opts: RepairEstimateOptions,
-  C: RepairRates
+  C: RepairRates,
+  travel?: Partial<FlyRates> | null
 ): RepairEstimate {
   const venues = (opts.venues || []).slice();
 
@@ -231,8 +253,19 @@ export function computeEstimate(
   const laborRate = C.laborRate * (opts.emergency ? C.emergencyMult || 1 : 1);
   const laborCost = laborHours * laborRate;
 
-  const trip = tripTravel(opts.office, venues, C, opts.geo);
-  const serviceCost = laborCost + trip.total;
+  const drive = tripTravel(opts.office, venues, C, opts.geo);
+  const crew = Math.max(1, Math.round(Number(opts.crewSize) || 1));
+  // Flights over drive: in drive mode plan.total IS drive.total (bit-for-bit).
+  const plan = planTravel({
+    drive,
+    onSiteHours: laborHours,
+    laborRate: C.laborRate,
+    crewDefault: Math.max(C.flyCrew ?? FLY_CREW_DEFAULTS.repair, crew),
+    rates: travel,
+    override: opts.travel,
+  });
+  const trip = withMode(drive, plan);
+  const serviceCost = laborCost + plan.total;
 
   const margin = C.margin;
   const serviceSellRaw =
@@ -260,6 +293,7 @@ export function computeEstimate(
     laborCost,
     emergency: !!opts.emergency,
     trip,
+    travel: plan,
     serviceCost,
     serviceSellRaw,
     serviceSell,
@@ -280,5 +314,5 @@ export function computeEstimate(
 export async function compute(
   opts: RepairEstimateOptions = {}
 ): Promise<RepairEstimate> {
-  return computeEstimate(opts, await getRates());
+  return computeEstimate(opts, await getRates(), await getTravelRates());
 }
