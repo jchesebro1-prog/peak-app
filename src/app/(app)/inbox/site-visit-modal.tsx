@@ -7,6 +7,7 @@ import {
   createSiteVisitAction,
   type InviteStatus,
 } from "./site-visit-actions";
+import { VenueAvailabilityCheck } from "@/components/venue-availability-check";
 
 /**
  * Schedule-site-visit modal (D76 / PUNCHLIST #2 phase 1). Opened from the
@@ -36,6 +37,15 @@ const lbl: CSSProperties = {
   textTransform: "uppercase",
   margin: "12px 0 5px",
 };
+
+/** Local (not UTC) "YYYY-MM-DDTHH:MM" — `Date#toISOString` converts to UTC
+ *  first, which would silently shift the venue-availability check by the
+ *  browser's offset from UTC. */
+function localDateTimeValue(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 function tomorrowISO(): string {
   const d = new Date(Date.now() + 24 * 3600_000);
@@ -279,6 +289,13 @@ export default function SiteVisitModal({
                 </select>
               </div>
             </div>
+
+            <VenueAvailabilityCheck
+              locationId={venueId || null}
+              start={`${date}T${time}`}
+              end={localDateTimeValue(new Date(`${date}T${time}:00`).getTime() + durationMin * 60_000)}
+              compact
+            />
 
             <label style={lbl}>Assigned to (gets the calendar invite)</label>
             <select style={inStyle} value={assignee} onChange={(e) => setAssignee(e.target.value)}>

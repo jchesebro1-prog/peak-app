@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { scheduleFlameTest, unscheduleFlameTest } from "../actions";
+import { VenueAvailabilityCheck } from "@/components/venue-availability-check";
 
 /**
  * Scheduling popover — port of Flame Test Scheduling.dc.html's modal. Opens
@@ -16,6 +17,7 @@ export function ScheduleButton({
   mode,
   customer,
   venue,
+  locationId,
   defaultDate,
   defaultTech,
   techOptions,
@@ -26,6 +28,7 @@ export function ScheduleButton({
   mode: "new" | "edit";
   customer: string;
   venue: string;
+  locationId?: string | null;
   defaultDate: string;
   defaultTech: string;
   techOptions: string[];
@@ -134,6 +137,7 @@ export function ScheduleButton({
                     background: "#fff",
                   }}
                 />
+                <VenueAvailabilityCheck locationId={locationId ?? null} start={date} />
               </label>
               <label style={{ display: "block" }}>
                 <span

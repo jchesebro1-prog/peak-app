@@ -260,6 +260,7 @@ export default async function FlameSchedulingPage() {
                   mode="new"
                   customer={j.customer || "Customer"}
                   venue={j.venue || ""}
+                  locationId={j.locationId}
                   defaultDate={j.scheduledDate || iso(Date.now() + 7 * DAY)}
                   defaultTech={j.assignedTo || defaultTech}
                   techOptions={techOptions}
@@ -415,6 +416,7 @@ export default async function FlameSchedulingPage() {
                       mode="edit"
                       customer={j.customer || "Customer"}
                       venue={j.venue || ""}
+                      locationId={j.locationId}
                       defaultDate={j.scheduledDate || iso(Date.now() + 7 * DAY)}
                       defaultTech={j.assignedTo || defaultTech}
                       techOptions={techOptions}

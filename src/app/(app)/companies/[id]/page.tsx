@@ -24,6 +24,8 @@ import {
   officesFromSettings,
 } from "@/lib/geo";
 import { dateYear, shortDate, timeAgo } from "@/lib/format";
+import { getSiteByDocLocId } from "@/lib/identity/sites";
+import { hasVenueCalendar } from "@/lib/stores/venue-calendars";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
 import ActivityComposer from "./activity-composer";
@@ -161,6 +163,13 @@ export default async function CustomerDetailPage({
       const coords = coordsOf(l) || {};
       const est = await estimate(offices, { ...l, ...coords });
       const sm = TRAVEL_SOURCE_META[est.source] || TRAVEL_SOURCE_META.none;
+      // Venue calendar link (docLocId round-trip, D101-style): `l.id` here
+      // IS the docLocId a scheduled record carries as its own locationId
+      // (venue-match.ts), so the matching site row is whichever one has it
+      // as legacyLocId (or, for a venue created straight in the new
+      // system, as its own id) — see identity/sites.ts's getSiteByDocLocId.
+      const site = l.id ? await getSiteByDocLocId(l.id) : null;
+      const calendarOn = site ? await hasVenueCalendar(l.id!) : false;
       return {
         key: l.id || l.label || Math.random().toString(36).slice(2),
         label: l.label || "Venue",
@@ -176,6 +185,8 @@ export default async function CustomerDetailPage({
         sourceLabel: sm.label,
         sourceInk: sm.ink,
         sourceSoft: sm.soft,
+        calendarHref: site ? `/venues/${encodeURIComponent(site.id)}#calendar` : null,
+        calendarOn,
       };
     })
   );
@@ -367,6 +378,14 @@ export default async function CustomerDetailPage({
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: "#8c919c", marginTop: 5 }}>{l.address}</div>
+                {l.calendarHref && (
+                  <Link
+                    href={l.calendarHref}
+                    style={{ display: "inline-block", marginTop: 6, fontSize: 11.5, fontWeight: 600, color: l.calendarOn ? "#1f7a52" : ACCENT_INK, textDecoration: "none" }}
+                  >
+                    {l.calendarOn ? "✓ Calendar" : "Calendar"}
+                  </Link>
+                )}
               </div>
               <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "11px 12px" }}>
                 <div style={{ fontSize: 9.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
