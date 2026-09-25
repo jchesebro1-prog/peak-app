@@ -5404,6 +5404,84 @@ async function asyncChecks(): Promise<void> {
     }
   }
 
+  /* ---- #156: phase casing survives a 5-cycle export -> import round trip
+   * through the REAL task_templates writer (commitImport/exportCsv), not a
+   * hand-rolled approximation of either. #145's own round-trip test (T10,
+   * just above) proved assignment targets survive ONE cycle; this proves a
+   * phase NAME's casing survives FIVE — the concern was drift that only
+   * shows up after more than one pass. The contrast case is deliberate:
+   * `discipline` IS lowercased by normalizeLine (task-templates.ts, doc'd
+   * on the TaskTemplateLine type) — asserting that too is what makes the
+   * phase assertion mean something; if both fields came back unchanged this
+   * test wouldn't distinguish "casing is preserved" from "nothing here
+   * transforms anything." */
+  {
+    const ttType156 = getTypeMeta("task_templates");
+    if (!ttType156) throw new Error("#156 setup: task_templates import type not registered");
+    const SET_156 = "TEST156: Phase Casing Round Trip";
+    const PHASE_156 = "Schematic Design";
+    const DISCIPLINE_156_INPUT = "Rigging";
+    const DISCIPLINE_156_STORED = "rigging"; // normalizeLine lowercases discipline, deliberately
+    const rowsFor156 = (csv: string) => {
+      const parsed = parseImportCsv(csv);
+      if (!parsed.ok) throw new Error("#156 setup: csv did not parse — " + parsed.error);
+      const mapping = autoMap(parsed.headers, ttType156.fields);
+      return prepareRows(parsed.rows, mapping, ttType156.fields).rows;
+    };
+    try {
+      const csv156 = [
+        "Template Set,Applies To,Phase,Discipline,Task,Section,Assign To,Start %,Length %",
+        `${SET_156},consulting,${PHASE_156},${DISCIPLINE_156_INPUT},Casing Check,Design,team,0,100`,
+      ].join("\n");
+      const created156 = await commitImport("task_templates", rowsFor156(csv156), "create", { effectiveAt: Date.now() });
+      ok(created156.created === 1 && created156.errored === 0, "#156 setup: the phase-casing fixture set commits");
+
+      const lineAfterCreate156 = (await allTaskTemplateSets()).find((s) => s.name === SET_156)?.lines[0];
+      ok(
+        lineAfterCreate156?.phase === PHASE_156,
+        `#156 cycle 0 (create): phase stored exactly as "${PHASE_156}", not lowercased or otherwise altered`
+      );
+      ok(
+        lineAfterCreate156?.discipline === DISCIPLINE_156_STORED,
+        "#156 cycle 0 (create): discipline IS lowercased on the way in — the contrast that makes the phase assertion meaningful"
+      );
+
+      // Five export -> re-import cycles, each through the real entry points:
+      // exportCsv (the task_templates writer's exportObjects — same as the
+      // Import hub's download) and commitImport -> ttApplyRow ->
+      // normalizeLine (the same update path a real re-import takes).
+      for (let cycle = 1; cycle <= 5; cycle++) {
+        const exported156 = await exportCsv("task_templates");
+        const lines156 = exported156.split("\n");
+        const header156 = lines156[0];
+        const rowLines156 = lines156.filter((l) => l.startsWith(SET_156 + ","));
+        ok(rowLines156.length === 1, `#156 cycle ${cycle}: export emits exactly the one fixture row`);
+        ok(
+          rowLines156[0]?.includes("," + PHASE_156 + ","),
+          `#156 cycle ${cycle}: the exported CSV cell for Phase is still byte-identical to "${PHASE_156}"`
+        );
+
+        const miniCsv156 = [header156, ...rowLines156].join("\n");
+        const cycleRes156 = await commitImport("task_templates", rowsFor156(miniCsv156), "update", { effectiveAt: Date.now() });
+        ok(cycleRes156.updated === 1 && cycleRes156.errored === 0, `#156 cycle ${cycle}: re-importing the exported row commits cleanly`);
+
+        const lineAfterCycle156 = (await allTaskTemplateSets()).find((s) => s.name === SET_156)?.lines[0];
+        ok(
+          lineAfterCycle156?.phase === PHASE_156,
+          `#156 cycle ${cycle}: phase is still byte-identical to "${PHASE_156}" after export -> import`
+        );
+        ok(
+          lineAfterCycle156?.discipline === DISCIPLINE_156_STORED,
+          `#156 cycle ${cycle}: discipline is still lowercased to "${DISCIPLINE_156_STORED}" (unchanged behavior, re-asserted every cycle)`
+        );
+      }
+    } finally {
+      for (const s of (await allTaskTemplateSets()).filter((s) => s.name === SET_156)) {
+        await removeTaskTemplateSet(s.id);
+      }
+    }
+  }
+
   /* --- #158 Task 2: ports persist through the catalog edit form --- */
   {
     const { mergeUpsert, get: getCatalogPart } = await import("@/lib/stores/catalog");
