@@ -253,6 +253,43 @@ async function main() {
   );
   console.log("PASS geo-backfill: postal-city distance gate");
 
+  /* ---- 3b. backfillVenueCoords: a time budget stops the run early (#185 item 1) ---- */
+  {
+    await db.delete(sites);
+    for (let i = 0; i < 3; i++)
+      await insertSite(`st-budget-${i}`, { address: `${i + 1} Budget Way`, city: `Budgetville${i}`, state: "WI" });
+    for (let i = 0; i < 3; i++)
+      nominatim.push({
+        when: (u) => q(u).includes(`${i + 1} budget way`),
+        hit: { lat: 43 + i / 10, lng: -89, city: `Budgetville${i}`, state: "Wisconsin" },
+      });
+    // Simulate real network latency deterministically so the budget has
+    // something to trip against — the stubbed fetch otherwise resolves
+    // instantly and no budgetMs could ever elapse mid-run.
+    const stubbedFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const res = await stubbedFetch(input);
+      await new Promise((r) => setTimeout(r, 100));
+      return res;
+    }) as typeof fetch;
+    let rBudget: Awaited<ReturnType<typeof backfillVenueCoords>>;
+    try {
+      rBudget = await backfillVenueCoords({ limit: 10, dryRun: true, delayMs: 0, budgetMs: 150 });
+    } finally {
+      globalThis.fetch = stubbedFetch;
+    }
+    assert.ok(
+      rBudget.queriesIssued >= 1 && rBudget.queriesIssued < 3,
+      `budget must stop the run before all 3 queries finish (issued ${rBudget.queriesIssued})`
+    );
+    assert.equal(
+      rBudget.remaining,
+      3 - rBudget.queriesIssued,
+      "unstarted queries are counted toward remaining, same as a limit cutoff"
+    );
+    console.log("PASS geo-backfill: backfillVenueCoords time budget");
+  }
+
   /* ---- 4. warmRoutes must also get past failed routes ---- */
   await setSettings({
     offices: [{ id: "o1", name: "Reedsburg", city: "Reedsburg", state: "WI", lat: 43.532, lng: -90.003, quoteDefault: true }],

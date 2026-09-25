@@ -24,9 +24,15 @@ export const metadata = { title: "Settings — Quartzite-6" };
 
 /**
  * The Admin → "Geocode addresses" runner calls geocodeBatchAction from this
- * page: 10 Nominatim lookups paced at 1.1s, plus a town-centre lookup when a
- * building's postal city disagrees (#166) — ~20s worst case per batch. Same
- * headroom the other heavy routes (/import, /inbox) already carry.
+ * page. #185/D235 gave each failing building row up to two more fallback
+ * lookups (plus the existing town-centre check), so a `limit`-sized batch of
+ * mostly-failing rows could exceed this route's maxDuration and get killed
+ * mid-run before it ever reported back. geocodeBatchAction now passes
+ * `budgetMs: 35_000` to backfillVenueCoords for the geocode phase, so the
+ * batch stops itself with time to spare for the request/response and
+ * revalidation on top — this maxDuration is the outer safety margin, not the
+ * expected run time. Same headroom the other heavy routes (/import, /inbox)
+ * already carry.
  */
 export const maxDuration = 60;
 

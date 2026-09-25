@@ -544,9 +544,21 @@ export async function backfillVenueCoords(opts?: {
    */
   skipQueries?: readonly string[];
   onProgress?: (done: number, total: number) => void;
+  /**
+   * #185 item 1: wall-clock budget for this call, checked before starting
+   * each new query (never mid-query). A failing building row costs about
+   * 4.4s (one search + a town-centre lookup + two fallback searches, each
+   * paced at delayMs) plus four network round trips, so a `limit`-sized
+   * batch of mostly-failing rows can run well past a server action's
+   * maxDuration — the Settings runner passes this; the CLI doesn't, and
+   * defaults to unbounded (no behaviour change).
+   */
+  budgetMs?: number;
 }): Promise<BackfillReport> {
   const dryRun = opts?.dryRun ?? true;
   const delayMs = opts?.delayMs ?? GEOCODE_DELAY_MS;
+  const budgetMs = opts?.budgetMs;
+  const start = Date.now();
   const db = await getDb();
 
   const missing = await venuesMissingCoords();
@@ -581,10 +593,13 @@ export async function backfillVenueCoords(opts?: {
   // Stated-town centres, looked up only when a building's city disagrees.
   const ctx: GeocodeCtx = { delayMs, townCentres: new Map() };
   const toRun = queries.slice(0, budget);
-  report.remaining = queries.length - toRun.length;
 
   let done = 0;
   for (const q of toRun) {
+    // #185 item 1: checked before starting each new query, never mid-query —
+    // an in-flight lookup always finishes; only queries not yet begun count
+    // toward `remaining`, same as a `limit` cutoff.
+    if (budgetMs != null && Date.now() - start >= budgetMs) break;
     const rows = byQuery.get(q)!;
     if (done > 0) await sleep(delayMs);
     report.queriesIssued++;
@@ -616,6 +631,11 @@ export async function backfillVenueCoords(opts?: {
       else report.geocodedCity++;
     }
   }
+
+  // Queries never started — whether cut off by `limit` (toRun already
+  // excluded them) or by `budgetMs` (the loop broke early, done < toRun.length)
+  // — are the caller's cue to pass them back next batch.
+  report.remaining = queries.length - done;
 
   return report;
 }

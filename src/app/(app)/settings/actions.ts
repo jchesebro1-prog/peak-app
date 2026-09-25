@@ -413,7 +413,12 @@ export async function geocodeBatchAction(input?: {
     };
   }
 
-  const r = await backfillVenueCoords({ limit, dryRun: false, skipQueries: skip });
+  // #185 item 1: a failing building row costs ~4.4s + 4 network round trips
+  // (search + town-centre lookup + two fallback searches), so a `limit`-sized
+  // batch of mostly-failing rows can run past this route's maxDuration (60s,
+  // see page.tsx) and get killed mid-run. 35s leaves headroom for the request
+  // itself plus revalidation on top of whatever geocoding finished.
+  const r = await backfillVenueCoords({ limit, dryRun: false, skipQueries: skip, budgetMs: 35_000 });
   revalidatePath("/", "layout");
   return {
     ok: true as const,
