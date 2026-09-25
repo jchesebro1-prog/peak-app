@@ -519,8 +519,17 @@ export type FoldedMobLine = { cost: number; price: number; internalNote: string 
  * per-mobilization lines carried, and every `extras[].cost`/`.price` must
  * already be round2'd too — foldLaborMobLines only redistributes them, it
  * does not re-derive them from a margin.
+ *
+ * The modal rounds its total once while each line rounds its own share, so
+ * the last line absorbs that cent-level drift toward `targetTotalPrice` and
+ * the lines always match the modal's "Price · ext".
  */
-export function foldLaborMobLines(mobCosts: number[], mobPrices: number[], extras: LaborExtra[]): FoldedMobLine[] {
+export function foldLaborMobLines(
+  mobCosts: number[],
+  mobPrices: number[],
+  extras: LaborExtra[],
+  targetTotalPrice?: number,
+): FoldedMobLine[] {
   const n = mobCosts.length;
   if (n === 0) return [];
   const weights = mobCosts.some((c) => c > 0) ? mobCosts : mobCosts.map(() => 1);
@@ -550,7 +559,7 @@ export function foldLaborMobLines(mobCosts: number[], mobPrices: number[], extra
     return { extra, costShares, priceShares };
   });
 
-  return mobCosts.map((mobCost, i) => {
+  const lines = mobCosts.map((mobCost, i) => {
     const addCost = perExtra.reduce((a, s) => a + s.costShares[i], 0);
     const addPrice = perExtra.reduce((a, s) => a + s.priceShares[i], 0);
     const parts = perExtra
@@ -562,6 +571,16 @@ export function foldLaborMobLines(mobCosts: number[], mobPrices: number[], extra
       internalNote: parts.length ? "Includes " + parts.join(" · ") : "",
     };
   });
+
+  if (typeof targetTotalPrice === "number" && Number.isFinite(targetTotalPrice) && lines.length > 0) {
+    const drift = round2(round2(targetTotalPrice) - lines.reduce((a, l) => a + l.price, 0));
+    if (drift !== 0 && Math.abs(drift) <= 0.05 * Math.max(1, lines.length + extras.length)) {
+      const last = lines[lines.length - 1];
+      last.price = round2(last.price + drift);
+    }
+  }
+
+  return lines;
 }
 
 /** h/m label — local copy of Geo.fmtTime (lib/geo is server-only). */

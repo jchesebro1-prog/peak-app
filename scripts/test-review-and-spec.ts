@@ -424,6 +424,11 @@ ok(
   "labor fold: three equal mobilizations plus a $1 extra still sum to exactly $4"
 );
 ok(foldLaborMobLines([], [], [{ label: "x", cost: 1, price: 1 }]).length === 0, "labor fold: no mobilizations folds to no lines");
+// The modal rounds its "Price · ext" once over the whole; each line rounds its own
+// share. With the target passed, the last line absorbs that cent so they agree.
+const foldTarget = foldLaborMobLines([9000], [12857.14], [{ label: "shop & engineering", cost: 1512, price: 2160 }, { label: "performance bonus", cost: 450, price: 642.85 }], 10962 / 0.7);
+ok(foldTarget[0].price === 15660, "labor fold: with the modal total passed, the single line equals it to the cent (15660, not 15659.99)");
+ok(foldLaborMobLines([9000], [12857.14], [{ label: "b", cost: 450, price: 642.85 }], 99999).map((l) => l.price)[0] === round2(12857.14 + 642.85), "labor fold: a target far from the lines' sum (not rounding drift) is ignored");
 
 // addLabor itself: computeLabor's real shop/bonus/allowance output, folded
 // the same way addLabor (estimator-client.tsx) folds it, must land on the

@@ -1772,7 +1772,7 @@ export default function EstimatorClient({
     if (activeMobs.length > 0) {
       const mobCosts = activeMobs.map(({ m }) => round2(m.cost));
       const mobPrices = mobCosts.map((c) => price(c));
-      const folded = foldLaborMobLines(mobCosts, mobPrices, extras);
+      const folded = foldLaborMobLines(mobCosts, mobPrices, extras, r.totalPrice);
       activeMobs.forEach(({ m, i }, idx) => {
         const label = m.raw.name && m.raw.name.trim() ? m.raw.name.trim() : "Mobilization " + (i + 1);
         const desc = label + " — " + discLabel;
