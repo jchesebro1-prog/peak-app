@@ -15937,3 +15937,67 @@ async function partDocsFetchAsyncChecks(): Promise<void> {
   });
   ok(!slow.ok && slow.error === "The link took too long to respond.", "part docs fetch: a slow body hitting the timeout is refused, not left hanging");
 }
+
+/* ======================================================================
+   Part documents (#DOC) — Task 6: the to-do list's view models and the
+   "Also covers…" suggestions. Pure.
+   ====================================================================== */
+import {
+  documentRow, documentRowMatches, parseDocumentsFilter, progressLine, slotViewFor, viewSatisfied, type DocumentRow,
+} from "@/lib/part-docs/views";
+import { alsoCoversSuggestions, commonPrefixLength, familyKey, isSameFamily } from "@/lib/part-docs/suggest";
+
+{
+  const docs: PdDoc[] = [
+    { id: "PD-ownaaaaaaaa", kind: "datasheet", title: "Own", fileName: "own.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-ownaaaaaaaa/own.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] },
+    { id: "PD-failaaaaaaa", kind: "datasheet", title: "Broken", fileName: "b.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: "https://x.example/b.pdf", source: "fetch", uploadedAt: 1, uploadedBy: "t", history: [], lastFetch: { at: 9, ok: false, error: "HTTP 404" } },
+  ];
+  const idx = buildCoverageIndex({
+    documents: docs,
+    links: [
+      { id: "l1", partSku: "FIXV", documentId: "PD-ownaaaaaaaa", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "l2", partSku: "LINKV", documentId: "PD-failaaaaaaa", kind: "datasheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [{ id: "a", parentSku: "FIXV", accessorySku: "LENSV", source: "assembly" }],
+    parts: [],
+  });
+  const descOf = (s: string) => ({ FIXV: "Fixture V" } as Record<string, string>)[s] ?? "";
+  const covered = slotViewFor(idx, "LENSV", "datasheet", descOf);
+  ok(covered.state === "covered" && covered.parents[0].desc === "Fixture V", "part docs views: a covered slot names its parents with descriptions");
+  const linkOnly = slotViewFor(idx, "LINKV", "datasheet", descOf);
+  ok(linkOnly.state === "link-only" && linkOnly.error === "HTTP 404", "part docs views: a link-only slot carries the last fetch failure");
+  ok(viewSatisfied(covered) && !viewSatisfied(linkOnly), "part docs views: satisfied matches the coverage rule");
+
+  const stat = (sku: string, quotes: number) => ({ sku, quotes, lastQuotedAt: 5, grid: 0, bidSpecs: 0 });
+  const rows: DocumentRow[] = [
+    documentRow(stat("FIXV", 9), { sku: "FIXV", desc: "Fixture V", category: "Lighting", mfr: "ETC", manufacturerModelNumber: "S4V" }, idx, descOf),
+    documentRow(stat("LENSV", 4), { sku: "LENSV", desc: "Lens V", category: "Lenses", mfr: "ETC" }, idx, descOf),
+    documentRow(stat("LINKV", 2), { sku: "LINKV", desc: "Link V", category: "Lighting", mfr: "Altman" }, idx, descOf),
+    documentRow(stat("NONEV", 1), { sku: "NONEV", desc: "None V", category: "Lighting", mfr: "Altman" }, idx, descOf),
+  ];
+  ok(rows[0].model === "S4V" && rows[0].datasheet.state === "own" && rows[0].specsheet.state === "missing", "part docs views: a row carries both slots");
+  const f = (sp: Record<string, string>) => rows.filter((r) => documentRowMatches(r, parseDocumentsFilter(sp))).map((r) => r.sku).join(",");
+  ok(f({}) === "FIXV,LENSV,LINKV,NONEV", "part docs views: no filter keeps every quoted part");
+  ok(f({ show: "missing-datasheet" }) === "LINKV,NONEV", "part docs views: missing datasheet = link-only or missing");
+  ok(f({ show: "link" }) === "LINKV" && f({ show: "covered" }) === "LENSV", "part docs views: link and covered filters");
+  ok(f({ mfr: "Altman", q: "none" }) === "NONEV" && f({ cat: "Lenses" }) === "LENSV", "part docs views: manufacturer, category and search compose");
+  ok(parseDocumentsFilter({ show: "bogus" }).show === "all", "part docs views: an unknown show falls back to all");
+  ok(progressLine(rows, "datasheet") === "2 of 4 quoted parts have a datasheet", "part docs views: the progress line counts satisfied slots");
+}
+
+{
+  ok(familyKey({ sku: "ETC:S4LED-S3-L", manufacturerModelNumber: "" }) === "S4LEDS3L", "part docs suggest: the family key is the normalized model, else SKU");
+  ok(commonPrefixLength("S4LEDS3LUSTR", "S4LEDS3DAYLT") === 7, "part docs suggest: common prefix");
+  ok(isSameFamily("S4LEDS3LUSTR", "S4LEDS3DAYLT") && !isSameFamily("S4LED", "S4PAR") && !isSameFamily("ABCDEFGHIJKL", "ABCDEZZZZZZZ"), "part docs suggest: family needs ≥5 shared and at least half the shorter key");
+  const parts = [
+    { sku: "S4LED-S3-LUSTR", desc: "Lustr", mfr: "ETC" },
+    { sku: "S4LED-S3-DAYLT", desc: "Daylight", mfr: "ETC" },
+    { sku: "S4LED-S3-TUNGS", desc: "Tungsten", mfr: "E.T.C." },
+    { sku: "S4LED-S3-OTHER", desc: "Other brand", mfr: "Altman" },
+    { sku: "LENS-19", desc: "19 deg lens", mfr: "ETC" },
+    { sku: "S4PAR", desc: "PAR", mfr: "ETC" },
+  ];
+  const s = alsoCoversSuggestions(parts[0], parts, ["LENS-19", "GHOST"], new Set(["S4LED-S3-TUNGS"]));
+  ok(s.map((x) => `${x.sku}:${x.reason}`).join(",") === "LENS-19:accessory,S4LED-S3-DAYLT:family", "part docs suggest: accessories first, then same-manufacturer family; linked, other-brand and unrelated parts are left out");
+  ok(alsoCoversSuggestions(parts[0], parts, [], new Set(), 1).length === 1, "part docs suggest: the list is capped");
+}

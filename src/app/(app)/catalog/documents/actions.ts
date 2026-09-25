@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { blobEnabled } from "@/lib/blob";
 import { get as getPart, list as listCatalog } from "@/lib/stores/catalog";
 import {
+  allDocuments,
   attachDocument,
   createDocument,
   detachDocument,
@@ -14,6 +15,7 @@ import {
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
+import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
 import { FETCH_ACTION_BUDGET_MS, FETCH_BATCH_SIZE, isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
@@ -206,4 +208,37 @@ export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActio
   }
   revalidate();
   return { ok: true, results };
+}
+
+/** "Also covers…" — after `documentId` landed on `sku`, the other parts it
+ *  likely describes (the part's accessories, then its model family), minus
+ *  the parts already linked to it. */
+export async function suggestAlsoCoversAction(sku: string, documentId: string): Promise<DocActionResult<{ suggestions: Suggestion[] }>> {
+  await requireUser();
+  const parts = await listCatalog();
+  const target = parts.find((p) => p.sku === sku);
+  if (!target) return { ok: false, error: "That part is no longer in the catalog." };
+  const state = await loadPartDocsState(parts);
+  const linked = new Set(state.links.filter((l) => l.documentId === documentId).map((l) => l.partSku));
+  const suggestions = alsoCoversSuggestions(target, parts, state.index.childrenOf.get(sku) ?? [], linked);
+  return { ok: true, suggestions };
+}
+
+export type DocumentHit = { id: string; title: string; fileName: string; kind: PartDocKind; hasFile: boolean };
+
+/** Title / file-name search over the shared documents (bulk "Attach an
+ *  existing document"). Documents with a stored file first. */
+export async function searchDocumentsAction(q: string): Promise<DocActionResult<{ hits: DocumentHit[] }>> {
+  await requireUser();
+  const tokens = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { ok: true, hits: [] };
+  const hits = (await allDocuments())
+    .filter((d) => {
+      const hay = `${d.title} ${d.fileName}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    })
+    .sort((a, b) => Number(!!b.blobKey) - Number(!!a.blobKey) || a.title.localeCompare(b.title))
+    .slice(0, 20)
+    .map((d) => ({ id: d.id, title: d.title, fileName: d.fileName, kind: d.kind, hasFile: !!d.blobKey }));
+  return { ok: true, hits };
 }

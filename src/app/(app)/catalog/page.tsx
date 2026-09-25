@@ -209,6 +209,22 @@ export default async function CatalogPage({
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{catalogMeta}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          {/* Part documents (#DOC) — the datasheet / spec-sheet to-do list. */}
+          <Link
+            href="/catalog/documents"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 9,
+              padding: "10px 15px",
+              textDecoration: "none",
+            }}
+          >
+            Datasheets
+          </Link>
           <Link
             href="/catalog?new=1"
             style={{
