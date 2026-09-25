@@ -203,7 +203,24 @@ import {
   sheetMimeVerdict,
 } from "@/lib/grid-sheet-file";
 import { defaultLaborMobs, disciplineForSystemTitle } from "@/app/(app)/estimator/labor-defaults";
-import { computeLabor, computeMob, lineMarginOf, repricedAtLineMargin, round2, systemFreight, systemFreightBase, systemItemsCost, systemItemsRev, vendorTotalSeed } from "@/app/(app)/estimator/pricing";
+import {
+  backSolveExtSell,
+  computeLabor,
+  computeMob,
+  foldLaborMobLines,
+  lineExtSellOf,
+  lineMarginOf,
+  priceFromUnitSellEdit,
+  repriceAtMargin,
+  repricedAtLineMargin,
+  round2,
+  systemFreight,
+  systemFreightBase,
+  systemItemsCost,
+  systemItemsRev,
+  vendorTotalSeed,
+  type LaborExtra,
+} from "@/app/(app)/estimator/pricing";
 import type { SpecSection as EstimatorSpecSection } from "@/app/(app)/estimator/types";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";

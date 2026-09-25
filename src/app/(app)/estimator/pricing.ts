@@ -69,6 +69,40 @@ export function lineExtSellOf(it: Pick<SpecItem, "qty" | "price" | "extSellOverr
 }
 
 /**
+ * Back-solve for a manually typed UNIT sell price — the other numbers (ext
+ * sell, margin) follow from qty × price once this lands, so any standing
+ * extended-sell override is cleared.
+ */
+export function priceFromUnitSellEdit(value: number): Pick<SpecItem, "price" | "sellOverride" | "extSellOverride"> {
+  return { price: round2(value), sellOverride: true, extSellOverride: undefined };
+}
+
+/**
+ * Back-solve for a manually typed EXTENDED sell: price = ext ÷ qty, so qty ×
+ * price reproduces the typed ext exactly — kept at FULL precision (not
+ * rounded to cents) rather than round-tripped through round2, which could
+ * land the reproduced ext a cent off. A qty of 0 has nothing to divide by, so
+ * it is treated as 1 and the line's qty is set to 1 along with it. Clears the
+ * extended-sell override itself: from here the line's ext follows qty ×
+ * price like any other line, including a later qty edit.
+ */
+export function backSolveExtSell(ext: number, qty: number): Pick<SpecItem, "price" | "qty" | "extSellOverride"> {
+  const q = qty > 0 ? qty : 1;
+  return { price: ext / q, qty: q, extSellOverride: undefined };
+}
+
+/**
+ * A line repriced by the system margin slider / Sell field (setMarginAll /
+ * setSystemMargin, estimator-client.tsx) — same price math as before, plus
+ * clearing any per-line extended-sell override so a line that was back-solved
+ * from a typed ext sell still follows the new margin instead of staying
+ * stuck at its old ext.
+ */
+export function repriceAtMargin(cost: number, marginFraction: number): Pick<SpecItem, "price" | "extSellOverride"> {
+  return { price: round2(cost / (1 - marginFraction)), extSellOverride: undefined };
+}
+
+/**
  * A line repriced to a new cost at the margin it is already carrying (#144,
  * D163) — the rule behind editing a stored vendor quote's total.
  *
@@ -453,6 +487,81 @@ export function computeLabor(draft: LaborDraft, rate: RateFn): LaborCalc {
     margin,
     totalPrice,
   };
+}
+
+/** One always-present labor extra (shop & engineering / performance bonus /
+ *  allowance) folded into the mobilization lines by foldLaborMobLines. */
+export type LaborExtra = { label: string; cost: number; price: number };
+
+/** One mobilization's line after folding, cost/price/internalNote only —
+ *  the caller (addLabor, estimator-client.tsx) fills in the rest of the
+ *  SpecItem. */
+export type FoldedMobLine = { cost: number; price: number; internalNote: string };
+
+/**
+ * Folds the shop & engineering, performance-bonus and allowance costs into
+ * each mobilization's own line so `addLabor` emits exactly one line per
+ * mobilization — the labor modal's subtitle already promises "one line per
+ * mobilization" (labor-modal.tsx); before this fold it silently also added a
+ * shop & engineering line (present whenever the auto PM/drafting hours are
+ * non-zero, which is nearly always), an optional allowance line, and an
+ * always-present 5%-of-cost performance-bonus line.
+ *
+ * Each extra is split proportionally to every mobilization's own cost
+ * (evenly when every mobilization's cost is $0); the LAST mobilization
+ * absorbs the rounding remainder, so the folded lines' cost and price sum to
+ * EXACTLY what the old one-line-per-extra output summed to, to the cent. The
+ * per-mobilization share of each extra lands in `internalNote` — internal
+ * only, never rendered on the customer document (section-card.tsx only shows
+ * it when isInternal).
+ *
+ * `mobCosts`/`mobPrices` must already be the same round2'd values the old
+ * per-mobilization lines carried, and every `extras[].cost`/`.price` must
+ * already be round2'd too — foldLaborMobLines only redistributes them, it
+ * does not re-derive them from a margin.
+ */
+export function foldLaborMobLines(mobCosts: number[], mobPrices: number[], extras: LaborExtra[]): FoldedMobLine[] {
+  const n = mobCosts.length;
+  if (n === 0) return [];
+  const weights = mobCosts.some((c) => c > 0) ? mobCosts : mobCosts.map(() => 1);
+  const weightSum = weights.reduce((a, w) => a + w, 0) || 1;
+
+  // Per extra: each mobilization's rounded share, with the last mobilization
+  // taking whatever the rounded shares before it didn't — so the shares
+  // always sum to the extra's own cost/price exactly, to the cent.
+  const perExtra = extras.map((extra) => {
+    const costShares = new Array(n).fill(0) as number[];
+    const priceShares = new Array(n).fill(0) as number[];
+    let costAcc = 0;
+    let priceAcc = 0;
+    for (let i = 0; i < n; i++) {
+      if (i === n - 1) {
+        costShares[i] = round2(extra.cost - costAcc);
+        priceShares[i] = round2(extra.price - priceAcc);
+      } else {
+        const c = round2((extra.cost * weights[i]) / weightSum);
+        const p = round2((extra.price * weights[i]) / weightSum);
+        costShares[i] = c;
+        priceShares[i] = p;
+        costAcc += c;
+        priceAcc += p;
+      }
+    }
+    return { extra, costShares, priceShares };
+  });
+
+  return mobCosts.map((mobCost, i) => {
+    const addCost = perExtra.reduce((a, s) => a + s.costShares[i], 0);
+    const addPrice = perExtra.reduce((a, s) => a + s.priceShares[i], 0);
+    const parts = perExtra
+      .filter((s) => s.costShares[i] > 0)
+      .map((s) => s.extra.label + " " + fmt(s.costShares[i]));
+    return {
+      cost: round2(mobCost + addCost),
+      price: round2(mobPrices[i] + addPrice),
+      internalNote: parts.length ? "Includes " + parts.join(" · ") : "",
+    };
+  });
 }
 
 /** h/m label — local copy of Geo.fmtTime (lib/geo is server-only). */
