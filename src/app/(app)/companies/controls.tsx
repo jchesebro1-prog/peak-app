@@ -1,34 +1,16 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
-import type { MapPin } from "@/components/map/LeafletMap";
 import { ACCENT_INK, ACCENT_SOFT } from "./lib";
 
 /**
- * Client bits for the Customers directory: the search / type / scope filter bar
- * (URL-as-state, debounced) and the venue map panel (LeafletMap needs the
- * browser, so it's pulled in with next/dynamic { ssr: false }).
+ * Client bits for the Customers directory: the search / type / scope filter
+ * bar (URL-as-state, debounced). The map panel lives in map-client.tsx
+ * (CompanyMapClient) — its own rail/map/pop-out layout needs the browser
+ * too, and is pulled into companies/page.tsx with next/dynamic separately.
  */
-
-const LeafletMap = dynamic(() => import("@/components/map/LeafletMap"), {
-  ssr: false,
-  loading: () => (
-    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#8c919c", background: "#e9eef1" }}>
-      Loading map…
-    </div>
-  ),
-});
-
-export function CustomersMap({ pins }: { pins: MapPin[] }) {
-  return (
-    <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-      <LeafletMap pins={pins} height={640} />
-    </div>
-  );
-}
 
 const segActive: React.CSSProperties = {
   fontSize: 12,
