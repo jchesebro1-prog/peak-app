@@ -9,6 +9,7 @@ import {
   submitForReview,
   addQuoteRevision,
   restoreQuoteRevision,
+  remove as removeQuote,
   statusFailureMessage,
   STAGES,
   type QuoteStatus,
@@ -123,4 +124,18 @@ export async function submitQuoteForReview(formData: FormData): Promise<void> {
     reviewer: reviewer !== "queue" ? reviewer : null,
   });
   revalidatePath("/", "layout");
+}
+
+/**
+ * Delete a quote (any type/status). Soft delete only. A WON quote's spawned
+ * project/jobs are NOT touched — those are independent records once
+ * created, and the quote-sweeps (e.g. syncEngagementsFromQuotes) only ever
+ * scan the live (non-deleted) quotes list, so removing a quote here can't
+ * cause a healing sweep to re-spawn or recreate anything for it.
+ */
+export async function deleteQuoteAction(id: string) {
+  await requireUser();
+  await removeQuote(id);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

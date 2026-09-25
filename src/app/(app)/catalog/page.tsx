@@ -11,6 +11,7 @@ import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { PriceDateBanner } from "./price-date-banner";
 import { upsertPart } from "./actions";
+import { DeletePartButton } from "./delete-part-button";
 import { activeUsers } from "@/lib/users";
 import { allVendorProfiles, vendorCompanies } from "@/lib/stores/vendors";
 import { claimOwnerByKey, resolveCatalogOwner } from "@/lib/vendor-status";
@@ -673,24 +674,27 @@ function PartFormModal({
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 600 }}>{editing ? "Edit part" : "Add a part"}</div>
-            <Link
-              href="/catalog"
-              scroll={false}
-              style={{
-                width: 30,
-                height: 30,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "#f1f2f5",
-                borderRadius: 8,
-                color: "#5b616e",
-                fontSize: 17,
-                textDecoration: "none",
-              }}
-            >
-              ×
-            </Link>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {editing && isAdmin && part && <DeletePartButton sku={part.id} />}
+              <Link
+                href="/catalog"
+                scroll={false}
+                style={{
+                  width: 30,
+                  height: 30,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "#f1f2f5",
+                  borderRadius: 8,
+                  color: "#5b616e",
+                  fontSize: 17,
+                  textDecoration: "none",
+                }}
+              >
+                ×
+              </Link>
+            </div>
           </div>
 
           <form action={upsertPart} style={{ padding: "18px 20px", overflowY: "auto" }}>

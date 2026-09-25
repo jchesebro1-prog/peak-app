@@ -3,8 +3,9 @@
 import type { CSSProperties } from "react";
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { claimLeadAction, snoozeLeadAction } from "./actions";
+import { claimLeadAction, deleteLeadAction, snoozeLeadAction } from "./actions";
 import { OwnerDot } from "./avatar";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { WorklistRowVM } from "./types";
 
 const chipBtn: CSSProperties = {
@@ -145,6 +146,18 @@ export default function WorklistRow({ row }: { row: WorklistRowVM }) {
         <button onClick={() => run(() => snoozeLeadAction(row.id))} disabled={isPending} style={chipBtn}>
           Snooze
         </button>
+        <ConfirmButton
+          className="pk-btn-danger"
+          label="Delete"
+          confirmLabel="Confirm"
+          style={{ fontSize: 11, padding: "6px 10px" }}
+          onConfirm={() =>
+            startTransition(async () => {
+              await deleteLeadAction(row.id);
+              router.refresh();
+            })
+          }
+        />
       </div>
     </div>
   );

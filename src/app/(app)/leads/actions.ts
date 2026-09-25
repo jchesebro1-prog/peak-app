@@ -9,6 +9,7 @@ import {
   get,
   logActivity,
   markLost,
+  remove as removeLead,
   setNextAction,
   setStage,
   update,
@@ -290,4 +291,18 @@ export async function requestSiteVisitAction(
   );
   revalidatePath("/", "layout");
   return { ok: true as const, visitId: res.visitId, surveyId: res.surveyId };
+}
+
+/**
+ * Delete a lead. Soft delete only — linked site visits / surveys are NOT
+ * cascade-deleted: once created they can outlive the lead (a visit/survey
+ * backfills customerId on convert, and surveys feed the venue-assessments
+ * list independently — see markLostAction's comment above), so the lead
+ * does not exclusively own them.
+ */
+export async function deleteLeadAction(id: string) {
+  await requireUser();
+  await removeLead(id);
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { ManufacturerEntry, VendorDiscounts, VendorRegistration } from "@/lib/vendor-status";
-import { claimManufacturerAction, releaseManufacturerAction, saveVendorProfileAction } from "../actions";
+import { claimManufacturerAction, releaseManufacturerAction, removeVendorProfileAction, saveVendorProfileAction } from "../actions";
+import { ConfirmButton } from "@/components/confirm-button";
 
 /**
  * #122 — Overview: discounts + project registration (inline-editable, one
@@ -161,6 +162,24 @@ export default function OverviewTab({
           {saved && !dirty && <span style={{ fontSize: 12, color: "#1f7a52", fontWeight: 600 }}>Saved</span>}
           {err && <span style={{ fontSize: 12, color: "#b4543a" }}>{err}</span>}
         </div>
+      </div>
+
+      <div style={CARD}>
+        <div style={H}>Danger zone</div>
+        <div style={{ fontSize: 12.5, color: "#8c919c", lineHeight: 1.5, marginBottom: 12 }}>
+          Deletes this vendor&apos;s manufacturers, price-list ledger, discounts and project
+          registration. The company record and its contacts stay.
+        </div>
+        <ConfirmButton
+          className="pk-btn-danger"
+          label="Delete vendor profile"
+          confirmLabel="Confirm delete"
+          onConfirm={async () => {
+            const res = await removeVendorProfileAction(vendorId);
+            if (!res.ok) throw new Error(res.error);
+            router.refresh();
+          }}
+        />
       </div>
     </>
   );

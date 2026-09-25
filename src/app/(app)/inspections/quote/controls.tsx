@@ -6,6 +6,7 @@ import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel"
 import type { CSSProperties } from "react";
 import { saveInspectionQuote, approveInspectionQuote } from "./actions";
 import { CustomerCombobox } from "@/components/customer-combobox";
+import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 
 /**
@@ -284,6 +285,7 @@ export function QuoteBuilder({
   const guardWon = useWonEditGuard(initial.status);
 
   const editingId = initial.editingId;
+  const won = initial.status === "won";
   const savedId = initial.savedId;
   const isApproved = initial.approved;
   const letterHref = savedId ? "/inspections/letter?id=" + encodeURIComponent(savedId) : "";
@@ -1080,6 +1082,12 @@ export function QuoteBuilder({
               >
                 {savedFlag ? "Saved ✓" : editingId ? "Update quote" : "Save quote"}
               </button>
+
+              {editingId && (
+                <div style={{ marginTop: 9 }}>
+                  <DeleteQuoteButton id={editingId} won={won} redirectTo="/quotes" />
+                </div>
+              )}
 
               {showApprove && (
                 <button

@@ -8,6 +8,7 @@ import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import {
   addQuoteTaskAction,
+  removeQuoteTaskAction,
   applyQuoteTemplateAction,
   approveReviewAction,
   attestApprovalAction,
@@ -92,6 +93,7 @@ import VendorQuoteModal, {
   vendorLinesTotal,
 } from "./vendor-quote-modal";
 import PreviewDoc from "./preview-doc";
+import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 
 /**
  * Estimator workspace — client port of Estimator.dc.html (build + preview
@@ -2089,6 +2091,7 @@ export default function EstimatorClient({
                   <option value="lost">Lost</option>
                 </select>
               </div>
+              {loadedId && <DeleteQuoteButton id={loadedId} won={status === "won"} redirectTo="/estimator" />}
               {aiSource && (
                 <button
                   type="button"
@@ -3010,6 +3013,7 @@ export default function EstimatorClient({
                         addAction={addQuoteTaskAction}
                         setStatusAction={setQuoteTaskStatusAction}
                         updateAction={updateQuoteTaskAction}
+                        removeAction={removeQuoteTaskAction}
                         defaultSection="Review"
                       />
                     </>

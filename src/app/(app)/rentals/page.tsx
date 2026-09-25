@@ -4,6 +4,7 @@ import { list, get, type EquipmentItem, type EquipmentCategory } from "@/lib/sto
 import { list as listLocations, type EquipmentLocation } from "@/lib/stores/equipment-locations";
 import { money } from "@/lib/format";
 import { upsertEquipmentItem, upsertEquipmentLocation } from "./actions";
+import { DeleteEquipmentItemButton, DeleteEquipmentLocationButton } from "./delete-buttons";
 
 export const metadata = { title: "Rentals — Quartzite-6" };
 
@@ -140,7 +141,7 @@ export default async function RentalsPage({
               textDecoration: "none",
             }}
           >
-            + Add location
+            Locations
           </Link>
           <Link
             href="/rentals?new=1"
@@ -285,7 +286,7 @@ export default async function RentalsPage({
       </div>
 
       {showForm && <ItemFormModal item={editingItem} catParam={catParam} locations={locations} />}
-      {isNewLocation && <LocationFormModal catParam={catParam} />}
+      {isNewLocation && <LocationFormModal catParam={catParam} locations={locations} />}
     </div>
   );
 }
@@ -444,24 +445,27 @@ function ItemFormModal({
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 600 }}>{editing ? "Edit rental item" : "Add rental item"}</div>
-            <Link
-              href={closeHref}
-              scroll={false}
-              style={{
-                width: 30,
-                height: 30,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "#f1f2f5",
-                borderRadius: 8,
-                color: "#5b616e",
-                fontSize: 17,
-                textDecoration: "none",
-              }}
-            >
-              ×
-            </Link>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {editing && item && <DeleteEquipmentItemButton id={item.id} redirectTo={closeHref} />}
+              <Link
+                href={closeHref}
+                scroll={false}
+                style={{
+                  width: 30,
+                  height: 30,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "#f1f2f5",
+                  borderRadius: 8,
+                  color: "#5b616e",
+                  fontSize: 17,
+                  textDecoration: "none",
+                }}
+              >
+                ×
+              </Link>
+            </div>
           </div>
 
           <form action={upsertEquipmentItem} style={{ padding: "18px 20px", overflowY: "auto" }}>
@@ -595,7 +599,7 @@ function ItemFormModal({
  * store so the item stock editor and the quote builder's location picker
  * (both already read `equipmentLocations.list()`) have something to show.
  */
-function LocationFormModal({ catParam }: { catParam: string }) {
+function LocationFormModal({ catParam, locations }: { catParam: string; locations: EquipmentLocation[] }) {
   const closeHref = "/rentals" + (catParam !== "all" ? "?cat=" + catParam : "");
   const label = (t: string) => (
     <div style={{ fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>
@@ -658,7 +662,7 @@ function LocationFormModal({ catParam }: { catParam: string }) {
               borderBottom: "1px solid #f0f1f4",
             }}
           >
-            <div style={{ fontSize: 15, fontWeight: 600 }}>Add location</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Locations</div>
             <Link
               href={closeHref}
               scroll={false}
@@ -679,7 +683,33 @@ function LocationFormModal({ catParam }: { catParam: string }) {
             </Link>
           </div>
 
-          <form action={upsertEquipmentLocation} style={{ padding: "18px 20px", overflowY: "auto" }}>
+          {locations.length > 0 && (
+            <div style={{ padding: "12px 20px 0", borderBottom: "1px solid #f0f1f4" }}>
+              {locations.map((loc) => (
+                <div
+                  key={loc.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    padding: "8px 0 12px",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{loc.name}</div>
+                    {loc.address && <div style={{ fontSize: 11, color: "#9aa0ab", marginTop: 1 }}>{loc.address}</div>}
+                  </div>
+                  <DeleteEquipmentLocationButton id={loc.id} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ padding: "14px 20px 0", fontSize: 10.5, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".05em" }}>
+            Add a location
+          </div>
+          <form action={upsertEquipmentLocation} style={{ padding: "10px 20px 18px", overflowY: "auto" }}>
             <div style={{ marginBottom: 13 }}>
               {label("Name")}
               <input name="name" required placeholder="Main warehouse" style={inputStyle} />

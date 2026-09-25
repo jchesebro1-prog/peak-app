@@ -5,6 +5,7 @@ import Link from "next/link";
 import { saveConsultingQuote } from "./actions";
 import { money } from "@/lib/format";
 import { CustomerCombobox } from "@/components/customer-combobox";
+import { DeleteQuoteButton } from "../../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
 
 /**
@@ -218,6 +219,11 @@ export function ConsultingQuoteBuilder({
           <Link href="/quotes" style={{ fontSize: 12.5, color: "var(--accent)" }}>
             Manage status &amp; review in Quotes →
           </Link>
+        )}
+        {initial && (
+          <span style={{ marginLeft: "auto" }}>
+            <DeleteQuoteButton id={initial.id} won={initial.status === "won"} redirectTo="/design/engagements/quote" />
+          </span>
         )}
       </div>
       {justSaved && (

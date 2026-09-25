@@ -36,6 +36,7 @@ import {
 } from "../quick/tierdefs-store";
 import {
   addDesignTaskAction,
+  removeDesignTaskAction,
   applyDesignTemplateAction,
   approveDesignAction,
   claimDesignReviewAction,
@@ -546,6 +547,7 @@ export default function DesignClient({
               addAction={addDesignTaskAction}
               setStatusAction={setDesignTaskStatusAction}
               updateAction={updateDesignTaskAction}
+              removeAction={removeDesignTaskAction}
               defaultSection="Design"
             />
           </div>

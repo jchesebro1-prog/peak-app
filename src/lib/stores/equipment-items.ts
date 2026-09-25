@@ -1,4 +1,4 @@
-import { getDoc, insertWithPrefixedId, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, insertWithPrefixedId, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 
 /**
  * Rentals module — equipment items (the rentable gear catalog). Doc-store
@@ -77,6 +77,16 @@ export async function mergeUpsert(
 ): Promise<EquipmentItem> {
   const existing = await get(id);
   return upsert({ ...(existing ?? {}), ...patch, id } as Omit<EquipmentItem, "id"> & { id?: string });
+}
+
+/**
+ * Soft delete one item. The active/upcoming-booking refusal lives in the
+ * caller (rentals/actions.ts), not here — checking that means reading
+ * equipment-bookings.ts, which itself imports `qtyOwned` from this module;
+ * keeping the guard out of the store avoids a circular import.
+ */
+export async function remove(id: string): Promise<void> {
+  await softDeleteDoc("equipment_items", id);
 }
 
 export async function qtyOwned(itemId: string, locationId: string): Promise<number> {

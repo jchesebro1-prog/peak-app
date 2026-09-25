@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, requirePerm } from "@/lib/session";
-import { clearCatalogPriceList, get as getPart, upsert, mergeUpsert } from "@/lib/stores/catalog";
+import { clearCatalogPriceList, get as getPart, upsert, mergeUpsert, remove as removePart } from "@/lib/stores/catalog";
 import { mfrKey, parseEffectiveDate } from "@/lib/catalog-books";
 import { checkSize } from "@/lib/catalog-import-guard";
 import { setPriceListEffective, setSettings } from "@/lib/settings";
@@ -21,6 +21,19 @@ export async function deleteCatalogPriceListAction(formData: FormData): Promise<
   await clearCatalogPriceList();
   revalidatePath("/catalog");
   redirect("/catalog?reset=1");
+}
+
+/** Delete a single catalog part (soft delete). Admin-gated like the other
+ *  catalog delete/remove mutations here (bulk price-list clear, datasheet
+ *  remove) rather than the plain requireUser() the edit form's upsertPart
+ *  uses — deleting a SKU outright is more destructive than editing one. */
+export async function deletePartAction(sku: string): Promise<Result> {
+  await requirePerm("manage_users");
+  const clean = sku.trim();
+  if (!clean) return { ok: false, error: "Missing SKU." };
+  await removePart(clean);
+  revalidatePath("/catalog");
+  return { ok: true };
 }
 
 /**

@@ -20,6 +20,7 @@ import { money } from "@/lib/format";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, submitQuoteForReview, createQuoteClientPackageAction } from "./actions";
+import { DeleteQuoteButton } from "./delete-quote-button";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
 
@@ -1024,6 +1025,7 @@ function SelectedPanel({
           >
             {editHrefFor(q).label}
           </Link>
+          <DeleteQuoteButton id={q.id} won={q.status === "won"} />
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { TaskRecord, TaskStatus } from "@/lib/stores/tasks";
 
 /**
@@ -86,6 +87,7 @@ export function TasksCard({
   addAction,
   setStatusAction,
   updateAction,
+  removeAction,
   defaultSection = "Install",
 }: {
   /** Name of the hidden field the add-task form submits (e.g. "id" for
@@ -97,6 +99,10 @@ export function TasksCard({
   addAction: (formData: FormData) => ActionResult | Promise<ActionResult>;
   setStatusAction: (formData: FormData) => void | Promise<void>;
   updateAction: (formData: FormData) => void | Promise<void>;
+  /** Optional so existing callers that haven't wired a remove action yet
+   *  keep compiling untouched — the Delete control only renders when this
+   *  is passed. */
+  removeAction?: (formData: FormData) => void | Promise<void>;
   /** Placeholder section for a new task — "Install" fits project work,
    *  quotes pass something that fits a review checklist instead. */
   defaultSection?: string;
@@ -211,6 +217,22 @@ export function TasksCard({
                     onChange={(e) => e.currentTarget.form?.requestSubmit()}
                   />
                 </form>
+
+                {removeAction && (
+                  <ConfirmButton
+                    className="pk-btn-danger"
+                    label="Delete"
+                    confirmLabel="Confirm"
+                    style={{ fontSize: 11, padding: "5px 9px" }}
+                    onConfirm={async () => {
+                      const fd = new FormData();
+                      fd.set("taskId", t.id);
+                      fd.set("id", parentId);
+                      await removeAction(fd);
+                      router.refresh();
+                    }}
+                  />
+                )}
               </div>
             );
           })}

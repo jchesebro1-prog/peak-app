@@ -8762,6 +8762,7 @@ seeded()
   .then(() => statusRefusalAsyncChecks())
   .then(() => venueCalendarAsyncChecks())
   .then(() => companyMapAsyncChecks())
+  .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -11949,6 +11950,221 @@ async function venueCalendarAsyncChecks(): Promise<void> {
     await db.delete(vaBlobsTable).where(vaEq(vaBlobsTable.id, `venue_calendar:${LOC}`));
     const swept = await vaGetVenueCalendar(LOC);
     ok(swept.windows.length === 0 && swept.icsWindows.length === 0, "venue-calendars: teardown leaves no trace of the TEST_VENUE_CAL fixture");
+  }
+}
+
+/* ======================================================================
+   "delete individual entries for everything" (part A) — DB-backed checks.
+   One store-level round trip per new delete: create a fixture (explicit id
+   where the store supports one, registered for teardown first per
+   scripts/test-fixtures.ts), assert it's live, delete it, assert it's gone
+   from both a get() and a list()-shaped read. Equipment items/locations
+   also get the active/upcoming-booking refusal, exercised against
+   equipment-bookings.ts's hasCommittedBooking() directly — the same
+   extraction this file's own #145 milestone-phase block documents doing
+   (requireUser()/requirePerm() throw "headers was called outside a request
+   scope" outside a real request, so the "use server" actions that call
+   these store functions are not callable from here; the predicate they
+   both share is). Part B (flame tests, repairs, inspections, projects,
+   consulting engagements, site visits, recordings, and confirms on
+   already-existing deletes) is out of scope here. */
+async function deletePartAAsyncChecks(): Promise<void> {
+  const Leads = await import("../src/lib/stores/leads");
+  const Quotes = await import("../src/lib/stores/quotes");
+  const Tasks = await import("../src/lib/stores/tasks");
+  const Notes = await import("../src/lib/stores/notes");
+  const Catalog = await import("../src/lib/stores/catalog");
+  const EquipItems = await import("../src/lib/stores/equipment-items");
+  const EquipLocations = await import("../src/lib/stores/equipment-locations");
+  const EquipBookings = await import("../src/lib/stores/equipment-bookings");
+  const Vendors = await import("../src/lib/stores/vendors");
+
+  // --- leads --------------------------------------------------------------
+  {
+    const id = fixtureId("delete-part-a", "lead");
+    registerFixture("leads", id);
+    await Leads.create({ id, org: "Delete-part-a test lead" });
+    ok(!!(await Leads.get(id)), "delete/leads setup: fixture lead is live");
+    await Leads.remove(id);
+    ok((await Leads.get(id)) === null, "delete/leads: remove() — get() returns null");
+    ok(!(await Leads.getAll()).some((l) => l.id === id), "delete/leads: remove() — getAll() no longer lists it");
+  }
+
+  // --- quotes ---------------------------------------------------------------
+  {
+    const id = fixtureId("delete-part-a", "quote");
+    registerFixture("quotes", id);
+    await Quotes.create({ id, name: "Delete-part-a test quote", customer: "Delete-part-a Test Customer" });
+    ok(!!(await Quotes.get(id)), "delete/quotes setup: fixture quote is live");
+    await Quotes.remove(id);
+    ok((await Quotes.get(id)) === null, "delete/quotes: remove() — get() returns null");
+    ok(!(await Quotes.getAll()).some((q) => q.id === id), "delete/quotes: remove() — getAll() no longer lists it");
+
+    // Coordinator review: a quote deleted while a builder still has it open
+    // must not come back on the next autosave/save. update()/setStatus()
+    // both read via getDoc() first, which already excludes a soft-deleted
+    // row (db/doc-store.ts:71), so patchDoc's read-then-write sees "no
+    // record" and performs NO write at all — not even a re-deleted no-op.
+    // Every service builder's "Save" (flame-tests/repairs/inspections/
+    // rentals/estimator actions.ts) calls update(), never create(), once it
+    // has a loaded id, so this is the one seam that matters.
+    const patched = await Quotes.update(id, { name: "should never resurrect" });
+    ok(patched === null, "delete/quotes: update() on a deleted quote is a no-op (returns null)");
+    ok((await Quotes.get(id)) === null, "delete/quotes: update() on a deleted quote does not resurrect it");
+    let statusThrew: unknown = null;
+    try {
+      await Quotes.setStatus(id, "sent", "Test Harness");
+    } catch (e) {
+      statusThrew = e;
+    }
+    ok(statusThrew === null, "delete/quotes: setStatus() on a deleted quote does not throw");
+    ok((await Quotes.get(id)) === null, "delete/quotes: setStatus() on a deleted quote does not resurrect it");
+
+    // The Change-type flow's retireReplacedDraft() only ever soft-deletes
+    // (never create()/upsert()s), and itself reads via get() — so retiring
+    // an already-deleted draft is a safe, idempotent no-op too.
+    const retired = await Quotes.retireReplacedDraft(id);
+    ok(retired === false, "delete/quotes: retireReplacedDraft() on an already-deleted draft is a no-op (returns false)");
+    ok((await Quotes.get(id)) === null, "delete/quotes: retireReplacedDraft() does not resurrect a deleted quote");
+  }
+
+  // --- tasks ------------------------------------------------------------
+  {
+    const quoteId = fixtureId("delete-part-a", "task-parent-quote");
+    registerFixture("quotes", quoteId);
+    await Quotes.create({ id: quoteId, name: "Delete-part-a task parent quote", customer: "Delete-part-a Test Customer" });
+    const taskId = fixtureId("delete-part-a", "task");
+    registerFixture("tasks", taskId);
+    await Tasks.createTask({ id: taskId, title: "Delete-part-a test task", quoteId }, { id: "test", name: "Test Harness" });
+    ok(!!(await Tasks.getTask(taskId)), "delete/tasks setup: fixture task is live");
+    ok((await Tasks.tasksForQuote(quoteId)).some((t) => t.id === taskId), "delete/tasks setup: fixture task lists under its parent quote");
+    await Tasks.removeTask(taskId);
+    ok((await Tasks.getTask(taskId)) === null, "delete/tasks: removeTask() — getTask() returns null");
+    ok(!(await Tasks.tasksForQuote(quoteId)).some((t) => t.id === taskId), "delete/tasks: removeTask() — tasksForQuote() no longer lists it");
+    await Quotes.remove(quoteId);
+  }
+
+  // --- notes --------------------------------------------------------------
+  {
+    const id = fixtureId("delete-part-a", "note");
+    const customerId = fixtureId("delete-part-a", "note-customer");
+    const t = Date.now();
+    await createFixture("notes", {
+      id,
+      parentKind: "customer",
+      parentId: customerId,
+      customerId,
+      by: "Test Harness",
+      at: t,
+      text: "Delete-part-a test note",
+      attachments: [],
+      taskIds: [],
+      system: false,
+      createdAt: t,
+      updatedAt: t,
+    });
+    ok((await Notes.notesForCustomer(customerId)).some((n) => n.id === id), "delete/notes setup: fixture note lists under its customer");
+
+    // canDeleteNote — the pure authorization rule removeCustomerNoteAction
+    // (companies/actions.ts) enforces server-side. Tested directly: the
+    // action itself calls requireUser(), which throws "headers was called
+    // outside a request scope" outside a real request, so it isn't callable
+    // from here (same reasoning as equipment-bookings.ts's
+    // hasCommittedBooking() above and this file's #145 milestone-phase
+    // extraction).
+    const note = await Notes.getNote(id);
+    if (note) {
+      ok(
+        Notes.canDeleteNote(note, { name: "Test Harness", roles: [] }).ok,
+        "delete/notes: canDeleteNote allows the note's own author"
+      );
+      const byOther = Notes.canDeleteNote(note, { name: "Someone Else", roles: [] });
+      ok(!byOther.ok, "delete/notes: canDeleteNote refuses a non-author with no manage_users");
+      ok(
+        !byOther.ok && /your own notes/.test(byOther.error),
+        "delete/notes: the non-author refusal names the rule, not a generic failure"
+      );
+      ok(
+        Notes.canDeleteNote(note, { name: "Someone Else", roles: ["Admin"] }).ok,
+        "delete/notes: canDeleteNote allows a non-author WITH manage_users"
+      );
+      const systemNote = { ...note, system: true };
+      const bySystemAuthor = Notes.canDeleteNote(systemNote, { name: note.by, roles: [] });
+      ok(!bySystemAuthor.ok, "delete/notes: canDeleteNote refuses a system note even for its own \"author\"");
+      const bySystemAdmin = Notes.canDeleteNote(systemNote, { name: "Someone Else", roles: ["Admin"] });
+      ok(!bySystemAdmin.ok, "delete/notes: canDeleteNote refuses a system note even for manage_users");
+    } else {
+      ok(false, "delete/notes setup: fixture note round-trips through getNote()");
+    }
+
+    await Notes.removeNote(id);
+    ok(!(await Notes.notesForCustomer(customerId)).some((n) => n.id === id), "delete/notes: removeNote() — notesForCustomer() no longer lists it");
+  }
+
+  // --- catalog parts --------------------------------------------------------
+  {
+    const sku = fixtureId("delete-part-a", "part");
+    await Catalog.upsert({ id: sku, sku, desc: "Delete-part-a test part", category: "Other", unit: "ea", list: 10, cost: 5 });
+    registerFixture("catalog_parts", sku);
+    ok(!!(await Catalog.get(sku)), "delete/catalog setup: fixture part is live");
+    await Catalog.remove(sku);
+    ok((await Catalog.get(sku)) === null, "delete/catalog: remove() — get() returns null");
+    ok(!(await Catalog.list()).some((p) => p.id === sku), "delete/catalog: remove() — list() no longer lists it");
+  }
+
+  // --- equipment items + locations (+ active-booking refusal) ---------------
+  {
+    // A: no booking — deletes clean.
+    const itemAId = fixtureId("delete-part-a", "equip-item-a");
+    await EquipItems.upsert({
+      id: itemAId, sku: itemAId, name: "Delete-part-a test item A", category: "other",
+      dayRate: 50, weekRate: 150, monthRate: 400, active: true, stock: [],
+    });
+    registerFixture("equipment_items", itemAId);
+    ok(!!(await EquipItems.get(itemAId)), "delete/equipment-items setup: fixture item A is live");
+    ok(!(await EquipBookings.hasCommittedBooking({ itemId: itemAId })), "delete/equipment-items: item A has no committed booking");
+    await EquipItems.remove(itemAId);
+    ok((await EquipItems.get(itemAId)) === null, "delete/equipment-items: remove() — get() returns null");
+    ok(!(await EquipItems.list()).some((i) => i.id === itemAId), "delete/equipment-items: remove() — list() no longer lists it");
+
+    // B: an active/upcoming booking refuses the delete (predicate-level,
+    // same as deleteEquipmentItemAction/deleteEquipmentLocationAction's own
+    // guard in rentals/actions.ts).
+    const itemBId = fixtureId("delete-part-a", "equip-item-b");
+    await EquipItems.upsert({
+      id: itemBId, sku: itemBId, name: "Delete-part-a test item B", category: "other",
+      dayRate: 50, weekRate: 150, monthRate: 400, active: true, stock: [],
+    });
+    registerFixture("equipment_items", itemBId);
+    const locId = fixtureId("delete-part-a", "equip-location");
+    await EquipLocations.upsert({ id: locId, name: "Delete-part-a test location" });
+    registerFixture("equipment_locations", locId);
+    const booking = await EquipBookings.create({
+      itemId: itemBId, locationId: locId, qty: 1, quoteId: fixtureId("delete-part-a", "equip-booking-quote"),
+      startDate: Date.now(), endDate: Date.now() + 86400000, status: "confirmed", rate: 100,
+    });
+    registerFixture("equipment_bookings", booking.id);
+    ok(await EquipBookings.hasCommittedBooking({ itemId: itemBId }), "delete/equipment-items: an active/upcoming booking is detected for the item — the delete action would refuse it");
+    ok(await EquipBookings.hasCommittedBooking({ locationId: locId }), "delete/equipment-locations: the same booking is detected for its location — the delete action would refuse it too");
+    await EquipBookings.setStatus(booking.id, "cancelled");
+    ok(!(await EquipBookings.hasCommittedBooking({ itemId: itemBId })), "delete/equipment-items: cancelling the booking clears the refusal");
+    await EquipItems.remove(itemBId);
+    await EquipLocations.remove(locId);
+    ok((await EquipItems.get(itemBId)) === null, "delete/equipment-items: remove() succeeds once no booking is committed");
+    ok((await EquipLocations.get(locId)) === null, "delete/equipment-locations: remove() — get() returns null");
+    ok(!(await EquipLocations.list()).some((l) => l.id === locId), "delete/equipment-locations: remove() — list() no longer lists it");
+  }
+
+  // --- vendor profiles --------------------------------------------------
+  {
+    const id = fixtureId("delete-part-a", "vendor");
+    registerFixture("vendor_profiles", id);
+    await Vendors.saveVendorProfile(id, { discounts: { note: "Delete-part-a test", percentOffList: 10, terms: "" } });
+    ok(!!(await Vendors.getVendorProfile(id)), "delete/vendors setup: fixture vendor profile is live");
+    ok((await Vendors.allVendorProfiles()).some((p) => p.id === id), "delete/vendors setup: fixture vendor profile lists");
+    await Vendors.removeVendorProfile(id);
+    ok((await Vendors.getVendorProfile(id)) === null, "delete/vendors: removeVendorProfile() — getVendorProfile() returns null");
+    ok(!(await Vendors.allVendorProfiles()).some((p) => p.id === id), "delete/vendors: removeVendorProfile() — allVendorProfiles() no longer lists it");
   }
 }
 
