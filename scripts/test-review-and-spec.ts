@@ -147,12 +147,18 @@ import {
   venueKindFromCategory,
 } from "@/app/(app)/import/link";
 import type { CustomerContact, CustomerLocation } from "@/lib/stores/customers";
+import { remove as removeCustomer, upsert as upsertCustomer } from "@/lib/stores/customers";
 // catalogPatch/templateCsv are pure (no store access, no DB) — see the note
 // on catalogPatch itself. commitImport/exportCsv are NOT — #145 D169 review
 // (Important 1) exercises the task_templates writer for real, DB-backed,
 // with cleanup (see asyncChecks()).
 import { catalogPatch, templateCsv as importTemplateCsv, commitImport, exportCsv } from "@/app/(app)/import/registry";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
+import {
+  EMPTY_MAP_FILTERS, filterMapPoints, groupPointsByCompany, hasActiveMapFilters, mapFilterOptions,
+  type CompanyMapPoint,
+} from "@/app/(app)/companies/map-filter";
+import { getCompanySummary } from "@/lib/company-summary";
 
 import {
   VENUE_CLASSES, SUBTYPES, VISIT_PURPOSES, classMeasureFields,
@@ -8250,6 +8256,7 @@ seeded()
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  .then(() => companyMapAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -8545,6 +8552,77 @@ async function archiveAsyncChecks(): Promise<void> {
   const ci = toContactInput({ name: "Maria Lopez", role: "TD", email: "m@x.org", phone: "1", mobile: "2", primary: true });
   ok(ci.mobile === "2" && ci.phone === "1" && ci.role === "TD" && ci.primary, "#137 T2 toContactInput carries mobile");
   ok(toContactInput({ name: "S", role: "", email: "", primary: false }).mobile === undefined, "#137 T2 toContactInput: absent mobile stays undefined");
+}
+
+/* ======================================================================
+   Companies map — pure in-memory filtering for the map view's left rail
+   (Jeff's request: search + filters sidebar, filtered client-side over the
+   whole book — companies/map-filter.ts). No store access; a fixed fixture
+   of points exercises every filter dimension + the rail's list/option
+   helpers.
+   ====================================================================== */
+{
+  const pt = (over: Partial<CompanyMapPoint>): CompanyMapPoint => ({
+    companyId: "c1", locId: "l1", lat: 44, lng: -89, name: "Hortonville HS", type: "Education",
+    owner: "Alex Rivera", lifecycle: "customer", keywords: ["priority"], venueLabel: "Main Stage",
+    city: "Hortonville", state: "WI", driveMin: 40, driveMiles: 22, openValue: 0, quoteCount: 0, addedAt: 0,
+    ...over,
+  });
+  const points: CompanyMapPoint[] = [
+    pt({ companyId: "c1", locId: "l1" }),
+    pt({ companyId: "c1", locId: "l2", venueLabel: "Black Box", driveMin: 41 }),
+    pt({
+      companyId: "c2", locId: "l1", name: "Riverside Rep", type: "Performing arts", owner: "Jamie Chen",
+      lifecycle: "prospect", keywords: [], city: "Appleton", state: "WI", driveMin: 90, driveMiles: 55,
+      openValue: 4200, quoteCount: 1,
+    }),
+    pt({
+      companyId: "c3", locId: "l1", name: "Grace Worship Center", type: "Worship", owner: "",
+      lifecycle: "none", keywords: ["board-member"], city: "Neenah", state: "WI", driveMin: null, driveMiles: null,
+    }),
+  ];
+
+  ok(filterMapPoints(points, EMPTY_MAP_FILTERS, "Alex Rivera").length === 4, "companies map: no filters → every point passes");
+
+  const byQ = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, q: "appleton" }, "Alex Rivera");
+  ok(byQ.length === 1 && byQ[0].companyId === "c2", "companies map: search matches city, case-insensitive");
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, q: "black box" }, "Alex Rivera").length === 1, "companies map: search matches venue label");
+
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, type: "Worship" }, "Alex Rivera").length === 1, "companies map: type filter");
+
+  const mine = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, owner: "mine" }, "Alex Rivera");
+  ok(mine.length === 2 && mine.every((p) => p.companyId === "c1"), "companies map: owner 'mine' resolves against meName");
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, owner: "Jamie Chen" }, "Alex Rivera").length === 1, "companies map: owner filter by a specific teammate");
+
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, lifecycle: "none" }, "Alex Rivera").length === 1, "companies map: lifecycle filter, including the normalized 'none'");
+
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, tag: "board-member" }, "Alex Rivera").length === 1, "companies map: tag filter matches one of the point's keywords");
+
+  const near = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, drive: "60" }, "Alex Rivera");
+  ok(near.length === 2 && near.every((p) => p.companyId === "c1"), "companies map: drive-time bucket excludes farther/unlocated points");
+  ok(filterMapPoints(points, { ...EMPTY_MAP_FILTERS, drive: "120" }, "Alex Rivera").length === 3, "companies map: a looser drive bucket still excludes the unlocated (driveMin null) point");
+
+  const openOnly = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, hasOpenQuotes: true }, "Alex Rivera");
+  ok(openOnly.length === 1 && openOnly[0].companyId === "c2", "companies map: 'Has open quotes' keeps only openValue > 0");
+
+  const combo = filterMapPoints(points, { ...EMPTY_MAP_FILTERS, type: "Education", owner: "mine", drive: "60" }, "Alex Rivera");
+  ok(combo.length === 2, "companies map: filters compose (AND), not just override each other");
+
+  ok(!hasActiveMapFilters(EMPTY_MAP_FILTERS), "companies map: the empty filter state reads inactive");
+  ok(hasActiveMapFilters({ ...EMPTY_MAP_FILTERS, q: "  x  " }), "companies map: a whitespace-padded query still reads active (trimmed check)");
+  ok(hasActiveMapFilters({ ...EMPTY_MAP_FILTERS, hasOpenQuotes: true }), "companies map: the open-quotes toggle alone reads active");
+
+  const grouped = groupPointsByCompany(points);
+  ok(grouped.length === 3, "companies map: groupPointsByCompany collapses c1's two venues to one row");
+  const c1Row = grouped.find((g) => g.companyId === "c1");
+  ok(!!c1Row && c1Row.venueCount === 2, "companies map: the collapsed row counts every venue");
+  ok(grouped.map((g) => g.name).join(",") === "Grace Worship Center,Hortonville HS,Riverside Rep", "companies map: rail list is name-sorted");
+
+  const opts = mapFilterOptions(points);
+  ok(opts.types.join(",") === "Education,Performing arts,Worship", "companies map: type options are unique + sorted, built from the FULL set");
+  ok(opts.tags.join(",") === "board-member,priority", "companies map: tag options are unique + sorted");
+  ok(opts.hasDriveData === true, "companies map: hasDriveData true when at least one point is located");
+  ok(mapFilterOptions(points.filter((p) => p.companyId === "c3")).hasDriveData === false, "companies map: hasDriveData false when every point in range is unlocated");
 }
 
 /* ======================================================================
@@ -11306,5 +11384,62 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   } finally {
     console.error = realConsoleError;
     await softDeleteDoc("quotes", Q_GATE);
+  }
+}
+
+/* ======================================================================
+   Companies map — getCompanySummary() (src/lib/company-summary.ts), the
+   pop-out panel's DB-backed data for one company. The customers store is
+   relational (companies/sites/contacts), not doc-store, so this fixture
+   goes through upsert()/remove() like every other companies test, with the
+   linked quote as a normal FIXTURE_MARKER row torn down by dropFixtures().
+   ====================================================================== */
+async function companyMapAsyncChecks(): Promise<void> {
+  const CID = fixtureId("CMAP", "company");
+  const QID = fixtureId("CMAP", "quote");
+  try {
+    await upsertCustomer({
+      id: CID,
+      name: "Test Map Co",
+      type: "Education",
+      lifecycle: "customer",
+      keywords: ["priority"],
+      phone: "555-0100",
+      website: "testmapco.org",
+      locations: [
+        { id: "v1", label: "Main Hall", city: "Appleton", state: "WI", lat: 44.26, lng: -88.4, primary: true, venueKind: "proscenium" },
+      ],
+      contacts: [{ name: "Sam Lead", role: "TD", email: "sam@test.org", phone: "555-0101", primary: true }],
+    });
+    await createFixture("quotes", {
+      id: QID,
+      name: "Test Map Quote",
+      quoteType: "system",
+      status: "sent",
+      customer: "Test Map Co",
+      customerId: CID,
+      locationId: null,
+      value: 5000,
+      owner: "Alex Rivera",
+    });
+
+    const s = await getCompanySummary(CID);
+    ok(!!s && s.name === "Test Map Co" && s.type === "Education", "getCompanySummary: resolves the company's name + type by id");
+    ok(!!s && s.lifecycleLabel === "Customer", "getCompanySummary: lifecycle label resolved from the stored lifecycle");
+    ok(!!s && s.phone === "555-0100" && s.website === "testmapco.org" && s.keywords.join(",") === "priority", "getCompanySummary: company-level phone/website/keywords carried through");
+    ok(!!s && !!s.primaryContact && s.primaryContact.name === "Sam Lead" && s.primaryContact.email === "sam@test.org", "getCompanySummary: primary contact resolved");
+    ok(!!s && s.venues.length === 1 && s.venues[0].label === "Main Hall" && s.venues[0].city === "Appleton", "getCompanySummary: venues carried through with city/state");
+    ok(!!s && s.openCount === 1 && s.openValueLabel === "$5,000", "getCompanySummary: a 'sent' quote rolls up into open value/count");
+    ok(!!s && s.recentQuotes.length === 1 && s.recentQuotes[0].id === QID && s.recentQuotes[0].status === "sent", "getCompanySummary: the linked quote appears in recentQuotes");
+    ok(!!s && s.owner === "Alex Rivera", "getCompanySummary: owner falls back to the linked quote's owner when the company has none stored");
+    ok(!!s && s.activeProjects.length === 0, "getCompanySummary: no projects yet -> activeProjects empty, not a throw");
+
+    const missing = await getCompanySummary("TEST-cmap-does-not-exist");
+    ok(missing === null, "getCompanySummary: an unknown id resolves to null rather than throwing");
+    const blank = await getCompanySummary("");
+    ok(blank === null, "getCompanySummary: an empty id resolves to null rather than throwing");
+  } finally {
+    await dropFixtures("CMAP");
+    await removeCustomer(CID);
   }
 }
