@@ -22,6 +22,7 @@
     "db:export": "tsx scripts/export.ts",
     "davinci:extract": "tsx scripts/davinci-extract.ts",
     "davinci:enrich": "tsx scripts/davinci-enrich.ts",
+    "part-docs:backfill": "tsx scripts/part-docs-backfill.ts",
     "db:inventory": "tsx scripts/inventory.ts",
     "ports:rules": "tsx scripts/port-rules.ts",
     "icons:grid": "tsx scripts/build-grid-icons.ts",

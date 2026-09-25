@@ -2276,6 +2276,92 @@ async function main() {
     assert.equal(r3row.secondary, "Brenda, me (2)", "#128 review: …and collapses into the 'me' chain slot regardless of its stamped author name");
   }
 
+  /* --- part documents (#DOC): stores, links, accessory graph, legacy backfill --- */
+  {
+    const Docs = await import("@/lib/stores/part-documents");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const { backfillLegacyDatasheets, legacyDocumentId } = await import("@/lib/part-docs/legacy");
+    const { loadPartDocsState } = await import("@/lib/part-docs/load");
+    const { slotCoverage } = await import("@/lib/part-docs/coverage");
+    const { setDocNotNeeded } = await import("@/lib/part-docs/not-needed");
+    const { upsert: upsertPart, get: getPart } = await import("@/lib/stores/catalog");
+    const { listDocs } = await import("@/db/doc-store");
+
+    const d = await Docs.createDocument({
+      kind: "datasheet", fileName: "S4_LED_Datasheet.pdf", contentType: "application/pdf", size: 10,
+      blobKey: "part-docs/PD-x/S4_LED_Datasheet.pdf", sourceUrl: null, source: "upload", by: "Jeff",
+    });
+    assert(d && /^PD-[0-9a-f]{12}$/.test(d.id), "part docs store: createDocument mints a PD- id");
+    assert.equal(d!.title, "S4 LED Datasheet", "part docs store: the title defaults from the file name");
+    assert.equal(await Docs.createDocument({ id: d!.id, kind: "datasheet", fileName: "x.pdf", contentType: "application/pdf", size: 1, blobKey: null, sourceUrl: null, source: "upload", by: "Jeff" }), null, "part docs store: an existing id is never overwritten");
+
+    assert.equal(await Docs.attachDocument(d!.id, ["DOC-FIX", "DOC-FIX", "DOC-LENS2"], "Jeff"), 2, "part docs store: attach links each part once");
+    assert.equal(await Docs.attachDocument(d!.id, ["DOC-FIX"], "Jeff"), 0, "part docs store: attaching again is a no-op");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.documentId === d!.id).length, 2, "part docs store: one link row per part↔document");
+    assert.equal(await Docs.detachDocument(d!.id, "DOC-LENS2"), true, "part docs store: detach removes a live link");
+    assert.equal(await Docs.detachDocument(d!.id, "DOC-LENS2"), false, "part docs store: detaching twice reports nothing removed");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.documentId === d!.id).length, 1, "part docs store: a detached link leaves the live list");
+    assert.equal(await Docs.attachDocument(d!.id, ["DOC-LENS2"], "Jeff"), 1, "part docs store: re-attaching revives the same row");
+    assert.equal(await Docs.ensureLinks([{ partSku: "DOC-OTHER", documentId: d!.id, kind: "datasheet" }], "Jeff"), 1, "part docs store: ensureLinks adds a new pair");
+    await Docs.detachDocument(d!.id, "DOC-OTHER");
+    assert.equal(await Docs.ensureLinks([{ partSku: "DOC-OTHER", documentId: d!.id, kind: "datasheet" }], "Jeff"), 0, "part docs store: ensureLinks never re-attaches a pair a human detached");
+
+    const replaced = await Docs.replaceDocumentFile(d!.id, { blobKey: "part-docs/PD-x/v2.pdf", fileName: "v2.pdf", contentType: "application/pdf", size: 20 }, "Chris", 5000);
+    assert.equal(replaced?.blobKey, "part-docs/PD-x/v2.pdf", "part docs store: replace points at the new file");
+    assert.deepEqual(replaced?.history, [{ blobKey: "part-docs/PD-x/S4_LED_Datasheet.pdf", fileName: "S4_LED_Datasheet.pdf", size: 10, replacedAt: 5000, replacedBy: "Chris" }], "part docs store: the replaced file is kept in history");
+    await Docs.recordFetchResult(d!.id, { ok: false, error: "HTTP 404" }, 6000);
+    assert.deepEqual((await Docs.getDocument(d!.id))?.lastFetch, { at: 6000, ok: false, error: "HTTP 404" }, "part docs store: a fetch failure is remembered with its reason");
+    assert.equal(await Docs.getDocument("../etc"), null, "part docs store: a non-id never reaches the table");
+
+    // accessory graph
+    const r1 = await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [
+      { parentSku: "DOC-FIX", accessorySku: "DOC-LENS" },
+      { parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true },
+      { parentSku: "DOC-FIX", accessorySku: "DOC-FIX" },
+    ]);
+    assert.deepEqual(r1, { written: 2, removed: 0 }, "part docs graph: sync writes each pair once and drops a self-link");
+    assert.deepEqual(await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [
+      { parentSku: "DOC-FIX", accessorySku: "DOC-LENS" },
+      { parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true },
+    ]), { written: 0, removed: 0 }, "part docs graph: an unchanged re-sync writes nothing");
+    assert.equal(await Acc.setOwnDatasheet("DOC-FIX", "DOC-CLAMP", true), 1, "part docs graph: the own-datasheet toggle flags the pair");
+    const r2 = await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [{ parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true }]);
+    assert.deepEqual(r2, { written: 0, removed: 1 }, "part docs graph: a pair the assembly dropped is removed");
+    assert.equal((await Acc.allAccessoryLinks()).find((l) => l.accessorySku === "DOC-CLAMP")?.ownDatasheet, true, "part docs graph: re-saving keeps the own-datasheet flag");
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-2" }, [{ parentSku: "DOC-FIX", accessorySku: "DOC-LENS" }]);
+    assert.equal((await Acc.allAccessoryLinks()).filter((l) => l.sourceRef === "fa-doc-1").length, 1, "part docs graph: another assembly's sync never touches this one's links");
+
+    // coverage over the stored graph, via the one-load loader
+    await upsertPart({ sku: "DOC-FIX", desc: "Fixture", category: "Lighting", unit: "ea", list: 1, cost: 1 });
+    await upsertPart({ sku: "DOC-LENS", desc: "Lens", category: "Lighting", unit: "ea", list: 1, cost: 1 });
+    const parts = [(await getPart("DOC-FIX"))!, (await getPart("DOC-LENS"))!];
+    const state = await loadPartDocsState(parts);
+    assert.equal(slotCoverage(state.index, "DOC-LENS", "datasheet").state, "covered", "part docs graph: an assembly member is covered by the fixture's datasheet");
+
+    // not-needed marks ride on the catalog part through mergeUpsert
+    assert.equal(await setDocNotNeeded(["DOC-LENS", "NO-SUCH-PART"], "specsheet", true), 1, "part docs not-needed: marks live parts only");
+    const lens = await getPart("DOC-LENS");
+    assert.deepEqual(lens?.docNotNeeded, { specsheet: true }, "part docs not-needed: the mark is on the part");
+    assert.equal(lens?.desc, "Lens", "part docs not-needed: mergeUpsert leaves the rest of the part alone");
+    assert.equal(await getPart("NO-SUCH-PART"), null, "part docs not-needed: never creates a part");
+    await setDocNotNeeded(["DOC-LENS"], "specsheet", false);
+    assert.equal((await getPart("DOC-LENS"))?.docNotNeeded, undefined, "part docs not-needed: clearing the last mark removes the field");
+
+    // legacy backfill
+    await upsertPart({ sku: "DOC-LEGACY", desc: "Legacy", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/DOC-LEGACY/old.pdf", datasheetName: "old.pdf" });
+    const legacy = (await getPart("DOC-LEGACY"))!;
+    assert.deepEqual(await backfillLegacyDatasheets([legacy]), { created: 1 }, "part docs legacy: a datasheetBlobKey becomes a shared document");
+    const ldoc = await Docs.getDocument(legacyDocumentId("DOC-LEGACY"));
+    assert(ldoc?.source === "legacy" && ldoc.blobKey === "part-datasheets/DOC-LEGACY/old.pdf" && ldoc.fileName === "old.pdf", "part docs legacy: the document keeps the old blob and name");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-LEGACY").length, 1, "part docs legacy: and is linked to its part");
+    assert.deepEqual(await backfillLegacyDatasheets([legacy]), { created: 0 }, "part docs legacy: a second run writes nothing");
+    await Docs.detachDocument(legacyDocumentId("DOC-LEGACY"), "DOC-LEGACY");
+    await backfillLegacyDatasheets([legacy]);
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-LEGACY").length, 0, "part docs legacy: a detached legacy document stays detached");
+    assert.equal((await getPart("DOC-LEGACY"))?.datasheetBlobKey, "part-datasheets/DOC-LEGACY/old.pdf", "part docs legacy: datasheetBlobKey stays readable");
+    assert((await listDocs("part_documents")).some((x) => x.id === legacyDocumentId("DOC-LEGACY")), "part docs legacy: the document itself is never deleted");
+  }
+
   console.log("review regression checks passed");
 }
 
