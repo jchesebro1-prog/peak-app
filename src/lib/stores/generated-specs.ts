@@ -1,4 +1,4 @@
-import { getDoc, listDocs, upsertDoc } from "@/db/doc-store";
+import { getDoc, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import type { AssembledSpec, BomRow } from "@/lib/bid-spec";
 
 /* ------------------------------------------------------------------ *
@@ -59,4 +59,11 @@ export async function saveGeneratedSpec(input: {
   };
   await upsertDoc<GeneratedSpec>("generated_specs", rec);
   return rec;
+}
+
+/** Delete a saved bid spec (soft delete — doc-store tombstone). The frozen
+ *  document was a generated artifact, not source data, so removing it never
+ *  touches the catalog/spec-section language it was assembled from. */
+export async function removeGeneratedSpec(id: string): Promise<void> {
+  await softDeleteDoc("generated_specs", id);
 }
