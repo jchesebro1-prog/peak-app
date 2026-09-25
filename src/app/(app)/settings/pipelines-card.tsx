@@ -29,7 +29,7 @@ import { PipelineStageRow } from "./pipeline-stage-row";
  * button is disabled with its record count until those records are moved to
  * another stage of the SAME pipeline via "Move records" (moveStageRecordsAction).
  *
- * The CustomerFieldsCard/GridSymbolsCard idiom: seeded from the server-
+ * The CustomerFieldsCard idiom: seeded from the server-
  * resolved props, whole-thing save, client-side pure validators run before
  * the server call so a bad edit never round-trips. Ids are minted once, on
  * add (slugStageId against the pipeline's own ids), and never re-slug when a

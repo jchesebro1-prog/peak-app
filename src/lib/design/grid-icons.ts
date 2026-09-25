@@ -389,3 +389,59 @@ export function legendRows(
   }
   return rows;
 }
+
+/* ------------------------ settings rows -------------------------- */
+
+export type SymbolCategoryRow = { category: string; gridScope: string | null };
+
+/** The Category icons card's rows: every live category — the shipped icon
+ *  defaults, the catalog taxonomy seed, live catalog categories, the Grid
+ *  library's categories and any stored override — de-duplicated trimmed +
+ *  case-insensitively (first spelling wins), Fabric/Labor excluded (never
+ *  devices), sorted. A category the Grid library uses carries that entry's
+ *  scope so its preview colour matches the plan. */
+export function symbolCategoryRows(input: {
+  catalogCategories: string[];
+  grid: Array<{ category: string; scope?: string | null }>;
+  stored?: Record<string, string> | null;
+  taxonomy?: string[];
+}): SymbolCategoryRow[] {
+  const rows = new Map<string, SymbolCategoryRow>();
+  const scopeOf = new Map<string, string>();
+  for (const g of input.grid) {
+    const k = norm(g.category);
+    if (k && g.scope && !scopeOf.has(k)) scopeOf.set(k, g.scope);
+  }
+  const add = (raw: string) => {
+    const category = (raw || "").trim();
+    const k = norm(category);
+    if (!k || k === "fabric" || k === "labor" || rows.has(k)) return;
+    rows.set(k, { category, gridScope: scopeOf.get(k) ?? null });
+  };
+  for (const c of Object.keys(DEFAULT_CATEGORY_ICONS)) add(c);
+  for (const c of input.taxonomy || []) add(c);
+  for (const c of input.catalogCategories) add(c);
+  for (const g of input.grid) add(g.category);
+  for (const c of Object.keys(input.stored || {})) add(c);
+  return Array.from(rows.values()).sort((a, b) => a.category.localeCompare(b.category));
+}
+
+/** The shipped default icon for a category (trimmed, case-insensitive), or
+ *  the generic device — what "Reset" on one Category icons row goes back to. */
+export function defaultIconFor(category: string): string {
+  return lookup(DEFAULT_CATEGORY_ICONS, category) ?? GENERIC_ICON_ID;
+}
+
+/** A representative glyph for each colour swatch's preview badge. */
+export const COLOR_KEY_SAMPLE_ICON: Record<SymbolColorKey, string> = {
+  "Lighting Controls": "lighting-controls",
+  Fixtures: "fixture",
+  "Video Controls": "video-controls",
+  Speakers: "speaker",
+  "Audio Controls": "audio-controls",
+  Curtains: "curtain",
+  Lighting: "bulb",
+  Rigging: "rigging",
+  AV: "network",
+  Other: GENERIC_ICON_ID,
+};

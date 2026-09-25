@@ -4,11 +4,13 @@ import { can } from "@/lib/team";
 import { getSettings } from "@/lib/settings";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { list as listCatalog } from "@/lib/stores/catalog";
-import { resolveCategoryShapes } from "@/lib/design/grid-symbols";
+import { symbolCategoryRows, symbolContext } from "@/lib/design/grid-icons";
+import { DEFAULT_CATEGORY_MAP } from "@/lib/catalog-taxonomy";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import { GROUPS, value as pricingValue, type RateEntry } from "@/lib/stores/pricing";
 import { buildPortRuleReport, type PortReportPart } from "@/lib/catalog-port-report";
-import { GridSymbolsCard } from "./grid-symbols-card";
+import { SymbolColorsCard } from "./symbol-colors-card";
+import { CategoryIconsCard } from "./category-icons-card";
 import { WireTypesCard } from "./wire-types-card";
 import { LaborHoursCard } from "./labor-hours-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
@@ -18,8 +20,8 @@ export const metadata = { title: "Grid settings — Quartzite-6" };
 /**
  * Grid Settings (/design/grid/settings, D-grid-settings) — the admin
  * configuration screens The Grid needs but Settings never had room for:
- * per-category symbol shapes (moved here after sitting orphaned since
- * settings/page.tsx commit 2855d84), a review UI over the #159 port-rules
+ * stock-symbol colours and per-category icons (spec 2026-09-25, replacing
+ * the D154 per-category shapes card), a review UI over the #159 port-rules
  * engine, the wire-type registry Grid wiring validation actually reads now,
  * and the install-hours-per-device knob. Admin-only (manage_users), same
  * gate as every other data-administration screen (Estimating Rules,
@@ -70,11 +72,17 @@ export default async function GridSettingsPage() {
     listCatalog(),
   ]);
 
-  // Grid symbols card (#131, D154) — live catalog categories, derived the
-  // same way design/grid/[id]/page.tsx derives them for the editor's own
-  // parts list, so the card can show a category no default matches.
-  const gridLiveCategories = Array.from(new Set(gridSymbols.map((s) => s.category || "Other"))).sort();
-  const categoryShapes = resolveCategoryShapes(settings.gridCategoryShapes);
+  // Stock symbols (spec 2026-09-25) — one resolution context for both
+  // cards' previews, and one row per live category: shipped defaults, the
+  // taxonomy seed, live catalog categories, Grid library categories (with
+  // their scope, so previews colour like the plan) and stored overrides.
+  const symCtx = symbolContext(settings);
+  const categoryRows = symbolCategoryRows({
+    catalogCategories: Array.from(new Set(catalog.map((p) => p.category || ""))),
+    grid: gridSymbols.map((s) => ({ category: s.category || "Other", scope: s.scope })),
+    stored: settings.gridCategoryIcons ?? null,
+    taxonomy: Object.keys(DEFAULT_CATEGORY_MAP),
+  });
   const wireTypes = resolveWireTypes(settings.wireTypes);
 
   const laborRate = GROUPS.flatMap((g) => g.items).find(
@@ -138,16 +146,19 @@ export default async function GridSettingsPage() {
             </span>
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>
-            Symbol shapes, port rules, wire types, and install labor — the settings specific to The
-            Grid.
+            Symbol colours and icons, port rules, wire types, and install labor — the settings specific
+            to The Grid.
           </div>
         </div>
       </div>
 
-      <GridSymbolsCard
-        key={JSON.stringify(categoryShapes) + "::" + gridLiveCategories.join("|")}
-        shapes={categoryShapes}
-        liveCategories={gridLiveCategories}
+      <SymbolColorsCard key={JSON.stringify(symCtx.colors)} colors={symCtx.colors} />
+
+      <CategoryIconsCard
+        key={JSON.stringify(settings.gridCategoryIcons ?? null) + "::" + categoryRows.length}
+        rows={categoryRows}
+        stored={settings.gridCategoryIcons ?? null}
+        ctx={symCtx}
       />
 
       <PortRulesCard

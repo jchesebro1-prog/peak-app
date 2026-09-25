@@ -5272,6 +5272,29 @@ import { SymbolIcon as SymIcon, SymbolShape as SymShape, glyphMetrics as symGlyp
     "#SYM render: stroke stays legible from 12px palette badges up to plan markers");
 }
 
+/* --- #SYM grid stock symbols — Task 4: Grid Settings rows --- */
+import { COLOR_KEY_SAMPLE_ICON, defaultIconFor, symbolCategoryRows } from "@/lib/design/grid-icons";
+
+{
+  const rows = symbolCategoryRows({
+    catalogCategories: ["Fabric", "Labor", "  Widgets ", "widgets", "Track", ""],
+    grid: [{ category: "Video", scope: "Video" }, { category: "Gizmos", scope: "Lighting" }],
+    stored: { "Stored Only": "wifi", speakers: "horn" },
+    taxonomy: ["Track", "Pipe"],
+  });
+  const names = rows.map((r) => r.category);
+  ok(!names.some((n) => /^(fabric|labor)$/i.test(n)), "#SYM rows: Fabric and Labor never get an icon row");
+  ok(names.filter((n) => n.toLowerCase() === "widgets").length === 1 && names.includes("Widgets"),
+    "#SYM rows: de-duplicated trimmed + case-insensitively, first spelling wins");
+  ok(names.includes("Stored Only") && names.includes("Gizmos") && names.includes("Pipe") && names.includes("Speakers") && !names.includes("speakers"),
+    "#SYM rows: stored, Grid, taxonomy and default categories all appear (a default's spelling beats a stored one)");
+  ok(names.join("|") === [...names].sort((a, b) => a.localeCompare(b)).join("|") && !names.includes(""), "#SYM rows: sorted, no blank row");
+  ok(rows.find((r) => r.category === "Video")?.gridScope === "Video" && rows.find((r) => r.category === "Track")?.gridScope === null,
+    "#SYM rows: a Grid category carries its scope for the preview colour");
+  ok(defaultIconFor(" speakers ") === "speaker" && defaultIconFor("Nope") === GENERIC_ICON_ID, "#SYM: defaultIconFor");
+  ok(SYMBOL_COLOR_KEYS.every((k) => isGridIconId(COLOR_KEY_SAMPLE_ICON[k])), "#SYM: every colour swatch has a registered sample icon");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
