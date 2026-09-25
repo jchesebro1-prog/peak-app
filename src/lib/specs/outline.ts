@@ -63,16 +63,21 @@ function labelFor(depth: number, n: number): string {
 
 /**
  * A label the author (or Word) already typed. Matches `A.` `a.` `1.` `1)`
- * `(a)` `(1)` followed by whitespace — and deliberately NOT `1.1 `, which is
- * an article number, not an outline label.
+ * `(a)` `(1)` followed by whitespace or end-of-string — and deliberately NOT
+ * `1.1 `, which is an article number, not an outline label.
  */
-const LABEL_RE = /^\(?(?:[A-Za-z]|\d{1,2})[.)]\s+/;
+const LABEL_RE = /^\(?(?:[A-Za-z]|\d{1,2})[.)](?:\s+|$)/;
 
 export function stripLabel(text: string): string {
   return text.replace(LABEL_RE, "");
 }
 
-/** Leading whitespace → level. A tab is one level; every two spaces is one. */
+/**
+ * Leading whitespace → level. A tab is one level; every two spaces is one.
+ * An odd space count floors down (three spaces reads as one level, same as
+ * two) — that is the right reading of "two spaces per level", so a stray
+ * pasted space is silently absorbed rather than flagged.
+ */
 function depthOf(line: string): number {
   let levels = 0;
   let spaces = 0;
@@ -89,20 +94,27 @@ export function parseOutline(body: string, context: OutlineContext = "article"):
   const counters = new Array<number>(MAX_OUTLINE_DEPTH).fill(0);
   const lines: OutlineLine[] = [];
   const warnings: string[] = [];
-  let prev = -1;
+  // Source indentation of each currently open level: stack[i] is the indent of
+  // the line rendered at depth i. A stack is what makes two lines with the SAME
+  // indentation land at the SAME depth — tracking only the previous line's depth
+  // does not, because clamping a jump raises the baseline and the next equally
+  // indented sibling then sails through unclamped. This also buys, for free: a
+  // deeper line always pushes exactly one level, so depth can never jump by
+  // more than one; a first line at any indentation lands at depth 0 because
+  // the stack starts empty; and the MAX_OUTLINE_DEPTH clamp below now affects
+  // only the rendered depth, leaving the source structure on the stack intact.
+  const open: number[] = [];
   let clamped = false;
 
   for (const raw of String(body || "").split(/\r?\n/)) {
     const text = stripLabel(raw.trim());
     if (!text) continue;
 
-    // A jump of more than one level is an authoring slip, not an intent to
-    // skip a numbering level — pull it back so the outline stays legible.
-    let level = depthOf(raw);
-    if (level > prev + 1) level = prev + 1;
-    prev = level;
+    const level = depthOf(raw);
+    while (open.length && level < open[open.length - 1]) open.pop();
+    if (!open.length || level > open[open.length - 1]) open.push(level);
 
-    let depth = offset + level;
+    let depth = offset + open.length - 1;
     if (depth >= MAX_OUTLINE_DEPTH) {
       depth = MAX_OUTLINE_DEPTH - 1;
       clamped = true;
@@ -195,4 +207,19 @@ export function substitutePlaceholders(
     );
   }
   return { text: out.join("\n"), warnings: [...new Set(warnings)] };
+}
+
+/**
+ * The pipeline every caller actually wants: substitute placeholders, then parse
+ * the result as an outline, with BOTH warning lists merged. Compose the two by
+ * hand only if you have a reason to — doing so is how a caller loses the
+ * substitution's warnings without noticing.
+ */
+export function renderBody(
+  body: string,
+  opts?: { context?: OutlineContext; placeholders?: PlaceholderContext }
+): OutlineResult {
+  const sub = substitutePlaceholders(body, opts?.placeholders ?? {});
+  const parsed = parseOutline(sub.text, opts?.context ?? "article");
+  return { lines: parsed.lines, warnings: [...new Set([...sub.warnings, ...parsed.warnings])] };
 }

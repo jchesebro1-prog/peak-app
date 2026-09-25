@@ -2201,7 +2201,7 @@ git commit -m "feat(specs): the Specs module shell — library index, section an
 - Create: `src/app/(app)/design/specs/library/[sectionId]/editor.tsx`
 
 **Interfaces:**
-- Consumes: `updateSectionAction`, `createArticleAction`, `updateArticleAction`, `deleteArticleAction` (Task 8); `parseOutline` / `outlineToText` / `substitutePlaceholders` (Task 1).
+- Consumes: `updateSectionAction`, `createArticleAction`, `updateArticleAction`, `deleteArticleAction` (Task 8); `renderBody` / `outlineToText` (Task 1).
 - Produces: nothing new.
 
 - [ ] **Step 1: The server component**
@@ -2214,7 +2214,7 @@ git commit -m "feat(specs): the Specs module shell — library index, section an
 
 1. **Header card** — number, title and sort as inputs; two selects, `Part 2 style` (`paragraphs` / `table`) and `Quantities` (`drawings` — "per drawings and schedules" — / `inline` — "printed on each entry"); a **Save** button calling `updateSectionAction`. Each select carries a one-line explainer beneath it; a reviewer must be able to tell what the choice does without opening the spec.
 2. **Part 1 — General** and **Part 3 — Execution**: an ordered list of articles, each a title input (placeholder `SUBMITTALS`) and a body textarea (`rows={8}`, monospace via the `pk-mono` class so indentation is legible). Controls per article: move up, move down, remove. An **+ Add article** button appends `{ id: newArticleId(), title: "", body: "" }`. The whole array is sent on **Save** through `updateSectionAction(id, { part1 })` — the editor owns the array; there is no per-article endpoint.
-3. **Live preview** beside each body: run `substitutePlaceholders(body, { section: { number, title }, manufacturers: [], articles: [] })` then `parseOutline(text, "article")`, render `outlineToText(lines, "  ")` in a `<pre>`, and list `warnings` beneath it in the muted style. Recompute on change with `useMemo` — this is pure and cheap, no debounce needed.
+3. **Live preview** beside each body: run `renderBody(body, { context: "article", placeholders: { section: { number, title }, manufacturers: [], articles: [] } })`, render `outlineToText(lines, "  ")` in a `<pre>`, and list `warnings` beneath it in the muted style. Recompute on change with `useMemo` — this is pure and cheap, no debounce needed.
 4. **Part 2 — category articles**: one card per article with title, sort, a manufacturers editor (one per line in a textarea, split on newline, blanks dropped), a category-keys editor (comma-separated), and a `general` body textarea with its own preview, this time passing `manufacturers` so `{{manufacturers}}` renders. Each card's **Save** calls `updateArticleAction`; **Remove** calls `deleteArticleAction` and surfaces the "parts still print under this article" refusal verbatim.
 
 State rule, learned from PUNCHLIST #141: do **not** key this component on `section.updatedAt`. Seed `useState` from props once, and after a successful save call `router.refresh()` without discarding the user's in-progress edits in the other regions.
@@ -2508,7 +2508,7 @@ git commit -m "feat(specs): per-article coverage table with on-a-BOM and datashe
 - Modify: `src/app/(app)/catalog/page.tsx` (load articles + templates; mount the panel)
 
 **Interfaces:**
-- Consumes: `writePartSpecFieldsAction` (Task 6), `articleIdForPart` / `specStateOf` (Task 4), `parseOutline` / `substitutePlaceholders` (Task 1), `scaffoldFrom` (Task 5).
+- Consumes: `writePartSpecFieldsAction` (Task 6), `articleIdForPart` / `specStateOf` (Task 4), `renderBody` (Task 1), `scaffoldFrom` (Task 5).
 
 - [ ] **Step 1: Pass the data down**
 
@@ -2536,7 +2536,7 @@ Controls, top to bottom:
 4. **Same spec as** — text input for a SKU. When non-empty, disable the body textarea and say `This part prints <SKU>'s text.`
 5. **Body** — a `pk-mono` textarea, `rows={14}`. When it is empty, an **Insert template** row of buttons, one per template, that writes `scaffoldFrom(t)` into the body. Preselect the button whose `key` matches the part's `category` case-insensitively.
 6. **Sort** — number input, `specSort`.
-7. **Live preview** — `substitutePlaceholders(body, { manufacturers: <the chosen article's manufacturers> })` then `parseOutline(text, "entry")`, rendered as `outlineToText(lines, "  ")` in a `<pre>` under the heading the entry will print with (`B. <specTitle or desc>`), with the warnings listed beneath. This is the whole point of the panel: the author sees the numbering they will get.
+7. **Live preview** — `renderBody(body, { context: "entry", placeholders: { manufacturers: <the chosen article's manufacturers> } })`, rendered as `outlineToText(lines, "  ")` in a `<pre>` under the heading the entry will print with (`B. <specTitle or desc>`), with the warnings listed beneath. This is the whole point of the panel: the author sees the numbering they will get.
 8. **Save** — calls `writePartSpecFieldsAction`, renders `{ok:false}`'s error inline, and on success calls `router.refresh()`.
 
 Do **not** key the panel on `specUpdatedAt` (PUNCHLIST #141). Seed state from props once; after a successful save, let `router.refresh()` bring the chip up to date without remounting the textarea.

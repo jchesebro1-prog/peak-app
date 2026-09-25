@@ -284,6 +284,7 @@ import {
   outlineToText,
   fillSlots,
   substitutePlaceholders,
+  renderBody,
   MAX_OUTLINE_DEPTH,
 } from "@/lib/specs/outline";
 
@@ -12542,10 +12543,26 @@ async function deletePartBAsyncChecks(): Promise<void> {
   const jump = parseOutline("One\n      Way too deep");
   ok(jump.lines[1].depth === 1, "outline: a level jump of more than one is pulled back to one");
 
-  ok(
-    outlineToText(parseOutline("One\n  Two").lines, "  ") === "A. One\n  1. Two",
-    "outline: outlineToText indents by depth"
-  );
+  const siblings = parseOutline("One\n      Way too deep\n      Also too deep");
+  ok(siblings.lines[1].depth === siblings.lines[2].depth, "outline: two lines with the same indentation are siblings, however deep the jump was");
+  ok(siblings.lines[1].label === "1." && siblings.lines[2].label === "2.", "outline: those siblings number 1., 2.");
+
+  const expanded = parseOutline("Acceptable manufacturers:\n    ETC\n    Chauvet");
+  ok(expanded.lines[1].depth === expanded.lines[2].depth, "outline: an expanded list stays flat when it is re-parsed");
+  ok(expanded.lines[2].label === "2.", "outline: the second expanded item is the first's sibling, not its child");
+
+  const zigzag = parseOutline("A\n  B\n    C\n  D\nE");
+  ok(zigzag.lines.map((l) => l.depth).join(",") === "0,1,2,1,0", "outline: coming back out of a nesting returns to the right depth");
+  ok(zigzag.lines[3].label === "2.", "outline: a line returning to a level continues that level's numbering");
+
+  ok(stripLabel("A.") === "", "outline: a line that is only a label strips to nothing");
+  ok(stripLabel("1)") === "", "outline: the same for a paren label");
+  ok(stripLabel("1.1") === "1.1", "outline: a bare article number is still not a label");
+  ok(stripLabel("110V") === "110V", "outline: a bare measurement is still not a label");
+  ok(parseOutline("One\nA.\nTwo").lines.length === 2, "outline: a label-only line is dropped, not doubled");
+
+  ok(outlineToText(parseOutline("One\n  Two").lines, "····") === "A. One\n····1. Two", "outline: outlineToText uses the indent it is given");
+  ok(outlineToText(parseOutline("One\n  Two").lines) === "A. One\n  1. Two", "outline: outlineToText defaults to two spaces");
 
   ok(
     fillSlots("{{material}} in {{color}}", { material: "22oz velour", color: "Black" }) === "22oz velour in Black",
@@ -12580,4 +12597,16 @@ async function deletePartBAsyncChecks(): Promise<void> {
 
   const dupes = substitutePlaceholders("{{nope}} and {{nope}}", {});
   ok(dupes.warnings.length === 1, "outline: repeated identical warnings are reported once");
+
+  const rendered = renderBody("Acceptable manufacturers:\n  {{manufacturers}}", { placeholders: { manufacturers: ["ETC", "Chauvet"] } });
+  ok(rendered.lines.length === 3, "outline: renderBody substitutes and then parses");
+  ok(rendered.lines[1].depth === rendered.lines[2].depth, "outline: renderBody keeps an expanded list flat");
+  ok(rendered.warnings.length === 0, "outline: a clean body renders without warnings");
+
+  const both = renderBody("See {{project.architect}}\n1\n  2\n    3\n      4\n        5\n          6", {});
+  ok(both.warnings.some((w) => w.includes("project.architect")), "outline: renderBody keeps the substitution's warnings");
+  ok(both.warnings.some((w) => w.includes("deeper")), "outline: renderBody keeps the parser's warnings too");
+
+  const entry = renderBody("Top\n  Sub", { context: "entry" });
+  ok(entry.lines[0].label === "1." && entry.lines[1].label === "a.", "outline: renderBody honours the entry context");
 }
