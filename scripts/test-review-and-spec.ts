@@ -34,6 +34,7 @@ import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentP
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
 import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inbox-links";
 import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { clampListWidth, parseListWidth, parseSideCollapsed, LIST_WIDTH_DEFAULT } from "@/lib/inbox-layout";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -9283,6 +9284,20 @@ import {
   ok(resolveAddressFor({ ...r3base, contactEmail: "" }) === "", "resolveAddressFor: no address → empty string");
   ok(firstRecipient(" , Nobody <>, Someone <s@x.org>")?.email === "s@x.org", "firstRecipient: skips empty parts");
   ok(firstRecipient("") === null && firstRecipient(undefined) === null, "firstRecipient: empty → null");
+}
+
+/* ---- Inbox round 3 (#126) — pane layout clamp/parse ---- */
+{
+  ok(clampListWidth(100) === 300, "clampListWidth: below the minimum → the minimum");
+  ok(clampListWidth(900) === 620, "clampListWidth: above the maximum → the maximum");
+  ok(clampListWidth(undefined) === LIST_WIDTH_DEFAULT && clampListWidth(null) === LIST_WIDTH_DEFAULT, "clampListWidth: nothing → the default");
+  ok(clampListWidth(Number.NaN) === LIST_WIDTH_DEFAULT, "clampListWidth: garbage → the default");
+  ok(clampListWidth(400.6) === 401, "clampListWidth: whole pixels");
+  ok(parseListWidth("500") === 500, "parseListWidth: a stored value round-trips");
+  ok(parseListWidth("9999") === 620, "parseListWidth: an out-of-range stored value is clamped");
+  ok(parseListWidth("garbage") === LIST_WIDTH_DEFAULT && parseListWidth(null) === LIST_WIDTH_DEFAULT && parseListWidth("") === LIST_WIDTH_DEFAULT, "parseListWidth: bad/absent → the default");
+  ok(parseSideCollapsed("1") === true, "parseSideCollapsed: '1' → collapsed");
+  ok(parseSideCollapsed("0") === false && parseSideCollapsed(null) === false && parseSideCollapsed("garbage") === false, "parseSideCollapsed: anything else → not collapsed");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async
