@@ -4975,3 +4975,108 @@ open. "+ Add" lives only in the expanded rail — adding a system while the list
 select a system the user cannot see. Deliberately not done here: restoring keyboard focus to the
 counterpart control after a toggle (the pressed button unmounts, so focus falls to <body>); it
 affects #164 equally and belongs in one fix for both rails.
+
+## D225. The spawn router honours deletions, survives a replay, and stays scoped to its own quote (#169–#171, 2026-09-24)
+
+`cfc00ad` shipped `spawnFromQuote` — create a quote's downstream record at the moment of the win, inside
+`setStatus`'s transaction. Thirty-one lines, and three defects. Each was verified against the shipped code, not
+inferred.
+
+**#169 — a deleted project came back.** The project branch called `createProjectFromQuote` unconditionally.
+Deleting a project created from a won quote records that quote in a dismissed list, which the page-load sweep has
+always honoured and the per-quote creator never did. Any later re-save of that quote's `won` status silently
+recreated what the user deleted. `dismissedQuoteIds()` is now exported and consulted before the project branch —
+exported rather than the blob id duplicated, so there is one source of truth.
+
+**#170 — re-approving an already-won quote created nothing.** The router returned early when `prevStatus === "won"`,
+which was survivable only because the four builder approve actions each called `createFromQuote` themselves. The
+same commit deleted all four. The real gate turned out to be a layer up: `setStatus` returns at
+`q.status === status` before the router is ever reached, so relaxing the router alone would have fixed nothing. The
+unchanged-status path now replays the spawn **and nothing else** — no write, no history entry, no revision, no #16
+assignment — and that contract is asserted, not just commented.
+
+**#171 — the consulting `lost` branch swept the whole book inside the transaction.** It delegated to
+`syncEngagementsFromQuotes()`, which lists every engagement and every quote and patches every engagement whose rule
+fires — other quotes' records, in this user's unit. One malformed row elsewhere blocked the status change the user
+asked for, and a rollback discarded legitimate repairs made for others. Now scoped to this quote through the
+existing pure rule `engagementSyncAction`, with all three write kinds going through one shared writer.
+
+**Two things deliberately kept from the shipped version** rather than "fixed": an unrecognised `quoteType` still
+routes to the project branch, because the CSV importer can mint `"service"` and `syncProjectsFromQuotes` expects it —
+an inert default would have silently stopped service quotes becoming projects. And the sweep keeps its
+`{created, skipped}` shape and per-quote `try`/`catch`.
+
+**One behaviour convergence, not a new rule:** applying the pure rule per-quote means a re-sent consulting quote now
+reopens a closed engagement at the status change instead of on the next page load. Both sweep call sites were page
+loads, so no end state is reachable now that was not reachable before — only sooner.
+
+**Recorded because it was nearly written down wrong:** no spawn opt-out was added for the CSV importer. The
+importer's `update` path matches quotes by name and customer across the whole book with no type filter, so a
+re-import can spawn repair jobs and rental bookings the shipped `update` path never created. The tombstone coverage
+in D227 is what has to catch that, because it sits where the importer's `setStatus` reaches it.
+
+**Left alone, on the record:** `startConversionAction` and `spawnServiceLinkedProject` still reach a quote-born
+project without consulting the dismissed list. Both are explicit, user-initiated actions where "convert" means what
+it says, and the UI only offers the first from a list that already filters. Noted so the choice is visible.
+
+## D226. `outsideTransaction` — detached work must not ride the caller's transaction (#172, 2026-09-24)
+
+`withTransaction` puts a `tx` in an `AsyncLocalStorage` that `getDb()` reads, which is what makes the whole ambient
+design work. It has a sharp edge: work *started* inside a unit but resolving **after** it commits still reads the
+dying `tx`, and its write throws "Transaction is closed" — into whatever catch the caller has.
+
+`outsideTransaction(fn)` runs `fn` with the ALS context exited, so anything it starts gets the pooled handle. It is
+for detached background work, and explicitly **not** a way to sneak a write past a rollback.
+
+Applied inside `queueLabelSync`, which covers all six call sites (comms, linking ×2, bridge ×3) rather than only the
+one that motivated it. The subtlety: a `.then()` continuation captures the context at **registration** time, so
+registering inside the exited scope is what matters, not where the promise resolves.
+
+**Honest scope:** this is preventative. `withTransaction` today exists only in `setStatus`, and nothing in its call
+closure reaches the Gmail path — so the silent dropped label sync was not yet reachable. It becomes reachable the
+first time a comms flow wraps a quote status change, which is exactly the kind of change nobody would think to audit
+for this. **Named behaviour change:** a sync queued inside a unit that later rolls back will now actually run,
+rather than throwing. Better, but different.
+
+## D227. A tombstone is coverage: the healing sweeps stop resurrecting deleted records (#173, 2026-09-24)
+
+`cfc00ad` deleted `syncFromQuotes()`/`createFromQuote()` from the four builder approve actions. New wins are
+transactional and fine. But wins that happened *before* it through the Estimator, Inbox or Home never swept, and the
+book-wide heal that used to run on any "Won" click went with it. `system` and `consulting` orphans still self-heal on
+page load; **the four service types had no repair path at all**, and their `syncFromQuotes` had zero callers.
+
+Each is now attached through `safeSweep` on the page that owns that record type **and on its scheduling page**. The
+scheduler is not decoration: a healed flame job is born `stage: "approved"`, which is precisely what the scheduling
+screen lists as awaiting a date — so the screen a dispatcher would check for the missing job was otherwise the one
+screen that could not create it. Bookings get `/rentals/board` only, which *is* the rentals scheduler; `/rentals` is
+the item directory and is deliberately not swept.
+
+**Reattaching a sweep to a page a delete redirects to is what makes tombstone-awareness mandatory,** not optional.
+These sweeps built "already covered" from `listDocs`, which excludes soft-deleted rows — so deleting an inspection
+and landing back on `/inspections` would have produced a fresh blank record with a new id. Delete would be
+destructive *and* ineffective. Coverage is now built with `includeDeleted`, and the per-quote creators too, because
+#170's replay reaches them. A trap worth recording: `listDocs` does not merge the `deleted` column onto the returned
+doc, so a tombstone handed back looks live — collect a `Set` of quote ids, never pass the docs around.
+
+**This reverses a documented intent.** `flame-jobs.ts` described re-creation after removal as deliberate prototype
+parity. That was written when the sweep ran on a win, not on every dashboard load. The comment is corrected.
+
+**Consequences, stated plainly:** a tombstone is now permanent coverage and there is no undelete UI. Page load is
+serialized behind the sweep on seven screens. And the reattached sweeps are still read-then-insert with no
+uniqueness on `quoteId` — see #178.
+
+## D228. A policy refusal and a defect no longer look the same (#174, 2026-09-24)
+
+`setStatus` throws for two unrelated reasons: the approval gate refusing a transition, whose message is written for
+the user, and any defect in the spawn graph, which is not. Every caller rendered both identically, so a `TypeError`
+from a spawner was indistinguishable from a governance decision in production.
+
+`ApprovalGateRefused` now carries a brand field, and `isApprovalGateRefusal` reads that brand **by value rather than
+`instanceof`** — a server-action bundle split can hold a second copy of the module, and an identity miss would lose
+the gate's message, which is the one message that must reach the user verbatim. One shared
+`statusFailureMessage(e, where, fallback?)` sits next to it: gate message verbatim, otherwise `console.error` with
+the real error plus a generic line. Every caller uses it rather than carrying its own copy.
+
+The gate's wording and conditions are unchanged. The renewal path in the Inbox still swallows by design, but now
+logs the real error instead of dropping a defect silently. The Home stage sheet, which previously caught nothing at
+all, now stays open showing the reason instead of closing as though it had worked.

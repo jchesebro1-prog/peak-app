@@ -4563,7 +4563,14 @@ until he says to build.
 
 ---
 
-## 74. No database transactions anywhere — every multi-write operation can half-apply — OPEN
+## 74. No database transactions anywhere — every multi-write operation can half-apply — OPEN (largely addressed)
+
+**Status note, 2026-09-24:** `cfc00ad` landed the primitive — `withTransaction` in `src/db/index.ts`, ambient via
+`AsyncLocalStorage`, with `setStatus` running its write and the downstream spawn in one unit. D226 added
+`outsideTransaction` for detached work, and D225 fixed three correctness defects in the spawn it enabled. The
+headline ask is met; this stays open only because nobody has audited the *other* multi-write paths the original
+item was about (`promoteDesignToQuote`, lead conversion, the identity writes). Close it when that sweep is done, or
+split the remainder into its own item.
 
 **Area:** `src/db/doc-store.ts`, `src/lib/stores/*`
 **Reported:** 2026-08-01 (the open half of #62)
@@ -5040,7 +5047,12 @@ gap #81's verification exposed. Same rule as the rest of the file: log-only unti
 
 ---
 
-## 85. Five void FormData actions still crash on a mint failure — OPEN
+## 85. Five void FormData actions still crash on a mint failure — OPEN (addressed differently)
+
+**Status note, 2026-09-24:** several commits on `main` gave these actions a `?err=` redirect and a rendered message
+(`createInspection`, the grid assembly actions, the venue-survey delete, the project form actions). That is a
+different shape from the inline-where-you-clicked approach this item describes, but it does surface the failure.
+Worth a look by whoever owns the item to decide whether it is satisfied or whether the inline form still matters.
 
 **Area:** `src/app/(app)/design/grid/actions.ts:19`, `src/app/(app)/field-work/actions.ts:38`,
 `src/app/(app)/projects/actions.ts:175`, `src/app/(app)/inspections/actions.ts:23`,
@@ -5080,7 +5092,12 @@ recreated).
 
 ---
 
-## 86. Mints inside page-load sync functions need a third fix shape — OPEN
+## 86. Mints inside page-load sync functions need a third fix shape — OPEN (largely addressed)
+
+**Status note, 2026-09-24:** `cfc00ad` added `src/lib/safe-sweep.ts` and routed the four original page-load sweeps
+through it, so a failing backfill no longer takes down a render. D227 extended that to the four service sweeps it
+reattached. What the original item also asked for — an inline notice with a Retry — exists for some call sites and
+not others; check before closing.
 
 **Area:** `syncFromQuotes` (flame), `syncProjectsFromQuotes` (`src/lib/stores/projects.ts`),
 `syncEngagementsFromQuotes`
@@ -7503,3 +7520,136 @@ expanded, stored `"1"`. Gates: tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL,
 spec count moved 2032 → 2044 only because #167's harness change added twelve specs.
 Decision D224. Follow-up noted, not done: focus lands on `<body>` after either rail's toggle
 because the pressed button unmounts (same in #164); a focus-restore effect would fix both.
+
+---
+
+## 169. `spawnFromQuote` resurrected a project the user deleted — DONE 2026-09-24 (D225)
+
+The project branch called `createProjectFromQuote` unconditionally. Deleting a project born from a won quote records
+that quote in a dismissed list, which the page-load sweep honours and the per-quote creator never did — so any later
+re-save of that quote's `won` status silently brought it back. `dismissedQuoteIds()` is now exported and consulted
+before the project branch.
+
+## 170. Re-approving an already-won quote created nothing at all — DONE 2026-09-24 (D225)
+
+`cfc00ad` deleted the four builder approve actions' own `createFromQuote`/`syncFromQuotes` calls while the router
+still returned early on `prevStatus === "won"`. Those actions set `won` and then act, so approving a quote that was
+already won spawned nothing. The real gate was a layer up — `setStatus` returns at `q.status === status` before the
+router runs. The unchanged-status path now replays the spawn and nothing else, asserted rather than assumed.
+
+## 171. The consulting `lost` branch swept the whole book inside the transaction — DONE 2026-09-24 (D225)
+
+It delegated to `syncEngagementsFromQuotes()`, patching every engagement whose rule fired — other quotes' records,
+inside this user's unit. One malformed row elsewhere blocked the status change the user asked for; a rollback
+discarded legitimate repairs for others. Now scoped to this quote via the existing pure `engagementSyncAction`.
+
+## 172. Detached work started inside a transaction reads a dying handle — DONE 2026-09-24 (D226)
+
+Work started inside a unit but resolving after it commits still gets the `tx` from `getDb()` and throws
+"Transaction is closed". `outsideTransaction(fn)` runs it with the ALS context exited; applied inside
+`queueLabelSync`, covering all six call sites. **Preventative** — `withTransaction` today exists only in
+`setStatus`, whose closure does not reach the Gmail path, so this was not yet reachable.
+
+## 173. The four service types lost their healing path entirely — DONE 2026-09-24 (D227)
+
+`cfc00ad` removed the book-wide heal that ran on any "Won" click without putting anything in its place, so
+pre-existing orphaned flame jobs, repairs, inspections and bookings had no repair path and their `syncFromQuotes`
+had zero callers. Each is reattached through `safeSweep` on its owning page **and its scheduling page**, with
+tombstone-aware coverage so the reattachment cannot turn a delete into a resurrection.
+
+## 174. A spawn defect rendered as a governance refusal — DONE 2026-09-24 (D228)
+
+`setStatus` throws both for the approval gate and for any defect in the spawn graph, and every caller rendered them
+identically. `ApprovalGateRefused` + `isApprovalGateRefusal` (brand-by-value, not `instanceof`) and one shared
+`statusFailureMessage` now separate them: the gate's message verbatim, everything else generic plus a real
+`console.error`.
+
+---
+
+## 175. The flame builder renames a hand-typed quote, in a format its own helper disagrees with — OPEN
+
+**Reported:** 2026-09-24. Verified on `main`.
+
+`src/app/(app)/flame-tests/quote/controls.tsx:341` does
+`if (loc && !venueSel[locId]?.on) setQuoteName(\`${loc.label} ${new Date().getFullYear()}\`)`.
+
+Two problems in one line. It is **ungated** — unlike `:336`, which checks `quoteNameManual.current` first — so
+toggling a venue overwrites a name the user typed. And it produces `"<Venue> 2026"` while the builder's own
+`automaticQuoteName()` (`:298`) produces `"<Venue> — Flame Test 2026"`, so a quote's name depends on which path
+last touched it.
+
+**Ask:** gate it like `:336`, and have it call `automaticQuoteName()` rather than building its own string. Nothing
+already saved changes.
+
+## 176. Four live `window.confirm()` sites, in an app whose own decision log says it throws silently — OPEN
+
+**Reported:** 2026-09-24. Verified on `main`.
+
+D127 states it plainly: Team & Roles uses a two-step **inline** confirm "because `window.confirm()` throws silently
+in this app (D96) and would have reintroduced the exact do-nothing symptom." `settings-client.tsx` carries the same
+comment. Four sites do it anyway:
+
+| Site | Guards | Fails… |
+|---|---|---|
+| `design/subassemblies/subassemblies-client.tsx` | Delete an assembly | **closed** — delete silently does nothing |
+| `calendar/calendar-filter-rail.tsx` | Disconnect a Google account | **closed** — disconnect silently does nothing |
+| `estimating-rules/controls.tsx` | Reset every estimating rate | **closed** — safe direction; the reset just won't run |
+| `estimator/estimator-client.tsx` | Editing a won quote's customer/venue/contact | **closed** — the edit is silently refused |
+
+Three of the four are the precise do-nothing symptom D127 was written about: a control that appears to work and
+doesn't.
+
+**Why this is live rather than theoretical:** the app ships iOS and Android Capacitor shells
+(`capacitor.config.ts`, D174) that load production in a WebView — exactly the context where a native dialog can be
+suppressed without throwing. A suppressed `confirm()` returns `false`, which is the failing direction for all four.
+It works in a desktop browser; nobody has checked it in the shells.
+
+**Ask:** adopt the inline pattern D127 already established in `settings-client.tsx`, or retire the D96 claim from
+the decision log — but the two states should not coexist.
+
+## 177. `redeem: tampered code -> not ok` is a ~1% flake in the spec harness — OPEN
+
+**Reported:** 2026-09-24. **Measured: 4 failures in 400 iterations.** It fired roughly one run in four across a
+long gate-running session.
+
+`mintHandoffCode` (`src/lib/native-auth.ts`) encrypts with a random IV, and the test flips the second-to-last
+base64url character; when that flip lands only on truncated bits the tampered code still decodes.
+
+This matters more than its rate suggests. `test:specs` is one of four mandated gates, and D204 exists precisely
+because intermittent failures taught people to dismiss a red suite — five separate people had already done so before
+that was fixed. A 1% flake re-teaches exactly that habit.
+
+**Ask:** make the tamper deterministic — flip a byte that is always significant rather than one at the base64url
+boundary.
+
+## 178. The healing sweeps are read-then-insert with no uniqueness on `quoteId` — OPEN
+
+**Reported:** 2026-09-24, raised by D227's own change.
+
+D225 made a *new* win atomic, but the four service sweeps reattached under D227 are the old shape: read the
+collection, decide nothing exists, insert. There is no unique index on `quoteId` — `schema.ts` has only
+`users.email` unique, and `insertDocIfAbsent` guards the document *id*, not the quote link. Two simultaneous loads
+of `/flame-tests`, or a double-clicked sweep Retry, can each create a job for the same orphan.
+
+Exposure is small — orphans are a finite legacy set and vanish on first heal — but it is the class of bug D225 went
+transactional to close, reopened narrowly.
+
+**Ask:** a unique partial index on `quoteId` per downstream collection, or route the sweeps' per-row create through
+the same guarantee the spawn uses. The eventual fix is probably a one-off backfill plus deleting the sweeps — see
+D227 on why they still exist.
+
+## 179. A refused status advance on a create save lets the Estimator mint a duplicate quote — OPEN
+
+**Reported:** 2026-09-24. Verified on `main`.
+
+`saveQuoteAction`'s create branch mints the quote, then attempts the requested status advance. If the approval gate
+refuses, it returns `ok: false` — but the quote **was** created, and the action even returns its `id`. The client
+ignores it: `estimator-client.tsx` adopts the id only under `if (res.ok && res.id)`, so `loadedId` is never set and
+the next press of Save takes the create path again and mints a **second** quote.
+
+The user sees one refusal message and ends up with two drafts, one of which they don't know about.
+
+**Ask:** adopt the returned id even when the advance is refused, so the retry becomes an update and the refusal
+surfaces as the status message it already is. Rolling the create back inside the transaction is cleaner in theory
+but would throw away the draft the user just typed.
+
