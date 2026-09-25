@@ -1,5 +1,6 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
+import { FLY_CREW_DEFAULTS, FLY_RATE_DEFAULTS, type FlyRates } from "@/lib/travel-plan";
 
 /**
  * PricingRules — server port of app/pricing.js: the single master registry of
@@ -44,6 +45,8 @@ export type FlametestRates = {
   margin: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
+  /** default crew when the trip is priced as flights (travel-plan.ts) */
+  flyCrew: number;
 };
 
 /** flametest.js DEFAULTS — seed/fallback for blob `flametest_rates`. */
@@ -54,6 +57,7 @@ export const FLAMETEST_RATE_DEFAULTS: FlametestRates = {
   baseFee: 150,
   margin: 0.30,
   travelRoundMin: 15,
+  flyCrew: FLY_CREW_DEFAULTS.flame,
 };
 
 export type RepairRates = {
@@ -71,6 +75,8 @@ export type RepairRates = {
   emergencyMult: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
+  /** default crew when the trip is priced as flights (travel-plan.ts) */
+  flyCrew: number;
 };
 
 /** repair.js DEFAULTS — seed/fallback for blob `repair_rates`. */
@@ -82,6 +88,7 @@ export const REPAIR_RATE_DEFAULTS: RepairRates = {
   margin: 0.30,
   emergencyMult: 1.5,
   travelRoundMin: 15,
+  flyCrew: FLY_CREW_DEFAULTS.repair,
 };
 
 export type InspectionRates = {
@@ -101,6 +108,8 @@ export type InspectionRates = {
   margin: number;
   /** round total travel time up to the nearest N minutes */
   travelRoundMin: number;
+  /** default crew when the trip is priced as flights (travel-plan.ts) */
+  flyCrew: number;
 };
 
 /** Inspection estimating defaults — seed/fallback for blob `inspection_rates`.
@@ -115,6 +124,7 @@ export const INSPECTION_RATE_DEFAULTS: InspectionRates = {
   minFee: 650,
   margin: 0.30,
   travelRoundMin: 15,
+  flyCrew: FLY_CREW_DEFAULTS.inspection,
 };
 
 export type TravelRates = {
@@ -122,15 +132,22 @@ export type TravelRates = {
   roadFactor: number;
   /** Assumed average door-to-door driving speed, mph (offline fallback only). */
   mph: number;
-};
+} & Partial<FlyRates>;
+
+/** A resolved `travel_rates` blob — getBlob() merges every default under the
+ *  stored patch, so the fly keys are always present at runtime. The fly keys
+ *  are optional on TravelRates only so drive-only callers (geo.ts, tests)
+ *  keep passing `{ roadFactor, mph }`; travel-plan.ts resolves any gap. */
+export type ResolvedTravelRates = { roadFactor: number; mph: number } & FlyRates;
 
 /** geo.js / flametest-engine.js DEFAULTS — seed/fallback for blob `travel_rates`.
  *  Live OSRM road routing overrides these when available; offline (or when a
  *  route hasn't been cached yet) these are the fallback used to turn
  *  straight-line distance into an estimated road distance / drive time. */
-export const TRAVEL_RATE_DEFAULTS: TravelRates = {
+export const TRAVEL_RATE_DEFAULTS: ResolvedTravelRates = {
   roadFactor: 1.25,
   mph: 50,
+  ...FLY_RATE_DEFAULTS,
 };
 
 export type CatalogRates = {
@@ -198,7 +215,7 @@ export async function setInspectionRates(
   await setBlob(INSPECTION_RATES_BLOB, patch);
 }
 
-export async function getTravelRates(): Promise<TravelRates> {
+export async function getTravelRates(): Promise<ResolvedTravelRates> {
   return getBlob(TRAVEL_RATES_BLOB, { ...TRAVEL_RATE_DEFAULTS });
 }
 
@@ -393,6 +410,7 @@ export const GROUPS: PricingGroup[] = [
       rate("baseFee", "Base minimum (whole job)", 150, "$", { min: 0, max: 1000, step: 5, store: "flame", help: "Floor on the whole job after mileage + travel + testing." }),
       rate("margin", "Flame-test margin", 30, "%", { min: 0, max: 60, step: 1, store: "flame", pctStored: true }),
       rate("travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "flame" }),
+      rate("flame.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "flame", key: "flyCrew", help: "Default crew for a flame test priced as flights (Travel & mileage → fly threshold). Overridable on each quote." }),
       formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ÷  (1 − margin)"),
     ],
   },
@@ -408,6 +426,7 @@ export const GROUPS: PricingGroup[] = [
       rate("repair.margin", "Repair margin (labor + travel)", 30, "%", { min: 0, max: 60, step: 1, store: "repair", key: "margin", pctStored: true }),
       rate("repair.emergencyMult", "Emergency / after-hours ×", 1.5, "×", { min: 1, max: 3, step: 0.05, store: "repair", key: "emergencyMult", help: "Multiplies the labor rate for emergency or after-hours work." }),
       rate("repair.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "repair", key: "travelRoundMin" }),
+      rate("repair.flyCrew", "Crew when the trip flies", 2, "people", { min: 1, max: 10, step: 1, store: "repair", key: "flyCrew", help: "Default crew for a repair priced as flights — never fewer than the quote's own crew size. Overridable on each quote." }),
       formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  +  parts ÷ (1 − partsMargin)"),
     ],
   },
@@ -424,19 +443,28 @@ export const GROUPS: PricingGroup[] = [
       rate("inspection.minFee", "Minimum inspection fee", 650, "$", { min: 0, max: 5000, step: 25, store: "inspection", key: "minFee", help: "Floor on the whole job after labor + travel." }),
       rate("inspection.margin", "Inspection margin", 30, "%", { min: 0, max: 60, step: 1, store: "inspection", key: "margin", pctStored: true }),
       rate("inspection.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "inspection", key: "travelRoundMin" }),
+      rate("inspection.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "inspection", key: "flyCrew", help: "Default crew for an inspection priced as flights. Overridable on each quote." }),
       formula("inspection.hours", "Inspection hours", "hours = ( baseHours + lineSets × lineSetMin ÷ 60 ) × (level 2 ? level2× : 1)"),
       formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )"),
     ],
   },
   {
     key: "travel", label: "Travel & mileage", live: true,
-    sub: "Distance / drive-time estimate (feeds flame-test + any travel line)",
-    note: "Live — feeds the flame-test travel estimate's offline fallback. Live road routing (OSRM) still overrides these when a cached/live route is available; these are only used for the straight-line fallback.",
+    sub: "Drive estimate + flights over drive (flame-test, repair and inspection quotes)",
+    note: "Live — road factor and speed feed the offline drive fallback (live OSRM routing still overrides them when a cached/live route is available). The flight rates price any flame-test, repair or inspection trip whose drive cost (mileage + drive time) reaches the threshold; 0 = never fly. Each service's default flying crew lives in its own group above.",
     items: [
       rate("travel.roadFactor", "Straight-line → road factor", 1.25, "×", { min: 1, max: 2, step: 0.05, store: "travel", key: "roadFactor", help: "Bumps as-the-crow-flies distance up to road distance." }),
       rate("travel.mph", "Assumed average speed", 50, "mph", { min: 20, max: 75, step: 1, store: "travel", key: "mph" }),
+      rate("travel.flyThreshold", "Fly when one trip's drive cost reaches", 1000, "$", { min: 0, max: 20000, step: 50, store: "travel", key: "flyThreshold", help: "One trip's drive cost (mileage + drive-time labor) at or over this prices the trip as flights. 0 = never fly." }),
+      rate("travel.airfarePerPerson", "Airfare allowance (round trip, per person)", 450, "$", { min: 0, max: 5000, step: 10, store: "travel", key: "airfarePerPerson", help: "The default — each quote can enter its own airfare." }),
+      rate("travel.hotelPerNight", "Hotel (per room per night)", 140, "$", { min: 0, max: 1000, step: 5, store: "travel", key: "hotelPerNight", help: "One room per person." }),
+      rate("travel.perDiemPerDay", "Per diem (per person per day)", 70, "$", { min: 0, max: 500, step: 5, store: "travel", key: "perDiemPerDay" }),
+      rate("travel.carPerDay", "Rental car (per car per day, 1 car per 2 people)", 75, "$", { min: 0, max: 500, step: 5, store: "travel", key: "carPerDay" }),
+      rate("travel.flyTravelHoursEachWay", "Travel-day labor (hours each way, per person)", 4, "hr", { min: 0, max: 24, step: 0.5, store: "travel", key: "flyTravelHoursEachWay", help: "Billed at the service's own labor rate." }),
+      rate("travel.flyHoursPerDay", "On-site hours per person per day", 8, "hr", { min: 1, max: 24, step: 0.5, store: "travel", key: "flyHoursPerDay", help: "Sets the nights: work days = on-site hours ÷ (crew × this), rounded up." }),
       formula("travel.miles", "Estimated road miles", "miles = straightLineMiles × roadFactor"),
       formula("travel.time", "Estimated drive time", "minutes = (miles ÷ mph) × 60"),
+      formula("travel.fly", "Flights (drive cost ≥ threshold)", "nights = ⌈on-site hrs ÷ (crew × hrs/day)⌉  ·  airfare = crew × allowance  ·  lodging = crew × nights × hotel  ·  per diem = crew × (nights + 1) × per diem  ·  car = ⌈crew ÷ 2⌉ × (nights + 1) × car  ·  travel labor = crew × hrs each way × 2 × labor rate"),
     ],
   },
   {

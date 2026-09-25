@@ -10029,6 +10029,180 @@ async function teardownFixtures(): Promise<void> {
   );
 }
 
+/* --- #TRV flights over drive — the pure planner, its rates and the Estimating
+   Rules rows (spec docs/superpowers/specs/2026-09-25-travel-flights-design.md §3, §6) --- */
+import {
+  FLY_RATE_DEFAULTS,
+  FLY_CREW_DEFAULTS,
+  TRAVEL_FLY_LINE,
+  planTravel,
+  resolveFlyRates,
+  normalizeTravelOverride,
+  parseTravelOverride,
+  carryTravelOverride,
+  draftFromOverride,
+  overrideFromDraft,
+  savedTrip,
+  flightOf,
+  travelLineAmount,
+  autoSwitchNote,
+  flyTravelSentence,
+  travelModeChangeReason,
+} from "@/lib/travel-plan";
+import {
+  FLAMETEST_RATE_DEFAULTS,
+  REPAIR_RATE_DEFAULTS,
+  INSPECTION_RATE_DEFAULTS,
+} from "@/lib/stores/pricing";
+{
+  const R = FLY_RATE_DEFAULTS;
+  ok(
+    R.flyThreshold === 1000 && R.airfarePerPerson === 450 && R.hotelPerNight === 140 &&
+      R.perDiemPerDay === 70 && R.carPerDay === 75 && R.flyTravelHoursEachWay === 4 && R.flyHoursPerDay === 8,
+    "#TRV: fly-rate defaults are exactly the spec table ($1,000 / $450 / $140 / $70 / $75 / 4 h / 8 h)"
+  );
+  ok(
+    FLY_CREW_DEFAULTS.flame === 1 && FLY_CREW_DEFAULTS.repair === 2 && FLY_CREW_DEFAULTS.inspection === 1,
+    "#TRV: default flying crew is flame 1 · repairs 2 · inspections 1"
+  );
+  ok(
+    TRAVEL_RATE_DEFAULTS.roadFactor === 1.25 && TRAVEL_RATE_DEFAULTS.mph === 50 &&
+      TRAVEL_RATE_DEFAULTS.flyThreshold === 1000 && TRAVEL_RATE_DEFAULTS.flyHoursPerDay === 8,
+    "#TRV: the travel_rates defaults keep 1.25 / 50 and carry every fly key"
+  );
+  ok(
+    FLAMETEST_RATE_DEFAULTS.flyCrew === 1 && REPAIR_RATE_DEFAULTS.flyCrew === 2 && INSPECTION_RATE_DEFAULTS.flyCrew === 1,
+    "#TRV: each service's rates blob defaults carry its flyCrew"
+  );
+  ok(TRAVEL_FLY_LINE === "Travel (air, lodging & per diem)", "#TRV: the customer-facing line is exactly 'Travel (air, lodging & per diem)'");
+
+  // threshold boundary (on-site 10 h, 1 person, $75/h)
+  const base = { onSiteHours: 10, laborRate: 75, crewDefault: 1, rates: R };
+  const p999 = planTravel({ ...base, drive: { total: 999.99 } });
+  ok(p999.mode === "drive" && p999.flight === null && p999.total === 999.99, "#TRV: a $999.99 drive stays a drive, total untouched");
+  const p1000 = planTravel({ ...base, drive: { total: 1000 } });
+  ok(p1000.mode === "fly" && p1000.autoMode === "fly" && p1000.choice === "auto" && p1000.flight !== null, "#TRV: a $1,000 drive flies (≥ threshold)");
+  const pNever = planTravel({ ...base, rates: { ...R, flyThreshold: 0 }, drive: { total: 50000 } });
+  ok(pNever.mode === "drive" && pNever.total === 50000, "#TRV: threshold 0 never flies");
+
+  // forced modes
+  const forcedDrive = planTravel({ ...base, drive: { total: 5000 }, override: { mode: "drive" } });
+  ok(forcedDrive.mode === "drive" && forcedDrive.autoMode === "fly" && forcedDrive.total === 5000 && forcedDrive.flight === null,
+    "#TRV: forced Drive over the threshold prices the drive");
+  const forcedFly = planTravel({ ...base, drive: { total: 100 }, override: { mode: "fly" } });
+  ok(forcedFly.mode === "fly" && forcedFly.autoMode === "drive" && forcedFly.choice === "fly" && forcedFly.total === 1765,
+    "#TRV: forced Fly under the threshold prices flights");
+
+  // formulas: 10 h on site, crew 1, 8 h/day → 2 work days, 2 nights, 3 trip days
+  const f = p1000.flight!;
+  ok(f.crew === 1 && f.workDays === 2 && f.nights === 2 && f.tripDays === 3, "#TRV: workDays = ceil(10 / 8) = 2, nights = workDays, tripDays = nights + 1");
+  ok(
+    f.airfare === 450 && f.lodging === 280 && f.perDiem === 210 && f.car === 225 &&
+      f.travelHours === 8 && f.travelLabor === 600 && f.total === 1765 && p1000.total === 1765,
+    "#TRV: airfare 450 + lodging 280 + per diem 210 + car 225 + travel labor 600 = 1,765"
+  );
+  ok(p1000.defaults.crew === 1 && p1000.defaults.nights === 2 && p1000.defaults.airfarePerPerson === 450, "#TRV: the plan reports the defaults the builder shows as placeholders");
+
+  // crew override 3 → 1 work day, 1 night, 2 trip days, ceil(3/2) = 2 cars
+  const c3 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 3 } }).flight!;
+  ok(
+    c3.crew === 3 && c3.workDays === 1 && c3.nights === 1 && c3.tripDays === 2 && c3.airfare === 1350 &&
+      c3.lodging === 420 && c3.perDiem === 420 && c3.car === 300 && c3.travelLabor === 1800 && c3.total === 4290,
+    "#TRV: a crew override of 3 re-derives work days and prices 2 cars (4,290)"
+  );
+  const c2 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 2 } }).flight!;
+  ok(c2.car === 150, "#TRV: 2 people share 1 car (ceil(2/2) × 2 days × $75)");
+
+  // nights override 0 → a same-day fly-in
+  const n0 = planTravel({ ...base, drive: { total: 2000 }, override: { nights: 0 } }).flight!;
+  ok(n0.workDays === 2 && n0.nights === 0 && n0.tripDays === 1 && n0.lodging === 0 && n0.perDiem === 70 && n0.car === 75,
+    "#TRV: a nights override replaces workDays; tripDays = nights + 1");
+
+  // airfare override
+  const air = planTravel({ ...base, drive: { total: 2000 }, override: { airfarePerPerson: 800 } }).flight!;
+  ok(air.airfare === 800 && air.total === 1765 - 450 + 800, "#TRV: the manual airfare replaces the allowance");
+
+  // travel labor uses the service's labor rate
+  const lab = planTravel({ ...base, laborRate: 100, drive: { total: 2000 } }).flight!;
+  ok(lab.travelLabor === 800, "#TRV: travel labor = crew × 4 h × 2 × the service's labor rate");
+
+  // zero on-site hours still books one work day
+  ok(planTravel({ ...base, onSiteHours: 0, drive: { total: 2000 } }).flight!.workDays === 1, "#TRV: zero on-site hours → 1 work day");
+
+  // missing blob keys fall back to the defaults
+  ok(JSON.stringify(resolveFlyRates(undefined)) === JSON.stringify(R), "#TRV: resolveFlyRates(undefined) = the defaults");
+  const partialRates = resolveFlyRates({ hotelPerNight: 200 });
+  ok(partialRates.hotelPerNight === 200 && partialRates.flyThreshold === 1000 && partialRates.carPerDay === 75,
+    "#TRV: a stored blob with only some fly keys keeps the defaults for the rest");
+  const pEmpty = planTravel({ ...base, rates: {}, drive: { total: 1000 } });
+  ok(pEmpty.mode === "fly" && pEmpty.total === 1765, "#TRV: an existing travel_rates blob with no fly keys prices with the defaults");
+
+  // override normalization / posting / drafts / carry-forward
+  ok(normalizeTravelOverride({ mode: "auto" }) === undefined, "#TRV: mode 'auto' with nothing else is no override");
+  ok(
+    JSON.stringify(normalizeTravelOverride({ mode: "fly", crew: "2", nights: "", airfarePerPerson: "abc" })) === JSON.stringify({ mode: "fly", crew: 2 }),
+    "#TRV: normalize keeps valid fields, coerces numeric strings, drops blanks and junk"
+  );
+  ok(normalizeTravelOverride({ crew: 0, nights: -1 }) === undefined && normalizeTravelOverride("junk") === undefined,
+    "#TRV: crew < 1, negative nights and non-objects are rejected");
+  ok(JSON.stringify(parseTravelOverride('{"mode":"drive","nights":3}')) === JSON.stringify({ mode: "drive", nights: 3 }) &&
+      parseTravelOverride("{not json") === undefined && parseTravelOverride(null) === undefined,
+    "#TRV: parseTravelOverride reads the posted JSON and tolerates garbage");
+  const d = draftFromOverride({ mode: "fly", crew: 3 });
+  ok(d.mode === "fly" && d.crew === "3" && d.nights === "" && d.airfare === "", "#TRV: draftFromOverride fills the builder inputs");
+  ok(JSON.stringify(overrideFromDraft(d)) === JSON.stringify({ mode: "fly", crew: 3 }) && overrideFromDraft(draftFromOverride(undefined)) === undefined,
+    "#TRV: overrideFromDraft round-trips; an untouched draft posts no override");
+  ok(JSON.stringify(carryTravelOverride({ mode: "fly", crew: 3, airfarePerPerson: 900 })) === JSON.stringify({ mode: "fly", crew: 3 }) &&
+      carryTravelOverride({ airfarePerPerson: 900 }) === undefined,
+    "#TRV: a renewal carries last year's mode/crew/nights but never last year's airfare");
+
+  // persisted trip + letters
+  const st = savedTrip({ miles: 1000, minutes: 960, mileageCost: 1000.4, timeCost: 1199.6, method: "estimate", mode: "fly", flight: { ...f, airfare: 450.4 } });
+  ok(st.mileageCost === 1000 && st.timeCost === 1200 && st.mode === "fly" && st.flight?.airfare === 450 && st.flight?.total === 1765,
+    "#TRV: savedTrip rounds money like today's trip block and keeps mode + flight");
+  const sd = savedTrip({ miles: 200, minutes: 240, mileageCost: 200, timeCost: 300, method: "route", mode: "drive" });
+  ok(sd.mode === "drive" && !("flight" in sd), "#TRV: a drive-mode saved trip carries mode 'drive' and no flight");
+  ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
+    "#TRV: flightOf returns a flight only for a fly-mode saved trip");
+  ok(travelLineAmount(1765, 0.3) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
+    "#TRV: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
+  ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
+    "#TRV: the builder note reads exactly as spec §5");
+  ok(
+    flyTravelSentence("Peak Systems Group (Milwaukee)", "Lakefront Theatre", 2521) ===
+      "Given the distance from Peak Systems Group (Milwaukee) to Lakefront Theatre, this visit is priced with air travel — Travel (air, lodging & per diem): $2,521.",
+    "#TRV: the letter sentence names the one travel line and its amount"
+  );
+  ok(
+    travelModeChangeReason("drive", "fly") === "travel now being priced as flights, lodging & per diem instead of a drive" &&
+      travelModeChangeReason("fly", "drive") === "travel now being priced as a drive instead of flights" &&
+      travelModeChangeReason("drive", "drive") === null && travelModeChangeReason("fly", "fly") === null,
+    "#TRV: renewal 'why the price changed' wording on a mode flip, silence otherwise"
+  );
+
+  // Estimating Rules rows (the page renders GROUPS generically)
+  const trvRows = (key: string): RateEntry[] =>
+    PRICING_GROUPS.find((g) => g.key === key)!.items.filter((it): it is RateEntry => it.kind === "rate");
+  const flyKeys = ["flyThreshold", "airfarePerPerson", "hotelPerNight", "perDiemPerDay", "carPerDay", "flyTravelHoursEachWay", "flyHoursPerDay"] as const;
+  ok(
+    flyKeys.every((k) => {
+      const row = trvRows("travel").find((it) => it.id === "travel." + k);
+      return !!row && row.store === "travel" && row.key === k && row.ref === false && row.def === FLY_RATE_DEFAULTS[k];
+    }),
+    "#TRV: Estimating Rules → Travel & mileage exposes all seven flight rates, live, keyed into travel_rates"
+  );
+  const crewRow = (g: string) => trvRows(g).find((it) => it.id === g + ".flyCrew");
+  ok(
+    crewRow("flame")?.store === "flame" && crewRow("flame")?.key === "flyCrew" && crewRow("flame")?.def === 1 &&
+      crewRow("repair")?.store === "repair" && crewRow("repair")?.def === 2 &&
+      crewRow("inspection")?.store === "inspection" && crewRow("inspection")?.def === 1,
+    "#TRV: each service group exposes its default flying crew"
+  );
+
+  const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
+  ok(!/^\s*import\s/m.test(trvSrc), "#TRV: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
