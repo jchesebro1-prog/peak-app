@@ -186,6 +186,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/quotes/new?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+quote&type=repair" },
   { route: "/quotes/new?replaces=Q-2041" },
   { route: "/quotes/new?customer=ghost-id" },
+  // #123 — the Inbox's "+ New quote" hand-off (prefill params are read, never required to match)
+  { route: "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032" },
   { route: "/estimator?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+estimate" },
   { route: "/estimator?customer=lakefront&category=Acoustics&replaces=Q-2041" },
   { route: "/flame-tests/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+flame" },

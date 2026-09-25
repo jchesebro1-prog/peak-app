@@ -32,6 +32,7 @@ import {
 import { resolveSender } from "@/lib/gmail/resolve";
 import { parsePeakLabel, desiredPeakLabels, diffLabels, labelForStatus, currentPeakLabelNames } from "@/lib/gmail/peak-labels";
 import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/label-interpret";
+import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inbox-links";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -9228,6 +9229,22 @@ import {
   ok(resolveRedirectHop("//127.0.0.1/x", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a protocol-relative Location to a private host is refused");
   ok(resolveRedirectHop("file:///etc/passwd", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location switching to file: is refused");
   ok(resolveRedirectHop("http://[not-a-valid-ipv6", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a malformed absolute Location is refused, not thrown");
+}
+
+/* ---- Inbox round 3 (#123) — work links ---- */
+{
+  ok(LINK_TYPE_OPTIONS.some((o) => o.value === "lead" && o.label === "Lead"), "LINK_TYPE_OPTIONS lists lead");
+  ok(LINK_TYPE_OPTIONS.map((o) => o.value).join(",") === "quote,lead,survey,inspection,project", "LINK_TYPE_OPTIONS order: quote first, lead second");
+  ok(
+    newQuoteHref({ threadId: "C-1032", customerId: "lakefront", contactName: "Brenda Gauchel" }) ===
+      "/quotes/new?customer=lakefront&contact=Brenda+Gauchel&thread=C-1032",
+    "newQuoteHref: every prefill, thread last"
+  );
+  ok(newQuoteHref({ threadId: "C-1032", customerId: null, contactName: "" }) === "/quotes/new?thread=C-1032", "newQuoteHref: unlinked thread carries only thread=");
+  ok(quoteNameFromSubject("Re: Fwd: Curtain quote for the PAC") === "Curtain quote for the PAC", "quoteNameFromSubject strips Re:/Fwd: prefixes");
+  ok(quoteNameFromSubject("RE: re: FW: hello") === "hello", "quoteNameFromSubject strips repeated prefixes case-insensitively");
+  ok(quoteNameFromSubject("") === "Untitled estimate" && quoteNameFromSubject("(no subject)") === "Untitled estimate", "quoteNameFromSubject falls back");
+  ok(quoteNameFromSubject("Rental for spring musical") === "Rental for spring musical", "quoteNameFromSubject leaves a plain subject alone");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

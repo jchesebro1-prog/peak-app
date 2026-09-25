@@ -3,6 +3,7 @@
  * components. All colors/labels are precomputed server-side because the
  * comms store (db-backed) can never be imported into a client bundle.
  */
+import type { LinkWorkType } from "@/lib/inbox-links";
 
 export type Opt = { value: string; label: string };
 
@@ -181,7 +182,7 @@ export type ReaderVM = {
   /** thread.customerId is empty but the contact email resolved a customer —
    *  picking a record also adopts the customer onto the thread */
   needsAdopt: boolean;
-  linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
+  linkOptions: Record<LinkWorkType, Opt[]>;
   /** Schedule-site-visit modal data (D76) — present when a customer resolved. */
   visit: {
     venues: Array<{ id: string; label: string; address: string; primary: boolean }>;

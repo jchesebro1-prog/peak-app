@@ -189,4 +189,8 @@ export type IntakeSubmit = {
   newContactRole: string;
   newContactEmail: string;
   newContactPhone: string;
+  /** #123 — set when the intake was opened from an Inbox thread ("+ New
+   *  quote"): the action mints the draft quote, links the thread and
+   *  returns to the Inbox instead of redirecting into the builder. */
+  threadId?: string;
 };

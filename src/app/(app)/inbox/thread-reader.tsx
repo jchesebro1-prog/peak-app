@@ -9,7 +9,6 @@ import {
   logNoteAction,
   reopenAction,
   replyAction,
-  setLinkAction,
   setMessageLinkAction,
   setStatusAction,
   unarchiveAction,
@@ -22,13 +21,6 @@ const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
 
 type Mode = "reply" | "replyAll" | "forward";
-
-const LINK_TYPE_OPTIONS: Opt[] = [
-  { value: "quote", label: "Quote" },
-  { value: "survey", label: "Survey" },
-  { value: "inspection", label: "Inspection" },
-  { value: "project", label: "Project" },
-];
 
 /* ---- conversation (Gmail-style) ------------------------------------------
  * Gmail shows the newest message open and everything before it as one-line
@@ -420,10 +412,6 @@ export default function ThreadReader({
   const [logBody, setLogBody] = useState("");
   const [loggingNote, setLoggingNote] = useState(false);
 
-  // link picker
-  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
-  const [linkType, setLinkType] = useState("quote");
-
   if (!vm) {
     return (
       <div style={rootStyle}>
@@ -532,157 +520,10 @@ export default function ThreadReader({
   const sendReady = cBody.trim().length > 0 && cTo.trim().length > 0;
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
-  const linkRecOptions = linkPickerOpen
-    ? vm.linkOptions[(linkType as keyof ReaderVM["linkOptions"]) || "quote"] || []
-    : [];
 
-  // #96 §2 — the "+ Link to work" chip + picker. Lives in the sidebar's
-  // Work section (see LinkSidebar children); kept here so its state and the
-  // adopt-on-pick behaviour stay with the reader.
-  const linkWork = (
-    <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {vm.link && (
-          <>
-            <a
-              href={vm.link.href}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                minWidth: 0,
-                textDecoration: "none",
-                fontSize: 11.5,
-                fontWeight: 600,
-                color: "#3a3f4a",
-                background: "#f4f5f7",
-                border: "1px solid #e8eaee",
-                borderRadius: 8,
-                padding: "6px 10px",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: ".04em",
-                  textTransform: "uppercase",
-                  color: "#fff",
-                  background: vm.link.color,
-                  padding: "2px 6px",
-                  borderRadius: 5,
-                  flexShrink: 0,
-                }}
-              >
-                {vm.link.kindLabel}
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {vm.link.label}
-              </span>
-            </a>
-            <button
-              onClick={async () => {
-                await setLinkAction(vm.id, null);
-                router.refresh();
-              }}
-              title="Remove link"
-              style={{
-                width: 26,
-                height: 26,
-                flexShrink: 0,
-                borderRadius: 7,
-                border: "1px solid #e4e7ec",
-                background: "#fff",
-                color: "#aab0bb",
-                fontSize: 14,
-                lineHeight: 1,
-                cursor: "pointer",
-              }}
-            >
-              ×
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => setLinkPickerOpen(!linkPickerOpen)}
-          style={{
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: ACCENT_INK,
-            background: ACCENT_SOFT,
-            border: `1px solid ${ACCENT_SOFT}`,
-            borderRadius: 8,
-            padding: "6px 10px",
-            cursor: "pointer",
-            fontFamily: "var(--font-ui)",
-          }}
-        >
-          {vm.link ? "Change link" : "+ Link to work"}
-        </button>
-      </div>
-      {linkPickerOpen && (
-        <>
-          {vm.resolvedCustomerId ? (
-            <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab", lineHeight: 1.45 }}>
-              Showing{" "}
-              <span style={{ fontWeight: 600, color: "#5b616e" }}>{vm.resolvedCustomerName}</span>
-              &apos;s quotes, surveys, inspections &amp; projects.
-            </div>
-          ) : (
-            <div style={{ marginTop: 9, fontSize: 11, color: "#9aa0ab", lineHeight: 1.45 }}>
-              Link this thread to a customer first and their records will show here.
-            </div>
-          )}
-          <div style={{ display: "grid", gap: 8, marginTop: 9 }}>
-            <select
-              value={linkType}
-              onChange={(e) => setLinkType(e.target.value)}
-              style={linkSelectStyle}
-            >
-              {LINK_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value=""
-              onChange={async (e) => {
-                const id = e.target.value;
-                if (!id) return;
-                const opt = linkRecOptions.find((o) => o.value === id);
-                await setLinkAction(
-                  vm.id,
-                  { type: linkType, id, label: opt ? opt.label : id },
-                  vm.needsAdopt && vm.resolvedCustomerId
-                    ? {
-                        customerId: vm.resolvedCustomerId,
-                        customer: vm.resolvedCustomerName,
-                      }
-                    : null
-                );
-                setLinkPickerOpen(false);
-                router.refresh();
-              }}
-              style={linkSelectStyle}
-            >
-              <option value="">Select a record…</option>
-              {linkRecOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </>
-      )}
-    </>
-  );
-  const sidebar = (
-    <LinkSidebar vm={vm} variant={variant}>
-      {linkWork}
-    </LinkSidebar>
-  );
+  // #96 §2 / #123 — the link sidebar now owns the "+ Link to work" picker
+  // itself (WorkLinkCard, rendered first inside LinkSidebar).
+  const sidebar = <LinkSidebar vm={vm} variant={variant} />;
 
   return (
     <div style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column" }}>
@@ -1267,19 +1108,6 @@ export default function ThreadReader({
     </div>
   );
 }
-
-const linkSelectStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  fontFamily: "var(--font-ui)",
-  fontSize: 12.5,
-  color: "#16181d",
-  border: "1px solid #e4e7ec",
-  borderRadius: 8,
-  padding: "8px 10px",
-  background: "#fff",
-  cursor: "pointer",
-};
 
 const rootStyle: React.CSSProperties = {
   display: "flex",

@@ -1984,6 +1984,51 @@ async function main() {
     assert(!(await Curtains.allCurtainTemplates()).some((t) => t.title === "Should not land"), "library io: a skipped curtain template never overwrites the Border template");
   }
 
+  // #123 — "+ New quote" from a thread: mint the draft, link the thread, adopt the customer
+  {
+    const { linkThreadToNewQuote } = await import("@/lib/gmail/linking");
+    const { get: getQuoteDoc } = await import("@/lib/stores/quotes");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3quote", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Brenda Gauchel", contactEmail: "brenda.t96@lakefront.k12.mn.us",
+      subject: "Re: Fwd: Curtain quote for the PAC", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    const r3made = await linkThreadToNewQuote("C-r3quote", {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: "loc1", contactName: "Brenda Gauchel",
+      quoteType: "flame_test", category: "", owner: "Tester",
+    });
+    assert.ok(!!r3made && r3made.quoteId.startsWith("Q-"), "#123 linkThreadToNewQuote mints a Q- id");
+    const r3q = await getQuoteDoc(r3made!.quoteId);
+    assert.equal(r3q?.customerId, "lakefront", "#123 the draft carries the intake's customer");
+    assert.equal(r3q?.locationId, "loc1", "#123 …and venue");
+    assert.equal(r3q?.contactName, "Brenda Gauchel", "#123 …and contact");
+    assert.equal(r3q?.quoteType, "flame_test", "#123 …and quote type");
+    assert.equal(r3q?.source, "inbox", "#123 source is inbox");
+    assert.equal(r3q?.status, "draft", "#123 the quote starts as a draft");
+    assert.equal(r3q?.name, "Curtain quote for the PAC", "#123 name comes from the subject when none was given, prefixes stripped");
+    const r3qt = await getDoc<CommThread>("comms", "C-r3quote");
+    assert.equal(r3qt?.link?.type, "quote", "#123 the thread links to a quote");
+    assert.equal(r3qt?.link?.id, r3made!.quoteId, "#123 …the minted one");
+    assert.equal(r3qt?.link?.label, `${r3made!.quoteId} · Curtain quote for the PAC`, "#123 label matches the picker's format");
+    assert.equal(r3qt?.customerId, "lakefront", "#123 an unlinked thread adopts the intake's customer");
+    assert.equal(r3qt?.resolution, "linked", "#123 …and reads as linked");
+
+    const r3named = await linkThreadToNewQuote("C-r3quote", {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: null, contactName: "",
+      quoteType: "system", category: "", owner: "Tester", name: "Custom name",
+    });
+    const r3qn = await getQuoteDoc(r3named!.quoteId);
+    assert.equal(r3qn?.name, "Custom name", "#123 an explicit intake name wins over the subject");
+
+    assert.equal(
+      await linkThreadToNewQuote("C-r3-no-such-thread", { customerId: "lakefront", customer: "x", locationId: null, contactName: "", quoteType: "system", category: "", owner: "Tester" }),
+      null,
+      "#123 unknown thread → null, nothing minted"
+    );
+  }
+
   console.log("review regression checks passed");
 }
 

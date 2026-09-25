@@ -3,7 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { activeUsers, getUser } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
-import { followUpCount } from "@/lib/stores/leads";
+import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
@@ -166,6 +166,7 @@ function tagFor(m: CommMessage): string {
 
 const LINK_KIND_COLOR: Record<string, string> = {
   quote: "var(--accent)",
+  lead: "#c85a3c",
   survey: "#1f7a52",
   inspection: "#7b3f8a",
   project: "#b4543a",
@@ -175,6 +176,7 @@ const LINK_KIND_COLOR: Record<string, string> = {
 function linkHref(link: { type: string; id: string }): string {
   const id = encodeURIComponent(link.id);
   if (link.type === "quote") return `/quotes?id=${id}`;
+  if (link.type === "lead") return `/leads?lead=${id}`;
   if (link.type === "survey") return `/venue-assessments?id=${id}`;
   if (link.type === "inspection") return `/inspections?id=${id}`;
   if (link.type === "project") return `/projects`;
@@ -614,6 +616,7 @@ export default async function InboxPage({
     );
     let linkOptions: ReaderVM["linkOptions"] = {
       quote: [],
+      lead: [],
       survey: [],
       inspection: [],
       project: [],
@@ -623,11 +626,12 @@ export default async function InboxPage({
     let quotes: Awaited<ReturnType<typeof allQuotes>> = [];
     let projects: Awaited<ReturnType<typeof getAllProjects>> = [];
     if (resolvedCid) {
-      const [q, surveys, inspections, p] = await Promise.all([
+      const [q, surveys, inspections, p, leads] = await Promise.all([
         allQuotes(),
         allSurveys(),
         allInspections(),
         getAllProjects(),
+        allLeads(),
       ]);
       quotes = q;
       projects = p;
@@ -639,6 +643,9 @@ export default async function InboxPage({
               nameToId.get((q.customer || "").toLowerCase()) === resolvedCid
           )
           .map((q) => ({ value: q.id, label: `${q.id} · ${q.name || "Quote"}` })),
+        lead: leads
+          .filter((l) => l.customerId === resolvedCid && l.stage !== "won" && l.stage !== "lost")
+          .map((l) => ({ value: l.id, label: `${l.id} · ${l.org || l.contact || "Lead"}` })),
         survey: surveys
           .filter((s) => s.customerId === resolvedCid)
           .map((s) => ({

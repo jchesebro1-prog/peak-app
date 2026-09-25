@@ -24,6 +24,10 @@ export const metadata = { title: "New quote — Quartzite-6" };
  * /quotes/new?type=<ServiceType>&customer=&venue=&contact=&name=
  * /quotes/new?replaces=<quoteId>  — "Change type" on a DRAFT (D205): pre-fills
  *   from that quote with its current type selected. A non-draft is ignored.
+ * /quotes/new?customer=&contact=&thread=<id>  — the Inbox's "+ New quote"
+ *   (#123, lib/inbox-links newQuoteHref): the intake mints the draft quote,
+ *   links the thread to it, and returns to /inbox?thread= instead of the
+ *   builder.
  */
 export default async function NewQuotePage({
   searchParams,
@@ -79,6 +83,11 @@ export default async function NewQuotePage({
   }
 
   return (
-    <QuoteIntakeForm customers={customers} initial={intakeInitial(seed, customers)} replacing={replacing} />
+    <QuoteIntakeForm
+      customers={customers}
+      initial={intakeInitial(seed, customers)}
+      replacing={replacing}
+      threadId={h.threadId}
+    />
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * #96 §2 — the reader's link sidebar. One card per resolution state
- * (linked / suggested / ambiguous / unknown), a quick-add card for
- * contacts + venues once a customer is in play, and the reader's existing
- * "+ Link to work" picker passed in as `children` (it lives in
- * thread-reader.tsx so its state stays with the reader).
+ * #96 §2 / #123 — the reader's link sidebar. The thread's work link
+ * (WorkLinkCard) renders first — the primary Inbox action is attaching the
+ * thread to an existing quote/survey/project or starting a new quote for
+ * it — followed by one card per CRM resolution state (linked / suggested /
+ * ambiguous / unknown) and a quick-add card for contacts + venues once a
+ * customer is in play.
  *
  * Everything here is display + server-action calls on a server-built
  * ReaderVM: no fetching, no env, no store imports.
@@ -13,7 +14,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import EntityQuickAdd, { INPUT, type QuickAddValues } from "@/components/entity-quick-add";
+import EntityQuickAdd, { type QuickAddValues } from "@/components/entity-quick-add";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 import type { ReaderVM } from "./types";
 import {
@@ -24,76 +25,19 @@ import {
   quickAddCustomerAction,
   quickAddVenueAction,
 } from "./link-actions";
-
-const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
-const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
-
-const CARD: React.CSSProperties = {
-  border: "1px solid #e4e7ec",
-  borderRadius: 10,
-  padding: "12px 13px",
-  background: "#fff",
-};
-const H: React.CSSProperties = {
-  fontSize: 10.5,
-  fontWeight: 600,
-  letterSpacing: ".06em",
-  textTransform: "uppercase",
-  color: "#aab0bb",
-  marginBottom: 8,
-};
-const MUTED: React.CSSProperties = { fontSize: 11.5, color: "#8c919c", marginTop: 3, lineHeight: 1.45 };
-const BODY: React.CSSProperties = { fontSize: 12.5, lineHeight: 1.5, color: "#3a3f4a" };
-const MONO: React.CSSProperties = { fontFamily: "var(--font-mono)", fontSize: 11.5 };
-/** matches the reader's ghost action buttons */
-const BTN: React.CSSProperties = {
-  fontFamily: "var(--font-ui)",
-  fontSize: 11.5,
-  fontWeight: 600,
-  color: "#3a3f4a",
-  background: "#fff",
-  border: "1px solid #e4e7ec",
-  borderRadius: 8,
-  padding: "6px 10px",
-  cursor: "pointer",
-};
-/** matches the reader's accent-tinted "+ Link to work" button */
-const ACCENT_BTN: React.CSSProperties = {
-  ...BTN,
-  color: ACCENT_INK,
-  background: ACCENT_SOFT,
-  border: `1px solid ${ACCENT_SOFT}`,
-};
-const PRIMARY: React.CSSProperties = {
-  ...BTN,
-  color: "#fff",
-  background: "var(--accent)",
-  border: "1px solid transparent",
-};
-const SELECT: React.CSSProperties = { ...INPUT, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" };
-const CHECK_ROW: React.CSSProperties = {
-  display: "flex",
-  gap: 7,
-  alignItems: "flex-start",
-  fontSize: 12,
-  color: "#3a3f4a",
-  marginTop: 10,
-  lineHeight: 1.4,
-  cursor: "pointer",
-};
+import WorkLinkCard from "./work-link-card";
+import { ACCENT_BTN, BODY, BTN, CARD, CHECK_ROW, H, MONO, MUTED, PRIMARY, SELECT } from "./sidebar-styles";
 
 type ActionResult = { ok: boolean; error?: string };
 
 export default function LinkSidebar({
   vm,
   variant,
-  children,
 }: {
   vm: ReaderVM;
   /** pane → 300px column beside the reader; overlay → full-width block
    *  under the reader header (the 540px overlay can't fit a column) */
   variant: "pane" | "overlay";
-  children?: React.ReactNode;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -253,12 +197,7 @@ export default function LinkSidebar({
       {/* Link-to-work is intentionally first: the primary Inbox action is
           attaching the thread to an existing quote/survey/project, while CRM
           customer resolution remains available below it (#123). */}
-      {children && (
-        <div style={CARD}>
-          <div style={H}>Work</div>
-          {children}
-        </div>
-      )}
+      <WorkLinkCard vm={vm} />
       {/* ---- linked ---- */}
       {vm.resolution === "linked" && vm.customerCard && (
         <div style={CARD}>

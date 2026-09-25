@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { get as getThread, visibleTo } from "@/lib/stores/comms";
+import { linkThreadToNewQuote } from "@/lib/gmail/linking";
 import { quoteEditPath, quoteServiceType, sameBuilder } from "./handoff";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
@@ -22,7 +24,7 @@ import { builderPath, isServiceType, type IntakeSubmit } from "./types";
 export async function createQuoteIntakeAction(
   input: IntakeSubmit
 ): Promise<{ ok: false; error: string }> {
-  await requireUser();
+  const me = await requireUser();
 
   if (!isServiceType(input.type)) return { ok: false, error: "Unknown quote type." };
 
@@ -119,6 +121,33 @@ export async function createQuoteIntakeAction(
       : input.contactMode === "new"
         ? (input.newContactName || "").trim()
         : "";
+
+  // #123 — opened from an Inbox thread ("+ New quote"): the builders only
+  // mint a quote on their first save, so mint the draft here to have an id
+  // to link, link the thread to it, and go back to the thread instead of the
+  // builder.
+  const threadId = (input.threadId || "").trim();
+  if (threadId) {
+    const thread = await getThread(threadId);
+    if (!thread || !visibleTo(thread, me.name))
+      return {
+        ok: false,
+        error: "That email thread couldn't be found — start the quote from the Quotes hub instead.",
+      };
+    const customerName = existing?.name || newCustomerName;
+    const made = await linkThreadToNewQuote(threadId, {
+      customerId,
+      customer: customerName,
+      locationId: venueId || null,
+      contactName: contact,
+      quoteType: input.type === "custom" ? "system" : input.type,
+      category: input.type === "custom" ? category : "",
+      owner: me.name,
+      name: input.name,
+    });
+    if (!made) return { ok: false, error: "That email thread couldn't be found." };
+    redirect(`/inbox?thread=${encodeURIComponent(threadId)}`);
+  }
 
   redirect(
     builderPath(input.type, customerId, {

@@ -19,6 +19,7 @@ import type { CommThread } from "@/lib/stores/comms";
 import { domainOf, isPublicDomain } from "./config";
 import { claimDomain, customersForDomain, customersForDomains } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
+import { quoteNameFromSubject } from "@/lib/inbox-links";
 
 export async function resolveForThread(email: string): Promise<Resolution> {
   return resolveSender(email, {
@@ -241,4 +242,46 @@ export async function linkThread(
   });
   const { queueLabelSync } = await import("./label-sync");
   queueLabelSync(threadId);
+}
+
+/** #123 — "+ New quote" from a thread. The guided intake's builders only
+ *  mint a quote on their first save (createQuoteIntakeAction just redirects
+ *  into one), so this mints the draft directly to have an id to link: the
+ *  thread's work link points at it, and a thread with no stored customer
+ *  adopts the intake's (same rule as setLinkAction's adopt). Lazy imports:
+ *  comms lazily imports this module, and quotes pulls in the assignments
+ *  store — neither belongs in this module's static graph. */
+export async function linkThreadToNewQuote(
+  threadId: string,
+  input: {
+    customerId: string;
+    customer: string;
+    locationId: string | null;
+    contactName: string;
+    quoteType: string;
+    category: string;
+    owner: string;
+    /** the intake's optional "Quote name" field; falls back to the thread
+     *  subject (Re:/Fwd: stripped) when blank. */
+    name?: string;
+  }
+): Promise<{ quoteId: string; name: string } | null> {
+  const { get: getThread, setLink } = await import("@/lib/stores/comms");
+  const t = await getThread(threadId);
+  if (!t) return null;
+  const { create: createQuote } = await import("@/lib/stores/quotes");
+  const q = await createQuote({
+    name: (input.name || "").trim() || quoteNameFromSubject(t.subject),
+    customer: input.customer,
+    customerId: input.customerId,
+    locationId: input.locationId,
+    contactName: input.contactName,
+    quoteType: input.quoteType,
+    category: input.category,
+    source: "inbox",
+    owner: input.owner,
+  });
+  if (!t.customerId) await linkThread(threadId, input.customerId, t.resolvedContactId ?? null);
+  await setLink(threadId, { type: "quote", id: q.id, label: `${q.id} · ${q.name}` });
+  return { quoteId: q.id, name: q.name };
 }

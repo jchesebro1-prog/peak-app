@@ -21,11 +21,16 @@ export default function QuoteIntakeForm({
   customers,
   initial,
   replacing,
+  threadId,
 }: {
   customers: IntakeCustomer[];
   initial: IntakeInitial;
   replacing: IntakeReplacing | null;
+  /** #123 — set when opened from the Inbox's "+ New quote"; the intake
+   *  mints the draft quote, links the thread and returns to the Inbox. */
+  threadId?: string;
 }) {
+  const fromThread = !!threadId;
   const [type, setType] = useState<ServiceType>(initial.type);
   // #110: the user-named category behind the trailing "Custom category" card.
   const [category, setCategory] = useState(initial.category);
@@ -166,6 +171,7 @@ export default function QuoteIntakeForm({
       newContactRole: newContact.role,
       newContactEmail: newContact.email,
       newContactPhone: newContact.phone,
+      threadId: threadId || undefined,
     };
     startTransition(async () => {
       const res = await createQuoteIntakeAction(payload);
@@ -185,7 +191,9 @@ export default function QuoteIntakeForm({
       <p style={{ fontSize: 13, color: "#8c919c", margin: "0 0 22px" }}>
         {replacing
           ? `Pick the new type for ${replacing.id}. It is replaced when the new quote is first saved.`
-          : "Pick who this is for, then jump straight into the builder."}
+          : fromThread
+            ? "Pick who this is for. A draft quote is created, linked to the email thread, and you land back on the thread."
+            : "Pick who this is for, then jump straight into the builder."}
       </p>
 
       {/* ---- service category ---- */}
@@ -469,7 +477,13 @@ export default function QuoteIntakeForm({
           cursor: !canSubmit || pending ? "default" : "pointer",
         }}
       >
-        {pending ? "Setting up…" : replacing && sameBuilder(type, replacing.type) ? `Back to ${replacing.id} →` : "Continue to builder →"}
+        {pending
+          ? "Setting up…"
+          : replacing && sameBuilder(type, replacing.type)
+            ? `Back to ${replacing.id} →`
+            : fromThread
+              ? "Create quote & link thread"
+              : "Continue to builder →"}
       </button>
     </div>
   );
