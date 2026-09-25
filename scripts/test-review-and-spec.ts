@@ -7729,7 +7729,7 @@ async function dayliteSupersedeFixChecks(): Promise<void> {
   const r2 = await commitHistory("", O2, {}, "Test Admin");
   ok(r2.errors.length === 0 && r2.created.soldLinked === 2, "daylite 12b fix: Opps-only commit links both" + (r2.errors.length ? " — " + r2.errors.join("; ") : ""));
   const done2 = (await getDoc<PR>("projects", doneJuly.id))!;
-  ok(done2.stage === "complete" && !!done2.quoteId && done2.source?.system === "daylite", `daylite 12b fix: an Opps-only import keeps the complete July job complete, linked to its quote (and now the import's) (${done2.stage})`);
+  ok(done2.stage === "complete" && !!done2.quoteId && done2.source?.system !== "daylite", `daylite 12b fix: an Opps-only import keeps the complete July job complete, linked to its quote (still a July record — a Projects import replaces it later) (${done2.stage})`);
   const ed2 = (await getDoc<PR>("projects", editedJuly.id))!;
   ok(
     !!ed2.quoteId && ed2.stage === editedJuly.stage && ed2.value === editedJuly.value && ed2.valueUnknown === editedJuly.valueUnknown && ed2.stageHistory.length === editedJuly.stageHistory.length,
@@ -7754,8 +7754,8 @@ async function dayliteSupersedeFixChecks(): Promise<void> {
 
 /* ============ Task 12b fix 2: a quote-linked July record becomes the import's; retirement misses are reported (DB) ============ */
 async function dayliteSupersedeFix2Checks(): Promise<void> {
-  const { commitHistory, finalizeHistory } = await import("@/lib/daylite/history-commit");
-  const { isUntouched, julyTestHooks, retireUntouchedJuly } = await import("@/lib/daylite/july-cleanup");
+  const { previewHistory, commitHistory, finalizeHistory } = await import("@/lib/daylite/history-commit");
+  const { isUntouched, __julyTestHooks: julyTestHooks, retireUntouchedJuly } = await import("@/lib/daylite/july-cleanup");
   const { companyId, projectId, quoteId, leadId } = await import("@/lib/daylite/ids");
   const { listDocs, upsertDoc, getDoc } = await import("@/db/doc-store");
   const { loadPipelines } = await import("@/lib/pipelines-server");
@@ -7772,25 +7772,36 @@ async function dayliteSupersedeFix2Checks(): Promise<void> {
   const HP = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t\n`;
   const HO = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t\n`;
 
-  // N1 — a split import: Opportunities first, then Projects. The won quote
-  // links the untouched July job and marks it the import's; part 2's Done row
-  // and Cancelled row for the SAME job then leave it (and its link) alone.
+  // N1 / fix 3 — a split import: Opportunities first, then Projects. The won
+  // quote links the untouched July job J (no marker — J stays a July record).
+  // Part 2's Cancelled row keeps J ("linked to quote"); part 2's Done row
+  // then REPLACES J with full data and carries the link forward. No second
+  // project for the quote, ever.
   const split = await julyProject("ZJ Split Job", "ZJ Church", "complete");
   const qid = quoteId("ZJ Split Job", "ZJ Church");
   const O3 = HO + `\tBid\t"ZJ Split Job"\tOpen\t\t\t"$6,000.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
   const r3a = await commitHistory("", O3, {}, "Test Admin");
   const linked = (await getDoc<PR>("projects", split.id))!;
-  ok(r3a.errors.length === 0 && linked.quoteId === qid && linked.source?.system === "daylite", "daylite 12b fix2: a won quote linking an untouched July job writes the daylite marker in the same patch");
-  const P3 = HP +
-    `\t\t"ZJ Split Job"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t\n` +
-    `\t\t"ZJ Split Job"\tCancelled\tBasic Install\t\t\t1/5/17\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
-  const r3b = await commitHistory(P3, "", {}, "Test Admin");
-  const after = await getDoc<PR>("projects", split.id);
-  ok(r3b.errors.length === 0 && !!after && after.quoteId === qid, "daylite 12b fix2: part 2 (Projects) neither overwrites the link away nor retires the quote's project");
+  ok(r3a.errors.length === 0 && linked.quoteId === qid && linked.source?.system !== "daylite", "daylite 12b fix3: a won quote links the untouched July job without marking it the import's");
+  const P3c = HP + `\t\t"ZJ Split Job"\tCancelled\tBasic Install\t\t\t1/5/17\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const pv3c = await previewHistory(P3c, "");
+  ok(pv3c.julyEdited.some((r) => r.id === split.id && r.reason === `linked to quote ${qid}`), "daylite 12b fix3: preview — the Cancelled row keeps J, reason 'linked to quote'");
+  const r3c = await commitHistory(P3c, "", {}, "Test Admin");
+  ok(r3c.errors.length === 0 && r3c.created.julyRetiredSkipped === 0 && r3c.created.julyEditedKept === 1 && (await getDoc<PR>("projects", split.id))?.quoteId === qid, "daylite 12b fix3: the Cancelled row never retires the quote's project");
+  const P3d = HP + `\t\t"ZJ Split Job"\tDone\tInstallation\t"8 • Final Payment Received"\t\t1/5/18\t2/5/18\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const O3won = HO + `\t\t"ZJ Split Job"\tWon\t\t\t"$6,500.00"\t\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const r3d = await commitHistory(P3d, O3won, {}, "Test Admin");
+  type Full = PR & { value: number; startedAt: number; closedAt?: number; stageHistory: Array<{ at: number }> };
+  const full = (await getDoc<Full>("projects", split.id))!;
+  ok(
+    r3d.errors.length === 0 && r3d.created.julyReplaced === 1 && full.source?.system === "daylite" && full.quoteId === qid &&
+      full.value === 6500 && full.stage === "complete" && full.startedAt === new Date(2018, 0, 5).getTime() && full.stageHistory.at(-1)!.at === new Date(2018, 1, 5).getTime(),
+    "daylite 12b fix3: part 2's Done row overwrites J with full data (dates, value, stage) and keeps quoteId === Q"
+  );
   const nBefore = (await listDocs("projects")).length;
   await ProjStore.syncProjectsFromQuotes();
   const forQ = (await listDocs<PR>("projects")).filter((p) => p.quoteId === qid);
-  ok((await listDocs("projects")).length === nBefore && forQ.length === 1, `daylite 12b fix2: syncProjectsFromQuotes adds nothing — the quote keeps exactly one live project (${forQ.length})`);
+  ok((await listDocs("projects")).length === nBefore && forQ.length === 1, `daylite 12b fix3: syncProjectsFromQuotes adds nothing — the quote keeps exactly one live project (${forQ.length})`);
 
   // Belt and braces — a July record that already carries a quoteId (no marker):
   // overwriting it keeps the link; a retire row keeps it with the reason.

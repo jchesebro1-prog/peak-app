@@ -366,12 +366,13 @@ Rules (code: `src/lib/daylite/history-commit.ts`, `src/lib/daylite/july-cleanup.
     venues are retired before the company, so a retry after a failure finishes the job.
   - Kept July records are counted once per id.
 - **Fix 2 (re-review):**
-  - When a won quote links an untouched July record, the same patch writes the daylite
-    source marker. From then on the record belongs to the import, and a later part of a
-    split import (Opportunities first, then Projects) never overwrites or retires it.
-  - As a backstop, overwriting a July record carries its existing `quoteId` forward, and
-    no record with a `quoteId` is retired: it is kept with "linked to quote <id>", and the
+  - A quote-linked July record is safe in a split import (Opportunities first, then
+    Projects). Overwriting a July record carries its existing `quoteId` forward, and no
+    record with a `quoteId` is retired: it is kept with "linked to quote <id>", and the
     SQL guard refuses it too.
+  - Fix 3 reversed a first version that wrote the daylite marker on link: that version
+    left the July record's rough data in place for good. Linking now adds no marker, so
+    the later Projects row still replaces the record with full data.
   - `isUntouched` requires numeric timestamps, the same as the SQL guard.
   - A guarded retirement that matches no row is reported as `julyChangedSinceKept`, in the
     chunk results, the finalize result and the result panel.

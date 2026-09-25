@@ -51,9 +51,10 @@ export function isUntouched(doc: Record<string, unknown>): boolean {
 /**
  * Spec-harness seam ONLY: runs just before each guarded retirement UPDATE so a
  * test can change a record between the decision and the write (the "changed
- * since the preview" path). Never set in app code.
+ * since the preview" path). Never set in app code, and ignored outright when
+ * NODE_ENV is "production".
  */
-export const julyTestHooks: { beforeRetire?: (coll: "projects" | "leads" | "companies", ids: string[]) => Promise<void> } = {};
+export const __julyTestHooks: { beforeRetire?: (coll: "projects" | "leads" | "companies", ids: string[]) => Promise<void> } = {};
 
 /* ---------------------------------------------------------------------------
  * July leads (§3)
@@ -219,7 +220,7 @@ export async function retireUntouchedJuly(coll: "projects" | "leads", ids: strin
   const t = DOC_TABLES[coll];
   const now = Date.now();
   const done: string[] = [];
-  await julyTestHooks.beforeRetire?.(coll, ids);
+  if (process.env.NODE_ENV !== "production") await __julyTestHooks.beforeRetire?.(coll, ids);
   for (let i = 0; i < ids.length; i += 500) {
     const rows = await db
       .update(t)
@@ -368,7 +369,7 @@ export async function scanJunkCompanies(
 export async function retireJunkCompanies(retire: JunkCompany[]): Promise<string[]> {
   const ids = retire.map((c) => c.id);
   if (!ids.length) return [];
-  await julyTestHooks.beforeRetire?.("companies", ids);
+  if (process.env.NODE_ENV !== "production") await __julyTestHooks.beforeRetire?.("companies", ids);
   const done: string[] = [];
   const db = await getDb();
   const t = Date.now();

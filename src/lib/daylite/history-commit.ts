@@ -550,9 +550,6 @@ function dryRunJuly(ctx: Ctx): {
       if (e) e.reason += "; linked to its sold quote";
       else linked.push({ id: target, name: ctx.july.get(target)?.name ?? target, reason: "Edited July record — linked to its sold quote" });
     }
-    // A linked untouched July record takes the import's marker (commit does
-    // the same), so it is no longer a July record.
-    if (mode === "linked") sim.july.delete(target);
     if (mode === "replacesJuly") {
       counts.julyReplaced++;
       superseded.add(target);
@@ -769,14 +766,13 @@ async function linkOrCreateSoldProject(
       });
       return "linked";
     }
-    const untouchedJuly = julyStateOf(ctx, targetId) === "untouched";
     await patchDoc<ProjectRecord>("projects", targetId, (doc) => {
       normalizeProject(doc, ctx.pipes);
       doc.quoteId = q.id;
-      // An untouched July record a won quote links becomes the history
-      // import's own (the marker): never again overwritten or retired as July
-      // by a later part of a split import (controller decision, 12b fix 2).
-      if (untouchedJuly) doc.source = { system: "daylite", importedAt };
+      // An untouched July record stays a July record (no marker): a later
+      // Projects import still replaces it with full data, and the link rides
+      // on writeProject's quoteId carry-forward; a July record with a quoteId
+      // is never retired (keptReason + the SQL guard). 12b fix 3.
       if (!doc.projectType) doc.projectType = "system";
       const pl = projectPipelineFor(ctx.pipes, doc);
       const want = q.projectStage ? stageById(pl, q.projectStage) : null;
@@ -793,7 +789,8 @@ async function linkOrCreateSoldProject(
       }
       return doc;
     });
-    ctx.july.delete(targetId);
+    const j = ctx.july.get(targetId);
+    if (j) j.quoteId = q.id;
     return "linked";
   }
   const pl = projectPipelineFor(ctx.pipes, { kind: "project" });
