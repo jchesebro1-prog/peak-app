@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { requirePerm } from "@/lib/session";
-import { DayliteHistory } from "./daylite-client";
+import { loadPipelines } from "@/lib/pipelines-server";
+import { projectPipelineFor } from "@/lib/pipelines";
+import { STAGE_META as REPAIR_STAGE_META } from "@/lib/stores/repair-jobs";
+import { DayliteHistory, type StageLabels } from "./daylite-client";
 
 export const metadata = { title: "Daylite history — Quartzite-6" };
 
@@ -17,6 +20,16 @@ export const maxDuration = 300;
 
 export default async function DayliteImportPage() {
   await requirePerm("manage_users");
+  // Live-work stage names come from the CONFIGURED pipelines (Settings can
+  // rename stages), resolved here so the client never imports a server store.
+  const pipes = await loadPipelines();
+  const labelsFor = (kind: "project" | "order") =>
+    Object.fromEntries(projectPipelineFor(pipes, { kind }).stages.map((st) => [st.id, st.label]));
+  const stageLabels: StageLabels = {
+    project: labelsFor("project"),
+    order: labelsFor("order"),
+    repair: Object.fromEntries(Object.entries(REPAIR_STAGE_META).map(([k, m]) => [k, m.label])),
+  };
   return (
     <div className="pk-content">
       <div style={{ marginBottom: 20 }}>
@@ -47,7 +60,7 @@ export default async function DayliteImportPage() {
           imported.
         </div>
       </div>
-      <DayliteHistory />
+      <DayliteHistory stageLabels={stageLabels} />
     </div>
   );
 }

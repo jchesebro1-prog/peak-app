@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PreviewRow } from "@/lib/daylite/history-commit";
 import {
@@ -116,10 +116,8 @@ const KIND_LABEL: Record<PreviewRow["kind"], string> = {
   order: "Order",
   quote: "Quote",
 };
-const stageLabel = (id: string) => {
-  const s = (id || "").replace(/[-_]+/g, " ").trim();
-  return s ? s[0].toUpperCase() + s.slice(1) : "—";
-};
+/** Stage id → configured label, per kind — resolved server-side in page.tsx. */
+export type StageLabels = Record<"project" | "order" | "repair", Record<string, string>>;
 const emptyAcc = (): Acc => ({ created: {}, skippedExisting: 0, errors: [] });
 
 /** Total work items = every planned project/repair/order + every open quote. */
@@ -199,8 +197,14 @@ function CountRows({ title, rows }: { title: string; rows: Array<[string, number
   );
 }
 
-export function DayliteHistory() {
+export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
   const router = useRouter();
+  // One commit loop at a time. A ref is checked and set synchronously, so a
+  // double-click can't start a second loop before React re-renders (two
+  // overlapping loops race in linkOrCreateSoldProject); `busy` mirrors it
+  // for the buttons' disabled state.
+  const lockRef = useRef(false);
+  const [busy, setBusy] = useState(false);
   const [projects, setProjects] = useState<FileText | null>(null);
   const [opps, setOpps] = useState<FileText | null>(null);
   const [fileErr, setFileErr] = useState("");
@@ -214,7 +218,7 @@ export function DayliteHistory() {
   const [nextStart, setNextStart] = useState(0);
   const [commitErr, setCommitErr] = useState("");
 
-  const running = phase === "running";
+  const running = phase === "running" || busy;
   const totalChars = (projects?.text.length ?? 0) + (opps?.text.length ?? 0);
   const totalBytes = (projects?.bytes ?? 0) + (opps?.bytes ?? 0);
   const tooBig = totalChars > MAX_CHARS || totalBytes > MAX_BODY_BYTES;
@@ -270,7 +274,18 @@ export function DayliteHistory() {
   }
 
   async function runFrom(start: number, base: Acc) {
-    if (!preview) return;
+    if (!preview || lockRef.current) return;
+    lockRef.current = true;
+    setBusy(true);
+    try {
+      await loop(start, base, preview);
+    } finally {
+      lockRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function loop(start: number, base: Acc, preview: DaylitePreview) {
     setPhase("running");
     setCommitErr("");
     let total = progress.total || workTotal(preview.counts);
@@ -305,6 +320,7 @@ export function DayliteHistory() {
   }
 
   function confirm() {
+    if (lockRef.current) return;
     setAcc(emptyAcc());
     setNextStart(0);
     setProgress({ done: 0, total: preview ? workTotal(preview.counts) : 0 });
@@ -470,7 +486,9 @@ export function DayliteHistory() {
                         <td style={td}>
                           <select
                             value={picks[r.id] ?? r.company ?? ""}
-                            disabled={running || phase === "done"}
+                            // Locked from the first chunk on (paused included): every chunk of one
+                            // run must commit with identical picks.
+                            disabled={phase !== "idle"}
                             onChange={(e) => setPicks((p) => ({ ...p, [r.id]: e.target.value }))}
                             style={{ fontSize: 12.5, padding: "5px 8px", border: "1px solid #e4e7ec", borderRadius: 7, background: "#fff", maxWidth: 240 }}
                           >
@@ -515,7 +533,7 @@ export function DayliteHistory() {
                           {r.already && <span style={{ fontSize: 11, color: "#9aa0ab" }}> · already imported</span>}
                         </td>
                         <td style={{ ...td, color: r.company ? "#16181d" : "#a0442b" }}>{r.company ?? "No company"}</td>
-                        <td style={{ ...td, whiteSpace: "nowrap" }}>{stageLabel(r.stage)}</td>
+                        <td style={{ ...td, whiteSpace: "nowrap" }}>{(r.kind !== "quote" && stageLabels[r.kind]?.[r.stage]) || r.stage}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -528,7 +546,7 @@ export function DayliteHistory() {
           <div style={card}>
             {phase === "idle" && (
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <button type="button" onClick={confirm} style={primaryBtn(true)}>
+                <button type="button" onClick={confirm} disabled={busy} style={primaryBtn(!busy)}>
                   Confirm import
                 </button>
                 <span style={{ fontSize: 12, color: "#8c919c" }}>
@@ -553,7 +571,7 @@ export function DayliteHistory() {
                       {commitErr} Rows already written are kept; retrying picks up from row {fmt(nextStart + 1)} and
                       skips anything that landed.
                     </div>
-                    <button type="button" onClick={() => void runFrom(nextStart, acc)} style={{ ...primaryBtn(true), marginTop: 12 }}>
+                    <button type="button" onClick={() => void runFrom(nextStart, acc)} disabled={busy} style={{ ...primaryBtn(!busy), marginTop: 12 }}>
                       Retry remaining
                     </button>
                   </>
@@ -618,7 +636,7 @@ export function DayliteHistory() {
                     </Link>
                   ))}
                   {acc.errors.length > 0 && (
-                    <button type="button" onClick={confirm} style={outlineBtn}>
+                    <button type="button" onClick={confirm} disabled={busy} style={outlineBtn}>
                       Run again
                     </button>
                   )}
