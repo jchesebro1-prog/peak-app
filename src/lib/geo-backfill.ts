@@ -145,16 +145,100 @@ function addressableRows(rows: SiteRow[]): SiteRow[] {
  * only when followed by a real unit id — one containing a digit, or a single
  * letter ("STE G") — so a street NAMED "Room Rd" or "Floor St" survives.
  * Wisconsin grid addresses ("W185 S8750 Racine Ave.") pass through untouched.
+ *
+ * #185/D235, measured against the 170 real production failures (2026-09-24):
+ * three more shapes of noise, stripped in this order —
+ *  - a parenthesised aside ("(see const. site address under comments)",
+ *    "(Across From Pizza Ranch On Hwy 12)") is a note to a human, never part
+ *    of a mailing address a geocoder could resolve.
+ *  - text pasted ahead of a real address with a colon separator ("Blaines
+ *    home address:, 1523 Harvest Lane") — keep only what follows the LAST
+ *    colon, since that's where the actual street starts.
+ *  - a bare box/mail-drop/building number with no "P.O." ("Box 231", "Mail
+ *    Drop 3248", "Building 401") is exactly as unresolvable as a P.O. box or
+ *    a suite, just spelled without the marker the existing rules key on.
+ *    Run AFTER the P.O.-box rule below, not before it — "P.O. Box 615" must
+ *    still be consumed as one unit by that rule, or this one would strip
+ *    only "Box 615" and leave a dangling "P.O.".
  */
 export function cleanStreet(street: string | null | undefined): string {
-  return (street || "")
+  let s = (street || "").replace(/\([^)]*\)/g, " ");
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon !== -1) s = s.slice(lastColon + 1);
+  return s
     .replace(/,?\s*\b(p\.?\s*o\.?|post\s+office)\s*box\s*[\w-]*/gi, "")
+    .replace(/,?\s*\b(mail\s*drop|box)\s*#?\s*\d+\b/gi, "")
+    .replace(/,?\s*\bbuilding\s+\d+\w*/gi, "")
     .replace(
       /,?\s*\b(suite|ste|apt|apartment|unit|floor|fl|room|rm|bldg)\b\.?\s*#?\s*(?:[\w-]*\d[\w-]*|[a-z])\b/gi,
       ""
     )
     .replace(/,?\s*#\s*[\w-]+/g, "")
-    .replace(/[\s,]+$/, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s,]+|[\s,]+$/g, "")
+    .trim();
+}
+
+/**
+ * Street text with a pasted "<City>, <ST> <zip>" tail and any leading label
+ * removed. Used ONLY by geocodeVenue's fallback lookup (below) — never by
+ * the primary query, which must stay byte-identical to today.
+ *
+ * #185/D235: a chunk of the 170 real misses carry the street as one long
+ * pasted string — the zip/state already baked in ("...Stevens Point, WI
+ * 54482"), the city repeated right after the street name with no comma
+ * ("...Stevens Point"), or a label/venue name ahead of the real house number
+ * ("TSL Clark Street Campus (Grades 5 to 8) 303 Clark Street"). Each is
+ * stripped only when it's unambiguous:
+ *  - the trailing ", ST zip" is a fixed shape, safe to always strip.
+ *  - the trailing city copy must match the venue's OWN stated city, so this
+ *    never eats a street that legitimately ends in a place name.
+ *  - the leading label is only dropped when what's in front of the house
+ *    number has no digit of its own (so a real second address doesn't get
+ *    merged) and doesn't end in a road word ("Highway 51 North" is the
+ *    street; "51 North" is not "the street with the road name removed").
+ */
+export function fallbackStreet(street: string | null | undefined, city: string | null | undefined): string {
+  let t = cleanStreet(street);
+  if (!t) return t;
+
+  // A pasted "<ST> <zip>" tail.
+  t = t.replace(/,?\s*[A-Za-z]{2}\s+\d{5}(-\d{4})?\s*$/, "");
+
+  // A pasted copy of the venue's own stated city, right at the end.
+  const c = (city || "").trim();
+  if (c) {
+    const escaped = c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    t = t.replace(new RegExp(`,?\\s*${escaped}\\s*,?\\s*$`, "i"), "");
+  }
+
+  // A label ahead of the real house number/street, e.g. an organization name
+  // or a parenthetical aside cleanStreet already turned into plain text.
+  const labeled = t.match(
+    /^(.*?)(?:^|[\s,])((?:[NSEWM]\d+\s*)?\d+[A-Za-z]?(?:-[A-Za-z0-9]+)?(?:\s+1\/2)?)\s+([A-Za-z].*)$/
+  );
+  if (labeled) {
+    const [, label, houseNum, rest] = labeled;
+    const endsInRoadWord = /\b(highway|hwy|route|rte|rt|county|cty|co|state|us|road|rd|interstate)\.?\s*$/i;
+    if (label && !/\d/.test(label) && !endsInRoadWord.test(label)) t = `${houseNum} ${rest}`;
+  }
+
+  return t.replace(/\s{2,}/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").trim();
+}
+
+/**
+ * City text with a parenthesised aside removed and the "Wisc." abbreviation
+ * some records use expanded — same "used only by the fallback lookup"
+ * contract as fallbackStreet(). "Rome (Sullivan)" is Rome, Sullivan being a
+ * disambiguating township note a geocoder has no use for; "Wisc. Dells" is
+ * how a chunk of the 170 misses spelled Wisconsin Dells.
+ */
+export function cleanCity(city: string | null | undefined): string {
+  return (city || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\bWisc\.?(?=\s|$)/gi, "Wisconsin")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s,]+|[\s,]+$/g, "")
     .trim();
 }
 
@@ -238,11 +322,70 @@ export type GeocodeOutcome =
   | { ok: true; lat: number; lng: number; precision: GeocodePrecision; hit: GeoSearchHit }
   | { ok: false; reason: GeocodeFailure["reason"]; got?: string };
 
+type GateResult = { ok: true } | { ok: false; reason: GeocodeFailure["reason"]; got?: string };
+
+/**
+ * The state gate + city gate a hit must clear, factored out so the fallback
+ * queries (below) can reuse it. `cityForCompare` lets a fallback attempt
+ * compare against `cleanCity(row.city)` instead of the raw stored city;
+ * `zip5` adds the D235 zip gate for those attempts only — attempt 1 passes
+ * neither, so its behaviour is unchanged.
+ */
+async function gateHit(
+  hit: GeoSearchHit,
+  row: { city?: string | null; state?: string | null },
+  precision: GeocodePrecision,
+  ctx: GeocodeCtx,
+  opts?: { cityForCompare?: string | null; zip5?: string }
+): Promise<GateResult> {
+  // Sanity gate: a hit in the wrong state is a bad match, and a bad match
+  // silently misprices a quote. Rows with no stated state can't be checked.
+  const want = stateAbbr(row.state) || (row.state || "").trim().toUpperCase();
+  if (want && hit.state && hit.state !== want)
+    return { ok: false, reason: "state-mismatch", got: `${hit.city}, ${hit.state}` };
+
+  const cityForCompare = opts?.cityForCompare ?? row.city;
+  // D235 zip gate: a fallback query dropped the city on purpose (a typo or a
+  // postal/OSM city disagreement is exactly why attempt 1 failed), so a hit
+  // whose zip matches the row's is accepted even though the city text does not.
+  const zipMatches = !!(opts?.zip5 && hit.zip && hit.zip.slice(0, 5) === opts.zip5);
+
+  // Second gate: the right state is not the right place ("Portage" -> Portage
+  // County, "LaCrosse" -> Town of Baraboo, both in Wisconsin). Require the
+  // resolved city to BE the stated city — except a street-level hit within
+  // POSTAL_CITY_RADIUS_MI of the stated town's centre, because a mailing city
+  // is postal, not municipal (Old Sauk Rd, Middleton is filed under Madison) —
+  // or, for a fallback attempt, a matching zip.
+  if (
+    (cityForCompare || "").trim() &&
+    !samePlace(cityForCompare, hit.city) &&
+    !zipMatches &&
+    !(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))
+  )
+    return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+
+  return { ok: true };
+}
+
 /**
  * Geocode ONE venue's address through exactly the checks the batch applies —
  * query choice, the state gate, the city gate and its postal-city radius.
  * Shared by backfillVenueCoords() and the Settings sidebar's Retry (#175) so
  * the two can never disagree about what a good match is. Writes nothing.
+ *
+ * #185/D235: measured against the 170 real production failures (2026-09-24),
+ * ATTEMPT 1 below (unchanged from before this punch) found 2. Nominatim's
+ * free-text search is often defeated by exactly the shapes it can't help
+ * with — a typo'd or postal-vs-OSM city name, a label pasted ahead of the
+ * street — where the same street WITHOUT the city resolves fine:
+ * "6911 Mangrove Lane, WI 53713" finds the building where "...Madison, WI
+ * 53713" finds nothing. So a building-precision row that attempt 1 could not
+ * place (no-hit or city-mismatch — a state-mismatch is a confidently wrong
+ * place, not worth retrying) gets two more tries, cheapest-truth-first: the
+ * same fields cleaned up (ATTEMPT 2), then the street and zip alone with no
+ * city at all (ATTEMPT 3). City-precision rows are untouched — the D185
+ * structured lookup they use is the one place a wrong guess costs the most,
+ * and it stays exact.
  */
 export async function geocodeVenue(
   row: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null },
@@ -263,27 +406,58 @@ export async function geocodeVenue(
       ? await search(q, { limit: 1 })
       : await searchCity(row.city, row.state, { limit: 1 });
   const hit = hits[0];
-  if (!hit) return { ok: false, reason: "no-hit" };
+  const attempt1: GeocodeOutcome = hit
+    ? await (async (): Promise<GeocodeOutcome> => {
+        const gate = await gateHit(hit, row, precision, ctx);
+        return gate.ok ? { ok: true, lat: hit.lat, lng: hit.lng, precision, hit } : gate;
+      })()
+    : { ok: false, reason: "no-hit" };
+  if (attempt1.ok) return attempt1;
 
-  // Sanity gate: a hit in the wrong state is a bad match, and a bad match
-  // silently misprices a quote. Rows with no stated state can't be checked.
-  const want = stateAbbr(row.state) || (row.state || "").trim().toUpperCase();
-  if (want && hit.state && hit.state !== want)
-    return { ok: false, reason: "state-mismatch", got: `${hit.city}, ${hit.state}` };
+  // Only a building-precision miss is worth retrying — see the doc comment
+  // above for why a state-mismatch and every city-precision row are excluded.
+  if (precision !== "building" || (attempt1.reason !== "no-hit" && attempt1.reason !== "city-mismatch"))
+    return attempt1;
 
-  // Second gate: the right state is not the right place ("Portage" -> Portage
-  // County, "LaCrosse" -> Town of Baraboo, both in Wisconsin). Require the
-  // resolved city to BE the stated city — except a street-level hit within
-  // POSTAL_CITY_RADIUS_MI of the stated town's centre, because a mailing city
-  // is postal, not municipal (Old Sauk Rd, Middleton is filed under Madison).
-  if (
-    (row.city || "").trim() &&
-    !samePlace(row.city, hit.city) &&
-    !(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))
-  )
-    return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+  const street2 = fallbackStreet(row.address, row.city);
+  const city2 = cleanCity(row.city);
+  const state = (row.state || "").trim();
+  const zip = (row.zip || "").trim();
+  const zip5 = zip.match(/^\d{5}/)?.[0];
 
-  return { ok: true, lat: hit.lat, lng: hit.lng, precision, hit };
+  // ATTEMPT 2 — the same postal order as geocodeQuery(), but with the pasted
+  // label/city/zip tail stripped from the street and the city cleaned up.
+  // Skipped when that leaves nothing to gain over attempt 1.
+  const q2 = [street2, city2, [state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  if (q2 && q2 !== q) {
+    await sleep(ctx.delayMs);
+    const [hit2] = await search(q2, { limit: 1 });
+    if (hit2) {
+      const gate2 = await gateHit(hit2, row, precision, ctx, { cityForCompare: city2, zip5 });
+      if (gate2.ok) return { ok: true, lat: hit2.lat, lng: hit2.lng, precision, hit: hit2 };
+    }
+  }
+
+  // ATTEMPT 3 — street + zip, no city at all: the biggest single win measured
+  // against the real book (see the file-level "Why" note) is that a wrong or
+  // merely-postal city in the query is often what defeats Nominatim, and the
+  // zip alone narrows the search enough that dropping the city outright finds
+  // the building. Only possible when the row actually has a 5-digit zip.
+  if (zip5) {
+    const q3 = [street2, [state, zip5].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    if (q3) {
+      await sleep(ctx.delayMs);
+      const [hit3] = await search(q3, { limit: 1 });
+      if (hit3) {
+        const gate3 = await gateHit(hit3, row, precision, ctx, { cityForCompare: city2, zip5 });
+        if (gate3.ok) return { ok: true, lat: hit3.lat, lng: hit3.lng, precision, hit: hit3 };
+      }
+    }
+  }
+
+  // Every attempt failed — report attempt 1's failure so the reason/got a
+  // human reads back matches the query they'd recognize as theirs.
+  return attempt1;
 }
 
 /**
