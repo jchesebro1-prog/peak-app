@@ -2152,7 +2152,7 @@ ok(isOpenStage("quote", "won") === false && isOpenStage("quote", "sent") === tru
 
 /* --- dashboard metrics (#43, task 4a) — openProjects/backlogProjects read the
  *  pipeline tag (isActive/isBacklog), not a hardcoded stage-literal list. --- */
-import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit } from "@/lib/dashboard/metrics";
+import { openProjects as metricsOpenProjects, backlogProjects as metricsBacklogProjects, projectedProfit, installsForecast } from "@/lib/dashboard/metrics";
 const metricsProjects = [
   { kind: "project", stage: "scheduled" },
   { kind: "project", stage: "deposit" },
@@ -2185,6 +2185,34 @@ const uknProfit = projectedProfit(uknProjects);
 ok(uknProfit.value === 500, `#UKN: projectedProfit's open-book value ignores the unknown project's stray $900 (got ${uknProfit.value})`);
 ok(uknProfit.profit === 250, `#UKN: projectedProfit's profit is margin × the known value only (got ${uknProfit.profit})`);
 ok(uknProfit.unknownCount === 1, "#UKN: projectedProfit reports the one unknown-value project in its book");
+
+// installsForecast's toBill/collected sums (#189) — "To be billed" and
+// "Expected collected" already exclude UKN records via knownValue; the
+// widgets need a count of what's being excluded so a mostly-unknown horizon
+// doesn't read as a small real number.
+const nowT189 = Date.now();
+const f189 = installsForecast(
+  [
+    { kind: "project", stage: "deposit", value: 1000, margin: 0.3, targetDate: nowT189 + 10 * DAY },
+    { kind: "project", stage: "deposit", value: 500, valueUnknown: true, margin: 0.3, targetDate: nowT189 + 20 * DAY },
+  ] as unknown as Parameters<typeof installsForecast>[0],
+  [],
+  nowT189,
+  12
+);
+ok(f189.toBill === 1000, `#189: toBill sums only the known-value project landing in the horizon (got ${f189.toBill})`);
+ok(f189.toBillUnknownCount === 1, "#189: toBillUnknownCount counts the UKN project the to-be-billed sum is silently excluding");
+const f189collected = installsForecast(
+  [
+    { kind: "project", stage: "deposit", value: 800, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+    { kind: "project", stage: "deposit", value: 200, valueUnknown: true, margin: 0.3, targetDate: nowT189 - 30 * DAY },
+  ] as unknown as Parameters<typeof installsForecast>[0],
+  [],
+  nowT189,
+  12
+);
+ok(f189collected.collected === 800, `#189: collected sums only the known-value project (got ${f189collected.collected})`);
+ok(f189collected.collectedUnknownCount === 1, "#189: collectedUnknownCount counts the UKN project the expected-collected sum is silently excluding");
 
 /* --- venue dimensions (lineset PRO dims, task 1) --- */
 const vdEst = venueDimsFromEstimator({ width: 36, ph: 18, depth: 26, grid: 24, wing: 12, proscenium: true });

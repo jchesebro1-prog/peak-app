@@ -193,6 +193,11 @@ export function installsForecast(
   /** Count of `book` records with an unknown value (Task 9) — they
    *  contribute 0 to every dollar figure above. */
   unknownValueCount: number;
+  /** Of the records landing inside the horizon (the `toBill` sum), how many
+   *  are UKN and so contribute 0 to it (#189). */
+  toBillUnknownCount: number;
+  /** Same, for the `collected` sum's own (net-30-shifted) window. */
+  collectedUnknownCount: number;
 } {
   const H = horizonMonths;
   const windowMs = H * 30 * DAY;
@@ -228,11 +233,13 @@ export function installsForecast(
     });
     buckets.push({ start: lo, billed, collected });
   }
+  const toBillBook = book.filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd);
   const toBill =
-    book.filter((p) => (p.targetDate || 0) >= now && (p.targetDate || 0) <= horizonEnd).reduce((s, p) => s + knownValue(p), 0) +
+    toBillBook.reduce((s, p) => s + knownValue(p), 0) +
     msPoints.filter((m) => m.targetDate >= now).reduce((a, m) => a + (m.amount || 0), 0);
+  const collectedBook = book.filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd);
   const collected =
-    book.filter((p) => (p.targetDate || 0) + 30 * DAY >= now && (p.targetDate || 0) + 30 * DAY <= horizonEnd).reduce((s, p) => s + knownValue(p), 0) +
+    collectedBook.reduce((s, p) => s + knownValue(p), 0) +
     msPoints.filter((m) => m.targetDate + 30 * DAY >= now && m.targetDate + 30 * DAY <= horizonEnd).reduce((a, m) => a + (m.amount || 0), 0);
 
   const stageMap = new Map<string, { value: number; count: number; tag: ProjectTag }>();
@@ -249,5 +256,6 @@ export function installsForecast(
   return {
     book, totalValue, blended, cost, buckets, bucketMs, toBill, collected, byStage,
     upcoming: timeline.slice(0, 6), timeline, windowMs, unknownValueCount: unknownCount(book),
+    toBillUnknownCount: unknownCount(toBillBook), collectedUnknownCount: unknownCount(collectedBook),
   };
 }

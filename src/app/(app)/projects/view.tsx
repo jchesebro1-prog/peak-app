@@ -334,6 +334,7 @@ export function ProjectsView({
     sub: custName(p),
     value: knownValue(p),
     valueLabel: formatJobValue(p, shortMoney),
+    valueUnknown: !!p.valueUnknown,
     chips: [],
     owner: p.owner ? { initials: idLookup.initialsOf(p.owner), color: idLookup.colorOf(p.owner) } : null,
     ownerTitle: p.owner || "Unassigned",
@@ -343,7 +344,9 @@ export function ProjectsView({
   }));
 
   const standfirst =
-    active.length + " active · " + shortMoney(activeValue) + " in delivery · " + atRisk.length + " need attention";
+    active.length + " active · " + shortMoney(activeValue) + " in delivery" +
+    (activeUnknown ? " · " + activeUnknown + " with unknown value" : "") +
+    " · " + atRisk.length + " need attention";
 
   return (
     <div className="pk-content">
