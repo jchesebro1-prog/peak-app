@@ -4,7 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { portalSession, type PortalSession } from "@/lib/portal";
 import { getOptionalUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { getAll as allQuotes, portalCanAcceptQuote, portalListsQuote } from "@/lib/stores/quotes";
 import { getAll as allLeads, OPEN_STAGES, type LeadStage } from "@/lib/stores/leads";
 import {
   renewals as flameRenewals,
@@ -208,13 +208,10 @@ export default async function PortalPage({
 
   // Published quotes the team sent, PLUS the customer's own self-serve estimates
   // still in draft (source "portal-self-serve") so they can see what they
-  // submitted. Internal drafts stay hidden — only the customer's own drafts.
+  // submitted. Internal drafts stay hidden — only the customer's own drafts —
+  // and so does imported Daylite history (portalListsQuote, stores/quotes).
   const published = quotes
-    .filter(
-      (q) =>
-        q.customerId === cid &&
-        (q.status !== "draft" || q.source === "portal-self-serve")
-    )
+    .filter((q) => portalListsQuote(q, cid))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
   const requests = leads
@@ -418,7 +415,7 @@ export default async function PortalPage({
         {published.map((q) => {
           const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
           const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
-          const canAccept = q.status === "sent" && !q.portalAcceptance && !preview;
+          const canAccept = portalCanAcceptQuote(q, cid) && !preview;
           const chip = isDraft
             ? { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
             : pendingAccept

@@ -9,6 +9,7 @@ import { create as createLead } from "@/lib/stores/leads";
 import {
   create as createQuote,
   get as getQuote,
+  portalCanAcceptQuote,
   update as updateQuote,
 } from "@/lib/stores/quotes";
 import { byCategory, get as getCatalogPart } from "@/lib/stores/catalog";
@@ -98,7 +99,8 @@ export async function submitPortalRequest(formData: FormData): Promise<void> {
  * button only FLAGS a follow-up for the team — a human confirms by marking
  * the quote Won, which runs the normal accepted-quote spawn machinery.
  * Tenant check: the quote must belong to the grant's customer and be in the
- * published "sent" state.
+ * published "sent" state — and never imported Daylite history
+ * (portalCanAcceptQuote, the same rule that renders the button).
  */
 export async function acceptPortalQuote(formData: FormData): Promise<void> {
   const session = await portalSession();
@@ -106,12 +108,7 @@ export async function acceptPortalQuote(formData: FormData): Promise<void> {
 
   const id = String(formData.get("quote") || "");
   const q = id ? await getQuote(id) : null;
-  if (
-    q &&
-    q.customerId === session.customerId &&
-    q.status === "sent" &&
-    !q.portalAcceptance
-  ) {
+  if (q && portalCanAcceptQuote(q, session.customerId)) {
     await updateQuote(id, {
       portalAcceptance: { at: Date.now(), by: session.name, byEmail: session.email },
     });

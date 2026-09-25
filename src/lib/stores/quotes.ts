@@ -250,6 +250,33 @@ export function hasApproval(review: QuoteReview | null | undefined): boolean {
   return !!review && review.state === "approved";
 }
 
+/**
+ * A quote the Daylite history import wrote (D241 — `source: "daylite"`).
+ * History brought across for the team, not an offer this app made: the
+ * customer portal never lists it and never accepts it (see the two portal
+ * rules below — the one place that decision lives).
+ */
+export function isImportedHistoryQuote(q: Pick<Quote, "source">): boolean {
+  return q.source === "daylite";
+}
+
+type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "portalAcceptance">;
+
+/** Customer portal list rule: the grant's customer's published quotes plus
+ *  their own self-serve drafts — never an internal draft, never imported
+ *  Daylite history. */
+export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
+  if (!customerId || q.customerId !== customerId) return false;
+  if (isImportedHistoryQuote(q)) return false;
+  return q.status !== "draft" || q.source === "portal-self-serve";
+}
+
+/** Customer portal Accept rule (button AND server action): a listed quote,
+ *  sent, not already accepted. */
+export function portalCanAcceptQuote(q: PortalQuoteFields, customerId: string): boolean {
+  return portalListsQuote(q, customerId) && q.status === "sent" && !q.portalAcceptance;
+}
+
 export type ApprovalGateAction = "send" | "won";
 export type ApprovalGateResult = { ok: true } | { ok: false; error: string };
 
