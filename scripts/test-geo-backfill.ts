@@ -15,9 +15,11 @@
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { sites } from "@/db/schema";
+import { companies, geoCache, sites } from "@/db/schema";
+import { seedIfEmpty } from "@/db/seed-data";
 import { setSettings } from "@/lib/settings";
-import { backfillVenueCoords, cleanStreet, warmRoutes } from "@/lib/geo-backfill";
+import { backfillVenueCoords, cleanStreet, geocodeVenue, newGeocodeCtx, warmRoutes } from "@/lib/geo-backfill";
+import { listUnlocatedVenues, locateVenue } from "@/lib/venue-locate";
 
 type Hit = { lat: number; lng: number; city: string; state: string; road?: string };
 
@@ -73,6 +75,7 @@ async function coordsOf(id: string) {
 async function main() {
   if (!process.env.PGLITE_PATH) throw new Error("Refusing to run without PGLITE_PATH (scratch db).");
   const db = await getDb();
+  await seedIfEmpty(db);
   await db.delete(sites);
 
   /* ---- cleanStreet: suite / unit / PO-box fragments are noise to a geocoder ---- */
@@ -199,6 +202,267 @@ async function main() {
   assert.equal(warmed, 3, "the three routable venues are warmed despite twelve failures ahead of them");
   assert.equal(skipKeys.length, 12);
   console.log("PASS geo-backfill: route runner gets past failed routes");
+
+  /* ---- 5. geocodeVenue: the one-venue path the sidebar's Retry uses ---- */
+  {
+    const ctx = newGeocodeCtx(0);
+    const ok = await geocodeVenue({ address: "605 Erie Avenue Suite 101", city: "Sheboygan", state: "WI" }, ctx);
+    assert.ok(ok.ok && ok.precision === "building", "suite address resolves at building precision");
+    const miss = await geocodeVenue({ address: "9 Nowhere Ln", city: "Deadville", state: "WI" }, ctx);
+    assert.deepEqual(miss, { ok: false, reason: "no-hit" });
+    nominatim.push({
+      when: (u) => q(u).startsWith("1 wrongstate rd"),
+      hit: { lat: 41.9, lng: -87.6, city: "Chicago", state: "Illinois" },
+    });
+    const st = await geocodeVenue({ address: "1 Wrongstate Rd", city: "Madison", state: "WI" }, ctx);
+    assert.ok(!st.ok && st.reason === "state-mismatch" && st.got === "Chicago, IL");
+    const far = await geocodeVenue({ address: "100 Main St", city: "Portage", state: "WI" }, ctx);
+    assert.ok(!far.ok && far.reason === "city-mismatch", "far same-name street still rejected");
+    const town = await geocodeVenue({ address: "P.O. Box 615", city: "Reedsburg", state: "WI" }, ctx);
+    assert.ok(town.ok && town.precision === "city");
+    console.log("PASS geo-backfill: geocodeVenue single-venue outcomes");
+  }
+
+  /* ---- 6. worklist query ---- */
+  await db.delete(sites);
+  await db.delete(companies);
+  const now = Date.now();
+  await db.insert(companies).values([
+    { id: "co-a", name: "Acme Theatre", createdAt: now, updatedAt: now },
+    { id: "co-b", name: "Beta School", createdAt: now, updatedAt: now },
+  ]);
+  const site = (id: string, companyId: string, f: Partial<typeof sites.$inferInsert>) =>
+    db.insert(sites).values({ id, companyId, createdAt: now, updatedAt: now, ...f });
+  await site("st-w1", "co-b", { name: "Gym", address: "1302 South Broadway", city: "DePere", state: "WI" });
+  await site("st-w2", "co-a", { name: "", address: "", city: "Muskego", state: "WI", lat: "" });
+  await site("st-located", "co-a", { address: "1 A St", city: "X", state: "WI", lat: "43", lng: "-89" });
+  await site("st-deleted", "co-a", { address: "2 A St", city: "X", state: "WI", deleted: true });
+  await site("st-manual", "co-a", { address: "3 A St", city: "X", state: "WI", travelMiles: "40" });
+  await site("st-noaddr", "co-a", { address: "", city: "" });
+  const wl = await listUnlocatedVenues({});
+  assert.deepEqual(wl.rows.map((r) => r.siteId), ["st-w2", "st-w1"], "ordered by company then venue; only fixable rows");
+  assert.equal(wl.total, 2);
+  assert.equal(wl.noAddress, 1, "the address-less venue is counted, not listed");
+  assert.equal(wl.rows[1].companyName, "Beta School");
+  assert.deepEqual((await listUnlocatedVenues({ q: "broadway" })).rows.map((r) => r.siteId), ["st-w1"]);
+  assert.deepEqual((await listUnlocatedVenues({ q: "acme" })).rows.map((r) => r.siteId), ["st-w2"]);
+  assert.deepEqual((await listUnlocatedVenues({ offset: 1, limit: 1 })).rows.map((r) => r.siteId), ["st-w1"]);
+  console.log("PASS geo-backfill: unlocated worklist query");
+
+  // #175 D228 item 4: estimateFromParts() only treats travelMiles as a manual
+  // override (src/lib/geo.ts) — travelMin alone is not one, so the worklist
+  // must not exclude a venue just because travelMin is set.
+  await site("st-travelmin-only", "co-a", { address: "9 TravelMin St", city: "X", state: "WI", travelMin: "45" });
+  assert.deepEqual(
+    (await listUnlocatedVenues({ q: "travelmin" })).rows.map((r) => r.siteId),
+    ["st-travelmin-only"],
+    "a venue with only travelMin set and no coordinates is still listed"
+  );
+  console.log("PASS geo-backfill: travelMin-only override does not hide the worklist row");
+
+  // #175 item 7: a literal % or _ in the search box must not act as a SQL
+  // wildcard against unrelated rows.
+  assert.equal((await listUnlocatedVenues({ q: "%" })).rows.length, 0, "a literal % matches nothing here");
+  assert.equal((await listUnlocatedVenues({ q: "_" })).rows.length, 0, "a literal _ matches nothing here");
+  console.log("PASS geo-backfill: search % and _ are escaped, not wildcards");
+  // Test-only row for item 4/7 above — remove it so later "worklist is empty"
+  // assertions aren't thrown off by it.
+  await db.delete(sites).where(eq(sites.id, "st-travelmin-only"));
+
+  /* ---- 7. locateVenue: retry / pick / pin, and nothing else changes ---- */
+  const snapshot = async () =>
+    JSON.stringify({
+      s: (await db.select().from(sites)).sort((a, b) => a.id.localeCompare(b.id)),
+      c: (await db.select().from(companies)).sort((a, b) => a.id.localeCompare(b.id)),
+    });
+  const others = async (exceptId: string) =>
+    JSON.stringify({
+      s: (await db.select().from(sites)).filter((r) => r.id !== exceptId).sort((a, b) => a.id.localeCompare(b.id)),
+      c: (await db.select().from(companies)).sort((a, b) => a.id.localeCompare(b.id)),
+    });
+
+  // retry failure writes NOTHING
+  const before = await snapshot();
+  const rf = await locateVenue(
+    { siteId: "st-w1", mode: "retry", address: "1302 South Broadway", city: "DePere", state: "WI", zip: "" },
+    { delayMs: 0 }
+  );
+  assert.deepEqual(rf, { ok: false, reason: "no-hit" });
+  assert.equal(await snapshot(), before, "a failed retry writes nothing");
+
+  // retry success writes the corrected address + coordinates, routes, touches nothing else
+  nominatim.push({
+    when: (u) => q(u).startsWith("1302 south broadway, de pere"),
+    hit: { lat: 44.4486, lng: -88.0604, city: "De Pere", state: "Wisconsin" },
+  });
+  const othersBefore = await others("st-w1");
+  const rs = await locateVenue(
+    { siteId: "st-w1", mode: "retry", address: "1302 South Broadway", city: "De Pere", state: "WI", zip: "54115" },
+    { delayMs: 0 }
+  );
+  assert.ok(rs.ok && rs.source === "routed" && rs.officeName === "Reedsburg", JSON.stringify(rs));
+  const [w1] = await db.select().from(sites).where(eq(sites.id, "st-w1"));
+  assert.equal(w1.city, "De Pere");
+  assert.equal(w1.zip, "54115");
+  assert.equal(w1.lat, "44.4486");
+  assert.equal(w1.travelMiles, null, "manual override untouched");
+  assert.equal(await others("st-w1"), othersBefore, "no other venue and no company changed");
+  const cached = await db.select().from(geoCache);
+  assert.ok(cached.some((r) => r.key.endsWith("|44.4486,-88.0604")), "route warmed for the new coordinates");
+
+  // a venue soft-deleted between the SELECT and the UPDATE (retry mode makes
+  // paced network calls in between) must be reported gone, not located
+  {
+    await insertSite("st-vanish", { address: "77 Vanish St", city: "Vanishton", state: "WI" });
+    nominatim.push({
+      when: (u) => q(u).startsWith("77 vanish st"),
+      hit: { lat: 45.0, lng: -89.9, city: "Vanishton", state: "Wisconsin" },
+    });
+    const stubbedFetch = globalThis.fetch;
+    let armed = true;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (armed) {
+        armed = false;
+        // The lookup that would otherwise resolve this venue races a delete
+        // that lands on the DB before the geocoder's answer comes back.
+        await db.update(sites).set({ deleted: true }).where(eq(sites.id, "st-vanish"));
+      }
+      return stubbedFetch(input);
+    }) as typeof fetch;
+    try {
+      const vanished = await locateVenue(
+        { siteId: "st-vanish", mode: "retry", address: "77 Vanish St", city: "Vanishton", state: "WI", zip: "" },
+        { delayMs: 0 }
+      );
+      assert.deepEqual(vanished, { ok: false, reason: "gone" });
+    } finally {
+      globalThis.fetch = stubbedFetch;
+    }
+    const [vRow] = await db.select().from(sites).where(eq(sites.id, "st-vanish"));
+    assert.equal(vRow.lat, null, "lat is still null — the vanished venue was never written");
+    console.log("PASS geo-backfill: locateVenue reports gone when the venue vanishes mid-call");
+  }
+
+  // pin writes ONLY lat/lng
+  const [w2Before] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
+  const w2OthersBeforePin = await others("st-w2");
+  const pinned = await locateVenue({ siteId: "st-w2", mode: "pin", lat: 42.9, lng: -88.13 });
+  assert.ok(pinned.ok);
+  assert.equal(await others("st-w2"), w2OthersBeforePin, "pin touches no other row");
+  const [w2] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
+  assert.equal(w2.lat, "42.9");
+  assert.equal(w2.city, "Muskego", "pin leaves the address text alone");
+  assert.equal(w2.address, w2Before.address, "pin leaves address unchanged");
+  assert.equal(w2.state, w2Before.state, "pin leaves state unchanged");
+  assert.equal(w2.zip, w2Before.zip, "pin leaves zip unchanged");
+  assert.equal(w2.name, w2Before.name, "pin leaves name unchanged");
+
+  // pick writes every field
+  const w2OthersBeforePick = await others("st-w2");
+  const pick = await locateVenue({
+    siteId: "st-w2", mode: "pick", address: "W185 S8750 Racine Ave", city: "Muskego", state: "WI",
+    zip: "53150", lat: 42.8923, lng: -88.1301,
+  });
+  assert.ok(pick.ok);
+  assert.equal(await others("st-w2"), w2OthersBeforePick, "pick touches no other row");
+  const [w2b] = await db.select().from(sites).where(eq(sites.id, "st-w2"));
+  assert.equal(w2b.address, "W185 S8750 Racine Ave");
+  assert.equal(w2b.zip, "53150");
+  assert.equal(w2b.lng, "-88.1301");
+
+  // validation
+  assert.deepEqual(await locateVenue({ siteId: "st-w2", mode: "pin", lat: 91, lng: 0 }), { ok: false, reason: "invalid" });
+  assert.deepEqual(await locateVenue({ siteId: "st-w2", mode: "pin", lat: NaN, lng: 0 }), { ok: false, reason: "invalid" });
+  assert.deepEqual(await locateVenue({ siteId: "st-deleted", mode: "pin", lat: 43, lng: -89 }), { ok: false, reason: "gone" });
+  assert.deepEqual(await locateVenue({ siteId: "nope", mode: "pin", lat: 43, lng: -89 }), { ok: false, reason: "gone" });
+  assert.equal((await listUnlocatedVenues({})).total, 0, "both fixed venues left the worklist");
+  console.log("PASS geo-backfill: locateVenue retry / pick / pin");
+
+  /* ---- 8. pick() protects existing address parts (#175 D228 item 2) ---- */
+  {
+    // A picked suggestion with a blank street (a town-level hit) must not
+    // wipe the venue's real street address.
+    await insertSite("st-pick-blank-street", {
+      address: "100 Original St", city: "Origtown", state: "WI", zip: "12345",
+    });
+    const p1 = await locateVenue({
+      siteId: "st-pick-blank-street", mode: "pick",
+      address: "", city: "Newtown", state: "WI", zip: "99999", lat: 43.1, lng: -89.1,
+    });
+    assert.ok(p1.ok, JSON.stringify(p1));
+    const [r1] = await db.select().from(sites).where(eq(sites.id, "st-pick-blank-street"));
+    assert.equal(r1.address, "100 Original St", "a blank picked street leaves the stored street alone");
+    assert.equal(r1.city, "Newtown", "a non-blank picked city still overwrites");
+    assert.equal(r1.zip, "99999");
+
+    // A picked suggestion without a house number (town/area match) must not
+    // truncate a real street address either.
+    await insertSite("st-pick-no-digit-street", {
+      address: "200 Original Ave", city: "Origtown", state: "WI", zip: "12345",
+    });
+    const p2 = await locateVenue({
+      siteId: "st-pick-no-digit-street", mode: "pick",
+      address: "South Broadway", city: "De Pere", state: "WI", zip: "54115", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(p2.ok, JSON.stringify(p2));
+    const [r2b] = await db.select().from(sites).where(eq(sites.id, "st-pick-no-digit-street"));
+    assert.equal(
+      r2b.address,
+      "200 Original Ave",
+      "a street suggestion with no house number leaves the stored street alone"
+    );
+    assert.equal(r2b.city, "De Pere");
+
+    // A blank picked zip must not clear a stored zip.
+    await insertSite("st-pick-blank-zip", {
+      address: "300 Original Blvd", city: "Origtown", state: "WI", zip: "54115",
+    });
+    const p3 = await locateVenue({
+      siteId: "st-pick-blank-zip", mode: "pick",
+      address: "1302 South Broadway", city: "De Pere", state: "WI", zip: "", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(p3.ok, JSON.stringify(p3));
+    const [r3b] = await db.select().from(sites).where(eq(sites.id, "st-pick-blank-zip"));
+    assert.equal(r3b.address, "1302 South Broadway", "a real house-numbered street still overwrites");
+    assert.equal(r3b.zip, "54115", "a blank picked zip leaves the stored zip alone");
+
+    console.log("PASS geo-backfill: pick() never blanks a real street or zip");
+  }
+
+  /* ---- 9. precision reported on the result (#175 D228 item 5) ---- */
+  {
+    // retry: a city-only match reports "city" precision.
+    await insertSite("st-precision-city", { address: "", city: "Reedsburg", state: "WI" });
+    const rc = await locateVenue(
+      { siteId: "st-precision-city", mode: "retry", address: "", city: "Reedsburg", state: "WI", zip: "" },
+      { delayMs: 0 }
+    );
+    assert.ok(rc.ok && rc.precision === "city", "a city-only retry reports city precision");
+
+    // pick: a house-numbered street reports building precision.
+    await insertSite("st-precision-pick-building", { address: "", city: "X", state: "WI" });
+    const pb = await locateVenue({
+      siteId: "st-precision-pick-building", mode: "pick",
+      address: "1302 South Broadway", city: "De Pere", state: "WI", zip: "54115", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(pb.ok && pb.precision === "building", "a house-numbered pick reports building precision");
+
+    // pick: a town-level suggestion (no house number, existing street blank
+    // too) reports city precision.
+    await insertSite("st-precision-pick-city", { address: "", city: "X", state: "WI" });
+    const pc = await locateVenue({
+      siteId: "st-precision-pick-city", mode: "pick",
+      address: "", city: "De Pere", state: "WI", zip: "54115", lat: 44.4, lng: -88.0,
+    });
+    assert.ok(pc.ok && pc.precision === "city", "a town-level pick with no stored street reports city precision");
+
+    // pin: always building precision — a human placed the exact point.
+    await insertSite("st-precision-pin", { address: "", city: "X", state: "WI" });
+    const pp = await locateVenue({ siteId: "st-precision-pin", mode: "pin", lat: 44.4, lng: -88.0 });
+    assert.ok(pp.ok && pp.precision === "building", "a pin always reports building precision");
+
+    console.log("PASS geo-backfill: precision reported on retry/pick/pin");
+  }
 
   console.log(`ALL PASSED (${calls} stubbed fetches)`);
 }

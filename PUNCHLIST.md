@@ -7653,3 +7653,92 @@ The user sees one refusal message and ends up with two drafts, one of which they
 surfaces as the status message it already is. Rolling the create back inside the transaction is cleaner in theory
 but would throw away the draft the user just typed.
 
+## 175. Fix unlocated venues from a sidebar, and choose the quote origin — DONE 2026-09-24 (D228)
+
+**Reported:** 2026-09-24 (Jeff, watching the #166 geocode run): "a useful feature is being able to click on the address and have that venue's information open on a side bar to update the bad addresses and before resending." Mid-build: "all estimating and rules should be out of the central shop which is Madison."
+
+**Done.** Settings → Admin now lists every venue that can't be located, replacing the old 20-item failure list. It is a live query, so it survives reloads, has no cap, and shrinks as venues are fixed. Clicking a row opens a right-hand sidebar with three fixes:
+- **Edit + Retry** runs the batch's own gates on the one venue. A failed retry writes nothing.
+- **Search** picks a Nominatim suggestion. A pick never blanks a stored street or zip: a street without a house number, or a blank field, keeps the stored value.
+- **Pin** drops and drags a pin on a map. The map centres on the stated town only when the structured lookup confirms the name.
+
+Every fix locates the venue and warms its OSRM route at once, so the result reads `✓ Located · 144 mi · 2h 53m from Madison Office (routed)`. **Next venue →** walks the list.
+
+The batch runner's failures now carry the venue id, so each row shows why it failed. Spec: `docs/superpowers/specs/2026-09-24-geo-fix-sidebar-design.md`; plan: `docs/superpowers/plans/2026-09-24-geo-fix-sidebar.md`.
+
+**Quote origin.** Production had no location flagged as quote default, so `quoteOrigin()` silently used the **first** listed, Milwaukee Remote. Every quote, estimating rule and route-warming call measured travel from Milwaukee. `setDefaultQuoteOfficeAction` existed, but nothing called it.
+
+Each location in Settings → Locations now shows a **Quote origin** pill, marked "default — first listed" while the choice is implicit, and a **Use for quotes** button. The Locations copy no longer claims the nearest location is picked. **Jeff's step:** click *Use for quotes* on Madison Office, then run *Geocode addresses* once to warm routes from Madison. Coordinates already found are kept.
+
+**Also fixed along the way.**
+- `.pk-btn` and `.pk-btn-quiet` are not defined in `globals.css`, so the #147 *Geocode addresses* and *Check coverage* buttons were unstyled on production. They now use `pk-btn-accent` and `pk-btn-outline`. The same dead classes are still used in `design/assemblies/assembly-builder.tsx` and `inbox/site-visit-modal.tsx`, outside this item.
+- `geocodeVenue()` is extracted from the batch, so the batch and the sidebar can never disagree about what a good match is.
+- `LeafletMap` gains an opt-in pick mode. Every existing map was verified unchanged.
+
+**Tests.** `npm run test:geo-backfill` grows to 13 sections (scratch PGlite, `fetch` stubbed). They cover the worklist query, including search, paging, override and escaping cases, and all three `locateVenue` paths with snapshot proof that no other venue or company row changes. They also cover the vanish-mid-call → `gone` race, the pick merge and the precision field.
+
+**Browser verification** used the worktree's own dev DB:
+- a `DePere` typo fixed by Retry;
+- a suite address picked from Search;
+- an address OSM lacks placed by Pin (drag included);
+- Next venue, Escape, and a honest no-match message;
+- the quote origin switched to Madison, with a pin at La Crosse → 144 mi routed from Madison;
+- the Companies map regression check: pins intact, clicks inert;
+- phone width: a full-width sidebar with no sideways scroll.
+
+**Gates:** tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors (same as origin/main at 974451b).
+
+**Open, deliberately:**
+- Failure reasons are not persisted: they are per page, and Retry reproduces them.
+- The type-ahead is debounced but still an autocomplete against public Nominatim, which its usage policy discourages. The Companies search does the same, app-wide.
+- The drawer has no focus trap.
+- Next does not cross a "Show more" page boundary.
+
+---
+
+## 176. Drive distance on the directories, and "Traveling from" on calendar appointments — DONE 2026-09-24 (D229)
+
+**Reported:** 2026-09-24 (Jeff): "one of things we need to have is basically a distance to all of the locations … people can add where they are traveling from when they set up appointments via the calendar." He chose a sortable drive column measured from the quote origin, and asked that people can type any address. The "estimate out of Madison" half of the request shipped in #175 as the quote-origin control.
+
+**Drive column.**
+- **Where:** `/venues` shows a **Drive** cell on every row. The `/companies` directory shows the same cell, taken from each company's primary venue.
+- **What the cell says:**
+  - `62 mi · 1h 8m` for a routed drive;
+  - `~62 mi · 1h 8m` for a straight-line estimate that is still waiting for a route;
+  - the entered value for a manual override;
+  - `—` for a venue that isn't located. Every cell reads `—` when no quote origin with coordinates is set.
+  - A tooltip explains each case.
+- **Sorting:** both pages get Recent activity / Default, Nearest first and Farthest first (`?sort=near|far`). The sort survives search and the filters. Unlocated rows always sort last.
+- **Speed:** travel for every row comes from one bulk helper, `src/lib/travel-bulk.ts` `travelForPoints()`. It reads offices and rates once and makes one `routeCachedBulk` query. Formatting and sorting live in the pure `src/lib/drive-format.ts`.
+
+**Calendar.** The New event form has a **Traveling from** select, shown in create mode and only for timed events:
+- **My base** — the person's "Based out of" office, else the quote origin;
+- each located saved location;
+- **Another address…**, which reveals a text field.
+
+The auto "Drive to …" block uses `src/lib/travel-origin.ts` `resolveTravelOrigin()`. It geocodes the destination first, then routes with a live OSRM call and falls back to a straight-line estimate. The block names where it measured from. If a typed address can't be found, it falls back to the base and says so.
+
+The block now runs in `after()` (next/server), so saving an appointment never waits on Nominatim or OSRM. `/calendar` also gains `maxDuration = 60`.
+
+**Renumbered 2026-09-24.** This item and the unlocated-venues sidebar were first drafted as #169/#170 (D225/D226). The quote-spawn-hardening session (unpushed branch `feat/quote-spawn-hardening`) already claims #169–#174 and D225–D227, so they became #175/#176 and D228/D229. Their commit subjects keep the old numbers.
+
+**Tests:** `npm run test:drive-distance` (new; scratch PGlite, `fetch` stubbed) covers:
+- cell formats and tooltips;
+- sort order, including unlocated rows last in both directions and tie handling;
+- `travelForPoints` for each source: routed, auto, manual, none, a shared cache key, the 19-city fallback, and no origin;
+- origin options (offices without coordinates excluded);
+- every `resolveTravelOrigin` branch, including a search that rejects.
+
+**Browser verification** (worktree dev DB, quote origin set to Madison):
+- `/venues` with all three sorts, a search keeping the sort, and the tooltips;
+- `/companies` with the sort select, the "Drive times from Madison Office" line, and a location-less company showing "—" last;
+- both pages at phone width, with no sideways scroll.
+
+**Not browser-verified:** the calendar create form. It opens only with a connected Google Calendar, which the worktree lacks. Check it on production after deploy by opening a new event; the check is read-only.
+
+**Gates:** tsc 0 errors, `test:specs` 2044 PASS / 0 FAIL, `test:smoke` ALL PASSED, eslint 124 problems / 0 errors (same as origin/main at 974451b).
+
+**Open, deliberately:**
+- Per-shop side-by-side distances, map colouring, type-ahead on the typed origin, and a return-trip block (spec §5).
+- The Drive cell markup is duplicated between the two pages.
+- After switching the origin to Madison, most rows read `~` until *Geocode addresses* re-warms routes from Madison.

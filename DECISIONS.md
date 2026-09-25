@@ -5088,3 +5088,21 @@ the real error plus a generic line. Every caller uses it rather than carrying it
 The gate's wording and conditions are unchanged. The renewal path in the Inbox still swallows by design, but now
 logs the real error instead of dropping a defect silently. The Home stage sheet, which previously caught nothing at
 all, now stays open showing the reason instead of closing as though it had worked.
+## D228. Unlocated venues are fixed one at a time from a live worklist; the quote origin is an explicit choice (#175, 2026-09-24)
+
+- **The worklist is a query, not the run's memory.** It lists live venues with an address or city, no usable coordinates, and no `travelMiles` override, ordered case-insensitively by company then venue. The rule matches `estimateFromParts`, where only `travelMiles` counts as manual. Reasons from the current page's batch run are shown when known and never persisted, which avoids a schema change for a transient list.
+- **Three fixes, no town-centre shortcut** (Jeff declined it):
+  - **Retry** reuses `geocodeVenue()`, the same gates as the batch.
+  - **A human pick or pin bypasses the gates**, because a person chose the place. A pick never erases stored data: the street is replaced only by one carrying a house number, and blank fields keep their stored values. This stops a town-level suggestion from becoming a back-door town-centre fix.
+  - **Precision is reported.** A city-precision result says "town centre".
+- **The sidebar never writes `travelMiles`/`travelMin`.** The Companies "Route" button does, and that freezes travel as a manual override. Here travel stays live through the route cache, warmed at fix time.
+- **Writes** are one targeted `UPDATE … WHERE id AND NOT deleted RETURNING`. Zero rows means `gone`.
+- **Quote origin** is set explicitly per location: a pill plus *Use for quotes*. The implicit "first listed" fallback stays, but is labelled so it is visible. Calendar travel blocks still start from each person's "Based out of" office and fall back to the quote origin; per-appointment origins are a separate item.
+
+## D229. Directory drive times measure from the quote origin; a calendar trip can start anywhere (#176, 2026-09-24)
+
+- **One origin for the directories.** The Drive column uses the same rule as every quote: `quoteOrigin()`, `coordsOf()` and `estimateFromParts()` (manual > routed > auto > none). It reads only the route cache, and a straight-line estimate is marked `~`, so a directory page never calls OSRM. With no located quote origin, every cell is "—", even for manual overrides, so the column can't imply a distance from nowhere.
+- **Companies use the primary venue** (`primaryLoc`). Nearest-of-many was rejected: it makes the row's number depend on a venue the row doesn't name.
+- **Unlocated rows sort last in both directions.** "Farthest first" should not open with 200 unknowns.
+- **The calendar origin is chosen per appointment:** a typed address, then a saved location with coordinates, then the person's base ("Based out of", else the quote origin). A typed miss falls back to the base and says so in the block's description; it doesn't silently drop the block. The travel block runs in `after()` so a slow geocoder can't time out the save and invite a duplicate meeting. Edits still don't regenerate the block (D144).
+- **Numbering.** #175/#176 and D228/D229, not #169/#170 and D225/D226, which a parallel session claimed first.

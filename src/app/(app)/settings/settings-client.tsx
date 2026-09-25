@@ -28,12 +28,15 @@ import {
   saveLogoAction,
   saveSettingsAction,
   searchAddressAction,
+  setDefaultQuoteOfficeAction,
   setRecordingsArchiveMailboxAction,
   setRecordingsBetaUsersAction,
   setRolesAction,
   setUserStatusAction,
   updateMemberAction,
 } from "./actions";
+import UnlocatedVenues from "./unlocated-venues";
+import { reasonLabel } from "./venue-locate-drawer";
 import DashboardLayoutEditor from "@/components/dashboard-layout-editor";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import type { UserStatus } from "@/lib/users";
@@ -93,6 +96,7 @@ type OfficeVM = {
   phone: string;
   lat: number | null;
   lng: number | null;
+  quoteDefault?: boolean;
 };
 
 type OfficeDraft = {
@@ -266,7 +270,10 @@ export default function SettingsClient({
   const [geoCov, setGeoCov] = useState<Awaited<ReturnType<typeof travelCoverageAction>> | null>(null);
   const [geoRunning, setGeoRunning] = useState(false);
   const [geoMsg, setGeoMsg] = useState("");
-  const [geoFails, setGeoFails] = useState<Array<{ query: string; reason: string; got?: string }>>([]);
+  // Why each venue failed in THIS page's run, keyed by site id — read by the
+  // unlocated-venues worklist. Not persisted (spec §5).
+  const [geoReasons, setGeoReasons] = useState<Record<string, string>>({});
+  const [geoListKey, setGeoListKey] = useState(0);
   const [clearConfirm, setClearConfirm] = useState("");
   const [clearDone, setClearDone] = useState<string | null>(null);
 
@@ -414,7 +421,7 @@ export default function SettingsClient({
   /** Drive both phases to completion, one bounded batch at a time. */
   async function runGeocode() {
     setGeoRunning(true);
-    setGeoFails([]);
+    setGeoReasons({});
     try {
       for (const phase of ["geocode", "routes"] as const) {
         // What already failed this run. A failed venue keeps no coordinates,
@@ -429,7 +436,9 @@ export default function SettingsClient({
           if (!r.ok) break;
           skip.push(...r.failedKeys);
           if (phase === "geocode" && "failures" in r && r.failures?.length) {
-            setGeoFails((prev) => [...prev, ...r.failures].slice(0, 50));
+            const add: Record<string, string> = {};
+            for (const f of r.failures) add[f.siteId] = reasonLabel(f.reason, f.got);
+            setGeoReasons((prev) => ({ ...prev, ...add }));
           }
           setGeoMsg(
             phase === "geocode"
@@ -445,6 +454,9 @@ export default function SettingsClient({
       setGeoMsg("Stopped: " + (e instanceof Error ? e.message : "unknown error"));
     } finally {
       setGeoRunning(false);
+      // Bumped here (not just on the success path) so a run that ends
+      // "Stopped: …" still reloads the worklist below it (#175 review).
+      setGeoListKey((k) => k + 1);
     }
   }
 
@@ -1153,8 +1165,12 @@ export default function SettingsClient({
           <div>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Locations</div>
             <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3 }}>
-              Used as the travel origin when estimating a job — the nearest
-              location to the site is picked automatically.
+              The quote origin is where every quote and estimating rule
+              measures travel from. Calendar travel blocks start from each
+              person&rsquo;s &ldquo;Based out of&rdquo; location (Account
+              page), falling back to the quote origin. After changing the
+              quote origin, run Admin → Geocode addresses once to fetch
+              driving routes from it.
             </div>
           </div>
           <button
@@ -1166,8 +1182,12 @@ export default function SettingsClient({
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-          {offices.map((o) => {
+          {(() => {
+            const originId = (offices.find((o) => o.quoteDefault) || offices[0])?.id;
+            const implicitOrigin = !offices.some((o) => o.quoteDefault);
+            return offices.map((o) => {
             const hasCoords = o.lat != null && o.lng != null;
+            const isOrigin = o.id === originId;
             const addr =
               [
                 o.street,
@@ -1226,6 +1246,23 @@ export default function SettingsClient({
                     >
                       {o.type || "Main Office"}
                     </span>
+                    {isOrigin && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: "2px 9px",
+                          borderRadius: 20,
+                          flexShrink: 0,
+                          whiteSpace: "nowrap",
+                          color: "#1f7a52",
+                          background: "#e8f3ee",
+                          border: "1px solid #cfe6db",
+                        }}
+                      >
+                        {implicitOrigin ? "Quote origin (default — first listed)" : "Quote origin"}
+                      </span>
+                    )}
                   </div>
                   <div
                     style={{
@@ -1256,6 +1293,15 @@ export default function SettingsClient({
                 >
                   {hasCoords ? "Located" : "No coords"}
                 </span>
+                {(!isOrigin || implicitOrigin) && (
+                  <button
+                    className="pk-btn-outline"
+                    title="Measure all quote travel from this location"
+                    onClick={() => run(() => setDefaultQuoteOfficeAction(o.id))}
+                  >
+                    Use for quotes
+                  </button>
+                )}
                 <button
                   className="pk-btn-outline"
                   title="Edit office"
@@ -1265,7 +1311,8 @@ export default function SettingsClient({
                 </button>
               </div>
             );
-          })}
+            });
+          })()}
           {offices.length === 0 && (
             <div style={{ fontSize: 12.5, color: "#9aa0ab", padding: "8px 2px" }}>
               No locations yet — add one to enable automatic travel estimates.
@@ -1645,7 +1692,7 @@ export default function SettingsClient({
               </div>
             </div>
             <button
-              className="pk-btn"
+              className="pk-btn-accent"
               style={{ whiteSpace: "nowrap" }}
               disabled={geoRunning}
               onClick={() => {
@@ -1657,7 +1704,7 @@ export default function SettingsClient({
           </div>
           <div style={{ marginTop: 10 }}>
             <button
-              className="pk-btn-quiet"
+              className="pk-btn-outline"
               style={{ fontSize: 12 }}
               onClick={() => {
                 void refreshGeoCoverage();
@@ -1693,22 +1740,11 @@ export default function SettingsClient({
             {geoMsg && (
               <div style={{ marginTop: 8, fontSize: 12.5, color: "#5d636e" }}>{geoMsg}</div>
             )}
-            {geoFails.length > 0 && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "#8a3a2a", maxWidth: 520 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                  {geoFails.length} address{geoFails.length === 1 ? "" : "es"} could not be
-                  resolved safely — fix these on the venue and re-run:
-                </div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, lineHeight: 1.6 }}>
-                  {geoFails.slice(0, 20).map((f, i) => (
-                    <div key={i}>
-                      {f.query} — {f.reason}
-                      {f.got ? ` (got ${f.got})` : ""}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <UnlocatedVenues
+              reasons={geoReasons}
+              refreshKey={geoListKey}
+              onChanged={() => void refreshGeoCoverage()}
+            />
           </div>
         </div>
 

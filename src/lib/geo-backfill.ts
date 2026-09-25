@@ -227,6 +227,65 @@ async function venuesMissingCoords(): Promise<SiteRow[]> {
     );
 }
 
+/** Per-run state for geocodeVenue(): pacing + the stated-town centre cache. */
+export type GeocodeCtx = { delayMs: number; townCentres: Map<string, GeoSearchHit | null> };
+
+export function newGeocodeCtx(delayMs: number = GEOCODE_DELAY_MS): GeocodeCtx {
+  return { delayMs, townCentres: new Map() };
+}
+
+export type GeocodeOutcome =
+  | { ok: true; lat: number; lng: number; precision: GeocodePrecision; hit: GeoSearchHit }
+  | { ok: false; reason: GeocodeFailure["reason"]; got?: string };
+
+/**
+ * Geocode ONE venue's address through exactly the checks the batch applies —
+ * query choice, the state gate, the city gate and its postal-city radius.
+ * Shared by backfillVenueCoords() and the Settings sidebar's Retry (#175) so
+ * the two can never disagree about what a good match is. Writes nothing.
+ */
+export async function geocodeVenue(
+  row: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null },
+  ctx: GeocodeCtx
+): Promise<GeocodeOutcome> {
+  const q = geocodeQuery(row);
+  if (!q) return { ok: false, reason: "no-hit" };
+  const precision = precisionOf(row);
+  // A venue with a street address wants a free-text lookup — that is how you
+  // resolve a building. A venue with only a city wants Nominatim's
+  // STRUCTURED form, because free text quietly returns the wrong place: the
+  // #147 fixture run got "Portage County" (64 mi out) for "Portage, WI" and
+  // "Town of Baraboo" (80 mi out) for "LaCrosse, WI". Structured resolves
+  // Portage correctly and returns nothing for LaCrosse — a reported miss
+  // beats a confident wrong answer that misprices every quote on that venue.
+  const hits =
+    precision === "building"
+      ? await search(q, { limit: 1 })
+      : await searchCity(row.city, row.state, { limit: 1 });
+  const hit = hits[0];
+  if (!hit) return { ok: false, reason: "no-hit" };
+
+  // Sanity gate: a hit in the wrong state is a bad match, and a bad match
+  // silently misprices a quote. Rows with no stated state can't be checked.
+  const want = stateAbbr(row.state) || (row.state || "").trim().toUpperCase();
+  if (want && hit.state && hit.state !== want)
+    return { ok: false, reason: "state-mismatch", got: `${hit.city}, ${hit.state}` };
+
+  // Second gate: the right state is not the right place ("Portage" -> Portage
+  // County, "LaCrosse" -> Town of Baraboo, both in Wisconsin). Require the
+  // resolved city to BE the stated city — except a street-level hit within
+  // POSTAL_CITY_RADIUS_MI of the stated town's centre, because a mailing city
+  // is postal, not municipal (Old Sauk Rd, Middleton is filed under Madison).
+  if (
+    (row.city || "").trim() &&
+    !samePlace(row.city, hit.city) &&
+    !(precision === "building" && (await nearStatedTown(hit, row, ctx.townCentres, ctx.delayMs)))
+  )
+    return { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+
+  return { ok: true, lat: hit.lat, lng: hit.lng, precision, hit };
+}
+
 /**
  * Phase 1 — geocode venues that have an address but no coordinates.
  *
@@ -283,7 +342,7 @@ export async function backfillVenueCoords(opts?: {
   const queries = [...byQuery.keys()].filter((q) => !skip.has(q));
   const budget = opts?.limit ?? queries.length;
   // Stated-town centres, looked up only when a building's city disagrees.
-  const townCentres = new Map<string, GeoSearchHit | null>();
+  const ctx: GeocodeCtx = { delayMs, townCentres: new Map() };
   const toRun = queries.slice(0, budget);
   report.remaining = queries.length - toRun.length;
 
@@ -292,75 +351,18 @@ export async function backfillVenueCoords(opts?: {
     const rows = byQuery.get(q)!;
     if (done > 0) await sleep(delayMs);
     report.queriesIssued++;
-    // A venue with a street address wants a free-text lookup — that is how you
-    // resolve a building. A venue with only a city wants Nominatim's
-    // STRUCTURED form, because free text quietly returns the wrong place: the
-    // #147 fixture run got "Portage County" (64 mi out) for "Portage, WI" and
-    // "Town of Baraboo" (80 mi out) for "LaCrosse, WI". Structured resolves
-    // Portage correctly and returns nothing for LaCrosse — a reported miss
-    // beats a confident wrong answer that misprices every quote on that venue.
-    const seed = rows[0];
-    const hits =
-      precisionOf(seed) === "building"
-        ? await search(q, { limit: 1 })
-        : await searchCity(seed.city, seed.state, { limit: 1 });
-    const hit = hits[0];
+    const out = await geocodeVenue(rows[0], ctx);
     done++;
     opts?.onProgress?.(done, toRun.length);
 
-    if (!hit) {
+    if (!out.ok) {
       for (const r of rows)
         report.failures.push({
           siteId: r.id,
           companyId: r.companyId,
           query: q,
-          reason: "no-hit",
-        });
-      continue;
-    }
-
-    // Sanity gate: a hit in the wrong state is a bad match, and a bad match
-    // silently misprices a quote. Reject loudly instead of storing it. Rows
-    // with no stated state can't be checked, so they pass.
-    const want = stateAbbr(rows[0].state) || (rows[0].state || "").trim().toUpperCase();
-    if (want && hit.state && hit.state !== want) {
-      for (const r of rows)
-        report.failures.push({
-          siteId: r.id,
-          companyId: r.companyId,
-          query: q,
-          reason: "state-mismatch",
-          got: `${hit.city}, ${hit.state}`,
-        });
-      continue;
-    }
-
-    // Second gate: the right state is not the right place. Both of the bad
-    // matches in the #147 fixture run were in Wisconsin and sailed through the
-    // state check — "Portage" -> Portage County, "LaCrosse" -> Town of
-    // Baraboo. Require the resolved city to BE the stated city. A venue whose
-    // stated city is blank has nothing to check against and passes.
-    //
-    // One exception, for buildings only: a mailing city is postal, so a real
-    // street-level hit can carry a neighbouring municipality's name. Accept it
-    // when it sits within POSTAL_CITY_RADIUS_MI of the stated town's centre —
-    // itself resolved through the same structured, city-gated lookup, so the
-    // Portage County trap cannot sneak back in through the reference point.
-    if (
-      (seed.city || "").trim() &&
-      !samePlace(seed.city, hit.city) &&
-      !(
-        precisionOf(seed) === "building" &&
-        (await nearStatedTown(hit, seed, townCentres, delayMs))
-      )
-    ) {
-      for (const r of rows)
-        report.failures.push({
-          siteId: r.id,
-          companyId: r.companyId,
-          query: q,
-          reason: "city-mismatch",
-          got: `${hit.city}, ${hit.state}`,
+          reason: out.reason,
+          ...(out.got ? { got: out.got } : {}),
         });
       continue;
     }
@@ -369,7 +371,7 @@ export async function backfillVenueCoords(opts?: {
       if (!dryRun) {
         await db
           .update(sites)
-          .set({ lat: String(hit.lat), lng: String(hit.lng), updatedAt: Date.now() })
+          .set({ lat: String(out.lat), lng: String(out.lng), updatedAt: Date.now() })
           .where(eq(sites.id, r.id));
       }
       report.geocoded++;
