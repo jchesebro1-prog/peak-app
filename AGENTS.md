@@ -208,7 +208,7 @@ See `.env.example`.
     Daylite project/opportunity history (`src/lib/daylite/`) and
     supersedes the July script, which now imports identity only.
     Remaining: Jeff's production run (#191), follow-ups #188–#192, O1.
-13. 🚧 **Specs module** (#SPEC, D-SPEC-1–D-SPEC-8) — Phase A (library) done:
+13. 🚧 **Specs module** (#205, D254–D261) — Phase A (library) done:
     a pure outline text engine (`src/lib/specs/outline.ts`); three new
     collections (`spec_articles`, `spec_templates`, `spec_curtain_templates`)
     alongside an upgraded `spec_sections`; canonical spec fields on
@@ -222,7 +222,7 @@ See `.env.example`.
     exact-header-only, gating drafts everywhere a spec prints, including the
     external Displays API. Phase B (the generator, the four doors, docx/zip
     output, a print view) and Phase C (the `spec-writer` skill, the North HS
-    seed) remain. Decisions D-SPEC-1–D-SPEC-8; punch item #SPEC.
+    seed) remain. Decisions D254–D261; punch item #205.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
