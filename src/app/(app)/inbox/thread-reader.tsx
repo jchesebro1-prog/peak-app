@@ -508,7 +508,10 @@ export default function ThreadReader({
     if (!b || sending) return;
     setSending(true);
     try {
-      await replyAction(vm.id, b);
+      // I2 — the #127 flow ran (and gets the final say on the body,
+      // signature kept or stripped) whenever this account has a signature
+      // configured; the server skips its own legacy footer in that case.
+      await replyAction(vm.id, b, !!signature);
       closeComposer();
       if (onAfterSend) onAfterSend(vm.id);
       else router.refresh();

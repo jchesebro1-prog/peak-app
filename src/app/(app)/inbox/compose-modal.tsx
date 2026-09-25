@@ -63,6 +63,9 @@ export default function ComposeModal({
     body: cd.body,
     customerId: cd.customerId,
     contactName: cd.contactName,
+    // I2 — the #127 flow ran (and its result is final) whenever this
+    // account has a signature configured; saveDraftAction ignores the flag.
+    signatureHandled: !!signature,
   });
 
   const doSaveDraft = async () => {

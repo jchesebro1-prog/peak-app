@@ -2,12 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { saveSignatureAction } from "./actions";
-import { SIGNATURE_MAX, signatureBlock } from "@/lib/inbox-signature";
+import { SIGNATURE_MAX, withSignature } from "@/lib/inbox-signature";
 
 /**
  * #127 — Account → "Email signature". Plain text, saved per user; the
- * preview is exactly what the composer appends (signatureBlock, minus the
- * leading blank lines it puts before the "-- " separator).
+ * preview is exactly what a fresh Reply/New message seeds (I2 review:
+ * withSignature("", saved, "add") — the same call the composer makes).
+ * This signature replaces the legacy profile-card footer entirely once set
+ * (I2 — see replyAction/composeSendAction's signatureHandled gate); a user
+ * with none configured still gets that old footer, unchanged.
  */
 export default function SignatureCard({ initial }: { initial: string }) {
   const [text, setText] = useState(initial);
@@ -33,7 +36,9 @@ export default function SignatureCard({ initial }: { initial: string }) {
       <div style={{ fontSize: 14.5, fontWeight: 600 }}>Email signature</div>
       <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 3, lineHeight: 1.5 }}>
         Added below a &quot;-- &quot; line on every reply and new email you write in the Inbox.
-        Plain text only; you can remove it from any message before sending.
+        Plain text only; you can remove it from any message before sending. Setting one here
+        replaces the automatic name/title/phone footer — once you save, that old footer stops
+        being added.
       </div>
       <textarea
         value={text}
@@ -112,7 +117,13 @@ export default function SignatureCard({ initial }: { initial: string }) {
               color: "#3a3f4a",
             }}
           >
-            {signatureBlock(saved).replace(/^\n+/, "")}
+            {/* I2 review — byte-for-byte what a fresh Reply/New message
+                seeds (withSignature("", saved, "add"), the exact call the
+                composer makes): the caret lands above these two blank
+                lines, then "-- ", then the signature. Stripping the leading
+                blank lines here would show something the composer never
+                actually puts in the body. */}
+            {withSignature("", saved, "add")}
           </pre>
         </div>
       )}

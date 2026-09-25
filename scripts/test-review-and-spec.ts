@@ -36,6 +36,7 @@ import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inb
 import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 import { clampListWidth, parseListWidth, parseSideCollapsed, LIST_WIDTH_DEFAULT } from "@/lib/inbox-layout";
 import { hasSignature, normalizeSignature, signatureBlock, withSignature, SIGNATURE_MAX } from "@/lib/inbox-signature";
+import { applyOutboundSignature, withEmailSignature } from "@/lib/email-signature";
 import { rowName } from "@/lib/inbox-rows";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
@@ -9321,6 +9322,32 @@ import {
   ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the next blank line");
   ok(hasSignature("x\n-- \ny") && !hasSignature("x\n--\ny") && !hasSignature("x -- y"), "hasSignature: the exact '\\n-- \\n' separator");
   ok(normalizeSignature("a".repeat(2500)).length === SIGNATURE_MAX, "normalizeSignature caps at SIGNATURE_MAX");
+}
+
+/* ---- Inbox round 3 review (I2) — #127 signature replaces the legacy footer ---- */
+{
+  const person = { name: "Jeff Chesebro", email: "jeff@peaksystemsgroup.com" };
+  // No #127 signature configured (signatureHandled falsy) → legacy footer, as before.
+  ok(
+    applyOutboundSignature("Hi Brenda,\nThanks!", undefined, person) === withEmailSignature("Hi Brenda,\nThanks!", person),
+    "applyOutboundSignature: no #127 signature → the legacy footer still applies"
+  );
+  ok(
+    applyOutboundSignature("Hi Brenda,\nThanks!", false, person) === withEmailSignature("Hi Brenda,\nThanks!", person),
+    "applyOutboundSignature: signatureHandled === false → same as undefined"
+  );
+  // signatureHandled: the #127 flow ran — legacy is skipped outright, body untouched either way.
+  const withSig = "Hi Brenda,\nThanks!\n\n-- \nJeff Chesebro\nPeak Systems Group";
+  ok(applyOutboundSignature(withSig, true, person) === withSig, "applyOutboundSignature: #127 signature kept → sent verbatim, no legacy footer stacked on top");
+  const stripped = "Hi Brenda,\nThanks!";
+  ok(applyOutboundSignature(stripped, true, person) === stripped, "applyOutboundSignature: #127 signature toggled OFF → no footer at all, legacy never fills the gap");
+  // A body that already carries the #127 block, run through applyOutboundSignature,
+  // never picks up a second (legacy) footer — the structural guarantee I2 asked for,
+  // not just withEmailSignature's own same-body double-append guard.
+  ok(
+    (applyOutboundSignature(withSig, true, person).match(/\n--/g) || []).length === 1,
+    "applyOutboundSignature: exactly one footer marker — never two"
+  );
 }
 
 /* ---- Inbox round 3 (#128) — row name: last responder, Gmail-style chain ---- */
