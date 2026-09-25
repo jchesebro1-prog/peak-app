@@ -5116,6 +5116,43 @@ ok(g131("speaker").glyph === symbolGeometry("speaker", 44, 30).glyph && g131("sp
 ok(symbolGeometry("speaker", 12, 9).glyph !== g131("speaker").glyph, "#131: glyphs scale with the symbol box");
 ok(markerColor("Speakers") === markerColor("Speakers") && /^#[0-9a-f]{6}$/.test(markerColor("Speakers")), "#131: markerColor is a stable hex per category");
 
+/* --- #SYM grid stock symbols (spec 2026-09-25) — Task 1: the Tabler icon generator --- */
+import {
+  buildIcons as symBuildIcons, generateFromPackage as symGenerate, parseTablerSvg as symParse, validatePicks as symValidatePicks,
+  GENERATED_MODULE_PATH as SYM_MODULE_PATH, LICENSE_PATH as SYM_LICENSE_PATH,
+} from "./grid-icons-gen";
+
+{
+  const els = symParse(
+    '<svg viewBox="0 0 24 24" class="icon"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M4 4h16" class="x" /><circle cx="12" cy="12" r="1" fill="currentColor" /></svg>'
+  );
+  ok(els.length === 2, "#SYM gen: the invisible 24x24 bounding path is skipped");
+  ok(JSON.stringify(els[0]) === '{"t":"path","a":{"d":"M4 4h16"}}', "#SYM gen: only geometry attributes survive (class dropped)");
+  ok(JSON.stringify(els[1]) === '{"t":"circle","a":{"cx":"12","cy":"12","r":"1"},"fill":true}', "#SYM gen: a currentColor fill is kept as fill:true");
+
+  const throws = (f: () => unknown, re: RegExp) => { try { f(); return false; } catch (e) { return re.test(String(e)); } };
+  const pick = (id: string, tabler: string) => ({ tabler, id, label: id, tags: ["A", "a", " "] });
+  ok(symValidatePicks([pick("x", "a")])[0].tags.join(",") === "a", "#SYM gen: tags are trimmed, lower-cased and de-duplicated");
+  ok(throws(() => symValidatePicks([pick("x", "a"), pick("x", "b")]), /duplicate id/), "#SYM gen: duplicate ids are refused");
+  ok(throws(() => symValidatePicks([pick("x", "a"), pick("y", "a")]), /duplicate tabler/), "#SYM gen: a Tabler icon is picked at most once");
+  ok(throws(() => symValidatePicks([pick("shape-rect", "a")]), /bad id/), "#SYM gen: shape-* ids are reserved for the legacy shapes");
+  ok(throws(() => symValidatePicks([pick("Bad Id", "a")]), /bad id/), "#SYM gen: ids are kebab-case");
+  ok(throws(() => symBuildIcons([pick("x", "nope-1"), pick("y", "nope-2")], () => null), /nope-1, nope-2/),
+    "#SYM gen: every missing Tabler name is reported at once");
+
+  const first = symGenerate(process.cwd());
+  const second = symGenerate(process.cwd());
+  ok(first.module === second.module && first.license === second.license, "#SYM gen: two runs are byte-identical");
+  ok(first.count >= 60 && first.count <= 100, `#SYM gen: 60–100 curated icons (got ${first.count})`);
+  ok(first.count === symValidatePicks(JSON.parse(readFileSync(join(process.cwd(), "scripts/grid-icon-picks.json"), "utf8"))).length,
+    "#SYM gen: every pick exists in the installed @tabler/icons outline set (none dropped)");
+  ok(readFileSync(join(process.cwd(), SYM_MODULE_PATH), "utf8") === first.module,
+    "#SYM gen: the committed grid-icons.generated.ts is current (npm run icons:grid)");
+  const lic = readFileSync(join(process.cwd(), SYM_LICENSE_PATH), "utf8");
+  ok(lic === first.license && lic.includes("MIT License") && lic.includes(`Tabler Icons ${first.version}`),
+    "#SYM gen: LICENSES/tabler-icons.txt is written, current, and names the version");
+}
+
 async function asyncChecks(): Promise<void> {
   /* ---- #96 §1 — resolver precedence ---- */
   {
