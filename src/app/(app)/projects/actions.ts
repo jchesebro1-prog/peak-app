@@ -247,16 +247,24 @@ export async function startConversionAction(formData: FormData): Promise<void> {
   if (!quoteId) return;
   let p;
   try {
-    // #180: this is the explicit "convert a pending quote" action — it has
-    // always meant to override a prior dismiss, so it opts out of the
-    // dismissed-list check createProjectFromQuote now applies by default.
-    p = await createProjectFromQuote(quoteId, { skipDismissed: true });
+    p = await createProjectFromQuote(quoteId);
   } catch (error) {
     console.error("startConversionAction: project mint failed", error);
     redirect("/projects?err=" + encodeURIComponent("Couldn’t start the project — please try again."));
   }
   revalidatePath("/", "layout");
   if (p) redirect("/projects/" + encodeURIComponent(p.id));
+  // #180 review: createProjectFromQuote returns null (not a throw) whenever
+  // the quote isn't eligible — already converted by someone else, dismissed,
+  // not actually won, or a type it refuses outright (flame_test/repair/
+  // inspection/consulting, see PUNCHLIST #180 item 3). This used to fall
+  // through silently: the button did nothing and nobody was told why.
+  redirect(
+    "/projects?err=" +
+      encodeURIComponent(
+        "That quote can't become a project — it may already be converted, have been dismissed, or not be an install/system quote."
+      )
+  );
 }
 
 /* ---- field-side mutations (Field Work reuses these; provided per contract) ---- */

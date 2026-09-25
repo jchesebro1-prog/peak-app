@@ -733,21 +733,22 @@ function fromQuote(q: QuoteLike, pipes: Pipelines): Omit<ProjectRecord, "id"> {
  * quote a concurrent action since dismissed (#169) or marked lost cannot
  * spawn a project here — see #180's status-recheck requirement.
  *
- * `skipDismissed` is for the ONE caller that means to override a dismiss:
- * the Projects screen's explicit "convert this pending quote" action
- * (`startConversionAction`) has always ignored the dismissed list — a
- * person re-converting a quote they previously dismissed is a deliberate
- * act, not a resurrection. Every other caller (the sweep, the real win
- * path) leaves it honoured.
+ * Always honours the dismissed list, including from the Projects screen's
+ * explicit "convert this pending quote" action (`startConversionAction`).
+ * An earlier version let that one caller pass an option to skip this check,
+ * on the theory that a person re-converting a quote they'd dismissed meant
+ * it — dropped in review: `pendingConversions` already hides a dismissed
+ * quote from that screen entirely, so the only way to reach this with a
+ * dismissed id was a hand-crafted POST, and a bypass reachable that way is
+ * a way to resurrect a project the user deliberately deleted (#169).
  */
 export async function createProjectFromQuote(
-  quoteId: string,
-  opts: { skipDismissed?: boolean } = {}
+  quoteId: string
 ): Promise<ProjectRecord | null> {
   return withQuoteLock(quoteId, async () => {
     const existing = await getProjectByQuote(quoteId);
     if (existing) return existing;
-    if (!opts.skipDismissed && (await dismissedQuoteIds()).includes(quoteId)) return null;
+    if ((await dismissedQuoteIds()).includes(quoteId)) return null;
     const q = await getDoc<QuoteLike>("quotes", quoteId);
     if (
       !q ||
@@ -879,6 +880,24 @@ export async function syncProjectsFromQuotes(): Promise<{ created: number; skipp
 }
 
 /** Won quotes that have not been converted yet — the "ready to start" strip (port of pendingConversions). */
+/**
+ * Won quotes that have not been converted yet — the "ready to start" strip.
+ *
+ * #180 review: this exclusion list must match createProjectFromQuote's own
+ * refusal list EXACTLY, or a quote type that function refuses (and so
+ * createProjectFromQuote returns null for) still shows up here with a
+ * "Start" button that silently does nothing when clicked. It was missing
+ * repair/inspection — those spawn their OWN records (repair-jobs.ts /
+ * inspections.ts) and createProjectFromQuote has refused them since #13,
+ * but this list only ever excluded flame_test/consulting.
+ *
+ * "rental" is NOT excluded here, matching createProjectFromQuote and
+ * syncProjectsFromQuotes — see PUNCHLIST #180 item 3's report on whether
+ * that's intended (rentals get their own booking spawn via
+ * equipment-bookings.ts on the real win path, but nothing stops a won
+ * rental quote from ALSO becoming an Installs project through this
+ * generic default-case path).
+ */
 export async function pendingConversions(): Promise<QuoteLike[]> {
   const skip = await dismissedQuoteIds();
   const have = new Set<string>();
@@ -888,6 +907,8 @@ export async function pendingConversions(): Promise<QuoteLike[]> {
       (q) =>
         q.status === "won" &&
         q.quoteType !== "flame_test" &&
+        q.quoteType !== "repair" &&
+        q.quoteType !== "inspection" &&
         q.quoteType !== "consulting" &&
         !have.has(q.id) &&
         !skip.includes(q.id)

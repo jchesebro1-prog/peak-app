@@ -9369,6 +9369,7 @@ seeded()
   .then(() => quoteSpawnAsyncChecks())
   .then(() => quoteLockTimeoutCatchAsyncChecks())
   .then(() => sweepHealingAsyncChecks())
+  .then(() => pendingConversionsAsyncChecks())
   .then(() => quoteLockAsyncChecks())
   .then(() => engagementSweepStaleSnapshotAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
@@ -12405,6 +12406,116 @@ async function sweepHealingAsyncChecks(): Promise<void> {
    Fixtures are `TEST180:`-prefixed and torn down in `finally`, same
    convention as #173's sweepHealingAsyncChecks just above.
    ====================================================================== */
+/* ====================================================================
+   #180 review round 2, items 2 & 3 — the Projects "ready to start" strip
+   and its convert action.
+
+   Item 2: `createProjectFromQuote`'s `skipDismissed` escape hatch is gone.
+   It existed for `startConversionAction` on the theory that a person
+   re-converting a dismissed quote meant it — but `pendingConversions`
+   already hides a dismissed quote from that screen entirely, so the only
+   way to reach the action with a dismissed id was a hand-crafted POST, and
+   an opt-out reachable that way could resurrect a project the user
+   deliberately deleted (#169). Proven by the source no longer containing
+   the option (there is nothing left to prove behaviourally that the
+   #180-round-1 dismissed-list tombstone check doesn't already cover, since
+   there is no longer any parameter to bypass it with).
+
+   Item 3: `pendingConversions` must exclude EXACTLY the quote types
+   `createProjectFromQuote` refuses — it was missing repair/inspection
+   (they spawn their own records; createProjectFromQuote has refused them
+   since #13), so a won repair/inspection quote showed a "Start" button
+   that silently did nothing. `startConversionAction` must also say so
+   instead of falling through silently when createProjectFromQuote returns
+   null.
+   ==================================================================== */
+async function pendingConversionsAsyncChecks(): Promise<void> {
+  // Source checks — same raw-source idiom as the client checks above,
+  // applied to two plain server modules.
+  const projectsSrc = readFileSync(join(process.cwd(), "src/lib/stores/projects.ts"), "utf8");
+  ok(
+    !/skipDismissed/.test(projectsSrc),
+    "#180 review 2 (item 2): skipDismissed is gone from projects.ts entirely — createProjectFromQuote always honours the dismissed list"
+  );
+  const pendingBody = projectsSrc.slice(
+    projectsSrc.indexOf("export async function pendingConversions"),
+    projectsSrc.indexOf("/* ---------- procurement")
+  );
+  ok(pendingBody.length > 0, "#180 review 2 (item 3) fixture: pendingConversions is still where the test expects it");
+  ok(
+    /q\.quoteType !== "repair"/.test(pendingBody) && /q\.quoteType !== "inspection"/.test(pendingBody),
+    "#180 review 2 (item 3): pendingConversions excludes repair and inspection, matching createProjectFromQuote's own refusal list"
+  );
+
+  const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/projects/actions.ts"), "utf8");
+  ok(
+    !/skipDismissed/.test(actionsSrc),
+    "#180 review 2 (item 2): startConversionAction no longer opts out of the dismissed-list check"
+  );
+  const startConversionBody = actionsSrc.slice(
+    actionsSrc.indexOf("export async function startConversionAction"),
+    actionsSrc.indexOf("/* ---- field-side mutations")
+  );
+  ok(startConversionBody.length > 0, "#180 review 2 (item 3) fixture: startConversionAction is still where the test expects it");
+  ok(
+    /if \(p\) redirect\(/.test(startConversionBody) && /redirect\(\s*"\/projects\?err=/.test(startConversionBody),
+    "#180 review 2 (item 3): startConversionAction redirects with a clear error when createProjectFromQuote returns null, instead of falling through silently"
+  );
+
+  // DB-backed: a won repair/inspection quote never shows up as a pending
+  // conversion, while a won install/system quote does; and
+  // createProjectFromQuote genuinely refuses the two of them directly.
+  const PRE = "TEST180r2:pc-";
+  const QUOTE_IDS: string[] = [];
+  const seedWon = (id: string, quoteType: string) =>
+    upsertDoc("quotes", {
+      id,
+      name: `#180 review 2 (items 2/3) ${quoteType}`,
+      quoteType,
+      status: "won",
+      customer: "Test Customer",
+      customerId: null,
+      locationId: null,
+      value: 500,
+      margin: 0,
+      source: "estimator",
+      owner: "Test Harness",
+      review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+    });
+  try {
+    const qSystem = `${PRE}system`;
+    const qRepair = `${PRE}repair`;
+    const qInspection = `${PRE}inspection`;
+    QUOTE_IDS.push(qSystem, qRepair, qInspection);
+    await seedWon(qSystem, "system");
+    await seedWon(qRepair, "repair");
+    await seedWon(qInspection, "inspection");
+
+    const pending = await ProjStore.pendingConversions();
+    const pendingIds = new Set(pending.map((q) => q.id));
+    ok(pendingIds.has(qSystem), "#180 review 2 (item 3): a won install/system quote still shows as a pending conversion");
+    ok(!pendingIds.has(qRepair), "#180 review 2 (item 3): a won repair quote no longer shows a dead 'Start' button");
+    ok(!pendingIds.has(qInspection), "#180 review 2 (item 3): a won inspection quote no longer shows a dead 'Start' button");
+
+    ok(
+      (await ProjStore.createProjectFromQuote(qRepair)) === null,
+      "#180 review 2 (item 3): createProjectFromQuote genuinely refuses a repair quote (confirms the exclusion list actually matches)"
+    );
+    ok(
+      (await ProjStore.createProjectFromQuote(qInspection)) === null,
+      "#180 review 2 (item 3): createProjectFromQuote genuinely refuses an inspection quote"
+    );
+  } finally {
+    for (const d of await listDocs169("projects")) {
+      if (typeof d.quoteId === "string" && d.quoteId.startsWith(PRE)) await softDeleteDoc("projects", d.id);
+    }
+    for (const id of QUOTE_IDS) await softDeleteDoc("quotes", id);
+  }
+}
+
 import { withQuoteLock } from "../src/db";
 import { sql } from "drizzle-orm";
 import {
