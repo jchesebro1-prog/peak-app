@@ -389,6 +389,14 @@ async function gateHit(
   // not — item 4 below still checks it isn't a same-zip coincidence far away.
   const zipMatches = !!(opts?.zip5 && hit.zip && hit.zip.slice(0, 5) === opts.zip5);
 
+  // D235 item 5: a fallback attempt (2 or 3 — the only callers that pass
+  // zip5) with nothing left to compare a city against, because the stated
+  // city cleaned to "", has only the zip left to trust. Without this, an
+  // empty cityForCompare fell through the city-mismatch check below and
+  // accepted unconditionally, zip or no zip.
+  if (opts?.zip5 !== undefined && !cityText)
+    return zipMatches ? { ok: true } : { ok: false, reason: "city-mismatch", got: `${hit.city}, ${hit.state}` };
+
   // Second gate: the right state is not the right place ("Portage" -> Portage
   // County, "LaCrosse" -> Town of Baraboo, both in Wisconsin). Require the
   // resolved city to BE the stated city — except a street-level hit within

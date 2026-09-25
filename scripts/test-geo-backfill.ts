@@ -398,6 +398,31 @@ async function main() {
     );
     assert.ok(!m.ok, "a same-zip hit far from the resolvable stated-town centre is rejected");
 
+    // #185 item 5: with nothing to compare a city against (the stated city
+    // cleans to ""), a fallback attempt must fall back to the zip alone —
+    // never accept unconditionally just because there's no city text.
+    const ctxI = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "42 blank city rd, wi 53020",
+      hit: { lat: 45.5, lng: -92.5, city: "SomeTown", state: "Wisconsin", zip: "53099" },
+    });
+    const i1 = await geocodeVenue(
+      { address: "42 Blank City Rd", city: "(Unknown)", state: "WI", zip: "53020" },
+      ctxI
+    );
+    assert.deepEqual(i1, { ok: false, reason: "no-hit" }, "no city to gate on and a mismatched zip is rejected");
+
+    const ctxJ = newGeocodeCtx(0);
+    nominatim.push({
+      when: (u) => q(u) === "43 blank city rd, wi 53021",
+      hit: { lat: 45.5, lng: -92.5, city: "SomeTown", state: "Wisconsin", zip: "53021" },
+    });
+    const j1 = await geocodeVenue(
+      { address: "43 Blank City Rd", city: "(Unknown)", state: "WI", zip: "53021" },
+      ctxJ
+    );
+    assert.ok(j1.ok, "no city to gate on but a matching zip is accepted");
+
     console.log("PASS geo-backfill: geocodeVenue fallback chain");
   }
 
