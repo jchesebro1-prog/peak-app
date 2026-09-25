@@ -6313,7 +6313,10 @@ follow-up). Files: `src/app/(app)/import/{types,parse,link,registry,actions,page
 `inbox/link-actions.ts`. Tests: `test:specs` (#137 T2/T3), `test:review:regressions` (#137
 T1/T4/T5/T6), `test:smoke` (hub + export routes). Decisions: D158.
 
-## 138. Cron reconcile of Peak/* label drift on dormant threads — OPEN (re-logged; was #98)
+## 138. Cron reconcile of Peak/* label drift on dormant threads — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: `reconcilePeakLabelsForMailbox()` exists at `src/lib/gmail/label-sync.ts:109` and is called from `bridge.ts`.
 
 D142's Peak→Gmail writer (`queueLabelSync`) is fire-and-forget: it's queued from the store mutation
 inside a server action, with no `waitUntil`, so on serverless the process can freeze or recycle before
@@ -6330,7 +6333,10 @@ differ would close this: bounded cost (one `getDoc` + one label-cache read per l
 only needs to run on the cron path, not the interactive one, since interactive traffic already
 self-heals via the next mutation. Reference D142.
 
-## 139. `PARTNER_TYPES` still mismatches `COMPANY_TYPES` for four non-vendor partner types — OPEN
+## 139. `PARTNER_TYPES` still mismatches `COMPANY_TYPES` for four non-vendor partner types — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: `PARTNER_TYPES` (`src/lib/identity/venue-defaults.ts:18`) carries all four `COMPANY_TYPES` spellings — `architect`, `general contractor`, `electrical contractor`, `engineer or AV consultant` — alongside the legacy capitalised literals.
 
 **Reported:** found during #122 (Vendors module) reviews, 2026-09-21 — pre-existing, out of that
 punch's scope.
@@ -6351,7 +6357,10 @@ data on `main` today.
 legacy literal, add the exact `COMPANY_TYPES` spelling): `"architect"`, `"general contractor"`,
 `"electrical contractor"`, `"engineer or AV consultant"`.
 
-## 140. A vendor with a price list but NO claimed manufacturers is permanently "Newer list received" — OPEN
+## 140. A vendor with a price list but NO claimed manufacturers is permanently "Newer list received" — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: `VENDOR_STATUS_KEYS` (`src/lib/vendor-status.ts:28`) is `["no-list", "no-claims", "newer-list", "outdated", "current"]`, and `VENDOR_STATUS_META["no-claims"]` exists at `:37`. Option (b) from the ask.
 
 **Reported:** found during the #122 (Vendors module) final review, 2026-09-21. Not a defect against
 the spec — the spec says this and the regression harness asserts it — so it is Jeff's call, not a
@@ -6378,7 +6387,10 @@ the ledger visible AND the queue quiet, at the cost of one more chip in `VENDOR_
 `/vendors` status filter. Whichever is picked, the spec §2 status table, `DECISIONS.md` D160 and the
 `#122` harness assertions move with it. Reference #122 / D160.
 
-## 141. Vendor Overview: the remount that fixed concurrent overwrites also eats the "Saved" chip and unsaved keystrokes — OPEN
+## 141. Vendor Overview: the remount that fixed concurrent overwrites also eats the "Saved" chip and unsaved keystrokes — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: the `key={row.profile.updatedAt}` remount is gone from `src/app/(app)/vendors/[id]/page.tsx`; the only remaining `key=` props are ordinary list keys.
 
 **Reported:** found during the #122 (Vendors module) re-review, 2026-09-22 — introduced by that
 module's own fix wave, so it ships with the feature rather than predating it.
@@ -6916,7 +6928,7 @@ failures were not theirs, and a real regression would have received the same shr
 from here can be read at face value.
 
 **Files:** `src/db/index.ts`, `scripts/test-review-and-spec.ts`. No schema change.
-## 149. The spec harness's fixture rows are never torn down, by file-wide convention — OPEN
+## 149. The spec harness's fixture rows are never torn down, by file-wide convention — DONE 2026-09-24 (D233)
 
 **Reported:** found during #145 Task 3's review, 2026-09-22 — pre-existing pattern, not introduced
 by #145, but #145 is what made it worth logging given the shared-DB risk below.
@@ -6941,7 +6953,10 @@ open `CE-####` on every `test:specs` run. Given the same find-or-create-by-fixed
 `try`/`finally` + `softDeleteDoc` treatment as Task 3's. Two instances fixed now; the ask above
 (a repo-wide convention) still stands — this remains a per-test discipline, not an enforced one.
 
-## 150. The engagement file proxy keys on a client-supplied storage key rather than record coordinates — OPEN
+## 150. The engagement file proxy keys on a client-supplied storage key rather than record coordinates — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: the route is now `src/app/api/engagement-files/[engagementId]/[noteId]/[attachmentIndex]/route.ts` — addressed by record coordinates, which is exactly what the ask specified. The old `[fileId]` shape is gone.
 
 **Reported:** found during #145 Task 9's review, 2026-09-22. Deferred deliberately during the run
 to avoid a third collision with a task (#145 Task 7) editing the same rendering path the same day.
@@ -6959,7 +6974,10 @@ those two layers to be safe in the first place.
 **Ask:** reshape `fileRefHref` and the proxy to address a note + attachment index rather than a raw
 `FileRef`, once no other task is mid-edit on the same rendering path.
 
-## 151. Task-template import validation surfaces at commit time, on the receipt — not per-row in the preview — OPEN
+## 151. Task-template import validation surfaces at commit time, on the receipt — not per-row in the preview — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: `ttRowWarnings` (`src/app/(app)/import/registry.ts:564`) is called at `:625` on the preview path as well as at `:1195`, so unknown phase/discipline values are flagged per row before commit.
 
 **Reported:** found during #145 Task 10's review, 2026-09-22. The spec (§5.5) said unknown
 phase/discipline values on a template-set CSV import are "reported per-row in the preview."
@@ -6976,7 +6994,10 @@ promised, and an operator still has to re-diff their own CSV to find which rows 
 unknown values are flagged per-row before commit, the way every other import type in the registry
 already works. Touches shared code beyond `task_templates`, which is why #145 didn't do it inline.
 
-## 152. Gantt: `barRect`'s overrun test is a raw instant where `overrunsEnd` is day-granular — OPEN
+## 152. Gantt: `barRect`'s overrun test is a raw instant where `overrunsEnd` is day-granular — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: `barRect` (`src/components/gantt/gantt-lib.ts:51`) now tests `snapToDay(bar.startAt) > snapToDay(endAt)`, day-granular on both sides, with a comment citing the same reasoning this item asked for.
 
 **Reported:** found during #145 Task 5's original build, 2026-09-22 — bounded and not reachable
 today, logged so it isn't lost if that changes.
@@ -6991,7 +7012,10 @@ wrong flag today because every post-drag `startAt` is snapped to local midnight
 **Ask:** floor `barRect`'s comparison to the local day the same way, so the two functions agree by
 construction rather than by the coincidence that nothing currently feeds `barRect` an unsnapped time.
 
-## 153. Gantt: a task's first drag can shift its visible length by up to a day — OPEN
+## 153. Gantt: a task's first drag can shift its visible length by up to a day — DONE (shipped on main, status was stale; verified 2026-09-24)
+
+**Closed 2026-09-24 without new work.** It was built on `main` and the status line was never updated —
+found while re-scoping the B2 batch. Evidence: the drag captures `calendarDuration(bar.startAt, bar.dueAt)` (`gantt-grid.tsx:202`), and `calendarDuration` (`gantt-lib.ts:88`) is `snapToDay(dueAt) − snapToDay(startAt)` — whole local days.
 
 **Reported:** found during #145 Task 5's original build, 2026-09-22.
 
@@ -7006,7 +7030,7 @@ that first drag only. Subsequent drags (both endpoints already at local midnight
 **Ask:** snap the duration's reference point (or recompute duration in whole days at the moment of
 the first drag) so a task's very first drag doesn't quietly clip up to a day off its length.
 
-## 154. Gantt: SSR/hydration style divergence from timezone-dependent day columns — OPEN
+## 154. Gantt: SSR/hydration style divergence from timezone-dependent day columns — DONE 2026-09-24 (D232)
 
 **Reported:** found during #145 Task 6's review, 2026-09-22 — measured and bounded, not fixed,
 because the fix is a rendering-strategy change (server TZ vs. client TZ) outside a scheduling
@@ -7039,7 +7063,7 @@ re-rendering that subtree) — logged so a future console-warning triage doesn't
 that this specific mismatch is cosmetic and self-correcting rather than a sign of a real bug, and
 doesn't assume every Gantt-grid caller shares the engagement tab's 0.17% bound.
 
-## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — OPEN
+## 155. A discipline deleted from Settings still renders as a checked box on an existing consulting quote — DONE 2026-09-24 (D231)
 
 **Reported:** found during #145 Task 11's review, 2026-09-22.
 
@@ -7057,7 +7081,7 @@ box reads as if unchecking it would do something, when saving drops it either wa
 vocabulary as "removed," or accept the current display and just note it in whatever end-user docs
 exist for the quote builder.
 
-## 156. `normalizeLine`'s idempotency on phase casing across repeated export→import cycles is unconfirmed — OPEN
+## 156. `normalizeLine`'s idempotency on phase casing across repeated export→import cycles is unconfirmed — DONE 2026-09-24 (non-issue, proven by a five-cycle test)
 
 **Reported:** found during #145 Task 10's review, 2026-09-22.
 
@@ -7073,7 +7097,7 @@ phase re-exported and re-imported five times stays `"Schematic Design"` or drift
 confirm by inspection that `normalizeLine`'s phase handling is already case-preserving and close
 this as a non-issue.
 
-## 157. `/schedule?view=timeline` stacks two independently-ranged grids — the same x-position means a different date in each — OPEN
+## 157. `/schedule?view=timeline` stacks two independently-ranged grids — the same x-position means a different date in each — DONE 2026-09-24 (D232)
 
 **Reported:** found during #145 Task 15's whole-branch review, 2026-09-22. The most user-visible of
 the carried minors from this branch; Jeff should not discover it by surprise.

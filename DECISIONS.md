@@ -5106,3 +5106,75 @@ all, now stays open showing the reason instead of closing as though it had worke
 - **Unlocated rows sort last in both directions.** "Farthest first" should not open with 200 unknowns.
 - **The calendar origin is chosen per appointment:** a typed address, then a saved location with coordinates, then the person's base ("Based out of", else the quote origin). A typed miss falls back to the base and says so in the block's description; it doesn't silently drop the block. The travel block runs in `after()` so a slow geocoder can't time out the save and invite a duplicate meeting. Edits still don't regenerate the block (D144).
 - **Numbering.** #175/#176 and D228/D229, not #169/#170 and D225/D226, which a parallel session claimed first.
+
+## D231. A discipline removed from Settings is kept on an existing quote unless someone unticks it (#155, 2026-09-24)
+
+The quote builder has always shown a discipline that is on the quote but gone from the live Settings vocabulary, and
+a recent change labelled it `<Name> (removed)`. The save action still intersected against the **live** list, so it was
+dropped on the next save whether or not the box was ticked.
+
+That combination is worse than either half alone: the label makes a silent behaviour visible without making it true —
+a checkbox that names itself "removed", looks tickable, and is discarded regardless. Two smaller things were wrong
+underneath it: the checkbox was `disabled`, so "untick it to remove it" was literally unreachable, and its tooltip
+said the opposite of what happened.
+
+Now `resolveDisciplines(posted, live, existing)` keeps a posted value when it is in the live vocabulary **or**
+already on this quote, and drops everything else. The checkbox is tickable and says so.
+
+**The hole that intersection existed to close stays closed.** It is there to stop a hand-crafted POST stashing an
+arbitrary discipline. The allowlist gained exactly one term — `existing`, read from the **stored quote**, never from
+the form — so a value in neither list is still refused, pinned by its own test.
+
+It lives in `src/lib/settings.ts` rather than beside the action, because a `"use server"` module can only export
+async functions and this needs to be a pure, directly-testable helper.
+
+## D232. `/schedule?view=timeline` gets one window, one ruler, and a noon anchor (#157, #154, 2026-09-24)
+
+The page stacked two grids that did not agree on what a date is. Consulting rendered `GanttGrid` over its own range
+as a percentage of that range; the Installs timeline computed its own `tlStart`/`tlDays`/`tlDayW` at a fixed
+pixel-per-day. Both padded identically, but from **different bar sets** — so the same horizontal offset in the two
+stacked sections was, in general, two different calendar dates, with no shared ruler to say so.
+
+Both sections now take one `{ start, end, dayWidth }` computed from the **union** of their bars, positioned as a
+percentage of that shared range inside one scroll container whose inner width is `days × dayWidth`. Percentage alone
+would have killed zoom and horizontal scroll; converting `GanttGrid` to fixed pixels would have dragged the
+engagement Schedule tab and the By-person view into the change for no benefit. The shared fixed inner width keeps
+`dayWidth` meaningful and makes zoom scale both sections together.
+
+**#154 came along with it, and the punch entry was wrong twice.** It said no fix was required because React
+self-heals a style-only hydration mismatch, and it framed the fix as a rendering-strategy change. The engineering
+spec said the columns must render identically; the spec is the later decision and governs — and the fix is two lines
+in one pure function, not a rewrite. The punch's *mechanism* was also off: `ganttRange` only ever ran on the server
+and its result is serialized, so the divergence was `GanttGrid` re-flooring those midnight boundaries client-side.
+Anchoring the range to local noon — the convention every other date in this app uses — gives that re-floor ±12h of
+slack. A side effect worth knowing: `?view=timeline` now has no #154 exposure at all, because it no longer renders a
+client grid; the fix still matters for `?view=people`.
+
+**Verified by measurement, not by eye:** ruler, consulting and install tracks all report `{left: 241, width: 12935}`;
+every bar sits an exact integer day offset from the shared week labels; the today band is one continuous line through
+both sections; and adding a scheduled engagement widened the install ruler from 131 to 143 weeks — the union working,
+which the old code could not have done.
+
+**Left deliberately:** the window is unbounded, so one garbage stored date yields a multi-decade grid, and per-day
+iteration makes that roughly three times the DOM cost of the old per-week loop. Clamping it would hide real
+long-lead work, which is worse.
+
+## D233. Spec fixtures are torn down by default, and teardown means removal, not a tombstone (#149, 2026-09-24)
+
+`scripts/test-review-and-spec.ts` wrote DB-backed fixtures that nothing deleted — a file-wide convention, not one
+test's oversight. Individual tests had been fixed by hand several times and the next author still had to remember.
+
+There is now one marker shape, `TEST<scope>:<slug>`, already the majority form in the file so the change is
+convention rather than churn; a `createFixture()` that registers for teardown at the moment of creation, so cleanup
+is the default; suite-level teardown in a `finally` so a mid-suite throw still cleans up; and
+`npm run test:sweep-fixtures` to repair a datadir after the fact — dry run by default, `--commit` to write, `--yes`
+additionally for a hosted target, and `--hard` refused on a hosted target under every flag combination.
+
+**The finding that makes this entry worth writing: teardown cannot soft-delete.** The first attempt did, and the
+suite passed at 2183 on the first run and failed with **21 errors** on the second against the same datadir. The
+spawn router is now tombstone-aware (D227) — a tombstone counts as coverage precisely so a deleted record is not
+recreated — so soft-deleted fixtures silently suppressed the spawns the next run was asserting. Fixture teardown
+removes rows outright.
+
+That interaction was invisible to every previous run of this suite, because each one got a fresh `mktemp -d`. Running
+twice against **one** datadir is what surfaced it, and is now the check that proves teardown works.
