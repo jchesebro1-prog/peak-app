@@ -6,6 +6,7 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { withQuoteLock } from "@/db";
 import { get as getCustomerDoc } from "./customers";
 
 /**
@@ -650,19 +651,29 @@ async function coveredQuoteIds(): Promise<Set<string>> {
   return out;
 }
 
+/** #180: check-then-insert runs under an advisory lock keyed on the quote id
+ *  (`withQuoteLock`), so a healing sweep racing another sweep or a live
+ *  re-approval for the SAME quote serializes instead of minting two jobs. */
 export async function createFromQuote(qid: string): Promise<RepairJobRecord | null> {
-  const existing = await byQuote(qid);
-  if (existing) return existing;
-  // #173: no live job, but a deleted one still means this quote is handled.
-  if ((await coveredQuoteIds()).has(qid)) return null;
-  const q = await getDoc<RepairQuoteLike>("quotes", qid);
-  if (!q || q.quoteType !== "repair") return null;
-  return create(await fromQuote(q));
+  return withQuoteLock(qid, async () => {
+    const existing = await byQuote(qid);
+    if (existing) return existing;
+    // #173: no live job, but a deleted one still means this quote is handled.
+    if ((await coveredQuoteIds()).has(qid)) return null;
+    const q = await getDoc<RepairQuoteLike>("quotes", qid);
+    // #180: re-read fresh under the lock — a sweep's `won` filter runs on a
+    // snapshot taken before the lock, so a quote marked lost (or otherwise
+    // moved on) between that snapshot and now must not spawn a job.
+    if (!q || q.quoteType !== "repair" || q.status !== "won") return null;
+    return create(await fromQuote(q));
+  });
 }
 
 /** Scan accepted (won) repair quotes and create any job not made yet.
  *  Returns the number of jobs created. Page-load backfill only (repairs
- *  dashboard + scheduler) — never call it inside a transaction. */
+ *  dashboard + scheduler) — never call it inside a transaction. Per-quote
+ *  creation routes through `createFromQuote` (#180) so its advisory lock
+ *  guards concurrent sweeps/approvals; `have` is only a fast-path skip. */
 export async function syncFromQuotes(): Promise<number> {
   const quotes = await listDocs<RepairQuoteLike>("quotes");
   const have = await coveredQuoteIds();
@@ -670,9 +681,9 @@ export async function syncFromQuotes(): Promise<number> {
   for (const q of quotes) {
     if (q.quoteType !== "repair" || q.status !== "won") continue;
     if (have.has(q.id)) continue;
-    await create(await fromQuote(q));
+    const rec = await createFromQuote(q.id);
     have.add(q.id);
-    made++;
+    if (rec) made++;
   }
   return made;
 }

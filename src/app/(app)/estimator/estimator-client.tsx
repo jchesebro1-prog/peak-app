@@ -384,6 +384,14 @@ export default function EstimatorClient({
   const [loadedId, setLoadedId] = useState(initial.loadedId);
   const [quoteId, setQuoteId] = useState(initial.quoteId);
   const [status, setStatus] = useState<QuoteStatus>(initial.status);
+  /** #180 review 2 — the status this tab last received FROM THE SERVER
+   *  (page load, or a confirmed save/status-change response). `status`
+   *  above also updates OPTIMISTICALLY (changeStatus/changeStage set it
+   *  before their server round trip resolves); this one only ever moves on
+   *  a server-confirmed value, so saveQuoteAction can tell a genuine
+   *  in-flight change apart from a stale tab that never heard about a
+   *  change made elsewhere. */
+  const [baseStatus, setBaseStatus] = useState<QuoteStatus>(initial.status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
   /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
      changes it), so it stays a plain const rather than state. */
@@ -437,6 +445,17 @@ export default function EstimatorClient({
   const [attestOpen, setAttestOpen] = useState(false);
   const [attestNote, setAttestNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  /** #180 review 3 — an informational note from the server that isn't a
+   *  failure: e.g. a stale tab's status display was refreshed because
+   *  someone else moved it elsewhere, even though this save succeeded and
+   *  never asked to change status itself. Shown alongside "Saved ✓", not
+   *  in place of it, and never implies anything went wrong. */
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  /** True while changeStatus/changeStage's own gated setStatusAction/
+   *  setQuoteStageAction round trip is in flight (security review,
+   *  2026-09-25) — disables Save so a click landing in that window can't
+   *  race the server's own gate with a second, ungated status value. */
+  const [statusChanging, setStatusChanging] = useState(false);
   /** Result banner for "Move system" — never auto-navigates (the user may
    *  have other unsaved edits on the CURRENT estimate). */
   const [moveNotice, setMoveNotice] = useState<
@@ -715,7 +734,12 @@ export default function EstimatorClient({
 
   const applySync = (r: ReviewSync) => {
     if (r.review) setReview(r.review);
-    if (r.status) setStatus(r.status);
+    // Server-confirmed — this is what makes baseStatus trustworthy for the
+    // next save's stale-tab check (#180 review 2).
+    if (r.status) {
+      setStatus(r.status);
+      setBaseStatus(r.status);
+    }
   };
 
   /** Same idea as applySync, for the Daylite stage bar's StageSync (Task 6) —
@@ -723,7 +747,10 @@ export default function EstimatorClient({
    *  underneath when the tag changes), so all four fields sync together. */
   const applyStageSync = (r: StageSync) => {
     if (r.review) setReview(r.review);
-    if (r.status) setStatus(r.status);
+    if (r.status) {
+      setStatus(r.status);
+      setBaseStatus(r.status);
+    }
     if (r.pipelineId) setPipelineId(r.pipelineId);
     if (r.stage) setStage(r.stage);
   };
@@ -752,11 +779,20 @@ export default function EstimatorClient({
           value: t.grand,
           margin: t.margin,
           status,
+          // #180 review 2 — what this tab last confirmed from the server,
+          // so the action can tell a genuine change from a stale tab.
+          baseStatus,
           sections,
           mobs,
           vendorQuotes,
         });
-        if (res.ok && res.id) {
+        // #181: adopt the id whenever the server hands one back, even when
+        // `ok` is false — the create branch mints the quote FIRST and only
+        // then attempts the requested status advance, so a refused advance
+        // still returns a real, saved id. Gating adoption on `res.ok` left
+        // `loadedId` unset, so the next Save took the create path again and
+        // minted a second quote for the same draft.
+        if (res.id) {
           setLoadedId(res.id);
           setQuoteId(res.id);
           // The server may have moved attachments into Blob storage — take its
@@ -765,16 +801,34 @@ export default function EstimatorClient({
           setRevNum(res.revNum);
           setRevDateMs(res.updatedAt);
           if (res.review) setReview(res.review);
-          if (res.status) setStatus(res.status);
+          // Server-confirmed either way (ok or refused/stale) — this IS the
+          // resync: whether the requested status applied, was refused, or
+          // was left alone because this tab was stale, res.status is always
+          // what the server actually has now (#180 review 2).
+          if (res.status) {
+            setStatus(res.status);
+            setBaseStatus(res.status);
+          }
           // Daylite stage bar (Task 6) — a brand-new quote has no pipeline
           // until this first save creates it; pick it up immediately so the
           // bar shows the right stage highlighted without another round trip.
           if (res.pipelineId) setPipelineId(res.pipelineId);
           if (res.stage) setStage(res.stage);
         }
-        setJustSaved(true);
-        if (savedTimer.current) clearTimeout(savedTimer.current);
-        savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+        if (res.ok) {
+          setActionError(null);
+          // #180 review 3 — a stale tab's status got silently refreshed;
+          // shown alongside "Saved ✓", never implying the save failed.
+          setActionNotice(res.notice || null);
+          setJustSaved(true);
+          if (savedTimer.current) clearTimeout(savedTimer.current);
+          savedTimer.current = setTimeout(() => setJustSaved(false), 1800);
+        } else {
+          // The gate's own message (statusFailureMessage, D230) — the quote
+          // itself saved; only the requested status advance was refused.
+          setActionNotice(null);
+          setActionError(res.error || "That save did not go through — nothing was written.");
+        }
       } catch (e) {
         /* #143 re-review: a save that THROWS — a rejected request body, a
            dropped connection — used to be indistinguishable from a save that
@@ -793,18 +847,23 @@ export default function EstimatorClient({
     setStatus(v);
     if (loadedId) {
       const id = loadedId;
+      setStatusChanging(true);
       startTransition(async () => {
-        const r = await setStatusAction(id, v);
-        if (!r.ok) {
-          // Punch #60: server rejected the transition (e.g. "won" without an
-          // approval on record) — roll back the optimistic UI change and
-          // surface why, instead of silently pretending it worked.
-          setStatus(prevStatus);
-          setActionError(r.error || "That status change was rejected.");
-          return;
+        try {
+          const r = await setStatusAction(id, v);
+          if (!r.ok) {
+            // Punch #60: server rejected the transition (e.g. "won" without an
+            // approval on record) — roll back the optimistic UI change and
+            // surface why, instead of silently pretending it worked.
+            setStatus(prevStatus);
+            setActionError(r.error || "That status change was rejected.");
+            return;
+          }
+          setActionError(null);
+          applySync(r);
+        } finally {
+          setStatusChanging(false);
         }
-        setActionError(null);
-        applySync(r);
       });
     }
   };
@@ -821,16 +880,21 @@ export default function EstimatorClient({
     const prevStage = stage;
     const prevStatus = status;
     setStage(stageId);
+    setStatusChanging(true);
     startTransition(async () => {
-      const r = await setQuoteStageAction(id, stageId);
-      if (!r.ok) {
-        setStage(prevStage);
-        setStatus(prevStatus);
-        setActionError(r.error || "That stage change was rejected.");
-        return;
+      try {
+        const r = await setQuoteStageAction(id, stageId);
+        if (!r.ok) {
+          setStage(prevStage);
+          setStatus(prevStatus);
+          setActionError(r.error || "That stage change was rejected.");
+          return;
+        }
+        setActionError(null);
+        applyStageSync(r);
+      } finally {
+        setStatusChanging(false);
       }
-      setActionError(null);
-      applyStageSync(r);
     });
   };
 
@@ -2045,6 +2109,8 @@ export default function EstimatorClient({
               <button
                 type="button"
                 onClick={doSave}
+                disabled={statusChanging}
+                title={statusChanging ? "A status change is still saving — try again in a moment." : undefined}
                 style={{
                   fontFamily: "var(--font-ui)",
                   fontSize: 13,
@@ -2052,7 +2118,8 @@ export default function EstimatorClient({
                   border: "none",
                   borderRadius: 8,
                   padding: "9px 15px",
-                  cursor: "pointer",
+                  cursor: statusChanging ? "not-allowed" : "pointer",
+                  opacity: statusChanging ? 0.6 : 1,
                   ...(justSaved
                     ? { background: "#22361f", color: "#5fd29a" }
                     : { background: "#2b2e35", color: "#cfd3da" }),
@@ -2395,6 +2462,44 @@ export default function EstimatorClient({
                   fontSize: 12.5,
                   fontWeight: 600,
                   color: "#9a2f22",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  flexShrink: 0,
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* informational save notice (#180 review 3) — a stale tab's
+              status got refreshed, but nothing this save asked for failed */}
+          {!actionError && actionNotice && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "9px 22px",
+                background: "#eef3fb",
+                borderBottom: "1px solid #cddaf0",
+                color: "#2b4a7a",
+                fontSize: 12.5,
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              <span>{actionNotice}</span>
+              <button
+                type="button"
+                onClick={() => setActionNotice(null)}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: "#2b4a7a",
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",

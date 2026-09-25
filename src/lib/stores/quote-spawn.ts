@@ -1,4 +1,5 @@
 import type { Quote, QuoteStatus } from "./quotes";
+import { isQuoteLockTimeout, withQuoteLock } from "@/db";
 
 export type SpawnFromQuoteOpts = {
   /**
@@ -37,33 +38,51 @@ export async function spawnFromQuote(
   prevStatus: QuoteStatus,
   opts: SpawnFromQuoteOpts = {}
 ): Promise<void> {
-  // Consulting is the one type whose lifecycle starts before the win —
-  // sending opens the engagement, winning advances it, losing closes it — so
-  // it is routed on every status, not just "won".
-  if (quote.quoteType === "consulting") {
-    await spawnConsulting(quote);
-    return;
-  }
-  if (quote.status !== "won") return;
-  // An optimisation, explicitly NOT the idempotence guarantee — every creator
-  // below dedupes on the quote id itself. `replayUnchanged` opts out of it.
-  if (prevStatus === "won" && !opts.replayUnchanged) return;
-  switch (quote.quoteType) {
-    case "flame_test":
-      await (await import("./flame-jobs")).createFromQuote(quote.id);
-      break;
-    case "repair":
-      await (await import("./repair-jobs")).createFromQuote(quote.id);
-      break;
-    case "inspection":
-      await (await import("./inspections")).createFromQuote(quote.id);
-      break;
-    case "rental":
-      await (await import("./equipment-bookings")).createFromQuote(quote.id);
-      break;
-    default:
-      await spawnProject(quote.id);
-      break;
+  try {
+    // Consulting is the one type whose lifecycle starts before the win —
+    // sending opens the engagement, winning advances it, losing closes it —
+    // so it is routed on every status, not just "won".
+    if (quote.quoteType === "consulting") {
+      await spawnConsulting(quote);
+      return;
+    }
+    if (quote.status !== "won") return;
+    // An optimisation, explicitly NOT the idempotence guarantee — every creator
+    // below dedupes on the quote id itself. `replayUnchanged` opts out of it.
+    if (prevStatus === "won" && !opts.replayUnchanged) return;
+    switch (quote.quoteType) {
+      case "flame_test":
+        await (await import("./flame-jobs")).createFromQuote(quote.id);
+        break;
+      case "repair":
+        await (await import("./repair-jobs")).createFromQuote(quote.id);
+        break;
+      case "inspection":
+        await (await import("./inspections")).createFromQuote(quote.id);
+        break;
+      case "rental":
+        await (await import("./equipment-bookings")).createFromQuote(quote.id);
+        break;
+      default:
+        await spawnProject(quote.id);
+        break;
+    }
+  } catch (e) {
+    // #180 review: this whole function runs inside setStatus's own
+    // transaction, so an uncaught throw here rolls the STATUS CHANGE back
+    // too — the user's win silently undoes itself. A wedged withQuoteLock
+    // (a healing sweep, or another re-approve, still holding the advisory
+    // lock past its timeout) must not do that: the record isn't lost, the
+    // next healing sweep (safeSweep-wrapped on every dashboard this quote
+    // type owns) creates it the moment it re-checks coverage. Scoped to
+    // ONLY the lock timeout — anything else is a real defect in the spawn
+    // graph and still propagates (and still rolls the win back), exactly
+    // as before.
+    if (!isQuoteLockTimeout(e)) throw e;
+    console.warn(
+      `spawnFromQuote: advisory lock timed out spawning for quote ${quote.id} (${quote.quoteType}) — the status change still committed; a healing sweep will create the record`,
+      e
+    );
   }
 }
 
@@ -72,14 +91,12 @@ export async function spawnFromQuote(
  * the user already deleted the one it made (#169).
  *
  * Deleting a quote-born project records that quote on the dismissed list
- * (`removeProject` → `dismissedQuoteIds`, projects.ts), and the page-load
- * sweep `syncProjectsFromQuotes` has always honoured it — but the per-quote
- * creator `createProjectFromQuote` never has. That was harmless while the
- * creator was only reachable from the Projects "convert a pending quote"
- * flow, which never operates on a dismissed quote; routing every win through
- * it silently resurrected a project the user had deleted. The check lives
- * here rather than inside `createProjectFromQuote` so the explicit convert
- * action still means what it says.
+ * (`removeProject` → `dismissedQuoteIds`, projects.ts). `createProjectFromQuote`
+ * (#180) checks it itself, fresh, inside its advisory lock — so this caller
+ * just calls it plainly, rather than pre-checking a stale snapshot here and
+ * racing the lock. It always honours the dismissed list now (review round
+ * 2, item 2) — the one caller that used to opt out (the Projects screen's
+ * explicit "convert a pending quote" action) had its bypass removed too.
  *
  * That is a claim about the dismissed BLOB only: it is a projects-only
  * mechanism, no other spawner has one, and minting a second dismissed list
@@ -92,9 +109,9 @@ export async function spawnFromQuote(
  * re-approval replay.
  */
 async function spawnProject(quoteId: string): Promise<void> {
-  const { createProjectFromQuote, dismissedQuoteIds } = await import("./projects");
-  if ((await dismissedQuoteIds()).includes(quoteId)) return;
-  // Idempotent on getProjectByQuote(quoteId).
+  const { createProjectFromQuote } = await import("./projects");
+  // Idempotent on getProjectByQuote(quoteId); dismissed-list + status
+  // re-checked fresh under the lock (#180).
   await createProjectFromQuote(quoteId);
 }
 
@@ -114,32 +131,55 @@ async function spawnProject(quoteId: string): Promise<void> {
  * close/reopen go through `applyEngagementStageAction`, the shared per-row
  * writer that owns the "Proposal lost" decision copy. The sweep stays what it
  * always was: a page-load reconciliation, never called from a transaction.
+ *
+ * #180 review round 3: the advance/close/reopen branch used to write
+ * through `applyEngagementStageAction` with no lock at all — only the
+ * "create" branch (via `ensureEngagementForQuote`) was locked. That meant
+ * the sweep's OWN lock (added in round 2 to guard its stale pre-loop
+ * snapshot) never actually contended with THIS, the live path: two
+ * independent advisory locks on the same quote only serialize callers that
+ * BOTH take one. The whole branch now runs under `withQuoteLock(quote.id,
+ * …)`, which — reached here from `spawnFromQuote` inside `setStatus`'s own
+ * transaction — simply joins that transaction (no new BEGIN) and holds the
+ * lock until it commits. A sweep pass racing the same quote now genuinely
+ * waits for the live win/lose/re-send to finish, then re-reads and acts on
+ * the committed result — never re-reads a pre-commit status and overwrites
+ * the live path's write (e.g. a "Proposal lost" close) with a decision
+ * made from stale data.
  */
-async function spawnConsulting(quote: Quote): Promise<void> {
+/** Exported (review round 3, item 2/5) purely so the regression harness can
+ *  call the real live-path function directly, rather than a copied block —
+ *  every other caller still goes through `spawnFromQuote`. */
+export async function spawnConsulting(quote: Quote): Promise<void> {
   const { engagementSyncAction, normalizeEngagementStatus } = await import(
     "@/lib/consulting-stages"
   );
   const { applyEngagementStageAction, ensureEngagementForQuote, getEngagementByQuote } =
     await import("./engagements");
-  const existing = await getEngagementByQuote(quote.id);
-  const stage = existing ? normalizeEngagementStatus(String(existing.status)) : null;
-  const action = engagementSyncAction(String(quote.status || ""), stage);
-  if (!action) return;
-  if (action.kind === "create") {
-    // The one case that cannot use the shared writer: there is no row yet, so
-    // it needs the quote itself (`fromQuote`) plus the id mint. `create` is
-    // only ever returned when `existing` is null, so the lookup inside
-    // `ensureEngagementForQuote` is the second scan of this path — kept
-    // because the builder it wraps is not exported on its own.
-    await ensureEngagementForQuote(quote.id, action.stage);
-    return;
-  }
-  // advance / close / reopen — `existing` is already in hand, so all three go
-  // STRAIGHT to the shared per-row writer: no second full-collection scan
-  // inside the transaction, and every write this branch makes goes through the
-  // one writer, as the module claims. `engagementSyncAction` only returns
-  // these three when `stage` was non-null, i.e. `existing` is set — the guard
-  // is for the type checker, never a silent skip of work that was due.
-  if (!existing) return;
-  await applyEngagementStageAction(action, existing.id, quote.id);
+  await withQuoteLock(quote.id, async () => {
+    const existing = await getEngagementByQuote(quote.id);
+    const stage = existing ? normalizeEngagementStatus(String(existing.status)) : null;
+    const action = engagementSyncAction(String(quote.status || ""), stage);
+    if (!action) return;
+    if (action.kind === "create") {
+      // The one case that cannot use the shared writer: there is no row yet,
+      // so it needs the quote itself (`fromQuote`) plus the id mint. `create`
+      // is only ever returned when `existing` is null, so the lookup inside
+      // `ensureEngagementForQuote` is the second scan of this path — kept
+      // because the builder it wraps is not exported on its own.
+      // `ensureEngagementForQuote` takes the SAME lock; nested here it just
+      // joins (Postgres advisory locks are per-session reentrant), not a
+      // second contention point.
+      await ensureEngagementForQuote(quote.id, action.stage);
+      return;
+    }
+    // advance / close / reopen — `existing` is already in hand, so all three go
+    // STRAIGHT to the shared per-row writer: no second full-collection scan
+    // inside the transaction, and every write this branch makes goes through the
+    // one writer, as the module claims. `engagementSyncAction` only returns
+    // these three when `stage` was non-null, i.e. `existing` is set — the guard
+    // is for the type checker, never a silent skip of work that was due.
+    if (!existing) return;
+    await applyEngagementStageAction(action, existing.id, quote.id);
+  });
 }
