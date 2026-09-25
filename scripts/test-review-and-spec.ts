@@ -8250,6 +8250,7 @@ seeded()
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  .then(() => deletePartBAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -11306,5 +11307,229 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   } finally {
     console.error = realConsoleError;
     await softDeleteDoc("quotes", Q_GATE);
+  }
+}
+
+/* ======================================================================
+   "Delete individual entries for everything" — part B (flame/repair jobs,
+   install projects, consulting engagements, site visits, recordings).
+
+   Flame/repair/inspection/project already had a store-level soft delete
+   AND tombstone-aware quote-spawn coverage before this change — proven
+   above by #169/#170/#173. This punch only ADDED action + UI for those
+   four (no store logic changed), so they get one light round trip each
+   here rather than re-deriving #169/#173's full matrix.
+
+   Consulting engagements had NEITHER a delete NOR tombstone-aware
+   coverage: `getEngagementByQuote` reads only live rows, so before this
+   change a re-approved quote (`ensureEngagementForQuote`) or the
+   `syncEngagementsFromQuotes` page-load sweep would read "no engagement"
+   for a deleted one and spawn a replacement. `coveredQuoteIds()`
+   (engagements.ts) closes that the same way flame-jobs.ts/repair-jobs.ts/
+   inspections.ts already did (#173/D227) — proven in full below, plus the
+   engagement delete's cascade to its own OPEN tasks.
+
+   Site visits and recordings are never quote-spawned or swept, so only
+   "delete -> gone from reads" applies to them (removeVisit's calendar
+   cleanup is a Google API call, not DB-provable here — see the UI code's
+   try/catch instead).
+
+   Every row here is `fixtureId("DELB", …)` / `createFixture()` (#149,
+   D233) or `registerFixture()`-registered right after mint, so the
+   suite-level teardown at the bottom of this file removes all of it —
+   no hand-rolled `finally` block needed. */
+import {
+  createProjectFromQuote as createProjectFromQuoteDelB,
+  syncProjectsFromQuotes as syncProjectsFromQuoteDelB,
+} from "../src/lib/stores/projects";
+import {
+  ensureEngagementForQuote as ensureEngagementForQuoteDelB,
+  syncEngagementsFromQuotes as syncEngagementsFromQuotesDelB,
+  getEngagement as getEngagementDelB,
+  removeEngagement,
+} from "../src/lib/stores/engagements";
+import { createTask as createTaskDelB, tasksForEngagement as tasksForEngagementDelB, getTask as getTaskDelB } from "../src/lib/stores/tasks";
+import { createVisit as createVisitDelB, getVisit as getVisitDelB, removeVisit } from "../src/lib/stores/site-visits";
+import { createRecording as createRecordingDelB, getRecording as getRecordingDelB, removeRecording } from "../src/lib/stores/recordings";
+
+async function deletePartBAsyncChecks(): Promise<void> {
+  const nowDelB = Date.now();
+  const baseQuoteDelB = (id: string, quoteType: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: `DELB harness ${quoteType} quote`,
+    quoteType,
+    status: "won",
+    customer: "Test Customer DELB",
+    customerId: null,
+    locationId: null,
+    value: 1000,
+    margin: 0,
+    source: "estimator",
+    owner: "Jeff Chesebro",
+    review: { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null },
+    createdAt: nowDelB,
+    updatedAt: nowDelB,
+    history: [],
+    ...extra,
+  });
+
+  /* ---------------- flame test job ---------------- */
+  {
+    const Q = fixtureId("DELB", "flame-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "flame_test", {
+      flameTest: { venues: [{ id: null, label: "Main Stage", curtains: 3 }] },
+    }));
+    const job = await flameCreate173(Q);
+    ok(!!job, "DELB flame: winning a quote spawns its job");
+    if (job) registerFixture("flame_jobs", job.id);
+    if (job) await flameRemove173(job.id);
+    ok(await flameByQuote(Q) === null, "DELB flame: the deleted job is gone from reads");
+    ok(await flameCreate173(Q) === null, "DELB flame: createFromQuote honours the tombstone (no resurrection on re-approve)");
+    await flameSync173();
+    ok(await flameByQuote(Q) === null, "DELB flame: the healing sweep does not resurrect the deleted job either");
+  }
+
+  /* ---------------- repair job ---------------- */
+  {
+    const Q = fixtureId("DELB", "repair-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "repair", {
+      repair: { title: "DELB repair", category: "other", venues: [{ id: null, label: "Main Stage" }] },
+    }));
+    const job = await createRepairFromQuote(Q);
+    ok(!!job, "DELB repair: winning a quote spawns its job");
+    if (job) registerFixture("repair_jobs", job.id);
+    if (job) await repairRemove173(job.id);
+    ok(await repairByQuote(Q) === null, "DELB repair: the deleted job is gone from reads");
+    ok(await createRepairFromQuote(Q) === null, "DELB repair: createFromQuote honours the tombstone");
+    await repairSync173();
+    ok(await repairByQuote(Q) === null, "DELB repair: the healing sweep does not resurrect the deleted job either");
+  }
+
+  /* ---------------- inspection (already had delete before this punch) ---------------- */
+  {
+    const Q = fixtureId("DELB", "inspection-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "inspection", {
+      inspection: { level: "l1", venues: [{ id: null, label: "Main Stage", lineSets: 12 }] },
+    }));
+    const recs = (await createInspectionFromQuote(Q)) || [];
+    ok(recs.length === 1, "DELB inspection: winning a quote spawns its requested record");
+    for (const r of recs) registerFixture("inspections", r.id);
+    for (const r of recs) await inspectionRemove173(r.id);
+    ok((await inspectionsByQuote(Q)).length === 0, "DELB inspection: the deleted record is gone from reads");
+    ok(((await createInspectionFromQuote(Q)) || []).length === 0, "DELB inspection: createFromQuote honours the tombstone");
+    await inspectionSync173();
+    ok((await inspectionsByQuote(Q)).length === 0, "DELB inspection: the healing sweep does not resurrect it either");
+  }
+
+  /* ---------------- install project ---------------- */
+  {
+    const Q = fixtureId("DELB", "project-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "system"));
+    const dismissedBefore = await dismissedQuoteIds();
+    const p = await createProjectFromQuoteDelB(Q);
+    ok(!!p, "DELB project: winning a system quote spawns its project");
+    if (p) registerFixture("projects", p.id);
+    if (p) await removeProject(p.id);
+    ok(await getProjectByQuote(Q) === null, "DELB project: the deleted project is gone from reads");
+    ok(
+      (await dismissedQuoteIds()).includes(Q),
+      "DELB project: deleting a quote-born project records that quote on the dismissed list (#169)"
+    );
+    const resweep = await syncProjectsFromQuoteDelB();
+    ok(await getProjectByQuote(Q) === null, "DELB project: the healing sweep does not resurrect the deleted project");
+    ok(resweep.skipped !== undefined, "DELB project: the sweep returns its usual shape (sanity check, not a stub)");
+    // Blob singleton — put the snapshot back rather than editing in place
+    // (the #169 convention above), so this fixture's own entry doesn't
+    // linger on a list every other test's dismissedQuoteIds() reads.
+    await setBlob(DISMISSED_BLOB_ID, { ids: dismissedBefore });
+  }
+
+  /* ---------------- consulting engagement (the store logic this punch
+     actually added — no delete AND no tombstone coverage existed before) */
+  {
+    const Q = fixtureId("DELB", "engagement-quote");
+    await createFixture("quotes", baseQuoteDelB(Q, "consulting"));
+    const eng = await ensureEngagementForQuoteDelB(Q, "awarded");
+    ok(!!eng, "DELB engagement: winning a consulting quote spawns its engagement");
+    if (!eng) return;
+    registerFixture("consulting_engagements", eng.id);
+
+    const me = { id: "u1", name: "Test Harness" };
+    const openTask = await createTaskDelB({ title: "DELB open task", engagementId: eng.id, status: "open" }, me);
+    const doneTask = await createTaskDelB({ title: "DELB done task", engagementId: eng.id, status: "done" }, me);
+    registerFixture("tasks", openTask.id);
+    registerFixture("tasks", doneTask.id);
+    ok((await tasksForEngagementDelB(eng.id)).length === 2, "DELB engagement fixture carries its two tasks (one open, one done)");
+
+    await removeEngagement(eng.id);
+    ok(await getEngagementDelB(eng.id) === null, "DELB engagement: the deleted engagement is gone from reads");
+    ok(await getTaskDelB(openTask.id) === null, "DELB engagement delete cascades to its OPEN task — soft-deleted too");
+    ok(!!(await getTaskDelB(doneTask.id)), "DELB engagement delete leaves its DONE task alone (history, not cascaded)");
+    ok(
+      (await tasksForEngagementDelB(eng.id)).length === 1,
+      "DELB tasksForEngagement now sees only the surviving done task"
+    );
+
+    // The actual gap this punch closed: a re-approve or the page-load
+    // sweep must not read "no engagement" and spawn a replacement.
+    const resurrected = await ensureEngagementForQuoteDelB(Q, "awarded");
+    ok(resurrected === null, "DELB engagement: ensureEngagementForQuote honours the tombstone (no resurrection on re-approve)");
+    ok(await getEngagementByQuote(Q) === null, "DELB engagement: still gone after the re-approve attempt");
+
+    await syncEngagementsFromQuotesDelB();
+    ok(await getEngagementByQuote(Q) === null, "DELB engagement: the page-load sweep does not resurrect the deleted engagement either");
+  }
+
+  /* ---------------- site visit (never spawned/swept — delete only) ---------------- */
+  {
+    const visit = await createVisitDelB({
+      customerId: null,
+      customer: "Test Customer DELB",
+      locationId: null,
+      venue: "Main Hall",
+      address: "123 Test St, Testville, WI",
+      contactName: "Test Contact",
+      contactEmail: "test@example.com",
+      contactPhone: "",
+      reason: "Site survey / measure",
+      startAt: null,
+      endAt: null,
+      notes: "",
+      assignedTo: "",
+      createdBy: "Test Harness",
+      engagementId: null,
+      stage: "requested",
+      leadId: null,
+      surveyId: null,
+      preferredTiming: "",
+    });
+    registerFixture("site_visits", visit.id);
+    ok(!!(await getVisitDelB(visit.id)), "DELB site visit: the fixture visit reads back before delete");
+    await removeVisit(visit.id);
+    ok(await getVisitDelB(visit.id) === null, "DELB site visit: the deleted visit is gone from reads");
+  }
+
+  /* ---------------- recording (never spawned/swept — delete only, audio untouched) ---------------- */
+  {
+    const rec = await createRecordingDelB({
+      parentKind: "site_visit",
+      parentId: fixtureId("DELB", "recording-parent"),
+      customerId: null,
+      customer: "Test Customer DELB",
+      locationId: null,
+      venue: "",
+      title: "DELB harness recording",
+      recordedByUserId: "u1",
+      recordedByName: "Test Harness",
+      startedAt: nowDelB,
+      endedAt: nowDelB + 60_000,
+      durationS: 60,
+      mime: "audio/mp4",
+      sizeBytes: 1024,
+    });
+    registerFixture("recordings", rec.id);
+    ok(!!(await getRecordingDelB(rec.id)), "DELB recording: the fixture recording reads back before delete");
+    await removeRecording(rec.id);
+    ok(await getRecordingDelB(rec.id) === null, "DELB recording: the deleted recording is gone from reads");
   }
 }
