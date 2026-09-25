@@ -8,9 +8,9 @@ import {
   addWindow,
   getVenueCalendar,
   hasVenueCalendar,
-  icsIsStale,
   importCsvWindows,
   refreshIcs,
+  refreshIfStale,
   removeWindow,
   setIcsUrl,
 } from "@/lib/stores/venue-calendars";
@@ -79,11 +79,10 @@ function weekRange(ms: number): { start: number; end: number } {
 }
 
 /** The scheduling-popover check: does this venue's calendar show
- *  [startMs, endMs) as open? Refreshes a stale ics feed best-effort first
- *  (never lets a slow/broken feed block the check past its own fetch
- *  timeout — refreshIcs never throws). Returns `hasCalendar: false` (not an
- *  error) for a venue with nothing on file, so the caller can show the
- *  "no venue calendar on file" hint rather than a blank panel. */
+ *  [startMs, endMs) as open? Refreshes a stale ics feed best-effort first,
+ *  but never waits more than ~2.5s for it (refreshIfStale) — the popover
+ *  answers from whatever's on file rather than making every date-field
+ *  edit wait out a slow or broken feed's own (longer) fetch timeout. */
 export async function getVenueAvailabilityAction(
   locationId: string | null,
   startMs: number,
@@ -93,10 +92,7 @@ export async function getVenueAvailabilityAction(
   if (!locationId || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
     return { hasCalendar: false, check: { status: "none", conflicts: [] }, windows: [], venueHref: null };
   }
-  let cal = await getVenueCalendar(locationId);
-  if (icsIsStale(cal)) {
-    cal = await refreshIcs(locationId, user.name);
-  }
+  const cal = await refreshIfStale(locationId, user.name);
   const { start, end } = weekRange(startMs);
   const site = await getSiteByDocLocId(locationId);
   return {

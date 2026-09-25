@@ -39,10 +39,24 @@ export async function hasVenueCalendar(locationId: string): Promise<boolean> {
   return !!cal.icsUrl || cal.windows.length > 0 || cal.icsWindows.length > 0;
 }
 
-async function saveVenueCalendar(cal: VenueCalendar, by: string): Promise<VenueCalendar> {
-  const next: VenueCalendar = { ...cal, updatedAt: Date.now(), updatedBy: by };
-  await setBlob(blobId(cal.locationId), next);
-  return next;
+/**
+ * Write ONLY the given keys (plus updatedAt/updatedBy) through `setBlob`'s
+ * jsonb `||` merge, then re-read to hand back the true post-write row —
+ * never a full-object overwrite. `setBlob`'s merge is per TOP-LEVEL KEY
+ * (doc-store.ts), so a writer that only ever names the keys it actually
+ * changed can never clobber a DIFFERENT key a concurrent writer touched at
+ * the same time: a background ics refresh writing only
+ * `{icsWindows, icsFetchedAt, ...}` can't stomp a `windows` array a PM
+ * added a window to seconds earlier, and vice versa. (Two writers racing
+ * on the SAME key still last-write-wins on that key — same residual gap
+ * doc-store.ts's own docstring calls out; closing that needs a row lock,
+ * out of scope here.) Re-reading rather than optimistically merging in
+ * memory means the RETURNED value is always the real row, not a guess that
+ * could itself be stale under concurrency.
+ */
+async function patchCalendar(locationId: string, patch: Partial<VenueCalendar>, by: string): Promise<VenueCalendar> {
+  await setBlob(blobId(locationId), { ...patch, updatedAt: Date.now(), updatedBy: by });
+  return getVenueCalendar(locationId);
 }
 
 export async function addWindow(
@@ -60,7 +74,7 @@ export async function addWindow(
     label: (input.label || "").trim(),
     source: "manual",
   };
-  return saveVenueCalendar({ ...cal, windows: [...cal.windows, w] }, by);
+  return patchCalendar(locationId, { windows: [...cal.windows, w] }, by);
 }
 
 /** Only a manual or csv-sourced window can be removed here — an ics window
@@ -69,7 +83,7 @@ export async function addWindow(
  *  or fix the source calendar, not a per-window action. */
 export async function removeWindow(locationId: string, windowId: string, by: string): Promise<VenueCalendar> {
   const cal = await getVenueCalendar(locationId);
-  return saveVenueCalendar({ ...cal, windows: cal.windows.filter((w) => w.id !== windowId) }, by);
+  return patchCalendar(locationId, { windows: cal.windows.filter((w) => w.id !== windowId) }, by);
 }
 
 /**
@@ -88,19 +102,23 @@ export async function importCsvWindows(
   const { windows: parsed, errors } = parseAvailabilityCsv(text, tz);
   const cal = await getVenueCalendar(locationId);
   const kept = mode === "replace-csv" ? cal.windows.filter((w) => w.source !== "csv") : cal.windows;
-  const next = await saveVenueCalendar({ ...cal, windows: [...kept, ...parsed] }, by);
+  const next = await patchCalendar(locationId, { windows: [...kept, ...parsed] }, by);
   return { cal: next, errors };
 }
 
 /** Save (or clear) the feed URL, then best-effort refresh it immediately so
  *  Save reads as "synced", not just "typed". A bad URL is saved anyway
  *  (Settings-style "keep what was typed, show the error") — refreshIcs
- *  records `icsError` rather than throwing. */
+ *  records `icsError` rather than throwing. Touches only the feed-related
+ *  keys, never `windows` — never any risk of a URL save racing a manual
+ *  window add. */
 export async function setIcsUrl(locationId: string, url: string | null, by: string): Promise<VenueCalendar> {
-  const cal = await getVenueCalendar(locationId);
   const trimmed = url && url.trim() ? url.trim() : null;
-  const next = await saveVenueCalendar(
-    { ...cal, icsUrl: trimmed, icsError: trimmed ? cal.icsError : null, icsWindows: trimmed ? cal.icsWindows : [] },
+  const next = await patchCalendar(
+    locationId,
+    trimmed
+      ? { icsUrl: trimmed }
+      : { icsUrl: null, icsError: null, icsWindows: [], icsFetchedAt: null, icsAttemptAt: null },
     by
   );
   if (!trimmed) return next;
@@ -110,31 +128,69 @@ export async function setIcsUrl(locationId: string, url: string | null, by: stri
 /**
  * Re-fetch+parse the feed. Never throws to the caller: on any failure the
  * PREVIOUS icsWindows are kept (a flaky feed shouldn't make a venue look
- * suddenly wide open) and `icsError` records what happened.
+ * suddenly wide open) and `icsError` records what happened. `icsAttemptAt`
+ * is stamped on every call regardless of outcome (the backoff clock,
+ * icsIsStale below); `icsFetchedAt` only advances on a SUCCESSFUL fetch (it
+ * means "windows are current as of"). Writes only the feed-related keys —
+ * never `windows` — so this can never race a concurrent manual add/remove.
  */
 export async function refreshIcs(locationId: string, by: string, tz?: string): Promise<VenueCalendar> {
   const cal = await getVenueCalendar(locationId);
   if (!cal.icsUrl) return cal;
+  const attemptAt = Date.now();
   try {
     const result = await fetchIcsWindows(cal.icsUrl, tz);
     if (result.ok) {
-      return saveVenueCalendar({ ...cal, icsWindows: result.windows, icsFetchedAt: Date.now(), icsError: null }, by);
+      return patchCalendar(locationId, { icsWindows: result.windows, icsFetchedAt: attemptAt, icsAttemptAt: attemptAt, icsError: null }, by);
     }
-    return saveVenueCalendar({ ...cal, icsFetchedAt: Date.now(), icsError: result.error }, by);
+    return patchCalendar(locationId, { icsAttemptAt: attemptAt, icsError: result.error }, by);
   } catch (err) {
-    return saveVenueCalendar(
-      { ...cal, icsFetchedAt: Date.now(), icsError: err instanceof Error ? err.message : "Sync failed." },
+    return patchCalendar(
+      locationId,
+      { icsAttemptAt: attemptAt, icsError: err instanceof Error ? err.message : "Sync failed." },
       by
     );
   }
 }
 
+/** A healthy feed is re-pulled every 6h; a FAILING one backs off to a much
+ *  shorter 30-minute retry window — long enough that a broken feed isn't
+ *  re-hit on every single scheduler popover check, short enough that a
+ *  transient blip (or a fix on the provider's end) recovers promptly
+ *  without the PM having to hit "Refresh now" by hand. */
 const REFRESH_STALE_MS = 6 * 3600000;
+const REFRESH_RETRY_MS = 30 * 60000;
 
-/** A calendar with a feed whose last fetch is stale (or has never
- *  happened). Used by the availability action to opportunistically
- *  refresh before answering, without ever letting a slow/broken feed block
- *  the check beyond fetchIcsWindows's own timeout. */
+/** A calendar with a feed whose last successful fetch (or, while failing,
+ *  last attempt) is old enough to be worth refreshing again. */
 export function icsIsStale(cal: VenueCalendar): boolean {
-  return !!cal.icsUrl && (cal.icsFetchedAt == null || Date.now() - cal.icsFetchedAt > REFRESH_STALE_MS);
+  if (!cal.icsUrl) return false;
+  if (cal.icsError) return cal.icsAttemptAt == null || Date.now() - cal.icsAttemptAt > REFRESH_RETRY_MS;
+  return cal.icsFetchedAt == null || Date.now() - cal.icsFetchedAt > REFRESH_STALE_MS;
+}
+
+const DEFAULT_REFRESH_BUDGET_MS = 2500;
+
+/**
+ * The scheduling-popover path: refresh a stale feed BEST-EFFORT, but never
+ * make the caller wait longer than `budgetMs` for it — races the real
+ * refresh against a timer and, if the timer wins, hands back whatever was
+ * already on file while letting the refresh keep running in the
+ * background (its own result still lands via `patchCalendar` once it
+ * finishes; a later call just picks up the fresher row). A feed that isn't
+ * due for a refresh at all (`icsIsStale` false) costs nothing beyond the
+ * one read. Errors from the backgrounded refresh are swallowed here —
+ * `refreshIcs` itself never throws, so this is only a defensive net.
+ */
+export async function refreshIfStale(locationId: string, by: string, budgetMs: number = DEFAULT_REFRESH_BUDGET_MS): Promise<VenueCalendar> {
+  const current = await getVenueCalendar(locationId);
+  if (!icsIsStale(current)) return current;
+  const refreshPromise = refreshIcs(locationId, by);
+  const budget = new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs));
+  const settled = await Promise.race([refreshPromise, budget]);
+  if (settled) return settled;
+  refreshPromise.catch(() => {
+    /* keeps running in the background; failures already land as icsError via patchCalendar */
+  });
+  return current;
 }

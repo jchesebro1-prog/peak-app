@@ -8191,7 +8191,13 @@ import {
   type AvailWindow as VaWindow,
   type VenueCalendar as VaCalendar,
 } from "@/lib/venue-availability";
-import { validateIcsUrl } from "@/lib/venue-calendar-fetch";
+import {
+  isPrivateOrReservedAddress,
+  isPrivateOrReservedIPv4,
+  isPrivateOrReservedIPv6,
+  resolveRedirectHop,
+  validateIcsUrlSync,
+} from "@/lib/venue-calendar-fetch";
 
 {
   const TZ = VA_TZ; // "America/Chicago"
@@ -8347,7 +8353,7 @@ import { validateIcsUrl } from "@/lib/venue-calendar-fetch";
   const D0 = zonedTimeToUtc(2026, 10, 6, 0, 0, 0, TZ);
   const openWin: VaWindow = { id: "o1", kind: "open", start: D0, end: D0 + 8 * 3600000, allDay: false, label: "", source: "manual" };
   const blockedWin: VaWindow = { id: "b1", kind: "blocked", start: D0 + 2 * 3600000, end: D0 + 3 * 3600000, allDay: false, label: "Lunch meeting", source: "manual" };
-  const cal: VaCalendar = { locationId: "TEST_VA", icsUrl: null, icsFetchedAt: null, icsError: null, windows: [openWin, blockedWin], icsWindows: [], updatedAt: 0, updatedBy: "" };
+  const cal: VaCalendar = { locationId: "TEST_VA", icsUrl: null, icsFetchedAt: null, icsAttemptAt: null, icsError: null, windows: [openWin, blockedWin], icsWindows: [], updatedAt: 0, updatedBy: "" };
 
   const conflict = vaCheckAvailability(cal, D0 + 2.5 * 3600000, D0 + 2.75 * 3600000);
   ok(conflict.status === "conflict" && conflict.conflicts[0]?.id === "b1", "checkAvailability: a range overlapping a blocked window is a conflict");
@@ -8375,15 +8381,61 @@ import { validateIcsUrl } from "@/lib/venue-calendar-fetch";
   ok(between.length === 2 && between[0].id === "o1" && between[1].id === "b1", "windowsBetween: returns every overlapping window, sorted by start");
 
   /* ---- URL guard: rejects localhost / 10.x / 169.254 / file: ---- */
-  ok(validateIcsUrl("http://localhost/cal.ics").ok === false, "ICS URL guard: rejects localhost");
-  ok(validateIcsUrl("http://127.0.0.1/cal.ics").ok === false, "ICS URL guard: rejects 127.0.0.1");
-  ok(validateIcsUrl("http://10.1.2.3/cal.ics").ok === false, "ICS URL guard: rejects a 10.x LAN address");
-  ok(validateIcsUrl("http://169.254.169.254/latest/meta-data/").ok === false, "ICS URL guard: rejects the 169.254 link-local/metadata range");
-  ok(validateIcsUrl("file:///etc/passwd").ok === false, "ICS URL guard: rejects a file: URL");
-  ok(validateIcsUrl("not a url").ok === false, "ICS URL guard: rejects unparsable input");
-  ok(validateIcsUrl("webcal://example.com/cal.ics").ok === true, "ICS URL guard: accepts webcal:// (normalized to https)");
-  ok((validateIcsUrl("webcal://example.com/cal.ics") as { ok: true; url: string }).url.startsWith("https://"), "ICS URL guard: webcal:// is rewritten to https://");
-  ok(validateIcsUrl("https://calendar.google.com/calendar/ical/abc/basic.ics").ok === true, "ICS URL guard: accepts an ordinary public https URL");
+  ok(validateIcsUrlSync("http://localhost/cal.ics").ok === false, "ICS URL guard: rejects localhost");
+  ok(validateIcsUrlSync("http://127.0.0.1/cal.ics").ok === false, "ICS URL guard: rejects 127.0.0.1");
+  ok(validateIcsUrlSync("http://10.1.2.3/cal.ics").ok === false, "ICS URL guard: rejects a 10.x LAN address");
+  ok(validateIcsUrlSync("http://169.254.169.254/latest/meta-data/").ok === false, "ICS URL guard: rejects the 169.254 link-local/metadata range");
+  ok(validateIcsUrlSync("file:///etc/passwd").ok === false, "ICS URL guard: rejects a file: URL");
+  ok(validateIcsUrlSync("not a url").ok === false, "ICS URL guard: rejects unparsable input");
+  ok(validateIcsUrlSync("webcal://example.com/cal.ics").ok === true, "ICS URL guard: accepts webcal:// (normalized to https)");
+  ok((validateIcsUrlSync("webcal://example.com/cal.ics") as { ok: true; url: string }).url.startsWith("https://"), "ICS URL guard: webcal:// is rewritten to https://");
+  ok(validateIcsUrlSync("https://calendar.google.com/calendar/ical/abc/basic.ics").ok === true, "ICS URL guard: accepts an ordinary public https URL");
+
+  // literal IPv4 forms a URL parser normalizes for us (decimal / hex / octal
+  // / short-form) — the guard only ever looks at the post-parse hostname,
+  // so proving THAT string is caught is what actually matters.
+  ok(validateIcsUrlSync("http://2130706433/cal.ics").ok === false, "ICS URL guard: rejects a decimal IPv4 literal (2130706433 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://0x7f000001/cal.ics").ok === false, "ICS URL guard: rejects a hex IPv4 literal (0x7f000001 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://0177.0.0.1/cal.ics").ok === false, "ICS URL guard: rejects an octal-leading IPv4 literal (0177.0.0.1 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://127.1/cal.ics").ok === false, "ICS URL guard: rejects short-form IPv4 (127.1 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://0/cal.ics").ok === false, "ICS URL guard: rejects 0 (0.0.0.0/8)");
+  ok(validateIcsUrlSync("http://100.64.1.1/cal.ics").ok === false, "ICS URL guard: rejects a 100.64.0.0/10 CGNAT address");
+
+  // bracketed IPv6 literals, incl. an IPv4-mapped one.
+  ok(validateIcsUrlSync("http://[::1]/cal.ics").ok === false, "ICS URL guard: rejects [::1] (loopback)");
+  ok(validateIcsUrlSync("http://[::]/cal.ics").ok === false, "ICS URL guard: rejects [::] (unspecified)");
+  ok(validateIcsUrlSync("http://[fe80::1]/cal.ics").ok === false, "ICS URL guard: rejects [fe80::1] (link-local)");
+  ok(validateIcsUrlSync("http://[fc00::1]/cal.ics").ok === false, "ICS URL guard: rejects [fc00::1] (unique-local)");
+  ok(validateIcsUrlSync("http://[::ffff:127.0.0.1]/cal.ics").ok === false, "ICS URL guard: rejects an IPv4-mapped IPv6 literal wrapping a loopback address");
+  ok(validateIcsUrlSync("http://[2001:4860:4860::8888]/cal.ics").ok === true, "ICS URL guard: an ordinary public IPv6 literal (Google DNS) is NOT flagged");
+
+  /* ---- the address classifier, called directly ---- */
+  ok(isPrivateOrReservedIPv4("10.0.0.5") === true, "address classifier: 10.0.0.0/8");
+  ok(isPrivateOrReservedIPv4("172.16.0.1") === true && isPrivateOrReservedIPv4("172.31.255.255") === true, "address classifier: 172.16.0.0/12 (both ends)");
+  ok(isPrivateOrReservedIPv4("172.15.255.255") === false && isPrivateOrReservedIPv4("172.32.0.0") === false, "address classifier: just outside 172.16.0.0/12 is NOT flagged");
+  ok(isPrivateOrReservedIPv4("192.168.1.1") === true, "address classifier: 192.168.0.0/16");
+  ok(isPrivateOrReservedIPv4("8.8.8.8") === false, "address classifier: an ordinary public IPv4 (Google DNS) is NOT flagged");
+  ok(isPrivateOrReservedIPv4("999.1.1.1") === false, "address classifier: an out-of-range octet is not silently treated as private");
+  ok(isPrivateOrReservedIPv6("::1") === true && isPrivateOrReservedIPv6("::") === true, "address classifier: IPv6 loopback + unspecified");
+  ok(isPrivateOrReservedIPv6("fe80::abcd") === true, "address classifier: fe80::/10 link-local");
+  ok(isPrivateOrReservedIPv6("fc00::1") === true && isPrivateOrReservedIPv6("fdff:ffff::1") === true, "address classifier: fc00::/7 unique-local (both ends)");
+  ok(isPrivateOrReservedIPv6("::ffff:10.0.0.1") === true, "address classifier: IPv4-mapped IPv6 wrapping a private IPv4 address");
+  ok(isPrivateOrReservedIPv6("2001:4860:4860::8888") === false, "address classifier: an ordinary public IPv6 address is NOT flagged");
+  ok(isPrivateOrReservedAddress("127.0.0.1") === true && isPrivateOrReservedAddress("::1") === true, "address classifier: dispatches by family");
+  ok(isPrivateOrReservedAddress("example.com") === false, "address classifier: a plain hostname (not an IP) reads as false — DNS resolution is a separate step");
+
+  /* ---- redirect-hop re-validation (pure — no network) ---- */
+  const hopOk = resolveRedirectHop("https://cdn.example.com/next.ics", "https://calendar.example.com/a.ics");
+  ok(hopOk.ok === true && hopOk.url === "https://cdn.example.com/next.ics", "redirect hop: an ordinary absolute https Location is accepted");
+  ok(resolveRedirectHop("http://127.0.0.1/steal", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location pointing at 127.0.0.1 is refused, not silently followed");
+  ok(resolveRedirectHop("http://169.254.169.254/latest/meta-data/", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location pointing at the cloud metadata address is refused");
+  // a RELATIVE Location is resolved against the hop it came from, not the
+  // original URL — same as a browser would, and still re-checked fresh.
+  const relHop = resolveRedirectHop("/other.ics", "https://calendar.example.com/a.ics");
+  ok(relHop.ok === true && relHop.url === "https://calendar.example.com/other.ics", "redirect hop: a relative Location resolves against its own base");
+  ok(resolveRedirectHop("//127.0.0.1/x", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a protocol-relative Location to a private host is refused");
+  ok(resolveRedirectHop("file:///etc/passwd", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location switching to file: is refused");
+  ok(resolveRedirectHop("http://[not-a-valid-ipv6", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a malformed absolute Location is refused, not thrown");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

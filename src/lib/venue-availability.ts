@@ -39,7 +39,13 @@ export type AvailWindow = {
 export type VenueCalendar = {
   locationId: string;
   icsUrl: string | null;
+  /** Last SUCCESSFUL fetch — what `icsWindows` reflects. */
   icsFetchedAt: number | null;
+  /** Last attempt regardless of outcome (success or failure) — the backoff
+   *  clock: a failing feed retries at a much shorter interval than a
+   *  healthy one's routine refresh, but still isn't re-hit on every single
+   *  scheduler popover. */
+  icsAttemptAt: number | null;
   icsError: string | null;
   /** manual + csv-imported windows */
   windows: AvailWindow[];
@@ -58,6 +64,7 @@ export function emptyVenueCalendar(locationId: string): VenueCalendar {
     locationId,
     icsUrl: null,
     icsFetchedAt: null,
+    icsAttemptAt: null,
     icsError: null,
     windows: [],
     icsWindows: [],
