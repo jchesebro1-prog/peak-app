@@ -167,7 +167,7 @@ export default function OverviewTab({
       <div style={CARD}>
         <div style={H}>Danger zone</div>
         <div style={{ fontSize: 12.5, color: "#8c919c", lineHeight: 1.5, marginBottom: 12 }}>
-          Deletes this vendor's manufacturers, price-list ledger, discounts and project
+          Deletes this vendor&apos;s manufacturers, price-list ledger, discounts and project
           registration. The company record and its contacts stay.
         </div>
         <ConfirmButton

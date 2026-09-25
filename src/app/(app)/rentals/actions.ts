@@ -4,23 +4,10 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import * as equipmentItems from "@/lib/stores/equipment-items";
 import * as equipmentLocations from "@/lib/stores/equipment-locations";
-import { list as listBookings } from "@/lib/stores/equipment-bookings";
+import { hasCommittedBooking } from "@/lib/stores/equipment-bookings";
 import type { EquipmentCategory } from "@/lib/stores/equipment-items";
 
 type Result = { ok: true } | { ok: false; error: string };
-
-/** A booking counts as active/upcoming when it isn't cancelled/returned and
- *  its window hasn't fully ended yet — mirrors equipment-bookings.ts's
- *  availableQty() "confirmed or out" committed-status rule. */
-async function hasActiveOrUpcomingBooking(
-  match: (b: Awaited<ReturnType<typeof listBookings>>[number]) => boolean
-): Promise<boolean> {
-  const now = Date.now();
-  const all = await listBookings();
-  return all.some(
-    (b) => match(b) && (b.status === "confirmed" || b.status === "out") && b.endDate >= now
-  );
-}
 
 /**
  * Rentals hub mutations (Task 4). Edits go through `mergeUpsert` rather than
@@ -102,7 +89,7 @@ export async function deleteEquipmentItemAction(id: string): Promise<Result> {
   await requirePerm("create");
   const clean = id.trim();
   if (!clean) return { ok: false, error: "Missing item id." };
-  if (await hasActiveOrUpcomingBooking((b) => b.itemId === clean)) {
+  if (await hasCommittedBooking({ itemId: clean })) {
     return {
       ok: false,
       error: "This item has an active or upcoming booking — cancel or complete it first.",
@@ -119,7 +106,7 @@ export async function deleteEquipmentLocationAction(id: string): Promise<Result>
   await requirePerm("create");
   const clean = id.trim();
   if (!clean) return { ok: false, error: "Missing location id." };
-  if (await hasActiveOrUpcomingBooking((b) => b.locationId === clean)) {
+  if (await hasCommittedBooking({ locationId: clean })) {
     return {
       ok: false,
       error: "This location has an active or upcoming booking — cancel or complete it first.",

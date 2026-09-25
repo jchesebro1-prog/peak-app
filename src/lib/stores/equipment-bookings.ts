@@ -73,6 +73,27 @@ export async function availableQty(
 }
 
 /**
+ * True when `itemId`/`locationId` (either may be omitted to match on just
+ * the other) has a booking that is neither cancelled/returned nor already
+ * fully in the past — the same "confirmed or out" committed-status rule
+ * availableQty() uses above. Pulled out of the rentals "use server" actions
+ * (rentals/actions.ts's deleteEquipmentItemAction/deleteEquipmentLocationAction)
+ * so it's callable directly from the DB-backed spec harness, which has no
+ * request context for requireUser()/requirePerm() to run in.
+ */
+export async function hasCommittedBooking(match: { itemId?: string; locationId?: string }): Promise<boolean> {
+  const now = Date.now();
+  const all = await list();
+  return all.some(
+    (b) =>
+      (match.itemId === undefined || b.itemId === match.itemId) &&
+      (match.locationId === undefined || b.locationId === match.locationId) &&
+      (b.status === "confirmed" || b.status === "out") &&
+      b.endDate >= now
+  );
+}
+
+/**
  * Id always minted (no explicit-id callers) — insertWithPrefixedId (D73)
  * instead of a read-then-write `bk-${all.length + 1}` count, which two
  * rental quotes approved moments apart (each spawning bookings via
