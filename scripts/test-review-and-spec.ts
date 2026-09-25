@@ -8427,6 +8427,266 @@ ok(
   "#149 --hard against a hosted target is refused by no flag combination — offline clients need the tombstone"
 );
 
+/* --- venue availability --- */
+import {
+  checkAvailability as vaCheckAvailability,
+  parseAvailabilityCsv,
+  parseIcs,
+  windowsBetween as vaWindowsBetween,
+  zonedTimeToUtc,
+  AVAILABILITY_CSV_TEMPLATE,
+  DAY_MS as VA_DAY_MS,
+  DEFAULT_TZ as VA_TZ,
+  type AvailWindow as VaWindow,
+  type VenueCalendar as VaCalendar,
+} from "@/lib/venue-availability";
+import {
+  isPrivateOrReservedAddress,
+  isPrivateOrReservedIPv4,
+  isPrivateOrReservedIPv6,
+  resolveRedirectHop,
+  validateIcsUrlSync,
+} from "@/lib/venue-calendar-fetch";
+
+{
+  const TZ = VA_TZ; // "America/Chicago"
+  const winFrom = zonedTimeToUtc(2026, 10, 1, 0, 0, 0, TZ);
+  const winTo = zonedTimeToUtc(2026, 12, 1, 0, 0, 0, TZ);
+
+  /* ---- ics: UTC, TZID, all-day, folded lines ---- */
+  const icsUtc = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    "UID:t1@test",
+    "DTSTART:20261005T140000Z",
+    "DTEND:20261005T160000Z",
+    "SUMMARY:UTC event",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+  const utcWins = parseIcs(icsUtc, { from: winFrom, to: winTo, tz: TZ });
+  ok(utcWins.length === 1, `ICS: one UTC (Z) event parses (${utcWins.length})`);
+  ok(utcWins[0]?.start === Date.UTC(2026, 9, 5, 14, 0, 0), "ICS: a Z-suffixed DTSTART is read as literal UTC");
+  ok(utcWins[0]?.end === Date.UTC(2026, 9, 5, 16, 0, 0), "ICS: a Z-suffixed DTEND is read as literal UTC");
+  ok(utcWins[0]?.kind === "blocked" && utcWins[0]?.source === "ics", "ICS: every parsed event is a blocked/ics window");
+  ok(utcWins[0]?.label === "UTC event", "ICS: SUMMARY becomes the window label");
+
+  const icsTzid = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:t2@test",
+    "DTSTART;TZID=America/Chicago:20261005T090000",
+    "DTEND;TZID=America/Chicago:20261005T100000",
+    "SUMMARY:Local TZID event",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const tzidWins = parseIcs(icsTzid, { from: winFrom, to: winTo, tz: TZ });
+  // Oct 5 2026 is inside US Central Daylight Time (UTC-5) — 09:00 CDT is 14:00Z.
+  ok(tzidWins.length === 1 && tzidWins[0].start === Date.UTC(2026, 9, 5, 14, 0, 0), `ICS: a TZID=America/Chicago DTSTART converts to the correct UTC instant (${tzidWins[0]?.start})`);
+
+  const icsAllDay = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:t3@test",
+    "DTSTART;VALUE=DATE:20261010",
+    "DTEND;VALUE=DATE:20261011",
+    "SUMMARY:All day closed",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const allDayWins = parseIcs(icsAllDay, { from: winFrom, to: winTo, tz: TZ });
+  ok(allDayWins.length === 1 && allDayWins[0].allDay === true, "ICS: VALUE=DATE parses as an all-day window");
+  ok(allDayWins[0]?.start === Date.UTC(2026, 9, 10, 5, 0, 0), `ICS: an all-day DTSTART is local midnight in the business tz (${allDayWins[0]?.start})`);
+  ok(allDayWins[0]?.end === Date.UTC(2026, 9, 11, 5, 0, 0), "ICS: DTEND on an all-day event is already the exclusive next-day boundary — no extra +1day bump");
+
+  const icsFolded = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:t4@test",
+    "DTSTART:20261012T090000Z",
+    "DTEND:20261012T100000Z",
+    "SUMMARY:This is a very long",
+    "  summary that continues",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const foldedWins = parseIcs(icsFolded, { from: winFrom, to: winTo, tz: TZ });
+  // Only the SINGLE leading fold-indicator space is stripped (RFC 5545
+  // §3.1) — the fixture's continuation line carries a real content space
+  // plus that fold marker, so exactly one space survives in the result.
+  ok(foldedWins[0]?.label === "This is a very long summary that continues", `ICS: a folded (CRLF + single leading space) line unfolds to one property value (${JSON.stringify(foldedWins[0]?.label)})`);
+
+  /* ---- ics: RRULE weekly + COUNT + EXDATE, cancelled/transparent skipped, garbage ---- */
+  const icsRrule = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:t5@test",
+    "DTSTART;TZID=America/Chicago:20261005T090000",
+    "DTEND;TZID=America/Chicago:20261005T100000",
+    "RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=5;BYDAY=MO",
+    "EXDATE;TZID=America/Chicago:20261019T090000",
+    "SUMMARY:Weekly rehearsal",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const rruleWins = parseIcs(icsRrule, { from: winFrom, to: winTo, tz: TZ });
+  ok(rruleWins.length === 4, `ICS RRULE: COUNT=5 minus one EXDATE leaves 4 occurrences (${rruleWins.length})`);
+  ok(rruleWins[0]?.start === Date.UTC(2026, 9, 5, 14, 0, 0), "ICS RRULE: first occurrence (Oct 5, CDT) converts correctly");
+  ok(!rruleWins.some((w) => w.start === Date.UTC(2026, 9, 19, 14, 0, 0)), "ICS RRULE: the EXDATE'd Oct 19 occurrence is excluded");
+  // Nov 2 2026 falls after the Nov 1 fall-back — 09:00 is now CST (UTC-6), so
+  // this also pins the expansion carries DST correctly across the series.
+  ok(rruleWins[3]?.start === Date.UTC(2026, 10, 2, 15, 0, 0), `ICS RRULE: the 5th (last kept) occurrence, Nov 2 CST, converts correctly (${rruleWins[3]?.start})`);
+
+  const icsSkip = [
+    "BEGIN:VCALENDAR",
+    "BEGIN:VEVENT",
+    "UID:cancelled@test",
+    "DTSTART:20261101T090000Z",
+    "DTEND:20261101T100000Z",
+    "STATUS:CANCELLED",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:transparent@test",
+    "DTSTART:20261102T090000Z",
+    "DTEND:20261102T100000Z",
+    "TRANSP:TRANSPARENT",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:kept@test",
+    "DTSTART:20261103T090000Z",
+    "DTEND:20261103T100000Z",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  const skipWins = parseIcs(icsSkip, { from: winFrom, to: winTo, tz: TZ });
+  ok(skipWins.length === 1 && skipWins[0].id.includes("kept"), `ICS: STATUS:CANCELLED and TRANSP:TRANSPARENT events are both dropped, only the plain one survives (${skipWins.length})`);
+
+  ok(parseIcs("", { from: winFrom, to: winTo }).length === 0, "ICS: empty input returns [] rather than throwing");
+  ok(parseIcs("this is not a calendar file at all\nrandom garbage\n", { from: winFrom, to: winTo }).length === 0, "ICS: non-calendar garbage returns []");
+  ok(parseIcs("BEGIN:VEVENT\nDTSTART:garbage\nEND:VEVENT", { from: winFrom, to: winTo }).length === 0, "ICS: a VEVENT with an unparsable DTSTART is skipped, not thrown");
+
+  /* ---- csv: date formats, synonyms, inclusive all-day end, row errors ---- */
+  const csvText = [
+    "type,start,end,label",
+    "open,2026-10-01,2026-10-01,Single day open",
+    "blocked,2026-10-05,2026-10-07,Three day block",
+    "busy,2026-10-10 18:00,2026-10-10 22:00,Timed busy",
+    "Available,10/15/2026,10/16/2026,Slash dates",
+    "closed,10/20/2026 6:00 PM,10/20/2026 10:00 PM,Slash with AM/PM",
+    "bogus,2026-11-01,2026-11-02,Bad type",
+    "open,not-a-date,2026-11-05,Bad start",
+  ].join("\n");
+  const csvResult = parseAvailabilityCsv(csvText, TZ);
+  ok(csvResult.windows.length === 5, `CSV: 5 of 7 rows parse to windows (${csvResult.windows.length})`);
+  ok(csvResult.errors.length === 2, `CSV: the other 2 rows report an error each (${csvResult.errors.length})`);
+  ok(csvResult.errors[0]?.line === 7 && csvResult.errors[1]?.line === 8, `CSV: row errors are 1-indexed counting the header as line 1 (${csvResult.errors.map((e) => e.line)})`);
+
+  const [csvSingleDay, csvThreeDay, csvTimed, csvSlash, csvSlashAmPm] = csvResult.windows;
+  ok(csvSingleDay?.allDay === true && csvSingleDay.end - csvSingleDay.start === VA_DAY_MS, "CSV: a same-day all-day row is exactly one day wide (inclusive end + 1)");
+  ok(csvThreeDay?.end - csvThreeDay.start === 3 * VA_DAY_MS, `CSV: Oct 5-7 (inclusive) is 3 days wide, not 2 (${(csvThreeDay!.end - csvThreeDay!.start) / VA_DAY_MS})`);
+  ok(csvTimed?.allDay === false && csvTimed.end - csvTimed.start === 4 * 3600000, "CSV: a timed row (HH:MM) keeps its exact hours, no +1day bump");
+  ok(csvSlash?.kind === "open" && csvSlash.end - csvSlash.start === 2 * VA_DAY_MS, "CSV: 'Available' (M/D/YYYY, case-insensitive) is a 2-day open window");
+  ok(csvSlashAmPm?.kind === "blocked" && csvSlashAmPm.end - csvSlashAmPm.start === 4 * 3600000, "CSV: 'closed' + M/D/YYYY + AM/PM all parse together");
+  ok(csvSingleDay?.start === zonedTimeToUtc(2026, 10, 1, 0, 0, 0, TZ), "CSV: an all-day start is local midnight in the business tz");
+
+  const missingCols = parseAvailabilityCsv("foo,bar\n1,2\n", TZ);
+  ok(missingCols.windows.length === 0 && missingCols.errors.length === 1 && missingCols.errors[0].line === 0, "CSV: a file missing type/start/end reports one whole-file error, not a crash");
+
+  const templateParse = parseAvailabilityCsv(AVAILABILITY_CSV_TEMPLATE, TZ);
+  ok(templateParse.errors.length === 0, `CSV: the app's own downloadable example CSV parses with zero row errors (${JSON.stringify(templateParse.errors)})`);
+  ok(templateParse.windows.length === AVAILABILITY_CSV_TEMPLATE.trim().split("\n").length - 1, "CSV: every example row becomes a window");
+
+  /* ---- checkAvailability: all four statuses, incl. partial-open coverage ---- */
+  const D0 = zonedTimeToUtc(2026, 10, 6, 0, 0, 0, TZ);
+  const openWin: VaWindow = { id: "o1", kind: "open", start: D0, end: D0 + 8 * 3600000, allDay: false, label: "", source: "manual" };
+  const blockedWin: VaWindow = { id: "b1", kind: "blocked", start: D0 + 2 * 3600000, end: D0 + 3 * 3600000, allDay: false, label: "Lunch meeting", source: "manual" };
+  const cal: VaCalendar = { locationId: "TEST_VA", icsUrl: null, icsFetchedAt: null, icsAttemptAt: null, icsError: null, windows: [openWin, blockedWin], icsWindows: [], updatedAt: 0, updatedBy: "" };
+
+  const conflict = vaCheckAvailability(cal, D0 + 2.5 * 3600000, D0 + 2.75 * 3600000);
+  ok(conflict.status === "conflict" && conflict.conflicts[0]?.id === "b1", "checkAvailability: a range overlapping a blocked window is a conflict");
+
+  const available = vaCheckAvailability(cal, D0 + 4 * 3600000, D0 + 5 * 3600000);
+  ok(available.status === "available", "checkAvailability: inside the open window, away from the blocked one, reads available");
+
+  const outside = vaCheckAvailability(cal, D0 + 7 * 3600000, D0 + 9 * 3600000);
+  ok(outside.status === "outside-open", "checkAvailability: a range only partly covered by the open window reads outside-open");
+
+  const none = vaCheckAvailability({ ...cal, windows: [], icsWindows: [] }, D0, D0 + 3600000);
+  ok(none.status === "none", "checkAvailability: a calendar with no windows at all reads none, not available");
+
+  const twoOpen: VaCalendar = {
+    ...cal,
+    windows: [
+      { id: "o2", kind: "open", start: D0, end: D0 + 4 * 3600000, allDay: false, label: "", source: "manual" },
+      { id: "o3", kind: "open", start: D0 + 4 * 3600000, end: D0 + 8 * 3600000, allDay: false, label: "", source: "manual" },
+    ],
+  };
+  const covered = vaCheckAvailability(twoOpen, D0 + 1 * 3600000, D0 + 7 * 3600000);
+  ok(covered.status === "available", "checkAvailability: two adjoining open windows together cover the range");
+
+  const between = vaWindowsBetween(cal, D0, D0 + 8 * 3600000);
+  ok(between.length === 2 && between[0].id === "o1" && between[1].id === "b1", "windowsBetween: returns every overlapping window, sorted by start");
+
+  /* ---- URL guard: rejects localhost / 10.x / 169.254 / file: ---- */
+  ok(validateIcsUrlSync("http://localhost/cal.ics").ok === false, "ICS URL guard: rejects localhost");
+  ok(validateIcsUrlSync("http://127.0.0.1/cal.ics").ok === false, "ICS URL guard: rejects 127.0.0.1");
+  ok(validateIcsUrlSync("http://10.1.2.3/cal.ics").ok === false, "ICS URL guard: rejects a 10.x LAN address");
+  ok(validateIcsUrlSync("http://169.254.169.254/latest/meta-data/").ok === false, "ICS URL guard: rejects the 169.254 link-local/metadata range");
+  ok(validateIcsUrlSync("file:///etc/passwd").ok === false, "ICS URL guard: rejects a file: URL");
+  ok(validateIcsUrlSync("not a url").ok === false, "ICS URL guard: rejects unparsable input");
+  ok(validateIcsUrlSync("webcal://example.com/cal.ics").ok === true, "ICS URL guard: accepts webcal:// (normalized to https)");
+  ok((validateIcsUrlSync("webcal://example.com/cal.ics") as { ok: true; url: string }).url.startsWith("https://"), "ICS URL guard: webcal:// is rewritten to https://");
+  ok(validateIcsUrlSync("https://calendar.google.com/calendar/ical/abc/basic.ics").ok === true, "ICS URL guard: accepts an ordinary public https URL");
+
+  // literal IPv4 forms a URL parser normalizes for us (decimal / hex / octal
+  // / short-form) — the guard only ever looks at the post-parse hostname,
+  // so proving THAT string is caught is what actually matters.
+  ok(validateIcsUrlSync("http://2130706433/cal.ics").ok === false, "ICS URL guard: rejects a decimal IPv4 literal (2130706433 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://0x7f000001/cal.ics").ok === false, "ICS URL guard: rejects a hex IPv4 literal (0x7f000001 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://0177.0.0.1/cal.ics").ok === false, "ICS URL guard: rejects an octal-leading IPv4 literal (0177.0.0.1 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://127.1/cal.ics").ok === false, "ICS URL guard: rejects short-form IPv4 (127.1 = 127.0.0.1)");
+  ok(validateIcsUrlSync("http://0/cal.ics").ok === false, "ICS URL guard: rejects 0 (0.0.0.0/8)");
+  ok(validateIcsUrlSync("http://100.64.1.1/cal.ics").ok === false, "ICS URL guard: rejects a 100.64.0.0/10 CGNAT address");
+
+  // bracketed IPv6 literals, incl. an IPv4-mapped one.
+  ok(validateIcsUrlSync("http://[::1]/cal.ics").ok === false, "ICS URL guard: rejects [::1] (loopback)");
+  ok(validateIcsUrlSync("http://[::]/cal.ics").ok === false, "ICS URL guard: rejects [::] (unspecified)");
+  ok(validateIcsUrlSync("http://[fe80::1]/cal.ics").ok === false, "ICS URL guard: rejects [fe80::1] (link-local)");
+  ok(validateIcsUrlSync("http://[fc00::1]/cal.ics").ok === false, "ICS URL guard: rejects [fc00::1] (unique-local)");
+  ok(validateIcsUrlSync("http://[::ffff:127.0.0.1]/cal.ics").ok === false, "ICS URL guard: rejects an IPv4-mapped IPv6 literal wrapping a loopback address");
+  ok(validateIcsUrlSync("http://[2001:4860:4860::8888]/cal.ics").ok === true, "ICS URL guard: an ordinary public IPv6 literal (Google DNS) is NOT flagged");
+
+  /* ---- the address classifier, called directly ---- */
+  ok(isPrivateOrReservedIPv4("10.0.0.5") === true, "address classifier: 10.0.0.0/8");
+  ok(isPrivateOrReservedIPv4("172.16.0.1") === true && isPrivateOrReservedIPv4("172.31.255.255") === true, "address classifier: 172.16.0.0/12 (both ends)");
+  ok(isPrivateOrReservedIPv4("172.15.255.255") === false && isPrivateOrReservedIPv4("172.32.0.0") === false, "address classifier: just outside 172.16.0.0/12 is NOT flagged");
+  ok(isPrivateOrReservedIPv4("192.168.1.1") === true, "address classifier: 192.168.0.0/16");
+  ok(isPrivateOrReservedIPv4("8.8.8.8") === false, "address classifier: an ordinary public IPv4 (Google DNS) is NOT flagged");
+  ok(isPrivateOrReservedIPv4("999.1.1.1") === false, "address classifier: an out-of-range octet is not silently treated as private");
+  ok(isPrivateOrReservedIPv6("::1") === true && isPrivateOrReservedIPv6("::") === true, "address classifier: IPv6 loopback + unspecified");
+  ok(isPrivateOrReservedIPv6("fe80::abcd") === true, "address classifier: fe80::/10 link-local");
+  ok(isPrivateOrReservedIPv6("fc00::1") === true && isPrivateOrReservedIPv6("fdff:ffff::1") === true, "address classifier: fc00::/7 unique-local (both ends)");
+  ok(isPrivateOrReservedIPv6("::ffff:10.0.0.1") === true, "address classifier: IPv4-mapped IPv6 wrapping a private IPv4 address");
+  ok(isPrivateOrReservedIPv6("2001:4860:4860::8888") === false, "address classifier: an ordinary public IPv6 address is NOT flagged");
+  ok(isPrivateOrReservedAddress("127.0.0.1") === true && isPrivateOrReservedAddress("::1") === true, "address classifier: dispatches by family");
+  ok(isPrivateOrReservedAddress("example.com") === false, "address classifier: a plain hostname (not an IP) reads as false — DNS resolution is a separate step");
+
+  /* ---- redirect-hop re-validation (pure — no network) ---- */
+  const hopOk = resolveRedirectHop("https://cdn.example.com/next.ics", "https://calendar.example.com/a.ics");
+  ok(hopOk.ok === true && hopOk.url === "https://cdn.example.com/next.ics", "redirect hop: an ordinary absolute https Location is accepted");
+  ok(resolveRedirectHop("http://127.0.0.1/steal", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location pointing at 127.0.0.1 is refused, not silently followed");
+  ok(resolveRedirectHop("http://169.254.169.254/latest/meta-data/", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location pointing at the cloud metadata address is refused");
+  // a RELATIVE Location is resolved against the hop it came from, not the
+  // original URL — same as a browser would, and still re-checked fresh.
+  const relHop = resolveRedirectHop("/other.ics", "https://calendar.example.com/a.ics");
+  ok(relHop.ok === true && relHop.url === "https://calendar.example.com/other.ics", "redirect hop: a relative Location resolves against its own base");
+  ok(resolveRedirectHop("//127.0.0.1/x", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a protocol-relative Location to a private host is refused");
+  ok(resolveRedirectHop("file:///etc/passwd", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a Location switching to file: is refused");
+  ok(resolveRedirectHop("http://[not-a-valid-ipv6", "https://calendar.example.com/a.ics").ok === false, "redirect hop: a malformed absolute Location is refused, not thrown");
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -8500,6 +8760,7 @@ seeded()
   .then(() => sweepHealingAsyncChecks())
   .then(() => outsideTransactionAsyncChecks())
   .then(() => statusRefusalAsyncChecks())
+  .then(() => venueCalendarAsyncChecks())
   .then(() => companyMapAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
@@ -11629,6 +11890,65 @@ async function statusRefusalAsyncChecks(): Promise<void> {
   } finally {
     console.error = realConsoleError;
     await softDeleteDoc("quotes", Q_GATE);
+  }
+}
+
+/* ====================================================================
+   venue availability — store round-trip (blob-backed, no migration).
+
+   Everything above this is pure-function coverage; this is the one piece
+   that needs a real datadir: add/remove/import-replace through the actual
+   `venue_calendar:<locationId>` blob (src/lib/stores/venue-calendars.ts),
+   proving the store's read-modify-write and the "replace-csv only touches
+   csv-sourced windows" contract against real Postgres/PGlite jsonb merge
+   semantics, not just against the pure engine. Scoped to one fixed test
+   locationId and torn down by overwriting the blob back to nothing
+   (blobs aren't `CollectionName` docs, so the fixture-marker sweep doesn't
+   reach them — same "put the snapshot back" teardown the #169 dismissed-
+   list blob singleton test above uses).
+   ==================================================================== */
+import { blobs as vaBlobsTable } from "@/db/doc-tables";
+import { eq as vaEq } from "drizzle-orm";
+import {
+  addWindow as vaAddWindow,
+  getVenueCalendar as vaGetVenueCalendar,
+  importCsvWindows as vaImportCsvWindows,
+  removeWindow as vaRemoveWindow,
+} from "../src/lib/stores/venue-calendars";
+
+async function venueCalendarAsyncChecks(): Promise<void> {
+  const LOC = "TEST_VENUE_CAL:loc1";
+  try {
+    const empty = await vaGetVenueCalendar(LOC);
+    ok(empty.locationId === LOC && empty.windows.length === 0 && empty.icsWindows.length === 0 && empty.icsUrl === null, "venue-calendars: a venue with nothing on file reads as an empty calendar, not an error");
+
+    const start = Date.now() + 7 * 86400000;
+    const afterAdd = await vaAddWindow(LOC, { kind: "blocked", start, end: start + 3600000, allDay: false, label: "Store round-trip" }, "Test Harness");
+    ok(afterAdd.windows.length === 1 && afterAdd.windows[0].source === "manual" && afterAdd.windows[0].label === "Store round-trip", "venue-calendars: addWindow persists a manual window and reads it back");
+    const manualId = afterAdd.windows[0].id;
+
+    const csvText = "type,start,end,label\nopen,2026-10-01,2026-10-03,CSV window A\nblocked,2026-10-10,2026-10-10,CSV window B\n";
+    const afterCsv = await vaImportCsvWindows(LOC, csvText, "append", "Test Harness");
+    ok(afterCsv.errors.length === 0, `venue-calendars: importCsvWindows(append) parses the fixture cleanly (${JSON.stringify(afterCsv.errors)})`);
+    ok(afterCsv.cal.windows.length === 3, `venue-calendars: append keeps the manual window AND adds the 2 csv rows (${afterCsv.cal.windows.length})`);
+    ok(afterCsv.cal.windows.filter((w) => w.source === "csv").length === 2, "venue-calendars: both imported rows are tagged source csv");
+
+    const csvText2 = "type,start,end,label\nopen,2026-11-01,2026-11-02,CSV replacement\n";
+    const afterReplace = await vaImportCsvWindows(LOC, csvText2, "replace-csv", "Test Harness");
+    ok(afterReplace.cal.windows.length === 2, `venue-calendars: replace-csv drops the OLD csv rows but keeps the manual one (${afterReplace.cal.windows.length})`);
+    ok(afterReplace.cal.windows.some((w) => w.id === manualId), "venue-calendars: replace-csv never touches a manual window");
+    ok(afterReplace.cal.windows.filter((w) => w.source === "csv").length === 1 && afterReplace.cal.windows.some((w) => w.label === "CSV replacement"), "venue-calendars: replace-csv's new row is on file, the old csv rows are gone");
+
+    const afterRemove = await vaRemoveWindow(LOC, manualId, "Test Harness");
+    ok(afterRemove.windows.length === 1 && !afterRemove.windows.some((w) => w.id === manualId), "venue-calendars: removeWindow drops exactly that window and nothing else");
+
+    const reread = await vaGetVenueCalendar(LOC);
+    ok(reread.windows.length === 1, "venue-calendars: a fresh read agrees with the last write (real read-after-write, not just the returned value)");
+  } finally {
+    const db = await getDb();
+    await db.delete(vaBlobsTable).where(vaEq(vaBlobsTable.id, `venue_calendar:${LOC}`));
+    const swept = await vaGetVenueCalendar(LOC);
+    ok(swept.windows.length === 0 && swept.icsWindows.length === 0, "venue-calendars: teardown leaves no trace of the TEST_VENUE_CAL fixture");
   }
 }
 

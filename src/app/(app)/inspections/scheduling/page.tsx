@@ -346,6 +346,7 @@ export default async function InspectionSchedulingPage({
                       mode="new"
                       customer={r.customer || "Customer"}
                       venue={r.venue || ""}
+                      locationId={r.locationId}
                       defaultDate={r.scheduledDate || iso(Date.now() + 7 * DAY)}
                       defaultTech={r.assignedTo || defaultTech}
                       techOptions={techOptions}
@@ -510,6 +511,7 @@ export default async function InspectionSchedulingPage({
                         mode="edit"
                         customer={r.customer || "Customer"}
                         venue={r.venue || ""}
+                        locationId={r.locationId}
                         defaultDate={r.scheduledDate || iso(Date.now() + 7 * DAY)}
                         defaultTech={r.assignedTo || defaultTech}
                         techOptions={techOptions}

@@ -24,7 +24,7 @@ export function safeCallbackPath(raw: string | undefined, origin: string): strin
  *  prefix tests would pass `10.evil.example` (any public hostname that
  *  merely starts with "10." or "192.168.") as "local", which is an open
  *  redirect. */
-function isPrivateHost(h: string): boolean {
+export function isPrivateHost(h: string): boolean {
   return (
     h === "localhost" ||
     h === "127.0.0.1" ||

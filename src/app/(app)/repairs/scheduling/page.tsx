@@ -19,6 +19,7 @@ import { safeSweep } from "@/lib/safe-sweep";
 import { RepairsMap } from "../controls";
 import { scheduleRepair, unscheduleRepair } from "../actions";
 import { formatJobValue } from "@/lib/job-value";
+import { ScheduleDateField } from "./date-field";
 
 export const metadata = { title: "Repair scheduler — Quartzite-6" };
 
@@ -606,22 +607,7 @@ export default async function RepairSchedulingPage({
                   >
                     Visit date
                   </span>
-                  <input
-                    type="date"
-                    name="scheduledDate"
-                    defaultValue={popDefaultDate}
-                    required
-                    style={{
-                      width: "100%",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 13.5,
-                      border: "1px solid #e4e7ec",
-                      borderRadius: 10,
-                      padding: "11px 12px",
-                      outline: "none",
-                      background: "#fff",
-                    }}
-                  />
+                  <ScheduleDateField locationId={popJob.locationId} defaultValue={popDefaultDate} />
                 </label>
                 <label style={{ display: "block" }}>
                   <span

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
-import { getSite } from "@/lib/identity/sites";
+import { docLocId, getSite } from "@/lib/identity/sites";
 import { getCompany } from "@/lib/identity/companies";
 import { contactsForCompany, displayName } from "@/lib/identity/contacts";
 import { CONTACT_STATUS_LABEL, type ContactStatus } from "@/lib/identity/config";
@@ -10,6 +10,8 @@ import { loadVenueHistory } from "@/lib/venue-history-server";
 import type { VenueHistoryRow } from "@/lib/venue-match";
 import { dateYear } from "@/lib/format";
 import { fmtMiles, fmtTime } from "@/lib/geo";
+import { getVenueCalendar } from "@/lib/stores/venue-calendars";
+import VenueCalendarCard from "./calendar-card";
 import { ACCENT_INK, ACCENT_SOFT, cityState, mono, venueKindLabel } from "../../companies/lib";
 
 /**
@@ -144,10 +146,12 @@ export default async function VenuePage({
   const site = await getSite(id);
   if (!site) notFound();
 
-  const [company, contacts, history] = await Promise.all([
+  const locationId = docLocId(site);
+  const [company, contacts, history, venueCalendar] = await Promise.all([
     getCompany(site.companyId),
     contactsForCompany(site.companyId),
     loadVenueHistory(site),
+    getVenueCalendar(locationId),
   ]);
 
   const address =
@@ -291,6 +295,8 @@ export default async function VenuePage({
           )}
         </div>
       </div>
+
+      <VenueCalendarCard locationId={locationId} initialCalendar={venueCalendar} />
 
       {/* open work */}
       {openHistory.length > 0 && (

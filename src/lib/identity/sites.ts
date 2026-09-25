@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
 
@@ -96,4 +96,25 @@ export async function softDeleteSite(id: string): Promise<void> {
 /** The id doc records store as `locationId` — legacy alias when present. */
 export function docLocId(s: SiteRow): string {
   return s.legacyLocId ?? s.id;
+}
+
+/**
+ * Reverse of docLocId: given the id a scheduled record carries as its own
+ * `locationId` (a migrated venue's legacyLocId, or a native site's own id),
+ * find the site row it names. Every doc-side "which venue is this?" lookup
+ * (the venue-availability check, the company record's venue → calendar
+ * link) needs this direction — `getSite` alone only resolves `sites.id`,
+ * which a migrated venue's callers never have.
+ */
+export async function getSiteByDocLocId(
+  locationId: string | null | undefined
+): Promise<SiteRow | null> {
+  if (!locationId) return null;
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(sites)
+    .where(and(eq(sites.deleted, false), or(eq(sites.legacyLocId, locationId), eq(sites.id, locationId))))
+    .limit(1);
+  return rows[0] ?? null;
 }

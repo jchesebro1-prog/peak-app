@@ -27,6 +27,7 @@ import { groupByPerson, mergeBookingsIntoPersonRows, UNASSIGNED_LABEL } from "./
 import { PortfolioGantt } from "./portfolio-gantt";
 import type { GanttRow } from "@/components/gantt/gantt-grid";
 import { dayColumns, ganttWindow, snapToDay, type GanttWindow } from "@/components/gantt/gantt-lib";
+import { BookingDateField } from "./booking-date-field";
 
 export const metadata = { title: "Schedule — Quartzite-6" };
 
@@ -2059,13 +2060,7 @@ export default async function SchedulePage({
                 <div style={{ display: "flex", gap: 11 }}>
                   <label style={{ display: "block", flex: 1 }}>
                     <span style={labelCap}>Start</span>
-                    <input
-                      type="date"
-                      name="start"
-                      defaultValue={isoOf(popStart)}
-                      required
-                      style={{ ...inputCss, fontFamily: "var(--font-mono)", fontSize: 13 }}
-                    />
+                    <BookingDateField locationId={popProject?.locationId ?? null} defaultValue={isoOf(popStart)} />
                   </label>
                   <label style={{ display: "block", width: 96 }}>
                     <span style={labelCap}>Days</span>
