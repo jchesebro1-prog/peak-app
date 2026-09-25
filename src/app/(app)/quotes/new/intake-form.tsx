@@ -62,6 +62,10 @@ export default function QuoteIntakeForm({
   });
 
   const [error, setError] = useState("");
+  // I4 review — the thread this intake was opened from already links
+  // something else; offers "Open it" / an explicit "Create another" confirm
+  // rather than silently overwriting that link.
+  const [linkedElsewhere, setLinkedElsewhere] = useState<{ label: string; href: string } | null>(null);
   const [pending, startTransition] = useTransition();
   // #178 — window.confirm() silently returns false with no dialog in this
   // app's Capacitor shells, so the old `!window.confirm(...)` check just
@@ -148,9 +152,10 @@ export default function QuoteIntakeForm({
     doSubmit();
   }
 
-  function doSubmit() {
+  function doSubmit(confirmReplaceLink?: boolean) {
     setConfirmReplace(false);
     setError("");
+    if (!confirmReplaceLink) setLinkedElsewhere(null);
     const payload: IntakeSubmit = {
       type,
       category: type === "custom" ? category.trim() : "",
@@ -172,11 +177,15 @@ export default function QuoteIntakeForm({
       newContactEmail: newContact.email,
       newContactPhone: newContact.phone,
       threadId: threadId || undefined,
+      confirmReplaceLink,
     };
     startTransition(async () => {
       const res = await createQuoteIntakeAction(payload);
       // A successful call redirect()s server-side and never returns here.
-      if (res && !res.ok) setError(res.error);
+      if (res && !res.ok) {
+        if ("linkedElsewhere" in res) setLinkedElsewhere({ label: res.linkedElsewhere.label, href: res.linkedElsewhere.href });
+        else setError(res.error);
+      }
     });
   }
 
@@ -408,6 +417,60 @@ export default function QuoteIntakeForm({
         </div>
       )}
 
+      {/* I4 review — the thread already links something that isn't an
+          inbox-minted draft for this customer; never overwritten silently. */}
+      {linkedElsewhere && (
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            background: "#fdf8ee",
+            border: "1px solid #f0e2bd",
+            borderRadius: 9,
+            padding: "10px 13px",
+            fontSize: 12.5,
+            color: "#8a6d1f",
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 200 }}>
+            This thread is already linked to <strong>{linkedElsewhere.label}</strong>.
+          </span>
+          <Link
+            href={linkedElsewhere.href}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#8a6d1f",
+              textDecoration: "underline",
+            }}
+          >
+            Open it
+          </Link>
+          <button
+            type="button"
+            onClick={() => doSubmit(true)}
+            disabled={pending}
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: "#fff",
+              background: "#b4863a",
+              border: "none",
+              borderRadius: 6,
+              padding: "5px 11px",
+              cursor: pending ? "default" : "pointer",
+            }}
+          >
+            Create another
+          </button>
+        </div>
+      )}
+
       {confirmReplace && replacing && (
         <div
           style={{
@@ -429,7 +492,7 @@ export default function QuoteIntakeForm({
           </span>
           <button
             type="button"
-            onClick={doSubmit}
+            onClick={() => doSubmit()}
             style={{
               fontFamily: "var(--font-ui)",
               fontSize: 11.5,

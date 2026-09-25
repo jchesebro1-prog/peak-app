@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -12,6 +13,20 @@ import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { builderPath, isServiceType, type IntakeSubmit } from "./types";
 
+/** I1/I4 review — where the "This thread is linked to X" banner's "open it"
+ *  points. Small and self-contained on purpose: the fuller LINK_KIND_COLOR/
+ *  linkHref table (inbox/page.tsx) also carries colours the intake page
+ *  doesn't need. */
+function linkedRecordHref(link: { type: string; id: string }): string {
+  const id = encodeURIComponent(link.id);
+  if (link.type === "quote") return `/quotes?id=${id}`;
+  if (link.type === "lead") return `/leads?lead=${id}`;
+  if (link.type === "survey") return `/venue-assessments?id=${id}`;
+  if (link.type === "inspection") return `/inspections?id=${id}`;
+  if (link.type === "project") return `/projects`;
+  return "#";
+}
+
 /**
  * The guided "new quote" intake — resolves/creates the customer (and an
  * optional new venue/contact appended to its arrays) through the same
@@ -21,9 +36,15 @@ import { builderPath, isServiceType, type IntakeSubmit } from "./types";
  * is a plain function call, not a client import.
  */
 
-export async function createQuoteIntakeAction(
-  input: IntakeSubmit
-): Promise<{ ok: false; error: string }> {
+export type IntakeResult =
+  | { ok: false; error: string }
+  /** I4 review — the thread this intake was opened from already links
+   *  something that isn't an inbox-minted draft for this customer; the
+   *  form shows "open it" (href) / "create another" (resubmits with
+   *  confirmReplaceLink: true). */
+  | { ok: false; linkedElsewhere: { type: string; id: string; label: string; href: string } };
+
+export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<IntakeResult> {
   const me = await requireUser();
 
   if (!isServiceType(input.type)) return { ok: false, error: "Unknown quote type." };
@@ -41,6 +62,19 @@ export async function createQuoteIntakeAction(
     return { ok: false, error: "That quote is no longer a draft — start a new quote instead." };
   }
   if (old && sameBuilder(input.type, quoteServiceType(old))) redirect(quoteEditPath(old));
+
+  // #123/I4 review — validated BEFORE any customer/venue/contact save side
+  // effect (it used to run after saveCustomerAction, which meant a bad or
+  // inaccessible thread id left behind a customer/venue/contact the failed
+  // request had no use for).
+  const threadId = (input.threadId || "").trim();
+  const thread = threadId ? await getThread(threadId) : null;
+  if (threadId && (!thread || !visibleTo(thread, me.name))) {
+    return {
+      ok: false,
+      error: "That email thread couldn't be found — start the quote from the Quotes hub instead.",
+    };
+  }
 
   const creatingCustomer = input.customerMode === "new";
   const newCustomerName = (input.newCustomerName || "").trim();
@@ -125,27 +159,47 @@ export async function createQuoteIntakeAction(
   // #123 — opened from an Inbox thread ("+ New quote"): the builders only
   // mint a quote on their first save, so mint the draft here to have an id
   // to link, link the thread to it, and go back to the thread instead of the
-  // builder.
-  const threadId = (input.threadId || "").trim();
-  if (threadId) {
-    const thread = await getThread(threadId);
-    if (!thread || !visibleTo(thread, me.name))
+  // builder. `thread` was already resolved + visibility-checked up top.
+  if (threadId && thread) {
+    const customerName = existing?.name || newCustomerName;
+    // I1 review — the venue/contact's full record, so the builder each
+    // service type opens into shows the same venue/contact this thread had
+    // instead of a blank slate (see linkThreadToNewQuote's doc comment for
+    // which type reads which fields).
+    const record = await getCustomer(customerId);
+    const venueRecord = venueId ? (record?.locations || []).find((l) => l.id === venueId) : null;
+    const contactRecord = contact ? (record?.contacts || []).find((c) => c.name === contact) : null;
+    const made = await linkThreadToNewQuote(
+      threadId,
+      {
+        customerId,
+        customer: customerName,
+        locationId: venueId || null,
+        locationLabel: venueRecord?.label || "",
+        contactName: contact,
+        contactRole: contactRecord?.role || "",
+        contactEmail: contactRecord?.email || "",
+        quoteType: input.type === "custom" ? "system" : input.type,
+        category: input.type === "custom" ? category : "",
+        owner: me.name,
+        name: input.name,
+      },
+      { confirmReplace: !!input.confirmReplaceLink }
+    );
+    if (!made.ok) {
+      if (made.reason === "not-found")
+        return { ok: false, error: "That email thread couldn't be found." };
       return {
         ok: false,
-        error: "That email thread couldn't be found — start the quote from the Quotes hub instead.",
+        linkedElsewhere: {
+          type: made.link.type,
+          id: made.link.id,
+          label: made.link.label || made.link.id,
+          href: linkedRecordHref(made.link),
+        },
       };
-    const customerName = existing?.name || newCustomerName;
-    const made = await linkThreadToNewQuote(threadId, {
-      customerId,
-      customer: customerName,
-      locationId: venueId || null,
-      contactName: contact,
-      quoteType: input.type === "custom" ? "system" : input.type,
-      category: input.type === "custom" ? category : "",
-      owner: me.name,
-      name: input.name,
-    });
-    if (!made) return { ok: false, error: "That email thread couldn't be found." };
+    }
+    revalidatePath("/", "layout");
     redirect(`/inbox?thread=${encodeURIComponent(threadId)}`);
   }
 

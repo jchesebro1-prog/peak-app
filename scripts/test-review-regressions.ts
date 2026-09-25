@@ -1984,7 +1984,9 @@ async function main() {
     assert(!(await Curtains.allCurtainTemplates()).some((t) => t.title === "Should not land"), "library io: a skipped curtain template never overwrites the Border template");
   }
 
-  // #123 — "+ New quote" from a thread: mint the draft, link the thread, adopt the customer
+  // #123/I1/I4 review — "+ New quote" from a thread: mint the draft with the
+  // right per-type shape, link the thread, adopt the customer, idempotent
+  // on a repeat call, and never silently overwrite a different link.
   {
     const { linkThreadToNewQuote } = await import("@/lib/gmail/linking");
     const { get: getQuoteDoc } = await import("@/lib/stores/quotes");
@@ -1995,38 +1997,106 @@ async function main() {
       subject: "Re: Fwd: Curtain quote for the PAC", channel: "email", status: "waiting_us", assignedTo: "", link: null,
       messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
     });
-    const r3made = await linkThreadToNewQuote("C-r3quote", {
-      customerId: "lakefront", customer: "Lakefront ISD", locationId: "loc1", contactName: "Brenda Gauchel",
+    const r3flameInput = {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: "loc1", locationLabel: "Auditorium",
+      contactName: "Brenda Gauchel", contactRole: "Director", contactEmail: "brenda.t96@lakefront.k12.mn.us",
       quoteType: "flame_test", category: "", owner: "Tester",
-    });
-    assert.ok(!!r3made && r3made.quoteId.startsWith("Q-"), "#123 linkThreadToNewQuote mints a Q- id");
-    const r3q = await getQuoteDoc(r3made!.quoteId);
+    };
+    const r3made = await linkThreadToNewQuote("C-r3quote", r3flameInput);
+    assert.ok(r3made.ok, "#123 linkThreadToNewQuote mints on the first call");
+    if (!r3made.ok) throw new Error("unreachable");
+    assert.ok(r3made.quoteId.startsWith("Q-"), "#123 …a Q- id");
+    assert.equal(r3made.reused, false, "#123 …freshly minted, not reused");
+    const r3q = await getQuoteDoc(r3made.quoteId);
     assert.equal(r3q?.customerId, "lakefront", "#123 the draft carries the intake's customer");
-    assert.equal(r3q?.locationId, "loc1", "#123 …and venue");
-    assert.equal(r3q?.contactName, "Brenda Gauchel", "#123 …and contact");
+    assert.equal(r3q?.locationId, "loc1", "#123 …and venue (system-shape top-level locationId)");
+    assert.equal(r3q?.contactName, "Brenda Gauchel", "#123 …and contact (system-shape top-level contactName)");
     assert.equal(r3q?.quoteType, "flame_test", "#123 …and quote type");
     assert.equal(r3q?.source, "inbox", "#123 source is inbox");
     assert.equal(r3q?.status, "draft", "#123 the quote starts as a draft");
     assert.equal(r3q?.name, "Curtain quote for the PAC", "#123 name comes from the subject when none was given, prefixes stripped");
+    // I1 — flame-tests/quote/page.tsx reads top-level `contact` and
+    // `flameTest.venues[].{id,label}` to reconstruct its editor state.
+    const r3ft = r3q?.flameTest as { venues?: Array<{ id?: string; label?: string }> } | null;
+    assert.deepEqual(r3ft?.venues, [{ id: "loc1", label: "Auditorium" }], "#123/I1 flameTest.venues carries the thread's venue id+label");
+    assert.deepEqual(r3q?.contact, { name: "Brenda Gauchel", role: "Director", email: "brenda.t96@lakefront.k12.mn.us" }, "#123/I1 the flame builder's contact object is seeded, not just contactName");
     const r3qt = await getDoc<CommThread>("comms", "C-r3quote");
     assert.equal(r3qt?.link?.type, "quote", "#123 the thread links to a quote");
-    assert.equal(r3qt?.link?.id, r3made!.quoteId, "#123 …the minted one");
-    assert.equal(r3qt?.link?.label, `${r3made!.quoteId} · Curtain quote for the PAC`, "#123 label matches the picker's format");
+    assert.equal(r3qt?.link?.id, r3made.quoteId, "#123 …the minted one");
+    assert.equal(r3qt?.link?.label, `${r3made.quoteId} · Curtain quote for the PAC`, "#123 label matches the picker's format");
     assert.equal(r3qt?.customerId, "lakefront", "#123 an unlinked thread adopts the intake's customer");
     assert.equal(r3qt?.resolution, "linked", "#123 …and reads as linked");
 
-    const r3named = await linkThreadToNewQuote("C-r3quote", {
-      customerId: "lakefront", customer: "Lakefront ISD", locationId: null, contactName: "",
-      quoteType: "system", category: "", owner: "Tester", name: "Custom name",
-    });
-    const r3qn = await getQuoteDoc(r3named!.quoteId);
-    assert.equal(r3qn?.name, "Custom name", "#123 an explicit intake name wins over the subject");
+    // I4 — a repeat mint for the SAME customer is idempotent: hands back the
+    // same draft instead of minting a second one (double submit, a second
+    // tab, the back button); the new call's own `name` is never applied —
+    // the existing draft's identity wins outright.
+    const r3again = await linkThreadToNewQuote("C-r3quote", { ...r3flameInput, name: "Ignored — reused" });
+    assert.ok(r3again.ok, "#123/I4 the repeat call still succeeds");
+    if (!r3again.ok) throw new Error("unreachable");
+    assert.equal(r3again.quoteId, r3made.quoteId, "#123/I4 …the SAME quote id — no duplicate minted");
+    assert.equal(r3again.reused, true, "#123/I4 …flagged as reused");
+    assert.equal((await getQuoteDoc(r3again.quoteId))?.name, "Curtain quote for the PAC", "#123/I4 the reused draft's name is untouched by the new call's input");
 
-    assert.equal(
+    // I4 — the thread now links a LEAD instead: refused outright...
+    await patchDoc<CommThread>("comms", "C-r3quote", (d) => {
+      d.link = { type: "lead", id: "L-9001", label: "L-9001 · Some Lead" };
+    });
+    const r3blocked = await linkThreadToNewQuote("C-r3quote", r3flameInput);
+    assert.ok(!r3blocked.ok && r3blocked.reason === "linked-elsewhere", "#123/I4 a thread linked to something else refuses to mint over it");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3quote"))?.link?.type, "lead", "#123/I4 …the existing link is untouched");
+    // ...but an explicit confirm mints a NEW draft and takes over the link.
+    const r3confirmed = await linkThreadToNewQuote("C-r3quote", r3flameInput, { confirmReplace: true });
+    assert.ok(r3confirmed.ok, "#123/I4 confirmReplace mints anyway");
+    if (!r3confirmed.ok) throw new Error("unreachable");
+    assert.notEqual(r3confirmed.quoteId, r3made.quoteId, "#123/I4 …a genuinely NEW draft, not the one from before the lead link");
+    assert.equal((await getDoc<CommThread>("comms", "C-r3quote"))?.link?.id, r3confirmed.quoteId, "#123/I4 …and the thread now points at it");
+
+    assert.deepEqual(
       await linkThreadToNewQuote("C-r3-no-such-thread", { customerId: "lakefront", customer: "x", locationId: null, contactName: "", quoteType: "system", category: "", owner: "Tester" }),
-      null,
-      "#123 unknown thread → null, nothing minted"
+      { ok: false, reason: "not-found" },
+      "#123 unknown thread → not-found, nothing minted"
     );
+  }
+
+  // I1 — the other service types read a different shape than flame_test's;
+  // rentals have no venue concept at all, consulting needs venueCustomerId.
+  {
+    const { linkThreadToNewQuote } = await import("@/lib/gmail/linking");
+    const { get: getQuoteDoc } = await import("@/lib/stores/quotes");
+    const r3now = Date.now();
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3rental", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us",
+      subject: "Rental for spring musical", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    const r3rental = await linkThreadToNewQuote("C-r3rental", {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: "loc1", locationLabel: "Auditorium",
+      contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us", quoteType: "rental", category: "", owner: "Tester",
+    });
+    assert.ok(r3rental.ok, "#123/I1 rental mints");
+    if (!r3rental.ok) throw new Error("unreachable");
+    const r3rq = await getQuoteDoc(r3rental.quoteId);
+    assert.equal(r3rq?.locationId, null, "#123/I1 rentals/quote/page.tsx never reads a venue — locationId stays null even though one was forwarded");
+    assert.deepEqual(r3rq?.contact, { name: "Tom Reyes", role: "", email: "tom@lakefront.k12.mn.us" }, "#123/I1 …but the contact still carries over");
+
+    await upsertDoc<CommThread>("comms", {
+      id: "C-r3consult", mailbox: "personal", mailboxUser: "Jeff Chesebro", unread: false, archived: false,
+      customerId: null, customer: "", contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us",
+      subject: "Consulting scope", channel: "email", status: "waiting_us", assignedTo: "", link: null,
+      messages: [], createdAt: r3now, updatedAt: r3now, resolution: "unknown",
+    });
+    const r3consult = await linkThreadToNewQuote("C-r3consult", {
+      customerId: "lakefront", customer: "Lakefront ISD", locationId: null,
+      contactName: "Tom Reyes", contactEmail: "tom@lakefront.k12.mn.us", quoteType: "consulting", category: "", owner: "Tester",
+    });
+    assert.ok(r3consult.ok, "#123/I1 consulting mints");
+    if (!r3consult.ok) throw new Error("unreachable");
+    const r3cq = await getQuoteDoc(r3consult.quoteId);
+    const r3consulting = r3cq?.consulting as { venueCustomerId?: string; venueCustomer?: string } | null;
+    assert.equal(r3consulting?.venueCustomerId, "lakefront", "#123/I1 design/engagements/quote/page.tsx requires venueCustomerId — seeded to the billed customer absent a distinct venue");
+    assert.equal(r3consulting?.venueCustomer, "Lakefront ISD", "#123/I1 …with its display name alongside");
   }
 
   // #124 — siteId follows the customer: setThreadSite stamps it, a re-link

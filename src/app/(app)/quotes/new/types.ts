@@ -193,4 +193,8 @@ export type IntakeSubmit = {
    *  quote"): the action mints the draft quote, links the thread and
    *  returns to the Inbox instead of redirecting into the builder. */
   threadId?: string;
+  /** I4 review — set only after the user explicitly picks "Create another"
+   *  on the "This thread is linked to X" notice; lets linkThreadToNewQuote
+   *  overwrite a thread's existing (non-inbox-draft) link on purpose. */
+  confirmReplaceLink?: boolean;
 };

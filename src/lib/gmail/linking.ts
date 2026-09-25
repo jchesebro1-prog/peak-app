@@ -15,7 +15,7 @@ import {
 } from "@/lib/identity/contacts";
 import { mintId } from "@/lib/identity/ids";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
-import type { CommThread } from "@/lib/stores/comms";
+import type { CommLink, CommThread } from "@/lib/stores/comms";
 import { domainOf, isPublicDomain } from "./config";
 import { claimDomain, customersForDomain, customersForDomains } from "./domains";
 import { resolveSender, type Resolution } from "./resolve";
@@ -249,46 +249,127 @@ export async function linkThread(
   queueLabelSync(threadId);
 }
 
+export type LinkThreadToNewQuoteInput = {
+  customerId: string;
+  customer: string;
+  locationId: string | null;
+  /** I1 review — the venue's own label; without it flame/repair/inspection
+   *  venue rows would show blank ("Venue" fallback) once opened in their
+   *  builder. */
+  locationLabel?: string;
+  contactName: string;
+  contactRole?: string;
+  contactEmail?: string;
+  quoteType: string;
+  category: string;
+  owner: string;
+  /** the intake's optional "Quote name" field; falls back to the thread
+   *  subject (Re:/Fwd: stripped) when blank. */
+  name?: string;
+};
+
+export type LinkThreadToNewQuoteResult =
+  | { ok: true; quoteId: string; name: string; reused: boolean }
+  | { ok: false; reason: "not-found" }
+  /** I4 review — the thread already points at something that ISN'T an
+   *  inbox-minted draft for this customer; the caller must not overwrite it
+   *  without an explicit confirm (opts.confirmReplace). */
+  | { ok: false; reason: "linked-elsewhere"; link: CommLink };
+
 /** #123 — "+ New quote" from a thread. The guided intake's builders only
  *  mint a quote on their first save (createQuoteIntakeAction just redirects
  *  into one), so this mints the draft directly to have an id to link: the
  *  thread's work link points at it, and a thread with no stored customer
- *  adopts the intake's (same rule as setLinkAction's adopt). Lazy imports:
- *  comms lazily imports this module, and quotes pulls in the assignments
- *  store — neither belongs in this module's static graph. */
+ *  adopts the intake's (same rule as setLinkAction's adopt).
+ *
+ *  I1 review — seeds exactly the fields each builder's own first save
+ *  writes (a `contact` object for the four service types, a minimal
+ *  `venues`/`consulting.venueCustomerId` shape per type — see each
+ *  builder's page.tsx for what it reads back), not just locationId +
+ *  contactName (the estimator's own shape, which is all the old version
+ *  seeded regardless of type).
+ *
+ *  I4 review — idempotent and non-destructive: a thread already linked to
+ *  an inbox-minted draft for the SAME customer hands that quote back
+ *  instead of minting a duplicate (double submit, a second tab, the back
+ *  button); a thread linked to anything else refuses (reason
+ *  "linked-elsewhere") unless the caller passes opts.confirmReplace, so a
+ *  lead or another quote a thread already points at is never silently
+ *  swapped out from under it.
+ *
+ *  Lazy imports: comms lazily imports this module, and quotes pulls in the
+ *  assignments store — neither belongs in this module's static graph. */
 export async function linkThreadToNewQuote(
   threadId: string,
-  input: {
-    customerId: string;
-    customer: string;
-    locationId: string | null;
-    contactName: string;
-    quoteType: string;
-    category: string;
-    owner: string;
-    /** the intake's optional "Quote name" field; falls back to the thread
-     *  subject (Re:/Fwd: stripped) when blank. */
-    name?: string;
-  }
-): Promise<{ quoteId: string; name: string } | null> {
+  input: LinkThreadToNewQuoteInput,
+  opts: { confirmReplace?: boolean } = {}
+): Promise<LinkThreadToNewQuoteResult> {
   const { get: getThread, setLink } = await import("@/lib/stores/comms");
   const t = await getThread(threadId);
-  if (!t) return null;
-  const { create: createQuote } = await import("@/lib/stores/quotes");
+  if (!t) return { ok: false, reason: "not-found" };
+
+  const { get: getQuoteDoc, create: createQuote } = await import("@/lib/stores/quotes");
+  if (t.link?.type === "quote") {
+    const existingQuote = await getQuoteDoc(t.link.id);
+    if (
+      existingQuote &&
+      existingQuote.source === "inbox" &&
+      existingQuote.status === "draft" &&
+      existingQuote.customerId === input.customerId
+    ) {
+      return { ok: true, quoteId: existingQuote.id, name: existingQuote.name, reused: true };
+    }
+  }
+  if (t.link && !opts.confirmReplace) {
+    return { ok: false, reason: "linked-elsewhere", link: t.link };
+  }
+
+  const contact = input.contactName.trim()
+    ? { name: input.contactName.trim(), role: input.contactRole || "", email: input.contactEmail || "" }
+    : null;
+  const venues = input.locationId ? [{ id: input.locationId, label: input.locationLabel || "Venue" }] : [];
+  // I1 review — each service type's builder reads a different shape back
+  // (flame-tests/quote/page.tsx, repairs/quote/page.tsx,
+  // inspections/quote/page.tsx, rentals/quote/page.tsx,
+  // design/engagements/quote/page.tsx); system/custom read only the
+  // top-level locationId/contactName set below and need nothing extra.
+  const typeFields: Record<string, unknown> = {};
+  if (input.quoteType === "flame_test") {
+    typeFields.flameTest = { venues };
+    typeFields.contact = contact;
+  } else if (input.quoteType === "repair") {
+    typeFields.repair = { venues };
+    typeFields.contact = contact;
+  } else if (input.quoteType === "inspection") {
+    typeFields.inspection = { venues };
+    typeFields.contact = contact;
+  } else if (input.quoteType === "rental") {
+    // Rentals have no venue concept — rentals/quote/page.tsx never reads a
+    // handoff venue — only the contact carries over.
+    typeFields.contact = contact;
+  } else if (input.quoteType === "consulting") {
+    // design/engagements/quote/page.tsx requires BOTH the billed customerId
+    // and a venueCustomerId; absent a distinct venue on this thread, the
+    // billed customer IS the venue owner.
+    typeFields.contact = contact;
+    typeFields.consulting = { venueCustomerId: input.customerId, venueCustomer: input.customer };
+  }
+
   const q = await createQuote({
     name: (input.name || "").trim() || quoteNameFromSubject(t.subject),
     customer: input.customer,
     customerId: input.customerId,
-    locationId: input.locationId,
+    locationId: input.quoteType === "rental" ? null : input.locationId,
     contactName: input.contactName,
     quoteType: input.quoteType,
     category: input.category,
     source: "inbox",
     owner: input.owner,
+    ...typeFields,
   });
   if (!t.customerId) await linkThread(threadId, input.customerId, t.resolvedContactId ?? null);
   await setLink(threadId, { type: "quote", id: q.id, label: `${q.id} · ${q.name}` });
-  return { quoteId: q.id, name: q.name };
+  return { ok: true, quoteId: q.id, name: q.name, reused: false };
 }
 
 /** #124 — stamp (or clear) the thread's venue. Validation (the site belongs
