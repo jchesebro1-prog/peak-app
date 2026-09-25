@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { removeQuoteAction, setQuoteStatusAction } from "./home-actions";
+import { ConfirmButton } from "@/components/confirm-button";
 
 /**
  * Stage sheet — port of Home.dc.html's quote sheet (open a pipeline row →
@@ -238,8 +239,8 @@ export default function HomeStageSheet({
           >
             Open in Estimator →
           </Link>
-          <button
-            onClick={del}
+          <ConfirmButton
+            onConfirm={del}
             disabled={pending}
             title="Delete quote"
             className="pkh-delbtn"
@@ -254,9 +255,7 @@ export default function HomeStageSheet({
               cursor: "pointer",
               fontFamily: "var(--font-ui)",
             }}
-          >
-            Delete
-          </button>
+          />
         </div>
       </div>
     </div>

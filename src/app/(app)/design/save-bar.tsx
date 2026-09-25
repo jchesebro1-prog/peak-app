@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveDesignAction, deleteDesignAction } from "./studio-actions";
 import type { StudioDesignKind } from "@/lib/stores/studio-designs";
+import { ConfirmButton } from "@/components/confirm-button";
 
 export type SavedRef = { id: string; name: string; customer: string };
 
@@ -70,7 +71,16 @@ export function SaveBar({
       </select>
       <button onClick={() => save(false)} disabled={pending || !name.trim()} style={btn(true)}>{pending ? "Saving…" : id ? "Update" : "Save"}</button>
       {id && <button onClick={() => save(true)} disabled={pending} style={btn()}>Save as new</button>}
-      {id && <button onClick={del} disabled={pending} style={{ ...btn(), color: "#b4543a" }}>Delete</button>}
+      {id && (
+        <ConfirmButton
+          label="Delete"
+          confirmLabel="Confirm delete"
+          disabled={pending}
+          className=""
+          style={{ ...btn(), color: "#b4543a" }}
+          onConfirm={del}
+        />
+      )}
       {saved.length > 0 && (
         <select value="" onChange={(e) => e.target.value && router.push(loadBase + encodeURIComponent(e.target.value))} style={{ ...field, flex: "1 1 150px" }}>
           <option value="">Open saved… ({saved.length})</option>

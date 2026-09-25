@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   deleteCustomerAction,
@@ -10,6 +10,7 @@ import {
   searchAddressAction,
 } from "./actions";
 import { CUSTOMER_TYPES, VENUE_KINDS, addressFromHit } from "./lib";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { AddressHitVM, SaveCustomerInput } from "./types";
 import { defsForType, type CustomFieldDef } from "@/lib/customer-fields";
 import { LIFECYCLES, LIFECYCLE_LABEL } from "@/lib/identity/config";
@@ -111,6 +112,43 @@ function newLoc(primary: boolean): LocRow {
 /** #23 — <input type="date"> ⇄ epoch-ms bridge (local Date parts, TZ-safe).
  *  Generic date VALUES store local midnight (unlike the lead drawer's
  *  follow-up 9:00 convention — that is a scheduling default, this is data). */
+/**
+ * Compact two-step remove for a location/contact row (punch: "never
+ * window.confirm" without dragging the full ConfirmButton — with its text
+ * labels and Cancel button — into a 30×30 icon slot). First click arms it
+ * (× → ✓, red); a second click within 4s removes the row; anything else
+ * (another click elsewhere, or the timeout) disarms it back to ×.
+ */
+function RemoveRowButton({ onRemove, title }: { onRemove: () => void; title: string }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button
+      type="button"
+      onClick={() => (armed ? onRemove() : setArmed(true))}
+      title={armed ? "Click again to remove" : title}
+      style={{
+        width: 30,
+        height: 30,
+        border: `1px solid ${armed ? "#eccfc4" : "#e4e7ec"}`,
+        background: armed ? "#f8ece7" : "#fff",
+        borderRadius: 8,
+        color: armed ? "#b4543a" : "#c4c9d2",
+        fontSize: armed ? 13 : 15,
+        fontWeight: armed ? 700 : 400,
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      {armed ? "✓" : "×"}
+    </button>
+  );
+}
+
 function toDateInput(ts: number | null): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -636,13 +674,7 @@ export default function EditCustomerModal({
                   {l.primary ? "✓ Primary" : "Make primary"}
                 </button>
                 {locations.length > 1 && (
-                  <button
-                    onClick={() => removeLoc(i)}
-                    title="Remove location"
-                    style={{ width: 30, height: 30, border: "1px solid #e4e7ec", background: "#fff", borderRadius: 8, color: "#c4c9d2", fontSize: 15, cursor: "pointer", flexShrink: 0 }}
-                  >
-                    ×
-                  </button>
+                  <RemoveRowButton onRemove={() => removeLoc(i)} title="Remove location" />
                 )}
               </div>
 
@@ -817,13 +849,7 @@ export default function EditCustomerModal({
                   {c.primary ? "✓ Primary" : "Make primary"}
                 </button>
                 {contacts.length > 1 && (
-                  <button
-                    onClick={() => removeContact(i)}
-                    title="Remove"
-                    style={{ width: 30, height: 30, border: "1px solid #e4e7ec", background: "#fff", borderRadius: 8, color: "#c4c9d2", fontSize: 15, cursor: "pointer", flexShrink: 0 }}
-                  >
-                    ×
-                  </button>
+                  <RemoveRowButton onRemove={() => removeContact(i)} title="Remove" />
                 )}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr 1fr", gap: 9 }}>
@@ -867,13 +893,14 @@ export default function EditCustomerModal({
         >
           <div>
             {mode === "edit" && (
-              <button
-                onClick={doDelete}
+              <ConfirmButton
+                label="Delete"
+                confirmLabel="Confirm delete"
                 disabled={busy}
+                className=""
                 style={{ fontSize: 13, fontWeight: 600, color: "#b4543a", background: "#f8ece7", border: "1px solid #eccfc4", borderRadius: 9, padding: "10px 14px", cursor: "pointer" }}
-              >
-                Delete
-              </button>
+                onConfirm={doDelete}
+              />
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

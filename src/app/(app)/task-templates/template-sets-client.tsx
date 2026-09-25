@@ -6,6 +6,7 @@ import type { TaskTemplateLine, TaskTemplateSetRecord } from "@/lib/stores/task-
 import { TEMPLATE_RECORD_LABEL, TEMPLATE_RECORD_KINDS, type TemplateRecordKind } from "@/lib/task-template-kinds";
 import type { Role } from "@/lib/team";
 import { archiveTaskTemplateSetAction, deleteTaskTemplateSetAction, saveTaskTemplateSetAction } from "./actions";
+import { ConfirmButton } from "@/components/confirm-button";
 
 /**
  * Admin editor for task-template sets (D149, #118). Whole-record editing —
@@ -349,9 +350,14 @@ export default function TemplateSetsClient({
                 {s.archived ? "Unarchive" : "Archive"}
               </button>
             )}
-            <button onClick={() => remove(s.localKey)} disabled={pending} style={dangerBtn}>
-              Delete
-            </button>
+            <ConfirmButton
+              label="Delete"
+              confirmLabel="Confirm delete"
+              disabled={pending}
+              className=""
+              style={dangerBtn}
+              onConfirm={() => remove(s.localKey)}
+            />
             {status[s.localKey] && (
               <span style={{ fontSize: 12, color: status[s.localKey] === "Saved." ? "#1f7a52" : "#b4543a" }}>
                 {status[s.localKey]}
