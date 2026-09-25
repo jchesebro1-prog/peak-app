@@ -9,7 +9,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { checkManufacturer, checkSize } from "@/lib/catalog-import-guard";
 import { setPriceListEffective } from "@/lib/settings";
 import { list as listCatalog, mergeUpsert, type CatalogProductMetadata, type CatalogPart } from "@/lib/stores/catalog";
-import { resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
+import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { parseCatalog } from "./parse";
@@ -28,15 +28,6 @@ export type CatalogImportInput = {
 };
 
 export type CatalogImportResult = { ok: true; imported: number; mfr: string } | { ok: false; error: string };
-
-/** D-SPEC fix wave (Task 14, item 3) — true for a string shaped like a spec
- *  section/article id ("ss-…" / "ar-…"). Mirrors the same-named helper in
- *  ../import/registry.ts: an unresolved ref in this shape is a DEAD pointer,
- *  not legacy free text, and must never be written into productMetadata's
- *  legacy text (it would just round-trip back as the same dead id). */
-function looksLikeSpecId(s: string): boolean {
-  return /^(ss|ar)-/.test(s);
-}
 
 export async function runCatalogImport(input: CatalogImportInput): Promise<CatalogImportResult> {
   const size = checkSize(input.bytes);
@@ -65,7 +56,7 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
   // only a brand-new part takes the 0 a document needs to be well-formed.
   const existing = new Set(catalog.map((p) => p.id)); // the document id IS the SKU (mergeUpsert's lookup)
   const bySku = new Map<string, CatalogPart>(catalog.map((p) => [p.id, p]));
-  // D-SPEC-5: the price-book importer writes the same canonical pointers the
+  // D258: the price-book importer writes the same canonical pointers the
   // Import hub's catalogPatch does. Loaded once for the whole file, not once
   // per row — and (fix wave item 5) not at all for the common price-only
   // file, which carries neither column: the ~37,400-part catalog makes that

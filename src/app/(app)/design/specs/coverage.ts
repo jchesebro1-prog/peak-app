@@ -138,13 +138,29 @@ export function hasDatasheet(p: CoveragePart): boolean {
   return false;
 }
 
-/** One row per catalog part — mapped to an article or not, spec'd or not.
- *  `bySku` (for specStateOf's same-as resolution) is built once here, not
- *  per part. */
-export function coverageRows(
+/** `articleIdForPart` once per part, keyed by SKU — the one Map the library
+ *  page's article-count table and `coverageRows` below both read, instead of
+ *  each resolving every part's article independently (final fix wave item
+ *  10). `articleIdForPart` itself also caches the (sort, title)-sorted
+ *  `articles` copy it needs for a category-default lookup, so this is now a
+ *  single O(n) pass with the sort paid once, not once per part per caller. */
+export function articleIdMapForParts(
   parts: CoveragePart[],
   articles: SpecCategoryArticle[],
-  sections: SpecSection[],
+  sections: SpecSection[]
+): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const p of parts) out.set(p.sku, articleIdForPart(p, articles, sections));
+  return out;
+}
+
+/** One row per catalog part — mapped to an article or not, spec'd or not.
+ *  `bySku` (for specStateOf's same-as resolution) is built once here, not
+ *  per part. `articleIdBySku` is the shared, already-computed map from
+ *  `articleIdMapForParts` — see final fix wave item 10. */
+export function coverageRows(
+  parts: CoveragePart[],
+  articleIdBySku: Map<string, string | null>,
   onBom: Set<string>
 ): CoverageRow[] {
   const bySku = new Map<string, CoveragePart>();
@@ -154,7 +170,7 @@ export function coverageRows(
     sku: p.sku,
     desc: p.desc ?? "",
     category: p.category ?? "",
-    articleId: articleIdForPart(p, articles, sections),
+    articleId: articleIdBySku.get(p.sku) ?? null,
     state: specStateOf(p, bySku),
     onBom: onBom.has(p.sku),
     hasDatasheet: hasDatasheet(p),

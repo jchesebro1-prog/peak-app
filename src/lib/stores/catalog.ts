@@ -140,12 +140,12 @@ export type CatalogPart = {
   pricedAt?: number;
 
   /* --- Specs module (D-SPEC). All additive JSONB, no migration. ---
-   * These are the ONE canonical set (D-SPEC-5). productMetadata.specSection /
+   * These are the ONE canonical set (D258). productMetadata.specSection /
    * .specArticle (Displays API, 2e284665) are legacy free text, adopted into
    * specSectionId / specArticleId only when they resolve — see
    * adoptLegacySpecPointers in src/lib/specs/articles.ts. A table-style Part 2
    * prints manufacturerModelNumber → manufacturerPartNumber → sku as the
-   * model; there is no separate model field (D-SPEC-8). */
+   * model; there is no separate model field (D261). */
   /** The Part 2 category article this part's entry prints under. Replaces
    *  D94's specSectionId as the placement pointer. */
   specArticleId?: string;

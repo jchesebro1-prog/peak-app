@@ -16,7 +16,7 @@ import * as Projects from "@/lib/stores/projects";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { DEFAULT_PIPELINES, projectPipelineFor, resolveProjectStage, type Pipelines } from "@/lib/pipelines";
 import * as Catalog from "@/lib/stores/catalog";
-import { resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
+import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
 import type { SpecLookup } from "@/lib/displays-api";
@@ -57,17 +57,6 @@ function ci(a: unknown, b: unknown): boolean {
 function pick<T extends string>(v: unknown, opts: readonly T[], fb: T): T {
   const s = str(v);
   return (opts as readonly string[]).indexOf(s) >= 0 ? (s as T) : fb;
-}
-
-/** D-SPEC fix wave (Task 14, item 3) — true for a string shaped like a spec
- *  section/article id ("ss-…" / "ar-…", see spec-sections.ts / spec-articles.ts
- *  `uid()`). An import value in this shape that fails to resolve is a DEAD
- *  pointer to a section/article that no longer exists, not legacy free text —
- *  writing it into productMetadata would round-trip through export and come
- *  back as the same unresolvable id forever. A real CSI number ("11 61 43")
- *  or a real legacy title ("Theatrical Stage Drapes") never matches this. */
-function looksLikeSpecId(s: string): boolean {
-  return /^(ss|ar)-/.test(s);
 }
 
 export type ImportMode = "skip" | "update" | "create";
@@ -234,7 +223,7 @@ export function catalogPatch(
   if (guideSpecUrl) addSourceDoc("guide-spec", guideSpecUrl);
   if (docs.length && hasMetadata) metadata.datasheets = docs;
 
-  // D-SPEC-5: "Spec Section" / "Spec Article" are the canonical pointer
+  // D258: "Spec Section" / "Spec Article" are the canonical pointer
   // columns. A value that resolves — a live id, or a CSI number / title that
   // matches exactly one live record — sets the canonical pointer (an explicit
   // import value is an instruction, so it may replace a stored pointer). One
@@ -1195,7 +1184,7 @@ const WRITERS: Record<string, Writer> = {
         manufacturerModelNumber: p.manufacturerModelNumber || "",
         mapPrice: p.mapPrice ?? "",
         productFamily: p.productMetadata?.productFamily || "",
-        // D-SPEC-5: the canonical id when there is one (it re-imports exactly);
+        // D258: the canonical id when there is one (it re-imports exactly);
         // otherwise the legacy Displays text, which re-imports as legacy text.
         specSectionId: (p.specSectionId && liveSectionIds.has(p.specSectionId) ? p.specSectionId : "") || p.productMetadata?.specSection || "",
         specArticleId: (p.specArticleId && liveArticleIds.has(p.specArticleId) ? p.specArticleId : "") || p.productMetadata?.specArticle || "",

@@ -9,6 +9,7 @@ import {
   matchBom,
   type MatchedRow,
   type SpecCatalogPart,
+  withStoredParts,
 } from "@/lib/bid-spec";
 import { list as listCatalog, mergeUpsert } from "@/lib/stores/catalog";
 import { getEngagement } from "@/lib/stores/engagements";
@@ -17,7 +18,6 @@ import { allArticles } from "@/lib/stores/spec-articles";
 import { saveGeneratedSpec } from "@/lib/stores/generated-specs";
 import { toArticles } from "@/lib/specs/sections";
 import { hasPrintableSpec } from "@/lib/specs/articles";
-import { withStoredParts } from "@/lib/bid-spec";
 
 /**
  * Bid-spec generator actions (D94). The catalog is the spec library: a
@@ -112,7 +112,7 @@ export async function writePartSpecAction(
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const part = catalog.find((p) => p.sku === sku);
   if (!part) return { ok: false, error: `No catalog part with SKU ${sku}.` };
-  // D-SPEC-5 mirror invariant (src/lib/stores/catalog.ts ~149-155):
+  // D258 mirror invariant (src/lib/stores/catalog.ts ~149-155):
   // specSectionId is written only as a MIRROR of specArticleId's own section.
   // This inline write sets specSectionId directly (there is no article picker
   // here) — if the part already carries a specArticleId pointing at an

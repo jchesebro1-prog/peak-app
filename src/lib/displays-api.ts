@@ -7,7 +7,7 @@ import { hasPrintableSpec, type SpecCategoryArticle } from "@/lib/specs/articles
 import type { SpecSection } from "@/lib/specs/sections";
 
 /** Sections + articles the Displays API needs to resolve canonical ids to the
- *  printable CSI number / title it has always returned (D-SPEC-5). */
+ *  printable CSI number / title it has always returned (D258). */
 export type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[] };
 
 /**

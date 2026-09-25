@@ -245,8 +245,11 @@ import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
 // specUpdatedBy checks below need a real section+article to resolve against
 // and the price-book importer entry point itself.
 import { runCatalogImport } from "@/app/(app)/catalog/import";
-import { createSection } from "@/lib/stores/spec-sections";
+import { createSection, getSection } from "@/lib/stores/spec-sections";
 import { createArticle } from "@/lib/stores/spec-articles";
+// Final fix wave item 8 — a partial library import must not blank a
+// section's omitted fields.
+import { importLibrary, SPEC_LIBRARY_KIND, SPEC_LIBRARY_VERSION } from "@/lib/specs/library-io";
 import { mergeActivity, prefillFromMeeting } from "@/lib/engagement-activity";
 import { performCapture, type CaptureDeps } from "@/lib/engagement-activity-write";
 
@@ -308,7 +311,7 @@ import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/c
 import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
 import {
-  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, hasDatasheet, coverageRows, filterCoverage,
+  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, hasDatasheet, coverageRows, filterCoverage, articleIdMapForParts,
 } from "@/app/(app)/design/specs/coverage";
 
 let fail = 0;
@@ -5441,6 +5444,48 @@ async function asyncChecks(): Promise<void> {
     ok(partResolve?.specSectionId === SEC2.id && partResolve?.specArticleId === ART2.id, "catalog price-book import fix wave: Spec Section/Article resolve to the canonical pointers");
     const partLegacyRow = await getPart(skuLegacyRow);
     ok(!partLegacyRow?.specArticleId && partLegacyRow?.productMetadata?.specArticle === "Some Unmatched Legacy Article", "catalog price-book import fix wave: an unresolvable Spec Article is kept as legacy text, never dropped");
+  }
+
+  /* --- Final fix wave item 8 — a whole-library JSON import that UPDATES an
+   * existing section must only write the fields the file actually carries.
+   * Before the fix, `importLibrary`'s section branch destructured
+   * `{ number, title, sort, part1, part3, part2Style, quantities }` off the
+   * file record into a fresh object literal — which always creates every one
+   * of those keys, `undefined` included, for a key the file never had — and
+   * `updateSection`'s `{ ...existing, ...patch }` merge treats a PRESENT key
+   * (even `undefined`) as "the caller owns this, overwrite it", so a file
+   * missing `part1` blanked the section's stored `part1` to `[]`. */
+  {
+    const seeded = await createSection({
+      number: "31 42 59",
+      title: fixtureId("SPEC-FIXWAVE8", "section"),
+      part1: [{ id: "sa-1", title: "General", body: "A. This clause must survive the partial import." }],
+      by: "Final fix wave test",
+    });
+    registerFixture("spec_sections", seeded.id);
+
+    // A file carrying only `title` for this section — `part1`, `part3`,
+    // `part2Style`, `quantities` and `sort` are all omitted, exactly the
+    // "hand-trimmed skill file" shape the brief describes.
+    const partialFile = {
+      kind: SPEC_LIBRARY_KIND,
+      version: SPEC_LIBRARY_VERSION,
+      exportedAt: Date.now(),
+      sections: [{ id: seeded.id, number: seeded.number, title: "Renamed by partial import" }],
+      articles: [],
+      templates: [],
+      curtainTemplates: [],
+    } as unknown as Parameters<typeof importLibrary>[0];
+
+    const counts = await importLibrary(partialFile, "Final fix wave test");
+    ok(counts.sections === 1, "library import fix wave: the partial section record is counted as imported");
+
+    const after = await getSection(seeded.id);
+    ok(after?.title === "Renamed by partial import", "library import fix wave: the field the file DID carry (title) is written");
+    ok(
+      after?.part1.length === 1 && after.part1[0].body === "A. This clause must survive the partial import.",
+      "library import fix wave: part1, omitted from the file, keeps its stored value instead of being blanked to []"
+    );
   }
 
   /* --- Rentals module, Task 1: equipment items + locations data layer ---
@@ -13261,7 +13306,7 @@ async function deletePartBAsyncChecks(): Promise<void> {
   );
 }
 
-/* --- specs: draft gating (D-SPEC-6) --- */
+/* --- specs: draft gating (D259) --- */
 {
   ok(hasPrintableSpec({ specBody: "Text.", specState: "authored" }), "gating: authored text prints");
   ok(hasPrintableSpec({ specBody: "Text." }), "gating: a D94 body with no state prints");
@@ -13314,7 +13359,7 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(!manifest.gaps.some((g) => g.kind === "missing-spec" && g.sku === "AUTHD"), "gating: an authored part is not a spec gap");
 }
 
-/* --- specs: legacy Displays pointers (D-SPEC-5) --- */
+/* --- specs: legacy Displays pointers (D258) --- */
 {
   const secs = [
     { id: "ss-a", number: "11 61 13", title: "A", sort: 1, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "t" },
@@ -13419,7 +13464,8 @@ async function deletePartBAsyncChecks(): Promise<void> {
   ok(!hasDatasheet({ sku: "D2", docs: [{ kind: "manual" }] }), "coverage: a manual alone is not a datasheet");
   ok(hasDatasheet({ sku: "D3", productMetadata: { datasheets: [{ kind: "cut-sheet" }] } }), "coverage: a researched cut sheet counts");
   ok(!hasDatasheet({ sku: "D4", productMetadata: { datasheets: [{ kind: "guide-spec" }] } }), "coverage: a guide spec alone is not a datasheet");
-  const rows = coverageRows(parts as never, articles, sections, new Set(["P1", "P3"]));
+  const articleIdBySku = articleIdMapForParts(parts as never, articles, sections);
+  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]));
   ok(rows.length === 5, "coverage: every part gets a row, mapped or not");
   ok(rows.find((r) => r.sku === "P1")!.state === "authored", "coverage: an authored part reads authored");
   ok(rows.find((r) => r.sku === "P2")!.state === "draft", "coverage: a draft reads draft, never authored");

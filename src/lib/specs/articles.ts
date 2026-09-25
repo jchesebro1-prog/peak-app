@@ -45,6 +45,19 @@ export function normalizeCategoryKey(key: string): string {
   return String(key || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+/** D-SPEC fix wave (Task 14, item 3) — true for a string shaped like a spec
+ *  section/article id ("ss-…" / "ar-…", the lowercase prefixes `uid()` mints
+ *  for spec_sections/spec_articles — see spec-sections.ts / spec-articles.ts).
+ *  An import value in this shape that fails to resolve is a DEAD pointer to a
+ *  section/article that no longer exists, not legacy free text — writing it
+ *  into productMetadata would round-trip through export and come back as the
+ *  same unresolvable id forever. A real CSI number ("11 61 43") or a real
+ *  legacy title ("Theatrical Stage Drapes") never matches this. Final fix
+ *  wave item 11 — was duplicated in import/registry.ts and catalog/import.ts. */
+export function looksLikeSpecId(s: string): boolean {
+  return /^(ss|ar)-/.test(s);
+}
+
 export function normalizeArticle(raw: unknown): SpecCategoryArticle {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const strings = (v: unknown): string[] =>
@@ -83,7 +96,7 @@ export function normalizeArticle(raw: unknown): SpecCategoryArticle {
   };
 }
 
-/* --- Legacy Displays metadata (D-SPEC-5) --- */
+/* --- Legacy Displays metadata (D258) --- */
 
 /** What commit 2e284665 stored under productMetadata: free text, not ids. */
 export type LegacySpecMetadata = { specSection?: string; specArticle?: string };
@@ -159,12 +172,30 @@ export function adoptLegacySpecPointers(
  * article. Returns null when nothing resolves — a pre-placement only; the part
  * is still "no spec" until text exists.
  */
+// Final fix wave item 10: articleIdForPart used to copy+sort `articles` by
+// (sort, title) on EVERY call, for the category-default lookup below — and a
+// caller resolving a whole catalog (coverage table, the article count map)
+// calls this once per part, so a ~37k-part production catalog meant ~37k
+// redundant sorts of the same array. Cached by the `articles` array's own
+// identity (WeakMap, so it never leaks/retains across a stale reference):
+// callers that pass the SAME array reference for every part in a loop (every
+// caller in this codebase does) get the sort exactly once.
+const categorySortCache = new WeakMap<SpecCategoryArticle[], SpecCategoryArticle[]>();
+function sortedByCategoryDefault(articles: SpecCategoryArticle[]): SpecCategoryArticle[] {
+  let sorted = categorySortCache.get(articles);
+  if (!sorted) {
+    sorted = [...articles].sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title));
+    categorySortCache.set(articles, sorted);
+  }
+  return sorted;
+}
+
 export function articleIdForPart(
   part: SpecPartLike,
   articles: SpecCategoryArticle[],
   sections: SpecSection[]
 ): string | null {
-  // D-SPEC-5: legacy Displays text fills absent canonical pointers at read
+  // D258: legacy Displays text fills absent canonical pointers at read
   // time, so the panel, coverage and Phase B are right before any write runs.
   part = { ...part, ...adoptLegacySpecPointers(part, articles, sections) };
   if (part.specArticleId) {
@@ -172,9 +203,7 @@ export function articleIdForPart(
   }
   const key = normalizeCategoryKey(part.category || "");
   if (key) {
-    const hit = [...articles]
-      .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title))
-      .find((a) => a.categoryKeys.some((c) => normalizeCategoryKey(c) === key));
+    const hit = sortedByCategoryDefault(articles).find((a) => a.categoryKeys.some((c) => normalizeCategoryKey(c) === key));
     if (hit) return hit.id;
   }
   if (part.specSectionId && sections.some((s) => s.id === part.specSectionId)) {
@@ -205,7 +234,7 @@ export function resolveSameAs(part: SpecPartLike, bySku: Map<string, SpecPartLik
   return { target, error: null };
 }
 
-/** THE print predicate (D-SPEC-6). Only authored text prints; a draft is
+/** THE print predicate (D259). Only authored text prints; a draft is
  *  missing. A D94 part with a body and no specState predates drafts and
  *  counts as authored. Every consumer that used to test `specBody?.trim()`
  *  calls this instead. */

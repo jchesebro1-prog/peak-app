@@ -3,7 +3,7 @@ import * as Sections from "@/lib/stores/spec-sections";
 import * as Articles from "@/lib/stores/spec-articles";
 import * as Templates from "@/lib/stores/spec-templates";
 import * as Curtains from "@/lib/stores/spec-curtain-templates";
-import { ensureStarterTemplates } from "@/lib/stores/spec-templates";
+import { ensureStarterTemplates, templateId } from "@/lib/stores/spec-templates";
 import { normalizeSection, type RawSpecSection, type SpecSection } from "@/lib/specs/sections";
 import { normalizeArticle, type SpecCategoryArticle } from "@/lib/specs/articles";
 import type { SpecTemplate } from "@/lib/stores/spec-templates";
@@ -99,12 +99,42 @@ export function parseLibraryFile(text: string): { file: SpecLibraryFile | null; 
 }
 
 /**
+ * Only the keys REC actually carries (own property, value not `undefined`)
+ * — so a hand-trimmed or skill-produced file that omits a field leaves the
+ * stored value alone instead of blanking it. A record's TS type (e.g.
+ * `SpecSection[]`) declares every field required, but that's only checked at
+ * compile time; the JSON a file on disk actually contains is whatever a
+ * human or another tool wrote, and can omit any key.
+ */
+function presentFields<T extends object>(rec: unknown, keys: ReadonlyArray<keyof T>): Partial<T> {
+  const o = (rec && typeof rec === "object" ? rec : {}) as Record<string, unknown>;
+  const out: Partial<T> = {};
+  for (const k of keys) {
+    const key = k as string;
+    if (Object.hasOwn(o, key) && o[key] !== undefined) {
+      (out as Record<string, unknown>)[key] = o[key];
+    }
+  }
+  return out;
+}
+
+/**
  * Upserts each record under the id the FILE gives it. Never deletes — an
  * import adds and updates, so a partial file from the skill cannot destroy
  * the library. `upsertDoc` revives a soft-deleted id (its onConflictDoUpdate
  * sets deleted: false — src/db/doc-store.ts:83), so re-importing a file
  * restores a record someone deleted, which is the point of importing a
  * whole library.
+ *
+ * "Partial" holds at the collection level (an import can carry only some of
+ * the four collections, or only some records) AND at the field level within
+ * a record that's UPDATING an existing one: every branch below only ever
+ * writes a key the file actually carries (`presentFields`), so a record
+ * missing e.g. `part1` on re-import keeps its stored `part1` rather than
+ * having it defaulted to empty by the normalize-then-replace each store's
+ * own save function would otherwise perform. A brand-new record still gets
+ * every field, normalized with the store's own defaults for whatever it
+ * omits — there's no stored value to preserve yet.
  */
 export async function importLibrary(file: SpecLibraryFile, by: string): Promise<SpecLibraryImportCounts> {
   const now = Date.now();
@@ -122,8 +152,8 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
     }
     const existing = await Sections.getSection(id);
     if (existing) {
-      const { number, title, sort, part1, part3, part2Style, quantities } = rec;
-      await Sections.updateSection(id, { number, title, sort, part1, part3, part2Style, quantities }, by);
+      const patch = presentFields<SpecSection>(rec, ["number", "title", "sort", "part1", "part3", "part2Style", "quantities"]);
+      await Sections.updateSection(id, patch, by);
     } else {
       const normalized = normalizeSection({ ...(rec as RawSpecSection), id, updatedAt: now, updatedBy: by });
       await upsertDoc<SpecSection>("spec_sections", normalized);
@@ -132,6 +162,24 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
   }
 
   for (const rec of file.articles) {
+    // id/sectionId read off the raw record (not normalizeArticle's output)
+    // so an existing-record lookup never forces the full-normalize defaults
+    // this loop used to apply on every re-import.
+    const id = String((rec as { id?: unknown }).id || "").trim();
+    const existing = id ? await Articles.getArticle(id) : null;
+    if (existing) {
+      const patch = presentFields<SpecCategoryArticle>(rec, [
+        "sectionId",
+        "sort",
+        "title",
+        "manufacturers",
+        "general",
+        "categoryKeys",
+      ]);
+      await Articles.updateArticle(id, patch, by);
+      articles++;
+      continue;
+    }
     // Never through Articles.createArticle, which mints a new id — a new id
     // would break every catalog part's specArticleId link to this article
     // and duplicate the article on every re-import.
@@ -140,21 +188,23 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
       skipped++;
       continue;
     }
-    const existing = await Articles.getArticle(normalized.id);
-    if (existing) {
-      await Articles.updateArticle(normalized.id, normalized, by);
-    } else {
-      await upsertDoc<SpecCategoryArticle>("spec_articles", normalized);
-    }
+    await upsertDoc<SpecCategoryArticle>("spec_articles", normalized);
     articles++;
   }
 
   for (const rec of file.templates) {
-    // Templates.saveTemplate is already keyed by slug, so it is idempotent.
-    await Templates.saveTemplate(
-      { key: rec.key, title: rec.title, headings: rec.headings, rules: rec.rules, example: rec.example },
-      by
-    );
+    const key = String((rec as { key?: unknown }).key || "").trim();
+    const id = key ? templateId(key) : "";
+    const existing = id ? await Templates.getTemplate(id) : null;
+    const patch = presentFields<SpecTemplate>(rec, ["key", "title", "headings", "rules", "example"]);
+    // saveTemplate always writes the full record (it's keyed by slug, so
+    // it's idempotent, but not field-partial) — merge onto the existing
+    // record first so an omitted key rides through unchanged rather than
+    // being defaulted to "" by the store's own normalize().
+    const merged: Omit<SpecTemplate, "id" | "updatedAt" | "updatedBy"> = existing
+      ? { key: existing.key, title: existing.title, headings: existing.headings, rules: existing.rules, example: existing.example, ...patch }
+      : { key: "", title: "", headings: [], rules: "", example: "", ...patch };
+    await Templates.saveTemplate(merged, by);
     templates++;
   }
 
@@ -166,19 +216,30 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
       skipped++;
       continue;
     }
-    await Curtains.saveCurtainTemplate(
-      {
-        id: rec.id,
-        articleId: rec.articleId,
-        sort: rec.sort,
-        title: rec.title,
-        body: rec.body,
-        fullnessClauses: rec.fullnessClauses,
-        hang: rec.hang,
-        defaultColor: rec.defaultColor,
-      },
-      by
-    );
+    const existing = await Curtains.getCurtainTemplate(rec.id as GridCurtainType);
+    const patch = presentFields<SpecCurtainTemplate>(rec, [
+      "articleId",
+      "sort",
+      "title",
+      "body",
+      "fullnessClauses",
+      "hang",
+      "defaultColor",
+    ]);
+    // Same full-replace-underneath concern as templates above.
+    const merged: Omit<SpecCurtainTemplate, "id" | "updatedAt" | "updatedBy"> = existing
+      ? {
+          articleId: existing.articleId,
+          sort: existing.sort,
+          title: existing.title,
+          body: existing.body,
+          fullnessClauses: existing.fullnessClauses,
+          hang: existing.hang,
+          defaultColor: existing.defaultColor,
+          ...patch,
+        }
+      : { articleId: "", sort: 0, title: "", body: "", fullnessClauses: { "0": "", "50": "", "75": "", "100": "" }, hang: "", defaultColor: "", ...patch };
+    await Curtains.saveCurtainTemplate({ id: rec.id as GridCurtainType, ...merged }, by);
     curtainTemplates++;
   }
 

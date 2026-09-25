@@ -4,7 +4,7 @@ import { allArticles } from "@/lib/stores/spec-articles";
 import { adoptLegacySpecPointers } from "@/lib/specs/articles";
 
 /**
- * D-SPEC-5, persisted. Fills absent canonical pointers from the Displays
+ * D258, persisted. Fills absent canonical pointers from the Displays
  * metadata so readers that do not adopt at read time (the Displays API, D94's
  * assemble, the catalog export) see ids. Idempotent: a second run writes
  * nothing. Never overwrites a canonical value and never deletes the legacy

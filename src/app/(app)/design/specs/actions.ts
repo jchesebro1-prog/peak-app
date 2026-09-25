@@ -25,6 +25,11 @@ type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
 function revalidate(sectionId?: string) {
   revalidatePath("/design/specs/library");
   if (sectionId) revalidatePath(`/design/specs/library/${sectionId}`);
+  // Template/curtain-template actions (saveTemplateAction, deleteTemplateAction,
+  // seedTemplatesAction, saveCurtainTemplateAction) share this helper but were
+  // never revalidating the templates screen itself — a save there left the
+  // list stale until an unrelated navigation.
+  revalidatePath("/design/specs/templates");
 }
 
 export async function createLibrarySectionAction(input: {

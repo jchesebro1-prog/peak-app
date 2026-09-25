@@ -7,8 +7,8 @@ import * as Catalog from "@/lib/stores/catalog";
 import * as Quotes from "@/lib/stores/quotes";
 import * as GridProjects from "@/lib/stores/grid-projects";
 import * as GeneratedSpecs from "@/lib/stores/generated-specs";
-import { articleIdForPart, type SpecCategoryArticle } from "@/lib/specs/articles";
-import { ON_BOM_WINDOW_MS, coverageRows, filterCoverage, skusOnBomSince, type CoverageState } from "../coverage";
+import type { SpecCategoryArticle } from "@/lib/specs/articles";
+import { ON_BOM_WINDOW_MS, articleIdMapForParts, coverageRows, filterCoverage, skusOnBomSince, type CoverageState } from "../coverage";
 import {
   AddSectionForm,
   AdoptLegacyPointersButton,
@@ -22,7 +22,7 @@ import {
  * "+ Add section" form and, when empty, the starter-sections seed button),
  * the Part 2 articles table grouped by section, mount points for Task 11's
  * import/export controls and Task 12's coverage table, and the Displays
- * "legacy pointers" adoption card (D-SPEC-5).
+ * "legacy pointers" adoption card (D258).
  */
 
 export const metadata = { title: "Spec library — Quartzite-6" };
@@ -84,13 +84,18 @@ export default async function SpecLibraryPage({
     list.sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title));
   }
 
+  // Final fix wave item 10: one Map, computed once, shared by the article
+  // count table below and the coverage rows further down — rather than each
+  // resolving articleIdForPart per part independently.
+  const articleIdBySku = articleIdMapForParts(parts, articles, sections);
+
   const partCountByArticle = new Map<string, number>();
   for (const p of parts) {
-    const aid = articleIdForPart(p, articles, sections);
+    const aid = articleIdBySku.get(p.sku);
     if (aid) partCountByArticle.set(aid, (partCountByArticle.get(aid) || 0) + 1);
   }
 
-  // D-SPEC-5: parts still carrying Displays research text with no matching
+  // D258: parts still carrying Displays research text with no matching
   // canonical pointer — the card below offers to fill what it can.
   const legacyUnlinkedParts = parts.filter((p) => {
     const md = p.productMetadata;
@@ -108,7 +113,7 @@ export default async function SpecLibraryPage({
   const coverageQ = one(sp.q);
 
   const onBom = skusOnBomSince({ quotes, gridProjects, generated }, Date.now() - ON_BOM_WINDOW_MS);
-  const coverageAll = coverageRows(parts, articles, sections, onBom);
+  const coverageAll = coverageRows(parts, articleIdBySku, onBom);
   const coverageFiltered = filterCoverage(coverageAll, {
     articleId: articleParam || undefined,
     state: stateParam || undefined,
