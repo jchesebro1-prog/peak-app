@@ -682,6 +682,11 @@ body {
 .pk-input.mono {
   font-family: var(--font-mono);
 }
+/* Monospace body/preview text outside a .pk-input, e.g. the spec section
+   editor's outline textareas and their <pre> previews (Task 9). */
+.pk-mono {
+  font-family: var(--font-mono);
+}
 .pk-field-label {
   font-size: 10px;
   font-weight: 600;
