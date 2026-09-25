@@ -38,7 +38,6 @@ import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
-import type { SuggestPart } from "./estimator-data";
 import { totals } from "./pricing";
 import { activeUsers } from "@/lib/users";
 
@@ -1100,34 +1099,6 @@ export async function resolveCatalogSkusAction(
     if (hit) out[requested] = hit;
   }
   return out;
-}
-
-/**
- * Catalog-backed quick-add suggestions for a section (PUNCHLIST #14, decision
- * B — replaces the hardcoded SUGGEST/GENERIC_SUGGEST arrays, which listed
- * SKUs that mostly didn't exist in the real catalog). Exact match (trimmed,
- * case-insensitive) on `mfr` — sections now carry an editable manufacturer,
- * so this only returns anything once one is set. Empty input -> empty
- * result rather than an unfiltered top-N, matching decision B's spirit: a
- * real, validated suggestion or nothing, never a guess.
- */
-export async function suggestPartsForMfr(mfr: string, limit = 4): Promise<SuggestPart[]> {
-  await requireUser();
-  const m = (mfr || "").trim().toLowerCase();
-  if (!m) return [];
-
-  const parts = await catalogList();
-  return parts
-    .filter((p) => (p.mfr || "").trim().toLowerCase() === m)
-    .sort((a, b) => (a.desc || "").localeCompare(b.desc || ""))
-    .slice(0, Math.max(1, limit))
-    .map((p) => ({
-      sku: p.sku,
-      desc: p.desc,
-      cost: p.cost || 0,
-      price: p.list || 0,
-      unit: p.unit || "ea",
-    }));
 }
 
 /* ---------------- travel, on demand (punch #89) ----------------

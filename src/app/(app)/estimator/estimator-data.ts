@@ -214,9 +214,9 @@ export type SuggestPart = {
  * hardcoded SKUs that didn't exist in the real catalog (only RB-SCRIM
  * happened to overlap, at a different price/unit), keyed by the four demo
  * section ids so real user-created sections never matched them anyway.
- * Quick-add suggestions are now catalog-backed: `suggestPartsForMfr` in
- * ./actions, driven by the section's own (now-editable) `mfr` field, and
- * rendered by ./suggested-parts.
+ * Quick-add suggestions were then catalog-backed by manufacturer, and retired
+ * with the system-level manufacturer control (D135); parts are added through
+ * the catalog picker.
  */
 
 /** The prototype's starting sections — used when the quote has no saved spec. */
