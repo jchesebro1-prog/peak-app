@@ -1,5 +1,5 @@
 import type { Quote, QuoteStatus } from "./quotes";
-import { isQuoteLockTimeout } from "@/db";
+import { isQuoteLockTimeout, withQuoteLock } from "@/db";
 
 export type SpawnFromQuoteOpts = {
   /**
@@ -92,11 +92,11 @@ export async function spawnFromQuote(
  *
  * Deleting a quote-born project records that quote on the dismissed list
  * (`removeProject` → `dismissedQuoteIds`, projects.ts). `createProjectFromQuote`
- * (#180) now checks it itself, fresh, inside its advisory lock — so this
- * caller just needs to leave the check ENABLED (the default), rather than
- * pre-checking a stale snapshot here and racing the lock. The explicit
- * "convert a pending quote" flow (Projects screen) is the one caller that
- * means to override a dismiss, and passes `{ skipDismissed: true }` for it.
+ * (#180) checks it itself, fresh, inside its advisory lock — so this caller
+ * just calls it plainly, rather than pre-checking a stale snapshot here and
+ * racing the lock. It always honours the dismissed list now (review round
+ * 2, item 2) — the one caller that used to opt out (the Projects screen's
+ * explicit "convert a pending quote" action) had its bypass removed too.
  *
  * That is a claim about the dismissed BLOB only: it is a projects-only
  * mechanism, no other spawner has one, and minting a second dismissed list
@@ -131,32 +131,55 @@ async function spawnProject(quoteId: string): Promise<void> {
  * close/reopen go through `applyEngagementStageAction`, the shared per-row
  * writer that owns the "Proposal lost" decision copy. The sweep stays what it
  * always was: a page-load reconciliation, never called from a transaction.
+ *
+ * #180 review round 3: the advance/close/reopen branch used to write
+ * through `applyEngagementStageAction` with no lock at all — only the
+ * "create" branch (via `ensureEngagementForQuote`) was locked. That meant
+ * the sweep's OWN lock (added in round 2 to guard its stale pre-loop
+ * snapshot) never actually contended with THIS, the live path: two
+ * independent advisory locks on the same quote only serialize callers that
+ * BOTH take one. The whole branch now runs under `withQuoteLock(quote.id,
+ * …)`, which — reached here from `spawnFromQuote` inside `setStatus`'s own
+ * transaction — simply joins that transaction (no new BEGIN) and holds the
+ * lock until it commits. A sweep pass racing the same quote now genuinely
+ * waits for the live win/lose/re-send to finish, then re-reads and acts on
+ * the committed result — never re-reads a pre-commit status and overwrites
+ * the live path's write (e.g. a "Proposal lost" close) with a decision
+ * made from stale data.
  */
-async function spawnConsulting(quote: Quote): Promise<void> {
+/** Exported (review round 3, item 2/5) purely so the regression harness can
+ *  call the real live-path function directly, rather than a copied block —
+ *  every other caller still goes through `spawnFromQuote`. */
+export async function spawnConsulting(quote: Quote): Promise<void> {
   const { engagementSyncAction, normalizeEngagementStatus } = await import(
     "@/lib/consulting-stages"
   );
   const { applyEngagementStageAction, ensureEngagementForQuote, getEngagementByQuote } =
     await import("./engagements");
-  const existing = await getEngagementByQuote(quote.id);
-  const stage = existing ? normalizeEngagementStatus(String(existing.status)) : null;
-  const action = engagementSyncAction(String(quote.status || ""), stage);
-  if (!action) return;
-  if (action.kind === "create") {
-    // The one case that cannot use the shared writer: there is no row yet, so
-    // it needs the quote itself (`fromQuote`) plus the id mint. `create` is
-    // only ever returned when `existing` is null, so the lookup inside
-    // `ensureEngagementForQuote` is the second scan of this path — kept
-    // because the builder it wraps is not exported on its own.
-    await ensureEngagementForQuote(quote.id, action.stage);
-    return;
-  }
-  // advance / close / reopen — `existing` is already in hand, so all three go
-  // STRAIGHT to the shared per-row writer: no second full-collection scan
-  // inside the transaction, and every write this branch makes goes through the
-  // one writer, as the module claims. `engagementSyncAction` only returns
-  // these three when `stage` was non-null, i.e. `existing` is set — the guard
-  // is for the type checker, never a silent skip of work that was due.
-  if (!existing) return;
-  await applyEngagementStageAction(action, existing.id, quote.id);
+  await withQuoteLock(quote.id, async () => {
+    const existing = await getEngagementByQuote(quote.id);
+    const stage = existing ? normalizeEngagementStatus(String(existing.status)) : null;
+    const action = engagementSyncAction(String(quote.status || ""), stage);
+    if (!action) return;
+    if (action.kind === "create") {
+      // The one case that cannot use the shared writer: there is no row yet,
+      // so it needs the quote itself (`fromQuote`) plus the id mint. `create`
+      // is only ever returned when `existing` is null, so the lookup inside
+      // `ensureEngagementForQuote` is the second scan of this path — kept
+      // because the builder it wraps is not exported on its own.
+      // `ensureEngagementForQuote` takes the SAME lock; nested here it just
+      // joins (Postgres advisory locks are per-session reentrant), not a
+      // second contention point.
+      await ensureEngagementForQuote(quote.id, action.stage);
+      return;
+    }
+    // advance / close / reopen — `existing` is already in hand, so all three go
+    // STRAIGHT to the shared per-row writer: no second full-collection scan
+    // inside the transaction, and every write this branch makes goes through the
+    // one writer, as the module claims. `engagementSyncAction` only returns
+    // these three when `stage` was non-null, i.e. `existing` is set — the guard
+    // is for the type checker, never a silent skip of work that was due.
+    if (!existing) return;
+    await applyEngagementStageAction(action, existing.id, quote.id);
+  });
 }

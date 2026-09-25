@@ -765,21 +765,41 @@ export async function syncEngagementsFromQuotes(): Promise<{ created: number; sk
           changed++;
         }
       } else {
-        // advance / close / reopen — #180 review: `existing` and `action`
-        // both came from this loop's PRE-LOOP snapshot (the engagement map
-        // and the quote list were each read once, before iterating), with
-        // no lock guarding the gap between that snapshot and this row's
-        // turn. Re-read the quote fresh under a lock keyed on it, and skip
-        // (don't write) if its status moved on since the snapshot — a live
-        // edit, a re-approve, or another sweep pass may have already
-        // handled it, or made this action stale (e.g. the quote is back to
-        // "lost" and no longer merits an "advance"). The write itself still
-        // goes through the same shared per-row writer the per-quote spawn
-        // path uses, so the two can never drift apart.
+        // advance / close / reopen — #180 review round 3: `existing` and
+        // `action` both came from this loop's PRE-LOOP snapshot (the
+        // engagement map and the quote list were each read once, before
+        // iterating), with no lock guarding the gap between that snapshot
+        // and this row's turn — and round 2's fix only re-checked the
+        // QUOTE's status, still applying the STALE `action`. That is not
+        // enough: `spawnConsulting` (the live win/lose/re-send path,
+        // round-3-locked to the SAME quote id) could have advanced or
+        // closed the engagement itself in that gap, or a person could have
+        // moved its stage by hand — applying a decision computed from the
+        // old stage can silently overwrite a real change (e.g. re-doing a
+        // "Proposal lost" close with a stale "advance").
+        //
+        // So: under the lock, re-read BOTH the quote and the engagement
+        // fresh and RECOMPUTE the action from that — never reuse the
+        // snapshot's `action` — then apply whatever that fresh computation
+        // says, through the same shared per-row writer the live path uses
+        // (or, if the fresh read says "create" — e.g. the engagement was
+        // deleted in the gap — the same locked, tombstone-aware creator).
         const applied = await withQuoteLock(q.id, async () => {
           const freshQ = await getDoc<QuoteLike>("quotes", q.id);
-          if (!freshQ || String(freshQ.status || "") !== String(q.status || "")) return false;
-          await applyEngagementStageAction(action, existing!.id, q.id);
+          if (!freshQ) return false;
+          const freshEng = await getEngagementByQuote(q.id);
+          const freshStage = freshEng ? normalizeEngagementStatus(String(freshEng.status)) : null;
+          const freshAction = engagementSyncAction(String(freshQ.status || ""), freshStage);
+          if (!freshAction) return false;
+          if (freshAction.kind === "create") {
+            // The engagement vanished (deleted, or never existed) in the
+            // gap between the snapshot and now — ensureEngagementForQuote
+            // is itself locked (reentrant, same id) and tombstone-aware, so
+            // a deliberately deleted engagement still isn't resurrected.
+            return !!(await ensureEngagementForQuote(q.id, freshAction.stage));
+          }
+          if (!freshEng) return false;
+          await applyEngagementStageAction(freshAction, freshEng.id, q.id);
           return true;
         });
         if (applied) changed++;

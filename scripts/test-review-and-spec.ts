@@ -12615,10 +12615,10 @@ async function pendingConversionsAsyncChecks(): Promise<void> {
 
 import { withQuoteLock } from "../src/db";
 import { sql } from "drizzle-orm";
+import { spawnConsulting } from "../src/lib/stores/quote-spawn";
 import {
   ensureEngagementForQuote,
   syncEngagementsFromQuotes,
-  applyEngagementStageAction,
   // `removeEngagement` is already imported (unaliased) further down by
   // deletePartBAsyncChecks's import block — reused here rather than
   // re-declared, since ES module imports of the same name in one file
@@ -12844,39 +12844,42 @@ async function quoteLockAsyncChecks(): Promise<void> {
     "#180 review 2 (item 5): the advance/close/reopen branch runs under an advisory lock keyed on the quote"
   );
   ok(
-    /await getDoc<QuoteLike>\("quotes", q\.id\)/.test(elseBranch) &&
-      /!== String\(q\.status \|\| ""\)/.test(elseBranch),
-    "#180 review 2 (item 5): it re-reads the quote fresh and compares against the loop snapshot's status before writing"
+    /const freshQ = await getDoc<QuoteLike>\("quotes", q\.id\)/.test(elseBranch) &&
+      /const freshEng = await getEngagementByQuote\(q\.id\)/.test(elseBranch),
+    "#180 review round 3 (item 5): it re-reads BOTH the quote and the engagement fresh under the lock, not just the quote"
+  );
+  ok(
+    /const freshAction = engagementSyncAction\(String\(freshQ\.status \|\| ""\), freshStage\)/.test(elseBranch),
+    "#180 review round 3 (item 5): the action is RECOMPUTED from the fresh reads via the same pure engagementSyncAction the sweep's own snapshot pass uses — never the stale snapshot's `action`"
+  );
+  ok(
+    /freshAction\.kind === "create"/.test(elseBranch) && /ensureEngagementForQuote\(q\.id, freshAction\.stage\)/.test(elseBranch),
+    "#180 review round 3 (item 5): if the fresh recompute says 'create' (the engagement vanished in the gap), it routes through the same locked, tombstone-aware creator, not a bare insert"
   );
 }
 
 /* ======================================================================
-   #180 review round 2, item 5 — syncEngagementsFromQuotes' advance/close/
-   reopen branch acted on `existing`/`action`, both derived from the loop's
-   PRE-LOOP snapshot (the engagement map and the quote list are each read
-   once, before iterating), with no lock guarding the gap between that
-   snapshot and a given row's turn. The fix re-reads the quote fresh under
-   a lock keyed on it right before writing, and skips (does not write) if
-   its status no longer matches what the snapshot said.
+   #180 review round 2/3, item 5 (and item 2) — syncEngagementsFromQuotes'
+   advance/close/reopen branch used to act on `existing`/`action`, both
+   derived from the loop's PRE-LOOP snapshot, with no lock guarding the gap
+   between that snapshot and a given row's turn. Round 2 added a lock but
+   only re-checked the QUOTE's fresh status against the snapshot; round 3
+   goes further — it re-reads BOTH the quote and the engagement fresh and
+   RECOMPUTES the action via the same pure engagementSyncAction, so a
+   change to the ENGAGEMENT itself (not just the quote) in that gap is
+   never overwritten either. Item 2 is the other half: the LIVE win path
+   (spawnConsulting, quote-spawn.ts) used to write through
+   applyEngagementStageAction with NO lock at all, so the sweep's lock
+   never actually contended with it — two independent locks on the same
+   quote only serialize callers that BOTH take one. spawnConsulting is now
+   locked too (exported specifically so it's callable here for real).
 
-   The "create" branch already goes through ensureEngagementForQuote, which
-   re-reads and re-derives everything fresh under the SAME lock (#180 round
-   1) — this item is specifically about the OTHER three actions, which
-   still wrote through the shared `applyEngagementStageAction` with no such
-   guard.
-
-   Proof, two ways:
-   - The happy path really still works: syncEngagementsFromQuotes(), run
-     for real, still advances a proposal_sent engagement to awarded when
-     the quote is (and stays) won.
-   - The guard itself: this harness can't force a real interleaving inside
-     one sweep call, so the exact guard the source now contains (a fresh
-     getDoc under withQuoteLock, compared against the snapshot's status,
-     skipping the write on a mismatch) is exercised directly with the SAME
-     exported primitives engagements.ts uses — not a re-implementation, the
-     real withQuoteLock/getDoc/applyEngagementStageAction — for the case
-     the review named: the quote moved on (won → lost) between the
-     snapshot and the write.
+   Review round 3, item 4 (test rework): the earlier version of this check
+   reimplemented the lock+fresh-read+write sequence as a local copy. Every
+   assertion below instead calls the REAL exported functions —
+   syncEngagementsFromQuotes, QuoteStore.setStatus (which itself reaches
+   the now-locked spawnConsulting on the real win path) and spawnConsulting
+   directly — never a re-implementation of engagements.ts's own logic.
    ====================================================================== */
 async function engagementSweepStaleSnapshotAsyncChecks(): Promise<void> {
   const PRE = "TEST180r2:eng-";
@@ -12893,73 +12896,97 @@ async function engagementSweepStaleSnapshotAsyncChecks(): Promise<void> {
     if (!doc) throw new Error(`forceStatus: ${id} not found`);
     await upsertDoc("quotes", { ...doc, status });
   };
+  const seedOrphanSent = async (id: string, label: string) => {
+    await QuoteStore.create({
+      id,
+      name: `#180 review (item 5) — ${label}`,
+      quoteType: "consulting",
+      customer: "Test Customer",
+      source: "estimator",
+      owner: "Test Harness",
+      consulting: {},
+    });
+    await forceStatus(id, "sent");
+    await syncEngagementsFromQuotes();
+  };
   try {
     /* ---- happy path: still advances proposal_sent -> awarded when the quote stays won ---- */
     const qHappy = `${PRE}happy`;
     QUOTE_IDS.push(qHappy);
-    const created1 = await QuoteStore.create({
-      id: qHappy,
-      name: "#180 review 2 (item 5) — sweep happy path",
-      quoteType: "consulting",
-      customer: "Test Customer",
-      source: "estimator",
-      owner: "Test Harness",
-      consulting: {},
-    });
-    ok(!!created1, "#180 review 2 (item 5) fixture: the consulting quote fixture was created");
-    await forceStatus(qHappy, "sent");
-    await syncEngagementsFromQuotes();
+    await seedOrphanSent(qHappy, "happy path");
     const engBefore = await getEngagementByQuote(qHappy);
-    ok(engBefore?.status === "proposal_sent", `#180 review 2 (item 5) fixture: the engagement is at proposal_sent before the win (is ${engBefore?.status})`);
+    ok(engBefore?.status === "proposal_sent", `#180 review (item 5) fixture: the engagement is at proposal_sent before the win (is ${engBefore?.status})`);
     // won -> the sweep's "advance" branch should move it to awarded.
     await forceStatus(qHappy, "won");
     await syncEngagementsFromQuotes();
     const engAfter = await getEngagementByQuote(qHappy);
-    ok(engAfter?.status === "awarded", `#180 review 2 (item 5): the sweep still advances proposal_sent -> awarded for a quote that stays won (is ${engAfter?.status})`);
+    ok(engAfter?.status === "awarded", `#180 review (item 5): the sweep still advances proposal_sent -> awarded for a quote that stays won (is ${engAfter?.status})`);
 
-    /* ---- the guard: a quote that moved on between the snapshot and the write must not be acted on ---- */
-    const qStale = `${PRE}stale`;
-    QUOTE_IDS.push(qStale);
-    await QuoteStore.create({
-      id: qStale,
-      name: "#180 review 2 (item 5) — sweep stale snapshot",
-      quoteType: "consulting",
-      customer: "Test Customer",
-      source: "estimator",
-      owner: "Test Harness",
-      consulting: {},
-    });
-    await forceStatus(qStale, "sent");
-    await syncEngagementsFromQuotes();
-    const engStaleBefore = await getEngagementByQuote(qStale);
-    ok(engStaleBefore?.status === "proposal_sent", "#180 review 2 (item 5) fixture: the stale-scenario engagement starts at proposal_sent");
-    await forceStatus(qStale, "won");
-    // Simulates a sweep loop that snapshotted the quote as "won" (deciding
-    // action = advance) — and then, before this row's turn, someone moved
-    // it on to "lost". The fix re-reads fresh inside the lock and must
-    // refuse to write against the stale "won" snapshot.
-    await forceStatus(qStale, "lost");
-    const snapshotAction: import("../src/lib/consulting-stages").EngagementSyncAction = { kind: "advance", stage: "awarded" };
-    const applied = await withQuoteLock(qStale, async () => {
-      const freshQ = await getDoc169("quotes", qStale);
-      if (!freshQ || String((freshQ as { status?: unknown }).status || "") !== "won") return false;
-      await applyEngagementStageAction(snapshotAction, engStaleBefore!.id, qStale);
-      return true;
-    });
-    ok(applied === false, "#180 review 2 (item 5): the fresh re-read under the lock sees the quote moved on ('lost', not the snapshot's 'won') and refuses to act");
-    const engStaleAfter = await getEngagementByQuote(qStale);
+    /* ---- a REAL live-path close is not disturbed by a later real sweep pass ---- */
+    const qClose = `${PRE}close`;
+    QUOTE_IDS.push(qClose);
+    await seedOrphanSent(qClose, "live close");
+    // Real transition — "lost" is ungated — reaches spawnFromQuote ->
+    // spawnConsulting for real, which (item 2) now runs under the lock.
+    await QuoteStore.setStatus(qClose, "lost", "Test Harness");
+    const engClosed = await getEngagementByQuote(qClose);
     ok(
-      engStaleAfter?.status === "proposal_sent",
-      `#180 review 2 (item 5): the engagement is untouched by the stale write attempt — still proposal_sent, not incorrectly advanced to awarded (is ${engStaleAfter?.status})`
+      engClosed?.status === "closed" && engClosed.decisions.length === 1 && engClosed.decisions[0]?.decision === "Proposal lost",
+      `#180 review (item 2): the real win path (setStatus -> spawnFromQuote -> spawnConsulting) closes the engagement with its "Proposal lost" decision (status ${engClosed?.status}, decisions ${engClosed?.decisions.length})`
     );
-    // A subsequent real sweep pass, reading everything fresh, does the
-    // RIGHT thing for the quote's actual current status ("lost" + still
-    // proposal_sent -> close), proving the skip didn't strand the record.
+    // A real sweep pass afterwards must not reopen, re-close (a second
+    // decision entry) or otherwise disturb the already-correct engagement —
+    // engagementSyncAction("lost", "closed") has no defined case, so a
+    // fresh recompute correctly does nothing.
     await syncEngagementsFromQuotes();
-    const engStaleFinal = await getEngagementByQuote(qStale);
+    const engClosedAfterSweep = await getEngagementByQuote(qClose);
     ok(
-      engStaleFinal?.status === "closed",
-      `#180 review 2 (item 5): the next real sweep pass correctly closes it once it reads the quote's true current status (is ${engStaleFinal?.status})`
+      engClosedAfterSweep?.status === "closed" && engClosedAfterSweep.decisions.length === 1,
+      `#180 review (item 5): a real sweep pass after the live close leaves it untouched — still closed, still exactly one decision entry (status ${engClosedAfterSweep?.status}, decisions ${engClosedAfterSweep?.decisions.length})`
+    );
+
+    /* ---- spawnConsulting called directly (the review's explicit alternative) reopens correctly ---- */
+    const qReopen = `${PRE}reopen`;
+    QUOTE_IDS.push(qReopen);
+    await seedOrphanSent(qReopen, "reopen");
+    await QuoteStore.setStatus(qReopen, "lost", "Test Harness"); // real close first
+    const closedForReopen = await QuoteStore.get(qReopen);
+    ok(closedForReopen?.status === "lost", "#180 review (item 5) fixture: the reopen-scenario quote is lost before the direct spawnConsulting call");
+    // Simulate the re-send that reopens it — engagementSyncAction("sent",
+    // "closed") = reopen — by calling the real exported spawnConsulting
+    // directly with the quote object it would receive on that transition,
+    // rather than going through setStatus's own approval gate for "sent".
+    await spawnConsulting({ ...(closedForReopen as QuoteStore.Quote), status: "sent" });
+    const engReopened = await getEngagementByQuote(qReopen);
+    ok(
+      engReopened?.status === "proposal_sent",
+      `#180 review (item 5): spawnConsulting, called directly, reopens a closed engagement back to proposal_sent (is ${engReopened?.status})`
+    );
+
+    /* ---- real concurrency: the live path and the sweep racing the SAME quote settle on exactly one correct, un-duplicated result ----
+     * Both sides push toward the SAME target here (advance proposal_sent ->
+     * awarded), so the correct final state is deterministic regardless of
+     * which one wins the lock first: whichever runs second re-reads fresh
+     * under the lock, finds the engagement already awarded, and does
+     * nothing (engagementSyncAction("won", "awarded") has no defined
+     * case). That "does nothing the second time" IS the property under
+     * test — without the lock, both could independently decide "advance"
+     * and either double-patch or (for the create case elsewhere) double-insert. */
+    const qRace = `${PRE}race`;
+    QUOTE_IDS.push(qRace);
+    await seedOrphanSent(qRace, "race");
+    await forceStatus(qRace, "won"); // orphaned won, same shape as the happy path above
+    const [, sweepResult] = await Promise.all([
+      QuoteStore.setStatus(qRace, "won", "Test Harness", { bypassApprovalGate: "engine-owned-flow" }), // real, locked, live advance
+      syncEngagementsFromQuotes(), // real, locked, fresh-recompute sweep
+    ]);
+    ok(sweepResult.skipped.length === 0, "#180 review (item 5): the racing sweep pass reported no per-row errors");
+    const raceRows = (await listDocs169("consulting_engagements", { includeDeleted: true })).filter((e) => e.quoteId === qRace);
+    ok(raceRows.length === 1, `#180 review (item 2/5): exactly one engagement row exists for the raced quote — no duplicate from the race (found ${raceRows.length})`);
+    const engRaceFinal = await getEngagementByQuote(qRace);
+    ok(
+      engRaceFinal?.status === "awarded",
+      `#180 review (item 2/5): whichever of the live advance or the sweep's own advance ran first, the lock serializes them onto the SAME correct final state — awarded, not double-applied (is ${engRaceFinal?.status})`
     );
   } finally {
     for (const coll of ["consulting_engagements"] as const) {
