@@ -11,6 +11,9 @@ import type { CurtainFullnessKey, SpecCurtainTemplate } from "@/lib/stores/spec-
  * `import type` only from the store module: this runs in a client component.
  */
 
+/** One grouped curtain row for spec assembly: identical curtains (type, fabric, colour, fullness) collapse to one row with a qty. */
+export type CurtainRow = { curtain: GridCurtain; fabricName: string; qty: number };
+
 const FULLNESS_STOPS: Array<[number, CurtainFullnessKey]> = [
   [0, "0"],
   [50, "50"],
