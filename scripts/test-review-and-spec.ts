@@ -7189,6 +7189,163 @@ async function moveStageRecordsAsyncChecks(): Promise<void> {
   }
 }
 
+/* ============ Task 11: Daylite history preview + idempotent commit (DB) ============ */
+async function dayliteCommitAsyncChecks(): Promise<void> {
+  const { previewHistory, commitHistory } = await import("@/lib/daylite/history-commit");
+  const { saveCompany } = await import("@/lib/identity/companies");
+  const { saveContact } = await import("@/lib/identity/contacts");
+  const { addUser } = await import("@/lib/users");
+  const { companyId, contactId, projectId, repairId, quoteId } = await import("@/lib/daylite/ids");
+  const { allTasks } = await import("@/lib/stores/tasks");
+  const { allAssignments } = await import("@/lib/stores/assignments");
+  const Repairs = await import("@/lib/stores/repair-jobs");
+  const { listDocs } = await import("@/db/doc-store");
+  const { dueChipLabel } = await import("@/app/(app)/projects/board-lib");
+
+  // Task 10's fixtures, plus a done repair owned by a (case-mismatched) team
+  // member and an open "Final Invoice" opp for the Deerfield install, so both
+  // won-quote paths (link an existing job / create one) are exercised.
+  const P = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"Sisters of St. Francis Dubuque, IA - BID"\tDone\tInstallation\t"8 • Final Payment Received"\t\t10/21/11\t2/22/12\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
+\tService\t"SERVICE CALL:  Pardeeville Gym - Audio Issues"\tNew\tService Call\t"2 • Service Scheduled"\t\t3/2/26\t\t\t\t\t"Pardeeville Schools"\t"Mike Mundth"\t
+\t\t"DEERFIELD HS - Gym AV BID"\tNew\tBasic Install\t"3 • Installation"\t\t4/1/26\t\t\t\t"Pat Doe"\t"Camosy Construction, Deerfield School District"\t"Isaac Mittlesteadt"\t
+\t\t"Old job"\tCancelled\tBasic Install\t\t\t1/1/15\t\t\t\t\t"X"\t"Y"\t
+\t\t"St. John's Luth – Montello"\tNew\tBasic Install\t\t\t5/1/26\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
+\t\t"TEST HS - Partial Company Match"\tNew\tBasic Install\t\t\t6/1/26\t\t\t\t\t"Camosy Construction, Some Rando Co"\t"Jeff Chesebro"\t
+\tService\t"SERVICE: Pardeeville Rigging Repair"\tDone\tService Call\t"4 • Invoice Sent"\t\t1/5/19\t1/20/19\t\t\t\t"Pardeeville Schools"\t"DANA IMPORTER"\t`;
+  const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\t\t"Sisters of St. Francis Dubuque, IA - BID"\tWon\t\t\t"$48,200.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jason Keagy"\t
+\tBid\t"BIG FOOT HS WALWORTH - Auditorium AV Upgrades"\tOpen\t\t\t"$84,500.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\tDesign\t"AL RINGLING - Lighting"\tOpen\t\t\t"$122,475.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"Al Ringling Theatre"\t"Jeff Chesebro"\t
+\tBid\t"Random Lost Opp"\tLost\t\t\t"$10,000.00"\tBID SPEC\t"1 • Collect Information"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\t\t"ST JOHNS LUTH  MONTELLO"\tWon\t\t\t"$15,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
+\t\t"St John's Luth. Montello!!"\tWon\t\t\t"$5,000.00"\t\t\t\t\t\t"Sisters of St. Francis"\t"Jeff Chesebro"\t
+\tBid\t"MISMATCHED PIPELINE TEST"\tOpen\t\t\t"$1,000.00"\tBID SPEC\t"4 • Acceptance"\t\t\t\t"Big Foot High School"\t"Jeff Chesebro"\t
+\tBid\t"DEERFIELD HS - Gym AV BID"\tOpen\t\t\t"$30,000.00"\tBID SPEC\t"8 • Final Invoice"\t\t\t\t"Camosy Construction, Deerfield School District"\t"Isaac Mittlesteadt"\t`;
+
+  // Seed the book through the identity helpers. "Al Ringling Theatre" is left
+  // out on purpose (a quote with no company in the book).
+  const book: Array<[string, string]> = [
+    ["Sisters of St. Francis", "Church"],
+    ["Pardeeville Schools", "School"],
+    ["Camosy Construction", "General Contractor"],
+    ["Deerfield School District", "School"],
+    ["Big Foot High School", "School"],
+  ];
+  for (const [name, type] of book) await saveCompany({ id: companyId(name), name, type });
+  await saveContact({ id: contactId("Pat", "Doe", "Deerfield School District"), firstName: "Pat", lastName: "Doe", homeCompanyId: companyId("Deerfield School District"), title: "Facilities Director" });
+  await addUser({ name: "Dana Importer", email: "dana.importer@example.test" });
+
+  const ids = {
+    sis: projectId("Sisters of St. Francis Dubuque, IA - BID", "Sisters of St. Francis"),
+    dfd: projectId("DEERFIELD HS - Gym AV BID", "Camosy Construction"),
+    testHs: projectId("TEST HS - Partial Company Match", "Camosy Construction"),
+    liveRp: repairId("SERVICE CALL:  Pardeeville Gym - Audio Issues", "Pardeeville Schools"),
+    doneRp: repairId("SERVICE: Pardeeville Rigging Repair", "Pardeeville Schools"),
+    bfQ: quoteId("BIG FOOT HS WALWORTH - Auditorium AV Upgrades", "Big Foot High School"),
+    bfP: projectId("BIG FOOT HS WALWORTH - Auditorium AV Upgrades", "Big Foot High School"),
+    dfdQ: quoteId("DEERFIELD HS - Gym AV BID", "Camosy Construction"),
+    alQ: quoteId("AL RINGLING - Lighting", "Al Ringling Theatre"),
+  };
+
+  // ---- preview ----
+  const pv = await previewHistory(P, O);
+  const c = pv.counts;
+  ok(
+    c.doneInstalls === 1 && c.liveInstalls === 3 && c.doneService === 1 && c.liveService === 1 && c.orders === 0 && c.openQuotes === 4,
+    "daylite commit: preview buckets — 1 done + 3 live installs, 1 done + 1 live service, 4 open quotes"
+  );
+  ok(c.soldLinked === 1 && c.soldNewProject === 1, "daylite commit: preview — one won quote links the Deerfield install, one (Big Foot) will create its project");
+  ok(c.valued === 2 && c.ukn === 4, "daylite commit: preview — 2 valued jobs, 4 UKN");
+  ok(c.needsPick === 2 && pv.needsPick.some((r) => r.id === ids.dfd), "daylite commit: preview — the Deerfield install (and its opp) need a company pick");
+  const dfdRow = pv.rows.find((r) => r.id === ids.dfd)!;
+  ok(dfdRow.company === "Deerfield School District", "daylite commit: the pick pre-fills the first non-contractor company, not Camosy (General Contractor)");
+  ok(!dfdRow.flags.some((f) => f.startsWith("contact not on file")), "daylite commit: Pat Doe matches the seeded contact at the default company");
+  ok(c.noCompany === 1 && pv.rows.find((r) => r.id === ids.alQ)!.flags.includes("no company"), "daylite commit: a company not in the book is flagged 'no company'");
+  ok(c.alreadyImported === 0 && c.skippedProjects_Cancelled === 1 && c.skippedOpps_Lost === 1, "daylite commit: preview — nothing already imported; skip reasons carried per file");
+  ok(pv.stats.valueConflicts === 1 && pv.stats.unmappedOppStages["acceptance"] === 1, "daylite commit: preview surfaces valueConflicts + unmappedOppStages");
+  ok(pv.live.length === 4 && pv.live.every((r) => !r.done && r.kind !== "quote"), "daylite commit: live rows = the non-done jobs");
+  const emptyPv = await previewHistory("", O);
+  ok(emptyPv.counts.openQuotes === 4 && emptyPv.counts.liveInstalls === 0, "daylite commit: preview accepts only one uploaded file");
+
+  // ---- commit ----
+  const tasksBefore = (await allTasks()).length;
+  const assignBefore = (await allAssignments()).length;
+  const t0 = Date.now();
+  const res = await commitHistory(P, O, { [ids.dfd]: "Camosy Construction" }, "Test Admin");
+  const ms = Date.now() - t0;
+  ok(res.errors.length === 0, "daylite commit: no row errors" + (res.errors.length ? " — " + res.errors.join("; ") : ""));
+  ok(
+    res.created.projects === 4 && res.created.repairs === 2 && res.created.quotes === 4 && res.created.soldLinked === 1 && res.created.soldNewProject === 1 && res.skippedExisting === 0,
+    `daylite commit: created 4 projects, 2 repairs, 4 quotes; 1 sold quote linked, 1 made its project (${ms}ms)`
+  );
+  ok((await allTasks()).length === tasksBefore, "daylite commit: importing creates NO tasks (no stage hook, no kickoff task)");
+  ok((await allAssignments()).length === assignBefore, "daylite commit: importing creates NO assignments (no done hook, no 'Install sold')");
+
+  const sis = await ProjStore.getProject(ids.sis);
+  const endDate = new Date(2012, 1, 22).getTime();
+  ok(!!sis && sis.stage === "complete" && sis.value === 48200 && !sis.valueUnknown, "daylite commit: done install at Complete, valued from its won opp");
+  ok(
+    !!sis && sis.stageHistory.length === 2 && sis.stageHistory[1].to === "complete" && sis.stageHistory[1].at === endDate && sis.stageHistory[0].at === new Date(2011, 9, 21).getTime(),
+    "daylite commit: done history opens on the Start Date and closes on the End Date"
+  );
+  ok(!!sis && sis.updatedAt === endDate && dueChipLabel(true, 0, ProjStore.fmtDate(sis.updatedAt)) === "Closed " + ProjStore.fmtDate(endDate), "daylite commit: the Projects list 'Closed <date>' chip reads the End Date");
+  ok(!!sis && sis.owner === "Jason Keagy" && !sis.legacyOwner && sis.source?.system === "daylite" && sis.customerId === companyId("Sisters of St. Francis"), "daylite commit: team-member owner, daylite source, company linked");
+
+  const testHs = await ProjStore.getProject(ids.testHs);
+  ok(!!testHs && testHs.valueUnknown === true && testHs.value === 0 && testHs.stage === "initial-contact", "daylite commit: a job with no won opp lands UKN");
+
+  const dfd = await ProjStore.getProject(ids.dfd);
+  ok(!!dfd && dfd.customerId === companyId("Camosy Construction") && dfd.customer === "Camosy Construction", "daylite commit: a company pick overrides the default");
+  ok(!!dfd && dfd.quoteId === ids.dfdQ && dfd.stage === "invoice" && dfd.stageHistory.at(-1)?.from === "installation", "daylite commit: the won Final-Invoice quote links the live install and moves it forward to Invoice");
+  ok(!!dfd && dfd.value === 30000 && dfd.valueUnknown === false, "daylite commit: linking a valued quote fills the UKN install's value");
+  ok(!!dfd && dfd.notes.some((n) => n.text === "Contact (Daylite): Pat Doe"), "daylite commit: the Daylite contact is kept in a project note");
+
+  const doneRp = await Repairs.get(ids.doneRp);
+  ok(!!doneRp && doneRp.stage === "completed" && doneRp.completedAt === new Date(2019, 0, 20).getTime() && doneRp.updatedAt === doneRp.completedAt, "daylite commit: done repair completed on its End Date");
+  ok(!!doneRp && doneRp.owner === "Dana Importer" && !doneRp.legacyOwner, "daylite commit: owner matches a team member case-insensitively");
+  ok(!!doneRp && Repairs.warrantyStatus(doneRp).state === "expired", "daylite commit: a years-old repair reads warranty lapsed (a list state, never a task)");
+  const liveRp = await Repairs.get(ids.liveRp);
+  ok(!!liveRp && liveRp.stage === "scheduled" && liveRp.completedAt === null && liveRp.valueUnknown === true, "daylite commit: live service call → scheduled repair, UKN");
+  ok(!!liveRp && liveRp.owner === "" && liveRp.legacyOwner === "Mike Mundth", "daylite commit: an owner not on the team → unassigned + legacyOwner");
+  ok(
+    (await allTasks()).filter((t) => [ids.doneRp, ids.liveRp].some((id) => JSON.stringify(t).includes(id))).length === 0,
+    "daylite commit: no task references either imported repair"
+  );
+
+  const bfQ = await QuoteStore.get(ids.bfQ);
+  ok(!!bfQ && bfQ.status === "won" && bfQ.stage === "awarded" && bfQ.pipelineId === "bid-spec" && bfQ.value === 84500 && bfQ.source === "daylite" && bfQ.quoteNote === "Imported from Daylite", "daylite commit: won quote written at its stage, no spawn");
+  ok(!!bfQ && bfQ.history.length === 1 && bfQ.history[0].to === "won", "daylite commit: quote history is the single imported status");
+  const linkedBf = (await listDocs<ProjStore.ProjectRecord>("projects")).filter((p) => p.quoteId === ids.bfQ);
+  ok(linkedBf.length === 1 && linkedBf[0].id === ids.bfP && linkedBf[0].stage === "deposit" && linkedBf[0].value === 84500, "daylite commit: exactly one project for the sold job, at Deposit");
+  const alQ = await QuoteStore.get(ids.alQ);
+  ok(!!alQ && alQ.status === "draft" && alQ.stage === "design" && alQ.customerId === null, "daylite commit: draft quote at Design, no company");
+
+  await ProjStore.syncProjectsFromQuotes();
+  const afterSync = (await listDocs<ProjStore.ProjectRecord>("projects")).filter((p) => p.quoteId === ids.bfQ || p.quoteId === ids.dfdQ);
+  ok(afterSync.length === 2, "daylite commit: the page-load sweep does not make a second project for an imported won quote");
+
+  // ---- idempotent re-run ----
+  const counts = async () => ({
+    p: (await listDocs("projects", { includeDeleted: true })).length,
+    r: (await listDocs("repair_jobs", { includeDeleted: true })).length,
+    q: (await listDocs("quotes", { includeDeleted: true })).length,
+  });
+  const before = await counts();
+  const again = await commitHistory(P, O, { [ids.dfd]: "Camosy Construction" }, "Test Admin");
+  const createdTotal = res.created.projects + res.created.orders + res.created.repairs + res.created.quotes;
+  const after = await counts();
+  ok(again.skippedExisting === createdTotal && Object.values(again.created).every((n) => n === 0) && again.errors.length === 0, "daylite commit: a re-run skips every row as already imported");
+  ok(JSON.stringify(before) === JSON.stringify(after), "daylite commit: a re-run writes no new docs");
+  const pv2 = await previewHistory(P, O);
+  ok(pv2.counts.alreadyImported === createdTotal && pv2.rows.every((r) => r.already), "daylite commit: preview after commit marks every row already imported");
+
+  // A soft-deleted import is not resurrected by a re-run.
+  await ProjStore.removeProject(ids.testHs);
+  const third = await commitHistory(P, "", {}, "Test Admin");
+  ok(third.created.projects === 0 && (await ProjStore.getProject(ids.testHs)) === null, "daylite commit: a deleted imported project stays deleted on re-run");
+}
+
 // #148: wait for the dev auto-seed once, up front, before any of this async
 // chain runs — asyncChecks() below reads seeded equipment items and surveys,
 // and without this the gate races a cold datadir's seed intermittently
@@ -7206,6 +7363,7 @@ seeded()
   .then(() => projectsPipelineAsyncChecks())
   .then(() => quotesPipelineAsyncChecks())
   .then(() => moveStageRecordsAsyncChecks())
+  .then(() => dayliteCommitAsyncChecks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);

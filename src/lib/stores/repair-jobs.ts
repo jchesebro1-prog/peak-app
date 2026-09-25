@@ -111,6 +111,8 @@ export type RepairJobRecord = {
   value: number;
   /** Imported record whose value wasn't known at the source (Task 9). */
   valueUnknown?: boolean;
+  /** The source system's owner name when it didn't match a team member (Daylite import). */
+  legacyOwner?: string;
   category: RepairCategoryKey;
   priority: RepairPriorityKey;
   title: string;

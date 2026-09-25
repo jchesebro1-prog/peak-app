@@ -140,6 +140,8 @@ export type Quote = {
   rental?: unknown;
   contact?: unknown;
   owner: string;
+  /** The source system's owner name when it didn't match a team member (Daylite import). */
+  legacyOwner?: string;
   /** Estimator/Quick Design spec subdoc. */
   spec?: unknown;
   vendorQuotes?: unknown;
