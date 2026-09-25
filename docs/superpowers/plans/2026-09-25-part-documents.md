@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-25-part-documents-design.md` — read it first. Also read `AGENTS.md` (Next.js 16 differs from your training data: check `node_modules/next/dist/docs/` before writing a route handler or config).
 
-**Verified:** every task below was built and gated in a throwaway copy of this branch before the plan was written — tsc, eslint (111 → 110 warnings, 0 errors), `npm run test:specs` (125 new `part docs` + 11 `#DOC` assertions), `npm run test:review:regressions`, `npx drizzle-kit generate` ("No schema changes") and `next build`. `test:smoke` was not run there (it boots a dev server); Task 12 runs it.
+**Verified:** every task below was built and gated in a throwaway copy of this branch before the plan was written — tsc, eslint (111 → 110 warnings, 0 errors), `npm run test:specs` (125 new `part docs` + 11 `#207` assertions), `npm run test:review:regressions`, `npx drizzle-kit generate` ("No schema changes") and `next build`. `test:smoke` was not run there (it boots a dev server); Task 12 runs it.
 
 ## Global Constraints
 
@@ -29,12 +29,12 @@ Every task's requirements implicitly include this section.
 - **Catalog writes go through `mergeUpsert(sku, patch)`**, never `upsert` (a full replace wipes ports, spec fields, datasheet fields…). Guard with `get(sku)` first — `mergeUpsert` creates a part that does not exist.
 - **Destructive UI uses the shared `ConfirmButton`** (`src/components/confirm-button.tsx`); its `onConfirm` must `throw new Error(r.error)` on `{ ok: false }` so the refusal shows.
 - **Scale:** production has ~37,400 catalog parts. One load of each collection per request (`loadPartDocsState(parts)` takes the catalog the caller already listed); single-pass Maps; never a scan of one collection per element of another; the catalog never ships to the browser (bulk drop sends file names; part search is a server action over `searchDocs`).
-- **Numbering placeholders:** `#DOC` for the punch item and `D-DOC-1`…`D-DOC-11` for decisions, in code comments and docs. The lead renumbers at merge time.
+- **Numbering placeholders:** `#207` for the punch item and `D270`…`D280` for decisions, in code comments and docs. The lead renumbers at merge time.
 - **Timestamps** are epoch-ms numbers. **Design tokens:** `pk-*` classes; accent only via `var(--accent)`.
 - **Environment:** run every command from `/Users/sm/Downloads/peak-app/.claude/worktrees/part-docs` after `export PATH=$HOME/.local/node/bin:$PATH`. Never touch `/Users/sm/Downloads/peak-app` (the main checkout) except to **read** the DaVinci `library.json` in Task 10, never open any real `.data/` (every DB command here uses `PGLITE_PATH=$(mktemp -d)` or an npm script that does), never run `next dev` yourself (only `npm run test:smoke` in Task 12 boots one), never `git stash` (the stash is shared across worktrees — commit instead), and check `ps aux | grep tsx` is empty before any DB script.
 - **Gates per task:** `npx tsc --noEmit -p .` clean; `npx eslint` 0 errors and no new warnings (baseline **111**); `env -u DATABASE_URL npm run test:specs` → `ALL PASSED`; `env -u DATABASE_URL npm run test:review:regressions` whenever the task is DB-backed; the build when it touches a client file. A known pre-existing flake — `redeem: tampered code -> not ok` — fails about one run in sixty (it flips a character that is sometimes already the flipped value); if it is the only FAIL, re-run.
 
-## Decisions this plan takes (logged in Task 12 as D-DOC-1…D-DOC-11)
+## Decisions this plan takes (logged in Task 12 as D270…D280)
 
 1. **Ids.** `PD-` + 12 random hex for uploads/fetches (browser-mintable, no scan); deterministic `PD-L…` (legacy, per SKU) and `PD-D…` (DaVinci, per URL); link ids `PDL-…` per (part, document); accessory ids `PAL-…` per (source, scope, parent, accessory). A URL is one document, shared.
 2. **"Has its own datasheet"** is a pair-level flag on the graph links, applies to both kinds, and any link of the pair setting it opts the pair out.
@@ -103,7 +103,7 @@ Every task's requirements implicitly include this section.
 | `src/app/(app)/design/grid/[id]/page.tsx`, `src/lib/design/grid-bom.ts` | `hasDatasheet` from documents. |
 | `next.config.ts`, `package.json` | Trace the extract; two scripts. |
 | `scripts/test-review-and-spec.ts`, `scripts/test-review-regressions.ts`, `scripts/smoke-routes.ts` | Tests. |
-| `DECISIONS.md`, `PUNCHLIST.md` | D-DOC-1…11, `#DOC`, #40 status. |
+| `DECISIONS.md`, `PUNCHLIST.md` | D270…11, `#207`, #40 status. |
 
 ---
 
@@ -154,7 +154,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 1: document ids and blob paths. Pure.
+   Part documents (#207) — Task 1: document ids and blob paths. Pure.
    ====================================================================== */
 import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDocFileName } from "@/lib/part-docs/types";
 
@@ -185,7 +185,7 @@ Create `src/lib/part-docs/types.ts`:
 
 ```ts
 /**
- * Part documents (#DOC) — the shared shapes. Pure: no store, no `@/db`, no
+ * Part documents (#207) — the shared shapes. Pure: no store, no `@/db`, no
  * Node built-ins, so client components import this freely.
  *
  * A document is a SHARED record (DaVinci's model): one datasheet PDF is
@@ -232,7 +232,7 @@ export type PartDocument = {
   uploadedAt: number;
   uploadedBy: string;
   history: PartDocumentHistoryEntry[];
-  /** The last fetch attempt of `sourceUrl` (D-DOC-3): failures stay listed
+  /** The last fetch attempt of `sourceUrl` (D272): failures stay listed
    *  with their reason until a later fetch succeeds. */
   lastFetch?: { at: number; ok: boolean; error?: string };
 };
@@ -352,7 +352,7 @@ with:
 ```ts
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
-  /** Part documents (#DOC): "this part needs no datasheet / spec sheet" —
+  /** Part documents (#207): "this part needs no datasheet / spec sheet" —
    *  satisfies that slot in the coverage rule (src/lib/part-docs/coverage.ts).
    *  Written only through mergeUpsert (setDocNotNeeded). */
   docNotNeeded?: DocNotNeeded;
@@ -371,9 +371,9 @@ with:
 
 ```ts
 export const specCurtainTemplates = docTable("spec_curtain_templates"); // Specs module (#205) — one document per Grid curtain type; migration 0025_spec_library
-export const partDocuments = docTable("part_documents"); // Part documents (#DOC) — shared datasheet/spec-sheet records, one file attached to many parts; migration 0026_part_documents
-export const partDocumentLinks = docTable("part_document_links"); // Part documents (#DOC) — one row per part↔document, soft-deleted to detach; migration 0026_part_documents
-export const partAccessoryLinks = docTable("part_accessory_links"); // Part documents (#DOC) — the fixture→accessory graph that computes accessory coverage; migration 0026_part_documents
+export const partDocuments = docTable("part_documents"); // Part documents (#207) — shared datasheet/spec-sheet records, one file attached to many parts; migration 0026_part_documents
+export const partDocumentLinks = docTable("part_document_links"); // Part documents (#207) — one row per part↔document, soft-deleted to detach; migration 0026_part_documents
+export const partAccessoryLinks = docTable("part_accessory_links"); // Part documents (#207) — the fixture→accessory graph that computes accessory coverage; migration 0026_part_documents
 ```
 
 In `src/db/doc-tables.ts`, replace this exact text:
@@ -401,7 +401,7 @@ Hand-written, never `drizzle-kit generate`d: `CREATE TABLE IF NOT EXISTS`, `CREA
 Create `drizzle/0026_part_documents.sql`:
 
 ```sql
--- Part documents (#DOC, docs/superpowers/specs/2026-09-25-part-documents-design.md §5) —
+-- Part documents (#207, docs/superpowers/specs/2026-09-25-part-documents-design.md §5) —
 -- shared datasheet/spec-sheet records, the part↔document links, and the
 -- fixture→accessory graph that computes accessory coverage.
 --
@@ -594,7 +594,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 2: the coverage rule, the quoted-parts
+   Part documents (#207) — Task 2: the coverage rule, the quoted-parts
    counter, the filename matcher and the kind guesser. All pure.
    ====================================================================== */
 import {
@@ -743,7 +743,7 @@ Create `src/lib/part-docs/coverage.ts`:
 import type { DocNotNeeded, PartAccessoryLink, PartDocKind, PartDocument, PartDocumentLink } from "./types";
 
 /**
- * The coverage rule (#DOC, spec §4) — pure, so the to-do page, the part
+ * The coverage rule (#207, spec §4) — pure, so the to-do page, the part
  * editor, the Assembly Builder, the Specs coverage table and the client
  * package all read one answer. Every pass is a single walk over its input
  * into Maps: production has ~37,400 catalog parts, so nothing here may scan
@@ -755,7 +755,7 @@ import type { DocNotNeeded, PartAccessoryLink, PartDocKind, PartDocument, PartDo
  *  3. Else P is an accessory of parents that have their own K document →
  *     "covered". With a context (the SKUs on one quote), only parents present
  *     in it count; none present → P is not covered on that quote. A pair
- *     marked `ownDatasheet` never covers (for either kind — D-DOC-2).
+ *     marked `ownDatasheet` never covers (for either kind — D271).
  *  4. Else P has only a URL nobody has fetched → "link-only" (not satisfied).
  *  5. Else → "missing".
  */
@@ -953,7 +953,7 @@ Create `src/lib/part-docs/quoted-parts.ts`:
 
 ```ts
 /**
- * Which parts Peak actually quotes (#DOC, spec §2.1) — the to-do list's
+ * Which parts Peak actually quotes (#207, spec §2.1) — the to-do list's
  * scope. Every SKU on any quote (any status), any Grid design placement, any
  * saved bid spec; no time window. Pure and single-pass: one walk per source,
  * one Map keyed by SKU.
@@ -1084,7 +1084,7 @@ import { normalizeSku } from "@/lib/davinci/sku";
 import type { PartDocKind } from "./types";
 
 /**
- * Bulk-drop filename matching (#DOC, spec §3 "Bulk drop"). Pure.
+ * Bulk-drop filename matching (#207, spec §3 "Bulk drop"). Pure.
  *
  * Every part contributes up to three keys — its SKU, MFR P/N and MFR M/N —
  * each through `normalizeSku` (drop a leading `MFR:` segment, uppercase,
@@ -1092,7 +1092,7 @@ import type { PartDocKind } from "./types";
  * uses. A filename is normalized the same way and every substring is looked
  * up, longest first: the longest length with any hit wins, so
  * `S4LED-S3-Lustr_Datasheet.pdf` matches `S4LEDS3LUSTR` over `S4LED`.
- * Keys shorter than MIN_MATCH_KEY never match (D-DOC-4) — a 3-character
+ * Keys shorter than MIN_MATCH_KEY never match (D273) — a 3-character
  * model number appears by accident inside too many filenames.
  */
 
@@ -1237,7 +1237,7 @@ git commit -m "feat(part-docs): pure coverage rule, quoted-parts counter, filena
 In `scripts/test-review-regressions.ts`, insert the following immediately before the line `console.log("review regression checks passed");`:
 
 ```ts
-  /* --- part documents (#DOC): stores, links, accessory graph, legacy backfill --- */
+  /* --- part documents (#207): stores, links, accessory graph, legacy backfill --- */
   {
     const Docs = await import("@/lib/stores/part-documents");
     const Acc = await import("@/lib/stores/part-accessory-links");
@@ -1352,7 +1352,7 @@ import {
 } from "@/lib/part-docs/types";
 
 /**
- * Part documents (#DOC, spec §5) — `part_documents` + `part_document_links`.
+ * Part documents (#207, spec §5) — `part_documents` + `part_document_links`.
  *
  * A document is shared: one row, linked to any number of parts. Nothing is
  * ever hard-deleted — a replace pushes the old file onto `history`, a detach
@@ -1451,7 +1451,7 @@ export async function replaceDocumentFile(id: string, file: StoredFile, by: stri
   });
 }
 
-/** Remember how the last fetch of `sourceUrl` went (D-DOC-3). */
+/** Remember how the last fetch of `sourceUrl` went (D272). */
 export async function recordFetchResult(id: string, result: { ok: boolean; error?: string }, at = Date.now()): Promise<void> {
   await patchDoc<PartDocument>("part_documents", id, (d) => ({
     ...d,
@@ -1520,7 +1520,7 @@ import { listDocs, patchDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import type { AccessoryLinkSource, AccessoryPair, PartAccessoryLink } from "@/lib/part-docs/types";
 
 /**
- * The fixture → accessory graph (#DOC, spec §5) — `part_accessory_links`.
+ * The fixture → accessory graph (#207, spec §5) — `part_accessory_links`.
  * Written by the Assembly Builder (source "assembly", sourceRef = the
  * assembly id) and the DaVinci pre-fill (source "davinci"); coverage is
  * computed from it (src/lib/part-docs/coverage.ts), never stored.
@@ -1649,7 +1649,7 @@ import { listDocs } from "@/db/doc-store";
 import { createDocument, ensureLinks } from "@/lib/stores/part-documents";
 
 /**
- * Legacy backfill (#DOC, spec §5): every part that still carries the old
+ * Legacy backfill (#207, spec §5): every part that still carries the old
  * single-file `datasheetBlobKey` gets a shared `part_documents` row (source
  * "legacy") and a link. Server-only.
  *
@@ -1712,7 +1712,7 @@ import { get as getPart, mergeUpsert } from "@/lib/stores/catalog";
 import type { DocNotNeeded, PartDocKind } from "./types";
 
 /**
- * Set or clear a part's "not needed" mark for one kind (#DOC, spec §4 step 2).
+ * Set or clear a part's "not needed" mark for one kind (#207, spec §4 step 2).
  * Server-only. Goes through `mergeUpsert` — never `upsert`, which would wipe
  * every field this write does not carry — and skips SKUs that are not in the
  * catalog, because mergeUpsert would otherwise create a malformed part.
@@ -1748,7 +1748,7 @@ import { backfillLegacyDatasheets, type LegacyPart } from "./legacy";
 import type { PartAccessoryLink, PartDocument, PartDocumentLink } from "./types";
 
 /**
- * One load of everything coverage needs (#DOC) — the three collections, once
+ * One load of everything coverage needs (#207) — the three collections, once
  * per request, plus the idempotent legacy backfill (which writes only when a
  * part still has an un-backfilled `datasheetBlobKey`). Server-only. Callers
  * pass the catalog they already loaded; this never lists it again.
@@ -1776,7 +1776,7 @@ Create `scripts/part-docs-backfill.ts`:
 
 ```ts
 /**
- * Legacy datasheet backfill (#DOC, spec §5): every part still carrying the
+ * Legacy datasheet backfill (#207, spec §5): every part still carrying the
  * old `datasheetBlobKey` gets a shared `part_documents` row (source
  * "legacy") and a link. The Datasheets page runs the same idempotent step on
  * every read; this is the explicit, reportable version.
@@ -1902,7 +1902,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 4: magic bytes and the upload check.
+   Part documents (#207) — Task 4: magic bytes and the upload check.
    verifyUploadedBlob runs against fake Blob deps — no token, no network.
    ====================================================================== */
 import {
@@ -1996,7 +1996,7 @@ In `src/lib/blob.ts`, insert the following immediately before the line `/**`:
 ```ts
 /**
  * The first `max` bytes of a private blob, plus its stored size — enough to
- * sniff what a client-uploaded file really is (part documents, #DOC) without
+ * sniff what a client-uploaded file really is (part documents, #207) without
  * pulling a 25 MB file through the function. Null when the blob is missing.
  */
 export async function getBlobHead(
@@ -2044,7 +2044,7 @@ Create `src/lib/part-docs/files.ts`:
 import type { PartDocKind } from "./types";
 
 /**
- * File-type rules for part documents (#DOC, spec §6). Pure — the upload
+ * File-type rules for part documents (#207, spec §6). Pure — the upload
  * route, the attach actions and the fetcher all call `sniffDocumentType` on
  * the real bytes; the extension and the browser's MIME are never trusted.
  */
@@ -2146,7 +2146,7 @@ import { checkDocumentBytes, CONTENT_TYPES, SNIFF_BYTES } from "./files";
 import { blobPathBelongsTo, MAX_PART_DOC_BYTES, type PartDocKind } from "./types";
 
 /**
- * Accept a browser-uploaded blob as a part document's file (#DOC, spec §6).
+ * Accept a browser-uploaded blob as a part document's file (#207, spec §6).
  * Server-only. The pathname comes from the client and is untrusted: it must
  * sit under `part-docs/<documentId>/`, and the bytes Blob actually holds must
  * sniff as a type the slot accepts. A rejected upload never became a
@@ -2218,7 +2218,7 @@ import { blobPathBelongsTo, isDocumentId, MAX_PART_DOC_BYTES } from "@/lib/part-
 export const maxDuration = 30;
 
 /**
- * Vercel Blob client-upload broker for part documents (#DOC, spec §6) — the
+ * Vercel Blob client-upload broker for part documents (#207, spec §6) — the
  * recordings route's pattern (src/app/api/recordings/upload/route.ts), so a
  * 25 MB PDF goes browser → Blob directly instead of through the ~900 KB
  * server-action ceiling the old datasheet upload hit.
@@ -2303,7 +2303,7 @@ import { getDocument } from "@/lib/stores/part-documents";
 import { contentDisposition, contentTypeForFileName } from "@/lib/part-docs/files";
 
 /**
- * Part-document viewer (#DOC, spec §7): signed-in only. Streams the private
+ * Part-document viewer (#207, spec §7): signed-in only. Streams the private
  * blob; a link-only document (no stored file yet) redirects to its source
  * URL instead. `?history=<n>` streams the n-th replaced file — nothing is
  * ever deleted, so every earlier version stays viewable.
@@ -2368,7 +2368,7 @@ import { isDocumentId, isPartDocKind, type PartDocKind } from "@/lib/part-docs/t
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
 /**
- * Part documents (#DOC) — every write from the Datasheets page, the bulk
+ * Part documents (#207) — every write from the Datasheets page, the bulk
  * drop and the part editor's Documents section. Anyone signed in may upload,
  * attach, replace, detach and mark not-needed (spec §2.4); every change
  * records who and when; nothing is hard-deleted.
@@ -2532,7 +2532,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 5: the guarded fetcher. A fake fetch and
+   Part documents (#207) — Task 5: the guarded fetcher. A fake fetch and
    IP-literal hosts keep every case offline (a public literal IP needs no
    DNS; a private one is refused before any request).
    ====================================================================== */
@@ -2618,7 +2618,7 @@ and the DB-backed half, immediately before the final `console.log("review regres
 In `scripts/test-review-regressions.ts`, insert the following immediately before the line `console.log("review regression checks passed");`:
 
 ```ts
-  /* --- part documents (#DOC): fetch from links, shared per URL --- */
+  /* --- part documents (#207): fetch from links, shared per URL --- */
   {
     const { upsert: upsertPart, list: listParts } = await import("@/lib/stores/catalog");
     const { loadPartDocsState } = await import("@/lib/part-docs/load");
@@ -2750,7 +2750,7 @@ import { hostnameIsUnsafe, resolveRedirectHop, validateIcsUrlSync } from "@/lib/
 import { MAX_PART_DOC_BYTES } from "./types";
 
 /**
- * Server-side download of a manufacturer document URL (#DOC, spec §6).
+ * Server-side download of a manufacturer document URL (#207, spec §6).
  * Server-only. It reuses src/lib/venue-calendar-fetch.ts's SSRF guard
  * unchanged — http(s) only, the literal-host check, DNS resolution with
  * private/loopback/link-local refusal, and BOTH re-applied to every redirect
@@ -2865,7 +2865,7 @@ import type { PartDocsState } from "./load";
 import { newDocumentId, partDocBlobPath, type PartDocKind, type PartDocument } from "./types";
 
 /**
- * "Fetch from links" (#DOC, spec §3/§6). Server-only. For one part and one
+ * "Fetch from links" (#207, spec §3/§6). Server-only. For one part and one
  * kind: try each URL the part has but hasn't fetched — its link-only
  * documents first, then the catalog's own Datasheet/Guide Spec/DaVinci
  * URLs — download it through the SSRF guard, check the bytes, store the file
@@ -3127,7 +3127,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 6: the to-do list's view models and the
+   Part documents (#207) — Task 6: the to-do list's view models and the
    "Also covers…" suggestions. Pure.
    ====================================================================== */
 import {
@@ -3217,7 +3217,7 @@ import type { PartDocKind } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
- * (#DOC). Pure. The server computes these from one CoverageIndex; client
+ * (#207). Pure. The server computes these from one CoverageIndex; client
  * components receive only these small objects, never the collections.
  */
 
@@ -3344,7 +3344,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { normalizeSku } from "@/lib/davinci/sku";
 
 /**
- * "Also covers…" (#DOC, spec §3): after a file lands on one part, the other
+ * "Also covers…" (#207, spec §3): after a file lands on one part, the other
  * parts it probably describes. Pure. Two sources, in this order:
  *  1. the part's accessories from the graph (the fixture datasheet covers
  *     them anyway — attaching makes it explicit), then
@@ -3506,7 +3506,7 @@ import { MAX_PART_DOC_BYTES, newDocumentId, partDocBlobPath, type PartDocKind } 
 import { attachUploadedDocumentAction, replaceDocumentFileAction } from "./actions";
 
 /**
- * Browser half of a part-document upload (#DOC, spec §6): bytes go straight
+ * Browser half of a part-document upload (#207, spec §6): bytes go straight
  * to private Blob through /api/part-documents/upload, then a server action
  * checks what actually landed and records it. Imported only by client
  * components; everything it imports is client-safe.
@@ -3585,7 +3585,7 @@ import { detachDocumentAction, fetchLinksAction, setNotNeededAction } from "./ac
 import { uploadNewDocument, uploadReplacement } from "./upload-client";
 
 /**
- * One document slot (#DOC, spec §3) — shared by the Datasheets to-do list and
+ * One document slot (#207, spec §3) — shared by the Datasheets to-do list and
  * the part editor. Shows one of: ✓ file (view · replace · detach), Covered on
  * N fixture datasheets, Link only (Fetch), Not needed, or an empty drop zone.
  * A file dropped on ANY state becomes the part's own document.
@@ -3806,7 +3806,7 @@ import type { Suggestion } from "@/lib/part-docs/suggest";
 import { attachExistingDocumentAction, suggestAlsoCoversAction } from "./actions";
 
 /**
- * The "Also covers…" step (#DOC, spec §3): right after a file lands on one
+ * The "Also covers…" step (#207, spec §3): right after a file lands on one
  * part, offer the parts it likely also describes — the part's accessories
  * first (pre-ticked), then its model family (unticked). Confirm attaches the
  * same shared document to the ticked parts.
@@ -3928,7 +3928,7 @@ import {
 } from "./actions";
 
 /**
- * The Datasheets to-do table (#DOC, spec §3): one row per quoted part,
+ * The Datasheets to-do table (#207, spec §3): one row per quoted part,
  * most-quoted first, two slot cells, multi-select with bulk actions.
  */
 
@@ -4151,7 +4151,7 @@ export const maxDuration = 300;
 const PAGE = 200;
 
 /**
- * Catalog → Datasheets (#DOC, spec §3): the to-do list. Every part Peak has
+ * Catalog → Datasheets (#207, spec §3): the to-do list. Every part Peak has
  * ever quoted (any quote status, any Grid placement, any bid spec), most
  * quoted first, with a Datasheet and a Spec sheet slot each. One load of
  * every collection per request; everything below is single-pass Maps.
@@ -4266,7 +4266,7 @@ with:
 
 ```tsx
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-          {/* Part documents (#DOC) — the datasheet / spec-sheet to-do list. */}
+          {/* Part documents (#207) — the datasheet / spec-sheet to-do list. */}
           <Link
             href="/catalog/documents"
             style={{
@@ -4347,7 +4347,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 
 ```ts
 
-/* --- Part documents (#DOC) — Task 7: bulk-drop review rows --- */
+/* --- Part documents (#207) — Task 7: bulk-drop review rows --- */
 import { matchFileRows } from "@/lib/part-docs/filename-match";
 {
   const rows = matchFileRows(
@@ -4492,7 +4492,7 @@ import BulkDrop from "./bulk-drop";
 
 export const metadata = { title: "Upload datasheets — Quartzite-6" };
 
-/** Bulk drop (#DOC, spec §3): drop a folder, review the matches, confirm. */
+/** Bulk drop (#207, spec §3): drop a folder, review the matches, confirm. */
 export default async function BulkUploadPage() {
   await requireUser();
   return (
@@ -4531,7 +4531,7 @@ import { matchFilesAction, searchPartsAction, type FileMatchRow, type PartHit } 
 import { preflight, uploadNewDocument } from "../upload-client";
 
 /**
- * Bulk drop (#DOC, spec §3). Files stay in the browser; only their names go
+ * Bulk drop (#207, spec §3). Files stay in the browser; only their names go
  * to the server for matching. The review table shows file → matched part(s)
  * + kind with confidence; an unmatched or ambiguous row gets a part search.
  * Confirm uploads each file straight to Blob and attaches it.
@@ -4827,7 +4827,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 
 ```ts
 
-/* --- Part documents (#DOC) — Task 8: the part editor's Documents view --- */
+/* --- Part documents (#207) — Task 8: the part editor's Documents view --- */
 import { partDocsView } from "@/lib/part-docs/views";
 {
   const file = (id: string, kind: "datasheet" | "specsheet", at: number): PdDoc => ({
@@ -4888,7 +4888,7 @@ export type PartDocRow = {
   history: Array<{ index: number; fileName: string; replacedAt: number; replacedBy: string }>;
 };
 
-/** The part editor's Documents section (#DOC, spec §3). */
+/** The part editor's Documents section (#207, spec §3). */
 export type PartDocsView = {
   sku: string;
   slots: Record<PartDocKind, SlotView>;
@@ -4951,7 +4951,7 @@ import AlsoCovers from "./documents/also-covers";
 import SlotCell, { docHref } from "./documents/slot-cell";
 
 /**
- * The part editor's Documents section (#DOC, spec §3): the two slots (same
+ * The part editor's Documents section (#207, spec §3): the two slots (same
  * cell as the Datasheets page), every document linked to the part with its
  * replaced versions, and the computed "Covered by" / "Covers" context from
  * the accessory graph. Any signed-in user (spec §2.4).
@@ -5076,7 +5076,7 @@ with:
   const defaultArticleId = editingPart
     ? articleIdForPart({ ...editingPart, specArticleId: undefined }, specArticleDocs, specSections)
     : null;
-  // Part documents (#DOC): the Documents section's view, computed only when a
+  // Part documents (#207): the Documents section's view, computed only when a
   // part is open — one load of the three document collections.
   const descBySku = editingPart ? new Map(parts.map((p) => [p.sku, p.desc])) : null;
   const partDocs = editingPart
@@ -5136,7 +5136,7 @@ with:
 
 ```tsx
   /** Deleting a part is admin-gated — same convention as the Categories &
-   *  trades card. (Documents are not: anyone signed in, D-DOC-6.) */
+   *  trades card. (Documents are not: anyone signed in, D275.) */
   isAdmin: boolean;
   /** Task 13 — the Spec panel shows for anyone who can `create` (owner
    *  decision 3); the spec write is gated by requirePerm("create") inside
@@ -5154,7 +5154,7 @@ with:
 
 ```tsx
   defaultArticleId: string | null;
-  /** Part documents (#DOC) — null for a new, unsaved part. */
+  /** Part documents (#207) — null for a new, unsaved part. */
   partDocs: PartDocsView | null;
   /** #158
 ```
@@ -5175,10 +5175,10 @@ In `src/app/(app)/catalog/page.tsx`, replace this exact text:
 with:
 
 ```tsx
-            {/* Part documents (#DOC) — the datasheet / spec-sheet slots,
+            {/* Part documents (#207) — the datasheet / spec-sheet slots,
                 this part's documents and its accessory coverage. Anyone
                 signed in (spec §2.4); only once the part exists. Replaces
-                the admin-only single-datasheet control (D-DOC-6). */}
+                the admin-only single-datasheet control (D275). */}
             {editing && part && partDocs && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
                 <PartDocumentsSection key={part.sku} view={partDocs} />
@@ -5271,7 +5271,7 @@ In `src/lib/stores/catalog.ts`, replace this exact text:
 with:
 
 ```ts
-   *  /api/part-datasheet/<sku> proxy. LEGACY since part documents (#DOC):
+   *  /api/part-datasheet/<sku> proxy. LEGACY since part documents (#207):
    *  nothing writes it any more; the backfill (src/lib/part-docs/legacy.ts)
    *  turns it into a shared `part_documents` row, and it stays readable
    *  for the readers that have not switched. */
@@ -5347,7 +5347,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 9: Assembly Builder ↔ accessory graph. Pure.
+   Part documents (#207) — Task 9: Assembly Builder ↔ accessory graph. Pure.
    ====================================================================== */
 import {
   assemblyRef, subassemblyRef, fixtureParentSku, fixtureAssemblyPairs, subassemblyPairs, memberCoverageFor, memberCoverageLabel, pairKey,
@@ -5388,7 +5388,7 @@ import {
 In `scripts/test-review-regressions.ts`, insert the following immediately before the line `console.log("review regression checks passed");`:
 
 ```ts
-  /* --- part documents (#DOC): Assembly Builder saves sync the graph in one pass --- */
+  /* --- part documents (#207): Assembly Builder saves sync the graph in one pass --- */
   {
     const Acc = await import("@/lib/stores/part-accessory-links");
     const first = await Acc.syncAccessoryScopes("assembly", "assembly:", [
@@ -5448,7 +5448,7 @@ import { ownFiles, slotCoverage, type CoverageIndex, type SlotState } from "./co
 import type { AccessoryPair } from "./types";
 
 /**
- * Assembly Builder ↔ accessory graph (#DOC, spec §3). Pure — the builders'
+ * Assembly Builder ↔ accessory graph (#207, spec §3). Pure — the builders'
  * client components import it. Each assembly's light engine is the parent;
  * its lens and every option/accessory part are the parent's accessory links.
  * The two builders keep separate sourceRef namespaces so a save of one never
@@ -5564,7 +5564,7 @@ export async function saveFixtureAssembliesAction(value: FixtureAssembly[]) {
   await requireUser();
   const fixtureAssemblies = sanitizeFixtureAssemblies(value);
   await setSettings({ fixtureAssemblies });
-  // Part documents (#DOC): each assembly's members become the fixture's
+  // Part documents (#207): each assembly's members become the fixture's
   // accessory links; an assembly deleted from the list takes its links with it.
   await syncAccessoryScopes(
     "assembly",
@@ -5577,7 +5577,7 @@ export async function saveFixtureAssembliesAction(value: FixtureAssembly[]) {
   return { ok: true as const, fixtureAssemblies };
 }
 
-/** The member's "has its own datasheet" toggle (#DOC, spec §3/§4): the pair
+/** The member's "has its own datasheet" toggle (#207, spec §3/§4): the pair
  *  stops (or resumes) counting the fixture's datasheet as the member's. */
 export async function setOwnDatasheetAction(parentSku: string, accessorySku: string, own: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireUser();
@@ -5603,7 +5603,7 @@ import { memberCoverageLabel, type MemberCoverage } from "@/lib/part-docs/assemb
 import { setOwnDatasheetAction } from "./actions";
 
 /**
- * One assembly member's datasheet coverage (#DOC, spec §3): "Covered by
+ * One assembly member's datasheet coverage (#207, spec §3): "Covered by
  * fixture datasheet" by default, with the "has its own datasheet" toggle.
  * Disabled until the assembly is saved (the pair isn't in the graph yet).
  */
@@ -5674,7 +5674,7 @@ export default function AssemblyBuilder({
   initial: FixtureAssembly[];
   parts: Hit[];
   priceDates: Record<string, number | null>;
-  /** #DOC — each saved member's datasheet coverage, keyed by pairKey(). */
+  /** #207 — each saved member's datasheet coverage, keyed by pairKey(). */
   coverage: Record<string, MemberCoverage>;
 }) {
 ```
@@ -5732,7 +5732,7 @@ with:
 ```tsx
   const assemblies = sanitizeFixtureAssemblies(settings.fixtureAssemblies);
   const priceDates = Object.fromEntries(assemblies.map((a) => [a.id, pricesAsOf(a.components.map((c) => c.sku), parts, settings)]));
-  // Part documents (#DOC): each member's datasheet coverage, for the active tab only.
+  // Part documents (#207): each member's datasheet coverage, for the active tab only.
   const { index } = await loadPartDocsState(parts);
   const coverage = memberCoverageFor(
     index,
@@ -5792,7 +5792,7 @@ with:
 
 ```ts
   const saved = input.id ? await save(item) : await create(item);
-  // Part documents (#DOC): the lens and options become the light engine's accessory links.
+  // Part documents (#207): the lens and options become the light engine's accessory links.
   await syncAccessoryLinks({ source: "assembly", sourceRef: subassemblyRef(saved.id) }, subassemblyPairs(saved));
   revalidatePath("/design/assemblies");
 ```
@@ -5844,7 +5844,7 @@ export default function SubassembliesClient({
   parts: CatalogPart[];
   initial: FixtureSubassembly[];
   priceListEffective: Record<string, number>;
-  /** #DOC — each saved member's datasheet coverage, keyed by pairKey(). */
+  /** #207 — each saved member's datasheet coverage, keyed by pairKey(). */
   coverage: Record<string, MemberCoverage>;
 }) {
 ```
@@ -5859,7 +5859,7 @@ with:
 
 ```tsx
         <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 5 }}>{item.lightEngineName} + {item.lensName}</div>
-        {/* #DOC — each member's datasheet coverage from the fixture. */}
+        {/* #207 — each member's datasheet coverage from the fixture. */}
         <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
           {subassemblyPairs(item).map((p) => (
             <div key={p.accessorySku} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -5944,7 +5944,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 10: the DaVinci accessory graph in the
+   Part documents (#207) — Task 10: the DaVinci accessory graph in the
    extract, and the pre-fill plan. Pure.
    ====================================================================== */
 import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
@@ -5965,33 +5965,33 @@ import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
     ],
   };
   const ex = extractLibrary(LIBDOC);
-  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#DOC extract: records still drop contentless types");
-  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#DOC extract: accessory links are kept once, never to the internal category or an unknown type");
-  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#DOC extract: both ends carry classification and normalized model numbers");
-  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#DOC extract: the parent is described too; the excluded type is not");
-  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#DOC extract: a library with no accessories yields an empty graph");
+  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#207 extract: records still drop contentless types");
+  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#207 extract: accessory links are kept once, never to the internal category or an unknown type");
+  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#207 extract: both ends carry classification and normalized model numbers");
+  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#207 extract: the parent is described too; the excluded type is not");
+  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#207 extract: a library with no accessories yields an empty graph");
 
   const allowEtc = (m: string) => m === "ETC" || m === "High End Systems";
   const plan = planDavinciPrefill(ex, [{ sku: "ETC:CSPAR" }, { sku: "CSPAR" }, { sku: "419LT" }, { sku: "ETC:7060A1017" }, { sku: "UNRELATED" }], allowEtc);
-  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#DOC prefill: one document per English datasheet URL (the reissued duplicate is one)");
-  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#DOC prefill: the document links to every Peak SKU of the type");
+  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#207 prefill: one document per English datasheet URL (the reissued duplicate is one)");
+  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#207 prefill: the document links to every Peak SKU of the type");
   ok(
     plan.accessoryPairs.map((p) => `${p.parentSku}>${p.accessorySku}x${p.maxQty}`).sort().join(",") ===
       "CSPAR>419LTx2,CSPAR>ETC:7060A1017x2,ETC:CSPAR>419LTx2,ETC:CSPAR>ETC:7060A1017x2",
-    "#DOC prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
+    "#207 prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
   );
-  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#DOC prefill: the report counts matched types and pairs");
+  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#207 prefill: the report counts matched types and pairs");
   const gated = planDavinciPrefill(ex, [{ sku: "CSPAR" }, { sku: "419LT" }], () => false);
-  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#DOC prefill: the manufacturer gate refuses every record");
+  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#207 prefill: the manufacturer gate refuses every record");
   const noLens = planDavinciPrefill(ex, [{ sku: "CSPAR" }], allowEtc);
-  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#DOC prefill: a link with no Peak part on one end writes nothing");
+  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#207 prefill: a link with no Peak part on one end writes nothing");
 }
 ```
 
 In `scripts/test-review-regressions.ts`, insert the following immediately before the line `console.log("review regression checks passed");`:
 
 ```ts
-  /* --- part documents (#DOC): DaVinci pre-fill apply is idempotent --- */
+  /* --- part documents (#207): DaVinci pre-fill apply is idempotent --- */
   {
     const { applyPrefill, davinciDocumentId } = await import("@/lib/part-docs/davinci-apply");
     const Docs = await import("@/lib/stores/part-documents");
@@ -6050,7 +6050,7 @@ with:
 
 ```ts
 /**
- * One end of a DaVinci accessory link (#DOC). Kept for EVERY type a link
+ * One end of a DaVinci accessory link (#207). Kept for EVERY type a link
  * touches — unlike `records`, which drops types with neither ports nor
  * documents, and lens tubes, clamps and cables are exactly those types.
  */
@@ -6074,7 +6074,7 @@ export type DavinciExtract = {
   libraryTimestamp: string;
   generatedAt: number;
   records: readonly DavinciRecord[];
-  /** Part documents (#DOC). Optional so an extract written before it still loads. */
+  /** Part documents (#207). Optional so an extract written before it still loads. */
   accessoryTypes?: Readonly<Record<string, DavinciAccessoryType>>;
   accessoryLinks?: readonly DavinciAccessoryLink[];
 };
@@ -6171,7 +6171,7 @@ function typeModelNumbers(t: Bag): string[] {
 }
 
 /**
- * The fixture → accessory graph (#DOC, spec §6): `types[].accessories[]`
+ * The fixture → accessory graph (#207, spec §6): `types[].accessories[]`
  * `{ typeId, maxQuantity, userDefinable }`, 7,937 links in the 2026-04-21
  * library. Both ends are kept by typeId, and every type a link touches gets
  * its model numbers here — records[] cannot serve, because it drops types
@@ -6243,7 +6243,7 @@ with:
 ```ts
  * `library.json` into the ~2.65 MB `data/davinci-extract.json` that ships in
  * the repo: 1,720 device types, 14,108 indexed identifiers, 6,168 ports,
- * 2,828 document links and — since part documents (#DOC) — the fixture →
+ * 2,828 document links and — since part documents (#207) — the fixture →
  * accessory graph: 6,702 links over 1,753 types.
 ```
 
@@ -6299,7 +6299,7 @@ import type { DavinciExtract } from "@/lib/davinci/types";
 import type { AccessoryPair } from "./types";
 
 /**
- * DaVinci pre-fill plan (#DOC, spec §6) — pure. Maps ETC's library onto
+ * DaVinci pre-fill plan (#207, spec §6) — pure. Maps ETC's library onto
  * Peak's catalog:
  *  - every English DaVinci datasheet becomes ONE shared, link-only document
  *    (keyed by URL — the same URL on several types is one document) linked
@@ -6432,7 +6432,7 @@ import { allDocuments, createDocument, ensureLinks } from "@/lib/stores/part-doc
 import { planDavinciPrefill, type PrefillPlan } from "./davinci-prefill";
 
 /**
- * DaVinci pre-fill, the writing half (#DOC, spec §6). Server/script only.
+ * DaVinci pre-fill, the writing half (#207, spec §6). Server/script only.
  * Writes link-only `part_documents` (source "davinci", sourceUrl only — no
  * ETC file is downloaded or rehosted), their part links, and the "davinci"
  * scope of `part_accessory_links`. Idempotent: document ids derive from the
@@ -6503,7 +6503,7 @@ Create `scripts/part-docs-davinci.ts`:
 
 ```ts
 /**
- * DaVinci → part documents pre-fill: report, dry run, apply (#DOC, spec §6).
+ * DaVinci → part documents pre-fill: report, dry run, apply (#207, spec §6).
  *
  *   npm run part-docs:davinci                     → the report, writes nothing
  *   npm run part-docs:davinci -- --apply          → dry run, writes nothing
@@ -6659,7 +6659,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { prefillFromDavinciAction } from "./actions";
 
-/** Admin-only (#DOC, spec §6): write ETC's DaVinci datasheet links and
+/** Admin-only (#207, spec §6): write ETC's DaVinci datasheet links and
  *  accessory graph. Nothing is downloaded — Fetch is a separate step. */
 export default function DavinciPrefillButton() {
   const router = useRouter();
@@ -6753,7 +6753,7 @@ with:
 
 ```ts
   experimental: { serverActions: { bodySizeLimit: "1200kb" } },
-  // Part documents (#DOC): the Datasheets page's admin "Pre-fill from
+  // Part documents (#207): the Datasheets page's admin "Pre-fill from
   // DaVinci" action reads the committed extract with fs at run time, which
   // file tracing cannot see — ship it with that route's function.
   outputFileTracingIncludes: { "/catalog/documents": ["./data/davinci-extract.json"] },
@@ -6774,7 +6774,7 @@ env -u DATABASE_URL npm run test:specs > "${TMPDIR:-/tmp}/pd-specs.log" 2>&1; ta
 
 Expected: `ALL PASSED` and no `FAIL` lines. (One pre-existing flake exists — `redeem: tampered code -> not ok`, a random-code test that fails about one run in sixty; if it is the only FAIL, re-run.)
 
-Expected additionally: `grep -c '^PASS #DOC' "${TMPDIR:-/tmp}/pd-specs.log"` prints `11`, and the existing `#162` DaVinci assertions still all pass.
+Expected additionally: `grep -c '^PASS #207' "${TMPDIR:-/tmp}/pd-specs.log"` prints `11`, and the existing `#162` DaVinci assertions still all pass.
 
 ```bash
 env -u DATABASE_URL npm run test:review:regressions 2>&1 | tail -2
@@ -6854,8 +6854,8 @@ In `scripts/test-review-and-spec.ts`, replace this exact text:
 with:
 
 ```ts
-  // #DOC: whether a part "has a datasheet" is the part-documents coverage
-  // rule's answer (datasheetSatisfiedSkus, tested in the #DOC blocks); the
+  // #207: whether a part "has a datasheet" is the part-documents coverage
+  // rule's answer (datasheetSatisfiedSkus, tested in the #207 blocks); the
   // table only reports the set it is handed. A link-only URL no longer counts.
   const articleIdBySku = articleIdMapForParts(parts as never, articles, sections);
   const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]), new Set(["P1"]));
@@ -6868,7 +6868,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 ```ts
 
 /* ======================================================================
-   Part documents (#DOC) — Task 11: the client package carries each
+   Part documents (#207) — Task 11: the client package carries each
    document once, covers accessories only in context, and says so.
    ====================================================================== */
 import { resolvePackageDocs, packageEntryName } from "@/lib/part-docs/package";
@@ -6984,7 +6984,7 @@ with:
  *  `bySku` (for specStateOf's same-as resolution) is built once here, not
  *  per part. `articleIdBySku` is the shared, already-computed map from
  *  `articleIdMapForParts` — see final fix wave item 10. `datasheetOk` is
- *  the part-documents coverage rule's answer (#DOC, spec §7 —
+ *  the part-documents coverage rule's answer (#207, spec §7 —
  *  datasheetSatisfiedSkus): own file, not needed, or covered by a fixture;
  *  a link nobody has fetched no longer counts. */
 export function coverageRows(
@@ -7030,7 +7030,7 @@ In `src/app/(app)/design/specs/library/page.tsx`, replace this exact text:
 with:
 
 ```tsx
-  // #DOC: the datasheet column is the part-documents coverage rule.
+  // #207: the datasheet column is the part-documents coverage rule.
   const { index: docIndex } = await loadPartDocsState(parts);
   const datasheetOk = datasheetSatisfiedSkus(docIndex, parts.map((p) => p.sku));
   const coverageAll = coverageRows(parts, articleIdBySku, onBom, datasheetOk);
@@ -7046,7 +7046,7 @@ import { slotCoverage, type CoverageIndex } from "./coverage";
 import type { PartDocKind } from "./types";
 
 /**
- * Which documents a client package carries (#DOC, spec §3 "Client
+ * Which documents a client package carries (#207, spec §3 "Client
  * package"). Pure. The context is the package's own SKU list: an accessory
  * is covered only by a fixture that is on the same quote/design; one quoted
  * without any of its fixtures is a `missing-datasheet` gap on that package
@@ -7277,7 +7277,7 @@ export type ClientPackageItem = {
   unit: string;
   category: string;
   catalogId: string | null;
-  /** The part's own datasheet, or the fixture datasheet covering it (#DOC). */
+  /** The part's own datasheet, or the fixture datasheet covering it (#207). */
   datasheet: PackageDocRef | null;
   /** Fixture SKUs on this package whose datasheet covers this part. */
   datasheetCoveredBy: string[];
@@ -7460,7 +7460,7 @@ with:
 
 ```ts
 /**
- * Put every package document in the zip ONCE (#DOC): a fixture datasheet
+ * Put every package document in the zip ONCE (#207): a fixture datasheet
  * that also covers its lens and clamps is one file. A document whose blob is
  * missing from storage turns into a gap for each SKU it was meant to serve.
  */
@@ -7664,7 +7664,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string): Promis
     preparedBy: by,
     date: Date.now(),
   });
-  // #DOC: the quote's own SKUs are the coverage context — an accessory rides
+  // #207: the quote's own SKUs are the coverage context — an accessory rides
   // on a fixture only when that fixture is on this quote.
   const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku));
   const items = bom.map((row) => {
@@ -7755,7 +7755,7 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 /**
  * Read-only package readiness seam (punch #40). Private Blob pathnames never
  * leave the server; consumers receive the authenticated part-document
- * viewer URL instead (#DOC). The eventual PDF/ZIP writer and the readiness UI use the
+ * viewer URL instead (#207). The eventual PDF/ZIP writer and the readiness UI use the
  * same manifest builder.
  */
 export async function GET(
@@ -7836,7 +7836,7 @@ git commit -m "feat(part-docs): Specs coverage and client packages use the cover
 - Modify: `src/app/api/part-datasheet/[id]/route.ts` (legacy blob, else redirect to the document viewer)
 - Modify: `src/app/(app)/design/grid/[id]/page.tsx`, `src/lib/design/grid-bom.ts` (comment)
 - Modify: `scripts/smoke-routes.ts`
-- Modify: `DECISIONS.md` (D-DOC-1…D-DOC-11), `PUNCHLIST.md` (`#DOC`, #40 status)
+- Modify: `DECISIONS.md` (D270…D280), `PUNCHLIST.md` (`#207`, #40 status)
 - Test: `scripts/test-review-and-spec.ts` (append a `Task 12` block)
 
 **Interfaces:**
@@ -7850,7 +7850,7 @@ Append to the end of `scripts/test-review-and-spec.ts`:
 
 ```ts
 
-/* --- Part documents (#DOC) — Task 12: Displays API datasheet links --- */
+/* --- Part documents (#207) — Task 12: Displays API datasheet links --- */
 import { publicDatasheets } from "@/lib/displays-api";
 {
   const idx = buildCoverageIndex({
@@ -7901,11 +7901,11 @@ import { linkedDocuments, type CoverageIndex } from "@/lib/part-docs/coverage";
 
 /** Sections + articles the Displays API needs to resolve canonical ids to the
  *  printable CSI number / title it has always returned (D258), plus the part
- *  documents index (#DOC) its datasheet links now come from. */
+ *  documents index (#207) its datasheet links now come from. */
 export type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[]; docs?: CoverageIndex };
 
 /**
- * A part's datasheet links for external consumers (#DOC, spec §7): every
+ * A part's datasheet links for external consumers (#207, spec §7): every
  * linked datasheet document through the authenticated viewer route (which
  * streams the file, or redirects a link-only one to its source), else the
  * manufacturer URLs the catalog row carries. Never a private blob key, and
@@ -7943,7 +7943,7 @@ In `src/lib/displays-api.ts`, replace this exact text:
 with:
 
 ```ts
-  // #DOC: attaching or fetching a document moves no part's updatedAt, so the
+  // #207: attaching or fetching a document moves no part's updatedAt, so the
   // documents and their links are folded in too.
   const docsPart = lib?.docs
     ? [...lib.docs.docsBySku]
@@ -8124,7 +8124,7 @@ import { allDocumentLinks, allDocuments } from "@/lib/stores/part-documents";
 /**
  * Authenticated part-datasheet proxy (D116, punch #39 Task 5) — kept as a
  * bridge for the older readers that still link here by SKU (the Grid
- * editor, the pre-v1 Displays route, bookmarks). Part documents (#DOC):
+ * editor, the pre-v1 Displays route, bookmarks). Part documents (#207):
  * a part still carrying the legacy `datasheetBlobKey` streams it exactly as
  * before; otherwise this redirects to the part's own datasheet document in
  * the new viewer (`/api/part-documents/<id>`) — a stored file first, else a
@@ -8181,7 +8181,7 @@ with:
 
 ```tsx
   const pricingById = new Map(catalog.map((p) => [p.id, p]));
-  // #DOC: "has a datasheet" = a stored datasheet document (or the legacy
+  // #207: "has a datasheet" = a stored datasheet document (or the legacy
   // blob); the editor's link goes through /api/part-datasheet/<sku>, which
   // bridges to the part-document viewer.
   const { index: docIndex } = await loadPartDocsState(catalog);
@@ -8213,7 +8213,7 @@ with:
 
 ```ts
   /** Datasheet attachment flag (Task 5, punch #39, D116) — true when the
-   *  catalog part has a stored datasheet: a part-document file (#DOC) or the
+   *  catalog part has a stored datasheet: a part-document file (#207) or the
    *  legacy blob. Deliberately just a boolean (not the blob key): the editor
    *  only needs to know whether to render a link to the authenticated
    *  /api/part-datasheet/<sku> proxy, which bridges to the document viewer. */
@@ -8232,9 +8232,9 @@ with:
 
 ```ts
   "/catalog",
-  "/catalog/documents", // #DOC — the Datasheets to-do list
+  "/catalog/documents", // #207 — the Datasheets to-do list
   "/catalog/documents?show=missing-datasheet",
-  "/catalog/documents/upload", // #DOC — bulk drop
+  "/catalog/documents/upload", // #207 — bulk drop
 ```
 
 In `scripts/smoke-routes.ts`, replace this exact text:
@@ -8247,19 +8247,19 @@ with:
 
 ```ts
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
-  // #DOC: the part editor with its Documents section (a seeded fabric SKU).
+  // #207: the part editor with its Documents section (a seeded fabric SKU).
   { route: "/catalog?edit=RB-MV-MN" },
 ```
 
 
 - [ ] **Step 7: Record the decisions and the punch item**
 
-The lead renumbers `#DOC` / `D-DOC-n` at merge time — recompute free numbers from `origin/main` right before merging, never from this branch.
+The lead renumbers the punch item and decision placeholders at merge time — recompute free numbers from `origin/main` right before merging, never from this branch. (Task 12: renumbered to punch #207 and decisions D270–D280.)
 
 Append to the end of `DECISIONS.md`:
 
 ```markdown
-## D-DOC-1. Part documents are shared records with deterministic link ids (#DOC, 2026-09-25)
+## D270. Part documents are shared records with deterministic link ids (#207, 2026-09-25)
 
 A datasheet or spec sheet is one `part_documents` row linked to many parts through `part_document_links` (spec §2.5,
 DaVinci's model). Ids: a new upload or fetch mints `PD-` + 12 random hex (`newDocumentId`, so the browser can mint the
@@ -8269,14 +8269,14 @@ part↔document, soft-deleted to detach and revived by re-attaching; accessory l
 parent, accessory). A document fetched or pre-filled from a URL is keyed by that URL: every part that referenced it
 shares the one document (spec §3).
 
-## D-DOC-2. "Has its own datasheet" opts a pair out for both kinds, across sources (#DOC, 2026-09-25)
+## D271. "Has its own datasheet" opts a pair out for both kinds, across sources (#207, 2026-09-25)
 
 The Assembly Builder's toggle lives on `part_accessory_links.ownDatasheet`, set on every live link of that
 parent/accessory pair (assembly and DaVinci alike), and coverage reads the pair as opted out if any of its links says
 so. It excludes the pair from step 3 of the coverage rule for spec sheets too — an accessory with its own datasheet is
 documented on its own. Re-saving an assembly carries the flag over.
 
-## D-DOC-3. Fetch failures are remembered on the document (#DOC, 2026-09-25)
+## D272. Fetch failures are remembered on the document (#207, 2026-09-25)
 
 Spec §6 says fetch failures are "listed with the reason" and batch fetch is resumable. `part_documents` gains an
 additive `lastFetch: { at, ok, error? }`. A catalog-held URL that fails to fetch becomes a link-only document (source
@@ -8285,7 +8285,7 @@ the same document. The fetcher reuses `src/lib/venue-calendar-fetch.ts`'s guard 
 became an export) with a 25 MB streaming cap, a 30 s timeout and five redirect hops, and batch fetch runs
 `FETCH_BATCH_SIZE` = 4 slots per server-action call.
 
-## D-DOC-4. Filename matching: normalizeSku keys, 4-character floor, any catalog part (#DOC, 2026-09-25)
+## D273. Filename matching: normalizeSku keys, 4-character floor, any catalog part (#207, 2026-09-25)
 
 Bulk drop matches each file name against every catalog part's SKU, MFR P/N and MFR M/N through the DaVinci matcher's
 own `normalizeSku`; the longest matching length wins, and keys under 4 characters never match (a 3-character model
@@ -8293,14 +8293,14 @@ number appears by accident in too many file names). A key two parts share is "am
 Matching covers the whole catalog, not only quoted parts, and runs server-side from file names alone — the catalog
 never ships to the browser.
 
-## D-DOC-5. What "quoted" means on the Datasheets page (#DOC, 2026-09-25)
+## D274. What "quoted" means on the Datasheets page (#207, 2026-09-25)
 
 Scope is every catalog part on any quote (any status), any Grid placement or any generated bid spec, no time window
 (spec §2.1). "Times quoted" counts distinct quotes; Grid and bid-spec use break ties, then the newest quote, then the
 SKU. Labor lines and `kind: "labor"` sections are skipped (the quote client package's own BOM rule), `Labor`-category
 parts are excluded, and a Grid curtain placement is not a catalog product.
 
-## D-DOC-6. The part editor's Documents section replaces the admin-only datasheet control (#DOC, 2026-09-25)
+## D275. The part editor's Documents section replaces the admin-only datasheet control (#207, 2026-09-25)
 
 Spec §2.4 lets anyone signed in upload, attach, replace and remove. The single-file, admin-only
 `PartDatasheetControl` and its `uploadPartDatasheetAction` / `removePartDatasheetAction` (8 MB data-URL transport,
@@ -8309,7 +8309,7 @@ Nothing writes `datasheetBlobKey` any more. It stays readable: the idempotent ba
 document on first read, and `/api/part-datasheet/<sku>` keeps streaming it — and otherwise redirects to the part's
 datasheet document — so older links (the Grid editor, the pre-v1 Displays route, bookmarks) keep working.
 
-## D-DOC-7. Both Assembly Builder tabs feed the accessory graph (#DOC, 2026-09-25)
+## D276. Both Assembly Builder tabs feed the accessory graph (#207, 2026-09-25)
 
 Assemblies tab: the `fixture`-role component is the parent and every other component an accessory (default quantity
 above zero = `included`), scoped `assembly:<id>`; a save syncs every assembly in one pass and soft-deletes the links of
@@ -8317,7 +8317,7 @@ assemblies removed from the list. Subassemblies tab: the light engine is the par
 accessory, scoped `subassembly:<id>`, synced on save and cleared on delete. The toggle is enabled once a member is
 saved (the pair must exist in the graph).
 
-## D-DOC-8. DaVinci pre-fill: English datasheets keyed by URL, the graph in the committed extract (#DOC, 2026-09-25)
+## D277. DaVinci pre-fill: English datasheets keyed by URL, the graph in the committed extract (#207, 2026-09-25)
 
 `extract.ts` now also emits `accessoryTypes` / `accessoryLinks` (6,702 links over 1,753 types from the 2026-04-21
 library; records are byte-identical), growing `data/davinci-extract.json` from ~1.39 MB to ~2.65 MB — the graph needs
@@ -8327,7 +8327,7 @@ documents for English DaVinci **Datasheet** documents only (manuals and other la
 manufacturer allowlist. Nothing is downloaded. It runs from an admin button on the Datasheets page (the extract is
 traced into that route with `outputFileTracingIncludes`) or `npm run part-docs:davinci -- --apply --commit`.
 
-## D-DOC-9. Client packages: every document once; only a missing datasheet is a gap (#DOC, 2026-09-25)
+## D278. Client packages: every document once; only a missing datasheet is a gap (#207, 2026-09-25)
 
 A package zips each needed document once (`datasheets/…`, `specsheets/…`) with the SKUs it serves. Coverage is
 computed in the package's own context — the Grid option's placements or the quote's lines — so an accessory rides on a
@@ -8336,13 +8336,13 @@ accessories are listed as `covered: [{ sku, by, note: "covered by <fixture>" }]`
 (the spec names only `missing-datasheet`). The manifest's old `datasheets` array (which carried private blob keys
 internally) is replaced by `documents`.
 
-## D-DOC-10. A rejected upload's blob is deleted (#DOC, 2026-09-25)
+## D279. A rejected upload's blob is deleted (#207, 2026-09-25)
 
 "Nothing is ever hard-deleted" (spec §2.4) governs documents. An upload whose bytes fail the magic-number check (not a
 PDF, or Word on a datasheet slot) or exceed 25 MB never became a document, so its blob is deleted rather than left
 orphaned.
 
-## D-DOC-11. Displays API datasheet links come from part documents (#DOC, 2026-09-25)
+## D280. Displays API datasheet links come from part documents (#207, 2026-09-25)
 
 `publicCatalogPart(...).datasheets` lists the part's linked datasheet documents through `/api/part-documents/<id>`
 (which streams, or redirects a link-only document to its source), else the manufacturer URLs the catalog row carries —
@@ -8353,7 +8353,7 @@ catalog ETag folds in documents and links, since attaching one moves no part's `
 Append to the end of `PUNCHLIST.md`:
 
 ```markdown
-## #DOC. Part documents — datasheets and spec sheets, shared, with accessory coverage — DONE 2026-09-25 (D-DOC-1…D-DOC-11)
+## #207. Part documents — datasheets and spec sheets, shared, with accessory coverage — DONE 2026-09-25 (D270…D280)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-part-documents-design.md` · **Plan:**
 `docs/superpowers/plans/2026-09-25-part-documents.md` · **Closes:** #40 (a) and the population half of (c).
@@ -8364,7 +8364,7 @@ fixture → link only → missing, with context for quotes/packages); **Catalog 
 to-do list of every quoted part with Datasheet / Spec sheet slots, drop zones, Also covers…, filters and bulk Fetch /
 Mark not needed / Attach existing; **Upload many** (`/catalog/documents/upload`) with filename matching; direct-to-Blob
 uploads (25 MB, magic-byte checked); fetch from links through the venue-calendar SSRF guard, one document per URL; the
-part editor's Documents section for anyone signed in (the admin-only single-datasheet control is retired, D-DOC-6);
+part editor's Documents section for anyone signed in (the admin-only single-datasheet control is retired, D275);
 the Assembly Builder feeding the fixture → accessory graph with per-member coverage and a has-its-own-datasheet
 toggle; the DaVinci accessory graph in the committed extract plus an admin/CLI pre-fill of link-only ETC datasheets;
 Specs coverage, client packages (once per document, coverage in context, "covered by <fixture>") and the Displays API
@@ -8385,7 +8385,7 @@ In `PUNCHLIST.md`, replace this exact text:
 with:
 
 ```markdown
-**Status:** (a) and the population half of (c) DONE via #DOC (part documents, 2026-09-25); (b) is the Specs module (#205); the generator half of (c) remains — wave 2.
+**Status:** (a) and the population half of (c) DONE via #207 (part documents, 2026-09-25); (b) is the Specs module (#205); the generator half of (c) remains — wave 2.
 ```
 
 
@@ -8403,7 +8403,7 @@ env -u DATABASE_URL npm run test:specs > "${TMPDIR:-/tmp}/pd-specs.log" 2>&1; ta
 
 Expected: `ALL PASSED` and no `FAIL` lines. (One pre-existing flake exists — `redeem: tampered code -> not ok`, a random-code test that fails about one run in sixty; if it is the only FAIL, re-run.)
 
-Expected additionally: `grep -c '^PASS part docs' "${TMPDIR:-/tmp}/pd-specs.log"` prints `125` and `grep -c '^PASS #DOC' "${TMPDIR:-/tmp}/pd-specs.log"` prints `11`.
+Expected additionally: `grep -c '^PASS part docs' "${TMPDIR:-/tmp}/pd-specs.log"` prints `125` and `grep -c '^PASS #207' "${TMPDIR:-/tmp}/pd-specs.log"` prints `11`.
 
 ```bash
 env -u DATABASE_URL npm run test:review:regressions 2>&1 | tail -2
@@ -8459,7 +8459,7 @@ git commit -m "feat(part-docs): Displays API links via the document viewer, data
 ## Self-Review
 
 **Spec coverage.**
-- §2.1 scope/ranking → Task 2 (`quotedPartStats`, `rankQuotedParts`), Task 6 page. §2.2 two kinds → Task 1 types, Task 4 `ALLOWED_TYPES`. §2.3 three ways in → Task 6 (to-do + drop zones), Task 7 (bulk drop), Task 5 (fetch). §2.4 anyone signed in / who+when / never hard-deleted → Task 3 stores (`uploadedBy`, `createdBy`, history, soft-delete detach), Task 4 actions (`requireUser`), D-DOC-10. §2.5 DaVinci model → Tasks 2, 9, 10.
+- §2.1 scope/ranking → Task 2 (`quotedPartStats`, `rankQuotedParts`), Task 6 page. §2.2 two kinds → Task 1 types, Task 4 `ALLOWED_TYPES`. §2.3 three ways in → Task 6 (to-do + drop zones), Task 7 (bulk drop), Task 5 (fetch). §2.4 anyone signed in / who+when / never hard-deleted → Task 3 stores (`uploadedBy`, `createdBy`, history, soft-delete detach), Task 4 actions (`requireUser`), D279. §2.5 DaVinci model → Tasks 2, 9, 10.
 - §3 to-do list (rows, five cell states, progress line, filters, search, multi-select, Fetch links / Mark not needed / Attach an existing document, drop → Also covers… with family + accessories) → Task 6. Bulk drop (normalization, longest match, kind guess, confidence, part search for unmatched/ambiguous, Confirm) → Tasks 2 + 7. Fetch from links (both sources, server-side, byte check, private storage, failures with reason, shared per URL) → Task 5 (+ Task 10 for DaVinci URLs). Part editor (slots, own documents, Covered by with context) → Task 8. Assembly Builder (members = accessory links, coverage, toggle, edit updates graph) → Task 9. Client package (once, context coverage, `missing-datasheet` only when no fixture present, "covered by") → Task 11.
 - §4 coverage rule, all five outcomes, context, opt-out, collapse > 5 → Task 2 (tested), used by Tasks 6, 8, 9, 11, 12.
 - §5 data: three collections via one idempotent migration with `_seq_bump` triggers → Task 1; not-needed marks on the part via `mergeUpsert` → Tasks 1 + 3; legacy backfill on first read + a script, `datasheetBlobKey` still readable → Task 3 (+ Task 8, Task 12 bridge); `part-docs/<documentId>/<fileName>` → Task 1 `partDocBlobPath`.
@@ -8468,6 +8468,6 @@ git commit -m "feat(part-docs): Displays API links via the document viewer, data
 - §8 testing: every pure item named there has assertions (coverage, filename matcher, kind guesser, quoted-parts counter, DaVinci mapping with merged duplicates); store CRUD, idempotent backfill and history-on-replace → Task 3 regressions; fetch guard reuse and magic bytes → Tasks 4–5; gates including smoke, build and drizzle "no changes" → Task 12.
 - §9 out of scope respected: no public rehosting, no OCR, `language` stored only.
 
-**Placeholder scan.** No TBD/TODO/"similar to". `#DOC` / `D-DOC-n` are the deliberate numbering placeholders the lead renumbers.
+**Placeholder scan.** No TBD/TODO/"similar to". The punch item and decision numbers were deliberate placeholders, renumbered by Task 12 to punch #207 and decisions D270–D280.
 
 **Type consistency.** Checked across tasks: `SlotCoverage` / `SlotView` / `DocRef`, `CoverageIndex` fields (`docsBySku`, `parentsOf`, `childrenOf`, `catalogUrls`, `docsById`, `notNeeded`), `PartDocsState`, `FetchTarget` / `FetchOutcome`, `DocActionResult`, `AccessoryPair` (defined once in `types.ts`, used by the store, `assembly-graph.ts` and `davinci-prefill.ts`), `MemberCoverage`, `PackageDocRef` / `PackageDocument`, `PrefillPlan`. The actions file's import block is rebuilt whole at each task that grows it (Tasks 5, 6, 7, 10), so an implementer never has to merge imports by hand.

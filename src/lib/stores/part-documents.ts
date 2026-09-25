@@ -10,7 +10,7 @@ import {
 } from "@/lib/part-docs/types";
 
 /**
- * Part documents (#DOC, spec §5) — `part_documents` + `part_document_links`.
+ * Part documents (#207, spec §5) — `part_documents` + `part_document_links`.
  *
  * A document is shared: one row, linked to any number of parts. Nothing is
  * ever hard-deleted — a replace pushes the old file onto `history`, a detach
@@ -133,7 +133,7 @@ export async function replaceDocumentFile(id: string, file: StoredFile, by: stri
   });
 }
 
-/** Remember how the last fetch of `sourceUrl` went (D-DOC-3). */
+/** Remember how the last fetch of `sourceUrl` went (D272). */
 export async function recordFetchResult(id: string, result: { ok: boolean; error?: string }, at = Date.now()): Promise<void> {
   await patchDoc<PartDocument>("part_documents", id, (d) => ({
     ...d,

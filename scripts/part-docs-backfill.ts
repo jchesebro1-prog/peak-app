@@ -1,5 +1,5 @@
 /**
- * Legacy datasheet backfill (#DOC, spec §5): every part still carrying the
+ * Legacy datasheet backfill (#207, spec §5): every part still carrying the
  * old `datasheetBlobKey` gets a shared `part_documents` row (source
  * "legacy") and a link. The Datasheets page runs the same idempotent step on
  * every read; this is the explicit, reportable version.

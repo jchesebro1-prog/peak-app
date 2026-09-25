@@ -1,5 +1,5 @@
 /**
- * Which parts Peak actually quotes (#DOC, spec §2.1) — the to-do list's
+ * Which parts Peak actually quotes (#207, spec §2.1) — the to-do list's
  * scope. Every SKU on any quote (any status), any Grid design placement, any
  * saved bid spec; no time window. Pure and single-pass: one walk per source,
  * one Map keyed by SKU.

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { prefillFromDavinciAction } from "./actions";
 
-/** Admin-only (#DOC, spec §6): write ETC's DaVinci datasheet links and
+/** Admin-only (#207, spec §6): write ETC's DaVinci datasheet links and
  *  accessory graph. Nothing is downloaded — Fetch is a separate step. */
 export default function DavinciPrefillButton() {
   const router = useRouter();

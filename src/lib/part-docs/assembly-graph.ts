@@ -4,7 +4,7 @@ import { ownFiles, slotCoverage, type CoverageIndex, type SlotState } from "./co
 import type { AccessoryPair } from "./types";
 
 /**
- * Assembly Builder ↔ accessory graph (#DOC, spec §3). Pure — the builders'
+ * Assembly Builder ↔ accessory graph (#207, spec §3). Pure — the builders'
  * client components import it. Each assembly's light engine is the parent;
  * its lens and every option/accessory part are the parent's accessory links.
  * The two builders keep separate sourceRef namespaces so a save of one never

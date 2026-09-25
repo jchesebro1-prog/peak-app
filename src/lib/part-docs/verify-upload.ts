@@ -4,7 +4,7 @@ import { checkDocumentBytes, CONTENT_TYPES, SNIFF_BYTES } from "./files";
 import { blobPathBelongsTo, MAX_PART_DOC_BYTES, type PartDocKind } from "./types";
 
 /**
- * Accept a browser-uploaded blob as a part document's file (#DOC, spec §6).
+ * Accept a browser-uploaded blob as a part document's file (#207, spec §6).
  * Server-only. The pathname comes from the client and is untrusted: it must
  * sit under `part-docs/<documentId>/`, and the bytes Blob actually holds must
  * sniff as a type the slot accepts. A rejected upload never became a

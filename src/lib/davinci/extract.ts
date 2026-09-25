@@ -5,7 +5,7 @@
  * plus 73 MB of images — gitignored, and exists on one machine. This distils
  * `library.json` into the ~2.65 MB `data/davinci-extract.json` that ships in
  * the repo: 1,720 device types, 14,108 indexed identifiers, 6,168 ports,
- * 2,828 document links and — since part documents (#DOC) — the fixture →
+ * 2,828 document links and — since part documents (#207) — the fixture →
  * accessory graph: 6,702 links over 1,753 types. The extract deliberately covers every eligible type,
  * not just the ones that match today's catalog, so a future price-book
  * import needs no regeneration. Ports are mapped here, once, so the extract
@@ -180,7 +180,7 @@ function typeModelNumbers(t: Bag): string[] {
 }
 
 /**
- * The fixture → accessory graph (#DOC, spec §6): `types[].accessories[]`
+ * The fixture → accessory graph (#207, spec §6): `types[].accessories[]`
  * `{ typeId, maxQuantity, userDefinable }`, 7,937 links in the 2026-04-21
  * library. Both ends are kept by typeId, and every type a link touches gets
  * its model numbers here — records[] cannot serve, because it drops types

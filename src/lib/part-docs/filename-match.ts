@@ -2,7 +2,7 @@ import { normalizeSku } from "@/lib/davinci/sku";
 import type { PartDocKind } from "./types";
 
 /**
- * Bulk-drop filename matching (#DOC, spec §3 "Bulk drop"). Pure.
+ * Bulk-drop filename matching (#207, spec §3 "Bulk drop"). Pure.
  *
  * Every part contributes up to three keys — its SKU, MFR P/N and MFR M/N —
  * each through `normalizeSku` (drop a leading `MFR:` segment, uppercase,
@@ -10,7 +10,7 @@ import type { PartDocKind } from "./types";
  * uses. A filename is normalized the same way and every substring is looked
  * up, longest first: the longest length with any hit wins, so
  * `S4LED-S3-Lustr_Datasheet.pdf` matches `S4LEDS3LUSTR` over `S4LED`.
- * Keys shorter than MIN_MATCH_KEY never match (D-DOC-4) — a 3-character
+ * Keys shorter than MIN_MATCH_KEY never match (D273) — a 3-character
  * model number appears by accident inside too many filenames.
  */
 

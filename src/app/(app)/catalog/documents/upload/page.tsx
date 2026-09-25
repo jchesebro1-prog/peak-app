@@ -5,7 +5,7 @@ import BulkDrop from "./bulk-drop";
 
 export const metadata = { title: "Upload datasheets — Quartzite-6" };
 
-/** Bulk drop (#DOC, spec §3): drop a folder, review the matches, confirm. */
+/** Bulk drop (#207, spec §3): drop a folder, review the matches, confirm. */
 export default async function BulkUploadPage() {
   await requireUser();
   return (

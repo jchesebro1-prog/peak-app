@@ -9,7 +9,7 @@ import AlsoCovers from "./documents/also-covers";
 import SlotCell, { docHref } from "./documents/slot-cell";
 
 /**
- * The part editor's Documents section (#DOC, spec §3): the two slots (same
+ * The part editor's Documents section (#207, spec §3): the two slots (same
  * cell as the Datasheets page), every document linked to the part with its
  * replaced versions, and the computed "Covered by" / "Covers" context from
  * the accessory graph. Any signed-in user (spec §2.4).

@@ -28,7 +28,7 @@ export default async function AssemblyBuilderPage({
   const [settings, parts, saved] = await Promise.all([getSettings(), listCatalog(), listSubassemblies()]);
   const assemblies = sanitizeFixtureAssemblies(settings.fixtureAssemblies);
   const priceDates = Object.fromEntries(assemblies.map((a) => [a.id, pricesAsOf(a.components.map((c) => c.sku), parts, settings)]));
-  // Part documents (#DOC): each member's datasheet coverage, for the active tab only.
+  // Part documents (#207): each member's datasheet coverage, for the active tab only.
   const { index } = await loadPartDocsState(parts);
   const coverage = memberCoverageFor(
     index,

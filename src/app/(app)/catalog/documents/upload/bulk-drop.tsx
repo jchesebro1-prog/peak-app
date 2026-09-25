@@ -7,7 +7,7 @@ import { matchFilesAction, searchPartsAction, type FileMatchRow, type PartHit } 
 import { preflight, uploadNewDocument } from "../upload-client";
 
 /**
- * Bulk drop (#DOC, spec §3). Files stay in the browser; only their names go
+ * Bulk drop (#207, spec §3). Files stay in the browser; only their names go
  * to the server for matching. The review table shows file → matched part(s)
  * + kind with confidence; an unmatched or ambiguous row gets a part search.
  * Confirm uploads each file straight to Blob and attaches it.

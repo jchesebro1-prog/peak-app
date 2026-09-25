@@ -3,7 +3,7 @@ import { listDocs, patchDoc, softDeleteDocs, upsertDocs, type DocBatchOpts } fro
 import type { AccessoryLinkSource, AccessoryPair, PartAccessoryLink } from "@/lib/part-docs/types";
 
 /**
- * The fixture → accessory graph (#DOC, spec §5) — `part_accessory_links`.
+ * The fixture → accessory graph (#207, spec §5) — `part_accessory_links`.
  * Written by the Assembly Builder (source "assembly", sourceRef = the
  * assembly id) and the DaVinci pre-fill (source "davinci"); coverage is
  * computed from it (src/lib/part-docs/coverage.ts), never stored.

@@ -190,7 +190,7 @@ export default async function CatalogPage({
   const defaultArticleId = editingPart
     ? articleIdForPart({ ...editingPart, specArticleId: undefined }, specArticleDocs, specSections)
     : null;
-  // Part documents (#DOC): the Documents section's view, computed only when a
+  // Part documents (#207): the Documents section's view, computed only when a
   // part is open — one load of the three document collections.
   const descBySku = editingPart ? new Map(parts.map((p) => [p.sku, p.desc])) : null;
   const partDocs = editingPart
@@ -218,7 +218,7 @@ export default async function CatalogPage({
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{catalogMeta}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-          {/* Part documents (#DOC) — the datasheet / spec-sheet to-do list. */}
+          {/* Part documents (#207) — the datasheet / spec-sheet to-do list. */}
           <Link
             href="/catalog/documents"
             style={{
@@ -674,7 +674,7 @@ function PartFormModal({
   categories: string[];
   manufacturers: string[];
   /** Deleting a part is admin-gated — same convention as the Categories &
-   *  trades card. (Documents are not: anyone signed in, D-DOC-6.) */
+   *  trades card. (Documents are not: anyone signed in, D275.) */
   isAdmin: boolean;
   /** Task 13 — the Spec panel shows for anyone who can `create` (owner
    *  decision 3); the spec write is gated by requirePerm("create") inside
@@ -683,7 +683,7 @@ function PartFormModal({
   specArticles: SpecPanelArticle[];
   specTemplates: SpecPanelTemplate[];
   defaultArticleId: string | null;
-  /** Part documents (#DOC) — null for a new, unsaved part. */
+  /** Part documents (#207) — null for a new, unsaved part. */
   partDocs: PartDocsView | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
@@ -930,10 +930,10 @@ function PartFormModal({
               </div>
             )}
 
-            {/* Part documents (#DOC) — the datasheet / spec-sheet slots,
+            {/* Part documents (#207) — the datasheet / spec-sheet slots,
                 this part's documents and its accessory coverage. Anyone
                 signed in (spec §2.4); only once the part exists. Replaces
-                the admin-only single-datasheet control (D-DOC-6). */}
+                the admin-only single-datasheet control (D275). */}
             {editing && part && partDocs && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
                 <PartDocumentsSection key={part.sku} view={partDocs} />

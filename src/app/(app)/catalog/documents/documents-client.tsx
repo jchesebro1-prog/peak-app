@@ -17,7 +17,7 @@ import {
 } from "./actions";
 
 /**
- * The Datasheets to-do table (#DOC, spec §3): one row per quoted part,
+ * The Datasheets to-do table (#207, spec §3): one row per quoted part,
  * most-quoted first, two slot cells, multi-select with bulk actions.
  *
  * `fetchLinksAction` now runs under a shared wall-clock budget (45s, under

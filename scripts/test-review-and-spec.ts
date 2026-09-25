@@ -15226,8 +15226,8 @@ async function deletePartBAsyncChecks(): Promise<void> {
     { sku: "P4", desc: "Pointer", category: "Fixtures", specSameAs: "P1" },
     { sku: "P5", desc: "Unmapped", category: "Nothing" },
   ];
-  // #DOC: whether a part "has a datasheet" is the part-documents coverage
-  // rule's answer (datasheetSatisfiedSkus, tested in the #DOC blocks); the
+  // #207: whether a part "has a datasheet" is the part-documents coverage
+  // rule's answer (datasheetSatisfiedSkus, tested in the #207 blocks); the
   // table only reports the set it is handed. A link-only URL no longer counts.
   const articleIdBySku = articleIdMapForParts(parts as never, articles, sections);
   const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]), new Set(["P1"]));
@@ -15554,7 +15554,7 @@ async function gridSymbolLookAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 1: document ids and blob paths. Pure.
+   Part documents (#207) — Task 1: document ids and blob paths. Pure.
    ====================================================================== */
 import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDocFileName } from "@/lib/part-docs/types";
 
@@ -15569,7 +15569,7 @@ import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDo
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Fix wave: blobPathBelongsTo tightened to a
+   Part documents (#207) — Fix wave: blobPathBelongsTo tightened to a
    strict file-segment allow-list (a blocklist of literal ".." and "/"
    can be bypassed once @vercel/blob's `get` concatenates the pathname
    into a URL — WHATWG parsing treats "\" as "/" and can percent-decode
@@ -15590,7 +15590,7 @@ import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDo
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 2: the coverage rule, the quoted-parts
+   Part documents (#207) — Task 2: the coverage rule, the quoted-parts
    counter, the filename matcher and the kind guesser. All pure.
    ====================================================================== */
 import {
@@ -15721,7 +15721,7 @@ import type { PartDocument as PdDoc, PartDocumentLink as PdLink, PartAccessoryLi
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 4: magic bytes and the upload check.
+   Part documents (#207) — Task 4: magic bytes and the upload check.
    verifyUploadedBlob runs against fake Blob deps — no token, no network.
    ====================================================================== */
 import {
@@ -15802,7 +15802,7 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Fix wave 2, security re-review: the fix-wave-1
+   Part documents (#207) — Fix wave 2, security re-review: the fix-wave-1
    orphan cleanup itself opened a hole. attachUploadedDocumentAction's two
    early refusals (bad kind, no live SKUs) called cleanupOrphan(documentId,
    blobPathname) BEFORE the "does this document already exist" check —
@@ -15850,7 +15850,7 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 5: the guarded fetcher. A fake fetch and
+   Part documents (#207) — Task 5: the guarded fetcher. A fake fetch and
    IP-literal hosts keep every case offline (a public literal IP needs no
    DNS; a private one is refused before any request).
    ====================================================================== */
@@ -15938,7 +15938,7 @@ async function partDocsFetchAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 6: the to-do list's view models and the
+   Part documents (#207) — Task 6: the to-do list's view models and the
    "Also covers…" suggestions. Pure.
    ====================================================================== */
 import {
@@ -16001,7 +16001,7 @@ import { alsoCoversSuggestions, commonPrefixLength, familyKey, isSameFamily } fr
   ok(alsoCoversSuggestions(parts[0], parts, [], new Set(), 1).length === 1, "part docs suggest: the list is capped");
 }
 
-/* --- Part documents (#DOC) — Task 7: bulk-drop review rows --- */
+/* --- Part documents (#207) — Task 7: bulk-drop review rows --- */
 import { matchFileRows } from "@/lib/part-docs/filename-match";
 {
   const rows = matchFileRows(
@@ -16011,7 +16011,7 @@ import { matchFileRows } from "@/lib/part-docs/filename-match";
   ok(rows.map((r) => `${r.confidence}:${r.kind}:${r.skus.join("|")}`).join(",") === "high:datasheet:ETC:CSPAR,high:specsheet:ETC:CSPAR,none:datasheet:", "part docs bulk: one review row per file, in order, with kind and matched SKUs");
 }
 
-/* --- Part documents (#DOC) — Task 8: the part editor's Documents view --- */
+/* --- Part documents (#207) — Task 8: the part editor's Documents view --- */
 import { partDocsView } from "@/lib/part-docs/views";
 {
   const file = (id: string, kind: "datasheet" | "specsheet", at: number): PdDoc => ({
@@ -16043,7 +16043,7 @@ import { partDocsView } from "@/lib/part-docs/views";
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 9: Assembly Builder ↔ accessory graph. Pure.
+   Part documents (#207) — Task 9: Assembly Builder ↔ accessory graph. Pure.
    ====================================================================== */
 import {
   assemblyRef, subassemblyRef, fixtureParentSku, fixtureAssemblyPairs, subassemblyPairs, memberCoverageFor, memberCoverageLabel, pairKey,
@@ -16081,7 +16081,7 @@ import {
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 10: the DaVinci accessory graph in the
+   Part documents (#207) — Task 10: the DaVinci accessory graph in the
    extract, and the pre-fill plan. Pure.
    ====================================================================== */
 import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
@@ -16102,30 +16102,30 @@ import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
     ],
   };
   const ex = extractLibrary(LIBDOC);
-  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#DOC extract: records still drop contentless types");
-  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#DOC extract: accessory links are kept once, never to the internal category or an unknown type");
-  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#DOC extract: both ends carry classification and normalized model numbers");
-  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#DOC extract: the parent is described too; the excluded type is not");
-  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#DOC extract: a library with no accessories yields an empty graph");
+  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#207 extract: records still drop contentless types");
+  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#207 extract: accessory links are kept once, never to the internal category or an unknown type");
+  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#207 extract: both ends carry classification and normalized model numbers");
+  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#207 extract: the parent is described too; the excluded type is not");
+  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#207 extract: a library with no accessories yields an empty graph");
 
   const allowEtc = (m: string) => m === "ETC" || m === "High End Systems";
   const plan = planDavinciPrefill(ex, [{ sku: "ETC:CSPAR" }, { sku: "CSPAR" }, { sku: "419LT" }, { sku: "ETC:7060A1017" }, { sku: "UNRELATED" }], allowEtc);
-  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#DOC prefill: one document per English datasheet URL (the reissued duplicate is one)");
-  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#DOC prefill: the document links to every Peak SKU of the type");
+  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#207 prefill: one document per English datasheet URL (the reissued duplicate is one)");
+  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#207 prefill: the document links to every Peak SKU of the type");
   ok(
     plan.accessoryPairs.map((p) => `${p.parentSku}>${p.accessorySku}x${p.maxQty}`).sort().join(",") ===
       "CSPAR>419LTx2,CSPAR>ETC:7060A1017x2,ETC:CSPAR>419LTx2,ETC:CSPAR>ETC:7060A1017x2",
-    "#DOC prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
+    "#207 prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
   );
-  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#DOC prefill: the report counts matched types and pairs");
+  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#207 prefill: the report counts matched types and pairs");
   const gated = planDavinciPrefill(ex, [{ sku: "CSPAR" }, { sku: "419LT" }], () => false);
-  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#DOC prefill: the manufacturer gate refuses every record");
+  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#207 prefill: the manufacturer gate refuses every record");
   const noLens = planDavinciPrefill(ex, [{ sku: "CSPAR" }], allowEtc);
-  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#DOC prefill: a link with no Peak part on one end writes nothing");
+  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#207 prefill: a link with no Peak part on one end writes nothing");
 }
 
 /* ======================================================================
-   Part documents (#DOC) — Task 11: the client package carries each
+   Part documents (#207) — Task 11: the client package carries each
    document once, covers accessories only in context, and says so.
    ====================================================================== */
 import { resolvePackageDocs, packageEntryName } from "@/lib/part-docs/package";
@@ -16172,4 +16172,24 @@ import { coveredNote } from "@/lib/client-package";
   ok(m.covered.length === 1 && m.covered[0].note === "covered by PKG-FIX" && m.documents.length === 2 && m.counts.datasheets === 1, "part docs package: the manifest lists the covered accessory and each document once");
   const lensOnly = buildClientPackageManifest(grid(["PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
   ok(lensOnly.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === "PKG-LENS"), "part docs package: a lens placed without its fixture is a missing-datasheet gap on that design");
+}
+
+/* --- Part documents (#207) — Task 12: Displays API datasheet links --- */
+import { publicDatasheets } from "@/lib/displays-api";
+{
+  const idx = buildCoverageIndex({
+    documents: [
+      { id: "PD-dispds00000", kind: "datasheet", title: "S4", fileName: "S4.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-dispds00000/S4.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] },
+    ],
+    links: [{ id: "1", partSku: "DISP-A", documentId: "PD-dispds00000", kind: "datasheet", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [],
+    parts: [{ sku: "DISP-B", productMetadata: { datasheets: [{ kind: "datasheet", sourceUrl: "https://mfr.example/b.pdf" }] } }],
+  });
+  ok(JSON.stringify(publicDatasheets("DISP-A", idx)) === JSON.stringify([{ name: "S4.pdf", url: "/api/part-documents/PD-dispds00000" }]), "part docs displays: a linked datasheet points at the document viewer");
+  ok(JSON.stringify(publicDatasheets("DISP-B", idx)) === JSON.stringify([{ name: "b.pdf", url: "https://mfr.example/b.pdf" }]), "part docs displays: an unfetched researched link is the manufacturer URL, not a 404 proxy");
+  ok(publicDatasheets("DISP-C", idx).length === 0 && publicDatasheets("DISP-A").length === 0, "part docs displays: nothing linked, nothing listed");
+  const part = { id: "DISP-A", sku: "DISP-A", desc: "A", category: "Lighting", unit: "ea", list: 1, cost: 1, updatedAt: 5 };
+  const noDocs = catalogEtag([part] as never, { sections: [], articles: [] });
+  ok(catalogEtag([part] as never, { sections: [], articles: [], docs: idx }) !== noDocs, "part docs displays: attaching a document changes the catalog ETag with no part touched");
+  ok(publicCatalogPart(part as never, { sections: [], articles: [], docs: idx }).datasheets[0].url === "/api/part-documents/PD-dispds00000", "part docs displays: publicCatalogPart carries the viewer links");
 }

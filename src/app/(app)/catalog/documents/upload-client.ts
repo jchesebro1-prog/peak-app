@@ -4,7 +4,7 @@ import { MAX_PART_DOC_BYTES, newDocumentId, partDocBlobPath, type PartDocKind } 
 import { attachUploadedDocumentAction, replaceDocumentFileAction } from "./actions";
 
 /**
- * Browser half of a part-document upload (#DOC, spec §6): bytes go straight
+ * Browser half of a part-document upload (#207, spec §6): bytes go straight
  * to private Blob through /api/part-documents/upload, then a server action
  * checks what actually landed and records it. Imported only by client
  * components; everything it imports is client-safe.

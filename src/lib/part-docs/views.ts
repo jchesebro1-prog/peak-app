@@ -9,7 +9,7 @@ import type { PartDocKind } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
- * (#DOC). Pure. The server computes these from one CoverageIndex; client
+ * (#207). Pure. The server computes these from one CoverageIndex; client
  * components receive only these small objects, never the collections.
  */
 
@@ -138,7 +138,7 @@ export type PartDocRow = {
   history: Array<{ index: number; fileName: string; replacedAt: number; replacedBy: string }>;
 };
 
-/** The part editor's Documents section (#DOC, spec §3). */
+/** The part editor's Documents section (#207, spec §3). */
 export type PartDocsView = {
   sku: string;
   slots: Record<PartDocKind, SlotView>;

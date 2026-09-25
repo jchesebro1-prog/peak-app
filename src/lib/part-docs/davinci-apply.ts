@@ -9,7 +9,7 @@ import { allDocuments, createDocuments, ensureLinksBatch, type NewPartDocument }
 import { planDavinciPrefill, type PrefillPlan } from "./davinci-prefill";
 
 /**
- * DaVinci pre-fill, the writing half (#DOC, spec §6). Server/script only.
+ * DaVinci pre-fill, the writing half (#207, spec §6). Server/script only.
  * Writes link-only `part_documents` (source "davinci", sourceUrl only — no
  * ETC file is downloaded or rehosted), their part links, and the "davinci"
  * scope of `part_accessory_links`. Idempotent: document ids derive from the

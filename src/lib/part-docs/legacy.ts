@@ -3,7 +3,7 @@ import { listDocs } from "@/db/doc-store";
 import { createDocument, ensureLinks } from "@/lib/stores/part-documents";
 
 /**
- * Legacy backfill (#DOC, spec §5): every part that still carries the old
+ * Legacy backfill (#207, spec §5): every part that still carries the old
  * single-file `datasheetBlobKey` gets a shared `part_documents` row (source
  * "legacy") and a link. Server-only.
  *

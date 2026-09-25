@@ -272,7 +272,7 @@ const DEFAULT_GUARDED_FETCH_ERROR_TEXT: Required<GuardedFetchErrorText> = {
 };
 
 /**
- * The shared guarded-fetch core (#DOC I2 — review fix wave 1): validate,
+ * The shared guarded-fetch core (#207 I2 — review fix wave 1): validate,
  * fetch, and follow redirects — re-validating scheme + literal-host + DNS on
  * EVERY hop, `redirect: "manual"` so nothing built into `fetch` can skip that
  * re-validation — then stream the body under a byte cap and a single

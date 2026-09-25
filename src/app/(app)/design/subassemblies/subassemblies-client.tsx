@@ -72,7 +72,7 @@ export default function SubassembliesClient({
   parts: CatalogPart[];
   initial: FixtureSubassembly[];
   priceListEffective: Record<string, number>;
-  /** #DOC — each saved member's datasheet coverage, keyed by pairKey(). */
+  /** #207 — each saved member's datasheet coverage, keyed by pairKey(). */
   coverage: Record<string, MemberCoverage>;
 }) {
   const router = useRouter();
@@ -151,7 +151,7 @@ export default function SubassembliesClient({
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{item.label}</div>
         <div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{item.description || "No description"}</div>
         <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 5 }}>{item.lightEngineName} + {item.lensName}</div>
-        {/* #DOC — each member's datasheet coverage from the fixture. */}
+        {/* #207 — each member's datasheet coverage from the fixture. */}
         <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
           {subassemblyPairs(item).map((p) => (
             <div key={p.accessorySku} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>

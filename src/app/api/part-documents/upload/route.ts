@@ -9,7 +9,7 @@ import { blobPathBelongsTo, isDocumentId, MAX_PART_DOC_BYTES } from "@/lib/part-
 export const maxDuration = 30;
 
 /**
- * Vercel Blob client-upload broker for part documents (#DOC, spec §6) — the
+ * Vercel Blob client-upload broker for part documents (#207, spec §6) — the
  * recordings route's pattern (src/app/api/recordings/upload/route.ts), so a
  * 25 MB PDF goes browser → Blob directly instead of through the ~900 KB
  * server-action ceiling the old datasheet upload hit.

@@ -5,6 +5,7 @@ import type { SpecCatalogPart } from "@/lib/bid-spec";
 import { hasPrintableSpec } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
+import { loadPartDocsState } from "@/lib/part-docs/load";
 
 export async function GET(req: Request) {
   try {
@@ -23,8 +24,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Invalid cursor." }, { status: 400, headers: displaysRateHeaders(rate) });
   }
   const [sections, articles] = await Promise.all([allSections(), allArticles()]);
-  const lib = { sections, articles };
-  const parts = (await listCatalog() as SpecCatalogPart[])
+  const all = (await listCatalog()) as SpecCatalogPart[];
+  const lib = { sections, articles, docs: (await loadPartDocsState(all)).index };
+  const parts = all
     .filter((part) => hasPrintableSpec(part))
     .sort((a, b) => displayTimestamp(b) - displayTimestamp(a) || a.id.localeCompare(b.id))
     .filter((part) => !cursor || isAfterDisplaysCursor(part, cursor));

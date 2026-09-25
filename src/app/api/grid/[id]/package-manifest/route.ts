@@ -8,7 +8,7 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 /**
  * Read-only package readiness seam (punch #40). Private Blob pathnames never
  * leave the server; consumers receive the authenticated part-document
- * viewer URL instead (#DOC). The eventual PDF/ZIP writer and the readiness UI use the
+ * viewer URL instead (#207). The eventual PDF/ZIP writer and the readiness UI use the
  * same manifest builder.
  */
 export async function GET(

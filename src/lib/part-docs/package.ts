@@ -2,7 +2,7 @@ import { slotCoverage, type CoverageIndex } from "./coverage";
 import type { PartDocKind } from "./types";
 
 /**
- * Which documents a client package carries (#DOC, spec §3 "Client
+ * Which documents a client package carries (#207, spec §3 "Client
  * package"). Pure. The context is the package's own SKU list: an accessory
  * is covered only by a fixture that is on the same quote/design; one quoted
  * without any of its fixtures is a `missing-datasheet` gap on that package

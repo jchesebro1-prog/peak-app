@@ -31,7 +31,7 @@ import {
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
 
 /**
- * Part documents (#DOC) — every write from the Datasheets page, the bulk
+ * Part documents (#207) — every write from the Datasheets page, the bulk
  * drop and the part editor's Documents section. Anyone signed in may upload,
  * attach, replace, detach and mark not-needed (spec §2.4); every change
  * records who and when; nothing is hard-deleted.

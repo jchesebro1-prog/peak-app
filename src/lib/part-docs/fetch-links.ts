@@ -13,7 +13,7 @@ import type { PartDocsState } from "./load";
 import { MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath, type PartDocKind, type PartDocument } from "./types";
 
 /**
- * "Fetch from links" (#DOC, spec §3/§6). Server-only. For one part and one
+ * "Fetch from links" (#207, spec §3/§6). Server-only. For one part and one
  * kind: try each URL the part has but hasn't fetched — its link-only
  * documents first, then the catalog's own Datasheet/Guide Spec/DaVinci
  * URLs — download it through the SSRF guard, check the bytes, store the file

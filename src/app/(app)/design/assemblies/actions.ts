@@ -11,7 +11,7 @@ export async function saveFixtureAssembliesAction(value: FixtureAssembly[]) {
   await requireUser();
   const fixtureAssemblies = sanitizeFixtureAssemblies(value);
   await setSettings({ fixtureAssemblies });
-  // Part documents (#DOC): each assembly's members become the fixture's
+  // Part documents (#207): each assembly's members become the fixture's
   // accessory links; an assembly deleted from the list takes its links with it.
   await syncAccessoryScopes(
     "assembly",
@@ -24,7 +24,7 @@ export async function saveFixtureAssembliesAction(value: FixtureAssembly[]) {
   return { ok: true as const, fixtureAssemblies };
 }
 
-/** The member's "has its own datasheet" toggle (#DOC, spec §3/§4): the pair
+/** The member's "has its own datasheet" toggle (#207, spec §3/§4): the pair
  *  stops (or resumes) counting the fixture's datasheet as the member's. */
 export async function setOwnDatasheetAction(parentSku: string, accessorySku: string, own: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireUser();

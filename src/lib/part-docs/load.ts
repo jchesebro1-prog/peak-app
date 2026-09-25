@@ -5,7 +5,7 @@ import { backfillLegacyDatasheets, type LegacyPart } from "./legacy";
 import type { PartAccessoryLink, PartDocument, PartDocumentLink } from "./types";
 
 /**
- * One load of everything coverage needs (#DOC) — the three collections, once
+ * One load of everything coverage needs (#207) — the three collections, once
  * per request, plus the idempotent legacy backfill (which writes only when a
  * part still has an un-backfilled `datasheetBlobKey`). Server-only. Callers
  * pass the catalog they already loaded; this never lists it again.

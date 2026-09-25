@@ -143,7 +143,7 @@ export function articleIdMapForParts(
  *  `bySku` (for specStateOf's same-as resolution) is built once here, not
  *  per part. `articleIdBySku` is the shared, already-computed map from
  *  `articleIdMapForParts` — see final fix wave item 10. `datasheetOk` is
- *  the part-documents coverage rule's answer (#DOC, spec §7 —
+ *  the part-documents coverage rule's answer (#207, spec §7 —
  *  datasheetSatisfiedSkus): own file, not needed, or covered by a fixture;
  *  a link nobody has fetched no longer counts. */
 export function coverageRows(

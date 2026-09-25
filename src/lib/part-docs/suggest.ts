@@ -2,7 +2,7 @@ import { mfrKey } from "@/lib/catalog-books";
 import { normalizeSku } from "@/lib/davinci/sku";
 
 /**
- * "Also covers…" (#DOC, spec §3): after a file lands on one part, the other
+ * "Also covers…" (#207, spec §3): after a file lands on one part, the other
  * parts it probably describes. Pure. Two sources, in this order:
  *  1. the part's accessories from the graph (the fixture datasheet covers
  *     them anyway — attaching makes it explicit), then

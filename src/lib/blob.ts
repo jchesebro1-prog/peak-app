@@ -38,7 +38,7 @@ export async function putBlob(
 
 /**
  * The first `max` bytes of a private blob, plus its stored size — enough to
- * sniff what a client-uploaded file really is (part documents, #DOC) without
+ * sniff what a client-uploaded file really is (part documents, #207) without
  * pulling a 25 MB file through the function. Null when the blob is missing.
  */
 export async function getBlobHead(
@@ -74,7 +74,7 @@ export async function getBlobHead(
   }
   // `get`'s own reported size (res.blob.size, from Content-Length) is not
   // trustworthy for the cap callers enforce on this number (part documents,
-  // #DOC: 25 MB) — Content-Length can be the COMPRESSED size when the
+  // #207: 25 MB) — Content-Length can be the COMPRESSED size when the
   // response was transferred with content-encoding, understating the real
   // byte count, and some responses omit it entirely (reporting 0). Always
   // ask `head` for the store's own listed (uncompressed) size instead.

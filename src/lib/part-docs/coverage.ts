@@ -1,7 +1,7 @@
 import type { DocNotNeeded, PartAccessoryLink, PartDocKind, PartDocument, PartDocumentLink } from "./types";
 
 /**
- * The coverage rule (#DOC, spec §4) — pure, so the to-do page, the part
+ * The coverage rule (#207, spec §4) — pure, so the to-do page, the part
  * editor, the Assembly Builder, the Specs coverage table and the client
  * package all read one answer. Every pass is a single walk over its input
  * into Maps: production has ~37,400 catalog parts, so nothing here may scan
@@ -13,7 +13,7 @@ import type { DocNotNeeded, PartAccessoryLink, PartDocKind, PartDocument, PartDo
  *  3. Else P is an accessory of parents that have their own K document →
  *     "covered". With a context (the SKUs on one quote), only parents present
  *     in it count; none present → P is not covered on that quote. A pair
- *     marked `ownDatasheet` never covers (for either kind — D-DOC-2).
+ *     marked `ownDatasheet` never covers (for either kind — D271).
  *  4. Else P has only a URL nobody has fetched → "link-only" (not satisfied).
  *  5. Else → "missing".
  */

@@ -43,7 +43,7 @@ export default function AssemblyBuilder({
   initial: FixtureAssembly[];
   parts: Hit[];
   priceDates: Record<string, number | null>;
-  /** #DOC — each saved member's datasheet coverage, keyed by pairKey(). */
+  /** #207 — each saved member's datasheet coverage, keyed by pairKey(). */
   coverage: Record<string, MemberCoverage>;
 }) {
   const [assemblies, setAssemblies] = useState(initial);

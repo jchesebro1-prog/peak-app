@@ -2276,7 +2276,7 @@ async function main() {
     assert.equal(r3row.secondary, "Brenda, me (2)", "#128 review: …and collapses into the 'me' chain slot regardless of its stamped author name");
   }
 
-  /* --- part documents (#DOC): stores, links, accessory graph, legacy backfill --- */
+  /* --- part documents (#207): stores, links, accessory graph, legacy backfill --- */
   {
     const Docs = await import("@/lib/stores/part-documents");
     const Acc = await import("@/lib/stores/part-accessory-links");
@@ -2362,7 +2362,7 @@ async function main() {
     assert((await listDocs("part_documents")).some((x) => x.id === legacyDocumentId("DOC-LEGACY")), "part docs legacy: the document itself is never deleted");
   }
 
-  /* --- part documents (#DOC): fetch from links, shared per URL --- */
+  /* --- part documents (#207): fetch from links, shared per URL --- */
   {
     const { upsert: upsertPart, list: listParts } = await import("@/lib/stores/catalog");
     const { loadPartDocsState } = await import("@/lib/part-docs/load");
@@ -2490,7 +2490,7 @@ async function main() {
     }
   }
 
-  /* --- part documents (#DOC): Assembly Builder saves sync the graph in one pass --- */
+  /* --- part documents (#207): Assembly Builder saves sync the graph in one pass --- */
   {
     const Acc = await import("@/lib/stores/part-accessory-links");
     const first = await Acc.syncAccessoryScopes("assembly", "assembly:", [
@@ -2506,7 +2506,7 @@ async function main() {
     assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "subassembly:SA-sync"), "part docs graph: a subassembly's links are outside the assemblies prefix and survive");
   }
 
-  /* --- part documents (#DOC): DaVinci pre-fill apply is idempotent --- */
+  /* --- part documents (#207): DaVinci pre-fill apply is idempotent --- */
   {
     const { applyPrefill, davinciDocumentId } = await import("@/lib/part-docs/davinci-apply");
     const Docs = await import("@/lib/stores/part-documents");
@@ -2537,7 +2537,7 @@ async function main() {
     assert((await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-F" && l.documentId === fetched!.id), "part docs prefill: …the part is linked to the fetched one instead");
   }
 
-  /* --- part documents (#DOC) review fix wave 1: batched doc-store writes
+  /* --- part documents (#207) review fix wave 1: batched doc-store writes
          mean exactly what their single-row versions mean --- */
   {
     const DS = await import("@/db/doc-store");
@@ -2632,7 +2632,7 @@ async function main() {
     assert.deepEqual(await DS.upsertDocs(coll, []), { ids: [], complete: true }, "batch writes: an empty batch is a complete no-op");
   }
 
-  /* --- part documents (#DOC) review fix wave 1: the pre-fill at production
+  /* --- part documents (#207) review fix wave 1: the pre-fill at production
          scale is batched, budgeted, and resumable --- */
   {
     const { applyPrefill, createPrefillStopper } = await import("@/lib/part-docs/davinci-apply");

@@ -3,7 +3,7 @@ import type { DavinciExtract } from "@/lib/davinci/types";
 import type { AccessoryPair } from "./types";
 
 /**
- * DaVinci pre-fill plan (#DOC, spec §6) — pure. Maps ETC's library onto
+ * DaVinci pre-fill plan (#207, spec §6) — pure. Maps ETC's library onto
  * Peak's catalog:
  *  - every English DaVinci datasheet becomes ONE shared, link-only document
  *    (keyed by URL — the same URL on several types is one document) linked

@@ -1,4 +1,4 @@
--- Part documents (#DOC, docs/superpowers/specs/2026-09-25-part-documents-design.md §5) —
+-- Part documents (#207, docs/superpowers/specs/2026-09-25-part-documents-design.md §5) —
 -- shared datasheet/spec-sheet records, the part↔document links, and the
 -- fixture→accessory graph that computes accessory coverage.
 --

@@ -23,7 +23,7 @@ export type ClientPackageItem = {
   unit: string;
   category: string;
   catalogId: string | null;
-  /** The part's own datasheet, or the fixture datasheet covering it (#DOC). */
+  /** The part's own datasheet, or the fixture datasheet covering it (#207). */
   datasheet: PackageDocRef | null;
   /** Fixture SKUs on this package whose datasheet covers this part. */
   datasheetCoveredBy: string[];

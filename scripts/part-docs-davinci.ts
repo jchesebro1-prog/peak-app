@@ -1,5 +1,5 @@
 /**
- * DaVinci → part documents pre-fill: report, dry run, apply (#DOC, spec §6).
+ * DaVinci → part documents pre-fill: report, dry run, apply (#207, spec §6).
  *
  *   npm run part-docs:davinci                     → the report, writes nothing
  *   npm run part-docs:davinci -- --apply          → dry run, writes nothing

@@ -1,5 +1,5 @@
 /**
- * Part documents (#DOC) — the shared shapes. Pure: no store, no `@/db`, no
+ * Part documents (#207) — the shared shapes. Pure: no store, no `@/db`, no
  * Node built-ins, so client components import this freely.
  *
  * A document is a SHARED record (DaVinci's model): one datasheet PDF is
@@ -46,7 +46,7 @@ export type PartDocument = {
   uploadedAt: number;
   uploadedBy: string;
   history: PartDocumentHistoryEntry[];
-  /** The last fetch attempt of `sourceUrl` (D-DOC-3): failures stay listed
+  /** The last fetch attempt of `sourceUrl` (D272): failures stay listed
    *  with their reason until a later fetch succeeds. */
   lastFetch?: { at: number; ok: boolean; error?: string };
 };

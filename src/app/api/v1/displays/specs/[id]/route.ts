@@ -5,6 +5,7 @@ import type { SpecCatalogPart } from "@/lib/bid-spec";
 import { hasPrintableSpec } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
+import { loadPartDocsState } from "@/lib/part-docs/load";
 
 export async function GET(req: Request, context: { params: Promise<unknown> }) {
   try {
@@ -20,7 +21,8 @@ export async function GET(req: Request, context: { params: Promise<unknown> }) {
   if (!hasPrintableSpec(part)) {
     return NextResponse.json({ error: "Spec not found." }, { status: 404 });
   }
-  return NextResponse.json(apiEnvelope(publicCatalogPart(part!, { sections, articles }), { readOnly: true }), {
+  const docs = (await loadPartDocsState([part!])).index;
+  return NextResponse.json(apiEnvelope(publicCatalogPart(part!, { sections, articles, docs }), { readOnly: true }), {
     headers: { "cache-control": "private, max-age=60", "x-api-read-only": "true", ...displaysRateHeaders(rate) },
   });
 }

@@ -1,7 +1,7 @@
 import type { PartDocKind } from "./types";
 
 /**
- * File-type rules for part documents (#DOC, spec §6). Pure — the upload
+ * File-type rules for part documents (#207, spec §6). Pure — the upload
  * route, the attach actions and the fetcher all call `sniffDocumentType` on
  * the real bytes; the extension and the browser's MIME are never trusted.
  */

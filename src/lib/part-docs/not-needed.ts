@@ -2,7 +2,7 @@ import { get as getPart, mergeUpsert } from "@/lib/stores/catalog";
 import type { DocNotNeeded, PartDocKind } from "./types";
 
 /**
- * Set or clear a part's "not needed" mark for one kind (#DOC, spec §4 step 2).
+ * Set or clear a part's "not needed" mark for one kind (#207, spec §4 step 2).
  * Server-only. Goes through `mergeUpsert` — never `upsert`, which would wipe
  * every field this write does not carry — and skips SKUs that are not in the
  * catalog, because mergeUpsert would otherwise create a malformed part.

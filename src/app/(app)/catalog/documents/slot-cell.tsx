@@ -11,7 +11,7 @@ import { detachDocumentAction, fetchLinksAction, setNotNeededAction } from "./ac
 import { uploadNewDocument, uploadReplacement } from "./upload-client";
 
 /**
- * One document slot (#DOC, spec §3) — shared by the Datasheets to-do list and
+ * One document slot (#207, spec §3) — shared by the Datasheets to-do list and
  * the part editor. Shows one of: ✓ file (view · replace · detach), Covered on
  * N fixture datasheets, Link only (Fetch), Not needed, or an empty drop zone.
  * A file dropped on ANY state becomes the part's own document.

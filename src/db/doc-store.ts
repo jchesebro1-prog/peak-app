@@ -139,7 +139,7 @@ export async function insertDocIfAbsent<T extends Doc>(
   return rows.length > 0;
 }
 
-/* ---------- batched writes (#DOC review fix wave 1) ----------
+/* ---------- batched writes (#207 review fix wave 1) ----------
  *
  * Multi-row counterparts of upsertDoc / insertDocIfAbsent / softDeleteDoc for
  * writers that hold thousands of rows at once (the DaVinci pre-fill writes

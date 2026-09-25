@@ -146,7 +146,7 @@ function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number 
 }
 
 /**
- * Put every package document in the zip ONCE (#DOC): a fixture datasheet
+ * Put every package document in the zip ONCE (#207): a fixture datasheet
  * that also covers its lens and clamps is one file. A document whose blob is
  * missing from storage turns into a gap for each SKU it was meant to serve.
  */
@@ -241,7 +241,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string): Promis
     preparedBy: by,
     date: Date.now(),
   });
-  // #DOC: the quote's own SKUs are the coverage context — an accessory rides
+  // #207: the quote's own SKUs are the coverage context — an accessory rides
   // on a fixture only when that fixture is on this quote.
   const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku));
   const items = bom.map((row) => {

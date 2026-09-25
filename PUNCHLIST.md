@@ -3091,7 +3091,7 @@ across the six beta categories; **(c)** the generator: one action walks a BOM an
 datasheet package + spec + rough drawings. Much exists (Grid→D94 bridge, derived riser, .docx
 output) — the missing piece is assembly; completeness depends on (a)+(b) population.
 
-**Status:** OPEN — wave 2 (depends on #39 attachments being populated).
+**Status:** (a) and the population half of (c) DONE via #207 (part documents, 2026-09-25); (b) is the Specs module (#205); the generator half of (c) remains — wave 2.
 
 ---
 
@@ -8285,3 +8285,29 @@ primary look.
 **Still open.** Per-model product artwork and admin icon uploads stay out of scope (D154). Wire routes still take
 the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
 lead's call (never against `.data/pglite`).
+
+## #207. Part documents — datasheets and spec sheets, shared, with accessory coverage — DONE 2026-09-25 (D270–D280)
+
+**Spec:** `docs/superpowers/specs/2026-09-25-part-documents-design.md` · **Plan:**
+`docs/superpowers/plans/2026-09-25-part-documents.md` · **Closes:** #40 (a) and the population half of (c).
+
+**Shipped.** Three doc-store collections (`part_documents`, `part_document_links`, `part_accessory_links`, migration
+0026, idempotent per D141); a pure coverage rule (`src/lib/part-docs/coverage.ts`: own → not needed → covered by a
+fixture → link only → missing, with context for quotes/packages); **Catalog → Datasheets** (`/catalog/documents`), the
+to-do list of every quoted part with Datasheet / Spec sheet slots, drop zones, Also covers…, filters and bulk Fetch /
+Mark not needed / Attach existing; **Upload many** (`/catalog/documents/upload`) with filename matching; direct-to-Blob
+uploads (25 MB, magic-byte checked); fetch from links through the shared `guardedFetchBytes` (venue-calendar-fetch.ts)
+SSRF guard — batches and the DaVinci pre-fill run under a 45 s budget and are resumable ("run again" picks up where a
+batch left off) — one document per URL; the doc store's batch writers (`insertDocsIfAbsent` / `upsertDocs` /
+`softDeleteDocs`, 500 rows per statement) back the pre-fill; the part editor's Documents section for anyone signed in
+(the admin-only single-datasheet control is retired, D275); the Assembly Builder feeding the fixture → accessory graph
+with per-member coverage and a has-its-own-datasheet toggle; the DaVinci accessory graph in the committed extract plus
+an admin/CLI pre-fill of link-only ETC datasheets; Specs coverage, client packages (once per document, coverage in
+context, "covered by <fixture>") and the Displays API reading the rule.
+
+**Still open (Jeff-gated).** Run **Pre-fill from DaVinci** on production (admin button on `/catalog/documents`) and
+confirm on a Vercel preview that the traced `data/davinci-extract.json` is present (the build's `.nft.json` lists it;
+the function itself has not run hosted yet); then **Fetch links** in batches. Blob uploads in local dev remain
+unreliable (see MASTER-HOWTO §9) — verify drag-and-drop on a preview deploy. **Follow-up:** an orphan sweep for stray
+part-document uploads (a blob uploaded but never attached, e.g. the browser closed mid-flow) is future work — nothing
+currently reclaims those Blob objects.

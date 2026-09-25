@@ -31,7 +31,7 @@ export const maxDuration = 60;
 const PAGE = 200;
 
 /**
- * Catalog → Datasheets (#DOC, spec §3): the to-do list. Every part Peak has
+ * Catalog → Datasheets (#207, spec §3): the to-do list. Every part Peak has
  * ever quoted (any quote status, any Grid placement, any bid spec), most
  * quoted first, with a Datasheet and a Spec sheet slot each. One load of
  * every collection per request; everything below is single-pass Maps.

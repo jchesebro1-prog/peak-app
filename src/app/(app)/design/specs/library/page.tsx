@@ -115,7 +115,7 @@ export default async function SpecLibraryPage({
   const coverageQ = one(sp.q);
 
   const onBom = skusOnBomSince({ quotes, gridProjects, generated }, Date.now() - ON_BOM_WINDOW_MS);
-  // #DOC: the datasheet column is the part-documents coverage rule.
+  // #207: the datasheet column is the part-documents coverage rule.
   const { index: docIndex } = await loadPartDocsState(parts);
   const datasheetOk = datasheetSatisfiedSkus(docIndex, parts.map((p) => p.sku));
   const coverageAll = coverageRows(parts, articleIdBySku, onBom, datasheetOk);

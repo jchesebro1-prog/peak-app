@@ -65,7 +65,7 @@ export async function saveFixtureAction(input: Input): Promise<{ ok: true; item:
     updatedAt: now,
   };
   const saved = input.id ? await save(item) : await create(item);
-  // Part documents (#DOC): the lens and options become the light engine's accessory links.
+  // Part documents (#207): the lens and options become the light engine's accessory links.
   await syncAccessoryLinks({ source: "assembly", sourceRef: subassemblyRef(saved.id) }, subassemblyPairs(saved));
   revalidatePath("/design/assemblies");
   revalidatePath("/design/subassemblies");

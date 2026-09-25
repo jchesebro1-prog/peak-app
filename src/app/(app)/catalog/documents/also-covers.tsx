@@ -6,7 +6,7 @@ import type { Suggestion } from "@/lib/part-docs/suggest";
 import { attachExistingDocumentAction, suggestAlsoCoversAction } from "./actions";
 
 /**
- * The "Also covers…" step (#DOC, spec §3): right after a file lands on one
+ * The "Also covers…" step (#207, spec §3): right after a file lands on one
  * part, offer the parts it likely also describes — the part's accessories
  * first (pre-ticked), then its model family (unticked). Confirm attaches the
  * same shared document to the ticked parts.

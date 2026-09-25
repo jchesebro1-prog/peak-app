@@ -71,6 +71,9 @@ const ROUTES = [
   // Daylite history import (Task 12) — two-file preview + chunked confirm.
   "/import/daylite",
   "/catalog",
+  "/catalog/documents", // #207 — the Datasheets to-do list
+  "/catalog/documents?show=missing-datasheet",
+  "/catalog/documents/upload", // #207 — bulk drop
   "/estimating-rules",
   "/inspections",
   "/flame-tests",
@@ -196,6 +199,8 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/engagements/quote?customer=lakefront&venue=lf2&contact=Tom+Reyes&name=Smoke+consulting" },
   { route: "/rentals/quote?customer=lakefront&contact=Tom+Reyes&name=Smoke+rental&replaces=Q-2041" },
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
+  // #207: the part editor with its Documents section (a seeded fabric SKU).
+  { route: "/catalog?edit=RB-MV-MN" },
   // Specs module (#205): /design/specs redirects to the library (Phase A —
   // the Generated list is Phase B), so it needs no reject — the harness
   // follows the redirect and judges the final /design/specs/library page.

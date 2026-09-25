@@ -2,7 +2,7 @@ import { guardedFetchBytes, type GuardedFetchErrorText } from "@/lib/venue-calen
 import { MAX_FETCH_TIMEOUT_MS, MAX_PART_DOC_BYTES } from "./types";
 
 /**
- * Server-side download of a manufacturer document URL (#DOC, spec §6).
+ * Server-side download of a manufacturer document URL (#207, spec §6).
  * Server-only. It reuses src/lib/venue-calendar-fetch.ts's `guardedFetchBytes`
  * (review fix wave 1, I2) unchanged — http(s) only, the literal-host check,
  * DNS resolution with private/loopback/link-local refusal, and BOTH

@@ -6,7 +6,7 @@ import { memberCoverageLabel, type MemberCoverage } from "@/lib/part-docs/assemb
 import { setOwnDatasheetAction } from "./actions";
 
 /**
- * One assembly member's datasheet coverage (#DOC, spec §3): "Covered by
+ * One assembly member's datasheet coverage (#207, spec §3): "Covered by
  * fixture datasheet" by default, with the "has its own datasheet" toggle.
  * Disabled until the assembly is saved (the pair isn't in the graph yet).
  */

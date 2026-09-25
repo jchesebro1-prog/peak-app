@@ -4,7 +4,7 @@ import { getDocument } from "@/lib/stores/part-documents";
 import { contentDisposition, contentTypeForFileName } from "@/lib/part-docs/files";
 
 /**
- * Part-document viewer (#DOC, spec §7): signed-in only. Streams the private
+ * Part-document viewer (#207, spec §7): signed-in only. Streams the private
  * blob; a link-only document (no stored file yet) redirects to its source
  * URL instead. `?history=<n>` streams the n-th replaced file — nothing is
  * ever deleted, so every earlier version stays viewable.
