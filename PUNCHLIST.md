@@ -8152,7 +8152,8 @@ same $15,879.24 total.
 grid specific settings."
 
 **Done.** New admin page `/design/grid/settings` (Design nav → *Grid Settings*, also linked from Settings → Admin):
-- **Grid symbols** — the #131 per-category symbol card (#199).
+- **Grid symbols** — the #131 per-category symbol card (#199). Superseded by #206 — replaced with the *Symbol
+  colours* and *Category icons* cards.
 - **Port rules review** — every rule in `PORT_RULES` with its note, target, proposed ports, how many port-less catalog
   parts it matches, sample parts and "matches nothing"; **Apply** writes that one rule's ports (two-step confirm with
   the count). Until now the only review loop was reading `npm run ports:rules` output (#159). The report logic moved
@@ -8238,7 +8239,8 @@ primary look.
 - **Colour** resolves group → trade → the Grid entry's scope → grey: 10 swatches (six catalog groups, three trades,
   Other), Okabe–Ito-based and ≥ 3:1 against the white glyph.
 - **Icon** resolves entry icon → legacy entry shape → category icon → a stored legacy category shape → the generic
-  device. Every `DEFAULT_CATEGORY_MAP` category and every live Grid category ships with an icon.
+  device. Every seeded category ships with an icon; any other category gets the generic device glyph until an
+  admin picks one.
 - **86 curated Tabler icons** (MIT, `@tabler/icons` 3.48.0, devDependency only), turned into committed path data by
   `npm run icons:grid`; licence in `LICENSES/tabler-icons.txt`. No runtime dependency, works offline.
 - **Grid Settings** — the 8-shape card is replaced by *Symbol colours* (10 swatches) and *Category icons* (one

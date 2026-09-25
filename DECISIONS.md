@@ -5628,10 +5628,15 @@ the system". Category lookups are trimmed and case-insensitive, like `shapeFor`.
 merge per key (a stored key replaces the default whose trimmed, lower-cased name matches). An empty save stores
 `null`; "Reset to defaults" posts that. The old whole-map `gridCategoryShapes` is read only as the step after the
 category icon, and only when an admin actually stored it — the old seed is never consulted, since every seeded
-category now has a real icon. The eight D154 shapes are registered icons (`shape-rect` … `shape-camera`: five
-geometric glyphs plus the three old glyph paths scaled 0.8), so a per-entry `shape` still draws what it meant.
-`symbolLook().shape` keeps the D154 answer for any back-compat caller. The 8-shape settings card and
-`saveGridCategoryShapesAction` are removed; `cleanGridCategoryShapes` stays (the regressions harness pins it).
+category now has a real icon. A stored `"rect"` is treated the same as no stored value at all (final fix wave,
+2026-09-25): the old 8-shape card always wrote an explicit `"rect"` for every custom category — it was never a real
+choice, just that card's own implicit default — so honouring it literally drew the rectangle glyph for every
+legacy-saved category forever, and Grid Settings' Category icons card, which computes each row's baseline with the
+same resolver, couldn't tell that choosing Device was a no-op either. Any other stored shape (e.g. `"speaker"`)
+is still honoured. The eight D154 shapes are registered icons (`shape-rect` … `shape-camera`: five geometric glyphs
+plus the three old glyph paths scaled 0.8), so a per-entry `shape` still draws what it meant. `symbolLook().shape`
+keeps the D154 answer for any back-compat caller. The 8-shape settings card and `saveGridCategoryShapesAction` are
+removed; `cleanGridCategoryShapes` stays (the regressions harness pins it).
 
 ## D268. The per-entry override: an icon supersedes the shape, and a colour is applied explicitly (#206, 2026-09-25)
 
