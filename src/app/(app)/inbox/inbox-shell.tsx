@@ -136,9 +136,12 @@ export default function InboxShell({
   const [listWidth, setListWidthState] = useState(LIST_WIDTH_DEFAULT);
   useEffect(() => {
     // queueMicrotask — a callback boundary, not a direct setState in the
-    // effect body (react-hooks/set-state-in-effect); still resolves before
-    // the next paint, so the corrected value is on screen as soon as any
-    // synchronous mount-effect version would have shown it.
+    // effect body (react-hooks/set-state-in-effect flags the latter as a
+    // cascading-render smell). This does NOT run before the initial paint —
+    // useEffect itself already fires after the browser has painted the
+    // server-matching defaults — it only adds a microtask's worth of extra
+    // delay on top of that, same one-frame correction the estimator's
+    // synchronous version (META_OPEN_KEY/SIDE_OPEN_KEY) always accepted.
     queueMicrotask(() => {
       try {
         if (parseSideCollapsed(window.localStorage.getItem(SIDE_COLLAPSED_KEY))) setSideCollapsedState(true);
@@ -184,10 +187,23 @@ export default function InboxShell({
     const stop = (e: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
       setListWidth(clampListWidth(startWidth + e.clientX - startX));
+    };
+    // I review — a cancelled gesture (the OS interrupts the drag — an edge
+    // swipe, an alert, losing pointer capture) never fired "pointerup"
+    // before, leaking the two window listeners and leaving the width
+    // un-persisted at wherever the last pointermove left it. Reverts to the
+    // pre-drag width instead of keeping the interrupted, never-saved value.
+    const cancel = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      setListWidthState(startWidth);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
   };
   const LIST_WIDTH_STEP = 16;
   const onListResizeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {

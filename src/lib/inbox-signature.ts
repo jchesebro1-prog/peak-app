@@ -35,9 +35,14 @@ function addSignature(body: string, signature: string): string {
 }
 
 /** Removes the signature: the exact block when it is still intact, else
- *  from the "-- " separator (and the blank line before it) up to the next
- *  blank line — so an edited signature still comes out cleanly and a
- *  forwarded block after it survives. */
+ *  from the "-- " separator (and the blank line before it) through to the
+ *  Forward block that follows it, or to the end of the body when there is
+ *  none — so an edited signature still comes out cleanly and a forwarded
+ *  block after it survives. I review — this used to cut at the next blank
+ *  line instead of the Forward marker, which truncated a MULTI-PARAGRAPH
+ *  signature (a blank line between the name and the company block, say) at
+ *  its own internal blank line the moment it was edited, leaving the back
+ *  half of the signature stuck onto the "stripped" body. */
 export function stripSignature(body: string, signature: string): string {
   const block = signatureBlock(signature);
   const exact = block ? body.indexOf(block) : -1;
@@ -45,7 +50,7 @@ export function stripSignature(body: string, signature: string): string {
   const sep = body.indexOf(SIG_SEP);
   if (sep < 0) return body;
   const start = sep > 0 && body[sep - 1] === "\n" ? sep - 1 : sep;
-  const after = body.indexOf("\n\n", sep + SIG_SEP.length);
+  const after = body.indexOf(FORWARD_MARK, sep + SIG_SEP.length);
   return body.slice(0, start) + (after < 0 ? "" : body.slice(after));
 }
 

@@ -9287,6 +9287,20 @@ import {
   ok(resolveAddressFor({ ...r3base, contactEmail: "" }) === "", "resolveAddressFor: no address → empty string");
   ok(firstRecipient(" , Nobody <>, Someone <s@x.org>")?.email === "s@x.org", "firstRecipient: skips empty parts");
   ok(firstRecipient("") === null && firstRecipient(undefined) === null, "firstRecipient: empty → null");
+  // I review — internal addresses (the company domain, and the mailbox's
+  // own address when passed) are never the thread's counterpart.
+  ok(
+    firstRecipient("Jeff Chesebro <jeff@peaksystemsgroup.com>, AP Clerk <ap@lakefront.k12.mn.us>")?.email === "ap@lakefront.k12.mn.us",
+    "firstRecipient: skips a @peaksystemsgroup.com self-CC ahead of the real recipient"
+  );
+  ok(
+    firstRecipient("jeff@peaksystemsgroup.com, sarah@peaksystemsgroup.com") === null,
+    "firstRecipient: every address internal → null, not a false match"
+  );
+  ok(
+    firstRecipient("jeff@example.com, ap@lakefront.k12.mn.us", "jeff@example.com")?.email === "ap@lakefront.k12.mn.us",
+    "firstRecipient: selfEmail skips the mailbox's own address even off the hardcoded domain"
+  );
 }
 
 /* ---- Inbox round 3 (#126) — pane layout clamp/parse ---- */
@@ -9319,7 +9333,15 @@ import {
   const fwd = "\n\n---------- Forwarded ----------\nFrom: Brenda\n\n> hi";
   ok(withSignature(fwd, sig, "add") === "\n\n-- \n" + sig + fwd, "add: forward keeps the forwarded block, signature above it");
   ok(withSignature("\n\n-- \n" + sig + fwd, sig, "strip") === fwd, "strip: forward gives the forwarded block back");
-  ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the next blank line");
+  ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the Forward marker");
+  // I review — a multi-paragraph signature (its own internal blank line)
+  // used to get truncated at that internal blank line once edited, instead
+  // of stripping the whole thing.
+  const multiSig = "Jeff Chesebro\n\nPeak Systems Group\n(218) 555-0100";
+  const multiSigEdited = "Jeff C.\n\nPeak Systems Group\n(218) 555-0100"; // name trimmed — no longer an exact substring match
+  ok(withSignature("Thanks!\n\n-- \n" + multiSig, multiSig, "strip") === "Thanks!", "strip: exact multi-paragraph signature removed whole");
+  ok(withSignature("Thanks!\n\n-- \n" + multiSigEdited, multiSig, "strip") === "Thanks!", "strip: an EDITED multi-paragraph signature is removed whole, not cut at its own internal blank line");
+  ok(withSignature("\n\n-- \n" + multiSigEdited + fwd, multiSig, "strip") === fwd, "strip: …and a forwarded block after an edited multi-paragraph signature still survives");
   ok(hasSignature("x\n-- \ny") && !hasSignature("x\n--\ny") && !hasSignature("x -- y"), "hasSignature: the exact '\\n-- \\n' separator");
   ok(normalizeSignature("a".repeat(2500)).length === SIGNATURE_MAX, "normalizeSignature caps at SIGNATURE_MAX");
 }

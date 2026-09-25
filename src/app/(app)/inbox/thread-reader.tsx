@@ -407,12 +407,18 @@ export default function ThreadReader({
   const [cBody, setCBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [attachNote, setAttachNote] = useState("");
-  // #127 — the composer body; on open the caret sits ABOVE the seeded signature
+  // #127 — the composer body; on open the caret sits ABOVE the seeded
+  // signature. I review — only when "To" is already filled (Reply/Reply
+  // all, once vm.contactEmail resolved one): Forward opens with "To" blank
+  // for the user to pick a recipient, which needs their attention first —
+  // stealing focus into the body would bury it.
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    if (!mode || !bodyRef.current) return;
+    if (!mode || !bodyRef.current || !cTo.trim()) return;
     bodyRef.current.focus();
     bodyRef.current.setSelectionRange(0, 0);
+    // cTo read once per mode-open, not on every keystroke in the To field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
   // D76 — schedule-site-visit modal
   const [visitOpen, setVisitOpen] = useState(false);

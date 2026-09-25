@@ -34,11 +34,18 @@ export default function ComposeModal({
   const [busy, setBusy] = useState<false | "save" | "send">(false);
   const set = (patch: Partial<ComposeInit>) =>
     setCd((c) => ({ ...c, ...patch }));
+  // I review — a blank "To" still needs the user's attention first; only
+  // steal focus into the body (above the seeded signature) once there's
+  // already a recipient — a reply/renewal-draft/pre-filled-customer open,
+  // never a genuinely blank New message. Deliberately mount-only, same as
+  // the seeded body itself (useState's initializer above): reads cd.to's
+  // INITIAL value only.
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    if (!bodyRef.current) return;
+    if (!bodyRef.current || !cd.to.trim()) return;
     bodyRef.current.focus();
     bodyRef.current.setSelectionRange(0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const sigOn = hasSignature(cd.body);
 

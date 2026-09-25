@@ -230,7 +230,11 @@ export async function quickAddVenueAction(input: {
   const after = await getCustomer(existing.id);
   const added = (after?.locations || []).find((l) => !!l.id && !beforeIds.has(l.id));
   const siteId = added?.id || null;
-  if (thread && siteId) {
+  // I review — a thread already linked to a DIFFERENT customer never gets
+  // this venue stamped on it; the venue card only ever offers venues on the
+  // thread's own linked customer, so a mismatch here means the thread
+  // changed customer between render and submit, not a legitimate request.
+  if (thread && siteId && (!thread.customerId || thread.customerId === existing.id)) {
     if (!thread.customerId) await linkThread(thread.id, existing.id, thread.resolvedContactId ?? null);
     await setThreadSite(thread.id, siteId);
   }
