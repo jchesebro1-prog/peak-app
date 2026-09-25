@@ -5,6 +5,7 @@ import Link from "next/link";
 import { saveConsultingQuote } from "./actions";
 import { money } from "@/lib/format";
 import { CustomerCombobox } from "@/components/customer-combobox";
+import { DeleteQuoteButton } from "../../../quotes/delete-quote-button";
 
 /**
  * Consulting proposal builder (#35 rebuild, spec §1). Structured scopes
@@ -214,6 +215,11 @@ export function ConsultingQuoteBuilder({
           <Link href="/quotes" style={{ fontSize: 12.5, color: "var(--accent)" }}>
             Manage status &amp; review in Quotes →
           </Link>
+        )}
+        {initial && (
+          <span style={{ marginLeft: "auto" }}>
+            <DeleteQuoteButton id={initial.id} won={initial.status === "won"} redirectTo="/design/engagements/quote" />
+          </span>
         )}
       </div>
       {justSaved && (

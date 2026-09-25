@@ -86,6 +86,7 @@ import VendorQuoteModal, {
   vendorLinesTotal,
 } from "./vendor-quote-modal";
 import PreviewDoc from "./preview-doc";
+import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 
 /**
  * Estimator workspace — client port of Estimator.dc.html (build + preview
@@ -2007,6 +2008,7 @@ export default function EstimatorClient({
                   <option value="lost">Lost</option>
                 </select>
               </div>
+              {loadedId && <DeleteQuoteButton id={loadedId} won={status === "won"} redirectTo="/estimator" />}
               {aiSource && (
                 <button
                   type="button"

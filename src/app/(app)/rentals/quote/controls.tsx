@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { priceRental } from "@/lib/pricing/rental";
 import { saveRentalQuote, approveRentalQuote, checkRentalAvailabilityAction } from "./actions";
+import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 
 /**
  * QuoteBuilder — the rental quote builder (rental twin of the repair
@@ -50,6 +51,8 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
+  /** Quote is already WON — Delete's confirm label says what stays behind. */
+  won: boolean;
 };
 
 type BuilderLineRow = { key: string; itemId: string; locationId: string; qty: string };
@@ -153,6 +156,7 @@ export function QuoteBuilder({
   const [pending, startTransition] = useTransition();
 
   const editingId = initial.editingId;
+  const won = initial.won;
   const savedId = initial.savedId;
   const isApproved = initial.approved;
 
@@ -809,6 +813,11 @@ export function QuoteBuilder({
               >
                 {isApproved ? "Locked — approved" : savedFlag ? "Saved ✓" : editingId ? "Update quote" : "Save quote"}
               </button>
+              {editingId && (
+                <div style={{ marginTop: 9 }}>
+                  <DeleteQuoteButton id={editingId} won={won} redirectTo="/quotes" />
+                </div>
+              )}
               {isApproved && (
                 <div style={{ marginTop: 8, fontSize: 11, color: "#9aa0ab", textAlign: "center", lineHeight: 1.5 }}>
                   This quote is already approved and its bookings are locked — edits here won&apos;t update inventory.

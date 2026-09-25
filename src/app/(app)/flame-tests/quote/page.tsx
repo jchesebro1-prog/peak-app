@@ -108,6 +108,7 @@ export default async function FlameTestQuotePage({
     saved,
     approved,
     savedId: "",
+    won: false,
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -144,6 +145,7 @@ export default async function FlameTestQuotePage({
       approved: approved || wonAlready,
       // an existing quote always has a letter target
       savedId: editQuote.id,
+      won: wonAlready,
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;
@@ -170,6 +172,7 @@ export default async function FlameTestQuotePage({
         saved: false,
         approved: false,
         savedId: "",
+        won: false,
       };
     }
   }

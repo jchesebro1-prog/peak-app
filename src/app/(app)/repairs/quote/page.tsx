@@ -140,6 +140,7 @@ export default async function RepairQuotePage({
     saved,
     approved,
     savedId: "",
+    won: false,
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -191,6 +192,7 @@ export default async function RepairQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      won: wonAlready,
     };
   } else if (inspId) {
     const insp = await getInspection(inspId);
@@ -252,6 +254,7 @@ export default async function RepairQuotePage({
         saved: false,
         approved: false,
         savedId: "",
+        won: false,
       };
     }
   } else if (preCustomer) {

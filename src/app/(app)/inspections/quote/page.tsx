@@ -119,6 +119,7 @@ export default async function InspectionQuotePage({
     saved,
     approved,
     savedId: "",
+    won: false,
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -158,6 +159,7 @@ export default async function InspectionQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      won: wonAlready,
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

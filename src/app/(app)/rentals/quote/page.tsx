@@ -106,6 +106,7 @@ export default async function RentalQuotePage({
     saved,
     approved,
     savedId: "",
+    won: false,
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
@@ -142,6 +143,7 @@ export default async function RentalQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      won: wonAlready,
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

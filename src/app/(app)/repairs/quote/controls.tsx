@@ -6,6 +6,7 @@ import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel"
 import type { CSSProperties } from "react";
 import { saveRepairQuote, approveRepairQuote } from "./actions";
 import { CustomerCombobox } from "@/components/customer-combobox";
+import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 
 /**
  * QuoteBuilder — the auto-priced repair estimator (repair twin of the
@@ -76,6 +77,8 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
+  /** Quote is already WON — Delete's confirm label says what stays behind. */
+  won: boolean;
 };
 
 /* ---------- inlined pure pricing (port of repair-engine.ts) ---------- */
@@ -323,6 +326,7 @@ export function QuoteBuilder({
   const [pending, startTransition] = useTransition();
 
   const editingId = initial.editingId;
+  const won = initial.won;
   const savedId = initial.savedId;
   const isApproved = initial.approved;
   const source = initial.source;
@@ -1307,6 +1311,12 @@ export function QuoteBuilder({
               >
                 {savedFlag ? "Saved ✓" : editingId ? "Update quote" : "Save quote"}
               </button>
+
+              {editingId && (
+                <div style={{ marginTop: 9 }}>
+                  <DeleteQuoteButton id={editingId} won={won} redirectTo="/quotes" />
+                </div>
+              )}
 
               {showApprove && (
                 <button
