@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MessageVM, Opt, ReaderVM } from "./types";
 import {
@@ -16,6 +16,7 @@ import {
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
+import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
 const ACCENT_INK = "color-mix(in srgb, var(--accent) 68%, #000)";
@@ -385,6 +386,7 @@ export default function ThreadReader({
   rosterOptions,
   onClose,
   onAfterSend,
+  signature,
 }: {
   vm: ReaderVM | null;
   variant: "pane" | "overlay";
@@ -392,6 +394,8 @@ export default function ThreadReader({
   onClose?: () => void;
   /** keeps the replied thread selected (prototype kept selectedId) */
   onAfterSend?: (id: string) => void;
+  /** #127 — seeded below a "-- " line on Reply / Reply all / Forward */
+  signature: string;
 }) {
   const router = useRouter();
 
@@ -403,6 +407,13 @@ export default function ThreadReader({
   const [cBody, setCBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [attachNote, setAttachNote] = useState("");
+  // #127 — the composer body; on open the caret sits ABOVE the seeded signature
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!mode || !bodyRef.current) return;
+    bodyRef.current.focus();
+    bodyRef.current.setSelectionRange(0, 0);
+  }, [mode]);
   // D76 — schedule-site-visit modal
   const [visitOpen, setVisitOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -464,7 +475,13 @@ export default function ThreadReader({
       setCCc("");
       setShowCc(false);
       setCSubject(/^fwd:/i.test(vm.subject) ? vm.subject : "Fwd: " + vm.subject);
-      setCBody("\n\n---------- Forwarded ----------\nFrom: " + vm.forwardFrom + "\n\n" + quote);
+      setCBody(
+        withSignature(
+          "\n\n---------- Forwarded ----------\nFrom: " + vm.forwardFrom + "\n\n" + quote,
+          signature,
+          "add"
+        )
+      );
       setAttachNote("");
     } else {
       setMode(m);
@@ -472,7 +489,7 @@ export default function ThreadReader({
       setCCc(m === "replyAll" ? vm.boxAddress : "");
       setShowCc(m === "replyAll");
       setCSubject(/^re:/i.test(vm.subject) ? vm.subject : "Re: " + vm.subject);
-      setCBody("");
+      setCBody(withSignature("", signature, "add"));
       setAttachNote("");
     }
   };
@@ -517,7 +534,9 @@ export default function ThreadReader({
     }
   };
 
-  const sendReady = cBody.trim().length > 0 && cTo.trim().length > 0;
+  // #127 — a signature alone (nothing typed above it) is not a real message
+  const sendReady = stripSignature(cBody, signature).trim().length > 0 && cTo.trim().length > 0;
+  const sigOn = hasSignature(cBody);
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
 
@@ -924,6 +943,7 @@ export default function ThreadReader({
                 />
               </FieldRow>
               <textarea
+                ref={bodyRef}
                 value={cBody}
                 onChange={(e) => setCBody(e.target.value)}
                 placeholder="Write your message…"
@@ -988,6 +1008,25 @@ export default function ThreadReader({
                   <PaperclipIcon size={14} />
                   Attach
                 </button>
+                {signature && (
+                  <button
+                    onClick={() => setCBody(withSignature(cBody, signature, sigOn ? "strip" : "add"))}
+                    aria-pressed={sigOn}
+                    title={sigOn ? "Remove your signature from this message" : "Add your signature below a -- line"}
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      color: sigOn ? ACCENT_INK : "#5b616e",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 4,
+                      fontFamily: "var(--font-ui)",
+                    }}
+                  >
+                    {sigOn ? "Remove signature" : "Add signature"}
+                  </button>
+                )}
                 <span style={{ flex: 1 }} />
                 <button
                   onClick={closeComposer}

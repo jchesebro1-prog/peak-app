@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComposeInit, CustomerVM, Opt } from "./types";
 import { composeSendAction, saveDraftAction } from "./actions";
 import { PaperclipIcon, SendIcon } from "./icons";
+import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 export default function ComposeModal({
   init,
   fromOptions,
   customers,
   contactEmails,
+  signature,
   onClose,
   onSaved,
   onSent,
@@ -18,14 +20,27 @@ export default function ComposeModal({
   fromOptions: Opt[];
   customers: CustomerVM[];
   contactEmails: Opt[];
+  /** #127 — seeded into a NEW message; a saved draft or a pre-filled body
+   *  (e.g. ?new=<customerId>) is left exactly as it came */
+  signature: string;
   onClose: () => void;
   onSaved: (mailbox: string) => void;
   onSent: (mailbox: string, id: string | null) => void;
 }) {
-  const [cd, setCd] = useState<ComposeInit>({ ...init });
+  const [cd, setCd] = useState<ComposeInit>(() => ({
+    ...init,
+    body: init.id || init.body ? init.body : withSignature("", signature, "add"),
+  }));
   const [busy, setBusy] = useState<false | "save" | "send">(false);
   const set = (patch: Partial<ComposeInit>) =>
     setCd((c) => ({ ...c, ...patch }));
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!bodyRef.current) return;
+    bodyRef.current.focus();
+    bodyRef.current.setSelectionRange(0, 0);
+  }, []);
+  const sigOn = hasSignature(cd.body);
 
   // real files already on the draft (IDEAS #36) — bytes stay server-side and
   // ride through sendDraft(); the composer just shows what will go out
@@ -35,8 +50,9 @@ export default function ComposeModal({
       ? (bytes / 1024 / 1024).toFixed(1) + " MB"
       : Math.max(1, Math.round(bytes / 1024)) + " KB";
 
+  // #127 — a signature alone doesn't count as a body
   const composeReady =
-    !!cd.to.trim() && !!(cd.subject.trim() || cd.body.trim());
+    !!cd.to.trim() && !!(cd.subject.trim() || stripSignature(cd.body, signature).trim());
 
   const payload = () => ({
     id: cd.id,
@@ -276,6 +292,7 @@ export default function ComposeModal({
         </div>
 
         <textarea
+          ref={bodyRef}
           value={cd.body}
           onChange={(e) => set({ body: e.target.value })}
           placeholder="Write your message…"
@@ -346,6 +363,25 @@ export default function ComposeModal({
           >
             Discard
           </button>
+          {signature && (
+            <button
+              onClick={() => set({ body: withSignature(cd.body, signature, sigOn ? "strip" : "add") })}
+              aria-pressed={sigOn}
+              title={sigOn ? "Remove your signature from this message" : "Add your signature below a -- line"}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: sigOn ? "var(--accent)" : "#8c919c",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "9px 6px",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              {sigOn ? "Remove signature" : "Add signature"}
+            </button>
+          )}
           <span style={{ flex: 1 }} />
           <button
             onClick={doSaveDraft}

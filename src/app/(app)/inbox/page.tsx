@@ -5,6 +5,7 @@ import { activeUsers, getUser } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { followUpCount, getAll as allLeads } from "@/lib/stores/leads";
 import { crmModeOn } from "@/lib/stores/notif-prefs";
+import { signatureFor } from "@/lib/stores/signatures";
 import { groupCompanyOptions } from "@/lib/vendor-status";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
@@ -266,6 +267,7 @@ export default async function InboxPage({
   // Read up front (punch #42): threadsIn's opts.crmMode needs the resolved
   // value, so it can't sit in the Promise.all below alongside threadsIn itself.
   const crmMode = await crmModeOn(me);
+  const signature = await signatureFor(me); // #127
 
   /* ---- parallel loads ---- */
   const [
@@ -1014,6 +1016,7 @@ export default async function InboxPage({
             initialLog={initialLog}
             categoryOptions={CATEGORIES}
             crmMode={crmMode}
+            signature={signature}
           />
         </div>
       </div>

@@ -35,6 +35,7 @@ import { planLabelCommands, collapseLabelEventsByThread } from "@/lib/gmail/labe
 import { LINK_TYPE_OPTIONS, newQuoteHref, quoteNameFromSubject } from "@/lib/inbox-links";
 import { firstRecipient, identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 import { clampListWidth, parseListWidth, parseSideCollapsed, LIST_WIDTH_DEFAULT } from "@/lib/inbox-layout";
+import { hasSignature, normalizeSignature, signatureBlock, withSignature, SIGNATURE_MAX } from "@/lib/inbox-signature";
 import {
   normalizeEngagementRecord, getEngagement, type EngagementPhase, createManualEngagement, allEngagements,
   setMilestonePhase, patchEngagement,
@@ -9298,6 +9299,27 @@ import {
   ok(parseListWidth("garbage") === LIST_WIDTH_DEFAULT && parseListWidth(null) === LIST_WIDTH_DEFAULT && parseListWidth("") === LIST_WIDTH_DEFAULT, "parseListWidth: bad/absent → the default");
   ok(parseSideCollapsed("1") === true, "parseSideCollapsed: '1' → collapsed");
   ok(parseSideCollapsed("0") === false && parseSideCollapsed(null) === false && parseSideCollapsed("garbage") === false, "parseSideCollapsed: anything else → not collapsed");
+}
+
+/* ---- Inbox round 3 (#127) — signature block ---- */
+{
+  const sig = "Jeff Chesebro\nPeak Systems Group";
+  ok(signatureBlock("") === "" && signatureBlock("  \n ") === "", "signatureBlock: empty → no block");
+  ok(signatureBlock(" " + sig + "\r\n") === "\n\n-- \n" + sig, "signatureBlock: '\\n\\n-- \\n' + trimmed, CRLF normalised");
+  ok(withSignature("", sig, "add") === "\n\n-- \n" + sig, "add: the reply/new seed is the bare block (cursor stays above it)");
+  ok(withSignature("Thanks!", sig, "add") === "Thanks!\n\n-- \n" + sig, "add: appends below the text");
+  ok(withSignature("Thanks!\n\n-- \n" + sig, sig, "add") === "Thanks!\n\n-- \n" + sig, "add: idempotent");
+  ok(withSignature("Thanks!", "", "add") === "Thanks!", "add: no signature configured → untouched");
+  ok(withSignature("\n\n-- \n" + sig, sig, "strip") === "", "strip: the bare seed → empty");
+  ok(withSignature("Thanks!\n\n-- \n" + sig, sig, "strip") === "Thanks!", "strip: exact block removed, text above untouched");
+  ok(withSignature("Thanks!\n\n-- \nJeff (edited)", sig, "strip") === "Thanks!", "strip: an edited signature still goes by the -- separator");
+  ok(withSignature("Thanks!", sig, "strip") === "Thanks!", "strip: nothing to strip → untouched");
+  const fwd = "\n\n---------- Forwarded ----------\nFrom: Brenda\n\n> hi";
+  ok(withSignature(fwd, sig, "add") === "\n\n-- \n" + sig + fwd, "add: forward keeps the forwarded block, signature above it");
+  ok(withSignature("\n\n-- \n" + sig + fwd, sig, "strip") === fwd, "strip: forward gives the forwarded block back");
+  ok(withSignature("\n\n-- \nJeff edited" + fwd, sig, "strip") === fwd, "strip: edited signature above a forwarded block → cut to the next blank line");
+  ok(hasSignature("x\n-- \ny") && !hasSignature("x\n--\ny") && !hasSignature("x -- y"), "hasSignature: the exact '\\n-- \\n' separator");
+  ok(normalizeSignature("a".repeat(2500)).length === SIGNATURE_MAX, "normalizeSignature caps at SIGNATURE_MAX");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async

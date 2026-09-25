@@ -2089,6 +2089,24 @@ async function main() {
     assert.equal(await setIdentityMessage("C-r3-no-such-thread", "m1"), null, "#125 unknown thread → null");
   }
 
+  // #127 — the signature round-trips through its own blob, one key per user,
+  // merged atomically (setBlob) so it never disturbs another user's row.
+  {
+    const { setSignature, signatureFor } = await import("@/lib/stores/signatures");
+    const { withSignature: withSig } = await import("@/lib/inbox-signature");
+    const r3sig = await setSignature("  Jeff Chesebro\r\nPeak Systems Group\n(218) 555-0100  \n", "Sig Tester");
+    assert.equal(r3sig, "Jeff Chesebro\nPeak Systems Group\n(218) 555-0100", "#127 setSignature normalises line endings and trims");
+    assert.equal(await signatureFor("Sig Tester"), r3sig, "#127 signatureFor round-trips");
+    assert.ok(withSig("", r3sig, "add").includes("\n-- \n"), "#127 the composer seed carries the -- separator");
+    await setSignature("Someone Else's sig", "Other Tester");
+    assert.equal(await signatureFor("Sig Tester"), r3sig, "#127 a second user's signature never overwrites the first (per-key merge)");
+    assert.equal((await setSignature("x".repeat(2500), "Sig Tester")).length, 2000, "#127 the store caps at 2,000 chars");
+    await setSignature("", "Sig Tester");
+    assert.equal(await signatureFor("Sig Tester"), "", "#127 an empty signature clears to ''");
+    assert.equal(await signatureFor("Other Tester"), "Someone Else's sig", "#127 clearing one user's signature leaves another's alone");
+    assert.equal(await signatureFor("Nobody Here"), "", "#127 no row → empty signature");
+  }
+
   console.log("review regression checks passed");
 }
 

@@ -101,6 +101,7 @@ export default function InboxShell({
   // state below) so the toggle flips instantly instead of waiting on the
   // server action + revalidate.
   crmMode: initialCrmMode,
+  signature,
 }: {
   box: string;
   folder: string;
@@ -122,6 +123,8 @@ export default function InboxShell({
   // Punch #42: per-user Inbox/CRM mode pref (waiting-first sort opt-in),
   // resolved server-side from the current user.
   crmMode: boolean;
+  /** #127 — the signed-in user's email signature ("" when none) */
+  signature: string;
 }) {
   const router = useRouter();
   // #126 — both remembered per browser (localStorage), hydration-safe: the
@@ -1109,6 +1112,7 @@ export default function InboxShell({
           variant="pane"
           rosterOptions={rosterOptions}
           onAfterSend={selectThread}
+          signature={signature}
         />
       </div>
 
@@ -1148,6 +1152,7 @@ export default function InboxShell({
               rosterOptions={rosterOptions}
               onClose={closeOverlay}
               onAfterSend={selectThread}
+              signature={signature}
             />
           </div>
         </>
@@ -1160,6 +1165,7 @@ export default function InboxShell({
           fromOptions={fromOptions}
           customers={customers}
           contactEmails={contactEmails}
+          signature={signature}
           onClose={() => setCompose(null)}
           onSaved={(mailbox) => {
             setCompose(null);
