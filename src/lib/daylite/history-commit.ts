@@ -113,7 +113,8 @@ const IMPORT_ACTOR = "Daylite import";
 
 type CompanyInfo = { id: string; name: string; type: string };
 
-type JulyInfo = { untouched: boolean; name: string };
+/** `quoteId`: set when a won quote already links this July record. */
+type JulyInfo = { untouched: boolean; name: string; quoteId: string | null };
 
 type Ctx = {
   plan: ReturnType<typeof planHistory>;
@@ -138,7 +139,18 @@ type Ctx = {
   julyRefs: Map<string, string>;
   /** The first work item that owns each July id — the one that counts it as kept. */
   firstOwner: Map<string, number>;
+  /** The work-list slice this call processes — floored and clamped ONCE, so
+   *  the reference scan and the commit slice always cover the same items. */
+  range: { start: number; end: number };
 };
+
+/** Floor + clamp a requested range to [0, total]; no range = the whole list. */
+function normRange(range: { start: number; end: number } | undefined, total: number): { start: number; end: number } {
+  if (!range) return { start: 0, end: total };
+  const start = Math.min(total, Math.max(0, Math.floor(Number(range.start)) || 0));
+  const end = Math.min(total, Math.max(start, Math.floor(Number(range.end)) || 0));
+  return { start, end };
+}
 
 /**
  * `range` limits the July reference scan to the retire candidates of that
@@ -167,7 +179,8 @@ async function loadContext(projectsTsv: string, oppsTsv: string, range?: { start
   const liveProjectIds = new Set(liveProjectDocs.map((d) => d.id));
   const july = new Map<string, JulyInfo>();
   for (const d of liveProjectDocs)
-    if (isJulyRecord("P-dl-", d)) july.set(d.id, { untouched: isUntouched(d), name: String(d.name ?? "") });
+    if (isJulyRecord("P-dl-", d))
+      july.set(d.id, { untouched: isUntouched(d), name: String(d.name ?? ""), quoteId: typeof d.quoteId === "string" && d.quoteId ? d.quoteId : null });
 
   const plan = planHistory({
     projects: projectsTsv ? parseTsv(projectsTsv) : [],
@@ -193,6 +206,7 @@ async function loadContext(projectsTsv: string, oppsTsv: string, range?: { start
     retireIds: new Set(plan.julyRetire.map((r) => r.julyId)),
     julyRefs: new Map(),
     firstOwner: new Map(),
+    range: normRange(range, plan.projects.length + plan.julyRetire.length + plan.quotes.length),
   };
 
   // Which work item owns each July id first (projects, then retire rows).
@@ -204,8 +218,7 @@ async function loadContext(projectsTsv: string, oppsTsv: string, range?: { start
 
   // The untouched July records this run (or chunk) could retire: what else
   // still points at them? One batched scan (./july-cleanup julyReferences).
-  const lo = range ? range.start : 0;
-  const hi = range ? range.end : Number.POSITIVE_INFINITY;
+  const { start: lo, end: hi } = ctx.range;
   const candidates = new Set<string>();
   plan.projects.forEach((p, i) => {
     if (i < lo || i >= hi) return;
@@ -339,8 +352,10 @@ function retiresId(ctx: Ctx, p: ProjectPlan, id: string): boolean {
 function keptReason(ctx: Ctx, id: string, retiring: boolean): string | null {
   const st = julyStateOf(ctx, id);
   if (st === "edited") return "edited in Quartzite";
-  if (st === "untouched" && retiring) return ctx.julyRefs.get(id) ?? null;
-  return null;
+  if (st !== "untouched" || !retiring) return null;
+  const q = ctx.july.get(id)?.quoteId;
+  if (q) return `linked to quote ${q}`;
+  return ctx.julyRefs.get(id) ?? null;
 }
 
 type RowDecision = {
@@ -535,6 +550,9 @@ function dryRunJuly(ctx: Ctx): {
       if (e) e.reason += "; linked to its sold quote";
       else linked.push({ id: target, name: ctx.july.get(target)?.name ?? target, reason: "Edited July record — linked to its sold quote" });
     }
+    // A linked untouched July record takes the import's marker (commit does
+    // the same), so it is no longer a July record.
+    if (mode === "linked") sim.july.delete(target);
     if (mode === "replacesJuly") {
       counts.julyReplaced++;
       superseded.add(target);
@@ -686,6 +704,9 @@ async function writeProject(ctx: Ctx, p: ProjectPlan, r: Resolved, by: string, i
     source: { system: "daylite", importedAt },
     stageHistory: history,
     notes: contactNote(r, by, importedAt),
+    // Overwriting a July record a won quote already links: the link survives
+    // (else syncProjectsFromQuotes would spawn a second project for that quote).
+    ...(ctx.july.get(p.id)?.quoteId ? { quoteId: ctx.july.get(p.id)!.quoteId, projectType: "system" as const } : {}),
   }, ctx.pipes, importedAt);
   // The Projects list's "Closed <date>" chip reads updatedAt (board-lib
   // dueChipLabel ← fmtDate(p.updatedAt)), so a done record carries its End
@@ -748,9 +769,14 @@ async function linkOrCreateSoldProject(
       });
       return "linked";
     }
+    const untouchedJuly = julyStateOf(ctx, targetId) === "untouched";
     await patchDoc<ProjectRecord>("projects", targetId, (doc) => {
       normalizeProject(doc, ctx.pipes);
       doc.quoteId = q.id;
+      // An untouched July record a won quote links becomes the history
+      // import's own (the marker): never again overwritten or retired as July
+      // by a later part of a split import (controller decision, 12b fix 2).
+      if (untouchedJuly) doc.source = { system: "daylite", importedAt };
       if (!doc.projectType) doc.projectType = "system";
       const pl = projectPipelineFor(ctx.pipes, doc);
       const want = q.projectStage ? stageById(pl, q.projectStage) : null;
@@ -767,6 +793,7 @@ async function linkOrCreateSoldProject(
       }
       return doc;
     });
+    ctx.july.delete(targetId);
     return "linked";
   }
   const pl = projectPipelineFor(ctx.pipes, { kind: "project" });
@@ -872,8 +899,7 @@ export async function commitHistory(
   const ctx = await loadContext(projectsTsv, oppsTsv, range);
   const { projects, julyRetire, quotes } = ctx.plan;
   const total = projects.length + julyRetire.length + quotes.length;
-  const start = range ? Math.max(0, Math.floor(range.start) || 0) : 0;
-  const end = range ? Math.min(total, Math.floor(range.end) || 0) : total;
+  const { start, end } = ctx.range;
   const slice = <T,>(list: T[], from: number): T[] => list.slice(Math.max(0, start - from), Math.max(0, end - from));
   /** Work-list index of each item in this slice (for the kept-once count). */
   const indexed = <T,>(list: T[], from: number): Array<[number, T]> =>
@@ -894,6 +920,7 @@ export async function commitHistory(
     julyMovedToRepairs: 0,
     julyRetiredSkipped: 0,
     julyEditedKept: 0,
+    julyChangedSinceKept: 0,
   };
   let skippedExisting = 0;
   const errors: string[] = [];
@@ -937,7 +964,10 @@ export async function commitHistory(
       // taken and the July record still untouched, and just retires it.
       for (const id of d.retire) {
         // The UPDATE re-checks live + no marker + untouched (time of check).
-        if (!(await retireUntouchedJuly("projects", [id])).length) continue;
+        if (!(await retireUntouchedJuly("projects", [id])).length) {
+          created.julyChangedSinceKept++; // changed since the decision → kept
+          continue;
+        }
         noteRetired(ctx, id);
         created[p.kind === "repair" ? "julyMovedToRepairs" : "julyReplaced"]++;
       }
@@ -953,7 +983,10 @@ export async function commitHistory(
     if (d.kind === "kept") countKept(i, r.julyId);
     if (d.kind !== "retire") continue;
     try {
-      if (!(await retireUntouchedJuly("projects", [r.julyId])).length) continue;
+      if (!(await retireUntouchedJuly("projects", [r.julyId])).length) {
+        created.julyChangedSinceKept++;
+        continue;
+      }
       noteRetired(ctx, r.julyId);
       created.julyRetiredSkipped++;
     } catch (e) {
@@ -1003,6 +1036,9 @@ export type FinalizeResult = {
   junkCompaniesKept: JunkKept[];
   /** Live July projects left in the data (edited ones, and any no row matched). */
   julyProjectsRemaining: number;
+  /** Leads/companies the scan chose to retire but whose guarded UPDATE matched
+   *  nothing — changed since the check, so kept. */
+  julyChangedSinceKept: number;
 };
 
 /**
@@ -1017,22 +1053,26 @@ export async function finalizeHistory(oppsIncluded: boolean, by: string): Promis
   let julyLeadsRetired = 0;
   let julyLeadsEditedKept = 0;
   let julyLeadsReferenced: Array<{ id: string; reason: string }> = [];
+  let changedSince = 0;
   if (oppsIncluded) {
     const leads = await julyLeadPlan();
     // Guarded UPDATE: a lead edited since the scan is not retired.
     julyLeadsRetired = (await retireUntouchedJuly("leads", leads.retire)).length;
+    changedSince += leads.retire.length - julyLeadsRetired;
     julyLeadsEditedKept = leads.edited.length + leads.referenced.length;
     julyLeadsReferenced = leads.referenced;
   }
   // Runs last: a lead retired above no longer holds its stub company.
   const junk = await scanJunkCompanies();
-  await retireJunkCompanies(junk.retire);
+  const junkRetired = await retireJunkCompanies(junk.retire);
+  changedSince += junk.retire.length - junkRetired.length;
   return {
     julyLeadsRetired,
     julyLeadsEditedKept,
     julyLeadsReferenced,
-    junkCompaniesRetired: junk.retire.length,
+    junkCompaniesRetired: junkRetired.length,
     junkCompaniesKept: junk.kept,
     julyProjectsRemaining: await countLiveJulyProjects(),
+    julyChangedSinceKept: changedSince,
   };
 }

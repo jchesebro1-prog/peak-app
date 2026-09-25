@@ -691,6 +691,7 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                         ["July service calls moved to Repairs", acc.created.julyMovedToRepairs || 0],
                         ["July records for skipped jobs removed", acc.created.julyRetiredSkipped || 0],
                         ["Edited July records left as is", acc.created.julyEditedKept || 0],
+                        ["July records changed since the preview — kept", acc.created.julyChangedSinceKept || 0],
                       ] as Array<[string, number]>
                     )
                       .filter(([label, n]) => n > 0 || (!label.startsWith("July") && !label.startsWith("Edited July")))
@@ -711,6 +712,8 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                       {plural(fin.result.julyLeadsRetired, "July lead", "July leads")} removed
                       {fin.result.julyLeadsEditedKept > 0 && ` (${fmt(fin.result.julyLeadsEditedKept)} edited or in use, kept)`} ·{" "}
                       {plural(fin.result.junkCompaniesRetired, "combined-name company", "combined-name companies")} retired
+                      {fin.result.julyChangedSinceKept > 0 &&
+                        ` · ${plural(fin.result.julyChangedSinceKept, "record", "records")} changed since the preview — kept`}
                       {fin.result.junkCompaniesKept.length > 0 && (
                         <details style={{ marginTop: 6 }}>
                           <summary style={{ cursor: "pointer", fontWeight: 600 }}>

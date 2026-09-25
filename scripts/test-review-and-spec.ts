@@ -7729,7 +7729,7 @@ async function dayliteSupersedeFixChecks(): Promise<void> {
   const r2 = await commitHistory("", O2, {}, "Test Admin");
   ok(r2.errors.length === 0 && r2.created.soldLinked === 2, "daylite 12b fix: Opps-only commit links both" + (r2.errors.length ? " — " + r2.errors.join("; ") : ""));
   const done2 = (await getDoc<PR>("projects", doneJuly.id))!;
-  ok(done2.stage === "complete" && !!done2.quoteId && done2.source?.system !== "daylite", `daylite 12b fix: an Opps-only import keeps the complete July job complete, linked to its quote (${done2.stage})`);
+  ok(done2.stage === "complete" && !!done2.quoteId && done2.source?.system === "daylite", `daylite 12b fix: an Opps-only import keeps the complete July job complete, linked to its quote (and now the import's) (${done2.stage})`);
   const ed2 = (await getDoc<PR>("projects", editedJuly.id))!;
   ok(
     !!ed2.quoteId && ed2.stage === editedJuly.stage && ed2.value === editedJuly.value && ed2.valueUnknown === editedJuly.valueUnknown && ed2.stageHistory.length === editedJuly.stageHistory.length,
@@ -7750,6 +7750,93 @@ async function dayliteSupersedeFixChecks(): Promise<void> {
   const fin = await finalizeHistory(false, "Test Admin");
   ok(!!(await getCompany(companyId(editedJunk))) && !fin.junkCompaniesKept.some((k) => k.id === companyId(editedJunk)), "daylite 12b fix: a combined-name company edited since creation is not a candidate");
   ok((await listDocs("leads")).some((d) => d.id === lateEdited.id), "daylite 12b fix: finalize without the Opportunities file retires no leads");
+}
+
+/* ============ Task 12b fix 2: a quote-linked July record becomes the import's; retirement misses are reported (DB) ============ */
+async function dayliteSupersedeFix2Checks(): Promise<void> {
+  const { commitHistory, finalizeHistory } = await import("@/lib/daylite/history-commit");
+  const { isUntouched, julyTestHooks, retireUntouchedJuly } = await import("@/lib/daylite/july-cleanup");
+  const { companyId, projectId, quoteId, leadId } = await import("@/lib/daylite/ids");
+  const { listDocs, upsertDoc, getDoc } = await import("@/db/doc-store");
+  const { loadPipelines } = await import("@/lib/pipelines-server");
+  const ProjStore = await import("@/lib/stores/projects");
+  const { mkLead } = await import("@/lib/stores/leads");
+  const pipes = await loadPipelines();
+  const T = new Date(2026, 6, 17, 10).getTime();
+  type PR = { id: string; source?: { system?: string }; quoteId: string | null; stage: string };
+  const julyProject = async (name: string, raw: string, stage: string, extra: Record<string, unknown> = {}) => {
+    const rec = { ...ProjStore.buildProject(projectId(name, raw), { name, customer: raw, customerId: companyId(raw), owner: "Jeff Chesebro", stage: stage as never, startedAt: T, installStart: T, installEnd: null }, pipes, T), ...extra };
+    await upsertDoc("projects", rec);
+    return rec;
+  };
+  const HP = `\tCategory\tName\tStatus\tPipeline\tStage\tDue Date\tStart Date\tEnd Date\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t\n`;
+  const HO = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t\n`;
+
+  // N1 — a split import: Opportunities first, then Projects. The won quote
+  // links the untouched July job and marks it the import's; part 2's Done row
+  // and Cancelled row for the SAME job then leave it (and its link) alone.
+  const split = await julyProject("ZJ Split Job", "ZJ Church", "complete");
+  const qid = quoteId("ZJ Split Job", "ZJ Church");
+  const O3 = HO + `\tBid\t"ZJ Split Job"\tOpen\t\t\t"$6,000.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const r3a = await commitHistory("", O3, {}, "Test Admin");
+  const linked = (await getDoc<PR>("projects", split.id))!;
+  ok(r3a.errors.length === 0 && linked.quoteId === qid && linked.source?.system === "daylite", "daylite 12b fix2: a won quote linking an untouched July job writes the daylite marker in the same patch");
+  const P3 = HP +
+    `\t\t"ZJ Split Job"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t\n` +
+    `\t\t"ZJ Split Job"\tCancelled\tBasic Install\t\t\t1/5/17\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const r3b = await commitHistory(P3, "", {}, "Test Admin");
+  const after = await getDoc<PR>("projects", split.id);
+  ok(r3b.errors.length === 0 && !!after && after.quoteId === qid, "daylite 12b fix2: part 2 (Projects) neither overwrites the link away nor retires the quote's project");
+  const nBefore = (await listDocs("projects")).length;
+  await ProjStore.syncProjectsFromQuotes();
+  const forQ = (await listDocs<PR>("projects")).filter((p) => p.quoteId === qid);
+  ok((await listDocs("projects")).length === nBefore && forQ.length === 1, `daylite 12b fix2: syncProjectsFromQuotes adds nothing — the quote keeps exactly one live project (${forQ.length})`);
+
+  // Belt and braces — a July record that already carries a quoteId (no marker):
+  // overwriting it keeps the link; a retire row keeps it with the reason.
+  const carried = await julyProject("ZJ Carry Job", "ZJ Church", "complete", { quoteId: "Q-legacy-1" });
+  const heldBack = await julyProject("ZJ Held Job", "ZJ Church", "complete", { quoteId: "Q-legacy-2" });
+  const P4 = HP +
+    `\t\t"ZJ Carry Job"\tDone\tInstallation\t\t\t1/5/18\t2/5/18\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t\n` +
+    `\t\t"ZJ Held Job"\tCancelled\tBasic Install\t\t\t1/5/17\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`;
+  const r4 = await commitHistory(P4, "", {}, "Test Admin");
+  const carriedAfter = (await getDoc<PR>("projects", carried.id))!;
+  ok(r4.errors.length === 0 && carriedAfter.source?.system === "daylite" && carriedAfter.quoteId === "Q-legacy-1", "daylite 12b fix2: overwriting a July record carries its existing quoteId forward");
+  ok(!!(await getDoc("projects", heldBack.id)) && r4.created.julyRetiredSkipped === 0 && r4.created.julyEditedKept === 1, "daylite 12b fix2: a July record linked to a quote is kept, never retired (reason: linked to quote)");
+  ok((await retireUntouchedJuly("projects", [heldBack.id])).length === 0, "daylite 12b fix2: the guarded retire UPDATE itself refuses a record with a quoteId");
+
+  // N2 — isUntouched needs real numbers (as the SQL guard does).
+  ok(isUntouched({ createdAt: T, updatedAt: T }) && !isUntouched({ createdAt: String(T), updatedAt: String(T) }) && !isUntouched({ createdAt: T }), "daylite 12b fix2: isUntouched accepts numbers only");
+
+  // N2 — a retirement whose guarded UPDATE matches nothing (the record changed
+  // after the decision) is counted as changed-since-the-preview, and kept.
+  const racer = await julyProject("ZJ Race Job", "ZJ Church", "complete");
+  julyTestHooks.beforeRetire = async (coll, ids) => {
+    if (coll === "projects" && ids.includes(racer.id)) await upsertDoc("projects", { ...racer, updatedAt: T + 10 * 60_000 });
+  };
+  let r5;
+  try {
+    r5 = await commitHistory(HP + `\t\t"ZJ Race Job"\tCancelled\tBasic Install\t\t\t1/5/17\t\t\t\t\t"ZJ Church"\t"Jeff Chesebro"\t`, "", {}, "Test Admin");
+  } finally {
+    julyTestHooks.beforeRetire = undefined;
+  }
+  ok(r5.created.julyChangedSinceKept === 1 && r5.created.julyRetiredSkipped === 0 && !!(await getDoc("projects", racer.id)), "daylite 12b fix2: a commit retirement that misses is reported as changed since the preview, and the record is kept");
+  const raceLead = mkLead({ id: leadId("ZJ Race Lead", "ZJ Church"), org: "ZJ Church", source: "existing", stage: "lost", createdAt: T });
+  await upsertDoc("leads", raceLead);
+  julyTestHooks.beforeRetire = async (coll, ids) => {
+    if (coll === "leads" && ids.includes(raceLead.id)) await upsertDoc("leads", { ...raceLead, updatedAt: T + 10 * 60_000 });
+  };
+  let fin;
+  try {
+    fin = await finalizeHistory(true, "Test Admin");
+  } finally {
+    julyTestHooks.beforeRetire = undefined;
+  }
+  ok(fin.julyChangedSinceKept === 1 && !!(await getDoc("leads", raceLead.id)), `daylite 12b fix2: a finalize lead retirement that misses is reported (${fin.julyChangedSinceKept}) and the lead kept`);
+
+  // N3 — a fractional / out-of-range chunk is normalised once: same slice, no throw.
+  const r6 = await commitHistory(P4, "", {}, "Test Admin", { start: 0.7, end: 99.2 });
+  ok(r6.total === 2 && r6.errors.length === 0 && r6.skippedExisting === 1 && r6.created.julyEditedKept === 1, "daylite 12b fix2: a fractional, past-the-end range is floored and clamped once (scan and slice agree)");
 }
 
 // #148: wait for the dev auto-seed once, up front, before any of this async
@@ -7773,6 +7860,7 @@ seeded()
   .then(() => dayliteChunkAsyncChecks())
   .then(() => dayliteSupersedeAsyncChecks())
   .then(() => dayliteSupersedeFixChecks())
+  .then(() => dayliteSupersedeFix2Checks())
   .then(() => {
     console.log(fail ? `\n${fail} FAILED` : "\nALL PASSED");
     process.exit(fail ? 1 : 0);

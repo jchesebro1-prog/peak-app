@@ -41,10 +41,19 @@ export function isJulyRecord(prefix: "P-dl-" | "L-dl-", doc: { id: string; sourc
 
 /** Doc-level timestamps: nobody edited it after the July script wrote it. */
 export function isUntouched(doc: Record<string, unknown>): boolean {
-  const c = Number(doc.createdAt);
-  const u = Number(doc.updatedAt);
-  return Number.isFinite(c) && Number.isFinite(u) && u - c < UNTOUCHED_MS;
+  // Numbers only — the same test the retirement UPDATE's SQL guard applies
+  // (jsonb_typeof = 'number'); a string timestamp is never "untouched".
+  const c = doc.createdAt;
+  const u = doc.updatedAt;
+  return typeof c === "number" && typeof u === "number" && Number.isFinite(c) && Number.isFinite(u) && u - c < UNTOUCHED_MS;
 }
+
+/**
+ * Spec-harness seam ONLY: runs just before each guarded retirement UPDATE so a
+ * test can change a record between the decision and the write (the "changed
+ * since the preview" path). Never set in app code.
+ */
+export const julyTestHooks: { beforeRetire?: (coll: "projects" | "leads" | "companies", ids: string[]) => Promise<void> } = {};
 
 /* ---------------------------------------------------------------------------
  * July leads (§3)
@@ -60,8 +69,9 @@ export async function julyLeads(): Promise<{ untouched: string[]; edited: string
   const rows = await db
     .select({
       id: t.id,
-      createdAt: sql<string | null>`${t.doc}->>'createdAt'`,
-      updatedAt: sql<string | null>`${t.doc}->>'updatedAt'`,
+      // jsonb values (not ->> text), so isUntouched sees real numbers.
+      createdAt: sql<unknown>`${t.doc}->'createdAt'`,
+      updatedAt: sql<unknown>`${t.doc}->'updatedAt'`,
       system: sql<string | null>`${t.doc}->'source'->>'system'`,
     })
     .from(t)
@@ -199,7 +209,8 @@ export async function julyReferences(
  * Soft-delete July records — re-checking every condition INSIDE the UPDATE
  * (still live, still no daylite marker, still untouched) so a record edited
  * after the preview/decision is never retired. Returns the ids actually
- * retired. The row change matches softDeleteDoc (deleted, rev + 1,
+ * retired (the caller reports the rest as changed since the check). Also never
+ * a record carrying a `quoteId`. The row change matches softDeleteDoc (deleted, rev + 1,
  * updatedAt/receivedAt; seq re-drawn by the update trigger).
  */
 export async function retireUntouchedJuly(coll: "projects" | "leads", ids: string[]): Promise<string[]> {
@@ -208,6 +219,7 @@ export async function retireUntouchedJuly(coll: "projects" | "leads", ids: strin
   const t = DOC_TABLES[coll];
   const now = Date.now();
   const done: string[] = [];
+  await julyTestHooks.beforeRetire?.(coll, ids);
   for (let i = 0; i < ids.length; i += 500) {
     const rows = await db
       .update(t)
@@ -217,6 +229,9 @@ export async function retireUntouchedJuly(coll: "projects" | "leads", ids: strin
           inArray(t.id, ids.slice(i, i + 500)),
           eq(t.deleted, false),
           sql`coalesce(${t.doc}->'source'->>'system', '') <> 'daylite'`,
+          // Never a record a won quote links — that would orphan the quote
+          // and make syncProjectsFromQuotes spawn a second project.
+          sql`coalesce(${t.doc}->>'quoteId', '') = ''`,
           sql`(case when jsonb_typeof(${t.doc}->'createdAt') = 'number' and jsonb_typeof(${t.doc}->'updatedAt') = 'number'
                 then (${t.doc}->>'updatedAt')::numeric - (${t.doc}->>'createdAt')::numeric < ${UNTOUCHED_MS}
                 else false end)`
@@ -350,9 +365,11 @@ export async function scanJunkCompanies(
  * other order would strand a live base venue under a deleted company). Both
  * UPDATEs re-check the company is still live and untouched.
  */
-export async function retireJunkCompanies(retire: JunkCompany[]): Promise<void> {
+export async function retireJunkCompanies(retire: JunkCompany[]): Promise<string[]> {
   const ids = retire.map((c) => c.id);
-  if (!ids.length) return;
+  if (!ids.length) return [];
+  await julyTestHooks.beforeRetire?.("companies", ids);
+  const done: string[] = [];
   const db = await getDb();
   const t = Date.now();
   const stillStub = (batch: string[]) =>
@@ -368,6 +385,12 @@ export async function retireJunkCompanies(retire: JunkCompany[]): Promise<void> 
           inArray(sites.companyId, db.select({ id: companies.id }).from(companies).where(stillStub(batch)))
         )
       );
-    await db.update(companies).set({ deleted: true, updatedAt: t }).where(stillStub(batch));
+    const rows = await db
+      .update(companies)
+      .set({ deleted: true, updatedAt: t })
+      .where(stillStub(batch))
+      .returning({ id: companies.id });
+    done.push(...rows.map((r) => r.id));
   }
+  return done;
 }
