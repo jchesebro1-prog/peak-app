@@ -288,6 +288,10 @@ import {
   MAX_OUTLINE_DEPTH,
 } from "@/lib/specs/outline";
 import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
+import {
+  normalizeCategoryKey, normalizeArticle, articleIdForPart, resolveSameAs, specStateOf,
+  type SpecCategoryArticle, type SpecPartLike,
+} from "@/lib/specs/articles";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -12649,4 +12653,62 @@ async function deletePartBAsyncChecks(): Promise<void> {
     "sections: partText flattens titled and untitled articles for the D94 renderer"
   );
   ok(partText([]) === "", "sections: partText of no articles is the empty string");
+}
+
+/* --- specs: category articles --- */
+{
+  const arts: SpecCategoryArticle[] = [
+    { id: "ar-drapes", sectionId: "ss-1", sort: 10, title: "Theatrical Stage Drapes", manufacturers: ["Rose Brand"], general: "A. General", categoryKeys: ["Curtains", "Soft Goods"], updatedAt: 1, updatedBy: "Jeff" },
+    { id: "ar-hoists", sectionId: "ss-1", sort: 20, title: "Packaged Hoists", manufacturers: [], general: "", categoryKeys: ["Rigging"], updatedAt: 1, updatedBy: "Jeff" },
+    { id: "ar-fix", sectionId: "ss-2", sort: 10, title: "Fixtures", manufacturers: ["ETC"], general: "", categoryKeys: ["Fixtures"], updatedAt: 1, updatedBy: "Jeff" },
+  ];
+  const sections = [
+    { id: "ss-1", number: "11 61 43", title: "Curtains", sort: 10, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "Jeff" },
+    { id: "ss-2", number: "26 55 61", title: "Fixtures", sort: 20, part1: [], part3: [], part2Style: "paragraphs" as const, quantities: "drawings" as const, updatedAt: 1, updatedBy: "Jeff" },
+  ];
+
+  ok(normalizeCategoryKey("  Soft   Goods ") === "soft goods", "articles: category keys normalize case and whitespace");
+
+  ok(articleIdForPart({ sku: "A", specArticleId: "ar-hoists" }, arts, sections) === "ar-hoists", "articles: an explicit article wins");
+  ok(articleIdForPart({ sku: "A", specArticleId: "ar-gone" }, arts, sections) === null, "articles: an explicit article that no longer exists resolves to nothing");
+  ok(articleIdForPart({ sku: "B", category: "soft goods" }, arts, sections) === "ar-drapes", "articles: the category default is case-insensitive");
+  ok(articleIdForPart({ sku: "C", category: "Nothing" }, arts, sections) === null, "articles: an unmapped category has no default");
+  ok(articleIdForPart({ sku: "D", specSectionId: "ss-1" }, arts, sections) === "ar-drapes", "articles: a legacy specSectionId resolves to that section's first article");
+  ok(articleIdForPart({ sku: "E", specSectionId: "ss-gone" }, arts, sections) === null, "articles: a legacy pointer to a missing section resolves to nothing");
+  ok(
+    articleIdForPart({ sku: "F", specArticleId: "ar-fix", category: "Curtains" }, arts, sections) === "ar-fix",
+    "articles: an explicit article beats the category default"
+  );
+
+  const bySku = new Map<string, SpecPartLike>([
+    ["BASE", { sku: "BASE", specBody: "Body.", specState: "authored" }],
+    ["PTR", { sku: "PTR", specSameAs: "BASE" }],
+    ["CHAIN", { sku: "CHAIN", specSameAs: "PTR" }],
+    ["LOOP", { sku: "LOOP", specSameAs: "LOOP" }],
+    ["GONE", { sku: "GONE", specSameAs: "NOPE" }],
+    ["DRAFT", { sku: "DRAFT", specBody: "Body.", specState: "draft" }],
+    ["BLANK", { sku: "BLANK" }],
+    ["LEGACY", { sku: "LEGACY", specBody: "Body." }],
+  ]);
+
+  ok(resolveSameAs(bySku.get("PTR")!, bySku).target?.sku === "BASE", "articles: same-as resolves one hop");
+  ok(resolveSameAs(bySku.get("PTR")!, bySku).error === null, "articles: a good same-as has no error");
+  ok((resolveSameAs(bySku.get("CHAIN")!, bySku).error || "").includes("PTR"), "articles: a same-as chain is an error naming the target");
+  ok(resolveSameAs(bySku.get("CHAIN")!, bySku).target === null, "articles: a chain resolves to nothing");
+  ok((resolveSameAs(bySku.get("LOOP")!, bySku).error || "").includes("LOOP"), "articles: a same-as cycle is an error");
+  ok((resolveSameAs(bySku.get("GONE")!, bySku).error || "").includes("NOPE"), "articles: a same-as to a missing SKU names it");
+  ok(resolveSameAs(bySku.get("BASE")!, bySku).target === null && resolveSameAs(bySku.get("BASE")!, bySku).error === null, "articles: a part with no same-as is neither a target nor an error");
+
+  ok(specStateOf(bySku.get("BASE")!, bySku) === "authored", "articles: authored body is authored");
+  ok(specStateOf(bySku.get("LEGACY")!, bySku) === "authored", "articles: a D94 body with no specState counts as authored");
+  ok(specStateOf(bySku.get("DRAFT")!, bySku) === "draft", "articles: a draft body is draft, never authored");
+  ok(specStateOf(bySku.get("PTR")!, bySku) === "same-as", "articles: a resolved pointer is same-as");
+  ok(specStateOf(bySku.get("CHAIN")!, bySku) === "missing", "articles: a chain is missing");
+  ok(specStateOf(bySku.get("BLANK")!, bySku) === "missing", "articles: no body is missing");
+
+  const junk = normalizeArticle({ id: "ar-x", sectionId: "ss-1", title: " Drapes ", manufacturers: ["Rose Brand", "", "Rose Brand"], categoryKeys: [" Curtains ", "curtains"] });
+  ok(junk.title === "Drapes", "articles: normalize trims the title");
+  ok(junk.manufacturers.length === 1, "articles: normalize drops blank and duplicate manufacturers");
+  ok(junk.categoryKeys.length === 1 && junk.categoryKeys[0] === "Curtains", "articles: normalize keeps one spelling per normalized category key");
+  ok(junk.sort === 0 && junk.general === "", "articles: normalize defaults sort and general");
 }
