@@ -1,14 +1,16 @@
 import {
   getDoc,
+  getDocRows,
   insertWithPrefixedId,
   listDocs,
+  listDocsByField,
   patchDoc,
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
 import { create as createQuote, update as updateQuote, get as getQuoteById, type Quote } from "@/lib/stores/quotes";
-import { getProject, type GridProject } from "@/lib/stores/grid-projects";
-import { buildGridQuote } from "@/lib/design/grid-quote";
+import { getProjects, type GridProject } from "@/lib/stores/grid-projects";
+import { buildGridQuote, loadGridQuoteInputs, type GridQuoteInputs } from "@/lib/design/grid-quote";
 
 /**
  * SandboxStore — the Design Dashboard's data layer. Port of app/sandbox.js
@@ -168,11 +170,31 @@ function normalizeDesign(d: DesignRecord): DesignRecord {
 
 /* ---------- CRUD ---------- */
 
-/** All designs, newest activity first (port of getAll). */
-export async function getAllDesigns(): Promise<DesignRecord[]> {
+/** All design RECORDS, newest activity first — as stored, with no live Grid
+ *  pricing (fix wave 3, I3). For reads that need only review / owner / id /
+ *  links (nav badges, reverse lookups); anything that shows a price or
+ *  completeness uses getAllDesigns. One query. */
+export async function listDesignRecords(): Promise<DesignRecord[]> {
   const list = await listDocs<DesignRecord>("designs");
-  const designs = list.map(normalizeDesign).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  return withLiveGrid(designs);
+  return list.map(normalizeDesign).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/** The designs linked to one Grid project — filtered in SQL, no live pricing. */
+export async function designsForGridProject(projectId: string): Promise<DesignRecord[]> {
+  return (await listDocsByField<DesignRecord>("designs", "gridProjectId", [projectId])).map(normalizeDesign);
+}
+
+/** All designs, newest activity first (port of getAll), with live Grid budgets / completeness. */
+export async function getAllDesigns(): Promise<DesignRecord[]> {
+  return withLiveGrid(await listDesignRecords());
+}
+
+/** Several designs by id in one read, with live Grid budgets / completeness
+ *  from ONE shared set of pricing inputs (fix wave 3). Order follows `ids`. */
+export async function getDesigns(ids: readonly string[]): Promise<DesignRecord[]> {
+  const rows = (await getDocRows<DesignRecord>("designs", ids)).filter((r) => !r.deleted);
+  const byId = new Map(rows.map((r) => [r.id, normalizeDesign(r.doc)] as const));
+  return withLiveGrid(ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : [])));
 }
 
 export async function getDesign(id: string): Promise<DesignRecord | null> {
@@ -184,12 +206,12 @@ export async function getDesign(id: string): Promise<DesignRecord | null> {
  * Read their current BOM total instead, so the Designs dashboard cannot show
  * the creation-time zero after a designer has placed equipment. Quick Design
  * records retain their saved (server-derived, D-GEM-23) equation result. */
-async function withLiveGridBudget(d: DesignRecord, project: GridProject | null): Promise<DesignRecord> {
-  if (!project) return d;
+async function withLiveGridBudget(d: DesignRecord, project: GridProject | null, inputs: GridQuoteInputs | null): Promise<DesignRecord> {
+  if (!project || !inputs) return d;
   const optionId = project.options?.[0]?.id;
   if (!optionId) return d;
   try {
-    const built = await buildGridQuote(project, optionId);
+    const built = await buildGridQuote(project, optionId, undefined, inputs);
     if (built.ok) return { ...d, budget: built.build.value };
   } catch {
     // A dashboard read must not fail because a partially edited Grid cannot
@@ -209,24 +231,49 @@ async function withLiveGridBudget(d: DesignRecord, project: GridProject | null):
  * design carries no `incomplete`, as before.
  */
 async function withLiveGrid(designs: DesignRecord[]): Promise<DesignRecord[]> {
-  const projects = await Promise.all(
-    designs.map((d) => (d.layoutMode === "manual" && d.gridProjectId ? getProject(d.gridProjectId) : Promise.resolve(null)))
-  );
-  const out = await Promise.all(designs.map((d, i) => withLiveGridBudget(d, projects[i])));
+  // Fix wave 3 (I3): ONE read for every linked project, and ONE set of
+  // pricing inputs (catalog, Grid library, Equipment-map ctx, tier memo)
+  // shared by every Grid design in the read — not a catalog load per design.
+  const linked = (d: DesignRecord) => (d.layoutMode === "manual" && d.gridProjectId ? d.gridProjectId : null);
+  const ids = designs.map(linked).filter((x): x is string => !!x);
+  const byId = ids.length ? await getProjects(ids) : new Map<string, GridProject>();
+  const projects = designs.map((d) => {
+    const id = linked(d);
+    return id ? byId.get(id) || null : null;
+  });
+  const priceable = projects.filter((p): p is GridProject => !!p && !!p.options?.[0]?.id);
+  let inputs: GridQuoteInputs | null = null;
+  if (priceable.length) {
+    try {
+      inputs = await loadGridQuoteInputs(priceable, { location: false });
+    } catch (err) {
+      // A dashboard read must not fail; the persisted budgets remain.
+      console.error("getAllDesigns: Grid pricing inputs failed to load", err);
+    }
+  }
+  const out = await Promise.all(designs.map((d, i) => withLiveGridBudget(d, projects[i], inputs)));
   const autoIdx = projects.flatMap((p, i) => (p && p.scopeInputs && p.autoEstimate ? [i] : []));
   if (!autoIdx.length) return out;
   try {
     const { autoNeedsPartMany } = await import("@/lib/design/grid-auto-fill");
     const { defaultOptionId } = await import("@/lib/design/grid-options");
-    const needs = await autoNeedsPartMany(autoIdx.map((i) => ({ project: projects[i]!, optionId: defaultOptionId(projects[i]!) })));
+    // The batch's Equipment-map ctx (built over the whole catalog) serves the
+    // completeness check too; only without one does it load its own.
+    const needs = await autoNeedsPartMany(
+      autoIdx.map((i) => ({ project: projects[i]!, optionId: defaultOptionId(projects[i]!) })),
+      inputs?.equip ?? undefined
+    );
     autoIdx.forEach((i, k) => {
       const n = needs[k];
       if (n !== null) out[i] = { ...out[i], incomplete: { needsPart: n } };
     });
   } catch (err) {
-    // A read must not fail because the map can't be priced right now; the
-    // server still refuses an incomplete Auto quote on promote (D-GEM-22).
+    // Fail CLOSED (fix wave 3): the read itself must not fail, but an Auto
+    // design whose completeness can't be checked right now reads Incomplete
+    // ("To be confirmed" on a letter, Add to Quotes disabled) — never a
+    // complete-looking price. The server still re-checks on promote (D-GEM-22).
     console.error("getAllDesigns: Auto completeness check failed", err);
+    for (const i of autoIdx) out[i] = { ...out[i], incomplete: { needsPart: Math.max(1, out[i].incomplete?.needsPart || 0) } };
   }
   return out;
 }
@@ -456,19 +503,20 @@ export async function promoteDesignToQuote(
   id: string,
   owner: string,
   /** The server's re-price this request (D-GEM-23): the quote's value, and
-   *  written back to the record so its stored budget/incomplete are fresh. */
-  price?: { needsPart: number; budget: number }
+   *  written back to the record so its stored budget/incomplete are fresh.
+   *  Required (fix wave 3) — no promote quotes a stored figure. */
+  price: { needsPart: number; budget: number }
 ): Promise<Quote | null> {
   const d = await getDesign(id);
   if (!d) return null;
-  const partial = await designToQuotePartial(id, price ? { value: price.budget } : {});
+  const partial = await designToQuotePartial(id, { value: price.budget });
   if (!partial) return null;
-  const fresh = price ? { budget: price.budget, incomplete: { needsPart: price.needsPart } } : {};
+  const fresh = { budget: price.budget, incomplete: { needsPart: price.needsPart } };
 
   const existing = d.quoteId ? await getQuoteById(d.quoteId) : null;
   if (existing && existing.status === "draft") {
     const q = await updateQuote(existing.id, { ...(partial as unknown as Partial<Quote>), owner });
-    if (price) await updateDesign(id, fresh);
+    await updateDesign(id, fresh);
     return q;
   }
 

@@ -25,7 +25,7 @@ import {
   type SysKey,
   type TierKey,
 } from "../quick/engine";
-import { tierSystems } from "@/lib/design/equipment-pricing";
+import { tierDefsFor, tierSystems } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable } from "@/lib/design/equipment-map";
 import { designRefreshHint, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
@@ -250,7 +250,9 @@ export default function DesignClient({
     const C = compute(s);
     const tierKey = (s.tier || "better") as TierKey;
     const td = TIERS.find((t) => t.key === tierKey) || TIERS[1];
-    const systems = tierSystems(C, s, tierKey, tierDefs, prices);
+    // The design's own saved line-set dial (fix wave 3), as Quick Design and the server price it.
+    const defs = tierDefsFor(s, tierDefs);
+    const systems = tierSystems(C, s, tierKey, defs, prices);
     const tot = tierTotals(systems, td, 0, 0, 0);
     const targets = targetsFromSystems(systems);
     const rows = systems
@@ -263,7 +265,7 @@ export default function DesignClient({
         sub: x.rev * (x.tierFixed ? 1 : td.priceMul),
         needsPart: targets[x.key]?.needsPart || 0,
       }));
-    const plan = buildPlan(s, gridSets(s, tierDefs), C.electrics, accentHex);
+    const plan = buildPlan(s, gridSets(s, defs), C.electrics, accentHex);
     return { s, tierLabel: td.label, rows, matRev: tot.matRev, needsPart: needsPartCount(systems), plan };
   }, [sel, tierDefs, prices, accentHex]);
 

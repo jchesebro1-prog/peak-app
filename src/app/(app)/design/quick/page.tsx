@@ -8,7 +8,7 @@ import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
-import { loadDesignPricing } from "@/lib/stores/design-pricing";
+import { loadDesignPricing, pickedFixtureIds } from "@/lib/stores/design-pricing";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
 import QuickDesignClient from "./quick-design-client";
 import "./quick-design.css";
@@ -60,8 +60,14 @@ export default async function Page({
   // as an Equipment map assembly cell (priceCell, final review I3): its
   // included sell, or cost ÷ (1 − margin) when list-less — never a list-only
   // sum — and a pick that prices needs-a-part stays needs-a-part.
+  //
+  // Fix wave 3 (I2): the design's own picks are priced too, even one whose
+  // assembly was deleted — it prices needs-a-part here exactly as the server
+  // prices it (quickDesignPrice), so the screen can't show a complete total
+  // the server would refuse. The picker shows it as "(deleted — choose
+  // another)" so it can be changed or cleared.
   const { table: prices, fixturePrices } = await loadDesignPricing(
-    fixtureList.map((f) => f.id),
+    [...new Set([...fixtureList.map((f) => f.id), ...(design ? pickedFixtureIds(design) : [])])],
     { catalog: catalogRows, fixtures: fixtureRecords }
   );
   const fixtureAssemblies = fixtureList.map((assembly) => ({ id: assembly.id, name: assembly.name }));

@@ -283,7 +283,7 @@ See `.env.example`.
     identical totals. Remaining is Jeff-gated: run the conversion on
     production and review any "needs review" fixtures. Decisions
     D294–D300; punch item #210.
-17. ✅ **Grid Equipment map + one intake** (#GEM, D-GEM-1…D-GEM-23) — every
+17. ✅ **Grid Equipment map + one intake** (#GEM, D-GEM-1…D-GEM-25) — every
     equation item (`src/lib/design/equipment-vocab.ts`, 46 `system:itemKey`
     rows) × tier maps to a catalog part, a fixture/System assembly or a
     confirmed allowance in Grid Settings → Equipment map (blob

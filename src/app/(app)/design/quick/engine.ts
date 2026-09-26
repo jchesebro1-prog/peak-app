@@ -144,6 +144,12 @@ export type AState = {
    *  quantities the screen showed (#GEM D-GEM-23). Missing = the equation's
    *  own count (tierDefsDefault). */
   tierSets?: Partial<Record<TierKey, number | null>>;
+  /** Units of the qty overrides whose meaning changed (#GEM fix wave 3,
+   *  D-GEM-24): `{ "curtains:Scenery track": "ft" }` marks a config whose
+   *  Scenery-track override is FEET. A saved config without the marker
+   *  predates it — its Scenery-track override is a run COUNT and is dropped
+   *  on hydrate. Every hydrated / default state carries the marker. */
+  overrideUnits?: Record<string, string>;
 };
 
 /**
@@ -175,6 +181,7 @@ export type QuickScopeInputs = Omit<
   | "planName"
   | "showGen"
   | "tierSets"
+  | "overrideUnits"
 >;
 
 /* -------------------------------- constants -------------------------------- */
@@ -699,6 +706,25 @@ export function applyOverrides(systems: SystemBlock[], s: AState, tierKey: TierK
   });
 }
 
+/** The Quick Design BOM's qty edit (setQtyOverride): the typed value as a
+ *  whole number ≥ 0 (junk → 0) at tier → system → desc. A Scenery-track
+ *  edit is in FEET — the row's unit (D-GEM-24). */
+export function withQtyOverride(
+  cur: AState["qtyOverrides"] | undefined,
+  tk: TierKey,
+  sysKey: string,
+  desc: string,
+  raw: string
+): AState["qtyOverrides"] {
+  let v = parseInt(raw, 10);
+  if (isNaN(v) || v < 0) v = 0;
+  const ov = JSON.parse(JSON.stringify(cur || {})) as AState["qtyOverrides"];
+  ov[tk] = ov[tk] || {};
+  ov[tk]![sysKey] = ov[tk]![sysKey] || {};
+  ov[tk]![sysKey][desc] = v;
+  return ov;
+}
+
 /* --------------------------------- riser --------------------------------- */
 
 export type RiserNode = {
@@ -747,7 +773,7 @@ export function defaultAState(contingencyPct: number): AState {
     sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: false, video: false, acoustical: true, pit: true },
     view: "estimate",
     tier: "better",
-    contingency: contingencyPct,
+    contingency: contingencyValue(contingencyPct),
     rigType: "motorized",
     drape: { draw: true, legs: true, border: true, scenerytrack: false, fullstage: true },
     fixtures: { par: true, front: true, cyc: true, side: true, automated: true },
@@ -758,6 +784,7 @@ export function defaultAState(contingencyPct: number): AState {
     qtyOverrides: {},
     mode: "auto",
     placements: [],
+    overrideUnits: { ...OVERRIDE_UNITS },
   };
 }
 
@@ -799,45 +826,88 @@ export function reconstruct(d: DesignRecordLike, base: AState): AState {
   return out;
 }
 
-/**
- * A saved "Scenery track" qty override (qtyOverrides[tier].curtains["Scenery
- * track"]) predates #GEM T5: it was a COUNT of track runs. The row now emits
- * FEET (depth blocks × pipe length — see compute()), so an old override's
- * number means something different than it did when it was saved. There is
- * no safe conversion (we don't know the pipe length it was saved against),
- * so hydrateAState drops the key rather than silently mis-applying it; the
- * calculated (correct) feet quantity is used until the designer re-edits it.
- */
-function dropStaleSceneryTrackOverride(qtyOverrides: AState["qtyOverrides"]): AState["qtyOverrides"] {
-  if (!qtyOverrides) return qtyOverrides;
-  let changed = false;
-  const next: AState["qtyOverrides"] = {};
-  for (const [tier, bySys] of Object.entries(qtyOverrides) as Array<[TierKey, Record<string, Record<string, number>>]>) {
-    if (bySys && bySys.curtains && Object.prototype.hasOwnProperty.call(bySys.curtains, "Scenery track")) {
-      changed = true;
-      const restCurtains = { ...bySys.curtains };
-      delete restCurtains["Scenery track"];
-      next[tier] = { ...bySys, curtains: restCurtains };
-    } else {
-      next[tier] = bySys;
-    }
-  }
-  return changed ? next : qtyOverrides;
+/** The qty override whose unit changed: a Scenery-track run COUNT before
+ *  #GEM T5, FEET since (depth blocks × pipe length — see compute()). */
+export const SCENERY_TRACK_OVERRIDE = "curtains:Scenery track";
+
+/** The override-units marker every config written since #GEM fix wave 3
+ *  carries (D-GEM-24). */
+export const OVERRIDE_UNITS: Readonly<Record<string, string>> = Object.freeze({ [SCENERY_TRACK_OVERRIDE]: "ft" });
+
+/** The contingency dial's range (the screen's slider, 0–25 %, whole numbers). */
+export function contingencyValue(v: unknown): number {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) ? clamp(n, 0, 25) : 0;
 }
 
-/** hydrate designer state from a saved record: full config when present, else reconstruct. */
+/**
+ * A saved config's qty overrides, cleaned the way the screen writes them
+ * (#GEM fix wave 3): whole numbers ≥ 0 (setQtyOverride), anything else
+ * dropped. `feet` false — a config saved before the override-units marker —
+ * also drops the Scenery-track override: it was a COUNT of track runs, the
+ * row now emits FEET, and there is no safe conversion (the pipe length it was
+ * saved against is unknown), so the calculated feet are used until the
+ * designer re-edits it. A marked (feet) override is kept, so the server
+ * prices the same quantity the screen showed (D-GEM-24).
+ */
+export function cleanQtyOverrides(raw: unknown, feet: boolean): AState["qtyOverrides"] {
+  const out: AState["qtyOverrides"] = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [tier, bySys] of Object.entries(raw as Record<string, unknown>)) {
+    if (!bySys || typeof bySys !== "object" || Array.isArray(bySys)) continue;
+    const sysOut: Record<string, Record<string, number>> = {};
+    for (const [sysKey, byDesc] of Object.entries(bySys as Record<string, unknown>)) {
+      if (!byDesc || typeof byDesc !== "object" || Array.isArray(byDesc)) continue;
+      const descOut: Record<string, number> = {};
+      for (const [desc, v] of Object.entries(byDesc as Record<string, unknown>)) {
+        if (!feet && `${sysKey}:${desc}` === SCENERY_TRACK_OVERRIDE) continue;
+        if (typeof v !== "number" || !Number.isFinite(v)) continue;
+        descOut[desc] = Math.max(0, Math.trunc(v));
+      }
+      sysOut[sysKey] = descOut;
+    }
+    out[tier as TierKey] = sysOut;
+  }
+  return out;
+}
+
+/** Whether a saved config's Scenery-track override is in feet (D-GEM-24). */
+export function overridesInFeet(cfg: { overrideUnits?: unknown } | null | undefined): boolean {
+  const u = cfg?.overrideUnits;
+  return !!u && typeof u === "object" && (u as Record<string, unknown>)[SCENERY_TRACK_OVERRIDE] === "ft";
+}
+
+/**
+ * A saved config (a design's, or a revision's being restored) laid over a
+ * state, cleaned exactly as the server reads it (#GEM fix wave 3): the
+ * versioned qty overrides, contingency 0–25, a known tier, and the
+ * override-units marker — so the screen shows what the server prices.
+ */
+export function applySavedConfig(base: AState, cfg: Partial<AState>): AState {
+  const merged: AState = { ...base, ...cfg, sys: { ...base.sys, ...(cfg.sys || {}) } };
+  // Only touch qtyOverrides when the saved config actually carries one —
+  // a config that never set the key falls through to base's, exactly like
+  // every other omitted AState field here.
+  if (cfg.qtyOverrides !== undefined) merged.qtyOverrides = cleanQtyOverrides(cfg.qtyOverrides, overridesInFeet(cfg));
+  merged.contingency = contingencyValue(merged.contingency);
+  if (!TIERS.some((t) => t.key === merged.tier)) merged.tier = "better";
+  merged.overrideUnits = { ...OVERRIDE_UNITS };
+  return merged;
+}
+
+/**
+ * hydrate designer state from a saved record: full config when present, else
+ * reconstruct. A hydrated state always carries `tierSets` (the saved dial, or
+ * `{}` — the equation's own count), so a saved design prices the same
+ * rigging quantities in every browser and on the server (D-GEM-23); only a
+ * brand-new design (defaultAState) follows this browser's line-sets dial.
+ */
 export function hydrateAState(d: DesignRecordLike, contingencyPct: number): AState {
   const base = defaultAState(contingencyPct);
-  if (d.config) {
-    const cfg = d.config as Partial<AState>;
-    const merged: AState = { ...base, ...cfg, sys: { ...base.sys, ...(cfg.sys || {}) } };
-    // Only touch qtyOverrides when the saved config actually carries one —
-    // a config that never set the key must fall through to base's default
-    // ({}), exactly like every other omitted AState field here.
-    if (cfg.qtyOverrides !== undefined) merged.qtyOverrides = dropStaleSceneryTrackOverride(cfg.qtyOverrides);
-    return merged;
-  }
-  return reconstruct(d, base);
+  const out = d.config ? applySavedConfig(base, d.config as Partial<AState>) : reconstruct(d, base);
+  if (!out.tierSets || typeof out.tierSets !== "object" || Array.isArray(out.tierSets)) out.tierSets = {};
+  if (!TIERS.some((t) => t.key === out.tier)) out.tier = "better";
+  return out;
 }
 
 /** The auto-suffix of the design name: "{Tier} design (W'×D')". */

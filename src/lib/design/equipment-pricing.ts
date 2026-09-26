@@ -12,12 +12,14 @@
 import { curtainCost, makingRateFor } from "./curtain-pricing";
 import {
   applyOverrides,
+  clamp,
   compute,
   hydrateAState,
   scaleSets,
   tierDefsDefault,
   tierTotals,
   TIERS,
+  OVERRIDE_UNITS,
   type AState,
   type DesignRecordLike,
   type BomItem,
@@ -136,22 +138,61 @@ export type QuickRates = { installPct: number; freightPct: number; contingencyPc
 /** A Quick design's server-derived price (#GEM D-GEM-19/D-GEM-23). */
 export type QuickDesignPrice = { needsPart: number; budget: number };
 
+/** One tier's line-set count as the screen's dial accepts it (1–300, whole),
+ *  or null — the rigging equation's own count — for anything else. */
+export function lineSetsValue(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? clamp(Math.round(v), 1, 300) : null;
+}
+
 /**
- * tierDefsDefault() with the design's own line-set counts (`config.tierSets`,
- * D-GEM-23) — the per-browser line-sets dial, snapshotted at save. It only
- * rescales rigging QUANTITIES (like qtyOverrides, which `config` already
- * carries); no price comes from the client.
+ * The tier definitions a design prices with (D-GEM-23, fix wave 3): `base`
+ * (the authored defaults on the server; this browser's own tier defs on the
+ * screen) with the design's line-set counts (`config.tierSets`) laid over it.
+ * A state with `tierSets` — every hydrated (saved) design — takes ALL THREE
+ * counts from it (a missing / junk one = the equation's count), so a saved
+ * design prices the same in every browser and on the server; only a brand-new
+ * design (no `tierSets` yet) follows the browser's dial. It rescales rigging
+ * QUANTITIES only; no price comes from the client.
  */
-export function tierDefsFor(s: Pick<AState, "tierSets">): TierDefs {
-  const td = tierDefsDefault();
+export function tierDefsFor(s: Pick<AState, "tierSets">, base: TierDefs = tierDefsDefault()): TierDefs {
+  const td = JSON.parse(JSON.stringify(base)) as TierDefs;
   const sets = s.tierSets;
-  if (sets && typeof sets === "object") {
-    for (const t of TIER_KEYS) {
-      const v = (sets as Record<string, unknown>)[t];
-      if (typeof v === "number" && Number.isFinite(v) && v >= 0) td[t].sets = Math.min(Math.round(v), 999);
-    }
+  if (sets && typeof sets === "object" && !Array.isArray(sets)) {
+    for (const t of TIER_KEYS) td[t].sets = lineSetsValue((sets as Record<string, unknown>)[t]);
   }
   return td;
+}
+
+/**
+ * Quick Design's live figure for its current state (#GEM fix wave 3) — the
+ * same calls the screen's selected-tier total makes (map pricing on the
+ * line-set-scaled BOM, the tier's qty overrides, tierTotals), in whole
+ * dollars as the screen shows it. The parity specs hold this equal to
+ * quickDesignPrice() of the record the screen saves.
+ */
+export function quickScreenPrice(
+  a: AState,
+  tierDefs: TierDefs,
+  table: EquipmentPriceTable,
+  fixturePrices: Record<string, UnitPrice>,
+  rates: QuickRates
+): QuickDesignPrice {
+  const tier = (a.tier || "better") as TierKey;
+  const td = TIERS.find((t) => t.key === tier) || TIERS[1];
+  const base = tierSystemsBase(compute(a), a, tier, tierDefs, table, fixtureOverridesFor(a.fixtureAssemblies, fixturePrices));
+  const systems = applyOverrides(base, a, tier);
+  const tot = tierTotals(systems, td, rates.installPct / 100, rates.freightPct / 100, (a.contingency ?? 0) / 100);
+  return { needsPart: needsPartCount(systems), budget: Number.isFinite(tot.grand) ? Math.round(tot.grand) : 0 };
+}
+
+/** The `config` a Quick Design save sends: the whole live state, the line-set
+ *  counts it priced with (D-GEM-23) and the override-units marker (D-GEM-24). */
+export function quickSaveConfig(a: AState, tierDefs: TierDefs): Record<string, unknown> {
+  return {
+    ...(JSON.parse(JSON.stringify(a)) as Record<string, unknown>),
+    tierSets: { good: tierDefs.good.sets, better: tierDefs.better.sets, best: tierDefs.best.sets },
+    overrideUnits: { ...OVERRIDE_UNITS },
+  };
 }
 
 /**
@@ -171,13 +212,12 @@ export function quickDesignPrice(
   rates: QuickRates
 ): QuickDesignPrice {
   try {
+    // hydrateAState applies the screen's own clamps (contingency 0–25, qty
+    // overrides whole ≥ 0, a known tier; the versioned Scenery-track
+    // override, D-GEM-24) and tierDefsFor the dial's (line sets 1–300), so
+    // this is the figure the screen shows for the same saved record.
     const s = hydrateAState(d, rates.contingencyPct);
-    const tier = TIER_KEYS.includes(s.tier) ? s.tier : "better";
-    const td = TIERS.find((t) => t.key === tier) || TIERS[1];
-    const systems = tierSystems(compute(s), s, tier, tierDefsFor(s), table, fixtureOverridesFor(s.fixtureAssemblies, fixturePrices));
-    const tot = tierTotals(systems, td, rates.installPct / 100, rates.freightPct / 100, (Number(s.contingency) || 0) / 100);
-    // Whole dollars — what the screen shows (moneyRound) and what a quote stores.
-    return { needsPart: needsPartCount(systems), budget: Number.isFinite(tot.grand) ? Math.round(tot.grand) : 0 };
+    return quickScreenPrice(s, tierDefsFor(s), table, fixturePrices, rates);
   } catch {
     return { needsPart: 1, budget: 0 };
   }

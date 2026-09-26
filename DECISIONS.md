@@ -6223,3 +6223,34 @@ context per read, never stored), so Home, Reviews, the dashboard and the engagem
 incomplete Quick design. Because a Quick design's stored price is from its last save, an incomplete one on Home and
 the dashboard says "Open in Quick Design and save to refresh its price". A deleted (or part-less) assembly in a client
 package lands in the gap report only, never the customer's BOM.
+
+## D-GEM-24. Quick Design qty overrides are versioned; the Scenery-track override is feet (#GEM, 2026-09-26)
+
+The Scenery track row emits FEET since #GEM T5 (depth blocks × pipe length); before, its qty override was a COUNT of
+track runs. Wave 1 dropped every saved "Scenery track" override on hydrate — but the screen priced a fresh edit while
+the server (which hydrates the saved config) dropped it, so the two disagreed (the reviewer's case: 13,321 on the
+screen, 16,125 on the server). Every Quick Design save now writes `config.overrideUnits = { "curtains:Scenery track":
+"ft" }` (`quickSaveConfig`, `src/lib/design/equipment-pricing.ts`); `hydrateAState` / `applySavedConfig`
+(`quick/engine.ts`) drop the Scenery-track override only from a config WITHOUT the marker (a pre-marker count), and
+every hydrated or default state carries the marker, so a restored old revision is cleaned the same way. The same read
+applies the screen's clamps (contingency 0–25, qty overrides whole ≥ 0, a known tier; line sets 1–300 in
+`tierDefsFor`), and a saved design prices with its own line-sets dial (`config.tierSets`, restored on open; a saved
+design with no dial uses the equation's count) — only a brand-new design follows the browser's dial. The screen's
+total is `quickScreenPrice` over the live state, the server's `quickDesignPrice` is the same function over the
+hydrated config, and a design's own fixture picks — a deleted one too, shown as "(deleted — choose another)" — are
+priced on the page as on the server (needs-a-part). No stored record is rewritten.
+
+## D-GEM-25. Nav counts read design records only; a design read loads Grid pricing once (#GEM, 2026-09-26)
+
+The nav badges ran `getAllDesigns()` on every page, which priced every Grid design live — one whole-catalog load
+(~37,400 parts in production), a library read and a tier lookup PER manual design. Nav counts now read
+`listDesignRecords()` (review / owner / id — one query, no pricing), and the Grid actions' reverse lookups use
+`designsForGridProject()` (a SQL-filtered read). `getAllDesigns` / `getDesign` / the new `getDesigns(ids)` keep live
+Grid budgets and Auto completeness, but load the linked projects in one read and ONE set of pricing inputs per read
+(`loadGridQuoteInputs`, `src/lib/design/grid-quote.ts`: catalog, Grid library, the Equipment-map ctx over that catalog
+when any Auto part is placed, a per-customer tier memo; no site lookup), which `buildGridQuote` accepts preloaded and
+`autoNeedsPartMany` reuses. With N plain Grid designs a design read went from 1 + 4N queries (N catalog loads) to 5
+(one), and nav counts from 13 + 4N + 1 to 14 (none). If the Auto completeness check fails, the Auto designs in that
+read are marked incomplete (fail closed), never shown complete. The engagement letter reads only its designs
+(`getDesigns`) and re-derives a Quick design's completeness and budget with `serverDesignPrices` (one price context),
+so a stored pre-wave-2 budget never prints when the map would call the design incomplete.

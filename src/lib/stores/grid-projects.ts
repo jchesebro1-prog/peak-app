@@ -1,5 +1,6 @@
 import {
   getDoc,
+  getDocRows,
   insertWithPrefixedId,
   listDocs,
   patchDoc,
@@ -294,6 +295,13 @@ export async function listProjects(): Promise<GridProject[]> {
 export async function getProject(id: string): Promise<GridProject | null> {
   const p = await getDoc<GridProject>("grid_projects", id);
   return p ? ensureOptions(p) : null;
+}
+
+/** Live projects by id in ONE read (fix wave 3, I3) — a design list's
+ *  linked projects, not one getDoc per design. Missing/deleted ids are absent. */
+export async function getProjects(ids: readonly string[]): Promise<Map<string, GridProject>> {
+  const rows = await getDocRows<GridProject>("grid_projects", ids);
+  return new Map(rows.filter((r) => !r.deleted).map((r) => [r.id, ensureOptions(r.doc)] as const));
 }
 
 export async function createProject(input: {

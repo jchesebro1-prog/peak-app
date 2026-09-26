@@ -79,7 +79,7 @@ export default function ScopeInputsPanel({
   value,
   onChange,
   systems,
-  fixtureAssemblies = [],
+  fixtureAssemblies: fixtureAssembliesProp,
   accentHex,
 }: {
   value: QuickScopeInputs;
@@ -96,6 +96,16 @@ export default function ScopeInputsPanel({
   const venue = venueOf(value);
 
   const update = (patch: Partial<QuickScopeInputs>) => onChange(patch);
+  /** A fixture pick whose assembly is no longer offered (deleted) — fix wave
+   *  3, I2: it prices needs-a-part, so the picker shows it and lets it be changed. */
+  const fixtureAssemblies = fixtureAssembliesProp || [];
+  const liveAssemblyIds = new Set(fixtureAssemblies.map((x) => x.id));
+  const isDeadPick = (fxKey: string) => {
+    const id = value.fixtureAssemblies?.[fxKey];
+    return !!id && !liveAssemblyIds.has(id);
+  };
+  // Only where the picker is offered (Quick Design) — Manual mode omits it.
+  const deadPicks = fixtureAssembliesProp ? Object.keys(value.fixtureAssemblies || {}).filter((k) => !!value.fixtures?.[k] && isDeadPick(k)) : [];
   const setVenue = (vk: string) => {
     const v = VENUES.find((x) => x.key === vk) || VENUES[0];
     const d = sizedDims(v, value.size);
@@ -232,7 +242,7 @@ export default function ScopeInputsPanel({
                     ))}
                   </div>
                 )}
-                {on && key === "lighting" && fixtureAssemblies.length > 0 && (
+                {on && key === "lighting" && (fixtureAssemblies.length > 0 || deadPicks.length > 0) && (
                   <div style={{ display: "grid", gap: 6, padding: "4px 2px 6px" }}>
                     {([["par", "Par"], ["front", "Front"], ["cyc", "Cyc"], ["side", "Side light"], ["automated", "Automated"]] as Array<[string, string]>)
                       .filter(([fxKey]) => !!value.fixtures?.[fxKey])
@@ -242,8 +252,10 @@ export default function ScopeInputsPanel({
                           <select
                             value={value.fixtureAssemblies?.[fxKey] || ""}
                             onChange={(event) => update({ fixtureAssemblies: { ...(value.fixtureAssemblies || {}), [fxKey]: event.target.value } })}
-                            style={{ minWidth: 0, border: "1px solid #e4e7ec", borderRadius: 7, padding: "6px 8px", background: "#fff", fontSize: 11.5 }}
+                            title={isDeadPick(fxKey) ? "This assembly was deleted — the row needs a part until you choose another" : undefined}
+                            style={{ minWidth: 0, border: `1px solid ${isDeadPick(fxKey) ? "#d9a08f" : "#e4e7ec"}`, borderRadius: 7, padding: "6px 8px", background: isDeadPick(fxKey) ? "#fdf1ed" : "#fff", color: isDeadPick(fxKey) ? "#a0442b" : undefined, fontSize: 11.5 }}
                           >
+                            {isDeadPick(fxKey) && <option value={value.fixtureAssemblies![fxKey]}>(deleted — choose another)</option>}
                             <option value="">Generic allowance</option>
                             {fixtureAssemblies.map((assembly) => (
                               <option key={assembly.id} value={assembly.id}>{assembly.name}</option>

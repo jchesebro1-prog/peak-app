@@ -18568,3 +18568,88 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
   ok(gemW2Hint({ incomplete: { needsPart: 2 } }) === gemW2HintText && gemW2Hint({ layoutMode: "manual", incomplete: { needsPart: 2 } }) === null && gemW2Hint({ incomplete: { needsPart: 0 } }) === null && gemW2HintText === "Open in Quick Design and save to refresh its price", "#GEM wave 2 M5: the refresh hint is for incomplete Quick designs only");
   ok(read("src/app/(app)/_dashboard/widgets/home-cards.tsx").includes("hint: designRefreshHint(d)") && read("src/app/(app)/home-my-designs.tsx").includes("{d.hint} →") && read("src/app/(app)/design/designs/design-client.tsx").includes("designRefreshHint(d)"), "#GEM wave 2 M5: Home and the Designs dashboard say how to refresh a stale incomplete price");
 }
+
+/* --- #GEM fix wave 3: Scenery-track override versioning (D-GEM-24), dead
+       fixture picks on the screen, plain nav read + one shared Grid pricing
+       load (D-GEM-25), clamps / saved line-set dial parity, fail-closed Auto
+       completeness, revision snapshot from the saved record, required
+       promote price, letter re-derivation. Parity uses the LIVE screen state
+       (quickScreenPrice over the state the designer edited), never a
+       re-hydrated config. --- */
+import {
+  quickScreenPrice as gemW3Screen, quickSaveConfig as gemW3SaveCfg, quickDesignPrice as gemW3Price,
+  tierDefsFor as gemW3TierDefs, fixtureOverridesFor as gemW3FxOv, lineSetsValue as gemW3Sets,
+} from "@/lib/design/equipment-pricing";
+import {
+  defaultAState as gemW3Default, withQtyOverride as gemW3Ov, tierDefsDefault as gemW3TdDefault,
+  hydrateAState as gemW3Hydrate, applySavedConfig as gemW3Apply, OVERRIDE_UNITS as gemW3Units,
+} from "@/app/(app)/design/quick/engine";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const table = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
+  const td = gemW3TdDefault();
+  // I1 — the reviewer's case: Scenery track on, the designer types 5 (feet) on the BOM.
+  const a0 = { ...gemW3Default(10), drape: { ...gemW3Default(10).drape, scenerytrack: true } };
+  const live = { ...a0, qtyOverrides: gemW3Ov(a0.qtyOverrides, "better", "curtains", "Scenery track", "5") };
+  const calc = gemW3Screen(a0, td, table, {}, rates);
+  const screen = gemW3Screen(live, td, table, {}, rates);
+  const cfg = gemW3SaveCfg(live, td);
+  const server = gemW3Price({ tier: "better", config: cfg }, table, {}, rates);
+  ok(screen.budget !== calc.budget, `#GEM wave 3 I1: the Scenery-track edit changes the screen total (${calc.budget} → ${screen.budget})`);
+  ok(server.budget === screen.budget && server.needsPart === screen.needsPart, `#GEM wave 3 I1: screen total == server total with a Scenery-track edit of 5 (${screen.budget} vs ${server.budget}; was ${calc.budget} on the server before wave 3)`);
+  ok(screen.budget === 13321 && calc.budget === 16125, `#GEM wave 3 I1: the reviewer's figures reproduce — 13321 on the screen, 16125 when the edit is dropped (${screen.budget} / ${calc.budget})`);
+  ok(JSON.stringify(cfg.overrideUnits) === JSON.stringify({ "curtains:Scenery track": "ft" }) && JSON.stringify(gemW3Units) === JSON.stringify(cfg.overrideUnits), "#GEM wave 3 I1: a save marks its overrides as feet");
+  const { overrideUnits: _drop, ...oldCfg } = cfg;
+  void _drop;
+  ok(gemW3Price({ tier: "better", config: oldCfg }, table, {}, rates).budget === calc.budget, "#GEM wave 3 I1: an unmarked (pre-wave-3) config's Scenery-track override is still dropped — it was a run count");
+  const reopened = gemW3Hydrate({ tier: "better", config: cfg }, 10);
+  ok(reopened.qtyOverrides.better?.curtains?.["Scenery track"] === 5 && gemW3Screen(reopened, gemW3TierDefs(reopened, td), table, {}, rates).budget === server.budget, "#GEM wave 3 I1: reopening the saved design keeps the feet override and shows the server's figure");
+  const restored = gemW3Apply(live, { qtyOverrides: { better: { curtains: { "Scenery track": 3 } } } } as never);
+  ok(restored.qtyOverrides.better?.curtains?.["Scenery track"] === undefined && restored.overrideUnits?.["curtains:Scenery track"] === "ft", "#GEM wave 3 I1: restoring an old (unmarked) revision drops its count-style override on the screen too");
+  // Minor — the screen's clamps, mirrored on the server through hydrate / tierDefsFor.
+  const wild = gemW3Hydrate({ tier: "nope", config: { contingency: 40, tier: "nope", qtyOverrides: { better: { lighting: { Par: -3, Front: 2.7, Cyc: "9" } } }, overrideUnits: { "curtains:Scenery track": "ft" } } }, 10);
+  ok(wild.contingency === 25 && wild.tier === "better" && wild.qtyOverrides.better?.lighting?.Par === 0 && wild.qtyOverrides.better?.lighting?.Front === 2 && !("Cyc" in (wild.qtyOverrides.better?.lighting || {})), "#GEM wave 3 minor: contingency 0–25, whole qty overrides ≥ 0, a known tier");
+  ok(gemW3Hydrate({ config: { contingency: -5 } }, 10).contingency === 0 && gemW3Default(40).contingency === 25, "#GEM wave 3 minor: contingency clamps at both ends, new designs too");
+  ok(gemW3Sets(0) === 1 && gemW3Sets(500) === 300 && gemW3Sets(12.4) === 12 && gemW3Sets(-1) === null && gemW3Sets("7") === null, "#GEM wave 3 minor: line sets 1–300, junk = the equation's count");
+  // The line-set dial: a saved design prices with ITS dial in any browser; a new one follows the browser's.
+  const browser = gemW3TdDefault();
+  browser.better.sets = 40;
+  const savedSets = gemW3Hydrate({ tier: "better", config: { ...gemW3SaveCfg(a0, td), tierSets: { good: null, better: 23, best: null } } }, 10);
+  ok(gemW3TierDefs(savedSets, browser).better.sets === 23 && gemW3Screen(savedSets, gemW3TierDefs(savedSets, browser), table, {}, rates).budget === gemW3Price({ tier: "better", config: { ...gemW3SaveCfg(a0, td), tierSets: { good: null, better: 23, best: null } } }, table, {}, rates).budget, "#GEM wave 3 minor: opening a saved design restores its line-sets dial — this browser's 40 doesn't change its total");
+  const preW2 = gemW3Hydrate({ tier: "better", config: { ...gemW3Default(10) } as never }, 10);
+  ok(gemW3TierDefs(preW2, browser).better.sets === null && gemW3TierDefs({}, browser).better.sets === 40, "#GEM wave 3 minor: a saved design with no dial prices at the equation's count (as the server does); only a new design follows the browser's dial");
+  // I2 — a dead pick is priced needs-a-part on the screen, as on the server.
+  const dead = { status: "needs-part" as const, ref: "", desc: "Assembly fa-gone was deleted", unit: "ea", unitCost: 0, unitSell: 0 };
+  const withPick = { ...a0, fixtureAssemblies: { par: "fa-gone" } };
+  const fxPrices = { "fa-gone": dead } as never;
+  ok(gemW3FxOv(withPick.fixtureAssemblies, fxPrices)["lighting:par"]?.status === "needs-part", "#GEM wave 3 I2: a dead pick's entry overrides the row as needs-a-part");
+  const scr = gemW3Screen(withPick, td, table, fxPrices, rates);
+  const srv = gemW3Price({ tier: "better", config: gemW3SaveCfg(withPick, td) }, table, fxPrices, rates);
+  ok(scr.needsPart > 0 && scr.needsPart === srv.needsPart && scr.budget === srv.budget, `#GEM wave 3 I2: screen and server agree on a dead pick (${scr.needsPart}/${srv.needsPart} needs-a-part)`);
+  const qp = read("src/app/(app)/design/quick/page.tsx");
+  const sip = read("src/components/design/scope-inputs-panel.tsx");
+  ok(qp.includes("pickedFixtureIds(design)") && qp.includes("...fixtureList.map((f) => f.id)"), "#GEM wave 3 I2: Quick Design prices the design's own picks too, even a deleted one");
+  ok(sip.includes("(deleted — choose another)") && sip.includes("isDeadPick(fxKey)") && sip.includes("fixtureAssembliesProp ?"), "#GEM wave 3 I2: the picker shows a dead pick as '(deleted — choose another)' (Quick Design only) so it can be changed");
+  // Screen wiring: the client uses the shared steps.
+  const qc = read("src/app/(app)/design/quick/quick-design-client.tsx");
+  ok(qc.includes("applyOverrides(selBase, a, selKey)") && qc.includes("quickSaveConfig(s, tierDefs)") && qc.includes("tierDefsFor({ tierSets: aTierSets }, globalTierDefs)") && qc.includes("applySavedConfig(prev, cfg)") && qc.includes("withQtyOverride(a.qtyOverrides"), "#GEM wave 3: Quick Design's screen prices, saves and restores through the same helpers the server uses");
+  // I3 — nav reads records only; one shared Grid pricing load per read.
+  const nav = read("src/lib/nav-counts.ts");
+  const ga = read("src/app/(app)/design/grid/[id]/actions.ts");
+  const ds = read("src/lib/stores/designs.ts");
+  const gq = read("src/lib/design/grid-quote.ts");
+  ok(nav.includes("listDesignRecords()") && !nav.includes("getAllDesigns"), "#GEM wave 3 I3: nav counts read design records only — no live Grid pricing on every page");
+  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 2, "#GEM wave 3 I3: the Grid actions find linked designs with a filtered read");
+  ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId)"), "#GEM wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
+  // Minors.
+  ok(ds.includes("fail CLOSED") || ds.includes("Fail CLOSED"), "#GEM wave 3 minor: an Auto completeness failure marks the design incomplete");
+  ok(/price: \{ needsPart: number; budget: number \}\n\): Promise<Quote \| null>/.test(ds), "#GEM wave 3 minor: promoteDesignToQuote's price is required");
+  const qa = read("src/app/(app)/design/quick/actions.ts");
+  ok(qa.includes("config: saved.config") && qa.includes("name: saved.name") && !qa.includes("config: partial.config"), "#GEM wave 3 minor: a revision snapshots the saved (whitelisted) record, not the client partial");
+  const lp = read("src/app/(app)/design/engagements/letter/page.tsx");
+  ok(lp.includes("serverDesignPrices(quick)") && lp.includes("getDesigns(eng.designIds)") && !lp.includes("getAllDesigns"), "#GEM wave 3 minor: the engagement letter re-derives a Quick design's completeness from the server price");
+}

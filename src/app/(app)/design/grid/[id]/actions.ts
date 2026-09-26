@@ -38,7 +38,7 @@ import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-o
 import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import { can } from "@/lib/team";
-import { getAllDesigns, removeDesign, updateDesign } from "@/lib/stores/designs";
+import { designsForGridProject, removeDesign, updateDesign } from "@/lib/stores/designs";
 import { getSite } from "@/lib/identity/sites";
 // Tier resolution, catalog listing and the BOM/curtain pricing moved verbatim
 // into lib/design/grid-quote.ts (D186) so a quote can be built per option on a
@@ -275,7 +275,8 @@ export async function saveGridIntakeAction(input: {
       locationName: input.locationName,
       a: input.autoConfig,
     });
-    const linked = (await getAllDesigns()).filter((d) => d.gridProjectId === input.projectId);
+    // A raw filtered read (fix wave 3, I3) — no live pricing of every design.
+    const linked = await designsForGridProject(input.projectId);
     for (const d of linked) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
     await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
@@ -823,7 +824,7 @@ export async function deleteProjectAction(
   await removeProject(id);
   // Reverse lookup, not a stored back-pointer — same idiom the Designs
   // dashboard uses for engagements. Designs number in the hundreds.
-  const linked = (await getAllDesigns()).filter((d) => d.gridProjectId === id);
+  const linked = await designsForGridProject(id);
   for (const d of linked) await removeDesign(d.id);
   revalidatePath("/design/designs");
   revalidatePath("/design");

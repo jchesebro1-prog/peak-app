@@ -112,10 +112,15 @@ export async function autoNeedsPart(project: GridProject, optionId: string, load
  * null for a design with no Auto choices (a Blank design), else its count.
  * No Auto design → nothing is loaded.
  */
-export async function autoNeedsPartMany(items: ReadonlyArray<AutoNeedsItem>): Promise<Array<number | null>> {
+export async function autoNeedsPartMany(
+  items: ReadonlyArray<AutoNeedsItem>,
+  /** A ctx the caller already holds whose parts cover the map's and every
+   *  swap's SKUs (fix wave 3: the design read's whole-catalog ctx). */
+  preloaded?: AutoNeedsCtx
+): Promise<Array<number | null>> {
   const isAuto = items.map((it) => autoChoices(it) !== null);
   if (!isAuto.some(Boolean)) return items.map(() => null);
-  const loaded = await loadAutoNeedsCtx(items.filter((_, i) => isAuto[i]));
+  const loaded = preloaded ?? (await loadAutoNeedsCtx(items.filter((_, i) => isAuto[i])));
   const table = buildEquipmentPriceTable(loaded.map, loaded.ctx);
   return items.map((it, i) => {
     if (!isAuto[i]) return null;

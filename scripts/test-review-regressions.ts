@@ -4289,6 +4289,102 @@ async function main() {
     for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
   }
 
+  /* --- #GEM fix wave 3 — I1 (D-GEM-24) Scenery-track feet override priced
+         identically on the screen's LIVE state and the server; I2 a dead
+         fixture pick is needs-a-part on both; I3 (D-GEM-25) query counts:
+         getAllDesigns is flat in N manual designs with ONE catalog load,
+         nav counts load no catalog at all; the letter re-derives. --- */
+  {
+    const EM = await import("@/lib/stores/equipment-map");
+    const DP = await import("@/lib/stores/design-pricing");
+    const Designs = await import("@/lib/stores/designs");
+    const GP = await import("@/lib/stores/grid-projects");
+    const { resolveOptionId } = await import("@/lib/design/grid-options");
+    const { navData } = await import("@/lib/nav-counts");
+    const { getDb } = await import("@/db");
+    const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+    const { defaultAState, withQtyOverride, tierDefsDefault } = await import("@/app/(app)/design/quick/engine");
+    const { quickScreenPrice, quickSaveConfig } = await import("@/lib/design/equipment-pricing");
+    const by = "tester";
+    for (const r of EQUIPMENT_ROWS) await EM.saveEquipmentRow(r.key, { sameAll: true, tiers: { good: { kind: "allowance", amount: 100, confirmed: true } } }, by);
+    const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
+    const td = tierDefsDefault();
+    // I1 — the live screen state with a Scenery-track edit of 5 ft.
+    const a0 = { ...defaultAState(10), drape: { ...defaultAState(10).drape, scenerytrack: true } };
+    const live = { ...a0, qtyOverrides: withQtyOverride(a0.qtyOverrides, "better", "curtains", "Scenery track", "5") };
+    const { table } = await DP.loadDesignPricing([]);
+    const screen = quickScreenPrice(live, td, table, {}, rates);
+    const calc = quickScreenPrice(a0, td, table, {}, rates);
+    const rec = { name: "GEMW3 scenery", venue: "Conference", size: "large", tier: "better", width: 50, depth: 30, grid: 50, systems: ["Curtains"], customer: "", customerId: null, locationId: null, budget: 1, config: quickSaveConfig(live, td) };
+    const saved = await DP.saveQuickDesign(null, rec, "Jeff Chesebro");
+    if (!saved.ok) throw new Error(saved.error);
+    assert.notEqual(screen.budget, calc.budget, "#GEM wave 3 I1: the edit moves the screen total");
+    assert.equal(saved.record.budget, screen.budget, `#GEM wave 3 I1: the stored (server) budget equals the live screen total with a Scenery-track edit (${saved.record.budget} vs ${screen.budget})`);
+    assert.equal((await DP.quickPromoteCheck(saved.record)).price.budget, screen.budget, "#GEM wave 3 I1: …and the promote re-price agrees");
+    // I2 — a pick whose assembly is gone: the page now prices it, so the screen agrees with the server.
+    const picked = { ...live, fixtureAssemblies: { par: "fa-gemw3-gone" } };
+    const pickRec = { ...rec, name: "GEMW3 dead pick", config: quickSaveConfig(picked, td) };
+    const liveIds: string[] = [];
+    const { fixturePrices } = await DP.loadDesignPricing([...new Set([...liveIds, ...DP.pickedFixtureIds(pickRec)])]);
+    const oldPage = await DP.loadDesignPricing(liveIds);
+    const scr = quickScreenPrice(picked, td, table, fixturePrices, rates);
+    const srv = await DP.serverDesignPrice(pickRec);
+    assert.equal(fixturePrices["fa-gemw3-gone"]?.status, "needs-part", "#GEM wave 3 I2: the dead pick prices needs-a-part");
+    assert.ok(scr.needsPart > 0 && scr.needsPart === srv.needsPart && scr.budget === srv.budget, `#GEM wave 3 I2: screen and server agree on a dead pick (${JSON.stringify(scr)} vs ${JSON.stringify(srv)})`);
+    assert.equal(quickScreenPrice(picked, td, table, oldPage.fixturePrices, rates).needsPart, 0, "#GEM wave 3 I2: (before: the page left it out and the screen read complete)");
+    // Letter — a stored budget (pre-wave-2, client-derived) is re-derived, not printed.
+    await EM.clearEquipmentRow("lighting:par");
+    const stale = await Designs.createDesign({ ...rec, name: "GEMW3 stale", budget: 999, incomplete: { needsPart: 0 }, owner: "Jeff Chesebro" });
+    const [rp] = await DP.serverDesignPrices([stale]);
+    assert.ok(rp.needsPart > 0, `#GEM wave 3 minor: the letter's re-derivation sees the unmapped row (${rp.needsPart}) the stored record hides`);
+    const got = await Designs.getDesigns([stale.id, saved.record.id, "D-NOPE"]);
+    assert.deepEqual(got.map((d) => d.id), [stale.id, saved.record.id], "#GEM wave 3 minor: getDesigns reads several designs in order in one go");
+    // I3 — query counts with N manual (Grid) designs.
+    const db = (await getDb()) as unknown as { $client: { query: (q: string, ...rest: unknown[]) => Promise<unknown> } };
+    const client = db.$client;
+    const orig = client.query.bind(client);
+    let queries = 0;
+    let catalogQueries = 0;
+    client.query = (q: string, ...rest: unknown[]) => {
+      queries++;
+      if (/"catalog_parts"/.test(q)) catalogQueries++;
+      return orig(q, ...rest);
+    };
+    const addManual = async (n: number) => {
+      for (let i = 0; i < n; i++) {
+        const p = await GP.createProject({ name: `GEMW3 grid ${i}`, customer: "", customerId: null, by });
+        await GP.addPlacement(p.id, { sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "GEMW3-DEV", optionId: resolveOptionId(p, null), by });
+        await Designs.createDesign({ name: `GEMW3 grid ${i}`, owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: p.id });
+      }
+    };
+    const measure = async () => {
+      await Designs.getAllDesigns();
+      queries = 0; catalogQueries = 0;
+      await Designs.getAllDesigns();
+      const all = { queries, catalogQueries };
+      queries = 0; catalogQueries = 0;
+      await navData("Jeff Chesebro");
+      return { all, nav: { queries, catalogQueries } };
+    };
+    try {
+      await addManual(2);
+      const manualCount = async () => (await Designs.listDesignRecords()).filter((d) => d.layoutMode === "manual" && d.gridProjectId).length;
+      const nA = await manualCount();
+      const small = await measure();
+      await addManual(6);
+      const nB = await manualCount();
+      const big = await measure();
+      console.log(`#GEM wave 3 I3 query counts: getAllDesigns ${small.all.queries} (N=${nA}) / ${big.all.queries} (N=${nB}), catalog loads ${small.all.catalogQueries}/${big.all.catalogQueries}; navData ${small.nav.queries}/${big.nav.queries}, catalog loads ${small.nav.catalogQueries}/${big.nav.catalogQueries}`);
+      assert.equal(big.all.queries, small.all.queries, `#GEM wave 3 I3: getAllDesigns' query count does not grow with manual designs (${small.all.queries} at N=${nA}, ${big.all.queries} at N=${nB})`);
+      assert.equal(big.all.catalogQueries, 1, "#GEM wave 3 I3: ONE catalog load per design read, whatever N");
+      assert.equal(big.nav.catalogQueries, 0, "#GEM wave 3 I3: nav counts never load the catalog");
+      assert.equal(big.nav.queries, small.nav.queries, "#GEM wave 3 I3: nav counts' query count does not grow with manual designs");
+    } finally {
+      client.query = orig;
+    }
+    for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
+  }
+
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems
          (configuration, like the settings they used to live in) and the
          kept fixtures' accessory graph is rebuilt. LAST: it wipes every

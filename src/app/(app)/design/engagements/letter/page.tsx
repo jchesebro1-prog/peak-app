@@ -8,7 +8,8 @@ import {
   type ConsultingEngagement,
   type ConsultingQuotePayload,
 } from "@/lib/stores/engagements";
-import { getAllDesigns, type DesignRecord } from "@/lib/stores/designs";
+import { getDesigns, type DesignRecord } from "@/lib/stores/designs";
+import { serverDesignPrices } from "@/lib/stores/design-pricing";
 import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { scopesTotal } from "@/lib/consulting-stages";
@@ -143,10 +144,22 @@ export default async function ConsultingLetterPage({
     date: longDate(),
   };
 
-  const linkedDesigns: DesignRecord[] =
-    kind === "spec" && eng && eng.designIds.length
-      ? (await getAllDesigns()).filter((d) => eng!.designIds.includes(d.id))
-      : [];
+  // Fix wave 3: only the engagement's designs (one read, shared Grid
+  // pricing inputs). A Quick design's completeness and budget are re-derived
+  // by the server price — a stored budget from before wave 2 was the
+  // client's figure and must not print as real while the map would call the
+  // design incomplete. Grid designs arrive live from getDesigns.
+  const linkedDesigns: DesignRecord[] = await (async () => {
+    if (!(kind === "spec" && eng && eng.designIds.length)) return [];
+    const ds = await getDesigns(eng.designIds);
+    const quick = ds.filter((d) => d.layoutMode !== "manual");
+    const prices = await serverDesignPrices(quick);
+    const byId = new Map(quick.map((d, i) => [d.id, prices[i]] as const));
+    return ds.map((d) => {
+      const p = byId.get(d.id);
+      return p ? { ...d, budget: p.budget, incomplete: { needsPart: p.needsPart } } : d;
+    });
+  })();
 
   const backHref =
     kind === "spec"

@@ -11,6 +11,8 @@ import {
   SHORT,
   SYS_ORDER,
   TIERS,
+  applyOverrides,
+  applySavedConfig,
   buildRiser,
   clamp,
   compute,
@@ -23,13 +25,14 @@ import {
   tierDefsDefault,
   tierTotals,
   venueOf,
+  withQtyOverride,
   type AState,
   type SysKey,
   type TierDefs,
   type TierKey,
   type ViewKey,
 } from "./engine";
-import { fixtureOverridesFor, tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
+import { fixtureOverridesFor, quickSaveConfig, tierDefsFor, tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
@@ -160,7 +163,13 @@ export default function QuickDesignClient({
 
   // tier definitions are global, per-browser (prototype localStorage parity);
   // resolved accent feeds SVG fills (attributes can't consume CSS vars)
-  const tierDefs = useSyncExternalStore(subscribeTierDefs, getTierDefs, getTierDefsServer);
+  const globalTierDefs = useSyncExternalStore(subscribeTierDefs, getTierDefs, getTierDefsServer);
+  /** The tier defs this design prices with (fix wave 3): a saved design's own
+   *  line-set counts (config.tierSets, restored on open) over this browser's
+   *  defs — so its total is the same in every browser and on the server. A
+   *  new design follows this browser's dial until it is dialled. */
+  const aTierSets = a.tierSets;
+  const tierDefs = useMemo(() => tierDefsFor({ tierSets: aTierSets }, globalTierDefs), [aTierSets, globalTierDefs]);
   const accentHex = useSyncExternalStore(subscribeAccent, getAccentHex, getAccentHexServer);
 
   useEffect(
@@ -200,22 +209,8 @@ export default function QuickDesignClient({
     () => tierSystemsBase(C, a, selKey, tierDefs, prices, fixtureOverrides),
     [C, a, selKey, tierDefs, prices, fixtureOverrides]
   );
-  const selSystems = useMemo(() => {
-    const ov = (a.qtyOverrides && a.qtyOverrides[selKey]) || {};
-    return selBase.map((sys) => {
-      const so = ov[sys.key];
-      if (!so) return sys;
-      let rev = 0;
-      let cost = 0;
-      const items = sys.items.map((it) => {
-        const q = so[it.desc] != null ? so[it.desc] : it.qty;
-        rev += q * it.price;
-        cost += q * it.cost;
-        return { ...it, qty: q };
-      });
-      return { ...sys, items, rev, cost };
-    });
-  }, [selBase, a.qtyOverrides, selKey]);
+  // The same step the server prices with (quickScreenPrice / quickDesignPrice).
+  const selSystems = useMemo(() => applyOverrides(selBase, a, selKey), [selBase, a, selKey]);
   const selTot = useMemo(() => tierTotals(selSystems, selTd, laborPct, freightPct, contPct), [selSystems, selTd, laborPct, freightPct, contPct]);
   /** Per-system needs-a-part counts for the SELECTED tier (#GEM D-GEM-10) —
    *  the Equipment map is empty/partial → the estimate is INCOMPLETE, never
@@ -285,11 +280,10 @@ export default function QuickDesignClient({
       locationId: linkedCustomerObj ? linkedLocation || null : null,
       customer: linkedCustomerObj ? linkedCustomerObj.name : "",
       // D-GEM-23: the server prices `config` itself (budget + incomplete), so
-      // the line-sets dial this browser used travels with it.
-      config: {
-        ...(JSON.parse(JSON.stringify(s)) as Record<string, unknown>),
-        tierSets: { good: tierDefs.good.sets, better: tierDefs.better.sets, best: tierDefs.best.sets },
-      },
+      // the line-sets dial this design used travels with it — and the
+      // override-units marker (D-GEM-24), so a Scenery-track edit (feet) is
+      // priced on the server exactly as it is here.
+      config: quickSaveConfig(s, tierDefs),
     };
   };
 
@@ -340,7 +334,9 @@ export default function QuickDesignClient({
   const restoreRevision = (r: DesignRevision) => {
     const cfg = r.config as Partial<AState> | undefined;
     if (!cfg) return;
-    setA((prev) => ({ ...prev, ...cfg }));
+    // Cleaned as the server reads it: an old revision's count-style
+    // Scenery-track override is dropped (D-GEM-24), clamps applied.
+    setA((prev) => applySavedConfig(prev, cfg));
     const cname = typeof r.customer === "string" ? r.customer : "";
     const lc = cname ? customers.find((c) => c.name === cname) : null;
     if (lc) setLinkedCustomer(lc.id);
@@ -401,12 +397,12 @@ export default function QuickDesignClient({
     putTierDefs(next);
   };
   const setTierBlurb = (tk: TierKey, val: string) => {
-    const td = JSON.parse(JSON.stringify(tierDefs)) as TierDefs;
+    const td = JSON.parse(JSON.stringify(globalTierDefs)) as TierDefs;
     td[tk].blurb = val;
     setTierDefsPersist(td);
   };
   const setTierSpec = (tk: TierKey, sysKey: string, val: string) => {
-    const td = JSON.parse(JSON.stringify(tierDefs)) as TierDefs;
+    const td = JSON.parse(JSON.stringify(globalTierDefs)) as TierDefs;
     td[tk].specs[sysKey] = val;
     setTierDefsPersist(td);
   };
@@ -414,9 +410,11 @@ export default function QuickDesignClient({
     let v = parseInt(raw, 10);
     if (isNaN(v)) v = 0;
     v = clamp(v, 1, 300);
-    const td = JSON.parse(JSON.stringify(tierDefs)) as TierDefs;
+    const td = JSON.parse(JSON.stringify(globalTierDefs)) as TierDefs;
     td[tk].sets = v;
     setTierDefsPersist(td);
+    // …and this design's own dial (saved with it as config.tierSets).
+    updA({ tierSets: { good: tierDefs.good.sets, better: tierDefs.better.sets, best: tierDefs.best.sets, [tk]: v } });
   };
 
   /* ---- designer edits ---- */
@@ -427,13 +425,7 @@ export default function QuickDesignClient({
     updA({ contingency: clamp(v, 0, 25) });
   };
   const setQtyOverride = (tk: TierKey, sysKey: string, desc: string, raw: string) => {
-    let v = parseInt(raw, 10);
-    if (isNaN(v) || v < 0) v = 0;
-    const ov = JSON.parse(JSON.stringify(a.qtyOverrides || {})) as AState["qtyOverrides"];
-    ov[tk] = ov[tk] || {};
-    ov[tk]![sysKey] = ov[tk]![sysKey] || {};
-    ov[tk]![sysKey][desc] = v;
-    updA({ qtyOverrides: ov });
+    updA({ qtyOverrides: withQtyOverride(a.qtyOverrides, tk, sysKey, desc, raw) });
   };
   const resetQtyOverride = (tk: TierKey, sysKey: string, desc: string) => {
     const cur = a.qtyOverrides;

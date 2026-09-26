@@ -1,7 +1,7 @@
 import { followUps, followUpInfo } from "@/lib/stores/leads";
 import { isDone } from "@/lib/pipelines";
 import { getAll as allQuotes } from "@/lib/stores/quotes";
-import { getAllDesigns } from "@/lib/stores/designs";
+import { listDesignRecords } from "@/lib/stores/designs";
 import { getAllProjects, riskFlags } from "@/lib/stores/projects";
 import { renewals, dueLabel } from "@/lib/stores/flame-jobs";
 import { getAll as allInspections } from "@/lib/stores/inspections";
@@ -51,7 +51,10 @@ export async function navData(me: string): Promise<{
     prefs,
   ] = await Promise.all([
     allQuotes(),
-    getAllDesigns(),
+    // Fix wave 3 (I3): the badge needs review / owner only — a plain record
+    // read, never live Grid pricing (a catalog load per Grid design) on
+    // every page navigation.
+    listDesignRecords(),
     getAllProjects(),
     allInspections(),
     allRepairs(),

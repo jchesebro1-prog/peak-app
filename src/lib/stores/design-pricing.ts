@@ -31,7 +31,8 @@ export function fixturePricesFrom(ids: Iterable<string>, ctx: EquipPriceCtx): Re
   return out;
 }
 
-function pickedFixtureIds(d: DesignRecordLike): string[] {
+/** The fixture ids a Quick design's config picks (live or deleted). */
+export function pickedFixtureIds(d: DesignRecordLike): string[] {
   const picks = (d.config as { fixtureAssemblies?: unknown } | null | undefined)?.fixtureAssemblies;
   if (!picks || typeof picks !== "object") return [];
   return Object.values(picks as Record<string, unknown>).filter((v): v is string => typeof v === "string" && !!v);
@@ -66,6 +67,17 @@ export async function serverDesignPrice(d: DesignRecordLike): Promise<QuickDesig
   const ids = pickedFixtureIds(d);
   const [{ table, fixturePrices }, rates] = await Promise.all([loadDesignPricing(ids), quickRates()]);
   return quickDesignPrice(d, table, fixturePrices, rates);
+}
+
+/** serverDesignPrice for several Quick designs with ONE price context (the
+ *  union of their fixture picks) and one rates read — fix wave 3, for the
+ *  engagement letter, which re-derives completeness rather than trusting a
+ *  stored (possibly pre-wave-2, client-derived) budget. */
+export async function serverDesignPrices(ds: ReadonlyArray<DesignRecordLike>): Promise<QuickDesignPrice[]> {
+  if (!ds.length) return [];
+  const ids = [...new Set(ds.flatMap(pickedFixtureIds))];
+  const [{ table, fixturePrices }, rates] = await Promise.all([loadDesignPricing(ids), quickRates()]);
+  return ds.map((d) => quickDesignPrice(d, table, fixturePrices, rates));
 }
 
 /** The server's needs-a-part count for one Quick design (config or reconstructed seed). */

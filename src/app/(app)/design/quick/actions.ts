@@ -99,19 +99,21 @@ export async function saveRevisionAction(
   }
   if (!res.ok) return res;
   const saved = res.record;
+  // Fix wave 3: the snapshot is built from the SAVED record — the
+  // whitelisted, type-checked fields (quickSaveFields) and the server's
+  // budget (D-GEM-23) — never the raw client partial.
   const snap = {
-    name: partial.name,
-    tier: partial.tier,
-    // D-GEM-23: the revision records the server's budget, never the client's.
+    name: saved.name,
+    tier: saved.tier,
     budget: saved.budget,
-    venue: partial.venue,
-    size: partial.size,
-    width: partial.width,
-    depth: partial.depth,
-    grid: partial.grid,
-    systems: partial.systems,
-    customer: partial.customer || "",
-    config: partial.config,
+    venue: saved.venue,
+    size: saved.size,
+    width: saved.width,
+    depth: saved.depth,
+    grid: saved.grid,
+    systems: saved.systems,
+    customer: saved.customer || "",
+    config: saved.config,
     by: user.name,
   };
   const r = await addDesignRevision(saved.id, snap);
