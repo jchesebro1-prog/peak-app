@@ -15551,3 +15551,130 @@ async function gridSymbolLookAsyncChecks(): Promise<void> {
   ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
   ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
 }
+
+/* --- #GDS grid drawing set — Task 1: sheet-set model --- */
+import {
+  SHEET_SIZES, REV_ROWS, drawingArea, resolveSheetSize, sheetCssVars, printPageCss, fitBox, scaleNote,
+  revLetter, revisionRows, revisionStatus, titleBlockData, cleanDrawingSet, cleanStandardNotes, resolveGeneralNotes,
+  placementScope, planSheetGroups, planContent, buildSheetList, toggleableSheets,
+} from "@/lib/design/grid-drawing-set";
+import { DRAWING_SYSTEMS, drawingSystemOf } from "@/lib/design/grid-scopes";
+import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/grid-schedule";
+
+{
+  // sizes
+  ok(JSON.stringify(drawingArea("b")) === JSON.stringify({ w: 13.3, h: 9.8 }), "#GDS sizes: the 11×17 drawing area is 13.3 × 9.8 in");
+  ok(drawingArea("d").w > 2 * drawingArea("b").w && SHEET_SIZES.d.w === 36 && SHEET_SIZES.d.h === 24, "#GDS sizes: 24×36 is the same layout scaled up");
+  ok(resolveSheetSize("d", "b") === "d" && resolveSheetSize("x", "d") === "d" && resolveSheetSize(undefined, undefined) === "b", "#GDS sizes: ?size= wins, then the saved size, then 11×17");
+  ok(printPageCss("d").includes("size: 36in 24in") && printPageCss("b").includes("size: 17in 11in") && printPageCss("b").includes("margin: 0"), "#GDS sizes: @page matches the sheet");
+  ok(sheetCssVars("b")["--dw-strip"] === "2.5in" && sheetCssVars("d")["--dw-w"] === "36in" && sheetCssVars("d")["--dw-k"] === "2.118", "#GDS sizes: CSS variables come from one table");
+  ok(JSON.stringify(fitBox(13.3, 9.8, 0.5)) === JSON.stringify({ w: 13.3, h: 6.65 }) && JSON.stringify(fitBox(13.3, 9.8, 1)) === JSON.stringify({ w: 9.8, h: 9.8 }) && fitBox(10, 10, 0).w === 0, "#GDS fit: a plan fits the drawing area by its limiting side");
+  ok(scaleNote({ scale: 100, unit: "ft" }, 10) === `1" = 10'-0"` && scaleNote(null, 10) === "NTS" && scaleNote({ scale: 100, unit: "ft" }, 0) === "NTS", "#GDS scale: from the calibration and the printed width, NTS when uncalibrated");
+
+  // revisions
+  ok([0, 25, 26, 27].map(revLetter).join() === "A,Z,AA,AB", "#GDS revisions: letters run A…Z, AA…");
+  const gdsRevs = [
+    { rev: 2, at: 2000, note: "", reason: "quote" as const },
+    { rev: 1, at: 1000, note: "Schematic", reason: "manual" as const },
+    { rev: 3, at: 3000, note: "", reason: "manual" as const },
+  ];
+  const gdsRows = revisionRows(gdsRevs, { "3": "Owner comments" });
+  ok(gdsRows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:Schematic|B:Issued with quote|C:Owner comments", "#GDS revisions: cut order; the note, else an editable label, else the reason");
+  ok(revisionStatus(gdsRows) === "Rev C" && revisionStatus([]) === "— Preliminary", "#GDS revisions: the set is marked with the latest letter, or Preliminary");
+
+  // title-block data
+  const tbBase = {
+    company: {
+      name: "Peak Systems Group",
+      logoDark: null,
+      offices: [
+        { street: "1 A St", city: "Appleton", state: "WI", zip: "54911", phone: "920-555-0100" },
+        { street: "9 B St", city: "Madison", state: "WI", zip: "53703", phone: "608-555-0100", quoteDefault: true },
+      ],
+    },
+    project: { id: "GRD-5009", name: "Main Stage", customer: "Lakefront", siteName: "", intake: { venueName: "Lakefront PAC", address: "12 Shore Dr" }, createdBy: "Jeff" },
+    option: { name: "Better", quoteId: "Q-2100" },
+    optionCount: 1,
+    revisions: [],
+    set: undefined,
+    sheet: { number: "L-101", title: "Lighting plan", scale: "AS NOTED" },
+    index: 2,
+    total: 5,
+    now: 5000,
+  };
+  const tb0 = titleBlockData(tbBase);
+  ok(tb0.status === "— Preliminary" && tb0.revisions.length === 0, "#GDS title block: no revisions → Preliminary");
+  ok(tb0.optionName === null && tb0.company.addressLines.join("|") === "9 B St|Madison, WI 53703" && tb0.company.phone === "608-555-0100", "#GDS title block: one option hides the option row; the quote-default office supplies the address");
+  ok(tb0.project.venue === "Lakefront PAC" && tb0.project.address === "12 Shore Dr" && tb0.drawnBy === "Jeff" && tb0.checkedBy === "" && tb0.sheet.index === 2 && tb0.sheet.total === 5 && tb0.quoteId === "Q-2100", "#GDS title block: venue falls back to intake, drawn-by to the creator");
+  const tbMany = revisionRows(Array.from({ length: 8 }, (_, i) => ({ rev: i + 1, at: i, note: `r${i + 1}`, reason: "manual" as const })));
+  const tb1 = titleBlockData({ ...tbBase, optionCount: 2, revisions: tbMany, set: { drawnBy: "SM", checkedBy: "JC" } });
+  ok(tb1.optionName === "Better" && tb1.revisions.length === REV_ROWS && tb1.revisions[0].letter === "H" && tb1.earlierRevisions === 2 && tb1.status === "Rev H", "#GDS title block: newest revisions first, capped, with a count of earlier ones");
+  ok(tb1.drawnBy === "SM" && tb1.checkedBy === "JC", "#GDS title block: set settings override drawn/checked");
+
+  // settings cleaning + notes
+  const gdsClean = cleanDrawingSet({ size: "z", drawnBy: "  Jeff  ", excluded: ["riser", "riser", 3, ""], generalNotes: "", revisionLabels: { "2": " Bid ", x: "no", "3": "" } });
+  ok(!("size" in gdsClean) && gdsClean.drawnBy === "Jeff" && JSON.stringify(gdsClean.excluded) === '["riser"]' && gdsClean.generalNotes === "" && JSON.stringify(gdsClean.revisionLabels) === '{"2":"Bid"}', "#GDS set settings: cleaned, deduped, blank notes kept as an explicit empty");
+  ok(cleanStandardNotes("  \n ") === null && cleanStandardNotes(" 1. Verify ") === "1. Verify", "#GDS standard notes: blank clears to null");
+  ok(resolveGeneralNotes(undefined, "1. Verify in field\n2) Coordinate with EC\n\n").join("|") === "Verify in field|Coordinate with EC" && resolveGeneralNotes({ generalNotes: "" }, "Std").length === 0, "#GDS notes: the standard notes are the default, an explicit empty wins, numbering is stripped");
+
+  // systems + plan grouping
+  ok(DRAWING_SYSTEMS.map((s) => s.prefix).join("") === "LAVRG" && drawingSystemOf("Curtains") === "rigging" && drawingSystemOf("Unscoped") === "general", "#GDS systems: L, A, V, R (rigging + curtains), G for unscoped");
+  const gdsParts = new Map<string, { group?: string; trade?: string }>([["FIX", { group: "Fixtures" }], ["SPK", { group: "Speakers" }], ["TRK", { trade: "Rigging" }], ["MYST", {}], ["CBL", {}]]);
+  ok(placementScope({ partId: "FIX", curtain: { name: "x" } }, gdsParts) === "Curtains", "#GDS systems: a curtain is Curtains whatever its fabric part");
+  const gdsPl = [
+    { id: "p1", sheetId: "s1", page: 1, partId: "FIX" },
+    { id: "p2", sheetId: "s2", page: 1, partId: "FIX" },
+    { id: "p3", sheetId: "s1", page: 1, partId: "SPK" },
+    { id: "p4", sheetId: "s1", page: 2, partId: "TRK" },
+    { id: "p5", sheetId: "s1", page: 1, partId: "FAB", curtain: { name: "Main" } },
+    { id: "p6", sheetId: "s1", page: 1, partId: "MYST" },
+  ];
+  const gdsRt = [
+    { id: "r1", sheetId: "s1", page: 1, partId: "CBL", fromPlacementId: "p3" },
+    { id: "r2", sheetId: "s1", page: 1, partId: "CBL" },
+  ];
+  const gdsGroups = planSheetGroups({ sheetOrder: ["s2", "s1"], placements: gdsPl, routes: gdsRt, partById: gdsParts });
+  ok(gdsGroups.map((g) => `${g.system}:${g.sheetId}:${g.page}`).join("|") === "lighting:s2:1|lighting:s1:1|audio:s1:1|rigging:s1:1|rigging:s1:2|general:s1:1", "#GDS plan sheets: one per system per source page, in sheet order");
+  const gdsAudio = planContent({ group: { system: "audio", sheetId: "s1", page: 1 }, placements: gdsPl, routes: gdsRt, spaces: [{ id: "sp", sheetId: "s1", page: 1 }, { id: "sp2", sheetId: "s1", page: 2 }], partById: gdsParts });
+  ok(gdsAudio.placements.map((p) => p.id).join() === "p3" && gdsAudio.routes.map((r) => r.id).join() === "r1" && gdsAudio.spaces.map((s) => s.id).join() === "sp", "#GDS plan sheets: a system sheet shows its own devices, the wires they terminate, and that page's spaces");
+  const gdsGeneral = planContent({ group: { system: "general", sheetId: "s1", page: 1 }, placements: gdsPl, routes: gdsRt, spaces: [], partById: gdsParts });
+  ok(gdsGeneral.placements.map((p) => p.id).join() === "p6" && gdsGeneral.routes.map((r) => r.id).join() === "r2", "#GDS plan sheets: unscoped devices and free unscoped wires go on the G sheet");
+
+  // sheet list
+  const gdsList = buildSheetList({ planGroups: gdsGroups, sourceNames: { s1: "Main floor", s2: "Balcony" }, schedulePages: 2, excluded: ["plan:lighting:s2:1", "schedule"] });
+  ok(gdsList.all.map((d) => d.number).join() === "T-001,L-101,L-102,A-101,R-101,R-102,G-101,E-501,E-601,E-602", "#GDS sheet list: numbering T → L/A/V/R/G → E-501 → E-60x");
+  ok(gdsList.all[1].title === "Lighting plan — Balcony" && gdsList.all[3].title === "Audio plan" && gdsList.all[5].title === "Rigging & drapery plan — Main floor, p. 2", "#GDS sheet list: titles name the source only when a system spans pages");
+  ok(gdsList.included.map((d) => d.number).join() === "T-001,L-102,A-101,R-101,R-102,G-101,E-501", "#GDS sheet list: excluded sheets drop out, numbers stay stable");
+  const gdsToggles = toggleableSheets(gdsList.all);
+  ok(gdsToggles.filter((t) => t.key === "schedule").length === 1 && gdsToggles.length === gdsList.all.length - 1, "#GDS sheet list: the schedule pages toggle as one");
+
+  // schedule
+  const gdsSch = buildSchedule({
+    placements: [
+      { id: "q1", sheetId: "s1", page: 1, x: 0.1, y: 0.1, partId: "FIX" },
+      { id: "q2", sheetId: "s1", page: 1, x: 0.2, y: 0.1, partId: "FIX" },
+      { id: "q3", sheetId: "s1", page: 1, x: 0.9, y: 0.9, partId: "GONE" },
+      { id: "q4", sheetId: "s1", page: 1, x: 0.3, y: 0.3, partId: "FAB", curtain: { type: "Draw", name: "Main", widthFt: 40, heightFt: 20, fullnessPct: 50, fabricSku: "FAB" } },
+    ],
+    spaces: [{ id: "sa", sheetId: "s1", page: 1, name: "Stage", points: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.5 }, { x: 0, y: 0.5 }] }],
+    descOf: (id) => ({ FIX: "Fixture", FAB: "Velour" } as Record<string, string>)[id],
+    wires: [
+      { id: "w1", partId: "W", fromName: "Stage", toName: "Unassigned", lengthFt: 10.5, unit: "ft" },
+      { id: "w2", partId: "W", fromName: "Stage", toName: "Stage", lengthFt: null, unit: "ft" },
+    ],
+  });
+  ok(gdsSch.sections.map((s) => s.name).join() === "Stage,Unassigned" && gdsSch.sections[0].rows[0].qty === 2 && gdsSch.sections[0].rows[1].code === "CURTAIN", "#GDS schedule: per-space rows, curtains one per drop");
+  ok(gdsSch.sections[1].rows[0].desc === "(no longer in the catalog)" && gdsSch.deviceCount === 3, "#GDS schedule: a missing part stays visible; curtains aren't counted as devices");
+  ok(gdsSch.wireFeet.length === 1 && gdsSch.wireFeet[0].ft === 10.5 && gdsSch.wireFeet[0].unmeasured === 1, "#GDS schedule: footage rolls up per wire part");
+  ok(scheduleGroups(gdsSch).length === 3 && scheduleGroups(gdsSch)[2].head.kind === "wires", "#GDS schedule: wire runs follow the spaces");
+  const gdsBig = [{ head: { kind: "section" as const, name: "Big", cont: false }, rows: Array.from({ length: 60 }, (_, i) => ({ kind: "row" as const, qty: 1, code: `P${i}`, desc: "d" })) }];
+  const gdsPages = paginateSchedule(gdsBig, 24, 2);
+  const gdsTop = gdsPages[1][0][0];
+  ok(gdsPages.length === 2 && gdsPages[0].length === 2 && gdsPages[1][0].length === 15 && gdsTop.kind === "section" && gdsTop.cont, "#GDS schedule: rows paginate across E-60x sheets, repeating the section head");
+  const gdsTight = paginateSchedule([
+    { head: { kind: "section", name: "A", cont: false }, rows: Array.from({ length: 4 }, () => ({ kind: "row" as const, qty: 1, code: "a", desc: "a" })) },
+    { head: { kind: "section", name: "B", cont: false }, rows: [{ kind: "row", qty: 1, code: "b", desc: "b" }] },
+  ], 5, 2);
+  ok(gdsTight.every((pg) => pg.every((col) => !col.length || col[col.length - 1].kind === "row")), "#GDS schedule: a section head never ends a column");
+  ok(paginateSchedule([], 24, 2).length === 1, "#GDS schedule: an empty schedule is still one sheet");
+}
