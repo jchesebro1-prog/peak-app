@@ -15678,3 +15678,43 @@ import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/gr
   ok(gdsTight.every((pg) => pg.every((col) => !col.length || col[col.length - 1].kind === "row")), "#GDS schedule: a section head never ends a column");
   ok(paginateSchedule([], 24, 2).length === 1, "#GDS schedule: an empty schedule is still one sheet");
 }
+
+/* --- #GDS grid drawing set — Task 2: title block + sheet frame --- */
+import { TitleBlock } from "@/components/drawing/title-block";
+import { DrawingSheet } from "@/components/drawing/drawing-sheet";
+
+{
+  const tbSheet = titleBlockData({
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] },
+    project: { id: "GRD-5009", name: "Main Stage", customer: "Lakefront", createdBy: "Jeff" },
+    option: { name: "Design", quoteId: null },
+    optionCount: 1,
+    revisions: [],
+    set: undefined,
+    sheet: { number: "A-101", title: "Audio plan", scale: "AS NOTED" },
+    index: 3,
+    total: 7,
+    now: Date.UTC(2026, 8, 25, 12),
+  });
+  const sheetHtml = symRender(symH(DrawingSheet, { size: "d", titleBlock: tbSheet, children: symH("p", null, "BODY") }));
+  ok(sheetHtml.includes('class="pk-drawing-sheet"') && sheetHtml.includes('data-size="d"') && sheetHtml.includes("--dw-w:36in") && sheetHtml.includes("--dw-k:2.118"), "#GDS sheet: the frame carries its size variables");
+  ok(sheetHtml.includes("BODY") && sheetHtml.includes('class="pk-drawing-area"') && sheetHtml.includes('class="pk-title-strip"') && sheetHtml.includes('data-sheet="A-101"'), "#GDS sheet: drawing area + right-side title strip");
+  ok(sheetHtml.includes("3 of 7 · — Preliminary") && sheetHtml.includes("Peak Systems Group") && !sheetHtml.includes("<img"), "#GDS title block: n of N, Preliminary, the company name when there is no logo");
+  ok(!sheetHtml.includes(">Option<"), "#GDS title block: no option row for a single-option design");
+  const tbRev = titleBlockData({
+    company: { name: "Peak", logoDark: "data:image/png;base64,AAAA", offices: [] },
+    project: { id: "GRD-5009", name: "Main Stage", customer: "", createdBy: "Jeff" },
+    option: { name: "Better", quoteId: "Q-2100" },
+    optionCount: 2,
+    revisions: revisionRows([{ rev: 1, at: 1000, note: "Bid set", reason: "manual" }, { rev: 2, at: 2000, note: "", reason: "quote" }]),
+    set: undefined,
+    sheet: { number: "T-001", title: "Cover sheet", scale: "NTS" },
+    index: 1,
+    total: 7,
+    now: 3000,
+  });
+  const tbHtml = symRender(symH(TitleBlock, { data: tbRev }));
+  ok(tbHtml.includes("<img") && tbHtml.includes("Bid set") && tbHtml.includes("Issued with quote") && tbHtml.includes("Rev B") && tbHtml.includes(">Option<") && tbHtml.includes("Q-2100"), "#GDS title block: logo, revision table, latest letter, option row, quote number");
+  const gdsCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+  ok(gdsCss.includes(".pk-drawing-sheet {") && /\.pk-tb-accent\s*\{[^}]*var\(--accent\)/.test(gdsCss) && gdsCss.includes("print-color-adjust: exact") && gdsCss.includes(".pk-drawing-sheet:last-child"), "#GDS CSS: sheet classes exist, the accent bar is var(--accent), sheets break one per page");
+}

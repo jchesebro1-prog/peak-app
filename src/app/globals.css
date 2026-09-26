@@ -880,6 +880,241 @@ button.pk-searchbar-glass {
   }
 }
 
+/* Grid drawing set (#GDS). Sheet geometry arrives as CSS variables from
+   DrawingSheet (lib/design/grid-drawing-set.ts is the one size table);
+   --dw-k scales every border and type size so 24×36 is the 11×17 layout
+   at 36/17. Accent only through var(--accent). */
+.pk-drawing-set {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  padding-bottom: 40px;
+}
+@media screen {
+  .pk-drawing-set {
+    zoom: var(--dw-screen-zoom, 0.6);
+  }
+}
+.pk-drawing-sheet {
+  width: var(--dw-w);
+  height: var(--dw-h);
+  flex: none;
+  position: relative;
+  background: #fff;
+  color: #16181d;
+  font-family: var(--font-ui), system-ui, sans-serif;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.pk-drawing-frame {
+  position: absolute;
+  inset: var(--dw-m);
+  border: calc(1.5pt * var(--dw-k)) solid #16181d;
+  display: flex;
+}
+.pk-drawing-area {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  padding: var(--dw-pad);
+  overflow: hidden;
+  font-size: calc(9pt * var(--dw-k));
+  line-height: 1.35;
+}
+.pk-title-strip {
+  width: var(--dw-strip);
+  flex: none;
+  border-left: calc(1.5pt * var(--dw-k)) solid #16181d;
+  display: flex;
+  flex-direction: column;
+  font-size: calc(7pt * var(--dw-k));
+  line-height: 1.3;
+  overflow: hidden;
+}
+.pk-tb-cell {
+  border-bottom: calc(0.75pt * var(--dw-k)) solid #16181d;
+  padding: calc(0.06in * var(--dw-k)) calc(0.08in * var(--dw-k));
+}
+.pk-tb-cell:last-child {
+  border-bottom: none;
+}
+.pk-tb-grow {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.pk-tb-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: calc(5.5pt * var(--dw-k));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5b616e;
+  margin-bottom: calc(1pt * var(--dw-k));
+}
+.pk-tb-strong {
+  font-weight: 700;
+  font-size: calc(8.5pt * var(--dw-k));
+}
+.pk-tb-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+.pk-tb-note {
+  color: #5b616e;
+  font-size: calc(6pt * var(--dw-k));
+  margin-top: calc(2pt * var(--dw-k));
+}
+.pk-tb-logo {
+  display: block;
+  max-width: 100%;
+  max-height: calc(0.55in * var(--dw-k));
+  object-fit: contain;
+  margin-bottom: calc(3pt * var(--dw-k));
+}
+.pk-tb-accent {
+  height: calc(3pt * var(--dw-k));
+  background: var(--accent);
+  flex: none;
+}
+.pk-tb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(3pt * var(--dw-k)) calc(6pt * var(--dw-k));
+}
+.pk-tb-revs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(6.5pt * var(--dw-k));
+}
+.pk-tb-revs th,
+.pk-tb-revs td {
+  text-align: left;
+  vertical-align: top;
+  padding: calc(1pt * var(--dw-k)) calc(3pt * var(--dw-k)) calc(1pt * var(--dw-k)) 0;
+}
+.pk-tb-revs th {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: calc(5.5pt * var(--dw-k));
+  font-weight: 600;
+  color: #5b616e;
+}
+.pk-tb-sheettitle {
+  font-weight: 700;
+  font-size: calc(9pt * var(--dw-k));
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.pk-tb-sheetno {
+  font-size: calc(26pt * var(--dw-k));
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  margin: calc(2pt * var(--dw-k)) 0;
+}
+/* Drawing-area content (cover, schedules, riser notes). */
+.pk-dw-h {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: calc(7pt * var(--dw-k));
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: calc(1pt * var(--dw-k)) solid #16181d;
+  padding-bottom: calc(2pt * var(--dw-k));
+  margin: 0 0 calc(5pt * var(--dw-k));
+}
+.pk-dw-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(0.35in * var(--dw-k));
+}
+.pk-dw-block {
+  margin-bottom: calc(12pt * var(--dw-k));
+}
+.pk-dw-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: calc(8pt * var(--dw-k));
+}
+.pk-dw-table th {
+  text-align: left;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: calc(6pt * var(--dw-k));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5b616e;
+  border-bottom: calc(1pt * var(--dw-k)) solid #16181d;
+  padding: calc(2pt * var(--dw-k)) calc(6pt * var(--dw-k)) calc(2pt * var(--dw-k)) 0;
+}
+.pk-dw-table td {
+  border-bottom: calc(0.5pt * var(--dw-k)) solid #d7dae0;
+  padding: calc(2.5pt * var(--dw-k)) calc(6pt * var(--dw-k)) calc(2.5pt * var(--dw-k)) 0;
+  vertical-align: top;
+}
+.pk-dw-sec {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: calc(6pt * var(--dw-k)) !important;
+  border-bottom: calc(1pt * var(--dw-k)) solid var(--accent) !important;
+}
+.pk-dw-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+.pk-dw-ellip {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pk-dw-notes {
+  margin: 0;
+  padding-left: calc(14pt * var(--dw-k));
+  line-height: 1.45;
+}
+.pk-dw-foot {
+  border-top: calc(1pt * var(--dw-k)) solid #16181d;
+  padding-top: calc(4pt * var(--dw-k));
+  color: #3d424e;
+}
+.pk-plan-fig canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.pk-plan-caption {
+  display: flex;
+  align-items: center;
+  gap: calc(14pt * var(--dw-k));
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: calc(6.5pt * var(--dw-k));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #3d424e;
+}
+.pk-riser-notes {
+  margin: 0;
+  padding-left: 1.4em;
+  line-height: 1.45;
+}
+@media print {
+  .pk-drawing-set {
+    zoom: 1 !important;
+    display: block !important;
+    padding: 0 !important;
+  }
+  .pk-drawing-sheet {
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+  .pk-drawing-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
+
 /* Login */
 .pk-login {
   min-height: 100vh;
