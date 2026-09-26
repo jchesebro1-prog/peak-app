@@ -71,6 +71,7 @@ export default async function RiserPage({
   const label = (p: PartLite) => (p.sku && p.sku !== p.desc ? `${p.desc} · ${p.sku}` : p.desc);
   const byLabel = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label);
   const devices = library.filter((p) => !isPerLengthUnit(p.unit)).map((p) => ({ id: p.id, label: label(p) })).sort(byLabel);
+  const cables = library.filter((p) => isPerLengthUnit(p.unit)).map((p) => ({ id: p.id, label: label(p) })).sort(byLabel);
 
   return (
     <div className="pk-content" style={{ maxWidth: 1240, padding: "26px 30px 64px" }}>
@@ -110,6 +111,9 @@ export default async function RiserPage({
           src: s.blobPath ? `/api/grid-sheets/${encodeURIComponent(s.id)}` : s.dataUrl,
         }))}
         spaces={(project.spaces || []).map((s) => ({ sheetId: s.sheetId, page: s.page }))}
+        cables={cables}
+        placements={slice.placements.map((pl) => ({ id: pl.id, sheetId: pl.sheetId, page: pl.page, x: pl.x, y: pl.y }))}
+        calibrations={(project.calibrations || []).map((c) => ({ docId: c.docId, page: c.page }))}
       />
       {legend.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 12, fontSize: 11.5, color: "#5b616e" }}>

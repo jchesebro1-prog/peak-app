@@ -15887,3 +15887,14 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
   const gpNotes = symRender(symH(RiserNotes, { notes: gpView.notes }));
   ok(gpNotes.includes("<ol") && gpNotes.includes("Verify in field"), "#GDS canvas: numbered riser notes");
 }
+
+/* --- #GDS grid drawing set — Task 6: riser tools wiring --- */
+{
+  const reSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx"), "utf8");
+  ok(reSrc.includes("connectKind(from, to, placements, calibrations)") && reSrc.includes("addRouteAction(") && reSrc.includes("addRiserLinkAction(") && reSrc.includes("measureSheetAspect("),
+    "#GDS Connect: two devices on one calibrated page draw a measured GridRoute; anything else stores a typed RiserLink");
+  ok(['op: "addConduit"', 'op: "addLevel"', 'op: "updateLevel"', 'op: "addNote"', 'op: "removeLink"'].every((s) => reSrc.includes(s)),
+    "#GDS tools: conduit, level line, note and link removal all write through patchRiserAction");
+  const aspectSrc = readFileSync(join(process.cwd(), "src/components/design/sheet-aspect.ts"), "utf8");
+  ok(aspectSrc.includes('import("pdfjs-dist")') && aspectSrc.includes("naturalHeight / img.naturalWidth"), "#GDS Connect: the sheet aspect is measured the way the editor measures it (image natural size, PDF viewport)");
+}

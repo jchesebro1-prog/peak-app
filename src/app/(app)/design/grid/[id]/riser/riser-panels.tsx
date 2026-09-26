@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type RefObject } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
+import type { RiserNote } from "@/lib/design/grid-riser-doc";
 
 /** Riser editor tool panels (#GDS). Plain controlled forms; the editor owns
  *  every server call and passes busy/callbacks in. */
@@ -189,6 +190,241 @@ export function SpacePanel({
         Cancel
       </button>
       <div style={HINT}>A small rectangle on the plan&apos;s lower margin — open the plan to reshape it around the real room.</div>
+    </div>
+  );
+}
+
+/** Connect / Conduit, after both ends are picked. */
+export function PairPanel({
+  tool,
+  kind,
+  fromLabel,
+  toLabel,
+  cables,
+  busy,
+  onConnect,
+  onConduit,
+  onCancel,
+}: {
+  tool: "connect" | "conduit";
+  kind: "route" | "link";
+  fromLabel: string;
+  toLabel: string;
+  cables: RiserPartOption[];
+  busy: boolean;
+  onConnect: (partId: string, lengthFt: number | null) => void;
+  onConduit: (label: string) => void;
+  onCancel: () => void;
+}) {
+  const [partId, setPartId] = useState("");
+  const [len, setLen] = useState("");
+  const [label, setLabel] = useState('1" EMT (by EC)');
+  const ft = Number(len);
+  if (tool === "conduit") {
+    return (
+      <div style={PANEL}>
+        <div style={TITLE}>{`Conduit: ${fromLabel} → ${toLabel}`}</div>
+        <label style={FIELD}>
+          Label
+          <input style={{ ...INPUT, width: 240 }} value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} />
+        </label>
+        <button type="button" className="pk-btn-accent" disabled={!label.trim() || busy} onClick={() => onConduit(label.trim())}>
+          Add conduit
+        </button>
+        <button type="button" className="pk-btn-outline" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+        <div style={HINT}>An annotation only — conduit is never priced and never on the BOM.</div>
+      </div>
+    );
+  }
+  const valid = Boolean(partId) && (kind === "route" || (ft > 0 && ft <= 5000));
+  return (
+    <div style={PANEL}>
+      <div style={TITLE}>{`Connect: ${fromLabel} → ${toLabel}`}</div>
+      <PartPicker label="Cable" options={cables} value={partId} onChange={setPartId} />
+      {kind === "link" && (
+        <label style={FIELD}>
+          Length (ft)
+          <input style={{ ...INPUT, width: 96 }} type="number" min={1} max={5000} step={1} value={len} onChange={(e) => setLen(e.target.value)} />
+        </label>
+      )}
+      <button type="button" className="pk-btn-accent" disabled={!valid || busy} onClick={() => onConnect(partId, kind === "link" ? ft : null)}>
+        {kind === "route" ? "Draw wire on the plan" : "Add link"}
+      </button>
+      <button type="button" className="pk-btn-outline" disabled={busy} onClick={onCancel}>
+        Cancel
+      </button>
+      <div style={HINT}>
+        {kind === "route"
+          ? "Both devices sit on the same calibrated page: this draws a straight wire run on the plan, priced by its measured length."
+          : "The ends aren't two devices on one calibrated page: this records a riser link whose typed length prices like a wire run."}
+      </div>
+    </div>
+  );
+}
+
+/** New level line, or edit an existing one. */
+export function LevelPanel({
+  title,
+  initialLabel = "",
+  initialElevation = "",
+  busy,
+  onSave,
+  onDelete,
+  onCancel,
+}: {
+  title: string;
+  initialLabel?: string;
+  initialElevation?: string;
+  busy: boolean;
+  onSave: (label: string, elevation: string) => void;
+  onDelete?: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState(initialLabel);
+  const [elevation, setElevation] = useState(initialElevation);
+  return (
+    <div style={PANEL}>
+      <div style={TITLE}>{title}</div>
+      <label style={FIELD}>
+        Label
+        <input style={{ ...INPUT, width: 200 }} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Stage level" maxLength={60} />
+      </label>
+      <label style={FIELD}>
+        Elevation (optional)
+        <input style={{ ...INPUT, width: 140 }} value={elevation} onChange={(e) => setElevation(e.target.value)} placeholder={`EL 100'-0"`} maxLength={30} />
+      </label>
+      <button type="button" className="pk-btn-accent" disabled={!label.trim() || busy} onClick={() => onSave(label.trim(), elevation.trim())}>
+        Save
+      </button>
+      {onDelete && <ConfirmButton label="Delete line" confirmLabel="Delete" disabled={busy} onConfirm={onDelete} />}
+      <button type="button" className="pk-btn-outline" disabled={busy} onClick={onCancel}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+/** A selected wire run or riser link. */
+export function EdgePanel({ title, detail, busy, onDelete, onCancel }: { title: string; detail: string; busy: boolean; onDelete: () => Promise<void>; onCancel: () => void }) {
+  return (
+    <div style={PANEL}>
+      <div style={TITLE}>{title}</div>
+      <div style={HINT}>{detail}</div>
+      <ConfirmButton label="Delete connection" confirmLabel="Delete" disabled={busy} onConfirm={onDelete} />
+      <button type="button" className="pk-btn-outline" disabled={busy} onClick={onCancel}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+/** A selected conduit annotation. */
+export function ConduitPanel({
+  label: initial,
+  busy,
+  onSave,
+  onDelete,
+  onCancel,
+}: {
+  label: string;
+  busy: boolean;
+  onSave: (label: string) => void;
+  onDelete: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState(initial);
+  return (
+    <div style={PANEL}>
+      <div style={TITLE}>Conduit</div>
+      <label style={FIELD}>
+        Label
+        <input style={{ ...INPUT, width: 240 }} value={label} onChange={(e) => setLabel(e.target.value)} maxLength={60} />
+      </label>
+      <button type="button" className="pk-btn-accent" disabled={!label.trim() || label.trim() === initial || busy} onClick={() => onSave(label.trim())}>
+        Save
+      </button>
+      <ConfirmButton label="Delete conduit" confirmLabel="Delete" disabled={busy} onConfirm={onDelete} />
+      <button type="button" className="pk-btn-outline" disabled={busy} onClick={onCancel}>
+        Close
+      </button>
+    </div>
+  );
+}
+
+/** Numbered riser notes: add, edit, delete (they print on E-501). */
+export function NotesPanel({
+  notes,
+  busy,
+  inputRef,
+  onAdd,
+  onSave,
+  onDelete,
+}: {
+  notes: RiserNote[];
+  busy: boolean;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onAdd: (text: string) => Promise<boolean>;
+  onSave: (id: string, text: string) => void;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  return (
+    <div className="pk-card pk-no-print" style={{ padding: "12px 16px", marginTop: 12, fontSize: 12.5 }}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>Riser notes</div>
+      {notes.map((n) =>
+        editing?.id === n.id ? (
+          <div key={n.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+            <span style={{ width: 22, color: "#8c919c" }}>{`${n.n}.`}</span>
+            <input style={{ ...INPUT, flex: 1 }} value={editing.text} onChange={(e) => setEditing({ id: n.id, text: e.target.value })} maxLength={500} />
+            <button
+              type="button"
+              className="pk-btn-accent"
+              disabled={!editing.text.trim() || busy}
+              onClick={() => {
+                onSave(n.id, editing.text.trim());
+                setEditing(null);
+              }}
+            >
+              Save
+            </button>
+            <button type="button" className="pk-btn-outline" onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div key={n.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+            <span style={{ width: 22, color: "#8c919c" }}>{`${n.n}.`}</span>
+            <span style={{ flex: 1 }}>{n.text}</span>
+            <button type="button" className="pk-btn-outline" style={{ fontSize: 11.5 }} disabled={busy} onClick={() => setEditing({ id: n.id, text: n.text })}>
+              Edit
+            </button>
+            <ConfirmButton label="Delete" confirmLabel="Delete note" disabled={busy} onConfirm={() => onDelete(n.id)} />
+          </div>
+        )
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <input
+          ref={inputRef}
+          style={{ ...INPUT, flex: 1 }}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Add a numbered note — e.g. Conduit and boxes by electrical contractor."
+          maxLength={500}
+        />
+        <button
+          type="button"
+          className="pk-btn-accent"
+          disabled={!text.trim() || busy}
+          onClick={async () => {
+            if (await onAdd(text.trim())) setText("");
+          }}
+        >
+          Add note
+        </button>
+      </div>
     </div>
   );
 }
