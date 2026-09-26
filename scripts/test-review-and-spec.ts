@@ -18115,3 +18115,98 @@ import {
   // M5 — maxDuration on the virtual-part pages
   ok(["riser", "set", "schedule"].every((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8").includes("export const maxDuration = 60")), "#GEM fix1 M5: riser, set and schedule pages get the editor's 60 s budget");
 }
+
+/* --- #GEM T7: Auto cards (priced from the map, sell-only to the client) + the fill rules --- */
+import { autoEstimateCards as gemCards7, autoTargets as gemAutoTargets7, clampScopeInputs as gemClamp7, priceOverrides as gemPriceOv7, sellOnlyCards as gemSellOnly7 } from "@/lib/design/auto-estimate";
+import { EACH_CAP as gemEachCap7, generateAutoLayout as gemLayout7, partIdForLine as gemPartIdFor7, venueFrame as gemFrame7 } from "@/lib/design/grid-auto-layout";
+import { buildEquipmentPriceTable as gemTable7, type EquipCell as GemCell7 } from "@/lib/design/equipment-map";
+import { compute as gemCompute7, defaultAState as gemDefault7, type AState as GemAState7 } from "@/app/(app)/design/quick/engine";
+import { prosGeom as gemProsGeom7 } from "@/app/(app)/design/quick/plan-svg";
+import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake";
+{
+  const parts = new Map<string, { sku: string; desc: string; unit: string; cost: number; list: number; category: string; curtainAreaRate?: number }>([
+    ["GEM7-PAR", { sku: "GEM7-PAR", desc: "LED par", unit: "ea", cost: 600, list: 900, category: "Lighting Fixtures" }],
+    ["GEM7-FRONT", { sku: "GEM7-FRONT", desc: "Profile spot", unit: "ea", cost: 1500, list: 2100, category: "Lighting Fixtures" }],
+    ["GEM7-HB", { sku: "GEM7-HB", desc: "Headblock", unit: "ea", cost: 500, list: 700, category: "Rigging Hardware" }],
+    ["GEM7-PIPE", { sku: "GEM7-PIPE", desc: "Batten pipe", unit: "ft", cost: 8, list: 12, category: "Rigging Hardware" }],
+    ["GEM7-VEL", { sku: "GEM7-VEL", desc: "Velour", unit: "sq ft", cost: 0, list: 0, category: "Fabric", curtainAreaRate: 3.5 }],
+    ["GEM7-SPK", { sku: "GEM7-SPK", desc: "Line array box", unit: "ea", cost: 1000, list: 1450, category: "Audio" }],
+    ["GEM7-MIX", { sku: "GEM7-MIX", desc: "Mixer", unit: "ea", cost: 5000, list: 7000, category: "Audio" }],
+  ]);
+  const rack = {
+    id: "SA-GEM7", kind: "system" as const, label: "GEM7 rack", description: "", scope: "Audio" as const,
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "GEM7-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const every = (c: GemCell7) => ({ tiers: { good: c }, sameAll: true, updatedBy: "t", updatedAt: 1 });
+  const table = gemTable7({
+    "lighting:par": every({ kind: "part", sku: "GEM7-PAR" }),
+    "lighting:front": every({ kind: "part", sku: "GEM7-FRONT" }),
+    "rigging:headblock": every({ kind: "part", sku: "GEM7-HB" }),
+    "rigging:pipe": every({ kind: "part", sku: "GEM7-PIPE" }),
+    "curtains:draw": every({ kind: "part", sku: "GEM7-VEL" }),
+    "audio:lineArray": every({ kind: "part", sku: "GEM7-SPK" }),
+    "audio:subwoofer": every({ kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 }),
+    "audio:mixerDsp": every({ kind: "assembly", id: "SA-GEM7" }),
+  }, ctx);
+  const a: GemAState7 = {
+    ...gemDefault7(0), venue: "school", size: "medium", width: 40, depth: 30, grid: 24, wing: 12, ph: 20, rigType: "counterweight",
+    sys: { rigging: true, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false },
+    drape: { draw: true, legs: false, border: false, scenerytrack: false, fullstage: false },
+    fixtures: { par: true, front: true, cyc: false, side: false, automated: false },
+  };
+  const inputs = { ...gemManualInputs7(a), sys: a.sys };
+  const est = {
+    tierByScope: { rigging: "better" as const, curtains: "better" as const, lighting: "better" as const, audio: "better" as const },
+    overrides: { "lighting:front": { qty: 3 } },
+  };
+  const cards = gemCards7(inputs, est, table, gemPriceOv7(est.overrides, ctx));
+  ok(cards.map((c) => c.scope).join(",") === "rigging,curtains,lighting,audio", "#GEM T7: one card per chosen Grid scope, in scope order");
+  const card = (k: string) => cards.find((c) => c.scope === k)!;
+  const line = (k: string, key: string) => card(k).lines.find((l) => l.rowKey === key)!;
+  const par = line("lighting", "lighting:par");
+  ok(par.status === "part" && par.unitSell === 900 && par.qty === 15 && par.total === 15 * 900 && par.ref === "GEM7-PAR", "#GEM T7: a mapped line pre-fills its part at the equation quantity");
+  const front = line("lighting", "lighting:front");
+  ok(front.qty === 3 && front.eqQty === 13 && front.total === 3 * 2100, "#GEM T7: an edited qty overrides the equation quantity");
+  const rig = card("rigging");
+  const arbor = line("rigging", "rigging:arbor");
+  ok(arbor.status === "needs-part" && arbor.total === 0 && arbor.unitSell === 0 && arbor.reason === "Not mapped yet" && rig.needsPart >= 1, "#GEM T7: unmapped lines are listed with a reason, never priced");
+  ok(rig.total === rig.lines.reduce((s, l) => s + l.total, 0), "#GEM T7: a card total sums only priced lines");
+  const sub = line("audio", "audio:subwoofer");
+  ok(sub.status === "allowance" && sub.unitSell === 1714.29 && card("audio").allowances === 1, "#GEM T7: a confirmed allowance line is flagged and priced");
+  const mix = line("audio", "audio:mixerDsp");
+  ok(mix.status === "assembly" && mix.unitSell === 7000, "#GEM T7: a System assembly line prices at its included totals");
+  const draw = line("curtains", "curtains:draw");
+  ok(draw.status === "part" && !!draw.drape && draw.unitCost > 0 && draw.ref === "GEM7-VEL", "#GEM T7: a drape line costs from the mapped fabric");
+  const swapOv = { "lighting:par": { assemblyId: "SA-GEM7" } };
+  const spar = gemCards7(inputs, { ...est, overrides: swapOv }, table, gemPriceOv7(swapOv, ctx)).find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:par")!;
+  ok(spar.status === "assembly" && spar.swapped && spar.refDesc === "GEM7 rack", "#GEM T7: any line can be swapped to an assembly for this design");
+  const sell = gemSellOnly7(cards);
+  ok(!JSON.stringify(sell).includes("unitCost") && sell[0].lines.length === cards[0].lines.length, "#GEM T7: the client payload carries no unit cost");
+  const tg = gemAutoTargets7(cards);
+  ok(tg.lighting!.sell === card("lighting").total && tg.rigging!.needsPart === rig.needsPart && tg.audio!.allowances === 1, "#GEM T7: Auto targets are the chosen cards' totals");
+  const clamped = gemClamp7({ ...inputs, width: 9999, depth: Number.NaN });
+  ok(clamped.width === 80 && clamped.depth === 14, "#GEM T7: client-sent dimensions are clamped");
+  const Cq = gemCompute7({ ...a, tier: "better" });
+  const specs = gemLayout7(a, cards, { electrics: Cq.electrics, sets: Cq.rigSets });
+  const placedQty = (key: string) => specs.filter((s) => s.auto.rowKey === key).reduce((n, s) => n + (s.qty ?? 1), 0);
+  const placeable = cards.flatMap((c) => c.lines.filter((l) => gemPartIdFor7(l, c.tier) !== null));
+  ok(placeable.length > 0 && placeable.every((l) => placedQty(l.rowKey) === l.qty), "#GEM T7: every placeable line lands at exactly its quantity");
+  ok(specs.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "#GEM T7: every position lies on the sheet");
+  const fr = gemFrame7(a);
+  const inside = (p: { x: number; y: number }, r: { x: number; y: number; w: number; h: number }) =>
+    p.x >= r.x - 1e-9 && p.x <= r.x + r.w + 1e-9 && p.y >= r.y - 1e-9 && p.y <= r.y + r.h + 1e-9;
+  ok(specs.filter((s) => s.auto.rowKey === "lighting:par").every((s) => inside(s, fr.stage)), "#GEM T7: pars hang on the electrics, inside the stage");
+  ok(specs.filter((s) => s.auto.rowKey === "lighting:front").every((s) => inside(s, fr.audience)), "#GEM T7: front lights go front-of-house");
+  ok(specs.filter((s) => s.auto.rowKey === "audio:mixerDsp").every((s) => inside(s, fr.booth)), "#GEM T7: the mixer rack goes to the control booth");
+  ok(!specs.some((s) => s.auto.rowKey === "rigging:arbor"), "#GEM T7: a needs-a-part line is never placed");
+  const drapes = specs.filter((s) => s.auto.rowKey === "curtains:draw");
+  ok(drapes.length === draw.qty && drapes.every((s) => s.partId === "GEM7-VEL" && s.curtain?.type === "Draw" && s.curtain.fabricSku === "GEM7-VEL" && s.curtain.widthFt === draw.drape!.w * draw.drape!.qty && s.curtain.fullnessPct === 50), "#GEM T7: draws land as curtain drop-ins on the mapped fabric, a pair as one drape");
+  ok(specs.filter((s) => s.auto.rowKey === "audio:subwoofer").every((s) => s.partId === "allow:audio:subwoofer:better") && specs.some((s) => s.partId === "asm:SA-GEM7"), "#GEM T7: allowances and assemblies land as virtual parts");
+  const pipeSpecs = specs.filter((s) => s.auto.rowKey === "rigging:pipe");
+  ok(pipeSpecs.length === 1 && pipeSpecs[0].qty === line("rigging", "rigging:pipe").qty && gemEachCap7 === 120, "#GEM T7: a lot row lands once, carrying its quantity");
+  ok(specs.every((s) => s.auto.tier === "better" && ["rigging", "curtains", "lighting", "audio"].includes(s.auto.scope)), "#GEM T7: every placement carries its auto tag");
+  const G = gemProsGeom7(a);
+  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#GEM T7: the frame is the base sheet's own geometry");
+}

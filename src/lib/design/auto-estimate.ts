@@ -1,0 +1,167 @@
+/**
+ * Auto intake cards (#GEM, spec §5) — the equations' items for each chosen
+ * Grid scope, priced at that scope's tier from the Equipment map (or a
+ * per-row swap), with editable quantities. Server-side: it prices through
+ * equipment-pricing.ts (cost-bearing). Clients receive sellOnlyCards() and
+ * import only its TYPES.
+ */
+import {
+  LIM,
+  SYS_ORDER,
+  compute,
+  defaultAState,
+  type AState,
+  type DimField,
+  type DrapeGeom,
+  type QuickScopeInputs,
+  type SysKey,
+  type TierKey,
+} from "@/app/(app)/design/quick/engine";
+import { EQUIPMENT_ROW_BY_KEY, type EquipPlace } from "./equipment-vocab";
+import { priceCell, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
+import { applyEquipment } from "./equipment-pricing";
+import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
+import type { AutoEstimate, AutoOverride } from "./grid-auto-model";
+import type { ScopeTargets } from "./scope-targets";
+
+/** Auto fills only the five Grid scopes (D-GEM-7). */
+export const AUTO_SCOPES: readonly SysKey[] = TRACKABLE_SYS_KEYS;
+
+export type AutoLine = {
+  rowKey: string;
+  scope: SysKey;
+  /** The equation's item name. */
+  label: string;
+  unit: string;
+  place: EquipPlace;
+  /** What the equations call for; `qty` is that or the designer's edit. */
+  eqQty: number;
+  qty: number;
+  status: PricedStatus | "needs-part";
+  /** needs-part only: why (not mapped, deleted part, …). */
+  reason?: string;
+  ref?: string;
+  refDesc?: string;
+  unitCost: number;
+  unitSell: number;
+  /** qty × unitSell (0 for needs-part). */
+  total: number;
+  swapped: boolean;
+  drape?: DrapeGeom;
+};
+export type AutoCard = { scope: SysKey; tier: TierKey; lines: AutoLine[]; total: number; needsPart: number; allowances: number };
+export type SellLine = Omit<AutoLine, "unitCost">;
+export type SellCard = Omit<AutoCard, "lines"> & { lines: SellLine[] };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Client-sent scope inputs, made safe for the equations: finite, non-negative, capped dims; boolean systems. */
+export function clampScopeInputs(inputs: QuickScopeInputs): QuickScopeInputs {
+  const dim = (f: DimField) => {
+    const v = Number(inputs[f]);
+    return Number.isFinite(v) ? Math.max(0, Math.min(LIM[f][1], v)) : LIM[f][0];
+  };
+  const sys = Object.fromEntries(SYS_ORDER.map((k) => [k, !!inputs.sys?.[k]])) as Record<SysKey, boolean>;
+  return { ...inputs, width: dim("width"), depth: dim("depth"), grid: dim("grid"), wing: dim("wing"), ph: dim("ph"), sys };
+}
+
+/** Price each row's swap (a catalog SKU or an assembly) through the same resolver as the map. */
+export function priceOverrides(overrides: Record<string, AutoOverride>, ctx: EquipPriceCtx): Record<string, UnitPrice> {
+  const out: Record<string, UnitPrice> = {};
+  for (const [rowKey, o] of Object.entries(overrides)) {
+    const def = EQUIPMENT_ROW_BY_KEY.get(rowKey);
+    if (!def) continue;
+    if (o.sku) out[rowKey] = priceCell({ kind: "part", sku: o.sku }, def, ctx);
+    else if (o.assemblyId) out[rowKey] = priceCell({ kind: "assembly", id: o.assemblyId }, def, ctx);
+  }
+  return out;
+}
+
+export function autoEstimateCards(
+  rawInputs: QuickScopeInputs,
+  est: AutoEstimate,
+  table: EquipmentPriceTable,
+  overridePrices: Record<string, UnitPrice>
+): AutoCard[] {
+  const inputs = clampScopeInputs(rawInputs);
+  const s: AState = { ...defaultAState(0), ...inputs, tier: "better" };
+  const C = compute(s);
+  const cards: AutoCard[] = [];
+  for (const scope of AUTO_SCOPES) {
+    if (!inputs.sys[scope]) continue;
+    const sys = C.systems.find((x) => x.key === scope);
+    if (!sys) continue;
+    const tier = est.tierByScope[scope] ?? "better";
+    const [priced] = applyEquipment([sys], tier, table, overridePrices);
+    const lines: AutoLine[] = [];
+    for (const it of priced.items) {
+      if (it.qty <= 0) continue;
+      const def = EQUIPMENT_ROW_BY_KEY.get(it.key);
+      if (!def) continue;
+      const o = est.overrides[it.key];
+      const qty = o?.qty ?? it.qty;
+      const status = it.status ?? "needs-part";
+      const needs = status === "needs-part";
+      const src = overridePrices[it.key] ?? table.byTier[tier][it.key];
+      lines.push({
+        rowKey: it.key,
+        scope,
+        label: it.desc,
+        unit: it.unit,
+        place: def.place,
+        eqQty: it.qty,
+        qty,
+        status,
+        ...(needs ? { reason: src && src.status === "needs-part" ? src.reason : "Not mapped yet" } : {}),
+        ...(it.ref ? { ref: it.ref } : {}),
+        ...(it.refDesc ? { refDesc: it.refDesc } : {}),
+        unitCost: needs ? 0 : it.cost,
+        unitSell: needs ? 0 : it.price,
+        total: needs ? 0 : round2(qty * it.price),
+        swapped: !!(o?.sku || o?.assemblyId),
+        ...(it.drape ? { drape: it.drape } : {}),
+      });
+    }
+    cards.push({
+      scope,
+      tier,
+      lines,
+      total: round2(lines.reduce((sum, l) => sum + l.total, 0)),
+      needsPart: lines.filter((l) => l.status === "needs-part").length,
+      allowances: lines.filter((l) => l.status === "allowance").length,
+    });
+  }
+  return cards;
+}
+
+function sellLine(l: AutoLine): SellLine {
+  return {
+    rowKey: l.rowKey,
+    scope: l.scope,
+    label: l.label,
+    unit: l.unit,
+    place: l.place,
+    eqQty: l.eqQty,
+    qty: l.qty,
+    status: l.status,
+    ...(l.reason ? { reason: l.reason } : {}),
+    ...(l.ref ? { ref: l.ref } : {}),
+    ...(l.refDesc ? { refDesc: l.refDesc } : {}),
+    unitSell: l.unitSell,
+    total: l.total,
+    swapped: l.swapped,
+    ...(l.drape ? { drape: l.drape } : {}),
+  };
+}
+
+/** What a client may see: every line without its unit cost. */
+export function sellOnlyCards(cards: AutoCard[]): SellCard[] {
+  return cards.map((c) => ({ scope: c.scope, tier: c.tier, lines: c.lines.map(sellLine), total: c.total, needsPart: c.needsPart, allowances: c.allowances }));
+}
+
+/** The Scope panel's target for Auto scopes = the chosen cards. */
+export function autoTargets(cards: Array<AutoCard | SellCard>): ScopeTargets {
+  const out: ScopeTargets = {};
+  for (const c of cards) out[c.scope] = { sell: c.total, needsPart: c.needsPart, allowances: c.allowances };
+  return out;
+}
