@@ -8246,8 +8246,12 @@ library, the template list, and one starter formula and one starter curtain temp
 `DECISIONS.md` D254…D261.
 
 **Still open.** Phase B: the generator (assembling a full spec from a project's BOM), the four doors (however a
-spec gets entered — see the build spec), docx-per-section output, zip output, and a print view. Phase C: the
-`spec-writer` skill and loading the North HS spec as a worked seed. Also open from this branch: **#204** (a
+spec gets entered — see the build spec), docx-per-section output, zip output, and a print view — including
+rendering `{{articles}}`/`{{manufacturers}}` and the category articles, which today's D94 generator does not read.
+Phase C: the `spec-writer` skill. **North HS seed DONE 2026-09-26 (D326, D327):** six sections' Part 1/Part 3 and 30
+Part 2 category headers in `docs/specs-seed/northhs-2026-07-30/spec-library.json` (loaded in dev; production is one
+Import library click), review list in its `REVIEW-NOTES.md`. Next from the seed: the Part 2 product text as
+catalog part specs (`catalog-spec.csv`), and the drapes article's curtain blocks as curtain templates. Also open from this branch: **#204** (a
 price-only Import-hub catalog import resets MAP to $0 — found while amending this plan, unrelated to spec fields,
 fix already scoped) and any Minor a reviewer carried during the branch (see the per-task reports in
 `.superpowers/sdd/task-*-report.md`).

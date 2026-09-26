@@ -6254,3 +6254,34 @@ when any Auto part is placed, a per-customer tier memo; no site lookup), which `
 read are marked incomplete (fail closed), never shown complete. The engagement letter reads only its designs
 (`getDesigns`) and re-derives a Quick design's completeness and budget with `serverDesignPrices` (one price context),
 so a stored pre-wave-2 budget never prints when the map would call the design incomplete.
+
+## D326. The North HS seed loads Part 1, Part 3 and the Part 2 category headers — never product entries (#205, 2026-09-26)
+
+The six Peak-family North HS Auditorium sections (11 61 13, 11 61 14, 11 61 23, 26 09 23, 26 09 61, 27 41 00; the
+27 30 00 file the design named was not in the source folder) are converted offline by
+`scripts/specs-seed-northhs.py` into `docs/specs-seed/northhs-2026-07-30/spec-library.json`, loaded through Specs →
+Library → Import library, with every hand change listed in the generated `REVIEW-NOTES.md`. The sources are
+PDF-to-Word conversions (each wrapped line is its own paragraph, each label is typed text + a tab), so the script
+rebuilds the outline from the label shape and joins unlabelled paragraphs onto the item before them. Each file
+becomes one section with its Part 1 / Part 3 articles; each 2.x article becomes a category article whose `general` is
+one top-level **General:** clause (the article's "A. General") holding only category-level clauses, with the
+acceptable-manufacturer list moved into `manufacturers` and printed through `{{manufacturers}}`. Product blocks
+(Basis of Design …, VALANCE, MAINS FED … ENCLOSURE, the AV equipment table) are **not** loaded: products come from
+catalog parts, which is the point of the library. The engineer's 26 09 23 articles have no single product, so the
+whole article is its General clause. Ids are fixed (`ss-nhs-<number>`, `ar-nhs-<number>-NN`, `sa-nhs-…`), so a
+re-import updates in place and never duplicates. The 11 61 14 file's title block says 11 61 13 — the filename wins.
+Two 26 09 61 articles shared the title ENTERTAINMENT POWER CONTROLS and were merged (a duplicate title makes the
+title-based article lookup ambiguous). `categoryKeys` are left empty: production's catalog categories differ from
+dev's, so defaulting parts into articles is set per environment in the section editor.
+
+## D327. Job-specific seed text is a fill-in: `{{placeholder}}` when the generator knows it, `[FILL IN: …]` otherwise (#205, 2026-09-26)
+
+A place, a room, a count or a date that belongs to one job does not ship as North HS's value. Where the Specs
+placeholder engine already has the value it is a placeholder — 11 61 23's SECTION INCLUDES and WORK INCLUDED "Base
+Bid" lists are `{{articles}}` (the Part 2 articles present in the generated spec). Everything else is a literal
+`[FILL IN: what goes here]` (18 in the seed: submittal day counts whose word and figure disagreed, North HS's
+Division 26 general-provisions section number, a spare-equipment quantity, the AV section's spaces served, and the AV
+SYSTEM DESCRIPTION rewritten as one clause per subsystem with the North HS specifics as fill-ins). A fill-in is not a
+placeholder, so it prints as written and cannot vanish silently; Phase B's finalize check should refuse a package
+that still contains `[FILL IN`. The library preview shows `{{articles}}` as "had no values" — it only resolves
+inside a generated spec.

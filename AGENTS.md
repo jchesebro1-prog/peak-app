@@ -233,8 +233,10 @@ See `.env.example`.
     Import hub; and the catalog importer carrying the same spec columns,
     exact-header-only, gating drafts everywhere a spec prints, including the
     external Displays API. Phase B (the generator, the four doors, docx/zip
-    output, a print view) and Phase C (the `spec-writer` skill, the North HS
-    seed) remain. Decisions D254–D261; punch item #205.
+    output, a print view) and the `spec-writer` skill remain. The North HS
+    seed shipped Sep 26 (D326–D327): six sections' Part 1/3 + Part 2
+    category headers, job text as fill-ins, `scripts/specs-seed-northhs.py`
+    → `docs/specs-seed/northhs-2026-07-30/`. Decisions D254–D261; punch #205.
 14. ✅ **Part documents** (#207, D270–D280) — datasheets and spec sheets are
     shared `part_documents` records linked to many parts through
     `part_document_links`, with accessory coverage computed in context from

@@ -1,0 +1,840 @@
+{
+  "kind": "peak-spec-library",
+  "version": 1,
+  "exportedAt": 1790000000000,
+  "sections": [
+    {
+      "id": "ss-nhs-116113",
+      "number": "11 61 13",
+      "title": "Acoustic Shell Enclosure",
+      "sort": 10,
+      "part1": [
+        {
+          "id": "sa-nhs-116113-p1-01",
+          "title": "SECTION INCLUDES",
+          "body": "Concert shells."
+        },
+        {
+          "id": "sa-nhs-116113-p1-02",
+          "title": "SUBMITTALS",
+          "body": "Comply with Section 01 33 00 – Submittal Procedures.\nProduct Data: Submit manufacturer’s product data, including the following:\n  Detailed specification of construction and fabrication.\n  Description of operations, including step by step set-up and take-down tasks.\n  Complete list of deviations from specifications.\nShop Drawings: Submit manufacturer’s shop drawings, including plans, elevations, sections, and details, indicating dimensions, tolerances, materials, components, fabrication, fasteners, hardware, finish, options, and accessories.\nSamples: Submit 2 sets of manufacturer’s samples for color selection or verification of acoustical reflective material.\nManufacturer’s Certification: Submit manufacturer’s certification that materials comply with specified requirements and are suitable for intended application.\nManufacturer’s Project References: Submit manufacturer’s list of successfully completed concert shell projects, including project name and location, name of architect, and type and quantity of concert shells furnished.\nContract Closeout Submittals: Submit contract closeout submittals as follows:\n  Operating and maintenance manuals, including the following:\n    Operation, maintenance, adjustment, and cleaning instructions.\n    Troubleshooting guide.\n    Parts list.\n    Detailed information required for Owner to properly operate and maintain concert shells.\n  Setup configuration layout and details to permit verification of safety design requirements.\n  Project record documents.\nWarranty Documentation: Submit manufacturer’s standard warranty."
+        },
+        {
+          "id": "sa-nhs-116113-p1-03",
+          "title": "QUALITY ASSURANCE",
+          "body": "Manufacturer’s Qualifications: Minimum 25 years of experience in the manufacturing of concert shells.\nManufacturer’s Quality Control:\n  Manufacturer shall make or have made, under their control, all parts comprising complete concert shells.\n  Maintain test and inspection procedures, to assure uniform high quality of all raw materials and finished product.\n  Manufacturer shall have capacity and facilities to furnish quality and quantity required without delaying the Work.\nWelder’s Qualifications: AWS certified for each type of weld required."
+        },
+        {
+          "id": "sa-nhs-116113-p1-04",
+          "title": "DELIVERY AND STORAGE",
+          "body": "Delivery Requirements: Deliver concert shells to site in manufacturer’s original, unopened containers and packaging, with labels clearly identifying product name and manufacturer.\nStorage Requirements: Store concert shells at location designated by the Owner."
+        },
+        {
+          "id": "sa-nhs-116113-p1-05",
+          "title": "WARRANTY",
+          "body": "Warranty Period: 2 years from date of delivery."
+        }
+      ],
+      "part3": [
+        {
+          "id": "sa-nhs-116113-p3-01",
+          "title": "INSTALLATION",
+          "body": "Three sets of detailed shop drawings and/or instructions shall be furnished by the manufacturer at installation.\nInstallation Supervised by Manufacturer: Manufacturer shall supply 1 factory-trained and certified representative to supervise installation of concert shells."
+        },
+        {
+          "id": "sa-nhs-116113-p3-02",
+          "title": "TRAINING",
+          "body": "Provide instruction and training of Owner’s personnel in the operation and maintenance of concert shells.\nProvide instruction and training by factory-trained and certified representative of manufacturer."
+        }
+      ],
+      "part2Style": "paragraphs",
+      "quantities": "drawings",
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ss-nhs-116114",
+      "number": "11 61 14",
+      "title": "Orchestra Pit Filler",
+      "sort": 20,
+      "part1": [
+        {
+          "id": "sa-nhs-116114-p1-01",
+          "title": "SECTION INCLUDES",
+          "body": "Portable Orchestra Pit Filler designed to form a pit floor at stage level heights."
+        },
+        {
+          "id": "sa-nhs-116114-p1-02",
+          "title": "SUBMITTALS",
+          "body": "Comply with Section 01 33 00 – Submittal Procedures.\nProduct Data: Submit manufacturer’s product data, including the following:\n  Detailed specification of construction and fabrication.\n  Description of operations, including step by step set-up and take-down tasks.\n  Complete list of deviations from specifications.\nShop Drawings: Submit manufacturer’s shop drawings, including plans, elevations, sections, and details, indicating dimensions, tolerances, materials, components, fabrication, fasteners, hardware, finish, options, and accessories.\nSamples: Submit 2 sets of manufacturer’s samples for color selection or verification of acoustical reflective material.\nManufacturer’s Certification: Submit manufacturer’s certification that materials comply with specified requirements and are suitable for intended application.\nManufacturer’s Project References: Submit manufacturer’s list of successfully completed pit cover projects, including project name and location, name of architect, and type of pit cover furnished.\nContract Closeout Submittals: Submit contract closeout submittals as follows:\n  Operating and maintenance manuals, including the following:\n    Operation, maintenance, adjustment, and cleaning instructions.\n    Troubleshooting guide.\n    Parts list.\n    Detailed information required for Owner to properly operate and maintain pit cover.\n  Setup configuration layout and details to permit verification of safety design requirements.\n  Project record documents.\nWarranty Documentation: Submit manufacturer’s standard warranty."
+        },
+        {
+          "id": "sa-nhs-116114-p1-03",
+          "title": "QUALITY ASSURANCE",
+          "body": "Manufacturer’s Qualifications: Minimum 25 years of experience in the manufacturing of orchestra pit covers.\nManufacturer’s Quality Control:\n  Manufacturer shall make or have made, under their control, all parts comprising complete pit cover system\n  Maintain test and inspection procedures, to assure uniform high quality of all raw materials and finished product.\n  Manufacturer shall have capacity and facilities to furnish quality and quantity required without delaying the Work.\nWelder’s Qualifications: AWS certified for each type of weld required."
+        },
+        {
+          "id": "sa-nhs-116114-p1-04",
+          "title": "DELIVERY AND STORAGE",
+          "body": "Delivery Requirements: Deliver stage extension platform systems to site in manufacturer’s original, unopened containers and packaging, with labels clearly identifying product name and manufacturer.\nStorage Requirements: Store stage extension platform systems at location designated by the Owner."
+        },
+        {
+          "id": "sa-nhs-116114-p1-05",
+          "title": "WARRANTY",
+          "body": "Warranty Period: 2 years from date of delivery."
+        }
+      ],
+      "part3": [
+        {
+          "id": "sa-nhs-116114-p3-01",
+          "title": "INSTALLATION",
+          "body": "Installing contractor shall deliver materials to jobsite\nInstallation Supervised by Manufacturer: Manufacturer shall supply 1 factory-trained and certified representative to supervise installation of Pit Cover\nInstalling contractor shall provide necessary labor to assist with install"
+        },
+        {
+          "id": "sa-nhs-116114-p3-02",
+          "title": "TRAINING",
+          "body": "Provide instruction and training of Owner’s personnel in the operation and maintenance of stage extension platform systems.\nProvide instruction and training by factory-trained and certified representative of manufacturer."
+        }
+      ],
+      "part2Style": "paragraphs",
+      "quantities": "drawings",
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ss-nhs-116123",
+      "number": "11 61 23",
+      "title": "Theatrical Rigging and Curtains",
+      "sort": 30,
+      "part1": [
+        {
+          "id": "sa-nhs-116123-p1-01",
+          "title": "SECTION INCLUDES",
+          "body": "{{articles}}"
+        },
+        {
+          "id": "sa-nhs-116123-p1-02",
+          "title": "SUBMITTALS",
+          "body": "Comply with Section 01 33 00 – Submittal Procedures.\nShop Drawings.\nWithin [FILL IN: number of days] days of contract award, the Contractor shall submit shop drawings in AutoCAD format to respective parties for approval prior to fabrication:\n  Complete, fully dimensioned shop drawings of all major components.\n  Plans, sections, and schematics indicating assembly and installation of components.\n  Load ratings of the major components within the system.\n  Any additional structural support supplied and installed by this contractor.\n  Specific listing of all variations from the Drawings and Specifications.\n  Power requirements for any electrical components.\nSamples: Within [FILL IN: number of days] days of contract award, the Contractor shall submit to the Respective Parties for approval prior to fabrication:\n  Samples and color lines for all curtain fabrics.\n  Samples of any equipment component requested by the Architect.\nFinal Submittal: Within thirty (30) days of final tests, and as a condition for final approval, the Contractor shall submit to the Architect:\n  Receipts for delivery of all non-installed items, designated as \"deliver to Owner\".\n  Certificates of warranty, as shown below.\n  Three (3) sets to the Respective Parties:\n  \"As built and approved\" CAD drawings and wiring diagrams showing all systems and components as installed, including all field modifications.\n  Operation and service manuals, schematics, and parts list for each unit of equipment installed or provided.\n  Flameproofing certificates for fabrics.\nWarranty Documentation: Submit manufacturer’s standard warranty."
+        },
+        {
+          "id": "sa-nhs-116123-p1-03",
+          "title": "QUALITY ASSURANCE",
+          "body": "Manufacturers\n  See Individual Categories in Products for Acceptable Manufacturers\n  Basis-of-Design Product: The design for each product is based on the product named.\n  Alternatives\n    Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified.\n    Alternative manufacturers must submit a full pre-approval package ten days prior to bid date.\n  The manufacturer shall be one who has been continuously engaged in the manufacture of the equipment specified in this section for a minimum of ten years.\n  Proposed equipment shall be UL and C-UL listed, and/or CE marked (where applicable) and bear the appropriate labels"
+        },
+        {
+          "id": "sa-nhs-116123-p1-04",
+          "title": "SCOPE",
+          "body": "All materials, components, and services necessary to provide a complete system indicated in this Section, as specified herein and shown on related Drawings including, but not limited to:\n  Preparation and submission of complete shop drawings and samples for approval prior to fabrication.\n  Verification of dimensions and conditions at the job site.\n  Shipment of equipment to job site.\n  Installation and completion, in accordance with these Specifications, related Drawings, the Equipment Manufacturers recommendations, established trade criteria, and all applicable code requirements. The inspections, demonstration, and necessary adjustment of the completed installation by the Contractors engineering personnel.\n  Preparation and submission of complete record drawings and operational and maintenance data and certificates."
+        },
+        {
+          "id": "sa-nhs-116123-p1-05",
+          "title": "WORK INCLUDED",
+          "body": "Base Bid:\n  {{articles}}\nThe above list is for reference only and is not intended to define limits of the work for a complete installation. Carefully follow all written specifications and drawings and provide such work for a complete and operating system."
+        },
+        {
+          "id": "sa-nhs-116123-p1-06",
+          "title": "WORK NOT INCLUDED",
+          "body": "Principal structural steel work, except as herein indicated.\nElectrical work, except as herein indicated"
+        },
+        {
+          "id": "sa-nhs-116123-p1-07",
+          "title": "RELATED WORK IN OTHER SECTIONS",
+          "body": "Structural steel\nConcrete and masonry\nSmoke vents and roof hatches\nHVAC\nPlumbing and sprinklers\nGeneral electrical work\nSound and communications equipment"
+        }
+      ],
+      "part3": [
+        {
+          "id": "sa-nhs-116123-p3-01",
+          "title": "FIELD QUALITY CONTROL",
+          "body": "All equipment shall be installed under the direct supervision of an ETCP certified theatrical rigger. All work shall be performed in strict accordance with approved shop and installation drawings. Inspection Prior to fabrication and installation, stage equipment contractor shall verify field dimensions and structural capabilities."
+        },
+        {
+          "id": "sa-nhs-116123-p3-02",
+          "title": "INSPECTIONS",
+          "body": "Prerequisites: Minimum inspection and testing requirements are established by the following prerequisites.\n  Line set components are manufactured under controlled process environments, and to engineered designs\n  Line set components are installed under conditions where a qualified person evaluates system design\n  Line set component manufacturers provide detailed recommendations for the application and installation of their respective products\n  The line set installation consists of standardized components and equipment layouts."
+        },
+        {
+          "id": "sa-nhs-116123-p3-03",
+          "title": "GENERAL REQUIREMENTS",
+          "body": "All installations shall be visually inspected after installation and shall be tested for operation in a nondestructive manner.\nAll systems shall be inspected after installation, and prior to user operation. Inspections shall meet requirements of this section, but additional requirements shall be permitted.\nQualified persons shall oversee the inspection and testing process and shall certify that all inspection requirements have been met.\nInspection procedures and results shall be fully documented. The testing supervisor, the installer and the system owner shall retain complete copies of the test documentation."
+        },
+        {
+          "id": "sa-nhs-116123-p3-04",
+          "title": "PROOF TESTING",
+          "body": "The design factor of lift lines shall be determined by the following calculation:\n  (Breaking Strength) x (Strength Reduction Factors) (Design Load Limit)\n  Where:\n    Breaking Strength = the minimum load at which tensile failure occurs, as certified by the manufacturer.\n    Strength Reduction Factors = the factors that reduce the static load breaking strength. Strength reduction factors take into account bending as the lift line passes over sheaves, and the types of knots or fittings used. Refer to the current edition of the Wire Rope User’s Guide, or to manufacturer’s specific recommendations for appropriate strength reduction values.\n    Design Load Limit = the maximum anticipated static load that the lift line will support in use."
+        },
+        {
+          "id": "sa-nhs-116123-p3-05",
+          "title": "RIGGING",
+          "body": "Hardware (bolts, nuts, washers, etc.) shall be Grade 5 or greater or similarly specified unless otherwise noted. Compressible swage fittings shall be crimped exactly according to manufacturer's recommendations as to quantity and spacing of crimps. Swage tools must be calibrated prior to beginning work. Trim dead end of cable to within 3/8\" of swage. The entire swage shall be taped including the short dead end of the cable. Only copper sleeves shall be used. Aluminum is not acceptable. Wire ropes shall be taped with good quality friction tape prior to cutting."
+        },
+        {
+          "id": "sa-nhs-116123-p3-06",
+          "title": "TESTS AND INSPECTIONS",
+          "body": "The complete job shall be subject to reasonable tests and inspections during construction and at final acceptance. Upon notice, the contractor shall furnish not to exceed two men (one to be the installation supervisor), and tools as required to conduct tests and inspections for the architect."
+        },
+        {
+          "id": "sa-nhs-116123-p3-07",
+          "title": "SYSTEM DEMONSTRATION",
+          "body": "After the installation is complete and all adjustments have been made, a representative of the contractor shall demonstrate the systems and instruct the Owner's personnel, using the written instruction books and maintenance manuals as a guide."
+        },
+        {
+          "id": "sa-nhs-116123-p3-08",
+          "title": "WARRANTY",
+          "body": "Manufacturer shall warrant products under normal use and service to be free from defects in materials and workmanship for a period of two years from date of delivery.\nWarranty shall cover repair or replacement of such parts determined defective upon inspection.\nWarranty does not cover any product or part of a product subject to accident, negligence, alteration, abuse or misuse. Warranty does not cover any accessories or parts not supplied by the manufacturer.\nWarranty shall not cover any labor expended or materials used to repair any equipment without manufacturer’s prior written authorization."
+        },
+        {
+          "id": "sa-nhs-116123-p3-09",
+          "title": "TESTING AND INSTRUCTION",
+          "body": "Upon completion of all installation work, the Contractor shall certify in writing that the work is complete and ready for final inspection. Final inspection shall be scheduled by the Owner, the Architect and Engineer within fourteen days following the Contractor's notice of completion. Final inspection shall be conducted by a knowledgeable representative of the Contractor and shall include the following:\nOperation of all components.\nVisual examination of all components.\nNecessary adjustments and/or modifications shall be made as required.\nContractor’s representative shall instruct Owner’s designated staff or representatives in the safe operation and maintenance of all items, including the storage and cleaning of all fabrics."
+        },
+        {
+          "id": "sa-nhs-116123-p3-10",
+          "title": "GENERAL REQUIREMENTS",
+          "body": "General Conditions of the project contract, work schedules, and site regulations apply to this work.\nThis work shall comply with all applicable local and national codes. All equipment shall be fully insured against loss or damage during shipment, installation and testing. Certification of such coverage shall be furnished to the Architect.\nThe Contractor shall warrant all equipment provided under this section to be free from defects in materials and workmanship for a period of at least twelve (12) months from a date of final acceptance of all work of this section.\nAll repairs and service during the warranty period shall be at the job site and include all necessary labor, materials and transportation of replacement material and parts.\nThis warranty shall cover any manufacturer defects of equipment and unusual wear and tear caused by improper installation. Normal wear and tear and abuse of equipment are exempted."
+        }
+      ],
+      "part2Style": "paragraphs",
+      "quantities": "drawings",
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ss-nhs-260923",
+      "number": "26 09 23",
+      "title": "Lighting Controls",
+      "sort": 40,
+      "part1": [
+        {
+          "id": "sa-nhs-260923-p1-01",
+          "title": "APPLICABLE PROVISIONS",
+          "body": "Drawings and general provisions of contract, including general and supplemental conditions and Division 01 specification sections, apply to work of this section."
+        },
+        {
+          "id": "sa-nhs-260923-p1-02",
+          "title": "APPLICABLE PUBLICATIONS",
+          "body": "Conform to requirements of current ANSI/NFPA 70 National Electrical Code.\nConform to current National Electrical Manufacturers Association (NEMA) Standards.\nConform to current Underwriters Laboratories (UL) Specifications and Standards.\nConform to current NEMA Enclosure Standards.\nConform to NEMA Standard WD-7-2000."
+        },
+        {
+          "id": "sa-nhs-260923-p1-03",
+          "title": "DESCRIPTION OF WORK",
+          "body": "Furnish and install a complete lighting control system as shown on the drawings and as specified herein. This equipment shall provide the following functions:\n  Control of emergency lighting through the use of bypass device when generator runs.\n  Control of Corridor / Common Space lighting via Building Automation System as shown on the drawings.\n  Control of exterior lighting dusk to dawn via Building Automation System.\n  Control of exterior lighting dusk on/time clock off – time clock on/dawn off via Building Automation System.\n  Dual technology, PIR and ultrasonic motion sensor lighting controls.\n  Control of other lighting as shown on the drawings."
+        },
+        {
+          "id": "sa-nhs-260923-p1-04",
+          "title": "RELATED WORK ELSEWHERE",
+          "body": "Division 09: Finishes.\nDivision 11: Equipment\nDivision 26, 27, and 28: Electrical"
+        },
+        {
+          "id": "sa-nhs-260923-p1-05",
+          "title": "SHOP DRAWINGS",
+          "body": "Submit shop drawings in accordance with Section [FILL IN: electrical general provisions section].\nThe following information shall be submitted in addition to items listed above:\n  Wiring diagram indicating wire size and type for each individual piece of equipment.\n  Complete riser diagram indicating all equipment and interconnecting components with indication of location of each device.\n  Submittal drawings are required for the following systems. They shall include the following:\n    Emergency bypass device:\n      Drawing showing front elevation, panel labeling, listing of components.\n      Cut sheets on components.\n      Relay control assignments to circuits, zones or groups of lighting shall be notated.\n      Detail of bypass.\n    Corridor / Common Space lighting controls:\n      Wiring diagrams for exterior lighting controls showing front panel elevation, panel wiring schematic, and indication of controlled circuits.\n      Cut sheets on components.\n      Diagrams shall include a ladder diagram showing the entire system and all interconnects.\n    Exterior lighting controls:\n      Wiring diagrams for exterior lighting controls showing front panel elevation, panel wiring schematic, and indication of controlled circuits.\n      Cut sheets on components.\n      Diagrams shall include a ladder diagram showing the entire system and all interconnects.\n    Dual technology, Passive infrared and ultrasonic lighting controls.\n      Drawing showing all switches, and sensors and connections between all devices and lighting circuits.\n      Cut sheets on components.\n      Proper circuit numbers shall be shown on drawings.\n    Other lighting controls as shown on drawings.\n      Drawing showing front elevation, panel labeling, listing of components.\n      Cut sheets on components.\n      Control assignments to circuits, zones or groups of lighting shall be notated."
+        },
+        {
+          "id": "sa-nhs-260923-p1-06",
+          "title": "OPERATION & MAINTENANCE MANUALS",
+          "body": "Submit Operations & Maintenance Manuals in accordance with Section [FILL IN: electrical general provisions section]."
+        },
+        {
+          "id": "sa-nhs-260923-p1-07",
+          "title": "QUALITY ASSURANCE",
+          "body": "Provide quality assurance in accordance with Section [FILL IN: electrical general provisions section].\nAll materials, equipment and parts shall be new and unused of current manufacture.\nProvide all necessary accessories required for a complete and operable system."
+        },
+        {
+          "id": "sa-nhs-260923-p1-08",
+          "title": "WARRANTY",
+          "body": "Equipment shall be warranted for a period of not less than 1 year from the date of commissioning against defects in material and workmanship.\nThe warranty shall be comprehensive. No deductibles shall be allowed for travel time, service hours, repair parts cost, etc."
+        }
+      ],
+      "part3": [
+        {
+          "id": "sa-nhs-260923-p3-01",
+          "title": "EXAMINATION",
+          "body": "Verify equipment is in compliance with approved submittal drawings."
+        },
+        {
+          "id": "sa-nhs-260923-p3-02",
+          "title": "FIELD MEASUREMENTS (NONE)",
+          "body": ""
+        },
+        {
+          "id": "sa-nhs-260923-p3-03",
+          "title": "DELIVERY, STORAGE AND HANDLING",
+          "body": "Receive, sign for and store all equipment in this section.\nMaintain original quality and condition of equipment while it is in storage."
+        },
+        {
+          "id": "sa-nhs-260923-p3-04",
+          "title": "INSTALLATION",
+          "body": "General:\n  The complete installation shall be done in a neat, workmanlike manner in accordance with all applicable codes and the manufacturer’s recommendations.\n  Install all fixtures, materials, assemblies and equipment in strict accordance with manufacturer’s recommendations and instructions. Consult manufacturer for all wiring diagrams, schematics, sizes, outlets, etc. before installing.\n  Start of installation shall not begin until areas are broom clean, properly lighted, exterior enclosing walls in place, exterior windows glazed, roof completely installed to prevent weather damage to equipment.\nCleaning:\n  Prior to turning the system over to the Owner, the system shall be physically cleaned.\n  All appearance defects shall be carefully and professionally touched up so that the equipment is in “factory new” condition.\n  At the completion of the work, remove from the building and the premises all rubbish and debris resulting from the work.\nInstall products in accordance with manufacturer's instructions.\nInstall devices plumb and level.\nInstall switches with off position down.\nLabeling:\n  Each panel enclosure shall be labeled as to its function.\n  Each bypass switch and bypass relay shall have engraved labels indicating their functions.\nFinal Testing\n  The completed lighting controls system shall be fully tested in accordance with NFPA by the Contractor in the presence of the Owner’s representative and the Engineer. Upon completion of a successful test, the Contractor shall so certify in writing to the Owner."
+        },
+        {
+          "id": "sa-nhs-260923-p3-05",
+          "title": "OWNER TRAINING",
+          "body": "Provide complete operator training for the Owner’s personnel.\nProvide minimum one hour training on the operation of each system in this section.\nOwner representative shall specifically be shown how the bypass lighting system operates and how he may bypass each of the lighting circuits by operating the bypass switch as part of the control system."
+        },
+        {
+          "id": "sa-nhs-260923-p3-06",
+          "title": "SPARE EQUIPMENT",
+          "body": "[FILL IN: quantity] dual technology motion detectors."
+        }
+      ],
+      "part2Style": "paragraphs",
+      "quantities": "drawings",
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ss-nhs-260961",
+      "number": "26 09 61",
+      "title": "Theatrical Lighting Controls and Fixtures",
+      "sort": 50,
+      "part1": [
+        {
+          "id": "sa-nhs-260961-p1-01",
+          "title": "WORK INCLUDED",
+          "body": "The Contractor, as part of the work of this section, shall provide, install and test a complete lighting control system as specified herein for areas indicated on the drawings and circuit schedules.\nThe Contractor shall furnish all conduit, wire, connectors, hardware and other incidental items necessary for the complete and proper operation of the lighting control system.\nThe Contractor shall coordinate all work described in this section with all other applicable plans and specifications, including but not limited to:\n  General Conditions\n  Electrical Section General Provisions\n  Conduit\n  Wire and Cable\n  Stage rigging\nShop Drawing Submittals:\n  Within sixty (60) days of contract award, the Contractor shall submit one (1) copy in PDF format of all shop drawings in PDF format to the respective parties for approval prior to fabrication:\n    Complete, fully dimensioned shop drawings of all major components.\n    Plans, sections and schematics indicating assembly and installation of components.\n    Load ratings of the major components within the system.\n    Any additional structural support supplied and installed by this contractor.\n    Specific listing of any and all variations from the Drawings and Specifications.\n    Power requirements for any electrical components."
+        },
+        {
+          "id": "sa-nhs-260961-p1-02",
+          "title": "SYSTEM DESCRIPTION",
+          "body": "The system shall be designed for the control of architectural and theatrical lighting and shall consist of factory pre-wired dimming and processing rack enclosures containing dimmers, power supplies, breakers, terminals and/or control electronics.\nSystem shall work in conjunction with specified low-voltage control stations."
+        },
+        {
+          "id": "sa-nhs-260961-p1-03",
+          "title": "SUBMITTALS",
+          "body": "Contractor shall provide 1 set of full system submittals in PDF format. Submittals shall include:\n  Full system riser diagram(s) illustrating interconnection of system components, wiring requirements, back box sizes and any special installation considerations.\n  Full set of printed technical data sheets.\n  Detailed set of dimmer schedules.\n  Detailed set of circuit and control schedules, including a complete list of all deviations from specifications.\nContractor shall provide any additional information, including equipment demonstration, as required by the engineer or specifier to verify compliance with specifications."
+        },
+        {
+          "id": "sa-nhs-260961-p1-04",
+          "title": "QUALITY ASSURANCE",
+          "body": "Manufacturers\n  See Individual Categories in Products for Acceptable Manufacturers\n  Basis-of-Design Product: The design for each lighting product is based on the product named.\n  Alternatives\n    Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified.\n    Alternative manufacturers must submit a full pre-approval package ten days prior to bid date.\n  The manufacturer shall be one who has been continuously engaged in the manufacturer of lighting control equipment for a minimum of ten years. All dimmer and cabinet fabrication must take place in a U.S. manufacturing plant.\n  Proposed equipment shall be UL and C-UL listed, and/or CE marked (where applicable) and bear the appropriate labels."
+        }
+      ],
+      "part3": [
+        {
+          "id": "sa-nhs-260961-p3-01",
+          "title": "INSTALLATION",
+          "body": "It shall be the responsibility of the Contractor to receive and store the necessary materials and equipment for installation of the dimmer system. It is the intent of these specifications and plans to include everything required for proper and complete installation and operation of the dimming system, even though every item may not be specifically mentioned. The contractor shall deliver on a timely basis to other trades any equipment that must be installed during construction.\nThe contractor shall be responsible for field measurements and coordinating physical size of all equipment with the architectural requirements of the spaces into which they are to be installed.\nThe contractor shall install all lighting control and dimming equipment in accordance with manufacturer’s approved shop drawings.\nAll branch load circuits shall be live tested before connecting the loads to the dimmer system load terminals."
+        },
+        {
+          "id": "sa-nhs-260961-p3-02",
+          "title": "CONTRACTOR SERVICES",
+          "body": "Upon completion of the installation, including testing of load circuits, the contractor shall notify the dimming system manufacturer that the system is available for formal checkout.\nNotification shall be provided in writing, two weeks prior to the time factory-trained personnel are needed on the job site.\nNo power is to be applied to the dimming system unless specifically authorized by written instructions from the manufacturer.\nThe purchaser shall be liable for any return visits by the factory engineer because of incomplete or incorrect wiring.\nUpon completion of the formal check-out, the factory engineer shall demonstrate operation and maintenance of the system to the owner’s representatives. Training shall not exceed four working hours. Additional training shall be available upon request."
+        },
+        {
+          "id": "sa-nhs-260961-p3-03",
+          "title": "WARRANTY",
+          "body": "Contractor shall warrant products under normal use and service to be free from defects in materials and workmanship for a period of two years from date of delivery.\nWarranty shall cover repair or replacement of such parts determined defective upon inspection.\nWarranty does not cover any product or part of a product subject to accident, negligence, alteration, abuse or misuse. Warranty does not cover any accessories or parts not supplied by the manufacturer.\nWarranty shall not cover any labor expended or materials used to repair any equipment without manufacturer’s prior written authorization."
+        }
+      ],
+      "part2Style": "paragraphs",
+      "quantities": "drawings",
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ss-nhs-274100",
+      "number": "27 41 00",
+      "title": "Audio-Video Systems",
+      "sort": 60,
+      "part1": [
+        {
+          "id": "sa-nhs-274100-p1-01",
+          "title": "SCOPE",
+          "body": "Provide a complete audio-video system for [FILL IN: spaces served] as indicated on the drawings and as specified herein. Provide impedance matching, balancing, testing and all accessories required for normal operation. Equipment not mentioned in this specification or shown on the drawings but necessary to meet the requirements of the specifications shall be provided without additional cost.\nThe above systems include the following:\n  All conduit systems shall be provided by Electrical Contractor complete with pull-strings. All exposed conduit ends shall be terminated by bushings.\n  All junction boxes shall be provided by Electrical Contractor unless otherwise noted. Blank covers to be provided on all junction boxes. In all cases, where a specific junction box size is not provided, size all junction boxes as required for the number of conduits. If a specific stated size is insufficient, size box up as needed. However, do not down size any junction boxes from the indicated size.\n  All pull boxes to be provided by Electrical Contractor unless otherwise noted.\n  All conduit to be 3/4” EMT unless otherwise noted.\n  All AC power supply requirements to be provided by Electrical Contractor.\n  All system equipment, per this specification.\n  Final check-out and drawings as called out on specifications.\n  Owner training as called out in these specifications.\n  O&M manuals as called out in these specifications.\n  All necessary conduit, box and electrical requirements shall be included in the base bid.\nThis specification section is performance based, describing the minimum material quality, required features, and operational requirements of the system. These documents do not convey every wire that must be installed and every equipment connection that must be made. Based on the equipment constraints described and the performance required of the system, as presented in these documents, the AV Contractor is solely responsible for determining all wiring, programming and miscellaneous equipment to include any conduit, back boxes, etc. required for a complete and operational system.\nThis document describes the major components of the system. All additional hardware, subassemblies, supporting equipment and other miscellaneous equipment required for proper system installation and operation shall be provided by the AV Contractor."
+        },
+        {
+          "id": "sa-nhs-274100-p1-02",
+          "title": "SYSTEM DESCRIPTION AND OPERATION",
+          "body": "Loudspeaker System and Amplification: [FILL IN: loudspeaker complement, amplification, and the seating areas each loudspeaker serves, per space]\nSignal Processing: Digital signal processors (DSPs) with networked audio capability shall handle all necessary system tuning and signal distribution. [FILL IN: network audio protocol, paging inputs, mixing console]\nPlayback and Recording: [FILL IN: media players, recorders, and where they are located]\nWireless Microphones: [FILL IN: channel count, transmitter types, and antenna distribution]\nHearing Assistance: A hearing assistance system shall be provided in each space including necessary transmitters, receiver packages including inductive lanyards and ear speakers with all necessary mounting and remote antenna hardware, docking stations and notification signage, all as specified and noted in the system drawings.\nProduction Intercom: A wired production intercom system shall be provided as specified and shown in the drawings to facilitate communications during productions. Wired connection points shall be installed at all stage and custom plate locations as indicated in the drawings. [FILL IN: intercom speaker station locations; wireless intercom]\nVideo Projection: [FILL IN: projectors and brightness, lenses, screens and sizes, and video input locations, per space]\nControl System: A [FILL IN: control system manufacturer] control system will be used for control of the audio-video systems. [FILL IN: user interfaces — touch screens, tablets] The AV Contractor shall provide all of the final control system programming files and any equipment passcodes to the Owner at system completion allowing complete access for future changes and maintenance as may be required.\nVideo Monitoring and Distribution: [FILL IN: camera positions, distribution matrix, and display locations]\nRecording and Streaming: [FILL IN: camera production package and streaming destinations]\nEquipment Racks and Power: All equipment shall be housed in the specified equipment racks. Power sequencing shall be installed as indicated on the drawings. AV Contractor is responsible for necessary low voltage control and appropriate sequence programming. System power on/off control shall be provided at each of the specified control system touch screen locations.\nWork by Others: [FILL IN: counters, desks, and other items provided by others]. AV Contractor shall coordinate with architect and builder to make any necessary recommendations during construction."
+        },
+        {
+          "id": "sa-nhs-274100-p1-03",
+          "title": "BIDDER QUALIFICATIONS",
+          "body": "A single AV contractor shall perform the entire work of this section. This contractor shall be regularly engaged in the installation and service of performance audio systems including but not limited to those systems listed.\nAV Contractors must meet the following qualifications:\n  Capability to provide all necessary equipment and systems within full and strict compliance with all provisions of this specification\n  Has been actively engaged in the installation of the systems included under this section for a minimum of five years.\n  AV contractor shall furnish upon request, a list of five projects whose size, value, scope and complexity is similar to that being bid.\n  AV contractor shall have access to all necessary equipment and have organizational capacity and technical competence necessary to enable performance of the work properly and expeditiously.\n  AV contractor shall possess licensed copies of approved CAD software, and shall have on staff competent personnel capable of generating necessary drawings in a timely fashion.\n  AV contractor shall employ an adequate number of skilled workers who are thoroughly trained and experienced in the necessary crafts and who are completely familiar with the specified requirements and the methods needed for proper performance of the work of this section.\n  The AV contractor must have a certified programmer on staff for the control systems and processors included in this specification.\n  The AV contractor shall show satisfactory evidence, upon request, that it maintains a fully equipped local service organization capable of furnishing adequate inspection and service to the systems, including replacement parts.\n  The Owner reserves the right to request any additional information he requires to determine the AV contractor’s ability to complete the work. Additional information shall be supplied at no additional cost to the Owner."
+        },
+        {
+          "id": "sa-nhs-274100-p1-04",
+          "title": "SUBMITTALS",
+          "body": "Provide one electronic set of shop drawings in PDF form for review. Files submitted in PDF format shall be files saved as or printed to PDF format, not scanned. Incomplete submittals will be returned without review.\nShop drawings shall include the manufacturer's catalog cut sheets for each component specified.\nSubmit shop drawings detailing:\n  Equipment list\n  Equipment rack(s) elevation layout\n  Conduit riser and box schedule with floor plan\n  Block diagram(s) including wire types and labels\nInclude information regarding all equipment sizes and weights.\nShop drawings shall indicate recommended and mandatory installation requirements.\nAll shop drawings are to be electronically rendered in \"D\" or \"E\" size format in AutoCAD 2010 or newer.\nReproductions of the Consultant’s drawings are not acceptable.\nSubmittals shall be provided within thirty (30) days of contract award, or sooner if necessary to meet construction schedules. Contractor is responsible for any and all costs resulting from delayed submittals.\nThere will be no substitutions for specified equipment allowed without approval at least 10 days prior to bid due date. Failure to obtain approval for substitutions shall bind the contractor to provide the specified equipment without request for additional payment.\nAV Contractor shall not procure equipment or begin work on this project until shop drawings have been submitted and approved.\nAny necessary resubmittals must include a list of numbered changes with drawings clouded and identified by the corresponding change number."
+        },
+        {
+          "id": "sa-nhs-274100-p1-05",
+          "title": "MAINTENANCE AND OPERATING MANUALS",
+          "body": "Provide one electronic and one printed set of maintenance manuals for owner use.\nManuals shall be assembled in hard cover three ring D-ring binders or spiral bound.\nEquipment manuals and warranty information for all system components shall be included.\nA line diagram of the system configuration, interconnection and cabling will be included.\nExplanation of numbering/color code scheme for loudspeaker, microphone and rack wiring cables will be included.\nThe name, address and telephone number of the servicing organization shall be affixed on the inside front cover of the manual.\nComplete all registration and warranty documents. Coordinate all warranty information with the Owner’s representative."
+        }
+      ],
+      "part3": [
+        {
+          "id": "sa-nhs-274100-p3-01",
+          "title": "WIRING",
+          "body": "All applicable provisions of NEC and local codes shall apply. All cabling and wiring shall be in metallic conduit or raceway whenever possible.\nAll AV systems conduit, raceway and standard enclosures are to be provided by the electrical contractor according to drawings provided.\nAll cabling shall be in accordance with manufacturer's recommendations.\nPower wiring serving the equipment rack shall contain a green insulated grounding conductor. The grounding conductor shall terminate directly on the receptacles in the equipment rack plug strip. The receptacles within the plug strip shall be isolated ground type. Maintain a true-earth single point rack ground. Do not compromise the ground by other metallic connections between the rack and the building. Where necessary to preserve the isolated ground, insulate AC power within the rack on plugmold grounded to the rack.\nAC power circuits shall be provided by the Electrical Contractor as indicated on the drawings.\nMaintain a strict phase convention for all cabling from the microphone outlets to the loudspeakers. A positive voltage supplied to:\n  Pin 2 of any microphone jack\n  The center pin of any RCA connector\n  The tip of any phone plug (1/4”) connector\nCabling shall be continuous and shall not be spliced between equipment. Color coding and tagging shall be maintained throughout the system at all accessible locations to the cabling.\nAll voice/data/audio/visual cabling run free air (not in conduits) must be plenum-rated if required elsewhere.\nAV system cabling is divided into classes that may not be intermixed within a conduit or raceway. Conduits for different AV cabling classifications must maintain minimum separations from each other and from other services. In certain cases, AV system cabling of different classes may pass through or terminate in a common enclosure provided that proper separation is maintained within the enclosure. AV system cabling may not be intermixed with AC wiring within a conduit, raceway or enclosure. AV system cabling may not be intermixed with wiring related to any other trades or discipline including but not limited to; fire protection, HVAC, CATV, alarm, intercom, master clock, access control or other similar systems within a conduit, raceway or enclosure.\nWithin equipment cabinets, all wires and cables shall be contained in wire management channels such as Panduit or equal, and dressed and labeled in such a manner that all wires may be easily traced, and such that they do not obstruct access to components which may need to be replaced or serviced.\nService loops and slack management\n  Provide functional cable service loops at the rear of all equipment racks to allow for proper maintenance, equipment removal, and system serviceability.\n  Install a continuous service loop where cabling transitions from the wall or cable tray into the mobile or stationary rack structure.\n  Service loops must contain sufficient slack to allow the rack to be fully moved, rotated, or serviced without placing physical tension on the cabling or terminations. Maintain a minimum of three (3) feet and maximum of five (5) feet of slack, adjusted appropriately for the specific rack footprint and travel distance.\n  Store and secure all excess slack neatly within designated cable managers, rack channels or umbilical management arms. Cable loops must not sag, drag on the floor, or obstruct the closing of rack doors.\n  Maintain the cable manufacturer’s specified minimum bend radius under both installation (tensile) and long-term (static) conditions.\n  Harness/dress call cables in racks and custom panels with suitable nylon tie wraps or Velcro straps in a vertical and horizontal configuration. Provide adequate amount of slack for cables that break out from harness. Provide a service loop for access to equipment for servicing and adjustment. Provide cable support."
+        },
+        {
+          "id": "sa-nhs-274100-p3-02",
+          "title": "LOUDSPEAKER INSTALLATION",
+          "body": "AV Contractor to determine final appropriate mounting height of speakers to provide best coverage to all seating areas using manufacturer recommendations and software.\nProvide even coverage for all seating in the theater, with 3 db front to back and side to side for the oneoctave band centered at 2000Hz. Total variation—worst to best seats—should not exceed plus or minus 4 db. Consultant will field verify end results with EASERA.\nThe sound system should be capable of delivering a minimum of 96db average program level with additional 10db peaking margin to any seat at an acoustic distortion level below 2% THD. The articulation loss of consonants should not exceed 15%. Articulation loss measurements are to be made with EASERA. Provide the Sound Consultant with printouts showing test scores with measurement locations. Consultant will field verify end results with EASERA.\nThe AV Contractor shall provide all necessary hardware and labor for loudspeaker installation with a minimum 5:1 safety factor per OSHA regulations. The contractor shall assume all responsibility and liability regarding the rigging or mounting systems used."
+        },
+        {
+          "id": "sa-nhs-274100-p3-03",
+          "title": "LABELS",
+          "body": "Assign a specific number to each microphone and loudspeaker line in logical order. All wire labeling shall be done with professional wire labeling equipment with heat-shrink or permanent self-laminating protection applied at each end of every cable. Label each line at the receptacle and at the mixer using engraving or another permanent labeling system. Label the function of any plate or panel-mounted switches knob, or dial immediately adjacent to the switch using engraving or another permanent labeling method. Do not use DYMO or other temporary labels."
+        },
+        {
+          "id": "sa-nhs-274100-p3-04",
+          "title": "WARRANTY",
+          "body": "The AV Contractor shall provide complete warranty of the system for a period of one year following the final acceptance of the system by the Owner.\nThis warranty shall cover any and all system failure or malfunction not directly attributable to abuse or operation not in accordance with instructions submitted by the Contractor."
+        },
+        {
+          "id": "sa-nhs-274100-p3-05",
+          "title": "ACCEPTANCE TEST",
+          "body": "After initial tests have been performed, notify the Owner that the final adjustments and acceptance tests are ready to be performed.\nAcceptance tests shall be performed with the Owner and his representatives in witness thereof.\nThe AV Contractor will have on-site and available during the Acceptance Tests, all programming computers, interfaces and all necessary test equipment to facilitate the final set-up of the system."
+        },
+        {
+          "id": "sa-nhs-274100-p3-06",
+          "title": "TRAINING",
+          "body": "After completion of the system installation, several suitable persons will be designated by the Owner to receive detailed system operation training. Additional persons designated by the Owner will receive maintenance training. The AV Contractor shall train these persons in the operation, maintenance, and troubleshooting of the system. A minimum of two, three (3) hour training sessions shall be provided for the Owner’s operating personnel in the proper operation and use of the systems. Complete maintenance and operating manuals and as-built drawings will be provided at the time of training. Training shall be scheduled at the Owner’s convenience."
+        }
+      ],
+      "part2Style": "table",
+      "quantities": "inline",
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    }
+  ],
+  "articles": [
+    {
+      "id": "ar-nhs-116113-01",
+      "sectionId": "ss-nhs-116113",
+      "sort": 10,
+      "title": "SYSTEM DESCRIPTION",
+      "manufacturers": [
+        "StageRight",
+        "Wenger Corporation"
+      ],
+      "general": "General:\n  Concert Shells: Moveable wall towers and ceiling that reflect a maximum range of audible frequencies.\n  Acceptable Manufacturers:\n    {{manufacturers}}",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116113-02",
+      "sectionId": "ss-nhs-116113",
+      "sort": 20,
+      "title": "TOWERS, SIDE AND BACK WALLS",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116113-03",
+      "sectionId": "ss-nhs-116113",
+      "sort": 30,
+      "title": "OVERHEAD SOUND REFLECTORS",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116113-04",
+      "sectionId": "ss-nhs-116113",
+      "sort": 40,
+      "title": "PANELS",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116113-05",
+      "sectionId": "ss-nhs-116113",
+      "sort": 50,
+      "title": "LIGHTING",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116114-01",
+      "sectionId": "ss-nhs-116114",
+      "sort": 10,
+      "title": "MANUFACTURERS",
+      "manufacturers": [
+        "StageRight",
+        "Wenger Corporation"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Substitutions: Not permitted.\n  Single Source: Provide all components of stage extension platform systems by single manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116114-02",
+      "sectionId": "ss-nhs-116114",
+      "sort": 20,
+      "title": "STAGE EXTENSION PLATFORM SYSTEMS",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116114-03",
+      "sectionId": "ss-nhs-116114",
+      "sort": 30,
+      "title": "SUPPORT SYSTEMS – CLEAR SPAN",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116114-04",
+      "sectionId": "ss-nhs-116114",
+      "sort": 40,
+      "title": "DECKS",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116114-05",
+      "sectionId": "ss-nhs-116114",
+      "sort": 50,
+      "title": "ACCESSORIES",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116123-01",
+      "sectionId": "ss-nhs-116123",
+      "sort": 10,
+      "title": "THEATRICAL STAGE DRAPES",
+      "manufacturers": [
+        "Rose Brand",
+        "KM Fabrics",
+        "iWeiss",
+        "Automated Device Company",
+        "Mainstage Theatrical Supply, LLC"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each product is based on the product named. Subject to compliance with requirements, see Part 1, Quality Assurance for how to seek compliance.\nGeneral Fabrication:\n  All pile fabrics shall be constructed with pile running down.\n  All seams shall be vertical with each width running the full height – no horizontal splices.\n  Thread colors shall match face fabric.\n  A label shall be sewn to every curtain showing height, width, and date of flameproofing. Label shall be located on offstage lower hem.\n  Sizes and quantities per Rigging Drawings and Schedules.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116123-02",
+      "sectionId": "ss-nhs-116123",
+      "sort": 20,
+      "title": "THEATRICAL MOTORIZED RIGGING",
+      "manufacturers": [
+        "Electronic Theater Controls",
+        "Wenger Corporation",
+        "Thern Stage Equipment",
+        "Peter Albrecht Company"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each product is based on the product named. Subject to compliance with requirements, see Part 1, Quality Assurance for how to seek compliance.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116123-03",
+      "sectionId": "ss-nhs-116123",
+      "sort": 30,
+      "title": "RIGGING PACKAGED HOISTS",
+      "manufacturers": [],
+      "general": "General:\n  Purpose-built for overhead lifting of theatre lights, equipment, curtains, and scenic elements, whether used on stages, in auditoriums or places of public assembly where people move beneath suspended or moving loads. Incorporate mechanical, electrical and safety features inherent to this equipment.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-116123-04",
+      "sectionId": "ss-nhs-116123",
+      "sort": 40,
+      "title": "CABLE MANAGEMENT",
+      "manufacturers": [],
+      "general": "",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-01",
+      "sectionId": "ss-nhs-260923",
+      "sort": 10,
+      "title": "GENERAL",
+      "manufacturers": [],
+      "general": "General:\n  All materials and equipment furnished shall be current production of manufacturers regularly engaged in the manufacture of such items, and for which replacement parts are available. All materials and equipment shall be new (less than 1 year old when turned over to the Owner).\n  Furnish and install complete lighting control system as specified in these specifications and on the drawings. Exact quantities and equipment configurations to be determined by plans, specifications, control schedules, and as required by manufacturer to make a complete and operating system.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-02",
+      "sectionId": "ss-nhs-260923",
+      "sort": 20,
+      "title": "BYPASS DEVICES",
+      "manufacturers": [
+        "LVS, Inc.",
+        "Wattstopper",
+        "Hubbell"
+      ],
+      "general": "General:\n  Function: It is the intent that the bypass device bypass the normal switching when there is a power fail and the lighting shall operate via the inverter. This shall be accomplished with the use of a UL924 listed emergency power bypass device. See detail on drawings.\n  Acceptable manufacturers: {{manufacturers}}, or equal. Model as required for type control (i.e. on/off or 0-10V dimming).\n  Review the drawings to determine the location of the bypass devices. Each bypass device shall be provided adjacent to a panelboard and an engraved red label shall be provided indicating its function. The label should describe the area of lighting bypass; i.e. gymnasium, IMC, etc.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-03",
+      "sectionId": "ss-nhs-260923",
+      "sort": 30,
+      "title": "DUAL TECHNOLOGY CEILING MOUNTED LIGHTING CONTROL",
+      "manufacturers": [
+        "Watt Stopper",
+        "Hubbell",
+        "Novitas",
+        "Leviton",
+        "Sensor Switch"
+      ],
+      "general": "General:\n  Provide dual technology type lighting controls in all areas unless directed to use single technology ultrasonic or passive infrared technology.\n  Determine proper sensor type and relay for direct connection requirements. Provide appropriate units.\n  Employ the services of a manufacturer’s appointed representative to assist in making the proper adjustments on the motion detector installation. Meet with this person prior to making installation to determine if the locations shown are appropriate for the type of device being furnished. Make modifications in the locations for the devices, if required, to provide a more adequate installation.\n  Modify time settings, sensitivity settings, and \"initial on\" and \"keep on\" controls as necessary, and as required for the space. Default time of 15 minutes “keep on” time will be used at initial activation.\n  Installation assistance:\n    Include time in bid to work with the Owner and manufacturer to determine the proper time setting and sensor setting for each of the motion switches.\n    Each of the switches shall be set for the type of space in which they operate.\n    Include time in bid to have the manufacturer’s representative come on site and review the job to determine what the expected settings are for the equipment.\n  Zero crossing relay controls shall be supplied.\n  Dual technology occupancy sensors shall be capable of detecting presence in the floor area by detecting doppler shifts in transmitted ultrasound and passive infrared heat changes.\n  Ultrasonic sensing shall be volumetric in coverage.\n  Passive infrared sensing shall utilize a multi-element fresnel lens to ensure that the sensor is insensitive to short-wavelength infrared waves such as those emitted by the sun. Lens shall have grooves facing in to avoid dust and residue build up which affect ir reception.\n  Both technologies shall sense presence in floor area before lighting will turn on. Detection by either technology shall hold lighting on for set period of time.\n  Sensors shall have time-out adjustment from 15 seconds to 35 minutes. Sensor shall not have settings exceeding 35minutes.\n  Sensors shall cover 2000 square feet with standard lens and 90 linear feet with long-range lens for walking motion. Coverage meeting NEMA Standard WD 7-2000 will be required.\n  Sensors shall be capable of being networked to achieve adequate coverage.\n  Sensors shall have an isolated relay rated at 24VDC that can be used to interface with HVAC, EMS, and other monitoring systems.\n  Each sensing technology shall have independent sensitivity adjustments, time adjustments and led display.\n  Sensitivity and timer control shall be accessible on the front of the sensor. Sensor shall incorporate an accessible but recessed on/override device.\n  Sensors shall operate on 24VDC.\n  Power supply shall be provided by a power pack that consists of a transformer and contact relay in one unit.\n  Provide 18 gauge plenum rated cable for interconnection of centers to relays.\n  Sensor shall have standard 5 year warranty and shall be UL listed.\n  Approved vendors are {{manufacturers}}.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-04",
+      "sectionId": "ss-nhs-260923",
+      "sort": 40,
+      "title": "INFRARED CEILING MOUNTED LIGHTING CONTROL",
+      "manufacturers": [
+        "Watt Stopper",
+        "Hubbell",
+        "Novitas",
+        "Leviton",
+        "Sensor Switch"
+      ],
+      "general": "General:\n  Where so indicated, provide a passive infrared lighting control.\n  Determine proper sensor type and relay for direct connection requirements. Provide appropriate units.\n  Employ the services of a manufacturer’s appointed representative to assist in making the proper adjustments on the motion detector installation. Meet with this person prior to making installation to determine if the locations shown are appropriate for the type of device being furnished. Make modifications in the locations for the devices, if required, to provide a more adequate installation.\n  Modify time settings, sensitivity settings, and \"initial on\" and \"keep on\" controls as necessary, and as required for the space. Default time of 15 minutes “keep on” time will be used at initial activation.\n  Installation assistance:\n    Include time in bid to work with the Owner and manufacturer to determine the proper time setting and sensor setting for each of the motion switches.\n    Each of the switches shall be set for the type of space in which they operate.\n    Include time in bid to have the manufacturer’s representative come on site and review the job to determine what the expected settings are for the equipment.\n  Zero crossing relay controls shall be supplied.\n  Infrared occupancy sensors shall be capable of detecting presence in the floor area by detecting passive infrared heat changes.\n  Passive infrared sensing shall utilize a multi-element fresnel lens to ensure that the sensor is insensitive to short-wavelength infrared waves such as those emitted by the sun. Lens shall have grooves facing in to avoid dust and residue build up which affect IR reception.\n  Sensors shall have time-out adjustment from 15 seconds to 35 minutes. Sensor shall not have settings exceeding 35minutes.\n  Sensors shall cover 1500 square feet. Coverage meeting NEMA standard WD 7-2000 will be required.\n  Sensors shall be capable of being networked to achieve adequate coverage.\n  Sensors shall have an isolated relay rated at 24vdc that can be used to interface with HVAC, EMS, and other monitoring systems.\n  Sensors shall have adjustable infrared sensitivity adjustment, time adjustment and LED display.\n  Sensitivity and timer control shall be accessible on the front of the sensor. Sensor shall incorporate an accessible but recessed on/override device.\n  Sensors shall operate on 24VDC.\n  Power supply shall be provided by a power pack that consists of a transformer and contact relay in one unit.\n  Provide 18 gauge plenum rated cable for interconnection of centers to relays.\n  Sensor shall have standard 5 year warranty and shall be UL listed.\n  Approved vendors are {{manufacturers}}.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-05",
+      "sectionId": "ss-nhs-260923",
+      "sort": 50,
+      "title": "ULTRASONIC CEILING MOUNTED LIGHTING CONTROL",
+      "manufacturers": [
+        "Watt Stopper",
+        "Hubbell",
+        "Novitas",
+        "Leviton",
+        "Sensor Switch"
+      ],
+      "general": "General:\n  Where so indicated, provide an ultrasonic lighting control.\n  Determine proper sensor type and relay for direct connection requirements. Provide appropriate units.\n  Employ the services of a manufacturer’s appointed representative to assist in making the proper adjustments on the motion detector installation. Meet with this person prior to making installation to determine if the locations shown are appropriate for the type of device being furnished. Make modifications in the locations for the devices, if required, to provide a more adequate installation.\n  Modify time settings, sensitivity settings, and \"initial on\" and \"keep on\" controls as necessary, and as required for the space. Default time of 15 minutes “keep on” time will be used at initial activation.\n  Installation assistance:\n    Include time in bid to work with the Owner and manufacturer to determine the proper time setting and sensor setting for each of the motion switches.\n    Each of the switches shall be set for the type of space in which they operate.\n    Include time in bid to have the manufacturer’s representative come on site and review the job to determine what the expected settings are for the equipment.\n  Zero crossing relay controls shall be supplied.\n  Ultrasonic sensing shall be volumetric in coverage.\n  Ultrasonic occupancy sensors shall be capable of detecting presence in the floor area by detecting doppler shifts in transmitted ultrasound.\n  Sensors shall have time-out adjustment from 15 seconds to 35 minutes. Sensor shall not have settings exceeding 35minutes.\n  Sensors shall cover 2000 square feet with standard lens and 90 linear feet with long-range lens for walking motion. Coverage meeting NEMA Standard WD 7-2000 will be required.\n  Sensors shall be capable of being networked to achieve adequate coverage.\n  Sensors shall have an isolated relay rated at 24VDC that can be used to interface with HVAC, EMS, and other monitoring systems.\n  Sensors shall have adjustable ultrasonic sensitivity sensor shall have independent sensitivity adjustments, time adjustments and led display.\n  Sensitivity and timer control shall be accessible on the front of the sensor. Sensor shall incorporate an accessible but recessed on/override device.\n  Sensors shall operate on 24VDC.\n  Power supply shall be provided by a power pack that consists of a transformer and contact relay in one unit.\n  Provide 18 gauge plenum rated cable for interconnection of centers to relays\n  Sensor shall have standard 5 year warranty and shall be UL and CUL listed.\n  Approved vendors are {{manufacturers}}.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-06",
+      "sectionId": "ss-nhs-260923",
+      "sort": 60,
+      "title": "AUTOMATIC PASSIVE INFRARED WALL SWITCH LIGHTING CONTROL",
+      "manufacturers": [
+        "Watt Stopper",
+        "Hubbell",
+        "Novitas",
+        "Leviton",
+        "Sensor Switch"
+      ],
+      "general": "General:\n  Where so indicated, provide a passive infrared wall switch lighting control.\n  Determine proper sensor type and relay for direct connection requirements. Provide appropriate units.\n  Employ the services of a manufacturer’s appointed representative to assist in making the proper adjustments on the motion detector installation. Meet with this person prior to making installation to determine if the locations shown are appropriate for the type of device being furnished. Make modifications in the locations for the devices, if required, to provide a more adequate installation.\n  Modify time settings, sensitivity settings, and \"initial on\" and \"keep on\" controls as necessary, and as required for the space. Default time of 15 minutes “keep on” time will be used at initial activation.\n  Installation assistance:\n    Include time in bid to work with the Owner and manufacturer to determine the proper time setting and sensor setting for each of the motion switches.\n    Each of the switches shall be set for the type of space in which they operate.\n    Include time in bid to have the manufacturer’s representative come on site and review the job to determine what the expected settings are for the equipment.\n  Confirm compatibility with all ballasts and fans used in conjunction with passive infrared wall switch.\n  Zero crossing relay controls shall be supplied.\n  Switch shall have processing capabilities designed to prevent false offs and false triggers.\n  Single relay and dual relay models shall be available. Dual relay models shall provide zero crossing relay controls only on the primary relay.\n  Load range 25 to 600 watts at 120 volts and 60 to 1200 watts at 277 volts.\n  Coverage area shall be 300 Sq. Ft.\n  Switch shall have option of auto on/off or manual on/auto off operation.\n  Switch shall have led passive infrared sensing indicator.\n  Timer to be set for 15 minutes and switch to be set in manual on/auto off mode at turn on.\n  Color to match wiring devices specified in section 26 27 26.\n  Approved vendors are {{manufacturers}}.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260923-07",
+      "sectionId": "ss-nhs-260923",
+      "sort": 70,
+      "title": "HIGH BAY OCCUPANCY SENSOR",
+      "manufacturers": [
+        "Watt Stopper",
+        "Sensor Switch",
+        "Hubbell",
+        "Novitas",
+        "Leviton"
+      ],
+      "general": "General:\n  The high bay occupancy sensors shown on lighting plans shall be Watt Stopper HB-100 types, Sensor Switch CM-6 type, or Hubbell, Novitas, or Leviton equals.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-01",
+      "sectionId": "ss-nhs-260961",
+      "sort": 10,
+      "title": "ENTERTAINMENT POWER CONTROLS",
+      "manufacturers": [
+        "Electronic Theatre Controls",
+        "SSRC",
+        "Lex Products",
+        "Lyntec Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-02",
+      "sectionId": "ss-nhs-260961",
+      "sort": 20,
+      "title": "ARCHITECTURAL LIGHTING CONTROLS",
+      "manufacturers": [
+        "Altman Stage Lighting",
+        "Electronic Theatre Controls",
+        "Mega-Lite Inc",
+        "Chauvet Lighting Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-03",
+      "sectionId": "ss-nhs-260961",
+      "sort": 30,
+      "title": "EMERGENCY CONTROL PRODUCTS",
+      "manufacturers": [
+        "Altman Stage Lighting",
+        "Electronic Theatre Controls",
+        "Mega-Lite Inc",
+        "Chauvet Lighting Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-04",
+      "sectionId": "ss-nhs-260961",
+      "sort": 40,
+      "title": "ENTERTAINMENT LIGHTING CONTROLS",
+      "manufacturers": [
+        "Altman Stage Lighting",
+        "Electronic Theatre Controls",
+        "Mega-Lite Inc",
+        "Chauvet Lighting Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-05",
+      "sectionId": "ss-nhs-260961",
+      "sort": 50,
+      "title": "PRODUCTION CONTROL DEVICES",
+      "manufacturers": [
+        "Altman Stage Lighting",
+        "Electronic Theatre Controls",
+        "Pathway Connectivity",
+        "Chauvet Lighting Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-06",
+      "sectionId": "ss-nhs-260961",
+      "sort": 60,
+      "title": "ENTERTAINMENT LUMINAIRES FIXED",
+      "manufacturers": [
+        "Altman Stage Lighting",
+        "Electronic Theatre Controls",
+        "Mega-Lite Inc",
+        "Chauvet Lighting Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-07",
+      "sectionId": "ss-nhs-260961",
+      "sort": 70,
+      "title": "ENTERTAINMENT LUMINAIRES MOVING",
+      "manufacturers": [
+        "Electronic Theatre Controls",
+        "Mega-Lite Inc",
+        "Chauvet Lighting Inc.",
+        "Vari-Lite"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-260961-08",
+      "sectionId": "ss-nhs-260961",
+      "sort": 80,
+      "title": "ENTERTAINMENT LUMINAIRE ACCESSORIES",
+      "manufacturers": [
+        "Mega-Lite",
+        "Electronic Theatre Controls",
+        "Chauvet",
+        "Robert Juliat",
+        "Vari-Lite",
+        "SSRC",
+        "The Lighting Source"
+      ],
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Refer to Part 2. Entertainment Luminaries for Product Specs of Fixtures\n  Permission to bid does not imply acceptance of the manufacturer.",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    },
+    {
+      "id": "ar-nhs-274100-01",
+      "sectionId": "ss-nhs-274100",
+      "sort": 10,
+      "title": "EQUIPMENT STANDARDS",
+      "manufacturers": [],
+      "general": "General:\n  Complete AV systems consisting of all the individual systems as shown and specified are required.\n  It is the responsibility of the AV contractor to verify the completeness of the drawings and specifications and the suitability of devices to meet the intent of the specifications.\n  Any additional equipment, accessories or incidentals required, whether or not specifically mentioned in this specification, shall be provided by the contractor without claim for additional payment, understanding that a complete operational system is required.\n  All materials and equipment shall be new and unused.\n  There will be no substitutions for specified equipment allowed without approval at least 10 days prior to bid due date. Failure to obtain approval for substitutions shall bind the contractor to provide the specified equipment without request for additional payment.\n  Provide and install according to system drawings the following equipment in the table below:",
+      "categoryKeys": [],
+      "updatedAt": 1790000000000,
+      "updatedBy": "seed:northhs-2026-07-30"
+    }
+  ],
+  "templates": [],
+  "curtainTemplates": []
+}
