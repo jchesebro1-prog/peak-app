@@ -246,7 +246,7 @@ import { loadExtract } from "@/lib/davinci/load";
 import type { DavinciExtract, DavinciRecord } from "@/lib/davinci/types";
 import { requireHostedConfirmation } from "./db-target";
 import { planEnrichment, applyEnrichment } from "@/lib/catalog-davinci-apply";
-import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
+import { upsert as upsertPart, get as getPart, getManyAnyCase } from "@/lib/stores/catalog";
 // #205 fix wave (Task 14) — DB-backed exporter / price-book-importer /
 // specUpdatedBy checks below need a real section+article to resolve against
 // and the price-book importer entry point itself.
@@ -19036,10 +19036,34 @@ async function specDocxAsyncChecks(): Promise<void> {
   ok(!/<w:t[^>]*>[A-Z]\.\s*<\/w:t>/.test(docXml) && !docXml.includes(">1.01<"), "#205 spec builder: no typed-in outline labels");
   ok((numXml.match(/<w:lvl /g) || []).length >= 7 && numXml.includes("PART %1"), "#205 spec builder: one multi-level list, PART → n.m → A. … a)");
   ok(docXml.includes("SECTION 11 61 23") && docXml.includes("END OF SECTION 11 61 23"), "#205 spec builder: title and END OF SECTION");
-  ok(hdrXml.includes("North HS") && hdrXml.includes("Project No. 3580") && hdrXml.includes("July 30, 2026"), "#205 spec builder: running header carries project, number, date");
+  const paras = (xml: string) => xml.match(/<w:p>[\s\S]*?<\/w:p>|<w:p [\s\S]*?<\/w:p>/g) || [];
+  const textOf = (p: string) => (p.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((t) => t.replace(/<[^>]+>/g, "")).join("");
+  const hdrParas = paras(hdrXml);
+  const hdrLine = hdrParas.find((p) => textOf(p).includes("North HS"));
+  ok(!!hdrLine && textOf(hdrLine).includes("July 30, 2026") && textOf(hdrLine).includes("Project No. 3580") && (hdrLine.match(/<w:tab\/>/g) || []).length === 2 && hdrLine.includes('w:val="center" w:pos="4680"') && hdrLine.includes('w:val="right" w:pos="9360"') && !hdrLine.includes("<w:b/>"), "#205 spec builder: running header — date ⇥ project ⇥ Project No. on one tabbed line, not bold");
+  ok(hdrParas.some((p) => textOf(p) === "Construction Documents" && p.includes('<w:jc w:val="center"/>')), "#205 spec builder: running header — phase centered on its own line");
+  const numIds = new Set([...docXml.matchAll(/<w:numId w:val="(\d+)"\/>/g)].map((m) => m[1]));
+  ok(numIds.size === 1, `#205 spec builder: every numbered paragraph is in ONE list instance (numIds: ${[...numIds].join(",")})`);
+  ok(!numXml.includes("w:lvlRestart"), "#205 spec builder: deeper levels restart by Word's default (no lvlRestart)");
+  const valance = paras(docXml).find((p) => textOf(p) === "VALANCE (Quantity: 1)");
+  ok(!!valance && valance.includes('<w:ilvl w:val="2"/>'), "#205 spec builder: a product heading is a level-2 item in the same list");
+  const stylesXml = await zip.file("word/styles.xml")!.async("string");
+  const h1 = (stylesXml.match(/<w:style [^>]*w:styleId="Heading1"[\s\S]*?<\/w:style>/) || [""])[0];
+  const h2 = (stylesXml.match(/<w:style [^>]*w:styleId="Heading2"[\s\S]*?<\/w:style>/) || [""])[0];
+  ok(h1.includes('<w:ilvl w:val="0"/>') && h1.includes(`<w:numId w:val="${[...numIds][0]}"/>`) && h2.includes('<w:ilvl w:val="1"/>') && h2.includes(`<w:numId w:val="${[...numIds][0]}"/>`) && !h1.includes("<w:pStyle") && !h2.includes("<w:pStyle"), "#205 spec builder: Heading 1/2 styles carry the list's numbering (style-linked), with no pStyle inside a style's pPr");
+  ok(!numXml.includes("<w:pStyle"), "#205 spec builder: no pStyle on list levels (docx writes it out of schema order; the style → list link alone numbers new headings)");
+  const partPara = paras(docXml).find((p) => textOf(p) === "GENERAL");
+  ok(!!partPara && partPara.includes('w:val="Heading1"') && !partPara.includes("<w:numPr>"), "#205 spec builder: PART headings number through their style, no direct numPr");
   ok(/PAGE/.test(ftrXml) && ftrXml.includes("11 61 23 - "), "#205 spec builder: footer carries the section number and a PAGE field");
   // Table style
   const tBuf = await buildSectionDocx(tAssembled);
   const tXml = await (await JSZip.loadAsync(tBuf)).file("word/document.xml")!.async("string");
   ok(tXml.includes("<w:tbl>") && tXml.includes("ANX4"), "#205 spec builder: table style writes a real Word table");
+
+  // Case-insensitive part lookup (DB-backed, suite's throwaway datadir).
+  const ciSku = fixtureId("SPECT3", "CaseSku");
+  await upsertPart({ id: ciSku, sku: ciSku, desc: "T3 case test", category: "Other", unit: "ea", list: 1, cost: 1 });
+  registerFixture("catalog_parts", ciSku);
+  const ci = await getManyAnyCase([ciSku.toLowerCase(), ciSku.toUpperCase(), "NO-SUCH-SKU-T3"]);
+  ok(ci.length >= 1 && ci.every((p) => p.sku === ciSku), "#205 spec builder: getManyAnyCase finds a part by SKU in any case, and nothing for an unknown SKU");
 }

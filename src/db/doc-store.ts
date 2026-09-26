@@ -91,6 +91,33 @@ export async function getDocRows<T extends Doc = Doc>(
 }
 
 /**
+ * Live rows whose id matches one of `ids` ignoring case — the fallback for a
+ * SKU typed in a different case than the part's real id (#205 spec builder:
+ * specs match SKUs case-insensitively). Filtered in SQL (`lower(id) IN …`),
+ * so it never materializes the collection; callers try the exact
+ * (primary-key) lookup first and only send the misses here.
+ */
+export async function getDocsByIdAnyCase<T extends Doc = Doc>(
+  coll: CollectionName,
+  ids: readonly string[]
+): Promise<T[]> {
+  const unique = [...new Set(ids.map((i) => i.toLowerCase()))].filter(Boolean);
+  if (!unique.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const out: T[] = [];
+  for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
+    const rows = await db
+      .select()
+      .from(t)
+      .where(and(eq(t.deleted, false), inArray(sql<string>`lower(${t.id})`, unique.slice(i, i + DOC_BATCH_CHUNK))))
+      .orderBy(asc(t.id));
+    for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
+  }
+  return out;
+}
+
+/**
  * Live rows whose top-level string field `field` is one of `values` —
  * filtered in SQL (`doc->>field IN (…)`) so a per-request lookup (one SKU's
  * links, a page of SKUs) never materializes the whole collection (#207

@@ -69,25 +69,23 @@ const LEVELS: ILevelsOptions[] = [
 ];
 
 const numbered = (level: number) => ({ reference: REF, level: Math.min(6, Math.max(0, level)), instance: INSTANCE });
+/** In a STYLE, `custom` stops docx writing `pStyle ListParagraph` into the style's own pPr (invalid there). */
+const styleNumbered = (level: number) => ({ ...numbered(level), custom: true });
 
+/**
+ * PART and article paragraphs take their number from their STYLE, not a
+ * direct numPr: Heading 1's pPr carries level 0 of the list and Heading 2's
+ * level 1, so a heading Jeff adds in Word by picking the style numbers
+ * itself. The reverse link (`w:pStyle` on the level) is deliberately left
+ * out: docx 9.7 writes it after `w:lvlJc`, out of CT_Lvl's schema order,
+ * which Word can reject as unreadable content.
+ */
 function partHeading(title: string): Paragraph {
-  return new Paragraph({
-    heading: HeadingLevel.HEADING_1,
-    numbering: numbered(0),
-    keepNext: true,
-    spacing: { before: 360, after: 120 },
-    children: [new TextRun(title)],
-  });
+  return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(title)] });
 }
 
 function articleHeading(title: string): Paragraph {
-  return new Paragraph({
-    heading: HeadingLevel.HEADING_2,
-    numbering: numbered(1),
-    keepNext: true,
-    spacing: { before: 240, after: 120 },
-    children: [new TextRun(title)],
-  });
+  return new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun(title)] });
 }
 
 /** An outline line's TEXT only — its label is Word's to draw. */
@@ -156,14 +154,34 @@ function body(a: AssembledSection): Array<Paragraph | Table> {
   return out;
 }
 
+/**
+ * The North HS originals' running header: one line — issue date at the left
+ * margin, project name centered, "Project No. <n>" flush right — then the
+ * phase centered beneath. A blank piece drops its text but keeps its tab, so
+ * the others hold their positions.
+ */
 function runningHeader(a: AssembledSection): Header {
   const h = a.header;
-  const meta = [longDate(h.issueDate), h.projectNumber ? `Project No. ${h.projectNumber}` : "", h.phase].filter(Boolean).join(" · ");
-  const paras = [
-    ...(h.projectName ? [new Paragraph({ children: [new TextRun({ text: h.projectName, bold: true, size: 20 })] })] : []),
-    ...(meta ? [new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: meta, size: 20 })] })] : []),
-  ];
-  return new Header({ children: paras.length ? paras : [new Paragraph({ children: [] })] });
+  const pieces = [longDate(h.issueDate), h.projectName, h.projectNumber ? `Project No. ${h.projectNumber}` : ""];
+  const line: Array<string | Tab> = [];
+  pieces.forEach((text, i) => {
+    if (i > 0) line.push(new Tab());
+    if (text) line.push(text);
+  });
+  return new Header({
+    children: [
+      new Paragraph({
+        tabStops: [
+          { type: TabStopType.CENTER, position: TEXT_WIDTH / 2 },
+          { type: TabStopType.RIGHT, position: TEXT_WIDTH },
+        ],
+        children: [new TextRun({ children: line, size: 20 })],
+      }),
+      ...(h.phase
+        ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: h.phase, size: 20 })] })]
+        : []),
+    ],
+  });
 }
 
 function runningFooter(a: AssembledSection): Footer {
@@ -188,8 +206,14 @@ export async function buildSectionDocx(a: AssembledSection): Promise<Buffer> {
     styles: {
       default: {
         document: { run: { font: FONT, size: 22 } },
-        heading1: { run: heading, paragraph: { outlineLevel: 0 } },
-        heading2: { run: heading, paragraph: { outlineLevel: 1 } },
+        heading1: {
+          run: heading,
+          paragraph: { outlineLevel: 0, keepNext: true, spacing: { before: 360, after: 120 }, numbering: styleNumbered(0) },
+        },
+        heading2: {
+          run: heading,
+          paragraph: { outlineLevel: 1, keepNext: true, spacing: { before: 240, after: 120 }, numbering: styleNumbered(1) },
+        },
       },
     },
     numbering: { config: [{ reference: REF, levels: LEVELS }] },

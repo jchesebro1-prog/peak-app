@@ -1,7 +1,7 @@
 import { assembleSection, type AssembledSection, type SpecBuilderPart } from "@/lib/specs/assemble-section";
 import { normalizeSpecDocument, type SpecDocument } from "@/lib/specs/spec-document";
 import type { SpecSection } from "@/lib/specs/sections";
-import { getMany } from "@/lib/stores/catalog";
+import { getManyAnyCase } from "@/lib/stores/catalog";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { getSpecDocument } from "@/lib/stores/spec-documents";
@@ -25,16 +25,17 @@ export async function loadAssembledSpec(
   if (!section) return { doc, section: null, assembled: null };
 
   // The doc's products, then each found part's same-as target (one hop is
-  // all assembleSection follows). Batched reads, never the whole catalog.
+  // all assembleSection follows). SKUs match case-insensitively, like the
+  // rest of the spec; batched reads, never the whole catalog.
   const parts = new Map<string, SpecBuilderPart>();
   const add = (list: SpecBuilderPart[]) => {
     for (const p of list) parts.set(p.sku.toUpperCase(), p);
   };
-  add((await getMany(doc.products.map((p) => p.sku))) as SpecBuilderPart[]);
+  add(await getManyAnyCase(doc.products.map((p) => p.sku)));
   const targets = [...parts.values()]
     .map((p) => (p.specSameAs || "").trim())
     .filter((s) => s && !parts.has(s.toUpperCase()));
-  if (targets.length) add((await getMany([...new Set(targets)])) as SpecBuilderPart[]);
+  if (targets.length) add(await getManyAnyCase([...new Set(targets)]));
 
   return { doc, section, assembled: assembleSection({ section, articles, sections, parts, doc }) };
 }

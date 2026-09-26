@@ -19,11 +19,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   // Header values must be Latin-1 (a project name with an en dash would
   // throw), so the plain filename= is an ASCII fallback; filename*= carries
   // the real name.
+  const rfc5987 = encodeURIComponent(name).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "");
   return new Response(new Uint8Array(buf), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "Content-Disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "Content-Disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${rfc5987}`,
       "Cache-Control": "no-store",
     },
   });
