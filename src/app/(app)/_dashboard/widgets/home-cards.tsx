@@ -135,16 +135,16 @@ export const HOME_RENDERERS = {
     const cards: DesignCard[] = designsAll.filter((d) => d.owner === ctx.user.name).map((d) => ({
       id: d.id, venue: d.venue || "—", name: d.name,
       tier: (d.tier || "better").replace(/^./, (c) => c.toUpperCase()),
-      // #GEM final review I1: the shared label — "Incomplete" while any line
+      // #211 final review I1: the shared label — "Incomplete" while any line
       // of the saved tier still needs a part, never a partial dollar figure.
       budget: designBudgetLabel(d, shortMoney),
       incomplete: designNeedsPart(d) > 0,
-      // #GEM wave 2 (M5): an incomplete Quick design's stored price is from
+      // #211 wave 2 (M5): an incomplete Quick design's stored price is from
       // its last save — say how to refresh it once the rows are mapped.
       hint: designRefreshHint(d) || undefined,
       meta: `${d.id} · ${d.width || "?"}' × ${d.depth || "?"}' × ${d.grid || "?"}'`,
       systemsLabel: `${(d.systems || []).length} systems`, edited: designTimeAgo(d.updatedAt),
-      // #GEM final review I2: a Grid (manual-layout) design opens in The Grid.
+      // #211 final review I2: a Grid (manual-layout) design opens in The Grid.
       openHref: designOpenHref(d),
     }));
     return <HomeMyDesigns cards={cards} />;

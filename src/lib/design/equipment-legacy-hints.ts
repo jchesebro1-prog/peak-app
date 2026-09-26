@@ -1,5 +1,5 @@
 /**
- * The dollars that used to live in quick/engine.ts (#GEM, D-GEM-4) — TIER_SKUS,
+ * The dollars that used to live in quick/engine.ts (#211, D304) — TIER_SKUS,
  * the rigging/controls/audio/video/shell/pit `cost:` literals, the video screen
  * `width × 260`, the scenery-track $3/ft and the curtain seed fabric rates —
  * kept ONLY as "was $X" hints on the Equipment map so Jeff can see what the

@@ -2,7 +2,7 @@
  * Quick Design estimating engine — port of the logic class embedded in
  * app/Quick Design.dc.html (the budgetary auto-estimate path). Venue presets,
  * dimension schemas, sizing equations and roll-up formulas are carried over;
- * the prototype's DOLLARS are not (#GEM, D-GEM-4): compute() emits item keys +
+ * the prototype's DOLLARS are not (#211, D304): compute() emits item keys +
  * quantities only, and src/lib/design/equipment-pricing.ts prices them from
  * the catalog-backed Equipment map. This module holds no cost data, so the
  * Grid's client components can import its presets and sizing safely.
@@ -48,7 +48,7 @@ export type VenueDef = {
 export type DrapeGeom = { w: number; h: number; fullness: number; qty: number };
 
 export type BomItem = {
-  /** Equipment map row key, `system:itemKey` (#GEM, equipment-vocab.ts). */
+  /** Equipment map row key, `system:itemKey` (#211, equipment-vocab.ts). */
   key: string;
   /** The equation's own item name (= the row label). */
   desc: string;
@@ -57,7 +57,7 @@ export type BomItem = {
   /** Unit cost / unit sell — 0 until equipment-pricing.ts prices the item. */
   cost: number;
   price: number;
-  /** Set by the Equipment map pricing step (#GEM): how this line priced. */
+  /** Set by the Equipment map pricing step (#211): how this line priced. */
   status?: "part" | "assembly" | "allowance" | "needs-part";
   /** What priced it: SKU, fixture id or row key — and its description. */
   ref?: string;
@@ -141,11 +141,11 @@ export type AState = {
   showGen?: boolean;
   /** The line-set count per tier the designer dialled (TierDefs[t].sets) at
    *  save time — carried in `config` so the SERVER prices the same rigging
-   *  quantities the screen showed (#GEM D-GEM-23). Missing = the equation's
+   *  quantities the screen showed (#211 D323). Missing = the equation's
    *  own count (tierDefsDefault). */
   tierSets?: Partial<Record<TierKey, number | null>>;
-  /** Units of the qty overrides whose meaning changed (#GEM fix wave 3,
-   *  D-GEM-24): `{ "curtains:Scenery track": "ft" }` marks a config whose
+  /** Units of the qty overrides whose meaning changed (#211 fix wave 3,
+   *  D324): `{ "curtains:Scenery track": "ft" }` marks a config whose
    *  Scenery-track override is FEET. A saved config without the marker
    *  predates it — its Scenery-track override is a run COUNT and is dropped
    *  on hydrate. Every hydrated / default state carries the marker. */
@@ -154,7 +154,7 @@ export type AState = {
 
 /**
  * The basic-info slice of AState shared by Quick Design's inline config
- * panel and Grid Manual mode's Scope panel (#GEM, D-GEM-5):
+ * panel and Grid Manual mode's Scope panel (#211, D305):
  * venue/size/dimensions plus the systems-in-scope toggles and their
  * sub-config (rig type, drape/fixture/control/shell picks, pit type).
  * Deliberately excludes the fields that only make sense for Quick Design's
@@ -446,11 +446,11 @@ const CURTAIN_KEY_TO_TYPE: Record<string, string> = { draw: "Draw", legs: "Legs"
 /* --------------------------------- compute --------------------------------- */
 
 /**
- * Pure function of the designer state — the refined BOM equations (#GEM:
+ * Pure function of the designer state — the refined BOM equations (#211:
  * QUANTITIES ONLY). Every item carries its Equipment map key (equipment-
  * vocab.ts) and no dollars; equipment-pricing.ts prices them. Sizing math is
  * unchanged, except the scenery track, which now emits FEET (count × pipe
- * length) so a per-foot catalog track can price it (D-GEM-1).
+ * length) so a per-foot catalog track can price it (D301).
  */
 export function compute(s: AState): ComputeResult {
   const C = clamp;
@@ -708,7 +708,7 @@ export function applyOverrides(systems: SystemBlock[], s: AState, tierKey: TierK
 
 /** The Quick Design BOM's qty edit (setQtyOverride): the typed value as a
  *  whole number ≥ 0 (junk → 0) at tier → system → desc. A Scenery-track
- *  edit is in FEET — the row's unit (D-GEM-24). */
+ *  edit is in FEET — the row's unit (D324). */
 export function withQtyOverride(
   cur: AState["qtyOverrides"] | undefined,
   tk: TierKey,
@@ -827,11 +827,11 @@ export function reconstruct(d: DesignRecordLike, base: AState): AState {
 }
 
 /** The qty override whose unit changed: a Scenery-track run COUNT before
- *  #GEM T5, FEET since (depth blocks × pipe length — see compute()). */
+ *  #211 T5, FEET since (depth blocks × pipe length — see compute()). */
 export const SCENERY_TRACK_OVERRIDE = "curtains:Scenery track";
 
-/** The override-units marker every config written since #GEM fix wave 3
- *  carries (D-GEM-24). */
+/** The override-units marker every config written since #211 fix wave 3
+ *  carries (D324). */
 export const OVERRIDE_UNITS: Readonly<Record<string, string>> = Object.freeze({ [SCENERY_TRACK_OVERRIDE]: "ft" });
 
 /** The contingency dial's range (the screen's slider, 0–25 %, whole numbers). */
@@ -842,13 +842,13 @@ export function contingencyValue(v: unknown): number {
 
 /**
  * A saved config's qty overrides, cleaned the way the screen writes them
- * (#GEM fix wave 3): whole numbers ≥ 0 (setQtyOverride), anything else
+ * (#211 fix wave 3): whole numbers ≥ 0 (setQtyOverride), anything else
  * dropped. `feet` false — a config saved before the override-units marker —
  * also drops the Scenery-track override: it was a COUNT of track runs, the
  * row now emits FEET, and there is no safe conversion (the pipe length it was
  * saved against is unknown), so the calculated feet are used until the
  * designer re-edits it. A marked (feet) override is kept, so the server
- * prices the same quantity the screen showed (D-GEM-24).
+ * prices the same quantity the screen showed (D324).
  */
 export function cleanQtyOverrides(raw: unknown, feet: boolean): AState["qtyOverrides"] {
   const out: AState["qtyOverrides"] = {};
@@ -871,7 +871,7 @@ export function cleanQtyOverrides(raw: unknown, feet: boolean): AState["qtyOverr
   return out;
 }
 
-/** Whether a saved config's Scenery-track override is in feet (D-GEM-24). */
+/** Whether a saved config's Scenery-track override is in feet (D324). */
 export function overridesInFeet(cfg: { overrideUnits?: unknown } | null | undefined): boolean {
   const u = cfg?.overrideUnits;
   return !!u && typeof u === "object" && (u as Record<string, unknown>)[SCENERY_TRACK_OVERRIDE] === "ft";
@@ -879,7 +879,7 @@ export function overridesInFeet(cfg: { overrideUnits?: unknown } | null | undefi
 
 /**
  * A saved config (a design's, or a revision's being restored) laid over a
- * state, cleaned exactly as the server reads it (#GEM fix wave 3): the
+ * state, cleaned exactly as the server reads it (#211 fix wave 3): the
  * versioned qty overrides, contingency 0–25, a known tier, and the
  * override-units marker — so the screen shows what the server prices.
  */
@@ -899,7 +899,7 @@ export function applySavedConfig(base: AState, cfg: Partial<AState>): AState {
  * hydrate designer state from a saved record: full config when present, else
  * reconstruct. A hydrated state always carries `tierSets` (the saved dial, or
  * `{}` — the equation's own count), so a saved design prices the same
- * rigging quantities in every browser and on the server (D-GEM-23); only a
+ * rigging quantities in every browser and on the server (D323); only a
  * brand-new design (defaultAState) follows this browser's line-sets dial.
  */
 export function hydrateAState(d: DesignRecordLike, contingencyPct: number): AState {

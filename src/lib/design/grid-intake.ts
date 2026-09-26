@@ -1,6 +1,6 @@
 /**
  * Manual-intake helpers (Spec 1, Task 6) and the one Auto/Blank intake's
- * scope inputs (#GEM). Pure.
+ * scope inputs (#211). Pure.
  */
 import { SYS_ORDER, venueOf, type AState, type QuickScopeInputs, type SysKey } from "@/app/(app)/design/quick/engine";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
@@ -32,7 +32,7 @@ export function manualScopeInputs(a: AState): QuickScopeInputs {
 }
 
 /**
- * The one intake's scope inputs (#GEM): venue/size/dims as entered, systems =
+ * The one intake's scope inputs (#211): venue/size/dims as entered, systems =
  * the designer's own scope picks (a.sys) limited to the five Grid scopes. The
  * intake starts a.sys from the venue preset, so an untouched intake equals
  * manualScopeInputs(a).

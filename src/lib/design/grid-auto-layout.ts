@@ -1,5 +1,5 @@
 /**
- * The Grid — Auto fill placement rules (#GEM, spec §5). Pure. Turns priced
+ * The Grid — Auto fill placement rules (#211, spec §5). Pure. Turns priced
  * Auto cards into placement specs on the GENERATED base sheet, using the same
  * venue geometry the sheet was drawn from (prosGeom / churchGeom, and for the
  * other kinds the fixed-fraction frame starterSpaces() in grid-projects.ts
@@ -183,7 +183,7 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
  * Placement specs for the given cards (spec §5). `a` is the geometry the base
  * sheet was drawn from (intake.autoConfig); `opts` are that design's electric
  * and set counts (compute()), plus `kept` — units per row already on the plan
- * by hand (keptUnitsByRow, D-GEM-20), subtracted before placing. Every spec
+ * by hand (keptUnitsByRow, D320), subtracted before placing. Every spec
  * carries `auto: { scope, rowKey, tier }`.
  */
 export function generateAutoLayout(
@@ -196,7 +196,7 @@ export function generateAutoLayout(
   const lots = new Map<SysKey, number>();
   for (const card of cards) {
     for (const rawLine of card.lines) {
-      // D-GEM-20: units of this row kept by hand (hand-moved / edited devices
+      // D320: units of this row kept by hand (hand-moved / edited devices
       // that still carry its autoOrigin) count toward the new quantity — only
       // the difference is placed, never below zero.
       const keptUnits = Math.max(0, Math.round(opts.kept?.[rawLine.rowKey] ?? 0));

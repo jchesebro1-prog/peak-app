@@ -1,5 +1,5 @@
 /**
- * Where a saved design opens (#GEM final review I2) — pure, shared by Home,
+ * Where a saved design opens (#211 final review I2) — pure, shared by Home,
  * the Reviews queue and the Designs dashboard. A manual-layout (Grid) design
  * opens its linked Grid project; everything else is a Quick Design record.
  */

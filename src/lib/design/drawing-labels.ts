@@ -63,7 +63,7 @@ export function placeChip(curve: { pts: Bezier; side?: 1 | -1 }, w: number, h: n
 
 /* ---------------------------------- plan ---------------------------------- */
 
-/** `qty` = the symbol's unit count (#GEM: a lot marker stands for many
+/** `qty` = the symbol's unit count (#211: a lot marker stands for many
  *  units); absent = 1. */
 export type TypeMarkItem = { key: string; desc: string; qty?: number };
 
@@ -80,7 +80,7 @@ export type TypeMarkRow = { tag: string; key: string; desc: string; qty: number 
  * order the parts are first seen and prefixed with the sheet's system letter
  * (L1, L2 … on L-101; A1 … on A-101). Returns each key's tag and the device
  * key rows (tag · qty · description) in tag order. A row's qty sums UNITS,
- * so a 240-unit lot marker counts 240, not 1 (#GEM fix wave 1, I3).
+ * so a 240-unit lot marker counts 240, not 1 (#211 fix wave 1, I3).
  */
 export function assignTypeMarks(items: readonly TypeMarkItem[], prefix: string): { tags: Map<string, string>; rows: TypeMarkRow[] } {
   const tags = new Map<string, string>();

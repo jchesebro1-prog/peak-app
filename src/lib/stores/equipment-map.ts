@@ -20,7 +20,7 @@ import { parseVirtualPartId, virtualPartsFor } from "@/lib/design/grid-virtual-p
 import type { PartLite } from "@/lib/design/grid-bom";
 
 /**
- * The Equipment map store (#GEM, D-GEM-2): one settings blob, one top-level
+ * The Equipment map store (#211, D302): one settings blob, one top-level
  * key per row. Starts EMPTY — nothing here ever writes a row on its own; only
  * saveEquipmentRow / clearEquipmentRow, called from the admin actions, do.
  * Survives the go-live reset (clearDemoData never touches blobs), like every
@@ -95,7 +95,7 @@ export async function loadEquipmentPriceTable(opts?: Parameters<typeof loadEquip
 
 /**
  * The virtual parts (asm:/allow:) a set of placements references, resolved
- * live (#GEM). No virtual id → nothing is loaded at all, so a design without
+ * live (#211). No virtual id → nothing is loaded at all, so a design without
  * Auto devices pays nothing. Pass `catalog` when the request already holds it.
  */
 export async function loadVirtualParts(partIds: Iterable<string>, catalog?: ReadonlyArray<CatalogPart>): Promise<PartLite[]> {

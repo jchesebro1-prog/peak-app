@@ -1,5 +1,5 @@
 /**
- * Equipment pricing (#GEM, D-GEM-4) — the estimate pipeline's ONLY pricing
+ * Equipment pricing (#211, D304) — the estimate pipeline's ONLY pricing
  * step. compute() (quick/engine.ts) emits quantities; this prices every item
  * from the Equipment map's price table, or from a per-design override (a
  * Quick Design fixture pick, an Auto intake swap). A needs-a-part item stays
@@ -7,7 +7,7 @@
  *
  * Cost-bearing (unit costs, curtain making rates): server code and the Quick
  * Design / Designs dashboard clients (already cost views) may import it. NO
- * Grid client file does — the #GEM T5 spec guard walks them.
+ * Grid client file does — the #211 T5 spec guard walks them.
  */
 import { curtainCost, makingRateFor } from "./curtain-pricing";
 import {
@@ -111,7 +111,7 @@ export function tierSystems(
 
 /**
  * Quick Design fixture picks (fixture type → fixture id) → per-row price
- * overrides (#GEM final review I3). `fixturePrices` is built on the SERVER
+ * overrides (#211 final review I3). `fixturePrices` is built on the SERVER
  * with priceCell({ kind: "assembly", id }) — the same resolver the Equipment
  * map prices an assembly cell with — so a pick sells at its included sell
  * (or cost ÷ (1 − margin) when list-less), and a pick that prices
@@ -135,7 +135,7 @@ const TIER_KEYS: readonly TierKey[] = ["good", "better", "best"];
 /** The pricing-rule percentages a Quick Design total uses (Settings → system.*Pct). */
 export type QuickRates = { installPct: number; freightPct: number; contingencyPct: number };
 
-/** A Quick design's server-derived price (#GEM D-GEM-19/D-GEM-23). */
+/** A Quick design's server-derived price (#211 D319/D323). */
 export type QuickDesignPrice = { needsPart: number; budget: number };
 
 /** One tier's line-set count as the screen's dial accepts it (1–300, whole),
@@ -145,7 +145,7 @@ export function lineSetsValue(v: unknown): number | null {
 }
 
 /**
- * The tier definitions a design prices with (D-GEM-23, fix wave 3): `base`
+ * The tier definitions a design prices with (D323, fix wave 3): `base`
  * (the authored defaults on the server; this browser's own tier defs on the
  * screen) with the design's line-set counts (`config.tierSets`) laid over it.
  * A state with `tierSets` — every hydrated (saved) design — takes ALL THREE
@@ -164,7 +164,7 @@ export function tierDefsFor(s: Pick<AState, "tierSets">, base: TierDefs = tierDe
 }
 
 /**
- * Quick Design's live figure for its current state (#GEM fix wave 3) — the
+ * Quick Design's live figure for its current state (#211 fix wave 3) — the
  * same calls the screen's selected-tier total makes (map pricing on the
  * line-set-scaled BOM, the tier's qty overrides, tierTotals), in whole
  * dollars as the screen shows it. The parity specs hold this equal to
@@ -186,7 +186,7 @@ export function quickScreenPrice(
 }
 
 /** The `config` a Quick Design save sends: the whole live state, the line-set
- *  counts it priced with (D-GEM-23) and the override-units marker (D-GEM-24). */
+ *  counts it priced with (D323) and the override-units marker (D324). */
 export function quickSaveConfig(a: AState, tierDefs: TierDefs): Record<string, unknown> {
   return {
     ...(JSON.parse(JSON.stringify(a)) as Record<string, unknown>),
@@ -197,7 +197,7 @@ export function quickSaveConfig(a: AState, tierDefs: TierDefs): Record<string, u
 
 /**
  * The server's own price for a saved (or about-to-be-saved) Quick Design
- * record (#GEM D-GEM-19, D-GEM-23): hydrate its config (or reconstruct a
+ * record (#211 D319, D323): hydrate its config (or reconstruct a
  * pre-config seed record from its display fields), run the equations, price
  * the chosen tier from the Equipment map and total it exactly as the screen
  * does (tierTotals with the install / freight / contingency percentages).
@@ -214,7 +214,7 @@ export function quickDesignPrice(
   try {
     // hydrateAState applies the screen's own clamps (contingency 0–25, qty
     // overrides whole ≥ 0, a known tier; the versioned Scenery-track
-    // override, D-GEM-24) and tierDefsFor the dial's (line sets 1–300), so
+    // override, D324) and tierDefsFor the dial's (line sets 1–300), so
     // this is the figure the screen shows for the same saved record.
     const s = hydrateAState(d, rates.contingencyPct);
     return quickScreenPrice(s, tierDefsFor(s), table, fixturePrices, rates);
@@ -223,7 +223,7 @@ export function quickDesignPrice(
   }
 }
 
-/** The needs-a-part half of quickDesignPrice (D-GEM-19). */
+/** The needs-a-part half of quickDesignPrice (D319). */
 export function quickDesignNeedsPart(
   d: DesignRecordLike,
   table: EquipmentPriceTable,

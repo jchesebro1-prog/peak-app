@@ -2797,9 +2797,9 @@ import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-inta
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFor as makingForQ } from "@/lib/design/curtain-pricing";
-/* The three pre-#GEM blocks that stood here (compute()'s own curtain cost, a
+/* The three pre-#211 blocks that stood here (compute()'s own curtain cost, a
  * Quick Design fixture pick, the tier pipeline's curtain cost) moved into the
- * "#GEM T5" block at EOF: compute() no longer carries dollars (D-GEM-4). */
+ * "#211 T5" block at EOF: compute() no longer carries dollars (D304). */
 
 /* --- budget and quote agree on the same drape (task 7) --- */
 {
@@ -17560,15 +17560,15 @@ import { spaceNameRect } from "@/lib/design/drawing-labels";
   ok(snNone.x === 75 && snNone.y === 44, "#209 I3: no clear corner → the centre");
 }
 
-/* --- #GEM T1: the equation item vocabulary — every compute() item has a map row, and back --- */
+/* --- #211 T1: the equation item vocabulary — every compute() item has a map row, and back --- */
 import { EQUIPMENT_ROWS as gemRows1, EQUIPMENT_ROW_BY_KEY as gemRowByKey1 } from "@/lib/design/equipment-vocab";
 import { compute as gemCompute1, defaultAState as gemDefault1, type AState as GemAState1 } from "@/app/(app)/design/quick/engine";
 import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintText as gemHintText1 } from "@/lib/design/equipment-legacy-hints";
 {
   const keys = gemRows1.map((r) => r.key);
-  ok(keys.length === 46 && new Set(keys).size === 46, `#GEM T1: 46 unique equipment rows (got ${keys.length})`);
-  ok(gemRows1.every((r) => r.key === `${r.system}:${r.itemKey}` && /^[a-z]+:[a-zA-Z]+$/.test(r.key)), "#GEM T1: every key is system:itemKey");
-  ok(gemRows1.every((r) => gemRowByKey1.get(r.key) === r), "#GEM T1: the by-key index covers every row");
+  ok(keys.length === 46 && new Set(keys).size === 46, `#211 T1: 46 unique equipment rows (got ${keys.length})`);
+  ok(gemRows1.every((r) => r.key === `${r.system}:${r.itemKey}` && /^[a-z]+:[a-zA-Z]+$/.test(r.key)), "#211 T1: every key is system:itemKey");
+  ok(gemRows1.every((r) => gemRowByKey1.get(r.key) === r), "#211 T1: the by-key index covers every row");
   const emitted = new Map<string, string>();
   const base = gemDefault1(0);
   for (const size of ["small", "medium", "large"] as const)
@@ -17585,24 +17585,24 @@ import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintTe
         for (const sys of gemCompute1(s).systems) for (const it of sys.items) emitted.set(it.key, it.desc);
       }
   const unknown = [...emitted.keys()].filter((k) => !gemRowByKey1.has(k));
-  ok(unknown.length === 0, `#GEM T1: every item compute() emits has an Equipment map row (unknown: ${unknown.join(", ") || "none"})`);
+  ok(unknown.length === 0, `#211 T1: every item compute() emits has an Equipment map row (unknown: ${unknown.join(", ") || "none"})`);
   const never = keys.filter((k) => !emitted.has(k));
-  ok(never.length === 0, `#GEM T1: every Equipment map row is emitted by some configuration (never: ${never.join(", ") || "none"})`);
-  ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#GEM T1: each row's label is the equation's own item name");
-  ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#GEM T1: the four fabric drapes are the curtain rows");
-  ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#GEM T1: Controls / Acoustical / Pit rows are never Auto-placed");
-  ok(keys.every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#GEM T1: every row carries its old built-in figure as a 'was' hint");
-  ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#GEM T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
-  ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#GEM T1: lighting hints are the old TIER_SKUS figures");
-  ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#GEM T1: one figure prints once, with its unit");
-  ok(gemHintSkus1(gemHints1["curtains:legs"]).join(",") === "RB-EN-16,RB-EN-22,RB-CHAR-25", "#GEM T1: fabric hints name the old per-tier fabric SKUs");
+  ok(never.length === 0, `#211 T1: every Equipment map row is emitted by some configuration (never: ${never.join(", ") || "none"})`);
+  ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#211 T1: each row's label is the equation's own item name");
+  ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#211 T1: the four fabric drapes are the curtain rows");
+  ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#211 T1: Controls / Acoustical / Pit rows are never Auto-placed");
+  ok(keys.every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#211 T1: every row carries its old built-in figure as a 'was' hint");
+  ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#211 T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
+  ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#211 T1: lighting hints are the old TIER_SKUS figures");
+  ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#211 T1: one figure prints once, with its unit");
+  ok(gemHintSkus1(gemHints1["curtains:legs"]).join(",") === "RB-EN-16,RB-EN-22,RB-CHAR-25", "#211 T1: fabric hints name the old per-tier fabric SKUs");
   const hintSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-legacy-hints.ts"), "utf8");
-  ok(hintSrc.includes('typeof window !== "undefined"'), "#GEM T1: the hint table refuses to load in a browser bundle");
+  ok(hintSrc.includes('typeof window !== "undefined"'), "#211 T1: the hint table refuses to load in a browser bundle");
   const vocabSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-vocab.ts"), "utf8");
-  ok(!/\$\s?\d/.test(vocabSrc) && !/\bcost\b/i.test(vocabSrc), "#GEM T1: the vocabulary is dollar-free");
+  ok(!/\$\s?\d/.test(vocabSrc) && !/\bcost\b/i.test(vocabSrc), "#211 T1: the vocabulary is dollar-free");
 }
 
-/* --- #GEM T2: Equipment map resolution — part / assembly / allowance / empty, never a fallback $ --- */
+/* --- #211 T2: Equipment map resolution — part / assembly / allowance / empty, never a fallback $ --- */
 import {
   ALLOWANCE_MAX as gemAllowMax2, buildEquipmentPriceTable as gemTable2, cellFor as gemCellFor2, mapSkus as gemMapSkus2,
   mergeEquipRow as gemMerge2, priceCell as gemPriceCell2, rowStatus as gemRowStatus2, sanitizeEquipmentMap as gemSanitize2,
@@ -17630,57 +17630,57 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
   const p = (cell: Parameters<typeof gemPriceCell2>[0], key = "lighting:par") => gemPriceCell2(cell, def(key), ctx);
   const par = p({ kind: "part", sku: "GEM-PAR" });
-  ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#GEM T2: a part prices at live catalog cost / list");
+  ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#211 T2: a part prices at live catalog cost / list");
   const hb = p({ kind: "part", sku: "GEM-HB" }, "rigging:headblock");
-  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#GEM T2: a part with no list sells at cost ÷ (1 − catalog margin)");
+  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#211 T2: a part with no list sells at cost ÷ (1 − catalog margin)");
   const gone = p({ kind: "part", sku: "GEM-GONE" });
-  ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#GEM T2: a deleted part is needs-a-part, not $0");
-  ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#GEM T2: an unpriced part is needs-a-part");
+  ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#211 T2: a deleted part is needs-a-part, not $0");
+  ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#211 T2: an unpriced part is needs-a-part");
   const asm = p({ kind: "assembly", id: "SA-GEM2" }, "audio:mixerDsp");
-  ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#GEM T2: a System assembly prices at its included totals (resolveFixture)");
-  ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#GEM T2: a deleted assembly is needs-a-part");
+  ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#211 T2: a System assembly prices at its included totals (resolveFixture)");
+  ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#211 T2: a deleted assembly is needs-a-part");
   const allow = p({ kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 }, "audio:subwoofer");
-  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#GEM T2: a confirmed allowance is a unit cost, sold through the catalog margin");
-  ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#GEM T2: an unconfirmed allowance never prices");
+  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#211 T2: a confirmed allowance is a unit cost, sold through the catalog margin");
+  ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#211 T2: an unconfirmed allowance never prices");
   const empty = p(null);
-  ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#GEM T2: an empty cell is needs-a-part with no $");
+  ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#211 T2: an empty cell is needs-a-part with no $");
   const vel = p({ kind: "part", sku: "GEM-VEL" }, "curtains:draw");
-  ok(vel.status === "part" && vel.areaRate === 3.5 && vel.unitCost === 0, "#GEM T2: a fabric row resolves the mapped fabric's area rate");
+  ok(vel.status === "part" && vel.areaRate === 3.5 && vel.unitCost === 0, "#211 T2: a fabric row resolves the mapped fabric's area rate");
   const mus = p({ kind: "part", sku: "GEM-MUS" }, "curtains:draw");
-  ok(mus.status === "part" && mus.areaRate === 0.9, "#GEM T2: …falling back to the fabric's own cost per sq ft");
-  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#GEM T2: a rateless or non-fabric part on a fabric row is needs-a-part (no seed-rate fallback)");
-  ok(p({ kind: "assembly", id: "SA-GEM2" }, "curtains:draw").status === "needs-part", "#GEM T2: a fabric row never maps to an assembly");
+  ok(mus.status === "part" && mus.areaRate === 0.9, "#211 T2: …falling back to the fabric's own cost per sq ft");
+  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#211 T2: a rateless or non-fabric part on a fabric row is needs-a-part (no seed-rate fallback)");
+  ok(p({ kind: "assembly", id: "SA-GEM2" }, "curtains:draw").status === "needs-part", "#211 T2: a fabric row never maps to an assembly");
   const same = { tiers: { good: { kind: "part" as const, sku: "GEM-PAR" } }, sameAll: true, updatedBy: "t", updatedAt: 1 };
-  ok(gemCellFor2(same, "best")?.kind === "part" && gemCellFor2({ ...same, sameAll: false }, "best") === null, "#GEM T2: same-for-all reads the Good cell for every tier");
-  ok(gemRowStatus2(undefined) === "needs-part" && gemRowStatus2(same) === "mapped", "#GEM T2: row status — nothing mapped vs every tier mapped");
-  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" }, better: { kind: "allowance", amount: 5, confirmedBy: "J", confirmedAt: 1 }, best: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "allowance", "#GEM T2: any confirmed-allowance tier → Allowance");
-  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "needs-part", "#GEM T2: any empty tier → Needs a part");
+  ok(gemCellFor2(same, "best")?.kind === "part" && gemCellFor2({ ...same, sameAll: false }, "best") === null, "#211 T2: same-for-all reads the Good cell for every tier");
+  ok(gemRowStatus2(undefined) === "needs-part" && gemRowStatus2(same) === "mapped", "#211 T2: row status — nothing mapped vs every tier mapped");
+  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" }, better: { kind: "allowance", amount: 5, confirmedBy: "J", confirmedAt: 1 }, best: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "allowance", "#211 T2: any confirmed-allowance tier → Allowance");
+  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "needs-part", "#211 T2: any empty tier → Needs a part");
   const clean = gemSanitize2({ "lighting:par": same, "bogus:row": same, "audio:subwoofer": null, "rigging:arbor": { tiers: { good: { kind: "allowance", amount: -3, confirmedBy: "J", confirmedAt: 1 }, better: { kind: "part", sku: "  " } } } });
-  ok(Object.keys(clean).join(",") === "lighting:par,rigging:arbor" && Object.keys(clean["rigging:arbor"].tiers).length === 0, "#GEM T2: sanitize drops unknown rows, cleared rows and invalid cells");
-  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: 99, confirmed: false } } }, "Jeff", 10).ok, "#GEM T2: saving an unconfirmed allowance is refused");
+  ok(Object.keys(clean).join(",") === "lighting:par,rigging:arbor" && Object.keys(clean["rigging:arbor"].tiers).length === 0, "#211 T2: sanitize drops unknown rows, cleared rows and invalid cells");
+  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: 99, confirmed: false } } }, "Jeff", 10).ok, "#211 T2: saving an unconfirmed allowance is refused");
   const m2 = gemMerge2(undefined, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, note: "until the book lands", confirmed: true } } }, "Chris", 20);
-  ok(m2.ok && m2.row.tiers.best?.kind === "allowance" && m2.row.tiers.better?.kind === "allowance" && m2.row.updatedBy === "Chris", "#GEM T2: same-for-all writes the Good cell into every tier, stamped");
+  ok(m2.ok && m2.row.tiers.best?.kind === "allowance" && m2.row.tiers.better?.kind === "allowance" && m2.row.updatedBy === "Chris", "#211 T2: same-for-all writes the Good cell into every tier, stamped");
   const prev2 = m2.ok ? m2.row : undefined;
   const m3 = gemMerge2(prev2, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, note: "until the book lands", confirmed: true } } }, "Jeff", 30);
   const c3 = m3.ok ? m3.row.tiers.good : null;
-  ok(m3.ok && c3?.kind === "allowance" && c3.confirmedBy === "Chris" && c3.confirmedAt === 20 && m3.row.updatedBy === "Jeff", "#GEM T2: re-saving an unchanged allowance keeps who confirmed it");
+  ok(m3.ok && c3?.kind === "allowance" && c3.confirmedBy === "Chris" && c3.confirmedAt === 20 && m3.row.updatedBy === "Jeff", "#211 T2: re-saving an unchanged allowance keeps who confirmed it");
   const m4 = gemMerge2(prev2, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1300, confirmed: true } } }, "Jeff", 40);
   const c4 = m4.ok ? m4.row.tiers.good : null;
-  ok(c4?.kind === "allowance" && c4.confirmedBy === "Jeff" && c4.confirmedAt === 40, "#GEM T2: changing the amount re-confirms it");
-  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: gemAllowMax2 + 1, confirmed: true } } }, "J", 1).ok, "#GEM T2: an absurd allowance is refused");
+  ok(c4?.kind === "allowance" && c4.confirmedBy === "Jeff" && c4.confirmedAt === 40, "#211 T2: changing the amount re-confirms it");
+  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: gemAllowMax2 + 1, confirmed: true } } }, "J", 1).ok, "#211 T2: an absurd allowance is refused");
   const map: GemMap2 = { "lighting:par": same, "audio:mixerDsp": { tiers: { better: { kind: "assembly", id: "SA-GEM2" } }, updatedBy: "t", updatedAt: 1 } };
   const table = gemTable2(map, ctx);
   const allKeys = [...gemRowByKey2.keys()];
-  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#GEM T2: the table has a price (or needs-a-part) for every row × tier");
-  ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#GEM T2: tiers resolve independently");
-  ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#GEM T2: every unmapped row is needs-a-part — nothing is pre-mapped");
-  ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#GEM T2: mapSkus names every part the map needs, assembly parts included");
+  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#211 T2: the table has a price (or needs-a-part) for every row × tier");
+  ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#211 T2: tiers resolve independently");
+  ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#211 T2: every unmapped row is needs-a-part — nothing is pre-mapped");
+  ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#211 T2: mapSkus names every part the map needs, assembly parts included");
 }
 
-/* --- #GEM T3: the Equipment map page — view models, suggestions, admin gate, no client store imports --- */
+/* --- #211 T3: the Equipment map page — view models, suggestions, admin gate, no client store imports --- */
 import { assemblyOptions as gemAsmOpts3, equipmentMapView as gemView3, mapSummary as gemSummary3, suggestParts as gemSuggest3 } from "@/lib/design/equipment-map-view";
 import { EQUIPMENT_ROW_BY_KEY as gemRowByKey3 } from "@/lib/design/equipment-vocab";
-/** Module paths a source file imports VALUES from (`import type …` excluded). Shared by the later #GEM guards. */
+/** Module paths a source file imports VALUES from (`import type …` excluded). Shared by the later #211 guards. */
 const gemValueImports = (src: string): string[] =>
   [...src.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
 {
@@ -17696,22 +17696,22 @@ const gemValueImports = (src: string): string[] =>
   const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
   const hints = { "lighting:par": { text: "was $500 / $750 / $1,150", skus: [] as string[] } };
   const empty = gemView3({}, ctx, hints);
-  ok(empty.length === 46 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#GEM T3: an empty map shows every row as Needs a part");
-  ok(empty.find((r) => r.key === "lighting:par")!.hint === "was $500 / $750 / $1,150" && empty[0].systemLabel === "Rigging", "#GEM T3: rows carry their 'was' hint and their group label");
+  ok(empty.length === 46 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#211 T3: an empty map shows every row as Needs a part");
+  ok(empty.find((r) => r.key === "lighting:par")!.hint === "was $500 / $750 / $1,150" && empty[0].systemLabel === "Rigging", "#211 T3: rows carry their 'was' hint and their group label");
   const view = gemView3({
     "lighting:par": { tiers: { good: { kind: "part", sku: "GEM-PAR" }, better: { kind: "part", sku: "GEM-GONE" }, best: { kind: "part", sku: "GEM-PAR" } }, updatedBy: "Jeff", updatedAt: 9 },
     "audio:mixerDsp": { tiers: { good: { kind: "assembly", id: "SA-GEM3" } }, sameAll: true, updatedBy: "Jeff", updatedAt: 9 },
     "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7, note: "no book yet" } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
   }, ctx, hints);
   const par = view.find((r) => r.key === "lighting:par")!;
-  ok(par.status === "needs-part" && par.cells[1].problem !== null && par.cells[0].unitSell === 900, "#GEM T3: a cell pointing at a deleted part makes the row Needs a part");
+  ok(par.status === "needs-part" && par.cells[1].problem !== null && par.cells[0].unitSell === 900, "#211 T3: a cell pointing at a deleted part makes the row Needs a part");
   const mix = view.find((r) => r.key === "audio:mixerDsp")!;
-  ok(mix.status === "mapped" && mix.sameAll && mix.cells.every((c) => c.kind === "assembly" && c.title === "GEM3 rack" && c.unitSell === 7000), "#GEM T3: a same-for-all assembly row reads Mapped in every tier");
+  ok(mix.status === "mapped" && mix.sameAll && mix.cells.every((c) => c.kind === "assembly" && c.title === "GEM3 rack" && c.unitSell === 7000), "#211 T3: a same-for-all assembly row reads Mapped in every tier");
   const sub = view.find((r) => r.key === "audio:subwoofer")!;
   const subIn = sub.cells[2].input;
-  ok(sub.status === "allowance" && sub.cells[2].confirmedBy === "Chris" && subIn?.kind === "allowance" && subIn.confirmed, "#GEM T3: an allowance row shows who confirmed it and re-posts as confirmed");
+  ok(sub.status === "allowance" && sub.cells[2].confirmedBy === "Chris" && subIn?.kind === "allowance" && subIn.confirmed, "#211 T3: an allowance row shows who confirmed it and re-posts as confirmed");
   const s = gemSummary3(view);
-  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 44, "#GEM T3: the summary counts rows by status");
+  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 44, "#211 T3: the summary counts rows by status");
   const catalog = [
     { sku: "RB-EN-16", desc: "Encore velour 16oz", category: "Fabric" },
     { sku: "RB-CHAR-25", desc: "Charisma velour 25oz", category: "Fabric" },
@@ -17720,20 +17720,20 @@ const gemValueImports = (src: string): string[] =>
     { sku: "FAB-PAR", desc: "par fabric", category: "Fabric" },
   ];
   const legs = gemSuggest3(catalog, gemRowByKey3.get("curtains:legs")!, ["RB-CHAR-25"], 8);
-  ok(legs[0].sku === "RB-CHAR-25" && legs.length === 2 && legs.every((p) => p.category === "Fabric"), "#GEM T3: fabric rows suggest fabrics only, the old fabric SKU first");
+  ok(legs[0].sku === "RB-CHAR-25" && legs.length === 2 && legs.every((p) => p.category === "Fabric"), "#211 T3: fabric rows suggest fabrics only, the old fabric SKU first");
   const pars = gemSuggest3(catalog, gemRowByKey3.get("lighting:par")!, [], 1);
-  ok(pars.length === 1 && pars[0].sku === "PAR-1", "#GEM T3: part suggestions skip fabric, rank by matched words, respect the limit");
+  ok(pars.length === 1 && pars[0].sku === "PAR-1", "#211 T3: part suggestions skip fabric, rank by matched words, respect the limit");
   const opts = gemAsmOpts3([rack], ctx);
-  ok(opts.length === 1 && opts[0].kind === "system" && opts[0].scope === "Audio" && opts[0].unitSell === 7000 && opts[0].unitCost === 5000, "#GEM T3: the assembly picker lists systems with their live totals");
+  ok(opts.length === 1 && opts[0].kind === "system" && opts[0].scope === "Audio" && opts[0].unitSell === 7000 && opts[0].unitCost === 5000, "#211 T3: the assembly picker lists systems with their live totals");
   const clientSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
-  ok(clientSrc.startsWith('"use client"') && !gemValueImports(clientSrc).some((m) => /^@\/lib\/stores\/|^@\/db\/|equipment-legacy-hints/.test(m)), "#GEM T3: the map client imports no store, DB or hint-table value");
+  ok(clientSrc.startsWith('"use client"') && !gemValueImports(clientSrc).some((m) => /^@\/lib\/stores\/|^@\/db\/|equipment-legacy-hints/.test(m)), "#211 T3: the map client imports no store, DB or hint-table value");
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
-  ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#GEM T3: admin-gated, and the page reads only the SKUs it shows");
+  ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#GEM T3: every settings action, the four new ones included, is admin-gated");
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
-/* --- #GEM T4: Scope targets are computed on the server; the old seeder is gone --- */
+/* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
 import { scopeTargetsByTier as gemTargetsByTier4, targetsFromSystems as gemTargetsFrom4 } from "@/lib/design/scope-targets";
 import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } from "@/app/(app)/design/quick/engine";
 {
@@ -17755,22 +17755,22 @@ import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } fro
       sys("controls", false, 999, []),
     ];
   });
-  ok(seen.join(",") === "good:good,better:better,best:best", "#GEM T4: the pricer runs once per tier, with that tier set on the state");
-  ok(byTier.best.lighting?.sell === 300 && byTier.good.lighting?.sell === 100, "#GEM T4: one target per tier, from the priced system's revenue");
-  ok(byTier.better.lighting?.needsPart === 1 && byTier.better.lighting?.allowances === 1, "#GEM T4: needs-a-part and allowance lines are counted, qty-0 lines are not");
-  ok(!("controls" in byTier.better) && Object.keys(gemTargetsFrom4([])).length === 0, "#GEM T4: an off system gets no target");
+  ok(seen.join(",") === "good:good,better:better,best:best", "#211 T4: the pricer runs once per tier, with that tier set on the state");
+  ok(byTier.best.lighting?.sell === 300 && byTier.good.lighting?.sell === 100, "#211 T4: one target per tier, from the priced system's revenue");
+  ok(byTier.better.lighting?.needsPart === 1 && byTier.better.lighting?.allowances === 1, "#211 T4: needs-a-part and allowance lines are counted, qty-0 lines are not");
+  ok(!("controls" in byTier.better) && Object.keys(gemTargetsFrom4([])).length === 0, "#211 T4: an off system gets no target");
   const spSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
-  ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#GEM T4: the Scope panel computes no targets in the browser");
+  ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#211 T4: the Scope panel computes no targets in the browser");
   const edSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const pgSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
-  ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#GEM T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
+  ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#211 T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
   const seedSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-seed.ts"), "utf8");
   const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
-  ok(!seedSrc.includes("quick/engine") && !seedSrc.includes("deriveSeedPlacements") && seedSrc.includes("export function isSeedPlaceholder"), "#GEM T4: grid-seed keeps only the placeholder helpers");
-  ok(!actSrc.includes("seedStartingLayoutAction") && !actSrc.includes("deriveSeedPlacements"), "#GEM T4: the old seeding action is removed");
+  ok(!seedSrc.includes("quick/engine") && !seedSrc.includes("deriveSeedPlacements") && seedSrc.includes("export function isSeedPlaceholder"), "#211 T4: grid-seed keeps only the placeholder helpers");
+  ok(!actSrc.includes("seedStartingLayoutAction") && !actSrc.includes("deriveSeedPlacements"), "#211 T4: the old seeding action is removed");
 }
 
-/* --- #GEM T5: the estimate prices only through the Equipment map — no built-in dollars --- */
+/* --- #211 T5: the estimate prices only through the Equipment map — no built-in dollars --- */
 import { compute as gemCompute5, defaultAState as gemDefault5, tierDefsDefault as gemTierDefs5, type AState as GemAState5 } from "@/app/(app)/design/quick/engine";
 import { applyEquipment as gemApply5, drapeUnitCost as gemDrape5, tierSystems as gemTierSystems5 } from "@/lib/design/equipment-pricing";
 import { buildEquipmentPriceTable as gemTable5 } from "@/lib/design/equipment-map";
@@ -17788,13 +17788,13 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   };
   const C = gemCompute5(s);
   const all = C.systems.flatMap((x) => x.items);
-  ok(all.length > 0 && all.every((it) => it.cost === 0 && it.price === 0) && C.systems.every((x) => x.rev === 0 && x.cost === 0), "#GEM T5: compute() carries quantities only — no built-in dollars");
-  ok(all.every((it) => gemRowByKey5.get(it.key)?.unit === it.unit), "#GEM T5: every item's unit is its Equipment map row's unit");
+  ok(all.length > 0 && all.every((it) => it.cost === 0 && it.price === 0) && C.systems.every((x) => x.rev === 0 && x.cost === 0), "#211 T5: compute() carries quantities only — no built-in dollars");
+  ok(all.every((it) => gemRowByKey5.get(it.key)?.unit === it.unit), "#211 T5: every item's unit is its Equipment map row's unit");
   const track = all.find((it) => it.key === "curtains:scenerytrack")!;
-  ok(track.unit === "ft" && track.qty === 3 * 44, `#GEM T5: the scenery track emits feet — depth blocks × pipe length (got ${track.qty})`);
+  ok(track.unit === "ft" && track.qty === 3 * 44, `#211 T5: the scenery track emits feet — depth blocks × pipe length (got ${track.qty})`);
   const draw = all.find((it) => it.key === "curtains:draw")!;
   const rule = gemDrapeRule5("Draw", { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 64, stageDepthFt: 30 }, "better")!;
-  ok(!!draw.drape && draw.drape.w === rule.w && draw.drape.h === rule.h && draw.drape.fullness === rule.fullness && draw.drape.qty === rule.qty, "#GEM T5: a drape item carries the goods.ts geometry the quote side uses");
+  ok(!!draw.drape && draw.drape.w === rule.w && draw.drape.h === rule.h && draw.drape.fullness === rule.fullness && draw.drape.qty === rule.qty, "#211 T5: a drape item carries the goods.ts geometry the quote side uses");
   const parts = new Map<string, { sku: string; desc: string; unit: string; cost: number; list: number; category: string; curtainAreaRate?: number }>([
     ["GEM5-PAR", { sku: "GEM5-PAR", desc: "LED par", unit: "ea", cost: 600, list: 900, category: "Lighting Fixtures" }],
     ["GEM5-HB", { sku: "GEM5-HB", desc: "Headblock", unit: "ea", cost: 500, list: 0, category: "Rigging Hardware" }],
@@ -17809,16 +17809,16 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   const better = gemTierSystems5(C, s, "better", gemTierDefs5(), table);
   const item = (sys: string, key: string, list = better) => list.find((x) => x.key === sys)!.items.find((i) => i.key === key)!;
   const par = item("lighting", "lighting:par");
-  ok(par.cost === 600 && par.price === 900 && par.status === "part" && par.refDesc === "LED par", "#GEM T5: a mapped part prices from the live catalog");
+  ok(par.cost === 600 && par.price === 900 && par.status === "part" && par.refDesc === "LED par", "#211 T5: a mapped part prices from the live catalog");
   const hb = item("rigging", "rigging:headblock");
-  ok(hb.cost === 500 && hb.price === 714.29, "#GEM T5: a list-less part sells at cost ÷ (1 − catalog margin)");
+  ok(hb.cost === 500 && hb.price === 714.29, "#211 T5: a list-less part sells at cost ÷ (1 − catalog margin)");
   const arbor = item("rigging", "rigging:arbor");
-  ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#GEM T5: an unmapped item is needs-a-part — never a fallback dollar");
+  ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#211 T5: an unmapped item is needs-a-part — never a fallback dollar");
   const d = item("curtains", "curtains:draw");
   const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5, makingRate: gemMaking5(rule.fullness) }).costTotal);
-  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#GEM T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
+  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#211 T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
   const sub = item("audio", "audio:subwoofer");
-  ok(sub.status === "allowance" && sub.cost === 1200, "#GEM T5: a confirmed allowance prices as its unit cost");
+  ok(sub.status === "allowance" && sub.cost === 1200, "#211 T5: a confirmed allowance prices as its unit cost");
   // Fix wave 1 (M5): a curtain row mapped to a CONFIRMED ALLOWANCE (not a
   // fabric part) prices at the flat allowance amount — the `it.drape &&
   // p.status !== "allowance"` guard in equipment-pricing.ts's priceItem
@@ -17838,7 +17838,7 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   const drawAllow = allowBetter.find((x) => x.key === "curtains")!.items.find((i) => i.key === "curtains:draw")!;
   ok(
     drawAllow.status === "allowance" && drawAllow.cost === 850 && drawAllow.price === Math.round((850 / 0.7) * 100) / 100,
-    "#GEM fix wave 1 (M5): a curtain row mapped to a confirmed allowance prices at the flat amount, not the area-rate drape formula"
+    "#211 fix wave 1 (M5): a curtain row mapped to a confirmed allowance prices at the flat amount, not the area-rate drape formula"
   );
   const rig = better.find((x) => x.key === "rigging")!;
   const rigNeedsPart = rig.items.filter((i) => i.status === "needs-part");
@@ -17854,32 +17854,32 @@ import { readdirSync as gemReaddir5 } from "node:fs";
       rigNeedsPart.every((i) => i.cost === 0 && i.price === 0) &&
       rig.cost === rigPriced.reduce((a, i) => a + i.qty * i.cost, 0) &&
       rig.rev === rigPriced.reduce((a, i) => a + i.qty * i.price, 0),
-    "#GEM T5: system totals sum only priced lines — a needs-a-part line never contributes a cost"
+    "#211 T5: system totals sum only priced lines — a needs-a-part line never contributes a cost"
   );
   const good = gemTierSystems5(C, s, "good", gemTierDefs5(), table);
-  ok(item("rigging", "rigging:headblock", good).status === "needs-part" && item("lighting", "lighting:par", good).price === 900, "#GEM T5: each tier resolves its own cells (same-for-all rows price every tier)");
+  ok(item("rigging", "rigging:headblock", good).status === "needs-part" && item("lighting", "lighting:par", good).price === 900, "#211 T5: each tier resolves its own cells (same-for-all rows price every tier)");
   const ov = gemTierSystems5(C, s, "better", gemTierDefs5(), table, { "lighting:par": { status: "assembly", ref: "fa-par", desc: "House PAR assembly", unit: "ea", unitCost: 432, unitSell: 610 } });
   const opar = item("lighting", "lighting:par", ov);
-  ok(opar.cost === 432 && opar.price === 610 && opar.refDesc === "House PAR assembly" && opar.desc === "Par", "#GEM T5: a per-design pick overrides the map for that row, keeping the equation's name");
+  ok(opar.cost === 432 && opar.price === 610 && opar.refDesc === "House PAR assembly" && opar.desc === "Par", "#211 T5: a per-design pick overrides the map for that row, keeping the equation's name");
   const once = gemApply5(C.systems, "better", table);
-  ok(once.every((x) => x.tierFixed) && once.find((x) => x.key === "lighting")!.rev === par.qty * 900, "#GEM T5: applyEquipment prices every system per tier (tier multipliers are inert)");
+  ok(once.every((x) => x.tierFixed) && once.find((x) => x.key === "lighting")!.rev === par.qty * 900, "#211 T5: applyEquipment prices every system per tier (tier multipliers are inert)");
   const engSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/engine.ts"), "utf8");
-  ok(!/TIER_SKUS|SEED_FABRIC_RATES/.test(engSrc) && !gemValueImports(engSrc).some((m) => /curtain-pricing|equipment-pricing/.test(m)) && !/\bcost:\s*(0\.\d|[1-9]|Math)/.test(engSrc), "#GEM T5: engine.ts holds no dollars and imports nothing cost-bearing");
+  ok(!/TIER_SKUS|SEED_FABRIC_RATES/.test(engSrc) && !gemValueImports(engSrc).some((m) => /curtain-pricing|equipment-pricing/.test(m)) && !/\bcost:\s*(0\.\d|[1-9]|Math)/.test(engSrc), "#211 T5: engine.ts holds no dollars and imports nothing cost-bearing");
   const walk = (dir: string): string[] =>
     gemReaddir5(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
   const gridClient = [...walk(join(process.cwd(), "src/app/(app)/design/grid")), ...walk(join(process.cwd(), "src/components/design"))]
     .map((f) => ({ f, src: readFileSync(f, "utf8") }))
     .filter(({ src }) => src.startsWith('"use client"'));
   const leaks = gridClient.filter(({ src }) => gemValueImports(src).some((m) => /curtain-pricing|equipment-pricing|equipment-legacy-hints|^@\/lib\/stores\/|^@\/db\//.test(m)));
-  ok(gridClient.length > 5 && leaks.length === 0, `#GEM T5: no Grid client file imports a cost-bearing module (leaks: ${leaks.map((l) => l.f.split("/src/")[1]).join(", ") || "none"})`);
+  ok(gridClient.length > 5 && leaks.length === 0, `#211 T5: no Grid client file imports a cost-bearing module (leaks: ${leaks.map((l) => l.f.split("/src/")[1]).join(", ") || "none"})`);
 }
 
-/* --- #GEM fix wave 1: review findings on Task 5 — I1 (needs-a-part guard),
+/* --- #211 fix wave 1: review findings on Task 5 — I1 (needs-a-part guard),
  * M1 (stale scenery-track override survives hydrateAState) --- */
 import { hydrateAState as gemHydrate6, type SystemBlock as GemSystemBlock6 } from "@/app/(app)/design/quick/engine";
 import { needsPartCount as gemNeedsPartCount6, addToQuotesGuard as gemGuard6 } from "@/lib/design/scope-targets";
 {
-  // M1: a saved "Scenery track" qty override predates #GEM T5 — it was a
+  // M1: a saved "Scenery track" qty override predates #211 T5 — it was a
   // COUNT of track runs; the row now emits FEET (depth blocks × pipe
   // length). hydrateAState must drop the stale key (no safe conversion)
   // rather than mis-apply it, while every other override survives untouched.
@@ -17898,16 +17898,16 @@ import { needsPartCount as gemNeedsPartCount6, addToQuotesGuard as gemGuard6 } f
   const gc = hydrated.qtyOverrides?.good?.curtains;
   ok(
     bc?.["Scenery track"] === undefined && bc?.Draw === 2 && bl?.Par === 10 && gc?.["Scenery track"] === undefined,
-    "#GEM fix wave 1 (M1): hydrateAState drops a stale Scenery-track override in every tier but keeps every other override"
+    "#211 fix wave 1 (M1): hydrateAState drops a stale Scenery-track override in every tier but keeps every other override"
   );
   const noOverrides = gemHydrate6({ config: { width: 40 } }, 10);
   ok(
     Object.keys(noOverrides.qtyOverrides || {}).length === 0,
-    "#GEM fix wave 1 (M1): a config with no qtyOverrides at all still falls through to the default ({}), not undefined"
+    "#211 fix wave 1 (M1): a config with no qtyOverrides at all still falls through to the default ({}), not undefined"
   );
 
   // I1: needsPartCount is a straight sum of targetsFromSystems' per-system
-  // counts (qty-0 lines and off systems excluded, matching #GEM T4's rule).
+  // counts (qty-0 lines and off systems excluded, matching #211 T4's rule).
   type St = "part" | "assembly" | "allowance" | "needs-part";
   const sys = (key: string, on: boolean, items: Array<{ key: string; qty: number; status?: St }>): GemSystemBlock6 => ({
     key: key as GemSystemBlock6["key"],
@@ -17930,33 +17930,33 @@ import { needsPartCount as gemNeedsPartCount6, addToQuotesGuard as gemGuard6 } f
   ];
   ok(
     gemNeedsPartCount6(systems) === 2,
-    "#GEM fix wave 1 (I1): needsPartCount sums needs-a-part lines across every ON system, skipping qty-0 lines and off systems"
+    "#211 fix wave 1 (I1): needsPartCount sums needs-a-part lines across every ON system, skipping qty-0 lines and off systems"
   );
-  ok(gemNeedsPartCount6([]) === 0, "#GEM fix wave 1 (I1): needsPartCount of no systems is 0");
+  ok(gemNeedsPartCount6([]) === 0, "#211 fix wave 1 (I1): needsPartCount of no systems is 0");
 
   // I1: the Add-to-Quotes guard — null (clear to promote) at 0, else a
   // message naming the count, with singular/plural agreement.
-  ok(gemGuard6(0) === null, "#GEM fix wave 1 (I1): addToQuotesGuard clears a complete estimate (needsPart 0)");
+  ok(gemGuard6(0) === null, "#211 fix wave 1 (I1): addToQuotesGuard clears a complete estimate (needsPart 0)");
   const oneMsg = gemGuard6(1);
   ok(
     typeof oneMsg === "string" && /^Incomplete — 1 item still needs a part\. Map it in the Equipment map/.test(oneMsg),
-    `#GEM fix wave 1 (I1): addToQuotesGuard's singular message names the item (got ${JSON.stringify(oneMsg)})`
+    `#211 fix wave 1 (I1): addToQuotesGuard's singular message names the item (got ${JSON.stringify(oneMsg)})`
   );
   const manyMsg = gemGuard6(3);
   ok(
     typeof manyMsg === "string" && /^Incomplete — 3 items still need a part\. Map them in the Equipment map/.test(manyMsg),
-    `#GEM fix wave 1 (I1): addToQuotesGuard's plural message names the items (got ${JSON.stringify(manyMsg)})`
+    `#211 fix wave 1 (I1): addToQuotesGuard's plural message names the items (got ${JSON.stringify(manyMsg)})`
   );
 }
 
-/* --- #GEM T6: lot quantities, virtual parts (assemblies + allowances), the Auto estimate model --- */
+/* --- #211 T6: lot quantities, virtual parts (assemblies + allowances), the Auto estimate model --- */
 import { bomBySpace as gemBySpace6, bomLines as gemBomLines6, bomTotals as gemBomTotals6, placementQty as gemQty6, type PartLite as GemPartLite6 } from "@/lib/design/grid-bom";
 import { allowancePartId as gemAllowId6, assemblyPartId as gemAsmId6, parseVirtualPartId as gemParseV6, virtualPartsFor as gemVirtual6 } from "@/lib/design/grid-virtual-parts";
 import { mergeScopeEstimate as gemMergeEst6, overrideRefs as gemRefs6, sanitizeAutoEstimate as gemSanEst6 } from "@/lib/design/grid-auto-model";
 import { buildSchedule as gemSchedule6 } from "@/lib/design/grid-schedule";
 import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
 {
-  ok(gemQty6({}) === 1 && gemQty6({ qty: 240 }) === 240 && gemQty6({ qty: 0 }) === 1 && gemQty6({ qty: Number.NaN }) === 1, "#GEM T6: a placement counts 1 unless it is a lot");
+  ok(gemQty6({}) === 1 && gemQty6({ qty: 240 }) === 240 && gemQty6({ qty: 0 }) === 1 && gemQty6({ qty: Number.NaN }) === 1, "#211 T6: a placement counts 1 unless it is a lot");
   const parts: GemPartLite6[] = [
     { id: "PIPE", sku: "PIPE", desc: "Pipe", category: "Rigging", unit: "ft", list: 12, cost: 8 },
     { id: "PAR", sku: "PAR", desc: "Par", category: "Lighting", unit: "ea", list: 900, cost: 600 },
@@ -17968,18 +17968,18 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   ];
   const lines = gemBomLines6(pls, parts);
   const pipe = lines.find((l) => l.partId === "PIPE")!;
-  ok(pipe.qty === 240 && pipe.ext === 2880 && lines.find((l) => l.partId === "PAR")!.qty === 2, "#GEM T6: a lot marker bills its quantity on the BOM");
+  ok(pipe.qty === 240 && pipe.ext === 2880 && lines.find((l) => l.partId === "PAR")!.qty === 2, "#211 T6: a lot marker bills its quantity on the BOM");
   const tot = gemBomTotals6(pls, parts);
-  ok(tot.value === 4680 && tot.cost === 3120, "#GEM T6: totals multiply by the lot quantity");
+  ok(tot.value === 4680 && tot.cost === 3120, "#211 T6: totals multiply by the lot quantity");
   const roll = gemBySpace6(pls, parts, [])[0];
-  ok(roll.count === 242 && roll.value === 4680, "#GEM T6: space rollups value a lot at its quantity (count is units since the final review, D-GEM-21)");
+  ok(roll.count === 242 && roll.value === 4680, "#211 T6: space rollups value a lot at its quantity (count is units since the final review, D321)");
   const sched = gemSchedule6({ placements: pls, spaces: [], descOf: (id) => parts.find((p) => p.id === id)?.desc, wires: [] });
-  ok(sched.sections[0].rows.find((r) => r.partId === "PIPE")!.qty === 240, "#GEM T6: the schedule counts a lot at its quantity");
+  ok(sched.sections[0].rows.find((r) => r.partId === "PIPE")!.qty === 240, "#211 T6: the schedule counts a lot at its quantity");
   const graph = gemRiser6(pls, [], [], parts, []);
-  ok(graph.nodes[0].groups.find((g) => g.partId === "PIPE")!.qty === 240, "#GEM T6: the riser counts a lot at its quantity");
-  ok(gemAsmId6("SA-1") === "asm:SA-1" && gemAllowId6("audio:subwoofer", "best") === "allow:audio:subwoofer:best", "#GEM T6: virtual part ids");
+  ok(graph.nodes[0].groups.find((g) => g.partId === "PIPE")!.qty === 240, "#211 T6: the riser counts a lot at its quantity");
+  ok(gemAsmId6("SA-1") === "asm:SA-1" && gemAllowId6("audio:subwoofer", "best") === "allow:audio:subwoofer:best", "#211 T6: virtual part ids");
   const pv = gemParseV6("allow:audio:subwoofer:best");
-  ok(pv?.kind === "allowance" && pv.rowKey === "audio:subwoofer" && pv.tier === "best" && gemParseV6("asm:SA-1")?.kind === "assembly" && gemParseV6("allow:bogus:row:best") === null && gemParseV6("GEM-PAR") === null, "#GEM T6: parse round-trips and rejects unknown rows and plain SKUs");
+  ok(pv?.kind === "allowance" && pv.rowKey === "audio:subwoofer" && pv.tier === "best" && gemParseV6("asm:SA-1")?.kind === "assembly" && gemParseV6("allow:bogus:row:best") === null && gemParseV6("GEM-PAR") === null, "#211 T6: parse round-trips and rejects unknown rows and plain SKUs");
   const rack = {
     id: "SA-GEM6", kind: "system" as const, label: "GEM6 rack", description: "", scope: "Audio" as const,
     lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
@@ -18000,30 +18000,30 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   };
   const map = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v = gemVirtual6(["asm:SA-GEM6", "asm:fa-gem6", "allow:audio:subwoofer:better", "allow:video:screen:good", "PLAIN", "asm:SA-GEM6"], map, ctx);
-  ok(v.length === 4 && v.every((p) => p.virtual === true), "#GEM T6: one virtual part per distinct virtual id; plain SKUs are not virtual");
+  ok(v.length === 4 && v.every((p) => p.virtual === true), "#211 T6: one virtual part per distinct virtual id; plain SKUs are not virtual");
   const vr = v.find((p) => p.id === "asm:SA-GEM6")!;
-  ok(vr.list === 7000 && vr.cost === 5000 && vr.gridScope === "Audio" && vr.desc === "GEM6 rack", "#GEM T6: a System assembly resolves live, in its system's scope");
-  ok(v.find((p) => p.id === "asm:fa-gem6")!.gridScope === "Lighting", "#GEM T6: a fixture assembly is Lighting");
+  ok(vr.list === 7000 && vr.cost === 5000 && vr.gridScope === "Audio" && vr.desc === "GEM6 rack", "#211 T6: a System assembly resolves live, in its system's scope");
+  ok(v.find((p) => p.id === "asm:fa-gem6")!.gridScope === "Lighting", "#211 T6: a fixture assembly is Lighting");
   const va = v.find((p) => p.id === "allow:audio:subwoofer:better")!;
-  ok(va.allowance === true && va.cost === 1200 && va.list === 1714.29 && va.gridScope === "Audio", "#GEM T6: a confirmed allowance prices live, flagged Allowance");
+  ok(va.allowance === true && va.cost === 1200 && va.list === 1714.29 && va.gridScope === "Audio", "#211 T6: a confirmed allowance prices live, flagged Allowance");
   const dead = v.find((p) => p.id === "allow:video:screen:good")!;
-  ok(dead.list === 0 && dead.cost === 0 && /no longer confirmed/.test(dead.desc), "#GEM T6: an allowance that is no longer confirmed prices $0 and says so");
+  ok(dead.list === 0 && dead.cost === 0 && /no longer confirmed/.test(dead.desc), "#211 T6: an allowance that is no longer confirmed prices $0 and says so");
   const est = gemSanEst6({
     tierByScope: { lighting: "best", controls: "good", audio: "nope" },
     overrides: { "lighting:par": { sku: " GEM-PAR ", qty: 12.4 }, "controls:console": { sku: "X" }, "bogus:row": { sku: "Y" }, "audio:subwoofer": { assemblyId: "SA-1", sku: "" }, "video:screen": {} },
   });
-  ok(JSON.stringify(est.tierByScope) === '{"lighting":"best"}' && est.overrides["lighting:par"].sku === "GEM-PAR" && est.overrides["lighting:par"].qty === 12 && est.overrides["audio:subwoofer"].assemblyId === "SA-1" && !("controls:console" in est.overrides) && !("bogus:row" in est.overrides) && !("video:screen" in est.overrides), "#GEM T6: sanitizeAutoEstimate keeps Grid scopes, known rows and real overrides only");
+  ok(JSON.stringify(est.tierByScope) === '{"lighting":"best"}' && est.overrides["lighting:par"].sku === "GEM-PAR" && est.overrides["lighting:par"].qty === 12 && est.overrides["audio:subwoofer"].assemblyId === "SA-1" && !("controls:console" in est.overrides) && !("bogus:row" in est.overrides) && !("video:screen" in est.overrides), "#211 T6: sanitizeAutoEstimate keeps Grid scopes, known rows and real overrides only");
   const merged = gemMergeEst6(est, "lighting", "good", { "lighting:front": { qty: 3 }, "audio:lineArray": { qty: 9 } });
-  ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#GEM T6: re-choosing one scope replaces only that scope's overrides");
+  ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#211 T6: re-choosing one scope replaces only that scope's overrides");
   const refs = gemRefs6(est);
-  ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#GEM T6: overrideRefs names the SKUs and assemblies to load");
+  ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#211 T6: overrideRefs names the SKUs and assemblies to load");
   const ed6 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
-  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#GEM T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
+  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
 }
 
-/* --- #GEM T6 fix wave 1: lot-aware riser rows, lot units on the drawing set + schedule, dead virtual parts, bid-spec rows, store sanitizers, per-option estimates --- */
+/* --- #211 T6 fix wave 1: lot-aware riser rows, lot units on the drawing set + schedule, dead virtual parts, bid-spec rows, store sanitizers, per-option estimates --- */
 import { planRowQty as gemPlanRow7, riserGraph as gemRiser7 } from "@/lib/design/grid-riser";
 import { assignTypeMarks as gemMarks7 } from "@/lib/design/drawing-labels";
 import { buildSchedule as gemSchedule7 } from "@/lib/design/grid-schedule";
@@ -18036,32 +18036,32 @@ import {
 {
   // I1 — planRowQty
   const one = gemPlanRow7([{ id: "a", qty: 12 }], 11)!;
-  ok(one.set.get("a") === 11 && !one.remove.length && one.add === 0, "#GEM fix1 I1: a 12-unit lot edited to 11 → the one marker holds 11");
+  ok(one.set.get("a") === 11 && !one.remove.length && one.add === 0, "#211 fix1 I1: a 12-unit lot edited to 11 → the one marker holds 11");
   const up = gemPlanRow7([{ id: "a", qty: 240 }], 300)!;
-  ok(up.set.get("a") === 300 && up.add === 0, "#GEM fix1 I1: a lot row goes past 200 and never gains markers");
+  ok(up.set.get("a") === 300 && up.add === 0, "#211 fix1 I1: a lot row goes past 200 and never gains markers");
   const mixUp = gemPlanRow7([{ id: "a", qty: 5 }, { id: "b" }, { id: "c", qty: 3 }, { id: "d" }], 14)!;
-  ok(mixUp.set.size === 1 && mixUp.set.get("c") === 7 && mixUp.add === 0 && !mixUp.remove.length, "#GEM fix1 I1: a mixed row's increase goes onto the NEWEST lot marker");
+  ok(mixUp.set.size === 1 && mixUp.set.get("c") === 7 && mixUp.add === 0 && !mixUp.remove.length, "#211 fix1 I1: a mixed row's increase goes onto the NEWEST lot marker");
   const mixDown = gemPlanRow7([{ id: "a", qty: 5 }, { id: "b" }, { id: "c", qty: 3 }, { id: "d" }], 5)!;
-  ok(mixDown.set.get("c") === 1 && mixDown.set.get("a") === 2 && !mixDown.remove.length, "#GEM fix1 I1: a decrease shrinks lots newest-first, keeping every marker while it can");
+  ok(mixDown.set.get("c") === 1 && mixDown.set.get("a") === 2 && !mixDown.remove.length, "#211 fix1 I1: a decrease shrinks lots newest-first, keeping every marker while it can");
   const mixFloor = gemPlanRow7([{ id: "a", qty: 5 }, { id: "b" }, { id: "c", qty: 3 }, { id: "d" }], 2)!;
-  ok(mixFloor.set.get("a") === 1 && mixFloor.set.get("b") === undefined && mixFloor.remove.join(",") === "c,d", "#GEM fix1 I1: past every lot's floor, the newest markers come off");
+  ok(mixFloor.set.get("a") === 1 && mixFloor.set.get("b") === undefined && mixFloor.remove.join(",") === "c,d", "#211 fix1 I1: past every lot's floor, the newest markers come off");
   const plain = gemPlanRow7([{ id: "a" }, { id: "b" }, { id: "c" }], 1)!;
   const plainUp = gemPlanRow7([{ id: "a" }], 4)!;
-  ok(plain.remove.join(",") === "b,c" && plainUp.add === 3 && !plainUp.set.size, "#GEM fix1 I1: a row without a lot keeps one-marker-per-unit");
-  ok(gemPlanRow7([{ id: "a", qty: 5 }], gemQtyMax7 + 1) === null && gemPlanRow7([{ id: "a", qty: 5 }], gemQtyMax7)?.set.get("a") === gemQtyMax7, "#GEM fix1 I1: a lot is capped at the placement qty cap");
+  ok(plain.remove.join(",") === "b,c" && plainUp.add === 3 && !plainUp.set.size, "#211 fix1 I1: a row without a lot keeps one-marker-per-unit");
+  ok(gemPlanRow7([{ id: "a", qty: 5 }], gemQtyMax7 + 1) === null && gemPlanRow7([{ id: "a", qty: 5 }], gemQtyMax7)?.set.get("a") === gemQtyMax7, "#211 fix1 I1: a lot is capped at the placement qty cap");
   const g7 = gemRiser7([{ sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 }, { sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" }], [], [], [], []);
-  ok(g7.nodes[0].groups.find((g) => g.partId === "PIPE")!.lot === true && g7.nodes[0].groups.find((g) => g.partId === "PAR")!.lot === undefined, "#GEM fix1 I1: the riser marks a row holding a lot");
+  ok(g7.nodes[0].groups.find((g) => g.partId === "PIPE")!.lot === true && g7.nodes[0].groups.find((g) => g.partId === "PAR")!.lot === undefined, "#211 fix1 I1: the riser marks a row holding a lot");
   const panels7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-panels.tsx"), "utf8");
   const riserEd7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx"), "utf8");
-  ok(panels7.includes("lot ? PLACEMENT_QTY_MAX : 200") && riserEd7.includes("lot={Boolean(rowGroup.lot)}"), "#GEM fix1 I1: the row panel lifts the 200 cap for a lot row");
+  ok(panels7.includes("lot ? PLACEMENT_QTY_MAX : 200") && riserEd7.includes("lot={Boolean(rowGroup.lot)}"), "#211 fix1 I1: the row panel lifts the 200 cap for a lot row");
   // I3 — drawing-set device key sums units
   const m7 = gemMarks7([{ key: "PIPE", desc: "Pipe", qty: 240 }, { key: "PAR", desc: "Par" }, { key: "PIPE", desc: "Pipe", qty: 10 }, { key: "PAR", desc: "Par", qty: 0 }], "R");
-  ok(m7.rows.map((r) => `${r.tag}:${r.qty}`).join(",") === "R1:250,R2:2", "#GEM fix1 I3: the device key adds each symbol's unit count");
+  ok(m7.rows.map((r) => `${r.tag}:${r.qty}`).join(",") === "R1:250,R2:2", "#211 fix1 I3: the device key adds each symbol's unit count");
   const set7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
-  ok(set7.includes("qty: f.qty") && set7.includes("`${desc} ×${qty}`") && set7.includes("`${tag} ×${qty}`"), "#GEM fix1 I3: the plan sheet carries lot qty into the key and labels the symbol ×N");
+  ok(set7.includes("qty: f.qty") && set7.includes("`${desc} ×${qty}`") && set7.includes("`${tag} ×${qty}`"), "#211 fix1 I3: the plan sheet carries lot qty into the key and labels the symbol ×N");
   // M2 — schedule counts units
   const sch7 = gemSchedule7({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 }, { id: "b", sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" }], spaces: [], descOf: () => "x", wires: [] });
-  ok(sch7.unitCount === 241, "#GEM fix1 M2: the schedule total counts units, not markers");
+  ok(sch7.unitCount === 241, "#211 fix1 M2: the schedule total counts units, not markers");
   // I4 / I5 — dead virtual parts, plain allowance desc
   const rackDead = {
     id: "SA-DEAD7", kind: "system" as const, label: "Empty rack", description: "", scope: "Audio" as const,
@@ -18077,14 +18077,14 @@ import {
   const map7 = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v7 = gemVirtual7(["asm:SA-DEAD7", "asm:SA-GONE7", "asm:SA-LIVE7", "allow:audio:subwoofer:good", "allow:video:screen:good"], map7, ctx7);
   const vOf = (id: string) => v7.find((p) => p.id === id)!;
-  ok(vOf("asm:SA-DEAD7").virtualDead === true && vOf("asm:SA-DEAD7").list === 0 && vOf("asm:SA-DEAD7").cost === 0 && /no priced parts/.test(vOf("asm:SA-DEAD7").desc), "#GEM fix1 I4: an assembly with no priced member is dead");
-  ok(vOf("asm:SA-GONE7").virtualDead === true && /deleted/.test(vOf("asm:SA-GONE7").desc), "#GEM fix1 I4: a deleted assembly is dead");
-  ok(vOf("allow:video:screen:good").virtualDead === true && !("tierFallback" in vOf("allow:video:screen:good")), "#GEM fix1 I4: an unconfirmed allowance is dead (its own flag, not a tier fallback)");
-  ok(vOf("asm:SA-LIVE7").virtualDead === undefined && vOf("asm:SA-LIVE7").cost === 1000 && vOf("asm:SA-LIVE7").list === 1600, "#GEM fix1 I4: a priced assembly is live");
-  ok(vOf("allow:audio:subwoofer:good").desc === "Subwoofer" && vOf("allow:audio:subwoofer:good").allowance === true && vOf("allow:audio:subwoofer:good").virtualDead === undefined, "#GEM fix1 I5: a live allowance's desc is the row's plain label");
+  ok(vOf("asm:SA-DEAD7").virtualDead === true && vOf("asm:SA-DEAD7").list === 0 && vOf("asm:SA-DEAD7").cost === 0 && /no priced parts/.test(vOf("asm:SA-DEAD7").desc), "#211 fix1 I4: an assembly with no priced member is dead");
+  ok(vOf("asm:SA-GONE7").virtualDead === true && /deleted/.test(vOf("asm:SA-GONE7").desc), "#211 fix1 I4: a deleted assembly is dead");
+  ok(vOf("allow:video:screen:good").virtualDead === true && !("tierFallback" in vOf("allow:video:screen:good")), "#211 fix1 I4: an unconfirmed allowance is dead (its own flag, not a tier fallback)");
+  ok(vOf("asm:SA-LIVE7").virtualDead === undefined && vOf("asm:SA-LIVE7").cost === 1000 && vOf("asm:SA-LIVE7").list === 1600, "#211 fix1 I4: a priced assembly is live");
+  ok(vOf("allow:audio:subwoofer:good").desc === "Subwoofer" && vOf("allow:audio:subwoofer:good").allowance === true && vOf("allow:audio:subwoofer:good").virtualDead === undefined, "#211 fix1 I5: a live allowance's desc is the row's plain label");
   const quote7 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   const ed7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
-  ok(quote7.includes("virtualDead") && quote7.includes("need") && ed7.includes("Needs a part") && ed7.includes("VIRTUAL_DEAD_HINT"), "#GEM fix1 I4: the quote refuses dead lines; the editor flags them 'Needs a part'");
+  ok(quote7.includes("virtualDead") && quote7.includes("need") && ed7.includes("Needs a part") && ed7.includes("VIRTUAL_DEAD_HINT"), "#211 fix1 I4: the quote refuses dead lines; the editor flags them 'Needs a part'");
   // M4 — bid-spec rows
   const spec7 = gemSpecRows7(
     [
@@ -18096,27 +18096,27 @@ import {
     ],
     (id) => ctx7.fixtures.get(id)
   );
-  ok(spec7.map((r) => `${r.sku}|${r.desc}|${r.qty}`).join(";") === "PAR-1|Par|4;MIX-7|MIX-7 (Live rack)|6;|Gone rack|1", "#GEM fix1 M4: bid-spec rows drop allowances and expand an assembly into its members under its label");
+  ok(spec7.map((r) => `${r.sku}|${r.desc}|${r.qty}`).join(";") === "PAR-1|Par|4;MIX-7|MIX-7 (Live rack)|6;|Gone rack|1", "#211 fix1 M4: bid-spec rows drop allowances and expand an assembly into its members under its label");
   const specAct7 = readFileSync(join(process.cwd(), "src/app/(app)/design/engagements/spec/actions.ts"), "utf8");
-  ok(specAct7.includes("gridSpecBomRows(gridLines"), "#GEM fix1 M4: the bid-spec action reads Grid lines through gridSpecBomRows");
+  ok(specAct7.includes("gridSpecBomRows(gridLines"), "#211 fix1 M4: the bid-spec action reads Grid lines through gridSpecBomRows");
   // M3 — store-side sanitizers
-  ok(gemLotQty7(240) === 240 && gemLotQty7(1) === undefined && gemLotQty7(Number.NaN) === undefined && gemLotQty7("12") === 12 && gemLotQty7(1e9) === gemAutoMax7 && gemLotQty7(-4) === undefined && gemAutoMax7 === gemQtyMax7, "#GEM fix1 M3: lot qty is finite, whole, ≥2 or absent, and capped");
-  ok(gemQty7({ qty: 1e9 }) === gemQtyMax7, "#GEM fix1 M3: readers cap a stored lot too");
+  ok(gemLotQty7(240) === 240 && gemLotQty7(1) === undefined && gemLotQty7(Number.NaN) === undefined && gemLotQty7("12") === 12 && gemLotQty7(1e9) === gemAutoMax7 && gemLotQty7(-4) === undefined && gemAutoMax7 === gemQtyMax7, "#211 fix1 M3: lot qty is finite, whole, ≥2 or absent, and capped");
+  ok(gemQty7({ qty: 1e9 }) === gemQtyMax7, "#211 fix1 M3: readers cap a stored lot too");
   const tg = gemTag7({ scope: "rigging", rowKey: "rigging:pipe", tier: "best", extra: 1 });
-  ok(JSON.stringify(tg) === '{"scope":"rigging","rowKey":"rigging:pipe","tier":"best"}' && gemTag7({ scope: "lighting", rowKey: "rigging:pipe", tier: "best" }) === null && gemTag7({ scope: "controls", rowKey: "controls:console", tier: "good" }) === null && gemTag7({ scope: "rigging", rowKey: "rigging:pipe", tier: "gold" }) === null && gemTag7("x") === null, "#GEM fix1 M3: an auto tag is rebuilt from a known scope, a row of that scope and a real tier");
+  ok(JSON.stringify(tg) === '{"scope":"rigging","rowKey":"rigging:pipe","tier":"best"}' && gemTag7({ scope: "lighting", rowKey: "rigging:pipe", tier: "best" }) === null && gemTag7({ scope: "controls", rowKey: "controls:console", tier: "good" }) === null && gemTag7({ scope: "rigging", rowKey: "rigging:pipe", tier: "gold" }) === null && gemTag7("x") === null, "#211 fix1 M3: an auto tag is rebuilt from a known scope, a row of that scope and a real tier");
   const tagged = { id: "a", auto: tg };
   const plainPl: { id: string; auto?: unknown } = { id: "b" };
-  ok(!("auto" in gemNoAuto7(tagged)) && "auto" in tagged && gemNoAuto7(plainPl) === plainPl, "#GEM fix1 I2: withoutAuto copies without the tag and leaves an untagged placement alone");
+  ok(!("auto" in gemNoAuto7(tagged)) && "auto" in tagged && gemNoAuto7(plainPl) === plainPl, "#211 fix1 I2: withoutAuto copies without the tag and leaves an untagged placement alone");
   // D1 — per-option estimates
   const legacy = { tierByScope: { lighting: "best" }, overrides: {} };
-  ok(JSON.stringify(gemEsts7(legacy, "opt-base")) === '{"opt-base":{"tierByScope":{"lighting":"best"},"overrides":{}}}' && gemEstFor7(legacy, "opt-2", "opt-base") === null, "#GEM fix1 D1: a legacy single estimate reads as the first option's only");
+  ok(JSON.stringify(gemEsts7(legacy, "opt-base")) === '{"opt-base":{"tierByScope":{"lighting":"best"},"overrides":{}}}' && gemEstFor7(legacy, "opt-2", "opt-base") === null, "#211 fix1 D1: a legacy single estimate reads as the first option's only");
   const perOpt = { "opt-a": { tierByScope: { audio: "good" }, overrides: {} }, "opt-b": "junk" };
-  ok(gemEstFor7(perOpt, "opt-a", "opt-a")?.tierByScope.audio === "good" && !("opt-b" in gemEsts7(perOpt, "opt-a")) && JSON.stringify(gemEsts7(null, "x")) === "{}", "#GEM fix1 D1: the per-option map is read per option, junk dropped");
+  ok(gemEstFor7(perOpt, "opt-a", "opt-a")?.tierByScope.audio === "good" && !("opt-b" in gemEsts7(perOpt, "opt-a")) && JSON.stringify(gemEsts7(null, "x")) === "{}", "#211 fix1 D1: the per-option map is read per option, junk dropped");
   // M5 — maxDuration on the virtual-part pages
-  ok(["riser", "set", "schedule"].every((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8").includes("export const maxDuration = 60")), "#GEM fix1 M5: riser, set and schedule pages get the editor's 60 s budget");
+  ok(["riser", "set", "schedule"].every((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8").includes("export const maxDuration = 60")), "#211 fix1 M5: riser, set and schedule pages get the editor's 60 s budget");
 }
 
-/* --- #GEM T7: Auto cards (priced from the map, sell-only to the client) + the fill rules --- */
+/* --- #211 T7: Auto cards (priced from the map, sell-only to the client) + the fill rules --- */
 import { autoEstimateCards as gemCards7, autoTargets as gemAutoTargets7, clampScopeInputs as gemClamp7, priceOverrides as gemPriceOv7, sellOnlyCards as gemSellOnly7 } from "@/lib/design/auto-estimate";
 import { EACH_CAP as gemEachCap7, generateAutoLayout as gemLayout7, partIdForLine as gemPartIdFor7, venueFrame as gemFrame7 } from "@/lib/design/grid-auto-layout";
 import { buildEquipmentPriceTable as gemTable7, type EquipCell as GemCell7 } from "@/lib/design/equipment-map";
@@ -18162,76 +18162,76 @@ import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake"
     overrides: { "lighting:front": { qty: 3 } },
   };
   const cards = gemCards7(inputs, est, table, gemPriceOv7(est.overrides, ctx));
-  ok(cards.map((c) => c.scope).join(",") === "rigging,curtains,lighting,audio", "#GEM T7: one card per chosen Grid scope, in scope order");
+  ok(cards.map((c) => c.scope).join(",") === "rigging,curtains,lighting,audio", "#211 T7: one card per chosen Grid scope, in scope order");
   const card = (k: string) => cards.find((c) => c.scope === k)!;
   const line = (k: string, key: string) => card(k).lines.find((l) => l.rowKey === key)!;
   const par = line("lighting", "lighting:par");
-  ok(par.status === "part" && par.unitSell === 900 && par.qty === 15 && par.total === 15 * 900 && par.ref === "GEM7-PAR", "#GEM T7: a mapped line pre-fills its part at the equation quantity");
+  ok(par.status === "part" && par.unitSell === 900 && par.qty === 15 && par.total === 15 * 900 && par.ref === "GEM7-PAR", "#211 T7: a mapped line pre-fills its part at the equation quantity");
   const front = line("lighting", "lighting:front");
-  ok(front.qty === 3 && front.eqQty === 13 && front.total === 3 * 2100, "#GEM T7: an edited qty overrides the equation quantity");
+  ok(front.qty === 3 && front.eqQty === 13 && front.total === 3 * 2100, "#211 T7: an edited qty overrides the equation quantity");
   const rig = card("rigging");
   const arbor = line("rigging", "rigging:arbor");
-  ok(arbor.status === "needs-part" && arbor.total === 0 && arbor.unitSell === 0 && arbor.reason === "Not mapped yet" && rig.needsPart >= 1, "#GEM T7: unmapped lines are listed with a reason, never priced");
-  ok(rig.total === rig.lines.reduce((s, l) => s + l.total, 0), "#GEM T7: a card total sums only priced lines");
+  ok(arbor.status === "needs-part" && arbor.total === 0 && arbor.unitSell === 0 && arbor.reason === "Not mapped yet" && rig.needsPart >= 1, "#211 T7: unmapped lines are listed with a reason, never priced");
+  ok(rig.total === rig.lines.reduce((s, l) => s + l.total, 0), "#211 T7: a card total sums only priced lines");
   const sub = line("audio", "audio:subwoofer");
-  ok(sub.status === "allowance" && sub.unitSell === 1714.29 && card("audio").allowances === 1, "#GEM T7: a confirmed allowance line is flagged and priced");
+  ok(sub.status === "allowance" && sub.unitSell === 1714.29 && card("audio").allowances === 1, "#211 T7: a confirmed allowance line is flagged and priced");
   const mix = line("audio", "audio:mixerDsp");
-  ok(mix.status === "assembly" && mix.unitSell === 7000, "#GEM T7: a System assembly line prices at its included totals");
+  ok(mix.status === "assembly" && mix.unitSell === 7000, "#211 T7: a System assembly line prices at its included totals");
   const draw = line("curtains", "curtains:draw");
-  ok(draw.status === "part" && !!draw.drape && draw.unitCost > 0 && draw.ref === "GEM7-VEL", "#GEM T7: a drape line costs from the mapped fabric");
+  ok(draw.status === "part" && !!draw.drape && draw.unitCost > 0 && draw.ref === "GEM7-VEL", "#211 T7: a drape line costs from the mapped fabric");
   const swapOv = { "lighting:par": { assemblyId: "SA-GEM7" } };
   const spar = gemCards7(inputs, { ...est, overrides: swapOv }, table, gemPriceOv7(swapOv, ctx)).find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:par")!;
-  ok(spar.status === "assembly" && spar.swapped && spar.refDesc === "GEM7 rack", "#GEM T7: any line can be swapped to an assembly for this design");
+  ok(spar.status === "assembly" && spar.swapped && spar.refDesc === "GEM7 rack", "#211 T7: any line can be swapped to an assembly for this design");
   const sell = gemSellOnly7(cards);
-  ok(!JSON.stringify(sell).includes("unitCost") && sell[0].lines.length === cards[0].lines.length, "#GEM T7: the client payload carries no unit cost");
+  ok(!JSON.stringify(sell).includes("unitCost") && sell[0].lines.length === cards[0].lines.length, "#211 T7: the client payload carries no unit cost");
   const tg = gemAutoTargets7(cards);
-  ok(tg.lighting!.sell === card("lighting").total && tg.rigging!.needsPart === rig.needsPart && tg.audio!.allowances === 1, "#GEM T7: Auto targets are the chosen cards' totals");
+  ok(tg.lighting!.sell === card("lighting").total && tg.rigging!.needsPart === rig.needsPart && tg.audio!.allowances === 1, "#211 T7: Auto targets are the chosen cards' totals");
   const clamped = gemClamp7({ ...inputs, width: 9999, depth: Number.NaN });
-  ok(clamped.width === 80 && clamped.depth === 14, "#GEM T7: client-sent dimensions are clamped");
+  ok(clamped.width === 80 && clamped.depth === 14, "#211 T7: client-sent dimensions are clamped");
   const Cq = gemCompute7({ ...a, tier: "better" });
   const specs = gemLayout7(a, cards, { electrics: Cq.electrics, sets: Cq.rigSets });
   const placedQty = (key: string) => specs.filter((s) => s.auto.rowKey === key).reduce((n, s) => n + (s.qty ?? 1), 0);
   const placeable = cards.flatMap((c) => c.lines.filter((l) => gemPartIdFor7(l, c.tier) !== null));
-  ok(placeable.length > 0 && placeable.every((l) => placedQty(l.rowKey) === l.qty), "#GEM T7: every placeable line lands at exactly its quantity");
-  ok(specs.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "#GEM T7: every position lies on the sheet");
+  ok(placeable.length > 0 && placeable.every((l) => placedQty(l.rowKey) === l.qty), "#211 T7: every placeable line lands at exactly its quantity");
+  ok(specs.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "#211 T7: every position lies on the sheet");
   const fr = gemFrame7(a);
   const inside = (p: { x: number; y: number }, r: { x: number; y: number; w: number; h: number }) =>
     p.x >= r.x - 1e-9 && p.x <= r.x + r.w + 1e-9 && p.y >= r.y - 1e-9 && p.y <= r.y + r.h + 1e-9;
-  ok(specs.filter((s) => s.auto.rowKey === "lighting:par").every((s) => inside(s, fr.stage)), "#GEM T7: pars hang on the electrics, inside the stage");
-  ok(specs.filter((s) => s.auto.rowKey === "lighting:front").every((s) => inside(s, fr.audience)), "#GEM T7: front lights go front-of-house");
-  ok(specs.filter((s) => s.auto.rowKey === "audio:mixerDsp").every((s) => inside(s, fr.booth)), "#GEM T7: the mixer rack goes to the control booth");
-  ok(!specs.some((s) => s.auto.rowKey === "rigging:arbor"), "#GEM T7: a needs-a-part line is never placed");
+  ok(specs.filter((s) => s.auto.rowKey === "lighting:par").every((s) => inside(s, fr.stage)), "#211 T7: pars hang on the electrics, inside the stage");
+  ok(specs.filter((s) => s.auto.rowKey === "lighting:front").every((s) => inside(s, fr.audience)), "#211 T7: front lights go front-of-house");
+  ok(specs.filter((s) => s.auto.rowKey === "audio:mixerDsp").every((s) => inside(s, fr.booth)), "#211 T7: the mixer rack goes to the control booth");
+  ok(!specs.some((s) => s.auto.rowKey === "rigging:arbor"), "#211 T7: a needs-a-part line is never placed");
   const drapes = specs.filter((s) => s.auto.rowKey === "curtains:draw");
-  ok(drapes.length === draw.qty && drapes.every((s) => s.partId === "GEM7-VEL" && s.curtain?.type === "Draw" && s.curtain.fabricSku === "GEM7-VEL" && s.curtain.widthFt === draw.drape!.w * draw.drape!.qty && s.curtain.fullnessPct === 50), "#GEM T7: draws land as curtain drop-ins on the mapped fabric, a pair as one drape");
-  ok(specs.filter((s) => s.auto.rowKey === "audio:subwoofer").every((s) => s.partId === "allow:audio:subwoofer:better") && specs.some((s) => s.partId === "asm:SA-GEM7"), "#GEM T7: allowances and assemblies land as virtual parts");
+  ok(drapes.length === draw.qty && drapes.every((s) => s.partId === "GEM7-VEL" && s.curtain?.type === "Draw" && s.curtain.fabricSku === "GEM7-VEL" && s.curtain.widthFt === draw.drape!.w * draw.drape!.qty && s.curtain.fullnessPct === 50), "#211 T7: draws land as curtain drop-ins on the mapped fabric, a pair as one drape");
+  ok(specs.filter((s) => s.auto.rowKey === "audio:subwoofer").every((s) => s.partId === "allow:audio:subwoofer:better") && specs.some((s) => s.partId === "asm:SA-GEM7"), "#211 T7: allowances and assemblies land as virtual parts");
   const pipeSpecs = specs.filter((s) => s.auto.rowKey === "rigging:pipe");
-  ok(pipeSpecs.length === 1 && pipeSpecs[0].qty === line("rigging", "rigging:pipe").qty && gemEachCap7 === 120, "#GEM T7: a lot row lands once, carrying its quantity");
-  ok(specs.every((s) => s.auto.tier === "better" && ["rigging", "curtains", "lighting", "audio"].includes(s.auto.scope)), "#GEM T7: every placement carries its auto tag");
+  ok(pipeSpecs.length === 1 && pipeSpecs[0].qty === line("rigging", "rigging:pipe").qty && gemEachCap7 === 120, "#211 T7: a lot row lands once, carrying its quantity");
+  ok(specs.every((s) => s.auto.tier === "better" && ["rigging", "curtains", "lighting", "audio"].includes(s.auto.scope)), "#211 T7: every placement carries its auto tag");
   const G = gemProsGeom7(a);
-  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#GEM T7: the frame is the base sheet's own geometry");
+  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#211 T7: the frame is the base sheet's own geometry");
 }
 
-/* --- #GEM T8: one intake — Auto or Blank; sell-only previews; New design → the Grid intake --- */
+/* --- #211 T8: one intake — Auto or Blank; sell-only previews; New design → the Grid intake --- */
 import { intakeScopeInputs as gemIntakeInputs8 } from "@/lib/design/grid-intake";
 import { defaultAState as gemDefault8 } from "@/app/(app)/design/quick/engine";
 {
   const a8 = { ...gemDefault8(0), venue: "pac", sys: { rigging: false, curtains: true, lighting: true, controls: true, audio: false, video: true, acoustical: true, pit: true } };
   const si = gemIntakeInputs8(a8);
-  ok(si.sys.curtains && si.sys.lighting && si.sys.video && !si.sys.rigging && !si.sys.audio && !si.sys.controls && !si.sys.pit && si.venue === "pac", "#GEM T8: the intake's scopes are the designer's picks, limited to the five Grid scopes");
+  ok(si.sys.curtains && si.sys.lighting && si.sys.video && !si.sys.rigging && !si.sys.audio && !si.sys.controls && !si.sys.pit && si.venue === "pac", "#211 T8: the intake's scopes are the designer's picks, limited to the five Grid scopes");
   const dir = "src/app/(app)/design/grid/[id]";
   const intakeSrc = readFileSync(join(process.cwd(), `${dir}/grid-intake.tsx`), "utf8");
-  ok(!/next release/i.test(intakeSrc) && intakeSrc.includes("Auto (equations)") && intakeSrc.includes("Blank") && intakeSrc.includes("EquipmentCards"), "#GEM T8: the intake offers Auto (equations) or Blank, and Auto has an Equipment step");
+  ok(!/next release/i.test(intakeSrc) && intakeSrc.includes("Auto (equations)") && intakeSrc.includes("Blank") && intakeSrc.includes("EquipmentCards"), "#211 T8: the intake offers Auto (equations) or Blank, and Auto has an Equipment step");
   const clientFiles = ["grid-intake.tsx", "equipment-card.tsx", "scope-picker.tsx"].map((f) => readFileSync(join(process.cwd(), `${dir}/${f}`), "utf8"));
-  ok(clientFiles.every((s) => s.startsWith('"use client"') && !gemValueImports(s).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m))), "#GEM T8: the intake's client files import no pricing, store or DB value (types only)");
+  ok(clientFiles.every((s) => s.startsWith('"use client"') && !gemValueImports(s).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m))), "#211 T8: the intake's client files import no pricing, store or DB value (types only)");
   const act8 = readFileSync(join(process.cwd(), `${dir}/actions.ts`), "utf8");
   const searchBody = act8.slice(act8.indexOf("export async function searchAutoEquipmentAction"), act8.indexOf("export async function saveGridIntakeAction"));
-  ok(act8.includes("sellOnlyCards(") && searchBody.includes("unitSell") && !/\bcost:\s*h\.cost/.test(searchBody), "#GEM T8: previews and part search return sell numbers only");
+  ok(act8.includes("sellOnlyCards(") && searchBody.includes("unitSell") && !/\bcost:\s*h\.cost/.test(searchBody), "#211 T8: previews and part search return sell numbers only");
   const dc = readFileSync(join(process.cwd(), "src/app/(app)/design/designs/design-client.tsx"), "utf8");
   const hm = readFileSync(join(process.cwd(), "src/app/(app)/home-my-designs.tsx"), "utf8");
-  ok(!dc.includes("NewDesignSplit") && !dc.includes('href="/design/quick"') && dc.includes("<NewDesignButton") && hm.includes("<NewDesignButton") && !hm.includes('href="/design/quick"'), "#GEM T8: every New design control opens the Grid intake; the Quick Design canvas is retired from New design");
+  ok(!dc.includes("NewDesignSplit") && !dc.includes('href="/design/quick"') && dc.includes("<NewDesignButton") && hm.includes("<NewDesignButton") && !hm.includes('href="/design/quick"'), "#211 T8: every New design control opens the Grid intake; the Quick Design canvas is retired from New design");
 }
 
-/* --- #GEM T8 fix wave 1: review findings — I2 (curtain swap picker:
+/* --- #211 T8 fix wave 1: review findings — I2 (curtain swap picker:
        Fabric-only, area-rate basis, no assemblies), M1 (assembly search
        scoped to the card's SysKey) and M7 (qty draft reconciled against a
        fresh re-price) pulled out as pure, unit-tested helpers. --- */
@@ -18257,11 +18257,11 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
       fabricHits9[0].ref === "GEM9-VEL" &&
       fabricHits9[0].unit === "sq ft" &&
       fabricHits9[0].unitSell === 5,
-    "#GEM T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
+    "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
   );
   ok(
     gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }], 0.3).length === 0,
-    "#GEM T8 fix wave 1 (I2): a Fabric part with no area rate at all is never a curtain-row candidate"
+    "#211 T8 fix wave 1 (I2): a Fabric part with no area rate at all is never a curtain-row candidate"
   );
 
   // The generic (non-curtain) part filter is unchanged: cost>0 or list>0.
@@ -18275,7 +18275,7 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
   );
   ok(
     partHits9.length === 2 && partHits9.every((h) => h.ref !== "GEM9-FREE") && partHits9.find((h) => h.ref === "GEM9-LIST")!.unitSell === 250,
-    "#GEM T8 fix wave 1 (I2): a non-curtain row keeps the cost>0||list>0 filter, and a list price wins over a cost-derived one"
+    "#211 T8 fix wave 1 (I2): a non-curtain row keeps the cost>0||list>0 filter, and a list price wins over a cost-derived one"
   );
 
   // M1: a System assembly is a candidate only on its own scope; a Fixture
@@ -18289,16 +18289,16 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
     gemAsmCand9(assemblies9, gemScopeLabel9("audio"))
       .map((f) => f.id)
       .join(",") === "sys-audio",
-    "#GEM T8 fix wave 1 (M1): an Audio row's assembly candidates are the Audio system only — no fixture, no other system"
+    "#211 T8 fix wave 1 (M1): an Audio row's assembly candidates are the Audio system only — no fixture, no other system"
   );
   const lightingCands9 = gemAsmCand9(assemblies9, gemScopeLabel9("lighting")).map((f) => f.id);
   ok(
     lightingCands9.includes("sys-lighting") && lightingCands9.includes("fx-par") && !lightingCands9.includes("sys-audio"),
-    "#GEM T8 fix wave 1 (M1): a Lighting row's assembly candidates are the Lighting system AND fixtures — the one scope where a bare fixture is a sensible swap"
+    "#211 T8 fix wave 1 (M1): a Lighting row's assembly candidates are the Lighting system AND fixtures — the one scope where a bare fixture is a sensible swap"
   );
   ok(
     gemScopeLabel9("curtains") === "Curtains" && gemScopeLabel9("video") === "Video",
-    "#GEM T8 fix wave 1 (M1): scopeLabelOf capitalizes the SysKey to the SystemScope label a System assembly's `scope` field stores"
+    "#211 T8 fix wave 1 (M1): scopeLabelOf capitalizes the SysKey to the SystemScope label a System assembly's `scope` field stores"
   );
 
   // M7: a qty draft survives a re-price that still agrees with it; drops
@@ -18309,7 +18309,7 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
     { rowKey: "audio:lineArray", qty: 6 },
     { rowKey: "audio:subwoofer", qty: 2 },
   ];
-  ok(gemReconcile9(draft9, linesUnchanged9) === draft9, "#GEM T8 fix wave 1 (M7): nothing stale — the SAME object comes back so the caller can skip its setState");
+  ok(gemReconcile9(draft9, linesUnchanged9) === draft9, "#211 T8 fix wave 1 (M7): nothing stale — the SAME object comes back so the caller can skip its setState");
   const linesMoved9 = [
     { rowKey: "audio:lineArray", qty: 9 },
     { rowKey: "audio:subwoofer", qty: 2 },
@@ -18317,62 +18317,62 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
   const reconciled9 = gemReconcile9(draft9, linesMoved9);
   ok(
     !("audio:lineArray" in reconciled9) && reconciled9["audio:subwoofer"] === "2",
-    "#GEM T8 fix wave 1 (M7): a row whose server qty moved away from the draft drops out; an untouched row's draft survives"
+    "#211 T8 fix wave 1 (M7): a row whose server qty moved away from the draft drops out; an untouched row's draft survives"
   );
   const linesGone9 = [{ rowKey: "audio:subwoofer", qty: 2 }];
-  ok(!("audio:lineArray" in gemReconcile9(draft9, linesGone9)), "#GEM T8 fix wave 1 (M7): a row dropped from the card entirely drops its draft too");
+  ok(!("audio:lineArray" in gemReconcile9(draft9, linesGone9)), "#211 T8 fix wave 1 (M7): a row dropped from the card entirely drops its draft too");
 }
 
-/* --- #GEM T8 fix wave 1 — source checks for I1/M2/M3/M5/M6, plus proof the
+/* --- #211 T8 fix wave 1 — source checks for I1/M2/M3/M5/M6, plus proof the
        search action actually wires in the pure helpers proven above. --- */
 {
   const dir9 = "src/app/(app)/design/grid/[id]";
   const act9 = readFileSync(join(process.cwd(), `${dir9}/actions.ts`), "utf8");
   const saveBody9 = act9.slice(act9.indexOf("export async function saveGridIntakeAction"));
-  ok(/try\s*{[^]*?fillAutoScopes\([^]*?}\s*catch/.test(saveBody9), "#GEM T8 fix wave 1 (I1): saveGridIntakeAction wraps the fillAutoScopes call in try/catch");
-  ok(/console\.error\(/.test(saveBody9), "#GEM T8 fix wave 1 (I1): a thrown Auto-fill error is logged server-side");
+  ok(/try\s*{[^]*?fillAutoScopes\([^]*?}\s*catch/.test(saveBody9), "#211 T8 fix wave 1 (I1): saveGridIntakeAction wraps the fillAutoScopes call in try/catch");
+  ok(/console\.error\(/.test(saveBody9), "#211 T8 fix wave 1 (I1): a thrown Auto-fill error is logged server-side");
   ok(
     /setAutoEstimate\(/.test(saveBody9) && /equipment choices could not be saved/i.test(saveBody9),
-    "#GEM T8 fix wave 1 (M6): a refused setAutoEstimate (null) gets its own specific warning, not a silent fall-through to the generic fill-failure message"
+    "#211 T8 fix wave 1 (M6): a refused setAutoEstimate (null) gets its own specific warning, not a silent fall-through to the generic fill-failure message"
   );
   const searchBody9 = act9.slice(act9.indexOf("export async function searchAutoEquipmentAction"), act9.indexOf("export async function saveGridIntakeAction"));
   ok(
     /searchAutoEquipmentAction\(query: string, rowKey: string\)/.test(act9) && searchBody9.includes("curtainSwapHits(") && searchBody9.includes("assemblySwapCandidates("),
-    "#GEM T8 fix wave 1 (I2/M1): the search action takes the row key and wires in the curtain and scope-matching helpers"
+    "#211 T8 fix wave 1 (I2/M1): the search action takes the row key and wires in the curtain and scope-matching helpers"
   );
 
   const fillSrc9 = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
-  ok(/compute\(\{[^}]*clampScopeInputs\(inputs\)/.test(fillSrc9), "#GEM T8 fix wave 1 (M2): the layout's compute() clamps scopeInputs the same way the cards do");
+  ok(/compute\(\{[^}]*clampScopeInputs\(inputs\)/.test(fillSrc9), "#211 T8 fix wave 1 (M2): the layout's compute() clamps scopeInputs the same way the cards do");
 
   const ndbSrc9 = readFileSync(join(process.cwd(), "src/components/design/new-design-button.tsx"), "utf8");
-  ok(/\{error &&/.test(ndbSrc9) && !/title=\{error/.test(ndbSrc9), "#GEM T8 fix wave 1 (M3): a create failure renders inline, not only inside the title tooltip");
+  ok(/\{error &&/.test(ndbSrc9) && !/title=\{error/.test(ndbSrc9), "#211 T8 fix wave 1 (M3): a create failure renders inline, not only inside the title tooltip");
 
   const intakeSrc9 = readFileSync(join(process.cwd(), `${dir9}/grid-intake.tsx`), "utf8");
-  ok(/preview\.error[^]*?Retry/.test(intakeSrc9), "#GEM T8 fix wave 1 (M5): the Equipment step offers a Retry when the preview fails");
+  ok(/preview\.error[^]*?Retry/.test(intakeSrc9), "#211 T8 fix wave 1 (M5): the Equipment step offers a Retry when the preview fails");
 
   const cardSrc9 = readFileSync(join(process.cwd(), `${dir9}/equipment-card.tsx`), "utf8");
   ok(
     cardSrc9.includes("reconcileQtyDraft(") &&
       cardSrc9.startsWith('"use client"') &&
       !gemValueImports(cardSrc9).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m)),
-    "#GEM T8 fix wave 1 (M7): the card wires the reconciler in, still importing no pricing/store/DB value"
+    "#211 T8 fix wave 1 (M7): the card wires the reconciler in, still importing no pricing/store/DB value"
   );
 }
 
-/* --- #GEM T9: "Change equipment…" on Auto scopes --- */
+/* --- #211 T9: "Change equipment…" on Auto scopes --- */
 {
   const dir = "src/app/(app)/design/grid/[id]";
   const sp9 = readFileSync(join(process.cwd(), `${dir}/scope-panel.tsx`), "utf8");
   const rd9 = readFileSync(join(process.cwd(), `${dir}/refill-dialog.tsx`), "utf8");
   const act9 = readFileSync(join(process.cwd(), `${dir}/actions.ts`), "utf8");
   const pg9 = readFileSync(join(process.cwd(), `${dir}/page.tsx`), "utf8");
-  ok(sp9.includes("Change equipment…") && sp9.includes("auto?.targets") && sp9.includes("<RefillDialog"), "#GEM T9: Auto scopes show their chosen target and a Change equipment… button");
-  ok(rd9.startsWith('"use client"') && rd9.includes("<ConfirmButton") && rd9.includes("refillScopeAction(") && !gemValueImports(rd9).some((m) => /\/auto-estimate$|\/equipment-pricing$|^@\/lib\/stores\/|^@\/db\//.test(m)), "#GEM T9: the re-fill is confirmed (ConfirmButton) and the dialog imports no pricing/store value");
+  ok(sp9.includes("Change equipment…") && sp9.includes("auto?.targets") && sp9.includes("<RefillDialog"), "#211 T9: Auto scopes show their chosen target and a Change equipment… button");
+  ok(rd9.startsWith('"use client"') && rd9.includes("<ConfirmButton") && rd9.includes("refillScopeAction(") && !gemValueImports(rd9).some((m) => /\/auto-estimate$|\/equipment-pricing$|^@\/lib\/stores\/|^@\/db\//.test(m)), "#211 T9: the re-fill is confirmed (ConfirmButton) and the dialog imports no pricing/store value");
   const refillBody = act9.slice(act9.indexOf("export async function refillScopeAction"));
-  ok(refillBody.includes("mergeScopeEstimate(") && refillBody.includes("fillAutoScopes(") && refillBody.includes("hasOption(") && pg9.includes("sellOnlyCards(autoCards)"), "#GEM T9: a re-fill merges one scope's choices and re-fills that scope in the current option; the page sends sell-only cards");
+  ok(refillBody.includes("mergeScopeEstimate(") && refillBody.includes("fillAutoScopes(") && refillBody.includes("hasOption(") && pg9.includes("sellOnlyCards(autoCards)"), "#211 T9: a re-fill merges one scope's choices and re-fills that scope in the current option; the page sends sell-only cards");
 }
 
-/* --- #GEM final review: I1–I6 + minors (D-GEM-19 … D-GEM-22) --- */
+/* --- #211 final review: I1–I6 + minors (D319 … D322) --- */
 import { designBudgetLabel as gemFrLabel, designNeedsPart as gemFrNeeds } from "@/lib/design/scope-targets";
 import { designOpenHref as gemFrHref } from "@/lib/design/design-links";
 import { fixtureOverridesFor as gemFrOverrides, quickDesignNeedsPart as gemFrQuickNeeds } from "@/lib/design/equipment-pricing";
@@ -18386,29 +18386,29 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
 {
   const money = (n: number) => `$${n}`;
   // I1 — one label everywhere.
-  ok(gemFrLabel({ budget: 5000, incomplete: { needsPart: 2 } }, money) === "Incomplete" && gemFrLabel({ budget: 5000 }, money) === "$5000" && gemFrLabel({ budget: 5000, incomplete: { needsPart: 0 } }, money) === "$5000", "#GEM final review I1: designBudgetLabel — Incomplete while a line needs a part; a pre-#GEM record keeps its budget");
-  ok(gemFrNeeds({ incomplete: { needsPart: Number.NaN } }) === 0 && gemFrNeeds({}) === 0 && gemFrNeeds({ incomplete: { needsPart: 3 } }) === 3, "#GEM final review I1: designNeedsPart reads junk / missing as 0");
+  ok(gemFrLabel({ budget: 5000, incomplete: { needsPart: 2 } }, money) === "Incomplete" && gemFrLabel({ budget: 5000 }, money) === "$5000" && gemFrLabel({ budget: 5000, incomplete: { needsPart: 0 } }, money) === "$5000", "#211 final review I1: designBudgetLabel — Incomplete while a line needs a part; a pre-#211 record keeps its budget");
+  ok(gemFrNeeds({ incomplete: { needsPart: Number.NaN } }) === 0 && gemFrNeeds({}) === 0 && gemFrNeeds({ incomplete: { needsPart: 3 } }) === 3, "#211 final review I1: designNeedsPart reads junk / missing as 0");
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const homeCards = read("src/app/(app)/_dashboard/widgets/home-cards.tsx");
   const reviews = read("src/app/(app)/reviews/page.tsx");
   const letter = read("src/app/(app)/design/engagements/letter/page.tsx");
-  ok(homeCards.includes("designBudgetLabel(d, shortMoney)") && reviews.includes("designBudgetLabel(d, shortMoney)") && letter.includes("designNeedsPart(d) > 0 ? \"To be confirmed\""), "#GEM final review I1: Home cards, the Reviews queue and the engagement letter all use the shared incomplete rule");
+  ok(homeCards.includes("designBudgetLabel(d, shortMoney)") && reviews.includes("designBudgetLabel(d, shortMoney)") && letter.includes("designNeedsPart(d) > 0 ? \"To be confirmed\""), "#211 final review I1: Home cards, the Reviews queue and the engagement letter all use the shared incomplete rule");
   // I2 — Grid designs open in The Grid; Home promotes through the dashboard's branch.
-  ok(gemFrHref({ id: "D-1", layoutMode: "manual", gridProjectId: "GP-9" }) === "/design/grid/GP-9" && gemFrHref({ id: "D-2" }) === "/design/quick?design=D-2" && gemFrHref({ id: "D-3", layoutMode: "manual", gridProjectId: null }) === "/design/quick?design=D-3", "#GEM final review I2: designOpenHref — Grid designs open in The Grid");
-  ok(homeCards.includes("openHref: designOpenHref(d)") && reviews.includes("openHref: designOpenHref(d)"), "#GEM final review I2: Home and Reviews link through designOpenHref");
+  ok(gemFrHref({ id: "D-1", layoutMode: "manual", gridProjectId: "GP-9" }) === "/design/grid/GP-9" && gemFrHref({ id: "D-2" }) === "/design/quick?design=D-2" && gemFrHref({ id: "D-3", layoutMode: "manual", gridProjectId: null }) === "/design/quick?design=D-3", "#211 final review I2: designOpenHref — Grid designs open in The Grid");
+  ok(homeCards.includes("openHref: designOpenHref(d)") && reviews.includes("openHref: designOpenHref(d)"), "#211 final review I2: Home and Reviews link through designOpenHref");
   const homeAct = read("src/app/(app)/home-actions.ts");
   const homeBody = homeAct.slice(homeAct.indexOf("export async function promoteDesignAction"));
-  ok(homeAct.includes('from "./design/designs/actions"') && homeBody.includes("promoteFromDesigns(designId)") && !homeAct.includes("promoteDesignToQuote"), "#GEM final review I2: Home's Add to Quotes delegates to the Designs dashboard's promoteDesignAction");
+  ok(homeAct.includes('from "./design/designs/actions"') && homeBody.includes("promoteFromDesigns(designId)") && !homeAct.includes("promoteDesignToQuote"), "#211 final review I2: Home's Add to Quotes delegates to the Designs dashboard's promoteDesignAction");
   // I3 — fixture picks: server-priced, a needs-part pick stays needs-part.
   const pickPrices = {
     "fa-live": { status: "assembly" as const, ref: "fa-live", desc: "Live", unit: "ea", unitCost: 100, unitSell: 143 },
     "fa-dead": { status: "needs-part" as const, reason: "no priced parts" },
   };
   const ov = gemFrOverrides({ par: "fa-live", front: "fa-dead", cyc: "fa-gone", side: "" }, pickPrices);
-  ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:front"]?.status === "needs-part" && !("lighting:cyc" in ov) && !("lighting:side" in ov), "#GEM final review I3: fixtureOverridesFor — priced pick overrides, a needs-part pick stays needs-part, a deleted pick falls back to the map");
+  ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:front"]?.status === "needs-part" && !("lighting:cyc" in ov) && !("lighting:side" in ov), "#211 final review I3: fixtureOverridesFor — priced pick overrides, a needs-part pick stays needs-part, a deleted pick falls back to the map");
   const qp = read("src/app/(app)/design/quick/page.tsx");
   const qc = read("src/app/(app)/design/quick/quick-design-client.tsx");
-  ok(qp.includes("loadDesignPricing(") && !qp.includes("assemblyUnitTotals") && qc.includes("fixtureOverridesFor(a.fixtureAssemblies, fixturePrices)") && !qc.includes("hit.sell"), "#GEM final review I3: Quick Design prices fixture picks on the server (priceCell), never the list-only sum");
+  ok(qp.includes("loadDesignPricing(") && !qp.includes("assemblyUnitTotals") && qc.includes("fixtureOverridesFor(a.fixtureAssemblies, fixturePrices)") && !qc.includes("hit.sell"), "#211 final review I3: Quick Design prices fixture picks on the server (priceCell), never the list-only sum");
   // I4 — the server's own count; the client's `incomplete` is never read.
   const allAllow = {
     margin: 0.3,
@@ -18417,18 +18417,18 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   const emptyTable = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } };
   const cfgFr = { ...gemFrDefault(10) } as unknown as Record<string, unknown>;
   const recFr = { tier: "better", config: cfgFr };
-  ok(gemFrQuickNeeds(recFr, emptyTable, {}) > 0 && gemFrQuickNeeds(recFr, allAllow, {}) === 0, "#GEM final review I4: quickDesignNeedsPart — empty map counts lines, a fully mapped map counts none");
-  ok(gemFrQuickNeeds({ tier: "better", config: { ...cfgFr, fixtureAssemblies: { par: "fa-dead" } } }, allAllow, pickPrices) === 1, "#GEM final review I4: a needs-part fixture pick blocks even when its row is mapped");
-  ok(gemFrQuickNeeds({ name: "seed", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging"] }, emptyTable, {}) > 0, "#GEM final review I4 (D-GEM-19): a pre-config (pre-#GEM) record is re-priced from its display fields — and refused while unmapped");
+  ok(gemFrQuickNeeds(recFr, emptyTable, {}) > 0 && gemFrQuickNeeds(recFr, allAllow, {}) === 0, "#211 final review I4: quickDesignNeedsPart — empty map counts lines, a fully mapped map counts none");
+  ok(gemFrQuickNeeds({ tier: "better", config: { ...cfgFr, fixtureAssemblies: { par: "fa-dead" } } }, allAllow, pickPrices) === 1, "#211 final review I4: a needs-part fixture pick blocks even when its row is mapped");
+  ok(gemFrQuickNeeds({ name: "seed", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging"] }, emptyTable, {}) > 0, "#211 final review I4 (D319): a pre-config (pre-#211) record is re-priced from its display fields — and refused while unmapped");
   const hostile = Object.defineProperty({}, "sys", { enumerable: true, get() { throw new Error("bad config"); } }) as Record<string, unknown>;
-  ok(gemFrQuickNeeds({ tier: "better", config: hostile }, allAllow, {}) === 1, "#GEM final review I4: a config that won't compute counts as incomplete, never throws");
+  ok(gemFrQuickNeeds({ tier: "better", config: hostile }, allAllow, {}) === 1, "#211 final review I4: a config that won't compute counts as incomplete, never throws");
   const qa = read("src/app/(app)/design/quick/actions.ts");
   const da = read("src/app/(app)/design/designs/actions.ts");
   const qaAdd = qa.slice(qa.indexOf("export async function addToQuotesAction"));
   const qaPersist = qa.slice(qa.indexOf("async function persistDesign"), qa.indexOf("/** Save / update the design"));
-  ok(qaAdd.includes("quickPromoteCheck(") && !qaAdd.includes("partial.incomplete") && !qaAdd.includes("partial.budget") && qaAdd.includes("promoteDesignToQuote(saved.id, user.name, price)") && qaPersist.includes("saveQuickDesign(id, clientPartial"), "#GEM final review I4 / wave 2 I1: Quick Design's promote re-prices on the server (budget too) and every save derives `incomplete` + `budget` server-side");
+  ok(qaAdd.includes("quickPromoteCheck(") && !qaAdd.includes("partial.incomplete") && !qaAdd.includes("partial.budget") && qaAdd.includes("promoteDesignToQuote(saved.id, user.name, price)") && qaPersist.includes("saveQuickDesign(id, clientPartial"), "#211 final review I4 / wave 2 I1: Quick Design's promote re-prices on the server (budget too) and every save derives `incomplete` + `budget` server-side");
   const daPromote = da.slice(da.indexOf("export async function promoteDesignAction"), da.indexOf("export async function deleteDesignAction"));
-  ok(daPromote.includes("quickPromoteCheck(d)") && daPromote.includes("promoteDesignToQuote(id, user.name, price)") && !daPromote.includes("d.incomplete") && daPromote.includes("createDraftQuoteAction(d.gridProjectId, null)"), "#GEM final review I4 / wave 2 I1: the dashboard's promote re-prices Quick designs on the server and quotes the server's figure; Grid designs quote through The Grid without acceptIncomplete");
+  ok(daPromote.includes("quickPromoteCheck(d)") && daPromote.includes("promoteDesignToQuote(id, user.name, price)") && !daPromote.includes("d.incomplete") && daPromote.includes("createDraftQuoteAction(d.gridProjectId, null)"), "#211 final review I4 / wave 2 I1: the dashboard's promote re-prices Quick designs on the server and quotes the server's figure; Grid designs quote through The Grid without acceptIncomplete");
   // I5 — client package: lot units, asm expansion, allowances out, no raw virtual ids.
   const fxPkg = {
     id: "SA-PKG", kind: "system" as const, label: "Rack", description: "", scope: "Audio" as const,
@@ -18453,18 +18453,18 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   ];
   const pkg = buildClientPackageManifest(pkgProject as never, pkgCat as never, "opt-a", null, (id) => (id === "SA-PKG" ? fxPkg : undefined));
   const bomBy = (sku: string) => pkg.bom.find((r) => r.sku === sku);
-  ok(bomBy("PKG-PIPE")?.qty === 241, "#GEM final review I5: a lot marker contributes its units to the package BOM");
-  ok(bomBy("PKG-MIX")?.qty === 8, "#GEM final review I5: an Auto assembly expands into its members (4 racks × 2 mixers)");
-  ok(!pkg.bom.some((r) => /^(asm|allow):/.test(r.sku) || /(asm|allow):/.test(r.desc)) && !pkg.items.some((i) => /^(asm|allow):/.test(i.sku)), "#GEM final review I5: no raw asm:/allow: id reaches the customer's package");
-  ok(!pkg.bom.some((r) => /SA-GONE/.test(r.desc) || r.sku === "") && !pkg.items.some((i) => /SA-GONE/.test(i.description)) && pkg.gaps.some((g) => g.kind === "missing-catalog" && /SA-GONE/.test(g.description) && g.qty === 1), "#GEM wave 2 M3: a deleted assembly lands in the gap report only — never the customer's BOM or items");
-  ok(gemFrPkgNeeds(pkgProject.placements) && !gemFrPkgNeeds([{ partId: "PKG-PIPE" }, { partId: "allow:audio:subwoofer:good" }]), "#GEM final review I5: fixtures load only when an asm: placement exists");
+  ok(bomBy("PKG-PIPE")?.qty === 241, "#211 final review I5: a lot marker contributes its units to the package BOM");
+  ok(bomBy("PKG-MIX")?.qty === 8, "#211 final review I5: an Auto assembly expands into its members (4 racks × 2 mixers)");
+  ok(!pkg.bom.some((r) => /^(asm|allow):/.test(r.sku) || /(asm|allow):/.test(r.desc)) && !pkg.items.some((i) => /^(asm|allow):/.test(i.sku)), "#211 final review I5: no raw asm:/allow: id reaches the customer's package");
+  ok(!pkg.bom.some((r) => /SA-GONE/.test(r.desc) || r.sku === "") && !pkg.items.some((i) => /SA-GONE/.test(i.description)) && pkg.gaps.some((g) => g.kind === "missing-catalog" && /SA-GONE/.test(g.description) && g.qty === 1), "#211 wave 2 M3: a deleted assembly lands in the gap report only — never the customer's BOM or items");
+  ok(gemFrPkgNeeds(pkgProject.placements) && !gemFrPkgNeeds([{ partId: "PKG-PIPE" }, { partId: "allow:audio:subwoofer:good" }]), "#211 final review I5: fixtures load only when an asm: placement exists");
   const pkgSrv = read("src/lib/client-package-server.ts");
-  ok(pkgSrv.includes("reduce((n, p) => n + placementQty(p), 0)") && pkgSrv.includes("packageNeedsFixtures("), "#GEM final review I5: 'Placed devices' counts units and the package resolves assemblies");
-  // I6 — D-GEM-20: kept devices count toward the new quantity.
+  ok(pkgSrv.includes("reduce((n, p) => n + placementQty(p), 0)") && pkgSrv.includes("packageNeedsFixtures("), "#211 final review I5: 'Placed devices' counts units and the package resolves assemblies");
+  // I6 — D320: kept devices count toward the new quantity.
   const tagged = { id: "x", optionId: "o1", partId: "P", auto: { scope: "lighting" as const, rowKey: "lighting:par", tier: "better" as const } };
   const handTouched = gemFrNoAuto(tagged);
-  ok(!("auto" in handTouched) && JSON.stringify((handTouched as { autoOrigin?: unknown }).autoOrigin) === JSON.stringify({ scope: "lighting", rowKey: "lighting:par" }), "#GEM final review I6: withoutAuto records the origin scope + row (not an auto tag)");
-  ok(gemFrOrigin({ scope: "lighting", rowKey: "audio:subwoofer" }) === null && gemFrOrigin({ scope: "controls", rowKey: "controls:console" }) === null, "#GEM final review I6: an origin must be a real row of an Auto scope");
+  ok(!("auto" in handTouched) && JSON.stringify((handTouched as { autoOrigin?: unknown }).autoOrigin) === JSON.stringify({ scope: "lighting", rowKey: "lighting:par" }), "#211 final review I6: withoutAuto records the origin scope + row (not an auto tag)");
+  ok(gemFrOrigin({ scope: "lighting", rowKey: "audio:subwoofer" }) === null && gemFrOrigin({ scope: "controls", rowKey: "controls:console" }) === null, "#211 final review I6: an origin must be a real row of an Auto scope");
   const kept = gemFrKept(
     [
       { ...handTouched, qty: undefined },
@@ -18477,7 +18477,7 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
     ["lighting", "rigging"],
     "o1"
   );
-  ok(kept["lighting:par"] === 2 && kept["rigging:pipe"] === 40 && Object.keys(kept).length === 2, "#GEM final review I6: keptUnitsByRow counts units per row — this option only, never an auto-tagged or origin-less device");
+  ok(kept["lighting:par"] === 2 && kept["rigging:pipe"] === 40 && Object.keys(kept).length === 2, "#211 final review I6: keptUnitsByRow counts units per row — this option only, never an auto-tagged or origin-less device");
   const lineOf = (rowKey: string, scope: string, qty: number) => ({ rowKey, scope, label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref: "SKU-" + rowKey, unitCost: 1, unitSell: 2, total: 2 * qty, swapped: false });
   const cardsFr = [
     { scope: "lighting", tier: "best", lines: [lineOf("lighting:par", "lighting", 12)], total: 0, needsPart: 0, allowances: 0 },
@@ -18491,37 +18491,37 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
       pipe: out.filter((s) => s.auto.rowKey === "rigging:pipe").reduce((n, s) => n + (s.qty ?? 1), 0),
     };
   };
-  ok(placedFor().par === 12 && placedFor({ "lighting:par": 3 }).par === 9 && placedFor({ "lighting:par": 12 }).par === 0 && placedFor({ "lighting:par": 20 }).par === 0, "#GEM final review I6: 12 called for, 3 kept → 9 placed; never below zero");
-  ok(placedFor({ "rigging:pipe": 40 }).pipe === 200, "#GEM final review I6: a lot row subtracts kept units (240 − 40 → one 200-unit lot)");
+  ok(placedFor().par === 12 && placedFor({ "lighting:par": 3 }).par === 9 && placedFor({ "lighting:par": 12 }).par === 0 && placedFor({ "lighting:par": 20 }).par === 0, "#211 final review I6: 12 called for, 3 kept → 9 placed; never below zero");
+  ok(placedFor({ "rigging:pipe": 40 }).pipe === 200, "#211 final review I6: a lot row subtracts kept units (240 − 40 → one 200-unit lot)");
   const rdFr = read("src/app/(app)/design/grid/[id]/refill-dialog.tsx");
-  ok(rdFr.includes("count toward") && rdFr.includes("keptUnits") && rdFr.includes("kept by hand in this scope"), "#GEM final review I6: the re-fill confirm says kept devices count toward the total, and how many");
-  // D-GEM-22 — Grid quote from an Auto design with needs-a-part lines.
+  ok(rdFr.includes("count toward") && rdFr.includes("keptUnits") && rdFr.includes("kept by hand in this scope"), "#211 final review I6: the re-fill confirm says kept devices count toward the total, and how many");
+  // D322 — Grid quote from an Auto design with needs-a-part lines.
   const cardsQ = [
     { scope: "lighting", lines: [{ status: "needs-part", qty: 4 }, { status: "part", qty: 2 }, { status: "needs-part", qty: 0 }] },
     { scope: "audio", lines: [{ status: "needs-part", qty: 1 }] },
   ] as never;
-  ok(gemFrAutoNeeds(cardsQ, { tierByScope: { lighting: "good" } }) === 1 && gemFrAutoNeeds(cardsQ, { tierByScope: { lighting: "good", audio: "best" } }) === 2, "#GEM final review D-GEM-22: autoQuoteNeedsPart counts chosen scopes' needs-a-part lines with qty > 0");
+  ok(gemFrAutoNeeds(cardsQ, { tierByScope: { lighting: "good" } }) === 1 && gemFrAutoNeeds(cardsQ, { tierByScope: { lighting: "good", audio: "best" } }) === 2, "#211 final review D322: autoQuoteNeedsPart counts chosen scopes' needs-a-part lines with qty > 0");
   const gridAct = read("src/app/(app)/design/grid/[id]/actions.ts");
   const quoteBody = gridAct.slice(gridAct.indexOf("export async function createDraftQuoteAction"));
   const refillBodyFr = gridAct.slice(gridAct.indexOf("export async function refillScopeAction"));
-  ok(quoteBody.includes("acceptIncomplete") && quoteBody.includes("autoNeedsPart(project, resolvedOptionId)"), "#GEM final review D-GEM-22: the Grid quote refuses Auto needs-a-part lines unless the person confirmed");
+  ok(quoteBody.includes("acceptIncomplete") && quoteBody.includes("autoNeedsPart(project, resolvedOptionId)"), "#211 final review D322: the Grid quote refuses Auto needs-a-part lines unless the person confirmed");
   const edFr = read("src/app/(app)/design/grid/[id]/editor.tsx");
-  ok(edFr.includes("Quote anyway") && edFr.includes("runQuote(true)"), "#GEM final review D-GEM-22: the editor asks before quoting an incomplete Auto design");
-  ok(refillBodyFr.indexOf("AUTO_SCOPES.includes(") > -1 && refillBodyFr.indexOf("AUTO_SCOPES.includes(") < refillBodyFr.indexOf("getProject("), "#GEM final review minor: refillScopeAction refuses a non-Auto scope before reading the project");
+  ok(edFr.includes("Quote anyway") && edFr.includes("runQuote(true)"), "#211 final review D322: the editor asks before quoting an incomplete Auto design");
+  ok(refillBodyFr.indexOf("AUTO_SCOPES.includes(") > -1 && refillBodyFr.indexOf("AUTO_SCOPES.includes(") < refillBodyFr.indexOf("getProject("), "#211 final review minor: refillScopeAction refuses a non-Auto scope before reading the project");
   // Minors
-  ok(gemFrUnit("Sq. Ft") === "sqft" && gemFrUnit("EACH") === "ea" && gemFrUnit("LF") === "ft" && gemFrMismatch("ft", "ea") !== null && gemFrMismatch("ea", "each") === null && gemFrMismatch("ft", "") === null, "#GEM final review minor: the Equipment map flags a mapped part whose unit differs from the row's");
-  ok(qc.includes("breakdownAmount(selTot.matRev)") && qc.includes("breakdownAmount(selTot.contingency"), "#GEM final review minor: Quick Design's breakdown rows read Incomplete while incomplete");
+  ok(gemFrUnit("Sq. Ft") === "sqft" && gemFrUnit("EACH") === "ea" && gemFrUnit("LF") === "ft" && gemFrMismatch("ft", "ea") !== null && gemFrMismatch("ea", "each") === null && gemFrMismatch("ft", "") === null, "#211 final review minor: the Equipment map flags a mapped part whose unit differs from the row's");
+  ok(qc.includes("breakdownAmount(selTot.matRev)") && qc.includes("breakdownAmount(selTot.contingency"), "#211 final review minor: Quick Design's breakdown rows read Incomplete while incomplete");
   const linkFr = read("src/components/design/equipment-map-link.tsx");
   const cardFr = read("src/app/(app)/design/grid/[id]/equipment-card.tsx");
   const spFr = read("src/app/(app)/design/grid/[id]/scope-panel.tsx");
-  ok(linkFr.includes("ask an admin to map it") && cardFr.includes("useCanMap()") && spFr.includes("<EquipmentMapLink") && !qc.includes('href="/design/grid/settings/equipment-map"') && read("src/app/(app)/design/grid/[id]/page.tsx").includes('canMap={can("manage_users", user.roles)}'), "#GEM final review minor: non-admins see 'ask an admin to map it' instead of a dead-end Equipment map link");
+  ok(linkFr.includes("ask an admin to map it") && cardFr.includes("useCanMap()") && spFr.includes("<EquipmentMapLink") && !qc.includes('href="/design/grid/settings/equipment-map"') && read("src/app/(app)/design/grid/[id]/page.tsx").includes('canMap={can("manage_users", user.roles)}'), "#211 final review minor: non-admins see 'ask an admin to map it' instead of a dead-end Equipment map link");
   const hubFr = read("src/app/(app)/design/page.tsx");
   const revFr = read("src/app/(app)/design/grid/[id]/revisions-panel.tsx");
   const rollFr = bomBySpace([{ sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "LOT", qty: 40 }, { sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "ONE" }], [], []);
-  ok(rollFr[0]?.count === 41 && hubFr.includes("placementQty(pl)") && revFr.includes("placementQty(pl)") && revFr.includes("units ·"), "#GEM final review minor: space rollups, the design hub and revisions count units");
+  ok(rollFr[0]?.count === 41 && hubFr.includes("placementQty(pl)") && revFr.includes("placementQty(pl)") && revFr.includes("units ·"), "#211 final review minor: space rollups, the design hub and revisions count units");
 }
 
-/* --- #GEM final review, fix wave 2 (D-GEM-23): the server is the Quick
+/* --- #211 final review, fix wave 2 (D323): the server is the Quick
        budget's authority; save whitelist; Grid records refused by Quick;
        Auto Grid completeness on every read; refresh hint. --- */
 import { quickDesignPrice as gemW2Price, tierDefsFor as gemW2TierDefs, tierSystems as gemW2TierSystems } from "@/lib/design/equipment-pricing";
@@ -18541,37 +18541,37 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
   const s0 = gemW2Hydrate(rec, 10);
   const screen = gemW2Totals(gemW2TierSystems(gemW2Compute(s0), s0, "better", gemW2TierDefs(s0), table, {}), gemW2Tiers[1], 0.18, 0.05, 0.1).grand;
   const p0 = gemW2Price(rec, table, {}, rates);
-  ok(p0.needsPart === 0 && p0.budget > 0 && p0.budget === Math.round(screen), `#GEM wave 2 I1: quickDesignPrice totals exactly as Quick Design's screen does (${p0.budget} vs ${screen})`);
+  ok(p0.needsPart === 0 && p0.budget > 0 && p0.budget === Math.round(screen), `#211 wave 2 I1: quickDesignPrice totals exactly as Quick Design's screen does (${p0.budget} vs ${screen})`);
   const pSets = gemW2Price({ tier: "better", config: { ...cfg, tierSets: { better: 23 } } }, table, {}, rates);
-  ok(pSets.budget !== p0.budget && gemW2TierDefs({ tierSets: { better: 2, good: -1, best: Number.NaN } as never }).better.sets === 2 && gemW2TierDefs({ tierSets: { good: -1 } as never }).good.sets === null, "#GEM wave 2 I1: the design's own line-set dial (config.tierSets) reaches the server price; junk is ignored");
-  ok(gemW2Price(rec, { margin: 0.3, byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#GEM wave 2 I1: an empty map still prices needs-a-part");
+  ok(pSets.budget !== p0.budget && gemW2TierDefs({ tierSets: { better: 2, good: -1, best: Number.NaN } as never }).better.sets === 2 && gemW2TierDefs({ tierSets: { good: -1 } as never }).good.sets === null, "#211 wave 2 I1: the design's own line-set dial (config.tierSets) reaches the server price; junk is ignored");
+  ok(gemW2Price(rec, { margin: 0.3, byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#211 wave 2 I1: an empty map still prices needs-a-part");
   const hostile = Object.defineProperty({}, "sys", { enumerable: true, get() { throw new Error("bad config"); } }) as Record<string, unknown>;
   const ph = gemW2Price({ tier: "better", config: hostile }, table, {}, rates);
-  ok(ph.needsPart === 1 && ph.budget === 0, "#GEM wave 2 I1: a config that won't compute is incomplete at $0, never throws");
+  ok(ph.needsPart === 1 && ph.budget === 0, "#211 wave 2 I1: a config that won't compute is incomplete at $0, never throws");
   // M2 — the save whitelist.
   const f = gemW2Fields({ name: "N", venue: "V", size: "large", tier: "best", width: "40", depth: 30, grid: null, systems: ["Rigging", 3], customer: "C", customerId: "CU-1", locationId: null, config: { a: 1 }, budget: 1, incomplete: { needsPart: 0 }, review: { state: "approved" }, quoteId: "Q-1", owner: "Mallory", layoutMode: "manual", gridProjectId: "GP-1", id: "D-999", revisions: [], updatedAt: 1 });
-  ok(Object.keys(f).every((k) => (gemW2Keys as readonly string[]).includes(k)) && !("budget" in f) && !("incomplete" in f) && !("review" in f) && !("quoteId" in f) && !("owner" in f) && !("layoutMode" in f) && !("gridProjectId" in f) && !("id" in f), "#GEM wave 2 M2: a Quick save writes only whitelisted design fields — never review/quoteId/owner/layoutMode/gridProjectId/budget/incomplete");
-  ok(f.width === 40 && !("grid" in f) && JSON.stringify(f.systems) === '["Rigging"]' && f.locationId === null && f.customerId === "CU-1" && JSON.stringify(f.config) === '{"a":1}', "#GEM wave 2 M2: whitelisted fields are type-checked");
-  ok(Object.keys(gemW2Fields({ config: [1], systems: "x" })).length === 0 && Object.keys(gemW2Fields(null)).length === 0, "#GEM wave 2 M2: junk payloads write nothing");
+  ok(Object.keys(f).every((k) => (gemW2Keys as readonly string[]).includes(k)) && !("budget" in f) && !("incomplete" in f) && !("review" in f) && !("quoteId" in f) && !("owner" in f) && !("layoutMode" in f) && !("gridProjectId" in f) && !("id" in f), "#211 wave 2 M2: a Quick save writes only whitelisted design fields — never review/quoteId/owner/layoutMode/gridProjectId/budget/incomplete");
+  ok(f.width === 40 && !("grid" in f) && JSON.stringify(f.systems) === '["Rigging"]' && f.locationId === null && f.customerId === "CU-1" && JSON.stringify(f.config) === '{"a":1}', "#211 wave 2 M2: whitelisted fields are type-checked");
+  ok(Object.keys(gemW2Fields({ config: [1], systems: "x" })).length === 0 && Object.keys(gemW2Fields(null)).length === 0, "#211 wave 2 M2: junk payloads write nothing");
   // M1 — Quick Design refuses / redirects a Grid record.
   const qp = read("src/app/(app)/design/quick/page.tsx");
   const qa = read("src/app/(app)/design/quick/actions.ts");
   const dp = read("src/lib/stores/design-pricing.ts");
-  ok(qp.includes('design?.layoutMode === "manual"') && qp.includes("redirect(") && qa.includes('existing?.layoutMode === "manual"') && dp.includes('existing?.layoutMode === "manual"'), "#GEM wave 2 M1: Quick Design's page redirects a Grid record to The Grid; its save / Add to Quotes refuse one");
-  ok(read("src/app/(app)/design/quick/quick-design-client.tsx").includes("tierSets: { good: tierDefs.good.sets"), "#GEM wave 2 I1: Quick Design sends its line-set dial with the config");
+  ok(qp.includes('design?.layoutMode === "manual"') && qp.includes("redirect(") && qa.includes('existing?.layoutMode === "manual"') && dp.includes('existing?.layoutMode === "manual"'), "#211 wave 2 M1: Quick Design's page redirects a Grid record to The Grid; its save / Add to Quotes refuse one");
+  ok(read("src/app/(app)/design/quick/quick-design-client.tsx").includes("tierSets: { good: tierDefs.good.sets"), "#211 wave 2 I1: Quick Design sends its line-set dial with the config");
   // I2 — Auto Grid designs carry live completeness through one shared ctx.
   const ds = read("src/lib/stores/designs.ts");
   const gaf = read("src/lib/design/grid-auto-fill.ts");
-  ok(ds.includes("autoNeedsPartMany(") && gaf.includes("export async function autoNeedsPartMany") && gaf.includes("loaded?: AutoNeedsCtx"), "#GEM wave 2 I2: getAllDesigns stamps Auto Grid completeness with ONE shared price context");
+  ok(ds.includes("autoNeedsPartMany(") && gaf.includes("export async function autoNeedsPartMany") && gaf.includes("loaded?: AutoNeedsCtx"), "#211 wave 2 I2: getAllDesigns stamps Auto Grid completeness with ONE shared price context");
   // M4 / M5
-  ok(read("src/app/(app)/design/page.tsx").includes("unit${n === 1") && !read("src/app/(app)/design/page.tsx").includes("device${n === 1"), "#GEM wave 2 M4: the design hub counts units");
-  ok(gemW2Hint({ incomplete: { needsPart: 2 } }) === gemW2HintText && gemW2Hint({ layoutMode: "manual", incomplete: { needsPart: 2 } }) === null && gemW2Hint({ incomplete: { needsPart: 0 } }) === null && gemW2HintText === "Open in Quick Design and save to refresh its price", "#GEM wave 2 M5: the refresh hint is for incomplete Quick designs only");
-  ok(read("src/app/(app)/_dashboard/widgets/home-cards.tsx").includes("hint: designRefreshHint(d)") && read("src/app/(app)/home-my-designs.tsx").includes("{d.hint} →") && read("src/app/(app)/design/designs/design-client.tsx").includes("designRefreshHint(d)"), "#GEM wave 2 M5: Home and the Designs dashboard say how to refresh a stale incomplete price");
+  ok(read("src/app/(app)/design/page.tsx").includes("unit${n === 1") && !read("src/app/(app)/design/page.tsx").includes("device${n === 1"), "#211 wave 2 M4: the design hub counts units");
+  ok(gemW2Hint({ incomplete: { needsPart: 2 } }) === gemW2HintText && gemW2Hint({ layoutMode: "manual", incomplete: { needsPart: 2 } }) === null && gemW2Hint({ incomplete: { needsPart: 0 } }) === null && gemW2HintText === "Open in Quick Design and save to refresh its price", "#211 wave 2 M5: the refresh hint is for incomplete Quick designs only");
+  ok(read("src/app/(app)/_dashboard/widgets/home-cards.tsx").includes("hint: designRefreshHint(d)") && read("src/app/(app)/home-my-designs.tsx").includes("{d.hint} →") && read("src/app/(app)/design/designs/design-client.tsx").includes("designRefreshHint(d)"), "#211 wave 2 M5: Home and the Designs dashboard say how to refresh a stale incomplete price");
 }
 
-/* --- #GEM fix wave 3: Scenery-track override versioning (D-GEM-24), dead
+/* --- #211 fix wave 3: Scenery-track override versioning (D324), dead
        fixture picks on the screen, plain nav read + one shared Grid pricing
-       load (D-GEM-25), clamps / saved line-set dial parity, fail-closed Auto
+       load (D325), clamps / saved line-set dial parity, fail-closed Auto
        completeness, revision snapshot from the saved record, required
        promote price, letter re-derivation. Parity uses the LIVE screen state
        (quickScreenPrice over the state the designer edited), never a
@@ -18599,57 +18599,57 @@ import {
   const screen = gemW3Screen(live, td, table, {}, rates);
   const cfg = gemW3SaveCfg(live, td);
   const server = gemW3Price({ tier: "better", config: cfg }, table, {}, rates);
-  ok(screen.budget !== calc.budget, `#GEM wave 3 I1: the Scenery-track edit changes the screen total (${calc.budget} → ${screen.budget})`);
-  ok(server.budget === screen.budget && server.needsPart === screen.needsPart, `#GEM wave 3 I1: screen total == server total with a Scenery-track edit of 5 (${screen.budget} vs ${server.budget}; was ${calc.budget} on the server before wave 3)`);
-  ok(screen.budget === 13321 && calc.budget === 16125, `#GEM wave 3 I1: the reviewer's figures reproduce — 13321 on the screen, 16125 when the edit is dropped (${screen.budget} / ${calc.budget})`);
-  ok(JSON.stringify(cfg.overrideUnits) === JSON.stringify({ "curtains:Scenery track": "ft" }) && JSON.stringify(gemW3Units) === JSON.stringify(cfg.overrideUnits), "#GEM wave 3 I1: a save marks its overrides as feet");
+  ok(screen.budget !== calc.budget, `#211 wave 3 I1: the Scenery-track edit changes the screen total (${calc.budget} → ${screen.budget})`);
+  ok(server.budget === screen.budget && server.needsPart === screen.needsPart, `#211 wave 3 I1: screen total == server total with a Scenery-track edit of 5 (${screen.budget} vs ${server.budget}; was ${calc.budget} on the server before wave 3)`);
+  ok(screen.budget === 13321 && calc.budget === 16125, `#211 wave 3 I1: the reviewer's figures reproduce — 13321 on the screen, 16125 when the edit is dropped (${screen.budget} / ${calc.budget})`);
+  ok(JSON.stringify(cfg.overrideUnits) === JSON.stringify({ "curtains:Scenery track": "ft" }) && JSON.stringify(gemW3Units) === JSON.stringify(cfg.overrideUnits), "#211 wave 3 I1: a save marks its overrides as feet");
   const { overrideUnits: _drop, ...oldCfg } = cfg;
   void _drop;
-  ok(gemW3Price({ tier: "better", config: oldCfg }, table, {}, rates).budget === calc.budget, "#GEM wave 3 I1: an unmarked (pre-wave-3) config's Scenery-track override is still dropped — it was a run count");
+  ok(gemW3Price({ tier: "better", config: oldCfg }, table, {}, rates).budget === calc.budget, "#211 wave 3 I1: an unmarked (pre-wave-3) config's Scenery-track override is still dropped — it was a run count");
   const reopened = gemW3Hydrate({ tier: "better", config: cfg }, 10);
-  ok(reopened.qtyOverrides.better?.curtains?.["Scenery track"] === 5 && gemW3Screen(reopened, gemW3TierDefs(reopened, td), table, {}, rates).budget === server.budget, "#GEM wave 3 I1: reopening the saved design keeps the feet override and shows the server's figure");
+  ok(reopened.qtyOverrides.better?.curtains?.["Scenery track"] === 5 && gemW3Screen(reopened, gemW3TierDefs(reopened, td), table, {}, rates).budget === server.budget, "#211 wave 3 I1: reopening the saved design keeps the feet override and shows the server's figure");
   const restored = gemW3Apply(live, { qtyOverrides: { better: { curtains: { "Scenery track": 3 } } } } as never);
-  ok(restored.qtyOverrides.better?.curtains?.["Scenery track"] === undefined && restored.overrideUnits?.["curtains:Scenery track"] === "ft", "#GEM wave 3 I1: restoring an old (unmarked) revision drops its count-style override on the screen too");
+  ok(restored.qtyOverrides.better?.curtains?.["Scenery track"] === undefined && restored.overrideUnits?.["curtains:Scenery track"] === "ft", "#211 wave 3 I1: restoring an old (unmarked) revision drops its count-style override on the screen too");
   // Minor — the screen's clamps, mirrored on the server through hydrate / tierDefsFor.
   const wild = gemW3Hydrate({ tier: "nope", config: { contingency: 40, tier: "nope", qtyOverrides: { better: { lighting: { Par: -3, Front: 2.7, Cyc: "9" } } }, overrideUnits: { "curtains:Scenery track": "ft" } } }, 10);
-  ok(wild.contingency === 25 && wild.tier === "better" && wild.qtyOverrides.better?.lighting?.Par === 0 && wild.qtyOverrides.better?.lighting?.Front === 2 && !("Cyc" in (wild.qtyOverrides.better?.lighting || {})), "#GEM wave 3 minor: contingency 0–25, whole qty overrides ≥ 0, a known tier");
-  ok(gemW3Hydrate({ config: { contingency: -5 } }, 10).contingency === 0 && gemW3Default(40).contingency === 25, "#GEM wave 3 minor: contingency clamps at both ends, new designs too");
-  ok(gemW3Sets(0) === 1 && gemW3Sets(500) === 300 && gemW3Sets(12.4) === 12 && gemW3Sets(-1) === null && gemW3Sets("7") === null, "#GEM wave 3 minor: line sets 1–300, junk = the equation's count");
+  ok(wild.contingency === 25 && wild.tier === "better" && wild.qtyOverrides.better?.lighting?.Par === 0 && wild.qtyOverrides.better?.lighting?.Front === 2 && !("Cyc" in (wild.qtyOverrides.better?.lighting || {})), "#211 wave 3 minor: contingency 0–25, whole qty overrides ≥ 0, a known tier");
+  ok(gemW3Hydrate({ config: { contingency: -5 } }, 10).contingency === 0 && gemW3Default(40).contingency === 25, "#211 wave 3 minor: contingency clamps at both ends, new designs too");
+  ok(gemW3Sets(0) === 1 && gemW3Sets(500) === 300 && gemW3Sets(12.4) === 12 && gemW3Sets(-1) === null && gemW3Sets("7") === null, "#211 wave 3 minor: line sets 1–300, junk = the equation's count");
   // The line-set dial: a saved design prices with ITS dial in any browser; a new one follows the browser's.
   const browser = gemW3TdDefault();
   browser.better.sets = 40;
   const savedSets = gemW3Hydrate({ tier: "better", config: { ...gemW3SaveCfg(a0, td), tierSets: { good: null, better: 23, best: null } } }, 10);
-  ok(gemW3TierDefs(savedSets, browser).better.sets === 23 && gemW3Screen(savedSets, gemW3TierDefs(savedSets, browser), table, {}, rates).budget === gemW3Price({ tier: "better", config: { ...gemW3SaveCfg(a0, td), tierSets: { good: null, better: 23, best: null } } }, table, {}, rates).budget, "#GEM wave 3 minor: opening a saved design restores its line-sets dial — this browser's 40 doesn't change its total");
+  ok(gemW3TierDefs(savedSets, browser).better.sets === 23 && gemW3Screen(savedSets, gemW3TierDefs(savedSets, browser), table, {}, rates).budget === gemW3Price({ tier: "better", config: { ...gemW3SaveCfg(a0, td), tierSets: { good: null, better: 23, best: null } } }, table, {}, rates).budget, "#211 wave 3 minor: opening a saved design restores its line-sets dial — this browser's 40 doesn't change its total");
   const preW2 = gemW3Hydrate({ tier: "better", config: { ...gemW3Default(10) } as never }, 10);
-  ok(gemW3TierDefs(preW2, browser).better.sets === null && gemW3TierDefs({}, browser).better.sets === 40, "#GEM wave 3 minor: a saved design with no dial prices at the equation's count (as the server does); only a new design follows the browser's dial");
+  ok(gemW3TierDefs(preW2, browser).better.sets === null && gemW3TierDefs({}, browser).better.sets === 40, "#211 wave 3 minor: a saved design with no dial prices at the equation's count (as the server does); only a new design follows the browser's dial");
   // I2 — a dead pick is priced needs-a-part on the screen, as on the server.
   const dead = { status: "needs-part" as const, ref: "", desc: "Assembly fa-gone was deleted", unit: "ea", unitCost: 0, unitSell: 0 };
   const withPick = { ...a0, fixtureAssemblies: { par: "fa-gone" } };
   const fxPrices = { "fa-gone": dead } as never;
-  ok(gemW3FxOv(withPick.fixtureAssemblies, fxPrices)["lighting:par"]?.status === "needs-part", "#GEM wave 3 I2: a dead pick's entry overrides the row as needs-a-part");
+  ok(gemW3FxOv(withPick.fixtureAssemblies, fxPrices)["lighting:par"]?.status === "needs-part", "#211 wave 3 I2: a dead pick's entry overrides the row as needs-a-part");
   const scr = gemW3Screen(withPick, td, table, fxPrices, rates);
   const srv = gemW3Price({ tier: "better", config: gemW3SaveCfg(withPick, td) }, table, fxPrices, rates);
-  ok(scr.needsPart > 0 && scr.needsPart === srv.needsPart && scr.budget === srv.budget, `#GEM wave 3 I2: screen and server agree on a dead pick (${scr.needsPart}/${srv.needsPart} needs-a-part)`);
+  ok(scr.needsPart > 0 && scr.needsPart === srv.needsPart && scr.budget === srv.budget, `#211 wave 3 I2: screen and server agree on a dead pick (${scr.needsPart}/${srv.needsPart} needs-a-part)`);
   const qp = read("src/app/(app)/design/quick/page.tsx");
   const sip = read("src/components/design/scope-inputs-panel.tsx");
-  ok(qp.includes("pickedFixtureIds(design)") && qp.includes("...fixtureList.map((f) => f.id)"), "#GEM wave 3 I2: Quick Design prices the design's own picks too, even a deleted one");
-  ok(sip.includes("(deleted — choose another)") && sip.includes("isDeadPick(fxKey)") && sip.includes("fixtureAssembliesProp ?"), "#GEM wave 3 I2: the picker shows a dead pick as '(deleted — choose another)' (Quick Design only) so it can be changed");
+  ok(qp.includes("pickedFixtureIds(design)") && qp.includes("...fixtureList.map((f) => f.id)"), "#211 wave 3 I2: Quick Design prices the design's own picks too, even a deleted one");
+  ok(sip.includes("(deleted — choose another)") && sip.includes("isDeadPick(fxKey)") && sip.includes("fixtureAssembliesProp ?"), "#211 wave 3 I2: the picker shows a dead pick as '(deleted — choose another)' (Quick Design only) so it can be changed");
   // Screen wiring: the client uses the shared steps.
   const qc = read("src/app/(app)/design/quick/quick-design-client.tsx");
-  ok(qc.includes("applyOverrides(selBase, a, selKey)") && qc.includes("quickSaveConfig(s, tierDefs)") && qc.includes("tierDefsFor({ tierSets: aTierSets }, globalTierDefs)") && qc.includes("applySavedConfig(prev, cfg)") && qc.includes("withQtyOverride(a.qtyOverrides"), "#GEM wave 3: Quick Design's screen prices, saves and restores through the same helpers the server uses");
+  ok(qc.includes("applyOverrides(selBase, a, selKey)") && qc.includes("quickSaveConfig(s, tierDefs)") && qc.includes("tierDefsFor({ tierSets: aTierSets }, globalTierDefs)") && qc.includes("applySavedConfig(prev, cfg)") && qc.includes("withQtyOverride(a.qtyOverrides"), "#211 wave 3: Quick Design's screen prices, saves and restores through the same helpers the server uses");
   // I3 — nav reads records only; one shared Grid pricing load per read.
   const nav = read("src/lib/nav-counts.ts");
   const ga = read("src/app/(app)/design/grid/[id]/actions.ts");
   const ds = read("src/lib/stores/designs.ts");
   const gq = read("src/lib/design/grid-quote.ts");
-  ok(nav.includes("listDesignRecords()") && !nav.includes("getAllDesigns"), "#GEM wave 3 I3: nav counts read design records only — no live Grid pricing on every page");
-  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 2, "#GEM wave 3 I3: the Grid actions find linked designs with a filtered read");
-  ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId)"), "#GEM wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
+  ok(nav.includes("listDesignRecords()") && !nav.includes("getAllDesigns"), "#211 wave 3 I3: nav counts read design records only — no live Grid pricing on every page");
+  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 2, "#211 wave 3 I3: the Grid actions find linked designs with a filtered read");
+  ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId)"), "#211 wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
   // Minors.
-  ok(ds.includes("fail CLOSED") || ds.includes("Fail CLOSED"), "#GEM wave 3 minor: an Auto completeness failure marks the design incomplete");
-  ok(/price: \{ needsPart: number; budget: number \}\n\): Promise<Quote \| null>/.test(ds), "#GEM wave 3 minor: promoteDesignToQuote's price is required");
+  ok(ds.includes("fail CLOSED") || ds.includes("Fail CLOSED"), "#211 wave 3 minor: an Auto completeness failure marks the design incomplete");
+  ok(/price: \{ needsPart: number; budget: number \}\n\): Promise<Quote \| null>/.test(ds), "#211 wave 3 minor: promoteDesignToQuote's price is required");
   const qa = read("src/app/(app)/design/quick/actions.ts");
-  ok(qa.includes("config: saved.config") && qa.includes("name: saved.name") && !qa.includes("config: partial.config"), "#GEM wave 3 minor: a revision snapshots the saved (whitelisted) record, not the client partial");
+  ok(qa.includes("config: saved.config") && qa.includes("name: saved.name") && !qa.includes("config: partial.config"), "#211 wave 3 minor: a revision snapshots the saved (whitelisted) record, not the client partial");
   const lp = read("src/app/(app)/design/engagements/letter/page.tsx");
-  ok(lp.includes("serverDesignPrices(quick)") && lp.includes("getDesigns(eng.designIds)") && !lp.includes("getAllDesigns"), "#GEM wave 3 minor: the engagement letter re-derives a Quick design's completeness from the server price");
+  ok(lp.includes("serverDesignPrices(quick)") && lp.includes("getDesigns(eng.designIds)") && !lp.includes("getAllDesigns"), "#211 wave 3 minor: the engagement letter re-derives a Quick design's completeness from the server price");
 }

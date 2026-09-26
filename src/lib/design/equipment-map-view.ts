@@ -1,5 +1,5 @@
 /**
- * Equipment map page view models (#GEM, spec §3) — pure. Built on the server
+ * Equipment map page view models (#211, spec §3) — pure. Built on the server
  * from the map + resolved prices so the client resolves nothing. Row status is
  * computed from RESOLVED prices: a cell pointing at a deleted part or an
  * unpriced assembly reads "Needs a part" (Auto would skip it) even though a
@@ -30,7 +30,7 @@ export type EquipCellVM = {
   perSqft: boolean;
   /** Why a stored cell does not price (deleted part, unpriced assembly …). */
   problem: string | null;
-  /** A mapped part whose catalog unit differs from the row's (#GEM final
+  /** A mapped part whose catalog unit differs from the row's (#211 final
    *  review): the equation's quantity is in the ROW's unit, so a per-foot row
    *  priced by a per-each part (or the reverse) misprices. Advisory only. */
   unitWarning?: string | null;

@@ -21,7 +21,7 @@ import ScopePicker from "./scope-picker";
 import { EquipmentCards, useAutoPreview } from "./equipment-card";
 
 /**
- * The one Grid intake (#GEM, spec §5 — replaces Spec 1's Manual-only intake):
+ * The one Grid intake (#211, spec §5 — replaces Spec 1's Manual-only intake):
  *   1. Start from — Auto (equations) or Blank.
  *   2. Venue — type, size, dimensions, scopes (the five Grid scopes with their
  *      sub-configuration), cover-page fields.

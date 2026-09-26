@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Grid Settings → Equipment map (#GEM, spec §3). Every equation item × tier
+ * Grid Settings → Equipment map (#211, spec §3). Every equation item × tier
  * → catalog part / assembly / confirmed allowance. Admin-only (manage_users —
  * the Estimating Rules gate). Read-only on load: nothing here writes. Reads
  * the map, every fixture/system, and ONLY the catalog SKUs they reference

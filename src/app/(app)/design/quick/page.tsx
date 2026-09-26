@@ -17,7 +17,7 @@ import "./quick-design.css";
  * Quick Design — the budgetary estimate builder (sandbox), ported from
  * app/Quick Design.dc.html. Server shell: loads the saved design
  * (?design=D-###), the customer directory, the Equipment map price table
- * (#GEM) and the live pricing-rule defaults; all estimating math runs
+ * (#211) and the live pricing-rule defaults; all estimating math runs
  * client-side (engine.ts).
  */
 
@@ -54,7 +54,7 @@ export default async function Page({
   }
   // #210: fixtures (not systems) under their kept ids — included parts only.
   const fixtureList = fixtureAssembliesFrom(fixtureRecords, catalogRows);
-  // The Equipment map price table (#GEM) plus each pickable fixture's price,
+  // The Equipment map price table (#211) plus each pickable fixture's price,
   // built from the catalog and fixtures this request already loaded (no
   // second load of either). A fixture pick prices through the SAME resolver
   // as an Equipment map assembly cell (priceCell, final review I3): its

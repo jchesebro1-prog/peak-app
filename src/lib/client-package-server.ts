@@ -54,7 +54,7 @@ function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], package
         {
           heading: "Derived plan summary",
           rows: [
-            // Units, not markers: an Auto lot marker stands for `qty` units (#GEM).
+            // Units, not markers: an Auto lot marker stands for `qty` units (#211).
             { label: "Placed devices", value: String((project.placements || []).filter((p) => !p.curtain).reduce((n, p) => n + placementQty(p), 0)) },
             { label: "Curtain drops", value: String((project.placements || []).filter((p) => !!p.curtain).length) },
             { label: "Spaces", value: String((project.spaces || []).length) },

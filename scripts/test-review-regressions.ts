@@ -3721,41 +3721,41 @@ async function main() {
     );
   }
 
-  /* --- #GEM T2: the Equipment map store — starts empty, per-row atomic writes, who/when --- */
+  /* --- #211 T2: the Equipment map store — starts empty, per-row atomic writes, who/when --- */
   {
     const EM = await import("@/lib/stores/equipment-map");
     const Cat = await import("@/lib/stores/catalog");
-    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: the map starts empty — nothing is pre-mapped");
-    assert.equal((await EM.saveEquipmentRow("bogus:row", { tiers: {} }, "Jeff")).ok, false, "#GEM T2: an unknown row is refused");
+    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#211 T2: the map starts empty — nothing is pre-mapped");
+    assert.equal((await EM.saveEquipmentRow("bogus:row", { tiers: {} }, "Jeff")).ok, false, "#211 T2: an unknown row is refused");
     const r1 = await EM.saveEquipmentRow("lighting:par", { tiers: { good: { kind: "part", sku: "GEM2-PAR" }, better: { kind: "part", sku: "GEM2-PAR" }, best: { kind: "part", sku: "GEM2-PAR" } } }, "Jeff", 1000);
     const r2 = await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, "Chris", 2000);
-    assert.ok(r1.ok && r2.ok, "#GEM T2: two rows save");
+    assert.ok(r1.ok && r2.ok, "#211 T2: two rows save");
     await Promise.all([
       EM.saveEquipmentRow("video:projector", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM2-PROJ" } } }, "Jeff", 3000),
       EM.saveEquipmentRow("video:screen", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM2-SCR" } } }, "Chris", 3000),
     ]);
     let m = await EM.getEquipmentMap();
-    assert.deepEqual(Object.keys(m).sort(), ["audio:subwoofer", "lighting:par", "video:projector", "video:screen"], "#GEM T2: concurrent edits to different rows both survive (atomic per-key merge)");
-    assert.ok(m["lighting:par"].updatedBy === "Jeff" && m["lighting:par"].updatedAt === 1000, "#GEM T2: every save stamps who/when");
+    assert.deepEqual(Object.keys(m).sort(), ["audio:subwoofer", "lighting:par", "video:projector", "video:screen"], "#211 T2: concurrent edits to different rows both survive (atomic per-key merge)");
+    assert.ok(m["lighting:par"].updatedBy === "Jeff" && m["lighting:par"].updatedAt === 1000, "#211 T2: every save stamps who/when");
     const sub = m["audio:subwoofer"].tiers.best;
-    assert.ok(sub?.kind === "allowance" && sub.confirmedBy === "Chris" && sub.confirmedAt === 2000 && sub.amount === 1200, "#GEM T2: a confirmed allowance stores who confirmed it and when");
-    assert.equal((await EM.saveEquipmentRow("audio:subwoofer", { tiers: { good: { kind: "allowance", amount: 5, confirmed: false } } }, "Jeff", 4000)).ok, false, "#GEM T2: an unconfirmed allowance is refused");
-    assert.equal((await EM.getEquipmentMap())["audio:subwoofer"].updatedAt, 2000, "#GEM T2: …and nothing was written");
+    assert.ok(sub?.kind === "allowance" && sub.confirmedBy === "Chris" && sub.confirmedAt === 2000 && sub.amount === 1200, "#211 T2: a confirmed allowance stores who confirmed it and when");
+    assert.equal((await EM.saveEquipmentRow("audio:subwoofer", { tiers: { good: { kind: "allowance", amount: 5, confirmed: false } } }, "Jeff", 4000)).ok, false, "#211 T2: an unconfirmed allowance is refused");
+    assert.equal((await EM.getEquipmentMap())["audio:subwoofer"].updatedAt, 2000, "#211 T2: …and nothing was written");
     await EM.clearEquipmentRow("video:projector");
     m = await EM.getEquipmentMap();
-    assert.ok(!("video:projector" in m) && "video:screen" in m, "#GEM T2: clearing one row leaves the others");
+    assert.ok(!("video:projector" in m) && "video:screen" in m, "#211 T2: clearing one row leaves the others");
     await Cat.upsert({ sku: "GEM2-PAR", desc: "GEM2 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
     const table = await EM.loadEquipmentPriceTable();
     const par = table.byTier.best["lighting:par"];
-    assert.ok(par.status === "part" && par.unitSell === 900 && par.unitCost === 600, "#GEM T2: the table prices a mapped part from the live catalog (targeted read)");
-    assert.equal(table.byTier.best["video:screen"].status, "needs-part", "#GEM T2: a mapped SKU missing from the catalog is needs-a-part");
+    assert.ok(par.status === "part" && par.unitSell === 900 && par.unitCost === 600, "#211 T2: the table prices a mapped part from the live catalog (targeted read)");
+    assert.equal(table.byTier.best["video:screen"].status, "needs-part", "#211 T2: a mapped SKU missing from the catalog is needs-a-part");
     const allow = table.byTier.good["audio:subwoofer"];
-    assert.ok(allow.status === "allowance" && allow.unitCost === 1200, "#GEM T2: the allowance prices as its confirmed unit cost");
+    assert.ok(allow.status === "allowance" && allow.unitCost === 1200, "#211 T2: the allowance prices as its confirmed unit cost");
     for (const k of ["lighting:par", "audio:subwoofer", "video:screen"]) await EM.clearEquipmentRow(k);
-    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: cleanup — later blocks start from an empty map");
+    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#211 T2: cleanup — later blocks start from an empty map");
   }
 
-  /* --- #GEM T6: auto placements — per-scope replace, hand-touched kept, lots + virtual parts on the quote --- */
+  /* --- #211 T6: auto placements — per-scope replace, hand-touched kept, lots + virtual parts on the quote --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const EM = await import("@/lib/stores/equipment-map");
@@ -3776,7 +3776,7 @@ async function main() {
       { x: 0.3, y: 0.1, partId: "GEM6-PAR", auto: tag("lighting:par") },
       { x: 0.9, y: 0.9, partId: "GEM6-PIPE", qty: 240, auto: pipeTag },
     ] });
-    assert.deepEqual(first, { removed: 0, added: 3 }, "#GEM T6: a fill adds only the items of the scopes it was asked to fill");
+    assert.deepEqual(first, { removed: 0, added: 3 }, "#211 T6: a fill adds only the items of the scopes it was asked to fill");
     await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [{ x: 0.9, y: 0.9, partId: "GEM6-PIPE", qty: 240, auto: pipeTag }] });
     await GP.addPlacement(p0.id, { sheetId, page: 1, x: 0.5, y: 0.5, partId: "GEM6-PAR", optionId: opt, by });
     p = (await GP.getProject(p0.id))!;
@@ -3784,28 +3784,28 @@ async function main() {
     await GP.movePlacement(p0.id, autoPars[0].id, { x: 0.15, y: 0.2 });
     await GP.setPlacementCategory(p0.id, autoPars[1].id, "FOH");
     p = (await GP.getProject(p0.id))!;
-    assert.ok(!p.placements.find((pl) => pl.id === autoPars[0].id)!.auto && !p.placements.find((pl) => pl.id === autoPars[1].id)!.auto, "#GEM T6: a move or a category edit clears the auto tag");
+    assert.ok(!p.placements.find((pl) => pl.id === autoPars[0].id)!.auto && !p.placements.find((pl) => pl.id === autoPars[1].id)!.auto, "#211 T6: a move or a category edit clears the auto tag");
     const second = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [
       { x: 0.1, y: 0.3, partId: "GEM6-PAR", auto: tag("lighting:par") },
       { x: 0.2, y: 0.3, partId: "GEM6-PAR", auto: tag("lighting:par") },
     ] });
-    assert.deepEqual(second, { removed: 1, added: 2 }, "#GEM T6: a re-fill replaces only the untouched auto devices of that scope");
+    assert.deepEqual(second, { removed: 1, added: 2 }, "#211 T6: a re-fill replaces only the untouched auto devices of that scope");
     p = (await GP.getProject(p0.id))!;
-    assert.equal(p.placements.filter((pl) => pl.partId === "GEM6-PAR").length, 5, "#GEM T6: two hand-touched + one hand-placed + two new");
+    assert.equal(p.placements.filter((pl) => pl.partId === "GEM6-PAR").length, 5, "#211 T6: two hand-touched + one hand-placed + two new");
     const lot = p.placements.find((pl) => pl.partId === "GEM6-PIPE")!;
-    assert.ok(lot.qty === 240 && lot.auto?.scope === "rigging", "#GEM T6: another scope's lot is untouched, its qty kept");
+    assert.ok(lot.qty === 240 && lot.auto?.scope === "rigging", "#211 T6: another scope's lot is untouched, its qty kept");
     const other = await GP.addOption(p0.id, { name: "Alt", by });
-    assert.ok(other.ok, "#GEM T6: a second option");
+    assert.ok(other.ok, "#211 T6: a second option");
     if (other.ok) {
       assert.deepEqual(
         await GP.replaceAutoPlacements(p0.id, { optionId: other.option.id, scopes: ["lighting"], sheetId, page: 1, by, items: [] }),
         { removed: 0, added: 0 },
-        "#GEM T6: a re-fill in one option never touches another option's devices"
+        "#211 T6: a re-fill in one option never touches another option's devices"
       );
     }
-    assert.equal(await GP.replaceAutoPlacements(p0.id, { optionId: "opt-gone", scopes: ["lighting"], sheetId, page: 1, by, items: [] }), null, "#GEM T6: an unknown option is refused");
+    assert.equal(await GP.replaceAutoPlacements(p0.id, { optionId: "opt-gone", scopes: ["lighting"], sheetId, page: 1, by, items: [] }), null, "#211 T6: an unknown option is refused");
     await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } });
-    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } } }, "#GEM T6: the Auto choices persist on the project, per option");
+    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } } }, "#211 T6: the Auto choices persist on the project, per option");
     await Cat.upsert({ sku: "GEM6-PAR", desc: "GEM6 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
     await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, by);
     const subTag = { scope: "audio" as const, rowKey: "audio:subwoofer", tier: "better" as const };
@@ -3815,17 +3815,17 @@ async function main() {
     ] });
     p = (await GP.getProject(p0.id))!;
     const q = await buildGridQuote(p, opt);
-    assert.ok(q.ok, "#GEM T6: the design quotes");
+    assert.ok(q.ok, "#211 T6: the design quotes");
     if (q.ok) {
       const allowLine = q.build.spec.lines.find((l) => l.sku === "allow:audio:subwoofer:better");
-      assert.ok(allowLine && allowLine.allowance === true && allowLine.qty === 2 && allowLine.price > 0, "#GEM T6: the allowance reaches the quote at its live price, flagged");
-      assert.equal(allowLine?.desc, "Subwoofer", "#GEM fix1 I5: the allowance's quote line reads as the row's plain label");
-      assert.ok(!q.build.spec.lines.some((l) => l.sku !== "allow:audio:subwoofer:better" && l.allowance), "#GEM T6: …and only the allowance is flagged");
+      assert.ok(allowLine && allowLine.allowance === true && allowLine.qty === 2 && allowLine.price > 0, "#211 T6: the allowance reaches the quote at its live price, flagged");
+      assert.equal(allowLine?.desc, "Subwoofer", "#211 fix1 I5: the allowance's quote line reads as the row's plain label");
+      assert.ok(!q.build.spec.lines.some((l) => l.sku !== "allow:audio:subwoofer:better" && l.allowance), "#211 T6: …and only the allowance is flagged");
     }
     await EM.clearEquipmentRow("audio:subwoofer");
   }
 
-  /* --- #GEM T6 fix wave 1: lot-aware riser qty, riser swap clears auto, per-option estimates, dead virtual lines refused, store sanitizers --- */
+  /* --- #211 T6 fix wave 1: lot-aware riser qty, riser swap clears auto, per-option estimates, dead virtual lines refused, store sanitizers --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const GR = await import("@/lib/stores/grid-riser");
@@ -3845,23 +3845,23 @@ async function main() {
     // I1: a 12-unit lot edited to 11 on the riser → ONE marker holding 11, BOM 11, auto cleared.
     const pipes = () => optionSlice(p, opt).placements.filter((pl) => pl.partId === "GEMF-PIPE");
     const r11 = await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 11, by });
-    assert.deepEqual(r11, { ok: true, added: 0, removed: 0 }, "#GEM fix1 I1: a lot qty edit adds and removes no markers");
+    assert.deepEqual(r11, { ok: true, added: 0, removed: 0 }, "#211 fix1 I1: a lot qty edit adds and removes no markers");
     p = (await GP.getProject(p0.id))!;
-    assert.ok(pipes().length === 1 && pipes()[0].qty === 11 && !pipes()[0].auto, "#GEM fix1 I1: 12-unit lot edited to 11 → one marker, qty 11, auto cleared");
+    assert.ok(pipes().length === 1 && pipes()[0].qty === 11 && !pipes()[0].auto, "#211 fix1 I1: 12-unit lot edited to 11 → one marker, qty 11, auto cleared");
     const pipePart = [{ id: "GEMF-PIPE", sku: "GEMF-PIPE", desc: "Pipe", category: "Rigging", unit: "ft", list: 12, cost: 8 }];
-    assert.equal(bomLines(optionSlice(p, opt).placements, pipePart).find((l) => l.partId === "GEMF-PIPE")?.qty, 11, "#GEM fix1 I1: …and the BOM bills 11");
-    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 240, by })).ok, "#GEM fix1 I1: a lot row goes past 200");
-    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 300, by })).ok, "#GEM fix1 I1: …and on up");
+    assert.equal(bomLines(optionSlice(p, opt).placements, pipePart).find((l) => l.partId === "GEMF-PIPE")?.qty, 11, "#211 fix1 I1: …and the BOM bills 11");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 240, by })).ok, "#211 fix1 I1: a lot row goes past 200");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 300, by })).ok, "#211 fix1 I1: …and on up");
     p = (await GP.getProject(p0.id))!;
-    assert.ok(pipes().length === 1 && pipes()[0].qty === 300, "#GEM fix1 I1: still one marker, now 300");
-    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 100_001, by }), { ok: false, reason: "bad-qty" }, "#GEM fix1 I1: a lot is capped at the placement qty cap");
-    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 1, by })).ok, "#GEM fix1 I1: a lot can come down to one unit");
+    assert.ok(pipes().length === 1 && pipes()[0].qty === 300, "#211 fix1 I1: still one marker, now 300");
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 100_001, by }), { ok: false, reason: "bad-qty" }, "#211 fix1 I1: a lot is capped at the placement qty cap");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 1, by })).ok, "#211 fix1 I1: a lot can come down to one unit");
     p = (await GP.getProject(p0.id))!;
-    assert.ok(pipes().length === 1 && pipes()[0].qty === undefined, "#GEM fix1 I1: a one-unit lot is a plain marker (qty dropped)");
+    assert.ok(pipes().length === 1 && pipes()[0].qty === undefined, "#211 fix1 I1: a one-unit lot is a plain marker (qty dropped)");
     // A plain row keeps one-marker-per-unit and its 200 cap.
-    assert.ok((await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 3, by })).ok, "#GEM fix1 I1: three plain devices");
-    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 250, by }), { ok: false, reason: "bad-qty" }, "#GEM fix1 I1: a plain row stays capped at 200 markers");
-    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 2, by }), { ok: true, added: 0, removed: 1 }, "#GEM fix1 I1: a plain row still removes the newest marker");
+    assert.ok((await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 3, by })).ok, "#211 fix1 I1: three plain devices");
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 250, by }), { ok: false, reason: "bad-qty" }, "#211 fix1 I1: a plain row stays capped at 200 markers");
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 2, by }), { ok: true, added: 0, removed: 1 }, "#211 fix1 I1: a plain row still removes the newest marker");
 
     // I2: a riser part swap is a hand edit — the next per-scope re-fill keeps the swapped devices.
     const frontTag = { scope: "lighting" as const, rowKey: "lighting:front", tier: "good" as const };
@@ -3869,20 +3869,20 @@ async function main() {
       { x: 0.8, y: 0.95, partId: "GEMF-FRONT", auto: frontTag },
       { x: 0.85, y: 0.95, partId: "GEMF-FRONT", auto: frontTag },
     ] });
-    assert.ok((await GR.replaceNodeDevicePart(p0.id, { optionId: opt, nodeKey: node, fromPartId: "GEMF-FRONT", toPartId: "GEMF-FRONT2" })).ok, "#GEM fix1 I2: riser part swap");
+    assert.ok((await GR.replaceNodeDevicePart(p0.id, { optionId: opt, nodeKey: node, fromPartId: "GEMF-FRONT", toPartId: "GEMF-FRONT2" })).ok, "#211 fix1 I2: riser part swap");
     p = (await GP.getProject(p0.id))!;
-    assert.ok(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").every((pl) => !pl.auto), "#GEM fix1 I2: the swap clears the auto tag");
-    assert.deepEqual(await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [] }), { removed: 0, added: 0 }, "#GEM fix1 I2: a lighting re-fill removes nothing…");
+    assert.ok(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").every((pl) => !pl.auto), "#211 fix1 I2: the swap clears the auto tag");
+    assert.deepEqual(await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [] }), { removed: 0, added: 0 }, "#211 fix1 I2: a lighting re-fill removes nothing…");
     p = (await GP.getProject(p0.id))!;
-    assert.equal(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").length, 2, "#GEM fix1 I2: …and the swapped devices stay");
-    // D-GEM-20 (final review): the swap recorded each device's origin row, and
+    assert.equal(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").length, 2, "#211 fix1 I2: …and the swapped devices stay");
+    // D320 (final review): the swap recorded each device's origin row, and
     // markers a riser qty edit ADDS to that row inherit it — the row's whole
     // edited count is kept on a re-fill.
-    assert.ok(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").every((pl) => pl.autoOrigin?.rowKey === "lighting:front"), "#GEM D-GEM-20: a riser part swap records the origin row");
-    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-FRONT2", qty: 4, by })).ok, "#GEM D-GEM-20: riser qty 2 → 4");
+    assert.ok(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").every((pl) => pl.autoOrigin?.rowKey === "lighting:front"), "#211 D320: a riser part swap records the origin row");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-FRONT2", qty: 4, by })).ok, "#211 D320: riser qty 2 → 4");
     p = (await GP.getProject(p0.id))!;
     const fronts = p.placements.filter((pl) => pl.partId === "GEMF-FRONT2");
-    assert.ok(fronts.length === 4 && fronts.every((pl) => !pl.auto && pl.autoOrigin?.scope === "lighting" && pl.autoOrigin.rowKey === "lighting:front"), "#GEM D-GEM-20: markers added by a riser qty edit inherit the row's origin");
+    assert.ok(fronts.length === 4 && fronts.every((pl) => !pl.auto && pl.autoOrigin?.scope === "lighting" && pl.autoOrigin.rowKey === "lighting:front"), "#211 D320: markers added by a riser qty edit inherit the row's origin");
 
     // M3: the store sanitizes what it writes.
     const m3 = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [
@@ -3893,44 +3893,44 @@ async function main() {
     ] });
     p = (await GP.getProject(p0.id))!;
     const byPart = (id: string) => p.placements.find((pl) => pl.partId === id);
-    assert.equal(m3?.added, 3, "#GEM fix1 M3: an item whose auto tag doesn't sanitize is dropped");
-    assert.ok(byPart("GEMF-HUGE")?.qty === 100_000 && byPart("GEMF-NAN")?.qty === undefined && !byPart("GEMF-BOGUS"), "#GEM fix1 M3: lot qty clamped / dropped");
-    assert.deepEqual(byPart("GEMF-EXTRA")?.auto, pipeTag, "#GEM fix1 M3: the stored tag is rebuilt, extra keys gone");
+    assert.equal(m3?.added, 3, "#211 fix1 M3: an item whose auto tag doesn't sanitize is dropped");
+    assert.ok(byPart("GEMF-HUGE")?.qty === 100_000 && byPart("GEMF-NAN")?.qty === undefined && !byPart("GEMF-BOGUS"), "#211 fix1 M3: lot qty clamped / dropped");
+    assert.deepEqual(byPart("GEMF-EXTRA")?.auto, pipeTag, "#211 fix1 M3: the stored tag is rebuilt, extra keys gone");
     await GP.addPlacements(p0.id, { sheetId, page: 1, optionId: opt, by, items: [{ x: 0.3, y: 0.95, partId: "GEMF-ADD", qty: 0.4, auto: { scope: "nope", rowKey: "x", tier: "good" } as unknown as typeof pipeTag }] });
     p = (await GP.getProject(p0.id))!;
-    assert.ok(byPart("GEMF-ADD") && byPart("GEMF-ADD")!.qty === undefined && byPart("GEMF-ADD")!.auto === undefined, "#GEM fix1 M3: addPlacements drops a junk qty and tag");
+    assert.ok(byPart("GEMF-ADD") && byPart("GEMF-ADD")!.qty === undefined && byPart("GEMF-ADD")!.auto === undefined, "#211 fix1 M3: addPlacements drops a junk qty and tag");
 
     // D1: Auto choices are per option — copied with an option, snapshotted, restored, removed with it.
     const estA = { tierByScope: { lighting: "best" as const }, overrides: { "lighting:par": { qty: 7 } } };
     const estB = { tierByScope: { audio: "good" as const }, overrides: {} };
     await GP.setAutoEstimate(p0.id, opt, { ...estA, overrides: { ...estA.overrides, "bogus:row": { qty: 1 } } } as typeof estA);
-    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA }, "#GEM fix1 D1/M3: stored under the option, sanitized");
-    assert.equal(await GP.setAutoEstimate(p0.id, "opt-gone", estB), null, "#GEM fix1 D1: an unknown option is refused");
+    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA }, "#211 fix1 D1/M3: stored under the option, sanitized");
+    assert.equal(await GP.setAutoEstimate(p0.id, "opt-gone", estB), null, "#211 fix1 D1: an unknown option is refused");
     const copy = await GP.addOption(p0.id, { name: "Copy", copyFromOptionId: opt, by });
-    assert.ok(copy.ok, "#GEM fix1 D1: option copy");
+    assert.ok(copy.ok, "#211 fix1 D1: option copy");
     if (copy.ok) {
       const opt2 = copy.option.id;
-      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA, [opt2]: estA }, "#GEM fix1 D1: a copied option carries the source option's Auto choices");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA, [opt2]: estA }, "#211 fix1 D1: a copied option carries the source option's Auto choices");
       await GP.setAutoEstimate(p0.id, opt2, estB);
       const rev = await GP.addRevision(p0.id, { by, note: "fix1" });
-      assert.deepEqual(rev?.autoEstimate, { [opt]: estA, [opt2]: estB }, "#GEM fix1 D1: a revision snapshots every option's Auto choices");
+      assert.deepEqual(rev?.autoEstimate, { [opt]: estA, [opt2]: estB }, "#211 fix1 D1: a revision snapshots every option's Auto choices");
       await GP.setAutoEstimate(p0.id, opt, null);
-      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt2]: estB }, "#GEM fix1 D1: clearing one option leaves the other");
-      assert.ok((await GP.restoreRevision(p0.id, rev!.rev, by)).ok, "#GEM fix1 D1: restore");
-      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA, [opt2]: estB }, "#GEM fix1 D1: restoring a revision brings its Auto choices back");
-      assert.ok((await GP.removeOption(p0.id, opt2, by)).ok, "#GEM fix1 D1: remove the copy");
-      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA }, "#GEM fix1 D1: removing an option drops its Auto choices");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt2]: estB }, "#211 fix1 D1: clearing one option leaves the other");
+      assert.ok((await GP.restoreRevision(p0.id, rev!.rev, by)).ok, "#211 fix1 D1: restore");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA, [opt2]: estB }, "#211 fix1 D1: restoring a revision brings its Auto choices back");
+      assert.ok((await GP.removeOption(p0.id, opt2, by)).ok, "#211 fix1 D1: remove the copy");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA }, "#211 fix1 D1: removing an option drops its Auto choices");
     }
     // A legacy single value (pre per-option) reads — and migrates — as the first option's.
     await patchDoc<{ id: string; autoEstimate?: unknown }>("grid_projects", p0.id, (d) => {
       d.autoEstimate = estB;
     });
     const legacyRev = await GP.addRevision(p0.id, { by, note: "legacy" });
-    assert.deepEqual(legacyRev?.autoEstimate, { [opt]: estB }, "#GEM fix1 D1: a legacy single estimate snapshots as the first option's");
+    assert.deepEqual(legacyRev?.autoEstimate, { [opt]: estB }, "#211 fix1 D1: a legacy single estimate snapshots as the first option's");
     const alt = await GP.addOption(p0.id, { name: "Alt", by });
     if (alt.ok) {
       await GP.setAutoEstimate(p0.id, alt.option.id, estA);
-      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estB, [alt.option.id]: estA }, "#GEM fix1 D1: the next write migrates the legacy value to the per-option map");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estB, [alt.option.id]: estA }, "#211 fix1 D1: the next write migrates the legacy value to the per-option map");
     }
 
     // I4: a dead virtual line (unconfirmed allowance, deleted assembly) makes the quote refuse, by name.
@@ -3944,16 +3944,16 @@ async function main() {
     ] });
     d = (await GP.getProject(d0.id))!;
     const dq = await buildGridQuote(d, dOpt);
-    assert.ok(!dq.ok, "#GEM fix1 I4: a design with dead virtual lines does not quote");
+    assert.ok(!dq.ok, "#211 fix1 I4: a design with dead virtual lines does not quote");
     if (!dq.ok) {
-      assert.match(dq.error, /2 devices need a part — replace or re-fill them/, "#GEM fix1 I4: the refusal says what to do");
-      assert.match(dq.error, /Projection screen \/ LED wall \(allowance no longer confirmed\)/, "#GEM fix1 I4: …naming the dead allowance");
-      assert.match(dq.error, /SA-GONE-FIX1 \(assembly deleted\)/, "#GEM fix1 I4: …and the deleted assembly");
-      assert.doesNotMatch(dq.error, /priced at list/, "#GEM fix1 I4: never reported as a tier fallback");
+      assert.match(dq.error, /2 devices need a part — replace or re-fill them/, "#211 fix1 I4: the refusal says what to do");
+      assert.match(dq.error, /Projection screen \/ LED wall \(allowance no longer confirmed\)/, "#211 fix1 I4: …naming the dead allowance");
+      assert.match(dq.error, /SA-GONE-FIX1 \(assembly deleted\)/, "#211 fix1 I4: …and the deleted assembly");
+      assert.doesNotMatch(dq.error, /priced at list/, "#211 fix1 I4: never reported as a tier fallback");
     }
   }
 
-  /* --- #GEM T8: the Auto fill paints the generated base sheet from the Equipment map --- */
+  /* --- #211 T8: the Auto fill paints the generated base sheet from the Equipment map --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const EM = await import("@/lib/stores/equipment-map");
@@ -3984,7 +3984,7 @@ async function main() {
       fixtures: { par: true, front: false, cyc: false, side: false, automated: false },
     };
     const p0 = await GP.createProject({ name: "GEM8 auto", customer: "", customerId: null, by });
-    // #GEM D-GEM-12 (post-brief): autoEstimate is stored PER OPTION —
+    // #211 D312 (post-brief): autoEstimate is stored PER OPTION —
     // resolveOptionId's virtual default id is known before the project ever
     // persists an `options` list, so it's captured once here and reused for
     // both setAutoEstimate and fillAutoScopes below.
@@ -3995,32 +3995,32 @@ async function main() {
     await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
     let p = (await GP.getProject(p0.id))!;
     const res = await fillAutoScopes(p0.id, opt, ["lighting", "curtains", "audio"], by);
-    assert.ok(res.ok, `#GEM T8: the fill runs (${res.ok ? "" : res.error})`);
+    assert.ok(res.ok, `#211 T8: the fill runs (${res.ok ? "" : res.error})`);
     p = (await GP.getProject(p0.id))!;
     const eq = compute({ ...a, tier: "better" });
     const qtyOf = (key: string) => eq.systems.flatMap((s) => s.items).find((i) => i.key === key)!.qty;
     const autoPl = p.placements.filter((pl) => pl.auto);
     const placed = (key: string) => autoPl.filter((pl) => pl.auto!.rowKey === key).reduce((n, pl) => n + (pl.qty ?? 1), 0);
-    assert.equal(placed("lighting:par"), qtyOf("lighting:par"), "#GEM T8: every par the equations call for is on the plan");
-    assert.equal(placed("curtains:draw"), qtyOf("curtains:draw"), "#GEM T8: every draw the equations call for is on the plan");
-    assert.ok(autoPl.filter((pl) => pl.auto!.rowKey === "curtains:draw").every((pl) => pl.curtain?.fabricSku === "GEM8-VEL" && pl.curtain.type === "Draw"), "#GEM T8: draws are curtain drop-ins on the mapped fabric");
-    assert.ok(qtyOf("audio:lineArray") > 0, "#GEM T8 fix wave 1 (M4): the equations actually call for line-array boxes here, so the next check is a real guard, not a vacuous zero-equals-zero");
-    assert.equal(placed("audio:lineArray"), 0, "#GEM T8: an unmapped row is never placed — no fallback dollar, no placeholder");
-    assert.ok(autoPl.some((pl) => pl.partId === `asm:${rack.id}`) && autoPl.some((pl) => pl.partId === "allow:audio:subwoofer:better"), "#GEM T8: the System assembly and the allowance land as virtual parts");
-    assert.ok(autoPl.every((pl) => pl.sheetId === p.sheetIds[0] && pl.optionId === opt), "#GEM T8: everything lands on the generated base sheet, in the current option");
-    assert.ok(res.ok && res.needsPart >= 1, "#GEM T8: the fill reports the needs-a-part lines");
-    assert.ok(await GC.getGridSymbol("GEM8-PAR"), "#GEM T8: a mapped part gets its Grid library entry at fill time");
+    assert.equal(placed("lighting:par"), qtyOf("lighting:par"), "#211 T8: every par the equations call for is on the plan");
+    assert.equal(placed("curtains:draw"), qtyOf("curtains:draw"), "#211 T8: every draw the equations call for is on the plan");
+    assert.ok(autoPl.filter((pl) => pl.auto!.rowKey === "curtains:draw").every((pl) => pl.curtain?.fabricSku === "GEM8-VEL" && pl.curtain.type === "Draw"), "#211 T8: draws are curtain drop-ins on the mapped fabric");
+    assert.ok(qtyOf("audio:lineArray") > 0, "#211 T8 fix wave 1 (M4): the equations actually call for line-array boxes here, so the next check is a real guard, not a vacuous zero-equals-zero");
+    assert.equal(placed("audio:lineArray"), 0, "#211 T8: an unmapped row is never placed — no fallback dollar, no placeholder");
+    assert.ok(autoPl.some((pl) => pl.partId === `asm:${rack.id}`) && autoPl.some((pl) => pl.partId === "allow:audio:subwoofer:better"), "#211 T8: the System assembly and the allowance land as virtual parts");
+    assert.ok(autoPl.every((pl) => pl.sheetId === p.sheetIds[0] && pl.optionId === opt), "#211 T8: everything lands on the generated base sheet, in the current option");
+    assert.ok(res.ok && res.needsPart >= 1, "#211 T8: the fill reports the needs-a-part lines");
+    assert.ok(await GC.getGridSymbol("GEM8-PAR"), "#211 T8: a mapped part gets its Grid library entry at fill time");
     const q = await buildGridQuote(p, opt);
-    assert.ok(q.ok, "#GEM T8: the Auto design quotes");
+    assert.ok(q.ok, "#211 T8: the Auto design quotes");
     if (q.ok) {
-      assert.ok(q.build.spec.lines.some((l) => l.allowance === true && l.qty === qtyOf("audio:subwoofer")), "#GEM T8: the allowance reaches the quote, flagged");
-      assert.ok(q.build.value > 0, "#GEM T8: the quote carries value");
+      assert.ok(q.build.spec.lines.some((l) => l.allowance === true && l.qty === qtyOf("audio:subwoofer")), "#211 T8: the allowance reaches the quote, flagged");
+      assert.ok(q.build.value > 0, "#211 T8: the quote carries value");
     }
     for (const k of ["lighting:par", "curtains:draw", "audio:mixerDsp", "audio:subwoofer"]) await EM.clearEquipmentRow(k);
   }
 
-  /* --- #GEM T9: a per-scope re-fill keeps hand-touched devices and honours
-         the new choices. Adapted from the brief for D-GEM-12 (not in the
+  /* --- #211 T9: a per-scope re-fill keeps hand-touched devices and honours
+         the new choices. Adapted from the brief for D312 (not in the
          original brief): autoEstimate is stored PER OPTION, so
          setAutoEstimate takes the option id and the current choices are read
          back with autoEstimateFor rather than a bare `p.autoEstimate`. --- */
@@ -4048,31 +4048,31 @@ async function main() {
     await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "better" }, overrides: {} });
     await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
     let p = (await GP.getProject(p0.id))!;
-    assert.ok((await fillAutoScopes(p0.id, opt, ["lighting"], by)).ok, "#GEM T9: first fill");
+    assert.ok((await fillAutoScopes(p0.id, opt, ["lighting"], by)).ok, "#211 T9: first fill");
     p = (await GP.getProject(p0.id))!;
     const pars = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
-    assert.ok(pars.length > 2, "#GEM T9: pars were placed");
+    assert.ok(pars.length > 2, "#211 T9: pars were placed");
     await GP.movePlacement(p0.id, pars[0].id, { x: 0.5, y: 0.5 });
     const curEst = autoEstimateFor(p.autoEstimate, opt, opt)!;
     await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(curEst, "lighting", "best", { "lighting:par": { qty: 4 } }));
     const res = await fillAutoScopes(p0.id, opt, ["lighting"], by);
-    // D-GEM-20 (final review): the hand-moved par counts toward the new 4 — 3 are placed.
-    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 3 && res.kept === 1, `#GEM T9: the re-fill replaced only the untouched pars, counting the kept one (${JSON.stringify(res)})`);
+    // D320 (final review): the hand-moved par counts toward the new 4 — 3 are placed.
+    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 3 && res.kept === 1, `#211 T9: the re-fill replaced only the untouched pars, counting the kept one (${JSON.stringify(res)})`);
     p = (await GP.getProject(p0.id))!;
     const moved = p.placements.find((pl) => pl.id === pars[0].id);
-    assert.ok(moved && !moved.auto && moved.x === 0.5, "#GEM T9: the hand-moved par stays where it was put");
+    assert.ok(moved && !moved.auto && moved.x === 0.5, "#211 T9: the hand-moved par stays where it was put");
     const fresh = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
-    assert.ok(fresh.length === 3 && fresh.every((pl) => pl.auto!.tier === "best"), "#GEM T9: the new pars follow the new tier and the edited quantity (4 = 3 new + 1 kept, D-GEM-20)");
-    assert.deepEqual(autoEstimateFor(p.autoEstimate, opt, opt), { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 4 } } }, "#GEM T9: the choices are saved, so Change equipment… re-opens with them");
+    assert.ok(fresh.length === 3 && fresh.every((pl) => pl.auto!.tier === "best"), "#211 T9: the new pars follow the new tier and the edited quantity (4 = 3 new + 1 kept, D320)");
+    assert.deepEqual(autoEstimateFor(p.autoEstimate, opt, opt), { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 4 } } }, "#211 T9: the choices are saved, so Change equipment… re-opens with them");
     await EM.clearEquipmentRow("lighting:par");
     // Final review minor: leave no GEM9 fixture behind for later blocks.
     await Cat.remove("GEM9-PAR");
-    assert.equal((await Cat.getMany(["GEM9-PAR"])).length, 0, "#GEM T9: cleanup — the GEM9 catalog fixture is removed");
+    assert.equal((await Cat.getMany(["GEM9-PAR"])).length, 0, "#211 T9: cleanup — the GEM9 catalog fixture is removed");
   }
 
-  /* --- #GEM final review: D-GEM-20 — a re-fill counts devices kept by hand
+  /* --- #211 final review: D320 — a re-fill counts devices kept by hand
          toward the row's new quantity (12 → move 3 → re-fill → 12 total;
-         re-fill to 8 → 5 placed + 3 kept), and D-GEM-22's autoNeedsPart. --- */
+         re-fill to 8 → 5 placed + 3 kept), and D322's autoNeedsPart. --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const EM = await import("@/lib/stores/equipment-map");
@@ -4097,35 +4097,35 @@ async function main() {
     await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "better" }, overrides: { "lighting:par": { qty: 12 } } });
     await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
     const first = await fillAutoScopes(p0.id, opt, ["lighting"], by);
-    assert.ok(first.ok && first.added === 12 && first.kept === 0, `#GEM D-GEM-20: the first fill places 12 pars (${JSON.stringify(first)})`);
+    assert.ok(first.ok && first.added === 12 && first.kept === 0, `#211 D320: the first fill places 12 pars (${JSON.stringify(first)})`);
     let p = (await GP.getProject(p0.id))!;
     const pars = () => p.placements.filter((pl) => pl.partId === "GEMK-PAR");
     const autoPars = pars().filter((pl) => pl.auto);
     for (const pl of autoPars.slice(0, 3)) await GP.movePlacement(p0.id, pl.id, { x: 0.5, y: 0.5 });
     p = (await GP.getProject(p0.id))!;
     const moved = pars().filter((pl) => !pl.auto);
-    assert.ok(moved.length === 3 && moved.every((pl) => pl.autoOrigin?.scope === "lighting" && pl.autoOrigin.rowKey === "lighting:par"), "#GEM D-GEM-20: a move clears auto and records the device's origin row");
+    assert.ok(moved.length === 3 && moved.every((pl) => pl.autoOrigin?.scope === "lighting" && pl.autoOrigin.rowKey === "lighting:par"), "#211 D320: a move clears auto and records the device's origin row");
     // New tier, still calling for 12 → 9 placed, 3 kept, 12 total.
     let est = autoEstimateFor(p.autoEstimate, opt, opt)!;
     await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(est, "lighting", "best", { "lighting:par": { qty: 12 } }));
     const second = await fillAutoScopes(p0.id, opt, ["lighting"], by);
-    assert.ok(second.ok && second.added === 9 && second.removed === 9 && second.kept === 3, `#GEM D-GEM-20: 12 called for, 3 kept by hand → 9 placed (${JSON.stringify(second)})`);
+    assert.ok(second.ok && second.added === 9 && second.removed === 9 && second.kept === 3, `#211 D320: 12 called for, 3 kept by hand → 9 placed (${JSON.stringify(second)})`);
     p = (await GP.getProject(p0.id))!;
-    assert.equal(pars().reduce((n, pl) => n + (pl.qty ?? 1), 0), 12, "#GEM D-GEM-20: …so the row totals 12, not 15");
-    assert.ok(pars().filter((pl) => pl.auto).every((pl) => pl.auto!.tier === "best"), "#GEM D-GEM-20: the placed ones follow the new tier");
+    assert.equal(pars().reduce((n, pl) => n + (pl.qty ?? 1), 0), 12, "#211 D320: …so the row totals 12, not 15");
+    assert.ok(pars().filter((pl) => pl.auto).every((pl) => pl.auto!.tier === "best"), "#211 D320: the placed ones follow the new tier");
     // A tier calling for 8 → 5 placed + the 3 kept.
     est = autoEstimateFor(p.autoEstimate, opt, opt)!;
     await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(est, "lighting", "good", { "lighting:par": { qty: 8 } }));
     const third = await fillAutoScopes(p0.id, opt, ["lighting"], by);
-    assert.ok(third.ok && third.added === 5 && third.kept === 3, `#GEM D-GEM-20: 8 called for, 3 kept → 5 placed (${JSON.stringify(third)})`);
+    assert.ok(third.ok && third.added === 5 && third.kept === 3, `#211 D320: 8 called for, 3 kept → 5 placed (${JSON.stringify(third)})`);
     p = (await GP.getProject(p0.id))!;
-    assert.equal(pars().length, 8, "#GEM D-GEM-20: 5 placed + 3 kept = 8");
+    assert.equal(pars().length, 8, "#211 D320: 5 placed + 3 kept = 8");
     // Fewer called for than kept → nothing placed, the kept devices stay (never below zero).
     est = autoEstimateFor(p.autoEstimate, opt, opt)!;
     await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(est, "lighting", "good", { "lighting:par": { qty: 2 } }));
     const fourth = await fillAutoScopes(p0.id, opt, ["lighting"], by);
     p = (await GP.getProject(p0.id))!;
-    assert.ok(fourth.ok && fourth.added === 0 && pars().length === 3, "#GEM D-GEM-20: fewer called for than kept → none placed, the kept 3 stay");
+    assert.ok(fourth.ok && fourth.added === 0 && pars().length === 3, "#211 D320: fewer called for than kept → none placed, the kept 3 stay");
     // A riser part swap / category edit also records the origin (withoutAuto everywhere).
     await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(autoEstimateFor(p.autoEstimate, opt, opt)!, "lighting", "good", { "lighting:par": { qty: 5 } }));
     await fillAutoScopes(p0.id, opt, ["lighting"], by);
@@ -4133,18 +4133,18 @@ async function main() {
     const oneAuto = pars().find((pl) => pl.auto)!;
     await GP.setPlacementCategory(p0.id, oneAuto.id, "Front of house");
     p = (await GP.getProject(p0.id))!;
-    assert.equal(p.placements.find((pl) => pl.id === oneAuto.id)?.autoOrigin?.rowKey, "lighting:par", "#GEM D-GEM-20: a category edit records the origin too");
-    // D-GEM-22: only lighting is chosen and par is mapped → nothing missing; add an unmapped Auto scope → counted.
-    assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 0, "#GEM D-GEM-22: a fully mapped Auto design has no missing lines");
+    assert.equal(p.placements.find((pl) => pl.id === oneAuto.id)?.autoOrigin?.rowKey, "lighting:par", "#211 D320: a category edit records the origin too");
+    // D322: only lighting is chosen and par is mapped → nothing missing; add an unmapped Auto scope → counted.
+    assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 0, "#211 D322: a fully mapped Auto design has no missing lines");
     const b = { ...a, sys: { ...a.sys, audio: true } };
     await GP.setScopeInputs(p0.id, intakeScopeInputs(b));
     await GP.setAutoEstimate(p0.id, opt, { ...autoEstimateFor((await GP.getProject(p0.id))!.autoEstimate, opt, opt)!, tierByScope: { lighting: "good", audio: "better" } });
-    assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 3, "#GEM D-GEM-22: an unmapped Auto scope's lines (3 audio rows) are counted as missing from the quote");
+    assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 3, "#211 D322: an unmapped Auto scope's lines (3 audio rows) are counted as missing from the quote");
     await EM.clearEquipmentRow("lighting:par");
     await Cat.remove("GEMK-PAR");
   }
 
-  /* --- #GEM final review I3/I4 (D-GEM-19): the server re-prices a Quick
+  /* --- #211 final review I3/I4 (D319): the server re-prices a Quick
          design before any promote, and derives `incomplete` on save. --- */
   {
     const EM = await import("@/lib/stores/equipment-map");
@@ -4160,15 +4160,15 @@ async function main() {
     const cfg = { ...defaultAState(10), tier: "better" as const };
     const rec = { name: "GEMFR", venue: "Conference", size: "large", tier: "better", width: 50, depth: 30, grid: 50, systems: ["Rigging"], config: cfg as unknown as Record<string, unknown> };
     const n0 = await DP.serverDesignNeedsPart(rec);
-    assert.ok(n0 > 0, "#GEM D-GEM-19: with the map empty, the server counts needs-a-part lines");
+    assert.ok(n0 > 0, "#211 D319: with the map empty, the server counts needs-a-part lines");
     const forged = await DP.quickPromoteGuard({ ...rec, incomplete: { needsPart: 0 } } as typeof rec);
-    assert.ok(forged && forged.needsPart === n0 && /^Incomplete — /.test(forged.error), "#GEM D-GEM-19: a client claiming complete is refused — the server re-prices");
+    assert.ok(forged && forged.needsPart === n0 && /^Incomplete — /.test(forged.error), "#211 D319: a client claiming complete is refused — the server re-prices");
     const savedRes = await DP.saveQuickDesign(null, { ...rec, incomplete: { needsPart: 0 }, budget: 1234 }, "Jeff Chesebro");
     if (!savedRes.ok) throw new Error(savedRes.error);
-    assert.equal(savedRes.record.incomplete?.needsPart, n0, "#GEM D-GEM-19: a save writes the server's count, never the client's");
-    assert.equal((await Designs.getDesign(savedRes.record.id))?.incomplete?.needsPart, n0, "#GEM D-GEM-19: …and it round-trips on the record");
+    assert.equal(savedRes.record.incomplete?.needsPart, n0, "#211 D319: a save writes the server's count, never the client's");
+    assert.equal((await Designs.getDesign(savedRes.record.id))?.incomplete?.needsPart, n0, "#211 D319: …and it round-trips on the record");
     const legacy = await Designs.createDesign({ name: "GEMFR legacy", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging", "Audio"], budget: 99000, owner: "Jeff Chesebro" });
-    assert.ok(legacy.incomplete === undefined && (await DP.quickPromoteGuard(legacy)) !== null, "#GEM D-GEM-19: a pre-#GEM design (no incomplete, no config) is refused until its rows are mapped");
+    assert.ok(legacy.incomplete === undefined && (await DP.quickPromoteGuard(legacy)) !== null, "#211 D319: a pre-#211 design (no incomplete, no config) is refused until its rows are mapped");
     // I3 — fixture picks price through priceCell (catalog margin), a dead pick stays needs-a-part.
     await Cat.upsert({ sku: "GEMFR-ENG", desc: "GEMFR engine", category: "Lighting Fixtures", unit: "ea", list: 0, cost: 500 });
     const live = sanitizeFixtureInput({ kind: "fixture", label: "GEMFR live", description: "", lightEngineSku: "GEMFR-ENG", lensSku: null });
@@ -4178,21 +4178,21 @@ async function main() {
     const fxDead = await Fx.createFixture(dead.value, by, { cost: 0, price: 0, pricedAt: null });
     // Every row a confirmed allowance → nothing needs a part.
     for (const r of EQUIPMENT_ROWS) await EM.saveEquipmentRow(r.key, { sameAll: true, tiers: { good: { kind: "allowance", amount: 100, confirmed: true } } }, by);
-    assert.equal(await DP.serverDesignNeedsPart(rec), 0, "#GEM D-GEM-19: every row mapped → complete");
-    assert.equal(await DP.quickPromoteGuard(legacy), null, "#GEM D-GEM-19: …and the pre-#GEM design can now become a quote");
+    assert.equal(await DP.serverDesignNeedsPart(rec), 0, "#211 D319: every row mapped → complete");
+    assert.equal(await DP.quickPromoteGuard(legacy), null, "#211 D319: …and the pre-#211 design can now become a quote");
     const { table, fixturePrices } = await DP.loadDesignPricing([fxLive.id, fxDead.id]);
     const pl = fixturePrices[fxLive.id];
-    assert.ok(pl.status === "assembly" && pl.unitCost === 500 && pl.unitSell > 500, `#GEM final review I3: a list-less fixture pick sells at cost ÷ (1 − margin), not a $0 list sum (${JSON.stringify(pl)})`);
-    assert.equal(fixturePrices[fxDead.id].status, "needs-part", "#GEM final review I3: a pick with no priced parts prices needs-a-part");
+    assert.ok(pl.status === "assembly" && pl.unitCost === 500 && pl.unitSell > 500, `#211 final review I3: a list-less fixture pick sells at cost ÷ (1 − margin), not a $0 list sum (${JSON.stringify(pl)})`);
+    assert.equal(fixturePrices[fxDead.id].status, "needs-part", "#211 final review I3: a pick with no priced parts prices needs-a-part");
     const withPick = (id: string) => ({ ...rec, config: { ...cfg, fixtureAssemblies: { par: id } } as unknown as Record<string, unknown> });
-    assert.equal(quickDesignNeedsPart(withPick(fxLive.id), table, fixturePrices), 0, "#GEM final review I3: a priced pick overrides the par row");
-    assert.equal(quickDesignNeedsPart(withPick(fxDead.id), table, fixturePrices), 1, "#GEM final review I3: a needs-a-part pick stays needs-a-part (the mapped row does not paper over it)");
-    assert.equal(await DP.serverDesignNeedsPart(withPick(fxDead.id)), 1, "#GEM D-GEM-19: the server guard sees the dead pick too");
+    assert.equal(quickDesignNeedsPart(withPick(fxLive.id), table, fixturePrices), 0, "#211 final review I3: a priced pick overrides the par row");
+    assert.equal(quickDesignNeedsPart(withPick(fxDead.id), table, fixturePrices), 1, "#211 final review I3: a needs-a-part pick stays needs-a-part (the mapped row does not paper over it)");
+    assert.equal(await DP.serverDesignNeedsPart(withPick(fxDead.id)), 1, "#211 D319: the server guard sees the dead pick too");
     for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
     await Cat.remove("GEMFR-ENG");
   }
 
-  /* --- #GEM final review, fix wave 2 — I2: a Grid Auto design carries its
+  /* --- #211 final review, fix wave 2 — I2: a Grid Auto design carries its
          live `incomplete` on every read (one shared price context); a Blank
          Grid design carries none. --- */
   {
@@ -4223,18 +4223,18 @@ async function main() {
     const blankP = await GP.createProject({ name: "GEMW2 blank", customer: "", customerId: null, by });
     const blank = await Designs.createDesign({ name: "GEMW2 blank", owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: blankP.id });
     const expected = await autoNeedsPart((await GP.getProject(one.p.id))!, one.opt);
-    assert.ok(expected > 0, `#GEM wave 2 I2: with the map empty the Auto design has needs-a-part lines (${expected})`);
+    assert.ok(expected > 0, `#211 wave 2 I2: with the map empty the Auto design has needs-a-part lines (${expected})`);
     const all = await Designs.getAllDesigns();
     const got = (id: string) => all.find((d) => d.id === id)!;
-    assert.equal(got(one.d.id).incomplete?.needsPart, expected, "#GEM wave 2 I2: getAllDesigns stamps a Grid Auto design's needs-a-part count");
-    assert.equal(got(two.d.id).incomplete?.needsPart, expected, "#GEM wave 2 I2: …for every Auto design in the read (one shared context)");
-    assert.equal(got(blank.id).incomplete, undefined, "#GEM wave 2 I2: a Blank Grid design carries no incomplete");
-    assert.equal(designBudgetLabel(got(one.d.id), (n) => `$${n}`), "Incomplete", "#GEM wave 2 I2: Home / Reviews read Incomplete for it (and Home's Add to Quotes is disabled by the same count)");
-    assert.equal(designNeedsPart((await Designs.getDesign(one.d.id))!), expected, "#GEM wave 2 I2: getDesign stamps it too (the engagement letter prints To be confirmed)");
-    assert.equal((await Designs.getDesign(one.d.id))!.incomplete?.needsPart, expected, "#GEM wave 2 I2: never stored — read live");
+    assert.equal(got(one.d.id).incomplete?.needsPart, expected, "#211 wave 2 I2: getAllDesigns stamps a Grid Auto design's needs-a-part count");
+    assert.equal(got(two.d.id).incomplete?.needsPart, expected, "#211 wave 2 I2: …for every Auto design in the read (one shared context)");
+    assert.equal(got(blank.id).incomplete, undefined, "#211 wave 2 I2: a Blank Grid design carries no incomplete");
+    assert.equal(designBudgetLabel(got(one.d.id), (n) => `$${n}`), "Incomplete", "#211 wave 2 I2: Home / Reviews read Incomplete for it (and Home's Add to Quotes is disabled by the same count)");
+    assert.equal(designNeedsPart((await Designs.getDesign(one.d.id))!), expected, "#211 wave 2 I2: getDesign stamps it too (the engagement letter prints To be confirmed)");
+    assert.equal((await Designs.getDesign(one.d.id))!.incomplete?.needsPart, expected, "#211 wave 2 I2: never stored — read live");
   }
 
-  /* --- #GEM final review, fix wave 2 — I1 (D-GEM-23), M1, M2: the server
+  /* --- #211 final review, fix wave 2 — I1 (D323), M1, M2: the server
          derives `budget` as well as `incomplete` on every save and promote;
          the save writes only whitelisted fields; Quick refuses a Grid record. --- */
   {
@@ -4251,47 +4251,47 @@ async function main() {
     const cfg = { ...defaultAState(10), tier: "better" as const };
     const rec = { name: "GEMW2 quick", venue: "Conference", size: "large", tier: "better", width: 50, depth: 30, grid: 50, systems: ["Rigging", "Lighting"], customer: "", customerId: null, locationId: null, config: cfg as unknown as Record<string, unknown> };
     const unmapped = await DP.serverDesignPrice(rec);
-    assert.ok(unmapped.needsPart === 1, `#GEM wave 2 I1: one unmapped row → 1 needs-a-part line (${unmapped.needsPart})`);
+    assert.ok(unmapped.needsPart === 1, `#211 wave 2 I1: one unmapped row → 1 needs-a-part line (${unmapped.needsPart})`);
     // A stale tab: the client claims complete with a partial budget, and tries to set server-owned fields.
     const forged = { ...rec, budget: 7, incomplete: { needsPart: 0 }, review: { state: "approved", reviewer: "Mallory", submittedBy: null, submittedAt: null, decidedBy: "Mallory", decidedAt: 1, note: "" }, quoteId: "Q-FORGED", owner: "Mallory", layoutMode: "manual", gridProjectId: "GP-FORGED", revisions: [{ rev: 99, at: 1 }] };
     const created = await DP.saveQuickDesign(null, forged, "Jeff Chesebro");
     if (!created.ok) throw new Error(created.error);
     const c0 = (await Designs.getDesign(created.record.id))!;
-    assert.equal(c0.incomplete?.needsPart, 1, "#GEM wave 2 I1: the stale-tab save stores the server's incomplete count, not the client's 0");
-    assert.equal(c0.budget, unmapped.budget, "#GEM wave 2 I1: …and the server's budget, not the client's partial figure");
-    assert.notEqual(c0.budget, 7, "#GEM wave 2 I1: the client budget is never stored");
-    assert.ok(c0.review.state === "none" && !c0.quoteId && c0.owner === "Jeff Chesebro" && c0.layoutMode === undefined && !c0.gridProjectId && !c0.revisions, "#GEM wave 2 M2: a create ignores review / quoteId / owner / layoutMode / gridProjectId / revisions from the client");
+    assert.equal(c0.incomplete?.needsPart, 1, "#211 wave 2 I1: the stale-tab save stores the server's incomplete count, not the client's 0");
+    assert.equal(c0.budget, unmapped.budget, "#211 wave 2 I1: …and the server's budget, not the client's partial figure");
+    assert.notEqual(c0.budget, 7, "#211 wave 2 I1: the client budget is never stored");
+    assert.ok(c0.review.state === "none" && !c0.quoteId && c0.owner === "Jeff Chesebro" && c0.layoutMode === undefined && !c0.gridProjectId && !c0.revisions, "#211 wave 2 M2: a create ignores review / quoteId / owner / layoutMode / gridProjectId / revisions from the client");
     await Designs.submitDesignForReview(c0.id, { by: "Jeff Chesebro", reviewer: "Pat" });
     const upd = await DP.saveQuickDesign(c0.id, forged, "Someone Else");
     if (!upd.ok) throw new Error(upd.error);
     const c1 = (await Designs.getDesign(c0.id))!;
-    assert.ok(c1.review.state === "in_review" && c1.review.reviewer === "Pat" && !c1.quoteId && c1.owner === "Jeff Chesebro" && c1.layoutMode === undefined && !c1.gridProjectId, "#GEM wave 2 M2: an update ignores review / quoteId / owner / layoutMode / gridProjectId from the client");
+    assert.ok(c1.review.state === "in_review" && c1.review.reviewer === "Pat" && !c1.quoteId && c1.owner === "Jeff Chesebro" && c1.layoutMode === undefined && !c1.gridProjectId, "#211 wave 2 M2: an update ignores review / quoteId / owner / layoutMode / gridProjectId from the client");
     // Map the row → the promote re-prices and quotes the SERVER figure.
     await EM.saveEquipmentRow("lighting:par", { sameAll: true, tiers: { good: { kind: "allowance", amount: 250, confirmed: true } } }, by);
     const { price, blocked } = await DP.quickPromoteCheck(c1);
-    assert.ok(blocked === null && price.needsPart === 0 && price.budget > 0 && price.budget !== c1.budget, `#GEM wave 2 I1: once mapped, the promote re-derives both (${JSON.stringify(price)} vs stored ${c1.budget})`);
+    assert.ok(blocked === null && price.needsPart === 0 && price.budget > 0 && price.budget !== c1.budget, `#211 wave 2 I1: once mapped, the promote re-derives both (${JSON.stringify(price)} vs stored ${c1.budget})`);
     // The server figure is the screen's figure: tierTotals over the same pipeline with the page's default rates.
     const s = hydrateAState(c1, 10);
     const { table } = await DP.loadDesignPricing([]);
     const screen = tierTotals(tierSystems(compute(s), s, "better", tierDefsFor(s), table, {}), TIERS[1], 0.18, 0.05, (s.contingency || 0) / 100).grand;
-    assert.equal(price.budget, Math.round(screen), "#GEM wave 2 I1: the server budget equals Quick Design's own total (whole dollars, as the screen shows it)");
+    assert.equal(price.budget, Math.round(screen), "#211 wave 2 I1: the server budget equals Quick Design's own total (whole dollars, as the screen shows it)");
     const q = await Designs.promoteDesignToQuote(c1.id, "Jeff Chesebro", price);
-    assert.ok(q, "#GEM wave 2 I1: promoted");
-    assert.equal((await Quotes.get(q!.id))?.value, price.budget, "#GEM wave 2 I1: the quote's value is the server's re-price, not the stored (stale) budget");
+    assert.ok(q, "#211 wave 2 I1: promoted");
+    assert.equal((await Quotes.get(q!.id))?.value, price.budget, "#211 wave 2 I1: the quote's value is the server's re-price, not the stored (stale) budget");
     const c2 = (await Designs.getDesign(c1.id))!;
-    assert.ok(c2.budget === price.budget && c2.incomplete?.needsPart === 0 && c2.quoteId === q!.id, "#GEM wave 2 I1: the promote writes the fresh budget/incomplete back to the design");
+    assert.ok(c2.budget === price.budget && c2.incomplete?.needsPart === 0 && c2.quoteId === q!.id, "#211 wave 2 I1: the promote writes the fresh budget/incomplete back to the design");
     // M1 — a Grid (manual) record is never saved or promoted through Quick Design.
     const grid = await Designs.createDesign({ name: "GEMW2 grid", owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: "GP-GEMW2-NONE" });
     const refused = await DP.saveQuickDesign(grid.id, rec, "Jeff Chesebro");
-    assert.ok(!refused.ok && refused.error === DP.GRID_DESIGN_REFUSAL, "#GEM wave 2 M1: saving a Grid record through Quick Design is refused");
+    assert.ok(!refused.ok && refused.error === DP.GRID_DESIGN_REFUSAL, "#211 wave 2 M1: saving a Grid record through Quick Design is refused");
     const g1 = (await Designs.getDesign(grid.id))!;
-    assert.ok(!g1.config && g1.layoutMode === "manual" && g1.gridProjectId === "GP-GEMW2-NONE", "#GEM wave 2 M1: …and the record is untouched");
+    assert.ok(!g1.config && g1.layoutMode === "manual" && g1.gridProjectId === "GP-GEMW2-NONE", "#211 wave 2 M1: …and the record is untouched");
     for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
   }
 
-  /* --- #GEM fix wave 3 — I1 (D-GEM-24) Scenery-track feet override priced
+  /* --- #211 fix wave 3 — I1 (D324) Scenery-track feet override priced
          identically on the screen's LIVE state and the server; I2 a dead
-         fixture pick is needs-a-part on both; I3 (D-GEM-25) query counts:
+         fixture pick is needs-a-part on both; I3 (D325) query counts:
          getAllDesigns is flat in N manual designs with ONE catalog load,
          nav counts load no catalog at all; the letter re-derives. --- */
   {
@@ -4318,9 +4318,9 @@ async function main() {
     const rec = { name: "GEMW3 scenery", venue: "Conference", size: "large", tier: "better", width: 50, depth: 30, grid: 50, systems: ["Curtains"], customer: "", customerId: null, locationId: null, budget: 1, config: quickSaveConfig(live, td) };
     const saved = await DP.saveQuickDesign(null, rec, "Jeff Chesebro");
     if (!saved.ok) throw new Error(saved.error);
-    assert.notEqual(screen.budget, calc.budget, "#GEM wave 3 I1: the edit moves the screen total");
-    assert.equal(saved.record.budget, screen.budget, `#GEM wave 3 I1: the stored (server) budget equals the live screen total with a Scenery-track edit (${saved.record.budget} vs ${screen.budget})`);
-    assert.equal((await DP.quickPromoteCheck(saved.record)).price.budget, screen.budget, "#GEM wave 3 I1: …and the promote re-price agrees");
+    assert.notEqual(screen.budget, calc.budget, "#211 wave 3 I1: the edit moves the screen total");
+    assert.equal(saved.record.budget, screen.budget, `#211 wave 3 I1: the stored (server) budget equals the live screen total with a Scenery-track edit (${saved.record.budget} vs ${screen.budget})`);
+    assert.equal((await DP.quickPromoteCheck(saved.record)).price.budget, screen.budget, "#211 wave 3 I1: …and the promote re-price agrees");
     // I2 — a pick whose assembly is gone: the page now prices it, so the screen agrees with the server.
     const picked = { ...live, fixtureAssemblies: { par: "fa-gemw3-gone" } };
     const pickRec = { ...rec, name: "GEMW3 dead pick", config: quickSaveConfig(picked, td) };
@@ -4329,16 +4329,16 @@ async function main() {
     const oldPage = await DP.loadDesignPricing(liveIds);
     const scr = quickScreenPrice(picked, td, table, fixturePrices, rates);
     const srv = await DP.serverDesignPrice(pickRec);
-    assert.equal(fixturePrices["fa-gemw3-gone"]?.status, "needs-part", "#GEM wave 3 I2: the dead pick prices needs-a-part");
-    assert.ok(scr.needsPart > 0 && scr.needsPart === srv.needsPart && scr.budget === srv.budget, `#GEM wave 3 I2: screen and server agree on a dead pick (${JSON.stringify(scr)} vs ${JSON.stringify(srv)})`);
-    assert.equal(quickScreenPrice(picked, td, table, oldPage.fixturePrices, rates).needsPart, 0, "#GEM wave 3 I2: (before: the page left it out and the screen read complete)");
+    assert.equal(fixturePrices["fa-gemw3-gone"]?.status, "needs-part", "#211 wave 3 I2: the dead pick prices needs-a-part");
+    assert.ok(scr.needsPart > 0 && scr.needsPart === srv.needsPart && scr.budget === srv.budget, `#211 wave 3 I2: screen and server agree on a dead pick (${JSON.stringify(scr)} vs ${JSON.stringify(srv)})`);
+    assert.equal(quickScreenPrice(picked, td, table, oldPage.fixturePrices, rates).needsPart, 0, "#211 wave 3 I2: (before: the page left it out and the screen read complete)");
     // Letter — a stored budget (pre-wave-2, client-derived) is re-derived, not printed.
     await EM.clearEquipmentRow("lighting:par");
     const stale = await Designs.createDesign({ ...rec, name: "GEMW3 stale", budget: 999, incomplete: { needsPart: 0 }, owner: "Jeff Chesebro" });
     const [rp] = await DP.serverDesignPrices([stale]);
-    assert.ok(rp.needsPart > 0, `#GEM wave 3 minor: the letter's re-derivation sees the unmapped row (${rp.needsPart}) the stored record hides`);
+    assert.ok(rp.needsPart > 0, `#211 wave 3 minor: the letter's re-derivation sees the unmapped row (${rp.needsPart}) the stored record hides`);
     const got = await Designs.getDesigns([stale.id, saved.record.id, "D-NOPE"]);
-    assert.deepEqual(got.map((d) => d.id), [stale.id, saved.record.id], "#GEM wave 3 minor: getDesigns reads several designs in order in one go");
+    assert.deepEqual(got.map((d) => d.id), [stale.id, saved.record.id], "#211 wave 3 minor: getDesigns reads several designs in order in one go");
     // I3 — query counts with N manual (Grid) designs.
     const db = (await getDb()) as unknown as { $client: { query: (q: string, ...rest: unknown[]) => Promise<unknown> } };
     const client = db.$client;
@@ -4374,11 +4374,11 @@ async function main() {
       await addManual(6);
       const nB = await manualCount();
       const big = await measure();
-      console.log(`#GEM wave 3 I3 query counts: getAllDesigns ${small.all.queries} (N=${nA}) / ${big.all.queries} (N=${nB}), catalog loads ${small.all.catalogQueries}/${big.all.catalogQueries}; navData ${small.nav.queries}/${big.nav.queries}, catalog loads ${small.nav.catalogQueries}/${big.nav.catalogQueries}`);
-      assert.equal(big.all.queries, small.all.queries, `#GEM wave 3 I3: getAllDesigns' query count does not grow with manual designs (${small.all.queries} at N=${nA}, ${big.all.queries} at N=${nB})`);
-      assert.equal(big.all.catalogQueries, 1, "#GEM wave 3 I3: ONE catalog load per design read, whatever N");
-      assert.equal(big.nav.catalogQueries, 0, "#GEM wave 3 I3: nav counts never load the catalog");
-      assert.equal(big.nav.queries, small.nav.queries, "#GEM wave 3 I3: nav counts' query count does not grow with manual designs");
+      console.log(`#211 wave 3 I3 query counts: getAllDesigns ${small.all.queries} (N=${nA}) / ${big.all.queries} (N=${nB}), catalog loads ${small.all.catalogQueries}/${big.all.catalogQueries}; navData ${small.nav.queries}/${big.nav.queries}, catalog loads ${small.nav.catalogQueries}/${big.nav.catalogQueries}`);
+      assert.equal(big.all.queries, small.all.queries, `#211 wave 3 I3: getAllDesigns' query count does not grow with manual designs (${small.all.queries} at N=${nA}, ${big.all.queries} at N=${nB})`);
+      assert.equal(big.all.catalogQueries, 1, "#211 wave 3 I3: ONE catalog load per design read, whatever N");
+      assert.equal(big.nav.catalogQueries, 0, "#211 wave 3 I3: nav counts never load the catalog");
+      assert.equal(big.nav.queries, small.nav.queries, "#211 wave 3 I3: nav counts' query count does not grow with manual designs");
     } finally {
       client.query = orig;
     }
@@ -4407,7 +4407,7 @@ async function main() {
     assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === `fixture:${kept.id}` && l.accessorySku === "FXB-KEEP-L"), "#210 final review M5: the reset's graph rebuild restores the kept fixture's accessory links");
   }
 
-  /* --- #GEM fix wave 1 (I1): a saved design's `incomplete` shape round-trips
+  /* --- #211 fix wave 1 (I1): a saved design's `incomplete` shape round-trips
      through the real store. Additive field — a legacy record saved with no
      `incomplete` at all must still read back without crashing. --- */
   {
@@ -4425,11 +4425,11 @@ async function main() {
       incomplete: { needsPart: 3 },
       owner: "Jeff Chesebro",
     });
-    assert.equal(created.incomplete?.needsPart, 3, "#GEM fix wave 1 (I1): createDesign persists the incomplete shape");
+    assert.equal(created.incomplete?.needsPart, 3, "#211 fix wave 1 (I1): createDesign persists the incomplete shape");
     const reread = await Designs.getDesign(created.id);
-    assert.equal(reread?.incomplete?.needsPart, 3, "#GEM fix wave 1 (I1): getDesign reads it back unchanged");
+    assert.equal(reread?.incomplete?.needsPart, 3, "#211 fix wave 1 (I1): getDesign reads it back unchanged");
     const cleared = await Designs.updateDesign(created.id, { incomplete: { needsPart: 0 }, budget: 20000 });
-    assert.equal(cleared?.incomplete?.needsPart, 0, "#GEM fix wave 1 (I1): updateDesign overwrites incomplete once the design becomes complete");
+    assert.equal(cleared?.incomplete?.needsPart, 0, "#211 fix wave 1 (I1): updateDesign overwrites incomplete once the design becomes complete");
     const legacy = await Designs.createDesign({
       name: "GEM fix wave 1 legacy design (no incomplete field)",
       venue: "Test venue",
@@ -4442,7 +4442,7 @@ async function main() {
       budget: 500,
       owner: "Jeff Chesebro",
     });
-    assert.equal(legacy.incomplete, undefined, "#GEM fix wave 1 (I1): a design saved without `incomplete` reads back as undefined, not a crash");
+    assert.equal(legacy.incomplete, undefined, "#211 fix wave 1 (I1): a design saved without `incomplete` reads back as undefined, not a crash");
   }
 
   console.log("review regression checks passed");

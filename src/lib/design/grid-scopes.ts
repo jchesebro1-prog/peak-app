@@ -48,7 +48,7 @@ export type GridLayer = GridScope | typeof UNSCOPED;
 /** Display order for every scope filter, layer list, and rollup. */
 export const GRID_LAYERS: GridLayer[] = [...GRID_SCOPES, UNSCOPED];
 
-/** The five trackable systems → their Grid scope (#GEM; the Scope panel's SYS_TO_GRID_SCOPE). */
+/** The five trackable systems → their Grid scope (#211; the Scope panel's SYS_TO_GRID_SCOPE). */
 export const GRID_SCOPE_OF_SYS: Partial<Record<SysKey, GridScope>> = {
   rigging: "Rigging",
   curtains: "Curtains",

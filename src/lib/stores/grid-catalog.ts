@@ -175,7 +175,7 @@ export async function setGridSymbolLook(
 }
 
 /**
- * Make sure each pricing part has a Grid library entry (#GEM Auto fill) — the
+ * Make sure each pricing part has a Grid library entry (#211 Auto fill) — the
  * same `fromPricing` shape the first-use seed writes, inserted ONLY where
  * missing (insert-if-absent: never overwrites an entry someone restyled).
  * Called from the Auto fill (a user action), never on page load.

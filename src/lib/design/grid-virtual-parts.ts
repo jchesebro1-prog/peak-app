@@ -1,5 +1,5 @@
 /**
- * Virtual parts (#GEM, D-GEM-6) — pure. Auto places assemblies and confirmed
+ * Virtual parts (#211, D306) — pure. Auto places assemblies and confirmed
  * allowances as ORDINARY placements whose partId is a virtual id:
  *   asm:<fixtureId>          a fixture or System assembly (#210)
  *   allow:<rowKey>:<tier>    a confirmed Equipment map allowance
@@ -8,10 +8,10 @@
  * schedule, drawing set and quote price and label them with no second code
  * path. `virtual` keeps them out of the device palette; `allowance` flags the
  * line internally (its desc is the row's plain label — customer text stays
- * normal, D-GEM-15). A virtual part with nothing real behind it — a deleted
+ * normal, D315). A virtual part with nothing real behind it — a deleted
  * assembly, an assembly with no priced member, an allowance no longer
  * confirmed — prices $0, says why in its desc and carries `virtualDead`: the
- * quote refuses it by name and the editor says "needs a part" (D-GEM-13).
+ * quote refuses it by name and the editor says "needs a part" (D313).
  */
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "./grid-bom";
@@ -109,8 +109,8 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
 }
 
 /**
- * A Grid quote's flat `spec.lines` → bid-spec BOM rows (#GEM fix wave 1, M4,
- * D-GEM-16), pure. The bid spec specifies products, so:
+ * A Grid quote's flat `spec.lines` → bid-spec BOM rows (#211 fix wave 1, M4,
+ * D316), pure. The bid spec specifies products, so:
  *  - allowance lines (flagged, or an `allow:` sku on an older quote) are
  *    left out, as the estimator path leaves out its allowance/labor lines;
  *  - an `asm:` line is expanded into its assembly's included members (SKU,

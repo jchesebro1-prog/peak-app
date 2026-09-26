@@ -8429,7 +8429,7 @@ never picked up.
 
 ---
 
-## GEM. The Grid — Equipment map (catalog-backed, no silent allowances) + one intake: Auto or Blank — DONE 2026-09-25 (D-GEM-1…D-GEM-18)
+## 211. The Grid — Equipment map (catalog-backed, no silent allowances) + one intake: Auto or Blank — DONE 2026-09-25 (D301…D325)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-grid-equipment-map-and-auto-intake-design.md` · **Plan:**
 `docs/superpowers/plans/2026-09-25-grid-equipment-map-and-auto-intake.md` · **Follows:** #210, D139, D147, D149, D186.
@@ -8439,15 +8439,15 @@ part, a fixture / System assembly, or a confirmed allowance (who / when), with t
 hint and on-demand suggested matches; rows read Mapped / Allowance / Needs a part. The hard-coded dollars left the
 estimate: Quick Design, the Designs dashboard and the Grid's Scope targets all price through the map (server-side,
 sell-only to the Grid). An incomplete estimate reads **"Incomplete — N item(s) need a part"** rather than a bare (and
-wrong) dollar total, and "Add to Quotes" refuses until every line of the chosen tier is priced (D-GEM-10). **New
+wrong) dollar total, and "Add to Quotes" refuses until every line of the chosen tier is priced (D310). **New
 design** opens one intake: **Auto (equations)** or **Blank** → venue, measurements and scopes → (Auto) an Equipment
 step per scope (tier, swap any line for a catalog part or assembly, edit any quantity, running totals, needs-a-part
 lines with "Map it") → the canvas, filled by rule on the generated base sheet with ordinary editable placements. A
 fill that throws or leaves needs-a-part lines opens the plan with a non-fatal warning instead of losing the intake
-(D-GEM-17). "Change equipment…" in the Scope panel re-fills one scope, keeping hand-touched devices. The curtain-swap
+(D317). "Change equipment…" in the Scope panel re-fills one scope, keeping hand-touched devices. The curtain-swap
 picker offers only catalog Fabric parts with a real area rate, priced as a per-sq-ft sell through the catalog margin,
-never the raw cost rate (D-GEM-18). Allowances reach the quote flagged internally; a dead virtual line (a deleted
-assembly or an allowance no longer confirmed) refuses the quote by name rather than pricing silently (D-GEM-13).
+never the raw cost rate (D318). Allowances reach the quote flagged internally; a dead virtual line (a deleted
+assembly or an allowance no longer confirmed) refuses the quote by name rather than pricing silently (D313).
 
 **Remaining (Jeff-gated):** the Equipment map starts **empty** — nothing is auto-mapped, so every Quick Design /
 Designs-dashboard estimate and every Auto-filled design reads "Incomplete" until rows are mapped in **Grid Settings →

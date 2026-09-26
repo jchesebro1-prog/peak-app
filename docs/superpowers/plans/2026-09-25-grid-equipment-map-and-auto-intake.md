@@ -53,7 +53,7 @@
 
 **Numbering and working rules**
 
-- Placeholders are `#GEM` (punch item) and `D-GEM-1` … `D-GEM-9` (decisions). The lead renumbers them at merge.
+- Placeholders are `#211` (punch item) and `D301` … `D309` (decisions). The lead renumbers them at merge.
 - Work only in `/Users/sm/Downloads/peak-app/.claude/worktrees/grid-equipment-map`. Never `cd` to `/Users/sm/Downloads/peak-app`.
 - Never open a real `.data/pglite`, never `git stash`, and never start a dev server by hand (`test:smoke` boots its own on a scratch datadir).
 - Commit after every task and end each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -194,15 +194,15 @@ Every task runs **types + lint + pure specs**. Tasks that touch the DB also run 
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T1: the equation item vocabulary — every compute() item has a map row, and back --- */
+/* --- #211 T1: the equation item vocabulary — every compute() item has a map row, and back --- */
 import { EQUIPMENT_ROWS as gemRows1, EQUIPMENT_ROW_BY_KEY as gemRowByKey1 } from "@/lib/design/equipment-vocab";
 import { compute as gemCompute1, defaultAState as gemDefault1, type AState as GemAState1 } from "@/app/(app)/design/quick/engine";
 import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintText as gemHintText1 } from "@/lib/design/equipment-legacy-hints";
 {
   const keys = gemRows1.map((r) => r.key);
-  ok(keys.length === 46 && new Set(keys).size === 46, `#GEM T1: 46 unique equipment rows (got ${keys.length})`);
-  ok(gemRows1.every((r) => r.key === `${r.system}:${r.itemKey}` && /^[a-z]+:[a-zA-Z]+$/.test(r.key)), "#GEM T1: every key is system:itemKey");
-  ok(gemRows1.every((r) => gemRowByKey1.get(r.key) === r), "#GEM T1: the by-key index covers every row");
+  ok(keys.length === 46 && new Set(keys).size === 46, `#211 T1: 46 unique equipment rows (got ${keys.length})`);
+  ok(gemRows1.every((r) => r.key === `${r.system}:${r.itemKey}` && /^[a-z]+:[a-zA-Z]+$/.test(r.key)), "#211 T1: every key is system:itemKey");
+  ok(gemRows1.every((r) => gemRowByKey1.get(r.key) === r), "#211 T1: the by-key index covers every row");
   const emitted = new Map<string, string>();
   const base = gemDefault1(0);
   for (const size of ["small", "medium", "large"] as const)
@@ -219,21 +219,21 @@ import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintTe
         for (const sys of gemCompute1(s).systems) for (const it of sys.items) emitted.set(it.key, it.desc);
       }
   const unknown = [...emitted.keys()].filter((k) => !gemRowByKey1.has(k));
-  ok(unknown.length === 0, `#GEM T1: every item compute() emits has an Equipment map row (unknown: ${unknown.join(", ") || "none"})`);
+  ok(unknown.length === 0, `#211 T1: every item compute() emits has an Equipment map row (unknown: ${unknown.join(", ") || "none"})`);
   const never = keys.filter((k) => !emitted.has(k));
-  ok(never.length === 0, `#GEM T1: every Equipment map row is emitted by some configuration (never: ${never.join(", ") || "none"})`);
-  ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#GEM T1: each row's label is the equation's own item name");
-  ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#GEM T1: the four fabric drapes are the curtain rows");
-  ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#GEM T1: Controls / Acoustical / Pit rows are never Auto-placed");
-  ok(keys.every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#GEM T1: every row carries its old built-in figure as a 'was' hint");
-  ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#GEM T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
-  ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#GEM T1: lighting hints are the old TIER_SKUS figures");
-  ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#GEM T1: one figure prints once, with its unit");
-  ok(gemHintSkus1(gemHints1["curtains:legs"]).join(",") === "RB-EN-16,RB-EN-22,RB-CHAR-25", "#GEM T1: fabric hints name the old per-tier fabric SKUs");
+  ok(never.length === 0, `#211 T1: every Equipment map row is emitted by some configuration (never: ${never.join(", ") || "none"})`);
+  ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#211 T1: each row's label is the equation's own item name");
+  ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#211 T1: the four fabric drapes are the curtain rows");
+  ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#211 T1: Controls / Acoustical / Pit rows are never Auto-placed");
+  ok(keys.every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#211 T1: every row carries its old built-in figure as a 'was' hint");
+  ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#211 T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
+  ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#211 T1: lighting hints are the old TIER_SKUS figures");
+  ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#211 T1: one figure prints once, with its unit");
+  ok(gemHintSkus1(gemHints1["curtains:legs"]).join(",") === "RB-EN-16,RB-EN-22,RB-CHAR-25", "#211 T1: fabric hints name the old per-tier fabric SKUs");
   const hintSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-legacy-hints.ts"), "utf8");
-  ok(hintSrc.includes('typeof window !== "undefined"'), "#GEM T1: the hint table refuses to load in a browser bundle");
+  ok(hintSrc.includes('typeof window !== "undefined"'), "#211 T1: the hint table refuses to load in a browser bundle");
   const vocabSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-vocab.ts"), "utf8");
-  ok(!/\$\s?\d/.test(vocabSrc) && !/\bcost\b/i.test(vocabSrc), "#GEM T1: the vocabulary is dollar-free");
+  ok(!/\$\s?\d/.test(vocabSrc) && !/\bcost\b/i.test(vocabSrc), "#211 T1: the vocabulary is dollar-free");
 }
 ```
 
@@ -250,11 +250,11 @@ Create `src/lib/design/equipment-vocab.ts`:
 
 ```ts
 /**
- * The equation item vocabulary (#GEM, D-GEM-1). Every item compute()
+ * The equation item vocabulary (#211, D301). Every item compute()
  * (quick/engine.ts) can emit, keyed `system:itemKey` — stable keys, never
  * display text. The Equipment map, the Auto intake and saved overrides all key
  * on these, so a relabel never orphans a mapping. `label` is the equation's
- * own item name (asserted equal by the #GEM T1 spec block). Pure and
+ * own item name (asserted equal by the #211 T1 spec block). Pure and
  * dollar-free: client components may import it.
  *
  * `place` is how Auto lands a row on the plan: "each" = one marker per unit,
@@ -373,7 +373,7 @@ Create `src/lib/design/equipment-legacy-hints.ts`:
 
 ```ts
 /**
- * The dollars that used to live in quick/engine.ts (#GEM, D-GEM-4) — TIER_SKUS,
+ * The dollars that used to live in quick/engine.ts (#211, D304) — TIER_SKUS,
  * the rigging/controls/audio/video/shell/pit `cost:` literals, the video screen
  * `width × 260`, the scenery-track $3/ft and the curtain seed fabric rates —
  * kept ONLY as "was $X" hints on the Equipment map so Jeff can see what the
@@ -483,7 +483,7 @@ In `src/app/(app)/design/quick/engine.ts`:
 
 ```ts
 export type BomItem = {
-  /** Equipment map row key, `system:itemKey` (#GEM, equipment-vocab.ts). */
+  /** Equipment map row key, `system:itemKey` (#211, equipment-vocab.ts). */
   key: string;
   desc: string;
   qty: number;
@@ -676,7 +676,7 @@ Expected: tsc silent; eslint `✖ 110 problems (0 errors, 110 warnings)`. If tsc
 
 ```bash
 git add src/lib/design/equipment-vocab.ts src/lib/design/equipment-legacy-hints.ts "src/app/(app)/design/quick/engine.ts" scripts/test-review-and-spec.ts
-git commit -m "feat(grid): equation item vocabulary + old figures as hints (#GEM T1)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): equation item vocabulary + old figures as hints (#211 T1)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -727,7 +727,7 @@ git commit -m "feat(grid): equation item vocabulary + old figures as hints (#GEM
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T2: Equipment map resolution — part / assembly / allowance / empty, never a fallback $ --- */
+/* --- #211 T2: Equipment map resolution — part / assembly / allowance / empty, never a fallback $ --- */
 import {
   ALLOWANCE_MAX as gemAllowMax2, buildEquipmentPriceTable as gemTable2, cellFor as gemCellFor2, mapSkus as gemMapSkus2,
   mergeEquipRow as gemMerge2, priceCell as gemPriceCell2, rowStatus as gemRowStatus2, sanitizeEquipmentMap as gemSanitize2,
@@ -755,51 +755,51 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
   const p = (cell: Parameters<typeof gemPriceCell2>[0], key = "lighting:par") => gemPriceCell2(cell, def(key), ctx);
   const par = p({ kind: "part", sku: "GEM-PAR" });
-  ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#GEM T2: a part prices at live catalog cost / list");
+  ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#211 T2: a part prices at live catalog cost / list");
   const hb = p({ kind: "part", sku: "GEM-HB" }, "rigging:headblock");
-  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#GEM T2: a part with no list sells at cost ÷ (1 − catalog margin)");
+  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#211 T2: a part with no list sells at cost ÷ (1 − catalog margin)");
   const gone = p({ kind: "part", sku: "GEM-GONE" });
-  ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#GEM T2: a deleted part is needs-a-part, not $0");
-  ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#GEM T2: an unpriced part is needs-a-part");
+  ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#211 T2: a deleted part is needs-a-part, not $0");
+  ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#211 T2: an unpriced part is needs-a-part");
   const asm = p({ kind: "assembly", id: "SA-GEM2" }, "audio:mixerDsp");
-  ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#GEM T2: a System assembly prices at its included totals (resolveFixture)");
-  ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#GEM T2: a deleted assembly is needs-a-part");
+  ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#211 T2: a System assembly prices at its included totals (resolveFixture)");
+  ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#211 T2: a deleted assembly is needs-a-part");
   const allow = p({ kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 }, "audio:subwoofer");
-  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#GEM T2: a confirmed allowance is a unit cost, sold through the catalog margin");
-  ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#GEM T2: an unconfirmed allowance never prices");
+  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#211 T2: a confirmed allowance is a unit cost, sold through the catalog margin");
+  ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#211 T2: an unconfirmed allowance never prices");
   const empty = p(null);
-  ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#GEM T2: an empty cell is needs-a-part with no $");
+  ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#211 T2: an empty cell is needs-a-part with no $");
   const vel = p({ kind: "part", sku: "GEM-VEL" }, "curtains:draw");
-  ok(vel.status === "part" && vel.areaRate === 3.5 && vel.unitCost === 0, "#GEM T2: a fabric row resolves the mapped fabric's area rate");
+  ok(vel.status === "part" && vel.areaRate === 3.5 && vel.unitCost === 0, "#211 T2: a fabric row resolves the mapped fabric's area rate");
   const mus = p({ kind: "part", sku: "GEM-MUS" }, "curtains:draw");
-  ok(mus.status === "part" && mus.areaRate === 0.9, "#GEM T2: …falling back to the fabric's own cost per sq ft");
-  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#GEM T2: a rateless or non-fabric part on a fabric row is needs-a-part (no seed-rate fallback)");
-  ok(p({ kind: "assembly", id: "SA-GEM2" }, "curtains:draw").status === "needs-part", "#GEM T2: a fabric row never maps to an assembly");
+  ok(mus.status === "part" && mus.areaRate === 0.9, "#211 T2: …falling back to the fabric's own cost per sq ft");
+  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#211 T2: a rateless or non-fabric part on a fabric row is needs-a-part (no seed-rate fallback)");
+  ok(p({ kind: "assembly", id: "SA-GEM2" }, "curtains:draw").status === "needs-part", "#211 T2: a fabric row never maps to an assembly");
   const same = { tiers: { good: { kind: "part" as const, sku: "GEM-PAR" } }, sameAll: true, updatedBy: "t", updatedAt: 1 };
-  ok(gemCellFor2(same, "best")?.kind === "part" && gemCellFor2({ ...same, sameAll: false }, "best") === null, "#GEM T2: same-for-all reads the Good cell for every tier");
-  ok(gemRowStatus2(undefined) === "needs-part" && gemRowStatus2(same) === "mapped", "#GEM T2: row status — nothing mapped vs every tier mapped");
-  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" }, better: { kind: "allowance", amount: 5, confirmedBy: "J", confirmedAt: 1 }, best: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "allowance", "#GEM T2: any confirmed-allowance tier → Allowance");
-  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "needs-part", "#GEM T2: any empty tier → Needs a part");
+  ok(gemCellFor2(same, "best")?.kind === "part" && gemCellFor2({ ...same, sameAll: false }, "best") === null, "#211 T2: same-for-all reads the Good cell for every tier");
+  ok(gemRowStatus2(undefined) === "needs-part" && gemRowStatus2(same) === "mapped", "#211 T2: row status — nothing mapped vs every tier mapped");
+  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" }, better: { kind: "allowance", amount: 5, confirmedBy: "J", confirmedAt: 1 }, best: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "allowance", "#211 T2: any confirmed-allowance tier → Allowance");
+  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "needs-part", "#211 T2: any empty tier → Needs a part");
   const clean = gemSanitize2({ "lighting:par": same, "bogus:row": same, "audio:subwoofer": null, "rigging:arbor": { tiers: { good: { kind: "allowance", amount: -3, confirmedBy: "J", confirmedAt: 1 }, better: { kind: "part", sku: "  " } } } });
-  ok(Object.keys(clean).join(",") === "lighting:par,rigging:arbor" && Object.keys(clean["rigging:arbor"].tiers).length === 0, "#GEM T2: sanitize drops unknown rows, cleared rows and invalid cells");
-  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: 99, confirmed: false } } }, "Jeff", 10).ok, "#GEM T2: saving an unconfirmed allowance is refused");
+  ok(Object.keys(clean).join(",") === "lighting:par,rigging:arbor" && Object.keys(clean["rigging:arbor"].tiers).length === 0, "#211 T2: sanitize drops unknown rows, cleared rows and invalid cells");
+  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: 99, confirmed: false } } }, "Jeff", 10).ok, "#211 T2: saving an unconfirmed allowance is refused");
   const m2 = gemMerge2(undefined, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, note: "until the book lands", confirmed: true } } }, "Chris", 20);
-  ok(m2.ok && m2.row.tiers.best?.kind === "allowance" && m2.row.tiers.better?.kind === "allowance" && m2.row.updatedBy === "Chris", "#GEM T2: same-for-all writes the Good cell into every tier, stamped");
+  ok(m2.ok && m2.row.tiers.best?.kind === "allowance" && m2.row.tiers.better?.kind === "allowance" && m2.row.updatedBy === "Chris", "#211 T2: same-for-all writes the Good cell into every tier, stamped");
   const prev2 = m2.ok ? m2.row : undefined;
   const m3 = gemMerge2(prev2, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, note: "until the book lands", confirmed: true } } }, "Jeff", 30);
   const c3 = m3.ok ? m3.row.tiers.good : null;
-  ok(m3.ok && c3?.kind === "allowance" && c3.confirmedBy === "Chris" && c3.confirmedAt === 20 && m3.row.updatedBy === "Jeff", "#GEM T2: re-saving an unchanged allowance keeps who confirmed it");
+  ok(m3.ok && c3?.kind === "allowance" && c3.confirmedBy === "Chris" && c3.confirmedAt === 20 && m3.row.updatedBy === "Jeff", "#211 T2: re-saving an unchanged allowance keeps who confirmed it");
   const m4 = gemMerge2(prev2, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1300, confirmed: true } } }, "Jeff", 40);
   const c4 = m4.ok ? m4.row.tiers.good : null;
-  ok(c4?.kind === "allowance" && c4.confirmedBy === "Jeff" && c4.confirmedAt === 40, "#GEM T2: changing the amount re-confirms it");
-  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: gemAllowMax2 + 1, confirmed: true } } }, "J", 1).ok, "#GEM T2: an absurd allowance is refused");
+  ok(c4?.kind === "allowance" && c4.confirmedBy === "Jeff" && c4.confirmedAt === 40, "#211 T2: changing the amount re-confirms it");
+  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: gemAllowMax2 + 1, confirmed: true } } }, "J", 1).ok, "#211 T2: an absurd allowance is refused");
   const map: GemMap2 = { "lighting:par": same, "audio:mixerDsp": { tiers: { better: { kind: "assembly", id: "SA-GEM2" } }, updatedBy: "t", updatedAt: 1 } };
   const table = gemTable2(map, ctx);
   const allKeys = [...gemRowByKey2.keys()];
-  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#GEM T2: the table has a price (or needs-a-part) for every row × tier");
-  ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#GEM T2: tiers resolve independently");
-  ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#GEM T2: every unmapped row is needs-a-part — nothing is pre-mapped");
-  ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#GEM T2: mapSkus names every part the map needs, assembly parts included");
+  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#211 T2: the table has a price (or needs-a-part) for every row × tier");
+  ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#211 T2: tiers resolve independently");
+  ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#211 T2: every unmapped row is needs-a-part — nothing is pre-mapped");
+  ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#211 T2: mapSkus names every part the map needs, assembly parts included");
 }
 ```
 
@@ -816,7 +816,7 @@ Create `src/lib/design/equipment-map.ts`:
 
 ```ts
 /**
- * The Grid Equipment map (#GEM, spec §3, D-GEM-2/D-GEM-3) — pure.
+ * The Grid Equipment map (#211, spec §3, D302/D303) — pure.
  *
  * Every equation item × tier maps to a catalog part, a fixture / System
  * assembly (the one builder, #210) or a CONFIRMED allowance. Anything else is
@@ -1089,7 +1089,7 @@ import {
 } from "@/lib/design/equipment-map";
 
 /**
- * The Equipment map store (#GEM, D-GEM-2): one settings blob, one top-level
+ * The Equipment map store (#211, D302): one settings blob, one top-level
  * key per row. Starts EMPTY — nothing here ever writes a row on its own; only
  * saveEquipmentRow / clearEquipmentRow, called from the admin actions, do.
  * Survives the go-live reset (clearDemoData never touches blobs), like every
@@ -1162,38 +1162,38 @@ Expected: `ALL PASSED`, **3991** PASS lines (3964 + 27).
 In `scripts/test-review-regressions.ts`, insert this block immediately before the line `  /* --- #210 final review M5: the go-live reset keeps fixtures and systems`:
 
 ```ts
-  /* --- #GEM T2: the Equipment map store — starts empty, per-row atomic writes, who/when --- */
+  /* --- #211 T2: the Equipment map store — starts empty, per-row atomic writes, who/when --- */
   {
     const EM = await import("@/lib/stores/equipment-map");
     const Cat = await import("@/lib/stores/catalog");
-    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: the map starts empty — nothing is pre-mapped");
-    assert.equal((await EM.saveEquipmentRow("bogus:row", { tiers: {} }, "Jeff")).ok, false, "#GEM T2: an unknown row is refused");
+    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#211 T2: the map starts empty — nothing is pre-mapped");
+    assert.equal((await EM.saveEquipmentRow("bogus:row", { tiers: {} }, "Jeff")).ok, false, "#211 T2: an unknown row is refused");
     const r1 = await EM.saveEquipmentRow("lighting:par", { tiers: { good: { kind: "part", sku: "GEM2-PAR" }, better: { kind: "part", sku: "GEM2-PAR" }, best: { kind: "part", sku: "GEM2-PAR" } } }, "Jeff", 1000);
     const r2 = await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, "Chris", 2000);
-    assert.ok(r1.ok && r2.ok, "#GEM T2: two rows save");
+    assert.ok(r1.ok && r2.ok, "#211 T2: two rows save");
     await Promise.all([
       EM.saveEquipmentRow("video:projector", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM2-PROJ" } } }, "Jeff", 3000),
       EM.saveEquipmentRow("video:screen", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM2-SCR" } } }, "Chris", 3000),
     ]);
     let m = await EM.getEquipmentMap();
-    assert.deepEqual(Object.keys(m).sort(), ["audio:subwoofer", "lighting:par", "video:projector", "video:screen"], "#GEM T2: concurrent edits to different rows both survive (atomic per-key merge)");
-    assert.ok(m["lighting:par"].updatedBy === "Jeff" && m["lighting:par"].updatedAt === 1000, "#GEM T2: every save stamps who/when");
+    assert.deepEqual(Object.keys(m).sort(), ["audio:subwoofer", "lighting:par", "video:projector", "video:screen"], "#211 T2: concurrent edits to different rows both survive (atomic per-key merge)");
+    assert.ok(m["lighting:par"].updatedBy === "Jeff" && m["lighting:par"].updatedAt === 1000, "#211 T2: every save stamps who/when");
     const sub = m["audio:subwoofer"].tiers.best;
-    assert.ok(sub?.kind === "allowance" && sub.confirmedBy === "Chris" && sub.confirmedAt === 2000 && sub.amount === 1200, "#GEM T2: a confirmed allowance stores who confirmed it and when");
-    assert.equal((await EM.saveEquipmentRow("audio:subwoofer", { tiers: { good: { kind: "allowance", amount: 5, confirmed: false } } }, "Jeff", 4000)).ok, false, "#GEM T2: an unconfirmed allowance is refused");
-    assert.equal((await EM.getEquipmentMap())["audio:subwoofer"].updatedAt, 2000, "#GEM T2: …and nothing was written");
+    assert.ok(sub?.kind === "allowance" && sub.confirmedBy === "Chris" && sub.confirmedAt === 2000 && sub.amount === 1200, "#211 T2: a confirmed allowance stores who confirmed it and when");
+    assert.equal((await EM.saveEquipmentRow("audio:subwoofer", { tiers: { good: { kind: "allowance", amount: 5, confirmed: false } } }, "Jeff", 4000)).ok, false, "#211 T2: an unconfirmed allowance is refused");
+    assert.equal((await EM.getEquipmentMap())["audio:subwoofer"].updatedAt, 2000, "#211 T2: …and nothing was written");
     await EM.clearEquipmentRow("video:projector");
     m = await EM.getEquipmentMap();
-    assert.ok(!("video:projector" in m) && "video:screen" in m, "#GEM T2: clearing one row leaves the others");
+    assert.ok(!("video:projector" in m) && "video:screen" in m, "#211 T2: clearing one row leaves the others");
     await Cat.upsert({ sku: "GEM2-PAR", desc: "GEM2 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
     const table = await EM.loadEquipmentPriceTable();
     const par = table.byTier.best["lighting:par"];
-    assert.ok(par.status === "part" && par.unitSell === 900 && par.unitCost === 600, "#GEM T2: the table prices a mapped part from the live catalog (targeted read)");
-    assert.equal(table.byTier.best["video:screen"].status, "needs-part", "#GEM T2: a mapped SKU missing from the catalog is needs-a-part");
+    assert.ok(par.status === "part" && par.unitSell === 900 && par.unitCost === 600, "#211 T2: the table prices a mapped part from the live catalog (targeted read)");
+    assert.equal(table.byTier.best["video:screen"].status, "needs-part", "#211 T2: a mapped SKU missing from the catalog is needs-a-part");
     const allow = table.byTier.good["audio:subwoofer"];
-    assert.ok(allow.status === "allowance" && allow.unitCost === 1200, "#GEM T2: the allowance prices as its confirmed unit cost");
+    assert.ok(allow.status === "allowance" && allow.unitCost === 1200, "#211 T2: the allowance prices as its confirmed unit cost");
     for (const k of ["lighting:par", "audio:subwoofer", "video:screen"]) await EM.clearEquipmentRow(k);
-    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: cleanup — later blocks start from an empty map");
+    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#211 T2: cleanup — later blocks start from an empty map");
   }
 
 ```
@@ -1212,7 +1212,7 @@ Expected: tsc silent; `✖ 110 problems (0 errors, 110 warnings)`.
 
 ```bash
 git add src/lib/design/equipment-map.ts src/lib/stores/equipment-map.ts scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
-git commit -m "feat(grid): Equipment map model, resolver and store (#GEM T2)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): Equipment map model, resolver and store (#211 T2)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1250,10 +1250,10 @@ git commit -m "feat(grid): Equipment map model, resolver and store (#GEM T2)" -m
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T3: the Equipment map page — view models, suggestions, admin gate, no client store imports --- */
+/* --- #211 T3: the Equipment map page — view models, suggestions, admin gate, no client store imports --- */
 import { assemblyOptions as gemAsmOpts3, equipmentMapView as gemView3, mapSummary as gemSummary3, suggestParts as gemSuggest3 } from "@/lib/design/equipment-map-view";
 import { EQUIPMENT_ROW_BY_KEY as gemRowByKey3 } from "@/lib/design/equipment-vocab";
-/** Module paths a source file imports VALUES from (`import type …` excluded). Shared by the later #GEM guards. */
+/** Module paths a source file imports VALUES from (`import type …` excluded). Shared by the later #211 guards. */
 const gemValueImports = (src: string): string[] =>
   [...src.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
 {
@@ -1269,22 +1269,22 @@ const gemValueImports = (src: string): string[] =>
   const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
   const hints = { "lighting:par": { text: "was $500 / $750 / $1,150", skus: [] as string[] } };
   const empty = gemView3({}, ctx, hints);
-  ok(empty.length === 46 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#GEM T3: an empty map shows every row as Needs a part");
-  ok(empty.find((r) => r.key === "lighting:par")!.hint === "was $500 / $750 / $1,150" && empty[0].systemLabel === "Rigging", "#GEM T3: rows carry their 'was' hint and their group label");
+  ok(empty.length === 46 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#211 T3: an empty map shows every row as Needs a part");
+  ok(empty.find((r) => r.key === "lighting:par")!.hint === "was $500 / $750 / $1,150" && empty[0].systemLabel === "Rigging", "#211 T3: rows carry their 'was' hint and their group label");
   const view = gemView3({
     "lighting:par": { tiers: { good: { kind: "part", sku: "GEM-PAR" }, better: { kind: "part", sku: "GEM-GONE" }, best: { kind: "part", sku: "GEM-PAR" } }, updatedBy: "Jeff", updatedAt: 9 },
     "audio:mixerDsp": { tiers: { good: { kind: "assembly", id: "SA-GEM3" } }, sameAll: true, updatedBy: "Jeff", updatedAt: 9 },
     "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7, note: "no book yet" } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
   }, ctx, hints);
   const par = view.find((r) => r.key === "lighting:par")!;
-  ok(par.status === "needs-part" && par.cells[1].problem !== null && par.cells[0].unitSell === 900, "#GEM T3: a cell pointing at a deleted part makes the row Needs a part");
+  ok(par.status === "needs-part" && par.cells[1].problem !== null && par.cells[0].unitSell === 900, "#211 T3: a cell pointing at a deleted part makes the row Needs a part");
   const mix = view.find((r) => r.key === "audio:mixerDsp")!;
-  ok(mix.status === "mapped" && mix.sameAll && mix.cells.every((c) => c.kind === "assembly" && c.title === "GEM3 rack" && c.unitSell === 7000), "#GEM T3: a same-for-all assembly row reads Mapped in every tier");
+  ok(mix.status === "mapped" && mix.sameAll && mix.cells.every((c) => c.kind === "assembly" && c.title === "GEM3 rack" && c.unitSell === 7000), "#211 T3: a same-for-all assembly row reads Mapped in every tier");
   const sub = view.find((r) => r.key === "audio:subwoofer")!;
   const subIn = sub.cells[2].input;
-  ok(sub.status === "allowance" && sub.cells[2].confirmedBy === "Chris" && subIn?.kind === "allowance" && subIn.confirmed, "#GEM T3: an allowance row shows who confirmed it and re-posts as confirmed");
+  ok(sub.status === "allowance" && sub.cells[2].confirmedBy === "Chris" && subIn?.kind === "allowance" && subIn.confirmed, "#211 T3: an allowance row shows who confirmed it and re-posts as confirmed");
   const s = gemSummary3(view);
-  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 44, "#GEM T3: the summary counts rows by status");
+  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 44, "#211 T3: the summary counts rows by status");
   const catalog = [
     { sku: "RB-EN-16", desc: "Encore velour 16oz", category: "Fabric" },
     { sku: "RB-CHAR-25", desc: "Charisma velour 25oz", category: "Fabric" },
@@ -1293,17 +1293,17 @@ const gemValueImports = (src: string): string[] =>
     { sku: "FAB-PAR", desc: "par fabric", category: "Fabric" },
   ];
   const legs = gemSuggest3(catalog, gemRowByKey3.get("curtains:legs")!, ["RB-CHAR-25"], 8);
-  ok(legs[0].sku === "RB-CHAR-25" && legs.length === 2 && legs.every((p) => p.category === "Fabric"), "#GEM T3: fabric rows suggest fabrics only, the old fabric SKU first");
+  ok(legs[0].sku === "RB-CHAR-25" && legs.length === 2 && legs.every((p) => p.category === "Fabric"), "#211 T3: fabric rows suggest fabrics only, the old fabric SKU first");
   const pars = gemSuggest3(catalog, gemRowByKey3.get("lighting:par")!, [], 1);
-  ok(pars.length === 1 && pars[0].sku === "PAR-1", "#GEM T3: part suggestions skip fabric, rank by matched words, respect the limit");
+  ok(pars.length === 1 && pars[0].sku === "PAR-1", "#211 T3: part suggestions skip fabric, rank by matched words, respect the limit");
   const opts = gemAsmOpts3([rack], ctx);
-  ok(opts.length === 1 && opts[0].kind === "system" && opts[0].scope === "Audio" && opts[0].unitSell === 7000 && opts[0].unitCost === 5000, "#GEM T3: the assembly picker lists systems with their live totals");
+  ok(opts.length === 1 && opts[0].kind === "system" && opts[0].scope === "Audio" && opts[0].unitSell === 7000 && opts[0].unitCost === 5000, "#211 T3: the assembly picker lists systems with their live totals");
   const clientSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
-  ok(clientSrc.startsWith('"use client"') && !gemValueImports(clientSrc).some((m) => /^@\/lib\/stores\/|^@\/db\/|equipment-legacy-hints/.test(m)), "#GEM T3: the map client imports no store, DB or hint-table value");
+  ok(clientSrc.startsWith('"use client"') && !gemValueImports(clientSrc).some((m) => /^@\/lib\/stores\/|^@\/db\/|equipment-legacy-hints/.test(m)), "#211 T3: the map client imports no store, DB or hint-table value");
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
-  ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#GEM T3: admin-gated, and the page reads only the SKUs it shows");
+  ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#GEM T3: every settings action, the four new ones included, is admin-gated");
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 ```
 
@@ -1320,7 +1320,7 @@ Create `src/lib/design/equipment-map-view.ts`:
 
 ```ts
 /**
- * Equipment map page view models (#GEM, spec §3) — pure. Built on the server
+ * Equipment map page view models (#211, spec §3) — pure. Built on the server
  * from the map + resolved prices so the client resolves nothing. Row status is
  * computed from RESOLVED prices: a cell pointing at a deleted part or an
  * unpriced assembly reads "Needs a part" (Auto would skip it) even though a
@@ -1486,7 +1486,7 @@ Create `src/app/(app)/design/grid/settings/settings-tabs.tsx`:
 ```tsx
 import Link from "next/link";
 
-/** Grid Settings sections (#GEM): General (the card stack) | Equipment map. */
+/** Grid Settings sections (#211): General (the card stack) | Equipment map. */
 export function GridSettingsTabs({ active }: { active: "general" | "equipment" }) {
   const tab = (key: "general" | "equipment", href: string, label: string) => (
     <Link
@@ -1534,7 +1534,7 @@ import { searchCatalog } from "@/app/(app)/estimator/actions";
 and append at EOF:
 
 ```ts
-/* ----------------------------- Equipment map (#GEM) ----------------------------- */
+/* ----------------------------- Equipment map (#211) ----------------------------- */
 
 export type EquipPartHit = { sku: string; desc: string; category: string; unit: string; cost: number; list: number };
 
@@ -1612,7 +1612,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Grid Settings → Equipment map (#GEM, spec §3). Every equation item × tier
+ * Grid Settings → Equipment map (#211, spec §3). Every equation item × tier
  * → catalog part / assembly / confirmed allowance. Admin-only (manage_users —
  * the Estimating Rules gate). Read-only on load: nothing here writes. Reads
  * the map, every fixture/system, and ONLY the catalog SKUs they reference
@@ -1981,7 +1981,7 @@ function PartPicker({ rowKey, sku, onPick }: { rowKey: string; sku: string; onPi
 In `scripts/smoke-routes.ts`, add this line directly under the `"/design/grid/settings", …` entry (line 97):
 
 ```ts
-  "/design/grid/settings/equipment-map", // #GEM Equipment map tab (admin; read-only on load)
+  "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
 ```
 
 - [ ] **Step 9: Run the specs + types + lint**
@@ -1998,7 +1998,7 @@ Expected: the build succeeds. Every smoke route is OK, including `/design/grid/s
 
 ```bash
 git add src/lib/design/equipment-map-view.ts "src/app/(app)/design/grid/settings" scripts/smoke-routes.ts scripts/test-review-and-spec.ts
-git commit -m "feat(grid): Equipment map tab in Grid Settings (#GEM T3)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): Equipment map tab in Grid Settings (#211 T3)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2033,7 +2033,7 @@ git commit -m "feat(grid): Equipment map tab in Grid Settings (#GEM T3)" -m "Co-
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T4: Scope targets are computed on the server; the old seeder is gone --- */
+/* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
 import { scopeTargetsByTier as gemTargetsByTier4, targetsFromSystems as gemTargetsFrom4 } from "@/lib/design/scope-targets";
 import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } from "@/app/(app)/design/quick/engine";
 {
@@ -2055,19 +2055,19 @@ import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } fro
       sys("controls", false, 999, []),
     ];
   });
-  ok(seen.join(",") === "good:good,better:better,best:best", "#GEM T4: the pricer runs once per tier, with that tier set on the state");
-  ok(byTier.best.lighting?.sell === 300 && byTier.good.lighting?.sell === 100, "#GEM T4: one target per tier, from the priced system's revenue");
-  ok(byTier.better.lighting?.needsPart === 1 && byTier.better.lighting?.allowances === 1, "#GEM T4: needs-a-part and allowance lines are counted, qty-0 lines are not");
-  ok(!("controls" in byTier.better) && Object.keys(gemTargetsFrom4([])).length === 0, "#GEM T4: an off system gets no target");
+  ok(seen.join(",") === "good:good,better:better,best:best", "#211 T4: the pricer runs once per tier, with that tier set on the state");
+  ok(byTier.best.lighting?.sell === 300 && byTier.good.lighting?.sell === 100, "#211 T4: one target per tier, from the priced system's revenue");
+  ok(byTier.better.lighting?.needsPart === 1 && byTier.better.lighting?.allowances === 1, "#211 T4: needs-a-part and allowance lines are counted, qty-0 lines are not");
+  ok(!("controls" in byTier.better) && Object.keys(gemTargetsFrom4([])).length === 0, "#211 T4: an off system gets no target");
   const spSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
-  ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#GEM T4: the Scope panel computes no targets in the browser");
+  ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#211 T4: the Scope panel computes no targets in the browser");
   const edSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const pgSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
-  ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#GEM T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
+  ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#211 T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
   const seedSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-seed.ts"), "utf8");
   const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
-  ok(!seedSrc.includes("quick/engine") && !seedSrc.includes("deriveSeedPlacements") && seedSrc.includes("export function isSeedPlaceholder"), "#GEM T4: grid-seed keeps only the placeholder helpers");
-  ok(!actSrc.includes("seedStartingLayoutAction") && !actSrc.includes("deriveSeedPlacements"), "#GEM T4: the old seeding action is removed");
+  ok(!seedSrc.includes("quick/engine") && !seedSrc.includes("deriveSeedPlacements") && seedSrc.includes("export function isSeedPlaceholder"), "#211 T4: grid-seed keeps only the placeholder helpers");
+  ok(!actSrc.includes("seedStartingLayoutAction") && !actSrc.includes("deriveSeedPlacements"), "#211 T4: the old seeding action is removed");
 }
 ```
 
@@ -2083,7 +2083,7 @@ Expected: FAIL: cannot resolve `@/lib/design/scope-targets`.
 In `src/app/(app)/design/quick/engine.ts`, add this field to `BomItem`, after `price: number;`:
 
 ```ts
-  /** Set by the Equipment map pricing step (#GEM): how this line priced. */
+  /** Set by the Equipment map pricing step (#211): how this line priced. */
   status?: "part" | "assembly" | "allowance" | "needs-part";
 ```
 
@@ -2095,7 +2095,7 @@ Create `src/lib/design/scope-targets.ts`:
 
 ```ts
 /**
- * Grid Scope panel targets (#GEM, D-GEM-5) — pure, computed on the SERVER.
+ * Grid Scope panel targets (#211, D305) — pure, computed on the SERVER.
  * grid/[id]/page.tsx runs the estimate pipeline once per tier and sends only
  * these sell numbers to the editor: the client never holds a price table, a
  * unit cost or a pricing constant. That is what removes D139's crossing of
@@ -2153,7 +2153,7 @@ import { scopeTargetsByTier } from "@/lib/design/scope-targets";
 (b) Replace the `engineFabrics` block (lines 133–137, with its comment) with:
 
 ```ts
-  // Scope targets (#GEM, D-GEM-5) — computed HERE; only sell numbers reach the
+  // Scope targets (#211, D305) — computed HERE; only sell numbers reach the
   // editor. The cost-bearing fabric rows below never leave the server.
   const engineFabrics: FabricOption[] = catalog
     .filter((p) => p.category === "Fabric")
@@ -2175,7 +2175,7 @@ In `src/app/(app)/design/grid/[id]/editor.tsx`:
 - In the props type, replace the `engineFabrics` doc comment and field (lines 255–258) with:
 
 ```ts
-  /** Scope panel Good/Better/Best targets per scope (#GEM, D-GEM-5) — SELL
+  /** Scope panel Good/Better/Best targets per scope (#211, D305) — SELL
    *  numbers computed server-side (grid/[id]/page.tsx); no cost crosses. */
   scopeTargets: ScopeTargetsByTier | null;
 ```
@@ -2206,7 +2206,7 @@ import { scopeColor, TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { setScopeInputsAction } from "./actions";
 ```
 
-(b) In the header doc comment, replace the sentence that begins "then runs the SAME estimating engine (scopeTargets) against it" with: "and lines the SERVER-computed Good/Better/Best sell targets (#GEM, D-GEM-5 — priced from the Equipment map) up against what's actually been placed on the sheet".
+(b) In the header doc comment, replace the sentence that begins "then runs the SAME estimating engine (scopeTargets) against it" with: "and lines the SERVER-computed Good/Better/Best sell targets (#211, D305 — priced from the Equipment map) up against what's actually been placed on the sheet".
 
 (c) Replace `ProgressRow` with:
 
@@ -2263,7 +2263,7 @@ function ProgressRow({
 (d) Props: in the destructure replace `engineFabrics,` with `targets,`. In the type, replace `engineFabrics: FabricOption[];` with:
 
 ```ts
-  /** Sell-only Good/Better/Best targets per scope, computed server-side (#GEM). */
+  /** Sell-only Good/Better/Best targets per scope, computed server-side (#211). */
   targets: ScopeTargetsByTier | null;
 ```
 
@@ -2298,7 +2298,7 @@ Replace the whole content of `src/lib/design/grid-seed.ts` with:
  * Seed placeholders (#38 Task 2, D149) — what is LEFT of the old "generate
  * starting layout" seeder. The seeder itself (deriveSeedPlacements +
  * seedStartingLayoutAction) is gone: the Auto intake's catalog-backed fill
- * (#GEM, grid-auto-fill.ts) replaced it, as D186 planned. These helpers stay
+ * (#211, grid-auto-fill.ts) replaced it, as D186 planned. These helpers stay
  * because a preview deploy may have written placeholder placements (D186), and
  * the quote guard, the editor and the drawing set still recognise them.
  */
@@ -2335,7 +2335,7 @@ Expected: the build succeeds.
 
 ```bash
 git add src/lib/design/scope-targets.ts src/lib/design/grid-seed.ts "src/app/(app)/design/quick/engine.ts" "src/app/(app)/design/grid/[id]/page.tsx" "src/app/(app)/design/grid/[id]/editor.tsx" "src/app/(app)/design/grid/[id]/scope-panel.tsx" "src/app/(app)/design/grid/[id]/actions.ts" scripts/test-review-and-spec.ts
-git commit -m "feat(grid): Scope targets computed server-side, sell-only; retire the seeder (#GEM T4)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): Scope targets computed server-side, sell-only; retire the seeder (#211 T4)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2348,7 +2348,7 @@ git commit -m "feat(grid): Scope targets computed server-side, sell-only; retire
 - Modify: `src/app/(app)/design/quick/page.tsx`, `src/app/(app)/design/quick/quick-design-client.tsx`
 - Modify: `src/app/(app)/design/designs/page.tsx`, `src/app/(app)/design/designs/design-client.tsx`
 - Modify: `src/app/(app)/design/grid/[id]/page.tsx` (targets from the map table)
-- Test: `scripts/test-review-and-spec.ts` (rewrite the three pre-#GEM engine blocks at lines 2795–2842; append a block at EOF)
+- Test: `scripts/test-review-and-spec.ts` (rewrite the three pre-#211 engine blocks at lines 2795–2842; append a block at EOF)
 
 **Interfaces:**
 - Consumes (Task 2): `EquipmentPriceTable`, `UnitPrice`, `sellFromCost`, `buildEquipmentPriceTable`, `loadEquipPriceCtx`, `loadEquipmentPriceTable`. From the engine: `applyOverrides`, `scaleSets`, `tierDefsDefault`. From curtain-pricing: `curtainCost`, `makingRateFor`. Task 4: `scopeTargetsByTier`.
@@ -2374,9 +2374,9 @@ import { defaultAState } from "@/app/(app)/design/quick/engine";
 (b) Delete the three `{ … }` blocks that follow the imports at lines 2797–2800: the Draw-cost block, the "Assembly Builder" fixture block, and the "tier-pipeline Draw cost" block, together with that block's `/* --- the tier pipeline (what the screen renders) … */` comment. In the base file they span lines 2801–2842, ending just before `/* --- budget and quote agree on the same drape (task 7) --- */`. Put this comment in their place:
 
 ```ts
-/* The three pre-#GEM blocks that stood here (compute()'s own curtain cost, a
+/* The three pre-#211 blocks that stood here (compute()'s own curtain cost, a
  * Quick Design fixture pick, the tier pipeline's curtain cost) moved into the
- * "#GEM T5" block at EOF: compute() no longer carries dollars (D-GEM-4). */
+ * "#211 T5" block at EOF: compute() no longer carries dollars (D304). */
 ```
 
 Keep the imports on lines 2797–2800 (`designPatchFromIntake`, `TRACKABLE_SYS_KEYS`, `drapeRuleQ`, `curtainCostQ`/`RATES_Q`/`makingForQ`); the task 7 block below still uses them. Deleting the three blocks removes **3** `ok(` calls.
@@ -2384,7 +2384,7 @@ Keep the imports on lines 2797–2800 (`designPatchFromIntake`, `TRACKABLE_SYS_K
 (c) Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T5: the estimate prices only through the Equipment map — no built-in dollars --- */
+/* --- #211 T5: the estimate prices only through the Equipment map — no built-in dollars --- */
 import { compute as gemCompute5, defaultAState as gemDefault5, tierDefsDefault as gemTierDefs5, type AState as GemAState5 } from "@/app/(app)/design/quick/engine";
 import { applyEquipment as gemApply5, drapeUnitCost as gemDrape5, tierSystems as gemTierSystems5 } from "@/lib/design/equipment-pricing";
 import { buildEquipmentPriceTable as gemTable5 } from "@/lib/design/equipment-map";
@@ -2402,13 +2402,13 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   };
   const C = gemCompute5(s);
   const all = C.systems.flatMap((x) => x.items);
-  ok(all.length > 0 && all.every((it) => it.cost === 0 && it.price === 0) && C.systems.every((x) => x.rev === 0 && x.cost === 0), "#GEM T5: compute() carries quantities only — no built-in dollars");
-  ok(all.every((it) => gemRowByKey5.get(it.key)?.unit === it.unit), "#GEM T5: every item's unit is its Equipment map row's unit");
+  ok(all.length > 0 && all.every((it) => it.cost === 0 && it.price === 0) && C.systems.every((x) => x.rev === 0 && x.cost === 0), "#211 T5: compute() carries quantities only — no built-in dollars");
+  ok(all.every((it) => gemRowByKey5.get(it.key)?.unit === it.unit), "#211 T5: every item's unit is its Equipment map row's unit");
   const track = all.find((it) => it.key === "curtains:scenerytrack")!;
-  ok(track.unit === "ft" && track.qty === 3 * 44, `#GEM T5: the scenery track emits feet — depth blocks × pipe length (got ${track.qty})`);
+  ok(track.unit === "ft" && track.qty === 3 * 44, `#211 T5: the scenery track emits feet — depth blocks × pipe length (got ${track.qty})`);
   const draw = all.find((it) => it.key === "curtains:draw")!;
   const rule = gemDrapeRule5("Draw", { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 64, stageDepthFt: 30 }, "better")!;
-  ok(!!draw.drape && draw.drape.w === rule.w && draw.drape.h === rule.h && draw.drape.fullness === rule.fullness && draw.drape.qty === rule.qty, "#GEM T5: a drape item carries the goods.ts geometry the quote side uses");
+  ok(!!draw.drape && draw.drape.w === rule.w && draw.drape.h === rule.h && draw.drape.fullness === rule.fullness && draw.drape.qty === rule.qty, "#211 T5: a drape item carries the goods.ts geometry the quote side uses");
   const parts = new Map<string, { sku: string; desc: string; unit: string; cost: number; list: number; category: string; curtainAreaRate?: number }>([
     ["GEM5-PAR", { sku: "GEM5-PAR", desc: "LED par", unit: "ea", cost: 600, list: 900, category: "Lighting Fixtures" }],
     ["GEM5-HB", { sku: "GEM5-HB", desc: "Headblock", unit: "ea", cost: 500, list: 0, category: "Rigging Hardware" }],
@@ -2423,34 +2423,34 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   const better = gemTierSystems5(C, s, "better", gemTierDefs5(), table);
   const item = (sys: string, key: string, list = better) => list.find((x) => x.key === sys)!.items.find((i) => i.key === key)!;
   const par = item("lighting", "lighting:par");
-  ok(par.cost === 600 && par.price === 900 && par.status === "part" && par.refDesc === "LED par", "#GEM T5: a mapped part prices from the live catalog");
+  ok(par.cost === 600 && par.price === 900 && par.status === "part" && par.refDesc === "LED par", "#211 T5: a mapped part prices from the live catalog");
   const hb = item("rigging", "rigging:headblock");
-  ok(hb.cost === 500 && hb.price === 714.29, "#GEM T5: a list-less part sells at cost ÷ (1 − catalog margin)");
+  ok(hb.cost === 500 && hb.price === 714.29, "#211 T5: a list-less part sells at cost ÷ (1 − catalog margin)");
   const arbor = item("rigging", "rigging:arbor");
-  ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#GEM T5: an unmapped item is needs-a-part — never a fallback dollar");
+  ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#211 T5: an unmapped item is needs-a-part — never a fallback dollar");
   const d = item("curtains", "curtains:draw");
   const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5, makingRate: gemMaking5(rule.fullness) }).costTotal);
-  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#GEM T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
+  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#211 T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
   const sub = item("audio", "audio:subwoofer");
-  ok(sub.status === "allowance" && sub.cost === 1200, "#GEM T5: a confirmed allowance prices as its unit cost");
+  ok(sub.status === "allowance" && sub.cost === 1200, "#211 T5: a confirmed allowance prices as its unit cost");
   const rig = better.find((x) => x.key === "rigging")!;
-  ok(rig.tierFixed === true && rig.cost === rig.items.reduce((a, i) => a + i.qty * i.cost, 0), "#GEM T5: system totals sum only priced lines");
+  ok(rig.tierFixed === true && rig.cost === rig.items.reduce((a, i) => a + i.qty * i.cost, 0), "#211 T5: system totals sum only priced lines");
   const good = gemTierSystems5(C, s, "good", gemTierDefs5(), table);
-  ok(item("rigging", "rigging:headblock", good).status === "needs-part" && item("lighting", "lighting:par", good).price === 900, "#GEM T5: each tier resolves its own cells (same-for-all rows price every tier)");
+  ok(item("rigging", "rigging:headblock", good).status === "needs-part" && item("lighting", "lighting:par", good).price === 900, "#211 T5: each tier resolves its own cells (same-for-all rows price every tier)");
   const ov = gemTierSystems5(C, s, "better", gemTierDefs5(), table, { "lighting:par": { status: "assembly", ref: "fa-par", desc: "House PAR assembly", unit: "ea", unitCost: 432, unitSell: 610 } });
   const opar = item("lighting", "lighting:par", ov);
-  ok(opar.cost === 432 && opar.price === 610 && opar.refDesc === "House PAR assembly" && opar.desc === "Par", "#GEM T5: a per-design pick overrides the map for that row, keeping the equation's name");
+  ok(opar.cost === 432 && opar.price === 610 && opar.refDesc === "House PAR assembly" && opar.desc === "Par", "#211 T5: a per-design pick overrides the map for that row, keeping the equation's name");
   const once = gemApply5(C.systems, "better", table);
-  ok(once.every((x) => x.tierFixed) && once.find((x) => x.key === "lighting")!.rev === par.qty * 900, "#GEM T5: applyEquipment prices every system per tier (tier multipliers are inert)");
+  ok(once.every((x) => x.tierFixed) && once.find((x) => x.key === "lighting")!.rev === par.qty * 900, "#211 T5: applyEquipment prices every system per tier (tier multipliers are inert)");
   const engSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/engine.ts"), "utf8");
-  ok(!/TIER_SKUS|SEED_FABRIC_RATES/.test(engSrc) && !gemValueImports(engSrc).some((m) => /curtain-pricing|equipment-pricing/.test(m)) && !/\bcost:\s*(0\.\d|[1-9]|Math)/.test(engSrc), "#GEM T5: engine.ts holds no dollars and imports nothing cost-bearing");
+  ok(!/TIER_SKUS|SEED_FABRIC_RATES/.test(engSrc) && !gemValueImports(engSrc).some((m) => /curtain-pricing|equipment-pricing/.test(m)) && !/\bcost:\s*(0\.\d|[1-9]|Math)/.test(engSrc), "#211 T5: engine.ts holds no dollars and imports nothing cost-bearing");
   const walk = (dir: string): string[] =>
     gemReaddir5(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
   const gridClient = [...walk(join(process.cwd(), "src/app/(app)/design/grid")), ...walk(join(process.cwd(), "src/components/design"))]
     .map((f) => ({ f, src: readFileSync(f, "utf8") }))
     .filter(({ src }) => src.startsWith('"use client"'));
   const leaks = gridClient.filter(({ src }) => gemValueImports(src).some((m) => /curtain-pricing|equipment-pricing|equipment-legacy-hints|^@\/lib\/stores\/|^@\/db\//.test(m)));
-  ok(gridClient.length > 5 && leaks.length === 0, `#GEM T5: no Grid client file imports a cost-bearing module (leaks: ${leaks.map((l) => l.f.split("/src/")[1]).join(", ") || "none"})`);
+  ok(gridClient.length > 5 && leaks.length === 0, `#211 T5: no Grid client file imports a cost-bearing module (leaks: ${leaks.map((l) => l.f.split("/src/")[1]).join(", ") || "none"})`);
 }
 ```
 
@@ -2467,7 +2467,7 @@ Create `src/lib/design/equipment-pricing.ts`:
 
 ```ts
 /**
- * Equipment pricing (#GEM, D-GEM-4) — the estimate pipeline's ONLY pricing
+ * Equipment pricing (#211, D304) — the estimate pipeline's ONLY pricing
  * step. compute() (quick/engine.ts) emits quantities; this prices every item
  * from the Equipment map's price table, or from a per-design override (a
  * Quick Design fixture pick, an Auto intake swap). A needs-a-part item stays
@@ -2475,7 +2475,7 @@ Create `src/lib/design/equipment-pricing.ts`:
  *
  * Cost-bearing (unit costs, curtain making rates): server code and the Quick
  * Design / Designs dashboard clients (already cost views) may import it. NO
- * Grid client file does — the #GEM T5 spec guard walks them.
+ * Grid client file does — the #211 T5 spec guard walks them.
  */
 import { curtainCost, makingRateFor } from "./curtain-pricing";
 import {
@@ -2582,7 +2582,7 @@ In `src/app/(app)/design/quick/engine.ts`:
  * Quick Design estimating engine — port of the logic class embedded in
  * app/Quick Design.dc.html (the budgetary auto-estimate path). Venue presets,
  * dimension schemas, sizing equations and roll-up formulas are carried over;
- * the prototype's DOLLARS are not (#GEM, D-GEM-4): compute() emits item keys +
+ * the prototype's DOLLARS are not (#211, D304): compute() emits item keys +
  * quantities only, and src/lib/design/equipment-pricing.ts prices them from
  * the catalog-backed Equipment map. This module holds no cost data, so the
  * Grid's client components can import its presets and sizing safely.
@@ -2598,7 +2598,7 @@ In `src/app/(app)/design/quick/engine.ts`:
 export type DrapeGeom = { w: number; h: number; fullness: number; qty: number };
 
 export type BomItem = {
-  /** Equipment map row key, `system:itemKey` (#GEM, equipment-vocab.ts). */
+  /** Equipment map row key, `system:itemKey` (#211, equipment-vocab.ts). */
   key: string;
   /** The equation's own item name (= the row label). */
   desc: string;
@@ -2607,7 +2607,7 @@ export type BomItem = {
   /** Unit cost / unit sell — 0 until equipment-pricing.ts prices the item. */
   cost: number;
   price: number;
-  /** Set by the Equipment map pricing step (#GEM): how this line priced. */
+  /** Set by the Equipment map pricing step (#211): how this line priced. */
   status?: "part" | "assembly" | "allowance" | "needs-part";
   /** What priced it: SKU, fixture id or row key — and its description. */
   ref?: string;
@@ -2623,11 +2623,11 @@ export type BomItem = {
 
 ```ts
 /**
- * Pure function of the designer state — the refined BOM equations (#GEM:
+ * Pure function of the designer state — the refined BOM equations (#211:
  * QUANTITIES ONLY). Every item carries its Equipment map key (equipment-
  * vocab.ts) and no dollars; equipment-pricing.ts prices them. Sizing math is
  * unchanged, except the scenery track, which now emits FEET (count × pipe
- * length) so a per-foot catalog track can price it (D-GEM-1).
+ * length) so a per-foot catalog track can price it (D301).
  */
 export function compute(s: AState): ComputeResult {
   const C = clamp;
@@ -2844,7 +2844,7 @@ import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map"
 
 ```tsx
   /** A per-design fixture pick (Assembly Builder) overrides that fixture row's
-   *  Equipment map price (#GEM) — the item keeps the equation's name. */
+   *  Equipment map price (#211) — the item keeps the equation's name. */
   const fixtureOverrides = useMemo(() => {
     const out: Record<string, UnitPrice> = {};
     for (const [fixtureKey, id] of Object.entries(a.fixtureAssemblies || {})) {
@@ -2899,7 +2899,7 @@ import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 - replace the `engineFabrics` + `scopeTargets` block from Task 4 with:
 
 ```ts
-  // The Equipment map price context (#GEM) — built from the catalog this
+  // The Equipment map price context (#211) — built from the catalog this
   // request already loaded (no second load). Server-only; the editor gets sell
   // numbers only (scope targets now; virtual parts in Task 6).
   const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
@@ -2925,7 +2925,7 @@ Expected: the build succeeds and every smoke route is OK (`/design/quick`, `/des
 
 ```bash
 git add src/lib/design/equipment-pricing.ts "src/app/(app)/design/quick" "src/app/(app)/design/designs" "src/app/(app)/design/grid/[id]/page.tsx" scripts/test-review-and-spec.ts
-git commit -m "feat(design): estimates price only through the Equipment map; engine carries no dollars (#GEM T5)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(design): estimates price only through the Equipment map; engine carries no dollars (#211 T5)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2979,14 +2979,14 @@ git commit -m "feat(design): estimates price only through the Equipment map; eng
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T6: lot quantities, virtual parts (assemblies + allowances), the Auto estimate model --- */
+/* --- #211 T6: lot quantities, virtual parts (assemblies + allowances), the Auto estimate model --- */
 import { bomBySpace as gemBySpace6, bomLines as gemBomLines6, bomTotals as gemBomTotals6, placementQty as gemQty6, type PartLite as GemPartLite6 } from "@/lib/design/grid-bom";
 import { allowancePartId as gemAllowId6, assemblyPartId as gemAsmId6, parseVirtualPartId as gemParseV6, virtualPartsFor as gemVirtual6 } from "@/lib/design/grid-virtual-parts";
 import { mergeScopeEstimate as gemMergeEst6, overrideRefs as gemRefs6, sanitizeAutoEstimate as gemSanEst6 } from "@/lib/design/grid-auto-model";
 import { buildSchedule as gemSchedule6 } from "@/lib/design/grid-schedule";
 import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
 {
-  ok(gemQty6({}) === 1 && gemQty6({ qty: 240 }) === 240 && gemQty6({ qty: 0 }) === 1 && gemQty6({ qty: Number.NaN }) === 1, "#GEM T6: a placement counts 1 unless it is a lot");
+  ok(gemQty6({}) === 1 && gemQty6({ qty: 240 }) === 240 && gemQty6({ qty: 0 }) === 1 && gemQty6({ qty: Number.NaN }) === 1, "#211 T6: a placement counts 1 unless it is a lot");
   const parts: GemPartLite6[] = [
     { id: "PIPE", sku: "PIPE", desc: "Pipe", category: "Rigging", unit: "ft", list: 12, cost: 8 },
     { id: "PAR", sku: "PAR", desc: "Par", category: "Lighting", unit: "ea", list: 900, cost: 600 },
@@ -2998,18 +2998,18 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   ];
   const lines = gemBomLines6(pls, parts);
   const pipe = lines.find((l) => l.partId === "PIPE")!;
-  ok(pipe.qty === 240 && pipe.ext === 2880 && lines.find((l) => l.partId === "PAR")!.qty === 2, "#GEM T6: a lot marker bills its quantity on the BOM");
+  ok(pipe.qty === 240 && pipe.ext === 2880 && lines.find((l) => l.partId === "PAR")!.qty === 2, "#211 T6: a lot marker bills its quantity on the BOM");
   const tot = gemBomTotals6(pls, parts);
-  ok(tot.value === 4680 && tot.cost === 3120, "#GEM T6: totals multiply by the lot quantity");
+  ok(tot.value === 4680 && tot.cost === 3120, "#211 T6: totals multiply by the lot quantity");
   const roll = gemBySpace6(pls, parts, [])[0];
-  ok(roll.count === 3 && roll.value === 4680, "#GEM T6: space rollups value a lot at its quantity (count stays markers)");
+  ok(roll.count === 3 && roll.value === 4680, "#211 T6: space rollups value a lot at its quantity (count stays markers)");
   const sched = gemSchedule6({ placements: pls, spaces: [], descOf: (id) => parts.find((p) => p.id === id)?.desc, wires: [] });
-  ok(sched.sections[0].rows.find((r) => r.partId === "PIPE")!.qty === 240, "#GEM T6: the schedule counts a lot at its quantity");
+  ok(sched.sections[0].rows.find((r) => r.partId === "PIPE")!.qty === 240, "#211 T6: the schedule counts a lot at its quantity");
   const graph = gemRiser6(pls, [], [], parts, []);
-  ok(graph.nodes[0].groups.find((g) => g.partId === "PIPE")!.qty === 240, "#GEM T6: the riser counts a lot at its quantity");
-  ok(gemAsmId6("SA-1") === "asm:SA-1" && gemAllowId6("audio:subwoofer", "best") === "allow:audio:subwoofer:best", "#GEM T6: virtual part ids");
+  ok(graph.nodes[0].groups.find((g) => g.partId === "PIPE")!.qty === 240, "#211 T6: the riser counts a lot at its quantity");
+  ok(gemAsmId6("SA-1") === "asm:SA-1" && gemAllowId6("audio:subwoofer", "best") === "allow:audio:subwoofer:best", "#211 T6: virtual part ids");
   const pv = gemParseV6("allow:audio:subwoofer:best");
-  ok(pv?.kind === "allowance" && pv.rowKey === "audio:subwoofer" && pv.tier === "best" && gemParseV6("asm:SA-1")?.kind === "assembly" && gemParseV6("allow:bogus:row:best") === null && gemParseV6("GEM-PAR") === null, "#GEM T6: parse round-trips and rejects unknown rows and plain SKUs");
+  ok(pv?.kind === "allowance" && pv.rowKey === "audio:subwoofer" && pv.tier === "best" && gemParseV6("asm:SA-1")?.kind === "assembly" && gemParseV6("allow:bogus:row:best") === null && gemParseV6("GEM-PAR") === null, "#211 T6: parse round-trips and rejects unknown rows and plain SKUs");
   const rack = {
     id: "SA-GEM6", kind: "system" as const, label: "GEM6 rack", description: "", scope: "Audio" as const,
     lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
@@ -3030,27 +3030,27 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   };
   const map = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
   const v = gemVirtual6(["asm:SA-GEM6", "asm:fa-gem6", "allow:audio:subwoofer:better", "allow:video:screen:good", "PLAIN", "asm:SA-GEM6"], map, ctx);
-  ok(v.length === 4 && v.every((p) => p.virtual === true), "#GEM T6: one virtual part per distinct virtual id; plain SKUs are not virtual");
+  ok(v.length === 4 && v.every((p) => p.virtual === true), "#211 T6: one virtual part per distinct virtual id; plain SKUs are not virtual");
   const vr = v.find((p) => p.id === "asm:SA-GEM6")!;
-  ok(vr.list === 7000 && vr.cost === 5000 && vr.gridScope === "Audio" && vr.desc === "GEM6 rack", "#GEM T6: a System assembly resolves live, in its system's scope");
-  ok(v.find((p) => p.id === "asm:fa-gem6")!.gridScope === "Lighting", "#GEM T6: a fixture assembly is Lighting");
+  ok(vr.list === 7000 && vr.cost === 5000 && vr.gridScope === "Audio" && vr.desc === "GEM6 rack", "#211 T6: a System assembly resolves live, in its system's scope");
+  ok(v.find((p) => p.id === "asm:fa-gem6")!.gridScope === "Lighting", "#211 T6: a fixture assembly is Lighting");
   const va = v.find((p) => p.id === "allow:audio:subwoofer:better")!;
-  ok(va.allowance === true && va.cost === 1200 && va.list === 1714.29 && va.gridScope === "Audio", "#GEM T6: a confirmed allowance prices live, flagged Allowance");
+  ok(va.allowance === true && va.cost === 1200 && va.list === 1714.29 && va.gridScope === "Audio", "#211 T6: a confirmed allowance prices live, flagged Allowance");
   const dead = v.find((p) => p.id === "allow:video:screen:good")!;
-  ok(dead.list === 0 && dead.cost === 0 && /no longer confirmed/.test(dead.desc), "#GEM T6: an allowance that is no longer confirmed prices $0 and says so");
+  ok(dead.list === 0 && dead.cost === 0 && /no longer confirmed/.test(dead.desc), "#211 T6: an allowance that is no longer confirmed prices $0 and says so");
   const est = gemSanEst6({
     tierByScope: { lighting: "best", controls: "good", audio: "nope" },
     overrides: { "lighting:par": { sku: " GEM-PAR ", qty: 12.4 }, "controls:console": { sku: "X" }, "bogus:row": { sku: "Y" }, "audio:subwoofer": { assemblyId: "SA-1", sku: "" }, "video:screen": {} },
   });
-  ok(JSON.stringify(est.tierByScope) === '{"lighting":"best"}' && est.overrides["lighting:par"].sku === "GEM-PAR" && est.overrides["lighting:par"].qty === 12 && est.overrides["audio:subwoofer"].assemblyId === "SA-1" && !("controls:console" in est.overrides) && !("bogus:row" in est.overrides) && !("video:screen" in est.overrides), "#GEM T6: sanitizeAutoEstimate keeps Grid scopes, known rows and real overrides only");
+  ok(JSON.stringify(est.tierByScope) === '{"lighting":"best"}' && est.overrides["lighting:par"].sku === "GEM-PAR" && est.overrides["lighting:par"].qty === 12 && est.overrides["audio:subwoofer"].assemblyId === "SA-1" && !("controls:console" in est.overrides) && !("bogus:row" in est.overrides) && !("video:screen" in est.overrides), "#211 T6: sanitizeAutoEstimate keeps Grid scopes, known rows and real overrides only");
   const merged = gemMergeEst6(est, "lighting", "good", { "lighting:front": { qty: 3 }, "audio:lineArray": { qty: 9 } });
-  ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#GEM T6: re-choosing one scope replaces only that scope's overrides");
+  ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#211 T6: re-choosing one scope replaces only that scope's overrides");
   const refs = gemRefs6(est);
-  ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#GEM T6: overrideRefs names the SKUs and assemblies to load");
+  ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#211 T6: overrideRefs names the SKUs and assemblies to load");
   const ed6 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
-  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#GEM T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
+  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
 }
 ```
 
@@ -3067,7 +3067,7 @@ Create `src/lib/design/grid-auto-model.ts`:
 
 ```ts
 /**
- * The Grid Auto intake's persisted choices (#GEM, spec §5) — pure.
+ * The Grid Auto intake's persisted choices (#211, spec §5) — pure.
  * `tierByScope` = the Good/Better/Best pick per Grid scope; `overrides` = per
  * equation row (`system:itemKey`) swaps (a catalog SKU or an assembly id) and
  * qty edits. Stored on the project as `autoEstimate` so "Change equipment…"
@@ -3149,7 +3149,7 @@ export function overrideRefs(est: AutoEstimate): { skus: string[]; assemblyIds: 
 In `src/lib/design/grid-scopes.ts`, directly after `export const GRID_LAYERS …` (line 49), add:
 
 ```ts
-/** The five trackable systems → their Grid scope (#GEM; the Scope panel's SYS_TO_GRID_SCOPE). */
+/** The five trackable systems → their Grid scope (#211; the Scope panel's SYS_TO_GRID_SCOPE). */
 export const GRID_SCOPE_OF_SYS: Partial<Record<SysKey, GridScope>> = {
   rigging: "Rigging",
   curtains: "Curtains",
@@ -3165,7 +3165,7 @@ Create `src/lib/design/grid-virtual-parts.ts`:
 
 ```ts
 /**
- * Virtual parts (#GEM, D-GEM-6) — pure. Auto places assemblies and confirmed
+ * Virtual parts (#211, D306) — pure. Auto places assemblies and confirmed
  * allowances as ORDINARY placements whose partId is a virtual id:
  *   asm:<fixtureId>          a fixture or System assembly (#210)
  *   allow:<rowKey>:<tier>    a confirmed Equipment map allowance
@@ -3275,18 +3275,18 @@ In `src/lib/design/grid-bom.ts`:
 (a) Add to `PartLite`, after `pricingPartId?: string | null;`:
 
 ```ts
-  /** #GEM virtual part (asm:/allow: ids, grid-virtual-parts.ts) — resolved
+  /** #211 virtual part (asm:/allow: ids, grid-virtual-parts.ts) — resolved
    *  server-side from an assembly or an Equipment map allowance; never offered
    *  in the device palette. */
   virtual?: true;
-  /** #GEM: an Equipment map allowance line — flagged internally ("Allowance"). */
+  /** #211: an Equipment map allowance line — flagged internally ("Allowance"). */
   allowance?: true;
 ```
 
 (b) Add after the `isCurtainPlacement` function:
 
 ```ts
-/** A placement's unit count (#GEM): an Auto "lot" marker carries `qty` (count
+/** A placement's unit count (#211): an Auto "lot" marker carries `qty` (count
  *  or length hardware); every other placement is one unit. */
 export function placementQty(pl: { qty?: number | null }): number {
   const n = Math.round(Number(pl.qty));
@@ -3337,14 +3337,14 @@ export type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
 
 ```ts
   /**
-   * Lot quantity (#GEM, D-GEM-6): one marker standing for `qty` units of its
+   * Lot quantity (#211, D306): one marker standing for `qty` units of its
    * part — Auto lands count/length hardware (pipe, cable, arbors …) this way.
    * Absent = 1. The BOM, schedule, riser and space rollups multiply by
    * placementQty(); labor suggestions count the marker once.
    */
   qty?: number;
   /**
-   * Auto-fill tag (#GEM, spec §5): set on a placement the Auto intake or a
+   * Auto-fill tag (#211, spec §5): set on a placement the Auto intake or a
    * per-scope "Change equipment…" re-fill painted. Any move or category edit
    * deletes it, so a hand-touched device is kept by every later re-fill.
    */
@@ -3354,7 +3354,7 @@ export type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
 (c) In `GridProject`, after `scopeInputs?: QuickScopeInputs | null;`, add:
 
 ```ts
-  /** Auto intake choices (#GEM): tier per scope + per-row swaps/qty. Absent on Blank designs. */
+  /** Auto intake choices (#211): tier per scope + per-row swaps/qty. Absent on Blank designs. */
   autoEstimate?: AutoEstimate;
 ```
 
@@ -3372,7 +3372,7 @@ export type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
 export type AutoPlacementInput = { x: number; y: number; partId: string; qty?: number; curtain?: GridCurtain; auto: AutoTag };
 
 /**
- * Auto fill / per-scope re-fill (#GEM, spec §5), atomically in ONE patch:
+ * Auto fill / per-scope re-fill (#211, spec §5), atomically in ONE patch:
  * every placement of `optionId` still carrying an `auto` tag in one of
  * `scopes` is removed (its riser links go with it, as removePlacement does),
  * then `items` (only those whose auto.scope is in `scopes`) are added.
@@ -3424,7 +3424,7 @@ export async function replaceAutoPlacements(
   return refused || !updated ? null : { removed, added };
 }
 
-/** Persist (or clear, with null) the Auto intake's choices (#GEM). */
+/** Persist (or clear, with null) the Auto intake's choices (#211). */
 export async function setAutoEstimate(projectId: string, est: AutoEstimate | null): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (est) p.autoEstimate = est;
@@ -3433,7 +3433,7 @@ export async function setAutoEstimate(projectId: string, est: AutoEstimate | nul
   });
 }
 
-/** A hand-touched placement stops being "auto" (#GEM): later re-fills keep it. */
+/** A hand-touched placement stops being "auto" (#211): later re-fills keep it. */
 function withoutAuto(pl: GridPlacement): GridPlacement {
   if (!pl.auto) return pl;
   const next = { ...pl };
@@ -3444,7 +3444,7 @@ function withoutAuto(pl: GridPlacement): GridPlacement {
 
 (f) In `setPlacementCategory`, change `const next = { ...pl };` to `const next = withoutAuto({ ...pl });`.
 
-(g) In `movePlacement`, change `pl.id === placementId ? { ...pl, x, y } : pl` to `pl.id === placementId ? withoutAuto({ ...pl, x, y }) : pl`, and add this sentence to its doc comment: "A move clears the #GEM auto tag, so a re-fill keeps the device."
+(g) In `movePlacement`, change `pl.id === placementId ? { ...pl, x, y } : pl` to `pl.id === placementId ? withoutAuto({ ...pl, x, y }) : pl`, and add this sentence to its doc comment: "A move clears the #211 auto tag, so a re-fill keeps the device."
 
 - [ ] **Step 8: Grid library entries for mapped parts, and the virtual-part loader**
 
@@ -3452,7 +3452,7 @@ In `src/lib/stores/grid-catalog.ts`, add `insertDocIfAbsent` to the doc-store im
 
 ```ts
 /**
- * Make sure each pricing part has a Grid library entry (#GEM Auto fill) — the
+ * Make sure each pricing part has a Grid library entry (#211 Auto fill) — the
  * same `fromPricing` shape the first-use seed writes, inserted ONLY where
  * missing (insert-if-absent: never overwrites an entry someone restyled).
  * Called from the Auto fill (a user action), never on page load.
@@ -3474,7 +3474,7 @@ In `src/lib/stores/equipment-map.ts`, add imports `import { parseVirtualPartId, 
 ```ts
 /**
  * The virtual parts (asm:/allow:) a set of placements references, resolved
- * live (#GEM). No virtual id → nothing is loaded at all, so a design without
+ * live (#211). No virtual id → nothing is loaded at all, so a design without
  * Auto devices pays nothing. Pass `catalog` when the request already holds it.
  */
 export async function loadVirtualParts(partIds: Iterable<string>, catalog?: ReadonlyArray<CatalogPart>): Promise<PartLite[]> {
@@ -3494,7 +3494,7 @@ export async function loadVirtualParts(partIds: Iterable<string>, catalog?: Read
 `src/app/(app)/design/grid/[id]/page.tsx`: move Task 5's `loadEquipPriceCtx` / `equipTable` / `scopeTargets` block up so it sits just before `const { index: docIndex } = await loadPartDocsState(catalog);`. Then add `import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";` and change the `parts` line to:
 
 ```ts
-  // #GEM: assemblies and allowances placed by Auto resolve live into PartLite rows.
+  // #211: assemblies and allowances placed by Auto resolve live into PartLite rows.
   const parts: PartLite[] = [
     ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile }),
     ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),
@@ -3515,7 +3515,7 @@ keeping each file's existing `gridPartsFrom(...)` arguments exactly as they are.
 - after `const symbols = await listGridSymbols();` insert:
 
 ```ts
-  // #GEM: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
+  // #211: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
   const virtual = await loadVirtualParts(placements.map((p) => p.partId), catalog);
   const allowanceIds = new Set(virtual.filter((v) => v.allowance).map((v) => v.id));
   const virtualRows = virtual.map((v) => ({
@@ -3562,7 +3562,7 @@ Expected: `ALL PASSED`, **4040** PASS lines (4023 + 17).
 In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final review M5` block:
 
 ```ts
-  /* --- #GEM T6: auto placements — per-scope replace, hand-touched kept, lots + virtual parts on the quote --- */
+  /* --- #211 T6: auto placements — per-scope replace, hand-touched kept, lots + virtual parts on the quote --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const EM = await import("@/lib/stores/equipment-map");
@@ -3583,7 +3583,7 @@ In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final re
       { x: 0.3, y: 0.1, partId: "GEM6-PAR", auto: tag("lighting:par") },
       { x: 0.9, y: 0.9, partId: "GEM6-PIPE", qty: 240, auto: pipeTag },
     ] });
-    assert.deepEqual(first, { removed: 0, added: 3 }, "#GEM T6: a fill adds only the items of the scopes it was asked to fill");
+    assert.deepEqual(first, { removed: 0, added: 3 }, "#211 T6: a fill adds only the items of the scopes it was asked to fill");
     await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [{ x: 0.9, y: 0.9, partId: "GEM6-PIPE", qty: 240, auto: pipeTag }] });
     await GP.addPlacement(p0.id, { sheetId, page: 1, x: 0.5, y: 0.5, partId: "GEM6-PAR", optionId: opt, by });
     p = (await GP.getProject(p0.id))!;
@@ -3591,28 +3591,28 @@ In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final re
     await GP.movePlacement(p0.id, autoPars[0].id, { x: 0.15, y: 0.2 });
     await GP.setPlacementCategory(p0.id, autoPars[1].id, "FOH");
     p = (await GP.getProject(p0.id))!;
-    assert.ok(!p.placements.find((pl) => pl.id === autoPars[0].id)!.auto && !p.placements.find((pl) => pl.id === autoPars[1].id)!.auto, "#GEM T6: a move or a category edit clears the auto tag");
+    assert.ok(!p.placements.find((pl) => pl.id === autoPars[0].id)!.auto && !p.placements.find((pl) => pl.id === autoPars[1].id)!.auto, "#211 T6: a move or a category edit clears the auto tag");
     const second = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [
       { x: 0.1, y: 0.3, partId: "GEM6-PAR", auto: tag("lighting:par") },
       { x: 0.2, y: 0.3, partId: "GEM6-PAR", auto: tag("lighting:par") },
     ] });
-    assert.deepEqual(second, { removed: 1, added: 2 }, "#GEM T6: a re-fill replaces only the untouched auto devices of that scope");
+    assert.deepEqual(second, { removed: 1, added: 2 }, "#211 T6: a re-fill replaces only the untouched auto devices of that scope");
     p = (await GP.getProject(p0.id))!;
-    assert.equal(p.placements.filter((pl) => pl.partId === "GEM6-PAR").length, 5, "#GEM T6: two hand-touched + one hand-placed + two new");
+    assert.equal(p.placements.filter((pl) => pl.partId === "GEM6-PAR").length, 5, "#211 T6: two hand-touched + one hand-placed + two new");
     const lot = p.placements.find((pl) => pl.partId === "GEM6-PIPE")!;
-    assert.ok(lot.qty === 240 && lot.auto?.scope === "rigging", "#GEM T6: another scope's lot is untouched, its qty kept");
+    assert.ok(lot.qty === 240 && lot.auto?.scope === "rigging", "#211 T6: another scope's lot is untouched, its qty kept");
     const other = await GP.addOption(p0.id, { name: "Alt", by });
-    assert.ok(other.ok, "#GEM T6: a second option");
+    assert.ok(other.ok, "#211 T6: a second option");
     if (other.ok) {
       assert.deepEqual(
         await GP.replaceAutoPlacements(p0.id, { optionId: other.option.id, scopes: ["lighting"], sheetId, page: 1, by, items: [] }),
         { removed: 0, added: 0 },
-        "#GEM T6: a re-fill in one option never touches another option's devices"
+        "#211 T6: a re-fill in one option never touches another option's devices"
       );
     }
-    assert.equal(await GP.replaceAutoPlacements(p0.id, { optionId: "opt-gone", scopes: ["lighting"], sheetId, page: 1, by, items: [] }), null, "#GEM T6: an unknown option is refused");
+    assert.equal(await GP.replaceAutoPlacements(p0.id, { optionId: "opt-gone", scopes: ["lighting"], sheetId, page: 1, by, items: [] }), null, "#211 T6: an unknown option is refused");
     await GP.setAutoEstimate(p0.id, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } });
-    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } }, "#GEM T6: the Auto choices persist on the project");
+    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } }, "#211 T6: the Auto choices persist on the project");
     await Cat.upsert({ sku: "GEM6-PAR", desc: "GEM6 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
     await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, by);
     const subTag = { scope: "audio" as const, rowKey: "audio:subwoofer", tier: "better" as const };
@@ -3622,11 +3622,11 @@ In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final re
     ] });
     p = (await GP.getProject(p0.id))!;
     const q = await buildGridQuote(p, opt);
-    assert.ok(q.ok, "#GEM T6: the design quotes");
+    assert.ok(q.ok, "#211 T6: the design quotes");
     if (q.ok) {
       const allowLine = q.build.spec.lines.find((l) => l.sku === "allow:audio:subwoofer:better");
-      assert.ok(allowLine && allowLine.allowance === true && allowLine.qty === 2 && allowLine.price > 0, "#GEM T6: the allowance reaches the quote at its live price, flagged");
-      assert.ok(!q.build.spec.lines.some((l) => l.sku !== "allow:audio:subwoofer:better" && l.allowance), "#GEM T6: …and only the allowance is flagged");
+      assert.ok(allowLine && allowLine.allowance === true && allowLine.qty === 2 && allowLine.price > 0, "#211 T6: the allowance reaches the quote at its live price, flagged");
+      assert.ok(!q.build.spec.lines.some((l) => l.sku !== "allow:audio:subwoofer:better" && l.allowance), "#211 T6: …and only the allowance is flagged");
     }
     await EM.clearEquipmentRow("audio:subwoofer");
   }
@@ -3647,7 +3647,7 @@ Expected: the build succeeds.
 
 ```bash
 git add src/lib/design/grid-auto-model.ts src/lib/design/grid-virtual-parts.ts src/lib/design/grid-scopes.ts src/lib/design/grid-bom.ts src/lib/design/grid-schedule.ts src/lib/design/grid-riser.ts src/lib/design/grid-quote.ts src/lib/stores/grid-projects.ts src/lib/stores/grid-catalog.ts src/lib/stores/equipment-map.ts "src/app/(app)/design/grid/[id]" scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
-git commit -m "feat(grid): lot placements, auto tag, virtual assembly/allowance parts (#GEM T6)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): lot placements, auto tag, virtual assembly/allowance parts (#211 T6)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -3685,7 +3685,7 @@ git commit -m "feat(grid): lot placements, auto tag, virtual assembly/allowance 
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T7: Auto cards (priced from the map, sell-only to the client) + the fill rules --- */
+/* --- #211 T7: Auto cards (priced from the map, sell-only to the client) + the fill rules --- */
 import { autoEstimateCards as gemCards7, autoTargets as gemAutoTargets7, clampScopeInputs as gemClamp7, priceOverrides as gemPriceOv7, sellOnlyCards as gemSellOnly7 } from "@/lib/design/auto-estimate";
 import { EACH_CAP as gemEachCap7, generateAutoLayout as gemLayout7, partIdForLine as gemPartIdFor7, venueFrame as gemFrame7 } from "@/lib/design/grid-auto-layout";
 import { buildEquipmentPriceTable as gemTable7, type EquipCell as GemCell7 } from "@/lib/design/equipment-map";
@@ -3731,53 +3731,53 @@ import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake"
     overrides: { "lighting:front": { qty: 3 } },
   };
   const cards = gemCards7(inputs, est, table, gemPriceOv7(est.overrides, ctx));
-  ok(cards.map((c) => c.scope).join(",") === "rigging,curtains,lighting,audio", "#GEM T7: one card per chosen Grid scope, in scope order");
+  ok(cards.map((c) => c.scope).join(",") === "rigging,curtains,lighting,audio", "#211 T7: one card per chosen Grid scope, in scope order");
   const card = (k: string) => cards.find((c) => c.scope === k)!;
   const line = (k: string, key: string) => card(k).lines.find((l) => l.rowKey === key)!;
   const par = line("lighting", "lighting:par");
-  ok(par.status === "part" && par.unitSell === 900 && par.qty === 15 && par.total === 15 * 900 && par.ref === "GEM7-PAR", "#GEM T7: a mapped line pre-fills its part at the equation quantity");
+  ok(par.status === "part" && par.unitSell === 900 && par.qty === 15 && par.total === 15 * 900 && par.ref === "GEM7-PAR", "#211 T7: a mapped line pre-fills its part at the equation quantity");
   const front = line("lighting", "lighting:front");
-  ok(front.qty === 3 && front.eqQty === 13 && front.total === 3 * 2100, "#GEM T7: an edited qty overrides the equation quantity");
+  ok(front.qty === 3 && front.eqQty === 13 && front.total === 3 * 2100, "#211 T7: an edited qty overrides the equation quantity");
   const rig = card("rigging");
   const arbor = line("rigging", "rigging:arbor");
-  ok(arbor.status === "needs-part" && arbor.total === 0 && arbor.unitSell === 0 && arbor.reason === "Not mapped yet" && rig.needsPart >= 1, "#GEM T7: unmapped lines are listed with a reason, never priced");
-  ok(rig.total === rig.lines.reduce((s, l) => s + l.total, 0), "#GEM T7: a card total sums only priced lines");
+  ok(arbor.status === "needs-part" && arbor.total === 0 && arbor.unitSell === 0 && arbor.reason === "Not mapped yet" && rig.needsPart >= 1, "#211 T7: unmapped lines are listed with a reason, never priced");
+  ok(rig.total === rig.lines.reduce((s, l) => s + l.total, 0), "#211 T7: a card total sums only priced lines");
   const sub = line("audio", "audio:subwoofer");
-  ok(sub.status === "allowance" && sub.unitSell === 1714.29 && card("audio").allowances === 1, "#GEM T7: a confirmed allowance line is flagged and priced");
+  ok(sub.status === "allowance" && sub.unitSell === 1714.29 && card("audio").allowances === 1, "#211 T7: a confirmed allowance line is flagged and priced");
   const mix = line("audio", "audio:mixerDsp");
-  ok(mix.status === "assembly" && mix.unitSell === 7000, "#GEM T7: a System assembly line prices at its included totals");
+  ok(mix.status === "assembly" && mix.unitSell === 7000, "#211 T7: a System assembly line prices at its included totals");
   const draw = line("curtains", "curtains:draw");
-  ok(draw.status === "part" && !!draw.drape && draw.unitCost > 0 && draw.ref === "GEM7-VEL", "#GEM T7: a drape line costs from the mapped fabric");
+  ok(draw.status === "part" && !!draw.drape && draw.unitCost > 0 && draw.ref === "GEM7-VEL", "#211 T7: a drape line costs from the mapped fabric");
   const swapOv = { "lighting:par": { assemblyId: "SA-GEM7" } };
   const spar = gemCards7(inputs, { ...est, overrides: swapOv }, table, gemPriceOv7(swapOv, ctx)).find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:par")!;
-  ok(spar.status === "assembly" && spar.swapped && spar.refDesc === "GEM7 rack", "#GEM T7: any line can be swapped to an assembly for this design");
+  ok(spar.status === "assembly" && spar.swapped && spar.refDesc === "GEM7 rack", "#211 T7: any line can be swapped to an assembly for this design");
   const sell = gemSellOnly7(cards);
-  ok(!JSON.stringify(sell).includes("unitCost") && sell[0].lines.length === cards[0].lines.length, "#GEM T7: the client payload carries no unit cost");
+  ok(!JSON.stringify(sell).includes("unitCost") && sell[0].lines.length === cards[0].lines.length, "#211 T7: the client payload carries no unit cost");
   const tg = gemAutoTargets7(cards);
-  ok(tg.lighting!.sell === card("lighting").total && tg.rigging!.needsPart === rig.needsPart && tg.audio!.allowances === 1, "#GEM T7: Auto targets are the chosen cards' totals");
+  ok(tg.lighting!.sell === card("lighting").total && tg.rigging!.needsPart === rig.needsPart && tg.audio!.allowances === 1, "#211 T7: Auto targets are the chosen cards' totals");
   const clamped = gemClamp7({ ...inputs, width: 9999, depth: Number.NaN });
-  ok(clamped.width === 80 && clamped.depth === 14, "#GEM T7: client-sent dimensions are clamped");
+  ok(clamped.width === 80 && clamped.depth === 14, "#211 T7: client-sent dimensions are clamped");
   const Cq = gemCompute7({ ...a, tier: "better" });
   const specs = gemLayout7(a, cards, { electrics: Cq.electrics, sets: Cq.rigSets });
   const placedQty = (key: string) => specs.filter((s) => s.auto.rowKey === key).reduce((n, s) => n + (s.qty ?? 1), 0);
   const placeable = cards.flatMap((c) => c.lines.filter((l) => gemPartIdFor7(l, c.tier) !== null));
-  ok(placeable.length > 0 && placeable.every((l) => placedQty(l.rowKey) === l.qty), "#GEM T7: every placeable line lands at exactly its quantity");
-  ok(specs.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "#GEM T7: every position lies on the sheet");
+  ok(placeable.length > 0 && placeable.every((l) => placedQty(l.rowKey) === l.qty), "#211 T7: every placeable line lands at exactly its quantity");
+  ok(specs.every((s) => s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1), "#211 T7: every position lies on the sheet");
   const fr = gemFrame7(a);
   const inside = (p: { x: number; y: number }, r: { x: number; y: number; w: number; h: number }) =>
     p.x >= r.x - 1e-9 && p.x <= r.x + r.w + 1e-9 && p.y >= r.y - 1e-9 && p.y <= r.y + r.h + 1e-9;
-  ok(specs.filter((s) => s.auto.rowKey === "lighting:par").every((s) => inside(s, fr.stage)), "#GEM T7: pars hang on the electrics, inside the stage");
-  ok(specs.filter((s) => s.auto.rowKey === "lighting:front").every((s) => inside(s, fr.audience)), "#GEM T7: front lights go front-of-house");
-  ok(specs.filter((s) => s.auto.rowKey === "audio:mixerDsp").every((s) => inside(s, fr.booth)), "#GEM T7: the mixer rack goes to the control booth");
-  ok(!specs.some((s) => s.auto.rowKey === "rigging:arbor"), "#GEM T7: a needs-a-part line is never placed");
+  ok(specs.filter((s) => s.auto.rowKey === "lighting:par").every((s) => inside(s, fr.stage)), "#211 T7: pars hang on the electrics, inside the stage");
+  ok(specs.filter((s) => s.auto.rowKey === "lighting:front").every((s) => inside(s, fr.audience)), "#211 T7: front lights go front-of-house");
+  ok(specs.filter((s) => s.auto.rowKey === "audio:mixerDsp").every((s) => inside(s, fr.booth)), "#211 T7: the mixer rack goes to the control booth");
+  ok(!specs.some((s) => s.auto.rowKey === "rigging:arbor"), "#211 T7: a needs-a-part line is never placed");
   const drapes = specs.filter((s) => s.auto.rowKey === "curtains:draw");
-  ok(drapes.length === draw.qty && drapes.every((s) => s.partId === "GEM7-VEL" && s.curtain?.type === "Draw" && s.curtain.fabricSku === "GEM7-VEL" && s.curtain.widthFt === draw.drape!.w * draw.drape!.qty && s.curtain.fullnessPct === 50), "#GEM T7: draws land as curtain drop-ins on the mapped fabric, a pair as one drape");
-  ok(specs.filter((s) => s.auto.rowKey === "audio:subwoofer").every((s) => s.partId === "allow:audio:subwoofer:better") && specs.some((s) => s.partId === "asm:SA-GEM7"), "#GEM T7: allowances and assemblies land as virtual parts");
+  ok(drapes.length === draw.qty && drapes.every((s) => s.partId === "GEM7-VEL" && s.curtain?.type === "Draw" && s.curtain.fabricSku === "GEM7-VEL" && s.curtain.widthFt === draw.drape!.w * draw.drape!.qty && s.curtain.fullnessPct === 50), "#211 T7: draws land as curtain drop-ins on the mapped fabric, a pair as one drape");
+  ok(specs.filter((s) => s.auto.rowKey === "audio:subwoofer").every((s) => s.partId === "allow:audio:subwoofer:better") && specs.some((s) => s.partId === "asm:SA-GEM7"), "#211 T7: allowances and assemblies land as virtual parts");
   const pipeSpecs = specs.filter((s) => s.auto.rowKey === "rigging:pipe");
-  ok(pipeSpecs.length === 1 && pipeSpecs[0].qty === line("rigging", "rigging:pipe").qty && gemEachCap7 === 120, "#GEM T7: a lot row lands once, carrying its quantity");
-  ok(specs.every((s) => s.auto.tier === "better" && ["rigging", "curtains", "lighting", "audio"].includes(s.auto.scope)), "#GEM T7: every placement carries its auto tag");
+  ok(pipeSpecs.length === 1 && pipeSpecs[0].qty === line("rigging", "rigging:pipe").qty && gemEachCap7 === 120, "#211 T7: a lot row lands once, carrying its quantity");
+  ok(specs.every((s) => s.auto.tier === "better" && ["rigging", "curtains", "lighting", "audio"].includes(s.auto.scope)), "#211 T7: every placement carries its auto tag");
   const G = gemProsGeom7(a);
-  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#GEM T7: the frame is the base sheet's own geometry");
+  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#211 T7: the frame is the base sheet's own geometry");
 }
 ```
 
@@ -3794,7 +3794,7 @@ Create `src/lib/design/auto-estimate.ts`:
 
 ```ts
 /**
- * Auto intake cards (#GEM, spec §5) — the equations' items for each chosen
+ * Auto intake cards (#211, spec §5) — the equations' items for each chosen
  * Grid scope, priced at that scope's tier from the Equipment map (or a
  * per-row swap), with editable quantities. Server-side: it prices through
  * equipment-pricing.ts (cost-bearing). Clients receive sellOnlyCards() and
@@ -3819,7 +3819,7 @@ import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
 import type { AutoEstimate, AutoOverride } from "./grid-auto-model";
 import type { ScopeTargets } from "./scope-targets";
 
-/** Auto fills only the five Grid scopes (D-GEM-7). */
+/** Auto fills only the five Grid scopes (D307). */
 export const AUTO_SCOPES: readonly SysKey[] = TRACKABLE_SYS_KEYS;
 
 export type AutoLine = {
@@ -3970,7 +3970,7 @@ Create `src/lib/design/grid-auto-layout.ts`:
 
 ```ts
 /**
- * The Grid — Auto fill placement rules (#GEM, spec §5). Pure. Turns priced
+ * The Grid — Auto fill placement rules (#211, spec §5). Pure. Turns priced
  * Auto cards into placement specs on the GENERATED base sheet, using the same
  * venue geometry the sheet was drawn from (prosGeom / churchGeom, and for the
  * other kinds the fixed-fraction frame starterSpaces() in grid-projects.ts
@@ -4209,7 +4209,7 @@ Expected: `ALL PASSED`, **4063** PASS lines (4040 + 23); tsc silent; eslint 0 er
 
 ```bash
 git add src/lib/design/auto-estimate.ts src/lib/design/grid-auto-layout.ts scripts/test-review-and-spec.ts
-git commit -m "feat(grid): Auto estimate cards + rule-based fill on the base sheet (#GEM T7)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): Auto estimate cards + rule-based fill on the base sheet (#211 T7)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -4248,24 +4248,24 @@ git commit -m "feat(grid): Auto estimate cards + rule-based fill on the base she
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T8: one intake — Auto or Blank; sell-only previews; New design → the Grid intake --- */
+/* --- #211 T8: one intake — Auto or Blank; sell-only previews; New design → the Grid intake --- */
 import { intakeScopeInputs as gemIntakeInputs8 } from "@/lib/design/grid-intake";
 import { defaultAState as gemDefault8 } from "@/app/(app)/design/quick/engine";
 {
   const a8 = { ...gemDefault8(0), venue: "pac", sys: { rigging: false, curtains: true, lighting: true, controls: true, audio: false, video: true, acoustical: true, pit: true } };
   const si = gemIntakeInputs8(a8);
-  ok(si.sys.curtains && si.sys.lighting && si.sys.video && !si.sys.rigging && !si.sys.audio && !si.sys.controls && !si.sys.pit && si.venue === "pac", "#GEM T8: the intake's scopes are the designer's picks, limited to the five Grid scopes");
+  ok(si.sys.curtains && si.sys.lighting && si.sys.video && !si.sys.rigging && !si.sys.audio && !si.sys.controls && !si.sys.pit && si.venue === "pac", "#211 T8: the intake's scopes are the designer's picks, limited to the five Grid scopes");
   const dir = "src/app/(app)/design/grid/[id]";
   const intakeSrc = readFileSync(join(process.cwd(), `${dir}/grid-intake.tsx`), "utf8");
-  ok(!/next release/i.test(intakeSrc) && intakeSrc.includes("Auto (equations)") && intakeSrc.includes("Blank") && intakeSrc.includes("EquipmentCards"), "#GEM T8: the intake offers Auto (equations) or Blank, and Auto has an Equipment step");
+  ok(!/next release/i.test(intakeSrc) && intakeSrc.includes("Auto (equations)") && intakeSrc.includes("Blank") && intakeSrc.includes("EquipmentCards"), "#211 T8: the intake offers Auto (equations) or Blank, and Auto has an Equipment step");
   const clientFiles = ["grid-intake.tsx", "equipment-card.tsx", "scope-picker.tsx"].map((f) => readFileSync(join(process.cwd(), `${dir}/${f}`), "utf8"));
-  ok(clientFiles.every((s) => s.startsWith('"use client"') && !gemValueImports(s).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m))), "#GEM T8: the intake's client files import no pricing, store or DB value (types only)");
+  ok(clientFiles.every((s) => s.startsWith('"use client"') && !gemValueImports(s).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m))), "#211 T8: the intake's client files import no pricing, store or DB value (types only)");
   const act8 = readFileSync(join(process.cwd(), `${dir}/actions.ts`), "utf8");
   const searchBody = act8.slice(act8.indexOf("export async function searchAutoEquipmentAction"), act8.indexOf("export async function saveGridIntakeAction"));
-  ok(act8.includes("sellOnlyCards(") && searchBody.includes("unitSell") && !/\bcost:\s*h\.cost/.test(searchBody), "#GEM T8: previews and part search return sell numbers only");
+  ok(act8.includes("sellOnlyCards(") && searchBody.includes("unitSell") && !/\bcost:\s*h\.cost/.test(searchBody), "#211 T8: previews and part search return sell numbers only");
   const dc = readFileSync(join(process.cwd(), "src/app/(app)/design/designs/design-client.tsx"), "utf8");
   const hm = readFileSync(join(process.cwd(), "src/app/(app)/home-my-designs.tsx"), "utf8");
-  ok(!dc.includes("NewDesignSplit") && !dc.includes('href="/design/quick"') && dc.includes("<NewDesignButton") && hm.includes("<NewDesignButton") && !hm.includes('href="/design/quick"'), "#GEM T8: every New design control opens the Grid intake; the Quick Design canvas is retired from New design");
+  ok(!dc.includes("NewDesignSplit") && !dc.includes('href="/design/quick"') && dc.includes("<NewDesignButton") && hm.includes("<NewDesignButton") && !hm.includes('href="/design/quick"'), "#211 T8: every New design control opens the Grid intake; the Quick Design canvas is retired from New design");
 }
 ```
 
@@ -4282,7 +4282,7 @@ In `src/lib/design/grid-intake.ts`, append:
 
 ```ts
 /**
- * The one intake's scope inputs (#GEM): venue/size/dims as entered, systems =
+ * The one intake's scope inputs (#211): venue/size/dims as entered, systems =
  * the designer's own scope picks (a.sys) limited to the five Grid scopes. The
  * intake starts a.sys from the venue preset, so an untouched intake equals
  * manualScopeInputs(a).
@@ -4315,7 +4315,7 @@ if (typeof window !== "undefined") throw new Error("grid-auto-fill is server-onl
 export type FillResult = { ok: true; added: number; removed: number; needsPart: number } | { ok: false; error: string };
 
 /**
- * Auto fill (#GEM, spec §5): price the project's Auto choices from the
+ * Auto fill (#211, spec §5): price the project's Auto choices from the
  * Equipment map + live catalog, lay them out by rule on the generated base
  * sheet (sheetIds[0]) using the geometry it was drawn from (intake.autoConfig),
  * and replace the untouched auto devices of `scopes` in `optionId` — hand-
@@ -4372,7 +4372,7 @@ import { searchCatalog } from "@/app/(app)/estimator/actions";
 
 ```ts
 /**
- * The Equipment step's live cards (#GEM, spec §5): the equations for the
+ * The Equipment step's live cards (#211, spec §5): the equations for the
  * given scope inputs, priced at each scope's tier from the Equipment map (or
  * this design's swaps), SELL-ONLY — no unit cost crosses to the client. Reads
  * only the SKUs the map and the swaps reference.
@@ -4393,7 +4393,7 @@ export async function previewAutoEstimateAction(input: {
 export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: string; unit: string; unitSell: number };
 
 /**
- * Swap picker search (#GEM): catalog parts (server-side search, capped) and
+ * Swap picker search (#211): catalog parts (server-side search, capped) and
  * fixtures/systems whose label matches — SELL numbers only.
  */
 export async function searchAutoEquipmentAction(query: string): Promise<{ hits: AutoEquipHit[] }> {
@@ -4421,7 +4421,7 @@ export async function searchAutoEquipmentAction(query: string): Promise<{ hits: 
 ```ts
 export async function saveGridIntakeAction(input: {
   projectId: string;
-  /** "auto" = Auto (equations); "manual" = Blank (stored as before, D-GEM-7). */
+  /** "auto" = Auto (equations); "manual" = Blank (stored as before, D307). */
   mode: "manual" | "auto";
   venueName: string;
   locationName: string;
@@ -4459,8 +4459,8 @@ export async function saveGridIntakeAction(input: {
     autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
-  // First-save gate (D145) — see the pre-#GEM comment: idempotent re-applies
-  // first, generateBaseSheet (the sentinel) last. The Auto fill (#GEM) runs
+  // First-save gate (D145) — see the pre-#211 comment: idempotent re-applies
+  // first, generateBaseSheet (the sentinel) last. The Auto fill (#211) runs
   // after the sheet exists; if it fails the plan still opens, with a warning,
   // and "Change equipment…" re-fills.
   let warning: string | undefined;
@@ -4508,7 +4508,7 @@ import { mergeScopeEstimate, type AutoEstimate, type AutoOverride } from "@/lib/
 import { previewAutoEstimateAction, searchAutoEquipmentAction, type AutoEquipHit } from "./actions";
 
 /**
- * The Auto Equipment step (#GEM, spec §5) — shared by the intake and the
+ * The Auto Equipment step (#211, spec §5) — shared by the intake and the
  * Scope panel's "Change equipment…". Cards arrive SELL-ONLY from
  * previewAutoEstimateAction; every change re-prices on the server (debounced).
  * No effects: previews run from event handlers.
@@ -4606,7 +4606,7 @@ export function EquipmentCard({
   };
   const setTier = (tier: TierKey) => {
     setDraft({});
-    // A tier pre-fills the whole card, so it resets this scope's swaps and qty edits (D-GEM-7).
+    // A tier pre-fills the whole card, so it resets this scope's swaps and qty edits (D307).
     onChange(mergeScopeEstimate(estimate, card.scope, tier, {}));
   };
   const swap = (line: SellLine, hit: AutoEquipHit) => {
@@ -4759,7 +4759,7 @@ import type { CSSProperties } from "react";
 import { SUBCFG, type AState } from "@/app/(app)/design/quick/engine";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 
-/** The intake's scope list (#GEM, spec §5): the five Grid scopes, each with its sub-configuration. */
+/** The intake's scope list (#211, spec §5): the five Grid scopes, each with its sub-configuration. */
 const LABEL: Record<string, string> = { rigging: "Rigging", curtains: "Curtains", lighting: "Lighting", audio: "Audio", video: "Video" };
 const chip = (sel: boolean): CSSProperties => ({
   border: `1px solid ${sel ? "var(--accent)" : "#e4e7ec"}`,
@@ -4839,7 +4839,7 @@ import ScopePicker from "./scope-picker";
 import { EquipmentCards, useAutoPreview } from "./equipment-card";
 
 /**
- * The one Grid intake (#GEM, spec §5 — replaces Spec 1's Manual-only intake):
+ * The one Grid intake (#211, spec §5 — replaces Spec 1's Manual-only intake):
  *   1. Start from — Auto (equations) or Blank.
  *   2. Venue — type, size, dimensions, scopes (the five Grid scopes with their
  *      sub-configuration), cover-page fields.
@@ -5084,7 +5084,7 @@ import { useRouter } from "next/navigation";
 import { createManualDesignAction } from "@/app/(app)/design/designs/actions";
 
 /**
- * "New design" (#GEM, spec §2.1): creates a Grid design and opens its one
+ * "New design" (#211, spec §2.1): creates a Grid design and opens its one
  * intake (Auto or Blank). The Quick Design canvas is no longer a New design
  * entry point; existing Quick designs still open in /design/quick. Writes only
  * on click — never on render or prefetch.
@@ -5138,7 +5138,7 @@ In `src/app/(app)/home-my-designs.tsx`:
 - replace both `<Link href="/design/quick" …>…</Link>` "New design" elements (lines 95 and 269) with `<NewDesignButton className=… style=…>…</NewDesignButton>`, dropping the `href` and keeping `className`, `style` and children;
 - `Link` stays imported; the file still uses it for the design cards.
 
-The Home greeting's "New estimate" and the pipeline's "Start a rough estimate" / "+ New rough estimate" links keep pointing at Quick Design (D-GEM-8). So does field-work's read-only view link.
+The Home greeting's "New estimate" and the pipeline's "Start a rough estimate" / "+ New rough estimate" links keep pointing at Quick Design (D308). So does field-work's read-only view link.
 
 - [ ] **Step 10: Run the pure specs**
 
@@ -5150,7 +5150,7 @@ Expected: `ALL PASSED`, **4068** PASS lines (4063 + 5). The Task 5 guard walks e
 In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final review M5` block:
 
 ```ts
-  /* --- #GEM T8: the Auto fill paints the generated base sheet from the Equipment map --- */
+  /* --- #211 T8: the Auto fill paints the generated base sheet from the Equipment map --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const EM = await import("@/lib/stores/equipment-map");
@@ -5188,25 +5188,25 @@ In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final re
     let p = (await GP.getProject(p0.id))!;
     const opt = resolveOptionId(p, null);
     const res = await fillAutoScopes(p0.id, opt, ["lighting", "curtains", "audio"], by);
-    assert.ok(res.ok, `#GEM T8: the fill runs (${res.ok ? "" : res.error})`);
+    assert.ok(res.ok, `#211 T8: the fill runs (${res.ok ? "" : res.error})`);
     p = (await GP.getProject(p0.id))!;
     const eq = compute({ ...a, tier: "better" });
     const qtyOf = (key: string) => eq.systems.flatMap((s) => s.items).find((i) => i.key === key)!.qty;
     const autoPl = p.placements.filter((pl) => pl.auto);
     const placed = (key: string) => autoPl.filter((pl) => pl.auto!.rowKey === key).reduce((n, pl) => n + (pl.qty ?? 1), 0);
-    assert.equal(placed("lighting:par"), qtyOf("lighting:par"), "#GEM T8: every par the equations call for is on the plan");
-    assert.equal(placed("curtains:draw"), qtyOf("curtains:draw"), "#GEM T8: every draw the equations call for is on the plan");
-    assert.ok(autoPl.filter((pl) => pl.auto!.rowKey === "curtains:draw").every((pl) => pl.curtain?.fabricSku === "GEM8-VEL" && pl.curtain.type === "Draw"), "#GEM T8: draws are curtain drop-ins on the mapped fabric");
-    assert.equal(placed("audio:lineArray"), 0, "#GEM T8: an unmapped row is never placed — no fallback dollar, no placeholder");
-    assert.ok(autoPl.some((pl) => pl.partId === `asm:${rack.id}`) && autoPl.some((pl) => pl.partId === "allow:audio:subwoofer:better"), "#GEM T8: the System assembly and the allowance land as virtual parts");
-    assert.ok(autoPl.every((pl) => pl.sheetId === p.sheetIds[0] && pl.optionId === opt), "#GEM T8: everything lands on the generated base sheet, in the current option");
-    assert.ok(res.ok && res.needsPart >= 1, "#GEM T8: the fill reports the needs-a-part lines");
-    assert.ok(await GC.getGridSymbol("GEM8-PAR"), "#GEM T8: a mapped part gets its Grid library entry at fill time");
+    assert.equal(placed("lighting:par"), qtyOf("lighting:par"), "#211 T8: every par the equations call for is on the plan");
+    assert.equal(placed("curtains:draw"), qtyOf("curtains:draw"), "#211 T8: every draw the equations call for is on the plan");
+    assert.ok(autoPl.filter((pl) => pl.auto!.rowKey === "curtains:draw").every((pl) => pl.curtain?.fabricSku === "GEM8-VEL" && pl.curtain.type === "Draw"), "#211 T8: draws are curtain drop-ins on the mapped fabric");
+    assert.equal(placed("audio:lineArray"), 0, "#211 T8: an unmapped row is never placed — no fallback dollar, no placeholder");
+    assert.ok(autoPl.some((pl) => pl.partId === `asm:${rack.id}`) && autoPl.some((pl) => pl.partId === "allow:audio:subwoofer:better"), "#211 T8: the System assembly and the allowance land as virtual parts");
+    assert.ok(autoPl.every((pl) => pl.sheetId === p.sheetIds[0] && pl.optionId === opt), "#211 T8: everything lands on the generated base sheet, in the current option");
+    assert.ok(res.ok && res.needsPart >= 1, "#211 T8: the fill reports the needs-a-part lines");
+    assert.ok(await GC.getGridSymbol("GEM8-PAR"), "#211 T8: a mapped part gets its Grid library entry at fill time");
     const q = await buildGridQuote(p, opt);
-    assert.ok(q.ok, "#GEM T8: the Auto design quotes");
+    assert.ok(q.ok, "#211 T8: the Auto design quotes");
     if (q.ok) {
-      assert.ok(q.build.spec.lines.some((l) => l.allowance === true && l.qty === qtyOf("audio:subwoofer")), "#GEM T8: the allowance reaches the quote, flagged");
-      assert.ok(q.build.value > 0, "#GEM T8: the quote carries value");
+      assert.ok(q.build.spec.lines.some((l) => l.allowance === true && l.qty === qtyOf("audio:subwoofer")), "#211 T8: the allowance reaches the quote, flagged");
+      assert.ok(q.build.value > 0, "#211 T8: the quote carries value");
     }
     for (const k of ["lighting:par", "curtains:draw", "audio:mixerDsp", "audio:subwoofer"]) await EM.clearEquipmentRow(k);
   }
@@ -5227,7 +5227,7 @@ Expected: the build succeeds and every route is OK (`/design/designs` and `/` re
 
 ```bash
 git add src/lib/design/grid-auto-fill.ts src/lib/design/grid-intake.ts "src/app/(app)/design/grid/[id]" src/components/design/new-design-button.tsx "src/app/(app)/design/designs/design-client.tsx" "src/app/(app)/home-my-designs.tsx" scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
-git commit -m "feat(grid): one intake — Auto (equations) or Blank — with the Equipment step and Auto fill; New design routes here (#GEM T8)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): one intake — Auto (equations) or Blank — with the Equipment step and Auto fill; New design routes here (#211 T8)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -5255,24 +5255,24 @@ git commit -m "feat(grid): one intake — Auto (equations) or Blank — with the
 Append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GEM T9: "Change equipment…" on Auto scopes --- */
+/* --- #211 T9: "Change equipment…" on Auto scopes --- */
 {
   const dir = "src/app/(app)/design/grid/[id]";
   const sp9 = readFileSync(join(process.cwd(), `${dir}/scope-panel.tsx`), "utf8");
   const rd9 = readFileSync(join(process.cwd(), `${dir}/refill-dialog.tsx`), "utf8");
   const act9 = readFileSync(join(process.cwd(), `${dir}/actions.ts`), "utf8");
   const pg9 = readFileSync(join(process.cwd(), `${dir}/page.tsx`), "utf8");
-  ok(sp9.includes("Change equipment…") && sp9.includes("auto?.targets") && sp9.includes("<RefillDialog"), "#GEM T9: Auto scopes show their chosen target and a Change equipment… button");
-  ok(rd9.startsWith('"use client"') && rd9.includes("<ConfirmButton") && rd9.includes("refillScopeAction(") && !gemValueImports(rd9).some((m) => /\/auto-estimate$|\/equipment-pricing$|^@\/lib\/stores\/|^@\/db\//.test(m)), "#GEM T9: the re-fill is confirmed (ConfirmButton) and the dialog imports no pricing/store value");
+  ok(sp9.includes("Change equipment…") && sp9.includes("auto?.targets") && sp9.includes("<RefillDialog"), "#211 T9: Auto scopes show their chosen target and a Change equipment… button");
+  ok(rd9.startsWith('"use client"') && rd9.includes("<ConfirmButton") && rd9.includes("refillScopeAction(") && !gemValueImports(rd9).some((m) => /\/auto-estimate$|\/equipment-pricing$|^@\/lib\/stores\/|^@\/db\//.test(m)), "#211 T9: the re-fill is confirmed (ConfirmButton) and the dialog imports no pricing/store value");
   const refillBody = act9.slice(act9.indexOf("export async function refillScopeAction"));
-  ok(refillBody.includes("mergeScopeEstimate(") && refillBody.includes("fillAutoScopes(") && refillBody.includes("hasOption(") && pg9.includes("sellOnlyCards(autoCards)"), "#GEM T9: a re-fill merges one scope's choices and re-fills that scope in the current option; the page sends sell-only cards");
+  ok(refillBody.includes("mergeScopeEstimate(") && refillBody.includes("fillAutoScopes(") && refillBody.includes("hasOption(") && pg9.includes("sellOnlyCards(autoCards)"), "#211 T9: a re-fill merges one scope's choices and re-fills that scope in the current option; the page sends sell-only cards");
 }
 ```
 
 This block has **3** `ok(` calls. In `scripts/test-review-regressions.ts`, insert before the `/* --- #210 final review M5` block:
 
 ```ts
-  /* --- #GEM T9: a per-scope re-fill keeps hand-touched devices and honours the new choices --- */
+  /* --- #211 T9: a per-scope re-fill keeps hand-touched devices and honours the new choices --- */
   {
     const GP = await import("@/lib/stores/grid-projects");
     const EM = await import("@/lib/stores/equipment-map");
@@ -5297,20 +5297,20 @@ This block has **3** `ok(` calls. In `scripts/test-review-regressions.ts`, inser
     await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
     let p = (await GP.getProject(p0.id))!;
     const opt = resolveOptionId(p, null);
-    assert.ok((await fillAutoScopes(p0.id, opt, ["lighting"], by)).ok, "#GEM T9: first fill");
+    assert.ok((await fillAutoScopes(p0.id, opt, ["lighting"], by)).ok, "#211 T9: first fill");
     p = (await GP.getProject(p0.id))!;
     const pars = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
-    assert.ok(pars.length > 2, "#GEM T9: pars were placed");
+    assert.ok(pars.length > 2, "#211 T9: pars were placed");
     await GP.movePlacement(p0.id, pars[0].id, { x: 0.5, y: 0.5 });
     await GP.setAutoEstimate(p0.id, mergeScopeEstimate(p.autoEstimate!, "lighting", "best", { "lighting:par": { qty: 4 } }));
     const res = await fillAutoScopes(p0.id, opt, ["lighting"], by);
-    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 4, `#GEM T9: the re-fill replaced only the untouched pars (${JSON.stringify(res)})`);
+    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 4, `#211 T9: the re-fill replaced only the untouched pars (${JSON.stringify(res)})`);
     p = (await GP.getProject(p0.id))!;
     const moved = p.placements.find((pl) => pl.id === pars[0].id);
-    assert.ok(moved && !moved.auto && moved.x === 0.5, "#GEM T9: the hand-moved par stays where it was put");
+    assert.ok(moved && !moved.auto && moved.x === 0.5, "#211 T9: the hand-moved par stays where it was put");
     const fresh = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
-    assert.ok(fresh.length === 4 && fresh.every((pl) => pl.auto!.tier === "best"), "#GEM T9: the new pars follow the new tier and the edited quantity");
-    assert.deepEqual(p.autoEstimate, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 4 } } }, "#GEM T9: the choices are saved, so Change equipment… re-opens with them");
+    assert.ok(fresh.length === 4 && fresh.every((pl) => pl.auto!.tier === "best"), "#211 T9: the new pars follow the new tier and the edited quantity");
+    assert.deepEqual(p.autoEstimate, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 4 } } }, "#211 T9: the choices are saved, so Change equipment… re-opens with them");
     await EM.clearEquipmentRow("lighting:par");
   }
 
@@ -5332,7 +5332,7 @@ then append at EOF:
 
 ```ts
 /**
- * "Change equipment…" (#GEM, spec §5): re-choose ONE Auto scope's tier,
+ * "Change equipment…" (#211, spec §5): re-choose ONE Auto scope's tier,
  * swaps and quantities, save them on the project, and re-fill only that
  * scope in this option. Untouched Auto devices are replaced; devices moved or
  * edited by hand stay. The UI confirms first (ConfirmButton).
@@ -5364,7 +5364,7 @@ export async function refillScopeAction(input: {
 In `src/app/(app)/design/grid/[id]/page.tsx`, add `import { autoEstimateCards, autoTargets, priceOverrides, sellOnlyCards } from "@/lib/design/auto-estimate";`. After the `scopeTargets` const, add:
 
 ```ts
-  // Auto designs (#GEM): the chosen cards, priced server-side; the editor gets sell-only lines + targets.
+  // Auto designs (#211): the chosen cards, priced server-side; the editor gets sell-only lines + targets.
   const autoCards =
     project.autoEstimate && project.scopeInputs
       ? autoEstimateCards(project.scopeInputs, project.autoEstimate, equipTable, priceOverrides(project.autoEstimate.overrides, equipCtx))
@@ -5384,7 +5384,7 @@ In `src/app/(app)/design/grid/[id]/editor.tsx`:
 - add `auto,` to the destructured props and to the props type:
 
 ```ts
-  /** Auto designs (#GEM): the chosen cards (sell-only) + their targets; null for Blank. */
+  /** Auto designs (#211): the chosen cards (sell-only) + their targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
 ```
 
@@ -5406,7 +5406,7 @@ import { EquipmentCard, useAutoPreview } from "./equipment-card";
 import { refillScopeAction } from "./actions";
 
 /**
- * "Change equipment…" (#GEM, spec §5) — re-opens one Auto scope's card with
+ * "Change equipment…" (#211, spec §5) — re-opens one Auto scope's card with
  * the last choices, re-prices on the server as it changes, and re-fills only
  * that scope on Apply (confirmed). Sell-only throughout.
  */
@@ -5501,7 +5501,7 @@ In `src/app/(app)/design/grid/[id]/scope-panel.tsx`:
 ```ts
   /** The active option (a re-fill paints only this option). */
   optionId: string;
-  /** Auto designs (#GEM): chosen tiers + sell-only cards and targets; null for Blank. */
+  /** Auto designs (#211): chosen tiers + sell-only cards and targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
 ```
 
@@ -5571,7 +5571,7 @@ Expected: the build succeeds and every route is OK.
 
 ```bash
 git add "src/app/(app)/design/grid/[id]" scripts/test-review-and-spec.ts scripts/test-review-regressions.ts
-git commit -m "feat(grid): Auto scopes in the Scope panel — chosen targets, Change equipment… re-fill (#GEM T9)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(grid): Auto scopes in the Scope panel — chosen targets, Change equipment… re-fill (#211 T9)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -5579,7 +5579,7 @@ git commit -m "feat(grid): Auto scopes in the Scope panel — chosen targets, Ch
 ### Task 10: Docs and the full gates
 
 **Files:**
-- Modify: `DECISIONS.md` (append D-GEM-1 … D-GEM-9 at EOF)
+- Modify: `DECISIONS.md` (append D301 … D309 at EOF)
 - Modify: `PUNCHLIST.md` (append the `## GEM.` entry at EOF)
 - Modify: `AGENTS.md` (phase 17 after phase 16)
 
@@ -5591,15 +5591,15 @@ git commit -m "feat(grid): Auto scopes in the Scope panel — chosen targets, Ch
 Append to `DECISIONS.md`:
 
 ```markdown
-## D-GEM-1. The equation vocabulary is 46 stable `system:itemKey` rows; the scenery track is measured in feet (#GEM, 2026-09-25)
+## D301. The equation vocabulary is 46 stable `system:itemKey` rows; the scenery track is measured in feet (#211, 2026-09-25)
 
 `src/lib/design/equipment-vocab.ts` lists every item `compute()` can emit — 16 rigging, 5 curtains, 5 lighting,
 9 controls, 3 audio, 3 video, 3 acoustical, 2 pit — keyed `system:itemKey`, labelled with the equation's own item
-name. The spec's "~60" was an estimate; the #GEM T1 spec block pins the set both ways (every emitted key has a row,
+name. The spec's "~60" was an estimate; the #211 T1 spec block pins the set both ways (every emitted key has a row,
 every row is emitted by some configuration). The only quantity change: the scenery track now emits feet (depth blocks ×
 pipe-rule length) instead of "ea at pipe length × $3", so a per-foot catalog track can price it.
 
-## D-GEM-2. The Equipment map is one settings blob with one top-level key per row (#GEM, 2026-09-25)
+## D302. The Equipment map is one settings blob with one top-level key per row (#211, 2026-09-25)
 
 Blob `grid_equipment_map`, `{ [rowKey]: { tiers: {good, better, best}, sameAll?, updatedBy, updatedAt } }` — flattened
 from the spec's `{ rows: … }` so `setBlob`'s atomic per-key jsonb merge keeps two admins' edits to different rows
@@ -5607,7 +5607,7 @@ independent. "Same for all tiers" saves the Good cell into all three and reads G
 with "I confirm this allowance" ticked; `confirmedBy/At` are re-stamped only when its amount or note changes. Editing is
 `manage_users` (the Estimating Rules gate). The map starts empty; the go-live reset keeps it (blobs are configuration).
 
-## D-GEM-3. Pricing from the map, and nothing else (#GEM, 2026-09-25)
+## D303. Pricing from the map, and nothing else (#211, 2026-09-25)
 
 Part: live cost; sell = list, or cost ÷ (1 − `catalog_rates.defaultMargin`) when the part has no list. Assembly:
 `resolveFixture` included cost / sell. Allowance: the confirmed amount is a unit cost, sold like a list-less part.
@@ -5616,7 +5616,7 @@ Fabric rows: the mapped Fabric part's `curtainAreaRate ?? costPerSqft` with the 
 assembly on a fabric row — is "needs a part": listed, counted, never summed, never placed. `SEED_FABRIC_RATES` stays
 for the Estimator, the portal and Grid curtain drop-ins, which read the catalog rate first (other features).
 
-## D-GEM-4. The estimate engine carries no dollars (#GEM, 2026-09-25)
+## D304. The estimate engine carries no dollars (#211, 2026-09-25)
 
 `compute()` emits keys + quantities; `src/lib/design/equipment-pricing.ts` (`applyEquipment`, `tierSystems`) is the
 only pricing step and is never imported by a Grid client file (walked by a spec guard). `TIER_SKUS`, every `cost:`
@@ -5624,9 +5624,9 @@ literal, the screen's `width × 260`, the scenery $3/ft and the engine's seed fa
 they survive as "was $X" hints in the server-only `equipment-legacy-hints.ts`. Every system is priced per tier, so the
 old tier cost/price multipliers are inert. Quick Design and the Designs dashboard price through the same table
 (server-built); a Quick Design fixture pick is a per-row override. Known: a saved Quick Design qty override that was
-keyed by an assembly's name (pre-#GEM the item took the assembly's name) no longer matches; the equation name is the key now.
+keyed by an assembly's name (pre-#211 the item took the assembly's name) no longer matches; the equation name is the key now.
 
-## D-GEM-5. Scope targets are computed on the server, sell-only (supersedes D139's accepted crossing) (#GEM, 2026-09-25)
+## D305. Scope targets are computed on the server, sell-only (supersedes D139's accepted crossing) (#211, 2026-09-25)
 
 `grid/[id]/page.tsx` prices Good / Better / Best per scope from the map (`scope-targets.ts`) and sends only sell
 numbers plus needs-a-part / allowance counts; `engineFabrics` and the in-browser `scopeTargets()` are gone, so the
@@ -5634,7 +5634,7 @@ Grid bundle carries no cost data beyond the `PartLite.cost` it already carried. 
 per-browser line-sets dial no longer moves Grid targets. While the map is empty a Blank design's targets read
 "no target" with a needs-a-part count — expected until the rows are mapped.
 
-## D-GEM-6. Auto placements: lots, the auto tag, virtual assembly / allowance parts (#GEM, 2026-09-25)
+## D306. Auto placements: lots, the auto tag, virtual assembly / allowance parts (#211, 2026-09-25)
 
 Count / length hardware (and any row over 120 units) lands as ONE placement carrying `qty`; BOM, schedule, riser and
 space rollups multiply by `placementQty()`, labor suggestions count the marker once. Auto placements carry
@@ -5645,7 +5645,7 @@ an allowance no longer confirmed prices $0 and says so. The quote's spec line ca
 documents print the line normally. A curtain pair lands as one drape of the pair's combined width (price-identical).
 Mapped catalog parts get a Grid library entry at fill time (`ensureGridSymbolsFor`, insert-if-absent).
 
-## D-GEM-7. One intake: Auto (equations) or Blank (#GEM, 2026-09-25)
+## D307. One intake: Auto (equations) or Blank (#211, 2026-09-25)
 
 Start from → Venue (type, size, dims, the five Grid scopes with their sub-configuration, cover page) → Equipment
 (Auto only). Blank stores `intake.mode = "manual"` (existing docs unchanged). Auto scopes are the five Grid scopes;
@@ -5655,14 +5655,14 @@ the base sheet was drawn from); fills land on `sheetIds[0]` in the current optio
 first-save gate after `generateBaseSheet`; a failure opens the plan with a warning and "Change equipment…"
 re-fills. `autoEstimate` is per project; a re-fill updates it and paints only the active option.
 
-## D-GEM-8. "New design" opens the Grid intake; the seeder is gone (#GEM, 2026-09-25)
+## D308. "New design" opens the Grid intake; the seeder is gone (#211, 2026-09-25)
 
 Every control labelled New design (Designs dashboard ×3, Home › My designs ×2) creates a Grid design and opens the
 intake. "New estimate" / "Start a rough estimate" still open Quick Design, which remains for existing designs.
 `seedStartingLayoutAction` and `deriveSeedPlacements` are removed (D186 kept them for this); the placeholder helpers
 stay for the quote guard.
 
-## D-GEM-9. The Equipment map is a Grid Settings sub-route; suggestions load on demand (#GEM, 2026-09-25)
+## D309. The Equipment map is a Grid Settings sub-route; suggestions load on demand (#211, 2026-09-25)
 
 `/design/grid/settings/equipment-map`, with a General | Equipment map tab strip on both pages — the General page does a
 whole-catalog port-rules pass the map must not pay for. The page reads the map, every fixture / system and only the
@@ -5675,7 +5675,7 @@ are server actions, one catalog pass per click.
 Append to `PUNCHLIST.md`:
 
 ```markdown
-## GEM. The Grid — Equipment map (catalog-backed, no silent allowances) + one intake: Auto or Blank — DONE 2026-09-25 (D-GEM-1…D-GEM-9)
+## 211. The Grid — Equipment map (catalog-backed, no silent allowances) + one intake: Auto or Blank — DONE 2026-09-25 (D301…D309)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-grid-equipment-map-and-auto-intake-design.md` · **Plan:**
 `docs/superpowers/plans/2026-09-25-grid-equipment-map-and-auto-intake.md` · **Follows:** #210, D139, D147, D149, D186.
@@ -5701,7 +5701,7 @@ placements and the quote.
 In `AGENTS.md`, insert after the phase 16 paragraph (it ends "…Decisions D294–D300; punch item #210."):
 
 ```markdown
-17. ✅ **Grid Equipment map + one intake** (#GEM, D-GEM-1…D-GEM-9) — every
+17. ✅ **Grid Equipment map + one intake** (#211, D301…D309) — every
     equation item (`src/lib/design/equipment-vocab.ts`, 46 `system:itemKey`
     rows) × tier maps to a catalog part, a fixture/System assembly or a
     confirmed allowance in Grid Settings → Equipment map (blob
@@ -5713,7 +5713,7 @@ In `AGENTS.md`, insert after the phase 16 paragraph (it ends "…Decisions D294�
     `grid-auto-fill.ts`) with ordinary placements (lots carry `qty`;
     assemblies/allowances are virtual `asm:`/`allow:` parts; `auto` tag
     cleared by any hand edit; "Change equipment…" re-fills one scope).
-    Remaining is Jeff-gated: mapping the rows. Punch item #GEM.
+    Remaining is Jeff-gated: mapping the rows. Punch item #211.
 ```
 
 - [ ] **Step 4: The full gates**
@@ -5736,5 +5736,5 @@ Expected: `tsc exit 0`; `✖ 110 problems (0 errors, 110 warnings)` or fewer war
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md AGENTS.md
-git commit -m "docs: Grid Equipment map + one intake (#GEM), D-GEM-1…D-GEM-9, AGENTS phase 17" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "docs: Grid Equipment map + one intake (#211), D301…D309, AGENTS phase 17" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```

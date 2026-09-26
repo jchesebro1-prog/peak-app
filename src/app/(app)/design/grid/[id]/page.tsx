@@ -117,7 +117,7 @@ export default async function GridEditorPage({
   const sites = project.customerId ? await sitesForCompany(project.customerId) : [];
   const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
 
-  // The Equipment map price context (#GEM) — built from the catalog this
+  // The Equipment map price context (#211) — built from the catalog this
   // request already loaded (no second load). The map and its context stay
   // server-side: the editor gets scope-target sell numbers, plus one PartLite
   // per virtual assembly/allowance the design actually places — and those rows
@@ -129,8 +129,8 @@ export default async function GridEditorPage({
     ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable))
     : null;
 
-  // Auto designs (#GEM): the chosen cards, priced server-side; the editor
-  // gets sell-only lines + targets. Adapted for D-GEM-12 (not in the
+  // Auto designs (#211): the chosen cards, priced server-side; the editor
+  // gets sell-only lines + targets. Adapted for D312 (not in the
   // original brief): autoEstimate is stored PER OPTION, so the active
   // option's choices are resolved with autoEstimateFor (a legacy
   // single-value doc reads as the first option's) rather than a bare
@@ -154,7 +154,7 @@ export default async function GridEditorPage({
   // detached legacy file no longer counts (final fix wave, I1).
   const { index: docIndex } = await loadPartDocsState(catalog);
   const hasDatasheetFile = (p: (typeof catalog)[number]) => ownFiles(docIndex, p.sku, "datasheet").length > 0;
-  // #GEM: assemblies and allowances placed by Auto resolve live into PartLite rows.
+  // #211: assemblies and allowances placed by Auto resolve live into PartLite rows.
   const parts: PartLite[] = [
     ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile }),
     ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),

@@ -342,7 +342,7 @@ export default async function ConsultingLetterPage({
                         {d.width && d.depth ? `${d.width}′ × ${d.depth}′${d.grid ? ` · ${d.grid}′ grid` : ""} · ` : ""}
                         {(d.systems || []).join(", ") || "—"}
                       </td>
-                      {/* #GEM final review I1 — a customer document: an incomplete
+                      {/* #211 final review I1 — a customer document: an incomplete
                           design (a line still needs a part) never prints its
                           partial dollar figure. */}
                       <td style={{ padding: "7px 4px", textAlign: "right" }}>

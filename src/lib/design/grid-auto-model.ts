@@ -1,5 +1,5 @@
 /**
- * The Grid Auto intake's persisted choices (#GEM, spec §5) — pure.
+ * The Grid Auto intake's persisted choices (#211, spec §5) — pure.
  * `tierByScope` = the Good/Better/Best pick per Grid scope; `overrides` = per
  * equation row (`system:itemKey`) swaps (a catalog SKU or an assembly id) and
  * qty edits. Stored on the project as `autoEstimate` so "Change equipment…"
@@ -12,12 +12,12 @@ import { PLACEMENT_QTY_MAX, placementQty } from "./grid-bom";
 
 export type AutoTag = { scope: SysKey; rowKey: string; tier: TierKey };
 /**
- * Where a hand-touched device came from (#GEM D-GEM-20): when a move, a
+ * Where a hand-touched device came from (#211 D320): when a move, a
  * category edit or a riser qty edit / part swap clears a placement's `auto`
  * tag, the scope and row it was painted for are kept here. It is NOT an auto
  * tag — a re-fill never removes it — but the re-fill counts its units toward
  * that row's new quantity, so the total stays right. Absent on every
- * placement touched before D-GEM-20 (those keep today's behaviour).
+ * placement touched before D320 (those keep today's behaviour).
  */
 export type AutoOrigin = { scope: SysKey; rowKey: string };
 export type AutoOverride = { sku?: string; assemblyId?: string; qty?: number };
@@ -86,7 +86,7 @@ export function overrideRefs(est: AutoEstimate): { skus: string[]; assemblyIds: 
   return { skus: [...skus], assemblyIds: [...assemblyIds] };
 }
 
-/* ---------------- store-side sanitizers (#GEM fix wave 1, M3) ---------------- */
+/* ---------------- store-side sanitizers (#211 fix wave 1, M3) ---------------- */
 
 /**
  * A lot marker's stored qty: a whole number in [2, AUTO_QTY_MAX], or
@@ -125,9 +125,9 @@ export function sanitizeAutoOrigin(raw: unknown): AutoOrigin | null {
   return { scope, rowKey };
 }
 
-/** A hand-touched placement stops being "auto" (#GEM): later re-fills keep it.
+/** A hand-touched placement stops being "auto" (#211): later re-fills keep it.
  *  Returns the same object when there is no tag, else a copy without it that
- *  records the tag's scope + row as `autoOrigin` (D-GEM-20), so the next
+ *  records the tag's scope + row as `autoOrigin` (D320), so the next
  *  re-fill of that scope counts it toward the row's quantity. */
 export function withoutAuto<T extends { auto?: unknown }>(pl: T): T {
   if (!pl.auto) return pl;
@@ -139,7 +139,7 @@ export function withoutAuto<T extends { auto?: unknown }>(pl: T): T {
 }
 
 /**
- * Units kept by hand per equation row (#GEM D-GEM-20): every placement of
+ * Units kept by hand per equation row (#211 D320): every placement of
  * `optionId` (any option when omitted) with no auto tag but an `autoOrigin`
  * in one of `scopes`, counted by placementQty (a lot marker is its units).
  * A re-fill subtracts these from the row's new quantity before placing.
@@ -160,9 +160,9 @@ export function keptUnitsByRow(
   return out;
 }
 
-/* ---------------- per-option estimates (#GEM fix wave 1, D1 / D-GEM-12) ---------------- */
+/* ---------------- per-option estimates (#211 fix wave 1, D1 / D312) ---------------- */
 
-/** Stored shape: one AutoEstimate per option id. A pre-D-GEM-12 doc stored a
+/** Stored shape: one AutoEstimate per option id. A pre-D312 doc stored a
  *  single AutoEstimate — read (and migrated on the next write) as the FIRST
  *  option's, the only option Auto could have filled before options mattered. */
 export type AutoEstimates = Record<string, AutoEstimate>;
@@ -190,7 +190,7 @@ export function autoEstimateFor(raw: unknown, optionId: string, firstOptionId: s
   return autoEstimatesOf(raw, firstOptionId)[optionId] ?? null;
 }
 
-/* ---------------- client-safe UI helpers (#GEM fix wave 1, M7) ---------------- */
+/* ---------------- client-safe UI helpers (#211 fix wave 1, M7) ---------------- */
 
 /**
  * The Equipment card's in-flight qty draft, reconciled against a fresh

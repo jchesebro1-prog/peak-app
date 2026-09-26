@@ -1,9 +1,9 @@
 /**
- * The equation item vocabulary (#GEM, D-GEM-1). Every item compute()
+ * The equation item vocabulary (#211, D301). Every item compute()
  * (quick/engine.ts) can emit, keyed `system:itemKey` — stable keys, never
  * display text. The Equipment map, the Auto intake and saved overrides all key
  * on these, so a relabel never orphans a mapping. `label` is the equation's
- * own item name (asserted equal by the #GEM T1 spec block). Pure and
+ * own item name (asserted equal by the #211 T1 spec block). Pure and
  * dollar-free: client components may import it.
  *
  * `place` is how Auto lands a row on the plan: "each" = one marker per unit,

@@ -1,5 +1,5 @@
 /**
- * Grid Scope panel targets (#GEM, D-GEM-5) — pure, computed on the SERVER.
+ * Grid Scope panel targets (#211, D305) — pure, computed on the SERVER.
  * grid/[id]/page.tsx runs the estimate pipeline once per tier and sends only
  * these sell numbers to the editor: the client never holds a price table, a
  * unit cost or a pricing constant. That is what removes D139's crossing of
@@ -44,7 +44,7 @@ export function scopeTargetsByTier(inputs: QuickScopeInputs, price: PriceSystems
 
 /**
  * Total needs-a-part lines across every in-scope system of one priced tier
- * (#GEM D-GEM-10). With the Equipment map empty or partial, an estimate is
+ * (#211 D310). With the Equipment map empty or partial, an estimate is
  * INCOMPLETE — never $0: Quick Design and the Designs dashboard show this
  * count in place of a bare dollar total, and "Add to Quotes" refuses to
  * promote while it's non-zero (see addToQuotesGuard below).
@@ -54,7 +54,7 @@ export function needsPartCount(systems: SystemBlock[]): number {
 }
 
 /**
- * The "Add to Quotes" guard (#GEM D-GEM-10) — pure so both the client's
+ * The "Add to Quotes" guard (#211 D310) — pure so both the client's
  * disabled-button check and the server actions (quick/actions.ts
  * addToQuotesAction, designs/actions.ts promoteDesignAction) share the exact
  * same rule and message. Returns the message to show, or null when the
@@ -69,8 +69,8 @@ export function addToQuotesGuard(needsPart: number): string | null {
 }
 
 /**
- * A saved design's needs-a-part count (#GEM D-GEM-10/D-GEM-19) — what the
- * server derived at save time. A pre-#GEM record has no `incomplete` and
+ * A saved design's needs-a-part count (#211 D310/D319) — what the
+ * server derived at save time. A pre-#211 record has no `incomplete` and
  * reads as 0: its stored budget stays visible (it is still refused as a
  * quote until the server re-price clears it — see design-pricing.ts).
  */
@@ -80,19 +80,19 @@ export function designNeedsPart(d: { incomplete?: { needsPart?: number } | null 
 }
 
 /** What a person does to bring a Quick design's stored price up to date
- *  (#GEM wave 2, M5): the record's `incomplete`/`budget` are what the server
- *  derived at its last save (D-GEM-23), so after the missing rows are mapped
+ *  (#211 wave 2, M5): the record's `incomplete`/`budget` are what the server
+ *  derived at its last save (D323), so after the missing rows are mapped
  *  it still reads Incomplete until it is re-saved. */
 export const REFRESH_PRICE_HINT = "Open in Quick Design and save to refresh its price";
 
 /** The refresh hint for an incomplete QUICK design (a Grid design's
- *  completeness is read live — D-GEM-22 — so it never goes stale). */
+ *  completeness is read live — D322 — so it never goes stale). */
 export function designRefreshHint(d: { layoutMode?: string | null; incomplete?: { needsPart?: number } | null }): string | null {
   return d.layoutMode !== "manual" && designNeedsPart(d) > 0 ? REFRESH_PRICE_HINT : null;
 }
 
 /**
- * The one budget label every design surface shows (#GEM final review I1):
+ * The one budget label every design surface shows (#211 final review I1):
  * Home cards, the Reviews queue, the engagement letter. "Incomplete" while
  * any line of the saved tier still needs a part — never the partial dollar
  * figure, which reads as a (wrong) price.

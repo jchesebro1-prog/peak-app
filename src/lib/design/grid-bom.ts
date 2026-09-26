@@ -68,20 +68,20 @@ export type PartLite = {
   kind?: "device" | "assembly";
   assemblyMembers?: Array<{ symbolId: string; qty: number; x: number; y: number }>;
   pricingPartId?: string | null;
-  /** #GEM virtual part (asm:/allow: ids, grid-virtual-parts.ts) — resolved
+  /** #211 virtual part (asm:/allow: ids, grid-virtual-parts.ts) — resolved
    *  server-side from an assembly or an Equipment map allowance; never offered
    *  in the device palette. */
   virtual?: true;
-  /** #GEM: an Equipment map allowance line — flagged internally ("Allowance"). */
+  /** #211: an Equipment map allowance line — flagged internally ("Allowance"). */
   allowance?: true;
-  /** #GEM (D-GEM-13): a virtual part with nothing real behind it — a deleted
+  /** #211 (D313): a virtual part with nothing real behind it — a deleted
    *  assembly, an assembly with no priced members, or an allowance that is no
    *  longer confirmed. Prices $0; the quote refuses it by name and the editor
    *  flags it "Needs a part" (never "priced at list"). */
   virtualDead?: true;
 };
 
-/** What the editor tells a person to do with a `virtualDead` part (#GEM). */
+/** What the editor tells a person to do with a `virtualDead` part (#211). */
 export const VIRTUAL_DEAD_HINT = "needs a part — replace or re-fill";
 
 /* -------------------------------- curtains -------------------------------- */
@@ -133,11 +133,11 @@ export function isCurtainPlacement(pl: { curtain?: GridCurtain | null }): boolea
   return Boolean(pl.curtain);
 }
 
-/** The most units one lot marker may stand for (#GEM) — the store writers
+/** The most units one lot marker may stand for (#211) — the store writers
  *  clamp to it and every reader caps at it. */
 export const PLACEMENT_QTY_MAX = 100_000;
 
-/** A placement's unit count (#GEM): an Auto "lot" marker carries `qty` (count
+/** A placement's unit count (#211): an Auto "lot" marker carries `qty` (count
  *  or length hardware); every other placement is one unit. */
 export function placementQty(pl: { qty?: number | null }): number {
   const n = Math.round(Number(pl.qty));
@@ -352,7 +352,7 @@ export function bomBySpace(
     const value = pl.curtain
       ? (pl.id ? curtainPrices?.get(pl.id) : 0) || 0
       : (byId.get(pl.partId)?.list || 0) * placementQty(pl);
-    // Counts are UNITS (#GEM final review): a lot marker counts its qty,
+    // Counts are UNITS (#211 final review): a lot marker counts its qty,
     // matching the BOM, schedule and riser; a curtain is one drop.
     const units = pl.curtain ? 1 : placementQty(pl);
     bucket.count += units;

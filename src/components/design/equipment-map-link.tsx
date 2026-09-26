@@ -5,7 +5,7 @@ import { createContext, useContext, type CSSProperties, type ReactNode } from "r
 
 /**
  * "Map it" / "Incomplete — N need a part" links into Grid Settings →
- * Equipment map (#GEM final review). Only admins (manage_users, the
+ * Equipment map (#211 final review). Only admins (manage_users, the
  * Estimating Rules gate) can edit the map, so for everyone else a link there
  * is a dead end: they get the same words with a hint to ask an admin
  * instead. Pages that render these links wrap their client tree in

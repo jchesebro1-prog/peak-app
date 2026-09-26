@@ -112,7 +112,7 @@ export function RowPanel({
   partId: string;
   desc: string;
   qty: number;
-  /** #GEM: the row holds a lot marker — its qty edits the lot, up to PLACEMENT_QTY_MAX. */
+  /** #211: the row holds a lot marker — its qty edits the lot, up to PLACEMENT_QTY_MAX. */
   lot?: boolean;
   devices: RiserPartOption[];
   busy: boolean;
@@ -123,7 +123,7 @@ export function RowPanel({
   const [partId, setPartId] = useState(currentPart);
   const [qty, setQty] = useState(String(currentQty));
   const n = Math.floor(Number(qty));
-  // A lot row (#GEM) can hold far more units than 200 markers — a 240 ft pipe
+  // A lot row (#211) can hold far more units than 200 markers — a 240 ft pipe
   // lot must stay editable and swappable.
   const maxQty = lot ? PLACEMENT_QTY_MAX : 200;
   const valid = Boolean(partId) && n >= 1 && n <= maxQty;

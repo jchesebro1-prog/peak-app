@@ -10,14 +10,14 @@ import { num } from "@/lib/stores/pricing";
 import { createDesign, getDesign, updateDesign, type DesignRecord } from "@/lib/stores/designs";
 
 /**
- * Server-side Quick Design pricing (#GEM final review I3/I4, D-GEM-19).
+ * Server-side Quick Design pricing (#211 final review I3/I4, D319).
  *
  * The Quick Design screen prices in the browser, but nothing it sends about
  * price or completeness is trusted: every save derives `incomplete` AND
- * `budget` here (D-GEM-23 — the server is the budget's authority), and every
+ * `budget` here (D323 — the server is the budget's authority), and every
  * promote path (Quick Design's Add to Quotes, the Designs dashboard, Home)
  * re-prices the design against the live Equipment map before a quote is
- * made. A needs-a-part line blocks — including a design saved before #GEM,
+ * made. A needs-a-part line blocks — including a design saved before #211,
  * whose stored budget stays visible but which can't become a quote until
  * its rows are mapped.
  */
@@ -62,7 +62,7 @@ async function quickRates(): Promise<QuickRates> {
 }
 
 /** The server's own price for one Quick design — needs-a-part count AND
- *  budget (D-GEM-19, D-GEM-23): one loadEquipPriceCtx for the map + picks. */
+ *  budget (D319, D323): one loadEquipPriceCtx for the map + picks. */
 export async function serverDesignPrice(d: DesignRecordLike): Promise<QuickDesignPrice> {
   const ids = pickedFixtureIds(d);
   const [{ table, fixturePrices }, rates] = await Promise.all([loadDesignPricing(ids), quickRates()]);
@@ -85,7 +85,7 @@ export async function serverDesignNeedsPart(d: DesignRecordLike): Promise<number
   return (await serverDesignPrice(d)).needsPart;
 }
 
-/** Promote check for a Quick design (D-GEM-19/D-GEM-23): the server price
+/** Promote check for a Quick design (D319/D323): the server price
  *  the quote must use, and the refusal when any line still needs a part. */
 export async function quickPromoteCheck(
   d: DesignRecordLike
@@ -95,12 +95,12 @@ export async function quickPromoteCheck(
   return { price, blocked: error ? { error, needsPart: price.needsPart } : null };
 }
 
-/** Promote guard for a Quick design (D-GEM-19): the message, or null when every line prices. */
+/** Promote guard for a Quick design (D319): the message, or null when every line prices. */
 export async function quickPromoteGuard(d: DesignRecordLike): Promise<{ error: string; needsPart: number } | null> {
   return (await quickPromoteCheck(d)).blocked;
 }
 
-/* ---------- the Quick Design save (D-GEM-23, final review M1/M2) ---------- */
+/* ---------- the Quick Design save (D323, final review M1/M2) ---------- */
 
 /** The only DesignRecord keys a Quick Design save may write. Everything else
  *  — review, quoteId, owner, layoutMode, gridProjectId, revisions, id,
@@ -134,7 +134,7 @@ export function quickSaveFields(input: unknown): QuickSaveFields {
 }
 
 /**
- * Save a Quick design (D-GEM-19/D-GEM-23): only QUICK_SAVE_KEYS from the
+ * Save a Quick design (D319/D323): only QUICK_SAVE_KEYS from the
  * client are written; `incomplete` AND `budget` are the server's price of the
  * merged record (or `known`, when the caller priced it this request). A Grid
  * (manual-layout) record is refused — it is never edited through Quick Design.

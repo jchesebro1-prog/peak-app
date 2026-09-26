@@ -9,7 +9,7 @@ import { EquipmentCard, useAutoPreview } from "./equipment-card";
 import { refillScopeAction } from "./actions";
 
 /**
- * "Change equipment…" (#GEM, spec §5) — re-opens one Auto scope's card with
+ * "Change equipment…" (#211, spec §5) — re-opens one Auto scope's card with
  * the last choices, re-prices on the server as it changes, and re-fills only
  * that scope on Apply (confirmed). Sell-only throughout.
  */
@@ -34,7 +34,7 @@ export default function RefillDialog({
   inputs: QuickScopeInputs;
   estimate: AutoEstimate;
   initialCards: SellCard[];
-  /** Units of this scope kept by hand (D-GEM-20) — they count toward the new quantities. */
+  /** Units of this scope kept by hand (D320) — they count toward the new quantities. */
   keptUnits?: number;
   onClose: () => void;
   onDone: () => void;

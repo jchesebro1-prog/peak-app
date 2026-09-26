@@ -1,5 +1,5 @@
 /**
- * Auto intake cards (#GEM, spec §5) — the equations' items for each chosen
+ * Auto intake cards (#211, spec §5) — the equations' items for each chosen
  * Grid scope, priced at that scope's tier from the Equipment map (or a
  * per-row swap), with editable quantities. Server-side: it prices through
  * equipment-pricing.ts (cost-bearing). Clients receive sellOnlyCards() and
@@ -24,7 +24,7 @@ import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
 import type { AutoEstimate, AutoOverride } from "./grid-auto-model";
 import type { ScopeTargets } from "./scope-targets";
 
-/** Auto fills only the five Grid scopes (D-GEM-7). */
+/** Auto fills only the five Grid scopes (D307). */
 export const AUTO_SCOPES: readonly SysKey[] = TRACKABLE_SYS_KEYS;
 
 export type AutoLine = {
@@ -136,7 +136,7 @@ export function autoEstimateCards(
 
 /**
  * The needs-a-part lines of an option's Auto choices that a quote would
- * silently leave out (#GEM final review, D-GEM-22): Auto never places a
+ * silently leave out (#211 final review, D322): Auto never places a
  * needs-a-part line, so the Grid's BOM — and its quote — are missing that
  * equipment. Only the scopes Auto was asked to fill (those with a chosen
  * tier) count, and a line edited to qty 0 was dropped on purpose.
@@ -182,7 +182,7 @@ export function autoTargets(cards: Array<AutoCard | SellCard>): ScopeTargets {
   return out;
 }
 
-/* ---------------- swap picker pure helpers (#GEM fix wave 1, I2/M1) ---------------- */
+/* ---------------- swap picker pure helpers (#211 fix wave 1, I2/M1) ---------------- */
 
 export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: string; unit: string; unitSell: number };
 

@@ -25,7 +25,7 @@ import RefillDialog from "./refill-dialog";
  * vs. target-$ tracker. Reuses Quick Design's venue/size/dims/systems
  * basic-info inputs (ScopeInputsPanel) to capture a QuickScopeInputs
  * snapshot on the project, and lines the SERVER-computed Good/Better/Best
- * sell targets (#GEM, D-GEM-5 — priced from the Equipment map) up against
+ * sell targets (#211, D305 — priced from the Equipment map) up against
  * what's actually been placed on the sheet (byScope, from bomBySpace) so a
  * designer can see at a glance whether Lighting is over or under budget.
  *
@@ -156,14 +156,14 @@ export default function ScopePanel({
   /** Whole-project placed $/count per scope, from bomBySpace(placements,
    *  parts, []) — computed once in editor.tsx. */
   byScope: RollupSlice[];
-  /** Sell-only Good/Better/Best targets per scope, computed server-side (#GEM). */
+  /** Sell-only Good/Better/Best targets per scope, computed server-side (#211). */
   targets: ScopeTargetsByTier | null;
   /** The active option (a re-fill paints only this option). */
   optionId: string;
-  /** Auto designs (#GEM): chosen tiers + sell-only cards and targets; null for Blank. */
+  /** Auto designs (#211): chosen tiers + sell-only cards and targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
   /** The active option's placements — the re-fill dialog counts the devices
-   *  kept by hand (D-GEM-20) that will count toward each row's quantity. */
+   *  kept by hand (D320) that will count toward each row's quantity. */
   placements?: ReadonlyArray<{ optionId?: string; auto?: unknown; autoOrigin?: unknown; qty?: number }>;
   /** Active option's tier (Spec 1) — the lens' initial value, never a gate. */
   defaultTier?: TierKey;

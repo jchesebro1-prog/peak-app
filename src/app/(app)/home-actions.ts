@@ -66,10 +66,10 @@ export async function removeQuoteAction(id: string) {
 
 /**
  * The bridge: promote a budgetary sandbox design into the formal pipeline.
- * Port of Home.dc.html promoteDesign(). #GEM final review I2: delegates to
+ * Port of Home.dc.html promoteDesign(). #211 final review I2: delegates to
  * the Designs dashboard's promoteDesignAction — the one path that branches
  * Grid/manual designs to The Grid's own quote builder and re-prices Quick
- * designs on the server against the Equipment map (D-GEM-19) — so Home can
+ * designs on the server against the Equipment map (D319) — so Home can
  * never promote a Grid design as if it were Quick, or an incomplete one.
  */
 export async function promoteDesignAction(

@@ -66,7 +66,7 @@ export async function promoteDesignAction(
   if (d.layoutMode === "manual") {
     if (!d.gridProjectId) return { ok: false, error: "This design has no linked Grid project." };
     // No acceptIncomplete here: an Auto design with needs-a-part lines is
-    // refused from the dashboard/Home (D-GEM-10); the Grid editor's own
+    // refused from the dashboard/Home (D310); the Grid editor's own
     // quote button is where a person can confirm quoting it anyway.
     const result = await createDraftQuoteAction(d.gridProjectId, null);
     if (!result.ok) return result;
@@ -76,11 +76,11 @@ export async function promoteDesignAction(
     return { ok: true, quoteId: result.quoteId };
   }
 
-  // #GEM D-GEM-10/D-GEM-19/D-GEM-23: never promote an incomplete estimate.
+  // #211 D310/D319/D323: never promote an incomplete estimate.
   // The server re-prices the saved record (its config, or a pre-config seed
   // rebuilt from its display fields) against the live Equipment map — the
   // stored `incomplete` and `budget` are never trusted, so a design saved
-  // before #GEM is refused until its rows are mapped (its budget stays
+  // before #211 is refused until its rows are mapped (its budget stays
   // visible meanwhile), and the quote's value is the server's re-price.
   const { price, blocked } = await quickPromoteCheck(d);
   if (blocked) return { ok: false, error: blocked.error, needsPart: blocked.needsPart };

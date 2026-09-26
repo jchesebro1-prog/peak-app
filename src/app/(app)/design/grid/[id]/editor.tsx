@@ -259,10 +259,10 @@ export default function GridEditor({
   parts: PartLite[];
   /** Catalog fabric rows with SELL price/sq ft (punch #49) - never cost. */
   fabrics: FabricSell[];
-  /** Scope panel Good/Better/Best targets per scope (#GEM, D-GEM-5) — SELL
+  /** Scope panel Good/Better/Best targets per scope (#211, D305) — SELL
    *  numbers computed server-side (grid/[id]/page.tsx); no cost crosses. */
   scopeTargets: ScopeTargetsByTier | null;
-  /** Auto designs (#GEM): the chosen cards (sell-only) + their targets; null for Blank. */
+  /** Auto designs (#211): the chosen cards (sell-only) + their targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
   /** Sell-side making coefficients for the live curtain price (punch #49). */
   curtainCoeffs: SellCoeffs;
@@ -299,7 +299,7 @@ export default function GridEditor({
    *  impossible to miss, never refuses the quote. Cleared on every new
    *  mint/update so a fixed catalog makes the warning go away on its own. */
   const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
-  /** D-GEM-22: the server refused the quote because Auto lines still need a
+  /** D322: the server refused the quote because Auto lines still need a
    *  part — the message, until the person confirms "Quote anyway" or leaves. */
   const [incompleteQuote, setIncompleteQuote] = useState<string | null>(null);
   /** Members of the ACTIVE option only (Spec 1). Every read below goes
@@ -644,7 +644,7 @@ export default function GridEditor({
   const includedLabor = laborRows.filter((l) => l.included && l.hours > 0);
   const laborValue = includedLabor.reduce((a, l) => a + l.ext, 0);
 
-  /** Create / update the option's draft quote. D-GEM-22: the server refuses
+  /** Create / update the option's draft quote. D322: the server refuses
    *  an Auto design with needs-a-part lines until the person confirms. */
   const runQuote = async (acceptIncomplete: boolean) => {
     setErr(null);
@@ -672,7 +672,7 @@ export default function GridEditor({
     () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
     [placements, parts, project.spaces, curtainPrices]
   );
-  /** Whole-project placed $/count by scope (#GEM, D-GEM-5) — feeds
+  /** Whole-project placed $/count by scope (#211, D305) — feeds
    *  the Scope panel's "placed" column. Reuses bomBySpace with an EMPTY
    *  spaces array: every placement falls into the single "Unassigned"
    *  bucket bomBySpace already produces for placements outside any space,
@@ -1552,7 +1552,7 @@ export default function GridEditor({
             )}
           </div>
 
-          {/* scope targets (#GEM, D-GEM-5) */}
+          {/* scope targets (#211, D305) */}
           <ScopePanel
             key={activeOptionId}
             projectId={project.id}
@@ -1816,7 +1816,7 @@ export default function GridEditor({
                       {partById.get(l.partId)?.virtual ? l.desc : l.partId}
                     </span>
                     {partById.get(l.partId)?.virtualDead ? (
-                      // #GEM D-GEM-13: nothing real behind it — the quote refuses it by name.
+                      // #211 D313: nothing real behind it — the quote refuses it by name.
                       <span
                         title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
                         style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}

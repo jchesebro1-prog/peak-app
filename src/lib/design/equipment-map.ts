@@ -1,5 +1,5 @@
 /**
- * The Grid Equipment map (#GEM, spec §3, D-GEM-2/D-GEM-3) — pure.
+ * The Grid Equipment map (#211, spec §3, D302/D303) — pure.
  *
  * Every equation item × tier maps to a catalog part, a fixture / System
  * assembly (the one builder, #210) or a CONFIRMED allowance. Anything else is
@@ -202,7 +202,7 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     // desc is bare (no "(allowance)" suffix here) — the one consumer that
     // shows a mapped-part description alongside the row's own name (Quick
     // Design's BOM label) already appends "· Allowance" from `status`; a
-    // suffix here would show it twice (#GEM M3).
+    // suffix here would show it twice (#211 M3).
     return { status: "allowance", ref: def.key, desc: def.label, unit: def.unit, unitCost: cell.amount, unitSell: sellFromCost(cell.amount, ctx.margin) };
   }
   if (cell.kind === "part") {

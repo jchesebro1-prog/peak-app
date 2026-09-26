@@ -15,12 +15,12 @@ import { PLACEMENT_QTY_MAX, placementQty, routeLengthFt, type PartLite, type Rou
  * ------------------------------------------------------------------ */
 
 /** `qty` counts UNITS (a lot marker adds its qty). `lot` = at least one of
- *  the row's markers is a lot (#GEM) — the row editor then edits the lot's
+ *  the row's markers is a lot (#211) — the row editor then edits the lot's
  *  quantity rather than adding/removing markers, up to PLACEMENT_QTY_MAX. */
 export type RiserGroup = { partId: string; desc: string; qty: number; category: string; shape: string | null; lot?: true };
 
 /**
- * A riser row's qty edit (#GEM fix wave 1, I1 / D-GEM-11), pure. `devices`
+ * A riser row's qty edit (#211 fix wave 1, I1 / D311), pure. `devices`
  * are the row's markers OLDEST first; `target` is the new unit count.
  *  - No lot marker in the row: one marker per unit, as before — add
  *    `target − units` markers, or remove the newest ones.

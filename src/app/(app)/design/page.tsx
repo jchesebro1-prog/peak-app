@@ -59,7 +59,7 @@ export default async function DesignOverviewPage({
     ...gridProjects
       .filter((p) => !linkedGridIds.has(p.id))
       .map((p) => {
-        // Units, not markers: an Auto lot marker stands for `qty` units (#GEM).
+        // Units, not markers: an Auto lot marker stands for `qty` units (#211).
         const n = (p.placements || []).reduce((sum, pl) => sum + (pl.curtain ? 1 : placementQty(pl)), 0);
         return {
           key: p.id,

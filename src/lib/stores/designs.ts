@@ -94,9 +94,9 @@ export type DesignRecord = {
   review: DesignReview;
   systems: string[];
   budget: number;
-  /** Equipment-map completeness of the chosen tier at save time (#GEM
-   *  D-GEM-10) — set whenever any line of that tier still needs a part.
-   *  Additive: missing/undefined on every pre-#GEM record reads as complete
+  /** Equipment-map completeness of the chosen tier at save time (#211
+   *  D310) — set whenever any line of that tier still needs a part.
+   *  Additive: missing/undefined on every pre-#211 record reads as complete
    *  (the dashboard and guard both treat a missing field as needsPart: 0). */
   incomplete?: { needsPart: number };
   updatedAt: number;
@@ -205,7 +205,7 @@ export async function getDesign(id: string): Promise<DesignRecord | null> {
 /** Manual/Grid designs do not have a reliable parametric `budget` snapshot.
  * Read their current BOM total instead, so the Designs dashboard cannot show
  * the creation-time zero after a designer has placed equipment. Quick Design
- * records retain their saved (server-derived, D-GEM-23) equation result. */
+ * records retain their saved (server-derived, D323) equation result. */
 async function withLiveGridBudget(d: DesignRecord, project: GridProject | null, inputs: GridQuoteInputs | null): Promise<DesignRecord> {
   if (!project || !inputs) return d;
   const optionId = project.options?.[0]?.id;
@@ -221,10 +221,10 @@ async function withLiveGridBudget(d: DesignRecord, project: GridProject | null, 
 }
 
 /**
- * The live Grid read (#GEM final review wave 2, I2): every manual design gets
+ * The live Grid read (#211 final review wave 2, I2): every manual design gets
  * its live BOM budget, and an AUTO one also gets `incomplete: { needsPart }`
  * — the chosen scopes' needs-a-part lines Auto left off the plan
- * (autoNeedsPart, D-GEM-22) — so Home, Reviews, the dashboard and the
+ * (autoNeedsPart, D322) — so Home, Reviews, the dashboard and the
  * engagement letter read "Incomplete" / "To be confirmed" for it exactly as
  * for a Quick design. ONE price context serves every Auto design in the read
  * (not one per design); a list with no Auto design loads none. A Blank Grid
@@ -271,7 +271,7 @@ async function withLiveGrid(designs: DesignRecord[]): Promise<DesignRecord[]> {
     // Fail CLOSED (fix wave 3): the read itself must not fail, but an Auto
     // design whose completeness can't be checked right now reads Incomplete
     // ("To be confirmed" on a letter, Add to Quotes disabled) — never a
-    // complete-looking price. The server still re-checks on promote (D-GEM-22).
+    // complete-looking price. The server still re-checks on promote (D322).
     console.error("getAllDesigns: Auto completeness check failed", err);
     for (const i of autoIdx) out[i] = { ...out[i], incomplete: { needsPart: Math.max(1, out[i].incomplete?.needsPart || 0) } };
   }
@@ -447,7 +447,7 @@ async function customerNameFor(id: string): Promise<string> {
  */
 export async function designToQuotePartial(
   id: string,
-  /** The server's price of the design this request (D-GEM-23) — the quote's
+  /** The server's price of the design this request (D323) — the quote's
    *  value. Omitted: the stored budget, itself server-derived on every save. */
   opts: { value?: number } = {}
 ): Promise<DesignQuotePartial | null> {
@@ -502,7 +502,7 @@ export async function designToQuotePartial(
 export async function promoteDesignToQuote(
   id: string,
   owner: string,
-  /** The server's re-price this request (D-GEM-23): the quote's value, and
+  /** The server's re-price this request (D323): the quote's value, and
    *  written back to the record so its stored budget/incomplete are fresh.
    *  Required (fix wave 3) — no promote quotes a stored figure. */
   price: { needsPart: number; budget: number }

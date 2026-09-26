@@ -100,20 +100,20 @@ export type GridPlacement = {
    */
   seededFrom?: string;
   /**
-   * Lot quantity (#GEM, D-GEM-6): one marker standing for `qty` units of its
+   * Lot quantity (#211, D306): one marker standing for `qty` units of its
    * part — Auto lands count/length hardware (pipe, cable, arbors …) this way.
    * Absent = 1. The BOM, schedule, riser and space rollups multiply by
    * placementQty(); labor suggestions count the marker once.
    */
   qty?: number;
   /**
-   * Auto-fill tag (#GEM, spec §5): set on a placement the Auto intake or a
+   * Auto-fill tag (#211, spec §5): set on a placement the Auto intake or a
    * per-scope "Change equipment…" re-fill painted. Any move or category edit
    * deletes it, so a hand-touched device is kept by every later re-fill.
    */
   auto?: AutoTag;
   /**
-   * D-GEM-20: set when a hand edit cleared `auto` — the scope + row the
+   * D320: set when a hand edit cleared `auto` — the scope + row the
    * device was painted for. Not an auto tag (re-fills keep the device), but
    * a re-fill of that scope counts its units toward the row's quantity.
    */
@@ -166,7 +166,7 @@ export type GridRevision = {
   /** Riser documents at snapshot time (#209). Absent on older snapshots —
    *  restore then drops back to the auto layout. */
   riser?: Record<string, RiserDoc>;
-  /** Auto intake choices per option at snapshot time (#GEM, D-GEM-12).
+  /** Auto intake choices per option at snapshot time (#211, D312).
    *  Absent on older snapshots — restore then clears them. */
   autoEstimate?: AutoEstimates;
 };
@@ -248,9 +248,9 @@ export type GridProject = {
    *  fresh from whatever this currently holds. Absent on pre-D-manual-scope
    *  docs, read as null. */
   scopeInputs?: QuickScopeInputs | null;
-  /** Auto intake choices PER OPTION (#GEM, D-GEM-12): option id → tier per
+  /** Auto intake choices PER OPTION (#211, D312): option id → tier per
    *  scope + per-row swaps/qty. Absent on Blank designs. A doc written before
-   *  D-GEM-12 holds one bare AutoEstimate — always read through
+   *  D312 holds one bare AutoEstimate — always read through
    *  autoEstimatesOf()/autoEstimateFor(), which treat it as the first option's. */
   autoEstimate?: AutoEstimates | AutoEstimate;
   /** Saved riser document per option id (#209) — node layout, level lines,
@@ -634,7 +634,7 @@ export async function addPlacements(
 
 export type AutoPlacementInput = { x: number; y: number; partId: string; qty?: number; curtain?: GridCurtain; auto: AutoTag };
 
-/** Store-side clean of a written lot qty and auto tag (#GEM M3): qty clamped
+/** Store-side clean of a written lot qty and auto tag (#211 M3): qty clamped
  *  to [2, AUTO_QTY_MAX] or dropped (absent = 1); the tag rebuilt from known
  *  scopes/rows/tiers or dropped. Never trusts a caller's raw value. */
 function lotAndTag(qty: unknown, auto: unknown): { qty?: number; auto?: AutoTag } {
@@ -644,7 +644,7 @@ function lotAndTag(qty: unknown, auto: unknown): { qty?: number; auto?: AutoTag 
 }
 
 /**
- * Auto fill / per-scope re-fill (#GEM, spec §5), atomically in ONE patch:
+ * Auto fill / per-scope re-fill (#211, spec §5), atomically in ONE patch:
  * every placement of `optionId` still carrying an `auto` tag in one of
  * `scopes` is removed (its riser links go with it, as removePlacement does),
  * then `items` (only those whose auto.scope is in `scopes`) are added.
@@ -704,8 +704,8 @@ export async function replaceAutoPlacements(
 }
 
 /**
- * Persist (or clear, with null) ONE option's Auto intake choices (#GEM,
- * D-GEM-12). The input is sanitized here, whatever the caller sent. A legacy
+ * Persist (or clear, with null) ONE option's Auto intake choices (#211,
+ * D312). The input is sanitized here, whatever the caller sent. A legacy
  * single stored value is migrated to the per-option map (as the first
  * option's) in the same patch. null = the project or the option is gone.
  */
@@ -812,7 +812,7 @@ export async function setPlacementCategory(
  *
  * Deliberately does NOT cut a revision: revisions are manual/quote/restore
  * (addRevision below), and a drag is a gesture, not a design decision.
- * A move clears the #GEM auto tag, so a re-fill keeps the device.
+ * A move clears the #211 auto tag, so a re-fill keeps the device.
  */
 export async function movePlacement(
   projectId: string,
@@ -1105,7 +1105,7 @@ export async function addOption(
         doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
       }
       // The copied placements keep their auto tags, so the copy carries the
-      // source option's Auto choices with them (#GEM, D-GEM-12).
+      // source option's Auto choices with them (#211, D312).
       const ests = autoEstimatesOf(doc.autoEstimate, doc.options[0].id);
       const src = ests[input.copyFromOptionId];
       if (src) doc.autoEstimate = { ...ests, [option.id]: JSON.parse(JSON.stringify(src)) as AutoEstimate };
@@ -1170,7 +1170,7 @@ export async function removeOption(
       delete riser[optionId];
       doc.riser = riser;
     }
-    // A legacy single estimate belongs to the pre-removal first option (#GEM, D-GEM-12).
+    // A legacy single estimate belongs to the pre-removal first option (#211, D312).
     if (doc.autoEstimate) {
       const ests = autoEstimatesOf(doc.autoEstimate, opts[0].id);
       delete ests[optionId];
@@ -1207,7 +1207,7 @@ function snapshotOf(
     routes: [...(p.routes || [])],
     // Deep copy: the riser document is nested and patched in place later.
     riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
-    // Auto choices are design state like the riser (#GEM, D-GEM-12) —
+    // Auto choices are design state like the riser (#211, D312) —
     // normalized (a legacy single value lands as the first option's) and deep-copied.
     autoEstimate: JSON.parse(JSON.stringify(autoEstimatesOf(p.autoEstimate, p.options?.[0]?.id ?? DEFAULT_OPTION_ID))) as AutoEstimates,
     options: ensureOptions({
@@ -1300,9 +1300,9 @@ export async function restoreRevision(
       ? target.options.map((o) => ({ ...o, quoteId: currentQuotes.has(o.id) ? currentQuotes.get(o.id)! : o.quoteId }))
       : undefined;
     ensureOptions(doc);
-    // Auto choices come back with the placements they describe (#GEM,
-    // D-GEM-12), kept only for options that exist after the restore. A
-    // pre-D-GEM-12 snapshot has none → cleared (the snapshot just pushed above
+    // Auto choices come back with the placements they describe (#211,
+    // D312), kept only for options that exist after the restore. A
+    // pre-D312 snapshot has none → cleared (the snapshot just pushed above
     // still holds the current ones).
     const restoredEsts = autoEstimatesOf(target.autoEstimate, doc.options![0].id);
     const liveOptionIds = new Set(doc.options!.map((o) => o.id));

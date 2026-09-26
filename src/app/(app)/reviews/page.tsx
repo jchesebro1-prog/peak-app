@@ -48,7 +48,7 @@ type RawItem = {
   name: string;
   owner: string;
   value: number;
-  /** Pre-formatted value (#GEM: a design's "Incomplete"); else shortMoney(value). */
+  /** Pre-formatted value (#211: a design's "Incomplete"); else shortMoney(value). */
   valueLabel?: string;
   review: QuoteReview;
   ts: number;
@@ -105,7 +105,7 @@ export default async function ReviewsPage({
       name: d.name,
       owner: d.owner,
       value: d.budget || 0,
-      // #GEM final review I1/I2: the shared incomplete label, and a Grid
+      // #211 final review I1/I2: the shared incomplete label, and a Grid
       // design opens in The Grid rather than as a Quick record.
       valueLabel: designBudgetLabel(d, shortMoney),
       review: (d.review as QuoteReview) || NONE,

@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-/** Grid Settings sections (#GEM): General (the card stack) | Equipment map. */
+/** Grid Settings sections (#211): General (the card stack) | Equipment map. */
 export function GridSettingsTabs({ active }: { active: "general" | "equipment" }) {
   const tab = (key: "general" | "equipment", href: string, label: string) => (
     <Link

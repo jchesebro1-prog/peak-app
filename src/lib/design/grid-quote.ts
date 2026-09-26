@@ -100,8 +100,8 @@ export async function buildGridQuote(
   const tier = inputs ? await inputs.tierFor(project.customerId) : await resolveTier(project.customerId);
   const catalog = inputs ? inputs.catalog : await listCatalog();
   const symbols = inputs ? inputs.symbols : await listGridSymbols();
-  // #GEM: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
-  // They are then tier-priced like every other Grid part (D-GEM-14): a quoted
+  // #211: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
+  // They are then tier-priced like every other Grid part (D314): a quoted
   // assembly's own sell is replaced by cost ÷ (1 − the customer's tier margin).
   // Only THIS option's virtual parts (a shared ctx must not let another
   // design's dead part refuse this one).
@@ -114,7 +114,7 @@ export async function buildGridQuote(
     : await loadVirtualParts(placements.map((p) => p.partId), catalog);
   // A dead virtual part (deleted assembly, assembly with no priced member,
   // allowance no longer confirmed) must not price at $0 or at "list" — the
-  // #64 seed-placeholder refusal, by name (D-GEM-13).
+  // #64 seed-placeholder refusal, by name (D313).
   const deadIds = new Set(virtual.filter((v) => v.virtualDead).map((v) => v.id));
   if (deadIds.size) {
     const dead = placements.filter((p) => deadIds.has(p.partId));

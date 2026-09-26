@@ -41,7 +41,7 @@ import SetSettingsPanel from "./set-settings-panel";
 
 export const metadata = { title: "Drawing set — Quartzite-6" };
 export const dynamic = "force-dynamic";
-// Virtual parts (#GEM) reach listFixtures() on this page — same budget as the editor.
+// Virtual parts (#211) reach listFixtures() on this page — same budget as the editor.
 export const maxDuration = 60;
 
 /** Schedule rows per column; two columns per E-60x sheet (the whole sheet,
@@ -170,7 +170,7 @@ export default async function DrawingSetPage({
       now,
     });
 
-  // `desc` feeds the device key; `qty` is the marker's unit count (#GEM: a
+  // `desc` feeds the device key; `qty` is the marker's unit count (#211: a
   // lot stands for many) — summed into the key and shown as ×N on the symbol
   // label, as the editor draws it.
   const figPlacement = (pl: GridPlacement): { fig: FigurePlacement; desc: string; qty: number } => {

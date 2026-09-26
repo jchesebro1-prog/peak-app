@@ -2,7 +2,7 @@
  * Seed placeholders (#38 Task 2, D149) — what is LEFT of the old "generate
  * starting layout" seeder. The seeder itself — the per-dims placement
  * generator and its server action — is gone: the Auto intake's catalog-backed
- * fill (#GEM, grid-auto-fill.ts) replaced it, as D186 planned. These helpers
+ * fill (#211, grid-auto-fill.ts) replaced it, as D186 planned. These helpers
  * stay because a preview deploy may have written placeholder placements
  * (D186), and the quote guard, the editor and the drawing set still
  * recognise them.

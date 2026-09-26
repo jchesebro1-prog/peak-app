@@ -26,12 +26,12 @@ export type DesignPartial = {
   depth: number;
   grid: number;
   systems: string[];
-  /** The screen's own total — sent, but NEVER stored or used (D-GEM-23):
+  /** The screen's own total — sent, but NEVER stored or used (D323):
    *  saveQuickDesign derives `budget` from `config` on the server. */
   budget: number;
-  /** Equipment-map completeness of the chosen tier (#GEM D-GEM-10) —
+  /** Equipment-map completeness of the chosen tier (#211 D310) —
    *  makeDesign() computes it for the screen, but the server NEVER trusts it
-   *  (D-GEM-19): saveQuickDesign re-derives it from `config` before writing,
+   *  (D319): saveQuickDesign re-derives it from `config` before writing,
    *  so a stale or hand-built client value can't mark a design complete. */
   incomplete?: { needsPart: number };
   customerId: string | null;
@@ -42,7 +42,7 @@ export type DesignPartial = {
 };
 
 /**
- * Every Quick Design save goes through saveQuickDesign (D-GEM-19/D-GEM-23,
+ * Every Quick Design save goes through saveQuickDesign (D319/D323,
  * final review M1/M2): only the whitelisted design fields are written (never
  * review / quoteId / owner / layoutMode / gridProjectId), `budget` and
  * `incomplete` are the server's own price of `config`, and a Grid record is
@@ -101,7 +101,7 @@ export async function saveRevisionAction(
   const saved = res.record;
   // Fix wave 3: the snapshot is built from the SAVED record — the
   // whitelisted, type-checked fields (quickSaveFields) and the server's
-  // budget (D-GEM-23) — never the raw client partial.
+  // budget (D323) — never the raw client partial.
   const snap = {
     name: saved.name,
     tier: saved.tier,
@@ -135,7 +135,7 @@ export async function addToQuotesAction(
   // M1: a Grid (manual-layout) record is never promoted through Quick Design.
   const existing = id ? await getDesign(id) : null;
   if (existing?.layoutMode === "manual") return { ok: false, error: GRID_DESIGN_REFUSAL };
-  // #GEM D-GEM-10/D-GEM-19/D-GEM-23: never promote an incomplete estimate.
+  // #211 D310/D319/D323: never promote an incomplete estimate.
   // The server re-prices the design's config against the Equipment map — the
   // client's `incomplete` and `budget` are never read — so a stale or forged
   // client can't bypass it, and the quote's value is the server's figure.

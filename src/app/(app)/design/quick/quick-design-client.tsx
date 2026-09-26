@@ -195,7 +195,7 @@ export default function QuickDesignClient({
   const contPct = (a.contingency ?? 0) / 100;
 
   /** A per-design fixture pick (Assembly Builder) overrides that fixture row's
-   *  Equipment map price (#GEM) — the item keeps the equation's name. The
+   *  Equipment map price (#211) — the item keeps the equation's name. The
    *  price comes from the server (fixturePrices); a pick that prices
    *  needs-a-part stays needs-a-part (final review I3). */
   const fixtureOverrides = useMemo(
@@ -212,7 +212,7 @@ export default function QuickDesignClient({
   // The same step the server prices with (quickScreenPrice / quickDesignPrice).
   const selSystems = useMemo(() => applyOverrides(selBase, a, selKey), [selBase, a, selKey]);
   const selTot = useMemo(() => tierTotals(selSystems, selTd, laborPct, freightPct, contPct), [selSystems, selTd, laborPct, freightPct, contPct]);
-  /** Per-system needs-a-part counts for the SELECTED tier (#GEM D-GEM-10) —
+  /** Per-system needs-a-part counts for the SELECTED tier (#211 D310) —
    *  the Equipment map is empty/partial → the estimate is INCOMPLETE, never
    *  $0. Drives the per-system rows, the summary panel and the Add-to-Quotes
    *  guard below. */
@@ -231,7 +231,7 @@ export default function QuickDesignClient({
     [C, a, tierDefs, prices, fixtureOverrides, laborPct, freightPct, contPct]
   );
 
-  /** A breakdown row's amount (#GEM final review): "Incomplete" while the
+  /** A breakdown row's amount (#211 final review): "Incomplete" while the
    *  selected tier has any needs-a-part line — a partial materials figure
    *  (and the install / freight / contingency derived from it) is not a
    *  price, the same rule as the tier total. */
@@ -272,16 +272,16 @@ export default function QuickDesignClient({
       grid: s.grid,
       systems: sysNames,
       budget: tot.grand,
-      // #GEM D-GEM-10: the chosen tier's own needs-a-part count, computed
+      // #211 D310: the chosen tier's own needs-a-part count, computed
       // from the same priced systems the budget total came from — an
       // incomplete estimate is marked, never silently priced at $0.
       incomplete: { needsPart: needsPartCount(sysForTot) },
       customerId: linkedCustomerObj ? linkedCustomerObj.id : null,
       locationId: linkedCustomerObj ? linkedLocation || null : null,
       customer: linkedCustomerObj ? linkedCustomerObj.name : "",
-      // D-GEM-23: the server prices `config` itself (budget + incomplete), so
+      // D323: the server prices `config` itself (budget + incomplete), so
       // the line-sets dial this design used travels with it — and the
-      // override-units marker (D-GEM-24), so a Scenery-track edit (feet) is
+      // override-units marker (D324), so a Scenery-track edit (feet) is
       // priced on the server exactly as it is here.
       config: quickSaveConfig(s, tierDefs),
     };
@@ -319,7 +319,7 @@ export default function QuickDesignClient({
 
   const onAddToQuotes = () => {
     const partial = makeDesign();
-    // #GEM D-GEM-10: block before even saving — the footer button is also
+    // #211 D310: block before even saving — the footer button is also
     // disabled while incomplete, but this guards a direct call (e.g. a
     // stale render) and matches the server-side check in addToQuotesAction.
     const guardMsg = addToQuotesGuard(partial.incomplete?.needsPart ?? 0);
@@ -335,7 +335,7 @@ export default function QuickDesignClient({
     const cfg = r.config as Partial<AState> | undefined;
     if (!cfg) return;
     // Cleaned as the server reads it: an old revision's count-style
-    // Scenery-track override is dropped (D-GEM-24), clamps applied.
+    // Scenery-track override is dropped (D324), clamps applied.
     setA((prev) => applySavedConfig(prev, cfg));
     const cname = typeof r.customer === "string" ? r.customer : "";
     const lc = cname ? customers.find((c) => c.name === cname) : null;
@@ -509,7 +509,7 @@ export default function QuickDesignClient({
         sub += ext;
         const upLabel = it.status === "needs-part" ? "Needs a part" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
         // An allowance's refDesc is just the row's own name (no distinct
-        // product) — the " · Allowance" suffix already says it once (#GEM M3).
+        // product) — the " · Allowance" suffix already says it once (#211 M3).
         const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "");
         return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext };
       });

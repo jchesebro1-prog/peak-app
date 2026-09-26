@@ -8,7 +8,7 @@ import { previewAutoEstimateAction, searchAutoEquipmentAction, type AutoEquipHit
 import { ASK_ADMIN_HINT, useCanMap } from "@/components/design/equipment-map-link";
 
 /**
- * The Auto Equipment step (#GEM, spec §5) — shared by the intake and the
+ * The Auto Equipment step (#211, spec §5) — shared by the intake and the
  * Scope panel's "Change equipment…". Cards arrive SELL-ONLY from
  * previewAutoEstimateAction; every change re-prices on the server (debounced).
  * No effects: previews run from event handlers.
@@ -108,7 +108,7 @@ export function EquipmentCard({
   const [draft, setDraft] = useState<Record<string, string>>({});
   // Only admins can edit the Equipment map; everyone else gets a hint, not a dead end.
   const canMap = useCanMap();
-  // Reconcile the qty draft against a fresh server re-price (#GEM fix wave 1,
+  // Reconcile the qty draft against a fresh server re-price (#211 fix wave 1,
   // M7) — comparing against the previous card's lines during render (the
   // "adjusting state when a prop changes" pattern, not an effect: this file
   // runs no effects). `card.lines` is a fresh array from every preview
@@ -127,7 +127,7 @@ export function EquipmentCard({
   };
   const setTier = (tier: TierKey) => {
     setDraft({});
-    // A tier pre-fills the whole card, so it resets this scope's swaps and qty edits (D-GEM-7).
+    // A tier pre-fills the whole card, so it resets this scope's swaps and qty edits (D307).
     onChange(mergeScopeEstimate(estimate, card.scope, tier, {}));
   };
   const swap = (line: SellLine, hit: AutoEquipHit) => {

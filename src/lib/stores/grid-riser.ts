@@ -223,7 +223,7 @@ export async function addDevicesToNode(
 
 /**
  * Edit a device row's qty — the row's UNIT count, lot markers included
- * (#GEM fix wave 1, I1 / D-GEM-11; the rule is planRowQty): a plain row
+ * (#211 fix wave 1, I1 / D311; the rule is planRowQty): a plain row
  * adds placements inside the space or removes the newest ones (their riser
  * links/conduits go with them); a row holding a lot marker edits the lot's
  * qty instead and never gains markers. A plain row stays capped at
@@ -268,7 +268,7 @@ export async function setNodeDeviceQty(
         return;
       }
       fresh = newPlacements(drop, input.partId, input.optionId, input.by, Date.now());
-      // D-GEM-20: markers added to an Auto-painted row stand in for that row
+      // D320: markers added to an Auto-painted row stand in for that row
       // too, so the row's whole edited unit count is kept on a re-fill.
       const origin = cur.map((pl) => sanitizeAutoOrigin(pl.auto ?? pl.autoOrigin)).find((o) => o) ?? null;
       if (origin) fresh = fresh.map((pl) => ({ ...pl, autoOrigin: origin }));
@@ -301,7 +301,7 @@ export async function setNodeDeviceQty(
 }
 
 /** Swap the catalog part on every placement of a device row. A swap is a
- *  hand edit (#GEM, D-GEM-11): the row's placements lose their `auto` tag, so
+ *  hand edit (#211, D311): the row's placements lose their `auto` tag, so
  *  a later per-scope re-fill keeps the chosen part. Lot qty is kept. */
 export async function replaceNodeDevicePart(
   projectId: string,

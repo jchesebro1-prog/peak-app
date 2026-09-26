@@ -283,7 +283,7 @@ See `.env.example`.
     identical totals. Remaining is Jeff-gated: run the conversion on
     production and review any "needs review" fixtures. Decisions
     D294–D300; punch item #210.
-17. ✅ **Grid Equipment map + one intake** (#GEM, D-GEM-1…D-GEM-25) — every
+17. ✅ **Grid Equipment map + one intake** (#211, D301…D325) — every
     equation item (`src/lib/design/equipment-vocab.ts`, 46 `system:itemKey`
     rows) × tier maps to a catalog part, a fixture/System assembly or a
     confirmed allowance in Grid Settings → Equipment map (blob
@@ -293,8 +293,8 @@ See `.env.example`.
     sell-only. An incomplete estimate reads "Incomplete — N items need a
     part" instead of a bare dollar total, and Add to Quotes refuses until
     every line is priced — re-checked on the server on every promote path,
-    including Home and designs saved before #GEM (D-GEM-19); the server
-    derives a Quick design's budget too and quotes its own figure (D-GEM-23). New design opens one intake — Auto (equations) or
+    including Home and designs saved before #211 (D319); the server
+    derives a Quick design's budget too and quotes its own figure (D323). New design opens one intake — Auto (equations) or
     Blank — and Auto fills the base sheet by rule (`grid-auto-layout.ts`,
     `grid-auto-fill.ts`) with ordinary placements (lots carry `qty`;
     assemblies/allowances are virtual `asm:`/`allow:` parts, tier-priced like
@@ -303,7 +303,7 @@ See `.env.example`.
     failed fill opens the plan with a warning instead of losing the intake).
     Remaining is Jeff-gated: the map starts empty, so mapping the rows in
     Grid Settings → Equipment map is what turns "Incomplete" into a real
-    estimate. Punch item #GEM.
+    estimate. Punch item #211.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

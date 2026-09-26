@@ -140,7 +140,7 @@ export default function DesignClient({
   const [promoteToast, setPromoteToast] = useState(false);
   const [promotedId, setPromotedId] = useState<string | null>(null);
   const [promoteError, setPromoteError] = useState<string | null>(null);
-  /** The last refused promote was an incomplete estimate (D-GEM-19) — offer the Equipment map. */
+  /** The last refused promote was an incomplete estimate (D319) — offer the Equipment map. */
   const [promoteNeedsPart, setPromoteNeedsPart] = useState(false);
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
@@ -156,7 +156,7 @@ export default function DesignClient({
     return designs;
   }, [designs, scope, me]);
 
-  // #GEM D-GEM-10: an incomplete design's budget is not a real dollar figure
+  // #211 D310: an incomplete design's budget is not a real dollar figure
   // (the Equipment map is empty/partial) — excluded from the roll-up rather
   // than counted as $0 or as a real total.
   const incompleteDesigns = useMemo(() => raw.filter((d) => (d.incomplete?.needsPart || 0) > 0), [raw]);
@@ -287,7 +287,7 @@ export default function DesignClient({
 
   const review = sel ? sel.review || { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" } : null;
   const isOwner = sel ? sel.owner === me : false;
-  /** #GEM D-GEM-10: the saved shape, not a live recompute — matches what
+  /** #211 D310: the saved shape, not a live recompute — matches what
    *  "Add to Quotes" actually gates (promoteDesignAction reads the record). */
   const selIncomplete = !!sel && (sel.incomplete?.needsPart || 0) > 0;
   const rbMeta: Record<string, { bg: string; bd: string; ink: string; icon: string; title: string }> = {
@@ -417,7 +417,7 @@ export default function DesignClient({
                     <EquipmentMapLink style={{ fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
                       {sel.incomplete!.needsPart} item{sel.incomplete!.needsPart === 1 ? "" : "s"} need{sel.incomplete!.needsPart === 1 ? "s" : ""} a part →
                     </EquipmentMapLink>
-                    {/* #GEM wave 2 (M5): the stored price is from the last save (D-GEM-23). */}
+                    {/* #211 wave 2 (M5): the stored price is from the last save (D323). */}
                     {designRefreshHint(sel) && (
                       <Link href={`/design/quick?design=${encodeURIComponent(sel.id)}`} style={{ display: "block", marginTop: 4, fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
                         {detail && detail.needsPart === 0 ? "Every item is mapped now — " : ""}

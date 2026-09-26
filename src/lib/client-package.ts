@@ -77,7 +77,7 @@ export function buildClientPackageManifest(
   catalog: SpecCatalogPart[],
   requestedOptionId?: string | null,
   docs?: CoverageIndex | null,
-  /** Resolves an Auto assembly (`asm:<id>`) into its members (#GEM). */
+  /** Resolves an Auto assembly (`asm:<id>`) into its members (#211). */
   fixtureOf?: (id: string) => FixtureResolvable | null | undefined,
 ): ClientPackageManifest {
   const optionId = resolveOptionId(project, requestedOptionId);
@@ -86,8 +86,8 @@ export function buildClientPackageManifest(
   const bySku = new Map(catalog.map((part) => [part.sku, part]));
   const bomMap = new Map<string, BomRow>();
 
-  // Device lines carry their UNITS (a lot marker is its `qty`, #GEM) and go
-  // through the same flattening as the bid spec (gridSpecBomRows, D-GEM-16):
+  // Device lines carry their UNITS (a lot marker is its `qty`, #211) and go
+  // through the same flattening as the bid spec (gridSpecBomRows, D316):
   // an Auto assembly expands into its included members, an allowance is left
   // out — no raw `asm:` / `allow:` id reaches the customer's package.
   const deviceLines: Array<{ sku: string; desc: string; qty: number }> = [];

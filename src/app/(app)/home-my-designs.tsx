@@ -9,8 +9,8 @@ import { promoteDesignAction } from "./home-actions";
 /**
  * "My designs" sandbox strip — port of Home.dc.html's Design Dashboard card.
  * Client component because of the promote flow: Add to Quotes → the Designs
- * dashboard's promote path (#GEM final review I2 — Grid designs quote through
- * The Grid, Quick designs are re-priced on the server first, D-GEM-19) and
+ * dashboard's promote path (#211 final review I2 — Grid designs quote through
+ * The Grid, Quick designs are re-priced on the server first, D319) and
  * shows the promote toast (with "Requote now" → Estimator) for 6 seconds.
  */
 
@@ -20,9 +20,9 @@ export type DesignCard = {
   name: string;
   meta: string;
   budget: string;
-  /** #GEM D-GEM-10: the saved tier still has needs-a-part lines — `budget` reads "Incomplete". */
+  /** #211 D310: the saved tier still has needs-a-part lines — `budget` reads "Incomplete". */
   incomplete?: boolean;
-  /** #GEM wave 2 (M5): "Open in Quick Design and save to refresh its price" for an incomplete Quick design. */
+  /** #211 wave 2 (M5): "Open in Quick Design and save to refresh its price" for an incomplete Quick design. */
   hint?: string;
   tier: string;
   systemsLabel: string;
@@ -39,7 +39,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
   const [, startTransition] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [promoted, setPromoted] = useState<string | null>(null);
-  /** A refused promote (#GEM D-GEM-19: the server re-price found a line that needs a part). */
+  /** A refused promote (#211 D319: the server re-price found a line that needs a part). */
   const [promoteError, setPromoteError] = useState<{ id: string; msg: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 

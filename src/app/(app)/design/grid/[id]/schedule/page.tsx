@@ -16,7 +16,7 @@ import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Equipment schedule — Quartzite-6" };
 export const dynamic = "force-dynamic";
-// Virtual parts (#GEM) reach listFixtures() on this page — same budget as the editor.
+// Virtual parts (#211) reach listFixtures() on this page — same budget as the editor.
 export const maxDuration = 60;
 
 /**

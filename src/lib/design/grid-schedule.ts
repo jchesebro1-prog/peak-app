@@ -16,7 +16,7 @@ export type ScheduleWire = { id: string; partId: string; fromName: string; toNam
 export type ScheduleData = {
   sections: ScheduleSection[];
   wires: ScheduleWire[];
-  /** Device UNITS (#GEM: a lot marker counts its qty), curtains excluded. */
+  /** Device UNITS (#211: a lot marker counts its qty), curtains excluded. */
   unitCount: number;
   wireFeet: Array<{ partId: string; ft: number; unit: string; unmeasured: number }>;
 };

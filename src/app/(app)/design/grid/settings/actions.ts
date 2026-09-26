@@ -88,7 +88,7 @@ export async function saveStandardNotesAction(text: string) {
   return { ok: true as const };
 }
 
-/* ----------------------------- Equipment map (#GEM) ----------------------------- */
+/* ----------------------------- Equipment map (#211) ----------------------------- */
 
 export type EquipPartHit = { sku: string; desc: string; category: string; unit: string; cost: number; list: number };
 

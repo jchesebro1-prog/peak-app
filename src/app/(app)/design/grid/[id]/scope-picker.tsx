@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import { SUBCFG, type AState } from "@/app/(app)/design/quick/engine";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 
-/** The intake's scope list (#GEM, spec §5): the five Grid scopes, each with its sub-configuration. */
+/** The intake's scope list (#211, spec §5): the five Grid scopes, each with its sub-configuration. */
 const LABEL: Record<string, string> = { rigging: "Rigging", curtains: "Curtains", lighting: "Lighting", audio: "Audio", video: "Video" };
 const chip = (sel: boolean): CSSProperties => ({
   border: `1px solid ${sel ? "var(--accent)" : "#e4e7ec"}`,

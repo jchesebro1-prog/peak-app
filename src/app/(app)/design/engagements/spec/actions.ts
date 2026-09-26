@@ -59,7 +59,7 @@ export async function bomFromQuoteAction(quoteId: string): Promise<Result<{ bom:
       push(it.sku, it.desc, it.qty);
     }
   }
-  // The Grid's flat lines (#GEM, D-GEM-16): allowances are left out like the
+  // The Grid's flat lines (#211, D316): allowances are left out like the
   // estimator's allowance/labor lines; an Auto assembly (asm:) expands into
   // its members. Fixtures load once, and only when an assembly line exists.
   const gridLines = q.spec?.lines || [];

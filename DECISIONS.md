@@ -6007,15 +6007,15 @@ Mounting, Accessories), and `components[]` carry box roles — cable/lamp/other 
 identical to main. Saved quotes are untouched: a saved line's stored `components[]` / description are frozen at save
 time and never re-derived.
 
-## D-GEM-1. The equation vocabulary is 46 stable `system:itemKey` rows; the scenery track is measured in feet (#GEM, 2026-09-25)
+## D301. The equation vocabulary is 46 stable `system:itemKey` rows; the scenery track is measured in feet (#211, 2026-09-25)
 
 `src/lib/design/equipment-vocab.ts` lists every item `compute()` can emit — 16 rigging, 5 curtains, 5 lighting,
 9 controls, 3 audio, 3 video, 3 acoustical, 2 pit — keyed `system:itemKey`, labelled with the equation's own item
-name. The spec's "~60" was an estimate; the #GEM T1 spec block pins the set both ways (every emitted key has a row,
+name. The spec's "~60" was an estimate; the #211 T1 spec block pins the set both ways (every emitted key has a row,
 every row is emitted by some configuration). The only quantity change: the scenery track now emits feet (depth blocks ×
 pipe-rule length) instead of "ea at pipe length × $3", so a per-foot catalog track can price it.
 
-## D-GEM-2. The Equipment map is one settings blob with one top-level key per row (#GEM, 2026-09-25)
+## D302. The Equipment map is one settings blob with one top-level key per row (#211, 2026-09-25)
 
 Blob `grid_equipment_map`, `{ [rowKey]: { tiers: {good, better, best}, sameAll?, updatedBy, updatedAt } }` — flattened
 from the spec's `{ rows: … }` so `setBlob`'s atomic per-key jsonb merge keeps two admins' edits to different rows
@@ -6023,7 +6023,7 @@ independent. "Same for all tiers" saves the Good cell into all three and reads G
 with "I confirm this allowance" ticked; `confirmedBy/At` are re-stamped only when its amount or note changes. Editing is
 `manage_users` (the Estimating Rules gate). The map starts empty; the go-live reset keeps it (blobs are configuration).
 
-## D-GEM-3. Pricing from the map, and nothing else (#GEM, 2026-09-25)
+## D303. Pricing from the map, and nothing else (#211, 2026-09-25)
 
 Part: live cost; sell = list, or cost ÷ (1 − `catalog_rates.defaultMargin`) when the part has no list. Assembly:
 `resolveFixture` included cost / sell. Allowance: the confirmed amount is a unit cost, sold like a list-less part.
@@ -6034,7 +6034,7 @@ constants the Estimator's curtain pricing uses, combined through the shared two-
 assembly on a fabric row — is "needs a part": listed, counted, never summed, never placed. `SEED_FABRIC_RATES` stays
 for the Estimator, the portal and Grid curtain drop-ins, which read the catalog rate first (other features).
 
-## D-GEM-4. The estimate engine carries no dollars (#GEM, 2026-09-25)
+## D304. The estimate engine carries no dollars (#211, 2026-09-25)
 
 `compute()` emits keys + quantities; `src/lib/design/equipment-pricing.ts` (`applyEquipment`, `tierSystems`) is the
 only pricing step and is never imported by a Grid client file (walked by a spec guard). `TIER_SKUS`, every `cost:`
@@ -6042,9 +6042,9 @@ literal, the screen's `width × 260`, the scenery $3/ft and the engine's seed fa
 they survive as "was $X" hints in the server-only `equipment-legacy-hints.ts`. Every system is priced per tier, so the
 old tier cost/price multipliers are inert. Quick Design and the Designs dashboard price through the same table
 (server-built); a Quick Design fixture pick is a per-row override. Known: a saved Quick Design qty override that was
-keyed by an assembly's name (pre-#GEM the item took the assembly's name) no longer matches; the equation name is the key now.
+keyed by an assembly's name (pre-#211 the item took the assembly's name) no longer matches; the equation name is the key now.
 
-## D-GEM-5. Scope targets are computed on the server, sell-only (supersedes D139's accepted crossing) (#GEM, 2026-09-25)
+## D305. Scope targets are computed on the server, sell-only (supersedes D139's accepted crossing) (#211, 2026-09-25)
 
 `grid/[id]/page.tsx` prices Good / Better / Best per scope from the map (`scope-targets.ts`) and sends only sell
 numbers plus needs-a-part / allowance counts; `engineFabrics` and the in-browser `scopeTargets()` are gone, so the
@@ -6052,7 +6052,7 @@ Grid bundle carries no cost data beyond the `PartLite.cost` it already carried. 
 per-browser line-sets dial no longer moves Grid targets. While the map is empty a Blank design's targets read
 "no target" with a needs-a-part count — expected until the rows are mapped.
 
-## D-GEM-6. Auto placements: lots, the auto tag, virtual assembly / allowance parts (#GEM, 2026-09-25)
+## D306. Auto placements: lots, the auto tag, virtual assembly / allowance parts (#211, 2026-09-25)
 
 Count / length hardware (and any row over 120 units) lands as ONE placement carrying `qty`; BOM, schedule, riser and
 space rollups multiply by `placementQty()`, labor suggestions count the marker once. Auto placements carry
@@ -6063,7 +6063,7 @@ an allowance no longer confirmed prices $0 and says so. The quote's spec line ca
 documents print the line normally. A curtain pair lands as one drape of the pair's combined width (price-identical).
 Mapped catalog parts get a Grid library entry at fill time (`ensureGridSymbolsFor`, insert-if-absent).
 
-## D-GEM-7. One intake: Auto (equations) or Blank (#GEM, 2026-09-25)
+## D307. One intake: Auto (equations) or Blank (#211, 2026-09-25)
 
 Start from → Venue (type, size, dims, the five Grid scopes with their sub-configuration, cover page) → Equipment
 (Auto only). Blank stores `intake.mode = "manual"` (existing docs unchanged). Auto scopes are the five Grid scopes;
@@ -6073,35 +6073,35 @@ the base sheet was drawn from); fills land on `sheetIds[0]` in the current optio
 first-save gate after `generateBaseSheet`; a failure opens the plan with a warning and "Change equipment…"
 re-fills. `autoEstimate` is per project; a re-fill updates it and paints only the active option.
 
-## D-GEM-8. "New design" opens the Grid intake; the seeder is gone (#GEM, 2026-09-25)
+## D308. "New design" opens the Grid intake; the seeder is gone (#211, 2026-09-25)
 
 Every control labelled New design (Designs dashboard ×3, Home › My designs ×2) creates a Grid design and opens the
 intake. "New estimate" / "Start a rough estimate" still open Quick Design, which remains for existing designs.
 `seedStartingLayoutAction` and `deriveSeedPlacements` are removed (D186 kept them for this); the placeholder helpers
 stay for the quote guard.
 
-## D-GEM-9. The Equipment map is a Grid Settings sub-route; suggestions load on demand (#GEM, 2026-09-25)
+## D309. The Equipment map is a Grid Settings sub-route; suggestions load on demand (#211, 2026-09-25)
 
 `/design/grid/settings/equipment-map`, with a General | Equipment map tab strip on both pages — the General page does a
 whole-catalog port-rules pass the map must not pay for. The page reads the map, every fixture / system and only the
 SKUs they reference (one `getMany`); part search and "Suggest" (old fabric SKUs first, then search-word matches)
 are server actions, one catalog pass per click.
 
-## D-GEM-10. An incomplete estimate is INCOMPLETE, never $0 (#GEM, 2026-09-25)
+## D310. An incomplete estimate is INCOMPLETE, never $0 (#211, 2026-09-25)
 
 With the Equipment map empty or partial, an estimate is incomplete rather than a bare (wrong) dollar total. Quick
 Design and the Designs dashboard show **"Incomplete — N item(s) need a part"** (amber, linking to the Equipment map)
 in place of a dollar figure wherever a tier/system/design has any needs-a-part line; a saved `DesignRecord` carries an
-additive, optional `incomplete: { needsPart: number }` (a pre-#GEM record reads it as `undefined`, i.e. complete).
+additive, optional `incomplete: { needsPart: number }` (a pre-#211 record reads it as `undefined`, i.e. complete).
 "Add to Quotes" (Quick Design's save path and the Designs-dashboard promote path alike) refuses — client toast and a
 defense-in-depth server-side check in the action — while any line of the chosen tier still needs a part; the button is
 disabled with a "N items need a part — Equipment map →" link. The Designs-dashboard budget roll-up **excludes**
 incomplete designs entirely (an incomplete design's stored budget is a stale/partial number, not a lower bound worth
 averaging in) rather than labelling the total as partial. This mechanism covers Quick Design (`config`-based) records
 only; manual/Grid (`layoutMode === "manual"`) designs are gated by their own, pre-existing Scope-panel mechanism
-(D-GEM-5) and do not populate `incomplete`.
+(D305) and do not populate `incomplete`.
 
-## D-GEM-11. Riser edits are hand edits; lot rows edit the lot (#GEM, 2026-09-25)
+## D311. Riser edits are hand edits; lot rows edit the lot (#211, 2026-09-25)
 
 A riser qty edit or part swap clears `auto` on every placement left in the edited row, so a later per-scope re-fill
 keeps it. A row's qty is its UNIT count. Rule (`planRowQty`): a row with no lot marker adds/removes single markers
@@ -6109,35 +6109,35 @@ keeps it. A row's qty is its UNIT count. Rule (`planRowQty`): a row with no lot 
 marker, a decrease shrinks lot markers newest-first (never below 1 unit; a 1-unit lot drops its `qty`) and only then
 removes the newest markers. Lot rows go up to 100,000 units.
 
-## D-GEM-12. Auto choices are per option (#GEM, 2026-09-25)
+## D312. Auto choices are per option (#211, 2026-09-25)
 
 `autoEstimate` is a map keyed by option id, carried by revision snapshots/restore, option copy and option removal. A
 legacy single stored value reads as the FIRST option's (the only one Auto could have filled) and is migrated on the
 next write.
 
-## D-GEM-13. Dead virtual lines refuse the quote (#GEM, 2026-09-25)
+## D313. Dead virtual lines refuse the quote (#211, 2026-09-25)
 
 A deleted assembly, an assembly with no priced member, or an allowance no longer confirmed carries `virtualDead` (not
 `tierFallback`), prices $0, and makes the quote refuse by name ("need a part — replace or re-fill"), like the #64
 seed-placeholder refusal. The editor flags them "Needs a part", never "priced at list".
 
-## D-GEM-14. Virtual lines are tier-priced like every Grid part (#GEM, 2026-09-25)
+## D314. Virtual lines are tier-priced like every Grid part (#211, 2026-09-25)
 
 On a quote, an assembly or allowance line's sell is re-derived as cost ÷ (1 − the customer's tier margin), replacing
 the assembly's own included sell / the catalog-margin sell `virtualPartsFor` computes; a line with sell but no cost
 falls back to that sell and is flagged `tierFallback` as usual.
 
-## D-GEM-15. Allowance lines read normally (#GEM, 2026-09-25)
+## D315. Allowance lines read normally (#211, 2026-09-25)
 
 An allowance's description is the Equipment map row's plain label; only the internal `allowance` flag and the
 "Allowance" chips mark it — no "(allowance)" suffix reaches customer-facing or builder text.
 
-## D-GEM-16. Bid specs specify products (#GEM, 2026-09-25)
+## D316. Bid specs specify products (#211, 2026-09-25)
 
 From a Grid quote the bid-spec BOM leaves allowance lines out (as the estimator path leaves out allowance/labor) and
 expands an Auto assembly line into its included members, each labelled with the assembly's name.
 
-## D-GEM-17. An Auto fill failure is a warning, not a lost intake (#GEM, 2026-09-25)
+## D317. An Auto fill failure is a warning, not a lost intake (#211, 2026-09-25)
 
 The first-save Auto fill (`fillAutoScopes`, inside `saveGridIntakeAction`) runs inside a `try`/`catch`. A thrown error
 is logged server-side and folded into the same non-fatal `warning` result an empty/needs-a-part fill already
@@ -6146,7 +6146,7 @@ the plan still opens normally with "Change equipment…" as the recovery path ra
 `setAutoEstimate` itself refuses (the option was removed between resolving it and saving), a specific warning is
 returned and the fill step is skipped rather than failing later with a generic message.
 
-## D-GEM-18. The curtain-swap picker shows a per-sq-ft SELL, never the raw cost rate (#GEM, 2026-09-25)
+## D318. The curtain-swap picker shows a per-sq-ft SELL, never the raw cost rate (#211, 2026-09-25)
 
 `searchAutoEquipmentAction` restricts a curtain row's swap search to catalog category "Fabric" and keeps only a hit
 with a positive `curtainAreaRate` (a list-less, cost-less fabric — the normal case — is still findable; no assemblies
@@ -6156,23 +6156,23 @@ prices a fabric row with — rather than showing the raw per-sq-ft cost as if it
 row's swap search is unchanged (`cost>0||list>0`, sell derived the existing way).
 
 
-## D-GEM-19. Add to Quotes re-prices on the server; the client's `incomplete` is never trusted (#GEM, 2026-09-26)
+## D319. Add to Quotes re-prices on the server; the client's `incomplete` is never trusted (#211, 2026-09-26)
 
 Jeff's call. Every Quick-design promote path — Quick Design's Add to Quotes, the Designs dashboard, and Home (which now
 delegates to the dashboard's action) — re-prices the design on the SERVER from its `config` (or, for a pre-config seed
 record, rebuilt from its display fields) against the live Equipment map (`src/lib/stores/design-pricing.ts`,
 `quickDesignNeedsPart`), with the per-design fixture picks priced by the same `priceCell` an assembly cell uses. Any
 needs-a-part line blocks, with the "Incomplete — N items still need a part" message and an Equipment map link. That
-includes designs saved before #GEM: their stored budget stays visible, but they cannot become quotes until their rows
+includes designs saved before #211: their stored budget stays visible, but they cannot become quotes until their rows
 are mapped. Every save also re-derives `incomplete` on the server (`persistDesign`), so the value on the record is
 never the client's. The server uses `tierDefsDefault()`: the per-browser line-sets dial only rescales rigging
-quantities (same trade as D-GEM-5). Quick Design's fixture picks now sell through `priceCell` (included sell, or cost
+quantities (same trade as D305). Quick Design's fixture picks now sell through `priceCell` (included sell, or cost
 ÷ (1 − margin) when list-less) instead of the list-only `assemblyUnitTotals` sum, and a pick that prices needs-a-part
 stays needs-a-part. Home, the Reviews queue and the engagement letter read one label (`designBudgetLabel`):
 "Incomplete" on Home/Reviews; the letter, a customer document, prints "To be confirmed" instead of a partial figure.
 Home and Reviews open a Grid design in The Grid (`designOpenHref`).
 
-## D-GEM-20. "Change equipment…" counts devices kept by hand toward the new quantity (#GEM, 2026-09-26)
+## D320. "Change equipment…" counts devices kept by hand toward the new quantity (#211, 2026-09-26)
 
 Jeff's call. When a hand edit clears a placement's `auto` tag (move, category edit, riser qty edit, riser part swap),
 `withoutAuto` now records `autoOrigin: { scope, rowKey }` — not an auto tag, so re-fills never remove the device
@@ -6183,29 +6183,29 @@ kept places 5. The kept device's own tier or swapped part is not considered — 
 dialog says so and shows how many units are kept. Placements hand-touched before this change carry no origin and keep
 today's behaviour (not counted).
 
-## D-GEM-21. Grid counts are units, not markers (#GEM, 2026-09-26)
+## D321. Grid counts are units, not markers (#211, 2026-09-26)
 
-Since an Auto lot marker stands for `qty` units (D-GEM-6), every count a person reads is units: the schedule footer and
+Since an Auto lot marker stands for `qty` units (D306), every count a person reads is units: the schedule footer and
 riser panel ("N units across M areas", formerly "devices"), the space rollups and Scope panel slices, the design hub's
 recent-designs line, the revisions panel and the client package's "Placed devices" (curtains count one per drop). The
-client package's BOM uses the same units and goes through `gridSpecBomRows`, like the bid spec (D-GEM-16): an Auto
+client package's BOM uses the same units and goes through `gridSpecBomRows`, like the bid spec (D316): an Auto
 assembly expands into its included members and allowance lines are left out, so no raw `asm:` / `allow:` id reaches a
 customer.
 
-## D-GEM-22. A Grid quote from an Auto design with needs-a-part lines asks first (#GEM, 2026-09-26)
+## D322. A Grid quote from an Auto design with needs-a-part lines asks first (#211, 2026-09-26)
 
-Auto never places a needs-a-part line (D-GEM-3), so a Grid quote from an Auto design with unmapped rows is missing that
+Auto never places a needs-a-part line (D303), so a Grid quote from an Auto design with unmapped rows is missing that
 equipment. `createDraftQuoteAction` counts the option's Auto needs-a-part lines (`autoNeedsPart`; only scopes with a
-chosen tier, lines with qty > 0) and refuses with the D-GEM-10 message unless the caller passes `acceptIncomplete`.
+chosen tier, lines with qty > 0) and refuses with the D310 message unless the caller passes `acceptIncomplete`.
 The Grid editor shows the message with "Quote anyway" (the designer may have placed replacements by hand) and an
 Equipment map link; the Designs dashboard and Home never pass it, so there it blocks. Blank designs are unaffected.
 Also: `refillScopeAction` refuses any scope that is not one of the five Auto scopes; the Equipment map flags a mapped
 part whose catalog unit differs from the row's unit (advisory; fabric rows exempt); "Map it" / "Incomplete" links show
 non-admins "ask an admin to map it" instead of a dead-end link (`EquipmentMapLink`, `CanMapProvider`).
 
-## D-GEM-23. The server is the Quick Design budget's authority (#GEM, 2026-09-26)
+## D323. The server is the Quick Design budget's authority (#211, 2026-09-26)
 
-Extends D-GEM-19 from `incomplete` to `budget`. Every Quick Design save (`saveQuickDesign`,
+Extends D319 from `incomplete` to `budget`. Every Quick Design save (`saveQuickDesign`,
 `src/lib/stores/design-pricing.ts`) derives BOTH `incomplete` and `budget` on the server from the record's `config`
 — one `loadEquipPriceCtx` for the map + fixture picks, the chosen tier's systems, and `tierTotals` with the same
 install / freight / contingency percentages the Quick Design page reads (`quickDesignPrice`, whole dollars, as the
@@ -6214,7 +6214,7 @@ the server's budget. Every promote path (Quick Design's Add to Quotes, the Desig
 re-derives both, refuses on any needs-a-part line, quotes the server's figure (`promoteDesignToQuote(…, price)` →
 `designToQuotePartial` value) and writes the fresh budget/incomplete back to the record. The per-browser line-sets
 dial now travels in `config.tierSets` (a rigging quantity, like `qtyOverrides`), so the server prices the same
-quantities the screen showed — this closes D-GEM-19's `tierDefsDefault()` gap. A Quick save writes only the design
+quantities the screen showed — this closes D319's `tierDefsDefault()` gap. A Quick save writes only the design
 fields (`QUICK_SAVE_KEYS`: name, venue, size, tier, width, depth, grid, systems, customer, customerId, locationId,
 config) — never review, quoteId, owner, layoutMode, gridProjectId or revisions — and Quick Design refuses a Grid
 (manual-layout) record: its save/Add to Quotes return an error and its page redirects to The Grid. Grid Auto designs
@@ -6224,9 +6224,9 @@ incomplete Quick design. Because a Quick design's stored price is from its last 
 the dashboard says "Open in Quick Design and save to refresh its price". A deleted (or part-less) assembly in a client
 package lands in the gap report only, never the customer's BOM.
 
-## D-GEM-24. Quick Design qty overrides are versioned; the Scenery-track override is feet (#GEM, 2026-09-26)
+## D324. Quick Design qty overrides are versioned; the Scenery-track override is feet (#211, 2026-09-26)
 
-The Scenery track row emits FEET since #GEM T5 (depth blocks × pipe length); before, its qty override was a COUNT of
+The Scenery track row emits FEET since #211 T5 (depth blocks × pipe length); before, its qty override was a COUNT of
 track runs. Wave 1 dropped every saved "Scenery track" override on hydrate — but the screen priced a fresh edit while
 the server (which hydrates the saved config) dropped it, so the two disagreed (the reviewer's case: 13,321 on the
 screen, 16,125 on the server). Every Quick Design save now writes `config.overrideUnits = { "curtains:Scenery track":
@@ -6240,7 +6240,7 @@ total is `quickScreenPrice` over the live state, the server's `quickDesignPrice`
 hydrated config, and a design's own fixture picks — a deleted one too, shown as "(deleted — choose another)" — are
 priced on the page as on the server (needs-a-part). No stored record is rewritten.
 
-## D-GEM-25. Nav counts read design records only; a design read loads Grid pricing once (#GEM, 2026-09-26)
+## D325. Nav counts read design records only; a design read loads Grid pricing once (#211, 2026-09-26)
 
 The nav badges ran `getAllDesigns()` on every page, which priced every Grid design live — one whole-catalog load
 (~37,400 parts in production), a library read and a tier lookup PER manual design. Nav counts now read

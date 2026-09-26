@@ -149,7 +149,7 @@ export async function removeGridAssemblyAction(id: string): Promise<Result> {
 }
 
 /**
- * The Equipment step's live cards (#GEM, spec §5): the equations for the
+ * The Equipment step's live cards (#211, spec §5): the equations for the
  * given scope inputs, priced at each scope's tier from the Equipment map (or
  * this design's swaps), SELL-ONLY — no unit cost crosses to the client. Reads
  * only the SKUs the map and the swaps reference.
@@ -170,7 +170,7 @@ export async function previewAutoEstimateAction(input: {
 export type { AutoEquipHit } from "@/lib/design/auto-estimate";
 
 /**
- * Swap picker search (#GEM; curtain-row scoping #GEM fix wave 1 I2/M1):
+ * Swap picker search (#211; curtain-row scoping #211 fix wave 1 I2/M1):
  * `rowKey` picks the branch. A curtain row (equipment-vocab's `curtain`
  * shape) swaps only to a Fabric part priced by area rate — never an
  * assembly, and never the generic cost>0||list>0 filter, which would hide
@@ -210,7 +210,7 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
 
 export async function saveGridIntakeAction(input: {
   projectId: string;
-  /** "auto" = Auto (equations); "manual" = Blank (stored as before, D-GEM-7). */
+  /** "auto" = Auto (equations); "manual" = Blank (stored as before, D307). */
   mode: "manual" | "auto";
   venueName: string;
   locationName: string;
@@ -249,16 +249,16 @@ export async function saveGridIntakeAction(input: {
     autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
-  // First-save gate (D145) — see the pre-#GEM comment: idempotent re-applies
-  // first, generateBaseSheet (the sentinel) last. The Auto fill (#GEM) runs
+  // First-save gate (D145) — see the pre-#211 comment: idempotent re-applies
+  // first, generateBaseSheet (the sentinel) last. The Auto fill (#211) runs
   // after the sheet exists; if it fails the plan still opens, with a warning,
   // and "Change equipment…" re-fills. `est`, when present, is stored under
-  // THIS option (D-GEM-12 — autoEstimate is per option, not project-wide).
+  // THIS option (D312 — autoEstimate is per option, not project-wide).
   let warning: string | undefined;
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
     await setScopeInputs(input.projectId, scopeInputs);
-    // #GEM fix wave 1 (M6): setAutoEstimate refuses (null) when the option it
+    // #211 fix wave 1 (M6): setAutoEstimate refuses (null) when the option it
     // was resolved against is already gone — a specific warning instead of
     // silently proceeding to fill from an estimate that was never saved.
     let estimateSaved = true;
@@ -281,7 +281,7 @@ export async function saveGridIntakeAction(input: {
     if (patch.name) await renameProject(input.projectId, patch.name);
     await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
     if (est && estimateSaved) {
-      // #GEM fix wave 1 (I1): a thrown error here (not just a returned
+      // #211 fix wave 1 (I1): a thrown error here (not just a returned
       // {ok:false}) must not fail the whole save — the base sheet, scope
       // inputs and autoEstimate are already persisted, so the plan still
       // opens, with the same "Change equipment…" recovery as a returned
@@ -865,9 +865,9 @@ export async function createDraftQuoteAction(
   if (optionId && resolvedOptionId !== optionId) return { ok: false, error: OPTION_GONE };
   const option = project.options!.find((o) => o.id === resolvedOptionId)!;
 
-  // #GEM D-GEM-22: an Auto design whose choices still have needs-a-part lines
+  // #211 D322: an Auto design whose choices still have needs-a-part lines
   // is missing that equipment on the plan (Auto never places one), so its
-  // quote would be short. Same rule as D-GEM-10: refused unless the person
+  // quote would be short. Same rule as D310: refused unless the person
   // confirmed it in the editor (acceptIncomplete) — the dashboard and Home
   // never pass it.
   if (!opts?.acceptIncomplete) {
@@ -934,12 +934,12 @@ export async function createDraftQuoteAction(
 }
 
 /**
- * "Change equipment…" (#GEM, spec §5): re-choose ONE Auto scope's tier,
+ * "Change equipment…" (#211, spec §5): re-choose ONE Auto scope's tier,
  * swaps and quantities, save them on the project, and re-fill only that
  * scope in this option. Untouched Auto devices are replaced; devices moved or
  * edited by hand stay. The UI confirms first (ConfirmButton).
  *
- * Adapted from the brief for D-GEM-12 (not in the original brief):
+ * Adapted from the brief for D312 (not in the original brief):
  * autoEstimate is stored PER OPTION, so the current choices are read with
  * autoEstimateFor(project.autoEstimate, optionId, defaultOptionId) and saved
  * back with setAutoEstimate(projectId, optionId, …) rather than a single
@@ -953,7 +953,7 @@ export async function refillScopeAction(input: {
   overrides: Record<string, AutoOverride>;
 }): Promise<{ ok: true; added: number; removed: number; needsPart: number; kept: number } | { ok: false; error: string }> {
   const user = await requireUser();
-  // Only the five Auto scopes are ever filled (D-GEM-7) — refuse anything
+  // Only the five Auto scopes are ever filled (D307) — refuse anything
   // else before touching the project (final review minor).
   if (!AUTO_SCOPES.includes(input?.scope)) return { ok: false, error: "Only Auto scopes can be re-filled." };
   const project = await getProject(input.projectId);
