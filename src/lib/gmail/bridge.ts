@@ -37,6 +37,7 @@ import {
 } from "./connections";
 import {
   getMessage,
+  getMessageMetadata,
   getProfile,
   listHistory,
   listLabels,
@@ -46,7 +47,7 @@ import {
   sendRaw,
   type GmailLabelEvent,
 } from "./api";
-import { buildRaw, parseAddress, parseInbound, type ParsedInbound } from "./mime";
+import { buildRaw, headerValue, parseAddress, parseInbound, type ParsedInbound } from "./mime";
 import { applyResolution, backfillMailbox, resolveForThread } from "./linking";
 import { queueLabelSync, reconcilePeakLabelsForMailbox } from "./label-sync";
 import { interpretLabelEvents } from "./label-interpret";
@@ -198,6 +199,10 @@ async function recordMessage(
     // #125 — keep the addresses so a picked identity message can be resolved
     fromEmail: p.from.email || undefined,
     to: p.to || undefined,
+    // #214 — who else was on it (the Link popup's participants). Message
+    // only: the THREAD's cc below stays "" because deliverThreadOutbound
+    // copies thread.cc onto every reply we send.
+    cc: p.cc || undefined,
   };
 
   // attach to an existing thread sharing the Gmail thread id
@@ -475,6 +480,32 @@ export async function pushInboxState(
   await patchDoc<CommThread>("comms", threadId, (d) => {
     d.gmailInboxed = inboxed;
   });
+}
+
+/**
+ * #214 — the Link popup's lazy Cc backfill for a message imported before Cc
+ * was stored: fetch that one message's Cc header (metadata format), stamp
+ * `cc` + `ccFetched` so it never runs twice, and return the header ("" when
+ * the message had no Cc). null = nothing to fetch (no such message, not a
+ * Gmail message, or no connected mailbox for the thread). Already-fetched
+ * messages return what is stored without calling Gmail.
+ */
+export async function fetchMessageCc(threadId: string, messageId: string): Promise<string | null> {
+  const t = await getDoc<CommThread>("comms", threadId);
+  const m = (t?.messages || []).find((x) => x.id === messageId);
+  if (!t || !m?.gmailId) return null;
+  if (m.cc || m.ccFetched) return m.cc || "";
+  const key = t.gmailAccountKey ?? (await keyForThread(t));
+  if (!key) return null;
+  const meta = await getMessageMetadata(key, m.gmailId, ["Cc"]);
+  const cc = headerValue(meta.payload?.headers, "Cc");
+  await patchDoc<CommThread>("comms", threadId, (d) => {
+    const x = (d.messages || []).find((y) => y.id === messageId);
+    if (!x) return;
+    if (cc) x.cc = cc;
+    x.ccFetched = true;
+  });
+  return cc;
 }
 
 /** Dedup set for the one-time history import: every Gmail message id already

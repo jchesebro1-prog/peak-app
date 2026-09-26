@@ -110,6 +110,10 @@ function header(headers: GmailHeader[] | undefined, name: string): string {
   return h ? h.value : "";
 }
 
+/** #214 — one header's value off a Gmail message ("" when absent); the
+ *  bridge's lazy Cc fetch reads a metadata-format response with it. */
+export const headerValue = header;
+
 function decodePart(data?: string): string {
   if (!data) return "";
   return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
@@ -150,6 +154,8 @@ export type ParsedInbound = {
   messageId: string; // RFC Message-ID header
   from: { name: string; email: string };
   to: string;
+  /** #214 — raw Cc header, "" when the message had none */
+  cc: string;
   subject: string;
   body: string;
   at: number; // epoch-ms
@@ -173,6 +179,7 @@ export function parseInbound(msg: GmailFullMessage): ParsedInbound {
     messageId: header(hs, "Message-ID"),
     from: parseAddress(header(hs, "From")),
     to: header(hs, "To"),
+    cc: header(hs, "Cc"),
     subject: header(hs, "Subject") || "(no subject)",
     body: extractBody(msg.payload) || msg.snippet || "",
     at,

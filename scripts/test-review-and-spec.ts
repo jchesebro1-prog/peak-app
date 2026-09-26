@@ -19667,3 +19667,92 @@ import {
   const venueMatchSrc221 = read("src/lib/venue-match.ts");
   ok(venueMatchSrc221.includes("quoteBuilderHref"), "#221: venue-match.ts quoteDeepLink delegates to quoteBuilderHref (fixes rental)");
 }
+
+/* ====== #214 Inbox Link popup — participants + Cc on import (Task 1) ======
+   Pure parsing of From/To/Cc into the popup's "People on this email", the
+   Cc header now read on import, and the lazy one-message Cc backfill —
+   the bridge/api halves checked as source text (they call Gmail). */
+import {
+  participantsOf as ip214Participants,
+  splitAddressList as ip214Split,
+  parseMailbox as ip214Mailbox,
+} from "@/lib/inbox-participants";
+import { parseInbound as ip214ParseInbound, headerValue as ip214Header } from "@/lib/gmail/mime";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const j = (x: unknown) => JSON.stringify(x);
+  ok(
+    j(ip214Split('"Hale, Chris" <chris@arch.com>, d@y.org')) === j(['"Hale, Chris" <chris@arch.com>', "d@y.org"]),
+    "#214 participants: a comma inside a quoted display name does not split the list"
+  );
+  ok(j(ip214Split(" , ;")) === "[]" && j(ip214Split(undefined)) === "[]", "#214 participants: empty parts and a missing header give no addresses");
+  const hale = ip214Mailbox('"Hale, Chris" <Chris.Hale@Arch.COM>');
+  ok(hale.name === "Hale, Chris" && hale.email === "chris.hale@arch.com", "#214 participants: quoted name unquoted, address lowercased");
+  ok(ip214Mailbox('"O\\"Brien, Pat" <pat@x.org>').name === 'O"Brien, Pat', "#214 participants: an escaped quote inside the display name survives");
+  ok(ip214Mailbox("Nobody <>").email === "" && ip214Mailbox("not an address").email === "", "#214 participants: no real address → empty email");
+  ok(ip214Mailbox("  AP@Lakefront.org ").email === "ap@lakefront.org", "#214 participants: a bare address parses");
+  const own = ["jeff@peaksystemsgroup.com", "Sarah@PeakSystemsGroup.com"];
+  const inbound = ip214Participants(
+    {
+      direction: "in",
+      author: "Brenda Gauchel",
+      fromEmail: "brenda@lakefront.k12.mn.us",
+      to: 'Jeff Chesebro <jeff@peaksystemsgroup.com>, "Hale, Chris" <chris@arch.com>',
+      cc: "AP Clerk <ap@lakefront.k12.mn.us>, BRENDA@lakefront.k12.mn.us, sarah@peaksystemsgroup.com",
+    },
+    own
+  );
+  ok(
+    inbound.map((p) => `${p.role}:${p.email}:${p.name}`).join("|") ===
+      "from:brenda@lakefront.k12.mn.us:Brenda Gauchel|to:chris@arch.com:Hale, Chris|cc:ap@lakefront.k12.mn.us:AP Clerk",
+    "#214 participants: From → To → Cc, deduped by address (first role wins), our own addresses dropped case-insensitively"
+  );
+  const outbound = ip214Participants(
+    { direction: "out", author: "Jeff Chesebro", fromEmail: "jeff@peaksystemsgroup.com", to: "a@x.org; b@x.org", cc: "" },
+    own
+  );
+  ok(outbound.map((p) => p.role + ":" + p.email).join() === "to:a@x.org,to:b@x.org", "#214 participants: an outbound message lists its recipients, never us as From");
+  const legacy = ip214Participants({ direction: "in", author: "Legacy" }, own, { name: "Brenda", email: "Brenda@L.org" });
+  ok(legacy.length === 1 && legacy[0].email === "brenda@l.org" && legacy[0].role === "from" && legacy[0].name === "Brenda", "#214 participants: an inbound message with no stored From falls back to the thread counterpart");
+  ok(ip214Participants({ direction: "in", author: "X" }, own, null).length === 0, "#214 participants: nothing stored and no counterpart → no participants");
+
+  const gm = {
+    id: "g1",
+    threadId: "t1",
+    labelIds: ["INBOX"],
+    internalDate: "1000",
+    payload: {
+      mimeType: "text/plain",
+      body: { data: Buffer.from("Body").toString("base64") },
+      headers: [
+        { name: "From", value: "Brenda <brenda@x.org>" },
+        { name: "To", value: "jeff@peaksystemsgroup.com" },
+        { name: "Cc", value: '"Hale, Chris" <chris@arch.com>' },
+        { name: "Subject", value: "Hi" },
+      ],
+    },
+  };
+  ok(ip214ParseInbound(gm).cc === '"Hale, Chris" <chris@arch.com>', "#214 Cc: parseInbound reads the raw Cc header");
+  ok(
+    ip214ParseInbound({ ...gm, payload: { ...gm.payload, headers: gm.payload.headers.filter((h) => h.name !== "Cc") } }).cc === "",
+    "#214 Cc: no Cc header → empty string"
+  );
+  ok(ip214Header([{ name: "CC", value: "a@b.org" }], "Cc") === "a@b.org", "#214 Cc: headerValue matches the header name case-insensitively");
+  const bridge = read("src/lib/gmail/bridge.ts");
+  ok(bridge.includes("cc: p.cc || undefined,"), "#214 Cc: the bridge stores Cc on each imported message");
+  ok(/cc: "",\s*\n\s*subject: p\.subject,/.test(bridge), "#214 Cc: a new thread's own cc stays empty — replies copy thread.cc, so an inbound Cc must never land there");
+  ok(
+    /export async function fetchMessageCc\(threadId: string, messageId: string\)/.test(bridge) &&
+      bridge.includes('getMessageMetadata(key, m.gmailId, ["Cc"])') &&
+      bridge.includes("x.ccFetched = true;") &&
+      bridge.includes("if (m.cc || m.ccFetched) return m.cc || \"\";"),
+    "#214 Cc: fetchMessageCc reads only the Cc header, stamps ccFetched, and never refetches"
+  );
+  const api = read("src/lib/gmail/api.ts");
+  ok(
+    /export async function getMessageMetadata\(/.test(api) &&
+      api.includes('new URLSearchParams({ format: "metadata" })') &&
+      api.includes('qs.append("metadataHeaders", h)'),
+    "#214 Cc: getMessageMetadata asks Gmail for headers only (format=metadata)"
+  );
+}

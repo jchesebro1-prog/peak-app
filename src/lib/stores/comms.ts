@@ -230,6 +230,13 @@ export type CommMessage = {
    *  readers fall back to the thread's contactEmail (see lib/inbox-identity). */
   fromEmail?: string;
   to?: string;
+  /** #214 — the raw Cc header ("Name <a@b>, c@d"), stamped by the Gmail
+   *  bridge on import, or by the Link popup's one-time lazy fetch for
+   *  messages imported before #214. */
+  cc?: string;
+  /** #214 — set once that lazy Cc fetch has run (whether or not the
+   *  message had a Cc), so it never runs twice. */
+  ccFetched?: true;
 };
 
 export type CommDraft = {

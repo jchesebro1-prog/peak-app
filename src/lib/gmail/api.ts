@@ -123,6 +123,18 @@ export async function getMessage(
   return gapi(mailboxKey, "/messages/" + id + "?format=full");
 }
 
+/** #214 — headers only (format=metadata): the Link popup's lazy Cc fetch
+ *  for messages imported before Cc was stored. 5 quota units, no body. */
+export async function getMessageMetadata(
+  mailboxKey: string,
+  id: string,
+  headers: string[]
+): Promise<GmailFullMessage> {
+  const qs = new URLSearchParams({ format: "metadata" });
+  for (const h of headers) qs.append("metadataHeaders", h);
+  return gapi(mailboxKey, "/messages/" + encodeURIComponent(id) + "?" + qs.toString());
+}
+
 /** The mailbox profile — carries the current historyId (sync cursor baseline). */
 export async function getProfile(
   mailboxKey: string
