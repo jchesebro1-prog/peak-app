@@ -34,8 +34,16 @@ parts** (search still finds them).
   - Video: Displays & Projectors · Screens & Lifts · Cameras · Switching & Distribution
   - General (Unscoped): Cable & Connectors · Racks & Cases · Power Distribution · Networking ·
     Parts & Consumables
-- Settings blob `gridTypeMap`: `{ [normalizedRawCategory]: typeKey }` (normalized = trimmed,
-  lowercased, whitespace collapsed). Admin-confirmed only.
+- Settings blob `gridTypeMap`: `{ [normalizedRawCategory]: { typeKey, by: "auto" | "admin", at } }`
+  (normalized = trimmed, lowercased, whitespace collapsed).
+- **Auto-apply (Jeff, 2026-09-26):** confident matches apply without a click. Whenever the map is
+  read for a catalog category that has no entry, a `"high"` confidence suggestion is written as an
+  `auto` entry (first run maps the whole existing catalog; new categories from later imports get the
+  same treatment). `"low"` / no suggestion stays unmapped and appears in the review list. An admin
+  edit writes `admin` and is never overwritten by auto. The review screen shows auto entries with an
+  "auto" chip so they can be spot-checked.
+- Existing per-raw-category icon settings are kept as the "Advanced" overrides, so nothing already
+  configured is lost.
 - Pure `src/lib/design/device-types.ts`: `deviceTypesFrom(raw)` (seed/sanitize/merge like other
   settings lists), `normalizeCategory`, `suggestDeviceType(category, sampleDescs?) → { typeKey,
   confidence: "high" | "low" } | null` (keyword rules per type, e.g. hoist/motor/chain → Hoists &
@@ -59,8 +67,9 @@ parts** (search still finds them).
 1. **Catalog → Device types** (replaces the raw list in "Categories & trades" as the primary
    editor; `manage_users`): the type list (rename, add, reorder, archive, merge = reassign a type's
    categories to another then archive), and the mapping table of every distinct raw category with
-   part count, suggested type + confidence, current type. Unmapped first. Bulk actions: "Accept all
-   high-confidence suggestions", select rows → assign type. The old group/trade map stays available
+   part count, suggested type + confidence, current type (with an "auto" chip when auto-applied).
+   Unmapped first. Bulk actions: "Accept all suggestions" (applies the low-confidence ones too), select
+   rows → assign type. The old group/trade map stays available
    under an "Estimating groups & trades" section (it feeds estimating, not the Grid).
 2. **Palette**: tabs **Favorites · Recent · All**; in All: scope chips → type chips for that scope
    (+ counts), manufacturer `<select>` (manufacturers present in the current scope/type), search box.
