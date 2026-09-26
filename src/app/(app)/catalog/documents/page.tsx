@@ -42,7 +42,8 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   // The one-time fixture conversion + graph move (#FXB; was the I2 graph
   // sync) rides alongside the first reads: one flag read once it has run,
   // and it lands before loadPartDocsState reads the graph (whose own
-  // first-read step is the legacy datasheet backfill).
+  // first-read step is the legacy datasheet backfill). Never on a Vercel
+  // preview, which shares production's database (fix wave 1, C1).
   const [parts, quotes, gridProjects, generated] = await Promise.all([
     listCatalog(),
     allQuotes(),

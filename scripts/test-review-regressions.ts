@@ -2764,11 +2764,23 @@ async function main() {
     const { setSettings } = await import("@/lib/settings");
     const { insertDocIfAbsent } = DS;
     const Mig = await import("@/lib/fixtures-migrate");
+    const { CONVERTED_BY, normalizeFixtureRow } = await import("@/lib/fixtures-convert");
     const { getDb } = await import("@/db");
-    const { blobs } = await import("@/db/doc-tables");
-    const { eq } = await import("drizzle-orm");
+    const { blobs, DOC_TABLES } = await import("@/db/doc-tables");
+    const { inArray, sql } = await import("drizzle-orm");
     const { getSettings } = await import("@/lib/settings");
-    await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
+    const flagIds = [Mig.FIXTURES_CONVERT_BLOB_ID, Mig.LEGACY_GRAPH_SYNC_BLOB_ID];
+    const clearFlags = async () => { await (await getDb()).delete(blobs).where(inArray(blobs.id, flagIds)); };
+    // A fingerprint of everything the conversion could write: row counts,
+    // max seq and rev sums of both doc tables, plus both flag blobs.
+    const tableFp = async () => {
+      const db = await getDb();
+      const one = async (t: (typeof DOC_TABLES)["subassemblies"]) =>
+        (await db.select({ n: sql<number>`count(*)::int`, s: sql<string>`coalesce(max(${t.seq}), 0)::text`, r: sql<string>`coalesce(sum(${t.rev}), 0)::text`, d: sql<number>`count(*) filter (where ${t.deleted})::int` }).from(t))[0];
+      return JSON.stringify([await one(DOC_TABLES.subassemblies), await one(DOC_TABLES.part_accessory_links)]);
+    };
+    const fp = async () => JSON.stringify([await tableFp(), await (await getDb()).select().from(blobs).where(inArray(blobs.id, flagIds)).orderBy(blobs.id)]);
+    await clearFlags();
     const priorAssemblies = ((await getSettings()).fixtureAssemblies ?? []) as unknown[];
     assert.equal(priorAssemblies.length, 0, "#FXB: the test database starts with no fixture assemblies");
     const fwAssemblies = [
@@ -2777,47 +2789,166 @@ async function main() {
         { sku: "FW-LENS", label: "Lens", role: "lens", defaultQty: 1 },
         { sku: "FW-CLAMP", label: "Clamp", role: "mount", defaultQty: 0 },
       ] },
+      // Converted once, then deleted by a user: must stay deleted.
+      { id: "fw-del", name: "FW deleted", components: [{ sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 }] },
     ];
     await setSettings({ fixtureAssemblies: fwAssemblies });
-    await insertDocIfAbsent("subassemblies", {
-      id: "SA-FW", kind: "fixture", label: "FW sub", description: "", lightEngineSku: "FW-S4", lightEngineName: "", lightEngineCost: 0,
-      lensSku: "FW-LENS2", lensName: "", lensCost: 0, options: { data: [{ sku: "FW-DATA", name: "", cost: 0, qty: 2 }], power: [], mounting: [], accessories: [] },
-      cost: 0, price: 0, createdAt: 1, updatedAt: 1,
-    });
+    await insertDocIfAbsent("subassemblies", { id: "fw-del", kind: "fixture", label: "FW deleted", lightEngineSku: "FW-S4", lines: { data: [], power: [], mounting: [], accessories: [] } });
+    await DS.softDeleteDoc("subassemblies", "fw-del");
+    const saOriginal = {
+      id: "SA-FW", kind: "fixture", label: "FW sub", description: "", lightEngineSku: "FW-S4", lightEngineName: "S4 engine", lightEngineCost: 40,
+      lensSku: "FW-LENS2", lensName: "Lens two", lensCost: 5, options: { data: [{ sku: "FW-DATA", name: "Data cable", cost: 3, qty: 2 }], power: [], mounting: [], accessories: [] },
+      cost: 51, price: 90, snapshot: { cost: 51, price: 90, pricedAt: null }, createdAt: 1, updatedAt: 1,
+    };
+    await insertDocIfAbsent("subassemblies", saOriginal);
     // The part-documents build's scopes as a database that ran its one-time
     // sync holds them, a deleted assembly's leftovers, DaVinci's scope, and a
-    // human's own-datasheet flag on one pair.
+    // human's own-datasheet flag on one assembly: pair and one subassembly: pair.
     await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-asm" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS", maxQty: 1, included: true }, { parentSku: "FW-S4", accessorySku: "FW-CLAMP" }]);
     await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-FW" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS2", maxQty: 1, included: true }, { parentSku: "FW-S4", accessorySku: "FW-DATA", maxQty: 2, included: true }]);
     await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-gone" }, [{ parentSku: "FW-OLD", accessorySku: "FW-OLDACC" }]);
     await Acc.syncAccessoryLinks({ source: "davinci", sourceRef: "TY-FWX" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS" }]);
     await Acc.setOwnDatasheet("FW-S4", "FW-LENS", true);
+    await Acc.setOwnDatasheet("FW-S4", "FW-DATA", true);
     assert.equal(await Mig.fixturesConverted(), false, "#FXB: a fresh database has not converted");
+
+    // Fix wave 1, C1(a): a Vercel preview (shares production's database)
+    // never converts on a page read — nothing is written at all.
+    const priorVercelEnv = process.env.VERCEL_ENV;
+    process.env.VERCEL_ENV = "preview";
+    try {
+      const before = await fp();
+      assert.equal(await Mig.ensureFixturesConverted(), false, "#FXB fix C1: a preview deploy's page read does not convert");
+      assert.equal(await fp(), before, "#FXB fix C1: …and writes nothing (rows, graph and flags untouched)");
+    } finally {
+      if (priorVercelEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = priorVercelEnv;
+    }
+    // Fix wave 1, M3: a pass out of budget before its first chunk writes nothing.
+    {
+      const before = await fp();
+      assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB fix M3: an out-of-budget pass reports incomplete");
+      assert.equal(await fp(), before, "#FXB fix M3: …and writes nothing — no insert, no rewrite, no graph row, no flag");
+    }
+
+    const isLegacyRef = (l: { source?: string; sourceRef?: string }) => l.source === "assembly" && /^(assembly|subassembly):/.test(l.sourceRef ?? "");
+    const legacyLive = (await Acc.allAccessoryLinks()).filter(isLegacyRef).length;
+    assert(legacyLive >= 5, `#FXB setup: at least this section's five legacy rows are live (got ${legacyLive})`);
     const r1 = await Mig.convertFixtures();
-    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4 && r1.graphRemoved >= 5, `#FXB: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
+    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4, `#FXB: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
+    assert.equal(r1.graphRemoved, legacyLive, "#FXB fix M3: graphRemoved is exactly the live legacy rows retired");
     assert.equal(await Mig.fixturesConverted(), true, "#FXB: a completed conversion sets the flag");
+    assert((await DS.getBlob(Mig.LEGACY_GRAPH_SYNC_BLOB_ID, { assembliesSyncedAt: 0 })).assembliesSyncedAt > 0, "#FXB fix M1: …and the part-documents build's graph flag, so an older build can't re-create assembly:/subassembly: rows");
+    assert.equal(await DS.getDoc("subassemblies", "fw-del"), null, "#FXB fix I1: a converted assembly a user deleted stays deleted (never revived)");
     const fw = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "fw-asm"))!;
     const fwLines = fw.lines as Record<string, Array<{ sku: string; qty: number }>>;
     assert(fw && fw.lightEngineSku === "FW-S4" && fw.lensSku === "FW-LENS" && fwLines.mounting[0]?.sku === "FW-CLAMP" && fwLines.mounting[0]?.qty === 0, "#FXB: the settings assembly converted by role, keeping its fa-style id");
-    const sa = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FW"))!;
-    assert(!!sa.lines && sa.options === undefined, "#FXB: the legacy subassembly row is rewritten in place under its SA- id");
-    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 1, "#FXB: settings.fixtureAssemblies is left untouched as a backup");
+    const saRow = (await DS.getDocRows("subassemblies", ["SA-FW"]))[0];
+    const sa = saRow.doc as Record<string, unknown> & { id: string };
+    const saLines = sa.lines as Record<string, Array<{ sku: string; qty: number }>>;
+    assert(!saRow.deleted && saLines?.data?.[0]?.sku === "FW-DATA" && saLines.data[0].qty === 2 && sa.createdBy === CONVERTED_BY, "#FXB: the legacy subassembly row gains the fixture fields in place under its SA- id");
+    // Fix wave 1, C1(b): the rewrite is additive — every original field survives.
+    for (const [k, v] of Object.entries(saOriginal)) assert.deepEqual(sa[k], v, `#FXB fix C1: the old row's ${k} survives the conversion unchanged`);
+    // …so a main-style reader (the old Subassemblies tab: options per box,
+    // stored names, stored cost/price) still reads the same record.
+    type OldShape = { id: string; lightEngineName: string; lensName: string; options: Record<string, Array<{ sku: string; name: string; qty: number }>>; price: number; cost: number };
+    const oldRead = (await DS.listDocs<OldShape>("subassemblies")).find((r) => r.id === "SA-FW")!;
+    assert(oldRead.lightEngineName === "S4 engine" && oldRead.lensName === "Lens two" && oldRead.options.data.map((o) => `${o.sku}:${o.name}:${o.qty}`).join() === "FW-DATA:Data cable:2" && oldRead.price === 90 && oldRead.cost === 51, "#FXB fix C1: a main-style reader still sees the old shape's fields");
+    const norm = normalizeFixtureRow(sa);
+    assert(norm.kind === "fixture" && norm.lensSku === "FW-LENS2" && norm.lines.data[0]?.sku === "FW-DATA" && norm.legacy?.from === "subassembly", "#FXB fix C1: …and the new reader normalizes the merged row as a converted fixture");
+    assert.equal((await DS.listSince("subassemblies", 0, 10_000)).changes.find((c) => c.id === "SA-FW")?.rev, 2, "#FXB fix I1: the in-place merge bumps rev exactly once");
+    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 2, "#FXB: settings.fixtureAssemblies is left untouched as a backup");
     const live = await Acc.allAccessoryLinks();
     const has = (ref: string, parent: string, acc: string) => live.some((l) => l.source === "assembly" && l.sourceRef === ref && l.parentSku === parent && l.accessorySku === acc);
     assert(has("fixture:fw-asm", "FW-S4", "FW-LENS") && has("fixture:fw-asm", "FW-S4", "FW-CLAMP") && has("fixture:SA-FW", "FW-S4", "FW-LENS2") && has("fixture:SA-FW", "FW-S4", "FW-DATA"), "#FXB: every fixture's pairs live under one fixture:<id> scope");
-    assert(!live.some((l) => l.source === "assembly" && /^(assembly|subassembly):/.test(l.sourceRef ?? "")), "#FXB: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
+    assert(!live.some(isLegacyRef), "#FXB: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
     assert.equal(live.find((l) => l.sourceRef === "fixture:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet, true, "#FXB: the pair's own-datasheet flag carries onto the fixture: row");
+    assert.equal(live.find((l) => l.sourceRef === "fixture:SA-FW" && l.accessorySku === "FW-DATA")?.ownDatasheet, true, "#FXB fix M3: …a subassembly:-origin pair's flag too");
     assert(live.some((l) => l.source === "davinci" && l.sourceRef === "TY-FWX"), "#FXB: DaVinci's scope is never touched");
-    assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: every later read is a no-op (one flag read)");
-    const again = await Mig.convertFixtures();
-    assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#FXB: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
+    {
+      const before = await fp();
+      assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: every later read reports converted");
+      assert.equal(await fp(), before, "#FXB fix M3: …and is a true no-op — nothing written, flags included");
+      const beforeTables = await tableFp();
+      const again = await Mig.convertFixtures();
+      assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#FXB: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
+      assert.equal(await tableFp(), beforeTables, "#FXB fix M3: …no row in either table is touched");
+    }
     // A run cut short by its budget leaves the flag unset; the next read finishes.
-    await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
+    await clearFlags();
     await setSettings({ fixtureAssemblies: [...fwAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
-    assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB: a conversion out of budget reports incomplete");
+    {
+      const before = await fp();
+      assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB: a conversion out of budget reports incomplete");
+      assert.equal(await fp(), before, "#FXB fix M3: …writes nothing");
+    }
     assert.equal(await Mig.fixturesConverted(), false, "#FXB: …and leaves the flag unset");
     assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: the next read finishes the job");
     assert(!!(await DS.getDoc("subassemblies", "fw-asm2")) && (await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "fixture:fw-asm2" && l.accessorySku === "FW-IRIS"), "#FXB: …writing the rest, graph included");
+
+    // Fix wave 1, I1: a save or delete landing between the pass's read and its
+    // write is never overwritten or revived — the pass reports incomplete and
+    // the next one re-plans from the fresh rows.
+    await clearFlags();
+    const legacyRow = (id: string, dataSku: string) => ({
+      id, kind: "fixture", label: id, description: "", lightEngineSku: "FW-RACE-E", lightEngineName: "E", lightEngineCost: 1, lensSku: "", lensName: "", lensCost: 0,
+      options: { data: [{ sku: dataSku, name: dataSku, cost: 1, qty: 1 }], power: [], mounting: [], accessories: [] }, cost: 2, price: 3, createdAt: 1, updatedAt: 1,
+    });
+    for (const id of ["SA-RACE-OLD", "SA-RACE-NEW", "SA-RACE-DEL"]) await insertDocIfAbsent("subassemblies", legacyRow(id, "FW-RACE-D"));
+    const newSave = { id: "SA-RACE-NEW", kind: "fixture", label: "User's save", description: "", lightEngineSku: "FW-RACE-E", lensSku: null, lines: { data: [{ sku: "FW-RACE-USER", qty: 4 }], power: [], mounting: [], accessories: [] }, updatedBy: "Jeff", updatedAt: 5 };
+    const race = await Mig.convertFixtures({
+      beforeWrite: async () => {
+        await upsertDoc("subassemblies", legacyRow("SA-RACE-OLD", "FW-RACE-OLDSAVE")); // an older build's save (old shape)
+        await upsertDoc("subassemblies", newSave); // a builder save (new shape)
+        await DS.softDeleteDoc("subassemblies", "SA-RACE-DEL"); // a delete
+      },
+    });
+    assert(!race.complete && race.rewritten === 0, `#FXB fix I1: a pass that lost every race rewrites nothing and stays incomplete (got ${JSON.stringify(race)})`);
+    assert.equal(await Mig.fixturesConverted(), false, "#FXB fix I1: …so the flag stays unset");
+    const oldSaved = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-RACE-OLD"))!;
+    assert(oldSaved.lines === undefined && JSON.stringify(oldSaved.options).includes("FW-RACE-OLDSAVE"), "#FXB fix I1: an older build's concurrent save is not overwritten from the stale snapshot");
+    assert.deepEqual(await DS.getDoc("subassemblies", "SA-RACE-NEW"), newSave, "#FXB fix I1: a concurrent builder save is left exactly as saved");
+    const delRow = (await DS.getDocRows("subassemblies", ["SA-RACE-DEL"]))[0];
+    assert(delRow.deleted && delRow.doc.lines === undefined, "#FXB fix I1: a concurrent delete is not revived (or rewritten)");
+    const race2 = await Mig.convertFixtures();
+    assert(race2.complete && race2.rewritten === 1, `#FXB fix I1: the next pass converts the re-saved row and completes (got ${JSON.stringify(race2)})`);
+    const oldConverted = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-RACE-OLD"))!;
+    assert.equal((oldConverted.lines as Record<string, Array<{ sku: string }>>).data[0]?.sku, "FW-RACE-OLDSAVE", "#FXB fix I1: …from the user's latest save, not the stale read");
+
+    // Fix wave 1, M3: two concurrent passes end in the same state as one —
+    // each insert and rewrite lands once, nothing revived or clobbered.
+    await clearFlags();
+    await setSettings({ fixtureAssemblies: [...fwAssemblies, { id: "fw-par", name: "FW par", components: [{ sku: "FW-PAR-E", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-PAR-L", label: "L", role: "lens", defaultQty: 1 }] }] });
+    await insertDocIfAbsent("subassemblies", legacyRow("SA-PAR", "FW-PAR-D"));
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-PAR" }, [{ parentSku: "FW-RACE-E", accessorySku: "FW-PAR-D", maxQty: 1, included: true }]);
+    const [p1, p2] = await Promise.all([Mig.convertFixtures(), Mig.convertFixtures()]);
+    assert.equal(p1.inserted + p2.inserted, 1, `#FXB fix M3: two concurrent passes insert the new assembly once (got ${JSON.stringify([p1, p2])})`);
+    assert.equal(p1.rewritten + p2.rewritten, 1, "#FXB fix M3: …and rewrite the legacy row once");
+    assert.equal(p1.graphWritten + p2.graphWritten, 2, "#FXB fix M3: …and write each new fixture: row once");
+    assert(p1.complete || p2.complete || (await Mig.convertFixtures()).complete, "#FXB fix M3: the pair (or one more pass) completes");
+    const parRow = (await DS.getDocRows("subassemblies", ["SA-PAR"]))[0];
+    assert(!parRow.deleted && (parRow.doc.lines as Record<string, Array<{ sku: string }>>).data[0]?.sku === "FW-PAR-D" && JSON.stringify(parRow.doc.options).includes("FW-PAR-D"), "#FXB fix M3: the legacy row is converted once, additively");
+    assert.equal((await DS.listSince("subassemblies", 0, 10_000)).changes.find((c) => c.id === "SA-PAR")?.rev, 2, "#FXB fix M3: …its rev bumped exactly once across both passes");
+    assert.equal(await DS.getDoc("subassemblies", "fw-del"), null, "#FXB fix M3: the deleted assembly is still not revived");
+    const parLive = await Acc.allAccessoryLinks();
+    assert(parLive.some((l) => l.sourceRef === "fixture:fw-par" && l.accessorySku === "FW-PAR-L") && parLive.some((l) => l.sourceRef === "fixture:SA-PAR" && l.accessorySku === "FW-PAR-D") && !parLive.some(isLegacyRef), "#FXB fix M3: …the graph ends fully moved");
+
+    // Fix wave 1, M3: a pass cut off after the fixture: rows landed but before
+    // the retire resumes on the next run. The only graph work is one fixture:
+    // chunk (check 1) and one retire chunk (check 2), so stopping at check 2
+    // cuts exactly between them.
+    await clearFlags();
+    await insertDocIfAbsent("subassemblies", { id: "SA-RES", kind: "fixture", label: "Resume", description: "", lightEngineSku: "FW-RES-E", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [{ sku: "FW-RES-A", qty: 1 }] } });
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-RES" }, [{ parentSku: "FW-RES-E", accessorySku: "FW-RES-A", maxQty: 1, included: true }]);
+    let checks = 0;
+    const cut = await Mig.convertFixtures({ shouldStop: () => ++checks >= 2 });
+    const cutLive = await Acc.allAccessoryLinks();
+    assert(!cut.complete && cut.graphWritten === 1 && cut.graphRemoved === 0, `#FXB fix M3: the cut pass wrote the fixture: row but retired nothing (got ${JSON.stringify(cut)})`);
+    assert(cutLive.some((l) => l.sourceRef === "fixture:SA-RES") && cutLive.some((l) => l.sourceRef === "subassembly:SA-RES"), "#FXB fix M3: …both scopes are live at the cut");
+    assert.equal(await Mig.fixturesConverted(), false, "#FXB fix M3: …and the flag is unset");
+    const resumed = await Mig.convertFixtures();
+    assert(resumed.complete && resumed.graphWritten === 0 && resumed.graphRemoved === 1, `#FXB fix M3: the re-run retires the one leftover and completes (got ${JSON.stringify(resumed)})`);
+    assert(await Mig.fixturesConverted(), "#FXB fix M3: …setting the flag");
     await setSettings({ fixtureAssemblies: priorAssemblies });
   }
 

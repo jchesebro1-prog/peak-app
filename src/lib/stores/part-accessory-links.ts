@@ -175,6 +175,22 @@ async function syncScopes(
  * is not); `changed` is the number of rows rewritten — 0 when the flag
  * already had that value, which is not an error (final fix wave, M1).
  */
+export async function setOwnDatasheet(parentSku: string, accessorySku: string, own: boolean): Promise<{ linked: boolean; changed: number }> {
+  const rows = (await allAccessoryLinks()).filter((l) => l.parentSku === parentSku && l.accessorySku === accessorySku);
+  let changed = 0;
+  for (const l of rows) {
+    if (!!l.ownDatasheet === own) continue;
+    await patchDoc<PartAccessoryLink>("part_accessory_links", l.id, (d) => {
+      const next = { ...d };
+      if (own) next.ownDatasheet = true;
+      else delete next.ownDatasheet;
+      return next;
+    });
+    changed++;
+  }
+  return { linked: rows.length > 0, changed };
+}
+
 /**
  * Soft-delete every live link of `source` whose sourceRef starts with one of
  * `prefixes` — the fixture builder's retirement of the part-documents build's
@@ -193,20 +209,4 @@ export async function retireAccessoryScopes(
   if (!stale.length) return { removed: 0, complete: true };
   const r = await softDeleteDocs("part_accessory_links", stale, opts);
   return { removed: r.ids.length, complete: r.complete };
-}
-
-export async function setOwnDatasheet(parentSku: string, accessorySku: string, own: boolean): Promise<{ linked: boolean; changed: number }> {
-  const rows = (await allAccessoryLinks()).filter((l) => l.parentSku === parentSku && l.accessorySku === accessorySku);
-  let changed = 0;
-  for (const l of rows) {
-    if (!!l.ownDatasheet === own) continue;
-    await patchDoc<PartAccessoryLink>("part_accessory_links", l.id, (d) => {
-      const next = { ...d };
-      if (own) next.ownDatasheet = true;
-      else delete next.ownDatasheet;
-      return next;
-    });
-    changed++;
-  }
-  return { linked: rows.length > 0, changed };
 }
