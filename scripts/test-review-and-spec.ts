@@ -19166,3 +19166,18 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
   const miss = await bomFromQuote("Q-NOPE-0000");
   ok(!miss.ok && /not found/i.test(miss.error), "#205 spec builder: bomFromQuote reports an unknown quote");
 }
+
+// #205 spec builder T5
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const b = read("src/app/(app)/design/specs/[id]/builder.tsx");
+  const f = read("src/app/(app)/design/specs/new/new-spec-form.tsx");
+  for (const [name, text] of [["builder", b], ["new-spec-form", f]] as const) {
+    ok(text.startsWith('"use client"') && !/@\/lib\/stores\/|@\/db\/|from "docx"|exceljs/.test(text.replace(/import type[^;]*;/g, "")), `#205 spec builder: ${name} is a client file with no store/db/docx imports`);
+  }
+  ok(b.includes("/api/spec-documents/") && b.includes("searchSpecPartsAction") && b.includes("writePartSpecFieldsAction"), "#205 spec builder: builder downloads, searches and writes part specs");
+  const list = read("src/app/(app)/design/specs/page.tsx");
+  ok(!list.includes('redirect("/design/specs/library")') && list.includes("/design/specs/new"), "#205 spec builder: /design/specs is the saved-spec list with + New spec");
+  const smoke = read("scripts/smoke-routes.ts");
+  ok(smoke.includes('"/design/specs/new"'), "#205 spec builder: smoke covers the new-spec page");
+}

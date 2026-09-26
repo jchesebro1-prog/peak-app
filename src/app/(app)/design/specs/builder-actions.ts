@@ -225,6 +225,12 @@ export type SpecPickerPart = {
   inSection: boolean;
   hasSpec: boolean;
   specArticleId: string | null;
+  /** The part's stored text (a draft, when !hasSpec) — the builder's Write
+   *  spec box starts from it, and writes specSort back unchanged
+   *  (writePartSpecFieldsAction clears whatever it isn't given). T5. */
+  specTitle: string;
+  specBody: string;
+  specSort: number | null;
 };
 
 /** Search the catalog for products to add to a spec. Default: parts with an
@@ -282,6 +288,9 @@ export async function searchSpecPartsAction(
       inSection,
       hasSpec,
       specArticleId: part.specArticleId || null,
+      specTitle: part.specTitle || "",
+      specBody: part.specBody || "",
+      specSort: typeof part.specSort === "number" && Number.isFinite(part.specSort) ? part.specSort : null,
     });
   }
   out.sort((a, b) => (a.inSection === b.inSection ? a.sku.localeCompare(b.sku) : a.inSection ? -1 : 1));
