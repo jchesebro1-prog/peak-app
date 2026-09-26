@@ -119,7 +119,7 @@ export function copyOptionMembers<
   makeId: (prefix: "gp-" | "wr-") => string;
   by: string;
   at: number;
-}): { placements: P[]; routes: R[] } {
+}): { placements: P[]; routes: R[]; idMap: Map<string, string> } {
   const idMap = new Map<string, string>();
   const placements = input.placements
     .filter((p) => p.optionId === input.fromOptionId)
@@ -142,5 +142,7 @@ export function copyOptionMembers<
       }
       return next;
     });
-  return { placements, routes };
+  // idMap (old placement id → copied id) lets the caller re-point anything
+  // else that references devices — the riser document's links (#GDS).
+  return { placements, routes, idMap };
 }

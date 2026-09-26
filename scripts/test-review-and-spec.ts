@@ -15718,3 +15718,116 @@ import { DrawingSheet } from "@/components/drawing/drawing-sheet";
   const gdsCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
   ok(gdsCss.includes(".pk-drawing-sheet {") && /\.pk-tb-accent\s*\{[^}]*var\(--accent\)/.test(gdsCss) && gdsCss.includes("print-color-adjust: exact") && gdsCss.includes(".pk-drawing-sheet:last-child"), "#GDS CSS: sheet classes exist, the accent bar is var(--accent), sheets break one per page");
 }
+
+/* --- #GDS grid drawing set — Task 3: riser document model --- */
+import {
+  RISER_H, UNASSIGNED_KEY, applyRiserOp, autoBox, buildRiserView, connectKind, copyRiserDoc, emptyRiserDoc,
+  marginPoints, marginSpaceRect, mergeLayout, nodeMinH, normalizeRiserDoc, pruneRiserEnds, riserLinksOf, spreadInSpace,
+  type RiserDoc,
+} from "@/lib/design/grid-riser-doc";
+
+{
+  // normalize
+  ok(JSON.stringify(normalizeRiserDoc(undefined)) === JSON.stringify(emptyRiserDoc()), "#GDS riser: an absent doc reads as empty");
+  const rdBad = normalizeRiserDoc({
+    nodes: { a: { x: 0.1, y: 0.2, w: 0.2, h: 0.2 }, b: { x: "no" } },
+    links: [{ id: "lk-1", from: { kind: "space", spaceId: null }, to: { kind: "bogus" }, partId: "W", lengthFt: 3, by: "t", at: 1 }],
+    notes: "x",
+  });
+  ok(Object.keys(rdBad.nodes).join() === "a" && rdBad.links.length === 0 && rdBad.notes.length === 0, "#GDS riser: malformed nodes/links/notes are dropped, never thrown on");
+
+  // layout merge
+  const rdMerged = mergeLayout(["a", "b", "c"], { a: autoBox(0), zombie: autoBox(5) });
+  ok(JSON.stringify(rdMerged.a) === JSON.stringify(autoBox(0)), "#GDS layout: a saved position wins");
+  ok(JSON.stringify(rdMerged.b) === JSON.stringify(autoBox(1)) && JSON.stringify(rdMerged.c) === JSON.stringify(autoBox(2)), "#GDS layout: new nodes take the next free auto slots");
+  ok(!("zombie" in rdMerged), "#GDS layout: a saved box for a vanished node is ignored");
+  ok(JSON.stringify(mergeLayout(["a", "b"], { b: autoBox(0) }).a) === JSON.stringify(autoBox(1)), "#GDS layout: an auto slot already taken by a saved box is skipped");
+
+  // reducer
+  let rdSeq = 0;
+  const rdMk = (p: string) => `${p}${++rdSeq}`;
+  let rd: RiserDoc = emptyRiserDoc();
+  let rdRes = applyRiserOp(rd, { op: "addLevel", label: "  Level 1 ", elevation: "EL 100", y: 0.9 }, rdMk);
+  ok(rdRes.changed && rdRes.doc.levels[0].label === "Level 1" && rdRes.doc.levels[0].id === "lv-1", "#GDS op: addLevel trims and mints an id");
+  rd = rdRes.doc;
+  ok(!applyRiserOp(rd, { op: "addLevel", label: "   ", y: 0.5 }, rdMk).changed, "#GDS op: a blank level label is refused");
+  rdRes = applyRiserOp(rd, { op: "updateLevel", id: rd.levels[0].id, y: 0.4, elevation: "" }, rdMk);
+  ok(rdRes.doc.levels[0].y === 0.4 && !("elevation" in rdRes.doc.levels[0]), "#GDS op: updateLevel moves the line and clears the elevation");
+  rd = rdRes.doc;
+  ok(!applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: "sp-a" }, label: "EMT" }, rdMk).changed, "#GDS op: a conduit from a node to itself is refused");
+  rdRes = applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: null }, label: "1in EMT by EC" }, rdMk);
+  ok(rdRes.changed && rdRes.doc.conduits.length === 1, "#GDS op: addConduit");
+  rd = rdRes.doc;
+  rd = applyRiserOp(rd, { op: "addNote", text: "First" }, rdMk).doc;
+  rd = applyRiserOp(rd, { op: "addNote", text: "Second" }, rdMk).doc;
+  rd = applyRiserOp(rd, { op: "removeNote", id: rd.notes[0].id }, rdMk).doc;
+  ok(rd.notes.length === 1 && rd.notes[0].n === 1 && rd.notes[0].text === "Second", "#GDS op: notes renumber after a removal");
+  rdRes = applyRiserOp(rd, { op: "moveNode", key: "sp-a", box: { x: 1.5, y: -2, w: 0.01, h: 0.01 } }, rdMk);
+  const rdBox = rdRes.doc.nodes["sp-a"];
+  ok(rdRes.changed && rdBox.x + rdBox.w <= 1 && rdBox.y === 0 && rdBox.w >= 0.1, "#GDS op: moveNode clamps into the canvas and to a minimum size");
+  ok(!applyRiserOp(rd, { op: "removeLink", id: "nope" }, rdMk).changed, "#GDS op: removing an unknown id reports no change");
+  ok(rd.conduits.length === 1 && riserLinksOf({ o: rd }, "o").length === 0, "#GDS op: conduits never become links (never priced)");
+
+  // device drops
+  const rdSq = [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.4 }, { x: 0.2, y: 0.4 }];
+  const rdPts = spreadInSpace(rdSq, 7, [{ x: 0.3, y: 0.3 }]);
+  ok(rdPts.length === 7 && rdPts.every((p) => pointInPolygon(p, rdSq)), "#GDS +Device: every new device lands inside the space polygon");
+  ok(new Set(rdPts.map((p) => `${p.x},${p.y}`)).size === 7 && !rdPts.some((p) => p.x === 0.3 && p.y === 0.3), "#GDS +Device: multiples spread out and avoid taken spots");
+  const rdBlock = [{ x: 0, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.5, y: 1 }, { x: 0, y: 1 }];
+  const rdMargin = marginPoints(3, [rdBlock], []);
+  ok(rdMargin.length === 3 && rdMargin.every((p) => p.y > 0.85 && !pointInPolygon(p, rdBlock)), "#GDS +Device: Unassigned devices land on the lower margin, outside every space");
+  const rdRect = marginSpaceRect(2);
+  ok(rdRect.length === 4 && polygonArea(rdRect) > 0.005 && rdRect.every((p) => p.y >= 0.86), "#GDS Space: a new riser space is a small rectangle on the plan's lower margin");
+
+  // connect rule
+  const rdPls = [{ id: "a", sheetId: "s1", page: 1 }, { id: "b", sheetId: "s1", page: 1 }, { id: "c", sheetId: "s2", page: 1 }];
+  const rdCals = [{ docId: "s1", page: 1 }];
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, rdCals) === "route", "#GDS Connect: same calibrated sheet → a measured GridRoute");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "c" }, rdPls, rdCals) === "link", "#GDS Connect: cross-sheet → a RiserLink");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, []) === "link", "#GDS Connect: an uncalibrated page falls back to a typed-length RiserLink");
+  ok(connectKind({ kind: "space", spaceId: "x" }, { kind: "space", spaceId: "y" }, rdPls, rdCals) === "link", "#GDS Connect: space → space is always a RiserLink");
+
+  // prune + copy
+  const rdWithLink: RiserDoc = {
+    ...rd,
+    nodes: { "sp-a": autoBox(0) },
+    links: [{ id: "lk-9", from: { kind: "placement", placementId: "a" }, to: { kind: "space", spaceId: null }, partId: "W", lengthFt: 10, by: "t", at: 1 }],
+  };
+  const rdPruned = pruneRiserEnds(rdWithLink, { placementIds: new Set(["a"]), spaceIds: new Set(["sp-a"]) });
+  ok(rdPruned.links.length === 0 && rdPruned.conduits.length === 0 && !("sp-a" in rdPruned.nodes), "#GDS delete: removing a device/space prunes its links, conduits and saved box");
+  const rdCopied = copyRiserDoc(rdWithLink, new Map([["a", "a2"]]), rdMk, "copier", 9);
+  const rdCopiedFrom = rdCopied.links[0]?.from;
+  ok(rdCopied.links.length === 1 && rdCopiedFrom?.kind === "placement" && rdCopiedFrom.placementId === "a2" && rdCopied.links[0].id !== "lk-9" && rdCopied.links[0].by === "copier", "#GDS option copy: links are re-pointed at the copied devices with new ids");
+  ok(copyRiserDoc(rdWithLink, new Map(), rdMk, "copier", 9).links.length === 0, "#GDS option copy: a link whose device wasn't copied is dropped");
+
+  // RiserLink footage in the BOM (routeLines 4th arg); conduits never reach it
+  const rdLinkParts = [{ id: "W", sku: "W", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1 }];
+  const rdBom = routeLines([], rdLinkParts, [], [{ partId: "W", lengthFt: 10.2 }, { partId: "W", lengthFt: 5 }, { partId: "W", lengthFt: Number.NaN }]);
+  ok(rdBom.lines.length === 1 && rdBom.lines[0].qty === 16 && rdBom.lines[0].ext === 32 && rdBom.unmeasured === 1 && !rdBom.lines[0].connectionType, "#GDS BOM: RiserLink lengths sum per part, round up, price like a route, never stamp a connectionType");
+  ok(routeLines([], rdLinkParts, []).lines.length === 0, "#GDS BOM: routeLines without links is unchanged");
+
+  // copyOptionMembers exposes its id map
+  const rdCm = copyOptionMembers({ placements: [{ id: "gp-1", optionId: "o1" }], routes: [], fromOptionId: "o1", toOptionId: "o2", makeId: (p) => `${p}x`, by: "t", at: 1 });
+  ok(rdCm.idMap.get("gp-1") === "gp-x", "#GDS: copyOptionMembers returns its old → new placement id map");
+
+  // the view
+  const rdSpaces = [
+    { id: "sp-a", sheetId: "s1", page: 1, name: "Stage", color: "#8a6d3b", points: rdSq },
+    { id: "sp-b", sheetId: "s1", page: 1, name: "Empty room", color: "#3b7a8a", points: [{ x: 0.6, y: 0.6 }, { x: 0.8, y: 0.6 }, { x: 0.8, y: 0.8 }, { x: 0.6, y: 0.8 }] },
+  ];
+  const rdPl = [
+    { id: "p1", sheetId: "s1", page: 1, x: 0.25, y: 0.25, partId: "FIX", at: 2 },
+    { id: "p2", sheetId: "s1", page: 1, x: 0.3, y: 0.25, partId: "FIX", at: 1 },
+  ];
+  const rdParts = [{ id: "FIX", sku: "FIX", desc: "Fixture", category: "Fixtures", unit: "ea", list: 1, cost: 1 }, ...rdLinkParts];
+  const rdGraph = riserGraph(rdPl, [], rdSpaces, rdParts, []);
+  const rdDoc: RiserDoc = { ...emptyRiserDoc(), links: [{ id: "lk-1", from: { kind: "placement", placementId: "p1" }, to: { kind: "space", spaceId: null }, partId: "W", lengthFt: 25, by: "t", at: 1 }] };
+  const rdView = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: rdDoc, partDesc: (id) => rdParts.find((p) => p.id === id)?.desc || id });
+  ok(rdView.nodes.map((n) => n.key).join() === `sp-a,sp-b,${UNASSIGNED_KEY}`, "#GDS riser view: every space is a node (empty ones too, so devices can be added), plus Unassigned when a link lands there");
+  ok(rdView.nodes[0].groups[0].ids.join() === "p2,p1", "#GDS riser view: a device row knows its placements, oldest first");
+  const rdEdge = rdView.edges[0];
+  ok(rdView.edges.length === 1 && rdEdge.kind === "link" && rdEdge.from.key === "sp-a" && rdEdge.from.partId === "FIX" && rdEdge.to.key === UNASSIGNED_KEY && rdEdge.desc === "Cable" && rdEdge.lengthFt === 25, "#GDS riser view: a RiserLink is an edge anchored on its device row");
+  ok(rdView.nodes.every((n) => n.box.h >= nodeMinH(n.groups.length) - 1e-9) && rdView.height >= RISER_H, "#GDS riser view: boxes never clip their rows");
+  const rdDangling = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: { ...rdDoc, links: [{ ...rdDoc.links[0], from: { kind: "placement", placementId: "gone" } }] } });
+  ok(rdDangling.edges.length === 0 && !rdDangling.nodes.some((n) => n.key === UNASSIGNED_KEY), "#GDS riser view: a link to a vanished device is not drawn");
+}
