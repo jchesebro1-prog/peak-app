@@ -306,9 +306,12 @@ import {
   fillSlots,
   substitutePlaceholders,
   renderBody,
+  outlineLabel,
   MAX_OUTLINE_DEPTH,
 } from "@/lib/specs/outline";
 import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
+import { fillInSlots, applyFillIns, staleFillInKeys } from "@/lib/specs/fill-ins";
+import { assembleSection, placeProduct, type SpecBuilderPart } from "@/lib/specs/assemble-section";
 import {
   normalizeCategoryKey, normalizeArticle, articleIdForPart, resolveSameAs, specStateOf,
   hasPrintableSpec, csiKey, resolveSectionRef, resolveArticleRef, adoptLegacySpecPointers,
@@ -18887,4 +18890,75 @@ async function specDocumentsAsyncChecks(): Promise<void> {
   await removeSpecDocument(doc.id);
   ok((await getSpecDocument(doc.id)) === null, "#205 spec builder: removeSpecDocument — getSpecDocument returns null after soft delete");
   ok(!(await allSpecDocuments()).some((s) => s.id === doc.id), "#205 spec builder: removeSpecDocument — allSpecDocuments no longer lists it");
+}
+
+// #205 spec builder T2
+{
+  const sec = normalizeSection({
+    id: "ss-t", number: "11 61 23", title: "Rigging", sort: 1,
+    part1: [
+      { id: "a1", title: "SECTION INCLUDES", body: "{{articles}}" },
+      { id: "a2", title: "SUBMITTALS", body: "Within [FILL IN: number of days] days.\nSamples within [FILL IN: number of days] days." },
+    ],
+    part3: [{ id: "a3", title: "WARRANTY", body: "Project {{project.name}} for [FILL IN: owner]." }],
+    part2Style: "paragraphs", quantities: "drawings", updatedAt: 0, updatedBy: "",
+  } as never);
+  const otherSec = normalizeSection({ id: "ss-o", number: "26 09 61", title: "Lighting", sort: 2, part1: [], part3: [], updatedAt: 0, updatedBy: "" } as never);
+  const art = (id: string, sectionId: string, sort: number, title: string, general = "", manufacturers: string[] = []) =>
+    ({ id, sectionId, sort, title, general, manufacturers, categoryKeys: [], updatedAt: 0, updatedBy: "" });
+  const articles = [
+    art("ar-d", "ss-t", 10, "DRAPES", "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}", ["Rose Brand", "KM"]),
+    art("ar-h", "ss-t", 20, "HOISTS", "General:\n  Purpose-built."),
+    art("ar-x", "ss-t", 30, "UNUSED"),
+    art("ar-l", "ss-o", 10, "LUMINAIRES"),
+  ];
+  const P = (o: Partial<SpecBuilderPart> & { sku: string }): SpecBuilderPart => ({ specState: "authored", ...o });
+  const parts = new Map<string, SpecBuilderPart>([
+    ["VAL", P({ sku: "VAL", desc: "Valance", specArticleId: "ar-d", specTitle: "VALANCE", specBody: "Material:\n  Velour" })],
+    ["LEG", P({ sku: "LEG", desc: "Legs", specArticleId: "ar-d", specSameAs: "VAL" })],
+    ["HST", P({ sku: "HST", desc: "Hoist", specArticleId: "ar-h", specTitle: "HOIST", specBody: "Basis of Design: P1" })],
+    ["DRF", P({ sku: "DRF", desc: "Draft", specArticleId: "ar-h", specBody: "x", specState: "draft" })],
+    ["FIX", P({ sku: "FIX", desc: "Fixture", specArticleId: "ar-l", specTitle: "FIX", specBody: "y" })],
+    ["NOA", P({ sku: "NOA", desc: "No article", specTitle: "N", specBody: "z" })],
+  ]);
+  const doc = normalizeSpecDocument({
+    id: "SP-1001", sectionId: "ss-t",
+    header: { projectName: "North HS", projectNumber: "3580", issueDate: "2026-07-30" },
+    source: { kind: "quote" }, printQuantities: true,
+    products: [{ sku: "HST", qty: 2 }, { sku: "VAL", qty: 1 }, { sku: "LEG" }, { sku: "DRF" }, { sku: "FIX" }, { sku: "NOA" }, { sku: "GONE" }],
+    fillIns: { "a2#1": "30", "a9#1": "stale" },
+  });
+  const slots = fillInSlots(sec);
+  ok(slots.length === 3 && slots[0].key === "a2#1" && slots[1].key === "a2#2" && slots[2].key === "a3#1" && slots[1].label === "number of days" && slots[2].part === 3, "#205 spec builder: fill-in slots are keyed by article + position, labelled by their text");
+  ok(applyFillIns("A [FILL IN: x] B [FILL IN: y]", "q", { "q#2": "TWO" }) === "A [FILL IN: x] B TWO", "#205 spec builder: applyFillIns replaces only answered blanks, by position");
+  ok(staleFillInKeys(sec, doc.fillIns).join() === "a9#1", "#205 spec builder: answers whose blank no longer exists are stale");
+  ok(placeProduct({ sku: "FIX" }, parts.get("FIX"), "ss-t", articles, [sec, otherSec]).ok === false, "#205 spec builder: a part in another section's article is not placed");
+  const over = placeProduct({ sku: "FIX", articleId: "ar-h" }, parts.get("FIX"), "ss-t", articles, [sec, otherSec]);
+  ok(over.ok === true && over.articleId === "ar-h", "#205 spec builder: a per-spec header override places a part from another section");
+  const a = assembleSection({ section: sec, articles, sections: [sec, otherSec], parts, doc });
+  ok(a.part1.map((x) => x.num).join() === "1.1,1.2" && a.part3[0].num === "3.1", "#205 spec builder: Part 1/3 articles number n.m");
+  ok(a.part1[0].lines.map((l) => l.text).join("|") === "DRAPES|HOISTS", "#205 spec builder: {{articles}} lists only the Part 2 articles that received products, in sort order");
+  ok(a.part1[1].lines[0].text === "Within 30 days." && a.part1[1].lines[1].text.includes("[FILL IN: number of days]"), "#205 spec builder: answered blank substituted, unanswered blank prints as written");
+  ok(a.part3[0].lines[0].text.startsWith("Project North HS"), "#205 spec builder: {{project.name}} comes from the header");
+  if (a.part2.style !== "paragraphs") throw new Error("expected paragraphs");
+  ok(a.part2.articles.map((x) => `${x.num} ${x.title}`).join("|") === "2.1 DRAPES|2.2 HOISTS", "#205 spec builder: only used Part 2 articles print, numbered in sort order");
+  const drapes = a.part2.articles[0];
+  ok(drapes.general.some((l) => l.text === "Rose Brand") && drapes.general[0].label === "A.", "#205 spec builder: General expands {{manufacturers}} and starts at A.");
+  ok(drapes.products.map((p) => `${p.label} ${p.heading}`).join("|") === "B. VALANCE (Quantity: 1)|C. VALANCE", "#205 spec builder: products continue the letters after General; same-as prints its target's text");
+  ok(drapes.products[0].lines[0].label === "1." && drapes.products[0].lines[1].label === "a.", "#205 spec builder: a product body renders in entry context (1., a.)");
+  ok(a.part2.articles[1].products[0].heading === "HOIST (Quantity: 2)", "#205 spec builder: Print quantities appends the BOM quantity");
+  const reasons = Object.fromEntries(a.checklist.leftOut.map((x) => [x.sku, x.reason]));
+  ok(reasons.DRF === "no-spec" && reasons.FIX === "other-section" && reasons.NOA === "needs-header" && reasons.GONE === "not-in-catalog" && a.checklist.leftOut.length === 4, "#205 spec builder: left-out reasons — draft, other section, no header, deleted part");
+  ok(a.checklist.fillInsLeft === 2 && a.checklist.staleAnswers.join() === "a9#1", "#205 spec builder: checklist counts unanswered blanks and stale answers");
+  const scratch = assembleSection({ section: sec, articles, sections: [sec, otherSec], parts, doc: { ...doc, source: { kind: "scratch" } } });
+  ok(scratch.part2.style === "paragraphs" && !scratch.part2.articles[0].products[0].heading.includes("Quantity"), "#205 spec builder: a from-scratch spec never prints quantities");
+  const tableSec = { ...sec, part2Style: "table" as const };
+  const t = assembleSection({ section: tableSec, articles, sections: [tableSec, otherSec], parts: new Map([...parts, ["SHURE:ANX4", P({ sku: "Shure:ANX4", desc: "Receiver", mfr: "", specArticleId: "ar-h", specTitle: "Receiver", specBody: "Receiver" })]]), doc: withProduct(doc, { sku: "Shure:ANX4", qty: 3 }) });
+  if (t.part2.style !== "table") throw new Error("expected table");
+  const row = t.part2.rows.find((r) => r.sku === "Shure:ANX4");
+  ok(!!row && row.mfr === "Shure" && row.model === "ANX4" && row.qty === 3 && t.part2.showQty, "#205 spec builder: table rows fall back to the SKU prefix/tail for Mfr/Model");
+  ok(t.part2.articles.every((x) => x.products.length === 0), "#205 spec builder: table style prints General clauses only above the table");
+  const empty = assembleSection({ section: sec, articles, sections: [sec], parts, doc: { ...doc, products: [] } });
+  ok(!empty.warnings.some((w) => w.includes("{{articles}}")), "#205 spec builder: an empty spec does not warn about {{articles}}");
+  ok(outlineLabel(0, 3) === "C." && outlineLabel(2, 1) === "a.", "#205 spec builder: outlineLabel is exported");
 }

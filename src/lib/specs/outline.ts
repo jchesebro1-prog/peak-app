@@ -46,7 +46,8 @@ function alpha(n: number): string {
   return out;
 }
 
-function labelFor(depth: number, n: number): string {
+/** Label for the n-th (1-based) item at a depth: A. / 1. / a. / 1) / a). */
+export function outlineLabel(depth: number, n: number): string {
   switch (depth) {
     case 0:
       return alpha(n) + ".";
@@ -122,7 +123,7 @@ export function parseOutline(body: string, context: OutlineContext = "article"):
 
     counters[depth]++;
     for (let j = depth + 1; j < MAX_OUTLINE_DEPTH; j++) counters[j] = 0;
-    lines.push({ depth, label: labelFor(depth, counters[depth]), text });
+    lines.push({ depth, label: outlineLabel(depth, counters[depth]), text });
   }
 
   if (clamped) {
