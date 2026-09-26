@@ -253,6 +253,9 @@ import { upsert as upsertPart, get as getPart } from "@/lib/stores/catalog";
 import { runCatalogImport } from "@/app/(app)/catalog/import";
 import { createSection, getSection } from "@/lib/stores/spec-sections";
 import { createArticle } from "@/lib/stores/spec-articles";
+import {
+  createSpecDocument, getSpecDocument, allSpecDocuments, patchSpecDocument, removeSpecDocument,
+} from "@/lib/stores/spec-documents";
 // Final fix wave item 8 — a partial library import must not blank a
 // section's omitted fields.
 import { importLibrary, SPEC_LIBRARY_KIND, SPEC_LIBRARY_VERSION } from "@/lib/specs/library-io";
@@ -319,6 +322,9 @@ import { buildClientPackageManifest } from "@/lib/client-package";
 import {
   ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, articleIdMapForParts,
 } from "@/app/(app)/design/specs/coverage";
+import {
+  normalizeSpecDocument, withProduct, withoutProduct, withProductOrder, withProductHeader, bomProducts, DEFAULT_SPEC_PHASE,
+} from "@/lib/specs/spec-document";
 
 let fail = 0;
 const ok = (c: boolean, m: string) => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fail++; };
@@ -10508,6 +10514,7 @@ seeded()
   .then(() => partDocsUploadAsyncChecks())
   .then(() => partDocsFetchAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
+  .then(() => specDocumentsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18832,4 +18839,52 @@ import {
   const pureImports = [...read("src/lib/specs/product-spec-import.ts").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   ok(JSON.stringify(pureImports) === JSON.stringify(["@/lib/specs/articles"]), "#205 product specs: the rules module stays pure — its only import is the spec articles rules");
   ok(read("src/app/(app)/design/specs/library/page.tsx").includes('href="/design/specs/library/product-specs"'), "#205 product specs: the library page links to the import");
+}
+
+// #205 spec builder T1
+{
+  const d = normalizeSpecDocument({ id: "SP-1001", sectionId: "ss-x", products: [{ sku: "A", qty: "2" }, { sku: "" }, "junk"], fillIns: { "ar#1": "30", bad: 5 } });
+  ok(d.header.phase === DEFAULT_SPEC_PHASE && d.header.projectName === "" && d.source.kind === "scratch", "#205 spec builder: normalize fills header/source defaults");
+  ok(d.products.length === 1 && d.products[0].qty === 2, "#205 spec builder: normalize drops blank/junk products and coerces qty");
+  ok(d.printQuantities === false && d.fillIns["ar#1"] === "30" && !("bad" in d.fillIns), "#205 spec builder: printQuantities defaults off; only string fill-in answers kept");
+  const d2 = withProduct(d, { sku: "a" });
+  ok(d2.products.length === 1, "#205 spec builder: withProduct ignores a SKU already present (case-insensitive)");
+  const d3 = withProduct(withProduct(d, { sku: "B" }), { sku: "C" });
+  ok(withProductOrder(d3, ["C", "A"]).products.map((p) => p.sku).join() === "C,A,B", "#205 spec builder: withProductOrder puts listed SKUs first, keeps the rest after");
+  ok(withoutProduct(d3, "b").products.map((p) => p.sku).join() === "A,C", "#205 spec builder: withoutProduct removes case-insensitively");
+  ok(withProductHeader(d3, "C", "ar-1").products[2].articleId === "ar-1" && withProductHeader(withProductHeader(d3, "C", "ar-1"), "C", null).products[2].articleId === undefined, "#205 spec builder: withProductHeader sets and clears the per-spec header");
+  const bp = bomProducts([{ sku: "X", qty: 2 }, { sku: "x", qty: 3 }, { sku: " ", qty: 1 }, { sku: "Y", qty: 0 }]);
+  ok(bp.length === 2 && bp[0].sku === "X" && bp[0].qty === 5 && bp[1].qty === 0, "#205 spec builder: bomProducts sums duplicate SKUs and drops blanks");
+}
+
+/**
+ * DB-backed: the spec_documents store's full lifecycle against the suite's
+ * throwaway datadir. Registered for teardown like every other minted-id
+ * fixture (registerFixture after creation — createSpecDocument mints its own
+ * SP-#### id, so there is no fixture id to pass in up front).
+ */
+async function specDocumentsAsyncChecks(): Promise<void> {
+  const doc = await createSpecDocument({
+    sectionId: "ss-spec-builder-t1",
+    header: { projectName: "Test Project", projectNumber: "", phase: "", issueDate: "", preparedBy: "" },
+    source: { kind: "scratch" },
+    products: [],
+    printQuantities: false,
+    fillIns: {},
+    createdBy: "Test Harness",
+    updatedBy: "Test Harness",
+  });
+  registerFixture("spec_documents", doc.id);
+  ok(/^SP-1\d{3}$/.test(doc.id), `#205 spec builder: createSpecDocument mints an SP-1### id (got ${doc.id})`);
+
+  const fetched = await getSpecDocument(doc.id);
+  ok(!!fetched && fetched.id === doc.id && fetched.sectionId === "ss-spec-builder-t1", "#205 spec builder: getSpecDocument round-trips the created doc");
+  ok((await allSpecDocuments()).some((s) => s.id === doc.id), "#205 spec builder: allSpecDocuments lists the created doc");
+
+  const patched = await patchSpecDocument(doc.id, (s) => withProduct(s, { sku: "PATCH-SKU" }), "Patch User");
+  ok(!!patched && patched.products.some((p) => p.sku === "PATCH-SKU") && patched.updatedBy === "Patch User", "#205 spec builder: patchSpecDocument applies the mutation and stamps updatedBy");
+
+  await removeSpecDocument(doc.id);
+  ok((await getSpecDocument(doc.id)) === null, "#205 spec builder: removeSpecDocument — getSpecDocument returns null after soft delete");
+  ok(!(await allSpecDocuments()).some((s) => s.id === doc.id), "#205 spec builder: removeSpecDocument — allSpecDocuments no longer lists it");
 }
