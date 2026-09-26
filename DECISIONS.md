@@ -5781,3 +5781,84 @@ orphaned.
 (which streams, or redirects a link-only document to its source), else the manufacturer URLs the catalog row carries —
 never the old `/api/part-datasheet/<sku>` URL that 404'd for a part whose only datasheet was a researched link. The
 catalog ETag folds in documents and links, since attaching one moves no part's `updatedAt`.
+
+## D-FXB-1. Fixtures and systems are one record type in the `subassemblies` table, ids kept (#FXB, 2026-09-25)
+
+`FixtureRecord` (`src/lib/fixture-assemblies.ts`, store `src/lib/stores/fixtures.ts`) replaces both builders' records
+in the existing `subassemblies` doc table — no new table, no SQL migration. A one-time, idempotent conversion
+(`src/lib/fixtures-migrate.ts`) inserts each `settings.fixtureAssemblies` entry under its `fa-…` id (insert-if-absent,
+so a deleted one stays deleted) and rewrites each legacy subassembly row in place under its `SA-…` id; the settings
+array is left untouched as a backup and no longer read. It runs on the first `listFixtures()`, on the Datasheets page,
+from `npm run fixtures:convert -- --commit` and `npm run part-docs:backfill -- --commit`, under a 15 s page budget; a
+blob flag (`fixtures_convert.convertedAt`) set only on completion makes later reads one single-row check. While it has
+not completed, `listFixtures()` serves the settings-backed assemblies in memory so Estimator/Quick Design/Grid ids keep
+resolving. The go-live reset wipes the table but keeps settings, so it re-arms the flag and the assemblies return as
+they did when they lived in settings. New records mint `SA-<TS36>` with `-2`, `-3`… on a same-millisecond collision.
+
+The runner skips entirely on a Vercel preview deploy (`VERCEL_ENV === "preview"`) — only the CLI paths
+(`fixtures:convert -- --commit`, `part-docs:backfill -- --commit`) write there — and every write is additive: the
+legacy `SA-…` rewrite is `additiveFixturePatch(original, converted)`, which adds only the keys the old row lacks and
+never overwrites one it already has, applied through a conditional atomic `UPDATE … WHERE id = X AND rev = <read rev>
+AND deleted = false AND <legacy shape>` per row — a save or delete landing between read and write loses the race
+harmlessly and that row just converts on the next pass. Completion also stamps `part_docs_graph_sync.assembliesSyncedAt`
+so D276's older backfill treats the moved graph as already synced (see D-FXB-4). A converted row's legacy-only fields
+(`options`, `lightEngineName`, `lensName`, `lightEngineCost`, `lensCost`, `cost`, `price`, snapshot-era keys…) then ride
+untouched until a human resaves that exact record through the new form: `updateFixture` preserves every field the new
+`CleanFixture` value doesn't own, with an explicit optional-field list so a field the user actually cleared (e.g.
+`lamp`) reads back absent rather than resurrected from the legacy copy.
+
+## D-FXB-2. Pricing is the Assemblies rule; a missing part keeps its cost override (#FXB, 2026-09-25)
+
+Unit cost = line cost override ?? catalog cost, unit sell = catalog list; only qty ≥ 1 lines count, qty 0 lines are
+optional add-ons listed with their unit numbers. A part missing from the catalog is `found: false`, sells at 0 and costs
+its override or 0 — the spec says "contributes 0", but the Assemblies resolver already applied an override to a missing
+part and converted totals must not move. The list's "was $X when built" badge compares **cost**: converted
+subassemblies' snapshot `price` was their cost (the old price = cost rule), so a sell comparison would flag every one.
+
+## D-FXB-3. Light engine and lens carry optional label / qty / override (#FXB, 2026-09-25)
+
+The spec stores `lightEngineSku` / `lensSku`; a converted Assemblies-tab fixture member can have its own label, a
+quantity other than 1, or an override, and dropping those would change Estimator descriptions and totals. They live in
+optional `lightEngineLine` / `lensLine` (qty defaults to 1). Parts price in form order — engine, lens, Data, Power,
+Mounting, Accessories — so a converted assembly's BOM description can list parts in a different order than before;
+totals, components and ids are identical (parity-tested). Converted cable/lamp/other members land in Accessories and
+their Estimator component role reads `accessory`. Old stored names survive only as `legacy.names`, fallback display for a
+missing part.
+
+## D-FXB-4. The accessory graph moves to one `fixture:<id>` scope (#FXB, 2026-09-25)
+
+Fixtures only: parent = light engine; lens and every box line (qty 0 = un-included link) are accessories. The
+conversion writes the `fixture:` scopes add-only (a live row and its flag are never rewritten), then soft-deletes every
+`assembly:` / `subassembly:` row — after, so the "has its own datasheet" flag carries from the old row of the same pair.
+This replaces D276's two scopes and its `part_docs_graph_sync` flag (production had already set that one, so the move
+needed its own flag). Saves reconcile `fixture:<id>`; deletes empty it. Systems never feed the graph.
+
+## D-FXB-5. Consumers read fixtures; systems wait for the Grid Equipment map (#FXB, 2026-09-25)
+
+The Estimator configurator and Quick Design list fixture records through `fixtureAssembliesFrom()`, which returns
+today's `ResolvedFixtureAssembly` shape, so their code paths are unchanged. Systems are not offered there (spec §5 lists
+fixtures); the Grid Equipment map is their first consumer. The Grid scope panel has no fixture picker today and its
+intake carries the id map, which keeps resolving because ids are kept — no Grid code change. The Estimator shows an
+optional add-on as an off switch (on = qty 1) and pre-fills a fixture's default hang position / circuit into an empty
+field. The fixture BOM line moved to `estimator/fixture-bom.ts`, unchanged.
+
+## D-FXB-6. Anyone signed in edits; kind is fixed; a human save clears needs-review (#FXB, 2026-09-25)
+
+`requireUser()` on save / delete / the datasheet toggle (the Subassemblies tab needed `manage_users`). Every save stamps
+`updatedAt` / `updatedBy`, and create also stamps `createdAt` / `createdBy`. A record cannot switch between fixture and system.
+Converted assemblies with no fixture-role member are flagged "needs review" (their first part became the light engine)
+until someone saves them. The save action reads only the record's SKUs from the catalog (`listDocsByField`), never the
+whole book. `/design/assemblies?tab=…` and `/design/subassemblies` redirect to the one list.
+
+The form's own part pickers (light engine, lens, every box line) never get the whole catalog either: they search
+server-side through a debounced `searchAssemblyPartsAction` (`requireUser`, result-capped, wraps the Estimator's
+existing `searchCatalog`) instead of filtering a client-side array. Combined with the page loading only the SKUs its
+saved fixtures reference, neither the page payload nor a picker's keystroke scales with production's ~37,400-row
+catalog; a part not yet on any fixture is still reachable, just through the search box instead of a preloaded list.
+
+## D-FXB-7. Converted lines list parts in form order, with box roles; totals are unchanged (#FXB, 2026-09-25)
+
+For a converted assembly, new Estimator lines list parts in the builder's form order (light engine, lens, Data, Power,
+Mounting, Accessories), and `components[]` carry box roles — cable/lamp/other → accessory. Totals (cost, price) stay
+identical to main. Saved quotes are untouched: a saved line's stored `components[]` / description are frozen at save
+time and never re-derived.

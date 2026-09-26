@@ -244,6 +244,19 @@ See `.env.example`.
     Remaining is Jeff-gated: run the DaVinci pre-fill + link fetch on
     production, verify Blob upload on a preview deploy. Decisions
     D270–D280; punch item #207.
+15. ✅ **One fixture builder** (#FXB, D-FXB-1…D-FXB-6) — the Assembly
+    Builder's two tabs merged: one `FixtureRecord` type (Fixture or
+    System) in the existing `subassemblies` doc table
+    (`src/lib/stores/fixtures.ts`; pure model, `resolveFixture` and save
+    rules in `src/lib/fixture-assemblies.ts`), one list + form at
+    `/design/assemblies`, Assemblies pricing (live cost + sell, per-line
+    override, qty 0 = optional add-on). A one-time, idempotent conversion
+    (`src/lib/fixtures-migrate.ts`, `npm run fixtures:convert`) keeps
+    `fa-…`/`SA-…` ids, leaves `settings.fixtureAssemblies` as a backup,
+    and moves the accessory graph to one `fixture:<id>` scope. Estimator
+    and Quick Design read fixtures through `fixtureAssembliesFrom()` with
+    identical totals. Remaining is Jeff-gated: run the conversion on
+    production and review any "needs review" fixtures.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

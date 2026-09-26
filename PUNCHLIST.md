@@ -8322,3 +8322,30 @@ the function itself has not run hosted yet); then **Fetch links** in batches. Bl
 unreliable (see MASTER-HOWTO §9) — verify drag-and-drop on a preview deploy. **Follow-up:** an orphan sweep for stray
 part-document uploads (a blob uploaded but never attached, e.g. the browser closed mid-flow) is future work — nothing
 currently reclaims those Blob objects.
+
+## #FXB. One fixture builder — the Subassemblies form with the Assemblies logic — DONE 2026-09-25 (D-FXB-1…D-FXB-7)
+
+**Spec:** `docs/superpowers/specs/2026-09-25-fixture-builder-merge-design.md` · **Plan:**
+`docs/superpowers/plans/2026-09-25-fixture-builder-merge.md` · **Follows:** #129, #130, #207.
+
+**Shipped.** `/design/assemblies` is one **Assemblies** list of fixtures and systems (All / Fixtures / Systems filter)
+with one form: **New assembly** asks Fixture or System. A fixture is label, description, light engine, optional lens,
+lamp, default hang position and circuit, and four boxes (Data / Power / Mounting / Accessories). A system is label,
+description, scope (Lighting … Other) and one parts list. Each line has qty (0 = optional add-on), cost override, ↑/↓, ×
+and the datasheet coverage toggle; the footer shows live included cost and sell and "prices as of"; the list shows
+drift ("cost was $X when built"), missing parts and "needs review". Anyone signed in may edit, with who/when stamps.
+Existing assemblies (`fa-…`) and subassemblies (`SA-…`) convert once, keeping their ids (`npm run fixtures:convert`,
+or automatically on first read) — additively (legacy fields ride untouched until a human resaves that record) and
+race-safe (rev-guarded, skipped on Vercel previews); `settings.fixtureAssemblies` stays as an untouched backup. The
+Estimator and Quick Design read fixtures with identical totals for converted records (parts listed in form order,
+D-FXB-7); the Estimator offers optional add-ons as a switch. The accessory graph moved to one `fixture:<id>` scope, the
+old `assembly:` / `subassembly:` rows retired with their own-datasheet flags carried; systems don't feed the graph and
+aren't offered in the Estimator or Quick Design. The builder's part pickers search the catalog server-side rather than
+shipping the whole ~37,400-row book to the client.
+
+**Still open (Jeff-gated).** Run `npm run fixtures:convert` (report) then `-- --commit --yes` on production, or just
+open the Assembly Builder once; review any "needs review" fixtures. Systems get their first consumer with the Grid
+Equipment map. **Operational note:** don't run `fixtures:convert -- --commit` or `part-docs:backfill -- --commit`
+against the hosted DB before this branch is on `main` — the preview guard only stops the automatic page-load path,
+not a deliberate CLI run, and converting production ahead of the merge would leave it converted against pre-merge
+code.
