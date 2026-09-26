@@ -5,6 +5,7 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { getEngagement } from "@/lib/stores/engagements";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getProject } from "@/lib/stores/grid-projects";
+import { bomFromQuote } from "@/lib/specs/quote-bom";
 import { specCustomerOptions } from "../customer-options";
 import NewSpecForm, { type NewSpecSource } from "./new-spec-form";
 
@@ -16,11 +17,14 @@ import NewSpecForm, { type NewSpecSource } from "./new-spec-form";
  *   /design/specs/new?quote=<id>                    Spec from this quote
  *   /design/specs/new?grid=<projectId>&quote=<id>   Spec from this Grid design
  *   /design/specs/new?engagement=<id>               the old engagement door:
- *     its install quote, else its quote, else from scratch
+ *     its install quote, else its own quote when that is a system quote
+ *     (a consulting proposal carries no equipment), else from scratch
  *
  * A source that doesn't resolve (unknown quote/engagement, a Grid design with
- * no quote) says so and falls back to from scratch rather than failing the
- * create.
+ * no quote) — or a quote with no equipment lines to specify — says so and
+ * falls back to from scratch rather than failing the create: the page runs
+ * the same bomFromQuote the create action does, so the form it shows is never
+ * a dead end (final fix 1).
  */
 
 export const metadata = { title: "New spec — Quartzite-6" };
@@ -29,14 +33,15 @@ function one(v: string | string[] | undefined): string {
   return (Array.isArray(v) ? v[0] ?? "" : v ?? "").trim();
 }
 
-const SECTION_PICK_NOTE = "only parts that belong to the section you pick are added.";
+const SECTION_PICK_NOTE =
+  "every equipment line is listed on the spec; parts that belong to other sections are listed but left out of the Word file.";
 
 export default async function NewSpecPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const [user, sp, sections, customerOptions] = await Promise.all([requireUser(), searchParams, allSections(), specCustomerOptions()]);
+  const [user, sp] = await Promise.all([requireUser(), searchParams]);
   if (!can("create", user.roles)) {
     // Creating is requirePerm("create") on the server anyway; say so plainly
     // instead of showing a form whose button would bounce.
@@ -54,6 +59,8 @@ export default async function NewSpecPage({
       </div>
     );
   }
+  // Only a creator gets this far, so only a creator's request reads the book.
+  const [sections, customerOptions] = await Promise.all([allSections(), specCustomerOptions()]);
   const quoteParam = one(sp.quote);
   const gridParam = one(sp.grid);
   const engagementParam = one(sp.engagement);
@@ -72,9 +79,12 @@ export default async function NewSpecPage({
     } else {
       defaultCustomerId = e.companyId || "";
       defaultProjectName = e.name;
-      quoteId = e.installQuoteId || e.quoteId || "";
+      // The engagement's own quote is its consulting proposal — no
+      // equipment — unless it is a system quote.
+      const own = !e.installQuoteId && e.quoteId ? await getQuote(e.quoteId) : null;
+      quoteId = e.installQuoteId || (own && (!own.quoteType || own.quoteType === "system") ? own.id : "");
       if (quoteId) fromLabel = e.name;
-      else notice = `${e.name} has no quote yet — this spec starts from scratch.`;
+      else notice = `${e.name} has no install quote yet — this spec starts from scratch.`;
     }
   } else if (gridParam) {
     const g = await getProject(gridParam);
@@ -96,8 +106,12 @@ export default async function NewSpecPage({
   let summary = "";
   if (quoteId) {
     const q = await getQuote(quoteId);
+    const bom = q ? await bomFromQuote(q.id) : null;
     if (!q) {
       notice = `Quote ${quoteId} was not found — this spec starts from scratch.`;
+    } else if (bom && !bom.ok) {
+      notice = `${bom.error} This spec starts from scratch.`;
+      defaultCustomerId = defaultCustomerId || q.customerId || "";
     } else {
       source = gridProjectId ? { kind: "grid", gridProjectId, quoteId: q.id } : { kind: "quote", quoteId: q.id };
       defaultCustomerId = defaultCustomerId || q.customerId || "";

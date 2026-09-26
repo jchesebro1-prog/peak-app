@@ -49,6 +49,19 @@ const INSTANCE = 1;
 const TEXT_WIDTH = 9360;
 const FONT = "Times New Roman";
 
+/**
+ * Text that is safe inside a Word XML run: XML 1.0 forbids most C0 control
+ * characters, and one in document.xml makes Word refuse the whole file. A
+ * vertical tab (\x0B — what Word itself puts on the clipboard for a manual
+ * line break) becomes a space; the rest are dropped. Every string this
+ * writer puts in a run goes through here (#205 spec builder final fix 5).
+ */
+export function xmlSafe(text: string): string {
+  return String(text ?? "")
+    .replace(/\x0B/g, " ")
+    .replace(/[\x00-\x08\x0C\x0E-\x1F\uFFFE\uFFFF]/g, "");
+}
+
 const indent = (left: number) => ({ indent: { left, hanging: 720 } });
 
 const LEVELS: ILevelsOptions[] = [
@@ -81,23 +94,23 @@ const styleNumbered = (level: number) => ({ ...numbered(level), custom: true });
  * which Word can reject as unreadable content.
  */
 function partHeading(title: string): Paragraph {
-  return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(title)] });
+  return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(xmlSafe(title))] });
 }
 
 function articleHeading(title: string): Paragraph {
-  return new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun(title)] });
+  return new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun(xmlSafe(title))] });
 }
 
 /** An outline line's TEXT only — its label is Word's to draw. */
 function item(level: number, text: string, keepNext = false): Paragraph {
-  return new Paragraph({ numbering: numbered(level), keepNext, spacing: { after: 120 }, children: [new TextRun(text)] });
+  return new Paragraph({ numbering: numbered(level), keepNext, spacing: { after: 120 }, children: [new TextRun(xmlSafe(text))] });
 }
 
 /** Article-context lines start at depth 0 → level 2 (A.); entry-context lines already start at depth 1. */
 const lines = (ls: OutlineLine[]) => ls.map((l) => item(2 + l.depth, l.text));
 
 function cell(text: string, bold = false): TableCell {
-  return new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold })] })] });
+  return new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: xmlSafe(text), bold })] })] });
 }
 
 function equipmentTable(rows: EquipmentRow[], showQty: boolean): Table {
@@ -123,7 +136,7 @@ function body(a: AssembledSection): Array<Paragraph | Table> {
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 240 },
-      children: [new TextRun({ text: `SECTION ${a.number} – ${a.title.toUpperCase()}`, bold: true })],
+      children: [new TextRun({ text: xmlSafe(`SECTION ${a.number} – ${a.title.toUpperCase()}`), bold: true })],
     }),
   ];
 
@@ -148,7 +161,7 @@ function body(a: AssembledSection): Array<Paragraph | Table> {
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { before: 360 },
-      children: [new TextRun({ text: `END OF SECTION ${a.number}`, bold: true })],
+      children: [new TextRun({ text: xmlSafe(`END OF SECTION ${a.number}`), bold: true })],
     })
   );
   return out;
@@ -166,7 +179,7 @@ function runningHeader(a: AssembledSection): Header {
   const line: Array<string | Tab> = [];
   pieces.forEach((text, i) => {
     if (i > 0) line.push(new Tab());
-    if (text) line.push(text);
+    if (text) line.push(xmlSafe(text));
   });
   return new Header({
     children: [
@@ -178,7 +191,7 @@ function runningHeader(a: AssembledSection): Header {
         children: [new TextRun({ children: line, size: 20 })],
       }),
       ...(h.phase
-        ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: h.phase, size: 20 })] })]
+        ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: xmlSafe(h.phase), size: 20 })] })]
         : []),
     ],
   });
@@ -190,8 +203,8 @@ function runningFooter(a: AssembledSection): Footer {
       new Paragraph({
         tabStops: [{ type: TabStopType.RIGHT, position: TEXT_WIDTH }],
         children: [
-          new TextRun({ text: a.title.toUpperCase(), size: 20 }),
-          new TextRun({ children: [new Tab(), `${a.number} - `, PageNumber.CURRENT], size: 20 }),
+          new TextRun({ text: xmlSafe(a.title.toUpperCase()), size: 20 }),
+          new TextRun({ children: [new Tab(), xmlSafe(`${a.number} - `), PageNumber.CURRENT], size: 20 }),
         ],
       }),
     ],
@@ -202,7 +215,7 @@ export async function buildSectionDocx(a: AssembledSection): Promise<Buffer> {
   const heading = { font: FONT, size: 22, bold: true, color: "000000" };
   const doc = new Document({
     creator: "Quartzite",
-    title: `Section ${a.number} – ${a.title}`,
+    title: xmlSafe(`Section ${a.number} – ${a.title}`),
     styles: {
       default: {
         document: { run: { font: FONT, size: 22 } },

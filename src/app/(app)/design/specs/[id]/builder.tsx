@@ -438,13 +438,21 @@ function ProductsCard({
   const closeWriting = useCallback(() => setWriting(null), []);
 
   const groups: Array<{ key: string; title: string; rows: SpecProductRow[]; attention?: boolean }> = [];
+  // From a BOM, a quote's parts for OTHER sections are expected (one quote
+  // feeds several section files), so they collapse into one expandable line
+  // instead of a row each — final fix 7. From scratch, each was picked by
+  // hand, so each keeps its own row.
+  const otherSectionRows = hasSection && fromBom ? productRows.filter((r) => r.leftOutReason === "other-section") : [];
   if (hasSection) {
     for (const a of sectionArticles) {
       const rows = productRows.filter((r) => !r.leftOutReason && r.placedArticleId === a.id);
       if (rows.length) groups.push({ key: a.id, title: a.title, rows });
     }
     const left = productRows.filter((r) => r.leftOutReason);
-    if (left.length) groups.push({ key: "attention", title: "Needs attention — left out of the Word file", rows: left, attention: true });
+    const attention = fromBom ? left.filter((r) => r.leftOutReason !== "other-section") : left;
+    if (attention.length || otherSectionRows.length) {
+      groups.push({ key: "attention", title: "Needs attention — left out of the Word file", rows: attention, attention: true });
+    }
   } else if (productRows.length) {
     groups.push({ key: "all", title: "Products", rows: productRows });
   }
@@ -557,6 +565,40 @@ function ProductsCard({
     }
   };
 
+  const productRow = (r: SpecProductRow, i: number, rows: SpecProductRow[]) => (
+    <div key={r.sku} style={ROW}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+          <span style={SKU}>{r.sku}</span>
+          <span style={{ fontSize: 13, color: "#16181b" }}>{r.specTitle || r.desc || "—"}</span>
+          {fromBom && r.qty != null && <span style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>Qty {r.qty}</span>}
+        </div>
+        {r.specTitle && r.desc && r.specTitle !== r.desc && <div style={MUTED}>{r.desc}</div>}
+        {r.leftOutReason && <div style={{ marginTop: 3 }}>{reasonLine(r)}</div>}
+      </div>
+      {canEdit && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending || i === 0} onClick={() => move(rows, i, -1)} aria-label={`Move ${r.sku} up`}>
+            ↑
+          </button>
+          <button
+            type="button"
+            className="pk-btn-outline"
+            style={SMALL_BTN}
+            disabled={pending || i === rows.length - 1}
+            onClick={() => move(rows, i, 1)}
+            aria-label={`Move ${r.sku} down`}
+          >
+            ↓
+          </button>
+          <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending} onClick={() => remove(r.sku)}>
+            Remove
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="pk-card" style={CARD}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -602,39 +644,16 @@ function ProductsCard({
       {groups.map((g) => (
         <div key={g.key} style={{ marginTop: 10 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: g.attention ? "#8a6d1f" : "#3a3f4a", marginBottom: 2 }}>{g.title}</div>
-          {g.rows.map((r, i) => (
-            <div key={r.sku} style={ROW}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                  <span style={SKU}>{r.sku}</span>
-                  <span style={{ fontSize: 13, color: "#16181b" }}>{r.specTitle || r.desc || "—"}</span>
-                  {fromBom && r.qty != null && <span style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>Qty {r.qty}</span>}
-                </div>
-                {r.specTitle && r.desc && r.specTitle !== r.desc && <div style={MUTED}>{r.desc}</div>}
-                {r.leftOutReason && <div style={{ marginTop: 3 }}>{reasonLine(r)}</div>}
-              </div>
-              {canEdit && (
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending || i === 0} onClick={() => move(g.rows, i, -1)} aria-label={`Move ${r.sku} up`}>
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="pk-btn-outline"
-                    style={SMALL_BTN}
-                    disabled={pending || i === g.rows.length - 1}
-                    onClick={() => move(g.rows, i, 1)}
-                    aria-label={`Move ${r.sku} down`}
-                  >
-                    ↓
-                  </button>
-                  <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending} onClick={() => remove(r.sku)}>
-                    Remove
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+          {g.rows.map((r, i) => productRow(r, i, g.rows))}
+          {g.attention && otherSectionRows.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ ...WARN, cursor: "pointer", padding: "6px 0" }}>
+                {otherSectionRows.length} part{otherSectionRows.length === 1 ? "" : "s"} from this{" "}
+                {doc.source.kind === "grid" ? "Grid design" : "quote"} belong{otherSectionRows.length === 1 ? "s" : ""} to other sections
+              </summary>
+              {otherSectionRows.map((r, i) => productRow(r, i, otherSectionRows))}
+            </details>
+          )}
         </div>
       ))}
 
@@ -756,11 +775,16 @@ export default function Builder({
       if (failed) queued.current = false;
       if (inFlight.current === 0 && queued.current) {
         queued.current = false;
-        // A file download, not a page: click a throwaway download link.
+        // A file download, not a page: click a throwaway download link —
+        // attached to the document for the click (some browsers ignore a
+        // click on a detached anchor), then removed.
         const link = document.createElement("a");
         link.href = downloadHref;
         link.download = "";
+        link.style.display = "none";
+        document.body.appendChild(link);
         link.click();
+        link.remove();
       }
     },
     [downloadHref]
@@ -798,7 +822,7 @@ export default function Builder({
 
         <HeaderCard doc={doc} customerOptions={customerOptions} canEdit={canEdit} />
 
-        {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} checklist={assembled.checklist} canEdit={canEdit} />}
+        {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} labels={doc.fillInLabels} checklist={assembled.checklist} canEdit={canEdit} />}
 
         <ProductsCard doc={doc} hasSection={!!section} sectionArticles={sectionArticles} productRows={productRows} canEdit={canEdit} />
 

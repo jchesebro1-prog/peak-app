@@ -20,6 +20,11 @@ export type SpecDocument = {
   printQuantities: boolean;
   /** Answers keyed `${articleId}#${n}` — the n-th [FILL IN: …] in that article (src/lib/specs/fill-ins.ts). */
   fillIns: Record<string, string>;
+  /** The label of the blank each answer was written for, same keys as
+   *  `fillIns`, normalized (fillInLabelKey). An answer whose label no longer
+   *  matches the blank at its key is stale. Absent for answers saved before
+   *  labels were kept — those apply by position, as before. */
+  fillInLabels: Record<string, string>;
   createdAt: number;
   createdBy: string;
   updatedAt: number;
@@ -27,6 +32,17 @@ export type SpecDocument = {
 };
 
 export const DEFAULT_SPEC_PHASE = "Construction Documents";
+/** Input caps the builder's server actions enforce (#205 spec builder final fix 16). */
+export const SPEC_HEADER_MAX = 200;
+export const SPEC_FILL_IN_MAX = 500;
+export const SPEC_REORDER_MAX = 500;
+
+/** A real calendar date in YYYY-MM-DD form (rejects 2026-02-30). */
+export function isValidIsoDate(v: unknown): v is string {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
 const KINDS: readonly SpecSourceKind[] = ["scratch", "quote", "grid"];
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v)).trim();
@@ -52,10 +68,16 @@ export function normalizeSpecDocument(raw: unknown): SpecDocument {
     const n = product(p);
     if (n && !products.some((x) => same(x.sku, n.sku))) products.push(n);
   }
-  const fillIns: Record<string, string> = {};
-  if (o.fillIns && typeof o.fillIns === "object") {
-    for (const [k, v] of Object.entries(o.fillIns as Record<string, unknown>)) if (typeof v === "string") fillIns[k] = v;
-  }
+  const stringMap = (v: unknown): Record<string, string> => {
+    const out: Record<string, string> = {};
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) if (typeof x === "string") out[k] = x;
+    }
+    return out;
+  };
+  const fillIns = stringMap(o.fillIns);
+  // A label only means something beside an answer.
+  const fillInLabels = Object.fromEntries(Object.entries(stringMap(o.fillInLabels)).filter(([k]) => k in fillIns));
   return {
     id: str(o.id),
     sectionId: str(o.sectionId),
@@ -77,6 +99,7 @@ export function normalizeSpecDocument(raw: unknown): SpecDocument {
     products,
     printQuantities: o.printQuantities === true,
     fillIns,
+    fillInLabels,
     createdAt: Number(o.createdAt) || 0,
     createdBy: str(o.createdBy),
     updatedAt: Number(o.updatedAt) || 0,
@@ -97,10 +120,11 @@ const SPEC_HEADER_KEYS: readonly (keyof SpecDocHeader)[] = [
  *  fields into the stored header this way (#205 spec builder T4 fix wave
  *  item 2). A key absent from `patch` is left untouched by the caller; a key
  *  present (even "") is copied, trimmed. */
-export function pickSpecHeaderPatch(patch: Record<string, unknown>): Partial<SpecDocHeader> {
+export function pickSpecHeaderPatch(patch: Record<string, unknown> | null | undefined): Partial<SpecDocHeader> {
+  const src = patch ?? {};
   const out: Partial<SpecDocHeader> = {};
   for (const k of SPEC_HEADER_KEYS) {
-    if (patch[k] !== undefined) out[k] = str(patch[k]);
+    if (src[k] !== undefined) out[k] = str(src[k]);
   }
   return out;
 }

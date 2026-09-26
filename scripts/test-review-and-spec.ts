@@ -310,10 +310,10 @@ import {
   MAX_OUTLINE_DEPTH,
 } from "@/lib/specs/outline";
 import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
-import { fillInSlots, applyFillIns, staleFillInKeys } from "@/lib/specs/fill-ins";
+import { fillInSlots, applyFillIns, staleFillInKeys, fillInLabelKey } from "@/lib/specs/fill-ins";
 import { assembleSection, placeProduct, articleInSection, type SpecBuilderPart } from "@/lib/specs/assemble-section";
 import { longDate, specFileName } from "@/lib/specs/spec-file-name";
-import { buildSectionDocx } from "@/lib/specs/spec-docx";
+import { buildSectionDocx, xmlSafe } from "@/lib/specs/spec-docx";
 import JSZip from "jszip";
 import {
   normalizeCategoryKey, normalizeArticle, articleIdForPart, resolveSameAs, specStateOf,
@@ -330,7 +330,7 @@ import {
 } from "@/app/(app)/design/specs/coverage";
 import {
   normalizeSpecDocument, withProduct, withoutProduct, withProductOrder, withProductHeader, bomProducts, DEFAULT_SPEC_PHASE,
-  pickSpecHeaderPatch,
+  pickSpecHeaderPatch, isValidIsoDate, SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, SPEC_REORDER_MAX,
 } from "@/lib/specs/spec-document";
 
 let fail = 0;
@@ -10524,6 +10524,7 @@ seeded()
   .then(() => specDocumentsAsyncChecks())
   .then(() => specDocxAsyncChecks())
   .then(() => specBuilderActionsAsyncChecks())
+  .then(() => specBuilderFinalFixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18981,8 +18982,10 @@ async function specDocumentsAsyncChecks(): Promise<void> {
 // #205 spec builder T3
 /**
  * The Word writer: pure file-name/date checks plus the generated .docx's
- * OOXML (real Word numbering, header/footer, table). Async because Packer is;
- * DB-less, so it runs anywhere in the chain.
+ * OOXML (real Word numbering, header/footer, table). Async because Packer is.
+ * Mostly DB-free, but its last check (getManyAnyCase) writes a catalog
+ * fixture into the suite's throwaway datadir, so it stays in the promise
+ * chain before teardownFixtures().
  */
 async function specDocxAsyncChecks(): Promise<void> {
   ok(longDate("2026-07-30") === "July 30, 2026" && longDate("") === "", "#205 spec builder: long issue date, no timezone shift");
@@ -19202,4 +19205,191 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
   const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(ed.includes("/design/specs/new?grid=") && ed.includes("Spec from this design"), "#205 spec builder: the Grid editor links to the spec builder without an engagement");
   ok(read("src/app/(app)/design/engagements/view.tsx").includes("/design/specs/new?engagement="), "#205 spec builder: the engagement's Bid spec link opens the new builder");
+}
+
+// #205 spec builder final fixes
+/**
+ * The whole-branch review's fix wave. Pure checks here (fill-in labels and
+ * lead-in context, XML-safe Word text, input caps, date validation) plus
+ * source-text checks for the UI/entry-point items; the DB-backed picker
+ * equivalence and docx control-character checks run in
+ * specBuilderFinalFixAsyncChecks, wired into the promise chain.
+ */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const sec = normalizeSection({
+    id: "ss-ff", number: "11 61 23", title: "Rigging", sort: 1,
+    part1: [
+      { id: "a1", title: "SUBMITTALS", body: "Please submit shop drawings for review within [FILL IN: number of days] days.\nSamples within [FILL IN: number of days] days." },
+    ],
+    part3: [{ id: "a3", title: "WARRANTY", body: "[FILL IN: owner] accepts." }],
+    part2Style: "paragraphs", quantities: "drawings", updatedAt: 0, updatedBy: "",
+  } as never);
+
+  // Item 4 — lead-in context tells two same-label blanks apart.
+  const slots = fillInSlots(sec);
+  ok(slots[0].context === "… submit shop drawings for review within" && slots[1].context === "Samples within" && slots[2].context === "", "#205 spec builder: a fill-in slot carries up to six words of lead-in text from its own line");
+  ok(fillInLabelKey("  Number   of DAYS ") === "number of days", "#205 spec builder: fill-in labels compare whitespace- and case-insensitively");
+
+  // Item 4 — a stored label that no longer matches its key's blank is stale.
+  const answers = { "a1#1": "30", "a1#2": "10", "a3#1": "the District" };
+  ok(staleFillInKeys(sec, answers, { "a1#1": "number of days", "a1#2": "Number of  Days", "a3#1": "owner" }).length === 0, "#205 spec builder: answers whose stored label matches (normalized) are live");
+  ok(staleFillInKeys(sec, answers, { "a1#1": "owner" }).join() === "a1#1", "#205 spec builder: an answer written for a different blank than the one now at its key is stale");
+  ok(staleFillInKeys(sec, answers, {}).length === 0 && staleFillInKeys(sec, answers).length === 0, "#205 spec builder: an answer with no stored label (saved before labels) still applies by position");
+  ok(applyFillIns("x [FILL IN: owner] y", "q", { "q#1": "30" }, { "q#1": "number of days" }) === "x [FILL IN: owner] y", "#205 spec builder: applyFillIns never prints an answer into a blank with a different label");
+  ok(applyFillIns("x [FILL IN: owner] y", "q", { "q#1": "Ann" }, { "q#1": "OWNER" }) === "x Ann y" && applyFillIns("x [FILL IN: owner] y", "q", { "q#1": "Ann" }) === "x Ann y", "#205 spec builder: applyFillIns applies a matching or label-less answer");
+
+  // Item 4 — the assembler skips a stale answer and counts its blank as open.
+  const doc = normalizeSpecDocument({
+    id: "SP-1", sectionId: "ss-ff", source: { kind: "scratch" },
+    fillIns: { "a1#1": "30", "a3#1": "the District" }, fillInLabels: { "a1#1": "number of days", "a3#1": "architect", orphan: "x" },
+  });
+  ok(doc.fillInLabels["a1#1"] === "number of days" && !("orphan" in doc.fillInLabels), "#205 spec builder: normalize keeps a fill-in label only beside an answer");
+  ok(normalizeSpecDocument({}).fillInLabels && Object.keys(normalizeSpecDocument({ fillInLabels: "junk" }).fillInLabels).length === 0, "#205 spec builder: normalize defaults fill-in labels to {}");
+  const asm = assembleSection({ section: sec, articles: [], sections: [sec], parts: new Map(), doc });
+  ok(asm.part1[0].lines[0].text.includes("within 30 days") && asm.part3[0].lines[0].text.startsWith("[FILL IN: owner]"), "#205 spec builder: the assembler prints a matching answer and skips a stale one");
+  ok(asm.checklist.staleAnswers.join() === "a3#1" && asm.checklist.fillInsLeft === 2 && asm.checklist.fillIns.find((f) => f.key === "a3#1")?.answered === false, "#205 spec builder: a stale answer is listed stale and its blank still counts as open");
+
+  // Item 5 — XML-illegal control characters.
+  ok(xmlSafe("a\x0Bb\x01c\x1Fd\te\nf") === "a bcd\te\nf", "#205 spec builder: xmlSafe turns a vertical tab into a space and drops other illegal control characters, keeping tab/newline");
+
+  // Item 9 / 16 — date validation and caps.
+  ok(isValidIsoDate("2026-09-26") && !isValidIsoDate("2026-02-30") && !isValidIsoDate("9/26/2026") && !isValidIsoDate(undefined), "#205 spec builder: isValidIsoDate accepts only a real YYYY-MM-DD date");
+  ok(SPEC_FILL_IN_MAX === 500 && SPEC_HEADER_MAX === 200 && SPEC_REORDER_MAX === 500, "#205 spec builder: input caps are 500 / 200 / 500");
+
+  // Item 13 — the header patch whitelist survives a missing patch.
+  ok(Object.keys(pickSpecHeaderPatch(undefined)).length === 0 && Object.keys(pickSpecHeaderPatch(null)).length === 0, "#205 spec builder: pickSpecHeaderPatch treats a missing patch as empty");
+
+  const actions = read("src/app/(app)/design/specs/builder-actions.ts");
+  const bodyOf = (name: string) => {
+    const start = actions.indexOf(`export async function ${name}`);
+    const next = actions.indexOf("export async function", start + 1);
+    return actions.slice(start, next === -1 ? undefined : next);
+  };
+  const fill = bodyOf("setSpecFillInAction");
+  ok(fill.includes("fillInSlots(") && fill.includes("fillInLabelKey(slot.label)") && fill.includes("SPEC_FILL_IN_MAX") && fill.includes("no longer in this section"), "#205 spec builder: setSpecFillInAction caps the value, refuses a non-live key, and stores the server-side label");
+  ok(bodyOf("reorderSpecProductsAction").includes("SPEC_REORDER_MAX") && bodyOf("updateSpecHeaderAction").includes("headerTooLong(") && bodyOf("createSpecDocumentAction").includes("headerTooLong("), "#205 spec builder: reorder and header writes are capped");
+  ok(bodyOf("createSpecDocumentAction").includes("isValidIsoDate(input.issueDate)"), "#205 spec builder: create uses the browser's issue date when it is valid");
+  ok(actions.includes("getCompany(cid)") && !actions.includes("@/lib/stores/customers"), "#205 spec builder: resolving a spec's customer reads the company row, not the full customer record");
+  ok(bodyOf("searchSpecPartsAction").includes("searchSpecParts(") && !actions.includes("listCatalog"), "#205 spec builder: the picker action delegates to the SQL-prefiltered searchSpecParts");
+
+  // Item 1 / 7 / 11 — the New spec page.
+  const nw = read("src/app/(app)/design/specs/new/page.tsx");
+  ok(nw.includes("bomFromQuote(q.id)") && !nw.includes("e.installQuoteId || e.quoteId ||") && nw.includes('own.quoteType === "system"'), "#205 spec builder: the New page checks the quote's BOM and the engagement door never picks a consulting quote");
+  ok(nw.includes("listed but left out of the Word file"), "#205 spec builder: the New page says other-section parts are listed but left out");
+  ok(nw.indexOf("specCustomerOptions()") > nw.indexOf('can("create", user.roles)'), "#205 spec builder: customer options load only after the create check");
+  const form = read("src/app/(app)/design/specs/new/new-spec-form.tsx");
+  ok(form.includes("issueDate: localToday()") && form.includes("Start from scratch instead"), "#205 spec builder: the New form sends the local date and offers from-scratch when the source fails");
+
+  // Item 2 / 3 / 7 / 10 / 12 / 14 — entry points and builder UI.
+  const view = read("src/app/(app)/design/engagements/view.tsx");
+  ok(view.includes("Earlier bid specs (") && view.includes("/design/engagements/spec?id="), "#205 spec builder: the engagement keeps a link to its earlier D94 bid specs");
+  ok(read("src/app/(app)/design/engagements/[id]/page.tsx").includes("specsForEngagement(sel.id)"), "#205 spec builder: the engagement page counts its earlier bid specs");
+  const hf = read("src/app/(app)/design/specs/[id]/header-fields.tsx");
+  ok(hf.includes("inputStyle={COMBO_INPUT}") && form.includes("inputStyle={COMBO_INPUT}"), "#205 spec builder: both customer typeaheads are styled like pk-input");
+  const b = read("src/app/(app)/design/specs/[id]/builder.tsx");
+  ok(b.includes("otherSectionRows") && b.includes("<details") && b.includes("to other sections"), "#205 spec builder: a BOM spec collapses other-section parts into one expandable line");
+  ok(/document\.body\.appendChild\(link\);\s*link\.click\(\);\s*link\.remove\(\);/.test(b), "#205 spec builder: the queued download's anchor is attached for the click and removed after");
+  ok(!read("src/app/(app)/design/specs/[id]/page.tsx").includes("getManyAnyCase"), "#205 spec builder: the builder page reuses the loader's parts instead of reading them twice");
+  ok(read("src/app/(app)/quotes/page.tsx").includes('canCreate && (!q.quoteType || q.quoteType === "system")'), "#205 spec builder: Spec from this quote shows only to creators");
+  ok(read("DECISIONS.md").includes("**only when the part has no article of its own**"), "#205 spec builder: D331 says Write spec writes the header onto the part only when it has none");
+}
+
+/**
+ * DB-backed (suite's throwaway datadir): the picker's SQL pre-filter gives
+ * exactly the rows the old whole-catalog scan did, and a Word file built
+ * from text holding control characters contains none of them.
+ */
+async function specBuilderFinalFixAsyncChecks(): Promise<void> {
+  const { searchSpecParts } = await import("@/lib/specs/picker");
+  const { listDocsFiltered } = await import("@/db/doc-store");
+  const { list: listCatalog } = await import("@/lib/stores/catalog");
+  const { allArticles } = await import("@/lib/stores/spec-articles");
+  const { allSections } = await import("@/lib/stores/spec-sections");
+
+  const SEC = await createSection({ number: "99 00 01", title: fixtureId("SPECFF", "section"), by: "Final fix test" });
+  registerFixture("spec_sections", SEC.id);
+  const SEC2 = await createSection({ number: "99 00 02", title: fixtureId("SPECFF", "section2"), by: "Final fix test" });
+  registerFixture("spec_sections", SEC2.id);
+  const IN = await createArticle({ sectionId: SEC.id, title: fixtureId("SPECFF", "in") }, "Final fix test");
+  registerFixture("spec_articles", IN.id);
+  const OUT = await createArticle({ sectionId: SEC2.id, title: fixtureId("SPECFF", "out") }, "Final fix test");
+  registerFixture("spec_articles", OUT.id);
+
+  const sku = (slug: string) => fixtureId("SPECFF", slug);
+  const mk = async (slug: string, extra: Record<string, unknown>) => {
+    const id = sku(slug);
+    await upsertPart({ id, sku: id, desc: `Final fix ${slug} widget`, mfr: "Acmeff", category: "Other", unit: "ea", list: 1, cost: 1, ...extra } as never);
+    registerFixture("catalog_parts", id);
+    return id;
+  };
+  const A = await mk("AUTH", { specArticleId: IN.id, specBody: "Body", specState: "authored" });
+  await mk("SAME", { specArticleId: IN.id, specSameAs: A });
+  await mk("SAMELOWER", { specArticleId: IN.id, specSameAs: A.toLowerCase() });
+  await mk("DRAFT", { specArticleId: IN.id, specBody: "Draft", specState: "draft" });
+  await mk("OTHER", { specArticleId: OUT.id, specBody: "Other", specState: "authored" });
+  await mk("NOSPEC", { specArticleId: IN.id });
+  await mk("CHAIN", { specArticleId: IN.id, specSameAs: sku("SAME") });
+  const onDoc = await mk("ONDOC", { specArticleId: IN.id, specBody: "On doc", specState: "authored" });
+  await mk("PCT", { desc: "100% wool 50_50 blend", specArticleId: IN.id, specBody: "x", specState: "authored" });
+
+  // The old action's algorithm, verbatim, over the whole catalog.
+  const reference = async (q: string, showAll: boolean) => {
+    const query = q.trim().toLowerCase();
+    const on = new Set([onDoc.toUpperCase()]);
+    const [allParts, articles, sections] = await Promise.all([listCatalog(), allArticles(), allSections()]);
+    const candidates = allParts.filter((part) => {
+      if (on.has(part.sku.toUpperCase())) return false;
+      if (!query) return true;
+      return `${part.sku} ${part.desc || ""} ${part.mfr || ""}`.toLowerCase().includes(query);
+    });
+    const articleById = new Map(articles.map((a) => [a.id, a]));
+    const ids = articleIdMapForParts(candidates, articles, sections);
+    const bySku = new Map(allParts.map((p) => [p.sku, p]));
+    const out = [];
+    for (const part of candidates) {
+      const articleId = ids.get(part.sku) ?? null;
+      const inSection = !!articleId && articleById.get(articleId)?.sectionId === SEC.id;
+      const state = specStateOf(part, bySku);
+      const hasSpec = state === "authored" || state === "same-as";
+      if (!showAll && !(hasSpec && inSection)) continue;
+      out.push({ sku: part.sku, articleId, inSection, hasSpec });
+    }
+    out.sort((a, b) => (a.inSection === b.inSection ? a.sku.localeCompare(b.sku) : a.inSection ? -1 : 1));
+    return out.slice(0, 60);
+  };
+  const doc = { sectionId: SEC.id, products: [{ sku: onDoc.toLowerCase() }] };
+  const brief = (rows: Array<{ sku: string; articleId: string | null; inSection: boolean; hasSpec: boolean }>) =>
+    JSON.stringify(rows.map((r) => [r.sku, r.articleId, r.inSection, r.hasSpec]));
+  for (const [q, showAll] of [["specff", false], ["SPECFF", true], ["", false], ["acmeff", true], ["ff:auth final", true], ["100%", true], ["50_50", false], ["zz-no-such-part-zz", true]] as const) {
+    const got = await searchSpecParts(doc, q, showAll);
+    const want = await reference(q, showAll);
+    ok(brief(got) === brief(want), `#205 spec builder: picker results match the whole-catalog scan for q=${JSON.stringify(q)} showAll=${showAll} (${got.length} rows)`);
+  }
+  const def = await searchSpecParts(doc, "specff", false);
+  ok(
+    def.some((r) => r.sku === A) && def.some((r) => r.sku === sku("SAME")) && def.some((r) => r.sku === sku("SAMELOWER")) &&
+      !def.some((r) => [sku("DRAFT"), sku("OTHER"), sku("NOSPEC"), sku("CHAIN"), onDoc].includes(r.sku)),
+    "#205 spec builder: the default picker keeps authored + same-as parts in this section and drops drafts, other sections, missing specs, chains and parts already on the spec"
+  );
+  const pct = await listDocsFiltered("catalog_parts", { text: "%", textFields: ["sku", "desc", "mfr"], limit: 5000 });
+  ok(pct.length > 0 && pct.every((p) => `${p.sku} ${p.desc || ""} ${p.mfr || ""}`.includes("%")), "#205 spec builder: listDocsFiltered treats % in a query as a literal, not a wildcard");
+  const spec = await listDocsFiltered<{ id: string; specBody?: string; specSameAs?: string }>("catalog_parts", { nonEmpty: ["specBody", "specSameAs"] });
+  ok(spec.every((p) => (p.specBody || "") !== "" || (p.specSameAs || "") !== "") && !spec.some((p) => p.id === sku("NOSPEC")), "#205 spec builder: listDocsFiltered's nonEmpty keeps only rows with one of the fields set");
+
+  // Item 5 — control characters never reach document.xml.
+  const cc = normalizeSection({
+    id: "ss-cc", number: "11 00 00", title: "Ctrl\x01 Test",
+    part1: [{ id: "c1", title: "GEN\x0BERAL NOTES", body: "Line one\x0Bstill one \x01ctrl\nTwo" }],
+    part3: [], part2Style: "table", quantities: "drawings", updatedAt: 0, updatedBy: "",
+  } as never);
+  const ccArt = { id: "ar-cc", sectionId: "ss-cc", sort: 1, title: "EQUIP\x02MENT", general: "", manufacturers: [], categoryKeys: [], updatedAt: 0, updatedBy: "" };
+  const ccParts = new Map<string, SpecBuilderPart>([["CC1", { sku: "CC1", desc: "Desc\x0Bwith tab", mfr: "M\x03fr", specArticleId: "ar-cc", specTitle: "T\x0Bitle", specBody: "Body\x01 text", specState: "authored" }]]);
+  const ccDoc = normalizeSpecDocument({ id: "SP-cc", sectionId: "ss-cc", header: { projectName: "Proj\x0Bect", projectNumber: "1\x01", phase: "Ph\x0Base", issueDate: "2026-09-26" }, source: { kind: "quote" }, products: [{ sku: "CC1", qty: 1 }] });
+  const ccAsm = assembleSection({ section: cc, articles: [ccArt], sections: [cc], parts: ccParts, doc: ccDoc });
+  const ccZip = await JSZip.loadAsync(await buildSectionDocx(ccAsm));
+  const xmlParts = await Promise.all(Object.keys(ccZip.files).filter((f) => f.endsWith(".xml")).map((f) => ccZip.file(f)!.async("string")));
+  ok(xmlParts.every((x) => !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(x)), "#205 spec builder: no XML part of the Word file carries a \\x0B, \\x01 or other illegal control character");
+  const ccXml = xmlParts.join("");
+  ok(ccXml.includes("Line one still one") && ccXml.includes("Proj ect"), "#205 spec builder: a vertical tab in spec or header text becomes a space in the Word file");
 }

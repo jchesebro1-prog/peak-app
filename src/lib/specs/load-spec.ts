@@ -1,7 +1,8 @@
-import { assembleSection, type AssembledSection, type SpecBuilderPart } from "@/lib/specs/assemble-section";
+import { assembleSection, type AssembledSection } from "@/lib/specs/assemble-section";
 import { normalizeSpecDocument, type SpecDocument } from "@/lib/specs/spec-document";
 import type { SpecSection } from "@/lib/specs/sections";
-import { getManyAnyCase } from "@/lib/stores/catalog";
+import type { SpecCategoryArticle } from "@/lib/specs/articles";
+import { getManyAnyCase, type CatalogPart } from "@/lib/stores/catalog";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { getSpecDocument } from "@/lib/stores/spec-documents";
@@ -12,23 +13,32 @@ import { getSpecDocument } from "@/lib/stores/spec-documents";
  * the same AssembledSection. Server-only (reads stores).
  *
  * `doc` comes back normalized with id "" when the spec is missing;
- * `section`/`assembled` are null when the spec's section is gone.
+ * `section`/`assembled` are null when the spec's section is gone. The
+ * library and the parts it read come back too (#205 spec builder final fix
+ * 10), so the builder page reuses them instead of reading them again —
+ * `parts` is keyed by UPPERCASE sku and includes same-as targets.
  */
-export async function loadAssembledSpec(
-  id: string
-): Promise<{ doc: SpecDocument; section: SpecSection | null; assembled: AssembledSection | null }> {
+export type LoadedSpec = {
+  doc: SpecDocument;
+  section: SpecSection | null;
+  assembled: AssembledSection | null;
+  sections: SpecSection[];
+  articles: SpecCategoryArticle[];
+  parts: Map<string, CatalogPart>;
+};
+
+export async function loadAssembledSpec(id: string): Promise<LoadedSpec> {
   const doc = (await getSpecDocument(id)) ?? normalizeSpecDocument({});
-  if (!doc.id) return { doc, section: null, assembled: null };
+  const parts = new Map<string, CatalogPart>();
+  if (!doc.id) return { doc, section: null, assembled: null, sections: [], articles: [], parts };
 
   const [sections, articles] = await Promise.all([allSections(), allArticles()]);
   const section = sections.find((s) => s.id === doc.sectionId) ?? null;
-  if (!section) return { doc, section: null, assembled: null };
 
   // The doc's products, then each found part's same-as target (one hop is
   // all assembleSection follows). SKUs match case-insensitively, like the
   // rest of the spec; batched reads, never the whole catalog.
-  const parts = new Map<string, SpecBuilderPart>();
-  const add = (list: SpecBuilderPart[]) => {
+  const add = (list: CatalogPart[]) => {
     for (const p of list) parts.set(p.sku.toUpperCase(), p);
   };
   add(await getManyAnyCase(doc.products.map((p) => p.sku)));
@@ -37,5 +47,6 @@ export async function loadAssembledSpec(
     .filter((s) => s && !parts.has(s.toUpperCase()));
   if (targets.length) add(await getManyAnyCase([...new Set(targets)]));
 
-  return { doc, section, assembled: assembleSection({ section, articles, sections, parts, doc }) };
+  const assembled = section ? assembleSection({ section, articles, sections, parts, doc }) : null;
+  return { doc, section, assembled, sections, articles, parts };
 }

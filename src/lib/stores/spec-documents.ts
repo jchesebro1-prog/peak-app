@@ -5,7 +5,7 @@ export type { SpecDocument };
 
 /** Saved specs (#205 Phase B). Ids SP-#### from base 1000. */
 export async function createSpecDocument(
-  input: Omit<SpecDocument, "id" | "createdAt" | "updatedAt">
+  input: Omit<SpecDocument, "id" | "createdAt" | "updatedAt" | "fillInLabels"> & { fillInLabels?: Record<string, string> }
 ): Promise<SpecDocument> {
   const t = Date.now();
   return insertWithPrefixedId<SpecDocument & Doc>("spec_documents", "SP", 1000, (id) =>

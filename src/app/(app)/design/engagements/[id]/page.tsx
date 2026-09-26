@@ -11,6 +11,7 @@ import { activeUsers } from "@/lib/users";
 import { getSettings, phaseWeightsFor } from "@/lib/settings";
 import { withEngagementPhaseIds, phaseWindows, type PhaseWindow } from "@/lib/consulting-schedule";
 import { getRecording, type RecordingSummarySection } from "@/lib/stores/recordings";
+import { specsForEngagement } from "@/lib/stores/generated-specs";
 import type { MeetingSource } from "@/lib/engagement-activity";
 import ActionError from "@/components/action-error";
 
@@ -81,13 +82,15 @@ export default async function ConsultingDetailPage({
   // meeting on this engagement — one getRecording() by id, not a scan of
   // every recording linked to the engagement.
   const needsRecordingSource = tab === "activity" && !sel.meetings.some((m) => m.id === prefillId);
-  const [notes, tasks, users, templateSets, settings, prefillRecording] = await Promise.all([
+  const [notes, tasks, users, templateSets, settings, prefillRecording, earlierSpecs] = await Promise.all([
     notesForEngagement(sel.id),
     tab === "activity" || tab === "schedule" ? tasksForEngagement(sel.id) : Promise.resolve([]),
     tab === "activity" ? activeUsers() : Promise.resolve([]),
     tab === "schedule" ? taskTemplateSetsFor("consulting") : Promise.resolve([]),
     tab === "schedule" ? getSettings() : Promise.resolve(null),
     prefillId && needsRecordingSource ? getRecording(prefillId) : Promise.resolve(null),
+    // #205 — old D94 bid specs keep a way in from the engagement.
+    specsForEngagement(sel.id),
   ]);
   // Only a recording actually linked to THIS engagement qualifies — a
   // prefill id for someone else's recording (or a plain typo) resolves to
@@ -126,6 +129,7 @@ export default async function ConsultingDetailPage({
         phaseBands={phaseBands}
         prefillId={prefillId}
         recordingSource={recordingSource}
+        earlierSpecCount={earlierSpecs.length}
         // Recordings spec §6 — server-rendered card slotted under Oversight.
         oversightExtra={tab === "oversight" ? <RecordingsCard parentKind="engagement" parentId={sel.id} /> : null}
       />

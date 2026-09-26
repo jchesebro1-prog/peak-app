@@ -4,9 +4,6 @@ import { can } from "@/lib/team";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
 import { articleIdForPart } from "@/lib/specs/articles";
-import { getManyAnyCase } from "@/lib/stores/catalog";
-import { allArticles } from "@/lib/stores/spec-articles";
-import { allSections } from "@/lib/stores/spec-sections";
 import { specCustomerOptions } from "../customer-options";
 import Builder, { type SpecProductRow } from "./builder";
 
@@ -23,27 +20,22 @@ export const metadata = { title: "Spec — Quartzite-6" };
 
 export default async function SpecBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const [user, { id }] = await Promise.all([requireUser(), params]);
-  const { doc, section, assembled } = await loadAssembledSpec(id);
+  // The loader's library + parts are reused below — one read of each.
+  const { doc, section, assembled, articles, sections, parts } = await loadAssembledSpec(id);
   if (!doc.id) notFound();
 
   const canEdit = can("create", user.roles);
-  const [articles, sections, parts, customerOptions] = await Promise.all([
-    allArticles(),
-    allSections(),
-    getManyAnyCase(doc.products.map((p) => p.sku)),
-    canEdit ? specCustomerOptions() : Promise.resolve([]),
-  ]);
+  const customerOptions = canEdit ? await specCustomerOptions() : [];
 
   const sectionArticles = articles
     .filter((a) => a.sectionId === doc.sectionId)
     .sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title))
     .map((a) => ({ id: a.id, title: a.title }));
   const articleTitle = new Map(articles.map((a) => [a.id, a.title]));
-  const partBySku = new Map(parts.map((p) => [p.sku.toUpperCase(), p]));
   const leftOutBySku = new Map((assembled?.checklist.leftOut || []).map((l) => [l.sku.toUpperCase(), l]));
 
   const productRows: SpecProductRow[] = doc.products.map((p) => {
-    const part = partBySku.get(p.sku.toUpperCase());
+    const part = parts.get(p.sku.toUpperCase());
     const leftOut = leftOutBySku.get(p.sku.toUpperCase()) || null;
     const placement = section ? placeProduct(p, part, section.id, articles, sections) : null;
     const otherArticleId = placement && !placement.ok && placement.reason === "other-section" ? placement.articleId : undefined;

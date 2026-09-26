@@ -3,7 +3,7 @@
 import { createContext, useContext, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CustomerCombobox, type CustomerComboboxOption } from "@/components/customer-combobox";
-import type { SpecDocHeader, SpecDocSource, SpecDocument } from "@/lib/specs/spec-document";
+import { SPEC_FILL_IN_MAX, SPEC_HEADER_MAX, type SpecDocHeader, type SpecDocSource, type SpecDocument } from "@/lib/specs/spec-document";
 import type { SpecChecklist } from "@/lib/specs/assemble-section";
 import { setSpecCustomerAction, setSpecFillInAction, updateSpecHeaderAction } from "../builder-actions";
 
@@ -24,6 +24,19 @@ export const CARD_TITLE: CSSProperties = { fontSize: 14.5, fontWeight: 600, marg
 export const CARD_SUB: CSSProperties = { fontSize: 12, color: "#8c919c", marginBottom: 14 };
 export const MUTED: CSSProperties = { fontSize: 12, color: "#9aa0ab" };
 export const ERR: CSSProperties = { fontSize: 12.5, color: "#b4543a" };
+/** CustomerCombobox takes an inline style, not a class — this mirrors
+ *  `.pk-input` (globals.css) so the typeahead matches the fields around it. */
+export const COMBO_INPUT: CSSProperties = {
+  width: "100%",
+  fontSize: 14,
+  fontFamily: "var(--font-ui)",
+  border: "1px solid #d6d9e0",
+  borderRadius: 9,
+  padding: "10px 12px",
+  outline: "none",
+  color: "var(--ink)",
+  background: "#fff",
+};
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -142,6 +155,7 @@ export function HeaderCard({
               id={`spec-h-${f.key}`}
               className={f.mono ? "pk-input mono" : "pk-input"}
               value={values[f.key]}
+              maxLength={SPEC_HEADER_MAX}
               disabled={!canEdit}
               onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
               onBlur={(e) => commit(f.key, e.target.value)}
@@ -172,7 +186,7 @@ export function HeaderCard({
           </label>
           {canEdit ? (
             <>
-              <CustomerCombobox id="spec-h-customer" options={customerOptions} value={customerId} onChange={pickCustomer} />
+              <CustomerCombobox id="spec-h-customer" options={customerOptions} value={customerId} onChange={pickCustomer} inputStyle={COMBO_INPUT} />
               {customerId && (
                 <button
                   type="button"
@@ -205,17 +219,27 @@ export function HeaderCard({
 export function FillInsCard({
   docId,
   answers,
+  labels,
   checklist,
   canEdit,
 }: {
   docId: string;
   answers: Record<string, string>;
+  /** The label each answer was written for (SpecDocument.fillInLabels). */
+  labels: Record<string, string>;
   checklist: SpecChecklist;
   canEdit: boolean;
 }) {
   const { err, pending, run } = useSave();
-  const [values, setValues] = useState<Record<string, string>>(answers);
-  const saved = useRef<Record<string, string>>(answers);
+  // A stale answer was written for a different blank than the one now at its
+  // key — it's listed below, never pre-filled into the live blank's field.
+  const [live] = useState<Record<string, string>>(() => {
+    const out = { ...answers };
+    for (const k of checklist.staleAnswers) delete out[k];
+    return out;
+  });
+  const [values, setValues] = useState<Record<string, string>>(live);
+  const saved = useRef<Record<string, string>>(live);
 
   const commit = (key: string, value: string) => {
     if (!canEdit || value.trim() === (saved.current[key] || "").trim()) return;
@@ -251,12 +275,16 @@ export function FillInsCard({
                 <div key={s.key}>
                   <label className="pk-field-label" htmlFor={`spec-fill-${s.key}`} style={{ display: "block" }}>
                     {s.articleTitle ? `${s.articleTitle} — ${s.label}` : s.label}
+                    {s.context && (
+                      <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, color: "#9aa0ab" }}> · after &ldquo;{s.context}&rdquo;</span>
+                    )}
                   </label>
                   <input
                     id={`spec-fill-${s.key}`}
                     className="pk-input"
                     placeholder={s.label}
                     value={values[s.key] || ""}
+                    maxLength={SPEC_FILL_IN_MAX}
                     disabled={!canEdit}
                     onChange={(e) => setValues((v) => ({ ...v, [s.key]: e.target.value }))}
                     onBlur={(e) => commit(s.key, e.target.value)}
@@ -272,12 +300,14 @@ export function FillInsCard({
       {checklist.staleAnswers.length > 0 && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0f1f4" }}>
           <div style={{ ...MUTED, marginBottom: 6 }}>
-            These answers match a blank that is no longer in the library&apos;s text, so they don&apos;t print.
+            These answers were written for a blank that is no longer in the library&apos;s text (or has moved), so they
+            don&apos;t print.
           </div>
           {checklist.staleAnswers.map((key) => (
             <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "#3a3f4a", marginBottom: 4 }}>
               <span>
-                No longer used: <span style={{ fontFamily: "var(--font-mono)" }}>{key}</span> = {answers[key]}
+                No longer used: {labels[key] ? <>&ldquo;{labels[key]}&rdquo; </> : null}
+                <span style={{ fontFamily: "var(--font-mono)" }}>{key}</span> = {answers[key]}
               </span>
               {canEdit && (
                 <button

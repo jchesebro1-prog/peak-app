@@ -109,7 +109,9 @@ export function assembleSection(input: {
   const warnings: string[] = [];
 
   const slots = fillInSlots(section);
-  const staleAnswers = staleFillInKeys(section, doc.fillIns);
+  const labels = doc.fillInLabels || {};
+  const staleAnswers = staleFillInKeys(section, doc.fillIns, labels);
+  const stale = new Set(staleAnswers);
 
   type Collected = { p: SpecDocProduct; part: SpecBuilderPart; tp: SpecBuilderPart; articleId: string };
   const collected: Collected[] = [];
@@ -166,12 +168,12 @@ export function assembleSection(input: {
   const part1 = section.part1.map((a, i) => ({
     num: `1.${i + 1}`,
     title: a.title,
-    lines: render(applyFillIns(a.body, a.id, doc.fillIns), "article", baseCtx),
+    lines: render(applyFillIns(a.body, a.id, doc.fillIns, labels), "article", baseCtx),
   }));
   const part3 = section.part3.map((a, i) => ({
     num: `3.${i + 1}`,
     title: a.title,
-    lines: render(applyFillIns(a.body, a.id, doc.fillIns), "article", baseCtx),
+    lines: render(applyFillIns(a.body, a.id, doc.fillIns, labels), "article", baseCtx),
   }));
 
   const showQty = doc.printQuantities && doc.source.kind !== "scratch";
@@ -212,9 +214,11 @@ export function assembleSection(input: {
     part2 = { style: "paragraphs", articles: articlesOut };
   }
 
+  // A stale answer (written for a different blank) doesn't answer the blank now at its key.
+  const answered = (key: string) => !stale.has(key) && (doc.fillIns[key] || "").trim() !== "";
   const checklist: SpecChecklist = {
-    fillIns: slots.map((s) => ({ ...s, answered: (doc.fillIns[s.key] || "").trim() !== "" })),
-    fillInsLeft: slots.filter((s) => (doc.fillIns[s.key] || "").trim() === "").length,
+    fillIns: slots.map((s) => ({ ...s, answered: answered(s.key) })),
+    fillInsLeft: slots.filter((s) => !answered(s.key)).length,
     staleAnswers,
     leftOut,
   };

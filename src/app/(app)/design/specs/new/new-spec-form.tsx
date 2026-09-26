@@ -3,7 +3,9 @@
 import { useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { CustomerCombobox, type CustomerComboboxOption } from "@/components/customer-combobox";
+import { SPEC_HEADER_MAX } from "@/lib/specs/spec-document";
 import { createSpecDocumentAction } from "../builder-actions";
+import { COMBO_INPUT } from "../[id]/header-fields";
 
 /**
  * #205 Phase B (T5) — the New spec form. Section is the one required pick;
@@ -24,6 +26,12 @@ const LBL: CSSProperties = {
 };
 const FIELD: CSSProperties = { marginBottom: 14 };
 const ERR: CSSProperties = { fontSize: 12.5, color: "#b4543a" };
+
+/** Today in the browser's own time zone, YYYY-MM-DD — the default issue date. */
+function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export default function NewSpecForm({
   sections,
@@ -50,7 +58,13 @@ export default function NewSpecForm({
   const [projectName, setProjectName] = useState(defaultProjectName);
   const [projectNumber, setProjectNumber] = useState("");
   const [err, setErr] = useState("");
+  // The page already checked the source has equipment lines; if it changes
+  // before Create (the quote was edited meanwhile), the owner can still
+  // start from scratch instead of being stuck on the error (final fix 1).
+  const [useSource, setUseSource] = useState(true);
+  const [sourceFailed, setSourceFailed] = useState(false);
   const [pending, start] = useTransition();
+  const activeSource = useSource ? source : null;
 
   const create = () => {
     setErr("");
@@ -64,10 +78,12 @@ export default function NewSpecForm({
         customerId: customerId || undefined,
         projectName,
         projectNumber,
-        ...(source ? { source } : {}),
+        issueDate: localToday(),
+        ...(activeSource ? { source: activeSource } : {}),
       });
       if (!res.ok) {
         setErr(res.error);
+        setSourceFailed("sourceFailed" in res && res.sourceFailed === true);
         return;
       }
       router.push(`/design/specs/${encodeURIComponent(res.id)}`);
@@ -83,7 +99,7 @@ export default function NewSpecForm({
         create();
       }}
     >
-      {summary && (
+      {summary && activeSource && (
         <div style={{ fontSize: 13, color: "#3a3f4a", background: "#fafbfc", border: "1px solid #f0f1f4", borderRadius: 9, padding: "9px 12px", marginBottom: 16 }}>
           {summary}
         </div>
@@ -112,7 +128,7 @@ export default function NewSpecForm({
         <label style={LBL} htmlFor="new-spec-customer">
           Customer (optional)
         </label>
-        <CustomerCombobox id="new-spec-customer" options={customerOptions} value={customerId} onChange={setCustomerId} />
+        <CustomerCombobox id="new-spec-customer" options={customerOptions} value={customerId} onChange={setCustomerId} inputStyle={COMBO_INPUT} />
         {customerId && (
           <button
             type="button"
@@ -129,7 +145,13 @@ export default function NewSpecForm({
           <label style={LBL} htmlFor="new-spec-project-name">
             Project name
           </label>
-          <input id="new-spec-project-name" className="pk-input" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+          <input
+            id="new-spec-project-name"
+            className="pk-input"
+            maxLength={SPEC_HEADER_MAX}
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+          />
         </div>
         <div style={FIELD}>
           <label style={LBL} htmlFor="new-spec-project-number">
@@ -139,6 +161,7 @@ export default function NewSpecForm({
             id="new-spec-project-number"
             className="pk-input"
             style={{ fontFamily: "var(--font-mono)" }}
+            maxLength={SPEC_HEADER_MAX}
             value={projectNumber}
             onChange={(e) => setProjectNumber(e.target.value)}
           />
@@ -153,6 +176,19 @@ export default function NewSpecForm({
           <span role="alert" style={ERR}>
             {err}
           </span>
+        )}
+        {sourceFailed && activeSource && (
+          <button
+            type="button"
+            className="pk-btn-outline"
+            onClick={() => {
+              setUseSource(false);
+              setSourceFailed(false);
+              setErr("");
+            }}
+          >
+            Start from scratch instead
+          </button>
         )}
       </div>
     </form>

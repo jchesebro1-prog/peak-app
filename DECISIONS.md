@@ -6338,9 +6338,11 @@ phase; footer: section title + page number; file name `<projectNumber>_<projectN
 
 The product picker defaults to parts with an approved spec in the section being built, grouped by category header;
 a **Show all catalog parts** switch reveals the rest of the catalog so a part with no spec text yet can be written
-one on the spot (the Spec panel's own "authored" action — the text is saved to the part, not the spec, and the
-part's live article placement is untouched). A per-spec header override lets one spec place a part under a
-different article without changing where the part itself normally prints. Products that are left out — no
+one on the spot (the Spec panel's own "authored" action — the text is saved to the part, not the spec). **Write
+spec** writes the header picked beside the text onto the part **only when the part has no article of its own** (no
+explicit header and no category default), so its next spec places it too; a header picked for a part that already
+belongs to another section's article applies to **this spec only** (a per-spec header override) and never changes
+where the part itself normally prints. Products that are left out — no
 printable spec, needing a header, belonging to another section, or since deleted from the catalog — are listed in
 the builder's checklist, never printed, and never block a download. Quantities print only when the spec has a BOM
 source and **Print quantities** is switched on (off by default); a from-scratch spec never shows quantities.
@@ -6351,4 +6353,7 @@ Each `[FILL IN: …]` blank in a section's Part 1/3 gets a key of its article id
 article's blanks, and every spec answers them independently — the same section used by two specs can have two
 different answers. An unanswered blank prints exactly as written in the library. If the library text changes so a
 saved key no longer has a matching blank, the builder shows that answer as stale ("no longer used") and never
-re-applies it elsewhere.
+re-applies it elsewhere. Each answer also stores the (normalized) label of the blank it was written for, looked up
+on the server; when a library edit moves a different blank to that position, the label no longer matches and the
+answer is stale too, instead of printing in the wrong blank. Answers saved before labels were kept apply by
+position, as before.

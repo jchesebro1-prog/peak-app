@@ -179,6 +179,7 @@ export function ConsultingView({
   phaseBands,
   prefillId,
   recordingSource,
+  earlierSpecCount,
 }: {
   data: ConsultingData;
   sel: ConsultingEngagement | null;
@@ -213,6 +214,10 @@ export function ConsultingView({
    *  the [id] page ONLY when `prefillId` doesn't already match a logged
    *  meeting. Never a store import here — see activity-tab.tsx. */
   recordingSource?: MeetingSource | null;
+  /** #205 spec builder final fix 2 — how many D94 bid specs this engagement
+   *  saved before the spec builder replaced that generator; > 0 shows an
+   *  "Earlier bid specs" link to where they are still viewable. */
+  earlierSpecCount?: number;
 }) {
   if (!sel) return <ConsultingList data={data} />;
   return (
@@ -228,6 +233,7 @@ export function ConsultingView({
       phaseBands={phaseBands || []}
       prefillId={prefillId ?? null}
       recordingSource={recordingSource ?? null}
+      earlierSpecCount={earlierSpecCount ?? 0}
     />
   );
 }
@@ -385,6 +391,7 @@ function EngagementDetail({
   phaseBands,
   prefillId,
   recordingSource,
+  earlierSpecCount,
 }: {
   data: ConsultingData;
   eng: ConsultingEngagement;
@@ -397,6 +404,7 @@ function EngagementDetail({
   phaseBands: PhaseWindow[];
   prefillId: string | null;
   recordingSource: MeetingSource | null;
+  earlierSpecCount: number;
 }) {
   const router = useRouter();
   const q = eng.quoteId ? data.quotesById[eng.quoteId] : undefined;
@@ -461,6 +469,11 @@ function EngagementDetail({
         <Link href={`/design/specs/new?engagement=${encodeURIComponent(eng.id)}`} style={{ color: "var(--accent)" }}>
           Bid specification →
         </Link>
+        {earlierSpecCount > 0 && (
+          <Link href={`/design/engagements/spec?id=${encodeURIComponent(eng.id)}`} style={{ color: "var(--accent)" }}>
+            Earlier bid specs ({earlierSpecCount}) →
+          </Link>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid #eef0f3", paddingBottom: 10, marginBottom: 16 }}>

@@ -15,7 +15,7 @@ import { quoteStagePillLabel } from "@/lib/pipelines";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getEngagementForQuoteRef, ENGAGEMENT_STATUS_LABEL } from "@/lib/stores/engagements";
 import { allUsers, reviewers } from "@/lib/users";
-import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
+import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { money } from "@/lib/format";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
@@ -710,6 +710,7 @@ export default async function QuotesPage({
                   backHref={hrefFor({ id: q.id })}
                   statusError={statusError}
                   packageError={packageError}
+                  canCreate={can("create", user.roles)}
                 />
               )}
             </div>
@@ -755,6 +756,7 @@ function SelectedPanel({
   backHref,
   statusError,
   packageError,
+  canCreate,
 }: {
   q: Quote;
   me: string;
@@ -768,6 +770,8 @@ function SelectedPanel({
    *  row (punch #60). */
   statusError: string | null;
   packageError: string | null;
+  /** #205 — "Spec from this quote" opens a create form; only creators see it. */
+  canCreate: boolean;
 }) {
   const rev = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
   const rm = RB_META[rev.state] || RB_META.none;
@@ -982,7 +986,7 @@ function SelectedPanel({
             Engagement {engagement.id} · {engagement.stage}
           </Link>
         )}
-        {(!q.quoteType || q.quoteType === "system") && (
+        {canCreate && (!q.quoteType || q.quoteType === "system") && (
           <Link href={`/design/specs/new?quote=${encodeURIComponent(q.id)}`} className="pk-btn-outline">
             Spec from this quote →
           </Link>
