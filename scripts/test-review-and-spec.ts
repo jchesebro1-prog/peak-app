@@ -10302,6 +10302,40 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
     "#TRV: the travel panel is a client component that imports only the pure planner");
 }
 
+/* --- #TRV letters: fly mode prints ONE customer line, never the itemization --- */
+import { renderField as trvRenderField } from "@/lib/templates";
+{
+  ok(
+    trvRenderField(undefined, "flame_proposal", "priceLineFly", { curtainsLabel: "12 curtains", price: "$3,593" }) ===
+      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 12 curtains inspected and documented — comes to $3,593, all in.",
+    "#TRV: flame_proposal has a fly-mode price line that never says 'the drive'"
+  );
+  ok(
+    trvRenderField(undefined, "inspection_proposal", "priceLineFly", { lineSetsLabel: "40 line sets", price: "$3,807" }) ===
+      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 40 line sets inspected and documented — comes to $3,807, all in.",
+    "#TRV: inspection_proposal has a fly-mode price line"
+  );
+  ok(!!getTemplateDef("flame_proposal")?.fields.some((fl) => fl.id === "priceLineFly") &&
+      !!getTemplateDef("inspection_proposal")?.fields.some((fl) => fl.id === "priceLineFly"),
+    "#TRV: the fly price line is an editable template field on both proposals");
+  const trvLetters: Array<[string, RegExp]> = [
+    ["src/app/(app)/flame-tests/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/inspections/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/repairs/letter/page.tsx", /flyTravelSentence\(/],
+    ["src/lib/renewal-outreach.ts", /flyTravelSentence\(/],
+  ];
+  for (const [f, line] of trvLetters) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(/flightOf\(/.test(src) && line.test(src) && /travelLineAmount\(/.test(src),
+      `#TRV: ${f} prints the one travel line at travel's share of the sell price in fly mode`);
+    ok(!/lodging|perDiem|airfare/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")),
+      `#TRV: ${f} never prints the itemized airfare / lodging / per diem`);
+  }
+  const renewalLetters = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
+  ok((renewalLetters.match(/flight \? "priceLineFly" : rtMiles > 0 \? "priceLine" : "priceLineNoTravel"/g) || []).length === 2,
+    "#TRV: both renewal PDFs pick the fly price line in fly mode");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())

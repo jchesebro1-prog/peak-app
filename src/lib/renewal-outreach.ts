@@ -47,7 +47,10 @@ import {
 import { renderField } from "@/lib/templates";
 import {
   carryTravelOverride,
+  flightOf,
+  flyTravelSentence,
   savedTrip,
+  travelLineAmount,
   travelModeChangeReason,
 } from "@/lib/travel-plan";
 
@@ -450,7 +453,18 @@ async function flameLetterDoc(
     });
   }
   const rtMiles = (ft.trip && ft.trip.miles) || 0;
-  if (rtMiles > 0) {
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(ft.trip);
+  if (flight) {
+    const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
+    const margin = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
+    blocks.push({
+      kind: "p",
+      text:
+        flyTravelSentence(`${companyName} (${originCity})`, venueName, travelLineAmount(flight.total, margin)) +
+        ` The on-site inspection should take approximately ${num1((curtainsTotal * curtainMin) / 60)} hours.`,
+    });
+  } else if (rtMiles > 0) {
     const oneWayMiles = rtMiles / 2;
     const mph = (await getTravelRates()).mph || 50;
     const oneWayHours = mph ? oneWayMiles / mph : 0;
@@ -486,7 +500,7 @@ async function flameLetterDoc(
     costLine: renderField(
       ov,
       "flame_proposal",
-      rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
+      flight ? "priceLineFly" : rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
       {
         curtainsLabel,
         price: money(quote.value != null ? quote.value : ft.total || 0),
@@ -774,7 +788,17 @@ async function inspectionLetterDoc(
     });
   }
   const rtMiles = (insp.trip && insp.trip.miles) || 0;
-  if (rtMiles > 0) {
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(insp.trip);
+  if (flight) {
+    const margin = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
+    blocks.push({
+      kind: "p",
+      text:
+        flyTravelSentence(`${companyName} (${insp.office || "our office"})`, venueName, travelLineAmount(flight.total, margin)) +
+        ` The on-site inspection should take approximately ${num1(insp.inspectHours || 0)} hours.`,
+    });
+  } else if (rtMiles > 0) {
     const oneWayMiles = rtMiles / 2;
     const mph = (await getTravelRates()).mph || 50;
     const oneWayHours = mph ? oneWayMiles / mph : 0;
@@ -810,7 +834,7 @@ async function inspectionLetterDoc(
     costLine: renderField(
       ov,
       "inspection_proposal",
-      rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
+      flight ? "priceLineFly" : rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
       {
         lineSetsLabel,
         price: money(quote.value != null ? quote.value : insp.total || 0),
