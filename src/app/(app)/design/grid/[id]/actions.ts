@@ -8,7 +8,6 @@ import {
   addCurtainPlacement,
   addOption,
   addPlacement,
-  addPlacements,
   addRevision,
   addRoute,
   addSpace,
@@ -37,7 +36,6 @@ import {
 import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
-import { deriveSeedPlacements } from "@/lib/design/grid-seed";
 import { can } from "@/lib/team";
 import { getAllDesigns, removeDesign, updateDesign } from "@/lib/stores/designs";
 import { getSite } from "@/lib/identity/sites";
@@ -180,51 +178,6 @@ export async function saveGridIntakeAction(input: {
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
   return { ok: true };
-}
-
-/**
- * "Generate starting layout from dims" (#38 Task 2, D14x) — paints real,
- * editable placements from the same parametric counts the Quick Design
- * estimator already guesses with (`compute()`), instead of leaving them
- * as numbers-only BOM lines. Additive by construction: `deriveSeedPlacements`
- * is diffed against every placement already carrying a `seededFrom` key, so
- * a re-run (after the user edits dims and re-saves intake) only adds the
- * delta — it never touches or duplicates what a prior run already placed,
- * and never touches a hand-placed device (those carry no `seededFrom` at
- * all). Devices land as placeholders (see grid-seed.ts's `SEED_PART_PREFIX`)
- * because there is no reliable mapping from "compute() says 2 electrics" to
- * one specific catalog SKU — punch #52's rule against inventing part
- * numbers applies here exactly as it did there.
- */
-export async function seedStartingLayoutAction(
-  projectId: string
-): Promise<{ ok: true; added: number; skipped: number } | { ok: false; error: string }> {
-  const user = await requireUser();
-  const project = await getProject(projectId);
-  if (!project) return { ok: false, error: "That design could not be found." };
-  if (!project.intake?.measurementBased || !project.intake.autoConfig) {
-    return { ok: false, error: "This design wasn't set up from measurements — nothing to generate from." };
-  }
-  const baseSheetId = project.sheetIds[0];
-  if (!baseSheetId) return { ok: false, error: "No plan sheet to seed onto yet." };
-
-  const desired = deriveSeedPlacements(project.intake.autoConfig);
-  const already = new Set(
-    (project.placements || []).flatMap((pl) => (pl.seededFrom ? [pl.seededFrom] : []))
-  );
-  const delta = desired.filter((d) => !already.has(d.seededFrom));
-  if (!delta.length) return { ok: true, added: 0, skipped: desired.length };
-
-  const updated = await addPlacements(projectId, {
-    sheetId: baseSheetId,
-    page: 1,
-    optionId: resolveOptionId(project, null),
-    items: delta,
-    by: user.name,
-  });
-  if (!updated) return { ok: false, error: "That design could not be found." };
-  revalidatePath(editorPath(projectId));
-  return { ok: true, added: delta.length, skipped: desired.length - delta.length };
 }
 
 /** Link the Grid to a saved Lineset Builder design. The schedule remains a

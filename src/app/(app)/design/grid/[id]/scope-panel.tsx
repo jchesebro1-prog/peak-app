@@ -1,26 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import {
   SHORT,
   SYS_ORDER,
   TIERS,
-  scopeTargets,
-  type FabricOption,
   type QuickScopeInputs,
   type SysKey,
   type TierKey,
 } from "@/app/(app)/design/quick/engine";
-import {
-  getAccentHex,
-  getAccentHexServer,
-  getTierDefs,
-  getTierDefsServer,
-  subscribeAccent,
-  subscribeTierDefs,
-} from "@/app/(app)/design/quick/tierdefs-store";
+import { getAccentHex, getAccentHexServer, subscribeAccent } from "@/app/(app)/design/quick/tierdefs-store";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { RollupSlice } from "@/lib/design/grid-bom";
+import type { ScopeTargetsByTier } from "@/lib/design/scope-targets";
 import { scopeColor, TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { setScopeInputsAction } from "./actions";
 
@@ -28,11 +21,10 @@ import { setScopeInputsAction } from "./actions";
  * Scope sidebar panel (D-manual-scope-targets) — Manual mode's placed-$
  * vs. target-$ tracker. Reuses Quick Design's venue/size/dims/systems
  * basic-info inputs (ScopeInputsPanel) to capture a QuickScopeInputs
- * snapshot on the project, then runs the SAME estimating engine
- * (scopeTargets) against it to produce a Good/Better/Best dollar target
- * per in-scope system, and lines that up against what's actually been
- * placed on the sheet (byScope, from bomBySpace) so a designer can see at
- * a glance whether Lighting is over or under budget.
+ * snapshot on the project, and lines the SERVER-computed Good/Better/Best
+ * sell targets (#GEM, D-GEM-5 — priced from the Equipment map) up against
+ * what's actually been placed on the sheet (byScope, from bomBySpace) so a
+ * designer can see at a glance whether Lighting is over or under budget.
  *
  * Only 5 of the 8 Quick Design systems are catalog-trackable in the Grid
  * (Jeff's five scopes in grid-scopes.ts — Lighting, Rigging, Curtains,
@@ -96,7 +88,21 @@ function moneyFmt(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
 }
 
-function ProgressRow({ label, color, placed, target }: { label: string; color: string; placed: number; target: number }) {
+function ProgressRow({
+  label,
+  color,
+  placed,
+  target,
+  needsPart = 0,
+  allowances = 0,
+}: {
+  label: string;
+  color: string;
+  placed: number;
+  target: number;
+  needsPart?: number;
+  allowances?: number;
+}) {
   const pct = target > 0 ? Math.min(1, placed / target) : placed > 0 ? 1 : 0;
   return (
     <div style={{ display: "grid", gap: 4 }}>
@@ -112,6 +118,20 @@ function ProgressRow({ label, color, placed, target }: { label: string; color: s
       <div style={{ height: 5, borderRadius: 3, background: "#edeff3", overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${pct * 100}%`, background: color, transition: "width .2s" }} />
       </div>
+      {(needsPart > 0 || allowances > 0) && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10.5 }}>
+          {needsPart > 0 && (
+            <Link href="/design/grid/settings/equipment-map" style={{ color: "#a0442b", textDecoration: "none" }}>
+              {needsPart} item{needsPart === 1 ? "" : "s"} need{needsPart === 1 ? "s" : ""} a part — not in the target
+            </Link>
+          )}
+          {allowances > 0 && (
+            <span style={{ color: "#8a6d1f" }}>
+              {allowances} allowance{allowances === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -120,7 +140,7 @@ export default function ScopePanel({
   projectId,
   scopeInputs,
   byScope,
-  engineFabrics,
+  targets,
   defaultTier,
   onChanged,
   onError,
@@ -130,7 +150,8 @@ export default function ScopePanel({
   /** Whole-project placed $/count per scope, from bomBySpace(placements,
    *  parts, []) — computed once in editor.tsx. */
   byScope: RollupSlice[];
-  engineFabrics: FabricOption[];
+  /** Sell-only Good/Better/Best targets per scope, computed server-side (#GEM). */
+  targets: ScopeTargetsByTier | null;
   /** Active option's tier (Spec 1) — the lens' initial value, never a gate. */
   defaultTier?: TierKey;
   onChanged: () => void;
@@ -139,7 +160,6 @@ export default function ScopePanel({
   const [tierKey, setTierKey] = useState<TierKey>(defaultTier ?? "better");
   const [pending, startTransition] = useTransition();
   const accentHex = useSyncExternalStore(subscribeAccent, getAccentHex, getAccentHexServer);
-  const tierDefs = useSyncExternalStore(subscribeTierDefs, getTierDefs, getTierDefsServer);
 
   // Local optimistic draft (D-manual-scope-targets fix): range-slider
   // dimension fields fire onChange on every drag step, and since the
@@ -212,10 +232,7 @@ export default function ScopePanel({
     }, 400);
   };
 
-  const targets = useMemo(() => {
-    if (!scopeInputs) return {};
-    return scopeTargets(scopeInputs, tierKey, tierDefs, engineFabrics);
-  }, [scopeInputs, tierKey, tierDefs, engineFabrics]);
+  const tierTargets = targets?.[tierKey] ?? {};
 
   const placedByKey = new Map(byScope.map((s) => [s.key, s]));
   const trackedKeys = SYS_ORDER.filter((k) => TRACKABLE_SYS_KEYS.includes(k) && scopeInputs?.sys[k]);
@@ -268,7 +285,15 @@ export default function ScopePanel({
               const scopeKey = SYS_TO_GRID_SCOPE[k]!;
               const placed = placedByKey.get(scopeKey)?.value || 0;
               return (
-                <ProgressRow key={k} label={SHORT[k]} color={scopeColor(scopeKey)} placed={placed} target={targets[k] || 0} />
+                <ProgressRow
+                  key={k}
+                  label={SHORT[k]}
+                  color={scopeColor(scopeKey)}
+                  placed={placed}
+                  target={tierTargets[k]?.sell || 0}
+                  needsPart={tierTargets[k]?.needsPart || 0}
+                  allowances={tierTargets[k]?.allowances || 0}
+                />
               );
             })}
           </div>

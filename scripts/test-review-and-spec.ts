@@ -17772,3 +17772,40 @@ const gemValueImports = (src: string): string[] =>
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
   ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#GEM T3: every settings action, the four new ones included, is admin-gated");
 }
+
+/* --- #GEM T4: Scope targets are computed on the server; the old seeder is gone --- */
+import { scopeTargetsByTier as gemTargetsByTier4, targetsFromSystems as gemTargetsFrom4 } from "@/lib/design/scope-targets";
+import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } from "@/app/(app)/design/quick/engine";
+{
+  type St = "part" | "assembly" | "allowance" | "needs-part";
+  const sys = (key: string, on: boolean, rev: number, items: Array<{ key: string; qty: number; status?: St }>): GemSystemBlock4 => ({
+    key: key as GemSystemBlock4["key"], name: key, on, m: 0.3, dot: "", rev, cost: 0,
+    items: items.map((i) => ({ key: i.key, desc: i.key, qty: i.qty, unit: "ea", cost: 0, price: 0, ...(i.status ? { status: i.status } : {}) })),
+  });
+  const inputs = { ...gemDefault4(0), venue: "pac" };
+  const seen: string[] = [];
+  const byTier = gemTargetsByTier4(inputs, (s, tier) => {
+    seen.push(`${tier}:${s.tier}`);
+    return [
+      sys("lighting", true, tier === "best" ? 300 : 100, [
+        { key: "lighting:par", qty: 4, status: "needs-part" },
+        { key: "lighting:front", qty: 2, status: "allowance" },
+        { key: "lighting:cyc", qty: 0, status: "needs-part" },
+      ]),
+      sys("controls", false, 999, []),
+    ];
+  });
+  ok(seen.join(",") === "good:good,better:better,best:best", "#GEM T4: the pricer runs once per tier, with that tier set on the state");
+  ok(byTier.best.lighting?.sell === 300 && byTier.good.lighting?.sell === 100, "#GEM T4: one target per tier, from the priced system's revenue");
+  ok(byTier.better.lighting?.needsPart === 1 && byTier.better.lighting?.allowances === 1, "#GEM T4: needs-a-part and allowance lines are counted, qty-0 lines are not");
+  ok(!("controls" in byTier.better) && Object.keys(gemTargetsFrom4([])).length === 0, "#GEM T4: an off system gets no target");
+  const spSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/scope-panel.tsx"), "utf8");
+  ok(!spSrc.includes("scopeTargets(") && !spSrc.includes("FabricOption") && !spSrc.includes("subscribeTierDefs"), "#GEM T4: the Scope panel computes no targets in the browser");
+  const edSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  const pgSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
+  ok(!edSrc.includes("engineFabrics") && !pgSrc.includes("engineFabrics={") && pgSrc.includes("scopeTargets={scopeTargets}"), "#GEM T4: no cost-bearing fabric rows cross to the Grid client (D139's crossing is gone)");
+  const seedSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-seed.ts"), "utf8");
+  const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
+  ok(!seedSrc.includes("quick/engine") && !seedSrc.includes("deriveSeedPlacements") && seedSrc.includes("export function isSeedPlaceholder"), "#GEM T4: grid-seed keeps only the placeholder helpers");
+  ok(!actSrc.includes("seedStartingLayoutAction") && !actSrc.includes("deriveSeedPlacements"), "#GEM T4: the old seeding action is removed");
+}

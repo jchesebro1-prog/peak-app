@@ -49,7 +49,8 @@ import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { optionSlice } from "@/lib/design/grid-options";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
-import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
+import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
+import type { ScopeTargetsByTier } from "@/lib/design/scope-targets";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
@@ -235,7 +236,7 @@ export default function GridEditor({
   sheets,
   parts,
   fabrics,
-  engineFabrics,
+  scopeTargets,
   curtainCoeffs,
   laborParts,
   laborHoursPerDevice,
@@ -252,10 +253,9 @@ export default function GridEditor({
   parts: PartLite[];
   /** Catalog fabric rows with SELL price/sq ft (punch #49) - never cost. */
   fabrics: FabricSell[];
-  /** Cost-bearing fabric rows for the scope-targets engine
-   *  (D-manual-scope-targets, DECISIONS.md), distinct from the
-   *  SELL-priced `fabrics` above (punch #49). */
-  engineFabrics: FabricOption[];
+  /** Scope panel Good/Better/Best targets per scope (#GEM, D-GEM-5) — SELL
+   *  numbers computed server-side (grid/[id]/page.tsx); no cost crosses. */
+  scopeTargets: ScopeTargetsByTier | null;
   /** Sell-side making coefficients for the live curtain price (punch #49). */
   curtainCoeffs: SellCoeffs;
   /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
@@ -1523,7 +1523,7 @@ export default function GridEditor({
             projectId={project.id}
             scopeInputs={project.scopeInputs}
             byScope={projectScopeRollup?.byScope || []}
-            engineFabrics={engineFabrics}
+            targets={scopeTargets}
             defaultTier={activeOption.tier}
             onChanged={() => router.refresh()}
             onError={(m) => setErr(m)}

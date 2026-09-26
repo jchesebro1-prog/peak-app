@@ -21,6 +21,8 @@ import { symbolContext } from "@/lib/design/grid-icons";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
+import { compute, tierDefsDefault, tierSystems } from "@/app/(app)/design/quick/engine";
+import { scopeTargetsByTier } from "@/lib/design/scope-targets";
 import type { FabricOption } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
@@ -130,11 +132,14 @@ export default async function GridEditorPage({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  // Cost-bearing fabric rows for the Scope panel's target $ math
-  // (D-manual-scope-targets, engine.ts scopeTargets — see DECISIONS.md).
+  // Scope targets (#GEM, D-GEM-5) — computed HERE; only sell numbers reach the
+  // editor. The cost-bearing fabric rows below never leave the server.
   const engineFabrics: FabricOption[] = catalog
     .filter((p) => p.category === "Fabric")
     .map((p) => ({ sku: p.sku, desc: p.desc, costPerSqft: p.costPerSqft ?? null }));
+  const scopeTargets = project.scopeInputs
+    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), engineFabrics))
+    : null;
 
   const curtainCoeffs = sellCoeffs(tier.margin);
   const laborParts: LaborPartLite[] = catalog
@@ -182,7 +187,7 @@ export default async function GridEditorPage({
       }))}
       parts={parts}
       fabrics={fabrics}
-      engineFabrics={engineFabrics}
+      scopeTargets={scopeTargets}
       curtainCoeffs={curtainCoeffs}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
