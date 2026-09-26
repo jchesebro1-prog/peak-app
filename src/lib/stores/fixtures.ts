@@ -50,8 +50,18 @@ export async function createFixture(value: CleanFixture, by: string, snapshot: F
   throw new Error(`Could not mint a free fixture id after ${base}`);
 }
 
-/** Replace the record body; keep id, kind, created stamps and provenance.
- *  A human save clears `needsReview`. */
+/** Field names FixtureRecord defines but `value` (CleanFixture) may not carry
+ *  — every optional field, even when absent from this save, so a cleared
+ *  optional (lamp, position, circuit…) is never resurrected from `existing`
+ *  just because it shares a name with the new shape. */
+const OPTIONAL_FIXTURE_FIELDS = ["scope", "lightEngineLine", "lensLine", "lamp", "position", "circuit", "parts"] as const;
+
+/** Replace the record body; keep id, kind, created stamps and provenance —
+ *  and, for a converted row (fix wave 1), every legacy-only key `value`
+ *  doesn't know about (options, lightEngineName, lensName, lightEngineCost,
+ *  lensCost, cost, price, snapshot-era keys…), so the first human save of a
+ *  converted SA- row doesn't silently drop the rollback/older-build fields
+ *  fixtures-migrate.ts deliberately kept. A human save clears `needsReview`. */
 export async function updateFixture(
   existing: FixtureRecord,
   value: CleanFixture,
@@ -59,7 +69,17 @@ export async function updateFixture(
   snapshot: FixtureSnapshot,
   now = Date.now()
 ): Promise<FixtureRecord> {
-  const rec: FixtureRecord = {
+  const newShapeKeys = new Set<string>([
+    ...Object.keys(value),
+    "id", "kind", "snapshot", "createdAt", "createdBy", "updatedAt", "updatedBy", "legacy", "needsReview",
+    ...OPTIONAL_FIXTURE_FIELDS,
+  ]);
+  const legacyCarry: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(existing)) {
+    if (!newShapeKeys.has(k)) legacyCarry[k] = v;
+  }
+  const rec = {
+    ...legacyCarry,
     ...value,
     id: existing.id,
     kind: existing.kind,
@@ -69,7 +89,7 @@ export async function updateFixture(
     updatedAt: now,
     updatedBy: by,
     ...(existing.legacy ? { legacy: existing.legacy } : {}),
-  };
+  } as FixtureRecord;
   return upsertDoc(COLL, rec);
 }
 

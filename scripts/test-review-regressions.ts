@@ -3129,6 +3129,92 @@ async function main() {
     assert(cleared.needsReview === undefined && cleared.legacy?.from === "assembly" && cleared.id === "fa-fxb-nr", "#FXB store: a human save clears needs-review and keeps the id + provenance");
   }
 
+  /* --- #FXB fix wave 1: updateFixture must not drop a converted SA- row's
+         legacy-only keys (options, lightEngineName, lensName,
+         lightEngineCost, lensCost, cost, price, snapshot-era keys…) on the
+         first human save. upsertDoc is a full-record replace, and `rec` used
+         to be built from `value` (the clean new shape) alone, so those keys
+         — kept verbatim by fixtures-migrate.ts for rollback/older-build
+         compatibility — silently vanished. --- */
+  {
+    const Fx = await import("@/lib/stores/fixtures");
+    const { subassemblyToFixture } = await import("@/lib/fixtures-convert");
+    const { additiveFixturePatch } = await import("@/lib/fixtures-migrate");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const DS = await import("@/db/doc-store");
+
+    // A row shaped exactly like a real conversion's output: the original
+    // legacy Subassemblies-tab fields, additively merged with what
+    // subassemblyToFixture computes (fixtures-migrate.ts's own merge path) —
+    // plus needsReview:true, to also prove that clears.
+    const rawLegacy: Record<string, unknown> & { id: string } = {
+      id: "SA-FXB-LEGACY",
+      kind: "fixture",
+      label: "Legacy Fixture",
+      description: "Old desc",
+      lightEngineSku: "FXB-ENG-L",
+      lightEngineName: "Legacy Engine",
+      lightEngineCost: 40,
+      lensSku: "FXB-LENS-L",
+      lensName: "Legacy Lens",
+      lensCost: 10,
+      lamp: "575W",
+      position: "FOH",
+      circuit: "A1",
+      options: { data: [], power: [{ sku: "FXB-CBL-L", name: "Legacy Cable", cost: 5, qty: 1 }], mounting: [], accessories: [] },
+      cost: 55,
+      price: 55,
+      createdAt: 1_600_000_000_000,
+      updatedAt: 1_600_000_000_000,
+    };
+    const convertedShape = subassemblyToFixture(rawLegacy as never);
+    const legacyRow = { ...rawLegacy, ...additiveFixturePatch(rawLegacy as never, convertedShape), needsReview: true };
+    assert(await DS.insertDocIfAbsent("subassemblies", legacyRow), "#FXB fix wave 1 setup: the converted-shaped legacy row inserts");
+
+    const before = (await Fx.getFixture("SA-FXB-LEGACY"))!;
+    assert.equal(before.position, "FOH", "#FXB fix wave 1 setup: the row reads back its legacy optional fields");
+    assert.equal(before.needsReview, true, "#FXB fix wave 1 setup: …and its needs-review flag");
+
+    // Edit through the form: rename, keep the light engine + circuit, but
+    // leave lamp/position blank — sanitizeFixtureInput omits a blank optional
+    // entirely, so `value` carries no key for it at all. The bug read
+    // "no key in value" as "nothing to carry", so it fell through to
+    // existing.lamp / existing.position and resurrected them.
+    const edited = sanitizeFixtureInput({
+      kind: "fixture",
+      label: "Legacy Fixture — edited",
+      description: "Old desc",
+      lightEngineSku: "FXB-ENG-L",
+      lensSku: "FXB-LENS-L",
+      circuit: "A1",
+    });
+    assert(edited.ok, "#FXB fix wave 1: the edited input sanitizes");
+    if (!edited.ok) throw new Error("unreachable");
+    const snap = { cost: 0, price: 0, pricedAt: null };
+    const saved = await Fx.updateFixture(before, edited.value, "Jeff", snap, 1_700_000_200_000);
+
+    assert.equal(saved.label, "Legacy Fixture — edited", "#FXB fix wave 1: the new-shape field reflects the edit");
+    assert.equal(saved.circuit, "A1", "#FXB fix wave 1: a kept optional survives the save");
+    assert.equal(saved.lamp, undefined, "#FXB fix wave 1: a cleared optional (lamp) stays cleared — not resurrected from existing");
+    assert.equal(saved.position, undefined, "#FXB fix wave 1: a cleared optional (position) stays cleared — not resurrected from existing");
+    assert.equal(saved.needsReview, undefined, "#FXB fix wave 1: a human save clears needs-review");
+
+    const stored = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FXB-LEGACY"))!;
+    assert.equal(stored.cost, 55, "#FXB fix wave 1: legacy `cost` survives the save");
+    assert.equal(stored.price, 55, "#FXB fix wave 1: legacy `price` survives the save");
+    assert.equal(stored.lightEngineName, "Legacy Engine", "#FXB fix wave 1: legacy `lightEngineName` survives the save");
+    assert.equal(stored.lensName, "Legacy Lens", "#FXB fix wave 1: legacy `lensName` survives the save");
+    assert.equal(stored.lightEngineCost, 40, "#FXB fix wave 1: legacy `lightEngineCost` survives the save");
+    assert.equal(stored.lensCost, 10, "#FXB fix wave 1: legacy `lensCost` survives the save");
+    assert.deepEqual(
+      (stored.options as Record<string, unknown[]>).power,
+      [{ sku: "FXB-CBL-L", name: "Legacy Cable", cost: 5, qty: 1 }],
+      "#FXB fix wave 1: legacy `options` survives the save"
+    );
+    assert(!("lamp" in stored), "#FXB fix wave 1: the cleared optional is actually gone from storage, not just from the returned value");
+    assert(!("needsReview" in stored), "#FXB fix wave 1: needs-review is actually gone from storage");
+  }
+
   console.log("review regression checks passed");
 }
 
