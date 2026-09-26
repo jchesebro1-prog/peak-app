@@ -187,9 +187,9 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
   if (def?.curtain) {
     const { hits } = await searchCatalog(q, "Fabric", 15);
     if (!hits.length) return { hits: [] };
-    const parts = await getCatalogParts(hits.map((h) => h.sku));
+    const [parts, rates] = await Promise.all([getCatalogParts(hits.map((h) => h.sku)), getCatalogRates()]);
     const bySku = new Map(parts.map((p) => [p.sku, p]));
-    return { hits: curtainSwapHits(hits.map((h) => ({ sku: h.sku, desc: h.desc, curtainAreaRate: bySku.get(h.sku)?.curtainAreaRate }))) };
+    return { hits: curtainSwapHits(hits.map((h) => ({ sku: h.sku, desc: h.desc, curtainAreaRate: bySku.get(h.sku)?.curtainAreaRate })), rates.defaultMargin) };
   }
   const [{ hits }, fixtures, rates] = await Promise.all([searchCatalog(q, "", 15), listFixtures(), getCatalogRates()]);
   const m = rates.defaultMargin;

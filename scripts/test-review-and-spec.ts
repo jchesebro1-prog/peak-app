@@ -18250,17 +18250,17 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
   const fabricHits9 = gemCurtainHits9([
     { sku: "GEM9-VEL", desc: "GEM9 velour", curtainAreaRate: 3.5 },
     { sku: "GEM9-RATELESS", desc: "GEM9 unrated fabric" },
-  ]);
+  ], 0.3);
   ok(
     fabricHits9.length === 1 &&
       fabricHits9[0].kind === "part" &&
       fabricHits9[0].ref === "GEM9-VEL" &&
       fabricHits9[0].unit === "sq ft" &&
-      fabricHits9[0].unitSell === 3.5,
-    "#GEM T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown at that rate — a list-less, cost-less fabric is still findable"
+      fabricHits9[0].unitSell === 5,
+    "#GEM T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
   );
   ok(
-    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }]).length === 0,
+    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }], 0.3).length === 0,
     "#GEM T8 fix wave 1 (I2): a Fabric part with no area rate at all is never a curtain-row candidate"
   );
 

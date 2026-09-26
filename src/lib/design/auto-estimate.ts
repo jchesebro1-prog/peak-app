@@ -175,14 +175,14 @@ export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: strin
  * when it has a positive area rate — a list-less, cost-less fabric priced
  * only by area rate (the normal case) is still findable, and nothing here is
  * ever an assembly (a curtain row maps to a Fabric part, never a System).
- * The rate itself is shown as the unit sell basis: a fabric has no per-each
- * sell price until a drape's geometry is known, so there is no cost-to-sell
- * conversion to make here.
+ * The area rate is a COST basis, so it is shown as a per-sq-ft SELL through
+ * the catalog margin (the same list-less rule the Equipment map prices a
+ * fabric row with) — the client never sees the raw cost rate.
  */
-export function curtainSwapHits(parts: ReadonlyArray<{ sku: string; desc: string; curtainAreaRate?: number }>): AutoEquipHit[] {
+export function curtainSwapHits(parts: ReadonlyArray<{ sku: string; desc: string; curtainAreaRate?: number }>, margin: number): AutoEquipHit[] {
   return parts
     .filter((p) => Number(p.curtainAreaRate ?? 0) > 0)
-    .map((p) => ({ kind: "part", ref: p.sku, desc: p.desc, unit: "sq ft", unitSell: Number(p.curtainAreaRate) }));
+    .map((p) => ({ kind: "part", ref: p.sku, desc: p.desc, unit: "sq ft", unitSell: sellFromCost(Number(p.curtainAreaRate), margin) }));
 }
 
 /** A non-curtain row's part candidates: priced (a cost or a list), sell-only. */
