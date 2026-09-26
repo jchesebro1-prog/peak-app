@@ -246,7 +246,6 @@ export default function GridEditor({
   curtainCoeffs,
   laborParts,
   laborHoursPerDevice,
-  specHref,
   venues,
   canCreate,
   symbolCtx,
@@ -270,8 +269,6 @@ export default function GridEditor({
   laborParts: LaborPartLite[];
   /** Install-hours-per-device knob from the pricing rules. */
   laborHoursPerDevice: number;
-  /** D94 bid-spec generator for this customer's engagement, when one exists. */
-  specHref: string | null;
   /** The customer's venues, for the picker (D113.6). */
   venues: Array<{ id: string; name: string }>;
   /** Gates delete — a Reviewer approves designs but has never made one. */
@@ -2008,12 +2005,12 @@ export default function GridEditor({
                 View in Quotes →
               </Link>
             )}
-            {activeOption.quoteId && specHref && (
+            {activeOption.quoteId && (
               <Link
-                href={specHref}
+                href={`/design/specs/new?grid=${encodeURIComponent(project.id)}&quote=${encodeURIComponent(activeOption.quoteId)}`}
                 style={{ display: "block", marginTop: 3, fontSize: 11.5, color: "var(--accent)", textAlign: "center" }}
               >
-                Bid spec from this design →
+                Spec from this design →
               </Link>
             )}
           </div>

@@ -6315,3 +6315,40 @@ are pure in `src/lib/specs/product-spec-import.ts`; reading and writing in `src/
 - **Known limit:** a part outside the file that already points "same as" at a part this import turns into a same-as
   becomes a two-hop chain, which reads as "missing" in coverage (D94's one-hop rule) rather than printing wrong
   text. Fix by pointing it at the holder in the Spec panel.
+
+## D329. Spec builder replaces the D94 generator's entry points (#205, 2026-09-26)
+
+The new Specs module builder (`/design/specs`) is now how a real Word spec gets assembled — one CSI section per
+file, saved as `spec_documents` (`SP-####`). Parts 1 and 3 are read live from the library at preview and download
+time; the downloaded Word file is a snapshot, not a copy stored on the spec. Quotes hub, the Grid editor and the
+consulting engagement all now open `/design/specs/new` with a source param instead of D94's engagement-scoped
+generator. D94's own screens are untouched and stay reachable — old saved D94 specs are still viewable at
+`/design/engagements/spec/[id]` — but nothing links a user into starting a new one from there anymore.
+
+## D330. Word output uses one real multi-level numbering definition (#205, 2026-09-26)
+
+The generated `.docx` carries one Word multi-level list (PART → n.m → A. → 1. → a. → 1) → a)) instead of typed-in
+numbers, so inserting a paragraph in Word renumbers everything after it. PART and article headings number through
+their Heading 1/2 styles (style-linked to the list), so a heading typed straight into Word numbers itself; body
+levels below that use direct numbering. This is deliberately unlike D94a's generator, which types numbers as text.
+Header, footer and file name follow the North HS originals (running header: date · project name · Project No. ·
+phase; footer: section title + page number; file name `<projectNumber>_<projectName>_Spec <number>_<title>_<date>.docx`).
+
+## D331. Products picker, headers and quantities (#205, 2026-09-26)
+
+The product picker defaults to parts with an approved spec in the section being built, grouped by category header;
+a **Show all catalog parts** switch reveals the rest of the catalog so a part with no spec text yet can be written
+one on the spot (the Spec panel's own "authored" action — the text is saved to the part, not the spec, and the
+part's live article placement is untouched). A per-spec header override lets one spec place a part under a
+different article without changing where the part itself normally prints. Products that are left out — no
+printable spec, needing a header, belonging to another section, or since deleted from the catalog — are listed in
+the builder's checklist, never printed, and never block a download. Quantities print only when the spec has a BOM
+source and **Print quantities** is switched on (off by default); a from-scratch spec never shows quantities.
+
+## D332. Fill-ins are keyed by article position, not stored as free text (#205, 2026-09-26)
+
+Each `[FILL IN: …]` blank in a section's Part 1/3 gets a key of its article id plus its position among that
+article's blanks, and every spec answers them independently — the same section used by two specs can have two
+different answers. An unanswered blank prints exactly as written in the library. If the library text changes so a
+saved key no longer has a matching blank, the builder shows that answer as stale ("no longer used") and never
+re-applies it elsewhere.

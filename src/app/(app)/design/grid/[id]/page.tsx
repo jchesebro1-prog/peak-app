@@ -7,8 +7,6 @@ import { list as listCatalog } from "@/lib/stores/catalog";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
-import { allEngagements } from "@/lib/stores/engagements";
-import { isOpenEngagement } from "@/lib/consulting-review";
 import { sitesForCompany } from "@/lib/identity/sites";
 import { num } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
@@ -78,11 +76,10 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, engagements, laborHoursPerDevice, settings, linesetDesigns] = await Promise.all([
+  const [sheets, catalog, gridSymbols, laborHoursPerDevice, settings, linesetDesigns] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
-    allEngagements(),
     // Install-hours-per-device knob (D114) — admin-tunable, now registered in
     // pricing.ts GROUPS (key "grid") and editable from Design → Grid Settings
     // as well as Estimating Rules. num() (not frac()) because this is a raw
@@ -102,16 +99,6 @@ export default async function GridEditorPage({
   // always fell back to DEFAULT_WIRE_TYPES and an admin's edits here were
   // invisible to the UX-only check (the server action was the same gap).
   const wireTypes = resolveWireTypes(settings.wireTypes);
-
-  // The D94 bid-spec generator is engagement-scoped; when the customer has a
-  // live engagement, the editor links straight into it (the generator's
-  // "Start from a quote" list matches this design's quote by customer).
-  const eng = project.customerId
-    ? engagements.find(
-        (e) => e.companyId === project.customerId && isOpenEngagement(e)
-      )
-    : undefined;
-  const specHref = eng ? `/design/engagements/spec?id=${encodeURIComponent(eng.id)}` : null;
 
   // Venue picker options (D113.6) — the customer's sites.
   const sites = project.customerId ? await sitesForCompany(project.customerId) : [];
@@ -229,7 +216,6 @@ export default async function GridEditorPage({
       curtainCoeffs={curtainCoeffs}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
-      specHref={specHref}
       venues={venues}
       symbolCtx={symbolContext(settings)}
       wireTypes={wireTypes}

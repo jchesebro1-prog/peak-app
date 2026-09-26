@@ -458,7 +458,7 @@ function EngagementDetail({
         <Link href={`/design/engagements/letter?id=${encodeURIComponent(eng.id)}&kind=spec`} style={{ color: "var(--accent)" }}>
           Spec package
         </Link>
-        <Link href={`/design/engagements/spec?id=${encodeURIComponent(eng.id)}`} style={{ color: "var(--accent)" }}>
+        <Link href={`/design/specs/new?engagement=${encodeURIComponent(eng.id)}`} style={{ color: "var(--accent)" }}>
           Bid specification →
         </Link>
       </div>

@@ -19194,3 +19194,12 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
   const nw = read("src/app/(app)/design/specs/new/page.tsx");
   ok(list.includes('can("create"') && nw.includes('can("create"'), "#205 spec builder: + New spec and the New spec form are gated on create");
 }
+
+// #205 spec builder T6
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(read("src/app/(app)/quotes/page.tsx").includes("/design/specs/new?quote="), "#205 spec builder: quotes hub offers Spec from this quote");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("/design/specs/new?grid=") && ed.includes("Spec from this design"), "#205 spec builder: the Grid editor links to the spec builder without an engagement");
+  ok(read("src/app/(app)/design/engagements/view.tsx").includes("/design/specs/new?engagement="), "#205 spec builder: the engagement's Bid spec link opens the new builder");
+}

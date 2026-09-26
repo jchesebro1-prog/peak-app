@@ -982,6 +982,11 @@ function SelectedPanel({
             Engagement {engagement.id} · {engagement.stage}
           </Link>
         )}
+        {(!q.quoteType || q.quoteType === "system") && (
+          <Link href={`/design/specs/new?quote=${encodeURIComponent(q.id)}`} className="pk-btn-outline">
+            Spec from this quote →
+          </Link>
+        )}
         <div
           style={{
             marginLeft: "auto",

@@ -220,7 +220,7 @@ See `.env.example`.
     Daylite project/opportunity history (`src/lib/daylite/`) and
     supersedes the July script, which now imports identity only.
     Remaining: Jeff's production run (#191), follow-ups #188–#192, O1.
-13. 🚧 **Specs module** (#205, D254–D261) — Phase A (library) done:
+13. ✅ **Specs module** (#205, D254–D261, D329–D332) — Phase A (library):
     a pure outline text engine (`src/lib/specs/outline.ts`); three new
     collections (`spec_articles`, `spec_templates`, `spec_curtain_templates`)
     alongside an upgraded `spec_sections`; canonical spec fields on
@@ -232,13 +232,26 @@ See `.env.example`.
     on any environment; library JSON export/import outside the columnar
     Import hub; and the catalog importer carrying the same spec columns,
     exact-header-only, gating drafts everywhere a spec prints, including the
-    external Displays API. Phase B (the generator, the four doors, docx/zip
-    output, a print view) and the `spec-writer` skill remain. The North HS
-    seed shipped Sep 26 (D326–D327): six sections' Part 1/3 + Part 2
-    category headers, job text as fill-ins, `scripts/specs-seed-northhs.py`
-    → `docs/specs-seed/northhs-2026-07-30/`; its product-specs template loads
-    back by MFR # at `/design/specs/library/product-specs` (D328, matched
-    parts only). Decisions D254–D261; punch #205.
+    external Displays API. The North HS seed shipped Sep 26 (D326–D327): six
+    sections' Part 1/3 + Part 2 category headers, job text as fill-ins,
+    `scripts/specs-seed-northhs.py` → `docs/specs-seed/northhs-2026-07-30/`;
+    its product-specs template loads back by MFR # at
+    `/design/specs/library/product-specs` (D328, matched parts only).
+    Phase B (D329–D332): a builder at `/design/specs` assembles a real,
+    editable Word spec — one CSI section per file, saved as `spec_documents`
+    (`SP-####`) reading Parts 1/3 live from the library; a fill-in form per
+    `[FILL IN: …]` blank; a product picker (approved-spec parts by default,
+    "Show all catalog parts" to author spec text onto a part on the spot);
+    a checklist of left-out products that warns without blocking; quantities
+    from a BOM behind Print quantities (off by default); and a Word download
+    with one real multi-level numbering definition that renumbers itself
+    when edited in Word. Quotes hub, the Grid editor and the consulting
+    engagement all open the new builder instead of the D94 generator's old
+    entry points; old saved D94 specs stay viewable at
+    `/design/engagements/spec/[id]`. Remaining: the `spec-writer` skill,
+    Grid curtains via curtain templates, a zip of several sections, and a
+    real-Word numbering check on Jeff's machine. Decisions D254–D261,
+    D329–D332; punch #205.
 14. ✅ **Part documents** (#207, D270–D280) — datasheets and spec sheets are
     shared `part_documents` records linked to many parts through
     `part_document_links`, with accessory coverage computed in context from
