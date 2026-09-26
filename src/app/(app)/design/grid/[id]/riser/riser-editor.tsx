@@ -266,7 +266,10 @@ export default function RiserEditor({
       const n = nodeByKey.get(key);
       const p = toUnit(e);
       if (!n || !p) return;
-      const box = liveBoxes[key] || n.box;
+      // A kept live box never shrinks below the node's current height (devices
+      // added since the last drag grow n.box.h) — same rule as RiserCanvas.
+      const live = liveBoxes[key];
+      const box = live ? { ...live, h: Math.max(live.h, n.box.h) } : n.box;
       drag.current = { kind: "node", key, dx: p.x - box.x, dy: p.y - box.y, box };
       e.currentTarget.setPointerCapture(e.pointerId);
     },

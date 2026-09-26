@@ -2503,6 +2503,36 @@ async function main() {
     assert.equal(capped.notes.length, GRD.MAX_NOTES, "#GDS M3: normalizeRiserDoc slices over-cap notes");
     assert.equal(capped.links.length, GRD.MAX_LINKS, "#GDS M3: normalizeRiserDoc slices over-cap links");
 
+    // Final review — write-side caps for links and conduits. Seed a full document in ONE write
+    // (adding 1000 links one by one would be slow), then an add of either is refused as "cap".
+    await patchDoc<{ id: string; riser?: Record<string, unknown> }>("grid_projects", p0.id, (doc) => {
+      const cur = GRD.normalizeRiserDoc(doc.riser?.[opt]);
+      const sp = (id: string | null) => ({ kind: "space" as const, spaceId: id });
+      doc.riser = {
+        ...(doc.riser || {}),
+        [opt]: {
+          ...cur,
+          conduits: Array.from({ length: GRD.MAX_CONDUITS }, (_, i) => ({ id: `cd-cap-${i}`, from: sp(stage.id), to: sp(booth.id), label: `c${i}` })),
+          links: Array.from({ length: GRD.MAX_LINKS }, (_, i) => ({ id: `lk-cap-${i}`, from: sp(stage.id), to: sp(booth.id), partId: "WIRE-X", lengthFt: 5, by, at: 1 })),
+        },
+      };
+    });
+    assert.deepEqual(
+      await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "space", spaceId: stage.id }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 12, by }),
+      { ok: false, reason: "cap" },
+      "#GDS final: a link beyond MAX_LINKS is refused with 'cap'"
+    );
+    assert.deepEqual(
+      await GR.patchRiser(p0.id, opt, { op: "addConduit", from: { kind: "space", spaceId: stage.id }, to: { kind: "space", spaceId: booth.id }, label: "one too many" }),
+      { ok: false, reason: "cap" },
+      "#GDS final: a conduit beyond MAX_CONDUITS is refused with 'cap'"
+    );
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(
+      p.riser![opt].links.length === GRD.MAX_LINKS && p.riser![opt].conduits.length === GRD.MAX_CONDUITS,
+      "#GDS final: the refused link and conduit were never stored"
+    );
+
     // M4 — buildGridQuote prices RiserLink footage summed with same-cable routes BEFORE the
     // per-part ceiling, and is unchanged (matches plain route math) when there are no links.
     {

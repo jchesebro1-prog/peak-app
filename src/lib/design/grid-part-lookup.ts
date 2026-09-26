@@ -1,6 +1,10 @@
 import { get as getPart } from "@/lib/stores/catalog";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 
+// Server-only (the `server-only` package isn't installed here): fail loudly
+// if a client bundle ever pulls this store-backed lookup in.
+if (typeof window !== "undefined") throw new Error("grid-part-lookup is server-only");
+
 /**
  * A part id as the Grid stores it: a pricing-catalog row first, else a
  * Grid-library entry (unit "ea", sku = model number). Server-only. Moved

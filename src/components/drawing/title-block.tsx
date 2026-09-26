@@ -1,4 +1,5 @@
 import type { TitleBlockData } from "@/lib/design/grid-drawing-set";
+import { DEFAULT_TZ } from "@/lib/venue-availability";
 
 /**
  * The drawing-set title block (#GDS, spec 2026-09-25 §2.1 — "A · Architectural
@@ -12,8 +13,10 @@ import type { TitleBlockData } from "@/lib/design/grid-drawing-set";
  * server renderer puts <!-- --> between adjacent text nodes.
  */
 
+// The app's default office zone, not the server's (a UTC server would print
+// tomorrow's date on an evening set).
 const fmtDate = (ms: number) =>
-  new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: DEFAULT_TZ });
 
 export function TitleBlock({ data }: { data: TitleBlockData }) {
   const { company, project, sheet } = data;
