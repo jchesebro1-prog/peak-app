@@ -223,6 +223,11 @@ export type BomLine = {
   kind?: "curtain";
   /** Curtain lines only: the name the designer typed, for a short label. */
   curtainName?: string;
+  /** #212: an allowance line that carries its own flag (custom items) —
+   *  the quote marks its spec line `allowance`, the bid spec drops it. */
+  allowance?: true;
+  /** #212: a per-design custom item — `partId` is `custom:<id>`, not a catalog id. */
+  custom?: true;
 };
 
 /**

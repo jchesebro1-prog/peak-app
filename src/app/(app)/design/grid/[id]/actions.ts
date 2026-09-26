@@ -15,6 +15,7 @@ import {
   generateBaseSheet,
   getProject,
   movePlacement,
+  removeCustomItem,
   removeOption,
   removePlacement,
   removeProject,
@@ -31,12 +32,14 @@ import {
   setLinesetDesign,
   setSheetCalibration,
   setVenue,
+  saveCustomItem,
   saveGridIntake,
   setAutoEstimate,
 } from "@/lib/stores/grid-projects";
 import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
+import type { GridCustomItemInput } from "@/lib/design/grid-custom-items";
 import { can } from "@/lib/team";
 import { designsForGridProject, removeDesign, updateDesign } from "@/lib/stores/designs";
 import { getSite } from "@/lib/identity/sites";
@@ -967,4 +970,38 @@ export async function refillScopeAction(input: {
   if (!res.ok) return res;
   revalidatePath(editorPath(input.projectId));
   return res;
+}
+
+/* ------------------------------ custom items (#212) ------------------------------ */
+
+/**
+ * Add or edit one per-design custom item on an option — "a product that just
+ * doesn't have a catalog item" (#212). Same gate as the placement edits; the
+ * store re-sanitizes whatever arrives. Revalidates the Designs dashboard too,
+ * since its live budget reads this option's quote build.
+ */
+export async function saveCustomItemAction(
+  projectId: string,
+  optionId: string,
+  input: GridCustomItemInput
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  await requireUser();
+  const r = await saveCustomItem(projectId, optionId, input);
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true, id: r.item.id };
+}
+
+export async function removeCustomItemAction(
+  projectId: string,
+  optionId: string,
+  itemId: string
+): Promise<Result> {
+  await requireUser();
+  const r = await removeCustomItem(projectId, optionId, String(itemId ?? ""));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true };
 }

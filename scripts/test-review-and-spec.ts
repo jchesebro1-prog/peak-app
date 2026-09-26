@@ -10507,6 +10507,7 @@ seeded()
   .then(() => partDocsUploadAsyncChecks())
   .then(() => partDocsFetchAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
+  .then(() => gridCustomItemsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18897,4 +18898,149 @@ import { EQUIPMENT_ROW_BY_KEY as ci212RowByKey } from "@/lib/design/equipment-vo
   const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
   ok(emc.includes("Quote description (optional)") && emc.includes("placeholder={label}") && emc.includes("maxLength={200}"),
     "#212: the Equipment map editor shows a Quote description input, placeholder = the row label");
+}
+
+/* --- #212 (b): per-design custom items — sanitize, list edits, BOM lines, pricing, bid-spec exclusion --- */
+import {
+  applyCustomItemSave as ci212Save, copyCustomItems as ci212Copy, customItemBomLines as ci212Lines,
+  customItemDesc as ci212Desc, customItemPartId as ci212PartId, customItemsCost as ci212Cost, customItemsOf as ci212Of,
+  sanitizeCustomItem as ci212Sanitize, withoutCustomItem as ci212Without, CUSTOM_ITEMS_MAX as ci212Max,
+  type GridCustomItem as Ci212Item,
+} from "@/lib/design/grid-custom-items";
+import { gridSpecBomRows as ci212SpecRows } from "@/lib/design/grid-virtual-parts";
+import { sellFromCost as ci212Sell } from "@/lib/design/equipment-map";
+{
+  const ID = "ci-0123456789ab";
+  const good = ci212Sanitize({ desc: "  Custom motor controller  ", mfr: " Acme ", model: "MC-9", system: "Rigging", qty: 2, unitCost: 1000.004 }, ID);
+  ok(good.ok && good.item.id === ID && good.item.desc === "Custom motor controller" && good.item.mfr === "Acme" && good.item.model === "MC-9" && good.item.system === "Rigging" && good.item.qty === 2 && good.item.unitCost === 1000,
+    "#212 custom: sanitize trims text, keeps a known system, rounds the cost to cents");
+  ok(!ci212Sanitize({ desc: "   ", qty: 1, unitCost: 10 }, ID).ok, "#212 custom: a description is required");
+  const longD = ci212Sanitize({ desc: "d".repeat(260), mfr: "m".repeat(90), model: "  ", qty: 1, unitCost: 10 }, ID);
+  ok(longD.ok && longD.item.desc.length === 200 && longD.item.mfr?.length === 80 && !("model" in longD.item),
+    "#212 custom: desc ≤ 200, mfr/model ≤ 80, a blank model is absent");
+  ok(!ci212Sanitize({ desc: "x", qty: 0, unitCost: 10 }, ID).ok && !ci212Sanitize({ desc: "x", qty: 1.5, unitCost: 10 }, ID).ok && !ci212Sanitize({ desc: "x", qty: 100001, unitCost: 10 }, ID).ok,
+    "#212 custom: qty is a whole number from 1 to 100,000");
+  ok(!ci212Sanitize({ desc: "x", qty: 1, unitCost: 0 }, ID).ok && !ci212Sanitize({ desc: "x", qty: 1, unitCost: 10_000_001 }, ID).ok && !ci212Sanitize({ desc: "x", qty: 1, unitCost: "abc" }, ID).ok,
+    "#212 custom: the unit cost must be above $0 and within the allowance ceiling");
+  const sysless = ci212Sanitize({ desc: "x", system: "Plumbing", qty: 1, unitCost: 5 }, ID);
+  ok(sysless.ok && !("system" in sysless.item), "#212 custom: an unknown system is dropped, not stored");
+  ok(ci212Desc({ desc: "Controller", mfr: "Acme", model: "MC-9" }) === "Controller — Acme — MC-9" && ci212Desc({ desc: "Controller", model: "MC-9" }) === "Controller — MC-9" && ci212Desc({ desc: "Controller" }) === "Controller",
+    "#212 custom: the quote text is desc — mfr — model");
+
+  const first: Ci212Item = good.ok ? good.item : { id: ID, desc: "?", qty: 1, unitCost: 1 };
+  const items: Ci212Item[] = [first, { id: "ci-bbbbbbbbbbbb", desc: "Stage lift", qty: 1, unitCost: 25000 }];
+  const lines = ci212Lines(items, 0.3);
+  ok(lines.length === 2 && lines.every((l) => l.allowance === true && l.custom === true && l.unit === "ea"),
+    "#212 custom: every custom BOM line is flagged allowance + custom");
+  ok(lines[0].partId === ci212PartId(ID) && lines[0].partId === `custom:${ID}` && lines[0].desc === "Custom motor controller — Acme — MC-9" && lines[0].qty === 2,
+    "#212 custom: sku custom:<id>, desc carries maker and model");
+  ok(lines[0].list === ci212Sell(1000, 0.3) && lines[0].list === 1428.57 && lines[0].ext === 2857.14 && lines[1].list === 35714.29 && lines[1].ext === 35714.29,
+    "#212 custom: sell = unit cost ÷ (1 − margin), ext = qty × sell");
+  ok(ci212Cost(items) === 27000, "#212 custom: the cost basis is qty × unit cost");
+  ok(ci212Lines(items, 0.3).every((l) => l.list > 0 && l.ext > 0), "#212 custom: a custom line is always priced — it can never read Incomplete");
+
+  ok(ci212Of(undefined).length === 0 && ci212Of("junk").length === 0, "#212 custom: a missing or junk list reads as none");
+  const read = ci212Of([first, { id: "bad-id", desc: "x", qty: 1, unitCost: 1 }, { id: "ci-cccccccccccc", desc: "", qty: 1, unitCost: 1 }, { ...first }, 7]);
+  ok(read.length === 1 && read[0].id === ID, "#212 custom: a stored list drops bad ids, invalid rows and duplicates");
+
+  const added = ci212Save([], { desc: "A", qty: 1, unitCost: 10 }, () => "ci-dddddddddddd");
+  ok(added.ok && added.items.length === 1 && added.item.id === "ci-dddddddddddd", "#212 custom: saving without an id adds a new item");
+  const edited = added.ok ? ci212Save(added.items, { id: "ci-dddddddddddd", desc: "A2", qty: 3, unitCost: 10 }, () => "ci-eeeeeeeeeeee") : added;
+  ok(edited.ok && edited.items.length === 1 && edited.item.id === "ci-dddddddddddd" && edited.item.desc === "A2" && edited.item.qty === 3,
+    "#212 custom: saving with an existing id edits it in place");
+  const gone = ci212Save([], { id: "ci-dddddddddddd", desc: "A", qty: 1, unitCost: 10 }, () => "ci-eeeeeeeeeeee");
+  ok(!gone.ok && gone.reason === "no-such-item", "#212 custom: editing an item removed elsewhere is refused");
+  const bad = ci212Save([], { desc: "", qty: 1, unitCost: 10 }, () => "ci-eeeeeeeeeeee");
+  ok(!bad.ok && bad.reason === "invalid" && bad.error.length > 0, "#212 custom: an invalid item is refused with a message");
+  const full = Array.from({ length: ci212Max }, (_, i): Ci212Item => ({ id: `ci-${String(i).padStart(12, "0")}`, desc: "x", qty: 1, unitCost: 1 }));
+  const over = ci212Save(full, { desc: "y", qty: 1, unitCost: 1 }, () => "ci-ffffffffffff");
+  ok(!over.ok && over.reason === "too-many", `#212 custom: an option holds at most ${ci212Max} custom items`);
+  ok(ci212Without(items, ID).map((i) => i.id).join() === "ci-bbbbbbbbbbbb", "#212 custom: remove drops exactly that item");
+  let n = 0;
+  const copies = ci212Copy(items, () => `ci-${String(++n).padStart(12, "a")}`);
+  ok(copies.length === 2 && copies.every((c, i) => c.id !== items[i].id && c.desc === items[i].desc && c.unitCost === items[i].unitCost),
+    "#212 custom: a copied option gets the same items under fresh ids");
+
+  const specRows = ci212SpecRows(
+    [{ sku: `custom:${ID}`, desc: "Custom motor controller — Acme — MC-9", qty: 2, allowance: true }, { sku: "ETC-S4", desc: "Source Four", qty: 3 }],
+    () => null
+  );
+  ok(specRows.length === 1 && specRows[0].sku === "ETC-S4", "#212 custom: the bid-spec BOM leaves custom items out");
+
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pure = src("src/lib/design/grid-custom-items.ts");
+  const pureValueImports = [...pure.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((mm) => mm[1]).sort();
+  ok(JSON.stringify(pureValueImports) === JSON.stringify(["./equipment-map", "./grid-scopes"]),
+    "#212 custom: the helper module stays pure (value imports: equipment-map, grid-scopes only)");
+  const gq = src("src/lib/design/grid-quote.ts");
+  ok(gq.includes("customItemBomLines(customItems, tier.margin)") && gq.includes("customItemsCost(customItems)") && gq.includes("allowanceIds.has(l.partId) || l.allowance"),
+    "#212 custom: buildGridQuote prices custom items at the tier margin and flags them allowance on the spec");
+  ok(src("src/lib/design/grid-options.ts").includes("customItems?: GridCustomItem[]"), "#212 custom: the items live on the Grid option");
+  const store = src("src/lib/stores/grid-projects.ts");
+  ok(store.includes("copyCustomItems(customItemsOf(src?.customItems)") && store.includes("customItems: o.customItems.map((c) => ({ ...c }))"),
+    "#212 custom: option copy and revision snapshots carry custom items");
+  const panel = src("src/app/(app)/design/grid/[id]/custom-items.tsx");
+  const panelImports = [...panel.matchAll(/from\s+"([^"]+)"/g)].map((mm) => mm[1]);
+  ok(panel.startsWith('"use client"') && panelImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")) && panel.includes("Allowance · custom") && panel.includes("+ Custom item"),
+    "#212 custom: the BOM section is a client component with no store import");
+  const acts = src("src/app/(app)/design/grid/[id]/actions.ts");
+  const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
+  ok(body("saveCustomItemAction").includes("await requireUser()") && body("saveCustomItemAction").includes("saveCustomItem(") && body("removeCustomItemAction").includes("await requireUser()"),
+    "#212 custom: both actions use the placement-edit gate and the server-side store");
+  const ed = src("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("<CustomItemsSection") && ed.includes("customValue") && ed.includes("disabled={busy || bomEmpty}"),
+    "#212 custom: the editor BOM shows custom items, totals them and can quote a custom-only option");
+}
+
+/* #212 (b) — custom items through the store and buildGridQuote on the scratch DB. */
+async function gridCustomItemsAsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const { buildGridQuote } = await import("../src/lib/design/grid-quote");
+  const { resolveTier } = await import("../src/lib/pricing-tiers");
+  const { sellFromCost } = await import("../src/lib/design/equipment-map");
+
+  const gp = await GP.createProject({ name: "CI212 test grid project", customer: "Test Customer CI212", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const base = (await GP.getProject(gp.id))!.options![0].id;
+
+  const empty = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  ok(!empty.ok, "#212 store: an option with nothing on it still refuses to quote");
+
+  const bad = await GP.saveCustomItem(gp.id, base, { desc: "", qty: 1, unitCost: 10 });
+  ok(!bad.ok && /Describe/.test(bad.error), "#212 store: an invalid item is refused with the sanitizer's message");
+  const noOpt = await GP.saveCustomItem(gp.id, "opt-nope", { desc: "x", qty: 1, unitCost: 10 });
+  ok(!noOpt.ok, "#212 store: an unknown option is refused");
+
+  const a = await GP.saveCustomItem(gp.id, base, { desc: "Custom motor controller", mfr: "Acme", model: "MC-9", qty: 2, unitCost: 1000 });
+  const id = a.ok ? a.item.id : "";
+  ok(a.ok && /^ci-[0-9a-f]{12}$/.test(id), "#212 store: a new custom item gets a ci- id");
+
+  const tier = await resolveTier(null);
+  const unit = sellFromCost(1000, tier.margin);
+  const built = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const line = built.ok ? built.build.spec.lines.find((l) => l.sku === `custom:${id}`) : undefined;
+  ok(built.ok && built.build.value === Math.round(2 * unit * 100) / 100,
+    `#212 quote: a custom-only option quotes at unit cost ÷ (1 − tier margin) × qty (${built.ok ? built.build.value : "refused"})`);
+  ok(!!line && line.allowance === true && line.desc === "Custom motor controller — Acme — MC-9" && line.qty === 2 && line.price === unit,
+    "#212 quote: the spec line carries the custom text, flagged allowance");
+  ok(built.ok && built.build.fallbackLines.length === 0, "#212 quote: a custom line is never a tier-fallback line");
+
+  const e = await GP.saveCustomItem(gp.id, base, { id, desc: "Custom motor controller", mfr: "Acme", model: "MC-9", qty: 3, unitCost: 1000 });
+  const afterEdit = (await GP.getProject(gp.id))!.options![0].customItems || [];
+  ok(e.ok && afterEdit.length === 1 && afterEdit[0].qty === 3 && afterEdit[0].id === id, "#212 store: editing keeps the id and changes the item in place");
+
+  const alt = await GP.addOption(gp.id, { name: "Alt", copyFromOptionId: base, by: "Test Harness" });
+  const altItems = alt.ok ? (await GP.getProject(gp.id))!.options!.find((o) => o.id === alt.option.id)?.customItems || [] : [];
+  ok(altItems.length === 1 && altItems[0].id !== id && altItems[0].desc === "Custom motor controller" && altItems[0].qty === 3,
+    "#212 store: copying an option copies its custom items under fresh ids");
+
+  const rev = await GP.addRevision(gp.id, { by: "Test Harness", note: "with a custom item" });
+  ok((rev?.options?.find((o) => o.id === base)?.customItems || []).length === 1, "#212 store: a revision snapshot holds the option's custom items");
+
+  const r = await GP.removeCustomItem(gp.id, base, id);
+  ok(r.ok && ((await GP.getProject(gp.id))!.options![0].customItems || []).length === 0, "#212 store: remove drops the item");
+
+  const restored = rev ? await GP.restoreRevision(gp.id, rev.rev, "Test Harness") : { ok: false as const };
+  const back = (await GP.getProject(gp.id))!.options!.find((o) => o.id === base)?.customItems || [];
+  ok(restored.ok && back.length === 1 && back[0].id === id, "#212 store: restoring a revision brings its custom items back");
 }

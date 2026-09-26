@@ -23,6 +23,13 @@ import { copyRiserDoc, pruneRisers, type RiserDoc } from "@/lib/design/grid-rise
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
+import {
+  applyCustomItemSave,
+  copyCustomItems,
+  customItemsOf,
+  withoutCustomItem,
+  type GridCustomItem,
+} from "@/lib/design/grid-custom-items";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 import {
@@ -1085,6 +1092,13 @@ export async function addOption(
   const option: GridOption = { id: rid("opt-"), name, quoteId: null, createdAt: at, ...(input.tier ? { tier: input.tier } : {}) };
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     const doc = ensureOptions(p);
+    // Custom items (#212) are option-scoped design state: a copied option
+    // carries its own copies, under fresh ids.
+    if (input.copyFromOptionId) {
+      const src = doc.options.find((o) => o.id === input.copyFromOptionId);
+      const items = copyCustomItems(customItemsOf(src?.customItems), () => rid("ci-"));
+      if (items.length) option.customItems = items;
+    }
     doc.options = [...doc.options, option];
     if (input.copyFromOptionId) {
       const copied = copyOptionMembers({
@@ -1183,6 +1197,60 @@ export async function removeOption(
   return updated ? { ok: true, removedPlacements, removedRoutes } : { ok: false, reason: "not-found" };
 }
 
+/* --------------------------- custom items (#212) --------------------------- */
+
+/**
+ * Add (no `id`) or edit (existing `id`) one custom item on an option. The raw
+ * input is re-sanitized here whatever the client sent. Does not cut a
+ * revision (same as a placement edit); quote/manual revisions capture it.
+ */
+export async function saveCustomItem(
+  projectId: string,
+  optionId: string,
+  raw: unknown
+): Promise<{ ok: true; item: GridCustomItem } | { ok: false; error: string }> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
+  let out: { ok: true; item: GridCustomItem } | { ok: false; error: string } = { ok: false, error: "Design not found." };
+  await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    const opt = doc.options.find((o) => o.id === optionId);
+    if (!opt) {
+      out = { ok: false, error: "That option was removed — refresh the page." };
+      return;
+    }
+    const r = applyCustomItemSave(customItemsOf(opt.customItems), raw, () => rid("ci-"));
+    if (!r.ok) {
+      out = { ok: false, error: r.error };
+      return;
+    }
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, customItems: r.items } : o));
+    p.updatedAt = Date.now();
+    out = { ok: true, item: r.item };
+  });
+  return out;
+}
+
+/** Remove one custom item. Idempotent: an id already gone is not an error. */
+export async function removeCustomItem(
+  projectId: string,
+  optionId: string,
+  itemId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) =>
+      o.id === optionId ? { ...o, customItems: withoutCustomItem(customItemsOf(o.customItems), itemId) } : o
+    );
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, error: "Design not found." };
+}
+
 /* ----------------------------- revisions ----------------------------- */
 
 /** Snapshot of the doc's mutable state as it stands. Pure. */
@@ -1211,7 +1279,10 @@ function snapshotOf(
     // normalized (a legacy single value lands as the first option's) and deep-copied.
     autoEstimate: JSON.parse(JSON.stringify(autoEstimatesOf(p.autoEstimate, p.options?.[0]?.id ?? DEFAULT_OPTION_ID))) as AutoEstimates,
     options: ensureOptions({
-      options: p.options ? p.options.map((o) => ({ ...o })) : undefined,
+      // Custom items (#212) ride on the option — copied, not shared.
+      options: p.options
+        ? p.options.map((o) => ({ ...o, ...(o.customItems ? { customItems: o.customItems.map((c) => ({ ...c })) } : {}) }))
+        : undefined,
       quoteId: p.quoteId,
       createdAt: p.createdAt,
     }).options,

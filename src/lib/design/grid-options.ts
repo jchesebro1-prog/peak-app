@@ -15,6 +15,7 @@
  */
 
 import type { TierKey } from "@/app/(app)/design/quick/engine";
+import type { GridCustomItem } from "./grid-custom-items";
 
 export type GridOption = {
   id: string; // 'opt-' + 12 hex, or DEFAULT_OPTION_ID for a normalized legacy doc
@@ -24,6 +25,9 @@ export type GridOption = {
   /** Draft quote minted from THIS option, when one exists. */
   quoteId: string | null;
   createdAt: number;
+  /** Per-design custom items (#212) — priced as allowances, never placed.
+   *  Absent on older options; always read through customItemsOf(). */
+  customItems?: GridCustomItem[];
 };
 
 export const DEFAULT_OPTION_ID = "opt-base";

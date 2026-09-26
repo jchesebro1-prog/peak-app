@@ -29,6 +29,7 @@ import { scopeTargetsByTier } from "@/lib/design/scope-targets";
 import { autoEstimateCards, autoTargets, priceOverrides, sellOnlyCards } from "@/lib/design/auto-estimate";
 import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
+import { customItemBomLines, customItemsOf } from "@/lib/design/grid-custom-items";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
@@ -178,6 +179,13 @@ export default async function GridEditorPage({
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const curtainCoeffs = sellCoeffs(tier.margin);
+  // #212: the active option's custom items, sell-priced at this customer's
+  // tier margin exactly as buildGridQuote prices them. Sell numbers only —
+  // the margin stays on the server (the curtain rule above).
+  const customLines = customItemBomLines(
+    customItemsOf(project.options?.find((o) => o.id === activeOptionId)?.customItems),
+    tier.margin
+  );
   const laborParts: LaborPartLite[] = catalog
     .filter((p) => (p.role || "").toLowerCase() === "labor")
     .map((p) => ({
@@ -234,6 +242,7 @@ export default async function GridEditorPage({
       symbolCtx={symbolContext(settings)}
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
+      customLines={customLines}
     />
     </CanMapProvider>
   );

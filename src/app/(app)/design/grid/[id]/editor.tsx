@@ -31,6 +31,7 @@ import {
   type GridCurtain,
   type GridCurtainType,
   type PartLite,
+  type BomLine,
 } from "@/lib/design/grid-bom";
 import {
   GRID_LAYERS,
@@ -87,6 +88,8 @@ import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import OptionSwitcher from "./option-switcher";
 import PlanLegend from "./plan-legend";
 import SymbolLookPanel from "./symbol-look-panel";
+import CustomItemsSection from "./custom-items";
+import { customItemsOf } from "@/lib/design/grid-custom-items";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -253,6 +256,7 @@ export default function GridEditor({
   activeOptionId,
   linesetDesigns,
   wireTypes,
+  customLines,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -287,6 +291,8 @@ export default function GridEditor({
    *  client-side canConnect() pre-check only; addRouteAction re-derives the
    *  same registry server-side as the authority. */
   wireTypes: WireType[];
+  /** #212: the active option's custom items, priced server-side (sell only). */
+  customLines: BomLine[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -667,7 +673,21 @@ export default function GridEditor({
     }
   };
 
-  const grandValue = totals.value + wires.value + laborValue + curtainValue;
+  // #212: per-design custom items — edited from the BOM, priced like allowances.
+  const customItems = useMemo(() => customItemsOf(activeOption.customItems), [activeOption.customItems]);
+  const customValue = customLines.reduce((a, l) => a + l.ext, 0);
+  const bomEmpty = lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0;
+  const customSection = (
+    <CustomItemsSection
+      key={activeOptionId}
+      projectId={project.id}
+      optionId={activeOptionId}
+      items={customItems}
+      lines={customLines}
+      onChanged={() => router.refresh()}
+    />
+  );
+  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue;
   const spaceRollups = useMemo(
     () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
     [placements, parts, project.spaces, curtainPrices]
@@ -1800,10 +1820,13 @@ export default function GridEditor({
           {/* BOM */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Bill of materials</div>
-            {lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 ? (
-              <div style={{ fontSize: 11.5, color: "#8c919c" }}>
-                Paint devices onto the plan to build the BOM.
-              </div>
+            {bomEmpty ? (
+              <>
+                <div style={{ fontSize: 11.5, color: "#8c919c" }}>
+                  Paint devices onto the plan to build the BOM.
+                </div>
+                {customSection}
+              </>
             ) : (
               <div style={{ display: "grid", gap: 4 }}>
                 {lines.map((l) => (
@@ -1890,6 +1913,7 @@ export default function GridEditor({
                     <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
                   </div>
                 ))}
+                {customSection}
                 {laborRows.length > 0 && (
                   <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
                     <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
@@ -1952,7 +1976,7 @@ export default function GridEditor({
                 color: "#fff",
                 borderColor: "#16181d",
               }}
-              disabled={busy || (lines.length === 0 && wires.lines.length === 0 && curtains.length === 0)}
+              disabled={busy || bomEmpty}
               onClick={() => runQuote(false)}
             >
               {activeOption.quoteId ? `Update draft quote ${activeOption.quoteId}` : "Create draft quote"}

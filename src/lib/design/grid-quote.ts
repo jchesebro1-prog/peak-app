@@ -21,6 +21,7 @@ import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options";
 import { riserLinksOf } from "@/lib/design/grid-riser-doc";
+import { customItemBomLines, customItemsCost, customItemsOf } from "@/lib/design/grid-custom-items";
 
 export type GridQuoteSpecLine = {
   sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true;
@@ -81,7 +82,9 @@ export async function buildGridQuote(
   const { placements, routes } = optionSlice(project, optionId);
   // Typed-length riser connections (#209) price exactly like wire routes.
   const riserLinks = riserLinksOf(project.riser, optionId);
-  if (!placements.length && !routes.length && !riserLinks.length)
+  // Per-design custom items (#212) — a design may be nothing but these.
+  const customItems = customItemsOf(option.customItems);
+  if (!placements.length && !routes.length && !riserLinks.length && !customItems.length)
     return { ok: false, error: "Place a device or route a wire first." };
 
   // Unresolved seed placeholders (D147) must not silently price at $0 (#64 idiom).
@@ -167,14 +170,22 @@ export async function buildGridQuote(
     labor.push({ sku: part.sku, desc: part.desc, qty: hours, unit: part.unit || "hr", price: part.list, ext: hours * part.list, cost: hours * part.cost });
   }
 
+  // Custom items (#212) price exactly like an Equipment-map allowance: sell =
+  // unit cost ÷ (1 − the customer's tier margin). Always priced, so they never
+  // make a design "Incomplete" or refuse the quote.
+  const custom = customItemBomLines(customItems, tier.margin);
+  const customValue = custom.reduce((a, l) => a + l.ext, 0);
+  const customCost = customItemsCost(customItems);
+
   const lines: BomLine[] = [
     ...devLines,
     ...wires.lines,
     ...curtains,
+    ...custom,
     ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
   ];
-  const value = devTotals.value + wires.value + curtainValue + labor.reduce((a, l) => a + l.ext, 0);
-  const cost = devTotals.cost + wires.cost + curtainCostTotal + labor.reduce((a, l) => a + l.cost, 0);
+  const value = devTotals.value + wires.value + curtainValue + customValue + labor.reduce((a, l) => a + l.ext, 0);
+  const cost = devTotals.cost + wires.cost + curtainCostTotal + customCost + labor.reduce((a, l) => a + l.cost, 0);
   const margin = value > 0 ? (value - cost) / value : 0;
   const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
 
@@ -192,7 +203,7 @@ export async function buildGridQuote(
       price: l.list,
       ext: l.ext,
       ...(isFallbackLine(l) ? { tierFallback: true as const } : {}),
-      ...(allowanceIds.has(l.partId) ? { allowance: true as const } : {}),
+      ...(allowanceIds.has(l.partId) || l.allowance ? { allowance: true as const } : {}),
     })),
   };
   const manyOptions = ensureOptions(project).options.length > 1;
