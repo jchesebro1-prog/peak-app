@@ -15831,3 +15831,15 @@ import {
   const rdDangling = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: { ...rdDoc, links: [{ ...rdDoc.links[0], from: { kind: "placement", placementId: "gone" } }] } });
   ok(rdDangling.edges.length === 0 && !rdDangling.nodes.some((n) => n.key === UNASSIGNED_KEY), "#GDS riser view: a link to a vanished device is not drawn");
 }
+
+/* --- #GDS grid drawing set — Task 4: RiserLinks reach the quote and the editor BOM --- */
+{
+  const gdsQuoteSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
+  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && gdsQuoteSrc.includes("routeLines(routes, tierCatalog, project.calibrations || [], riserLinks)"), "#GDS quote: RiserLinks price as wire lines on the draft quote");
+  const gdsEditorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  ok(gdsEditorSrc.includes("routeLines(routes || [], parts, project.calibrations, riserLinks)"), "#GDS editor: the live BOM sidebar counts RiserLinks too");
+  const gdsStoreSrc = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
+  ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#GDS revisions: snapshotOf copies the riser document");
+  const gdsActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/actions.ts"), "utf8");
+  ok((gdsActionsSrc.match(/await requireUser\(\)/g) || []).length === 6, "#GDS riser actions: every one is behind requireUser, the Grid editing gate");
+}

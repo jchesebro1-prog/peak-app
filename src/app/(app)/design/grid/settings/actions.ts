@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { setSettings } from "@/lib/settings";
 import { cleanCategoryIcons, cleanSymbolColors } from "@/lib/design/grid-icons";
+import { cleanStandardNotes } from "@/lib/design/grid-drawing-set";
 import { cleanWireTypes, type WireType } from "@/lib/catalog-connect";
 import { PORT_RULES } from "@/lib/catalog-port-rules";
 import { applyRules } from "@/lib/catalog-port-apply";
@@ -68,4 +69,14 @@ export async function applyPortRuleAction(
   revalidatePath("/design/grid/settings");
   revalidatePath("/catalog");
   return { ok: true, applied: out.byRule[ruleId] || 0, skippedHasPorts: out.skippedHasPorts };
+}
+
+/** Standard general notes for drawing-set covers (#GDS). Blank clears the
+ *  key (null) so covers print no default notes. */
+export async function saveStandardNotesAction(text: string) {
+  await requirePerm("manage_users");
+  await setSettings({ gridStandardNotes: cleanStandardNotes(text) });
+  revalidatePath("/design/grid/settings");
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }

@@ -2276,6 +2276,113 @@ async function main() {
     assert.equal(r3row.secondary, "Brenda, me (2)", "#128 review: …and collapses into the 'me' chain slot regardless of its stamped author name");
   }
 
+  // #GDS — riser document + drawing-set settings persistence (scratch DB).
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const GR = await import("@/lib/stores/grid-riser");
+    const { pointInPolygon: inPoly } = await import("@/lib/design/grid-geometry");
+    const by = "tester";
+    const p0 = await GP.createProject({ name: "GDS riser", customer: "", customerId: null, by });
+    const sheet = (await GP.addSheet(p0.id, {
+      name: "Plan",
+      mime: "image/svg+xml",
+      dataUrl: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E",
+      by,
+    }))!;
+    const stagePoly = [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }, { x: 0.1, y: 0.5 }];
+    await GP.addSpace(p0.id, { sheetId: sheet.id, page: 1, name: "Stage", points: stagePoly, by });
+    await GP.addSpace(p0.id, { sheetId: sheet.id, page: 1, name: "Booth", points: [{ x: 0.6, y: 0.1 }, { x: 0.8, y: 0.1 }, { x: 0.8, y: 0.3 }, { x: 0.6, y: 0.3 }], by });
+    let p = (await GP.getProject(p0.id))!;
+    const opt = p.options![0].id;
+    const [stage, booth] = p.spaces!;
+    const devA = () => p.placements.filter((pl) => pl.partId === "DEV-A");
+
+    // + Device lands inside the space
+    assert.deepEqual(await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A", qty: 3, by }), { ok: true, added: 3 });
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(devA().length, 3, "#GDS +Device: three placements written");
+    assert.ok(devA().every((pl) => pl.sheetId === sheet.id && pl.page === 1 && pl.optionId === opt && inPoly(pl, stagePoly)), "#GDS +Device: every device lands inside the space, on its sheet/page, in the option");
+
+    // qty edit adds / removes
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A", qty: 5, by }), { ok: true, added: 2, removed: 0 });
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A", qty: 2, by }), { ok: true, added: 0, removed: 3 });
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(devA().length, 2, "#GDS qty edit: lowering the qty removes placements");
+
+    // Unassigned → lower margin; unknown space refused
+    assert.deepEqual(await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: "unassigned", partId: "DEV-U", qty: 1, by }), { ok: true, added: 1 });
+    p = (await GP.getProject(p0.id))!;
+    const u = p.placements.find((pl) => pl.partId === "DEV-U")!;
+    assert.ok(u.y > 0.85 && !inPoly(u, stagePoly), "#GDS +Device: Unassigned devices land on the plan's lower margin");
+    assert.deepEqual(await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: "sp-nope", partId: "DEV-A", qty: 1, by }), { ok: false, reason: "no-such-space" });
+
+    // part swap
+    assert.deepEqual(await GR.replaceNodeDevicePart(p0.id, { optionId: opt, nodeKey: booth.id, fromPartId: "DEV-A", toPartId: "DEV-B" }), { ok: false, reason: "no-devices" });
+    await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: booth.id, partId: "DEV-C", qty: 1, by });
+    assert.deepEqual(await GR.replaceNodeDevicePart(p0.id, { optionId: opt, nodeKey: booth.id, fromPartId: "DEV-C", toPartId: "DEV-B" }), { ok: true, changed: 1 });
+
+    // RiserLink + document ops
+    p = (await GP.getProject(p0.id))!;
+    const a1 = devA()[0];
+    const link = await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "placement", placementId: a1.id }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 42.26, by });
+    assert.ok(link.ok, "#GDS Connect: a RiserLink is stored");
+    assert.deepEqual(await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "placement", placementId: "gp-gone" }, to: { kind: "space", spaceId: null }, partId: "WIRE-X", lengthFt: 5, by }), { ok: false, reason: "bad-end" });
+    assert.deepEqual(await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "space", spaceId: null }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 0, by }), { ok: false, reason: "bad-length" });
+    assert.deepEqual(await GR.patchRiser(p0.id, opt, { op: "addConduit", from: { kind: "space", spaceId: stage.id }, to: { kind: "space", spaceId: booth.id }, label: "1in EMT by EC" }), { ok: true });
+    assert.deepEqual(await GR.patchRiser(p0.id, opt, { op: "addNote", text: "Verify in field" }), { ok: true });
+    assert.deepEqual(await GR.patchRiser(p0.id, opt, { op: "addLevel", label: "Level 1", y: 0.9 }), { ok: true });
+    assert.deepEqual(await GR.patchRiser(p0.id, opt, { op: "moveNode", key: stage.id, box: { x: 0.5, y: 0.1, w: 0.2, h: 0.2 } }), { ok: true });
+    assert.deepEqual(await GR.patchRiser(p0.id, opt, { op: "addNote", text: "   " }), { ok: false, reason: "invalid" });
+    assert.deepEqual(await GR.patchRiser(p0.id, "opt-nope", { op: "addNote", text: "x" }), { ok: false, reason: "no-such-option" });
+    p = (await GP.getProject(p0.id))!;
+    const doc = p.riser![opt];
+    assert.equal(doc.links[0].lengthFt, 42.3, "#GDS a link length is kept to 0.1 ft");
+    assert.ok(doc.conduits.length === 1 && doc.notes[0].n === 1 && doc.levels.length === 1 && doc.nodes[stage.id].x === 0.5, "#GDS riser doc: conduit, note, level and saved node box persist");
+
+    // revisions snapshot + restore the riser document
+    const rev = await GP.addRevision(p0.id, { by, note: "with riser" });
+    assert.equal(rev?.riser?.[opt]?.links.length, 1, "#GDS revisions: the snapshot carries the riser document");
+    await GR.patchRiser(p0.id, opt, { op: "removeLink", id: doc.links[0].id });
+    assert.equal((await GP.getProject(p0.id))!.riser![opt].links.length, 0);
+    await GP.restoreRevision(p0.id, rev!.rev, by);
+    assert.equal((await GP.getProject(p0.id))!.riser![opt].links.length, 1, "#GDS revisions: restore brings the riser document back");
+
+    // option copy re-points; option removal drops
+    const copy = await GP.addOption(p0.id, { name: "Alt", copyFromOptionId: opt, by });
+    assert.ok(copy.ok, "#GDS option copy succeeds");
+    if (copy.ok) {
+      p = (await GP.getProject(p0.id))!;
+      const alt = p.riser![copy.option.id];
+      const altFrom = alt.links[0].from;
+      assert.ok(
+        altFrom.kind === "placement" && altFrom.placementId !== a1.id && p.placements.some((pl) => pl.id === altFrom.placementId && pl.optionId === copy.option.id),
+        "#GDS option copy: the copied link points at the copied device"
+      );
+      assert.equal(alt.notes[0].text, "Verify in field");
+      await GP.removeOption(p0.id, copy.option.id, by);
+      p = (await GP.getProject(p0.id))!;
+      assert.ok(!(copy.option.id in (p.riser || {})), "#GDS option removal drops that option's riser document");
+    }
+
+    // delete cascades
+    await GR.removeNodeDevices(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A" });
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(p.riser![opt].links.length, 0, "#GDS delete: removing the devices prunes the links that ended on them");
+    await GP.removeSpace(p0.id, stage.id);
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(p.riser![opt].conduits.length === 0 && !(stage.id in p.riser![opt].nodes), "#GDS delete: removing a space prunes its conduits and saved box");
+
+    // drawing-set settings
+    await GP.setDrawingSet(p0.id, { size: "d", drawnBy: "  JC ", excluded: ["riser", "riser"] });
+    assert.deepEqual((await GP.getProject(p0.id))!.drawingSet, { size: "d", drawnBy: "JC", excluded: ["riser"] });
+    await GP.setDrawingSet(p0.id, { generalNotes: "" });
+    let ds = (await GP.getProject(p0.id))!.drawingSet!;
+    assert.ok(ds.generalNotes === "" && ds.size === "d", "#GDS set settings merge; an explicit empty notes text is kept");
+    await GP.setDrawingSet(p0.id, {}, { resetGeneralNotes: true });
+    ds = (await GP.getProject(p0.id))!.drawingSet!;
+    assert.ok(!("generalNotes" in ds) && ds.size === "d", "#GDS 'Use standard notes' removes the set's own notes");
+  }
+
   console.log("review regression checks passed");
 }
 

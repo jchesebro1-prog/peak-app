@@ -192,6 +192,7 @@ export default async function GridEditorPage({
         routes: project.routes || [],
         revisions: project.revisions || [],
         linesetDesignId: project.linesetDesignId || null,
+        riser: project.riser || {},
       }}
       sheets={sheets.map((s) => ({
         id: s.id,

@@ -46,7 +46,8 @@ import { getSite } from "@/lib/identity/sites";
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart } from "@/lib/stores/catalog";
-import { createGridAssembly, getGridSymbol, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
+import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
+import { partForGrid } from "@/lib/design/grid-part-lookup";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
 import { isGridShape } from "@/lib/design/grid-symbols";
@@ -74,13 +75,6 @@ function editorPath(projectId: string): string {
 }
 
 const OPTION_GONE = "That option was removed — refresh the page.";
-
-async function partForGrid(id: string) {
-  const priced = await getPart(id);
-  if (priced) return priced;
-  const symbol = await getGridSymbol(id);
-  return symbol ? { ...symbol, sku: symbol.modelNumber || symbol.id, unit: "ea" } : null;
-}
 
 export async function createGridAssemblyAction(input: {
   name: string;
