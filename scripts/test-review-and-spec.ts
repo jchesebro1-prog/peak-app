@@ -5414,8 +5414,9 @@ import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
   // shared builder.
   const gridPlanPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
   const gridRiserPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
-  ok(gridPlanPageSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridRiserPageSrc.includes("gridSymbolEntry(s, p, categoryMap)"),
-    "#206 final fix wave: the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry");
+  const gridPartsSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-parts.ts"), "utf8");
+  ok(gridPartsSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridPlanPageSrc.includes("gridPartsFrom(") && gridRiserPageSrc.includes("gridPartsFrom("),
+    "#206 final fix wave (moved by #GDS): the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry, via the shared gridPartsFrom");
 }
 
 /* --- #206 grid stock symbols — Task 3: the badge renderer --- */
@@ -15842,4 +15843,47 @@ import {
   ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#GDS revisions: snapshotOf copies the riser document");
   const gdsActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/actions.ts"), "utf8");
   ok((gdsActionsSrc.match(/await requireUser\(\)/g) || []).length === 6, "#GDS riser actions: every one is behind requireUser, the Grid editing gate");
+}
+
+/* --- #GDS grid drawing set — Task 5: parts builder, riser view, riser canvas --- */
+import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { riserViewForOption, type RiserProjectLite } from "@/lib/design/grid-riser-view";
+import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
+
+{
+  const gpSym = { id: "GS-1", name: "Wash light", manufacturer: "ETC", modelNumber: "W1", scope: "Lighting", category: "Fixtures", width: 48, height: 34, ports: [], pricingPartId: "CAT-1", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const gpCat = [
+    { id: "CAT-1", sku: "W1", desc: "Wash", category: "Fixtures", unit: "ea", list: 900, cost: 500 },
+    { id: "CAT-2", sku: "C2", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1 },
+  ];
+  const gpLib = gridPartsFrom([gpSym] as never, gpCat as never, {});
+  ok(gpLib.length === 1 && gpLib[0].id === "GS-1" && gpLib[0].list === 900 && gpLib[0].desc === "Wash light" && gpLib[0].symbolWidth === 48, "#GDS parts: a Grid-library entry prices from its linked catalog row");
+  const gpAll = gridPartsFrom([gpSym] as never, gpCat as never, {}, { catalogFallback: true });
+  ok(gpAll.map((p) => p.id).join() === "GS-1,CAT-1,CAT-2", "#GDS parts: the catalog fallback resolves pre-library placements");
+
+  const gpProj: RiserProjectLite = {
+    placements: [{ id: "v1", sheetId: "s1", page: 1, x: 0.3, y: 0.3, partId: "GS-1", optionId: "opt-base", by: "t", at: 1 }],
+    routes: [],
+    spaces: [{ id: "sp-v", sheetId: "s1", page: 1, name: "Stage", color: "#8a6d3b", points: [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.4 }, { x: 0.2, y: 0.4 }], by: "t", at: 1 }],
+    calibrations: [],
+    options: [{ id: "opt-base", name: "Design", quoteId: null, createdAt: 1 }],
+    riser: {
+      "opt-base": {
+        nodes: {},
+        levels: [{ id: "lv-1", label: "Level 1", elevation: "EL 100", y: 0.9 }],
+        conduits: [{ id: "cd-1", from: { kind: "space", spaceId: "sp-v" }, to: { kind: "space", spaceId: null }, label: "EMT by EC" }],
+        notes: [{ id: "nt-1", n: 1, text: "Verify in field" }],
+        links: [{ id: "lk-1", from: { kind: "placement", placementId: "v1" }, to: { kind: "space", spaceId: null }, partId: "CAT-2", lengthFt: 40, by: "t", at: 1 }],
+      },
+    },
+  };
+  const gpView = riserViewForOption({ project: gpProj, optionId: "opt-base", parts: gpAll, symCtx: symbolContext(null) });
+  ok(gpView.nodes.map((n) => n.key).join() === "sp-v,unassigned" && gpView.nodes[0].groups[0].qty === 1 && gpView.nodes[0].groups[0].ids.join() === "v1", "#GDS riser view: spaces + Unassigned (linked), groups carry their placement ids");
+  ok(gpView.edges.length === 1 && gpView.edges[0].kind === "link" && gpView.edges[0].from.partId === "GS-1" && gpView.edges[0].desc === "Cable", "#GDS riser view: RiserLinks become edges anchored on the device row");
+  const gpHtml = symRender(symH(RiserCanvas, { view: gpView }));
+  ok(gpHtml.includes("Stage") && gpHtml.includes("1× Wash light") && gpHtml.includes("Unassigned"), "#GDS canvas: nodes and device rows");
+  ok(gpHtml.includes("Level 1 · EL 100") && gpHtml.includes("EMT by EC") && gpHtml.includes('data-edge="link"') && gpHtml.includes("(typed)"), "#GDS canvas: level line, conduit annotation, typed-length link");
+  ok(!gpHtml.includes("cursor"), "#GDS canvas: the print render has no interactive affordances");
+  const gpNotes = symRender(symH(RiserNotes, { notes: gpView.notes }));
+  ok(gpNotes.includes("<ol") && gpNotes.includes("Verify in field"), "#GDS canvas: numbered riser notes");
 }

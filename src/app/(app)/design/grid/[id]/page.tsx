@@ -15,7 +15,8 @@ import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
-import { gridSymbolEntry, symbolContext } from "@/lib/design/grid-icons";
+import { symbolContext } from "@/lib/design/grid-icons";
+import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
 import type { FabricOption } from "@/app/(app)/design/quick/engine";
@@ -99,41 +100,9 @@ export default async function GridEditorPage({
   const sites = project.customerId ? await sitesForCompany(project.customerId) : [];
   const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
 
-  /** Client payload: sheets without re-serialization surprises + PartLite slice. */
-  const pricingById = new Map(catalog.map((p) => [p.id, p]));
-  const parts: PartLite[] = gridSymbols.map((s) => {
-    const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
-    // Prefer the LIVE catalog part's ports over the grid_catalog symbol's
-    // seed-time snapshot (`s.ports`): grid-catalog.ts only ever copies
-    // `ports` from the pricing catalog once, at first seed, and never
-    // refreshes it. Editing ports later through the catalog ports editor
-    // updates `p.ports` but leaves `s.ports` frozen — reading `s.ports`
-    // here would hide new/corrected ports from the inspector and from the
-    // client's `bothHavePorts` pre-validation. Fall back to the symbol's
-    // snapshot only when there's no linked pricing part with its own ports.
-    const ports = p?.ports?.length ? p.ports : s.ports;
-    return {
-      id: s.id,
-      sku: s.modelNumber || s.id,
-      desc: s.name,
-      unit: p?.unit || "ea",
-      list: p?.list || 0,
-      cost: p?.cost || 0,
-      ...(ports.length > 0 ? { ports } : {}),
-      ...(p?.datasheetBlobKey ? { hasDatasheet: true } : {}),
-      // Category, icon/colour/shape overrides, Grid scope and the pricing
-      // part's group/trade — the same builder the riser uses, so a device
-      // draws the same badge on both (final fix wave #3).
-      ...gridSymbolEntry(s, p, categoryMap),
-      manufacturer: s.manufacturer,
-      modelNumber: s.modelNumber,
-      symbolWidth: s.width,
-      symbolHeight: s.height,
-      kind: s.kind || "device",
-      assemblyMembers: s.members,
-      pricingPartId: s.pricingPartId,
-    };
-  });
+  /** Client payload: sheets without re-serialization surprises + PartLite slice
+   *  (the one builder the riser, drawing set and schedule use too — #GDS). */
+  const parts: PartLite[] = gridPartsFrom(gridSymbols, catalog, categoryMap);
 
   /**
    * Curtain drop-in (punch #49): the fabric list and the sell coefficients for
