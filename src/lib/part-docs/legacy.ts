@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { listDocs } from "@/db/doc-store";
-import { createDocument, ensureLinks } from "@/lib/stores/part-documents";
+import { getDocRows, listDocs } from "@/db/doc-store";
+import { createDocument, documentLinkId, ensureLinks } from "@/lib/stores/part-documents";
 
 /**
  * Legacy backfill (#207, spec §5): every part that still carries the old
@@ -12,6 +12,16 @@ import { createDocument, ensureLinks } from "@/lib/stores/part-documents";
  * so a second run writes nothing, and a human who later detaches the legacy
  * document is never overruled. `datasheetBlobKey` itself is left in place for
  * the readers that have not switched yet.
+ *
+ * Final fix wave 2 (I4): document creation and linking are two separate
+ * writes, so a run interrupted between them used to leave a document with no
+ * link — and every later call skipped that SKU entirely (its id was already
+ * "known"), so the link was never written and the bridge/marker read that as
+ * a detached, permanent 404. Every candidate's link is now checked (and
+ * repaired if it has never existed) regardless of whether this call is the
+ * one that minted its document — reads are bounded to just these
+ * candidates' deterministic ids (getDocRows, chunked), never a scan of the
+ * whole link table.
  */
 
 export type LegacyPart = { sku: string; datasheetBlobKey?: string; datasheetName?: string; updatedAt?: number };
@@ -30,8 +40,8 @@ export async function backfillLegacyDatasheets(
   // Documents are never deleted, so a caller that already listed them can
   // hand their ids over and save this read.
   const known = opts.knownIds ?? new Set((await listDocs("part_documents", { includeDeleted: true })).map((d) => d.id));
-  if (candidates.every((p) => known.has(legacyDocumentId(p.sku)))) return { created: 0 };
-  const pairs: Array<{ partSku: string; documentId: string; kind: "datasheet" }> = [];
+
+  let created = 0;
   for (const p of candidates) {
     const id = legacyDocumentId(p.sku);
     if (known.has(id)) continue;
@@ -49,8 +59,19 @@ export async function backfillLegacyDatasheets(
       by,
       at: p.updatedAt,
     });
-    if (doc) pairs.push({ partSku: p.sku, documentId: id, kind: "datasheet" });
+    if (doc) created++;
   }
-  await ensureLinks(pairs, by);
-  return { created: pairs.length };
+
+  // Repair pass: every candidate (new this run or already minted earlier)
+  // gets its link written if — and only if — that link has never existed.
+  // ensureLinks' own "ever" gate (part_document_links, includeDeleted) means
+  // a human's later detach is still never overruled by this.
+  const linkIds = candidates.map((p) => documentLinkId(p.sku, legacyDocumentId(p.sku)));
+  const everLinked = new Set((await getDocRows("part_document_links", linkIds)).map((r) => r.id));
+  const pairs: Array<{ partSku: string; documentId: string; kind: "datasheet" }> = candidates
+    .filter((p) => !everLinked.has(documentLinkId(p.sku, legacyDocumentId(p.sku))))
+    .map((p) => ({ partSku: p.sku, documentId: legacyDocumentId(p.sku), kind: "datasheet" as const }));
+  if (pairs.length) await ensureLinks(pairs, by);
+
+  return { created };
 }

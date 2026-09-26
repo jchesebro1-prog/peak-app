@@ -2813,6 +2813,136 @@ async function main() {
     await setSettings({ fixtureAssemblies: priorAssemblies });
   }
 
+  /* --- part documents (#207) final fix wave 2, I4: an interrupted legacy
+         backfill (document minted, link never written) must not 404 --- */
+  {
+    const Docs = await import("@/lib/stores/part-documents");
+    const { resolvePartDatasheet, partsWithOwnDatasheet } = await import("@/lib/part-docs/datasheet-bridge");
+    const { backfillLegacyDatasheets, legacyDocumentId } = await import("@/lib/part-docs/legacy");
+    const { upsert: upsertPart, get: getPart } = await import("@/lib/stores/catalog");
+
+    await upsertPart({ sku: "DOC-INTERRUPT", desc: "Interrupted", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/DOC-INTERRUPT/old.pdf", datasheetName: "old.pdf" });
+    const part = (await getPart("DOC-INTERRUPT"))!;
+    const docId = legacyDocumentId("DOC-INTERRUPT");
+    // Simulate legacy.ts stopping between "create the document" and
+    // "ensureLinks" (two separate writes): the document exists, its link
+    // never does.
+    const minted = await Docs.createDocument({
+      id: docId, kind: "datasheet", fileName: "old.pdf", contentType: "application/pdf", size: 0,
+      blobKey: "part-datasheets/DOC-INTERRUPT/old.pdf", sourceUrl: null, source: "legacy", sourceRef: "DOC-INTERRUPT", by: "Legacy datasheet backfill",
+    });
+    assert(minted, "final fix I4 setup: the interrupted state — the document exists, unlinked");
+
+    assert.deepEqual(await resolvePartDatasheet(part), { kind: "legacy", blobKey: "part-datasheets/DOC-INTERRUPT/old.pdf" }, "final fix I4: a minted-but-unlinked legacy document must not 404 — the link never existed, so the legacy blob still streams");
+    assert((await partsWithOwnDatasheet([part])).has("DOC-INTERRUPT"), "final fix I4: …and the catalog marker still shows it");
+
+    const repaired = await backfillLegacyDatasheets([part]);
+    assert.deepEqual(repaired, { created: 0 }, "final fix I4: the backfill repairs the missing link without minting a second document");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-INTERRUPT" && l.documentId === docId).length, 1, "final fix I4: the missing link now exists");
+    assert.deepEqual(await resolvePartDatasheet(part), { kind: "document", documentId: docId }, "final fix I4: the bridge now redirects to the (now-linked) legacy document");
+
+    // A human's detach afterwards must still stick — the repair pass must
+    // never make a detached link un-detachable, and must never resurrect it
+    // on a later run.
+    await Docs.detachDocument(docId, "DOC-INTERRUPT");
+    assert.equal(await resolvePartDatasheet(part), null, "final fix I4: once linked and then detached, it 404s as before");
+    await backfillLegacyDatasheets([part]);
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-INTERRUPT").length, 0, "final fix I4: …confirmed — the repair pass itself never revives a link a human detached");
+  }
+
+  /* --- part documents (#207) final fix wave 2, I5: the one-time graph sync
+         uses a STRICT settings read — a DB error must propagate, not read
+         as "no fixture assemblies" and mark the pass complete --- */
+  {
+    const { getDb, withTransaction } = await import("@/db");
+    const { sql, eq } = await import("drizzle-orm");
+    const { blobs } = await import("@/db/doc-tables");
+    const { getSettingsPatch, getSettingsPatchStrict, getSettingsStrict } = await import("@/lib/settings");
+
+    // settings.ts: the strict readers agree with the lenient ones when the
+    // DB is healthy…
+    await setSettings({ companyName: "Strict Settings Probe" });
+    assert.equal((await getSettingsStrict()).companyName, "Strict Settings Probe", "final fix I5: getSettingsStrict matches getSettings when the DB is healthy");
+
+    // …but a genuine DB error propagates from the strict reader (never
+    // resolves to `{}`), while the lenient one still swallows it exactly as
+    // documented (unchanged) — both probed inside a transaction so the
+    // DROP is rolled back and never actually lands.
+    await assert.rejects(
+      withTransaction(async () => {
+        const db = await getDb();
+        await db.execute(sql`DROP TABLE app_settings`);
+        await getSettingsPatchStrict();
+      }),
+      "final fix I5: getSettingsPatchStrict propagates a DB error instead of resolving to {}",
+    );
+    await assert.rejects(
+      withTransaction(async () => {
+        const db = await getDb();
+        await db.execute(sql`DROP TABLE app_settings`);
+        assert.deepEqual(await getSettingsPatch(), {}, "final fix I5: the lenient reader still swallows the same failure (documented behavior, unchanged)");
+        throw new Error("I5-lenient-probe-rollback");
+      }),
+      /I5-lenient-probe-rollback/,
+      "final fix I5: probe transaction rolled back cleanly",
+    );
+    assert.equal((await getSettingsStrict()).companyName, "Strict Settings Probe", "final fix I5: app_settings is intact after both probes roll back");
+
+    // End to end: the one-time assembly-graph sync itself now propagates a
+    // settings-read failure instead of syncing subassemblies-only and
+    // marking itself complete.
+    const { syncAllAssemblyGraphs, assemblyGraphSynced, GRAPH_SYNC_BLOB_ID } = await import("@/lib/part-docs/assembly-sync");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
+    assert.equal(await assemblyGraphSynced(), false, "final fix I5 setup: the flag starts unset");
+    await assert.rejects(
+      withTransaction(async () => {
+        const db = await getDb();
+        await db.execute(sql`DROP TABLE app_settings`);
+        await syncAllAssemblyGraphs();
+      }),
+      "final fix I5: a settings-read failure during the one-time sync propagates — it must not silently sync subassemblies only",
+    );
+    assert.equal(await assemblyGraphSynced(), false, "final fix I5: …and the completion flag stays unset after the throw");
+  }
+
+  /* --- part documents (#207) final fix wave 2, I6: the one-time graph sync
+         is strictly add-only — it can never overwrite a concurrent Assembly
+         Builder save --- */
+  {
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    // Seed the scope the way a normal (reconcile) save would.
+    await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }, { parentSku: "FW-CONC", accessorySku: "FW-B" }] },
+    ]);
+    // A concurrent save lands "during" the one-time sync's window: it drops
+    // FW-B and adds FW-C.
+    await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }, { parentSku: "FW-CONC", accessorySku: "FW-C" }] },
+    ]);
+    const before = (await Acc.allAccessoryLinks()).filter((l) => l.sourceRef === "assembly:fw-conc").map((l) => l.accessorySku).sort();
+    assert.deepEqual(before, ["FW-A", "FW-C"], "final fix I6 setup: the concurrent save's drop+add landed");
+
+    // The one-time sync now runs off ITS OWN stale settings snapshot — read
+    // before the concurrent save above, so it still thinks the scope is
+    // [FW-A, FW-B] and knows nothing of FW-C. A reconcile sync would
+    // soft-delete FW-C (not in its stale desired set) — overwriting the
+    // concurrent save; add-only must never remove anything.
+    const r = await Acc.syncAccessoryScopeSet("assembly", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }, { parentSku: "FW-CONC", accessorySku: "FW-B" }] },
+    ]);
+    assert.equal(r.removed, 0, "final fix I6: the one-time sync never soft-deletes anything");
+    const after = (await Acc.allAccessoryLinks()).filter((l) => l.sourceRef === "assembly:fw-conc").map((l) => l.accessorySku).sort();
+    assert(after.includes("FW-C"), "final fix I6: the concurrent save's FW-C addition survives the one-time sync's stale, add-only pass — never overwritten");
+
+    // An already-live row (and its own-datasheet flag) is left completely
+    // alone by the add-only pass, never rewritten.
+    await Acc.setOwnDatasheet("FW-CONC", "FW-A", true);
+    await Acc.syncAccessoryScopeSet("assembly", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }] },
+    ]);
+    assert.equal((await Acc.allAccessoryLinks()).find((l) => l.sourceRef === "assembly:fw-conc" && l.accessorySku === "FW-A")?.ownDatasheet, true, "final fix I6: an already-live row's own-datasheet flag is never touched by the add-only pass");
+  }
+
   console.log("review regression checks passed");
 }
 

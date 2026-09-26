@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { listDocs, patchDoc, softDeleteDocs, upsertDocs, type DocBatchOpts } from "@/db/doc-store";
+import { insertDocsIfAbsent, listDocs, patchDoc, softDeleteDocs, upsertDocs, type DocBatchOpts } from "@/db/doc-store";
 import type { AccessoryLinkSource, AccessoryPair, PartAccessoryLink } from "@/lib/part-docs/types";
 
 /**
@@ -86,6 +86,17 @@ export async function syncAccessoryScopes(
  * listed are left alone (no prefix pruning). The one-time assembly graph
  * sync (final fix wave, I2) uses this, so a settings read that comes back
  * empty can never wipe the graph.
+ *
+ * Strictly ADD-ONLY (final fix wave, #3): this is the one-time sync's only
+ * caller, and it runs off of whatever settings/subassembly snapshot the
+ * request happened to read — a real Assembly Builder save can land
+ * concurrently, on the very scopes this pass is about to write. Reconciling
+ * (soft-deleting a pair not in this stale desired set, or rewriting a row
+ * that differs) would overwrite that concurrent save. So this only inserts
+ * pairs that are not currently live; an already-live row (its fields, its
+ * own-datasheet flag) is never touched, and nothing is ever soft-deleted
+ * here. Normal save-time sync (syncAccessoryLinks/syncAccessoryScopes, the
+ * Assembly Builder and DaVinci pre-fill's own writers) keeps full reconcile.
  */
 export async function syncAccessoryScopeSet(
   source: AccessoryLinkSource,
@@ -94,14 +105,15 @@ export async function syncAccessoryScopeSet(
 ): Promise<{ written: number; removed: number; complete: boolean }> {
   const refs = new Set(scopes.map((s) => s.sourceRef));
   if (!refs.size) return { written: 0, removed: 0, complete: true };
-  return syncScopes(source, (l) => refs.has(l.sourceRef ?? ""), scopes, opts);
+  return syncScopes(source, (l) => refs.has(l.sourceRef ?? ""), scopes, opts, "addOnly");
 }
 
 async function syncScopes(
   source: AccessoryLinkSource,
   owns: (l: PartAccessoryLink) => boolean,
   scopes: ReadonlyArray<{ sourceRef?: string; pairs: readonly AccessoryPair[] }>,
-  opts: DocBatchOpts = {}
+  opts: DocBatchOpts = {},
+  mode: "reconcile" | "addOnly" = "reconcile"
 ): Promise<{ written: number; removed: number; complete: boolean }> {
   const all = await allAccessoryLinks();
   const own = new Map(all.filter((l) => l.source === source && owns(l)).map((l) => [l.id, l]));
@@ -128,6 +140,16 @@ async function syncScopes(
         ...(sourceRef ? { sourceRef } : {}),
       });
     }
+  }
+
+  if (mode === "addOnly") {
+    // Only rows whose deterministic id doesn't exist at all are written
+    // (ON CONFLICT DO NOTHING) — a live row OR one only just soft-deleted by
+    // a concurrent save is left completely alone, fields and own-datasheet
+    // flag included. Nothing is ever soft-deleted in this mode.
+    const missing = [...desired.entries()].filter(([id]) => !own.has(id)).map(([, link]) => link);
+    const w = await insertDocsIfAbsent<PartAccessoryLink>("part_accessory_links", missing, opts);
+    return { written: w.ids.length, removed: 0, complete: w.complete };
   }
 
   // The full changed/stale sets first, then chunked multi-row writes

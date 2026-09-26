@@ -1,5 +1,5 @@
 import { getBlob, setBlob } from "@/db/doc-store";
-import { getSettings } from "@/lib/settings";
+import { getSettingsStrict } from "@/lib/settings";
 import { sanitizeFixtureAssemblies } from "@/lib/fixture-assemblies";
 import { list as listSubassemblies } from "@/lib/stores/subassemblies";
 import { syncAccessoryScopeSet } from "@/lib/stores/part-accessory-links";
@@ -49,7 +49,12 @@ export type AssemblyGraphSyncResult = {
 };
 
 export async function syncAllAssemblyGraphs(opts: { shouldStop?: () => boolean } = {}): Promise<AssemblyGraphSyncResult> {
-  const [settings, subs] = await Promise.all([getSettings(), listSubassemblies()]);
+  // Strict read (final fix wave, I5): getSettings/getSettingsPatch swallow a
+  // DB error into `{}` — here that would read as "no fixture assemblies"
+  // and sync subassemblies only, then still mark the pass complete (the
+  // completing setBlob below only runs when this call resolves, so a throw
+  // here is exactly what keeps the flag unset on a transient failure).
+  const [settings, subs] = await Promise.all([getSettingsStrict(), listSubassemblies()]);
   const assemblies = sanitizeFixtureAssemblies(settings.fixtureAssemblies);
   const scopes = [
     ...assemblies.map((a) => ({ sourceRef: assemblyRef(a.id), pairs: fixtureAssemblyPairs(a) })),
