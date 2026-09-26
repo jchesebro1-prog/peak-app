@@ -84,6 +84,27 @@ export function normalizeSpecDocument(raw: unknown): SpecDocument {
   };
 }
 
+const SPEC_HEADER_KEYS: readonly (keyof SpecDocHeader)[] = [
+  "projectName",
+  "projectNumber",
+  "phase",
+  "issueDate",
+  "preparedBy",
+];
+
+/** Whitelist + trim a header patch to just `SpecDocHeader`'s five keys —
+ *  `updateSpecHeaderAction` guards against a client sending arbitrary extra
+ *  fields into the stored header this way (#205 spec builder T4 fix wave
+ *  item 2). A key absent from `patch` is left untouched by the caller; a key
+ *  present (even "") is copied, trimmed. */
+export function pickSpecHeaderPatch(patch: Record<string, unknown>): Partial<SpecDocHeader> {
+  const out: Partial<SpecDocHeader> = {};
+  for (const k of SPEC_HEADER_KEYS) {
+    if (patch[k] !== undefined) out[k] = str(patch[k]);
+  }
+  return out;
+}
+
 export function withProduct(doc: SpecDocument, p: SpecDocProduct): SpecDocument {
   const n = product(p);
   if (!n || doc.products.some((x) => same(x.sku, n.sku))) return doc;

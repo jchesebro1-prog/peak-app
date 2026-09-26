@@ -311,7 +311,7 @@ import {
 } from "@/lib/specs/outline";
 import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
 import { fillInSlots, applyFillIns, staleFillInKeys } from "@/lib/specs/fill-ins";
-import { assembleSection, placeProduct, type SpecBuilderPart } from "@/lib/specs/assemble-section";
+import { assembleSection, placeProduct, articleInSection, type SpecBuilderPart } from "@/lib/specs/assemble-section";
 import { longDate, specFileName } from "@/lib/specs/spec-file-name";
 import { buildSectionDocx } from "@/lib/specs/spec-docx";
 import JSZip from "jszip";
@@ -330,6 +330,7 @@ import {
 } from "@/app/(app)/design/specs/coverage";
 import {
   normalizeSpecDocument, withProduct, withoutProduct, withProductOrder, withProductHeader, bomProducts, DEFAULT_SPEC_PHASE,
+  pickSpecHeaderPatch,
 } from "@/lib/specs/spec-document";
 
 let fail = 0;
@@ -19104,6 +19105,60 @@ async function specDocxAsyncChecks(): Promise<void> {
   ok(src.startsWith('"use server"'), "#205 spec builder: builder-actions is a server-action module");
   const old = read("src/app/(app)/design/engagements/spec/actions.ts");
   ok(old.includes("bomFromQuote(") && !old.includes("gridSpecBomRows("), "#205 spec builder: the D94 action delegates to the shared bomFromQuote");
+}
+
+// #205 spec builder T4 fix wave
+/**
+ * The reviewer's fix wave pulled the two genuinely pure bits out of
+ * builder-actions.ts so they're testable without a session: the
+ * section-membership check (now `articleInSection`, shared with
+ * `placeProduct`) and the header patch whitelist (`pickSpecHeaderPatch`).
+ * The DB-touching wrapper around the section check (`checkArticleInSection`)
+ * stays private and untested directly, same reasoning as T4's own note —
+ * actions need a session — but its two callers are checked by source text.
+ */
+{
+  const arts = [
+    { id: "ar-a", sectionId: "ss-1", sort: 0, title: "A", manufacturers: [], general: "", categoryKeys: [], updatedAt: 0, updatedBy: "" },
+    { id: "ar-b", sectionId: "ss-2", sort: 0, title: "B", manufacturers: [], general: "", categoryKeys: [], updatedAt: 0, updatedBy: "" },
+  ];
+  ok(articleInSection("ar-a", "ss-1", arts) === true, "#205 spec builder: articleInSection accepts an article that belongs to the section");
+  ok(articleInSection("ar-b", "ss-1", arts) === false, "#205 spec builder: articleInSection refuses an article from another section");
+  ok(articleInSection("ar-nope", "ss-1", arts) === false, "#205 spec builder: articleInSection refuses an unknown article id");
+  ok(articleInSection(null, "ss-1", arts) === false && articleInSection(undefined, "ss-1", arts) === false, "#205 spec builder: articleInSection refuses a null/undefined article id");
+
+  const picked = pickSpecHeaderPatch({ projectName: "  North HS  ", phase: 7, evil: "<script>", issueDate: undefined });
+  ok(
+    picked.projectName === "North HS" && picked.phase === "7" && !("evil" in picked) && !("issueDate" in picked),
+    "#205 spec builder: pickSpecHeaderPatch whitelists the five header keys, trims/stringifies them, and drops unknown or absent keys"
+  );
+  ok(Object.keys(pickSpecHeaderPatch({})).length === 0, "#205 spec builder: pickSpecHeaderPatch on an empty patch touches nothing");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const src = read("src/app/(app)/design/specs/builder-actions.ts");
+  const bodyOf = (name: string) => {
+    const start = src.indexOf(`export async function ${name}`);
+    const next = src.indexOf("export async function", start + 1);
+    return src.slice(start, next === -1 ? undefined : next);
+  };
+  ok(
+    bodyOf("addSpecProductAction").includes("checkArticleInSection(") && bodyOf("setSpecProductHeaderAction").includes("checkArticleInSection("),
+    "#205 spec builder: addSpecProductAction and setSpecProductHeaderAction both call the one shared section-membership check"
+  );
+  ok(
+    (src.match(/That article is not in this spec's section\./g) || []).length === 1,
+    "#205 spec builder: the refusal message is defined once, not duplicated per action"
+  );
+  ok(bodyOf("addSpecProductAction").includes("getManyAnyCase(["), "#205 spec builder: addSpecProductAction resolves the SKU case-insensitively");
+  ok(bodyOf("addSpecProductAction").includes('"Already on this spec."'), "#205 spec builder: addSpecProductAction refuses a SKU already on the spec");
+  ok(
+    bodyOf("setSpecCustomerAction").includes("resolveSpecCustomer(") && bodyOf("createSpecDocumentAction").includes("resolveSpecCustomer("),
+    "#205 spec builder: setSpecCustomerAction and createSpecDocumentAction both resolve the customer through the one shared helper"
+  );
+  ok(
+    (src.match(/"Customer not found\."/g) || []).length === 1,
+    "#205 spec builder: an unknown customerId's error is defined once, not duplicated per action"
+  );
 }
 
 async function specBuilderActionsAsyncChecks(): Promise<void> {

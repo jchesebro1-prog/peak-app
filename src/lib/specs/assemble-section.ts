@@ -53,6 +53,19 @@ const up = (s: string) => s.toUpperCase();
 const prefix = (sku: string) => (sku.indexOf(":") > 0 ? sku.slice(0, sku.indexOf(":")) : "");
 const tail = (sku: string) => (sku.indexOf(":") >= 0 ? sku.slice(sku.indexOf(":") + 1) : "");
 
+/** Whether `articleId` names a live article inside `sectionId` — the one
+ *  check for a per-spec header override, shared between `placeProduct`
+ *  below and the builder actions' addSpecProductAction/
+ *  setSpecProductHeaderAction (#205 spec builder T4 fix wave item 1), so a
+ *  header override can never point outside the spec's own section. */
+export function articleInSection(
+  articleId: string | null | undefined,
+  sectionId: string,
+  articles: SpecCategoryArticle[]
+): boolean {
+  return !!articleId && articles.some((a) => a.id === articleId && a.sectionId === sectionId);
+}
+
 /**
  * Where a BOM part lands: its own resolved article when that belongs to this
  * section, else a per-spec header override (chosen when the product was
@@ -67,10 +80,9 @@ export function placeProduct(
   sections: SpecSection[]
 ): Placement {
   if (!part) return { ok: false, reason: "not-in-catalog" };
-  const inSection = (id?: string | null) => !!id && articles.some((a) => a.id === id && a.sectionId === sectionId);
   const own = articleIdForPart(part, articles, sections);
-  if (inSection(own)) return { ok: true, articleId: own! };
-  if (inSection(p.articleId)) return { ok: true, articleId: p.articleId! };
+  if (articleInSection(own, sectionId, articles)) return { ok: true, articleId: own! };
+  if (articleInSection(p.articleId, sectionId, articles)) return { ok: true, articleId: p.articleId! };
   if (own) return { ok: false, reason: "other-section", articleId: own };
   return { ok: false, reason: "needs-header" };
 }
