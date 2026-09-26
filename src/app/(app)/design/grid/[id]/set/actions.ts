@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/session";
 import { setDrawingSet } from "@/lib/stores/grid-projects";
 import type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 
-/** Save the drawing set's settings on the project (#GDS). Same gate as any
+/** Save the drawing set's settings on the project (#209). Same gate as any
  *  Grid edit; the store cleans every field. */
 export async function saveDrawingSetAction(
   projectId: string,

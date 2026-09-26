@@ -103,7 +103,7 @@ export default async function GridEditorPage({
   const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
 
   /** Client payload: sheets without re-serialization surprises + PartLite slice
-   *  (the one builder the riser, drawing set and schedule use too — #GDS). */
+   *  (the one builder the riser, drawing set and schedule use too — #209). */
   // #207: "has a datasheet" = a stored datasheet document of the part's own;
   // the editor's link goes through /api/part-datasheet/<sku>, which bridges
   // to the part-document viewer. loadPartDocsState runs the legacy backfill

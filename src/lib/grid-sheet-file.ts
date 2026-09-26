@@ -69,7 +69,7 @@ export function sheetMimeVerdict(mime: string): "ok" | "svg" | "other" {
 
 /**
  * Decode an in-database sheet's data-URL (`data:<mime>[;params][;base64],…`)
- * so the sheet proxy can stream it like a Blob sheet (#GDS final review I6 —
+ * so the sheet proxy can stream it like a Blob sheet (#209 final review I6 —
  * the drawing set loads every sheet by URL, once, instead of inlining the
  * data-URL into each plan page). Null for anything that isn't a data-URL.
  */

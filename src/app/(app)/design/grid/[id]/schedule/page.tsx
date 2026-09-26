@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 /**
  * Per-space equipment schedule (D113 item 3) — the field document: what
  * hangs in which room, plus the wire runs (routes and typed riser links,
- * #GDS) between rooms. Deliberately NO prices. Built by the same
+ * #209) between rooms. Deliberately NO prices. Built by the same
  * buildSchedule the drawing set's E-60x sheets use, so the two never differ.
  */
 export default async function SchedulePage({

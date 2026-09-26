@@ -239,7 +239,7 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/grid/GRD-5001?option=opt-does-not-exist", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/riser?option=opt-base", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/schedule?option=opt-does-not-exist", reject: "no longer exists" },
-  /* The drawing set (#GDS) at both sheet sizes, and an unknown option. */
+  /* The drawing set (#209) at both sheet sizes, and an unknown option. */
   { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?size=d", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?option=opt-does-not-exist&size=b", reject: "no longer exists" },

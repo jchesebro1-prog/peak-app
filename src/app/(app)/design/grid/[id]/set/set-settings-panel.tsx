@@ -6,7 +6,7 @@ import { SHEET_SIZES, type DrawingSetSettings, type SheetSizeKey } from "@/lib/d
 import { saveDrawingSetAction } from "./actions";
 
 /**
- * Set settings (#GDS spec §3), saved on the project: size, drawn/checked by,
+ * Set settings (#209 spec §3), saved on the project: size, drawn/checked by,
  * which sheets print, the set's own general notes (or the standard ones),
  * and labels for revisions that have no note. Never prints.
  */
@@ -85,7 +85,7 @@ export default function SetSettingsPanel({
   async function saveAll() {
     // Unticking "own notes" must actually revert the cover to the standard
     // notes, not just stop sending generalNotes — a bare merge patch would
-    // leave the previously-saved custom text in place (#GDS review I1).
+    // leave the previously-saved custom text in place (#209 review I1).
     if (
       await save(
         { drawnBy, checkedBy, excluded, revisionLabels: labels, ...(ownNotes ? { generalNotes: notes } : {}) },

@@ -22,7 +22,7 @@ import {
 import type { GridPlacement, GridProject } from "./grid-projects";
 
 /**
- * The riser editor's writes (#GDS, drawing set spec §4). Each function is ONE
+ * The riser editor's writes (#209, drawing set spec §4). Each function is ONE
  * patchDoc on the Grid project, computed from the doc read inside the patch,
  * so a device add, a qty edit and the riser document can never disagree.
  * Placements written here are ordinary GridPlacements — the plan, BOM,

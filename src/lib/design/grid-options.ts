@@ -143,6 +143,6 @@ export function copyOptionMembers<
       return next;
     });
   // idMap (old placement id → copied id) lets the caller re-point anything
-  // else that references devices — the riser document's links (#GDS).
+  // else that references devices — the riser document's links (#209).
   return { placements, routes, idMap };
 }

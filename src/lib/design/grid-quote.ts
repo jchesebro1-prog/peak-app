@@ -41,7 +41,7 @@ export async function buildGridQuote(
   if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
   const option = ensureOptions(project).options.find((o) => o.id === optionId)!;
   const { placements, routes } = optionSlice(project, optionId);
-  // Typed-length riser connections (#GDS) price exactly like wire routes.
+  // Typed-length riser connections (#209) price exactly like wire routes.
   const riserLinks = riserLinksOf(project.riser, optionId);
   if (!placements.length && !routes.length && !riserLinks.length)
     return { ok: false, error: "Place a device or route a wire first." };

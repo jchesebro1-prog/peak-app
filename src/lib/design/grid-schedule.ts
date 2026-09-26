@@ -1,6 +1,6 @@
 /**
  * The Grid — equipment schedule (D113 item 3), shared by /schedule and the
- * drawing set's E-60x sheets (#GDS). Pure and dependency-free (the grid-bom
+ * drawing set's E-60x sheets (#209). Pure and dependency-free (the grid-bom
  * rule). Deliberately NO prices: this is the field document.
  */
 
@@ -21,7 +21,7 @@ export type ScheduleData = {
 };
 
 /**
- * The wire runs a RiserView draws (#GDS) as schedule rows: each route/
+ * The wire runs a RiserView draws (#209) as schedule rows: each route/
  * RiserLink edge, named by the human node ("Unassigned" for an edge that
  * lands there) on either end. Shared by /schedule and the set's E-60x
  * sheets so the two wire tables — set/page.tsx and schedule/page.tsx — can

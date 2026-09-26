@@ -8352,7 +8352,7 @@ A browser check of the three builders in fly mode on a scratch datadir is the le
 
 ---
 
-## #GDS. The Grid — professional drawing set (title blocks) + editable riser — DONE 2026-09-25 (D-GDS-1…D-GDS-7)
+## 209. The Grid — professional drawing set (title blocks) + editable riser — DONE 2026-09-25 (D287…D293)
 
 **Reported:** 2026-09-25 (Jeff, brainstorm with mockups): "talk through making the outputs look more professional …
 adding title blocks, and adding the ability to add via the riser." Spec:

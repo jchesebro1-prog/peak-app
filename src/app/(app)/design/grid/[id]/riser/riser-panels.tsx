@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type RefObject } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { RiserNote } from "@/lib/design/grid-riser-doc";
 
-/** Riser editor tool panels (#GDS). Plain controlled forms; the editor owns
+/** Riser editor tool panels (#209). Plain controlled forms; the editor owns
  *  every server call and passes busy/callbacks in. */
 
 export type RiserPartOption = { id: string; label: string };

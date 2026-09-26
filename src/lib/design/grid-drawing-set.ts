@@ -1,5 +1,5 @@
 /**
- * The Grid — drawing set model (drawing set spec 2026-09-25, #GDS).
+ * The Grid — drawing set model (drawing set spec 2026-09-25, #209).
  *
  * Pure and dependency-free (the grid-bom rule): the set page (server), the
  * title block, the plan-sheet figure (a client component) and the spec

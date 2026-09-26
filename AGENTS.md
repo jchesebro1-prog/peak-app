@@ -183,7 +183,7 @@ See `.env.example`.
    `projects/peak-system-designer.md`; what remains is Jeff-gated data/infra
    (symbol+datasheet metadata, palette seeding, blob storage). Suite renamed
    **Quartzite** (D107) alongside slice 1.
-   ✅ Drawing set + editable riser (#GDS, Sep 25): a title-blocked drawing set
+   ✅ Drawing set + editable riser (#209, Sep 25): a title-blocked drawing set
    at `/design/grid/<id>/set` — T-001 cover (sheet index, symbol legend,
    general notes), one plan sheet per system per source page (L/A/V/R, plus
    G-101 for unscoped devices) with a calibration-derived scale note, E-501
@@ -194,7 +194,7 @@ See `.env.example`.
    notes, backed by a capped, server-canonicalized per-option riser document
    that revisions and option copies carry; its legend now builds from
    current placements. `/schedule` now names Grid-library parts and lists
-   RiserLinks alongside routed wire runs. Decisions D-GDS-1–D-GDS-7.
+   RiserLinks alongside routed wire runs. Decisions D287–D293.
 11. ✅ **Consulting project management** (#145, D164–D172, D178, D175–D177) —
     task templates gain a phase/discipline scope and proportional %/%
     scheduling within phase windows; a pure scheduling engine

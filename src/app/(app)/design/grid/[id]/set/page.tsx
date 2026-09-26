@@ -75,7 +75,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
 }
 
 /**
- * The drawing set (#GDS, spec 2026-09-25 §3): every sheet is one printed
+ * The drawing set (#209, spec 2026-09-25 §3): every sheet is one printed
  * page with the architectural title strip — T-001 cover (project, sheet
  * index, symbol legend, general notes), one plan sheet per system per source
  * page, E-501 riser (the saved riser layout), E-60x equipment schedules (no

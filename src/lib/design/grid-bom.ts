@@ -390,7 +390,7 @@ export function routeLines(
   routes: RouteLite[],
   parts: PartLite[],
   cals: Calibration[],
-  /** RiserLinks (#GDS) — typed-length cable runs from the riser. Summed with
+  /** RiserLinks (#209) — typed-length cable runs from the riser. Summed with
    *  the measured routes of the same part BEFORE rounding up, so a part's
    *  footage is bought whole once. They carry no validated connectionType,
    *  so a line they touch is never annotated with one. */

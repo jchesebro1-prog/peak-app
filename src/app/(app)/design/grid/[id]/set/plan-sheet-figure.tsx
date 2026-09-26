@@ -41,7 +41,7 @@ const SPACE_FS = 12 * K;
 const textW = (s: string, fs: number) => s.length * fs * 0.7 + 2 * K;
 
 /**
- * One system's plan on a drawing-set sheet (#GDS): the base sheet (image or
+ * One system's plan on a drawing-set sheet (#209): the base sheet (image or
  * PDF page) fitted to the drawing area, that system's devices, wires and the
  * page's space outlines on top, a device key (type mark · qty · description)
  * beside or under the plan, and a caption with the printed scale (from the
@@ -90,7 +90,7 @@ export default function PlanSheetFigure({
   // A PDF's canvas is sized (giving us the aspect) before it has actually
   // painted — an image's data-ready is fine gated on load alone, but a PDF
   // sheet also has to wait for PdfCanvas's onRendered so the print harness
-  // never captures a blank page (#GDS review I2).
+  // never captures a blank page (#209 review I2).
   const ready = isPdf ? aspect !== null && rendered : aspect !== null;
   const layout = planKeyLayout({ areaW, areaH, captionH, aspect, rows: keyRows.length, k });
   const fit = aspect ? fitBox(layout.planW, layout.planH, aspect) : null;

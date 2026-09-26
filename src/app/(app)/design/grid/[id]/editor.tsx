@@ -221,7 +221,7 @@ export type ProjectLite = {
   revisions: GridRevision[];
   scopeInputs: QuickScopeInputs | null;
   linesetDesignId: string | null;
-  /** Riser documents per option (#GDS) — the sidebar BOM counts RiserLinks. */
+  /** Riser documents per option (#209) — the sidebar BOM counts RiserLinks. */
   riser: Record<string, RiserDoc>;
 };
 

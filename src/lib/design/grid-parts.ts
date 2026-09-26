@@ -5,7 +5,7 @@ import type { PartLite } from "./grid-bom";
 import { gridSymbolEntry } from "./grid-icons";
 
 /**
- * The ONE Grid-library → PartLite builder (#GDS): the plan editor, the riser,
+ * The ONE Grid-library → PartLite builder (#209): the plan editor, the riser,
  * the drawing set and the schedule all price, name and badge a device the
  * same way. Pure (type-only store imports); callers load the rows.
  *

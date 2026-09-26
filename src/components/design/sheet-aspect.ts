@@ -2,7 +2,7 @@
  * A plan sheet page's height ÷ width, measured in the browser the same way
  * the Grid editor does (image natural size; PDF page viewport) — the aspect
  * a GridRoute stamps so its length is recomputable anywhere (D110). Used by
- * the riser's Connect tool (#GDS), which draws a route without the plan open.
+ * the riser's Connect tool (#209), which draws a route without the plan open.
  * Browser-only: call it from event handlers, never during render.
  */
 

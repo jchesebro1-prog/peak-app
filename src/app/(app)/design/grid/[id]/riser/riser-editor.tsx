@@ -38,7 +38,7 @@ import {
 } from "./riser-panels";
 
 /**
- * The editable riser (#GDS, spec §4). The graph is derived server-side and
+ * The editable riser (#209, spec §4). The graph is derived server-side and
  * arrives as `view`; every edit goes through a server action, then
  * router.refresh() re-derives it. Only in-flight drags and the half-picked
  * Connect/Conduit end live here.

@@ -23,7 +23,7 @@ export async function GET(
   if (!sheet.blobPath) {
     // An in-database sheet (dev, and pre-D116 uploads): decode its data-URL
     // and serve the bytes, so the drawing set can fetch every sheet by URL
-    // once instead of inlining it into each plan page (#GDS I6).
+    // once instead of inlining it into each plan page (#209 I6).
     const decoded = decodeDataUrl(sheet.dataUrl);
     if (!decoded || !decoded.bytes.length) return new Response("Not found", { status: 404 });
     const mime = sheet.mime || decoded.mime;

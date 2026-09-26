@@ -31,7 +31,7 @@ type PdfDoc = {
 };
 
 /**
- * Parsed documents, shared per source (#GDS final review I6): a drawing set
+ * Parsed documents, shared per source (#209 final review I6): a drawing set
  * puts the same PDF sheet on several plan pages (one per system), and each
  * used to download and parse it again. Small LRU — a session rarely has more
  * than a handful of plan sheets open; a failed load is evicted so a retry
@@ -87,7 +87,7 @@ export default function PdfCanvas({
   dataUrl: string;
   page: number;
   zoom: number;
-  /** Print sizing (#GDS I6): when set, `zoom` is ignored and the page is
+  /** Print sizing (#209 I6): when set, `zoom` is ignored and the page is
    *  rasterized at about 200 dpi across the width it prints at inside this
    *  inch box, capped at 12 MP (drawing-labels printZoom). */
   printBox?: { w: number; h: number };
@@ -97,7 +97,7 @@ export default function PdfCanvas({
    *  canvas. Unlike `onSize` (fired as soon as the canvas is sized, before
    *  the render promise resolves — see the render effect below), this is
    *  safe for a caller that needs the plan to be visibly on screen, e.g. a
-   *  print-readiness flag (#GDS). Optional — existing callers are unaffected. */
+   *  print-readiness flag (#209). Optional — existing callers are unaffected. */
   onRendered?: () => void;
   /** Fired when the document fails to load, or the requested page fails to
    *  render (a genuine failure — never for an in-flight render cancelled by

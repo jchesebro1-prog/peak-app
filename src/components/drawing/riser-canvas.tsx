@@ -15,7 +15,7 @@ import {
 import { bezierAt, placeChip, type Bezier, type Pt, type Rect } from "@/lib/design/drawing-labels";
 
 /**
- * The riser, drawn (#GDS). One pure SVG renderer for the riser editor
+ * The riser, drawn (#209). One pure SVG renderer for the riser editor
  * (client, with handlers) and the drawing set's E-501 (server, no handlers):
  * nodes with device rows, wire routes (solid), RiserLinks (dash-dot, marked
  * "typed"), conduits (grey dashed annotation, never priced) and level lines.

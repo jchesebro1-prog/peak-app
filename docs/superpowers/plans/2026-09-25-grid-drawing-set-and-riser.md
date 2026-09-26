@@ -37,7 +37,7 @@ Project and environment rules (binding):
 - Accent colour only through `var(--accent)` (CSS) or the settings `accent` handed to `PrintButton` — never hardcode accent-coloured UI. Use the `pk-*` classes. Timestamps are epoch-ms numbers.
 - Destructive UI goes through `src/components/confirm-button.tsx` `ConfirmButton`; its `onConfirm` must throw when an action returns `{ ok: false }`.
 - Grid writes go through Grid project server actions → store functions → `patchDoc`. Conduits are never priced.
-- Placeholders: punch item `#GDS`, decisions `D-GDS-1` … `D-GDS-7`, harness labels `#GDS`. The lead renumbers at merge — do not invent real numbers.
+- Placeholders: punch item `#209`, decisions `D287` … `D293`, harness labels `#209`. The lead renumbers at merge — do not invent real numbers.
 - Commit with `git -c user.name="SM" commit`, message ending with a blank line then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Do not push.
 - Gates (every task): `npx tsc --noEmit` prints nothing; `npx eslint 2>&1 | tail -1` prints `✖ 111 problems (0 errors, 111 warnings)` (the baseline — a task may not add a warning); `npm run test:specs` ends `ALL PASSED`. Task 4 and Task 8 also run `D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts` (ends `review regression checks passed`). Tasks that touch a client component or anything a client component imports (4, 5, 6, 7, 8) also run `env -u DATABASE_URL NEXT_TELEMETRY_DISABLED=1 npm run build` (exit 0) and then `rm -rf .next`. `npm run test:smoke` runs in Tasks 7 and 8 (it boots its own server on a throwaway datadir). The only other server this plan starts is Task 8's scratch-datadir print server.
 
@@ -92,9 +92,9 @@ npx tsc --noEmit && npx eslint 2>&1 | tail -1   # baseline: ✖ 111 problems (0 
 | `src/app/(app)/design/grid/settings/standard-notes-card.tsx`, `page.tsx` | Create / Modify (T7) | "Standard general notes" card. |
 | `scripts/smoke-routes.ts` | Modify (T7) | The set route at both sizes. |
 | `scripts/fixture-grid-drawing-set.ts` | Create (T8) | Scratch-DB fixture for print verification. |
-| `scripts/test-review-and-spec.ts` | Modify (T1–T7) | Pure `#GDS` blocks appended at EOF (+ one existing #206 check re-pointed in T5). |
-| `scripts/test-review-regressions.ts` | Modify (T4) | DB-backed `#GDS` block. |
-| `DECISIONS.md`, `PUNCHLIST.md` | Modify (T9) | `D-GDS-1…7`, `#GDS`. |
+| `scripts/test-review-and-spec.ts` | Modify (T1–T7) | Pure `#209` blocks appended at EOF (+ one existing #206 check re-pointed in T5). |
+| `scripts/test-review-regressions.ts` | Modify (T4) | DB-backed `#209` block. |
+| `DECISIONS.md`, `PUNCHLIST.md` | Modify (T9) | `D287…D293`, `#209`. |
 
 **Harness rules.** Append new `scripts/test-review-and-spec.ts` blocks at the very end of the file (after the closing `}` of `gridSymbolLookAsyncChecks`). Top-level `import` lines may sit anywhere (they hoist), but a binding may be imported only once in the whole file — a duplicate kills the suite. These are already imported and must be **reused, not re-imported**: `readFileSync`, `join`, `routeLines`, `riserGraph`, `copyOptionMembers`, `pointInPolygon`, `polygonArea`, `symbolContext`, `symbolLook`, `legendRows`, `symH` (React `createElement`), `symRender` (`renderToStaticMarkup`), `ok`. Every new binding in the imports below was checked absent on 2026-09-25. Blocks are wrapped in `{ … }` so their locals never collide. The DB-backed regressions harness gets its block inside `main()`, immediately before `console.log("review regression checks passed");`, using dynamic `await import(...)`.
 
@@ -123,7 +123,7 @@ npx tsc --noEmit && npx eslint 2>&1 | tail -1   # baseline: ✖ 111 problems (0 
 - [ ] **Step 1: Write the failing test** — append to the end of `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 1: sheet-set model --- */
+/* --- #209 grid drawing set — Task 1: sheet-set model --- */
 import {
   SHEET_SIZES, REV_ROWS, drawingArea, resolveSheetSize, sheetCssVars, printPageCss, fitBox, scaleNote,
   revLetter, revisionRows, revisionStatus, titleBlockData, cleanDrawingSet, cleanStandardNotes, resolveGeneralNotes,
@@ -134,24 +134,24 @@ import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/gr
 
 {
   // sizes
-  ok(JSON.stringify(drawingArea("b")) === JSON.stringify({ w: 13.3, h: 9.8 }), "#GDS sizes: the 11×17 drawing area is 13.3 × 9.8 in");
-  ok(drawingArea("d").w > 2 * drawingArea("b").w && SHEET_SIZES.d.w === 36 && SHEET_SIZES.d.h === 24, "#GDS sizes: 24×36 is the same layout scaled up");
-  ok(resolveSheetSize("d", "b") === "d" && resolveSheetSize("x", "d") === "d" && resolveSheetSize(undefined, undefined) === "b", "#GDS sizes: ?size= wins, then the saved size, then 11×17");
-  ok(printPageCss("d").includes("size: 36in 24in") && printPageCss("b").includes("size: 17in 11in") && printPageCss("b").includes("margin: 0"), "#GDS sizes: @page matches the sheet");
-  ok(sheetCssVars("b")["--dw-strip"] === "2.5in" && sheetCssVars("d")["--dw-w"] === "36in" && sheetCssVars("d")["--dw-k"] === "2.118", "#GDS sizes: CSS variables come from one table");
-  ok(JSON.stringify(fitBox(13.3, 9.8, 0.5)) === JSON.stringify({ w: 13.3, h: 6.65 }) && JSON.stringify(fitBox(13.3, 9.8, 1)) === JSON.stringify({ w: 9.8, h: 9.8 }) && fitBox(10, 10, 0).w === 0, "#GDS fit: a plan fits the drawing area by its limiting side");
-  ok(scaleNote({ scale: 100, unit: "ft" }, 10) === `1" = 10'-0"` && scaleNote(null, 10) === "NTS" && scaleNote({ scale: 100, unit: "ft" }, 0) === "NTS", "#GDS scale: from the calibration and the printed width, NTS when uncalibrated");
+  ok(JSON.stringify(drawingArea("b")) === JSON.stringify({ w: 13.3, h: 9.8 }), "#209 sizes: the 11×17 drawing area is 13.3 × 9.8 in");
+  ok(drawingArea("d").w > 2 * drawingArea("b").w && SHEET_SIZES.d.w === 36 && SHEET_SIZES.d.h === 24, "#209 sizes: 24×36 is the same layout scaled up");
+  ok(resolveSheetSize("d", "b") === "d" && resolveSheetSize("x", "d") === "d" && resolveSheetSize(undefined, undefined) === "b", "#209 sizes: ?size= wins, then the saved size, then 11×17");
+  ok(printPageCss("d").includes("size: 36in 24in") && printPageCss("b").includes("size: 17in 11in") && printPageCss("b").includes("margin: 0"), "#209 sizes: @page matches the sheet");
+  ok(sheetCssVars("b")["--dw-strip"] === "2.5in" && sheetCssVars("d")["--dw-w"] === "36in" && sheetCssVars("d")["--dw-k"] === "2.118", "#209 sizes: CSS variables come from one table");
+  ok(JSON.stringify(fitBox(13.3, 9.8, 0.5)) === JSON.stringify({ w: 13.3, h: 6.65 }) && JSON.stringify(fitBox(13.3, 9.8, 1)) === JSON.stringify({ w: 9.8, h: 9.8 }) && fitBox(10, 10, 0).w === 0, "#209 fit: a plan fits the drawing area by its limiting side");
+  ok(scaleNote({ scale: 100, unit: "ft" }, 10) === `1" = 10'-0"` && scaleNote(null, 10) === "NTS" && scaleNote({ scale: 100, unit: "ft" }, 0) === "NTS", "#209 scale: from the calibration and the printed width, NTS when uncalibrated");
 
   // revisions
-  ok([0, 25, 26, 27].map(revLetter).join() === "A,Z,AA,AB", "#GDS revisions: letters run A…Z, AA…");
+  ok([0, 25, 26, 27].map(revLetter).join() === "A,Z,AA,AB", "#209 revisions: letters run A…Z, AA…");
   const gdsRevs = [
     { rev: 2, at: 2000, note: "", reason: "quote" as const },
     { rev: 1, at: 1000, note: "Schematic", reason: "manual" as const },
     { rev: 3, at: 3000, note: "", reason: "manual" as const },
   ];
   const gdsRows = revisionRows(gdsRevs, { "3": "Owner comments" });
-  ok(gdsRows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:Schematic|B:Issued with quote|C:Owner comments", "#GDS revisions: cut order; the note, else an editable label, else the reason");
-  ok(revisionStatus(gdsRows) === "Rev C" && revisionStatus([]) === "— Preliminary", "#GDS revisions: the set is marked with the latest letter, or Preliminary");
+  ok(gdsRows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:Schematic|B:Issued with quote|C:Owner comments", "#209 revisions: cut order; the note, else an editable label, else the reason");
+  ok(revisionStatus(gdsRows) === "Rev C" && revisionStatus([]) === "— Preliminary", "#209 revisions: the set is marked with the latest letter, or Preliminary");
 
   // title-block data
   const tbBase = {
@@ -174,24 +174,24 @@ import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/gr
     now: 5000,
   };
   const tb0 = titleBlockData(tbBase);
-  ok(tb0.status === "— Preliminary" && tb0.revisions.length === 0, "#GDS title block: no revisions → Preliminary");
-  ok(tb0.optionName === null && tb0.company.addressLines.join("|") === "9 B St|Madison, WI 53703" && tb0.company.phone === "608-555-0100", "#GDS title block: one option hides the option row; the quote-default office supplies the address");
-  ok(tb0.project.venue === "Lakefront PAC" && tb0.project.address === "12 Shore Dr" && tb0.drawnBy === "Jeff" && tb0.checkedBy === "" && tb0.sheet.index === 2 && tb0.sheet.total === 5 && tb0.quoteId === "Q-2100", "#GDS title block: venue falls back to intake, drawn-by to the creator");
+  ok(tb0.status === "— Preliminary" && tb0.revisions.length === 0, "#209 title block: no revisions → Preliminary");
+  ok(tb0.optionName === null && tb0.company.addressLines.join("|") === "9 B St|Madison, WI 53703" && tb0.company.phone === "608-555-0100", "#209 title block: one option hides the option row; the quote-default office supplies the address");
+  ok(tb0.project.venue === "Lakefront PAC" && tb0.project.address === "12 Shore Dr" && tb0.drawnBy === "Jeff" && tb0.checkedBy === "" && tb0.sheet.index === 2 && tb0.sheet.total === 5 && tb0.quoteId === "Q-2100", "#209 title block: venue falls back to intake, drawn-by to the creator");
   const tbMany = revisionRows(Array.from({ length: 8 }, (_, i) => ({ rev: i + 1, at: i, note: `r${i + 1}`, reason: "manual" as const })));
   const tb1 = titleBlockData({ ...tbBase, optionCount: 2, revisions: tbMany, set: { drawnBy: "SM", checkedBy: "JC" } });
-  ok(tb1.optionName === "Better" && tb1.revisions.length === REV_ROWS && tb1.revisions[0].letter === "H" && tb1.earlierRevisions === 2 && tb1.status === "Rev H", "#GDS title block: newest revisions first, capped, with a count of earlier ones");
-  ok(tb1.drawnBy === "SM" && tb1.checkedBy === "JC", "#GDS title block: set settings override drawn/checked");
+  ok(tb1.optionName === "Better" && tb1.revisions.length === REV_ROWS && tb1.revisions[0].letter === "H" && tb1.earlierRevisions === 2 && tb1.status === "Rev H", "#209 title block: newest revisions first, capped, with a count of earlier ones");
+  ok(tb1.drawnBy === "SM" && tb1.checkedBy === "JC", "#209 title block: set settings override drawn/checked");
 
   // settings cleaning + notes
   const gdsClean = cleanDrawingSet({ size: "z", drawnBy: "  Jeff  ", excluded: ["riser", "riser", 3, ""], generalNotes: "", revisionLabels: { "2": " Bid ", x: "no", "3": "" } });
-  ok(!("size" in gdsClean) && gdsClean.drawnBy === "Jeff" && JSON.stringify(gdsClean.excluded) === '["riser"]' && gdsClean.generalNotes === "" && JSON.stringify(gdsClean.revisionLabels) === '{"2":"Bid"}', "#GDS set settings: cleaned, deduped, blank notes kept as an explicit empty");
-  ok(cleanStandardNotes("  \n ") === null && cleanStandardNotes(" 1. Verify ") === "1. Verify", "#GDS standard notes: blank clears to null");
-  ok(resolveGeneralNotes(undefined, "1. Verify in field\n2) Coordinate with EC\n\n").join("|") === "Verify in field|Coordinate with EC" && resolveGeneralNotes({ generalNotes: "" }, "Std").length === 0, "#GDS notes: the standard notes are the default, an explicit empty wins, numbering is stripped");
+  ok(!("size" in gdsClean) && gdsClean.drawnBy === "Jeff" && JSON.stringify(gdsClean.excluded) === '["riser"]' && gdsClean.generalNotes === "" && JSON.stringify(gdsClean.revisionLabels) === '{"2":"Bid"}', "#209 set settings: cleaned, deduped, blank notes kept as an explicit empty");
+  ok(cleanStandardNotes("  \n ") === null && cleanStandardNotes(" 1. Verify ") === "1. Verify", "#209 standard notes: blank clears to null");
+  ok(resolveGeneralNotes(undefined, "1. Verify in field\n2) Coordinate with EC\n\n").join("|") === "Verify in field|Coordinate with EC" && resolveGeneralNotes({ generalNotes: "" }, "Std").length === 0, "#209 notes: the standard notes are the default, an explicit empty wins, numbering is stripped");
 
   // systems + plan grouping
-  ok(DRAWING_SYSTEMS.map((s) => s.prefix).join("") === "LAVRG" && drawingSystemOf("Curtains") === "rigging" && drawingSystemOf("Unscoped") === "general", "#GDS systems: L, A, V, R (rigging + curtains), G for unscoped");
+  ok(DRAWING_SYSTEMS.map((s) => s.prefix).join("") === "LAVRG" && drawingSystemOf("Curtains") === "rigging" && drawingSystemOf("Unscoped") === "general", "#209 systems: L, A, V, R (rigging + curtains), G for unscoped");
   const gdsParts = new Map<string, { group?: string; trade?: string }>([["FIX", { group: "Fixtures" }], ["SPK", { group: "Speakers" }], ["TRK", { trade: "Rigging" }], ["MYST", {}], ["CBL", {}]]);
-  ok(placementScope({ partId: "FIX", curtain: { name: "x" } }, gdsParts) === "Curtains", "#GDS systems: a curtain is Curtains whatever its fabric part");
+  ok(placementScope({ partId: "FIX", curtain: { name: "x" } }, gdsParts) === "Curtains", "#209 systems: a curtain is Curtains whatever its fabric part");
   const gdsPl = [
     { id: "p1", sheetId: "s1", page: 1, partId: "FIX" },
     { id: "p2", sheetId: "s2", page: 1, partId: "FIX" },
@@ -205,19 +205,19 @@ import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/gr
     { id: "r2", sheetId: "s1", page: 1, partId: "CBL" },
   ];
   const gdsGroups = planSheetGroups({ sheetOrder: ["s2", "s1"], placements: gdsPl, routes: gdsRt, partById: gdsParts });
-  ok(gdsGroups.map((g) => `${g.system}:${g.sheetId}:${g.page}`).join("|") === "lighting:s2:1|lighting:s1:1|audio:s1:1|rigging:s1:1|rigging:s1:2|general:s1:1", "#GDS plan sheets: one per system per source page, in sheet order");
+  ok(gdsGroups.map((g) => `${g.system}:${g.sheetId}:${g.page}`).join("|") === "lighting:s2:1|lighting:s1:1|audio:s1:1|rigging:s1:1|rigging:s1:2|general:s1:1", "#209 plan sheets: one per system per source page, in sheet order");
   const gdsAudio = planContent({ group: { system: "audio", sheetId: "s1", page: 1 }, placements: gdsPl, routes: gdsRt, spaces: [{ id: "sp", sheetId: "s1", page: 1 }, { id: "sp2", sheetId: "s1", page: 2 }], partById: gdsParts });
-  ok(gdsAudio.placements.map((p) => p.id).join() === "p3" && gdsAudio.routes.map((r) => r.id).join() === "r1" && gdsAudio.spaces.map((s) => s.id).join() === "sp", "#GDS plan sheets: a system sheet shows its own devices, the wires they terminate, and that page's spaces");
+  ok(gdsAudio.placements.map((p) => p.id).join() === "p3" && gdsAudio.routes.map((r) => r.id).join() === "r1" && gdsAudio.spaces.map((s) => s.id).join() === "sp", "#209 plan sheets: a system sheet shows its own devices, the wires they terminate, and that page's spaces");
   const gdsGeneral = planContent({ group: { system: "general", sheetId: "s1", page: 1 }, placements: gdsPl, routes: gdsRt, spaces: [], partById: gdsParts });
-  ok(gdsGeneral.placements.map((p) => p.id).join() === "p6" && gdsGeneral.routes.map((r) => r.id).join() === "r2", "#GDS plan sheets: unscoped devices and free unscoped wires go on the G sheet");
+  ok(gdsGeneral.placements.map((p) => p.id).join() === "p6" && gdsGeneral.routes.map((r) => r.id).join() === "r2", "#209 plan sheets: unscoped devices and free unscoped wires go on the G sheet");
 
   // sheet list
   const gdsList = buildSheetList({ planGroups: gdsGroups, sourceNames: { s1: "Main floor", s2: "Balcony" }, schedulePages: 2, excluded: ["plan:lighting:s2:1", "schedule"] });
-  ok(gdsList.all.map((d) => d.number).join() === "T-001,L-101,L-102,A-101,R-101,R-102,G-101,E-501,E-601,E-602", "#GDS sheet list: numbering T → L/A/V/R/G → E-501 → E-60x");
-  ok(gdsList.all[1].title === "Lighting plan — Balcony" && gdsList.all[3].title === "Audio plan" && gdsList.all[5].title === "Rigging & drapery plan — Main floor, p. 2", "#GDS sheet list: titles name the source only when a system spans pages");
-  ok(gdsList.included.map((d) => d.number).join() === "T-001,L-102,A-101,R-101,R-102,G-101,E-501", "#GDS sheet list: excluded sheets drop out, numbers stay stable");
+  ok(gdsList.all.map((d) => d.number).join() === "T-001,L-101,L-102,A-101,R-101,R-102,G-101,E-501,E-601,E-602", "#209 sheet list: numbering T → L/A/V/R/G → E-501 → E-60x");
+  ok(gdsList.all[1].title === "Lighting plan — Balcony" && gdsList.all[3].title === "Audio plan" && gdsList.all[5].title === "Rigging & drapery plan — Main floor, p. 2", "#209 sheet list: titles name the source only when a system spans pages");
+  ok(gdsList.included.map((d) => d.number).join() === "T-001,L-102,A-101,R-101,R-102,G-101,E-501", "#209 sheet list: excluded sheets drop out, numbers stay stable");
   const gdsToggles = toggleableSheets(gdsList.all);
-  ok(gdsToggles.filter((t) => t.key === "schedule").length === 1 && gdsToggles.length === gdsList.all.length - 1, "#GDS sheet list: the schedule pages toggle as one");
+  ok(gdsToggles.filter((t) => t.key === "schedule").length === 1 && gdsToggles.length === gdsList.all.length - 1, "#209 sheet list: the schedule pages toggle as one");
 
   // schedule
   const gdsSch = buildSchedule({
@@ -234,20 +234,20 @@ import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/gr
       { id: "w2", partId: "W", fromName: "Stage", toName: "Stage", lengthFt: null, unit: "ft" },
     ],
   });
-  ok(gdsSch.sections.map((s) => s.name).join() === "Stage,Unassigned" && gdsSch.sections[0].rows[0].qty === 2 && gdsSch.sections[0].rows[1].code === "CURTAIN", "#GDS schedule: per-space rows, curtains one per drop");
-  ok(gdsSch.sections[1].rows[0].desc === "(no longer in the catalog)" && gdsSch.deviceCount === 3, "#GDS schedule: a missing part stays visible; curtains aren't counted as devices");
-  ok(gdsSch.wireFeet.length === 1 && gdsSch.wireFeet[0].ft === 10.5 && gdsSch.wireFeet[0].unmeasured === 1, "#GDS schedule: footage rolls up per wire part");
-  ok(scheduleGroups(gdsSch).length === 3 && scheduleGroups(gdsSch)[2].head.kind === "wires", "#GDS schedule: wire runs follow the spaces");
+  ok(gdsSch.sections.map((s) => s.name).join() === "Stage,Unassigned" && gdsSch.sections[0].rows[0].qty === 2 && gdsSch.sections[0].rows[1].code === "CURTAIN", "#209 schedule: per-space rows, curtains one per drop");
+  ok(gdsSch.sections[1].rows[0].desc === "(no longer in the catalog)" && gdsSch.deviceCount === 3, "#209 schedule: a missing part stays visible; curtains aren't counted as devices");
+  ok(gdsSch.wireFeet.length === 1 && gdsSch.wireFeet[0].ft === 10.5 && gdsSch.wireFeet[0].unmeasured === 1, "#209 schedule: footage rolls up per wire part");
+  ok(scheduleGroups(gdsSch).length === 3 && scheduleGroups(gdsSch)[2].head.kind === "wires", "#209 schedule: wire runs follow the spaces");
   const gdsBig = [{ head: { kind: "section" as const, name: "Big", cont: false }, rows: Array.from({ length: 60 }, (_, i) => ({ kind: "row" as const, qty: 1, code: `P${i}`, desc: "d" })) }];
   const gdsPages = paginateSchedule(gdsBig, 24, 2);
   const gdsTop = gdsPages[1][0][0];
-  ok(gdsPages.length === 2 && gdsPages[0].length === 2 && gdsPages[1][0].length === 15 && gdsTop.kind === "section" && gdsTop.cont, "#GDS schedule: rows paginate across E-60x sheets, repeating the section head");
+  ok(gdsPages.length === 2 && gdsPages[0].length === 2 && gdsPages[1][0].length === 15 && gdsTop.kind === "section" && gdsTop.cont, "#209 schedule: rows paginate across E-60x sheets, repeating the section head");
   const gdsTight = paginateSchedule([
     { head: { kind: "section", name: "A", cont: false }, rows: Array.from({ length: 4 }, () => ({ kind: "row" as const, qty: 1, code: "a", desc: "a" })) },
     { head: { kind: "section", name: "B", cont: false }, rows: [{ kind: "row", qty: 1, code: "b", desc: "b" }] },
   ], 5, 2);
-  ok(gdsTight.every((pg) => pg.every((col) => !col.length || col[col.length - 1].kind === "row")), "#GDS schedule: a section head never ends a column");
-  ok(paginateSchedule([], 24, 2).length === 1, "#GDS schedule: an empty schedule is still one sheet");
+  ok(gdsTight.every((pg) => pg.every((col) => !col.length || col[col.length - 1].kind === "row")), "#209 schedule: a section head never ends a column");
+  ok(paginateSchedule([], 24, 2).length === 1, "#209 schedule: an empty schedule is still one sheet");
 }
 ```
 
@@ -262,11 +262,11 @@ Expected: the harness aborts before any PASS line with `Cannot find module '@/li
 /* ---------------------------- drawing systems ---------------------------- */
 
 /**
- * Drawing-set systems (drawing set spec 2026-09-25 §3, #GDS). One plan-sheet
+ * Drawing-set systems (drawing set spec 2026-09-25 §3, #209). One plan-sheet
  * family per system, keyed off the SAME scope taxonomy the Scope panel uses
  * (scopeOfPart above), so re-mapping a catalog category re-files its devices
  * on the drawings too. Curtains print with rigging on the R-sheets. `general`
- * is the catch-all for Unscoped devices (D-GDS-2): the spec lists four
+ * is the catch-all for Unscoped devices (D288): the spec lists four
  * systems, but a device with no scope must never silently vanish from a set.
  */
 export type DrawingSystemKey = "lighting" | "audio" | "video" | "rigging" | "general";
@@ -297,7 +297,7 @@ export function drawingSystemOf(scope: GridLayer): DrawingSystemKey {
 
 ```ts
 /**
- * The Grid — drawing set model (drawing set spec 2026-09-25, #GDS).
+ * The Grid — drawing set model (drawing set spec 2026-09-25, #209).
  *
  * Pure and dependency-free (the grid-bom rule): the set page (server), the
  * title block, the plan-sheet figure (a client component) and the spec
@@ -762,7 +762,7 @@ export function toggleableSheets(all: DrawingSheetDef[]): Array<{ key: string; l
 ```ts
 /**
  * The Grid — equipment schedule (D113 item 3), shared by /schedule and the
- * drawing set's E-60x sheets (#GDS). Pure and dependency-free (the grid-bom
+ * drawing set's E-60x sheets (#209). Pure and dependency-free (the grid-bom
  * rule). Deliberately NO prices: this is the field document.
  */
 
@@ -890,8 +890,8 @@ export function paginateSchedule(groups: ScheduleGroup[], perColumn = 30, column
 
 - [ ] **Step 6: Run the harness to verify it passes**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|FAIL|ALL PASSED|FAILED"`
-Expected: every `#GDS …` line starts with `PASS`, no `FAIL`, last line `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#209|FAIL|ALL PASSED|FAILED"`
+Expected: every `#209 …` line starts with `PASS`, no `FAIL`, last line `ALL PASSED`.
 
 - [ ] **Step 7: Gates**
 
@@ -902,7 +902,7 @@ Expected: tsc prints nothing; eslint `✖ 111 problems (0 errors, 111 warnings)`
 
 ```bash
 git add src/lib/design/grid-scopes.ts src/lib/design/grid-drawing-set.ts src/lib/design/grid-schedule.ts scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): drawing-set model — sheet sizes, title-block data, per-system sheet list, schedule (#GDS)
+git -c user.name="SM" commit -m "feat(grid): drawing-set model — sheet sizes, title-block data, per-system sheet list, schedule (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -924,7 +924,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 2: title block + sheet frame --- */
+/* --- #209 grid drawing set — Task 2: title block + sheet frame --- */
 import { TitleBlock } from "@/components/drawing/title-block";
 import { DrawingSheet } from "@/components/drawing/drawing-sheet";
 
@@ -942,10 +942,10 @@ import { DrawingSheet } from "@/components/drawing/drawing-sheet";
     now: Date.UTC(2026, 8, 25, 12),
   });
   const sheetHtml = symRender(symH(DrawingSheet, { size: "d", titleBlock: tbSheet, children: symH("p", null, "BODY") }));
-  ok(sheetHtml.includes('class="pk-drawing-sheet"') && sheetHtml.includes('data-size="d"') && sheetHtml.includes("--dw-w:36in") && sheetHtml.includes("--dw-k:2.118"), "#GDS sheet: the frame carries its size variables");
-  ok(sheetHtml.includes("BODY") && sheetHtml.includes('class="pk-drawing-area"') && sheetHtml.includes('class="pk-title-strip"') && sheetHtml.includes('data-sheet="A-101"'), "#GDS sheet: drawing area + right-side title strip");
-  ok(sheetHtml.includes("3 of 7 · — Preliminary") && sheetHtml.includes("Peak Systems Group") && !sheetHtml.includes("<img"), "#GDS title block: n of N, Preliminary, the company name when there is no logo");
-  ok(!sheetHtml.includes(">Option<"), "#GDS title block: no option row for a single-option design");
+  ok(sheetHtml.includes('class="pk-drawing-sheet"') && sheetHtml.includes('data-size="d"') && sheetHtml.includes("--dw-w:36in") && sheetHtml.includes("--dw-k:2.118"), "#209 sheet: the frame carries its size variables");
+  ok(sheetHtml.includes("BODY") && sheetHtml.includes('class="pk-drawing-area"') && sheetHtml.includes('class="pk-title-strip"') && sheetHtml.includes('data-sheet="A-101"'), "#209 sheet: drawing area + right-side title strip");
+  ok(sheetHtml.includes("3 of 7 · — Preliminary") && sheetHtml.includes("Peak Systems Group") && !sheetHtml.includes("<img"), "#209 title block: n of N, Preliminary, the company name when there is no logo");
+  ok(!sheetHtml.includes(">Option<"), "#209 title block: no option row for a single-option design");
   const tbRev = titleBlockData({
     company: { name: "Peak", logoDark: "data:image/png;base64,AAAA", offices: [] },
     project: { id: "GRD-5009", name: "Main Stage", customer: "", createdBy: "Jeff" },
@@ -959,9 +959,9 @@ import { DrawingSheet } from "@/components/drawing/drawing-sheet";
     now: 3000,
   });
   const tbHtml = symRender(symH(TitleBlock, { data: tbRev }));
-  ok(tbHtml.includes("<img") && tbHtml.includes("Bid set") && tbHtml.includes("Issued with quote") && tbHtml.includes("Rev B") && tbHtml.includes(">Option<") && tbHtml.includes("Q-2100"), "#GDS title block: logo, revision table, latest letter, option row, quote number");
+  ok(tbHtml.includes("<img") && tbHtml.includes("Bid set") && tbHtml.includes("Issued with quote") && tbHtml.includes("Rev B") && tbHtml.includes(">Option<") && tbHtml.includes("Q-2100"), "#209 title block: logo, revision table, latest letter, option row, quote number");
   const gdsCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
-  ok(gdsCss.includes(".pk-drawing-sheet {") && /\.pk-tb-accent\s*\{[^}]*var\(--accent\)/.test(gdsCss) && gdsCss.includes("print-color-adjust: exact") && gdsCss.includes(".pk-drawing-sheet:last-child"), "#GDS CSS: sheet classes exist, the accent bar is var(--accent), sheets break one per page");
+  ok(gdsCss.includes(".pk-drawing-sheet {") && /\.pk-tb-accent\s*\{[^}]*var\(--accent\)/.test(gdsCss) && gdsCss.includes("print-color-adjust: exact") && gdsCss.includes(".pk-drawing-sheet:last-child"), "#209 CSS: sheet classes exist, the accent bar is var(--accent), sheets break one per page");
 }
 ```
 
@@ -976,7 +976,7 @@ Expected: aborts with `Cannot find module '@/components/drawing/title-block'`.
 import type { TitleBlockData } from "@/lib/design/grid-drawing-set";
 
 /**
- * The drawing-set title block (#GDS, spec 2026-09-25 §2.1 — "A · Architectural
+ * The drawing-set title block (#209, spec 2026-09-25 §2.1 — "A · Architectural
  * side strip"): logo + company, project, option, revision table, drawn /
  * checked / scale / date, quote, and the sheet title + big sheet number.
  *
@@ -1089,7 +1089,7 @@ import { sheetCssVars, type SheetSizeKey, type TitleBlockData } from "@/lib/desi
 import { TitleBlock } from "./title-block";
 
 /**
- * One drawing-set sheet (#GDS): exact paper size (11×17 or 24×36), border
+ * One drawing-set sheet (#209): exact paper size (11×17 or 24×36), border
  * frame, drawing area on the left, title strip on the right. Geometry comes
  * from grid-drawing-set's size table via CSS variables, never literals here.
  * Server-renderable (no "use client").
@@ -1122,7 +1122,7 @@ export function DrawingSheet({
 - [ ] **Step 5: Add the CSS** — in `src/app/globals.css`, insert immediately before the line `/* Login */`:
 
 ```css
-/* Grid drawing set (#GDS). Sheet geometry arrives as CSS variables from
+/* Grid drawing set (#209). Sheet geometry arrives as CSS variables from
    DrawingSheet (lib/design/grid-drawing-set.ts is the one size table);
    --dw-k scales every border and type size so 24×36 is the 11×17 layout
    at 36/17. Accent only through var(--accent). */
@@ -1361,8 +1361,8 @@ export function DrawingSheet({
 
 - [ ] **Step 6: Run the harness to verify it passes**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|FAIL|ALL PASSED|FAILED"`
-Expected: all `#GDS` lines `PASS`, `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#209|FAIL|ALL PASSED|FAILED"`
+Expected: all `#209` lines `PASS`, `ALL PASSED`.
 
 - [ ] **Step 7: Gates**
 
@@ -1373,7 +1373,7 @@ Expected: tsc silent; `✖ 111 problems (0 errors, 111 warnings)`.
 
 ```bash
 git add src/components/drawing/title-block.tsx src/components/drawing/drawing-sheet.tsx src/app/globals.css scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): architectural title block + drawing sheet frame, 11×17 and 24×36 (#GDS)
+git -c user.name="SM" commit -m "feat(grid): architectural title block + drawing sheet frame, 11×17 and 24×36 (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1400,7 +1400,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 3: riser document model --- */
+/* --- #209 grid drawing set — Task 3: riser document model --- */
 import {
   RISER_H, UNASSIGNED_KEY, applyRiserOp, autoBox, buildRiserView, connectKind, copyRiserDoc, emptyRiserDoc,
   marginPoints, marginSpaceRect, mergeLayout, nodeMinH, normalizeRiserDoc, pruneRiserEnds, riserLinksOf, spreadInSpace,
@@ -1409,64 +1409,64 @@ import {
 
 {
   // normalize
-  ok(JSON.stringify(normalizeRiserDoc(undefined)) === JSON.stringify(emptyRiserDoc()), "#GDS riser: an absent doc reads as empty");
+  ok(JSON.stringify(normalizeRiserDoc(undefined)) === JSON.stringify(emptyRiserDoc()), "#209 riser: an absent doc reads as empty");
   const rdBad = normalizeRiserDoc({
     nodes: { a: { x: 0.1, y: 0.2, w: 0.2, h: 0.2 }, b: { x: "no" } },
     links: [{ id: "lk-1", from: { kind: "space", spaceId: null }, to: { kind: "bogus" }, partId: "W", lengthFt: 3, by: "t", at: 1 }],
     notes: "x",
   });
-  ok(Object.keys(rdBad.nodes).join() === "a" && rdBad.links.length === 0 && rdBad.notes.length === 0, "#GDS riser: malformed nodes/links/notes are dropped, never thrown on");
+  ok(Object.keys(rdBad.nodes).join() === "a" && rdBad.links.length === 0 && rdBad.notes.length === 0, "#209 riser: malformed nodes/links/notes are dropped, never thrown on");
 
   // layout merge
   const rdMerged = mergeLayout(["a", "b", "c"], { a: autoBox(0), zombie: autoBox(5) });
-  ok(JSON.stringify(rdMerged.a) === JSON.stringify(autoBox(0)), "#GDS layout: a saved position wins");
-  ok(JSON.stringify(rdMerged.b) === JSON.stringify(autoBox(1)) && JSON.stringify(rdMerged.c) === JSON.stringify(autoBox(2)), "#GDS layout: new nodes take the next free auto slots");
-  ok(!("zombie" in rdMerged), "#GDS layout: a saved box for a vanished node is ignored");
-  ok(JSON.stringify(mergeLayout(["a", "b"], { b: autoBox(0) }).a) === JSON.stringify(autoBox(1)), "#GDS layout: an auto slot already taken by a saved box is skipped");
+  ok(JSON.stringify(rdMerged.a) === JSON.stringify(autoBox(0)), "#209 layout: a saved position wins");
+  ok(JSON.stringify(rdMerged.b) === JSON.stringify(autoBox(1)) && JSON.stringify(rdMerged.c) === JSON.stringify(autoBox(2)), "#209 layout: new nodes take the next free auto slots");
+  ok(!("zombie" in rdMerged), "#209 layout: a saved box for a vanished node is ignored");
+  ok(JSON.stringify(mergeLayout(["a", "b"], { b: autoBox(0) }).a) === JSON.stringify(autoBox(1)), "#209 layout: an auto slot already taken by a saved box is skipped");
 
   // reducer
   let rdSeq = 0;
   const rdMk = (p: string) => `${p}${++rdSeq}`;
   let rd: RiserDoc = emptyRiserDoc();
   let rdRes = applyRiserOp(rd, { op: "addLevel", label: "  Level 1 ", elevation: "EL 100", y: 0.9 }, rdMk);
-  ok(rdRes.changed && rdRes.doc.levels[0].label === "Level 1" && rdRes.doc.levels[0].id === "lv-1", "#GDS op: addLevel trims and mints an id");
+  ok(rdRes.changed && rdRes.doc.levels[0].label === "Level 1" && rdRes.doc.levels[0].id === "lv-1", "#209 op: addLevel trims and mints an id");
   rd = rdRes.doc;
-  ok(!applyRiserOp(rd, { op: "addLevel", label: "   ", y: 0.5 }, rdMk).changed, "#GDS op: a blank level label is refused");
+  ok(!applyRiserOp(rd, { op: "addLevel", label: "   ", y: 0.5 }, rdMk).changed, "#209 op: a blank level label is refused");
   rdRes = applyRiserOp(rd, { op: "updateLevel", id: rd.levels[0].id, y: 0.4, elevation: "" }, rdMk);
-  ok(rdRes.doc.levels[0].y === 0.4 && !("elevation" in rdRes.doc.levels[0]), "#GDS op: updateLevel moves the line and clears the elevation");
+  ok(rdRes.doc.levels[0].y === 0.4 && !("elevation" in rdRes.doc.levels[0]), "#209 op: updateLevel moves the line and clears the elevation");
   rd = rdRes.doc;
-  ok(!applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: "sp-a" }, label: "EMT" }, rdMk).changed, "#GDS op: a conduit from a node to itself is refused");
+  ok(!applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: "sp-a" }, label: "EMT" }, rdMk).changed, "#209 op: a conduit from a node to itself is refused");
   rdRes = applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: null }, label: "1in EMT by EC" }, rdMk);
-  ok(rdRes.changed && rdRes.doc.conduits.length === 1, "#GDS op: addConduit");
+  ok(rdRes.changed && rdRes.doc.conduits.length === 1, "#209 op: addConduit");
   rd = rdRes.doc;
   rd = applyRiserOp(rd, { op: "addNote", text: "First" }, rdMk).doc;
   rd = applyRiserOp(rd, { op: "addNote", text: "Second" }, rdMk).doc;
   rd = applyRiserOp(rd, { op: "removeNote", id: rd.notes[0].id }, rdMk).doc;
-  ok(rd.notes.length === 1 && rd.notes[0].n === 1 && rd.notes[0].text === "Second", "#GDS op: notes renumber after a removal");
+  ok(rd.notes.length === 1 && rd.notes[0].n === 1 && rd.notes[0].text === "Second", "#209 op: notes renumber after a removal");
   rdRes = applyRiserOp(rd, { op: "moveNode", key: "sp-a", box: { x: 1.5, y: -2, w: 0.01, h: 0.01 } }, rdMk);
   const rdBox = rdRes.doc.nodes["sp-a"];
-  ok(rdRes.changed && rdBox.x + rdBox.w <= 1 && rdBox.y === 0 && rdBox.w >= 0.1, "#GDS op: moveNode clamps into the canvas and to a minimum size");
-  ok(!applyRiserOp(rd, { op: "removeLink", id: "nope" }, rdMk).changed, "#GDS op: removing an unknown id reports no change");
-  ok(rd.conduits.length === 1 && riserLinksOf({ o: rd }, "o").length === 0, "#GDS op: conduits never become links (never priced)");
+  ok(rdRes.changed && rdBox.x + rdBox.w <= 1 && rdBox.y === 0 && rdBox.w >= 0.1, "#209 op: moveNode clamps into the canvas and to a minimum size");
+  ok(!applyRiserOp(rd, { op: "removeLink", id: "nope" }, rdMk).changed, "#209 op: removing an unknown id reports no change");
+  ok(rd.conduits.length === 1 && riserLinksOf({ o: rd }, "o").length === 0, "#209 op: conduits never become links (never priced)");
 
   // device drops
   const rdSq = [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.4 }, { x: 0.2, y: 0.4 }];
   const rdPts = spreadInSpace(rdSq, 7, [{ x: 0.3, y: 0.3 }]);
-  ok(rdPts.length === 7 && rdPts.every((p) => pointInPolygon(p, rdSq)), "#GDS +Device: every new device lands inside the space polygon");
-  ok(new Set(rdPts.map((p) => `${p.x},${p.y}`)).size === 7 && !rdPts.some((p) => p.x === 0.3 && p.y === 0.3), "#GDS +Device: multiples spread out and avoid taken spots");
+  ok(rdPts.length === 7 && rdPts.every((p) => pointInPolygon(p, rdSq)), "#209 +Device: every new device lands inside the space polygon");
+  ok(new Set(rdPts.map((p) => `${p.x},${p.y}`)).size === 7 && !rdPts.some((p) => p.x === 0.3 && p.y === 0.3), "#209 +Device: multiples spread out and avoid taken spots");
   const rdBlock = [{ x: 0, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.5, y: 1 }, { x: 0, y: 1 }];
   const rdMargin = marginPoints(3, [rdBlock], []);
-  ok(rdMargin.length === 3 && rdMargin.every((p) => p.y > 0.85 && !pointInPolygon(p, rdBlock)), "#GDS +Device: Unassigned devices land on the lower margin, outside every space");
+  ok(rdMargin.length === 3 && rdMargin.every((p) => p.y > 0.85 && !pointInPolygon(p, rdBlock)), "#209 +Device: Unassigned devices land on the lower margin, outside every space");
   const rdRect = marginSpaceRect(2);
-  ok(rdRect.length === 4 && polygonArea(rdRect) > 0.005 && rdRect.every((p) => p.y >= 0.86), "#GDS Space: a new riser space is a small rectangle on the plan's lower margin");
+  ok(rdRect.length === 4 && polygonArea(rdRect) > 0.005 && rdRect.every((p) => p.y >= 0.86), "#209 Space: a new riser space is a small rectangle on the plan's lower margin");
 
   // connect rule
   const rdPls = [{ id: "a", sheetId: "s1", page: 1 }, { id: "b", sheetId: "s1", page: 1 }, { id: "c", sheetId: "s2", page: 1 }];
   const rdCals = [{ docId: "s1", page: 1 }];
-  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, rdCals) === "route", "#GDS Connect: same calibrated sheet → a measured GridRoute");
-  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "c" }, rdPls, rdCals) === "link", "#GDS Connect: cross-sheet → a RiserLink");
-  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, []) === "link", "#GDS Connect: an uncalibrated page falls back to a typed-length RiserLink");
-  ok(connectKind({ kind: "space", spaceId: "x" }, { kind: "space", spaceId: "y" }, rdPls, rdCals) === "link", "#GDS Connect: space → space is always a RiserLink");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, rdCals) === "route", "#209 Connect: same calibrated sheet → a measured GridRoute");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "c" }, rdPls, rdCals) === "link", "#209 Connect: cross-sheet → a RiserLink");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, []) === "link", "#209 Connect: an uncalibrated page falls back to a typed-length RiserLink");
+  ok(connectKind({ kind: "space", spaceId: "x" }, { kind: "space", spaceId: "y" }, rdPls, rdCals) === "link", "#209 Connect: space → space is always a RiserLink");
 
   // prune + copy
   const rdWithLink: RiserDoc = {
@@ -1475,21 +1475,21 @@ import {
     links: [{ id: "lk-9", from: { kind: "placement", placementId: "a" }, to: { kind: "space", spaceId: null }, partId: "W", lengthFt: 10, by: "t", at: 1 }],
   };
   const rdPruned = pruneRiserEnds(rdWithLink, { placementIds: new Set(["a"]), spaceIds: new Set(["sp-a"]) });
-  ok(rdPruned.links.length === 0 && rdPruned.conduits.length === 0 && !("sp-a" in rdPruned.nodes), "#GDS delete: removing a device/space prunes its links, conduits and saved box");
+  ok(rdPruned.links.length === 0 && rdPruned.conduits.length === 0 && !("sp-a" in rdPruned.nodes), "#209 delete: removing a device/space prunes its links, conduits and saved box");
   const rdCopied = copyRiserDoc(rdWithLink, new Map([["a", "a2"]]), rdMk, "copier", 9);
   const rdCopiedFrom = rdCopied.links[0]?.from;
-  ok(rdCopied.links.length === 1 && rdCopiedFrom?.kind === "placement" && rdCopiedFrom.placementId === "a2" && rdCopied.links[0].id !== "lk-9" && rdCopied.links[0].by === "copier", "#GDS option copy: links are re-pointed at the copied devices with new ids");
-  ok(copyRiserDoc(rdWithLink, new Map(), rdMk, "copier", 9).links.length === 0, "#GDS option copy: a link whose device wasn't copied is dropped");
+  ok(rdCopied.links.length === 1 && rdCopiedFrom?.kind === "placement" && rdCopiedFrom.placementId === "a2" && rdCopied.links[0].id !== "lk-9" && rdCopied.links[0].by === "copier", "#209 option copy: links are re-pointed at the copied devices with new ids");
+  ok(copyRiserDoc(rdWithLink, new Map(), rdMk, "copier", 9).links.length === 0, "#209 option copy: a link whose device wasn't copied is dropped");
 
   // RiserLink footage in the BOM (routeLines 4th arg); conduits never reach it
   const rdLinkParts = [{ id: "W", sku: "W", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1 }];
   const rdBom = routeLines([], rdLinkParts, [], [{ partId: "W", lengthFt: 10.2 }, { partId: "W", lengthFt: 5 }, { partId: "W", lengthFt: Number.NaN }]);
-  ok(rdBom.lines.length === 1 && rdBom.lines[0].qty === 16 && rdBom.lines[0].ext === 32 && rdBom.unmeasured === 1 && !rdBom.lines[0].connectionType, "#GDS BOM: RiserLink lengths sum per part, round up, price like a route, never stamp a connectionType");
-  ok(routeLines([], rdLinkParts, []).lines.length === 0, "#GDS BOM: routeLines without links is unchanged");
+  ok(rdBom.lines.length === 1 && rdBom.lines[0].qty === 16 && rdBom.lines[0].ext === 32 && rdBom.unmeasured === 1 && !rdBom.lines[0].connectionType, "#209 BOM: RiserLink lengths sum per part, round up, price like a route, never stamp a connectionType");
+  ok(routeLines([], rdLinkParts, []).lines.length === 0, "#209 BOM: routeLines without links is unchanged");
 
   // copyOptionMembers exposes its id map
   const rdCm = copyOptionMembers({ placements: [{ id: "gp-1", optionId: "o1" }], routes: [], fromOptionId: "o1", toOptionId: "o2", makeId: (p) => `${p}x`, by: "t", at: 1 });
-  ok(rdCm.idMap.get("gp-1") === "gp-x", "#GDS: copyOptionMembers returns its old → new placement id map");
+  ok(rdCm.idMap.get("gp-1") === "gp-x", "#209: copyOptionMembers returns its old → new placement id map");
 
   // the view
   const rdSpaces = [
@@ -1504,13 +1504,13 @@ import {
   const rdGraph = riserGraph(rdPl, [], rdSpaces, rdParts, []);
   const rdDoc: RiserDoc = { ...emptyRiserDoc(), links: [{ id: "lk-1", from: { kind: "placement", placementId: "p1" }, to: { kind: "space", spaceId: null }, partId: "W", lengthFt: 25, by: "t", at: 1 }] };
   const rdView = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: rdDoc, partDesc: (id) => rdParts.find((p) => p.id === id)?.desc || id });
-  ok(rdView.nodes.map((n) => n.key).join() === `sp-a,sp-b,${UNASSIGNED_KEY}`, "#GDS riser view: every space is a node (empty ones too, so devices can be added), plus Unassigned when a link lands there");
-  ok(rdView.nodes[0].groups[0].ids.join() === "p2,p1", "#GDS riser view: a device row knows its placements, oldest first");
+  ok(rdView.nodes.map((n) => n.key).join() === `sp-a,sp-b,${UNASSIGNED_KEY}`, "#209 riser view: every space is a node (empty ones too, so devices can be added), plus Unassigned when a link lands there");
+  ok(rdView.nodes[0].groups[0].ids.join() === "p2,p1", "#209 riser view: a device row knows its placements, oldest first");
   const rdEdge = rdView.edges[0];
-  ok(rdView.edges.length === 1 && rdEdge.kind === "link" && rdEdge.from.key === "sp-a" && rdEdge.from.partId === "FIX" && rdEdge.to.key === UNASSIGNED_KEY && rdEdge.desc === "Cable" && rdEdge.lengthFt === 25, "#GDS riser view: a RiserLink is an edge anchored on its device row");
-  ok(rdView.nodes.every((n) => n.box.h >= nodeMinH(n.groups.length) - 1e-9) && rdView.height >= RISER_H, "#GDS riser view: boxes never clip their rows");
+  ok(rdView.edges.length === 1 && rdEdge.kind === "link" && rdEdge.from.key === "sp-a" && rdEdge.from.partId === "FIX" && rdEdge.to.key === UNASSIGNED_KEY && rdEdge.desc === "Cable" && rdEdge.lengthFt === 25, "#209 riser view: a RiserLink is an edge anchored on its device row");
+  ok(rdView.nodes.every((n) => n.box.h >= nodeMinH(n.groups.length) - 1e-9) && rdView.height >= RISER_H, "#209 riser view: boxes never clip their rows");
   const rdDangling = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: { ...rdDoc, links: [{ ...rdDoc.links[0], from: { kind: "placement", placementId: "gone" } }] } });
-  ok(rdDangling.edges.length === 0 && !rdDangling.nodes.some((n) => n.key === UNASSIGNED_KEY), "#GDS riser view: a link to a vanished device is not drawn");
+  ok(rdDangling.edges.length === 0 && !rdDangling.nodes.some((n) => n.key === UNASSIGNED_KEY), "#209 riser view: a link to a vanished device is not drawn");
 }
 ```
 
@@ -1523,7 +1523,7 @@ Expected: aborts with `Cannot find module '@/lib/design/grid-riser-doc'`.
 
 ```ts
 /**
- * The Grid — editable riser document (drawing set spec 2026-09-25 §4, #GDS).
+ * The Grid — editable riser document (drawing set spec 2026-09-25 §4, #209).
  *
  * Devices, spaces and wire runs stay DERIVED from the plan (riserGraph,
  * D112) — the riser can never drift from the layout. This document holds
@@ -2089,7 +2089,7 @@ export function routeLines(
   routes: RouteLite[],
   parts: PartLite[],
   cals: Calibration[],
-  /** RiserLinks (#GDS) — typed-length cable runs from the riser. Summed with
+  /** RiserLinks (#209) — typed-length cable runs from the riser. Summed with
    *  the measured routes of the same part BEFORE rounding up, so a part's
    *  footage is bought whole once. They carry no validated connectionType,
    *  so a line they touch is never annotated with one. */
@@ -2126,14 +2126,14 @@ and the final statement `return { placements, routes };` to
 
 ```ts
   // idMap (old placement id → copied id) lets the caller re-point anything
-  // else that references devices — the riser document's links (#GDS).
+  // else that references devices — the riser document's links (#209).
   return { placements, routes, idMap };
 ```
 
 - [ ] **Step 6: Run the harness to verify it passes**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|FAIL|ALL PASSED|FAILED"`
-Expected: all `#GDS` lines `PASS` (Tasks 1–3), `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#209|FAIL|ALL PASSED|FAILED"`
+Expected: all `#209` lines `PASS` (Tasks 1–3), `ALL PASSED`.
 
 - [ ] **Step 7: Gates**
 
@@ -2144,7 +2144,7 @@ Expected: tsc silent; `✖ 111 problems (0 errors, 111 warnings)`.
 
 ```bash
 git add src/lib/design/grid-riser-doc.ts src/lib/design/grid-bom.ts src/lib/design/grid-options.ts scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): riser document model — saved layout, levels, conduits, notes, RiserLinks priced like routes (#GDS)
+git -c user.name="SM" commit -m "feat(grid): riser document model — saved layout, levels, conduits, notes, RiserLinks priced like routes (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2186,7 +2186,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing DB test** — in `scripts/test-review-regressions.ts`, insert immediately before the line `  console.log("review regression checks passed");`:
 
 ```ts
-  // #GDS — riser document + drawing-set settings persistence (scratch DB).
+  // #209 — riser document + drawing-set settings persistence (scratch DB).
   {
     const GP = await import("@/lib/stores/grid-projects");
     const GR = await import("@/lib/stores/grid-riser");
@@ -2210,20 +2210,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     // + Device lands inside the space
     assert.deepEqual(await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A", qty: 3, by }), { ok: true, added: 3 });
     p = (await GP.getProject(p0.id))!;
-    assert.equal(devA().length, 3, "#GDS +Device: three placements written");
-    assert.ok(devA().every((pl) => pl.sheetId === sheet.id && pl.page === 1 && pl.optionId === opt && inPoly(pl, stagePoly)), "#GDS +Device: every device lands inside the space, on its sheet/page, in the option");
+    assert.equal(devA().length, 3, "#209 +Device: three placements written");
+    assert.ok(devA().every((pl) => pl.sheetId === sheet.id && pl.page === 1 && pl.optionId === opt && inPoly(pl, stagePoly)), "#209 +Device: every device lands inside the space, on its sheet/page, in the option");
 
     // qty edit adds / removes
     assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A", qty: 5, by }), { ok: true, added: 2, removed: 0 });
     assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A", qty: 2, by }), { ok: true, added: 0, removed: 3 });
     p = (await GP.getProject(p0.id))!;
-    assert.equal(devA().length, 2, "#GDS qty edit: lowering the qty removes placements");
+    assert.equal(devA().length, 2, "#209 qty edit: lowering the qty removes placements");
 
     // Unassigned → lower margin; unknown space refused
     assert.deepEqual(await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: "unassigned", partId: "DEV-U", qty: 1, by }), { ok: true, added: 1 });
     p = (await GP.getProject(p0.id))!;
     const u = p.placements.find((pl) => pl.partId === "DEV-U")!;
-    assert.ok(u.y > 0.85 && !inPoly(u, stagePoly), "#GDS +Device: Unassigned devices land on the plan's lower margin");
+    assert.ok(u.y > 0.85 && !inPoly(u, stagePoly), "#209 +Device: Unassigned devices land on the plan's lower margin");
     assert.deepEqual(await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: "sp-nope", partId: "DEV-A", qty: 1, by }), { ok: false, reason: "no-such-space" });
 
     // part swap
@@ -2235,7 +2235,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     p = (await GP.getProject(p0.id))!;
     const a1 = devA()[0];
     const link = await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "placement", placementId: a1.id }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 42.26, by });
-    assert.ok(link.ok, "#GDS Connect: a RiserLink is stored");
+    assert.ok(link.ok, "#209 Connect: a RiserLink is stored");
     assert.deepEqual(await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "placement", placementId: "gp-gone" }, to: { kind: "space", spaceId: null }, partId: "WIRE-X", lengthFt: 5, by }), { ok: false, reason: "bad-end" });
     assert.deepEqual(await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "space", spaceId: null }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 0, by }), { ok: false, reason: "bad-length" });
     assert.deepEqual(await GR.patchRiser(p0.id, opt, { op: "addConduit", from: { kind: "space", spaceId: stage.id }, to: { kind: "space", spaceId: booth.id }, label: "1in EMT by EC" }), { ok: true });
@@ -2246,67 +2246,67 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     assert.deepEqual(await GR.patchRiser(p0.id, "opt-nope", { op: "addNote", text: "x" }), { ok: false, reason: "no-such-option" });
     p = (await GP.getProject(p0.id))!;
     const doc = p.riser![opt];
-    assert.equal(doc.links[0].lengthFt, 42.3, "#GDS a link length is kept to 0.1 ft");
-    assert.ok(doc.conduits.length === 1 && doc.notes[0].n === 1 && doc.levels.length === 1 && doc.nodes[stage.id].x === 0.5, "#GDS riser doc: conduit, note, level and saved node box persist");
+    assert.equal(doc.links[0].lengthFt, 42.3, "#209 a link length is kept to 0.1 ft");
+    assert.ok(doc.conduits.length === 1 && doc.notes[0].n === 1 && doc.levels.length === 1 && doc.nodes[stage.id].x === 0.5, "#209 riser doc: conduit, note, level and saved node box persist");
 
     // revisions snapshot + restore the riser document
     const rev = await GP.addRevision(p0.id, { by, note: "with riser" });
-    assert.equal(rev?.riser?.[opt]?.links.length, 1, "#GDS revisions: the snapshot carries the riser document");
+    assert.equal(rev?.riser?.[opt]?.links.length, 1, "#209 revisions: the snapshot carries the riser document");
     await GR.patchRiser(p0.id, opt, { op: "removeLink", id: doc.links[0].id });
     assert.equal((await GP.getProject(p0.id))!.riser![opt].links.length, 0);
     await GP.restoreRevision(p0.id, rev!.rev, by);
-    assert.equal((await GP.getProject(p0.id))!.riser![opt].links.length, 1, "#GDS revisions: restore brings the riser document back");
+    assert.equal((await GP.getProject(p0.id))!.riser![opt].links.length, 1, "#209 revisions: restore brings the riser document back");
 
     // option copy re-points; option removal drops
     const copy = await GP.addOption(p0.id, { name: "Alt", copyFromOptionId: opt, by });
-    assert.ok(copy.ok, "#GDS option copy succeeds");
+    assert.ok(copy.ok, "#209 option copy succeeds");
     if (copy.ok) {
       p = (await GP.getProject(p0.id))!;
       const alt = p.riser![copy.option.id];
       const altFrom = alt.links[0].from;
       assert.ok(
         altFrom.kind === "placement" && altFrom.placementId !== a1.id && p.placements.some((pl) => pl.id === altFrom.placementId && pl.optionId === copy.option.id),
-        "#GDS option copy: the copied link points at the copied device"
+        "#209 option copy: the copied link points at the copied device"
       );
       assert.equal(alt.notes[0].text, "Verify in field");
       await GP.removeOption(p0.id, copy.option.id, by);
       p = (await GP.getProject(p0.id))!;
-      assert.ok(!(copy.option.id in (p.riser || {})), "#GDS option removal drops that option's riser document");
+      assert.ok(!(copy.option.id in (p.riser || {})), "#209 option removal drops that option's riser document");
     }
 
     // delete cascades
     await GR.removeNodeDevices(p0.id, { optionId: opt, nodeKey: stage.id, partId: "DEV-A" });
     p = (await GP.getProject(p0.id))!;
-    assert.equal(p.riser![opt].links.length, 0, "#GDS delete: removing the devices prunes the links that ended on them");
+    assert.equal(p.riser![opt].links.length, 0, "#209 delete: removing the devices prunes the links that ended on them");
     await GP.removeSpace(p0.id, stage.id);
     p = (await GP.getProject(p0.id))!;
-    assert.ok(p.riser![opt].conduits.length === 0 && !(stage.id in p.riser![opt].nodes), "#GDS delete: removing a space prunes its conduits and saved box");
+    assert.ok(p.riser![opt].conduits.length === 0 && !(stage.id in p.riser![opt].nodes), "#209 delete: removing a space prunes its conduits and saved box");
 
     // drawing-set settings
     await GP.setDrawingSet(p0.id, { size: "d", drawnBy: "  JC ", excluded: ["riser", "riser"] });
     assert.deepEqual((await GP.getProject(p0.id))!.drawingSet, { size: "d", drawnBy: "JC", excluded: ["riser"] });
     await GP.setDrawingSet(p0.id, { generalNotes: "" });
     let ds = (await GP.getProject(p0.id))!.drawingSet!;
-    assert.ok(ds.generalNotes === "" && ds.size === "d", "#GDS set settings merge; an explicit empty notes text is kept");
+    assert.ok(ds.generalNotes === "" && ds.size === "d", "#209 set settings merge; an explicit empty notes text is kept");
     await GP.setDrawingSet(p0.id, {}, { resetGeneralNotes: true });
     ds = (await GP.getProject(p0.id))!.drawingSet!;
-    assert.ok(!("generalNotes" in ds) && ds.size === "d", "#GDS 'Use standard notes' removes the set's own notes");
+    assert.ok(!("generalNotes" in ds) && ds.size === "d", "#209 'Use standard notes' removes the set's own notes");
   }
 ```
 
 - [ ] **Step 2: Write the failing source checks** — append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 4: RiserLinks reach the quote and the editor BOM --- */
+/* --- #209 grid drawing set — Task 4: RiserLinks reach the quote and the editor BOM --- */
 {
   const gdsQuoteSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
-  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && gdsQuoteSrc.includes("routeLines(routes, tierCatalog, project.calibrations || [], riserLinks)"), "#GDS quote: RiserLinks price as wire lines on the draft quote");
+  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && gdsQuoteSrc.includes("routeLines(routes, tierCatalog, project.calibrations || [], riserLinks)"), "#209 quote: RiserLinks price as wire lines on the draft quote");
   const gdsEditorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
-  ok(gdsEditorSrc.includes("routeLines(routes || [], parts, project.calibrations, riserLinks)"), "#GDS editor: the live BOM sidebar counts RiserLinks too");
+  ok(gdsEditorSrc.includes("routeLines(routes || [], parts, project.calibrations, riserLinks)"), "#209 editor: the live BOM sidebar counts RiserLinks too");
   const gdsStoreSrc = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
-  ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#GDS revisions: snapshotOf copies the riser document");
+  ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#209 revisions: snapshotOf copies the riser document");
   const gdsActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/actions.ts"), "utf8");
-  ok((gdsActionsSrc.match(/await requireUser\(\)/g) || []).length === 6, "#GDS riser actions: every one is behind requireUser, the Grid editing gate");
+  ok((gdsActionsSrc.match(/await requireUser\(\)/g) || []).length === 6, "#209 riser actions: every one is behind requireUser, the Grid editing gate");
 }
 ```
 
@@ -2314,7 +2314,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Run: `D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts 2>&1 | tail -3`
 Expected: fails with `Cannot find module '@/lib/stores/grid-riser'`.
-Run: `npm run test:specs 2>&1 | grep -E "#GDS quote|#GDS editor|#GDS revisions|#GDS riser actions|FAILED" | head`
+Run: `npm run test:specs 2>&1 | grep -E "#209 quote|#209 editor|#209 revisions|#209 riser actions|FAILED" | head`
 Expected: the harness aborts reading `riser/actions.ts` (`ENOENT`) or the quote/editor lines print `FAIL`.
 
 - [ ] **Step 4: Store fields, revisions, cascades — `src/lib/stores/grid-projects.ts`**
@@ -2343,7 +2343,7 @@ with
   /** Option list at snapshot time (Spec 1). Absent on older snapshots —
    *  restore normalizes to a single default option. */
   options?: GridOption[];
-  /** Riser documents at snapshot time (#GDS). Absent on older snapshots —
+  /** Riser documents at snapshot time (#209). Absent on older snapshots —
    *  restore then drops back to the auto layout. */
   riser?: Record<string, RiserDoc>;
 };
@@ -2360,10 +2360,10 @@ with
 
 ```ts
   scopeInputs?: QuickScopeInputs | null;
-  /** Saved riser document per option id (#GDS) — node layout, level lines,
+  /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
-  /** Drawing-set settings (#GDS) — size, drawn/checked by, excluded sheets,
+  /** Drawing-set settings (#209) — size, drawn/checked by, excluded sheets,
    *  general notes, revision labels. Absent = defaults. */
   drawingSet?: DrawingSetSettings;
   createdBy: string;
@@ -2383,7 +2383,7 @@ with
 ```ts
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.placements = (p.placements || []).filter((pl) => pl.id !== placementId);
-    // A riser link or conduit that ended on this device goes with it (#GDS).
+    // A riser link or conduit that ended on this device goes with it (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
     p.updatedAt = Date.now();
   });
@@ -2400,7 +2400,7 @@ with
 
 ```ts
     p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
-    // Its riser box, and any link/conduit ending on it, go too (#GDS).
+    // Its riser box, and any link/conduit ending on it, go too (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: new Set([spaceId]) });
     p.updatedAt = Date.now();
 ```
@@ -2419,7 +2419,7 @@ with
       doc.placements = [...(doc.placements || []), ...copied.placements];
       doc.routes = [...(doc.routes || []), ...copied.routes];
       // The copied option gets its own riser document, device ends re-pointed
-      // at the copied placements (#GDS).
+      // at the copied placements (#209).
       const srcRiser = doc.riser?.[input.copyFromOptionId];
       if (srcRiser) {
         doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
@@ -2472,8 +2472,8 @@ with
 
 ```ts
     doc.routes = [...(target.routes || [])];
-    // The riser document is design state like placements (#GDS): restored
-    // wholesale. A pre-#GDS snapshot has none → back to the auto layout.
+    // The riser document is design state like placements (#209): restored
+    // wholesale. A pre-#209 snapshot has none → back to the auto layout.
     if (target.riser) doc.riser = JSON.parse(JSON.stringify(target.riser)) as Record<string, RiserDoc>;
     else delete doc.riser;
 ```
@@ -2481,7 +2481,7 @@ with
 (j) Immediately after the closing `}` of `setScopeInputs`, add:
 
 ```ts
-/** Merge drawing-set settings (#GDS). `resetGeneralNotes` drops the set's own
+/** Merge drawing-set settings (#209). `resetGeneralNotes` drops the set's own
  *  notes so the cover falls back to Grid Settings' standard notes. */
 export async function setDrawingSet(
   projectId: string,
@@ -2520,7 +2520,7 @@ import {
 import type { GridPlacement, GridProject } from "./grid-projects";
 
 /**
- * The riser editor's writes (#GDS, drawing set spec §4). Each function is ONE
+ * The riser editor's writes (#209, drawing set spec §4). Each function is ONE
  * patchDoc on the Grid project, computed from the doc read inside the patch,
  * so a device add, a qty edit and the riser document can never disagree.
  * Placements written here are ordinary GridPlacements — the plan, BOM,
@@ -2780,7 +2780,7 @@ import { getGridSymbol } from "@/lib/stores/grid-catalog";
 /**
  * A part id as the Grid stores it: a pricing-catalog row first, else a
  * Grid-library entry (unit "ea", sku = model number). Server-only. Moved
- * verbatim out of design/grid/[id]/actions.ts (#GDS) so the riser actions
+ * verbatim out of design/grid/[id]/actions.ts (#209) so the riser actions
  * validate parts through the same lookup.
  */
 export async function partForGrid(id: string) {
@@ -2835,7 +2835,7 @@ import {
 } from "@/lib/stores/grid-riser";
 
 /**
- * Riser editor actions (#GDS). Same gate as every Grid edit (requireUser);
+ * Riser editor actions (#209). Same gate as every Grid edit (requireUser);
  * parts are validated here, geometry and the document live in the store.
  */
 
@@ -2961,7 +2961,7 @@ import { requireUser } from "@/lib/session";
 import { setDrawingSet } from "@/lib/stores/grid-projects";
 import type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 
-/** Save the drawing set's settings on the project (#GDS). Same gate as any
+/** Save the drawing set's settings on the project (#209). Same gate as any
  *  Grid edit; the store cleans every field. */
 export async function saveDrawingSetAction(
   projectId: string,
@@ -2981,7 +2981,7 @@ export async function saveDrawingSetAction(
 In `src/lib/settings.ts`, immediately after the line `  gridSymbolColors?: Record<string, string> | null;` add:
 
 ```ts
-  /** Drawing set (#GDS) — the "Standard general notes" printed on every
+  /** Drawing set (#209) — the "Standard general notes" printed on every
    *  set's cover (T-001) unless that set has its own. One note per line;
    *  null/absent = none. Edited in Design → Grid Settings. */
   gridStandardNotes?: string | null;
@@ -3003,7 +3003,7 @@ import { cleanStandardNotes } from "@/lib/design/grid-drawing-set";
 and append at the end of the file:
 
 ```ts
-/** Standard general notes for drawing-set covers (#GDS). Blank clears the
+/** Standard general notes for drawing-set covers (#209). Blank clears the
  *  key (null) so covers print no default notes. */
 export async function saveStandardNotesAction(text: string) {
   await requirePerm("manage_users");
@@ -3039,7 +3039,7 @@ with
 
 ```ts
   const { placements, routes } = optionSlice(project, optionId);
-  // Typed-length riser connections (#GDS) price exactly like wire routes.
+  // Typed-length riser connections (#209) price exactly like wire routes.
   const riserLinks = riserLinksOf(project.riser, optionId);
   if (!placements.length && !routes.length && !riserLinks.length)
     return { ok: false, error: "Place a device or route a wire first." };
@@ -3085,7 +3085,7 @@ with
 ```ts
   scopeInputs: QuickScopeInputs | null;
   linesetDesignId: string | null;
-  /** Riser documents per option (#GDS) — the sidebar BOM counts RiserLinks. */
+  /** Riser documents per option (#209) — the sidebar BOM counts RiserLinks. */
   riser: Record<string, RiserDoc>;
 };
 ```
@@ -3126,8 +3126,8 @@ with
 
 Run: `D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts 2>&1 | tail -2`
 Expected: `review regression checks passed`.
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|FAIL|ALL PASSED|FAILED"`
-Expected: every `#GDS` line `PASS`, `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#209|FAIL|ALL PASSED|FAILED"`
+Expected: every `#209` line `PASS`, `ALL PASSED`.
 
 - [ ] **Step 13: Gates**
 
@@ -3144,7 +3144,7 @@ git add src/lib/stores/grid-projects.ts src/lib/stores/grid-riser.ts src/lib/des
   "src/app/(app)/design/grid/[id]/set/actions.ts" src/lib/settings.ts "src/app/(app)/design/grid/settings/actions.ts" \
   src/lib/design/grid-quote.ts "src/app/(app)/design/grid/[id]/editor.tsx" "src/app/(app)/design/grid/[id]/page.tsx" \
   scripts/test-review-regressions.ts scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): persist riser document + drawing-set settings; riser actions; RiserLinks priced on the quote (#GDS)
+git -c user.name="SM" commit -m "feat(grid): persist riser document + drawing-set settings; riser actions; RiserLinks priced on the quote (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3175,7 +3175,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 5: parts builder, riser view, riser canvas --- */
+/* --- #209 grid drawing set — Task 5: parts builder, riser view, riser canvas --- */
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { riserViewForOption, type RiserProjectLite } from "@/lib/design/grid-riser-view";
 import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
@@ -3187,9 +3187,9 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     { id: "CAT-2", sku: "C2", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1 },
   ];
   const gpLib = gridPartsFrom([gpSym] as never, gpCat as never, {});
-  ok(gpLib.length === 1 && gpLib[0].id === "GS-1" && gpLib[0].list === 900 && gpLib[0].desc === "Wash light" && gpLib[0].symbolWidth === 48, "#GDS parts: a Grid-library entry prices from its linked catalog row");
+  ok(gpLib.length === 1 && gpLib[0].id === "GS-1" && gpLib[0].list === 900 && gpLib[0].desc === "Wash light" && gpLib[0].symbolWidth === 48, "#209 parts: a Grid-library entry prices from its linked catalog row");
   const gpAll = gridPartsFrom([gpSym] as never, gpCat as never, {}, { catalogFallback: true });
-  ok(gpAll.map((p) => p.id).join() === "GS-1,CAT-1,CAT-2", "#GDS parts: the catalog fallback resolves pre-library placements");
+  ok(gpAll.map((p) => p.id).join() === "GS-1,CAT-1,CAT-2", "#209 parts: the catalog fallback resolves pre-library placements");
 
   const gpProj: RiserProjectLite = {
     placements: [{ id: "v1", sheetId: "s1", page: 1, x: 0.3, y: 0.3, partId: "GS-1", optionId: "opt-base", by: "t", at: 1 }],
@@ -3208,14 +3208,14 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     },
   };
   const gpView = riserViewForOption({ project: gpProj, optionId: "opt-base", parts: gpAll, symCtx: symbolContext(null) });
-  ok(gpView.nodes.map((n) => n.key).join() === "sp-v,unassigned" && gpView.nodes[0].groups[0].qty === 1 && gpView.nodes[0].groups[0].ids.join() === "v1", "#GDS riser view: spaces + Unassigned (linked), groups carry their placement ids");
-  ok(gpView.edges.length === 1 && gpView.edges[0].kind === "link" && gpView.edges[0].from.partId === "GS-1" && gpView.edges[0].desc === "Cable", "#GDS riser view: RiserLinks become edges anchored on the device row");
+  ok(gpView.nodes.map((n) => n.key).join() === "sp-v,unassigned" && gpView.nodes[0].groups[0].qty === 1 && gpView.nodes[0].groups[0].ids.join() === "v1", "#209 riser view: spaces + Unassigned (linked), groups carry their placement ids");
+  ok(gpView.edges.length === 1 && gpView.edges[0].kind === "link" && gpView.edges[0].from.partId === "GS-1" && gpView.edges[0].desc === "Cable", "#209 riser view: RiserLinks become edges anchored on the device row");
   const gpHtml = symRender(symH(RiserCanvas, { view: gpView }));
-  ok(gpHtml.includes("Stage") && gpHtml.includes("1× Wash light") && gpHtml.includes("Unassigned"), "#GDS canvas: nodes and device rows");
-  ok(gpHtml.includes("Level 1 · EL 100") && gpHtml.includes("EMT by EC") && gpHtml.includes('data-edge="link"') && gpHtml.includes("(typed)"), "#GDS canvas: level line, conduit annotation, typed-length link");
-  ok(!gpHtml.includes("cursor"), "#GDS canvas: the print render has no interactive affordances");
+  ok(gpHtml.includes("Stage") && gpHtml.includes("1× Wash light") && gpHtml.includes("Unassigned"), "#209 canvas: nodes and device rows");
+  ok(gpHtml.includes("Level 1 · EL 100") && gpHtml.includes("EMT by EC") && gpHtml.includes('data-edge="link"') && gpHtml.includes("(typed)"), "#209 canvas: level line, conduit annotation, typed-length link");
+  ok(!gpHtml.includes("cursor"), "#209 canvas: the print render has no interactive affordances");
   const gpNotes = symRender(symH(RiserNotes, { notes: gpView.notes }));
-  ok(gpNotes.includes("<ol") && gpNotes.includes("Verify in field"), "#GDS canvas: numbered riser notes");
+  ok(gpNotes.includes("<ol") && gpNotes.includes("Verify in field"), "#209 canvas: numbered riser notes");
 }
 ```
 
@@ -3235,7 +3235,7 @@ with:
   const gridRiserPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
   const gridPartsSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-parts.ts"), "utf8");
   ok(gridPartsSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridPlanPageSrc.includes("gridPartsFrom(") && gridRiserPageSrc.includes("gridPartsFrom("),
-    "#206 final fix wave (moved by #GDS): the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry, via the shared gridPartsFrom");
+    "#206 final fix wave (moved by #209): the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry, via the shared gridPartsFrom");
 ```
 
 - [ ] **Step 2: Run the harness to verify it fails**
@@ -3253,7 +3253,7 @@ import type { PartLite } from "./grid-bom";
 import { gridSymbolEntry } from "./grid-icons";
 
 /**
- * The ONE Grid-library → PartLite builder (#GDS): the plan editor, the riser,
+ * The ONE Grid-library → PartLite builder (#209): the plan editor, the riser,
  * the drawing set and the schedule all price, name and badge a device the
  * same way. Pure (type-only store imports); callers load the rows.
  *
@@ -3324,7 +3324,7 @@ and replace the whole block that starts at `  /** Client payload: sheets without
 
 ```ts
   /** Client payload: sheets without re-serialization surprises + PartLite slice
-   *  (the one builder the riser, drawing set and schedule use too — #GDS). */
+   *  (the one builder the riser, drawing set and schedule use too — #209). */
   const parts: PartLite[] = gridPartsFrom(gridSymbols, catalog, categoryMap);
 ```
 
@@ -3340,7 +3340,7 @@ import { riserGraph, type RiserGroup } from "./grid-riser";
 import { buildRiserView, type RiserDoc, type RiserView } from "./grid-riser-doc";
 
 /**
- * One option's riser, ready to draw (#GDS): the derived graph (riserGraph,
+ * One option's riser, ready to draw (#209): the derived graph (riserGraph,
  * D112) + the saved riser document + each device row's stock-symbol look
  * (the same symbolLook the plan uses). Shared by the riser editor page, the
  * drawing set's E-501 and the schedule's wire runs. Pure.
@@ -3402,7 +3402,7 @@ import {
 } from "@/lib/design/grid-riser-doc";
 
 /**
- * The riser, drawn (#GDS). One pure SVG renderer for the riser editor
+ * The riser, drawn (#209). One pure SVG renderer for the riser editor
  * (client, with handlers) and the drawing set's E-501 (server, no handlers):
  * nodes with device rows, wire routes (solid), RiserLinks (dash-dot, marked
  * "typed"), conduits (grey dashed annotation, never priced) and level lines.
@@ -3644,7 +3644,7 @@ export function RiserNotes({ notes }: { notes: RiserNote[] }) {
 import { useState, type CSSProperties } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
 
-/** Riser editor tool panels (#GDS). Plain controlled forms; the editor owns
+/** Riser editor tool panels (#209). Plain controlled forms; the editor owns
  *  every server call and passes busy/callbacks in. */
 
 export type RiserPartOption = { id: string; label: string };
@@ -3849,7 +3849,7 @@ import { patchRiserAction, riserAddDevicesAction, riserRemoveDevicesAction, rise
 import { DevicePanel, RowPanel, SpacePanel, type RiserPartOption } from "./riser-panels";
 
 /**
- * The editable riser (#GDS, spec §4). The graph is derived server-side and
+ * The editable riser (#209, spec §4). The graph is derived server-side and
  * arrives as `view`; every edit goes through a server action, then
  * router.refresh() re-derives it. Only in-flight drag positions live here.
  */
@@ -4095,7 +4095,7 @@ export const metadata = { title: "Riser — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**
- * The riser (D112 → editable, #GDS). Devices, spaces and wire runs are still
+ * The riser (D112 → editable, #209). Devices, spaces and wire runs are still
  * DERIVED from the plan on every load; the saved riser document adds node
  * positions, level lines, conduits, notes and typed-length links. Every tool
  * writes through the Grid project's actions, so the plan, BOM and quote see
@@ -4206,7 +4206,7 @@ export default async function RiserPage({
 
 - [ ] **Step 9: Run the harness to verify it passes**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|#206 final fix wave \(moved|FAIL|ALL PASSED|FAILED"`
+Run: `npm run test:specs 2>&1 | grep -E "#209|#206 final fix wave \(moved|FAIL|ALL PASSED|FAILED"`
 Expected: all `PASS`, `ALL PASSED`.
 
 - [ ] **Step 10: Gates**
@@ -4222,7 +4222,7 @@ Expected: exit 0 (the riser editor and panels are client components; they import
 git add src/lib/design/grid-parts.ts src/lib/design/grid-riser-view.ts src/components/drawing/riser-canvas.tsx \
   "src/app/(app)/design/grid/[id]/riser/riser-panels.tsx" "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx" \
   "src/app/(app)/design/grid/[id]/riser/page.tsx" "src/app/(app)/design/grid/[id]/page.tsx" scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): editable riser — saved layout, + Device onto the plan, edit/delete rows, add spaces (#GDS)
+git -c user.name="SM" commit -m "feat(grid): editable riser — saved layout, + Device onto the plan, edit/delete rows, add spaces (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -4245,22 +4245,22 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 6: riser tools wiring --- */
+/* --- #209 grid drawing set — Task 6: riser tools wiring --- */
 {
   const reSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx"), "utf8");
   ok(reSrc.includes("connectKind(from, to, placements, calibrations)") && reSrc.includes("addRouteAction(") && reSrc.includes("addRiserLinkAction(") && reSrc.includes("measureSheetAspect("),
-    "#GDS Connect: two devices on one calibrated page draw a measured GridRoute; anything else stores a typed RiserLink");
+    "#209 Connect: two devices on one calibrated page draw a measured GridRoute; anything else stores a typed RiserLink");
   ok(['op: "addConduit"', 'op: "addLevel"', 'op: "updateLevel"', 'op: "addNote"', 'op: "removeLink"'].every((s) => reSrc.includes(s)),
-    "#GDS tools: conduit, level line, note and link removal all write through patchRiserAction");
+    "#209 tools: conduit, level line, note and link removal all write through patchRiserAction");
   const aspectSrc = readFileSync(join(process.cwd(), "src/components/design/sheet-aspect.ts"), "utf8");
-  ok(aspectSrc.includes('import("pdfjs-dist")') && aspectSrc.includes("naturalHeight / img.naturalWidth"), "#GDS Connect: the sheet aspect is measured the way the editor measures it (image natural size, PDF viewport)");
+  ok(aspectSrc.includes('import("pdfjs-dist")') && aspectSrc.includes("naturalHeight / img.naturalWidth"), "#209 Connect: the sheet aspect is measured the way the editor measures it (image natural size, PDF viewport)");
 }
 ```
 
 - [ ] **Step 2: Run the harness to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS Connect|#GDS tools|ENOENT" | head -5`
-Expected: `FAIL #GDS Connect …` / `FAIL #GDS tools …`, or an `ENOENT` for `sheet-aspect.ts`.
+Run: `npm run test:specs 2>&1 | grep -E "#209 Connect|#209 tools|ENOENT" | head -5`
+Expected: `FAIL #209 Connect …` / `FAIL #209 tools …`, or an `ENOENT` for `sheet-aspect.ts`.
 
 - [ ] **Step 3: Create `src/components/design/sheet-aspect.ts`**
 
@@ -4269,7 +4269,7 @@ Expected: `FAIL #GDS Connect …` / `FAIL #GDS tools …`, or an `ENOENT` for `s
  * A plan sheet page's height ÷ width, measured in the browser the same way
  * the Grid editor does (image natural size; PDF page viewport) — the aspect
  * a GridRoute stamps so its length is recomputable anywhere (D110). Used by
- * the riser's Connect tool (#GDS), which draws a route without the plan open.
+ * the riser's Connect tool (#209), which draws a route without the plan open.
  * Browser-only: call it from event handlers, never during render.
  */
 
@@ -4599,7 +4599,7 @@ import {
 } from "./riser-panels";
 
 /**
- * The editable riser (#GDS, spec §4). The graph is derived server-side and
+ * The editable riser (#209, spec §4). The graph is derived server-side and
  * arrives as `view`; every edit goes through a server action, then
  * router.refresh() re-derives it. Only in-flight drags and the half-picked
  * Connect/Conduit end live here.
@@ -5068,7 +5068,7 @@ with
 
 - [ ] **Step 7: Run the harness to verify it passes**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|FAIL|ALL PASSED|FAILED"`
+Run: `npm run test:specs 2>&1 | grep -E "#209|FAIL|ALL PASSED|FAILED"`
 Expected: all `PASS`, `ALL PASSED`.
 
 - [ ] **Step 8: Gates**
@@ -5083,7 +5083,7 @@ Expected: exit 0.
 ```bash
 git add src/components/design/sheet-aspect.ts "src/app/(app)/design/grid/[id]/riser/riser-panels.tsx" \
   "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx" "src/app/(app)/design/grid/[id]/riser/page.tsx" scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): riser Connect (route or typed link), conduit annotations, level lines, numbered notes (#GDS)
+git -c user.name="SM" commit -m "feat(grid): riser Connect (route or typed link), conduit annotations, level lines, numbered notes (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -5110,7 +5110,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — append to `scripts/test-review-and-spec.ts`:
 
 ```ts
-/* --- #GDS grid drawing set — Task 7: the set route --- */
+/* --- #209 grid drawing set — Task 7: the set route --- */
 {
   const gdsClientFiles = [
     "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx",
@@ -5129,26 +5129,26 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   for (const rel of gdsClientFiles) {
     const src = readFileSync(join(process.cwd(), rel), "utf8");
     const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
-    ok(valueImports.length === 0, `#GDS client boundary: ${rel} imports no VALUE from @/lib/stores or @/db`);
+    ok(valueImports.length === 0, `#209 client boundary: ${rel} imports no VALUE from @/lib/stores or @/db`);
   }
   const gdsSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
   ok(gdsSetSrc.includes("printPageCss(size)") && gdsSetSrc.includes("buildSheetList(") && gdsSetSrc.includes("riserViewForOption(") && gdsSetSrc.includes("resolveOptionId(project, requestedOption)"),
-    "#GDS set page: one sheet list, @page from the size table, the saved riser, the same ?option= resolution as riser/schedule");
+    "#209 set page: one sheet list, @page from the size table, the saved riser, the same ?option= resolution as riser/schedule");
   ok(gdsSetSrc.includes("<PrintButton") && !gdsSetSrc.includes("#b08d4a\"}") && gdsSetSrc.includes("resolveGeneralNotes(set, settings.gridStandardNotes)"),
-    "#GDS set page: printed with the existing PrintButton; general notes default to Grid Settings' standard notes");
+    "#209 set page: printed with the existing PrintButton; general notes default to Grid Settings' standard notes");
   const gdsSchedSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
-  ok(gdsSchedSrc.includes("buildSchedule(") && gdsSchedSrc.includes("riserViewForOption("), "#GDS schedule page: shares the set's schedule builder and lists RiserLinks");
+  ok(gdsSchedSrc.includes("buildSchedule(") && gdsSchedSrc.includes("riserViewForOption("), "#209 schedule page: shares the set's schedule builder and lists RiserLinks");
   const gdsSmokeSrc = readFileSync(join(process.cwd(), "scripts/smoke-routes.ts"), "utf8");
-  ok(gdsSmokeSrc.includes('"/design/grid/GRD-5001/set"') && gdsSmokeSrc.includes('"/design/grid/GRD-5001/set?size=d"'), "#GDS smoke: the set route is covered at both sizes");
+  ok(gdsSmokeSrc.includes('"/design/grid/GRD-5001/set"') && gdsSmokeSrc.includes('"/design/grid/GRD-5001/set?size=d"'), "#209 smoke: the set route is covered at both sizes");
   const gdsFigSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx"), "utf8");
-  ok(gdsFigSrc.includes("data-plan-figure") && gdsFigSrc.includes("scaleNote(cal") && gdsFigSrc.includes("fitBox("), "#GDS plan figure: fitted to the drawing area, scale note from the calibration, ready flag for print");
+  ok(gdsFigSrc.includes("data-plan-figure") && gdsFigSrc.includes("scaleNote(cal") && gdsFigSrc.includes("fitBox("), "#209 plan figure: fitted to the drawing area, scale note from the calibration, ready flag for print");
 }
 ```
 
 - [ ] **Step 2: Run the harness to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "ENOENT|FAIL #GDS" | head -5`
-Expected: an `ENOENT` for `set/plan-sheet-figure.tsx` (or `FAIL #GDS …` lines).
+Run: `npm run test:specs 2>&1 | grep -E "ENOENT|FAIL #209" | head -5`
+Expected: an `ENOENT` for `set/plan-sheet-figure.tsx` (or `FAIL #209 …` lines).
 
 - [ ] **Step 3: Create `src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx`**
 
@@ -5175,7 +5175,7 @@ const U = 1000;
 const K = U / 900;
 
 /**
- * One system's plan on a drawing-set sheet (#GDS): the base sheet (image or
+ * One system's plan on a drawing-set sheet (#209): the base sheet (image or
  * PDF page) fitted to the drawing area, that system's devices, wires and the
  * page's space outlines on top, and a caption with the printed scale (from
  * the calibration — "NTS" when uncalibrated) and orientation. `data-ready`
@@ -5293,7 +5293,7 @@ import { SHEET_SIZES, type DrawingSetSettings, type SheetSizeKey } from "@/lib/d
 import { saveDrawingSetAction } from "./actions";
 
 /**
- * Set settings (#GDS spec §3), saved on the project: size, drawn/checked by,
+ * Set settings (#209 spec §3), saved on the project: size, drawn/checked by,
  * which sheets print, the set's own general notes (or the standard ones),
  * and labels for revisions that have no note. Never prints.
  */
@@ -5557,7 +5557,7 @@ function scheduleRow(it: ScheduleItem, key: number) {
 }
 
 /**
- * The drawing set (#GDS, spec 2026-09-25 §3): every sheet is one printed
+ * The drawing set (#209, spec 2026-09-25 §3): every sheet is one printed
  * page with the architectural title strip — T-001 cover (project, sheet
  * index, symbol legend, general notes), one plan sheet per system per source
  * page, E-501 riser (the saved riser layout), E-60x equipment schedules (no
@@ -5860,7 +5860,7 @@ export const dynamic = "force-dynamic";
 /**
  * Per-space equipment schedule (D113 item 3) — the field document: what
  * hangs in which room, plus the wire runs (routes and typed riser links,
- * #GDS) between rooms. Deliberately NO prices. Built by the same
+ * #209) between rooms. Deliberately NO prices. Built by the same
  * buildSchedule the drawing set's E-60x sheets use, so the two never differ.
  */
 export default async function SchedulePage({
@@ -6045,7 +6045,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveStandardNotesAction } from "./actions";
 
-/** Grid Settings → "Standard general notes" (#GDS): printed on every drawing
+/** Grid Settings → "Standard general notes" (#209): printed on every drawing
  *  set's cover (T-001) unless that set has its own notes. One per line. */
 export function StandardNotesCard({ value }: { value: string }) {
   const router = useRouter();
@@ -6178,7 +6178,7 @@ with
 
 ```ts
   { route: "/design/grid/GRD-5001/schedule?option=opt-does-not-exist", reject: "no longer exists" },
-  /* The drawing set (#GDS) at both sheet sizes, and an unknown option. */
+  /* The drawing set (#209) at both sheet sizes, and an unknown option. */
   { route: "/design/grid/GRD-5001/set", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?size=d", reject: "no longer exists" },
   { route: "/design/grid/GRD-5001/set?option=opt-does-not-exist&size=b", reject: "no longer exists" },
@@ -6187,8 +6187,8 @@ with
 
 - [ ] **Step 10: Run the harness to verify it passes**
 
-Run: `npm run test:specs 2>&1 | grep -E "#GDS|FAIL|ALL PASSED|FAILED"`
-Expected: all `PASS` (including every `#GDS client boundary:` line), `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#209|FAIL|ALL PASSED|FAILED"`
+Expected: all `PASS` (including every `#209 client boundary:` line), `ALL PASSED`.
 
 - [ ] **Step 11: Gates**
 
@@ -6206,7 +6206,7 @@ git add "src/app/(app)/design/grid/[id]/set" "src/app/(app)/design/grid/[id]/sch
   "src/app/(app)/design/grid/settings/standard-notes-card.tsx" "src/app/(app)/design/grid/settings/page.tsx" \
   "src/app/(app)/design/grid/[id]/editor.tsx" "src/app/(app)/design/grid/[id]/riser/page.tsx" \
   scripts/smoke-routes.ts scripts/test-review-and-spec.ts
-git -c user.name="SM" commit -m "feat(grid): drawing set — T-001 cover, per-system plan sheets, E-501 riser, E-60x schedules, title-blocked at 11x17/24x36 (#GDS)
+git -c user.name="SM" commit -m "feat(grid): drawing set — T-001 cover, per-system plan sheets, E-501 riser, E-60x schedules, title-blocked at 11x17/24x36 (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -6229,7 +6229,7 @@ This is the one task that runs a dev server, and only on a scratch datadir (memo
 
 ```ts
 /**
- * Drawing-set print fixture (#GDS). Seeds ONE demo Grid project — a plan
+ * Drawing-set print fixture (#209). Seeds ONE demo Grid project — a plan
  * sheet, two spaces, devices in several systems, a wire route, a RiserLink,
  * a level line, a conduit, riser notes, two revisions and set settings —
  * into a SCRATCH PGlite, prints the project id, and exits.
@@ -6470,7 +6470,7 @@ git status --short                            # only the fixture script is new; 
 
 ```bash
 git add scripts/fixture-grid-drawing-set.ts
-git -c user.name="SM" commit -m "test(grid): drawing-set print fixture — verified 11x17 and 24x36 page count and size (#GDS)
+git -c user.name="SM" commit -m "test(grid): drawing-set print fixture — verified 11x17 and 24x36 page count and size (#209)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -6479,19 +6479,19 @@ Report the real numbers (pages per size, sheet list, gate outputs) in the task s
 
 ---
 
-### Task 9: Docs — DECISIONS (D-GDS-1…7) and PUNCHLIST (#GDS)
+### Task 9: Docs — DECISIONS (D287…D293) and PUNCHLIST (#209)
 
 **Files:**
 - Modify: `DECISIONS.md` (append at end)
 - Modify: `PUNCHLIST.md` (append at end)
 
-**Interfaces:** none (placeholders `#GDS`, `D-GDS-n`; the lead renumbers at merge).
+**Interfaces:** none (placeholders `#209`, `D287…D293`; the lead renumbers at merge).
 
 - [ ] **Step 1: Append to `DECISIONS.md`**
 
 ```markdown
 
-## D-GDS-1. The drawing set is a browser-print page with one size table (#GDS, 2026-09-25)
+## D287. The drawing set is a browser-print page with one size table (#209, 2026-09-25)
 
 `/design/grid/<id>/set` renders every sheet as an exact-size `.pk-drawing-sheet` (11×17 ANSI B default, 24×36 ARCH D
 per set) and prints through the shared `PrintButton`. `lib/design/grid-drawing-set.ts` is the only place sheet
@@ -6499,7 +6499,7 @@ geometry lives: `DrawingSheet` turns it into CSS variables, the page turns it in
 the plan to the same drawing area. 24×36 is the 11×17 layout scaled by 36/17 (borders, strip and type); the paper
 aspect differs slightly, so the drawing area absorbs it. `?size=` beats the saved size, which beats 11×17.
 
-## D-GDS-2. Plan sheets: one per system per source page, plus G-101 for unscoped devices (#GDS, 2026-09-25)
+## D288. Plan sheets: one per system per source page, plus G-101 for unscoped devices (#209, 2026-09-25)
 
 Systems map onto the Scope panel's own taxonomy (`DRAWING_SYSTEMS` in grid-scopes.ts): L = Lighting, A = Audio,
 V = Video, R = Rigging + Curtains. A system gets a sheet only where it has devices or wires. A wire belongs to the
@@ -6510,7 +6510,7 @@ sheet. Sheet numbers are assigned before exclusions, so excluding L-101 never re
 "n of N" count only included sheets; all E-60x pages toggle together. "In scope" means "has placements" — the Scope
 panel's system toggles do not hide placed equipment from the drawings.
 
-## D-GDS-3. Revision table, labels and the printed date (#GDS, 2026-09-25)
+## D289. Revision table, labels and the printed date (#209, 2026-09-25)
 
 Every Grid revision is lettered A, B, C … (then AA …) in cut order, including quote and restore bookkeeping
 revisions — they are real snapshots. The label is the revision's note, else a per-set label typed on the set page,
@@ -6518,7 +6518,7 @@ else a plain reason ("Issued with quote"). The strip prints the newest six with 
 the print date; "drawn by" defaults to the project's creator, "checked by" to blank. The company block uses the
 quote-default office's address and phone; Settings has no website field, so none prints.
 
-## D-GDS-4. The riser document is per option, layout-only for derived things (#GDS, 2026-09-25)
+## D290. The riser document is per option, layout-only for derived things (#209, 2026-09-25)
 
 `GridProject.riser[optionId]` stores node boxes, level lines, conduits, notes and RiserLinks; devices, spaces and
 routes stay derived (D112). Nothing is written on first open — the auto layout is recomputed and saved positions win
@@ -6527,7 +6527,7 @@ added to it. Revisions snapshot and restore the whole riser map; option copy re-
 placements; option removal drops that option's document; deleting a device or space prunes the links/conduits that
 ended on it (and a space's saved box).
 
-## D-GDS-5. + Device, qty edits and Space write ordinary plan geometry (#GDS, 2026-09-25)
+## D291. + Device, qty edits and Space write ordinary plan geometry (#209, 2026-09-25)
 
 + Device spreads new placements on a 0.02 grid spiralling out from the space centroid, inside the polygon and clear
 of existing devices; Unassigned devices go along the first sheet's lower margin outside every space. Lowering a
@@ -6535,7 +6535,7 @@ row's qty removes the newest placements in that space; raising it adds more the 
 every placement in the row. The Space tool adds a 0.10 × 0.07 rectangle on the first-chosen sheet's lower margin
 through the existing `addSpaceAction`; reshaping happens on the plan.
 
-## D-GDS-6. Connect: a measured route when possible, else a typed RiserLink; conduit is never priced (#GDS, 2026-09-25)
+## D292. Connect: a measured route when possible, else a typed RiserLink; conduit is never priced (#209, 2026-09-25)
 
 Two different devices on the same sheet and page, with that page calibrated → a straight `GridRoute` through the
 existing `addRouteAction` (port validation, calibration gate, measured length; the page aspect is measured in the
@@ -6545,7 +6545,7 @@ footage is summed with routes of the same part before rounding up (`routeLines` 
 live BOM and the draft quote, and never carries a connectionType. Conduits are annotations only and never reach
 the BOM.
 
-## D-GDS-7. One PartLite builder and one schedule builder (#GDS, 2026-09-25)
+## D293. One PartLite builder and one schedule builder (#209, 2026-09-25)
 
 `gridPartsFrom` (lib/design/grid-parts.ts) replaces the inline builders in the plan page and the riser page; the
 riser, set and schedule use its catalog fallback so pre-library placements still resolve. `/schedule` and the E-60x
@@ -6558,7 +6558,7 @@ E-60x paginate at 30 rows per column, two columns per sheet, repeating a section
 
 ```markdown
 
-## #GDS. The Grid — professional drawing set (title blocks) + editable riser — DONE 2026-09-25 (D-GDS-1…D-GDS-7)
+## 209. The Grid — professional drawing set (title blocks) + editable riser — DONE 2026-09-25 (D287…D293)
 
 **Reported:** 2026-09-25 (Jeff, brainstorm with mockups): "talk through making the outputs look more professional …
 adding title blocks, and adding the ability to add via the riser." Spec:
@@ -6586,7 +6586,7 @@ real-project browser check on a scratch DB copy is the lead's call (never agains
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md
-git -c user.name="SM" commit -m "docs: drawing set + editable riser (#GDS, D-GDS-1…D-GDS-7)
+git -c user.name="SM" commit -m "docs: drawing set + editable riser (#209, D287…D293)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -6601,6 +6601,6 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - §4 saved riser document shape → Task 3 types + Task 4 persistence. Auto layout seeds, saved wins, new spaces slotted → `mergeLayout` (Task 3). + Device inside the space / Unassigned margin → Task 3 geometry, Task 4 store, Task 5 UI. Edit/delete rows → Task 4 store + Task 5 UI. Connect route vs RiserLink, both edge kinds drawn, link in BOM/quote → Tasks 3, 4, 6. Space → Task 5. Level line + drag → Task 6. Conduit never priced → Task 3 test + Task 6. Note → Task 6. Print → riser page `PrintButton` (Task 5) + E-501. Permissions + patchDoc + revisions snapshot riser → Task 4.
 - §5 tests: title-block data + Preliminary (T1), sheet list/index (T1), per-system filtering (T1), layout merge (T3), + Device inside polygon (T3 pure, T4 DB), qty add/remove (T4), Connect route vs link (T3), RiserLink in BOM (T3), conduit excluded (T3), revision snapshot/restore incl. riser (T4), print at B and D (T8), gates (every task, full in T8).
 
-**Placeholder scan.** No TBD/TODO; every code step carries complete code; `#GDS` / `D-GDS-n` are the mandated numbering placeholders.
+**Placeholder scan.** No TBD/TODO; every code step carries complete code; `#209` / `D287…D293` are the mandated numbering placeholders.
 
 **Type consistency.** Checked across tasks: `RiserDoc`/`RiserOp`/`EndRef`/`RiserLink` (T3) used unchanged by T4–T8; `routeLines(routes, parts, cals, links)` (T3) matches T4 callers; `copyOptionMembers(...).idMap` (T3) matches T4 `addOption`; `titleBlockData`/`TitleBlockData` (T1) match T2/T7; `buildSchedule`/`scheduleGroups`/`paginateSchedule` (T1) match T7 and the schedule page; `riserViewForOption` (T5) matches T7; `RiserEditor` props grow in T6 and the page passes them; `saveDrawingSetAction(projectId, patch, opts)` (T4) matches T7's panel; `setDrawingSet(projectId, patch, { resetGeneralNotes })` (T4) matches T8's fixture.

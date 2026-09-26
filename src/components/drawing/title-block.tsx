@@ -2,7 +2,7 @@ import type { TitleBlockData } from "@/lib/design/grid-drawing-set";
 import { DEFAULT_TZ } from "@/lib/venue-availability";
 
 /**
- * The drawing-set title block (#GDS, spec 2026-09-25 §2.1 — "A · Architectural
+ * The drawing-set title block (#209, spec 2026-09-25 §2.1 — "A · Architectural
  * side strip"): logo + company, project, option, revision table, drawn /
  * checked / scale / date, quote, and the sheet title + big sheet number.
  *

@@ -15,7 +15,7 @@ import {
 } from "@/lib/stores/grid-riser";
 
 /**
- * Riser editor actions (#GDS). Same gate as every Grid edit (requireUser);
+ * Riser editor actions (#209). Same gate as every Grid edit (requireUser);
  * parts are validated here, geometry and the document live in the store.
  */
 

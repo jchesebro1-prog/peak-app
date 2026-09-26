@@ -18,7 +18,7 @@ export const metadata = { title: "Riser — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**
- * The riser (D112 → editable, #GDS). Devices, spaces and wire runs are still
+ * The riser (D112 → editable, #209). Devices, spaces and wire runs are still
  * DERIVED from the plan on every load; the saved riser document adds node
  * positions, level lines, conduits, notes and typed-length links. Every tool
  * writes through the Grid project's actions, so the plan, BOM and quote see

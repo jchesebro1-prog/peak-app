@@ -1,5 +1,5 @@
 /**
- * Drawing-set print fixture (#GDS). Seeds ONE demo Grid project — a plan
+ * Drawing-set print fixture (#209). Seeds ONE demo Grid project — a plan
  * sheet, two spaces, devices in several systems, a wire route, a RiserLink,
  * a level line, a conduit, riser notes, two revisions and set settings —
  * into a SCRATCH PGlite, prints the project id, and exits.

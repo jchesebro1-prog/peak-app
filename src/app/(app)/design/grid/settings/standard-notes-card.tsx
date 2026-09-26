@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveStandardNotesAction } from "./actions";
 
-/** Grid Settings → "Standard general notes" (#GDS): printed on every drawing
+/** Grid Settings → "Standard general notes" (#209): printed on every drawing
  *  set's cover (T-001) unless that set has its own notes. One per line. */
 export function StandardNotesCard({ value }: { value: string }) {
   const router = useRouter();

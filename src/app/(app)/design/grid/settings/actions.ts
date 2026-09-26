@@ -71,7 +71,7 @@ export async function applyPortRuleAction(
   return { ok: true, applied: out.byRule[ruleId] || 0, skippedHasPorts: out.skippedHasPorts };
 }
 
-/** Standard general notes for drawing-set covers (#GDS). Blank clears the
+/** Standard general notes for drawing-set covers (#209). Blank clears the
  *  key (null) so covers print no default notes. */
 export async function saveStandardNotesAction(text: string) {
   await requirePerm("manage_users");

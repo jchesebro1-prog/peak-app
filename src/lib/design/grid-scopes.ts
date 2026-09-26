@@ -161,11 +161,11 @@ export function isLayerVisible(
 /* ---------------------------- drawing systems ---------------------------- */
 
 /**
- * Drawing-set systems (drawing set spec 2026-09-25 §3, #GDS). One plan-sheet
+ * Drawing-set systems (drawing set spec 2026-09-25 §3, #209). One plan-sheet
  * family per system, keyed off the SAME scope taxonomy the Scope panel uses
  * (scopeOfPart above), so re-mapping a catalog category re-files its devices
  * on the drawings too. Curtains print with rigging on the R-sheets. `general`
- * is the catch-all for Unscoped devices (D-GDS-2): the spec lists four
+ * is the catch-all for Unscoped devices (D288): the spec lists four
  * systems, but a device with no scope must never silently vanish from a set.
  */
 export type DrawingSystemKey = "lighting" | "audio" | "video" | "rigging" | "general";

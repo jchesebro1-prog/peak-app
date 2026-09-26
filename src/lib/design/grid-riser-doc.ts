@@ -1,5 +1,5 @@
 /**
- * The Grid — editable riser document (drawing set spec 2026-09-25 §4, #GDS).
+ * The Grid — editable riser document (drawing set spec 2026-09-25 §4, #209).
  *
  * Devices, spaces and wire runs stay DERIVED from the plan (riserGraph,
  * D112) — the riser can never drift from the layout. This document holds
@@ -209,7 +209,7 @@ export function nodeMinH(groupCount: number): number {
 
 /* -------------------------------- layout -------------------------------- */
 
-/** Three wide columns (#GDS final review I2): room between nodes for the
+/** Three wide columns (#209 final review I2): room between nodes for the
  *  edge chips, and device rows long enough to read. */
 const COLS = 3;
 const BOX_W = 0.22;
@@ -372,7 +372,7 @@ export function applyRiserOp(
 
 /** Device-drop spacing, normalized to the page width: a plan symbol is
  *  ~44 px on the editor's 900 px page (≈ 0.05), so drops a little further
- *  apart than that never stack (#GDS final review I4). */
+ *  apart than that never stack (#209 final review I4). */
 export const DROP_STEP = 0.06;
 
 /**

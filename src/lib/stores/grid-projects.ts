@@ -129,7 +129,7 @@ export type GridRevision = {
   /** Option list at snapshot time (Spec 1). Absent on older snapshots —
    *  restore normalizes to a single default option. */
   options?: GridOption[];
-  /** Riser documents at snapshot time (#GDS). Absent on older snapshots —
+  /** Riser documents at snapshot time (#209). Absent on older snapshots —
    *  restore then drops back to the auto layout. */
   riser?: Record<string, RiserDoc>;
 };
@@ -211,10 +211,10 @@ export type GridProject = {
    *  fresh from whatever this currently holds. Absent on pre-D-manual-scope
    *  docs, read as null. */
   scopeInputs?: QuickScopeInputs | null;
-  /** Saved riser document per option id (#GDS) — node layout, level lines,
+  /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
-  /** Drawing-set settings (#GDS) — size, drawn/checked by, excluded sheets,
+  /** Drawing-set settings (#209) — size, drawn/checked by, excluded sheets,
    *  general notes, revision labels. Absent = defaults. */
   drawingSet?: DrawingSetSettings;
   createdBy: string;
@@ -714,7 +714,7 @@ export async function removePlacement(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.placements = (p.placements || []).filter((pl) => pl.id !== placementId);
-    // A riser link or conduit that ended on this device goes with it (#GDS).
+    // A riser link or conduit that ended on this device goes with it (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
     p.updatedAt = Date.now();
   });
@@ -795,7 +795,7 @@ export async function setScopeInputs(
   });
 }
 
-/** Merge drawing-set settings (#GDS). `resetGeneralNotes` drops the set's own
+/** Merge drawing-set settings (#209). `resetGeneralNotes` drops the set's own
  *  notes so the cover falls back to Grid Settings' standard notes. */
 export async function setDrawingSet(
   projectId: string,
@@ -865,7 +865,7 @@ export async function removeSpace(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
-    // Its riser box, and any link/conduit ending on it, go too (#GDS).
+    // Its riser box, and any link/conduit ending on it, go too (#209).
     if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: new Set([spaceId]) });
     p.updatedAt = Date.now();
   });
@@ -952,7 +952,7 @@ export async function addOption(
       doc.placements = [...(doc.placements || []), ...copied.placements];
       doc.routes = [...(doc.routes || []), ...copied.routes];
       // The copied option gets its own riser document, device ends re-pointed
-      // at the copied placements (#GDS).
+      // at the copied placements (#209).
       const srcRiser = doc.riser?.[input.copyFromOptionId];
       if (srcRiser) {
         doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
@@ -1110,8 +1110,8 @@ export async function restoreRevision(
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
     doc.routes = [...(target.routes || [])];
-    // The riser document is design state like placements (#GDS): restored
-    // wholesale. A pre-#GDS snapshot has none → back to the auto layout.
+    // The riser document is design state like placements (#209): restored
+    // wholesale. A pre-#209 snapshot has none → back to the auto layout.
     if (target.riser) doc.riser = JSON.parse(JSON.stringify(target.riser)) as Record<string, RiserDoc>;
     else delete doc.riser;
     // sheetIds themselves are still never restored wholesale from the

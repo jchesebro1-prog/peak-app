@@ -7,7 +7,7 @@ import { riserGraph, type RiserGroup } from "./grid-riser";
 import { buildRiserView, type RiserDoc, type RiserView } from "./grid-riser-doc";
 
 /**
- * One option's riser, ready to draw (#GDS): the derived graph (riserGraph,
+ * One option's riser, ready to draw (#209): the derived graph (riserGraph,
  * D112) + the saved riser document + each device row's stock-symbol look
  * (the same symbolLook the plan uses). Shared by the riser editor page, the
  * drawing set's E-501 and the schedule's wire runs. Pure.

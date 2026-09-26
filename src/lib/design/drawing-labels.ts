@@ -1,5 +1,5 @@
 /**
- * Drawing-set label placement (#GDS final review I2/I3). Pure and
+ * Drawing-set label placement (#209 final review I2/I3). Pure and
  * dependency-free (the grid-bom rule) — the riser canvas (server + client),
  * the plan-sheet figure (client) and the spec harness all import it.
  *
@@ -258,7 +258,7 @@ export function planKeyLayout(input: {
 /** Device-key rows a plan sheet prints before it says "+N more". */
 export const KEY_MAX_ROWS = 36;
 
-/** Raster zoom for a PDF plan sheet (#GDS I6): about `dpi` across the width
+/** Raster zoom for a PDF plan sheet (#209 I6): about `dpi` across the width
  *  the page will print at inside a `boxW` × `boxH` inch box, capped at
  *  `maxPixels` per canvas. `pageW`/`pageH` are the page's scale-1 viewport
  *  (PDF points). Floored at 1 (screen resolution) unless the pixel cap

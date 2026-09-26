@@ -880,7 +880,7 @@ button.pk-searchbar-glass {
   }
 }
 
-/* Grid drawing set (#GDS). Sheet geometry arrives as CSS variables from
+/* Grid drawing set (#209). Sheet geometry arrives as CSS variables from
    DrawingSheet (lib/design/grid-drawing-set.ts is the one size table);
    --dw-k scales every border and type size so 24×36 is the 11×17 layout
    at 36/17. Accent only through var(--accent). */

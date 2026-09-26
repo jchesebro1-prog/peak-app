@@ -22,7 +22,7 @@ const subscribeNothing = () => () => {};
  * Shared print button for single-page letters (window.print() is the only
  * genuinely-client bit). Mirrors the per-letter PrintButton toolbars.
  *
- * `waitFor` (optional, #GDS): a selector whose elements must all carry
+ * `waitFor` (optional, #209): a selector whose elements must all carry
  * data-ready="1" (or data-error="1") before printing is allowed — the
  * drawing set's plan sheets render asynchronously, and printing earlier
  * would capture blank plans.

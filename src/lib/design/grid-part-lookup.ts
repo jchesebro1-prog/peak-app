@@ -8,7 +8,7 @@ if (typeof window !== "undefined") throw new Error("grid-part-lookup is server-o
 /**
  * A part id as the Grid stores it: a pricing-catalog row first, else a
  * Grid-library entry (unit "ea", sku = model number). Server-only. Moved
- * verbatim out of design/grid/[id]/actions.ts (#GDS) so the riser actions
+ * verbatim out of design/grid/[id]/actions.ts (#209) so the riser actions
  * validate parts through the same lookup.
  */
 export async function partForGrid(id: string) {

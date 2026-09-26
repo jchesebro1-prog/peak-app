@@ -120,7 +120,7 @@ export type AppSettingsData = {
    *  or "Other" (SYMBOL_COLOR_KEYS), merged over DEFAULT_SYMBOL_COLORS by
    *  resolveSymbolColors. Edited in Design → Grid Settings → Symbol colours. */
   gridSymbolColors?: Record<string, string> | null;
-  /** Drawing set (#GDS) — the "Standard general notes" printed on every
+  /** Drawing set (#209) — the "Standard general notes" printed on every
    *  set's cover (T-001) unless that set has its own. One note per line;
    *  null/absent = none. Edited in Design → Grid Settings. */
   gridStandardNotes?: string | null;

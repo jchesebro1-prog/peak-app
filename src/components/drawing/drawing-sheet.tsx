@@ -3,7 +3,7 @@ import { sheetCssVars, type SheetSizeKey, type TitleBlockData } from "@/lib/desi
 import { TitleBlock } from "./title-block";
 
 /**
- * One drawing-set sheet (#GDS): exact paper size (11×17 or 24×36), border
+ * One drawing-set sheet (#209): exact paper size (11×17 or 24×36), border
  * frame, drawing area on the left, title strip on the right. Geometry comes
  * from grid-drawing-set's size table via CSS variables, never literals here.
  * Server-renderable (no "use client").
