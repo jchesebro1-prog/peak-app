@@ -18,6 +18,10 @@ import "./quick-design.css";
  */
 
 export const dynamic = "force-dynamic";
+/** #FXB: this page's first listFixtures() can run the one-time fixture
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS) — 60 s keeps
+ *  that well inside the function limit, like the Datasheets page. */
+export const maxDuration = 60;
 
 export default async function Page({
   searchParams,

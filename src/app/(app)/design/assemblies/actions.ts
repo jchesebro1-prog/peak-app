@@ -3,9 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { listDocsByField } from "@/db/doc-store";
-import type { CatalogPart } from "@/lib/stores/catalog";
-import { fixtureSkus, resolveFixture, sanitizeFixtureInput, type FixtureInput } from "@/lib/fixture-assemblies";
+import { getMany as getCatalogParts } from "@/lib/stores/catalog";
+import { clampPickerLimit, fixtureSkus, resolveFixture, sanitizeFixtureInput, type FixtureInput } from "@/lib/fixture-assemblies";
 import { createFixture, getFixture, removeFixture, updateFixture } from "@/lib/stores/fixtures";
 import { fixturePairs, fixtureRef } from "@/lib/part-docs/assembly-graph";
 import { setOwnDatasheet, syncAccessoryLinks } from "@/lib/stores/part-accessory-links";
@@ -31,7 +30,8 @@ const revalidateConsumers = () => {
  * nothing `searchCatalog` already returns).
  */
 export async function searchAssemblyPartsAction(query: string, limit = 40): Promise<{ hits: PartHit[]; total: number }> {
-  const { hits, total } = await searchCatalog(query, "", limit);
+  // The limit arrives from the client: clamp it (final review M2).
+  const { hits, total } = await searchCatalog(String(query ?? ""), "", clampPickerLimit(limit));
   return {
     hits: hits.map((h) => ({
       sku: h.sku,
@@ -64,14 +64,19 @@ export async function saveFixtureAction(input: FixtureInput): Promise<{ ok: true
   if (id && !existing) return { ok: false, error: "This assembly was deleted — reload the page." };
   if (existing && existing.kind !== clean.value.kind) return { ok: false, error: "An assembly can't change between fixture and system." };
   const [parts, settings] = await Promise.all([
-    listDocsByField<CatalogPart>("catalog_parts", "sku", fixtureSkus(clean.value)),
+    getCatalogParts(fixtureSkus(clean.value)),
     getSettings(),
   ]);
   const live = resolveFixture({ ...clean.value, id: id || "new" }, parts, settings);
   const snapshot = { cost: live.cost, price: live.sell, pricedAt: live.pricesAsOf };
-  const saved = existing
-    ? await updateFixture(existing, clean.value, user.name, snapshot)
-    : await createFixture(clean.value, user.name, snapshot);
+  let saved;
+  try {
+    saved = existing
+      ? await updateFixture(existing, clean.value, user.name, snapshot)
+      : await createFixture(clean.value, user.name, snapshot);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not save this assembly." };
+  }
   await syncAccessoryLinks({ source: "assembly", sourceRef: fixtureRef(saved.id) }, fixturePairs(saved));
   revalidateConsumers();
   return { ok: true, id: saved.id };

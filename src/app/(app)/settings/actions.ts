@@ -328,7 +328,8 @@ export async function saveConsultingDisciplinesAction(disciplines: string[]) {
  * imported into a clean database. Admin-only, and guarded by a typed
  * confirmation phrase so it can never fire by accident. Also turns the demo-
  * data toggle off, so the collections aren't re-seeded on the next boot.
- * Leaves team, settings, estimating rates and Gmail connections intact.
+ * Leaves team, settings, estimating rates, Gmail connections and the
+ * Assembly Builder's fixtures/systems intact.
  */
 export async function clearDemoDataAction(confirm: string) {
   await requirePerm("manage_users");
@@ -336,13 +337,17 @@ export async function clearDemoDataAction(confirm: string) {
     return { ok: false as const, error: 'Type CLEAR to confirm.' };
   }
   const { clearDemoData } = await import("@/db/seed-data");
+  // #FXB: fixtures and systems (the `subassemblies` table) are configuration
+  // and survive the reset (CONFIG_COLLECTIONS), so the one-time conversion
+  // is not re-armed here. Their accessory graph lives in a table the reset
+  // does wipe, so rebuild it (add-only) from the kept fixtures.
   const cleared = await clearDemoData();
-  // #FXB: fixtures live in a doc table the reset just wiped; re-arm the
-  // one-time conversion so the settings-backed assemblies (configuration,
-  // which this reset keeps) come back on the next read, as they did when
-  // they lived in settings.
-  const { resetFixturesConversion } = await import("@/lib/fixtures-migrate");
-  await resetFixturesConversion();
+  try {
+    const { syncAllAssemblyGraphs } = await import("@/lib/part-docs/assembly-sync");
+    await syncAllAssemblyGraphs();
+  } catch (e) {
+    console.error("[go-live reset] fixture accessory graph rebuild failed", e);
+  }
   await setSettings({ seedDemo: false });
   revalidatePath("/", "layout");
   return { ok: true as const, cleared };

@@ -71,7 +71,7 @@ import {
   resolveOptionId,
   syncQuoteMirror,
 } from "@/lib/design/grid-options";
-import { DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
+import { CONFIG_COLLECTIONS, DEFAULT_SETTINGS, DEMO_COLLECTIONS } from "@/db/seed-data";
 import { DOC_TABLES, SYNCABLE_COLLECTIONS } from "@/db/doc-tables";
 import { PARTNER_TYPES, baseVenueKind } from "@/lib/identity/venue-defaults";
 import { VENDOR_COMPANY_TYPE, isVendorType } from "@/lib/identity/config";
@@ -1006,11 +1006,24 @@ ok(
 
 /* --- Go-live reset coverage (PUNCHLIST #94) --- */
 const resetCollections = [...DEMO_COLLECTIONS].sort();
-const documentCollections = Object.keys(DOC_TABLES).sort();
+const documentCollections = Object.keys(DOC_TABLES).filter((c) => !CONFIG_COLLECTIONS.includes(c as never)).sort();
 ok(
   resetCollections.join("\n") === documentCollections.join("\n"),
   "go-live reset covers every business-document collection"
 );
+ok(
+  CONFIG_COLLECTIONS.join() === "subassemblies" && !resetCollections.includes("subassemblies"),
+  "#FXB final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
+);
+{
+  const settingsActions = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
+  const reset = settingsActions.slice(settingsActions.indexOf("export async function clearDemoDataAction"));
+  const resetBody = reset.slice(0, reset.indexOf("\n}\n"));
+  ok(
+    !resetBody.includes("resetFixturesConversion") && resetBody.includes("syncAllAssemblyGraphs"),
+    "#FXB final review M5: the go-live reset no longer re-arms the fixture conversion, and rebuilds the kept fixtures' accessory graph"
+  );
+}
 ok(
   resetCollections.includes("equipment_bookings") &&
     resetCollections.includes("grid_sheets") &&
@@ -16224,6 +16237,7 @@ import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
    ====================================================================== */
 import {
   resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, fixtureAssembliesFrom, headLineForPick,
+  clampPickerLimit, FIXTURE_MAX_LINES,
   type FixtureRecord as FxbRecord, type HeadLine as HeadLineT,
 } from "@/lib/fixture-assemblies";
 {
@@ -16294,6 +16308,54 @@ import {
   ok(engineNoQty.ok && engineNoQty.value.lightEngineLine?.qty === undefined, "#FXB M2 sanitizeFixtureInput: no qty provided for the engine line is left alone, not forced to 1");
   const lensZero = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lensLine: { qty: 0 } });
   ok(lensZero.ok && lensZero.value.lensLine?.qty === 0, "#FXB M2 sanitizeFixtureInput: the lens line keeps its 0-floor — only the engine line gets the 1-floor");
+
+  /* ---- final review ---- */
+  // M1 — the Estimator keys component quantities by SKU, so one SKU on two
+  // lines is refused, naming the part.
+  const dupBox = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { data: [{ sku: "FX-CBL", label: "Power cable", qty: 1 }], power: [{ sku: "FX-CBL", qty: 2 }] } });
+  ok(!dupBox.ok && dupBox.error.includes("FX-CBL") && dupBox.error.includes("Power cable") && /two lines/.test(dupBox.error), "#FXB final review M1: the same SKU in two boxes is refused, naming the part");
+  const dupEngine = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { accessories: [{ sku: "FX-ENG", qty: 1 }] } });
+  ok(!dupEngine.ok && dupEngine.error.includes("FX-ENG"), "#FXB final review M1: a box line repeating the light engine is refused");
+  const dupLens = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lines: { mounting: [{ sku: "FX-LENS", qty: 0 }] } });
+  ok(!dupLens.ok && dupLens.error.includes("FX-LENS"), "#FXB final review M1: a box line repeating the lens is refused (even as an optional qty-0 line)");
+  const sameEngineLens = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-ENG" });
+  ok(!sameEngineLens.ok && sameEngineLens.error.includes("FX-ENG"), "#FXB final review M1: the lens can't be the light engine's own SKU");
+  const dupSys = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 1 }, { sku: "A", qty: 3 }] });
+  ok(!dupSys.ok && dupSys.error.includes("A"), "#FXB final review M1: a system's parts list refuses a repeated SKU too");
+  const distinct = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lines: { data: [{ sku: "FX-DMX", qty: 1 }], power: [{ sku: "FX-CBL", qty: 1 }] } });
+  ok(distinct.ok, "#FXB final review M1: distinct SKUs still save");
+  // M1 scope — conversion is never re-validated: a legacy row with a
+  // repeated SKU still converts (it only fails on its next human save).
+  const legacyDup = subassemblyToFixture({
+    id: "SA-DUP", kind: "fixture", label: "Dup", description: "", lightEngineSku: "C-ENG", lightEngineName: "", lightEngineCost: 0,
+    lensSku: "", lensName: "", lensCost: 0,
+    options: { data: [{ sku: "C-X", name: "", cost: 0, qty: 1 }], power: [{ sku: "C-X", name: "", cost: 0, qty: 2 }], mounting: [], accessories: [] },
+    cost: 0, price: 0, createdAt: 1, updatedAt: 1,
+  });
+  ok(legacyDup.lines.data[0]?.sku === "C-X" && legacyDup.lines.power[0]?.sku === "C-X", "#FXB final review M1: a converted legacy row with a repeated SKU still converts unchanged");
+  // M9 — at most 200 lines / parts per assembly.
+  const manyLines = (n: number, pfx: string) => Array.from({ length: n }, (_, i) => ({ sku: `${pfx}-${i}`, qty: 1 }));
+  ok(FIXTURE_MAX_LINES === 200, "#FXB final review M9: the per-assembly line cap is 200");
+  const at200 = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { data: manyLines(100, "D"), accessories: manyLines(100, "A") } });
+  ok(at200.ok, "#FXB final review M9: 200 box lines save");
+  const over200 = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { data: manyLines(100, "D"), accessories: manyLines(101, "A") } });
+  ok(!over200.ok && /200/.test(over200.error), "#FXB final review M9: 201 box lines across the boxes are refused");
+  const sys201 = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: manyLines(201, "P") });
+  ok(!sys201.ok && /200/.test(sys201.error), "#FXB final review M9: a system with 201 parts is refused");
+  // M2 — the picker's client-supplied limit is clamped.
+  ok(clampPickerLimit(40) === 40 && clampPickerLimit(0) === 1 && clampPickerLimit(-5) === 1 && clampPickerLimit(10_000) === 100 && clampPickerLimit("abc") === 40 && clampPickerLimit(12.9) === 12, "#FXB final review M2: the picker search limit clamps to 1..100");
+  {
+    const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/actions.ts"), "utf8");
+    ok(actionsSrc.includes("clampPickerLimit(limit)"), "#FXB final review M2: searchAssemblyPartsAction clamps the client limit");
+    const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/page.tsx"), "utf8");
+    ok(!/listDocsByField/.test(pageSrc + actionsSrc) && pageSrc.includes("getCatalogParts(") && actionsSrc.includes("getCatalogParts("), "#FXB final review M3: the builder page and save read catalog parts by id (the SKU), not a doc-field scan");
+    for (const rel of ["src/app/(app)/estimator/page.tsx", "src/app/(app)/design/quick/page.tsx", "src/app/(app)/design/assemblies/page.tsx"]) {
+      ok(/^export const maxDuration = 60;$/m.test(readFileSync(join(process.cwd(), rel), "utf8")), `#FXB final review M8: ${rel} (can run the first-load conversion) sets maxDuration = 60`);
+    }
+    const builderSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/fixture-builder.tsx"), "utf8");
+    const removeFn = builderSrc.slice(builderSrc.indexOf("const remove = async"), builderSrc.indexOf("const remove = async") + 600);
+    ok(/try \{\s*await deleteFixtureAction/.test(removeFn) && removeFn.includes("setListError(") && builderSrc.includes("{listError &&"), "#FXB final review M10: a rejected delete is caught and shown on the list");
+  }
 
   const fa = fixtureAssembliesFrom([rec, sys], cat);
   ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#FXB fixtureAssembliesFrom: fixtures only, id and label carried");
@@ -16379,6 +16441,8 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
   const applied = [...p1.rewrites, ...p1.inserts] as unknown as Array<Record<string, unknown> & { id: string }>;
   const p2 = planFixtureConversion([asm], applied, 2000);
   ok(p2.inserts.length === 0 && p2.rewrites.length === 0, "#FXB plan: running the conversion twice changes nothing");
+  const p3 = planFixtureConversion([asm], [], 3000, new Set(["fa-conv"]));
+  ok(p3.inserts.length === 0, "#FXB final review M11: a soft-deleted assembly id is not planned (nor reported) as an insert");
 
   // The accessory graph: one fixture: scope; systems feed nothing.
   const pairs = fixturePairs({ kind: "fixture", lightEngineSku: "G-ENG", lensSku: "G-LENS", lines: { data: [{ sku: "G-DMX", qty: 2 }], power: [], mounting: [{ sku: "G-CLAMP", qty: 0 }], accessories: [{ sku: "G-ENG", qty: 1 }] } });

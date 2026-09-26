@@ -2,8 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { listDocsByField } from "@/db/doc-store";
-import type { CatalogPart } from "@/lib/stores/catalog";
+import { getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { fixtureSkus } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { loadPartDocsState } from "@/lib/part-docs/load";
@@ -13,6 +12,10 @@ import type { PartHit } from "./fixture-form";
 
 export const metadata = { title: "Assembly Builder — Quartzite-6" };
 export const dynamic = "force-dynamic";
+/** #FXB: this page's first listFixtures() can run the one-time fixture
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS) — 60 s keeps
+ *  that well inside the function limit, like the Datasheets page. */
+export const maxDuration = 60;
 
 /** #FXB — one builder for fixtures and systems (spec
  *  2026-09-25-fixture-builder-merge-design.md). The #130 `?tab=` switch is
@@ -32,7 +35,7 @@ export default async function AssemblyBuilderPage({
   // pickers' own server search (searchAssemblyPartsAction), which merges its
   // hits into the client's bySku seed below.
   const skus = [...new Set(fixtures.flatMap(fixtureSkus))];
-  const parts = skus.length ? await listDocsByField<CatalogPart>("catalog_parts", "sku", skus) : [];
+  const parts = await getCatalogParts(skus);
   // Part documents (#207): each saved line's datasheet coverage.
   const { index } = await loadPartDocsState(parts);
   const coverage = memberCoverageFor(index, fixtures.flatMap(fixturePairs));

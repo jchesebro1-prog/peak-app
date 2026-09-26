@@ -459,7 +459,40 @@ function cleanHead(raw: unknown, minQty = 0): HeadLine | undefined {
  * The save rules (spec §2.4): label + light engine (fixture); label + scope +
  * at least one part (system). Lens optional. A SKU missing from the catalog
  * is NOT an error here — it prices as missing and shows a warning.
+ *
+ * Final review fixes: at most FIXTURE_MAX_LINES box lines / parts (M9), and
+ * no SKU on two lines (M1) — the Estimator keys a fixture's component
+ * quantities by SKU, so a duplicate would silently collapse to its last
+ * line's qty. Only new saves are checked; converted rows are never
+ * re-validated, so a legacy duplicate still converts and reads as before.
  */
+export const FIXTURE_MAX_LINES = 200;
+
+/** The part pickers' server-search result cap, clamped to 1..100 — the
+ *  value arrives from the client (final review M2). Non-numbers → 40. */
+export function clampPickerLimit(limit: unknown): number {
+  const n = Math.floor(Number(limit));
+  return Number.isFinite(n) ? Math.min(100, Math.max(1, n)) : 40;
+}
+
+type NamedSku = { sku: string; label?: string };
+
+/** The first SKU that appears on two of `lines`, named for the error. */
+function duplicateSkuError(lines: readonly NamedSku[]): string | null {
+  const seen = new Map<string, NamedSku>();
+  for (const l of lines) {
+    const prior = seen.get(l.sku);
+    if (prior) {
+      const label = prior.label || l.label;
+      return `${l.sku}${label ? ` (${label})` : ""} is on two lines — keep one line and set its quantity there.`;
+    }
+    seen.set(l.sku, l);
+  }
+  return null;
+}
+
+const tooManyLines = `An assembly can have at most ${FIXTURE_MAX_LINES} lines.`;
+
 export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFixture } | { ok: false; error: string } {
   const i = (input && typeof input === "object" ? input : {}) as FixtureInput;
   const kind: FixtureKind = i.kind === "system" ? "system" : "fixture";
@@ -473,6 +506,9 @@ export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFi
     if (!scope) return { ok: false, error: "Pick a scope for the system." };
     const parts = cleanList(i.parts);
     if (!parts.length) return { ok: false, error: "Add at least one part to the system." };
+    if (parts.length > FIXTURE_MAX_LINES) return { ok: false, error: tooManyLines };
+    const dup = duplicateSkuError(parts);
+    if (dup) return { ok: false, error: dup };
     return { ok: true, value: { kind, label, description, scope, lightEngineSku: "", lensSku: null, lines, parts } };
   }
   const lightEngineSku = text(i.lightEngineSku, 160);
@@ -481,6 +517,14 @@ export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFi
   for (const box of FIXTURE_BOXES) lines[box] = cleanList(i.lines?.[box]);
   const lightEngineLine = cleanHead(i.lightEngineLine, 1);
   const lensLine = lensSku ? cleanHead(i.lensLine) : undefined;
+  const boxLines = FIXTURE_BOXES.flatMap((box) => lines[box]);
+  if (boxLines.length > FIXTURE_MAX_LINES) return { ok: false, error: tooManyLines };
+  const dup = duplicateSkuError([
+    { sku: lightEngineSku, label: lightEngineLine?.label },
+    ...(lensSku ? [{ sku: lensSku, label: lensLine?.label }] : []),
+    ...boxLines,
+  ]);
+  if (dup) return { ok: false, error: dup };
   const lamp = text(i.lamp, 120);
   const position = text(i.position, 120);
   const circuit = text(i.circuit, 120);

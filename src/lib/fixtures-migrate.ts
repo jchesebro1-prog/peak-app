@@ -114,12 +114,11 @@ async function mergeIfUnchanged(id: string, rev: number, patch: Record<string, u
 
 export async function convertFixtures(opts: FixtureConvertOpts = {}): Promise<FixtureConvertResult> {
   const [settings, { live: snapshot, deletedIds }] = await Promise.all([getSettingsStrict(), readRows()]);
-  const plan = planFixtureConversion(settings.fixtureAssemblies, snapshot.map((s) => s.row), opts.now ?? Date.now());
+  const plan = planFixtureConversion(settings.fixtureAssemblies, snapshot.map((s) => s.row), opts.now ?? Date.now(), deletedIds);
   await opts.beforeWrite?.();
   const out: FixtureConvertResult = { inserted: 0, rewritten: 0, graphWritten: 0, graphRemoved: 0, complete: false };
   // Insert-if-absent still guards a delete that lands after the read.
-  const inserts = plan.inserts.filter((r) => !deletedIds.has(r.id));
-  const ins = await insertDocsIfAbsent("subassemblies", inserts, { shouldStop: opts.shouldStop });
+  const ins = await insertDocsIfAbsent("subassemblies", plan.inserts, { shouldStop: opts.shouldStop });
   out.inserted = ins.ids.length;
   if (!ins.complete) return out;
   const byId = new Map(snapshot.map((s) => [s.row.id, s]));
@@ -171,8 +170,9 @@ export async function ensureFixturesConverted(budgetMs = FIXTURES_CONVERT_BUDGET
   }
 }
 
-/** Re-arm the conversion (the go-live reset wipes the doc table but keeps
- *  settings, so the settings-backed assemblies come back on the next read). */
+/** Re-arm the conversion. Test seam only: the go-live reset keeps the
+ *  `subassemblies` table (seed-data.ts CONFIG_COLLECTIONS), so nothing in
+ *  the app calls this any more. */
 export async function resetFixturesConversion(): Promise<void> {
   await setBlob(FIXTURES_CONVERT_BLOB_ID, { convertedAt: 0 });
 }

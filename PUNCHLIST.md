@@ -8349,3 +8349,18 @@ Equipment map. **Operational note:** don't run `fixtures:convert -- --commit` or
 against the hosted DB before this branch is on `main` — the preview guard only stops the automatic page-load path,
 not a deliberate CLI run, and converting production ahead of the merge would leave it converted against pre-merge
 code.
+
+**Rollback / cutover.** If this merge is reverted, `main` goes back to reading `settings.fixtureAssemblies`, which the
+conversion never wrote, so the Assemblies tab shows what it showed before (edits made in the new builder to converted
+`fa-…` records are not in settings and are lost to it). Estimator quote lines saved against `fa-…` ids keep their
+frozen components, and `fixture:<id>` accessory links keep counting for datasheet coverage, since the part-documents
+readers count any live link. A converted `SA-…` row still carries its old fields, so main's Subassemblies tab lists
+it — but saving it there full-replaces the record from its old `options`, dropping the new `lines` (and any edits
+made in the new builder); the row is then legacy-shaped again, and if this branch returns the new code normalizes it in
+memory and rewrites it on its next save. Rows only the new builder wrote (new `SA-…` fixtures, systems, converted
+`fa-…` rows) also show on main's Subassemblies tab, as fixtures with no options (main tolerates the missing field). The
+conversion flag stays set, so settings edits made on main during a rollback are never re-imported by a later re-merge —
+re-enter them in the builder. During cutover, previews of any branch cut before this merge still run the old code against the
+shared production database and keep writing the old shapes (settings assemblies, `options`-only subassembly rows,
+`assembly:`/`subassembly:` graph rows); the new code reads each of those, and a legacy-shaped row converts on the
+next pass — but an `fa-…` assembly added in settings after the flag is set is not picked up.

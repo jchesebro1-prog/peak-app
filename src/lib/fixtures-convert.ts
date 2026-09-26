@@ -159,17 +159,19 @@ export function normalizeFixtureRow(row: RawFixtureRow): FixtureRecord {
 }
 
 /**
- * What a conversion pass must write: every settings assembly with no live
- * row of that id (insert-if-absent, so a soft-deleted one stays deleted), and
- * every live row still in the legacy shape (rewrite in place). Running it
- * again over the result plans nothing.
+ * What a conversion pass must write: every settings assembly with no row of
+ * that id — neither live nor soft-deleted (`deletedIds`; a deleted one stays
+ * deleted, and insert-if-absent would skip it anyway) — and every live row
+ * still in the legacy shape (rewrite in place). Running it again over the
+ * result plans nothing.
  */
 export function planFixtureConversion(
   settingsAssemblies: unknown,
   rows: readonly RawFixtureRow[],
-  at: number
+  at: number,
+  deletedIds: ReadonlySet<string> = new Set()
 ): { inserts: FixtureRecord[]; rewrites: FixtureRecord[] } {
-  const live = new Set(rows.map((r) => r.id));
+  const live = new Set([...rows.map((r) => r.id), ...deletedIds]);
   const inserts = sanitizeFixtureAssemblies(settingsAssemblies)
     .filter((a) => !live.has(a.id))
     .map((a) => assemblyToFixture(a, at));

@@ -19,8 +19,16 @@ const commit = args.includes("--commit");
 async function main() {
   const { hosted } = resolveDbTarget(commit ? "fixtures:convert (WRITE)" : "fixtures:convert (read-only)");
   if (commit) requireHostedConfirmation(hosted, args);
-  const [settings, rows] = await Promise.all([getSettingsStrict(), listDocs("subassemblies")]);
-  const plan = planFixtureConversion(settings.fixtureAssemblies, rows, Date.now());
+  const [settings, rows, allRows] = await Promise.all([
+    getSettingsStrict(),
+    listDocs("subassemblies"),
+    listDocs("subassemblies", { includeDeleted: true }),
+  ]);
+  // A soft-deleted id is never re-inserted, so it is not "to convert"
+  // (final review M11) — the same plan convertFixtures writes.
+  const live = new Set(rows.map((r) => r.id));
+  const deletedIds = new Set(allRows.map((r) => r.id).filter((id) => !live.has(id)));
+  const plan = planFixtureConversion(settings.fixtureAssemblies, rows, Date.now(), deletedIds);
   console.log(`\n  rows in subassemblies            ${rows.length}`);
   console.log(`  assemblies to convert            ${plan.inserts.length}`);
   console.log(`  legacy subassemblies to rewrite  ${plan.rewrites.length}`);

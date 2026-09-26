@@ -1,4 +1,4 @@
-import { clearCollection, getDoc, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, getDocRows, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
@@ -186,6 +186,13 @@ export async function list(): Promise<CatalogPart[]> {
 
 export async function get(sku: string): Promise<CatalogPart | null> {
   return getDoc<CatalogPart>("catalog_parts", sku);
+}
+
+/** The live parts among `skus`, read by primary key (the SKU is the document
+ *  id) — batched, never the whole book and never one query per part. Missing
+ *  and deleted SKUs are simply absent. */
+export async function getMany(skus: readonly string[]): Promise<CatalogPart[]> {
+  return (await getDocRows<CatalogPart>("catalog_parts", skus)).filter((r) => !r.deleted).map((r) => r.doc);
 }
 
 /** Rows of a given category (port of window.catalogByCategory). */

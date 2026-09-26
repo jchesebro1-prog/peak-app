@@ -3215,6 +3215,136 @@ async function main() {
     assert(!("needsReview" in stored), "#FXB fix wave 1: needs-review is actually gone from storage");
   }
 
+  /* --- #FXB final review I1: updateFixture carries legacy-only keys from the
+         RAW stored row. A row still in the OLD shape (a preview; production
+         before/while the conversion runs; a row an older build re-saved)
+         normalizes without options/lightEngineName/…, so carrying from the
+         normalized record dropped exactly what main still reads. --- */
+  {
+    const Fx = await import("@/lib/stores/fixtures");
+    const DS = await import("@/db/doc-store");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const raw: Record<string, unknown> & { id: string } = {
+      id: "SA-FXB-RAW",
+      kind: "fixture",
+      label: "Raw legacy",
+      description: "Unconverted",
+      lightEngineSku: "FXB-RAW-E",
+      lightEngineName: "Raw Engine",
+      lightEngineCost: 70,
+      lensSku: "FXB-RAW-L",
+      lensName: "Raw Lens",
+      lensCost: 20,
+      lamp: "LED",
+      position: "Cat 1",
+      options: { data: [{ sku: "FXB-RAW-D", name: "Raw DMX", cost: 4, qty: 2 }], power: [], mounting: [], accessories: [] },
+      cost: 98,
+      price: 98,
+      snapshot: { cost: 98, price: 98, pricedAt: null },
+      createdAt: 1_600_000_000_000,
+      updatedAt: 1_600_000_000_000,
+    };
+    assert(await DS.insertDocIfAbsent("subassemblies", raw), "#FXB final review I1 setup: an UNCONVERTED legacy row inserts");
+    const existing = (await Fx.getFixture("SA-FXB-RAW"))!;
+    assert(existing && !("options" in existing) && existing.lines.data[0]?.sku === "FXB-RAW-D", "#FXB final review I1 setup: it reads back normalized (no legacy keys on the record)");
+    const edited = sanitizeFixtureInput({
+      kind: "fixture",
+      label: "Raw legacy — edited",
+      description: "Unconverted",
+      lightEngineSku: "FXB-RAW-E",
+      lensSku: "FXB-RAW-L",
+      position: "Cat 1",
+      lines: { data: [{ sku: "FXB-RAW-D", qty: 3 }], power: [{ sku: "FXB-RAW-P", qty: 1 }] },
+    });
+    if (!edited.ok) throw new Error(`unreachable: ${edited.error}`);
+    await Fx.updateFixture(existing, edited.value, "Jeff", { cost: 0, price: 0, pricedAt: null }, 1_700_000_300_000);
+    const stored = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FXB-RAW"))!;
+    for (const k of ["options", "lightEngineName", "lightEngineCost", "lensName", "lensCost", "cost", "price"]) {
+      assert.deepEqual(stored[k], raw[k], `#FXB final review I1: saving an unconverted legacy row keeps its old \`${k}\``);
+    }
+    const lines = stored.lines as Record<string, Array<{ sku: string; qty: number }>>;
+    assert(stored.label === "Raw legacy — edited" && lines.data[0]?.qty === 3 && lines.power[0]?.sku === "FXB-RAW-P" && stored.updatedBy === "Jeff" && stored.updatedAt === 1_700_000_300_000, "#FXB final review I1: …and writes the new fields");
+    assert(!("lamp" in stored) && stored.position === "Cat 1", "#FXB final review I1: …a cleared optional (lamp) stays cleared, a kept one stays");
+  }
+
+  /* --- #FXB final review M4: while unconverted (every Vercel preview) the
+         settings-backed fa- records served in memory are first-class: get
+         finds them, a save creates their row under the same id, a delete
+         leaves a soft-deleted row (so neither the list nor a later
+         conversion brings them back). --- */
+  {
+    const Fx = await import("@/lib/stores/fixtures");
+    const Mig = await import("@/lib/fixtures-migrate");
+    const DS = await import("@/db/doc-store");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const { CONVERTED_BY } = await import("@/lib/fixtures-convert");
+    const snap = { cost: 0, price: 0, pricedAt: null };
+    const asm = (id: string, name: string) => ({ id, name, components: [{ sku: `${id}-E`, label: "Engine", role: "fixture", defaultQty: 1 }, { sku: `${id}-C`, label: "Cable", role: "power", defaultQty: 2 }] });
+    await Mig.resetFixturesConversion();
+    await setSettings({ fixtureAssemblies: [asm("fa-mem-1", "Mem one"), asm("fa-mem-2", "Mem two"), asm("fa-mem-3", "Mem three")] });
+    const priorVercelEnv = process.env.VERCEL_ENV;
+    process.env.VERCEL_ENV = "preview";
+    try {
+      const list0 = await Fx.listFixtures();
+      assert(["fa-mem-1", "fa-mem-2", "fa-mem-3"].every((id) => list0.some((f) => f.id === id)), "#FXB final review M4 setup: an unconverted database lists the settings assemblies in memory");
+      assert.equal((await DS.getDocRows("subassemblies", ["fa-mem-1", "fa-mem-2", "fa-mem-3"])).length, 0, "#FXB final review M4 setup: …with no rows behind them");
+
+      const mem1 = await Fx.getFixture("fa-mem-1");
+      assert(mem1 && mem1.label === "Mem one" && mem1.lines.power[0]?.sku === "fa-mem-1-C", "#FXB final review M4: getFixture finds the in-memory fa- record listFixtures serves");
+      const v = sanitizeFixtureInput({ kind: "fixture", label: "Mem one — edited", description: "", lightEngineSku: "fa-mem-1-E", lines: { power: [{ sku: "fa-mem-1-C", qty: 3 }] } });
+      if (!v.ok) throw new Error(`unreachable: ${v.error}`);
+      await Fx.updateFixture(mem1!, v.value, "Jeff", snap, 1_700_000_400_000);
+      const [row1] = await DS.getDocRows<Record<string, unknown> & { id: string }>("subassemblies", ["fa-mem-1"]);
+      assert(row1 && !row1.deleted && row1.doc.label === "Mem one — edited" && (row1.doc.legacy as { from?: string })?.from === "assembly" && row1.doc.createdBy === CONVERTED_BY && row1.doc.createdAt === 1_700_000_400_000 && row1.doc.updatedBy === "Jeff", "#FXB final review M4: saving an in-memory fa- record creates its row under the same id, in the conversion's shape");
+      const list1 = await Fx.listFixtures();
+      assert.equal(list1.filter((f) => f.id === "fa-mem-1").length, 1, "#FXB final review M4: …listed once (the row, not the in-memory copy too)");
+      assert.equal(list1.find((f) => f.id === "fa-mem-1")?.label, "Mem one — edited", "#FXB final review M4: …with the saved edit");
+
+      await Fx.removeFixture("fa-mem-2");
+      const [row2] = await DS.getDocRows("subassemblies", ["fa-mem-2"]);
+      assert(row2 && row2.deleted, "#FXB final review M4: deleting an in-memory fa- record writes a soft-deleted row");
+      assert.equal(await Fx.getFixture("fa-mem-2"), null, "#FXB final review M4: …getFixture no longer finds it");
+      assert(!(await Fx.listFixtures()).some((f) => f.id === "fa-mem-2"), "#FXB final review M4: …and the in-memory list no longer re-shows it");
+
+      const mem3 = (await Fx.getFixture("fa-mem-3"))!;
+      await Fx.removeFixture("fa-mem-3");
+      const v3 = sanitizeFixtureInput({ kind: "fixture", label: "Mem three", description: "", lightEngineSku: "fa-mem-3-E" });
+      if (!v3.ok) throw new Error("unreachable");
+      await assert.rejects(Fx.updateFixture(mem3, v3.value, "Jeff", snap), /deleted/, "#FXB final review M4: a save of an in-memory record deleted meanwhile is refused, not revived");
+      assert((await DS.getDocRows("subassemblies", ["fa-mem-3"]))[0]?.deleted, "#FXB final review M4: …the row stays deleted");
+    } finally {
+      if (priorVercelEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = priorVercelEnv;
+    }
+    const conv = await Mig.convertFixtures();
+    assert(conv.complete, `#FXB final review M4: the conversion then completes (got ${JSON.stringify(conv)})`);
+    assert((await DS.getDocRows("subassemblies", ["fa-mem-2"]))[0]?.deleted, "#FXB final review M4: …and does not re-insert the deleted fa- record");
+    assert.equal((await Fx.getFixture("fa-mem-1"))?.label, "Mem one — edited", "#FXB final review M4: …nor overwrite the saved one");
+    await setSettings({ fixtureAssemblies: [] });
+  }
+
+  /* --- #FXB final review M5: the go-live reset keeps fixtures and systems
+         (configuration, like the settings they used to live in) and the
+         kept fixtures' accessory graph is rebuilt. LAST: it wipes every
+         other doc collection in this harness database. --- */
+  {
+    const Fx = await import("@/lib/stores/fixtures");
+    const Mig = await import("@/lib/fixtures-migrate");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const { clearDemoData } = await import("@/db/seed-data");
+    const { syncAllAssemblyGraphs } = await import("@/lib/part-docs/assembly-sync");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const v = sanitizeFixtureInput({ kind: "fixture", label: "Kept across reset", description: "", lightEngineSku: "FXB-KEEP-E", lensSku: "FXB-KEEP-L" });
+    if (!v.ok) throw new Error("unreachable");
+    const kept = await Fx.createFixture(v.value, "Jeff", { cost: 0, price: 0, pricedAt: null });
+    const flagBefore = await Mig.fixturesConverted();
+    await clearDemoData();
+    assert.equal((await Fx.getFixture(kept.id))?.label, "Kept across reset", "#FXB final review M5: the go-live reset keeps fixtures");
+    assert.equal(await Mig.fixturesConverted(), flagBefore, "#FXB final review M5: …and leaves the conversion flag as it was");
+    await syncAllAssemblyGraphs();
+    assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === `fixture:${kept.id}` && l.accessorySku === "FXB-KEEP-L"), "#FXB final review M5: the reset's graph rebuild restores the kept fixture's accessory links");
+  }
+
   console.log("review regression checks passed");
 }
 

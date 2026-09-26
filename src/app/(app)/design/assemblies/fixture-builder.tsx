@@ -33,6 +33,8 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
   const [filter, setFilter] = useState<Filter>("all");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Final review M10: a rejected delete is shown on the list, not swallowed.
+  const [listError, setListError] = useState<string | null>(null);
 
   // Session-grown parts: the server seed plus every hit a picker has turned
   // up (I1). A fresh seed from the server (after save/delete → router.refresh)
@@ -97,7 +99,13 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
     }
   };
   const remove = async (rec: FixtureRecord) => {
-    await deleteFixtureAction(rec.id);
+    setListError(null);
+    try {
+      await deleteFixtureAction(rec.id);
+    } catch (e) {
+      setListError(`Could not delete ${rec.label}: ${e instanceof Error ? e.message : "try again."}`);
+      return;
+    }
     if (draft?.id === rec.id) { setDraft(null); setDraftOrigin(null); }
     router.refresh();
   };
@@ -151,6 +159,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
           <h2 style={{ fontSize: 17, margin: 0 }}>Assemblies</h2>
           <span style={{ color: "#9aa0ab", fontSize: 12 }}>{shown.length} shown</span>
         </div>
+        {listError && <div role="alert" style={{ margin: "0 0 10px", color: "#a0442b", fontSize: 12 }}>{listError}</div>}
         {shown.length === 0 ? (
           <p style={{ color: "#8c919c", fontSize: 13 }}>No assemblies yet — build the first fixture or system from your catalog.</p>
         ) : (

@@ -145,9 +145,17 @@ export async function seedDemoCollections(): Promise<number> {
  * bookings may contain demo-created records even though they have no seed
  * fixture of their own.
  */
-export const DEMO_COLLECTIONS: CollectionName[] = Object.keys(
+/**
+ * Doc collections that hold configuration, not demo business records, and so
+ * survive the go-live reset like settings do. `subassemblies` holds the
+ * Assembly Builder's fixtures and systems (#FXB) — before the merge those
+ * assemblies lived in settings, which the reset has always kept.
+ */
+export const CONFIG_COLLECTIONS: readonly CollectionName[] = ["subassemblies"];
+
+export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(
   DOC_TABLES
-) as CollectionName[];
+) as CollectionName[]).filter((c) => !CONFIG_COLLECTIONS.includes(c));
 
 /**
  * Go-live reset — the inverse of seedDemoCollections. Hard-deletes every
