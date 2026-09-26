@@ -3,14 +3,15 @@
 import Link from "next/link";
 import type { ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft } from "./types";
-import { optionalToggleQty } from "./fixture-bom";
+import { assemblyComponentTotals, optionalToggleQty } from "./fixture-bom";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, Stat } from "./est-ui";
 
+/** Header totals — delegates to fixture-bom.ts's shared qty/cost/sell math
+ *  (#FXB) rather than keeping a second copy of it here. */
 function totals(assembly: ResolvedFixtureAssembly | undefined, quantities: Record<string, string>) {
-  return (assembly?.components || []).reduce((sum, part) => {
-    const qty = Math.max(0, Number(quantities[part.sku] ?? part.defaultQty) || 0);
-    return { cost: sum.cost + part.cost * qty, sell: sum.sell + part.list * qty };
-  }, { cost: 0, sell: 0 });
+  if (!assembly) return { cost: 0, sell: 0 };
+  const { cost, price } = assemblyComponentTotals(assembly, quantities);
+  return { cost, sell: price };
 }
 
 export default function FixtureModal({

@@ -16395,3 +16395,100 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
   ok(optionalToggleQty(false) === "0", "#FXB Estimator: switching it off returns it to 0");
   ok(fixtureBomLine(after, { ...draft, componentQty: { "B-ENG": "0", "B-CBL": "0" } }) === null, "#FXB Estimator: a line with no sell is refused, as before");
 }
+
+/* --- #FXB Estimator parity (D-FXB-7) — a realistic converted assembly, its
+       components stored in NON-canonical order: a lens, a cable, a lamp, an
+       "other", a missing catalog part carrying a cost override, and a qty-0
+       line with its own override. The new fixtureBomLine's cost/price must
+       be EXACTLY equal to the OLD math — reproduced here directly from the
+       pre-conversion FixtureAssembly (not by calling fixtureBomLine on both
+       sides, which would let a regression inside it cancel out) — while its
+       description and components[] reorder into the builder's form order
+       (light engine, lens, Data, Power, Mounting, Accessories) and every
+       non-head member's role becomes its box role: cable/lamp/other →
+       accessory. Pure. --- */
+{
+  // Deliberately NOT form order: cable, a missing/overridden part, the light
+  // engine, a qty-0/overridden line, the lens, the lamp, then "other".
+  const stored = {
+    id: "fa-batten",
+    name: "Batten Strip",
+    components: [
+      { sku: "T-CBL", label: "Cable", role: "cable" as const, defaultQty: 3 },
+      { sku: "T-GHOST", label: "Ghost", role: "other" as const, defaultQty: 1, costOverride: 42 },
+      { sku: "T-ENG", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+      { sku: "T-OPT", label: "Gel Frame", role: "accessory" as const, defaultQty: 0, costOverride: 6 },
+      { sku: "T-LENS", label: "Lens", role: "lens" as const, defaultQty: 1 },
+      { sku: "T-LAMP", label: "Lamp", role: "lamp" as const, defaultQty: 1 },
+      { sku: "T-OTH", label: "Other", role: "other" as const, defaultQty: 2 },
+    ],
+  };
+  const cat = [
+    { sku: "T-ENG", desc: "Batten engine", unit: "ea", cost: 500, list: 750 },
+    { sku: "T-LENS", desc: "Zoom lens", unit: "ea", cost: 40, list: 60 },
+    { sku: "T-CBL", desc: "Power cable", unit: "ea", cost: 12, list: 18 },
+    { sku: "T-LAMP", desc: "Lamp module", unit: "ea", cost: 25, list: 40 },
+    { sku: "T-OTH", desc: "Misc bit", unit: "ea", cost: 8, list: 14 },
+    { sku: "T-OPT", desc: "Optional gel frame", unit: "ea", cost: 5, list: 9 },
+    // T-GHOST is intentionally absent — a catalog part that no longer exists.
+  ];
+  const draft = { componentQty: {} as Record<string, string>, position: "FOH", circuit: "4" };
+
+  // OLD math — the qty/cost/price formula + assemblyDescription, run
+  // directly over resolveFixtureAssemblies's pre-conversion output, exactly
+  // as estimator-client.tsx's addFixture computed it before Task 5.
+  const before = resolveFixtureAssemblies([stored], cat)[0];
+  const oldQtyOf = (sku: string, fallback: number) => Math.max(0, Number(draft.componentQty[sku] ?? fallback) || 0);
+  const oldComponents = before.components.map((part) => ({
+    sku: part.sku, label: part.label, role: part.role,
+    qty: oldQtyOf(part.sku, part.defaultQty), unit: part.unit, cost: part.cost, price: part.list,
+  }));
+  const oldIncluded = oldComponents.filter((part) => part.qty > 0);
+  const oldCost = oldIncluded.reduce((sum, part) => sum + part.cost * part.qty, 0);
+  const oldPrice = oldIncluded.reduce((sum, part) => sum + part.price * part.qty, 0);
+  const oldPc: string[] = [];
+  if (draft.position.trim()) oldPc.push("Pos " + draft.position.trim());
+  if (draft.circuit.trim()) oldPc.push("Ckt " + draft.circuit.trim());
+  let oldDesc = assemblyDescription({
+    ...before,
+    components: before.components.map((part) => ({ ...part, defaultQty: oldQtyOf(part.sku, part.defaultQty) })),
+  });
+  if (oldPc.length) oldDesc += " (" + oldPc.join(" / ") + ")";
+
+  ok(oldCost === 659 && oldPrice === 932, "#FXB Estimator parity: old math's own totals (sanity)");
+  ok(
+    oldDesc === "Batten Strip — Cable ×3; Ghost; Engine; Lens; Lamp; Other ×2 (Pos FOH / Ckt 4)",
+    "#FXB Estimator parity: old description keeps the stored (non-canonical) order"
+  );
+
+  // NEW math: convert, then run fixture-bom.ts's fixtureBomLine over the
+  // exact same draft.
+  const after = fixtureAssembliesFrom([assemblyToFixture(stored, 5000)], cat)[0];
+  const line = fixtureBomLine(after, draft)!;
+
+  ok(
+    !!line && line.cost === oldCost && line.price === oldPrice,
+    "#FXB Estimator parity: converted totals are EXACTLY equal to the old math's (cost/price unaffected by reordering)"
+  );
+  ok(
+    line.desc === "Batten Strip — Engine; Lens; Cable ×3; Ghost; Lamp; Other ×2 (Pos FOH / Ckt 4)",
+    "#FXB Estimator parity (D-FXB-7): the new description lists parts in form order — light engine, lens, Data, Power, Mounting, Accessories"
+  );
+  ok(
+    JSON.stringify(line.components.map((c) => ({ sku: c.sku, role: c.role, qty: c.qty }))) ===
+      JSON.stringify([
+        { sku: "T-ENG", role: "fixture", qty: 1 },
+        { sku: "T-LENS", role: "lens", qty: 1 },
+        { sku: "T-CBL", role: "accessory", qty: 3 },
+        { sku: "T-GHOST", role: "accessory", qty: 1 },
+        { sku: "T-OPT", role: "accessory", qty: 0 },
+        { sku: "T-LAMP", role: "accessory", qty: 1 },
+        { sku: "T-OTH", role: "accessory", qty: 2 },
+      ]),
+    "#FXB Estimator parity (D-FXB-7): components[] land in form order with box roles — cable/lamp/other → accessory"
+  );
+  ok(
+    line.components.find((c) => c.sku === "T-GHOST")!.cost === 42 && line.components.find((c) => c.sku === "T-OPT")!.cost === 6,
+    "#FXB Estimator parity: the missing part's and the qty-0 line's cost overrides both ride through unchanged"
+  );
+}

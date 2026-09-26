@@ -540,6 +540,10 @@ export default function EstimatorClient({
      cleared by discardDraft, so an abandoned edit can never leak into the next
      plain "+ Vendor quote". */
   const vendorEditRef = useRef<string | null>(null);
+  /* #FXB: the position/circuit values last auto-filled from a fixture's
+     defaults, so switching the assembly can tell "still what we prefilled"
+     apart from "the user typed something" and never clobber the latter. */
+  const fixturePrefillRef = useRef<{ position: string; circuit: string }>({ position: "", circuit: "" });
   /** A stored vendor quote, back into the form's draft shape (#144). */
   const vendorDraftFromRecord = (v: VendorQuote): VendorDraft => {
     /* Line ids are persisted on the record and so outlive the page that minted
@@ -1361,13 +1365,16 @@ export default function EstimatorClient({
       setVendorDraft(rec ? vendorDraftFromRecord(rec) : freshVendor());
     } else if (kind === "fixture") {
       const first = fixtureAssemblies[0];
+      // #FXB: the fixture's default hang position / circuit.
+      const position = first?.position || "";
+      const circuit = first?.circuit || "";
+      fixturePrefillRef.current = { position, circuit };
       setFixtureDraft({
         ...freshFixture(),
         assemblyId: first?.id || "",
         componentQty: Object.fromEntries((first?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
-        // #FXB: the fixture's default hang position / circuit.
-        position: first?.position || "",
-        circuit: first?.circuit || "",
+        position,
+        circuit,
       });
     } else if (kind === "labor") {
       // Resolve travel before seeding the draft (punch #89): the estimate is
@@ -1651,14 +1658,20 @@ export default function EstimatorClient({
     setFixtureDraft((d) => ({ ...d, [field]: val }));
   const setFixtureAssembly = (assemblyId: string) => {
     const assembly = fixtureAssemblies.find((item) => item.id === assemblyId);
+    const nextPosition = assembly?.position || "";
+    const nextCircuit = assembly?.circuit || "";
+    // #FXB: only replace position/circuit when the field still equals what
+    // was last prefilled (i.e. the user never touched it) — never overwrite
+    // a value the user typed.
+    const prefill = fixturePrefillRef.current;
     setFixtureDraft((draft) => ({
       ...draft,
       assemblyId,
       componentQty: Object.fromEntries((assembly?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
-      // #FXB: a fixture's default position / circuit fills an empty field only.
-      position: draft.position || assembly?.position || "",
-      circuit: draft.circuit || assembly?.circuit || "",
+      position: draft.position === prefill.position ? nextPosition : draft.position,
+      circuit: draft.circuit === prefill.circuit ? nextCircuit : draft.circuit,
     }));
+    fixturePrefillRef.current = { position: nextPosition, circuit: nextCircuit };
   };
   const setFixtureComponentQty = (sku: string, value: string) =>
     setFixtureDraft((draft) => ({ ...draft, componentQty: { ...draft.componentQty, [sku]: value } }));
