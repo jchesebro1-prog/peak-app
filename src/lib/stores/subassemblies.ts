@@ -1,57 +1,9 @@
-import { getDoc, insertDocIfAbsent, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
-
-export type FixtureSubassembly = {
-  id: string;
-  kind: "fixture";
-  label: string;
-  description: string;
-  lightEngineSku: string;
-  lightEngineName: string;
-  /** Build-time snapshot (#129). Live values come from resolveSubassembly. */
-  lightEngineCost: number;
-  lensSku: string;
-  lensName: string;
-  /** Build-time snapshot (#129). */
-  lensCost: number;
-  lamp?: string;
-  position?: string;
-  circuit?: string;
-  options: Record<FixtureOptionCategory, FixtureCompatibleOption[]>;
-  /** Build-time snapshot (#129) — kept so older readers and exports still
-   *  see a number; the screen shows the live resolveSubassembly() value. */
-  cost: number;
-  price: number;
-  /** #129 — "was $X when built": the numbers frozen at the last save and the
-   *  newest effective price date among its parts at that moment. */
-  snapshot?: { cost: number; price: number; pricedAt: number | null };
-  createdAt: number;
-  updatedAt: number;
-};
-
-export type FixtureOptionCategory = "data" | "power" | "mounting" | "accessories";
-export type FixtureCompatibleOption = { sku: string; name: string; cost: number; qty: number };
-
-export type Subassembly = FixtureSubassembly;
-
-export async function list(): Promise<Subassembly[]> {
-  return listDocs<Subassembly>("subassemblies");
-}
-
-export async function get(id: string): Promise<Subassembly | null> {
-  return getDoc<Subassembly>("subassemblies", id);
-}
-
-export async function save(subassembly: Subassembly): Promise<Subassembly> {
-  return upsertDoc("subassemblies", subassembly);
-}
-
-export async function create(subassembly: Omit<Subassembly, "id">): Promise<Subassembly> {
-  const base = `SA-${Date.now().toString(36).toUpperCase()}`;
-  const candidate = { ...subassembly, id: base };
-  if (await insertDocIfAbsent("subassemblies", candidate)) return candidate;
-  return save({ ...candidate, id: `${base}-${Math.floor(Math.random() * 1000)}` });
-}
-
-export async function remove(id: string): Promise<void> {
-  await softDeleteDoc("subassemblies", id);
-}
+/**
+ * @deprecated #FXB — fixtures and systems live in src/lib/stores/fixtures.ts
+ * (same `subassemblies` doc table). These names stay as aliases so an older
+ * reader still compiles; the pre-#FXB row shape is `LegacySubassembly` in
+ * src/lib/fixtures-convert.ts.
+ */
+export type { FixtureRecord as FixtureSubassembly, FixtureRecord as Subassembly, FixtureOptionCategory } from "@/lib/fixture-assemblies";
+export type { LegacyOption as FixtureCompatibleOption } from "@/lib/fixtures-convert";
+export { listFixtures as list, getFixture as get, removeFixture as remove } from "./fixtures";

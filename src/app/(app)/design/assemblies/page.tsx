@@ -1,21 +1,21 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
-import { list as listSubassemblies, type FixtureSubassembly } from "@/lib/stores/subassemblies";
-import { pricesAsOf, sanitizeFixtureAssemblies } from "@/lib/fixture-assemblies";
+import { listFixtures } from "@/lib/stores/fixtures";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { fixtureAssemblyPairs, memberCoverageFor, subassemblyPairs } from "@/lib/part-docs/assembly-graph";
-import AssemblyBuilder, { type Hit } from "./assembly-builder";
-import AssembliesTabs from "./tabs";
-import SubassembliesClient from "../subassemblies/subassemblies-client";
+import { fixturePairs, memberCoverageFor } from "@/lib/part-docs/assembly-graph";
+import FixtureBuilder from "./fixture-builder";
+import type { PartHit } from "./fixture-form";
 
 export const metadata = { title: "Assembly Builder — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
-/** #130 — Assemblies and Subassemblies on one screen, switched by ?tab=. Only
- *  the active builder renders (the subassembly picker takes the whole
- *  catalog as props). Both price from the live catalog (#129). */
+/** #FXB — one builder for fixtures and systems (spec
+ *  2026-09-25-fixture-builder-merge-design.md). The #130 `?tab=` switch is
+ *  gone; a stale `?tab=` link lands on the one list. Everything prices from
+ *  the live catalog, loaded once here. */
 export default async function AssemblyBuilderPage({
   searchParams,
 }: {
@@ -23,25 +23,20 @@ export default async function AssemblyBuilderPage({
 }) {
   await requireUser();
   const sp = await searchParams;
-  const tabRaw = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
-  const tab = tabRaw === "subassemblies" ? "subassemblies" : "assemblies";
-  const [settings, parts, saved] = await Promise.all([getSettings(), listCatalog(), listSubassemblies()]);
-  const assemblies = sanitizeFixtureAssemblies(settings.fixtureAssemblies);
-  const priceDates = Object.fromEntries(assemblies.map((a) => [a.id, pricesAsOf(a.components.map((c) => c.sku), parts, settings)]));
-  // Part documents (#207): each member's datasheet coverage, for the active tab only.
+  if (sp.tab !== undefined) redirect("/design/assemblies");
+  const [settings, parts, fixtures] = await Promise.all([getSettings(), listCatalog(), listFixtures()]);
+  // Part documents (#207): each saved line's datasheet coverage.
   const { index } = await loadPartDocsState(parts);
-  const coverage = memberCoverageFor(
-    index,
-    tab === "assemblies" ? assemblies.flatMap(fixtureAssemblyPairs) : (saved as FixtureSubassembly[]).flatMap(subassemblyPairs)
-  );
-  // #121: the component picker filters in the browser (Typeahead) — ship
-  // only the slice it renders (never cost), the Subassemblies page's idiom.
-  const builderParts: Hit[] = parts.map((p) => ({
+  const coverage = memberCoverageFor(index, fixtures.flatMap(fixturePairs));
+  const hits: PartHit[] = parts.map((p) => ({
     sku: p.sku,
     desc: p.desc,
     category: p.category,
     mfr: p.mfr || "",
-    list: p.list,
+    unit: p.unit || "ea",
+    list: Number(p.list) || 0,
+    cost: Number(p.cost) || 0,
+    ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
   }));
 
   return (
@@ -49,14 +44,9 @@ export default async function AssemblyBuilderPage({
       <Link href="/design" style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>← Design</Link>
       <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-.015em", margin: "7px 0 4px" }}>Assembly Builder</h1>
       <p style={{ color: "#8c919c", fontSize: 13, margin: "0 0 16px", maxWidth: 700 }}>
-        Assemblies and fixture subassemblies both price from the live catalog — a price-list import re-prices them at once.
+        Fixtures and systems in one list. Everything prices from the live catalog — a price-list import re-prices them at once.
       </p>
-      <AssembliesTabs active={tab} />
-      {tab === "assemblies" ? (
-        <AssemblyBuilder initial={settings.fixtureAssemblies || []} parts={builderParts} priceDates={priceDates} coverage={coverage} />
-      ) : (
-        <SubassembliesClient parts={parts} initial={saved as FixtureSubassembly[]} priceListEffective={settings.priceListEffective || {}} coverage={coverage} />
-      )}
+      <FixtureBuilder initial={fixtures} parts={hits} priceListEffective={settings.priceListEffective || {}} coverage={coverage} />
     </div>
   );
 }

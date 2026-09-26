@@ -52,8 +52,9 @@ export function designRedirect(
     return "/design/engagements/" + rest + qs(pathname, query);
   }
 
-  // Subassemblies became a tab of the Assembly Builder (#130).
-  if (pathname === "/design/subassemblies") return "/design/assemblies?tab=subassemblies";
+  // Subassemblies became a tab of the Assembly Builder (#130), then merged
+  // into its one list (#FXB).
+  if (pathname === "/design/subassemblies") return "/design/assemblies";
   if (KNOWLEDGE_MOVES[pathname]) return KNOWLEDGE_MOVES[pathname];
 
   if (pathname === "/design-studio") return "/design";

@@ -1770,8 +1770,8 @@ ok(designRedirect("/quotes", {}) === null,
   "unrelated paths are not redirected");
 ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
   "unknown tab values pass through — the destination validates, not the redirect");
-ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies?tab=subassemblies",
-  "#130 /design/subassemblies redirects to the Subassemblies tab of the Assembly Builder");
+ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies",
+  "#130/#FXB /design/subassemblies redirects to the one Assembly Builder list");
 
 /* --- design module nav (D97) --- */
 import { activeKeyFor, NAV, parentGroupOf } from "@/components/nav/nav-data";

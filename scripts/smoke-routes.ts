@@ -112,8 +112,8 @@ const ROUTES = [
   "/design/engagements",
   "/design/fixtures", // #136 redirect stub → /knowledge/fixtures (the harness follows it)
   "/design/assemblies",
-  "/design/assemblies?tab=subassemblies",
-  "/design/subassemblies", // #130 — redirect to the tab above; must stay 3xx
+  "/design/assemblies?tab=subassemblies", // #FXB — the retired tab link redirects to the one list
+  "/design/subassemblies", // #130/#FXB — redirect to /design/assemblies; must stay 3xx
   "/design/motors",
   "/design/quick",
   "/design/steel", // #136 redirect stub → /knowledge/steel
