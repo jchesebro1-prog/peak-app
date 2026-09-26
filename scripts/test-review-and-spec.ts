@@ -18958,6 +18958,13 @@ async function specDocumentsAsyncChecks(): Promise<void> {
   const row = t.part2.rows.find((r) => r.sku === "Shure:ANX4");
   ok(!!row && row.mfr === "Shure" && row.model === "ANX4" && row.qty === 3 && t.part2.showQty, "#205 spec builder: table rows fall back to the SKU prefix/tail for Mfr/Model");
   ok(t.part2.articles.every((x) => x.products.length === 0), "#205 spec builder: table style prints General clauses only above the table");
+  const t0 = assembleSection({ section: tableSec, articles, sections: [tableSec, otherSec], parts, doc: { ...doc, products: doc.products.map((p) => (p.sku === "HST" ? { ...p, qty: 0 } : p)) } });
+  if (t0.part2.style !== "table") throw new Error("expected table");
+  ok(t0.part2.rows.find((r) => r.sku === "HST")?.qty === undefined, "#205 spec builder: table rows carry no qty when qty is 0, same rule as paragraphs");
+  const tScratch = assembleSection({ section: tableSec, articles, sections: [tableSec, otherSec], parts, doc: { ...doc, source: { kind: "scratch" } } });
+  if (tScratch.part2.style !== "table") throw new Error("expected table");
+  ok(tScratch.part2.rows.every((r) => r.qty === undefined), "#205 spec builder: table rows carry no qty when quantities aren't printed (scratch source)");
+  ok(applyFillIns("x [FILL IN: a] y", "q", { "q#1": "line one\nline two" }) === "x line one line two y", "#205 spec builder: applyFillIns collapses an answer's internal whitespace before substituting");
   const empty = assembleSection({ section: sec, articles, sections: [sec], parts, doc: { ...doc, products: [] } });
   ok(!empty.warnings.some((w) => w.includes("{{articles}}")), "#205 spec builder: an empty spec does not warn about {{articles}}");
   ok(outlineLabel(0, 3) === "C." && outlineLabel(2, 1) === "a.", "#205 spec builder: outlineLabel is exported");

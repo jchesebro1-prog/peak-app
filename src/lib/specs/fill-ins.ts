@@ -32,7 +32,7 @@ export function applyFillIns(body: string, articleId: string, answers: Record<st
   let n = 0;
   return String(body || "").replace(FILL_IN_RE, (whole) => {
     n++;
-    const v = (answers[`${articleId}#${n}`] || "").trim();
+    const v = (answers[`${articleId}#${n}`] || "").replace(/\s+/g, " ").trim();
     return v || whole;
   });
 }

@@ -180,7 +180,7 @@ export function assembleSection(input: {
       mfr: c.part.mfr || prefix(c.part.sku) || "",
       model: c.part.manufacturerModelNumber || c.part.manufacturerPartNumber || tail(c.part.sku) || c.part.sku,
       description: c.tp.specTitle || c.part.desc || "",
-      ...(c.p.qty != null ? { qty: c.p.qty } : {}),
+      ...(showQty && (c.p.qty || 0) > 0 ? { qty: c.p.qty } : {}),
     }));
     part2 = { style: "table", articles: articlesOut, rows, showQty };
   } else {
