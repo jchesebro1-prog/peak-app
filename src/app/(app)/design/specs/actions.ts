@@ -9,6 +9,14 @@ import * as Curtains from "@/lib/stores/spec-curtain-templates";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { adoptAllLegacySpecPointers } from "@/lib/specs/legacy-pointers";
 import { importLibrary, parseLibraryFile } from "@/lib/specs/library-io";
+import { applyProductSpecPlan, readSpecSheets } from "@/lib/specs/product-spec-io";
+import {
+  planProductSpecImport,
+  readProductSpecRows,
+  type PlanRow,
+  type ProductSpecCounts,
+  type ProductSpecPlan,
+} from "@/lib/specs/product-spec-import";
 import type { SpecArticle, SpecPart2Style, SpecQuantities } from "@/lib/specs/sections";
 import type { SpecCurtainTemplate } from "@/lib/stores/spec-curtain-templates";
 import { GRID_CURTAIN_TYPES, type GridCurtainType } from "@/lib/design/grid-bom";
@@ -292,5 +300,80 @@ export async function importLibraryAction(text: string): Promise<
   } catch (e) {
     console.error("importLibraryAction", e);
     return { ok: false, error: "Could not import the library. Nothing was changed after the last record it reported." };
+  }
+}
+
+/* ---------------- Product spec import (#205) ---------------- */
+
+/** Same ceiling as the library import: the file rides a Server Action
+ *  capped at 1200kb in next.config.ts, so our message always wins. */
+const MAX_PRODUCT_SPEC_BYTES = 900_000;
+
+/** Parse the uploaded file and plan it against the live catalog and
+ *  articles. Preview and import both come through here, so the import
+ *  re-plans from the file itself and never trusts a plan from the client. */
+async function planProductSpecsFromForm(
+  fd: FormData
+): Promise<{ ok: true; plan: ProductSpecPlan; sheets: string[] } | { ok: false; error: string }> {
+  const file = fd.get("file");
+  if (!file || typeof file === "string") return { ok: false, error: "Choose a file first." };
+  const name = String(file.name || "").toLowerCase();
+  if (!name.endsWith(".xlsx") && !name.endsWith(".csv")) {
+    return { ok: false, error: "Choose an .xlsx or .csv file." };
+  }
+  if (file.size > MAX_PRODUCT_SPEC_BYTES) {
+    return { ok: false, error: "That file is too large — the product spec import limit is 900 KB." };
+  }
+  const read = await readSpecSheets(await file.arrayBuffer(), file.name);
+  if (!read.ok) return read;
+  const { rows, sheetsRead, error } = readProductSpecRows(read.sheets);
+  if (error) return { ok: false, error };
+  const [parts, articles] = await Promise.all([listCatalog(), Articles.allArticles()]);
+  const plan = planProductSpecImport({
+    rows,
+    parts,
+    articles,
+    replaceExisting: fd.get("replaceExisting") === "1",
+  });
+  return { ok: true, plan, sheets: sheetsRead };
+}
+
+export async function previewProductSpecsAction(
+  fd: FormData
+): Promise<Result<{ rows: PlanRow[]; counts: ProductSpecCounts; sheets: string[] }>> {
+  await requirePerm("create");
+  try {
+    const res = await planProductSpecsFromForm(fd);
+    if (!res.ok) return res;
+    // The rows carry no spec text and at most five candidate SKUs per
+    // ambiguous token — the patches stay on the server.
+    return { ok: true, rows: res.plan.rows, counts: res.plan.counts, sheets: res.sheets };
+  } catch (e) {
+    console.error("previewProductSpecsAction", e);
+    return { ok: false, error: "Could not read that file. Try again." };
+  }
+}
+
+export async function importProductSpecsAction(
+  fd: FormData
+): Promise<Result<{ written: number; sameAs: number; failed: number; firstError?: string }>> {
+  const user = await requirePerm("create");
+  try {
+    const res = await planProductSpecsFromForm(fd);
+    if (!res.ok) return res;
+    const applied = await applyProductSpecPlan(res.plan, user.name);
+    revalidatePath("/catalog");
+    revalidatePath("/design/specs/library");
+    const first = applied.errors[0];
+    return {
+      ok: true,
+      written: applied.written,
+      sameAs: applied.sameAs,
+      failed: applied.errors.length,
+      ...(first ? { firstError: `${first.sku}: ${first.error}` } : {}),
+    };
+  } catch (e) {
+    console.error("importProductSpecsAction", e);
+    return { ok: false, error: "Could not import the product specs. Parts written before the failure keep their text." };
   }
 }

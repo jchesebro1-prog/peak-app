@@ -27,8 +27,9 @@ function csvCell(v: string): string {
   return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
 
-/** One cell → its text. Dates go ISO; formulas use their cached result. */
-function cellText(value: ExcelJS.CellValue): string {
+/** One cell → its text. Dates go ISO; formulas use their cached result.
+ *  Exported for the product spec import (#205), which reads every sheet. */
+export function cellText(value: ExcelJS.CellValue): string {
   if (value == null) return "";
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   if (typeof value === "object") {

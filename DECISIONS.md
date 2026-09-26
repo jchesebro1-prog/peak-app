@@ -6285,3 +6285,33 @@ SYSTEM DESCRIPTION rewritten as one clause per subsystem with the North HS speci
 placeholder, so it prints as written and cannot vanish silently; Phase B's finalize check should refuse a package
 that still contains `[FILL IN`. The library preview shows `{{articles}}` as "had no values" — it only resolves
 inside a generated spec.
+
+## D328. Product specs load by MFR #, onto matched parts only — never a catalog-wide spec pass (#205, 2026-09-26)
+
+Only parts a spec actually describes need spec text, so product language enters the catalog from the
+product-specs template (`product-specs-template.xlsx`, one row per product entry with a stable Spec ID and Article
+ID) after Jeff fills in the MFR #(s) each spec applies to. **Specs → Library → Import product specs**
+(`/design/specs/library/product-specs`) reads every sheet with a Spec ID + MFR # column (.xlsx or .csv, 900 KB),
+previews, and on confirm writes — re-planning from the file on the server, never trusting a client plan. The rules
+are pure in `src/lib/specs/product-spec-import.ts`; reading and writing in `src/lib/specs/product-spec-io.ts`.
+- **Matching:** each MFR # (a cell may list several, split on commas/semicolons/new lines) is looked up against
+  the SKU, the SKU after its `Mfr:` prefix, `manufacturerPartNumber` and `manufacturerModelNumber` — exact first
+  (case/space-insensitive), then loose (letters and digits only, flagged "Loose match"). Several hits narrow by the
+  row's Manufacturer; still several is "ambiguous" (candidates listed), none is "not found", and a part already
+  matched by an earlier row is "claimed" (first row wins). A single match whose maker differs from the row's is
+  written but warned.
+- **It never creates a part.** The regular catalog import keys on exact SKU and creates on a miss, so a mistyped
+  MFR # there would mint junk parts; this path only writes to parts that exist.
+- **What is written:** the first matched part holds the text (`specArticleId`, the article's `specSectionId`,
+  `specTitle`, `specBody`, a cleared `specSameAs`); every other part in the cell is `specSameAs` the holder (no
+  body). All are `authored` — filling the template is the review step, as saving in the Spec panel is — with
+  `specSource: "product-specs:<Spec ID>"`, which makes a re-import of a corrected file overwrite its own earlier
+  writes. Text from anywhere else (printable, or a same-as pointer) is skipped unless **Replace spec text a part
+  already has** is ticked; a draft body is replaced freely; identical writes report "unchanged". A same-as never
+  points at a part without its own text (the holder is promoted past a protected same-as part, and a failed holder
+  write skips its same-as parts).
+- **AV equipment list rows** have no Spec Text: their Description is both title and body — 27 41 00 prints Part 2 as
+  an equipment table.
+- **Known limit:** a part outside the file that already points "same as" at a part this import turns into a same-as
+  becomes a two-hop chain, which reads as "missing" in coverage (D94's one-hop rule) rather than printing wrong
+  text. Fix by pointing it at the holder in the Spec panel.

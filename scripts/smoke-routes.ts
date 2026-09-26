@@ -98,6 +98,7 @@ const ROUTES = [
   "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
   "/design/specs/library", // Specs module (#205) — the library index
   "/design/specs/templates", // Specs module (#205) — the template list
+  "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
   "/inbox",
   "/inbox?view=unmatched",
   "/queue",

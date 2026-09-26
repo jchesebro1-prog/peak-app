@@ -18653,3 +18653,183 @@ import {
   const lp = read("src/app/(app)/design/engagements/letter/page.tsx");
   ok(lp.includes("serverDesignPrices(quick)") && lp.includes("getDesigns(eng.designIds)") && !lp.includes("getAllDesigns"), "#211 wave 3 minor: the engagement letter re-derives a Quick design's completeness from the server price");
 }
+
+// #205 product spec import — the filled product-specs template back into the
+// catalog: header detection, MFR # matching, holder / same-as roles, what is
+// skipped and what is written. Pure rules over hand-built parts and articles;
+// the actions and the client component are checked as source text.
+import {
+  splitMfrTokens as ps205Split, readProductSpecRows as ps205Read, planProductSpecImport as ps205Plan,
+  matchToken as ps205Match, indexParts as ps205Index, cleanSpecText as ps205Clean,
+  PRODUCT_SPEC_SOURCE_PREFIX as ps205Prefix,
+  type ProductSpecPartLike as Ps205Part, type ProductSpecRow as Ps205Row, type PlanRow as Ps205PlanRow,
+} from "@/lib/specs/product-spec-import";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const articles = [{ id: "ar-1", sectionId: "ss-1" }, { id: "ar-2", sectionId: "ss-2" }];
+  const row = (o: Partial<Ps205Row>): Ps205Row => ({
+    sheet: "Product specs", line: 2, specId: "PS-1", mfr: "", manufacturer: "", title: "Fixture", text: "Body:\n  Line", articleId: "ar-1", ...o,
+  });
+  const plan = (rows: Ps205Row[], parts: Ps205Part[], replaceExisting = false) =>
+    ps205Plan({ rows, parts, articles, replaceExisting });
+  const tok = (r: Ps205PlanRow, i = 0) => r.tokens[i];
+
+  // Tokens.
+  ok(JSON.stringify(ps205Split(" A1, b2;\nA1 ;; B2\r\nC3 ")) === JSON.stringify(["A1", "b2", "C3"]), "#205 product specs: MFR # splits on , ; and newlines, trims, drops empties, de-dupes case-insensitively in order");
+  ok(ps205Split("  ").length === 0, "#205 product specs: a blank MFR # has no tokens");
+
+  // Header detection: two qualifying sheets, the Instructions sheet skipped.
+  const sheets = [
+    { name: "Instructions", rows: [["Product specs — MFR # matching template"], ["Fill the MFR # column."]] },
+    {
+      name: "Product specs",
+      rows: [
+        ["Spec ID", "Section", "Spec Title", "Manufacturer", "MFR #", "Spec Text", "Article ID"],
+        ["PS-1", "11 61 13", "Towers", "StageRight", "", "Towers:\n  Self-supporting.  \n\n", "ar-1"],
+        [],
+        ["PS-2", "11 61 13", "", "ETC", "7460A1011", "", "ar-1"],
+      ],
+    },
+    {
+      name: "AV equipment list",
+      rows: [
+        ["spec id", "Manufacturer", "Model (from spec)", "mfr#", "Description", "ARTICLE-ID"],
+        ["PS-AV1", "1Sound", "1SCT212", "1SCT212-B", "Full-range loudspeaker", "ar-2"],
+      ],
+    },
+  ];
+  const parsed = ps205Read(sheets);
+  ok(JSON.stringify(parsed.sheetsRead) === JSON.stringify(["Product specs", "AV equipment list"]) && !parsed.error, "#205 product specs: every sheet with Spec ID + MFR # is read; the Instructions sheet is skipped");
+  ok(parsed.rows.length === 3 && parsed.rows[1].line === 4 && parsed.rows[2].line === 2, "#205 product specs: empty rows are dropped and line numbers follow the sheet");
+  ok(parsed.rows[0].text === "Towers:\n  Self-supporting.", "#205 product specs: Spec Text keeps its leading spaces, loses trailing whitespace and blank end lines");
+  ok(parsed.rows[1].title === "" && parsed.rows[1].text === "", "#205 product specs: a row with no Spec Title/Text/Description reads as empty");
+  const av = parsed.rows[2];
+  ok(av.title === "Full-range loudspeaker" && av.text === "Full-range loudspeaker" && av.articleId === "ar-2" && av.manufacturer === "1Sound", "#205 product specs: with no Spec Title/Text columns, Description is both title and text; headers match case/punctuation-insensitively");
+  ok(!!ps205Read([sheets[0]]).error, "#205 product specs: a file with no qualifying sheet is refused");
+  ok(ps205Clean("\n\n  a  \n    b\t\n\n") === "  a\n    b", "#205 product specs: cleanSpecText trims only line ends and blank edge lines");
+
+  // Matching.
+  const parts: Ps205Part[] = [
+    { sku: "ETC:7460A1011", desc: "Source Four LED", mfr: "ETC" },
+    { sku: "PK-100", desc: "By MPN", mfr: "Chauvet", manufacturerPartNumber: "COLORADO-1" },
+    { sku: "PK-200", desc: "By model", mfr: "Martin", manufacturerModelNumber: "MAC Aura XB" },
+    { sku: "ETC:DUP-1", desc: "ETC dup", mfr: "ETC" },
+    { sku: "ALTMAN:DUP-1", desc: "Altman dup", mfr: "Altman Lighting" },
+    { sku: "X:DUP-2", desc: "a", mfr: "Acme" },
+    { sku: "Y:DUP-2", desc: "b", mfr: "Acme" },
+  ];
+  const idx = ps205Index(parts);
+  const m1 = ps205Match("ETC:7460A1011", "", idx);
+  const m2 = ps205Match("7460a1011", "", idx);
+  const m3 = ps205Match("colorado-1", "", idx);
+  const m4 = ps205Match(" mac  aura xb ", "", idx);
+  ok(m1.status === "matched" && m1.sku === "ETC:7460A1011" && !m1.loose, "#205 product specs: exact match by SKU");
+  ok(m2.status === "matched" && m2.sku === "ETC:7460A1011" && !m2.loose, "#205 product specs: exact match by the SKU's part after ':' (case-insensitive)");
+  ok(m3.status === "matched" && m3.sku === "PK-100" && !m3.loose, "#205 product specs: exact match by manufacturer part number");
+  ok(m4.status === "matched" && m4.sku === "PK-200" && !m4.loose, "#205 product specs: exact match by model number, whitespace collapsed");
+  const m5 = ps205Match("7460-A1011", "", idx);
+  ok(m5.status === "matched" && m5.sku === "ETC:7460A1011" && m5.loose, "#205 product specs: a loose (alphanumerics-only) match is flagged loose");
+  const m6 = ps205Match("DUP-1", "", idx);
+  ok(m6.status === "ambiguous" && m6.total === 2 && m6.candidates.join() === "ALTMAN:DUP-1,ETC:DUP-1", "#205 product specs: two parts under one MFR # with no manufacturer is ambiguous, candidates listed");
+  const m7 = ps205Match("DUP-1", "Altman", idx);
+  ok(m7.status === "matched" && m7.sku === "ALTMAN:DUP-1" && !m7.mfrWarning, "#205 product specs: the row's manufacturer narrows an ambiguous MFR # to one part");
+  const m8 = ps205Match("DUP-2", "Zeta", idx);
+  ok(m8.status === "ambiguous" && m8.total === 2, "#205 product specs: narrowing that leaves nothing stays ambiguous with the un-narrowed candidates");
+  const m9 = ps205Match("COLORADO-1", "Martin", idx);
+  ok(m9.status === "matched" && !!m9.mfrWarning && m9.mfrWarning.includes("Chauvet"), "#205 product specs: one match whose manufacturer clearly differs still matches, with a warning");
+  ok(ps205Match("NOPE-9", "", idx).status === "not-found", "#205 product specs: an MFR # nothing carries is not found");
+
+  // Roles, patches and counts.
+  const p1 = plan([row({ specId: "PS-1", mfr: "7460A1011, COLORADO-1, NOPE-9" })], parts);
+  const r1 = p1.rows[0];
+  const hold = tok(r1, 0);
+  const same = tok(r1, 1);
+  ok(r1.status === "ready" && r1.holderSku === "ETC:7460A1011", "#205 product specs: the first matched part holds the text");
+  ok(hold.status === "matched" && hold.role === "holder" && hold.action === "write" && same.status === "matched" && same.role === "same-as" && same.action === "write", "#205 product specs: the rest of the row's matches become same-as");
+  ok(tok(r1, 2).status === "not-found" && p1.counts.notFound === 1 && p1.counts.readyRows === 1, "#205 product specs: a not-found token is reported beside the matches");
+  const wHold = p1.writes.find((w) => w.role === "holder")!;
+  const wSame = p1.writes.find((w) => w.role === "same-as")!;
+  ok("specSameAs" in wHold.patch && wHold.patch.specSameAs === undefined && wHold.patch.specBody === "Body:\n  Line", "#205 product specs: the holder patch carries the body and an explicit specSameAs: undefined (clears a stale pointer)");
+  ok(!("specBody" in wSame.patch) && wSame.patch.specSameAs === "ETC:7460A1011", "#205 product specs: the same-as patch omits specBody and points at the holder");
+  ok(wHold.patch.specArticleId === "ar-1" && wHold.patch.specSectionId === "ss-1" && wHold.patch.specState === "authored" && wHold.patch.specSource === ps205Prefix + "PS-1" && wHold.patch.specTitle === "Fixture", "#205 product specs: article + section mirror, authored, source product-specs:<Spec ID>");
+  ok(p1.counts.partsToWrite === 2 && p1.counts.sameAsLinks === 1, "#205 product specs: counts — two parts to write, one same-as link");
+
+  // Claimed by an earlier row.
+  const p2 = plan([row({ specId: "PS-1", mfr: "7460A1011" }), row({ specId: "PS-2", mfr: "ETC:7460A1011", line: 3 })], parts);
+  const c2 = tok(p2.rows[1]);
+  ok(c2.status === "claimed" && c2.bySpecId === "PS-1" && p2.rows[1].status === "unmatched" && p2.counts.claimed === 1 && p2.writes.length === 1, "#205 product specs: a part matched by an earlier row is claimed — first row wins");
+
+  // Existing text.
+  const authoredElsewhere: Ps205Part = { sku: "ETC:7460A1011", desc: "", mfr: "ETC", specBody: "Hand-written.", specState: "authored", specSource: "authored" };
+  const p3 = plan([row({ mfr: "7460A1011" })], [authoredElsewhere]);
+  ok(tok(p3.rows[0]).status === "matched" && (tok(p3.rows[0]) as { action: string }).action === "skip-existing" && p3.writes.length === 0 && p3.counts.skippedExisting === 1, "#205 product specs: a part with printable text from elsewhere is skipped by default");
+  const p3b = plan([row({ mfr: "7460A1011" })], [authoredElsewhere], true);
+  ok(p3b.writes.length === 1 && p3b.counts.skippedExisting === 0, "#205 product specs: Replace existing overwrites it");
+  const pointerElsewhere: Ps205Part = { sku: "ETC:7460A1011", specSameAs: "OTHER-1", specSource: "authored" };
+  ok(plan([row({ mfr: "7460A1011" })], [pointerElsewhere]).writes.length === 0, "#205 product specs: a same-as pointer from elsewhere is also protected");
+  const ownSource: Ps205Part = { sku: "ETC:7460A1011", specBody: "Old import.", specState: "authored", specSource: ps205Prefix + "PS-9" };
+  ok(plan([row({ mfr: "7460A1011" })], [ownSource]).writes.length === 1, "#205 product specs: text from an earlier product-specs import is overwritten without the checkbox");
+  const draft: Ps205Part = { sku: "ETC:7460A1011", specBody: "Draft.", specState: "draft", specSource: "skill:2026-09-01" };
+  ok(plan([row({ mfr: "7460A1011" })], [draft]).writes.length === 1, "#205 product specs: a draft (unprintable) body is replaced freely");
+
+  // Unchanged: re-importing the same file writes nothing.
+  const stored: Ps205Part = {
+    sku: "ETC:7460A1011", specArticleId: "ar-1", specSectionId: "ss-1", specTitle: "Fixture", specBody: "Body:\n  Line",
+    specState: "authored", specSource: ps205Prefix + "PS-1",
+  };
+  const p4 = plan([row({ mfr: "7460A1011" })], [stored]);
+  ok(p4.writes.length === 0 && p4.counts.unchanged === 1 && (tok(p4.rows[0]) as { action: string }).action === "unchanged", "#205 product specs: a part already holding exactly this spec is unchanged, not written");
+  ok(plan([row({ mfr: "7460A1011", title: "New title" })], [stored]).writes.length === 1, "#205 product specs: any field that differs makes it a write");
+
+  // Holder promotion.
+  const pointerFirst: Ps205Part[] = [{ sku: "A:1", specSameAs: "Z:9", specSource: "authored" }, { sku: "B:2" }, { sku: "C:3" }];
+  const p5 = plan([row({ mfr: "A:1, B:2, C:3" })], pointerFirst);
+  const r5 = p5.rows[0];
+  ok(r5.holderSku === "B:2" && (tok(r5, 0) as { action: string }).action === "skip-existing" && (tok(r5, 1) as { role?: string }).role === "holder", "#205 product specs: a protected first match without its own text is passed over — the next writable match holds the text");
+  ok(p5.writes.find((w) => w.sku === "C:3")?.patch.specSameAs === "B:2" && !p5.writes.some((w) => w.sku === "A:1"), "#205 product specs: the others point at the promoted holder; the protected part is untouched");
+  const printableFirst: Ps205Part[] = [{ sku: "A:1", specBody: "Own text.", specState: "authored", specSource: "authored" }, { sku: "B:2" }];
+  const p6 = plan([row({ mfr: "A:1, B:2" })], printableFirst);
+  ok(p6.rows[0].holderSku === "A:1" && p6.writes.length === 1 && p6.writes[0].sku === "B:2" && p6.writes[0].patch.specSameAs === "A:1", "#205 product specs: a protected first match WITH printable text stays holder; the rest point at it");
+  const allProtected: Ps205Part[] = [{ sku: "A:1", specSameAs: "Z:9", specSource: "authored" }];
+  const p7 = plan([row({ mfr: "A:1" })], allProtected);
+  ok(!p7.rows[0].holderSku && p7.writes.length === 0 && (tok(p7.rows[0]) as { role?: string }).role === undefined, "#205 product specs: with no part able to hold the text, nothing is written");
+
+  // Row errors and blanks.
+  const p8 = plan(
+    [
+      row({ specId: "PS-1", mfr: "7460A1011", articleId: "ar-gone" }),
+      row({ specId: "PS-2", mfr: "COLORADO-1", articleId: "" }),
+      row({ specId: "PS-3", mfr: "MAC Aura XB" }),
+      row({ specId: "ps-3", mfr: "DUP-1", manufacturer: "ETC" }),
+      row({ specId: "", mfr: "X:DUP-2" }),
+      row({ specId: "PS-5", mfr: "Y:DUP-2", title: "", text: "" }),
+      row({ specId: "PS-6", mfr: "" }),
+      row({ specId: "PS-6", mfr: "ETC:DUP-1" }),
+    ],
+    parts
+  );
+  const st = p8.rows.map((r) => r.status).join();
+  ok(st === "error,error,ready,error,error,error,blank,ready", `#205 product specs: row statuses (${st})`);
+  ok(p8.rows[0].error!.includes("Import the spec library first") && p8.rows[0].error!.includes("ar-gone"), "#205 product specs: an Article ID not in the library is an error naming it");
+  ok(p8.rows[3].error!.includes("appears earlier"), "#205 product specs: a repeated Spec ID (the later row) is an error");
+  ok(p8.rows[4].error!.includes("no Spec ID") && p8.rows[5].error!.includes("no Spec Text"), "#205 product specs: missing Spec ID and missing text+title are errors");
+  ok(p8.counts.blankRows === 1 && p8.counts.errorRows === 5 && p8.rows[6].tokens.length === 0, "#205 product specs: a blank MFR # row is skipped silently and counted");
+  ok(p8.rows[7].status === "ready", "#205 product specs: a blank row never makes a later filled row with its Spec ID a duplicate");
+
+  // Source text: permissions, server-side re-plan, client imports.
+  const acts = read("src/app/(app)/design/specs/actions.ts");
+  const fnBody = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
+  const prev = fnBody("previewProductSpecsAction");
+  const imp = fnBody("importProductSpecsAction");
+  ok(prev.includes('requirePerm("create")') && imp.includes('requirePerm("create")'), "#205 product specs: both actions require the create permission");
+  ok(imp.includes("planProductSpecsFromForm(fd)") && imp.includes("applyProductSpecPlan(res.plan") && !/fd\.get\("plan"\)/.test(acts), "#205 product specs: the import re-plans from the uploaded file on the server");
+  ok(!prev.includes("applyProductSpecPlan"), "#205 product specs: preview writes nothing");
+  const io = read("src/lib/specs/product-spec-io.ts");
+  ok(io.includes("mergeUpsert(") && !/\bupsert\(/.test(io.replace(/mergeUpsert\(/g, "")), "#205 product specs: parts are written through mergeUpsert, never upsert");
+  const client = read("src/app/(app)/design/specs/library/product-specs/product-specs-client.tsx");
+  const clientImports = [...client.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(client.startsWith('"use client"') && clientImports.length > 0 && clientImports.every((s) => !s.startsWith("@/lib/stores/") && s !== "exceljs" && !s.startsWith("@/db") && !s.includes("product-spec-io")), "#205 product specs: the client component imports no store, no exceljs, no db");
+  const pureImports = [...read("src/lib/specs/product-spec-import.ts").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(JSON.stringify(pureImports) === JSON.stringify(["@/lib/specs/articles"]), "#205 product specs: the rules module stays pure — its only import is the spec articles rules");
+  ok(read("src/app/(app)/design/specs/library/page.tsx").includes('href="/design/specs/library/product-specs"'), "#205 product specs: the library page links to the import");
+}

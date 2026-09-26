@@ -8250,8 +8250,12 @@ spec gets entered — see the build spec), docx-per-section output, zip output, 
 rendering `{{articles}}`/`{{manufacturers}}` and the category articles, which today's D94 generator does not read.
 Phase C: the `spec-writer` skill. **North HS seed DONE 2026-09-26 (D326, D327):** six sections' Part 1/Part 3 and 30
 Part 2 category headers in `docs/specs-seed/northhs-2026-07-30/spec-library.json` (loaded in dev; production is one
-Import library click), review list in its `REVIEW-NOTES.md`. Next from the seed: the Part 2 product text as
-catalog part specs (`catalog-spec.csv`), and the drapes article's curtain blocks as curtain templates. Also open from this branch: **#204** (a
+Import library click), review list in its `REVIEW-NOTES.md`. **Product specs by MFR # DONE 2026-09-26 (D328):**
+the same script writes `product-specs-template.xlsx` (45 product entries + the de-duplicated 27 41 00 AV list,
+MFR # pre-filled there); Jeff fills the MFR # column and loads it at Specs → Library → **Import product specs**
+(preview → import, matched parts only, never creates a part). Remaining from the seed: Jeff's fill of the
+template, then the production import (library first, then product specs); the drapes article's curtain blocks as
+curtain templates. Also open from this branch: **#204** (a
 price-only Import-hub catalog import resets MAP to $0 — found while amending this plan, unrelated to spec fields,
 fix already scoped) and any Minor a reviewer carried during the branch (see the per-task reports in
 `.superpowers/sdd/task-*-report.md`).

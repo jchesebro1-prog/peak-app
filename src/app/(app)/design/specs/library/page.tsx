@@ -152,6 +152,9 @@ export default async function SpecLibraryPage({
             Templates
             <span style={{ marginLeft: 6, fontFamily: "var(--font-mono)", color: "#9aa0ab" }}>{templates.length}</span>
           </Link>
+          <Link href="/design/specs/library/product-specs" className="pk-btn-outline" style={{ textDecoration: "none" }}>
+            Import product specs
+          </Link>
           <a href="#import-export" className="pk-btn-outline" style={{ textDecoration: "none" }}>
             Import / Export
           </a>

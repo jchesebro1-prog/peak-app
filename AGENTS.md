@@ -236,7 +236,9 @@ See `.env.example`.
     output, a print view) and the `spec-writer` skill remain. The North HS
     seed shipped Sep 26 (D326–D327): six sections' Part 1/3 + Part 2
     category headers, job text as fill-ins, `scripts/specs-seed-northhs.py`
-    → `docs/specs-seed/northhs-2026-07-30/`. Decisions D254–D261; punch #205.
+    → `docs/specs-seed/northhs-2026-07-30/`; its product-specs template loads
+    back by MFR # at `/design/specs/library/product-specs` (D328, matched
+    parts only). Decisions D254–D261; punch #205.
 14. ✅ **Part documents** (#207, D270–D280) — datasheets and spec sheets are
     shared `part_documents` records linked to many parts through
     `part_document_links`, with accessory coverage computed in context from
