@@ -20,11 +20,11 @@ import {
   type CommThread,
 } from "@/lib/stores/comms";
 import { activeUsers } from "@/lib/users";
-import { domainOf, gmailEnabled, personalKey } from "@/lib/gmail/config";
+import { domainOf, gmailEnabled, personalKey, shouldStampCcFetched } from "@/lib/gmail/config";
 import { getConnectionInfo } from "@/lib/gmail/connections";
 import { customersForDomain } from "@/lib/gmail/domains";
 import { linkThread } from "@/lib/gmail/linking";
-import { allCompanies, getCompanies } from "@/lib/identity/companies";
+import { allCompanies, getCompany, getCompanies } from "@/lib/identity/companies";
 import {
   allContacts,
   displayName,
@@ -72,10 +72,15 @@ async function ownAddresses(t: CommThread, me: SessionUser): Promise<string[]> {
   return out.filter(Boolean);
 }
 
-function senderOf(m: CommMessage, t: CommThread): Participant | null {
+/** `own` (defaults to none — fillContactBlanksAction's use is unaffected)
+ *  drops a From address that is actually one of ours: an inbound message
+ *  can be "in" direction while its From is a teammate/our own mailbox (a
+ *  self-cc, an internal forward recorded as inbound, …), and that must
+ *  never read as an unknown sender worth an "Add as contact" prefill. */
+function senderOf(m: CommMessage, t: CommThread, own: readonly string[] = []): Participant | null {
   if (m.direction !== "in") return null;
   return (
-    participantsOf(m, [], { name: t.contactName, email: t.contactEmail }).find((p) => p.role === "from") ||
+    participantsOf(m, own, { name: t.contactName, email: t.contactEmail }).find((p) => p.role === "from") ||
     null
   );
 }
@@ -91,7 +96,8 @@ async function loadThread(threadId: string, messageId: string, me: SessionUser):
 }
 
 async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): Promise<LinkPopupData> {
-  const parts = participantsOf(m, await ownAddresses(t, me), {
+  const own = await ownAddresses(t, me);
+  const parts = participantsOf(m, own, {
     name: t.contactName,
     email: t.contactEmail,
   });
@@ -131,7 +137,7 @@ async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): P
     .filter((c): c is NonNullable<typeof c> => !!c)
     .map((c) => ({ id: c.id, name: displayName(c), companyName: companyName(c.homeCompanyId) }));
 
-  const sender = senderOf(m, t);
+  const sender = senderOf(m, t, own);
   const signature = sender ? extractSignature(m.body || "", { name: sender.name, email: sender.email }) : null;
   const senderRow = sender ? participants.find((p) => p.email === sender.email) ?? null : null;
   const senderContactId = senderRow?.contactId ?? null;
@@ -201,6 +207,15 @@ export async function fetchMessageCcAction(threadId: string, messageId: string):
       await fetchMessageCc(threadId, messageId);
     } catch (err) {
       console.error("[inbox] Cc fetch failed", threadId, messageId, err);
+      if (shouldStampCcFetched(err)) {
+        // Gmail no longer has this message (404) — it will never succeed,
+        // so stop asking on every popup open. A transient failure is left
+        // un-stamped and retried next time.
+        await patchDoc<CommThread>("comms", threadId, (d) => {
+          const x = (d.messages || []).find((y) => y.id === messageId);
+          if (x) x.ccFetched = true;
+        });
+      }
     }
   }
   const again = await loadThread(threadId, messageId, me);
@@ -222,6 +237,13 @@ export async function setThreadContactsAction(
   if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
   const c = on ? await getContact(contactId) : null;
   if (on && !c) return { ok: false, error: "Person not found." };
+  // softDeleteCompany doesn't cascade to its contacts, so a contact can
+  // still carry a homeCompanyId that no longer resolves to a live company.
+  // Mirror linkThreadToCustomerAction's getCustomer check: refuse before
+  // any write rather than silently linking the thread to a dead company.
+  if (on && c?.homeCompanyId && !(await getCompany(c.homeCompanyId))) {
+    return { ok: false, error: "That person's company was deleted." };
+  }
   const pre = applyContactLink(t, contactId, on);
   if (!pre.ok) return pre;
   await patchDoc<CommThread>("comms", threadId, (d) => {

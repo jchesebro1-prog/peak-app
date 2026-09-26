@@ -10526,6 +10526,7 @@ seeded()
   .then(() => specBuilderActionsAsyncChecks())
   .then(() => specBuilderFinalFixAsyncChecks())
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
+  .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -19716,6 +19717,18 @@ import { parseInbound as ip214ParseInbound, headerValue as ip214Header } from "@
   const legacy = ip214Participants({ direction: "in", author: "Legacy" }, own, { name: "Brenda", email: "Brenda@L.org" });
   ok(legacy.length === 1 && legacy[0].email === "brenda@l.org" && legacy[0].role === "from" && legacy[0].name === "Brenda", "#214 participants: an inbound message with no stored From falls back to the thread counterpart");
   ok(ip214Participants({ direction: "in", author: "X" }, own, null).length === 0, "#214 participants: nothing stored and no counterpart → no participants");
+  // Fix wave 1 — an "in" message whose From is actually one of our own
+  // addresses (self-cc, an internal forward recorded as inbound, …) must
+  // never surface as an unknown sender: with the real own-addresses list,
+  // it has no From participant at all.
+  const selfSentIn = ip214Participants(
+    { direction: "in", author: "Jeff Chesebro", fromEmail: "Jeff@PeakSystemsGroup.com", to: "a@x.org" },
+    own
+  );
+  ok(
+    selfSentIn.every((p) => p.role !== "from"),
+    "#214 participants: fix wave 1 — an inbound message actually sent by one of our own addresses has no From participant"
+  );
 
   const gm = {
     id: "g1",
@@ -20059,6 +20072,70 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n    \};/.test(page214), "#214 page: the reader VM carries the linked people");
 }
 
+/* ====== #214 Inbox Link popup — review fix wave 1 (Task 4 follow-up):
+   never link a deleted company through a person; own-address and gone-
+   message guards. requireUser() throws outside a request scope, so the
+   actions themselves can't be called from here (same constraint as the
+   rest of this file) — their guard rails are checked as source text, next
+   to pure checks on the two new DB-free helpers the fixes lean on
+   (shouldStampCcFetched, rankLinkTargets' person filter). */
+import { shouldStampCcFetched as gmail214StampCc } from "@/lib/gmail/config";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acts214b = read("src/app/(app)/inbox/link-popup-actions.ts");
+  const fn214b = (name: string) => {
+    const at = acts214b.indexOf(`export async function ${name}(`);
+    return at < 0 ? "" : acts214b.slice(at, acts214b.indexOf("\n}\n", at));
+  };
+  const build214 = (() => {
+    const at = acts214b.indexOf("async function buildPopupData(");
+    return at < 0 ? "" : acts214b.slice(at, acts214b.indexOf("\n}\n", at));
+  })();
+
+  // 1 — setThreadContactsAction refuses a deleted-company contact.
+  const set214b = fn214b("setThreadContactsAction");
+  ok(
+    set214b.includes("await getCompany(c.homeCompanyId)") &&
+      set214b.includes('error: "That person\'s company was deleted."') &&
+      set214b.indexOf("getCompany(c.homeCompanyId)") < set214b.indexOf("applyContactLink(t, contactId, on)"),
+    "#214 fix wave 1: setThreadContactsAction refuses to link a contact whose home company was soft-deleted, before any write"
+  );
+
+  // rankLinkTargets: the same live-companies filter venues already get.
+  const g5 = lt214Rank("lakefront", {
+    companies: [{ id: "lakefront", name: "Lakefront Public Schools" }],
+    sites: [],
+    people: [
+      { id: "ct-live", name: "Lakefront Live Person", companyId: "lakefront", emails: [] },
+      { id: "ct-gone", name: "Lakefront Gone Person", companyId: "deleted-co", emails: [] },
+      { id: "ct-none", name: "Lakefront No Company", companyId: null, emails: [] },
+    ],
+  });
+  ok(
+    g5.people.map((p) => p.id).sort().join() === "ct-live,ct-none",
+    "#214 fix wave 1: rankLinkTargets drops a person whose home company isn't among the live companies passed in, but keeps one with no home company"
+  );
+
+  // 2 — buildPopupData never prefills "Add as contact" for our own address.
+  ok(
+    build214.includes("senderOf(m, t, own)"),
+    "#214 fix wave 1: buildPopupData passes our own addresses into senderOf, so a message actually sent by us never prefills 'Add as contact'"
+  );
+
+  // 3 — fetchMessageCcAction stamps ccFetched only for a gone message.
+  const cc214b = fn214b("fetchMessageCcAction");
+  ok(
+    cc214b.includes("shouldStampCcFetched(err)") && cc214b.includes("x.ccFetched = true"),
+    "#214 fix wave 1: a Cc fetch that fails because Gmail no longer has the message (404) is stamped so the popup stops re-asking; a transient failure is left un-stamped"
+  );
+  ok(
+    gmail214StampCc(new Error("Gmail API /messages/xyz?format=metadata → 404 Not Found")) === true &&
+      gmail214StampCc(new Error("Gmail API /messages/xyz?format=metadata → 500 Internal Server Error")) === false &&
+      gmail214StampCc(new TypeError("fetch failed")) === false,
+    "#214 fix wave 1: shouldStampCcFetched is true only for a 404, never for a transient failure"
+  );
+}
+
 /* ====== #214 Inbox Link popup — emailsMatching excludes a soft-deleted
    company's contacts (Task 3 review follow-up). Real DB, scratch datadir. ====== */
 async function emailsMatchingCompanyDeletedAsyncChecks(): Promise<void> {
@@ -20084,5 +20161,75 @@ async function emailsMatchingCompanyDeletedAsyncChecks(): Promise<void> {
   ok(
     hits.has(liveContact) && !hits.has(goneContact),
     "#214 link search: emailsMatching drops a contact whose home company is soft-deleted"
+  );
+}
+
+/* ======================================================================
+   #214 review fix wave 1 — setThreadContactsAction never links a deleted
+   company through a person. Real DB, scratch datadir.
+
+   requireUser() throws outside a request scope, so the "use server" action
+   itself can't be called from this harness (same constraint noted
+   throughout this file — see refusedAdvanceAsyncChecks, deletePartAAsync
+   Checks, etc.): this reproduces the action's real sequence up to and
+   including the #214 fix — getContact, then the company-aliveness guard
+   (a real getCompany call, the same one the action makes) — against a
+   contact whose homeCompanyId points at a company softDeleteCompany just
+   tombstoned (which does not cascade to contacts, so getContact still
+   returns the row). The guard evaluates false, exactly as it does inside
+   the action, so the sequence stops there; a fresh read of the thread
+   fixture then confirms it was never touched. ====================== */
+async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
+  const { saveCompany, softDeleteCompany, getCompany: getCompany214fw1 } = await import("@/lib/identity/companies");
+  const { saveContact, getContact: getContact214fw1 } = await import("@/lib/identity/contacts");
+  const CommStore214fw1 = await import("@/lib/stores/comms");
+  const { createFixture, fixtureId } = await import("./test-fixtures");
+
+  const GONE_CO = "co214fw1-gone";
+  const CT = "ct214fw1-contact";
+  const THREAD = fixtureId(214, "fw1-thread-no-company");
+
+  await saveCompany({ id: GONE_CO, name: "#214 fix wave 1 — company about to be deleted" });
+  await saveContact({ id: CT, firstName: "Gone214FW1", lastName: "Contact", homeCompanyId: GONE_CO, title: "" });
+  await softDeleteCompany(GONE_CO);
+
+  await createFixture("comms", {
+    id: THREAD,
+    mailbox: "personal",
+    mailboxUser: "Test Harness",
+    unread: false,
+    archived: false,
+    customerId: null,
+    customer: "",
+    contactName: "Gone214FW1 Contact",
+    contactEmail: "gone214fw1@example.test",
+    subject: "#214 fix wave 1 harness",
+    channel: "email",
+    status: "waiting_us",
+    assignedTo: "Test Harness",
+    link: null,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  // setThreadContactsAction(THREAD, CT, true)'s real sequence, up to the fix:
+  const c = await getContact214fw1(CT);
+  ok(
+    !!c && c.homeCompanyId === GONE_CO,
+    "#214 fix wave 1: harness contact carries a homeCompanyId pointing at the now-deleted company (softDeleteCompany doesn't cascade to contacts)"
+  );
+  const stillAlive = c?.homeCompanyId ? await getCompany214fw1(c.homeCompanyId) : null;
+  ok(
+    stillAlive === null,
+    "#214 fix wave 1: getCompany — the same call the action's guard makes — confirms the contact's home company is gone"
+  );
+  const guardRefuses = !!(c?.homeCompanyId) && !stillAlive;
+  ok(guardRefuses, "#214 fix wave 1: the action's guard condition evaluates to refuse for this contact, before applyContactLink/patchDoc/linkThread ever run");
+
+  const after = await CommStore214fw1.get(THREAD);
+  ok(
+    !!after && after.customerId === null && (after.linkedContactIds || []).length === 0 && !after.resolvedContactId,
+    "#214 fix wave 1: linking a deleted-company contact refuses and leaves the thread's customerId (and linked people) unchanged"
   );
 }

@@ -122,6 +122,18 @@ export function isRateLimit(err: unknown): boolean {
   );
 }
 
+/** #214 — a Cc fetch that failed because Gmail no longer has the message
+ *  (404: it was deleted, or the id was never real) should stamp
+ *  `ccFetched` so the Link popup stops asking every time it opens; a
+ *  transient failure (network blip, 5xx, rate limit, an expired token)
+ *  should not, so the next popup open retries it. Same DB-free module as
+ *  isRateLimit, for the same reason: the pure test harness can exercise it
+ *  without a network call. */
+export function shouldStampCcFetched(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err);
+  return /\b404\b/.test(m);
+}
+
 /** #97 — a single sync run keeps pulling import chunks while it has time and
  *  quota headroom: 40 s stays inside the 60 s route cap, and 8 chunks × 80
  *  messages × 5 units = 3,200 units, about half the per-minute quota. */

@@ -132,7 +132,11 @@ export function rankLinkTargets(
   if (!only || only === "person") {
     out.people = typeaheadMatches(
       query,
-      data.people,
+      // A contact's homeCompanyId can point at a company that's since been
+      // soft-deleted (softDeleteCompany doesn't cascade to its contacts) —
+      // drop those, same rule the venues filter above already applies via
+      // nameOf.has. A person with no home company is unaffected.
+      data.people.filter((p) => !p.companyId || nameOf.has(p.companyId)),
       (qq, p) => allIn(qq, `${p.name} ${p.emails.join(" ")}`),
       (qq, p) => nameRank(qq, p.name),
       LINK_TARGET_MAX
