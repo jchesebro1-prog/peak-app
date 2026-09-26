@@ -8,6 +8,17 @@ import { saveFlameQuote, approveFlameQuote } from "./actions";
 import { CustomerCombobox } from "@/components/customer-combobox";
 import { DeleteQuoteButton } from "../../quotes/delete-quote-button";
 import { ChangeTypeControl, useWonEditGuard } from "@/components/quote-flow-controls";
+import { TravelModePanel } from "@/components/travel-mode-panel";
+import {
+  FLY_CREW_DEFAULTS,
+  draftFromOverride,
+  overrideFromDraft,
+  planTravel,
+  type FlyRates,
+  type TravelDraft,
+  type TravelOverride,
+  type TravelPlan,
+} from "@/lib/travel-plan";
 
 /**
  * QuoteBuilder — the auto-priced flame-test quote estimator (client port of
@@ -49,7 +60,11 @@ export type BuilderRates = {
   baseFee: number;
   margin: number;
   travelRoundMin: number;
+  /** Default flying crew (Estimating Rules → Flame-test pricing). */
+  flyCrew?: number;
 };
+/** Estimating Rules → Travel & mileage (blob `travel_rates`): drive fallback + flight rates. */
+export type BuilderTravelRates = FlyRates & { roadFactor: number; mph: number };
 export type BuilderInitial = {
   editingId: string | null;
   customerId: string;
@@ -66,6 +81,8 @@ export type BuilderInitial = {
   replaces: string;
   /** #160 — the intake supplied a name: don't auto-rename on venue toggles. */
   nameLocked: boolean;
+  /** The saved travel override (flights over drive) — absent = auto. */
+  travel?: TravelOverride | null;
 };
 
 /* ---------- inlined pure pricing (port of flametest-engine.ts) ---------- */
@@ -98,13 +115,16 @@ function haversine(a: Coords | BuilderOffice, b: Coords | BuilderOffice): number
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
-function driveMiles(a: Coords | BuilderOffice, b: Coords | BuilderOffice): number | null {
+/* Live Estimating Rules road factor / speed — the values the server re-prices
+   with — so the preview's drive total, and therefore its drive-or-fly
+   decision, matches the saved quote. */
+function driveMiles(a: Coords | BuilderOffice, b: Coords | BuilderOffice, tr: BuilderTravelRates): number | null {
   const m = haversine(a, b);
-  return m == null ? null : Math.round(m * 1.25);
+  return m == null ? null : Math.round(m * tr.roadFactor);
 }
-function driveMinutes(a: Coords | BuilderOffice, b: Coords | BuilderOffice): number | null {
-  const mi = driveMiles(a, b);
-  return mi == null ? null : Math.round((mi / 50) * 60);
+function driveMinutes(a: Coords | BuilderOffice, b: Coords | BuilderOffice, tr: BuilderTravelRates): number | null {
+  const mi = driveMiles(a, b, tr);
+  return mi == null ? null : Math.round((mi / tr.mph) * 60);
 }
 type PerVenue = { id: string; label: string; curtains: number; laborCost: number };
 type Trip = {
@@ -125,6 +145,8 @@ type Pricing = {
   margin: number;
   marginAmount: number;
   total: number;
+  /** Flights over drive — travel.total is the figure the quote prices. */
+  travel: TravelPlan;
 };
 
 function priceVenue(v: VenueIn, rates: BuilderRates): PerVenue {
@@ -133,15 +155,15 @@ function priceVenue(v: VenueIn, rates: BuilderRates): PerVenue {
   const laborCost = laborMin * (rates.laborRate / 60);
   return { id: v.id, label: v.label || "Venue", curtains, laborCost };
 }
-function tripTravel(office: BuilderOffice | null, venues: VenueIn[], rates: BuilderRates): Trip {
+function tripTravel(office: BuilderOffice | null, venues: VenueIn[], rates: BuilderRates, tr: BuilderTravelRates): Trip {
   let miles = 0;
   let minutes = 0;
   const coordVenues = venues.filter((v) => v.coords && v.coords.lat != null);
   if (office && office.lat != null && coordVenues.length === venues.length && venues.length > 0) {
     const seq: (Coords | BuilderOffice)[] = [office, ...venues.map((v) => v.coords), office];
     for (let i = 0; i < seq.length - 1; i++) {
-      const m = driveMiles(seq[i], seq[i + 1]);
-      const t = driveMinutes(seq[i], seq[i + 1]);
+      const m = driveMiles(seq[i], seq[i + 1], tr);
+      const t = driveMinutes(seq[i], seq[i + 1], tr);
       if (m != null) miles += m;
       if (t != null) minutes += t;
     }
@@ -169,12 +191,27 @@ function tripTravel(office: BuilderOffice | null, venues: VenueIn[], rates: Buil
     total: mileageCost + timeCost,
   };
 }
-function computePricing(office: BuilderOffice | null, venues: VenueIn[], rates: BuilderRates): Pricing {
+function computePricing(
+  office: BuilderOffice | null,
+  venues: VenueIn[],
+  rates: BuilderRates,
+  tr: BuilderTravelRates,
+  override: TravelOverride | undefined
+): Pricing {
   const perVenue = venues.map((v) => priceVenue(v, rates));
   const testingSubtotal = perVenue.reduce((a, v) => a + v.laborCost, 0);
   const curtainsTotal = perVenue.reduce((a, v) => a + v.curtains, 0);
-  const trip = tripTravel(office, venues, rates);
-  const rawCost = trip.total + testingSubtotal;
+  const trip = tripTravel(office, venues, rates, tr);
+  // Flights over drive — the same planner the server engine runs.
+  const travel = planTravel({
+    drive: trip,
+    onSiteHours: (curtainsTotal * rates.curtainMinutes) / 60,
+    laborRate: rates.laborRate,
+    crewDefault: rates.flyCrew ?? FLY_CREW_DEFAULTS.flame,
+    rates: tr,
+    override,
+  });
+  const rawCost = travel.total + testingSubtotal;
   const baseApplied = rawCost < rates.baseFee;
   const cost = baseApplied ? rates.baseFee : rawCost;
   const margin = rates.margin;
@@ -190,6 +227,7 @@ function computePricing(office: BuilderOffice | null, venues: VenueIn[], rates: 
     margin,
     marginAmount: total - cost,
     total,
+    travel,
   };
 }
 
@@ -238,12 +276,14 @@ export function QuoteBuilder({
   customers,
   offices,
   rates: baseRates,
+  travelRates,
   initial,
   accent,
 }: {
   customers: BuilderCustomer[];
   offices: BuilderOffice[];
   rates: BuilderRates;
+  travelRates: BuilderTravelRates;
   initial: BuilderInitial;
   accent: string;
 }) {
@@ -261,6 +301,7 @@ export function QuoteBuilder({
   const [mileageRate, setMileageRate] = useState(baseRates.mileageRate.toFixed(2));
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
+  const [travelDraft, setTravelDraft] = useState<TravelDraft>(() => draftFromOverride(initial.travel));
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
 
@@ -374,6 +415,7 @@ export function QuoteBuilder({
     baseFee: baseRates.baseFee,
     margin: marginPts / 100,
     travelRoundMin: baseRates.travelRoundMin,
+    flyCrew: baseRates.flyCrew,
   };
   const selectedVenues: VenueIn[] = locations
     .filter((l) => venueSel[l.id]?.on)
@@ -389,7 +431,7 @@ export function QuoteBuilder({
   const office = offices.find((o) => o.quoteDefault) || offices[0] || null;
   const r =
     hasCustomer && selectedVenues.length
-      ? computePricing(office, selectedVenues, liveRates)
+      ? computePricing(office, selectedVenues, liveRates, travelRates, overrideFromDraft(travelDraft))
       : null;
   const chargeById = new Map((r?.perVenue || []).map((p) => [p.id, p]));
 
@@ -424,6 +466,7 @@ export function QuoteBuilder({
     fd.set("margin", String(marginPts));
     fd.set("mileageRate", mileageRate);
     fd.set("laborRate", laborRate);
+    fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
     fd.set(
       "venues",
       JSON.stringify(selectedVenues.map((v) => ({ id: v.id, label: v.label, curtains: v.curtains })))
@@ -834,8 +877,20 @@ export function QuoteBuilder({
                   · shared once
                 </span>
               </SubHead>
-              <BreakRow label={"Mileage · " + mileageDetail} value={money(trip.mileageCost)} />
-              <BreakRow label={"Travel time · " + timeDetail} value={money(trip.timeCost)} last />
+              {/* the drive figures stay visible; muted when the trip is priced as flights */}
+              <div style={{ opacity: r?.travel.mode === "fly" ? 0.45 : 1 }}>
+                <BreakRow label={"Mileage · " + mileageDetail} value={money(trip.mileageCost)} />
+                <BreakRow label={"Travel time · " + timeDetail} value={money(trip.timeCost)} last />
+              </div>
+              <TravelModePanel
+                plan={r?.travel ?? null}
+                draft={travelDraft}
+                onDraft={(next) => {
+                  setTravelDraft(next);
+                  dirty();
+                }}
+                accent={accent}
+              />
 
               <SubHead style={{ marginTop: 16 }}>
                 Testing · {venueCount} venue{venueCount === 1 ? "" : "s"}

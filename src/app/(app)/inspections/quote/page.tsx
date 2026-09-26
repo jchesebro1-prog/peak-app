@@ -5,6 +5,8 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { LEVELS, levelMeta } from "@/lib/stores/inspections";
 import { getRates } from "@/lib/inspection-engine";
 import { getSettings } from "@/lib/settings";
+import { getTravelRates } from "@/lib/stores/pricing";
+import { normalizeTravelOverride } from "@/lib/travel-plan";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -39,6 +41,7 @@ type InspectionDoc = {
   scope?: string;
   venues?: InVenue[];
   contact?: InContact;
+  travel?: unknown;
 } | null;
 
 export default async function InspectionQuotePage({
@@ -46,12 +49,13 @@ export default async function InspectionQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, customerDocs, rates, settings] = await Promise.all([
+  const [user, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     getRates(),
     getSettings(),
+    getTravelRates(),
   ]);
 
   const editId = one(sp.id);
@@ -154,6 +158,7 @@ export default async function InspectionQuotePage({
       contactManual,
       level: levelMeta(insp && insp.level).key,
       notes: (insp && insp.scope) || "",
+      travel: normalizeTravelOverride(insp && insp.travel) ?? null,
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
@@ -203,6 +208,7 @@ export default async function InspectionQuotePage({
         customers={customers}
         offices={offices}
         rates={rates}
+        travelRates={travelRates}
         levels={LEVELS.map((l) => ({
           key: l.key,
           label: l.label,

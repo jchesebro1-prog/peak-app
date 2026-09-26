@@ -10,6 +10,8 @@ import {
 } from "@/lib/stores/repair-jobs";
 import { getRates } from "@/lib/repair-engine";
 import { getSettings } from "@/lib/settings";
+import { getTravelRates } from "@/lib/stores/pricing";
+import { normalizeTravelOverride } from "@/lib/travel-plan";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -53,6 +55,7 @@ type RepairDoc = {
   crewSize?: number;
   contact?: RpContact;
   venues?: RpVenue[];
+  travel?: unknown;
 } | null;
 
 export default async function RepairQuotePage({
@@ -60,12 +63,13 @@ export default async function RepairQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, customerDocs, rates, settings] = await Promise.all([
+  const [, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     getRates(),
     getSettings(),
+    getTravelRates(),
   ]);
 
   const editId = one(sp.id);
@@ -187,6 +191,7 @@ export default async function RepairQuotePage({
             : "",
       crewSize: String((rp && rp.crewSize) || 1),
       source: (rp && rp.source) || null,
+      travel: normalizeTravelOverride(rp && rp.travel) ?? null,
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
@@ -300,6 +305,7 @@ export default async function RepairQuotePage({
         customers={customers}
         offices={offices}
         rates={rates}
+        travelRates={travelRates}
         categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
         priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
         initial={initial}

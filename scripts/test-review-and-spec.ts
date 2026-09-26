@@ -10280,6 +10280,28 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   ok(/crewSize,\s*\n\s*travel: travelOverride/.test(repairActionsSrc), "#TRV: the repair save passes the crew size so the flying crew is never smaller");
 }
 
+/* --- #TRV builders: previews run the same planner with the live travel
+   rates, render the travel panel, post the override — and stay client-safe --- */
+{
+  for (const svc of ["flame-tests", "repairs", "inspections"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/controls.tsx`), "utf8");
+    ok(/from "@\/lib\/travel-plan"/.test(src) && /planTravel\(/.test(src) && /<TravelModePanel/.test(src),
+      `#TRV: the ${svc} builder previews through planTravel and renders the travel panel`);
+    ok(/fd\.set\("travel", JSON\.stringify\(overrideFromDraft\(travelDraft\) \?\? \{\}\)\)/.test(src),
+      `#TRV: the ${svc} builder posts its travel override`);
+    ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(src),
+      `#TRV: the ${svc} builder imports no value from @/lib/stores or @/db`);
+    ok(!/\* 1\.25\)/.test(src) && !/\/ 50\) \* 60/.test(src),
+      `#TRV: the ${svc} preview uses the live road factor / speed, not 1.25 / 50`);
+    const page = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
+    ok(/getTravelRates\(\)/.test(page) && /travelRates=\{travelRates\}/.test(page) && /normalizeTravelOverride\(/.test(page),
+      `#TRV: the ${svc} page hands the builder live travel rates and the saved override`);
+  }
+  const panelSrc = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
+  ok(/^"use client";/.test(panelSrc) && !/from "@\/(lib\/stores|db)\//.test(panelSrc) && /autoSwitchNote\(/.test(panelSrc),
+    "#TRV: the travel panel is a client component that imports only the pure planner");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
