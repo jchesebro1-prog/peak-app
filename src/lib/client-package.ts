@@ -2,6 +2,8 @@ import type { SpecCatalogPart, BomRow } from "@/lib/bid-spec";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import type { GridProject, GridPlacement } from "@/lib/stores/grid-projects";
 import { hasPrintableSpec } from "@/lib/specs/articles";
+import type { CoverageIndex } from "@/lib/part-docs/coverage";
+import { resolvePackageDocs, type PackageDocRef, type PackageDocument } from "@/lib/part-docs/package";
 
 export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec";
 
@@ -21,7 +23,11 @@ export type ClientPackageItem = {
   unit: string;
   category: string;
   catalogId: string | null;
-  datasheet: { name: string; blobKey: string } | null;
+  /** The part's own datasheet, or the fixture datasheet covering it (#207). */
+  datasheet: PackageDocRef | null;
+  /** Fixture SKUs on this package whose datasheet covers this part. */
+  datasheetCoveredBy: string[];
+  specsheet: PackageDocRef | null;
   spec: { sectionId: string; body: string } | null;
 };
 
@@ -31,10 +37,18 @@ export type ClientPackageManifest = {
   optionId: string;
   bom: BomRow[];
   items: ClientPackageItem[];
-  datasheets: Array<{ sku: string; name: string; blobKey: string }>;
+  /** Every datasheet / spec sheet the package carries, ONCE, with the SKUs it serves. */
+  documents: PackageDocument[];
+  /** Items whose datasheet is a fixture's — the gap report's "covered by <fixture>". */
+  covered: Array<{ sku: string; by: string[]; note: string }>;
   gaps: ClientPackageGap[];
   counts: { items: number; datasheets: number; gaps: number };
 };
+
+/** A gap-report line for an accessory that rides on its fixture's datasheet. */
+export function coveredNote(sku: string, by: string[]): { sku: string; by: string[]; note: string } {
+  return { sku, by, note: `covered by ${by.join(", ")}` };
+}
 
 function addBom(map: Map<string, BomRow>, placement: GridPlacement, desc: string): void {
   // Curtains are made-to-size lines, not a reusable product datasheet line.
@@ -57,6 +71,7 @@ export function buildClientPackageManifest(
   project: GridProject,
   catalog: SpecCatalogPart[],
   requestedOptionId?: string | null,
+  docs?: CoverageIndex | null,
 ): ClientPackageManifest {
   const optionId = resolveOptionId(project, requestedOptionId);
   const { placements } = optionSlice(project, optionId);
@@ -75,6 +90,8 @@ export function buildClientPackageManifest(
   const bom = [...bomMap.values()].sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
   const items: ClientPackageItem[] = [];
   const gaps: ClientPackageGap[] = [];
+  const catalogSkus = bom.map((row) => (byId.get(row.sku) || bySku.get(row.sku))?.sku).filter((s): s is string => !!s);
+  const packageDocs = resolvePackageDocs(docs, catalogSkus);
 
   for (const row of bom) {
     const part = byId.get(row.sku) || bySku.get(row.sku);
@@ -87,20 +104,15 @@ export function buildClientPackageManifest(
         category: "Unknown",
         catalogId: null,
         datasheet: null,
+        datasheetCoveredBy: [],
+        specsheet: null,
         spec: null,
       });
       gaps.push({ kind: "missing-catalog", sku: row.sku, description: row.desc, qty: row.qty, catalogId: null });
       continue;
     }
 
-    const datasheet = part.datasheetBlobKey && part.datasheetName
-      ? { name: part.datasheetName, blobKey: part.datasheetBlobKey }
-      : part.productMetadata?.datasheets?.find((file) => file.blobKey)
-        ? {
-            name: part.productMetadata.datasheets.find((file) => file.blobKey)!.fileName,
-            blobKey: part.productMetadata.datasheets.find((file) => file.blobKey)!.blobKey!,
-          }
-        : null;
+    const partDocs = packageDocs.bySku.get(part.sku);
     const spec = part.specSectionId && hasPrintableSpec(part)
       ? { sectionId: part.specSectionId, body: part.specBody!.trim() }
       : null;
@@ -112,10 +124,12 @@ export function buildClientPackageManifest(
       unit: part.unit,
       category: part.category,
       catalogId: part.id,
-      datasheet,
+      datasheet: partDocs?.datasheet ?? null,
+      datasheetCoveredBy: partDocs?.datasheetCoveredBy ?? [],
+      specsheet: partDocs?.specsheet ?? null,
       spec,
     });
-    if (!datasheet) gaps.push({ kind: "missing-datasheet", sku: part.sku, description: part.desc, qty: row.qty, catalogId: part.id });
+    if (!partDocs?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: part.sku, description: part.desc, qty: row.qty, catalogId: part.id });
     if (!spec) gaps.push({ kind: "missing-spec", sku: part.sku, description: part.desc, qty: row.qty, catalogId: part.id });
   }
 
@@ -125,8 +139,9 @@ export function buildClientPackageManifest(
     optionId,
     bom,
     items,
-    datasheets: items.flatMap((item) => item.datasheet ? [{ sku: item.sku, ...item.datasheet }] : []),
+    documents: packageDocs.documents,
+    covered: items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy)),
     gaps,
-    counts: { items: items.length, datasheets: items.filter((item) => item.datasheet).length, gaps: gaps.length },
+    counts: { items: items.length, datasheets: packageDocs.documents.filter((d) => d.kind === "datasheet").length, gaps: gaps.length },
   };
 }

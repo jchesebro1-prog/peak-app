@@ -4,6 +4,8 @@ import { getSettings } from "@/lib/settings";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { list as listSubassemblies, type FixtureSubassembly } from "@/lib/stores/subassemblies";
 import { pricesAsOf, sanitizeFixtureAssemblies } from "@/lib/fixture-assemblies";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { fixtureAssemblyPairs, memberCoverageFor, subassemblyPairs } from "@/lib/part-docs/assembly-graph";
 import AssemblyBuilder, { type Hit } from "./assembly-builder";
 import AssembliesTabs from "./tabs";
 import SubassembliesClient from "../subassemblies/subassemblies-client";
@@ -24,8 +26,13 @@ export default async function AssemblyBuilderPage({
   const tabRaw = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   const tab = tabRaw === "subassemblies" ? "subassemblies" : "assemblies";
   const [settings, parts, saved] = await Promise.all([getSettings(), listCatalog(), listSubassemblies()]);
-  const priceDates = Object.fromEntries(
-    sanitizeFixtureAssemblies(settings.fixtureAssemblies).map((a) => [a.id, pricesAsOf(a.components.map((c) => c.sku), parts, settings)])
+  const assemblies = sanitizeFixtureAssemblies(settings.fixtureAssemblies);
+  const priceDates = Object.fromEntries(assemblies.map((a) => [a.id, pricesAsOf(a.components.map((c) => c.sku), parts, settings)]));
+  // Part documents (#207): each member's datasheet coverage, for the active tab only.
+  const { index } = await loadPartDocsState(parts);
+  const coverage = memberCoverageFor(
+    index,
+    tab === "assemblies" ? assemblies.flatMap(fixtureAssemblyPairs) : (saved as FixtureSubassembly[]).flatMap(subassemblyPairs)
   );
   // #121: the component picker filters in the browser (Typeahead) — ship
   // only the slice it renders (never cost), the Subassemblies page's idiom.
@@ -46,9 +53,9 @@ export default async function AssemblyBuilderPage({
       </p>
       <AssembliesTabs active={tab} />
       {tab === "assemblies" ? (
-        <AssemblyBuilder initial={settings.fixtureAssemblies || []} parts={builderParts} priceDates={priceDates} />
+        <AssemblyBuilder initial={settings.fixtureAssemblies || []} parts={builderParts} priceDates={priceDates} coverage={coverage} />
       ) : (
-        <SubassembliesClient parts={parts} initial={saved as FixtureSubassembly[]} priceListEffective={settings.priceListEffective || {}} />
+        <SubassembliesClient parts={parts} initial={saved as FixtureSubassembly[]} priceListEffective={settings.priceListEffective || {}} coverage={coverage} />
       )}
     </div>
   );

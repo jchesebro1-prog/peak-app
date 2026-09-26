@@ -10,6 +10,8 @@ import { Typeahead } from "@/components/search/typeahead";
 import { catalogFilter, catalogRank } from "@/lib/search/typeahead-rank";
 import { deleteSubassemblyAction, saveFixtureAction } from "./actions";
 import { ConfirmButton } from "@/components/confirm-button";
+import { pairKey, subassemblyPairs, type MemberCoverage } from "@/lib/part-docs/assembly-graph";
+import MemberCoverageChip from "../assemblies/member-coverage";
 
 const pricesNote = (at: number | null) => (at == null ? "prices as of: unknown" : `prices as of ${dateYear(at)}`);
 
@@ -61,7 +63,18 @@ function PartPicker({ label, parts, value, onChange, clearOnPick = false }: { la
   );
 }
 
-export default function SubassembliesClient({ parts, initial, priceListEffective }: { parts: CatalogPart[]; initial: FixtureSubassembly[]; priceListEffective: Record<string, number> }) {
+export default function SubassembliesClient({
+  parts,
+  initial,
+  priceListEffective,
+  coverage,
+}: {
+  parts: CatalogPart[];
+  initial: FixtureSubassembly[];
+  priceListEffective: Record<string, number>;
+  /** #207 — each saved member's datasheet coverage, keyed by pairKey(). */
+  coverage: Record<string, MemberCoverage>;
+}) {
   const router = useRouter();
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
@@ -138,6 +151,15 @@ export default function SubassembliesClient({ parts, initial, priceListEffective
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{item.label}</div>
         <div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{item.description || "No description"}</div>
         <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 5 }}>{item.lightEngineName} + {item.lensName}</div>
+        {/* #207 — each member's datasheet coverage from the fixture. */}
+        <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
+          {subassemblyPairs(item).map((p) => (
+            <div key={p.accessorySku} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#5b616e" }}>{p.accessorySku}</span>
+              <MemberCoverageChip parentSku={p.parentSku} accessorySku={p.accessorySku} coverage={coverage[pairKey(p.parentSku, p.accessorySku)]} />
+            </div>
+          ))}
+        </div>
         {live.missing.length > 0 && (
           <div style={{ color: "#a0442b", fontSize: 11.5, marginTop: 4 }}>
             {live.missing.length} part{live.missing.length === 1 ? "" : "s"} no longer in the catalog: {live.missing.join(", ")}

@@ -317,7 +317,7 @@ import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/c
 import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
 import {
-  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, hasDatasheet, coverageRows, filterCoverage, articleIdMapForParts,
+  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, articleIdMapForParts,
 } from "@/app/(app)/design/specs/coverage";
 
 let fail = 0;
@@ -10030,6 +10030,470 @@ async function teardownFixtures(): Promise<void> {
   );
 }
 
+/* --- #208 flights over drive — the pure planner, its rates and the Estimating
+   Rules rows (spec docs/superpowers/specs/2026-09-25-travel-flights-design.md §3, §6) --- */
+import {
+  FLY_RATE_DEFAULTS,
+  FLY_CREW_DEFAULTS,
+  TRAVEL_FLY_LINE,
+  planTravel,
+  resolveFlyRates,
+  normalizeTravelOverride,
+  parseTravelOverride,
+  carryTravelOverride,
+  draftFromOverride,
+  overrideFromDraft,
+  savedTrip,
+  flightOf,
+  travelLineAmount,
+  autoSwitchNote,
+  flyTravelSentence,
+  travelModeChangeReason,
+} from "@/lib/travel-plan";
+import {
+  FLAMETEST_RATE_DEFAULTS,
+  REPAIR_RATE_DEFAULTS,
+  INSPECTION_RATE_DEFAULTS,
+} from "@/lib/stores/pricing";
+{
+  const R = FLY_RATE_DEFAULTS;
+  ok(
+    R.flyThreshold === 1000 && R.airfarePerPerson === 450 && R.hotelPerNight === 140 &&
+      R.perDiemPerDay === 70 && R.carPerDay === 75 && R.flyTravelHoursEachWay === 4 && R.flyHoursPerDay === 8,
+    "#208: fly-rate defaults are exactly the spec table ($1,000 / $450 / $140 / $70 / $75 / 4 h / 8 h)"
+  );
+  ok(
+    FLY_CREW_DEFAULTS.flame === 1 && FLY_CREW_DEFAULTS.repair === 2 && FLY_CREW_DEFAULTS.inspection === 1,
+    "#208: default flying crew is flame 1 · repairs 2 · inspections 1"
+  );
+  ok(
+    TRAVEL_RATE_DEFAULTS.roadFactor === 1.25 && TRAVEL_RATE_DEFAULTS.mph === 50 &&
+      TRAVEL_RATE_DEFAULTS.flyThreshold === 1000 && TRAVEL_RATE_DEFAULTS.flyHoursPerDay === 8,
+    "#208: the travel_rates defaults keep 1.25 / 50 and carry every fly key"
+  );
+  ok(
+    FLAMETEST_RATE_DEFAULTS.flyCrew === 1 && REPAIR_RATE_DEFAULTS.flyCrew === 2 && INSPECTION_RATE_DEFAULTS.flyCrew === 1,
+    "#208: each service's rates blob defaults carry its flyCrew"
+  );
+  ok(TRAVEL_FLY_LINE === "Travel (air, lodging & per diem)", "#208: the customer-facing line is exactly 'Travel (air, lodging & per diem)'");
+
+  // threshold boundary (on-site 10 h, 1 person, $75/h)
+  const base = { onSiteHours: 10, laborRate: 75, crewDefault: 1, rates: R };
+  const p999 = planTravel({ ...base, drive: { total: 999.99 } });
+  ok(p999.mode === "drive" && p999.flight === null && p999.total === 999.99, "#208: a $999.99 drive stays a drive, total untouched");
+  const p1000 = planTravel({ ...base, drive: { total: 1000 } });
+  ok(p1000.mode === "fly" && p1000.autoMode === "fly" && p1000.choice === "auto" && p1000.flight !== null, "#208: a $1,000 drive flies (≥ threshold)");
+  const pNever = planTravel({ ...base, rates: { ...R, flyThreshold: 0 }, drive: { total: 50000 } });
+  ok(pNever.mode === "drive" && pNever.total === 50000, "#208: threshold 0 never flies");
+
+  // forced modes
+  const forcedDrive = planTravel({ ...base, drive: { total: 5000 }, override: { mode: "drive" } });
+  ok(forcedDrive.mode === "drive" && forcedDrive.autoMode === "fly" && forcedDrive.total === 5000 && forcedDrive.flight === null,
+    "#208: forced Drive over the threshold prices the drive");
+  const forcedFly = planTravel({ ...base, drive: { total: 100 }, override: { mode: "fly" } });
+  ok(forcedFly.mode === "fly" && forcedFly.autoMode === "drive" && forcedFly.choice === "fly" && forcedFly.total === 1765,
+    "#208: forced Fly under the threshold prices flights");
+
+  // formulas: 10 h on site, crew 1, 8 h/day → 2 work days, 2 nights, 3 trip days
+  const f = p1000.flight!;
+  ok(f.crew === 1 && f.workDays === 2 && f.nights === 2 && f.tripDays === 3, "#208: workDays = ceil(10 / 8) = 2, nights = workDays, tripDays = nights + 1");
+  ok(
+    f.airfare === 450 && f.lodging === 280 && f.perDiem === 210 && f.car === 225 &&
+      f.travelHours === 8 && f.travelLabor === 600 && f.total === 1765 && p1000.total === 1765,
+    "#208: airfare 450 + lodging 280 + per diem 210 + car 225 + travel labor 600 = 1,765"
+  );
+  ok(p1000.defaults.crew === 1 && p1000.defaults.nights === 2 && p1000.defaults.airfarePerPerson === 450, "#208: the plan reports the defaults the builder shows as placeholders");
+
+  // crew override 3 → 1 work day, 1 night, 2 trip days, ceil(3/2) = 2 cars
+  const c3 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 3 } }).flight!;
+  ok(
+    c3.crew === 3 && c3.workDays === 1 && c3.nights === 1 && c3.tripDays === 2 && c3.airfare === 1350 &&
+      c3.lodging === 420 && c3.perDiem === 420 && c3.car === 300 && c3.travelLabor === 1800 && c3.total === 4290,
+    "#208: a crew override of 3 re-derives work days and prices 2 cars (4,290)"
+  );
+  const c2 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 2 } }).flight!;
+  ok(c2.car === 150, "#208: 2 people share 1 car (ceil(2/2) × 2 days × $75)");
+
+  // nights override 0 → a same-day fly-in
+  const n0 = planTravel({ ...base, drive: { total: 2000 }, override: { nights: 0 } }).flight!;
+  ok(n0.workDays === 2 && n0.nights === 0 && n0.tripDays === 1 && n0.lodging === 0 && n0.perDiem === 70 && n0.car === 75,
+    "#208: a nights override replaces workDays; tripDays = nights + 1");
+
+  // airfare override
+  const air = planTravel({ ...base, drive: { total: 2000 }, override: { airfarePerPerson: 800 } }).flight!;
+  ok(air.airfare === 800 && air.total === 1765 - 450 + 800, "#208: the manual airfare replaces the allowance");
+
+  // travel labor uses the service's labor rate
+  const lab = planTravel({ ...base, laborRate: 100, drive: { total: 2000 } }).flight!;
+  ok(lab.travelLabor === 800, "#208: travel labor = crew × 4 h × 2 × the service's labor rate");
+
+  // zero on-site hours still books one work day
+  ok(planTravel({ ...base, onSiteHours: 0, drive: { total: 2000 } }).flight!.workDays === 1, "#208: zero on-site hours → 1 work day");
+
+  // missing blob keys fall back to the defaults
+  ok(JSON.stringify(resolveFlyRates(undefined)) === JSON.stringify(R), "#208: resolveFlyRates(undefined) = the defaults");
+  const partialRates = resolveFlyRates({ hotelPerNight: 200 });
+  ok(partialRates.hotelPerNight === 200 && partialRates.flyThreshold === 1000 && partialRates.carPerDay === 75,
+    "#208: a stored blob with only some fly keys keeps the defaults for the rest");
+  const pEmpty = planTravel({ ...base, rates: {}, drive: { total: 1000 } });
+  ok(pEmpty.mode === "fly" && pEmpty.total === 1765, "#208: an existing travel_rates blob with no fly keys prices with the defaults");
+
+  // override normalization / posting / drafts / carry-forward
+  ok(normalizeTravelOverride({ mode: "auto" }) === undefined, "#208: mode 'auto' with nothing else is no override");
+  ok(
+    JSON.stringify(normalizeTravelOverride({ mode: "fly", crew: "2", nights: "", airfarePerPerson: "abc" })) === JSON.stringify({ mode: "fly", crew: 2 }),
+    "#208: normalize keeps valid fields, coerces numeric strings, drops blanks and junk"
+  );
+  ok(normalizeTravelOverride({ crew: 0, nights: -1 }) === undefined && normalizeTravelOverride("junk") === undefined,
+    "#208: crew < 1, negative nights and non-objects are rejected");
+  ok(JSON.stringify(parseTravelOverride('{"mode":"drive","nights":3}')) === JSON.stringify({ mode: "drive", nights: 3 }) &&
+      parseTravelOverride("{not json") === undefined && parseTravelOverride(null) === undefined,
+    "#208: parseTravelOverride reads the posted JSON and tolerates garbage");
+  const d = draftFromOverride({ mode: "fly", crew: 3 });
+  ok(d.mode === "fly" && d.crew === "3" && d.nights === "" && d.airfare === "", "#208: draftFromOverride fills the builder inputs");
+  ok(JSON.stringify(overrideFromDraft(d)) === JSON.stringify({ mode: "fly", crew: 3 }) && overrideFromDraft(draftFromOverride(undefined)) === undefined,
+    "#208: overrideFromDraft round-trips; an untouched draft posts no override");
+  ok(JSON.stringify(carryTravelOverride({ mode: "fly", crew: 3, airfarePerPerson: 900 })) === JSON.stringify({ mode: "fly", crew: 3 }) &&
+      carryTravelOverride({ airfarePerPerson: 900 }) === undefined,
+    "#208: a renewal carries last year's mode/crew/nights but never last year's airfare");
+
+  // persisted trip + letters
+  const st = savedTrip({ miles: 1000, minutes: 960, mileageCost: 1000.4, timeCost: 1199.6, method: "estimate", mode: "fly", flight: { ...f, airfare: 450.4 } });
+  ok(st.mileageCost === 1000 && st.timeCost === 1200 && st.mode === "fly" && st.flight?.airfare === 450 && st.flight?.total === 1765,
+    "#208: savedTrip rounds money like today's trip block and keeps mode + flight");
+  const sd = savedTrip({ miles: 200, minutes: 240, mileageCost: 200, timeCost: 300, method: "route", mode: "drive" });
+  ok(sd.mode === "drive" && !("flight" in sd), "#208: a drive-mode saved trip carries mode 'drive' and no flight");
+  ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
+    "#208: flightOf returns a flight only for a fly-mode saved trip");
+  ok(travelLineAmount(1765, 0.3) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
+    "#208: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
+  ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
+    "#208: the builder note reads exactly as spec §5");
+  ok(
+    flyTravelSentence("Peak Systems Group (Milwaukee)", "Lakefront Theatre", 2521) ===
+      "Given the distance from Peak Systems Group (Milwaukee) to Lakefront Theatre, this visit is priced with air travel — Travel (air, lodging & per diem): $2,521.",
+    "#208: the letter sentence names the one travel line and its amount"
+  );
+  ok(
+    travelModeChangeReason("drive", "fly") === "travel now being priced as flights, lodging & per diem instead of a drive" &&
+      travelModeChangeReason("fly", "drive") === "travel now being priced as a drive instead of flights" &&
+      travelModeChangeReason("drive", "drive") === null && travelModeChangeReason("fly", "fly") === null,
+    "#208: renewal 'why the price changed' wording on a mode flip, silence otherwise"
+  );
+
+  // Estimating Rules rows (the page renders GROUPS generically)
+  const trvRows = (key: string): RateEntry[] =>
+    PRICING_GROUPS.find((g) => g.key === key)!.items.filter((it): it is RateEntry => it.kind === "rate");
+  const flyKeys = ["flyThreshold", "airfarePerPerson", "hotelPerNight", "perDiemPerDay", "carPerDay", "flyTravelHoursEachWay", "flyHoursPerDay"] as const;
+  ok(
+    flyKeys.every((k) => {
+      const row = trvRows("travel").find((it) => it.id === "travel." + k);
+      return !!row && row.store === "travel" && row.key === k && row.ref === false && row.def === FLY_RATE_DEFAULTS[k];
+    }),
+    "#208: Estimating Rules → Travel & mileage exposes all seven flight rates, live, keyed into travel_rates"
+  );
+  const crewRow = (g: string) => trvRows(g).find((it) => it.id === g + ".flyCrew");
+  ok(
+    crewRow("flame")?.store === "flame" && crewRow("flame")?.key === "flyCrew" && crewRow("flame")?.def === 1 &&
+      crewRow("repair")?.store === "repair" && crewRow("repair")?.def === 2 &&
+      crewRow("inspection")?.store === "inspection" && crewRow("inspection")?.def === 1,
+    "#208: each service group exposes its default flying crew"
+  );
+
+  const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
+  ok(!/^\s*import\s/m.test(trvSrc), "#208: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
+}
+
+/* --- #208 engines: drive mode unchanged vs before (hard-coded pre-change
+   figures), fly mode equals the hand-computed spec formula. All fixtures use
+   the no-coords estimate branch (trip = one-way × 2) so every number is exact. --- */
+import { computeEstimate as trvRepairEstimate } from "@/lib/repair-engine";
+import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engine";
+{
+  const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
+
+  // ---- flame (1 person) ----
+  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
+  const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
+  const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
+  ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.total, 575 / (1 - 0.3)),
+    "#208 flame: a $500 drive prices exactly as before (575 cost → 821.43)");
+  ok(fd.trip.mode === "drive" && !("flight" in fd.trip) && fd.travel?.total === fd.trip.total && fd.rawCost === fd.trip.total + fd.testingSubtotal,
+    "#208 flame: drive mode prices trip.total itself (bit-for-bit)");
+  const ff = computeFlameQuote({ venues: [flameFar] }, flameRates);
+  ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.total, 2515 / (1 - 0.3)),
+    "#208 flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
+  ok(ff.trip.flight?.crew === 1 && ff.trip.flight?.nights === 2 && ff.trip.flight?.tripDays === 3,
+    "#208 flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
+  const ffDrive = computeFlameQuote({ venues: [flameFar], travel: { mode: "drive" } }, flameRates);
+  ok(ffDrive.trip.mode === "drive" && ffDrive.rawCost === 2950, "#208 flame: forced Drive over the threshold prices the 2,200 drive");
+  const fdFly = computeFlameQuote({ venues: [flameNear], travel: { mode: "fly" } }, flameRates);
+  ok(fdFly.trip.mode === "fly" && fdFly.travel?.total === 1480 && fdFly.rawCost === 1555, "#208 flame: forced Fly under the threshold (1 night) = 1,480 travel");
+  const ffCrew2 = computeFlameQuote({ venues: [flameFar] }, { ...flameRates, flyCrew: 2 });
+  ok(ffCrew2.travel?.total === 2810, "#208 flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
+
+  // ---- repair (default crew 2) ----
+  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
+  ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.total, 607.5 / (1 - 0.3)) && rd.trip.mode === "drive",
+    "#208 repair: a $307.50 drive prices exactly as before (607.50 service cost)");
+  const rf = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24 }, repairRates);
+  ok(rf.trip.mode === "fly" && rf.trip.flight?.crew === 2 && rf.travel?.total === 3305 && rf.serviceCost === 5105 && near(rf.total, 5105 / (1 - 0.3)),
+    "#208 repair: 24 crew-hours far away fly 2 people — 3,305 travel + 1,800 labor");
+  const rf3 = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3 }, repairRates);
+  ok(rf3.trip.flight?.crew === 3 && rf3.travel?.total === 4290, "#208 repair: a crew of 3 on the quote flies 3 (never fewer than the priced crew)");
+  const rfe = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, emergency: true }, repairRates);
+  ok(rfe.laborCost === 2700 && rfe.trip.flight?.travelLabor === 1200, "#208 repair: emergency multiplies on-site labor only — travel labor stays at the base $75");
+  const rfOverride = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, travel: { mode: "drive" } }, repairRates);
+  ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#208 repair: forced Drive keeps the drive");
+
+  // ---- inspection (1 person) ----
+  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
+  ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.total, 832.5 / (1 - 0.3)) && idr.trip.mode === "drive",
+    "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
+  const ifl = trvInspectionEstimate({ venues: [{ id: "trv-i2", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 }] }, inspRates);
+  ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.total, 2665 / (1 - 0.3)),
+    "#208 inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
+}
+
+/* --- #208 save paths: every path that persists a service quote stores the
+   priced trip through savedTrip() (mode + flight) and the per-quote override --- */
+{
+  const trvSavers = [
+    "src/app/(app)/flame-tests/quote/actions.ts",
+    "src/app/(app)/repairs/quote/actions.ts",
+    "src/app/(app)/inspections/quote/actions.ts",
+    "src/lib/renewal-outreach.ts",
+  ];
+  for (const f of trvSavers) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(/trip: savedTrip\(r\.trip\)/.test(src) && !/mileageCost: Math\.round\(r\.trip\.mileageCost\)/.test(src),
+      `#208: ${f} persists the priced trip (mode + flight) through savedTrip()`);
+    ok(/travel: travelOverride/.test(src) && /\{ travel: travelOverride \}/.test(src),
+      `#208: ${f} prices with and persists the per-quote travel override`);
+  }
+  const renewalSrc = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
+  ok((renewalSrc.match(/carryTravelOverride\(/g) || []).length === 2 && (renewalSrc.match(/travelModeChangeReason\(/g) || []).length === 2,
+    "#208: flame + inspection renewals carry last year's travel choice and explain a mode flip");
+  const repairActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/repairs/quote/actions.ts"), "utf8");
+  ok(/crewSize,\s*\n\s*travel: travelOverride/.test(repairActionsSrc), "#208: the repair save passes the crew size so the flying crew is never smaller");
+}
+
+/* --- #208 builders: previews run the same planner with the live travel
+   rates, render the travel panel, post the override — and stay client-safe --- */
+{
+  for (const svc of ["flame-tests", "repairs", "inspections"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/controls.tsx`), "utf8");
+    ok(/from "@\/lib\/travel-plan"/.test(src) && /planTravel\(/.test(src) && /<TravelModePanel/.test(src),
+      `#208: the ${svc} builder previews through planTravel and renders the travel panel`);
+    ok(/fd\.set\("travel", JSON\.stringify\(overrideFromDraft\(travelDraft\) \?\? \{\}\)\)/.test(src),
+      `#208: the ${svc} builder posts its travel override`);
+    ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(src),
+      `#208: the ${svc} builder imports no value from @/lib/stores or @/db`);
+    ok(!/\* 1\.25\)/.test(src) && !/\/ 50\) \* 60/.test(src),
+      `#208: the ${svc} preview uses the live road factor / speed, not 1.25 / 50`);
+    const page = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
+    ok(/getTravelRates\(\)/.test(page) && /travelRates=\{travelRates\}/.test(page) && /normalizeTravelOverride\(/.test(page),
+      `#208: the ${svc} page hands the builder live travel rates and the saved override`);
+  }
+  const panelSrc = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
+  ok(/^"use client";/.test(panelSrc) && !/from "@\/(lib\/stores|db)\//.test(panelSrc) && /autoSwitchNote\(/.test(panelSrc),
+    "#208: the travel panel is a client component that imports only the pure planner");
+}
+
+/* --- #208 letters: fly mode prints ONE customer line, never the itemization --- */
+import { renderField as trvRenderField } from "@/lib/templates";
+{
+  ok(
+    trvRenderField(undefined, "flame_proposal", "priceLineFly", { curtainsLabel: "12 curtains", price: "$3,593" }) ===
+      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 12 curtains inspected and documented — comes to $3,593, all in.",
+    "#208: flame_proposal has a fly-mode price line that never says 'the drive'"
+  );
+  ok(
+    trvRenderField(undefined, "inspection_proposal", "priceLineFly", { lineSetsLabel: "40 line sets", price: "$3,807" }) ===
+      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 40 line sets inspected and documented — comes to $3,807, all in.",
+    "#208: inspection_proposal has a fly-mode price line"
+  );
+  ok(!!getTemplateDef("flame_proposal")?.fields.some((fl) => fl.id === "priceLineFly") &&
+      !!getTemplateDef("inspection_proposal")?.fields.some((fl) => fl.id === "priceLineFly"),
+    "#208: the fly price line is an editable template field on both proposals");
+  const trvLetters: Array<[string, RegExp]> = [
+    ["src/app/(app)/flame-tests/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/inspections/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/repairs/letter/page.tsx", /flyTravelSentence\(/],
+    ["src/lib/renewal-outreach.ts", /flyTravelSentence\(/],
+  ];
+  for (const [f, line] of trvLetters) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(/flightOf\(/.test(src) && line.test(src) && /travelLineAmount\(/.test(src),
+      `#208: ${f} prints the one travel line at travel's share of the sell price in fly mode`);
+    ok(!/lodging|perDiem|airfare/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")),
+      `#208: ${f} never prints the itemized airfare / lodging / per diem`);
+  }
+  const renewalLetters = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
+  ok((renewalLetters.match(/flight \? "priceLineFly" : rtMiles > 0 \? "priceLine" : "priceLineNoTravel"/g) || []).length === 2,
+    "#208: both renewal PDFs pick the fly price line in fly mode");
+}
+
+/* --- #208 branch-review fixes (2026-09-25): I1 (renewal nights carry),
+   M1 (both-fly change-reason wording), M2 (repair crew clamp), M3 (travel
+   panel normalized-entry hint), M4 (Estimating Rules formula note) --- */
+import {
+  carryInspectionTravelOverride,
+  flameChangeReasons,
+  inspectionChangeReasons,
+} from "@/lib/renewal-outreach";
+{
+  // I1 — a prior inspection quote's carried override drops `nights` (keeps
+  // mode + crew) when that quote covered more than one venue; a single-venue
+  // prior still carries nights forward.
+  const multiVenuePrior = carryInspectionTravelOverride(
+    { mode: "fly", crew: 2, nights: 3, airfarePerPerson: 900 },
+    3
+  );
+  ok(
+    JSON.stringify(multiVenuePrior) === JSON.stringify({ mode: "fly", crew: 2 }),
+    "#208 I1: a multi-venue prior's carried override drops nights (and airfare), keeps mode + crew"
+  );
+  const singleVenuePrior = carryInspectionTravelOverride(
+    { mode: "fly", crew: 2, nights: 3, airfarePerPerson: 900 },
+    1
+  );
+  ok(
+    JSON.stringify(singleVenuePrior) === JSON.stringify({ mode: "fly", crew: 2, nights: 3 }),
+    "#208 I1: a single-venue prior's carried override keeps nights too"
+  );
+  ok(
+    carryInspectionTravelOverride({ nights: 4 }, 2) === undefined,
+    "#208 I1: dropping the only field a multi-venue override carried collapses to no override (falls back to Auto)"
+  );
+  ok(
+    JSON.stringify(carryInspectionTravelOverride({ mode: "drive" }, 0)) === JSON.stringify({ mode: "drive" }),
+    "#208 I1: an override with no nights to drop passes through unchanged regardless of venue count"
+  );
+}
+{
+  // M1 — mileage-rate / travel-distance reasons are dropped when both years
+  // priced this trip as flights; a mode flip still explains itself.
+  const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const farFlameVenue: FTVenue = { id: "trv-m1-flame-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
+  const fr = computeFlameQuote({ venues: [farFlameVenue] }, flameRatesM1);
+  ok(fr.trip.mode === "fly", "#208 M1 flame setup: the fixture actually flies this year");
+  const priorFlameBothFly = {
+    rates: { ...flameRatesM1, mileageRate: 2 },
+    trip: { miles: fr.trip.miles - 40, mode: "fly" },
+    curtainsTotal: fr.curtainsTotal,
+  };
+  const flameBothFly = flameChangeReasons(priorFlameBothFly, fr);
+  ok(
+    !flameBothFly.some((x) => /mileage rate/.test(x)) && !flameBothFly.some((x) => /travel distance/.test(x)),
+    "#208 M1 flame: mileage-rate and travel-distance changes are never cited when both years flew"
+  );
+  const priorFlameDrove = { ...priorFlameBothFly, trip: { miles: fr.trip.miles - 40, mode: "drive" } };
+  const flameFlip = flameChangeReasons(priorFlameDrove, fr);
+  ok(
+    flameFlip.some((x) => /mileage rate/.test(x)) &&
+      flameFlip.some((x) => /travel distance/.test(x)) &&
+      flameFlip.some((x) => /priced as flights/.test(x)),
+    "#208 M1 flame: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
+  );
+
+  const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const farInspVenue = { id: "trv-m1-insp-far", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 };
+  const ir = trvInspectionEstimate({ venues: [farInspVenue] }, inspRatesM1);
+  ok(ir.trip.mode === "fly", "#208 M1 inspection setup: the fixture actually flies this year");
+  const priorInspBothFly = {
+    rates: { ...inspRatesM1, mileageRate: 2 },
+    venues: [{ id: "trv-m1-insp-far", label: "Far", lineSets: 40 }],
+    lineSetsTotal: ir.lineSetsTotal,
+    trip: { miles: ir.trip.miles - 40, mode: "fly" },
+  };
+  const inspBothFly = inspectionChangeReasons(priorInspBothFly, ir, "Far");
+  ok(
+    !inspBothFly.some((x) => /mileage rate/.test(x)) && !inspBothFly.some((x) => /travel distance/.test(x)),
+    "#208 M1 inspection: mileage-rate and travel-distance changes are never cited when both years flew"
+  );
+  const priorInspDrove = { ...priorInspBothFly, trip: { miles: ir.trip.miles - 40, mode: "drive" } };
+  const inspFlip = inspectionChangeReasons(priorInspDrove, ir, "Far");
+  ok(
+    inspFlip.some((x) => /mileage rate/.test(x)) &&
+      inspFlip.some((x) => /travel distance/.test(x)) &&
+      inspFlip.some((x) => /priced as flights/.test(x)),
+    "#208 M1 inspection: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
+  );
+}
+{
+  // M2 — repair-engine.ts clamps a manual crew override up to crewSize
+  // (D282 "never fewer"); an override already at or above it is untouched.
+  const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rClamped = trvRepairEstimate(
+    { venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3, travel: { mode: "fly", crew: 1 } },
+    repairRatesM2
+  );
+  ok(
+    rClamped.trip.flight?.crew === 3,
+    "#208 M2: a manual crew override below the job's crew size is clamped up to crewSize, never lower"
+  );
+  const rNotClamped = trvRepairEstimate(
+    { venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 2, travel: { mode: "fly", crew: 5 } },
+    repairRatesM2
+  );
+  ok(rNotClamped.trip.flight?.crew === 5, "#208 M2: a manual crew override above crewSize is left alone");
+}
+{
+  // M3 — the travel panel flags a normalized (rounded) or invalid crew/nights
+  // entry instead of silently pricing a different number than what's shown,
+  // and prices with travel-plan's fmtUsd rather than a local money().
+  const panelSrc2 = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
+  ok(
+    /\bfmtUsd\b/.test(panelSrc2) && /from "@\/lib\/travel-plan"/.test(panelSrc2) && !/function money\(/.test(panelSrc2),
+    "#208 M3: the travel panel prices with travel-plan's fmtUsd, not a local money()"
+  );
+  ok(
+    /function normalizedHint\(/.test(panelSrc2) &&
+      /normalizedHint\(draft\.crew, flight\.crew, 1\)/.test(panelSrc2) &&
+      /normalizedHint\(draft\.nights, flight\.nights, 0\)/.test(panelSrc2),
+    "#208 M3: a typed crew/nights value is checked against its effective (normalized) value next to the field"
+  );
+  ok(
+    /Invalid entry — using \$\{effective\}/.test(panelSrc2) && /Rounded to \$\{effective\}/.test(panelSrc2),
+    "#208 M3: the hint names the effective value actually pricing the quote, or flags the entry invalid"
+  );
+}
+{
+  // I2 (D286) — a quote saved before this feature shipped (past draft,
+  // no recorded travel choice) opens the builder seeded to Drive so
+  // saving/approving keeps the price the customer already saw; drafts and
+  // quotes with a recorded choice are untouched (stay Auto / their choice).
+  const trvLegacyPages = [
+    "src/app/(app)/flame-tests/quote/page.tsx",
+    "src/app/(app)/repairs/quote/page.tsx",
+    "src/app/(app)/inspections/quote/page.tsx",
+  ];
+  for (const f of trvLegacyPages) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(
+      /const legacyDrive =\s*\n\s*editQuote\.status !== "draft" && !\w+\?\.travel && !\w+\?\.trip\?\.mode;/.test(src),
+      `#208 I2: ${f} computes legacyDrive only for a past-draft quote with no recorded travel choice`
+    );
+    ok(
+      /\?\? \(legacyDrive \? \{ mode: "drive" \} : null\)/.test(src),
+      `#208 I2: ${f} seeds the travel draft to { mode: "drive" } for that legacy case`
+    );
+  }
+}
+{
+  // M4 — the Estimating Rules formula strings name flights-over-drive.
+  const trvFormula = (key: string, id: string): string =>
+    (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
+  const trvFlyNote = "travel = flights when one trip's drive cost ≥ threshold";
+  ok(trvFormula("flame", "flame.total").includes(trvFlyNote), "#208 M4: flame.total's formula string notes flights-over-drive");
+  ok(trvFormula("repair", "repair.total").includes(trvFlyNote), "#208 M4: repair.total's formula string notes flights-over-drive");
+  ok(trvFormula("inspection", "inspection.total").includes(trvFlyNote), "#208 M4: inspection.total's formula string notes flights-over-drive");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
@@ -10068,6 +10532,8 @@ seeded()
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   .then(() => deleteRound2AsyncChecks())
+  .then(() => partDocsUploadAsyncChecks())
+  .then(() => partDocsFetchAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -15225,12 +15691,11 @@ async function deletePartBAsyncChecks(): Promise<void> {
     { sku: "P4", desc: "Pointer", category: "Fixtures", specSameAs: "P1" },
     { sku: "P5", desc: "Unmapped", category: "Nothing" },
   ];
-  ok(hasDatasheet({ sku: "D1", docs: [{ kind: "datasheet" }] }), "coverage: a DaVinci datasheet link counts as a datasheet");
-  ok(!hasDatasheet({ sku: "D2", docs: [{ kind: "manual" }] }), "coverage: a manual alone is not a datasheet");
-  ok(hasDatasheet({ sku: "D3", productMetadata: { datasheets: [{ kind: "cut-sheet" }] } }), "coverage: a researched cut sheet counts");
-  ok(!hasDatasheet({ sku: "D4", productMetadata: { datasheets: [{ kind: "guide-spec" }] } }), "coverage: a guide spec alone is not a datasheet");
+  // #207: whether a part "has a datasheet" is the part-documents coverage
+  // rule's answer (datasheetSatisfiedSkus, tested in the #207 blocks); the
+  // table only reports the set it is handed. A link-only URL no longer counts.
   const articleIdBySku = articleIdMapForParts(parts as never, articles, sections);
-  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]));
+  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]), new Set(["P1"]));
   ok(rows.length === 5, "coverage: every part gets a row, mapped or not");
   ok(rows.find((r) => r.sku === "P1")!.state === "authored", "coverage: an authored part reads authored");
   ok(rows.find((r) => r.sku === "P2")!.state === "draft", "coverage: a draft reads draft, never authored");
@@ -15553,6 +16018,671 @@ async function gridSymbolLookAsyncChecks(): Promise<void> {
   ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
 }
 
+/* ======================================================================
+   Part documents (#207) — Task 1: document ids and blob paths. Pure.
+   ====================================================================== */
+import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDocFileName } from "@/lib/part-docs/types";
+
+{
+  const id = newDocumentId();
+  ok(/^PD-[0-9a-f]{12}$/.test(id) && isDocumentId(id) && newDocumentId() !== id, "part docs ids: PD- + 12 hex, random");
+  ok(!isDocumentId("PD-../x") && !isDocumentId("Q-2041") && !isDocumentId(null), "part docs ids: anything else is refused");
+  ok(safeDocFileName("ETC S4 / Datasheet (EN).pdf") === "ETC_S4_Datasheet_EN_.pdf" && safeDocFileName("") === "file", "part docs ids: file names are made path-safe");
+  ok(partDocBlobPath("PD-abcdef123456", "a b.pdf") === "part-docs/PD-abcdef123456/a_b.pdf", "part docs ids: the blob path is part-docs/<id>/<file>");
+  ok(blobPathBelongsTo("part-docs/PD-abcdef123456/a_b-Xy12.pdf", "PD-abcdef123456"), "part docs ids: a suffixed pathname under the id belongs to it");
+  ok(!blobPathBelongsTo("part-docs/PD-other123456/a.pdf", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/../x", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/sub/x.pdf", "PD-abcdef123456"), "part docs ids: another document's path, traversal and nesting are refused");
+}
+
+/* ======================================================================
+   Part documents (#207) — Fix wave: blobPathBelongsTo tightened to a
+   strict file-segment allow-list (a blocklist of literal ".." and "/"
+   can be bypassed once @vercel/blob's `get` concatenates the pathname
+   into a URL — WHATWG parsing treats "\" as "/" and can percent-decode
+   "%2e%2e"/"%2f" before dot-segment removal). No test here calls Blob;
+   this is pure string-rule coverage of the tightened regex.
+   ====================================================================== */
+{
+  const ID = "PD-abcdef123456";
+  ok(!blobPathBelongsTo(`part-docs/${ID}/%2e%2e\\PD-000000000000/x.pdf`, ID), "part docs ids: an encoded-dot-dot + backslash traversal payload is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a%2Fb.pdf`, ID), "part docs ids: a percent-encoded slash in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a?.pdf`, ID), "part docs ids: a literal ? in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a#.pdf`, ID), "part docs ids: a literal # in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a\\b.pdf`, ID), "part docs ids: a bare backslash in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/ .pdf`, ID), "part docs ids: a space in the file segment is refused");
+  ok(blobPathBelongsTo(`part-docs/${ID}/guide-spec-ab12CD34.docx`, ID), "part docs ids: a legit Blob-suffixed file name is accepted");
+  ok(safeDocFileName(".hidden.pdf") === "hidden.pdf", "part docs ids: safeDocFileName strips a leading dot rather than leave one");
+  ok(blobPathBelongsTo(partDocBlobPath(ID, ".hidden.pdf"), ID) && blobPathBelongsTo(partDocBlobPath(ID, "...pdf"), ID), "part docs ids: whatever safeDocFileName produces always satisfies the strict segment rule, even from an all-dot name");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 2: the coverage rule, the quoted-parts
+   counter, the filename matcher and the kind guesser. All pure.
+   ====================================================================== */
+import {
+  buildCoverageIndex, slotCoverage, slotSatisfied, coveredLabel, collapseList, datasheetSatisfiedSkus, urlKindOf,
+  COVERED_COLLAPSE,
+} from "@/lib/part-docs/coverage";
+import { quoteLineSkus, quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
+import { buildFilenameIndex, matchFileName, guessKind, normalizeFileName, MIN_MATCH_KEY } from "@/lib/part-docs/filename-match";
+import type { PartDocument as PdDoc, PartDocumentLink as PdLink, PartAccessoryLink as PdAcc } from "@/lib/part-docs/types";
+
+{
+  const doc = (id: string, kind: "datasheet" | "specsheet", file: boolean, url: string | null = null): PdDoc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1,
+    blobKey: file ? `part-docs/${id}/${id}.pdf` : null, sourceUrl: url, source: file ? "upload" : "davinci",
+    uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const link = (partSku: string, d: PdDoc): PdLink => ({ id: `L-${partSku}-${d.id}`, partSku, documentId: d.id, kind: d.kind, createdAt: 1, createdBy: "t" });
+  const acc = (parentSku: string, accessorySku: string, ownDatasheet = false): PdAcc => ({ id: `A-${parentSku}-${accessorySku}`, parentSku, accessorySku, source: "assembly", ownDatasheet });
+
+  const F1 = doc("PD-fix1aaaaaaa", "datasheet", true);
+  const F2 = doc("PD-fix2aaaaaaa", "datasheet", true);
+  const LENS = doc("PD-lensaaaaaaa", "datasheet", true);
+  const LINK = doc("PD-linkaaaaaaa", "datasheet", false, "https://example.com/x.pdf");
+  const SPEC = doc("PD-specaaaaaaa", "specsheet", true);
+  const index = buildCoverageIndex({
+    documents: [F1, F2, LENS, LINK, SPEC],
+    links: [link("FIX1", F1), link("FIX1", SPEC), link("FIX2", F2), link("LENSOWN", LENS), link("LINKY", LINK), link("FIX1", F1)],
+    accessoryLinks: [
+      acc("FIX1", "LENS"), acc("FIX2", "LENS"), acc("FIX1", "CLAMP"), acc("FIX1", "LENSOWN"),
+      acc("FIX1", "OPTOUT", true), acc("NODOC", "ORPHAN"), acc("FIX1", "FIX1"),
+    ],
+    parts: [
+      { sku: "NN", docNotNeeded: { datasheet: true } },
+      { sku: "URLONLY", docs: [{ kind: "datasheet", url: "https://etc.example/ds.pdf" }, { kind: "manual", url: "https://etc.example/m.pdf" }] },
+      { sku: "GUIDE", productMetadata: { datasheets: [{ kind: "guide-spec", sourceUrl: "https://mfr.example/guide.docx" }] } },
+      { sku: "LINKY", docs: [{ kind: "datasheet", url: "https://example.com/x.pdf" }] },
+    ],
+  });
+
+  // 1. own
+  const own = slotCoverage(index, "FIX1", "datasheet");
+  ok(own.state === "own" && own.docs.length === 1, "part docs coverage: an own file is 'own' (a duplicate link row counts once)");
+  ok(slotCoverage(index, "FIX1", "specsheet").state === "own", "part docs coverage: kinds are independent slots");
+  // 2. not needed
+  ok(slotCoverage(index, "NN", "datasheet").state === "not-needed", "part docs coverage: a not-needed mark satisfies its kind");
+  ok(slotCoverage(index, "NN", "specsheet").state === "missing", "part docs coverage: …and only its kind");
+  // 3. covered
+  const lens = slotCoverage(index, "LENS", "datasheet");
+  ok(lens.state === "covered" && lens.parents.join(",") === "FIX1,FIX2" && lens.docs.length === 2, "part docs coverage: an accessory is covered by every parent's own datasheet, N = distinct parent documents");
+  ok(slotCoverage(index, "LENSOWN", "datasheet").state === "own", "part docs coverage: an accessory's own file wins over coverage");
+  ok(slotCoverage(index, "OPTOUT", "datasheet").state === "missing", "part docs coverage: an ownDatasheet pair never covers");
+  ok(slotCoverage(index, "ORPHAN", "datasheet").state === "missing", "part docs coverage: a parent without a file covers nothing");
+  ok(slotCoverage(index, "CLAMP", "specsheet").state === "covered", "part docs coverage: spec sheets ride the same graph");
+  ok(slotCoverage(index, "FIX1", "datasheet").state === "own" && !index.parentsOf.has("FIX1"), "part docs coverage: a self-link is dropped");
+  // context
+  const inQuote = slotCoverage(index, "LENS", "datasheet", new Set(["LENS", "FIX2"]));
+  ok(inQuote.state === "covered" && inQuote.parents.join(",") === "FIX2", "part docs coverage: in a quote only parents on that quote cover");
+  ok(slotCoverage(index, "LENS", "datasheet", new Set(["LENS"])).state === "missing", "part docs coverage: an accessory quoted without any fixture is not covered on that quote");
+  // 4. link only
+  const urlOnly = slotCoverage(index, "URLONLY", "datasheet");
+  ok(urlOnly.state === "link-only" && urlOnly.urls.join(",") === "https://etc.example/ds.pdf", "part docs coverage: a catalog datasheet URL is link-only (a manual is not)");
+  ok(slotCoverage(index, "GUIDE", "specsheet").state === "link-only", "part docs coverage: a Guide Spec URL feeds the spec-sheet slot");
+  const linky = slotCoverage(index, "LINKY", "datasheet");
+  ok(linky.state === "link-only" && linky.docs.length === 1 && linky.urls.length === 0, "part docs coverage: a URL already on a linked document is not listed twice");
+  // 5. missing
+  ok(slotCoverage(index, "NOTHING", "datasheet").state === "missing", "part docs coverage: nothing at all is missing");
+  // helpers
+  ok(slotSatisfied(own) && slotSatisfied(lens) && !slotSatisfied(urlOnly) && !slotSatisfied({ state: "missing" }), "part docs coverage: own/covered satisfy, link-only/missing do not");
+  ok(slotSatisfied({ state: "not-needed" }), "part docs coverage: not-needed satisfies");
+  const sat = datasheetSatisfiedSkus(index, ["FIX1", "LENS", "URLONLY", "NN", "NOTHING"]);
+  ok([...sat].sort().join(",") === "FIX1,LENS,NN", "part docs coverage: datasheetSatisfiedSkus applies the rule, link-only excluded");
+  ok(COVERED_COLLAPSE === 5, "part docs coverage: the covered list collapses above 5");
+  const c = collapseList([1, 2, 3, 4, 5, 6, 7]);
+  ok(c.shown.length === 5 && c.more === 2 && collapseList([1, 2]).more === 0, "part docs coverage: collapseList shows 5 and counts the rest");
+  ok(coveredLabel(1, "datasheet") === "Covered on 1 fixture datasheet" && coveredLabel(3, "specsheet") === "Covered on 3 fixture spec sheets", "part docs coverage: the covered label pluralizes");
+  ok(urlKindOf("cut-sheet") === "datasheet" && urlKindOf("guide-spec") === "specsheet" && urlKindOf("manual") === null, "part docs coverage: URL kinds map to slots");
+}
+
+{
+  ok(quoteLineSkus({ sections: [{ kind: "labor", items: [{ sku: "LAB" }] }, { items: [{ sku: "A" }, { sku: "A" }, { sku: "MOB", labor: true }, { sku: " B " }] }] }).join(",") === "A,B", "part docs quoted: labor sections and labor lines are skipped, SKUs are distinct and trimmed");
+  ok(quoteLineSkus({ kind: "grid", lines: [{ sku: "G1" }, {}] }).join(",") === "G1", "part docs quoted: the Grid's flat lines count");
+  ok(quoteLineSkus(null).length === 0 && quoteLineSkus("junk").length === 0, "part docs quoted: junk yields nothing");
+
+  const catalog = new Set(["A", "B", "C", "G", "S"]);
+  const stats = quotedPartStats(
+    {
+      quotes: [
+        { updatedAt: 100, status: "lost", spec: { sections: [{ items: [{ sku: "A" }, { sku: "B" }] }] } },
+        { createdAt: 300, spec: { sections: [{ items: [{ sku: "A" }, { sku: "A" }, { sku: "NOT-IN-CATALOG" }] }] } },
+        { updatedAt: 1, spec: { kind: "grid", lines: [{ sku: "C" }] } },
+      ],
+      gridProjects: [
+        { placements: [{ partId: "G" }, { partId: "G" }, { partId: "A" }, { partId: "CURT", curtain: { type: "Border" } }] },
+        { placements: [{ partId: "G" }] },
+      ],
+      generated: [{ bom: [{ sku: "S" }] }, { rows: [{ row: { sku: "S" } }, { row: { sku: "S" } }] }],
+    },
+    (sku) => catalog.has(sku)
+  );
+  ok(stats.get("A")?.quotes === 2 && stats.get("A")?.lastQuotedAt === 300, "part docs quoted: quotes of any status count once each; lastQuotedAt is the newest");
+  ok(stats.get("A")?.grid === 1 && stats.get("G")?.grid === 2 && stats.get("G")?.quotes === 0, "part docs quoted: Grid placements count once per project");
+  ok(stats.get("S")?.bidSpecs === 2, "part docs quoted: both bid-spec shapes count, once per spec");
+  ok(!stats.has("NOT-IN-CATALOG") && !stats.has("CURT"), "part docs quoted: only catalog parts, never a curtain placement");
+  const ranked = rankQuotedParts(stats.values()).map((s) => s.sku);
+  ok(ranked.join(",") === "A,B,C,G,S", "part docs quoted: most-quoted first, then Grid/bid-spec use, then SKU");
+}
+
+{
+  const idx = buildFilenameIndex([
+    { sku: "ETC:S4LED-S3-LUSTR", manufacturerModelNumber: "S4LED S3 Lustr" },
+    { sku: "ETC:S4LED", manufacturerPartNumber: "7460A1001" },
+    { sku: "450" },
+    { sku: "DUP-A", manufacturerPartNumber: "SHARED-99" },
+    { sku: "DUP-B", manufacturerPartNumber: "SHARED-99" },
+  ]);
+  ok(MIN_MATCH_KEY === 4 && !idx.keys.has("450"), "part docs filenames: keys under 4 characters are never indexed");
+  ok(normalizeFileName("folder/S4LED-S3 Lustr_Datasheet.pdf") === "S4LEDS3LUSTRDATASHEET", "part docs filenames: path, extension and punctuation are dropped");
+  const long = matchFileName("S4LED-S3-Lustr_Datasheet.pdf", idx);
+  ok(long.confidence === "high" && long.skus.join(",") === "ETC:S4LED-S3-LUSTR", "part docs filenames: the longest match wins over a shorter prefix");
+  const pn = matchFileName("7460A1001 spec.pdf", idx);
+  ok(pn.confidence === "high" && pn.skus.join(",") === "ETC:S4LED", "part docs filenames: a MFR P/N matches");
+  const amb = matchFileName("shared_99.pdf", idx);
+  ok(amb.confidence === "ambiguous" && amb.skus.join(",") === "DUP-A,DUP-B", "part docs filenames: one key on two parts is ambiguous");
+  ok(matchFileName("brochure.pdf", idx).confidence === "none", "part docs filenames: nothing found is none");
+  ok(guessKind("S4LED Guide Spec.pdf") === "specsheet" && guessKind("x-specification.PDF") === "specsheet", "part docs kind: spec/guide/specification → spec sheet");
+  ok(guessKind("anything.docx") === "specsheet" && guessKind("anything.DOC") === "specsheet", "part docs kind: Word → spec sheet");
+  ok(guessKind("S4LED Datasheet.pdf") === "datasheet", "part docs kind: everything else → datasheet");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 4: magic bytes and the upload check.
+   verifyUploadedBlob runs against fake Blob deps — no token, no network.
+   ====================================================================== */
+import {
+  sniffDocumentType, checkDocumentBytes, contentDisposition, contentTypeForFileName, acceptFor, CONTENT_TYPES,
+} from "@/lib/part-docs/files";
+import { verifyUploadedBlob, displayFileName } from "@/lib/part-docs/verify-upload";
+
+const pdDocBytes = (s: string, pad = 0) => new Uint8Array([...new Array(pad).fill(0x20), ...[...s].map((c) => c.charCodeAt(0))]);
+const pdDocx = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."[Content_Types].xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."word/document.xml"].map((c) => c.charCodeAt(0)), 60);
+  return b;
+};
+// A ZIP that names a word/ path but is not an OOXML package at all (no
+// [Content_Types].xml) — Fix wave: requiring both markers must still
+// refuse this, not just a plain non-Word ZIP like pdXlsx below.
+const pdWordLikeZipNotOoxml = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."word/not-really-office.txt"].map((c) => c.charCodeAt(0)), 30);
+  return b;
+};
+const pdXlsx = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."[Content_Types].xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."xl/workbook.xml"].map((c) => c.charCodeAt(0)), 60);
+  return b;
+};
+const pdOle = () => new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
+
+ok(sniffDocumentType(pdDocBytes("%PDF-1.7\n")) === "pdf", "part docs bytes: %PDF- is a PDF");
+ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 500)) === "pdf", "part docs bytes: %PDF- after leading junk (inside 1 KB) is still a PDF");
+ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 2000)) === null, "part docs bytes: …but not past the first 1 KB");
+ok(sniffDocumentType(pdOle()) === "doc", "part docs bytes: the OLE2 magic is a Word .doc");
+ok(sniffDocumentType(pdDocx()) === "docx", "part docs bytes: a ZIP naming both [Content_Types].xml and word/ is a .docx");
+ok(sniffDocumentType(pdXlsx()) === null, "part docs bytes: a ZIP that is not Word is refused");
+ok(sniffDocumentType(pdWordLikeZipNotOoxml()) === null, "part docs bytes: a ZIP naming word/ WITHOUT [Content_Types].xml (not really OOXML) is refused");
+ok(sniffDocumentType(pdDocBytes("<!DOCTYPE html><html>")) === null, "part docs bytes: an HTML error page is refused");
+const pdCheck = checkDocumentBytes("datasheet", pdDocx());
+ok(!pdCheck.ok && pdCheck.error === "Datasheets must be PDF files.", "part docs bytes: a datasheet slot refuses Word");
+ok(checkDocumentBytes("specsheet", pdDocx()).ok && checkDocumentBytes("specsheet", pdOle()).ok, "part docs bytes: a spec-sheet slot takes Word");
+ok(contentTypeForFileName("A.DOCX") === CONTENT_TYPES.docx && contentTypeForFileName("a.pdf") === "application/pdf", "part docs bytes: content type by name for history files");
+ok(contentDisposition('Ünïcode "x".pdf') === `inline; filename="_n_code _x_.pdf"; filename*=UTF-8''${encodeURIComponent('Ünïcode "x".pdf')}`, "part docs bytes: the disposition carries an ASCII fallback and the UTF-8 name");
+ok(acceptFor("datasheet") === ".pdf,application/pdf" && acceptFor("specsheet").includes(".docx"), "part docs bytes: the file picker accept list follows the slot");
+ok(displayFileName("S4 Datasheet", "pdf") === "S4 Datasheet.pdf" && displayFileName("guide.PDF", "pdf") === "guide.PDF" && displayFileName("guide.pdf", "docx") === "guide.docx", "part docs bytes: the display name ends in the real extension");
+
+async function partDocsUploadAsyncChecks(): Promise<void> {
+  const removed: string[] = [];
+  const fake = (bytes: Uint8Array | null, size = 1000) => ({
+    head: async () => (bytes ? { bytes, size } : null),
+    remove: async (p: string) => { removed.push(p); },
+  });
+  const ID = "PD-abcdef123456";
+  const good = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/ds-Ab12.pdf`, fileName: "ds.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7")));
+  ok(good.ok && good.file.blobKey === `part-docs/${ID}/ds-Ab12.pdf` && good.file.size === 1000 && good.file.contentType === "application/pdf", "part docs upload: a real PDF under its own path is accepted");
+  const foreign = await verifyUploadedBlob({ documentId: ID, blobPathname: "part-docs/PD-000000000000/x.pdf", fileName: "x.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7")));
+  ok(!foreign.ok && removed.length === 0, "part docs upload: another document's pathname is refused without touching it");
+  const missing = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, fake(null));
+  ok(!missing.ok && missing.error.includes("didn't arrive"), "part docs upload: a blob that isn't there is refused");
+  const html = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, fake(pdDocBytes("<html>")));
+  ok(!html.ok && removed.includes(`part-docs/${ID}/x.pdf`), "part docs upload: a file that is not a PDF is refused and its blob deleted");
+  const big = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/big.pdf`, fileName: "big.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7"), 26 * 1024 * 1024));
+  ok(!big.ok && big.error === "That file is over 25 MB.", "part docs upload: over 25 MB is refused");
+  const word = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/g.docx`, fileName: "Guide Spec.docx", kind: "specsheet" }, fake(pdDocx()));
+  ok(word.ok && word.file.contentType === CONTENT_TYPES.docx && word.file.fileName === "Guide Spec.docx", "part docs upload: a Word spec sheet is accepted");
+
+  // Fix wave: a Blob read failure (network, BlobError, …) is not "never
+  // arrived" and must never leak the vendor's own error text.
+  const blobDown = {
+    head: async () => { throw new Error("BlobError: fetch failed, connect ECONNREFUSED 127.0.0.1:443"); },
+    remove: async (p: string) => { removed.push(p); },
+  };
+  const readFailure = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, blobDown);
+  ok(!readFailure.ok && readFailure.error === "Couldn't read the uploaded file — try again", "part docs upload: a Blob read failure is refused with a generic message, not the vendor's own text");
+}
+
+/* ======================================================================
+   Part documents (#207) — Fix wave 2, security re-review: the fix-wave-1
+   orphan cleanup itself opened a hole. attachUploadedDocumentAction's two
+   early refusals (bad kind, no live SKUs) called cleanupOrphan(documentId,
+   blobPathname) BEFORE the "does this document already exist" check —
+   `blobPathBelongsTo` only proves the pathname sits under
+   `part-docs/<documentId>/…`, not that it's the CALLER's own new upload.
+   Any signed-in user can read an existing document's real blobKey (or a
+   history entry's) through sync pull, then call the action with that
+   existing documentId, that real blobPathname, and a deliberately bad
+   kind — the live file was deleted before the exists-check ever ran.
+
+   requireUser() throws outside a request scope (same constraint used
+   throughout this suite — see refusedAdvanceAsyncChecks,
+   estimatorUpdateStatusGateAsyncChecks above), so
+   attachUploadedDocumentAction itself can't be called from this harness.
+   Proven structurally instead, the same way #180/#181 above prove their
+   server-action fixes: read the source, and confirm (a) neither early
+   refusal can reach a delete, and (b) the only code that CAN delete an
+   uploaded blob (verifyUploadedBlob's own refusal path) is positioned
+   strictly after the exists-check in source order, so it is unreachable
+   until the document is confirmed new.
+   ====================================================================== */
+{
+  const docActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/catalog/documents/actions.ts"),
+    "utf8"
+  );
+  // `\(` (not a bare word match) so these don't trip on the prose above
+  // explaining what used to be here — they check for an actual function
+  // definition or call, not a mention in a comment.
+  ok(!/cleanupOrphan\(/.test(docActionsSrc), "part docs actions: the vulnerable cleanupOrphan helper (and every call to it) is gone, not just unused");
+  ok(!/deleteBlob\(/.test(docActionsSrc), "part docs actions: this file never calls deleteBlob directly — the only blob delete anywhere in the upload path is verifyUploadedBlob's own gated refusal");
+
+  const fnStart = docActionsSrc.indexOf("export async function attachUploadedDocumentAction");
+  const fnEnd = docActionsSrc.indexOf("\nexport async function replaceDocumentFileAction");
+  ok(fnStart >= 0 && fnEnd > fnStart, "part docs actions fixture: attachUploadedDocumentAction is still where the test expects it");
+  const fnBody = docActionsSrc.slice(fnStart, fnEnd);
+
+  const existsCheckAt = fnBody.indexOf("await getDocument(input.documentId)");
+  const verifyCallAt = fnBody.indexOf("await verifyUploadedBlob(input)");
+  ok(existsCheckAt >= 0 && verifyCallAt >= 0, "part docs actions fixture: both the exists-check and the verifyUploadedBlob call are still present");
+  ok(verifyCallAt > existsCheckAt, "part docs actions: verifyUploadedBlob (the only call in this function that can delete a blob) runs strictly AFTER the exists-check — unreachable while the document already exists");
+
+  const beforeExistsCheck = fnBody.slice(0, existsCheckAt);
+  ok(!/verifyUploadedBlob\(|deleteBlob\(|cleanupOrphan\(/.test(beforeExistsCheck), "part docs actions: nothing before the exists-check can touch Blob at all — the bad-kind and no-live-SKU refusals just return {ok:false}");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 5: the guarded fetcher. A fake fetch and
+   IP-literal hosts keep every case offline (a public literal IP needs no
+   DNS; a private one is refused before any request).
+   ====================================================================== */
+import { fetchDocumentBytes } from "@/lib/part-docs/fetch";
+import { fileNameForFetched } from "@/lib/part-docs/files";
+
+ok(fileNameForFetched(`attachment; filename="S4 LED.pdf"`, "https://x.example/a", "t", "pdf") === "S4 LED.pdf", "part docs fetch names: Content-Disposition filename wins");
+ok(fileNameForFetched(`attachment; filename*=UTF-8''Gu%C3%ADa.pdf`, "https://x.example/a", "t", "pdf") === "Guía.pdf", "part docs fetch names: the RFC 5987 name is decoded");
+ok(fileNameForFetched(null, "https://x.example/docs/S4_Datasheet.pdf?v=2", "t", "pdf") === "S4_Datasheet.pdf", "part docs fetch names: else the URL's file name");
+ok(fileNameForFetched(null, "https://www.etcconnect.com/WorkArea/DownloadAsset.aspx?id=1", "Source Four LED", "pdf") === "Source Four LED.pdf", "part docs fetch names: an .aspx endpoint falls back to the title");
+ok(fileNameForFetched(`inline; filename="guide.pdf"`, "https://x.example/a", "t", "docx") === "guide.docx", "part docs fetch names: the extension follows the real bytes");
+
+async function partDocsFetchAsyncChecks(): Promise<void> {
+  const pdf = new TextEncoder().encode("%PDF-1.7\n...");
+  const calls: string[] = [];
+  const fakeFetch = (routes: Record<string, () => Response>) =>
+    (async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      const r = routes[url];
+      return r ? r() : new Response("nope", { status: 404 });
+    }) as typeof fetch;
+  const neverUnsafe = async () => false;
+
+  const scheme = await fetchDocumentBytes("file:///etc/passwd");
+  ok(!scheme.ok && scheme.error === "Only http(s) links can be fetched.", "part docs fetch: a non-http scheme is refused");
+  const loop = await fetchDocumentBytes("http://127.0.0.1/x.pdf", { fetchImpl: fakeFetch({}) });
+  ok(!loop.ok && calls.length === 0, "part docs fetch: a loopback literal is refused before any request (venue-calendar guard)");
+  const meta = await fetchDocumentBytes("http://169.254.169.254/latest", { fetchImpl: fakeFetch({}) });
+  ok(!meta.ok && calls.length === 0, "part docs fetch: the cloud metadata address is refused");
+
+  const hop = await fetchDocumentBytes("http://93.184.216.34/ds.pdf", {
+    fetchImpl: fakeFetch({ "http://93.184.216.34/ds.pdf": () => new Response(null, { status: 302, headers: { location: "http://10.0.0.5/ds.pdf" } }) }),
+  });
+  ok(!hop.ok && !calls.includes("http://10.0.0.5/ds.pdf"), "part docs fetch: a redirect to a private address is refused and never requested");
+
+  const rebind = await fetchDocumentBytes("https://docs.example.com/ds.pdf", { fetchImpl: fakeFetch({}), isUnsafeHost: async () => true });
+  ok(!rebind.ok && rebind.error === "That host isn't reachable from the server.", "part docs fetch: a hostname resolving to a private address is refused");
+
+  const good = await fetchDocumentBytes("http://93.184.216.34/a", {
+    isUnsafeHost: neverUnsafe,
+    fetchImpl: fakeFetch({
+      "http://93.184.216.34/a": () => new Response(null, { status: 301, headers: { location: "/files/ds.pdf" } }),
+      "http://93.184.216.34/files/ds.pdf": () => new Response(pdf, { status: 200, headers: { "content-disposition": 'attachment; filename="ds.pdf"' } }),
+    }),
+  });
+  ok(good.ok && good.file.finalUrl === "http://93.184.216.34/files/ds.pdf" && good.file.bytes.byteLength === pdf.byteLength && good.file.contentDisposition!.includes("ds.pdf"), "part docs fetch: a relative redirect is re-validated, followed, and the bytes returned");
+
+  const big = await fetchDocumentBytes("http://93.184.216.34/big", {
+    isUnsafeHost: neverUnsafe,
+    maxBytes: 4,
+    fetchImpl: fakeFetch({ "http://93.184.216.34/big": () => new Response(pdf, { status: 200 }) }),
+  });
+  ok(!big.ok && big.error === "That file is over 25 MB.", "part docs fetch: the streaming size cap refuses an oversized body");
+  const missing = await fetchDocumentBytes("http://93.184.216.34/404", { isUnsafeHost: neverUnsafe, fetchImpl: fakeFetch({}) });
+  ok(!missing.ok && missing.error === "The link returned HTTP 404.", "part docs fetch: an HTTP error is reported with its status");
+  const loops = await fetchDocumentBytes("http://93.184.216.34/r0", {
+    isUnsafeHost: neverUnsafe,
+    fetchImpl: (async (input: string | URL | Request) => {
+      const n = Number(String(input).split("/r").pop()) + 1;
+      return new Response(null, { status: 302, headers: { location: `/r${n}` } });
+    }) as typeof fetch,
+  });
+  ok(!loops.ok && loops.error === "Too many redirects.", "part docs fetch: a redirect loop stops");
+
+  // Review fix wave 1, M7(c): a body that never finishes must be refused by
+  // the timeout, not hang the request forever. The fake response's stream
+  // only ever settles when the AbortController's signal fires — exactly
+  // what guardedFetchBytes's timer drives — so this proves the timeout
+  // actually tears down an in-progress body read, not just a pre-body wait.
+  const slow = await fetchDocumentBytes("http://93.184.216.34/slow", {
+    isUnsafeHost: neverUnsafe,
+    timeoutMs: 20,
+    fetchImpl: (async (_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch,
+  });
+  ok(!slow.ok && slow.error === "The link took too long to respond.", "part docs fetch: a slow body hitting the timeout is refused, not left hanging");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 6: the to-do list's view models and the
+   "Also covers…" suggestions. Pure.
+   ====================================================================== */
+import {
+  documentRow, documentRowMatches, parseDocumentsFilter, progressLine, slotViewFor, viewSatisfied, type DocumentRow,
+} from "@/lib/part-docs/views";
+import { alsoCoversSuggestions, commonPrefixLength, familyKey, isSameFamily } from "@/lib/part-docs/suggest";
+
+{
+  const docs: PdDoc[] = [
+    { id: "PD-ownaaaaaaaa", kind: "datasheet", title: "Own", fileName: "own.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-ownaaaaaaaa/own.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] },
+    { id: "PD-failaaaaaaa", kind: "datasheet", title: "Broken", fileName: "b.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: "https://x.example/b.pdf", source: "fetch", uploadedAt: 1, uploadedBy: "t", history: [], lastFetch: { at: 9, ok: false, error: "HTTP 404" } },
+  ];
+  const idx = buildCoverageIndex({
+    documents: docs,
+    links: [
+      { id: "l1", partSku: "FIXV", documentId: "PD-ownaaaaaaaa", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "l2", partSku: "LINKV", documentId: "PD-failaaaaaaa", kind: "datasheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [{ id: "a", parentSku: "FIXV", accessorySku: "LENSV", source: "assembly" }],
+    parts: [],
+  });
+  const descOf = (s: string) => ({ FIXV: "Fixture V" } as Record<string, string>)[s] ?? "";
+  const covered = slotViewFor(idx, "LENSV", "datasheet", descOf);
+  ok(covered.state === "covered" && covered.parents[0].desc === "Fixture V", "part docs views: a covered slot names its parents with descriptions");
+  const linkOnly = slotViewFor(idx, "LINKV", "datasheet", descOf);
+  ok(linkOnly.state === "link-only" && linkOnly.error === "HTTP 404", "part docs views: a link-only slot carries the last fetch failure");
+  ok(viewSatisfied(covered) && !viewSatisfied(linkOnly), "part docs views: satisfied matches the coverage rule");
+
+  const stat = (sku: string, quotes: number) => ({ sku, quotes, lastQuotedAt: 5, grid: 0, bidSpecs: 0 });
+  const rows: DocumentRow[] = [
+    documentRow(stat("FIXV", 9), { sku: "FIXV", desc: "Fixture V", category: "Lighting", mfr: "ETC", manufacturerModelNumber: "S4V" }, idx, descOf),
+    documentRow(stat("LENSV", 4), { sku: "LENSV", desc: "Lens V", category: "Lenses", mfr: "ETC" }, idx, descOf),
+    documentRow(stat("LINKV", 2), { sku: "LINKV", desc: "Link V", category: "Lighting", mfr: "Altman" }, idx, descOf),
+    documentRow(stat("NONEV", 1), { sku: "NONEV", desc: "None V", category: "Lighting", mfr: "Altman" }, idx, descOf),
+  ];
+  ok(rows[0].model === "S4V" && rows[0].datasheet.state === "own" && rows[0].specsheet.state === "missing", "part docs views: a row carries both slots");
+  const f = (sp: Record<string, string>) => rows.filter((r) => documentRowMatches(r, parseDocumentsFilter(sp))).map((r) => r.sku).join(",");
+  ok(f({}) === "FIXV,LENSV,LINKV,NONEV", "part docs views: no filter keeps every quoted part");
+  ok(f({ show: "missing-datasheet" }) === "LINKV,NONEV", "part docs views: missing datasheet = link-only or missing");
+  ok(f({ show: "link" }) === "LINKV" && f({ show: "covered" }) === "LENSV", "part docs views: link and covered filters");
+  ok(f({ mfr: "Altman", q: "none" }) === "NONEV" && f({ cat: "Lenses" }) === "LENSV", "part docs views: manufacturer, category and search compose");
+  ok(parseDocumentsFilter({ show: "bogus" }).show === "all", "part docs views: an unknown show falls back to all");
+  ok(progressLine(rows, "datasheet") === "2 of 4 quoted parts have a datasheet", "part docs views: the progress line counts satisfied slots");
+}
+
+{
+  ok(familyKey({ sku: "ETC:S4LED-S3-L", manufacturerModelNumber: "" }) === "S4LEDS3L", "part docs suggest: the family key is the normalized model, else SKU");
+  ok(commonPrefixLength("S4LEDS3LUSTR", "S4LEDS3DAYLT") === 7, "part docs suggest: common prefix");
+  ok(isSameFamily("S4LEDS3LUSTR", "S4LEDS3DAYLT") && !isSameFamily("S4LED", "S4PAR") && !isSameFamily("ABCDEFGHIJKL", "ABCDEZZZZZZZ"), "part docs suggest: family needs ≥5 shared and at least half the shorter key");
+  const parts = [
+    { sku: "S4LED-S3-LUSTR", desc: "Lustr", mfr: "ETC" },
+    { sku: "S4LED-S3-DAYLT", desc: "Daylight", mfr: "ETC" },
+    { sku: "S4LED-S3-TUNGS", desc: "Tungsten", mfr: "E.T.C." },
+    { sku: "S4LED-S3-OTHER", desc: "Other brand", mfr: "Altman" },
+    { sku: "LENS-19", desc: "19 deg lens", mfr: "ETC" },
+    { sku: "S4PAR", desc: "PAR", mfr: "ETC" },
+  ];
+  const s = alsoCoversSuggestions(parts[0], parts, ["LENS-19", "GHOST"], new Set(["S4LED-S3-TUNGS"]));
+  ok(s.map((x) => `${x.sku}:${x.reason}`).join(",") === "LENS-19:accessory,S4LED-S3-DAYLT:family", "part docs suggest: accessories first, then same-manufacturer family; linked, other-brand and unrelated parts are left out");
+  ok(alsoCoversSuggestions(parts[0], parts, [], new Set(), 1).length === 1, "part docs suggest: the list is capped");
+}
+
+/* --- Part documents (#207) — Task 7: bulk-drop review rows --- */
+import { matchFileRows } from "@/lib/part-docs/filename-match";
+{
+  const rows = matchFileRows(
+    ["ColorSource PAR Datasheet.pdf", "CSPAR guide spec.docx", "random.pdf"],
+    [{ sku: "ETC:CSPAR", manufacturerModelNumber: "ColorSource PAR" }]
+  );
+  ok(rows.map((r) => `${r.confidence}:${r.kind}:${r.skus.join("|")}`).join(",") === "high:datasheet:ETC:CSPAR,high:specsheet:ETC:CSPAR,none:datasheet:", "part docs bulk: one review row per file, in order, with kind and matched SKUs");
+}
+
+/* --- Part documents (#207) — Task 8: the part editor's Documents view --- */
+import { partDocsView } from "@/lib/part-docs/views";
+{
+  const file = (id: string, kind: "datasheet" | "specsheet", at: number): PdDoc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1, blobKey: `part-docs/${id}/f.pdf`, sourceUrl: null,
+    source: "upload", uploadedAt: at, uploadedBy: "Jeff",
+    history: [{ blobKey: `part-docs/${id}/old.pdf`, fileName: "old.pdf", size: 1, replacedAt: at - 1, replacedBy: "Chris" }],
+  });
+  const idx = buildCoverageIndex({
+    documents: [file("PD-edfixds0000", "datasheet", 10), file("PD-edfixss0000", "specsheet", 20), file("PD-edlens00000", "datasheet", 5)],
+    links: [
+      { id: "1", partSku: "EDFIX", documentId: "PD-edfixds0000", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "2", partSku: "EDFIX", documentId: "PD-edfixss0000", kind: "specsheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [
+      { id: "a", parentSku: "EDFIX", accessorySku: "EDLENS", source: "assembly" },
+      { id: "b", parentSku: "EDFIX", accessorySku: "EDCLAMP", source: "davinci" },
+      { id: "c", parentSku: "EDBARE", accessorySku: "EDLENS", source: "davinci" },
+    ],
+    parts: [],
+  });
+  const desc = (s: string) => `${s} desc`;
+  const fix = partDocsView(idx, "EDFIX", desc);
+  ok(fix.documents.map((d) => d.id).join(",") === "PD-edfixss0000,PD-edfixds0000", "part docs editor: the part's documents, newest first");
+  ok(fix.documents[0].history[0].fileName === "old.pdf" && fix.documents[0].history[0].index === 0, "part docs editor: replaced files are listed for viewing");
+  ok(fix.accessories.map((a) => a.sku).join(",") === "EDLENS,EDCLAMP" && fix.coveredBy.length === 0, "part docs editor: a fixture lists the accessories it covers");
+  const lens = partDocsView(idx, "EDLENS", desc);
+  ok(lens.coveredBy.length === 1 && lens.coveredBy[0].sku === "EDFIX" && lens.coveredBy[0].kinds.join(",") === "datasheet,specsheet", "part docs editor: an accessory shows which fixtures cover it, and for which kinds (a parent without a file is left out)");
+  ok(lens.slots.datasheet.state === "covered" && lens.slots.specsheet.state === "covered" && lens.documents.length === 0, "part docs editor: both slots read covered");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 9: Assembly Builder ↔ accessory graph. Pure.
+   ====================================================================== */
+import {
+  assemblyRef, subassemblyRef, fixtureParentSku, fixtureAssemblyPairs, subassemblyPairs, memberCoverageFor, memberCoverageLabel, pairKey,
+} from "@/lib/part-docs/assembly-graph";
+{
+  const asm = {
+    components: [
+      { sku: "S4LED", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+      { sku: "LENS19", label: "Lens", role: "lens" as const, defaultQty: 1 },
+      { sku: "CLAMP", label: "Clamp", role: "mount" as const, defaultQty: 0 },
+      { sku: "S4LED", label: "dup", role: "other" as const, defaultQty: 1 },
+    ],
+  };
+  ok(fixtureParentSku(asm) === "S4LED" && fixtureParentSku({ components: [] }) === null, "part docs assemblies: the fixture component is the parent");
+  const pairs = fixtureAssemblyPairs(asm);
+  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? "in" : "opt"}`).join(",") === "S4LED>LENS19:in,S4LED>CLAMP:opt", "part docs assemblies: every other component is an accessory; qty 0 is optional, the fixture itself is skipped");
+  ok(fixtureAssemblyPairs({ components: [{ sku: "X", label: "x", role: "lens", defaultQty: 1 }] }).length === 0, "part docs assemblies: no fixture, no links");
+  const sub = subassemblyPairs({ lightEngineSku: "ENG", lensSku: "L1", options: { data: [{ sku: "D1", name: "d", cost: 1, qty: 2 }], power: [], mounting: [{ sku: "M1", name: "m", cost: 1, qty: 1 }], accessories: [] } });
+  ok(sub.map((p) => `${p.accessorySku}x${p.maxQty}`).join(",") === "L1x1,D1x2,M1x1" && sub.every((p) => p.parentSku === "ENG"), "part docs assemblies: a subassembly's lens and options are the light engine's accessories");
+  ok(assemblyRef("fa-1") === "assembly:fa-1" && subassemblyRef("SA-1") === "subassembly:SA-1", "part docs assemblies: the two builders keep separate sourceRef namespaces");
+
+  const idx = buildCoverageIndex({
+    documents: [{ id: "PD-engds000000", kind: "datasheet", title: "E", fileName: "e.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-engds000000/e.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] }],
+    links: [{ id: "1", partSku: "S4LED", documentId: "PD-engds000000", kind: "datasheet", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [
+      { id: "a", parentSku: "S4LED", accessorySku: "LENS19", source: "assembly", sourceRef: "assembly:fa-1" },
+      { id: "b", parentSku: "S4LED", accessorySku: "CLAMP", source: "assembly", sourceRef: "assembly:fa-1", ownDatasheet: true },
+    ],
+    parts: [],
+  });
+  const cov = memberCoverageFor(idx, [...pairs, { parentSku: "S4LED", accessorySku: "NEW" }]);
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "LENS19")]) === "Covered by fixture datasheet", "part docs assemblies: a member reads covered by the fixture datasheet by default");
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "CLAMP")]) === "Has its own datasheet — none attached yet", "part docs assemblies: the own-datasheet toggle opts the member out");
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "NEW")]) === "Save to link it to the fixture" && !cov[pairKey("S4LED", "NEW")].linked, "part docs assemblies: an unsaved member is not linked yet");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 10: the DaVinci accessory graph in the
+   extract, and the pre-fill plan. Pure.
+   ====================================================================== */
+import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
+{
+  const LIBDOC = {
+    ...LIB162,
+    constants: {
+      ...LIB162.constants,
+      productClassifications: [{ productClassificationId: "PC-P", text: "Product" }, { productClassificationId: "PC-A", text: "Accessory" }],
+    },
+    types: [
+      { ...LIB162.types[0], typeInformation: { ...LIB162.types[0].typeInformation, productClassificationId: "PC-P" },
+        accessories: [{ typeId: "TY-LENS", maxQuantity: 2, userDefinable: true }, { typeId: "TY-LENS", maxQuantity: 2, userDefinable: true }, { typeId: "TY-X", maxQuantity: 1, userDefinable: false }, { typeId: "TY-GHOST", maxQuantity: 1 }] },
+      LIB162.types[1],
+      // A lens tube: no ports, no documents — dropped from records, kept for the graph.
+      { typeId: "TY-LENS", typeInformation: { displayName: "19 deg lens tube", categoryId: "C-1", manufacturerId: "M-ETC", productClassificationId: "PC-A" },
+        partInformation: { generatorData: { lookupData: [{ modelNumber: "419LT", partNumber: "7060A1017" }] } }, documents: [], ports: [], accessories: [] },
+    ],
+  };
+  const ex = extractLibrary(LIBDOC);
+  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#207 extract: records still drop contentless types");
+  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#207 extract: accessory links are kept once, never to the internal category or an unknown type");
+  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#207 extract: both ends carry classification and normalized model numbers");
+  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#207 extract: the parent is described too; the excluded type is not");
+  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#207 extract: a library with no accessories yields an empty graph");
+
+  const allowEtc = (m: string) => m === "ETC" || m === "High End Systems";
+  const plan = planDavinciPrefill(ex, [{ sku: "ETC:CSPAR" }, { sku: "CSPAR" }, { sku: "419LT" }, { sku: "ETC:7060A1017" }, { sku: "UNRELATED" }], allowEtc);
+  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#207 prefill: one document per English datasheet URL (the reissued duplicate is one)");
+  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#207 prefill: the document links to every Peak SKU of the type");
+  ok(
+    plan.accessoryPairs.map((p) => `${p.parentSku}>${p.accessorySku}x${p.maxQty}`).sort().join(",") ===
+      "CSPAR>419LTx2,CSPAR>ETC:7060A1017x2,ETC:CSPAR>419LTx2,ETC:CSPAR>ETC:7060A1017x2",
+    "#207 prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
+  );
+  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#207 prefill: the report counts matched types and pairs");
+  const gated = planDavinciPrefill(ex, [{ sku: "CSPAR" }, { sku: "419LT" }], () => false);
+  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#207 prefill: the manufacturer gate refuses every record");
+  const noLens = planDavinciPrefill(ex, [{ sku: "CSPAR" }], allowEtc);
+  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#207 prefill: a link with no Peak part on one end writes nothing");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 11: the client package carries each
+   document once, covers accessories only in context, and says so.
+   ====================================================================== */
+import { resolvePackageDocs, packageEntryName } from "@/lib/part-docs/package";
+import { coveredNote } from "@/lib/client-package";
+{
+  const file = (id: string, kind: "datasheet" | "specsheet", name: string): PdDoc => ({
+    id, kind, title: name, fileName: name, contentType: "application/pdf", size: 1, blobKey: `part-docs/${id}/${name}`, sourceUrl: null,
+    source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const idx = buildCoverageIndex({
+    documents: [file("PD-pkgfix00000", "datasheet", "S4 Datasheet.pdf"), file("PD-pkgspec0000", "specsheet", "S4 Guide.docx")],
+    links: [
+      { id: "1", partSku: "PKG-FIX", documentId: "PD-pkgfix00000", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "2", partSku: "PKG-FIX", documentId: "PD-pkgspec0000", kind: "specsheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [
+      { id: "a", parentSku: "PKG-FIX", accessorySku: "PKG-LENS", source: "assembly" },
+      { id: "b", parentSku: "PKG-FIX", accessorySku: "PKG-CLAMP", source: "davinci" },
+    ],
+    parts: [{ sku: "PKG-NN", docNotNeeded: { datasheet: true } }],
+  });
+  const withFix = resolvePackageDocs(idx, ["PKG-FIX", "PKG-LENS", "PKG-CLAMP", "PKG-NN"]);
+  ok(withFix.documents.length === 2 && withFix.documents.find((d) => d.kind === "datasheet")!.skus.join(",") === "PKG-FIX,PKG-LENS,PKG-CLAMP", "part docs package: the fixture datasheet is listed once, serving the fixture and its accessories");
+  ok(withFix.bySku.get("PKG-LENS")!.datasheetCoveredBy.join(",") === "PKG-FIX" && withFix.bySku.get("PKG-LENS")!.datasheetOk, "part docs package: an accessory on the same quote is covered by its fixture");
+  ok(withFix.bySku.get("PKG-NN")!.datasheetOk && !withFix.bySku.get("PKG-NN")!.datasheet, "part docs package: not-needed is no gap and no file");
+  const alone = resolvePackageDocs(idx, ["PKG-LENS"]);
+  ok(!alone.bySku.get("PKG-LENS")!.datasheetOk && alone.documents.length === 0, "part docs package: an accessory quoted without its fixture is not covered on that quote");
+  ok(!resolvePackageDocs(null, ["PKG-FIX"]).bySku.get("PKG-FIX")!.datasheetOk, "part docs package: no index means no documents");
+  const used = new Set<string>();
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  ok(packageEntryName({ documentId: "PD-a", kind: "datasheet", name: "S4 Datasheet.pdf" }, used, safe) === "datasheets/S4_Datasheet.pdf", "part docs package: datasheets go under datasheets/");
+  ok(packageEntryName({ documentId: "PD-b", kind: "datasheet", name: "S4 Datasheet.pdf" }, used, safe) === "datasheets/PD-b-S4_Datasheet.pdf", "part docs package: a clashing name is prefixed with its id");
+  ok(packageEntryName({ documentId: "PD-c", kind: "specsheet", name: "g.docx" }, used, safe) === "specsheets/g.docx", "part docs package: spec sheets go under specsheets/");
+  ok(coveredNote("PKG-LENS", ["PKG-FIX"]).note === "covered by PKG-FIX", "part docs package: the gap report says covered by <fixture>");
+
+  const part = (sku: string) => ({ id: sku, sku, desc: sku, category: "Lighting", unit: "ea", list: 1, cost: 1 });
+  const grid = (placements: string[]) => ({
+    id: "GRD-PKG", name: "P", createdAt: 1, quoteId: null,
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
+    placements: placements.map((partId, i) => ({ id: `gp-${i}`, optionId: "opt-a", partId })),
+  });
+  const m = buildClientPackageManifest(grid(["PKG-FIX", "PKG-LENS", "PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
+  ok(!m.gaps.some((g) => g.kind === "missing-datasheet"), "part docs package: a Grid design with the fixture has no datasheet gap for its lens");
+  ok(m.covered.length === 1 && m.covered[0].note === "covered by PKG-FIX" && m.documents.length === 2 && m.counts.datasheets === 1, "part docs package: the manifest lists the covered accessory and each document once");
+  const lensOnly = buildClientPackageManifest(grid(["PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
+  ok(lensOnly.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === "PKG-LENS"), "part docs package: a lens placed without its fixture is a missing-datasheet gap on that design");
+}
+
+/* --- Part documents (#207) — Task 12: Displays API datasheet links --- */
+import { publicDatasheets } from "@/lib/displays-api";
+{
+  const idx = buildCoverageIndex({
+    documents: [
+      { id: "PD-dispds00000", kind: "datasheet", title: "S4", fileName: "S4.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-dispds00000/S4.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] },
+    ],
+    links: [{ id: "1", partSku: "DISP-A", documentId: "PD-dispds00000", kind: "datasheet", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [],
+    parts: [{ sku: "DISP-B", productMetadata: { datasheets: [{ kind: "datasheet", sourceUrl: "https://mfr.example/b.pdf" }] } }],
+  });
+  ok(JSON.stringify(publicDatasheets("DISP-A", idx)) === JSON.stringify([{ name: "S4.pdf", url: "/api/part-documents/PD-dispds00000" }]), "part docs displays: a linked datasheet points at the document viewer");
+  ok(JSON.stringify(publicDatasheets("DISP-B", idx)) === JSON.stringify([{ name: "b.pdf", url: "https://mfr.example/b.pdf" }]), "part docs displays: an unfetched researched link is the manufacturer URL, not a 404 proxy");
+  ok(publicDatasheets("DISP-C", idx).length === 0 && publicDatasheets("DISP-A").length === 0, "part docs displays: nothing linked, nothing listed");
+  const part = { id: "DISP-A", sku: "DISP-A", desc: "A", category: "Lighting", unit: "ea", list: 1, cost: 1, updatedAt: 5 };
+  const noDocs = catalogEtag([part] as never, { sections: [], articles: [] });
+  ok(catalogEtag([part] as never, { sections: [], articles: [], docs: idx }) !== noDocs, "part docs displays: attaching a document changes the catalog ETag with no part touched");
+  ok(publicCatalogPart(part as never, { sections: [], articles: [], docs: idx }).datasheets[0].url === "/api/part-documents/PD-dispds00000", "part docs displays: publicCatalogPart carries the viewer links");
+}
+
+/* --- Part documents (#207) — final fix wave: covered cells collapse on the
+       server (M7); part search's SQL token is the most selective (T7) --- */
+import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
+{
+  const parents = Array.from({ length: 8 }, (_, i) => `COLP-${i}`);
+  const idx = buildCoverageIndex({
+    documents: parents.map((p, i): PdDoc => ({
+      id: `PD-col${String(i).padStart(9, "0")}`, kind: "datasheet", title: p, fileName: `${p}.pdf`, contentType: "application/pdf", size: 1,
+      blobKey: `part-docs/x/${p}.pdf`, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+    })),
+    links: parents.map((p, i) => ({ id: `l${i}`, partSku: p, documentId: `PD-col${String(i).padStart(9, "0")}`, kind: "datasheet" as const, createdAt: 1, createdBy: "t" })),
+    accessoryLinks: parents.map((p, i) => ({ id: `a${i}`, parentSku: p, accessorySku: "COL-ACC", source: "davinci" as const })),
+    parts: [],
+  });
+  const v = slotViewFor(idx, "COL-ACC", "datasheet", (s) => `${s} desc`);
+  ok(v.state === "covered" && v.parents.length === 5 && v.parentCount === 8 && v.docs.length === 5 && v.docCount === 8, "part docs views M7: a covered cell ships the first 5 parents and documents plus the full counts");
+  ok(v.state === "covered" && v.parents[0].sku === "COLP-0" && v.parents[0].desc === "COLP-0 desc", "part docs views M7: …in order, with descriptions");
+  const one = slotViewFor(idx, "COLP-0", "datasheet", () => "");
+  ok(one.state === "own", "part docs views M7: a parent's own slot is unaffected");
+
+  ok(mostSelectiveToken(["etc", "s4", "lustr"]) === "lustr", "part docs search T7: the longest token filters in SQL");
+  ok(mostSelectiveToken(["abcd", "wxyz"]) === "abcd" && mostSelectiveToken([]) === "", "part docs search T7: ties keep the first; no tokens, no filter");
+}
+
 /* --- #GDS grid drawing set — Task 1: sheet-set model --- */
 import {
   SHEET_SIZES, REV_ROWS, drawingArea, resolveSheetSize, sheetCssVars, printPageCss, fitBox, scaleNote,
@@ -15860,6 +16990,17 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
   ok(gpLib.length === 1 && gpLib[0].id === "GS-1" && gpLib[0].list === 900 && gpLib[0].desc === "Wash light" && gpLib[0].symbolWidth === 48, "#GDS parts: a Grid-library entry prices from its linked catalog row");
   const gpAll = gridPartsFrom([gpSym] as never, gpCat as never, {}, { catalogFallback: true });
   ok(gpAll.map((p) => p.id).join() === "GS-1,CAT-1,CAT-2", "#GDS parts: the catalog fallback resolves pre-library placements");
+  // Merge with #207: the editor passes the part-documents check; the default
+  // stays the legacy blob check. A stale legacy key must not win over it.
+  const gpLegacyCat = gpCat.map((c) => (c.id === "CAT-1" ? { ...c, datasheetBlobKey: "part-datasheets/W1/old.pdf" } : c));
+  ok(gridPartsFrom([gpSym] as never, gpLegacyCat as never, {})[0].hasDatasheet === true && gpLib[0].hasDatasheet === undefined,
+    "#GDS parts: by default hasDatasheet is the legacy blob check");
+  ok(gridPartsFrom([gpSym] as never, gpLegacyCat as never, {}, { hasDatasheet: () => false })[0].hasDatasheet === undefined
+    && gridPartsFrom([gpSym] as never, gpCat as never, {}, { hasDatasheet: (p) => p.sku === "W1" })[0].hasDatasheet === true,
+    "#GDS parts: a caller's hasDatasheet (the #207 part-documents check) replaces the legacy blob check");
+  const gpPlanSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
+  ok(gpPlanSrc.includes("gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile })") && gpPlanSrc.includes("ownFiles(docIndex, p.sku, \"datasheet\")"),
+    "#GDS parts: the plan editor flags datasheets from part documents (#207), not the legacy blob key");
 
   const gpProj: RiserProjectLite = {
     placements: [{ id: "v1", sheetId: "s1", page: 1, x: 0.3, y: 0.3, partId: "GS-1", optionId: "opt-base", by: "t", at: 1 }],

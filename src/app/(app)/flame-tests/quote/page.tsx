@@ -4,6 +4,8 @@ import { travelForCustomerVenues } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getRates } from "@/lib/flametest-engine";
 import { getSettings } from "@/lib/settings";
+import { getTravelRates } from "@/lib/stores/pricing";
+import { normalizeTravelOverride } from "@/lib/travel-plan";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -31,19 +33,25 @@ function one(v: string | string[] | undefined): string {
 /* flame-test quote subdoc shape (what actions.ts saves) */
 type FtVenue = { id?: string | null; label?: string; curtains?: number };
 type FtContact = { name?: string; role?: string; email?: string } | null;
-type FlameTestDoc = { venues?: FtVenue[]; contact?: FtContact } | null;
+type FlameTestDoc = {
+  venues?: FtVenue[];
+  contact?: FtContact;
+  travel?: unknown;
+  trip?: { mode?: string } | null;
+} | null;
 
 export default async function FlameTestQuotePage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, customerDocs, rates, settings] = await Promise.all([
+  const [, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
     getRates(),
     getSettings(),
+    getTravelRates(),
   ]);
 
   const editId = one(sp.id);
@@ -132,6 +140,12 @@ export default async function FlameTestQuotePage({
       }
     }
     const wonAlready = editQuote.status === "won";
+    // Flights over drive (D286) shipped after some quotes were already past
+    // draft. Those never recorded a travel choice, so re-opening them under
+    // Auto could re-price a sent drive quote as flights. Seed Drive instead —
+    // drafts (no customer has seen a price yet) stay Auto.
+    const legacyDrive =
+      editQuote.status !== "draft" && !ft?.travel && !ft?.trip?.mode;
     initial = {
       editingId: editQuote.id,
       customerId: cid,
@@ -146,6 +160,7 @@ export default async function FlameTestQuotePage({
       status: editQuote.status,
       replaces: "",
       nameLocked: false,
+      travel: normalizeTravelOverride(ft && ft.travel) ?? (legacyDrive ? { mode: "drive" } : null),
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;
@@ -198,6 +213,7 @@ export default async function FlameTestQuotePage({
         customers={customers}
         offices={offices}
         rates={rates}
+        travelRates={travelRates}
         initial={initial}
         accent={settings.accent || "#7b3f8a"}
       />

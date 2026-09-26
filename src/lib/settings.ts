@@ -255,6 +255,32 @@ export async function getSettings(): Promise<AppSettingsData> {
   return { ...DEFAULT_SETTINGS, ...patch } as AppSettingsData;
 }
 
+/**
+ * Strict counterpart to getSettingsPatch: a DB error PROPAGATES instead of
+ * resolving to `{}`. getSettingsPatch's swallow exists so settings can never
+ * take the whole app down (e.g. before the first migration has run) — right
+ * for a page render, wrong for a writer that would otherwise mistake "the
+ * read failed" for "there is nothing configured" and act on an empty patch
+ * as if it were the truth (#207 final fix wave: the one-time assembly-graph
+ * sync — a transient failure here must not silently sync subassemblies only
+ * and still mark the pass complete). Use this wherever an empty read must
+ * never be treated as legitimately empty.
+ */
+export async function getSettingsPatchStrict(): Promise<Record<string, unknown>> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.id, "main"))
+    .limit(1);
+  return rows[0]?.data ?? {};
+}
+
+export async function getSettingsStrict(): Promise<AppSettingsData> {
+  const patch = await getSettingsPatchStrict();
+  return { ...DEFAULT_SETTINGS, ...patch } as AppSettingsData;
+}
+
 /** Merge a patch into the stored settings (port of AppSettings.set). */
 export async function setSettings(
   patch: Record<string, unknown>

@@ -235,6 +235,41 @@ See `.env.example`.
     external Displays API. Phase B (the generator, the four doors, docx/zip
     output, a print view) and Phase C (the `spec-writer` skill, the North HS
     seed) remain. Decisions D254–D261; punch item #205.
+14. ✅ **Part documents** (#207, D270–D280) — datasheets and spec sheets are
+    shared `part_documents` records linked to many parts through
+    `part_document_links`, with accessory coverage computed in context from
+    a fixture → accessory graph (`part_accessory_links`), DaVinci's model.
+    **Catalog → Datasheets** (`/catalog/documents`) is the to-do list of
+    every quoted part's Datasheet/Spec sheet slots (drop zones, Also
+    covers…, filters, bulk Fetch/Mark not needed/Attach existing) plus
+    **Upload many** (`/catalog/documents/upload`, filename matching);
+    direct-to-Blob uploads (25 MB, magic-byte checked); fetch from
+    manufacturer links through the shared `guardedFetchBytes` SSRF guard
+    (`src/lib/venue-calendar-fetch.ts`), batched under a 45 s budget and
+    resumable; the part editor's Documents section (anyone signed in)
+    replaces the old admin-only single-datasheet control; the Assembly
+    Builder feeds the accessory graph with per-member coverage and a
+    has-its-own-datasheet toggle; a DaVinci pre-fill (admin/CLI) links
+    English ETC datasheets by URL, no files downloaded; Specs coverage,
+    client packages, and the Displays API (`publicDatasheets`) all read the
+    one coverage rule. Closes #40 (a) and the population half of (c).
+    Remaining is Jeff-gated: run the DaVinci pre-fill + link fetch on
+    production, verify Blob upload on a preview deploy. Decisions
+    D270–D280; punch item #207.
+
+15. ✅ **Flights over drive** (#208, D281–D286) — a pure planner
+    (`src/lib/travel-plan.ts`) prices flights instead of a drive once one
+    trip's drive cost reaches a threshold (default $1,000), applied
+    everywhere a flame-test, repair or inspection quote is priced: the
+    three engines, their builder previews, save actions and renewal
+    re-pricing. Auto · Drive · Fly override with editable crew / nights /
+    airfare per quote; new Estimating Rules for the fly allowances and each
+    service's default flying crew. Customer letters, quote documents and
+    renewal PDFs print one "Travel (air, lodging & per diem)" line; renewals
+    carry last year's travel choice, not its airfare, and call out a mode
+    flip. Not in scope: the Estimator, rentals, consulting, live airfare
+    lookup, per-venue split trips. Decisions D281–D286; punch item
+    #208.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

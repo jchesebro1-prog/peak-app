@@ -1,7 +1,7 @@
 import { dataUrlToBytes, getBlobStream, putBlob, safeName, blobEnabled } from "@/lib/blob";
 import { assemble, matchBom, type AssembledSpec, type SpecCatalogPart } from "@/lib/bid-spec";
 import { buildSpecDocx } from "@/lib/bid-spec-docx";
-import { buildClientPackageManifest, type ClientPackageGap } from "@/lib/client-package";
+import { buildClientPackageManifest, coveredNote, type ClientPackageGap } from "@/lib/client-package";
 import { renderLetterPdf, type FieldSheetDoc, type LetterDoc } from "@/lib/pdf";
 import { riserGraph } from "@/lib/design/grid-riser";
 import { list as listCatalog } from "@/lib/stores/catalog";
@@ -10,6 +10,9 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { saveClientPackage, type ClientPackageRecord } from "@/lib/stores/client-packages";
 import type { Quote } from "@/lib/stores/quotes";
 import { createStoredZip, type ZipFile } from "@/lib/zip";
+import type { CoverageIndex } from "@/lib/part-docs/coverage";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { packageEntryName, resolvePackageDocs, type PackageDocument } from "@/lib/part-docs/package";
 
 export type BuiltClientPackage = {
   record: ClientPackageRecord;
@@ -142,23 +145,27 @@ function quoteBom(quote: Quote): Array<{ sku: string; desc: string; qty: number 
   return [...rows.values()];
 }
 
-async function addDatasheets(
-  items: Array<{ sku: string; description: string; qty: number; catalogId: string | null; datasheet: { name: string; blobKey: string } | null }>,
-  catalog: SpecCatalogPart[],
+/**
+ * Put every package document in the zip ONCE (#207): a fixture datasheet
+ * that also covers its lens and clamps is one file. A document whose blob is
+ * missing from storage turns into a gap for each SKU it was meant to serve.
+ */
+async function addDocuments(
+  documents: PackageDocument[],
+  index: CoverageIndex,
+  describe: (sku: string) => { description: string; qty: number; catalogId: string | null },
   files: ZipFile[],
   gaps: ClientPackageGap[],
 ): Promise<void> {
-  for (const item of items) {
-    if (!item.datasheet) continue;
-    const part = catalog.find((candidate) => candidate.id === item.catalogId || candidate.sku === item.sku);
-    const metadataFile = part?.productMetadata?.datasheets?.find((file) => file.blobKey);
-    const blobKey = part?.datasheetBlobKey || metadataFile?.blobKey;
+  const used = new Set<string>();
+  for (const doc of documents) {
+    const blobKey = index.docsById.get(doc.documentId)?.blobKey;
     const stream = blobKey ? await getBlobStream(blobKey) : null;
     if (!stream) {
-      gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
+      if (doc.kind === "datasheet") for (const sku of doc.skus) gaps.push({ kind: "missing-datasheet", sku, ...describe(sku) });
       continue;
     }
-    files.push({ name: `datasheets/${safeName(item.sku)}-${safeName(item.datasheet.name)}`, data: await bytesFromStream(stream) });
+    files.push({ name: packageEntryName(doc, used, safeName), data: await bytesFromStream(stream) });
   }
 }
 
@@ -169,7 +176,8 @@ export async function createClientPackage(
 ): Promise<BuiltClientPackage> {
   if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
-  const manifest = buildClientPackageManifest(project, catalog, requestedOptionId);
+  const { index: docIndex } = await loadPartDocsState(catalog);
+  const manifest = buildClientPackageManifest(project, catalog, requestedOptionId, docIndex);
   const matched = matchBom(manifest.bom, catalog);
   const sections = await allSections();
   const spec = assemble(matched.rows, sections, {
@@ -185,7 +193,11 @@ export async function createClientPackage(
     { name: "drawings/rough-drawings.pdf", data: roughDrawings(project, catalog, packageName) },
   ];
   const gaps = [...manifest.gaps];
-  await addDatasheets(manifest.items, catalog, files, gaps);
+  const itemBySku = new Map(manifest.items.map((item) => [item.sku, item]));
+  await addDocuments(manifest.documents, docIndex, (sku) => {
+    const item = itemBySku.get(sku);
+    return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
+  }, files, gaps);
   for (const [index, sheet] of (await listSheets(project.id)).entries()) {
     let bytes: Buffer | null = null;
     if (sheet.dataUrl) {
@@ -196,12 +208,7 @@ export async function createClientPackage(
     }
     if (bytes) files.push({ name: `drawings/plan-${String(index + 1).padStart(2, "0")}-${safeName(sheet.name)}`, data: bytes });
   }
-  const publicManifest = {
-    ...manifest,
-    datasheets: manifest.datasheets.map(({ sku, name }) => ({ sku, name })),
-    items: manifest.items.map(({ datasheet, ...item }) => ({ ...item, datasheet: datasheet ? { name: datasheet.name } : null })),
-    gaps,
-  };
+  const publicManifest = { ...manifest, gaps };
   files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ ...publicManifest, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const zip = createStoredZip(files);
   const fileName = `${packageName}.zip`;
@@ -222,6 +229,8 @@ export async function createClientPackage(
 export async function createQuoteClientPackage(quote: Quote, by: string): Promise<BuiltClientPackage> {
   if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
+  const { index: docIndex } = await loadPartDocsState(catalog);
+  const bySku = new Map(catalog.map((part) => [part.sku, part]));
   const bom = quoteBom(quote);
   const matched = matchBom(bom, catalog);
   const sections = await allSections();
@@ -232,22 +241,38 @@ export async function createQuoteClientPackage(quote: Quote, by: string): Promis
     preparedBy: by,
     date: Date.now(),
   });
+  // #207: the quote's own SKUs are the coverage context — an accessory rides
+  // on a fixture only when that fixture is on this quote.
+  const packageDocs = resolvePackageDocs(docIndex, bom.filter((row) => bySku.has(row.sku)).map((row) => row.sku));
   const items = bom.map((row) => {
-    const part = catalog.find((candidate) => candidate.sku === row.sku);
-    const datasheet = part?.datasheetBlobKey && part.datasheetName ? { name: part.datasheetName, blobKey: part.datasheetBlobKey } : part?.productMetadata?.datasheets?.find((file) => file.blobKey) ? { name: part.productMetadata.datasheets.find((file) => file.blobKey)!.fileName, blobKey: part.productMetadata.datasheets.find((file) => file.blobKey)!.blobKey! } : null;
-    return { sku: row.sku, description: row.desc, qty: row.qty, catalogId: part?.id || null, datasheet };
+    const part = bySku.get(row.sku);
+    const docs = packageDocs.bySku.get(row.sku);
+    return {
+      sku: row.sku,
+      description: row.desc,
+      qty: row.qty,
+      catalogId: part?.id || null,
+      datasheet: docs?.datasheet ?? null,
+      datasheetCoveredBy: docs?.datasheetCoveredBy ?? [],
+      specsheet: docs?.specsheet ?? null,
+    };
   });
   const gaps: ClientPackageGap[] = matched.rows.filter((row) => row.bucket !== "ready").map((row) => ({ kind: row.bucket === "no-match" ? "missing-catalog" : "missing-spec", sku: row.row.sku, description: row.row.desc, qty: row.row.qty, catalogId: row.part?.id || null }));
   for (const item of items) {
-    if (!item.datasheet) gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
+    if (item.catalogId && !packageDocs.bySku.get(item.sku)?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
   }
+  const covered = items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
   const packageName = `${safeName(quote.name || quote.id)}-${quote.id}`;
   const files: ZipFile[] = [
     { name: "specification.docx", data: await buildSpecDocx(spec) },
     { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) },
   ];
-  await addDatasheets(items, catalog, files, gaps);
-  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, gaps, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
+  const itemBySku = new Map(items.map((item) => [item.sku, item]));
+  await addDocuments(packageDocs.documents, docIndex, (sku) => {
+    const item = itemBySku.get(sku);
+    return { description: item?.description ?? sku, qty: item?.qty ?? 0, catalogId: item?.catalogId ?? null };
+  }, files, gaps);
+  files.unshift({ name: "00-package-index.json", data: Buffer.from(JSON.stringify({ quoteId: quote.id, quoteName: quote.name, items, documents: packageDocs.documents, covered, gaps, generatedAt: Date.now(), specSections: spec.sections.length }, null, 2), "utf8") });
   const fileName = `${packageName}.zip`;
   const stored = await putBlob(`client-packages/quote-${safeName(quote.id)}/${fileName}`, createStoredZip(files), "application/zip");
   const record = await saveClientPackage({ projectId: `quote:${quote.id}`, fileName, blobPath: stored.pathname, createdBy: by, itemCount: items.length, datasheetCount: files.filter((file) => file.name.startsWith("datasheets/")).length, gapCount: gaps.length });

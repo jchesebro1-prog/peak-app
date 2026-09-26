@@ -28,10 +28,11 @@ export type PartLite = {
    *  part has been migrated to declare ports; the Grid editor uses this to
    *  decide whether a device-wire route can be validated at all. */
   ports?: Port[];
-  /** Datasheet attachment flag (Task 5, punch #39, D116) — true only when
-   *  the catalog part has a datasheet blob attached. Deliberately just a
-   *  boolean (not the blob key): the editor only needs to know whether to
-   *  render a link to the authenticated /api/part-datasheet/<sku> proxy. */
+  /** Datasheet attachment flag (Task 5, punch #39, D116) — true when the
+   *  catalog part has a stored datasheet: a part-document file (#207) or the
+   *  legacy blob. Deliberately just a boolean (not the blob key): the editor
+   *  only needs to know whether to render a link to the authenticated
+   *  /api/part-datasheet/<sku> proxy, which bridges to the document viewer. */
   hasDatasheet?: boolean;
   /** Resolved beta group (Task 6, punch #39) — `groupOf(part, map)` run
    *  server-side against the admin-editable category map; null when the

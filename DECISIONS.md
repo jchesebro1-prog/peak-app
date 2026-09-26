@@ -5677,6 +5677,169 @@ category default is labelled "<category> — <desc>" (the #131 riser rule). Curt
 because they draw their own drape glyph, not a badge. The plan legend's open/closed state lives in `localStorage`
 through `useSyncExternalStore` (no hydration mismatch, no setState in an effect) and its rows always print.
 
+## D270. Part documents are shared records with deterministic link ids (#207, 2026-09-25)
+
+A datasheet or spec sheet is one `part_documents` row linked to many parts through `part_document_links` (spec §2.5,
+DaVinci's model). Ids: a new upload or fetch mints `PD-` + 12 random hex (`newDocumentId`, so the browser can mint the
+id its Blob path is keyed under without a collection scan); the legacy backfill uses `PD-L` + sha1(SKU) and the
+DaVinci pre-fill `PD-D` + sha1(URL), so both are idempotent. Link ids are `PDL-` + sha1(SKU, document) — one row per
+part↔document, soft-deleted to detach and revived by re-attaching; accessory links are `PAL-` + sha1(source, scope,
+parent, accessory). A document fetched or pre-filled from a URL is keyed by that URL: every part that referenced it
+shares the one document (spec §3).
+
+## D271. "Has its own datasheet" opts a pair out for both kinds, across sources (#207, 2026-09-25)
+
+The Assembly Builder's toggle lives on `part_accessory_links.ownDatasheet`, set on every live link of that
+parent/accessory pair (assembly and DaVinci alike), and coverage reads the pair as opted out if any of its links says
+so. It excludes the pair from step 3 of the coverage rule for spec sheets too — an accessory with its own datasheet is
+documented on its own. Re-saving an assembly carries the flag over.
+
+## D272. Fetch failures are remembered on the document (#207, 2026-09-25)
+
+Spec §6 says fetch failures are "listed with the reason" and batch fetch is resumable. `part_documents` gains an
+additive `lastFetch: { at, ok, error? }`. A catalog-held URL that fails to fetch becomes a link-only document (source
+`fetch`) linked to the part, carrying the failure, so the Datasheets page shows it until a retry succeeds and fills
+the same document. The fetcher reuses `src/lib/venue-calendar-fetch.ts`'s shared `guardedFetchBytes` (only
+`hostnameIsUnsafe` became an export) with a 25 MB streaming cap, a 30 s timeout and five redirect hops; batch fetch
+and the DaVinci pre-fill both run under a 45 s wall-clock budget per server-action call and are resumable — "run
+again" picks up wherever a batch left off.
+
+## D273. Filename matching: normalizeSku keys, 4-character floor, any catalog part (#207, 2026-09-25)
+
+Bulk drop matches each file name against every catalog part's SKU, MFR P/N and MFR M/N through the DaVinci matcher's
+own `normalizeSku`; the longest matching length wins, and keys under 4 characters never match (a 3-character model
+number appears by accident in too many file names). A key two parts share is "ambiguous" and nothing is pre-ticked.
+Matching covers the whole catalog, not only quoted parts, and runs server-side from file names alone — the catalog
+never ships to the browser.
+
+## D274. What "quoted" means on the Datasheets page (#207, 2026-09-25)
+
+Scope is every catalog part on any quote (any status), any Grid placement or any generated bid spec, no time window
+(spec §2.1). "Times quoted" counts distinct quotes; Grid and bid-spec use break ties, then the newest quote, then the
+SKU. Labor lines and `kind: "labor"` sections are skipped (the quote client package's own BOM rule), `Labor`-category
+parts are excluded, and a Grid curtain placement is not a catalog product.
+
+## D275. The part editor's Documents section replaces the admin-only datasheet control (#207, 2026-09-25)
+
+Spec §2.4 lets anyone signed in upload, attach, replace and remove. The single-file, admin-only
+`PartDatasheetControl` and its `uploadPartDatasheetAction` / `removePartDatasheetAction` (8 MB data-URL transport,
+wrote `datasheetBlobKey`) are removed; the Documents section uploads direct to Blob (25 MB) into shared documents.
+Nothing writes `datasheetBlobKey` any more. It stays readable: the idempotent backfill turns it into a `legacy`
+document on first read, and `/api/part-datasheet/<sku>` keeps streaming it — and otherwise redirects to the part's
+datasheet document — so older links (the Grid editor, the pre-v1 Displays route, bookmarks) keep working.
+Final fix wave: the bridge checks the part's own live datasheet documents FIRST (a stored file, else a link-only one)
+and streams `datasheetBlobKey` only when the part has no live datasheet link and its legacy document was never minted —
+so after a replace or detach of the backfilled legacy document, the Grid's "Datasheet" link never opens the stale
+file. The lookup is keyed by SKU in SQL, not a scan of every link and document. The catalog list's "Datasheet" marker
+follows the same rule (the part's own datasheet file).
+
+## D276. Both Assembly Builder tabs feed the accessory graph (#207, 2026-09-25)
+
+Assemblies tab: the `fixture`-role component is the parent and every other component an accessory (default quantity
+above zero = `included`), scoped `assembly:<id>`; a save syncs every assembly in one pass and soft-deletes the links of
+assemblies removed from the list. Subassemblies tab: the light engine is the parent, the lens and every option an
+accessory, scoped `subassembly:<id>`, synced on save and cleared on delete. The toggle is enabled once a member is
+saved (the pair must exist in the graph); setting it to the value it already has is a no-op success, and only a pair
+missing from the graph asks for a save first.
+Final fix wave: assemblies saved before part documents shipped are brought into the graph by a one-time, idempotent
+sync of every fixture assembly and subassembly (`src/lib/part-docs/assembly-sync.ts`), the same pairs and scopes a
+save writes. It syncs exactly the scopes that exist and prunes nothing else — a deleted assembly's links stay the save
+action's job, and a settings read that comes back empty can never wipe the graph. It runs from
+`npm run part-docs:backfill -- --commit` and on the Datasheets page's first read under a 15 s budget; a blob flag
+(`part_docs_graph_sync`) set only on completion makes later reads a single-row check.
+
+## D277. DaVinci pre-fill: English datasheets keyed by URL, the graph in the committed extract (#207, 2026-09-25)
+
+`extract.ts` now also emits `accessoryTypes` / `accessoryLinks` (6,702 links over 1,753 types from the 2026-04-21
+library; records are byte-identical), growing `data/davinci-extract.json` from ~1.39 MB to ~2.65 MB — the graph needs
+every type a link touches, including the lens tubes and clamps `records` drops. The pre-fill writes link-only
+documents for English DaVinci **Datasheet** documents only (manuals and other languages are not a slot; `language:
+"en"`), links them to every Peak ETC SKU of the type, and writes the DaVinci graph scope; both ends pass the #162
+manufacturer allowlist. Nothing is downloaded. It runs from an admin button on the Datasheets page (the extract is
+traced into that route with `outputFileTracingIncludes`) or `npm run part-docs:davinci -- --apply --commit`. The doc
+store's new batch writers (`insertDocsIfAbsent` / `upsertDocs` / `softDeleteDocs`, 500 rows per statement) carry the
+pre-fill's writes.
+
+## D278. Client packages: every document once; only a missing datasheet is a gap (#207, 2026-09-25)
+
+A package zips each needed document once (`datasheets/…`, `specsheets/…`) with the SKUs it serves. Coverage is
+computed in the package's own context — the Grid option's placements or the quote's lines — so an accessory rides on a
+fixture only when that fixture is in the same package; alone, it is a `missing-datasheet` gap there. Covered
+accessories are listed as `covered: [{ sku, by, note: "covered by <fixture>" }]`. A missing spec sheet is not a gap
+(the spec names only `missing-datasheet`). The manifest's old `datasheets` array (which carried private blob keys
+internally) is replaced by `documents`.
+
+## D279. A rejected upload's blob is deleted (#207, 2026-09-25)
+
+"Nothing is ever hard-deleted" (spec §2.4) governs documents. An upload whose bytes fail the magic-number check (not a
+PDF, or Word on a datasheet slot) or exceed 25 MB never became a document, so its blob is deleted rather than left
+orphaned.
+
+## D280. Displays API datasheet links come from part documents (#207, 2026-09-25)
+
+`publicCatalogPart(...).datasheets` lists the part's linked datasheet documents through `/api/part-documents/<id>`
+(which streams, or redirects a link-only document to its source), else the manufacturer URLs the catalog row carries —
+never the old `/api/part-datasheet/<sku>` URL that 404'd for a part whose only datasheet was a researched link. The
+catalog ETag folds in documents and links, since attaching one moves no part's `updatedAt`.
+
+## D281. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#208, 2026-09-25)
+
+Jeff: "once we reach 1000 dollars in travel expenses, then it switches to flights and hotels with allowances." A pure,
+import-free planner (`src/lib/travel-plan.ts`) runs in the flame-test, repair and inspection engines, their builder
+previews, the save actions and renewal re-pricing, so every path applies one rule. Trigger: the engines' existing
+per-trip drive cost (`trip.total` = mileage + drive-time labor) ≥ `flyThreshold` (default $1,000; 0 = never fly),
+overridable per quote as Auto · Drive · Fly. Fly = crew × airfare + crew × nights × hotel + crew × (nights + 1) × per
+diem + ⌈crew ÷ 2⌉ × (nights + 1) × car + crew × hours each way × 2 × the service's labor rate; nights default to
+⌈on-site hours ÷ (crew × hours per day)⌉; crew, nights and airfare are editable on the quote (blank = default, shown
+as the placeholder). Flight rates live in the shared `travel_rates` blob and each service's default crew in its own
+rates blob (flame 1, repair 2, inspection 1), all in Estimating Rules; missing keys fall back to the defaults — no
+migration. Drive mode returns the drive total itself, so drive-mode prices are bit-for-bit unchanged, and saved
+quotes keep their stored price until someone re-prices them. `trip` keeps the drive numbers and gains `mode` (and
+`flight` when flying); the per-quote override is saved as `travel` on the service subdoc.
+
+## D282. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#208, 2026-09-25)
+
+The spec's default repair crew is 2, but a repair quote already carries a crew size. The flying crew defaults to
+`max(repair_rates.flyCrew, the quote's crew size)` so a crew of 3 is never priced as 2 flights. Travel-day labor
+bills at the service's base labor rate even on emergency quotes — the same rate drive time already uses; only
+on-site labor takes the emergency multiplier.
+
+## D283. Customers see one travel line, at travel's share of the sell price (#208, 2026-09-25)
+
+In fly mode the letters, quote documents and renewal PDFs print one line, "Travel (air, lodging & per diem)", with
+the flight cost marked up by the quote's margin (`flight.total ÷ (1 − margin)`, rounded) — never a bare cost figure
+next to an all-in price. It replaces the round-trip mobilization row (flame, inspection) and the distance sentence
+(repair); the hours column shows the travel-day hours. The proposals' `priceLine` says "the drive", so a new
+editable template field `priceLineFly` ("Everything above — travel (air, lodging & per diem), …") is used in fly
+mode. The itemized airfare / lodging / per diem / car / travel labor stays builder-only.
+
+## D284. Renewals keep last year's travel choice, not last year's airfare (#208, 2026-09-25)
+
+Renewal re-pricing (D69, current rates) carries the prior quote's travel override — mode, crew, nights — but drops
+its manual airfare, which is a one-year number; the allowance applies. When the renewal's mode differs from last
+year's, the email's "why the price changed" list gains "travel now being priced as flights, lodging & per diem
+instead of a drive" (or "…as a drive instead of flights"). Branch review (I1): an inspection record re-prices
+exactly ONE venue, but the prior quote's `nights` may have covered however many venues shared last year's trip —
+carrying that count forward would overstate a single-venue trip's nights, so `nights` is dropped (mode and crew
+still carry) unless the prior quote was itself single-venue, mirroring the venue-count gate the mode-flip wording
+already used.
+
+## D285. The quote-builder previews use the live road factor and speed (#208, 2026-09-25)
+
+The three builders' inlined previews hardcoded 1.25 / 50 mph while the server re-priced with the Estimating Rules
+values. With a threshold on the drive total the two could disagree on drive vs fly, so the pages now hand the
+builders the live `travel_rates` blob and the previews use it. Server totals are unchanged.
+
+## D286. Pre-feature sent quotes open on Drive, not Auto (#208, 2026-09-25)
+
+Branch review finding (I2): a service quote saved before flights-over-drive shipped recorded no travel choice at
+all. If such a quote is past draft (sent, won, lost — a customer may already have seen the price) and is reopened
+in the builder, Auto would silently re-price it as flights the moment the drive cost has since crept over the
+threshold, changing a price nobody agreed to. The three builder pages now seed the travel draft to `{ mode: "drive"
+}` whenever the saved doc has no `travel` override and no `trip.mode` — i.e., it predates the feature — and the
+quote is not a draft. A draft (no customer has seen a price yet) and any quote that already recorded a travel
+choice stay Auto / their own choice.
+
 ## D-GDS-1. The drawing set is a browser-print page with one size table (#GDS, 2026-09-25)
 
 `/design/grid/<id>/set` renders every sheet as an exact-size `.pk-drawing-sheet` (11×17 ANSI B default, 24×36 ARCH D

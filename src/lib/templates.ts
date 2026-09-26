@@ -117,6 +117,14 @@ export const TEMPLATES: TemplateDef[] = [
           "Every one of your {{curtainsLabel}} inspected and documented on-site comes to {{price}}, all in.",
       },
       {
+        id: "priceLineFly",
+        label: "Price line (flights)",
+        multiline: true,
+        help: "Used when travel is priced as flights — air, lodging & per diem.",
+        default:
+          "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your {{curtainsLabel}} inspected and documented — comes to {{price}}, all in.",
+      },
+      {
         id: "costTail",
         label: "Cost note / proposed-fee basis",
         multiline: true,
@@ -287,6 +295,14 @@ export const TEMPLATES: TemplateDef[] = [
         multiline: true,
         default:
           "Every one of your {{lineSetsLabel}} inspected and documented on-site comes to {{price}}, all in.",
+      },
+      {
+        id: "priceLineFly",
+        label: "Price line (flights)",
+        multiline: true,
+        help: "Used when travel is priced as flights — air, lodging & per diem.",
+        default:
+          "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your {{lineSetsLabel}} inspected and documented — comes to {{price}}, all in.",
       },
       {
         id: "costTail",

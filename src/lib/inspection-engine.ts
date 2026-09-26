@@ -1,11 +1,20 @@
 import { getBlob, setBlob } from "@/db/doc-store";
-import { INSPECTION_RATE_DEFAULTS } from "@/lib/stores/pricing";
+import { INSPECTION_RATE_DEFAULTS, getTravelRates } from "@/lib/stores/pricing";
 import {
   tripTravel,
   type GeoAdapter,
   type TripTravel,
   type TripVenueInput,
 } from "@/lib/repair-engine";
+import {
+  FLY_CREW_DEFAULTS,
+  planTravel,
+  withMode,
+  type FlyRates,
+  type TravelOverride,
+  type TravelPlan,
+  type TripMode,
+} from "@/lib/travel-plan";
 
 export { INSPECTION_RATE_DEFAULTS };
 export type { GeoAdapter, TripTravel, TripVenueInput };
@@ -26,6 +35,10 @@ export type { GeoAdapter, TripTravel, TripVenueInput };
  *      repair engine — tripTravel is imported from it so the two can never
  *      drift).
  *   4. Total = (labor + travel) ÷ (1 − margin), floored at the minimum fee.
+ *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
+ *      whose drive cost reaches the threshold prices as flights (default crew
+ *      inspection_rates.flyCrew, nights from the inspection hours). Drive
+ *      mode is unchanged.
  */
 
 export type InspectionRates = {
@@ -37,6 +50,7 @@ export type InspectionRates = {
   minFee: number; // $ minimum for the whole job
   margin: number; // points, margin of the sell price
   travelRoundMin: number; // round total travel time up to the nearest N minutes
+  flyCrew?: number; // default crew when the trip flies (FLY_CREW_DEFAULTS.inspection when absent)
 };
 
 const RATES_BLOB_ID = "inspection_rates"; // rss_inspection_rates_v1
@@ -72,6 +86,8 @@ export type InspectionEstimateOptions = {
   venues?: InspectionVenueInput[];
   /** 1 = annual visual · 2 = five-year in-depth. */
   level?: number;
+  /** Per-quote travel override (Auto · Drive · Fly, crew, nights, airfare). */
+  travel?: TravelOverride | null;
   /** Optional routing service (prototype's window.Geo). */
   geo?: GeoAdapter | null;
 };
@@ -86,7 +102,10 @@ export type InspectionEstimate = {
   levelMult: number;
   laborRate: number;
   laborCost: number;
-  trip: TripTravel;
+  /** The drive numbers (trip.total is always the DRIVE cost) + mode/flight. */
+  trip: TripTravel & TripMode;
+  /** The travel plan — travel.total is the figure the quote prices. */
+  travel: TravelPlan;
   cost: number;
   sellRaw: number;
   minFee: number;
@@ -99,7 +118,8 @@ export type InspectionEstimate = {
 /** Pure compute with the rates passed in explicitly. */
 export function computeEstimate(
   opts: InspectionEstimateOptions,
-  C: InspectionRates
+  C: InspectionRates,
+  travel?: Partial<FlyRates> | null
 ): InspectionEstimate {
   const venues = (opts.venues || []).slice();
   const level = opts.level === 2 ? 2 : 1;
@@ -113,8 +133,18 @@ export function computeEstimate(
   const inspectHours = Math.round(inspectHoursRaw * levelMult * 10) / 10;
   const laborCost = inspectHours * C.laborRate;
 
-  const trip = tripTravel(opts.office, venues, C, opts.geo);
-  const cost = laborCost + trip.total;
+  const drive = tripTravel(opts.office, venues, C, opts.geo);
+  // Flights over drive: in drive mode plan.total IS drive.total (bit-for-bit).
+  const plan = planTravel({
+    drive,
+    onSiteHours: inspectHours,
+    laborRate: C.laborRate,
+    crewDefault: C.flyCrew ?? FLY_CREW_DEFAULTS.inspection,
+    rates: travel,
+    override: opts.travel,
+  });
+  const trip = withMode(drive, plan);
+  const cost = laborCost + plan.total;
 
   const margin = C.margin;
   const sellRaw = margin > 0 && margin < 1 ? cost / (1 - margin) : cost;
@@ -132,6 +162,7 @@ export function computeEstimate(
     laborRate: C.laborRate,
     laborCost,
     trip,
+    travel: plan,
     cost,
     sellRaw,
     minFee: C.minFee,
@@ -146,5 +177,5 @@ export function computeEstimate(
 export async function compute(
   opts: InspectionEstimateOptions = {}
 ): Promise<InspectionEstimate> {
-  return computeEstimate(opts, await getRates());
+  return computeEstimate(opts, await getRates(), await getTravelRates());
 }

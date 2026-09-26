@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
+import { TRAVEL_FLY_LINE, flightOf, travelLineAmount } from "@/lib/travel-plan";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -77,7 +78,7 @@ type FlameTestDoc = {
     zip?: string;
   } | null;
   trip?: { miles?: number; minutes?: number } | null;
-  rates?: { curtainMinutes?: number } | null;
+  rates?: { curtainMinutes?: number; margin?: number } | null;
   total?: number | null;
 };
 
@@ -219,7 +220,10 @@ export default async function FlameTestLetterPage({
   const oneWayHours = mph ? rtMiles / 2 / mph : 0;
   const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
   const inspectionHours = (curtainsTotal * curtainMin) / 60;
-  const travelHours = 2 * oneWayHours;
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(ft.trip);
+  const travelMargin = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
+  const travelHours = flight ? flight.travelHours : 2 * oneWayHours;
   const totalHours = travelHours + inspectionHours;
   const hasTrip = rtMiles > 0;
 
@@ -282,7 +286,15 @@ export default async function FlameTestLetterPage({
       hours: num1(inspectionHours) + " hrs",
     });
   }
-  if (hasTrip) {
+  if (flight) {
+    scopeRows.push({
+      item: pad2(sr++),
+      desc: TRAVEL_FLY_LINE,
+      sub: "From " + originCity,
+      qty: money(travelLineAmount(flight.total, travelMargin)),
+      hours: num1(flight.travelHours) + " hrs",
+    });
+  } else if (hasTrip) {
     scopeRows.push({
       item: pad2(sr++),
       desc: "Round-trip site mobilization from " + originCity,
@@ -305,7 +317,7 @@ export default async function FlameTestLetterPage({
   const priceHeadline = renderField(
     settings.templates,
     "flame_proposal",
-    hasTrip ? "priceLine" : "priceLineNoTravel",
+    flight ? "priceLineFly" : hasTrip ? "priceLine" : "priceLineNoTravel",
     { curtainsLabel, price: totalLabel }
   );
   const priceSupport = renderField(settings.templates, "flame_proposal", "costTail", {});

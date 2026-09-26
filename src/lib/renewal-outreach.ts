@@ -45,6 +45,15 @@ import {
   type LetterDoc,
 } from "@/lib/pdf";
 import { renderField } from "@/lib/templates";
+import {
+  carryTravelOverride,
+  flightOf,
+  flyTravelSentence,
+  savedTrip,
+  travelLineAmount,
+  travelModeChangeReason,
+  type TravelOverride,
+} from "@/lib/travel-plan";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -196,7 +205,9 @@ type FlameTestDoc = {
   curtainsTotal?: number | null;
   contact?: FtContact;
   origin?: { name?: string; street?: string; city?: string; state?: string; zip?: string } | null;
-  trip?: { miles?: number; minutes?: number } | null;
+  trip?: { miles?: number; minutes?: number; mode?: string; flight?: unknown } | null;
+  /** Per-quote travel override (travel-plan.ts TravelOverride). */
+  travel?: unknown;
   /** Rate snapshot the quote was priced with (persist saves r.rates). */
   rates?: Partial<FlameTestRates> | null;
   total?: number | null;
@@ -205,7 +216,7 @@ type FlameTestDoc = {
 /** Customer-safe reasons why this year's flame price differs from last
  *  year's — diff of the rate snapshot stored on the prior quote vs today's
  *  rates, plus travel/scope movement. Margin changes stay generic (D69). */
-function flameChangeReasons(
+export function flameChangeReasons(
   priorFt: FlameTestDoc | null,
   r: FlameTestPricing
 ): string[] {
@@ -213,8 +224,12 @@ function flameChangeReasons(
   const old = priorFt?.rates || null;
   const cur = r.rates;
   let generic = false;
+  // M1: mileage rate / drive distance don't move a fly-mode price, so don't
+  // cite them when both years priced this trip as flights.
+  const priorMode = priorFt?.trip ? (priorFt.trip.mode === "fly" ? "fly" : "drive") : null;
+  const bothFly = priorMode === "fly" && r.trip.mode === "fly";
   if (old) {
-    if (old.mileageRate != null && old.mileageRate !== cur.mileageRate)
+    if (!bothFly && old.mileageRate != null && old.mileageRate !== cur.mileageRate)
       out.push(
         `the current federal mileage rate (${usd2(cur.mileageRate)}/mi, was ${usd2(old.mileageRate)})`
       );
@@ -235,10 +250,15 @@ function flameChangeReasons(
     generic = true;
   }
   const oldMiles = priorFt?.trip?.miles;
-  if (oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
+  if (!bothFly && oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
     out.push(
       `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
     );
+  // Flights over drive (spec 2026-09-25 §5): say so when the mode flipped.
+  if (priorMode) {
+    const flip = travelModeChangeReason(priorMode, r.trip.mode);
+    if (flip) out.push(flip);
+  }
   const oldCurtains = priorFt?.curtainsTotal;
   if (oldCurtains != null && oldCurtains !== r.curtainsTotal)
     out.push(
@@ -306,8 +326,10 @@ async function ensureFlameRenewalQuote(
 
   const rates = await getFlameRates();
   const travelRates = await getTravelRates();
+  // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
+  const travelOverride = carryTravelOverride(priorFt?.travel);
   const r = computeFlame(
-    { office: office || undefined, venues: venueInputs },
+    { office: office || undefined, venues: venueInputs, travel: travelOverride },
     rates,
     travelRates
   );
@@ -345,13 +367,8 @@ async function ensureFlameRenewalQuote(
         testingCost: Math.round(v.laborCost),
       })),
       curtainsTotal: r.curtainsTotal,
-      trip: {
-        miles: r.trip.miles,
-        minutes: r.trip.minutes,
-        mileageCost: Math.round(r.trip.mileageCost),
-        timeCost: Math.round(r.trip.timeCost),
-        method: r.trip.method,
-      },
+      trip: savedTrip(r.trip),
+      ...(travelOverride ? { travel: travelOverride } : {}),
       rawCost: Math.round(r.rawCost),
       baseFee: Math.round(r.baseFee),
       baseApplied: r.baseApplied,
@@ -441,7 +458,18 @@ async function flameLetterDoc(
     });
   }
   const rtMiles = (ft.trip && ft.trip.miles) || 0;
-  if (rtMiles > 0) {
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(ft.trip);
+  if (flight) {
+    const curtainMin = (ft.rates && ft.rates.curtainMinutes) || 5;
+    const margin = typeof ft.rates?.margin === "number" ? ft.rates.margin : quote.margin || 0;
+    blocks.push({
+      kind: "p",
+      text:
+        flyTravelSentence(`${companyName} (${originCity})`, venueName, travelLineAmount(flight.total, margin)) +
+        ` The on-site inspection should take approximately ${num1((curtainsTotal * curtainMin) / 60)} hours.`,
+    });
+  } else if (rtMiles > 0) {
     const oneWayMiles = rtMiles / 2;
     const mph = (await getTravelRates()).mph || 50;
     const oneWayHours = mph ? oneWayMiles / mph : 0;
@@ -477,7 +505,7 @@ async function flameLetterDoc(
     costLine: renderField(
       ov,
       "flame_proposal",
-      rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
+      flight ? "priceLineFly" : rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
       {
         curtainsLabel,
         price: money(quote.value != null ? quote.value : ft.total || 0),
@@ -499,7 +527,9 @@ type InspectionDoc = {
   venues?: InVenue[];
   lineSetsTotal?: number | null;
   inspectHours?: number | null;
-  trip?: { miles?: number; minutes?: number } | null;
+  trip?: { miles?: number; minutes?: number; mode?: string; flight?: unknown } | null;
+  /** Per-quote travel override (travel-plan.ts TravelOverride). */
+  travel?: unknown;
   /** Rate snapshot the quote was priced with (persist saves r.rates). */
   rates?: Partial<InspectionRates> | null;
   total?: number | null;
@@ -508,7 +538,7 @@ type InspectionDoc = {
 
 /** Customer-safe reasons why this year's inspection price differs — rate
  *  snapshot diff + travel/scope movement; margin stays generic (D69). */
-function inspectionChangeReasons(
+export function inspectionChangeReasons(
   priorIn: InspectionDoc | null,
   r: InspectionEstimate,
   venueLabel: string
@@ -517,12 +547,16 @@ function inspectionChangeReasons(
   const old = priorIn?.rates || null;
   const cur = r.rates;
   let generic = false;
+  // M1: mileage rate / drive distance don't move a fly-mode price, so don't
+  // cite them when both years priced this trip as flights.
+  const priorMode = priorIn?.trip ? (priorIn.trip.mode === "fly" ? "fly" : "drive") : null;
+  const bothFly = priorMode === "fly" && r.trip.mode === "fly";
   if (old) {
     if (old.laborRate != null && old.laborRate !== cur.laborRate)
       out.push(
         `our current labor rate ($${cur.laborRate}/hr, was $${old.laborRate})`
       );
-    if (old.mileageRate != null && old.mileageRate !== cur.mileageRate)
+    if (!bothFly && old.mileageRate != null && old.mileageRate !== cur.mileageRate)
       out.push(
         `the current federal mileage rate (${usd2(cur.mileageRate)}/mi, was ${usd2(old.mileageRate)})`
       );
@@ -565,13 +599,37 @@ function inspectionChangeReasons(
       `the inspection now covering ${r.lineSetsTotal} line set${r.lineSetsTotal === 1 ? "" : "s"} (was ${oldLineSets})`
     );
   const oldMiles = priorVenueCount === 1 ? priorIn?.trip?.miles : null;
-  if (oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
+  if (!bothFly && oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
     out.push(
       `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
     );
+  // Flights over drive (spec 2026-09-25 §5): say so when the mode flipped
+  // (single-venue priors only — a combined trip is explained above).
+  if (priorVenueCount === 1 && priorMode) {
+    const flip = travelModeChangeReason(priorMode, r.trip.mode);
+    if (flip) out.push(flip);
+  }
   if (generic && !out.length) return []; // → "our current rates" fallback
   if (generic) out.push("our updated pricing");
   return out;
+}
+
+/** I1: an inspection record re-prices exactly ONE venue, but the prior
+ *  quote's carried `nights` may have covered however many venues shared that
+ *  trip last year — carrying that count forward would overstate a
+ *  single-venue trip's nights. Drop `nights` unless the prior quote was
+ *  itself single-venue (keep `mode`; keep `crew` — mirrors the flip-reason
+ *  gate in inspectionChangeReasons, which only explains the flip for
+ *  single-venue priors too). Exported for direct testing (pure). */
+export function carryInspectionTravelOverride(
+  raw: unknown,
+  priorVenueCount: number
+): TravelOverride | undefined {
+  const o = carryTravelOverride(raw);
+  if (!o || priorVenueCount === 1) return o;
+  const { nights: _priorNights, ...rest } = o;
+  void _priorNights;
+  return Object.keys(rest).length ? rest : undefined;
 }
 
 /** This cycle's renewal quote for a completed inspection — reused when it
@@ -614,17 +672,22 @@ async function ensureInspectionRenewalQuote(
   const level = levelMeta(rec.level).key;
   const rates = await getInspectionRates();
   const travelRates = await getTravelRates();
+  // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
+  const priorVenueCount = priorIn?.venues?.length || 0;
+  const travelOverride = carryInspectionTravelOverride(priorIn?.travel, priorVenueCount);
   const r = computeInspection(
     {
       office: office || undefined,
       venues: [venueInput],
       level,
+      travel: travelOverride,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
       },
     },
-    rates
+    rates,
+    travelRates
   );
 
   const contact: FtContact = rec.contact
@@ -660,13 +723,8 @@ async function ensureInspectionRenewalQuote(
       inspectHours: r.inspectHours,
       baseHours: r.baseHours,
       levelMult: r.levelMult,
-      trip: {
-        miles: r.trip.miles,
-        minutes: r.trip.minutes,
-        mileageCost: Math.round(r.trip.mileageCost),
-        timeCost: Math.round(r.trip.timeCost),
-        method: r.trip.method,
-      },
+      trip: savedTrip(r.trip),
+      ...(travelOverride ? { travel: travelOverride } : {}),
       laborCost: Math.round(r.laborCost),
       cost: Math.round(r.cost),
       minFee: r.minFee,
@@ -758,7 +816,17 @@ async function inspectionLetterDoc(
     });
   }
   const rtMiles = (insp.trip && insp.trip.miles) || 0;
-  if (rtMiles > 0) {
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(insp.trip);
+  if (flight) {
+    const margin = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
+    blocks.push({
+      kind: "p",
+      text:
+        flyTravelSentence(`${companyName} (${insp.office || "our office"})`, venueName, travelLineAmount(flight.total, margin)) +
+        ` The on-site inspection should take approximately ${num1(insp.inspectHours || 0)} hours.`,
+    });
+  } else if (rtMiles > 0) {
     const oneWayMiles = rtMiles / 2;
     const mph = (await getTravelRates()).mph || 50;
     const oneWayHours = mph ? oneWayMiles / mph : 0;
@@ -794,7 +862,7 @@ async function inspectionLetterDoc(
     costLine: renderField(
       ov,
       "inspection_proposal",
-      rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
+      flight ? "priceLineFly" : rtMiles > 0 ? "priceLine" : "priceLineNoTravel",
       {
         lineSetsLabel,
         price: money(quote.value != null ? quote.value : insp.total || 0),

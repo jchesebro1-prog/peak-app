@@ -32,8 +32,32 @@ export type DavinciRecord = {
   docs: readonly DavinciDoc[];
 };
 
+/**
+ * One end of a DaVinci accessory link (#207). Kept for EVERY type a link
+ * touches — unlike `records`, which drops types with neither ports nor
+ * documents, and lens tubes, clamps and cables are exactly those types.
+ */
+export type DavinciAccessoryType = {
+  manufacturer: string;
+  /** `typeInformation.productClassificationId` label: "Product", "Accessory", … */
+  classification: string;
+  /** Through normalizeSku, like DavinciRecord.modelNumbers. */
+  modelNumbers: readonly string[];
+};
+
+/** `types[].accessories[]` — a fixture (parent) and a part it accepts. */
+export type DavinciAccessoryLink = {
+  parentTypeId: string;
+  accessoryTypeId: string;
+  maxQuantity: number;
+  userDefinable: boolean;
+};
+
 export type DavinciExtract = {
   libraryTimestamp: string;
   generatedAt: number;
   records: readonly DavinciRecord[];
+  /** Part documents (#207). Optional so an extract written before it still loads. */
+  accessoryTypes?: Readonly<Record<string, DavinciAccessoryType>>;
+  accessoryLinks?: readonly DavinciAccessoryLink[];
 };

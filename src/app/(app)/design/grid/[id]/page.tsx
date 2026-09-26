@@ -4,6 +4,8 @@ import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { resolveOptionId } from "@/lib/design/grid-options";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { allEngagements } from "@/lib/stores/engagements";
 import { isOpenEngagement } from "@/lib/consulting-review";
@@ -102,7 +104,14 @@ export default async function GridEditorPage({
 
   /** Client payload: sheets without re-serialization surprises + PartLite slice
    *  (the one builder the riser, drawing set and schedule use too — #GDS). */
-  const parts: PartLite[] = gridPartsFrom(gridSymbols, catalog, categoryMap);
+  // #207: "has a datasheet" = a stored datasheet document of the part's own;
+  // the editor's link goes through /api/part-datasheet/<sku>, which bridges
+  // to the part-document viewer. loadPartDocsState runs the legacy backfill
+  // first, so a legacy blob is a document by now — and a replaced or
+  // detached legacy file no longer counts (final fix wave, I1).
+  const { index: docIndex } = await loadPartDocsState(catalog);
+  const hasDatasheetFile = (p: (typeof catalog)[number]) => ownFiles(docIndex, p.sku, "datasheet").length > 0;
+  const parts: PartLite[] = gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile });
 
   /**
    * Curtain drop-in (punch #49): the fabric list and the sell coefficients for
