@@ -19604,3 +19604,66 @@ async function specBuilderFinalFixAsyncChecks(): Promise<void> {
   const ccXml = xmlParts.join("");
   ok(ccXml.includes("Line one still one") && ccXml.includes("Proj ect"), "#205 spec builder: a vertical tab in spec or header text becomes a space in the Word file");
 }
+
+/* --- #221: every quote link opens the quote's own builder --- */
+import {
+  quoteBuilderHref as q221Href,
+  estimatorShouldRedirect as q221Redirect,
+} from "@/lib/quote-links";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const EXPECTED: Array<[string | undefined | null, string]> = [
+    ["flame_test", "/flame-tests/quote?id="],
+    ["repair", "/repairs/quote?id="],
+    ["inspection", "/inspections/quote?id="],
+    ["consulting", "/design/engagements/quote?id="],
+    ["rental", "/rentals/quote?id="],
+    ["system", "/estimator?id="],
+    [undefined, "/estimator?id="],
+    [null, "/estimator?id="],
+    ["", "/estimator?id="],
+    ["some-unknown-type", "/estimator?id="],
+  ];
+  for (const [quoteType, prefix] of EXPECTED) {
+    const href = q221Href({ id: "Q-2041", quoteType });
+    ok(href === `${prefix}Q-2041`, `#221: quoteBuilderHref maps quoteType=${JSON.stringify(quoteType)} to ${prefix}<id> (got ${href})`);
+  }
+  ok(
+    q221Href({ id: "Q 2041/x", quoteType: "repair" }) === `/repairs/quote?id=${encodeURIComponent("Q 2041/x")}`,
+    "#221: the id is URL-encoded the same way editHrefFor did it"
+  );
+
+  const redirectTrue = ["flame_test", "repair", "inspection", "consulting", "rental"];
+  const redirectFalse: Array<string | undefined | null> = ["system", undefined, null, ""];
+  for (const t of redirectTrue)
+    ok(q221Redirect({ id: "x", quoteType: t }) === true, `#221: estimatorShouldRedirect is true for quoteType=${t}`);
+  for (const t of redirectFalse)
+    ok(q221Redirect({ id: "x", quoteType: t }) === false, `#221: estimatorShouldRedirect is false for quoteType=${JSON.stringify(t)}`);
+
+  // Source checks: A–E no longer hard-code /estimator?id= for an arbitrary quote,
+  // and each now uses the shared quoteBuilderHref.
+  const files221 = [
+    "src/app/(app)/companies/[id]/page.tsx",
+    "src/lib/company-summary.ts",
+    "src/app/(app)/home-stage-sheet.tsx",
+    "src/lib/dashboard/home-metrics.ts",
+    "src/app/(app)/reviews/page.tsx",
+  ];
+  for (const f of files221) {
+    const src = read(f);
+    ok(
+      !/`\/estimator\?id=\$\{/.test(src) && !/"\/estimator\?id="/.test(src),
+      `#221: ${f} no longer hard-codes /estimator?id= for an arbitrary quote`
+    );
+    ok(src.includes("quoteBuilderHref"), `#221: ${f} imports/uses quoteBuilderHref`);
+  }
+
+  const est221 = read("src/app/(app)/estimator/page.tsx");
+  ok(est221.includes("estimatorShouldRedirect"), "#221: estimator/page.tsx uses estimatorShouldRedirect as a server-side backstop");
+
+  const quotesPageSrc221 = read("src/app/(app)/quotes/page.tsx");
+  ok(quotesPageSrc221.includes("quoteBuilderHref"), "#221: quotes/page.tsx editHrefFor delegates to quoteBuilderHref");
+
+  const venueMatchSrc221 = read("src/lib/venue-match.ts");
+  ok(venueMatchSrc221.includes("quoteBuilderHref"), "#221: venue-match.ts quoteDeepLink delegates to quoteBuilderHref (fixes rental)");
+}

@@ -1,6 +1,8 @@
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { get as getQuote, type Quote, type QuoteReview } from "@/lib/stores/quotes";
+import { quoteBuilderHref, estimatorShouldRedirect } from "@/lib/quote-links";
 import { byCategory, list as catalogList } from "@/lib/stores/catalog";
 import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
@@ -217,6 +219,10 @@ export default async function EstimatorPage({
   }
 
   const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
+  // #221: a quote created by a different builder (flame test, repair,
+  // inspection, consulting, rental) opens its own builder, not the
+  // Estimator — this is the server-side backstop behind every link fix.
+  if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
   const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures] =
     await Promise.all([

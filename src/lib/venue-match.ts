@@ -9,8 +9,9 @@
  * this module makes that mistake impossible by resolving through the same
  * doc-loc id the stores use, and the spec test pins it with a regression guard.
  *
- * Self-contained: this module's only import is the pure pipelines module
- * (no @/db, no store), so it stays client-safe and testable. Project "open"
+ * Self-contained: this module only imports the pure pipelines and
+ * quote-links modules (no @/db, no store), so it stays client-safe and
+ * testable. Project "open"
  * is no longer a fixed stage list — a project pipeline's stages carry
  * arbitrary ids, so open = not on the pipeline's Done-tagged stage, read
  * from the RECORD (isOpenProject → isDone: its stamped stageMeta, else its
@@ -18,6 +19,7 @@
  */
 
 import { isDone, type StageMeta } from "@/lib/pipelines";
+import { quoteBuilderHref } from "@/lib/quote-links";
 
 export type VenueHistoryKind =
   | "quote"
@@ -65,19 +67,7 @@ export function engagementMatchesVenue(
 
 /** A quote edits in its type-specific builder (system quotes in the Estimator). */
 export function quoteDeepLink(quoteType: string, id: string): string {
-  const q = encodeURIComponent(id);
-  switch (quoteType) {
-    case "flame_test":
-      return `/flame-tests/quote?id=${q}`;
-    case "repair":
-      return `/repairs/quote?id=${q}`;
-    case "inspection":
-      return `/inspections/quote?id=${q}`;
-    case "consulting":
-      return `/design/engagements/quote?id=${q}`;
-    default:
-      return `/estimator?id=${q}`;
-  }
+  return quoteBuilderHref({ id, quoteType });
 }
 
 /** Open (not-closed) stage/status values per kind. Visits are time-based, handled by the caller.

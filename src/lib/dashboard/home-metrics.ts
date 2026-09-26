@@ -3,6 +3,7 @@ import { money } from "@/lib/format";
 import { firstName } from "@/lib/team";
 import type { DesignRecord } from "@/lib/stores/designs";
 import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
+import { quoteBuilderHref } from "@/lib/quote-links";
 
 const DAY = 86_400_000;
 
@@ -132,7 +133,7 @@ export function homeAlerts(
         dot: "#b4543a",
         tagColor: "#b4543a",
         tagBg: "#f7e9e5",
-        href: `/estimator?id=${encodeURIComponent(q.id)}`,
+        href: quoteBuilderHref(q),
       });
     }
   });

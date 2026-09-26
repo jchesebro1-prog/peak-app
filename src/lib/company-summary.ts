@@ -6,6 +6,7 @@ import { coordsOf, estimate, fmtMiles, fmtTime, officesFromSettings } from "@/li
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 import { moneyDash } from "@/app/(app)/companies/lib";
+import { quoteBuilderHref } from "@/lib/quote-links";
 
 /**
  * Companies map — the pop-out panel's data (Jeff's request: click a pin,
@@ -133,7 +134,7 @@ export async function getCompanySummary(id: string): Promise<CompanySummary | nu
       name: qt.name || qt.id,
       status: qt.status,
       valueLabel: moneyDash(qt.value),
-      href: `/estimator?id=${encodeURIComponent(qt.id)}`,
+      href: quoteBuilderHref(qt),
     }));
 
   const activeProjects: CompanySummaryProject[] = custProjects

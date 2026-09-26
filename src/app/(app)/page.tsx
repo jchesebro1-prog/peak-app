@@ -95,6 +95,7 @@ export default async function HomePage({
     ? {
         id: sheetQ.id, name: sheetQ.name, meta: `${sheetQ.id} · ${sheetQ.customer || "—"}`, value: money(sheetQ.value),
         marginLabel: sheetQ.margin ? `${Math.round(sheetQ.margin * 100)}% margin` : "", status: sheetQ.status,
+        quoteType: sheetQ.quoteType,
       }
     : null;
   const closeHref = pipe === "all" ? "/" : `/?pipe=${pipe}`;

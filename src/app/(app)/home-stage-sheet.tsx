@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { removeQuoteAction, setQuoteStatusAction } from "./home-actions";
 import { ConfirmButton } from "@/components/confirm-button";
+import { quoteBuilderHref } from "@/lib/quote-links";
 
 /**
  * Stage sheet — port of Home.dc.html's quote sheet (open a pipeline row →
@@ -20,6 +21,7 @@ export type SheetQuote = {
   value: string;
   marginLabel: string;
   status: string;
+  quoteType?: string | null;
 };
 
 const STATUS_META: Record<string, { ink: string; soft: string }> = {
@@ -221,7 +223,7 @@ export default function HomeStageSheet({
           }}
         >
           <Link
-            href={`/estimator?id=${encodeURIComponent(quote.id)}`}
+            href={quoteBuilderHref(quote)}
             style={{
               flex: 1,
               display: "flex",

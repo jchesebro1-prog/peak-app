@@ -25,6 +25,7 @@ import {
 } from "@/lib/geo";
 import { dateYear, shortDate, timeAgo } from "@/lib/format";
 import { getSiteByDocLocId } from "@/lib/identity/sites";
+import { quoteBuilderHref } from "@/lib/quote-links";
 import { hasVenueCalendar } from "@/lib/stores/venue-calendars";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
@@ -574,7 +575,7 @@ export default async function CustomerDetailPage({
               return (
                 <Link
                   key={qt.id}
-                  href={`/estimator?id=${encodeURIComponent(qt.id)}`}
+                  href={quoteBuilderHref(qt)}
                   className="cu-d-row"
                   style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 102px 96px 92px", gap: 10, padding: "13px 18px", alignItems: "center", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
                 >

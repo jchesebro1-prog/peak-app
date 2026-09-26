@@ -8,6 +8,7 @@ import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import ReviewList, { type ReviewItem } from "./review-list";
 import { designBudgetLabel } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
+import { quoteBuilderHref } from "@/lib/quote-links";
 import type { ReviewKind } from "./actions";
 
 export const metadata = { title: "Reviews — Quartzite-6" };
@@ -94,10 +95,7 @@ export default async function ReviewsPage({
       value: q.value || 0,
       review: q.review || NONE,
       ts: q.updatedAt || 0,
-      openHref:
-        q.quoteType === "consulting"
-          ? "/design/engagements/quote?id=" + encodeURIComponent(q.id)
-          : "/estimator?id=" + encodeURIComponent(q.id),
+      openHref: quoteBuilderHref(q),
     })),
     ...designs.map((d) => ({
       kind: "Design" as const,

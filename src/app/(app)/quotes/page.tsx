@@ -21,6 +21,7 @@ import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, submitQuoteForReview, createQuoteClientPackageAction } from "./actions";
 import { DeleteQuoteButton } from "./delete-quote-button";
+import { quoteBuilderHref } from "@/lib/quote-links";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
 
@@ -59,17 +60,15 @@ const TYPE_BADGE: Record<
 
 /** Each service quote type edits in its own builder; system quotes in the Estimator. */
 function editHrefFor(q: Quote): { href: string; label: string } {
-  if (q.quoteType === "flame_test")
-    return { href: `/flame-tests/quote?id=${encodeURIComponent(q.id)}`, label: "Open flame test quote →" };
-  if (q.quoteType === "repair")
-    return { href: `/repairs/quote?id=${encodeURIComponent(q.id)}`, label: "Open repair quote →" };
-  if (q.quoteType === "inspection")
-    return { href: `/inspections/quote?id=${encodeURIComponent(q.id)}`, label: "Open inspection quote →" };
-  if (q.quoteType === "consulting")
-    return { href: `/design/engagements/quote?id=${encodeURIComponent(q.id)}`, label: "Open consulting quote →" };
-  if (q.quoteType === "rental")
-    return { href: `/rentals/quote?id=${encodeURIComponent(q.id)}`, label: "Open rental quote →" };
-  return { href: `/estimator?id=${encodeURIComponent(q.id)}`, label: "Open in Estimator →" };
+  const href = quoteBuilderHref(q);
+  const label =
+    q.quoteType === "flame_test" ? "Open flame test quote →"
+    : q.quoteType === "repair" ? "Open repair quote →"
+    : q.quoteType === "inspection" ? "Open inspection quote →"
+    : q.quoteType === "consulting" ? "Open consulting quote →"
+    : q.quoteType === "rental" ? "Open rental quote →"
+    : "Open in Estimator →";
+  return { href, label };
 }
 
 /** Prototype shortMoney: $48.0k / $313k / $860. */
