@@ -45,6 +45,8 @@ export type VenueDef = {
 };
 
 export type BomItem = {
+  /** Equipment map row key, `system:itemKey` (#GEM, equipment-vocab.ts). */
+  key: string;
   desc: string;
   qty: number;
   unit: string;
@@ -513,25 +515,26 @@ export function compute(
   const pipeLenFt = venueOf(s).kind === "proscenium" ? battenLenFt(W) : W;
 
   // Rigging — single type
+  type EqItem = { key: string; desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null };
   const rigType = s.rigType || "counterweight";
-  let rigItems: Array<{ desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null }>;
+  let rigItems: EqItem[];
   if (rigType === "motorized") {
     const m = pick({ el: 2, lo: 2, hi: 2, vs: 0 }, { el: 3, lo: 3, hi: 3, vs: 1 }, { el: 4, lo: 4, hi: 2, vs: 2 });
     rigItems = [
-      { desc: "Electric hoist", unit: "ea", qty: m.el * Math.max(2, fl(D / 30)), cost: 60000 },
-      { desc: "Low-capacity hoist", unit: "ea", qty: m.lo * dBlk, cost: 15000 },
-      { desc: "High-capacity hoist", unit: "ea", qty: m.hi * dBlk, cost: 40000 },
+      { key: "rigging:electricHoist", desc: "Electric hoist", unit: "ea", qty: m.el * Math.max(2, fl(D / 30)), cost: 60000 },
+      { key: "rigging:lowCapHoist", desc: "Low-capacity hoist", unit: "ea", qty: m.lo * dBlk, cost: 15000 },
+      { key: "rigging:highCapHoist", desc: "High-capacity hoist", unit: "ea", qty: m.hi * dBlk, cost: 40000 },
     ];
-    if (m.vs) rigItems.push({ desc: "Variable-speed hoist", unit: "ea", qty: m.vs * dBlk, cost: 60000 });
+    if (m.vs) rigItems.push({ key: "rigging:varSpeedHoist", desc: "Variable-speed hoist", unit: "ea", qty: m.vs * dBlk, cost: 60000 });
   } else if (rigType === "deadhung") {
     const sets = pick(5, 6, 7) * dBlk;
     const points = sets * fl(W / 10);
     rigItems = [
-      { desc: "Rigging point", unit: "ea", qty: points, cost: 20 },
-      { desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
-      { desc: "Aircraft cable", unit: "ft", qty: points * G, cost: 0.02 },
-      { desc: "Chain wrap, 3 ft", unit: "ea", qty: points, cost: 1 },
-      { desc: "Termination kit", unit: "ea", qty: points * 2, cost: 1 },
+      { key: "rigging:riggingPoint", desc: "Rigging point", unit: "ea", qty: points, cost: 20 },
+      { key: "rigging:pipe", desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
+      { key: "rigging:aircraftCable", desc: "Aircraft cable", unit: "ft", qty: points * G, cost: 0.02 },
+      { key: "rigging:chainWrap", desc: "Chain wrap, 3 ft", unit: "ea", qty: points, cost: 1 },
+      { key: "rigging:terminationKit", desc: "Termination kit", unit: "ea", qty: points * 2, cost: 1 },
     ];
   } else {
     // Counterweight — driven by the number of line sets.
@@ -539,17 +542,17 @@ export function compute(
     const loftPerSet = Math.max(1, fl(W / 10)); // 1 loftblock per 10 ft of pro width, per set
     const loft = sets * loftPerSet;
     rigItems = [
-      { desc: "Headblock", unit: "ea", qty: sets, cost: 550 },
-      { desc: "Footblock", unit: "ea", qty: sets, cost: 350 },
-      { desc: "Arbor", unit: "ea", qty: sets, cost: 700 },
-      { desc: "T-bar track", unit: "ea", qty: sets, cost: 100 },
-      { desc: "Lock rail", unit: "ea", qty: sets, cost: 30 },
-      { desc: "Handline", unit: "ft", qty: sets * 2 * G, cost: 3 },
-      { desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
-      { desc: "Loftblock", unit: "ea", qty: loft, cost: 250 },
-      { desc: "Aircraft cable", unit: "ft", qty: loft * (2 * G + W), cost: 0.02 },
-      { desc: "Termination kit", unit: "ea", qty: loft * 2, cost: 1 },
-      { desc: "Chain wrap, 3 ft", unit: "ea", qty: loft, cost: 1 },
+      { key: "rigging:headblock", desc: "Headblock", unit: "ea", qty: sets, cost: 550 },
+      { key: "rigging:footblock", desc: "Footblock", unit: "ea", qty: sets, cost: 350 },
+      { key: "rigging:arbor", desc: "Arbor", unit: "ea", qty: sets, cost: 700 },
+      { key: "rigging:tbarTrack", desc: "T-bar track", unit: "ea", qty: sets, cost: 100 },
+      { key: "rigging:lockRail", desc: "Lock rail", unit: "ea", qty: sets, cost: 30 },
+      { key: "rigging:handline", desc: "Handline", unit: "ft", qty: sets * 2 * G, cost: 3 },
+      { key: "rigging:pipe", desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
+      { key: "rigging:loftblock", desc: "Loftblock", unit: "ea", qty: loft, cost: 250 },
+      { key: "rigging:aircraftCable", desc: "Aircraft cable", unit: "ft", qty: loft * (2 * G + W), cost: 0.02 },
+      { key: "rigging:terminationKit", desc: "Termination kit", unit: "ea", qty: loft * 2, cost: 1 },
+      { key: "rigging:chainWrap", desc: "Chain wrap, 3 ft", unit: "ea", qty: loft, cost: 1 },
     ];
   }
 
@@ -559,9 +562,9 @@ export function compute(
   // block. Scenery track is hardware, not soft goods, and keeps its lump
   // per-ft price via addCurtain.
   const drape = s.drape || {};
-  const curtainItems: Array<{ desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null }> = [];
-  const addCurtain = (on: boolean | undefined, desc: string, count: number, area: number, rate: number, fabricKey: string | null) => {
-    if (on && count > 0) curtainItems.push({ desc, unit: "ea", qty: count, cost: Math.round(area * rate), area, fabricKey });
+  const curtainItems: EqItem[] = [];
+  const addCurtain = (on: boolean | undefined, key: string, desc: string, count: number, area: number, rate: number, fabricKey: string | null) => {
+    if (on && count > 0) curtainItems.push({ key, desc, unit: "ea", qty: count, cost: Math.round(area * rate), area, fabricKey });
   };
   // `proscenium` gates the wing addition inside venueDimsFromEstimator (#66):
   // wing space is only OUTSIDE `width` for a real proscenium opening, same
@@ -571,7 +574,7 @@ export function compute(
     if (!on || count <= 0) return;
     const r = curtainMakeCost(fabricKey, gdims, s.tier);
     if (!r) return;
-    curtainItems.push({ desc, unit: "ea", qty: count, cost: r.cost, area: r.area, fabricKey });
+    curtainItems.push({ key: `curtains:${fabricKey}`, desc, unit: "ea", qty: count, cost: r.cost, area: r.area, fabricKey });
   };
   priceDrape(drape.draw, "Draw", dBlk * 1, "draw");
   priceDrape(drape.legs, "Leg", dBlk * 2, "legs");
@@ -580,16 +583,16 @@ export function compute(
   // Track hardware, not soft goods. Jeff 2026-07-27: it follows the pipe rule,
   // so it spans the same length as the batten it parallels (PRO width + 4 ft in
   // a proscenium house, room width elsewhere) rather than raw stage width.
-  addCurtain(drape.scenerytrack, "Scenery track", dBlk * 1, pipeLenFt * 1, 3, null);
+  addCurtain(drape.scenerytrack, "curtains:scenerytrack", "Scenery track", dBlk * 1, pipeLenFt * 1, 3, null);
 
   // Fixtures — multi. E = unified electric count; wUnit ≈ 1 per 8 ft of width.
   const fx = s.fixtures || {};
   const E = Math.max(1, electrics);
   const wUnit = Math.max(1, Math.round(W / 8));
-  const lightItems: Array<{ desc: string; unit: string; qty: number; cost: number }> = [];
+  const lightItems: EqItem[] = [];
   const addFix = (key: string, on: boolean | undefined, desc: string, qty: number, cost: number) => {
     const selected = assemblyOptions[s.fixtureAssemblies?.[key] || ""];
-    if (on && qty > 0) lightItems.push({ desc: selected?.name || desc, unit: "ea", qty, cost: selected?.cost || cost });
+    if (on && qty > 0) lightItems.push({ key: `lighting:${key}`, desc: selected?.name || desc, unit: "ea", qty, cost: selected?.cost || cost });
   };
   addFix("par", fx.par, "Par", Math.round(E * wUnit * pick(0.7, 1, 1.2)), 750);
   addFix("front", fx.front, "Front", Math.round(wUnit * pick(2, 2.5, 3)), 2250);
@@ -603,46 +606,39 @@ export function compute(
 
   // Controls — multi (Console / Architectural / Data groups)
   const ctrl = s.ctrl || {};
-  const ctrlItems: Array<{ desc: string; unit: string; qty: number; cost: number }> = [];
+  const ctrlItems: EqItem[] = [];
   if (ctrl.console) {
-    ctrlItems.push({ desc: "Console", unit: "ea", qty: 1, cost: 7000 });
-    ctrlItems.push({ desc: "Console touch screen", unit: "ea", qty: pick(1, 2, 2), cost: 2000 });
-    if (size === "large") ctrlItems.push({ desc: "Battery backup", unit: "ea", qty: 1, cost: 30 });
+    ctrlItems.push({ key: "controls:console", desc: "Console", unit: "ea", qty: 1, cost: 7000 });
+    ctrlItems.push({ key: "controls:consoleTouch", desc: "Console touch screen", unit: "ea", qty: pick(1, 2, 2), cost: 2000 });
+    if (size === "large") ctrlItems.push({ key: "controls:batteryBackup", desc: "Battery backup", unit: "ea", qty: 1, cost: 30 });
   }
   if (ctrl.architectural) {
-    ctrlItems.push({ desc: "Processor", unit: "ea", qty: 1, cost: 10000 });
-    ctrlItems.push({ desc: "Button", unit: "ea", qty: pick(fl(W / 20), fl(W / 10), fl(W / 5)), cost: 250 });
-    if (size === "large") ctrlItems.push({ desc: "Architectural touch screen", unit: "ea", qty: 1, cost: 2000 });
+    ctrlItems.push({ key: "controls:processor", desc: "Processor", unit: "ea", qty: 1, cost: 10000 });
+    ctrlItems.push({ key: "controls:button", desc: "Button", unit: "ea", qty: pick(fl(W / 20), fl(W / 10), fl(W / 5)), cost: 250 });
+    if (size === "large") ctrlItems.push({ key: "controls:archTouch", desc: "Architectural touch screen", unit: "ea", qty: 1, cost: 2000 });
   }
   if (ctrl.data) {
-    ctrlItems.push({ desc: "Input station", unit: "ea", qty: pick(1, 2, 4), cost: 100 });
-    ctrlItems.push({ desc: "Output station", unit: "ea", qty: pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3)), cost: 125 });
-    ctrlItems.push({ desc: "Distro system", unit: "ea", qty: 1, cost: 3000 });
+    ctrlItems.push({ key: "controls:inputStation", desc: "Input station", unit: "ea", qty: pick(1, 2, 4), cost: 100 });
+    ctrlItems.push({ key: "controls:outputStation", desc: "Output station", unit: "ea", qty: pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3)), cost: 125 });
+    ctrlItems.push({ key: "controls:distro", desc: "Distro system", unit: "ea", qty: 1, cost: 3000 });
   }
 
   // Acoustical shell — multi (size-independent)
   const shell = s.shell || {};
-  const shellItems: Array<{ desc: string; unit: string; qty: number; cost: number }> = [];
-  if (shell.towers) shellItems.push({ desc: "Tower", unit: "ea", qty: fl(W / 10) + 2 * fl(D / 10), cost: 10000 });
-  if (shell.ceiling) shellItems.push({ desc: "Ceiling", unit: "ea", qty: fl(D / 10), cost: 20000 });
-  if (shell.transport) shellItems.push({ desc: "Transport", unit: "ea", qty: fl(D / 10), cost: 1000 });
+  const shellItems: EqItem[] = [];
+  if (shell.towers) shellItems.push({ key: "acoustical:tower", desc: "Tower", unit: "ea", qty: fl(W / 10) + 2 * fl(D / 10), cost: 10000 });
+  if (shell.ceiling) shellItems.push({ key: "acoustical:ceiling", desc: "Ceiling", unit: "ea", qty: fl(D / 10), cost: 20000 });
+  if (shell.transport) shellItems.push({ key: "acoustical:transport", desc: "Transport", unit: "ea", qty: fl(D / 10), cost: 1000 });
 
   // Pit filler — single. Per-sqft over Pro Width × 10 ft.
   const pitType = s.pitType || "legged";
   const pitArea = W * 10;
-  const pitItems =
+  const pitItems: EqItem[] =
     pitType === "clearspan"
-      ? [{ desc: "Clear-span pit filler deck", unit: "sqft", qty: pitArea, cost: 150 }]
-      : [{ desc: "Legged pit filler deck", unit: "sqft", qty: pitArea, cost: 125 }];
+      ? [{ key: "pit:clearspan", desc: "Clear-span pit filler deck", unit: "sqft", qty: pitArea, cost: 150 }]
+      : [{ key: "pit:legged", desc: "Legged pit filler deck", unit: "sqft", qty: pitArea, cost: 125 }];
 
-  const defs: Array<{
-    key: SysKey;
-    name: string;
-    on: boolean;
-    m: number;
-    dot: string;
-    items: Array<{ desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null }>;
-  }> = [
+  const defs: Array<{ key: SysKey; name: string; on: boolean; m: number; dot: string; items: EqItem[] }> = [
     { key: "rigging", name: "Rigging", on: s.sys.rigging, m: 0.3, dot: "#7b3f8a", items: rigItems },
     { key: "curtains", name: "Curtains", on: s.sys.curtains, m: 0.3, dot: "#b4543a", items: curtainItems },
     { key: "lighting", name: "Fixtures", on: s.sys.lighting, m: 0.3, dot: "#c98a2b", items: lightItems },
@@ -652,17 +648,17 @@ export function compute(
     {
       key: "audio", name: "Audio", on: s.sys.audio, m: 0.3, dot: "#3155a8",
       items: [
-        { desc: "Line-array loudspeaker", unit: "ea", qty: arrayBoxes, cost: 1450 },
-        { desc: "Subwoofer", unit: "ea", qty: subs, cost: 1850 },
-        { desc: "Digital mixer, DSP & amplifiers", unit: "lot", qty: 1, cost: 14200 },
+        { key: "audio:lineArray", desc: "Line-array loudspeaker", unit: "ea", qty: arrayBoxes, cost: 1450 },
+        { key: "audio:subwoofer", desc: "Subwoofer", unit: "ea", qty: subs, cost: 1850 },
+        { key: "audio:mixerDsp", desc: "Digital mixer, DSP & amplifiers", unit: "lot", qty: 1, cost: 14200 },
       ],
     },
     {
       key: "video", name: "Video", on: s.sys.video, m: 0.31, dot: "#2a7d8a",
       items: [
-        { desc: "Laser projector, 4K", unit: "ea", qty: projectors, cost: 18500 },
-        { desc: "Projection screen / LED wall", unit: "lot", qty: 1, cost: Math.round(s.width * 260) },
-        { desc: "Video processor & switcher", unit: "lot", qty: 1, cost: 9800 },
+        { key: "video:projector", desc: "Laser projector, 4K", unit: "ea", qty: projectors, cost: 18500 },
+        { key: "video:screen", desc: "Projection screen / LED wall", unit: "lot", qty: 1, cost: Math.round(s.width * 260) },
+        { key: "video:processor", desc: "Video processor & switcher", unit: "lot", qty: 1, cost: 9800 },
       ],
     },
   ];
@@ -673,7 +669,7 @@ export function compute(
       const price = it.cost / (1 - d.m);
       rev += it.qty * price;
       cost += it.qty * it.cost;
-      return { desc: it.desc, qty: it.qty, unit: it.unit || "ea", cost: it.cost, price, area: it.area, fabricKey: it.fabricKey };
+      return { key: it.key, desc: it.desc, qty: it.qty, unit: it.unit || "ea", cost: it.cost, price, area: it.area, fabricKey: it.fabricKey };
     });
     return { ...d, items, rev, cost };
   });

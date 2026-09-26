@@ -17599,3 +17599,45 @@ import { spaceNameRect } from "@/lib/design/drawing-labels";
   const snNone = spaceNameRect(snPoly, 50, 12, [{ x: -10, y: -10, w: 300, h: 300 }], 5);
   ok(snNone.x === 75 && snNone.y === 44, "#209 I3: no clear corner → the centre");
 }
+
+/* --- #GEM T1: the equation item vocabulary — every compute() item has a map row, and back --- */
+import { EQUIPMENT_ROWS as gemRows1, EQUIPMENT_ROW_BY_KEY as gemRowByKey1 } from "@/lib/design/equipment-vocab";
+import { compute as gemCompute1, defaultAState as gemDefault1, type AState as GemAState1 } from "@/app/(app)/design/quick/engine";
+import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintText as gemHintText1 } from "@/lib/design/equipment-legacy-hints";
+{
+  const keys = gemRows1.map((r) => r.key);
+  ok(keys.length === 46 && new Set(keys).size === 46, `#GEM T1: 46 unique equipment rows (got ${keys.length})`);
+  ok(gemRows1.every((r) => r.key === `${r.system}:${r.itemKey}` && /^[a-z]+:[a-zA-Z]+$/.test(r.key)), "#GEM T1: every key is system:itemKey");
+  ok(gemRows1.every((r) => gemRowByKey1.get(r.key) === r), "#GEM T1: the by-key index covers every row");
+  const emitted = new Map<string, string>();
+  const base = gemDefault1(0);
+  for (const size of ["small", "medium", "large"] as const)
+    for (const rigType of ["counterweight", "deadhung", "motorized"])
+      for (const pitType of ["legged", "clearspan"]) {
+        const s: GemAState1 = {
+          ...base, venue: "pac", size, width: 60, depth: 40, grid: 50, wing: 16, ph: 26, rigType, pitType,
+          sys: { rigging: true, curtains: true, lighting: true, controls: true, audio: true, video: true, acoustical: true, pit: true },
+          drape: { draw: true, legs: true, border: true, scenerytrack: true, fullstage: true },
+          fixtures: { par: true, front: true, cyc: true, side: true, automated: true },
+          ctrl: { console: true, architectural: true, data: true },
+          shell: { towers: true, ceiling: true, transport: true },
+        };
+        for (const sys of gemCompute1(s).systems) for (const it of sys.items) emitted.set(it.key, it.desc);
+      }
+  const unknown = [...emitted.keys()].filter((k) => !gemRowByKey1.has(k));
+  ok(unknown.length === 0, `#GEM T1: every item compute() emits has an Equipment map row (unknown: ${unknown.join(", ") || "none"})`);
+  const never = keys.filter((k) => !emitted.has(k));
+  ok(never.length === 0, `#GEM T1: every Equipment map row is emitted by some configuration (never: ${never.join(", ") || "none"})`);
+  ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#GEM T1: each row's label is the equation's own item name");
+  ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#GEM T1: the four fabric drapes are the curtain rows");
+  ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#GEM T1: Controls / Acoustical / Pit rows are never Auto-placed");
+  ok(keys.every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#GEM T1: every row carries its old built-in figure as a 'was' hint");
+  ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#GEM T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
+  ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#GEM T1: lighting hints are the old TIER_SKUS figures");
+  ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#GEM T1: one figure prints once, with its unit");
+  ok(gemHintSkus1(gemHints1["curtains:legs"]).join(",") === "RB-EN-16,RB-EN-22,RB-CHAR-25", "#GEM T1: fabric hints name the old per-tier fabric SKUs");
+  const hintSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-legacy-hints.ts"), "utf8");
+  ok(hintSrc.includes('typeof window !== "undefined"'), "#GEM T1: the hint table refuses to load in a browser bundle");
+  const vocabSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-vocab.ts"), "utf8");
+  ok(!/\$\s?\d/.test(vocabSrc) && !/\bcost\b/i.test(vocabSrc), "#GEM T1: the vocabulary is dollar-free");
+}
