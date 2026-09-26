@@ -95,6 +95,7 @@ const ROUTES = [
   "/settings",
   "/settings?section=admin",
   "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
+  "/design/grid/settings/equipment-map", // #GEM Equipment map tab (admin; read-only on load)
   "/design/specs/library", // Specs module (#205) — the library index
   "/design/specs/templates", // Specs module (#205) — the template list
   "/inbox",

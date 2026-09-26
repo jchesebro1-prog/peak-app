@@ -15,6 +15,7 @@ import { WireTypesCard } from "./wire-types-card";
 import { LaborHoursCard } from "./labor-hours-card";
 import { StandardNotesCard } from "./standard-notes-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
+import { GridSettingsTabs } from "./settings-tabs";
 
 export const metadata = { title: "Grid settings — Quartzite-6" };
 
@@ -152,6 +153,8 @@ export default async function GridSettingsPage() {
           </div>
         </div>
       </div>
+
+      <GridSettingsTabs active="general" />
 
       <SymbolColorsCard key={JSON.stringify(symCtx.colors)} colors={symCtx.colors} />
 

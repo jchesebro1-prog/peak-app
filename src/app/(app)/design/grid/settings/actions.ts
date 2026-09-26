@@ -8,6 +8,13 @@ import { cleanStandardNotes } from "@/lib/design/grid-drawing-set";
 import { cleanWireTypes, type WireType } from "@/lib/catalog-connect";
 import { PORT_RULES } from "@/lib/catalog-port-rules";
 import { applyRules } from "@/lib/catalog-port-apply";
+import { list as listCatalog } from "@/lib/stores/catalog";
+import { clearEquipmentRow, saveEquipmentRow } from "@/lib/stores/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
+import { LEGACY_HINTS, legacyHintSkus } from "@/lib/design/equipment-legacy-hints";
+import { suggestParts } from "@/lib/design/equipment-map-view";
+import type { EquipRowInput } from "@/lib/design/equipment-map";
+import { searchCatalog } from "@/app/(app)/estimator/actions";
 
 /**
  * Grid Settings mutations (/design/grid/settings). All gated on manage_users
@@ -79,4 +86,56 @@ export async function saveStandardNotesAction(text: string) {
   revalidatePath("/design/grid/settings");
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/* ----------------------------- Equipment map (#GEM) ----------------------------- */
+
+export type EquipPartHit = { sku: string; desc: string; category: string; unit: string; cost: number; list: number };
+
+function revalidateEquipment() {
+  revalidatePath("/design/grid/settings/equipment-map");
+  // Scope targets, Quick Design and the Designs dashboard all price through the map.
+  revalidatePath("/", "layout");
+}
+
+/** Save one row (all three tiers). An allowance must arrive confirmed; who/when is stamped server-side. */
+export async function saveEquipmentRowAction(
+  rowKey: string,
+  input: EquipRowInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requirePerm("manage_users");
+  const r = await saveEquipmentRow(String(rowKey ?? ""), input, user.name);
+  if (!r.ok) return r;
+  revalidateEquipment();
+  return { ok: true };
+}
+
+export async function clearEquipmentRowAction(rowKey: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  if (!(await clearEquipmentRow(String(rowKey ?? "")))) return { ok: false, error: "Unknown equipment row." };
+  revalidateEquipment();
+  return { ok: true };
+}
+
+/** Server-side part search (never the whole ~37k catalog on the client). Admin page, so cost is shown. */
+export async function searchEquipmentPartsAction(query: string): Promise<{ hits: EquipPartHit[]; total: number }> {
+  await requirePerm("manage_users");
+  const { hits, total } = await searchCatalog(String(query ?? ""), "", 20);
+  return {
+    hits: hits.map((h) => ({ sku: h.sku, desc: h.desc, category: h.category, unit: h.unit, cost: h.cost, list: h.list })),
+    total,
+  };
+}
+
+/** Suggested matches for one row, on demand (one catalog pass per click, never 46 on page load). */
+export async function suggestEquipmentPartsAction(rowKey: string): Promise<{ hits: EquipPartHit[] }> {
+  await requirePerm("manage_users");
+  const def = EQUIPMENT_ROW_BY_KEY.get(String(rowKey ?? ""));
+  if (!def) return { hits: [] };
+  const parts = await listCatalog();
+  return {
+    hits: suggestParts(parts, def, legacyHintSkus(LEGACY_HINTS[def.key]), 8).map((p) => ({
+      sku: p.sku, desc: p.desc, category: p.category || "", unit: p.unit || "ea", cost: p.cost || 0, list: p.list || 0,
+    })),
+  };
 }

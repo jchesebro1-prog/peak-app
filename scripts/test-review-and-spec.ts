@@ -17716,3 +17716,59 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#GEM T2: every unmapped row is needs-a-part — nothing is pre-mapped");
   ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#GEM T2: mapSkus names every part the map needs, assembly parts included");
 }
+
+/* --- #GEM T3: the Equipment map page — view models, suggestions, admin gate, no client store imports --- */
+import { assemblyOptions as gemAsmOpts3, equipmentMapView as gemView3, mapSummary as gemSummary3, suggestParts as gemSuggest3 } from "@/lib/design/equipment-map-view";
+import { EQUIPMENT_ROW_BY_KEY as gemRowByKey3 } from "@/lib/design/equipment-vocab";
+/** Module paths a source file imports VALUES from (`import type …` excluded). Shared by the later #GEM guards. */
+const gemValueImports = (src: string): string[] =>
+  [...src.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
+{
+  const parts = new Map([
+    ["GEM-PAR", { sku: "GEM-PAR", desc: "LED par", unit: "ea", cost: 600, list: 900, category: "Lighting Fixtures" }],
+    ["GEM-MIX", { sku: "GEM-MIX", desc: "Mixer", unit: "ea", cost: 5000, list: 7000, category: "Audio" }],
+  ]);
+  const rack = {
+    id: "SA-GEM3", kind: "system" as const, label: "GEM3 rack", description: "", scope: "Audio" as const,
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "GEM-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const hints = { "lighting:par": { text: "was $500 / $750 / $1,150", skus: [] as string[] } };
+  const empty = gemView3({}, ctx, hints);
+  ok(empty.length === 46 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#GEM T3: an empty map shows every row as Needs a part");
+  ok(empty.find((r) => r.key === "lighting:par")!.hint === "was $500 / $750 / $1,150" && empty[0].systemLabel === "Rigging", "#GEM T3: rows carry their 'was' hint and their group label");
+  const view = gemView3({
+    "lighting:par": { tiers: { good: { kind: "part", sku: "GEM-PAR" }, better: { kind: "part", sku: "GEM-GONE" }, best: { kind: "part", sku: "GEM-PAR" } }, updatedBy: "Jeff", updatedAt: 9 },
+    "audio:mixerDsp": { tiers: { good: { kind: "assembly", id: "SA-GEM3" } }, sameAll: true, updatedBy: "Jeff", updatedAt: 9 },
+    "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7, note: "no book yet" } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
+  }, ctx, hints);
+  const par = view.find((r) => r.key === "lighting:par")!;
+  ok(par.status === "needs-part" && par.cells[1].problem !== null && par.cells[0].unitSell === 900, "#GEM T3: a cell pointing at a deleted part makes the row Needs a part");
+  const mix = view.find((r) => r.key === "audio:mixerDsp")!;
+  ok(mix.status === "mapped" && mix.sameAll && mix.cells.every((c) => c.kind === "assembly" && c.title === "GEM3 rack" && c.unitSell === 7000), "#GEM T3: a same-for-all assembly row reads Mapped in every tier");
+  const sub = view.find((r) => r.key === "audio:subwoofer")!;
+  const subIn = sub.cells[2].input;
+  ok(sub.status === "allowance" && sub.cells[2].confirmedBy === "Chris" && subIn?.kind === "allowance" && subIn.confirmed, "#GEM T3: an allowance row shows who confirmed it and re-posts as confirmed");
+  const s = gemSummary3(view);
+  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 44, "#GEM T3: the summary counts rows by status");
+  const catalog = [
+    { sku: "RB-EN-16", desc: "Encore velour 16oz", category: "Fabric" },
+    { sku: "RB-CHAR-25", desc: "Charisma velour 25oz", category: "Fabric" },
+    { sku: "PAR-1", desc: "LED par wash", category: "Lighting Fixtures" },
+    { sku: "PAR-2", desc: "Par can", category: "Lighting Fixtures" },
+    { sku: "FAB-PAR", desc: "par fabric", category: "Fabric" },
+  ];
+  const legs = gemSuggest3(catalog, gemRowByKey3.get("curtains:legs")!, ["RB-CHAR-25"], 8);
+  ok(legs[0].sku === "RB-CHAR-25" && legs.length === 2 && legs.every((p) => p.category === "Fabric"), "#GEM T3: fabric rows suggest fabrics only, the old fabric SKU first");
+  const pars = gemSuggest3(catalog, gemRowByKey3.get("lighting:par")!, [], 1);
+  ok(pars.length === 1 && pars[0].sku === "PAR-1", "#GEM T3: part suggestions skip fabric, rank by matched words, respect the limit");
+  const opts = gemAsmOpts3([rack], ctx);
+  ok(opts.length === 1 && opts[0].kind === "system" && opts[0].scope === "Audio" && opts[0].unitSell === 7000 && opts[0].unitCost === 5000, "#GEM T3: the assembly picker lists systems with their live totals");
+  const clientSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
+  ok(clientSrc.startsWith('"use client"') && !gemValueImports(clientSrc).some((m) => /^@\/lib\/stores\/|^@\/db\/|equipment-legacy-hints/.test(m)), "#GEM T3: the map client imports no store, DB or hint-table value");
+  const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
+  ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#GEM T3: admin-gated, and the page reads only the SKUs it shows");
+  const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#GEM T3: every settings action, the four new ones included, is admin-gated");
+}
