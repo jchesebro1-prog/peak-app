@@ -1,9 +1,12 @@
 import type { SpecCatalogPart, BomRow } from "@/lib/bid-spec";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
-import type { GridProject, GridPlacement } from "@/lib/stores/grid-projects";
+import type { GridProject } from "@/lib/stores/grid-projects";
 import { hasPrintableSpec } from "@/lib/specs/articles";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { resolvePackageDocs, type PackageDocRef, type PackageDocument } from "@/lib/part-docs/package";
+import { placementQty } from "@/lib/design/grid-bom";
+import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
+import type { FixtureResolvable } from "@/lib/fixture-assemblies";
 
 export type PackageGapKind = "missing-catalog" | "missing-datasheet" | "missing-spec";
 
@@ -50,13 +53,15 @@ export function coveredNote(sku: string, by: string[]): { sku: string; by: strin
   return { sku, by, note: `covered by ${by.join(", ")}` };
 }
 
-function addBom(map: Map<string, BomRow>, placement: GridPlacement, desc: string): void {
-  // Curtains are made-to-size lines, not a reusable product datasheet line.
-  // Keep them in the BOM as individual rows so the package never loses scope.
-  const key = placement.curtain ? placement.id : placement.partId;
+function addBom(map: Map<string, BomRow>, key: string, row: BomRow): void {
   const current = map.get(key);
-  if (current && !placement.curtain) current.qty += 1;
-  else map.set(key, { sku: placement.curtain ? placement.id : placement.partId, desc, qty: 1 });
+  if (current) current.qty += row.qty;
+  else map.set(key, { ...row });
+}
+
+/** True when any placement is an Auto assembly (`asm:`) — the caller loads fixtures only then. */
+export function packageNeedsFixtures(placements: ReadonlyArray<{ partId: string }>): boolean {
+  return placements.some((pl) => parseVirtualPartId(pl.partId)?.kind === "assembly");
 }
 
 /**
@@ -72,6 +77,8 @@ export function buildClientPackageManifest(
   catalog: SpecCatalogPart[],
   requestedOptionId?: string | null,
   docs?: CoverageIndex | null,
+  /** Resolves an Auto assembly (`asm:<id>`) into its members (#GEM). */
+  fixtureOf?: (id: string) => FixtureResolvable | null | undefined,
 ): ClientPackageManifest {
   const optionId = resolveOptionId(project, requestedOptionId);
   const { placements } = optionSlice(project, optionId);
@@ -79,12 +86,29 @@ export function buildClientPackageManifest(
   const bySku = new Map(catalog.map((part) => [part.sku, part]));
   const bomMap = new Map<string, BomRow>();
 
+  // Device lines carry their UNITS (a lot marker is its `qty`, #GEM) and go
+  // through the same flattening as the bid spec (gridSpecBomRows, D-GEM-16):
+  // an Auto assembly expands into its included members, an allowance is left
+  // out — no raw `asm:` / `allow:` id reaches the customer's package.
+  const deviceLines: Array<{ sku: string; desc: string; qty: number }> = [];
   for (const placement of placements) {
+    if (placement.curtain) {
+      // Curtains are made-to-size lines, not a reusable product datasheet line.
+      // Keep them in the BOM as individual rows so the package never loses scope.
+      const desc = `${placement.curtain.type} curtain${placement.curtain.fabricSku ? ` · ${placement.curtain.fabricSku}` : ""}`;
+      addBom(bomMap, placement.id, { sku: placement.id, desc, qty: 1 });
+      continue;
+    }
+    const ref = parseVirtualPartId(placement.partId);
     const part = byId.get(placement.partId) || bySku.get(placement.partId);
-    const desc = placement.curtain
-      ? `${placement.curtain.type} curtain${placement.curtain.fabricSku ? ` · ${placement.curtain.fabricSku}` : ""}`
-      : part?.desc || placement.category || placement.partId;
-    addBom(bomMap, placement, desc);
+    const desc =
+      ref?.kind === "assembly"
+        ? fixtureOf?.(ref.id)?.label || `Assembly ${ref.id} (deleted)`
+        : part?.desc || placement.category || placement.partId;
+    deviceLines.push({ sku: placement.partId, desc, qty: placementQty(placement) });
+  }
+  for (const row of gridSpecBomRows(deviceLines, (id) => fixtureOf?.(id))) {
+    addBom(bomMap, row.sku || `desc:${row.desc}`, row);
   }
 
   const bom = [...bomMap.values()].sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));

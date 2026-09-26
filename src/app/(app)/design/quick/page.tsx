@@ -3,11 +3,12 @@ import { can } from "@/lib/team";
 import { getDesign } from "@/lib/stores/designs";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { list as catalogList } from "@/lib/stores/catalog";
-import { assemblyUnitTotals, fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
+import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
-import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
+import { loadDesignPricing } from "@/lib/stores/design-pricing";
+import { CanMapProvider } from "@/components/design/equipment-map-link";
 import QuickDesignClient from "./quick-design-client";
 import "./quick-design.css";
 
@@ -45,16 +46,22 @@ export default async function Page({
       listFixtures(),
       catalogList(),
     ]);
-  // The Equipment map price context (#GEM) — built from the catalog and
-  // fixtures this request already loaded (no second load of either).
-  const prices = await loadEquipmentPriceTable({ catalog: catalogRows, fixtures: fixtureRecords });
   // #210: fixtures (not systems) under their kept ids — included parts only.
-  const fixtureAssemblies = fixtureAssembliesFrom(fixtureRecords, catalogRows).map((assembly) => {
-    const totals = assemblyUnitTotals(assembly);
-    return { id: assembly.id, name: assembly.name, cost: totals.cost, sell: totals.sell };
-  });
+  const fixtureList = fixtureAssembliesFrom(fixtureRecords, catalogRows);
+  // The Equipment map price table (#GEM) plus each pickable fixture's price,
+  // built from the catalog and fixtures this request already loaded (no
+  // second load of either). A fixture pick prices through the SAME resolver
+  // as an Equipment map assembly cell (priceCell, final review I3): its
+  // included sell, or cost ÷ (1 − margin) when list-less — never a list-only
+  // sum — and a pick that prices needs-a-part stays needs-a-part.
+  const { table: prices, fixturePrices } = await loadDesignPricing(
+    fixtureList.map((f) => f.id),
+    { catalog: catalogRows, fixtures: fixtureRecords }
+  );
+  const fixtureAssemblies = fixtureList.map((assembly) => ({ id: assembly.id, name: assembly.name }));
 
   return (
+    <CanMapProvider canMap={can("manage_users", user.roles)}>
     <QuickDesignClient
       me={user.name}
       canApprove={can("approve", user.roles)}
@@ -75,6 +82,8 @@ export default async function Page({
       rates={{ installPct, freightPct, contingencyPct }}
       reviewerNames={reviewerRows.map((u) => u.name)}
       fixtureAssemblies={fixtureAssemblies}
+      fixturePrices={fixturePrices}
     />
+    </CanMapProvider>
   );
 }

@@ -17972,7 +17972,7 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   const tot = gemBomTotals6(pls, parts);
   ok(tot.value === 4680 && tot.cost === 3120, "#GEM T6: totals multiply by the lot quantity");
   const roll = gemBySpace6(pls, parts, [])[0];
-  ok(roll.count === 3 && roll.value === 4680, "#GEM T6: space rollups value a lot at its quantity (count stays markers)");
+  ok(roll.count === 242 && roll.value === 4680, "#GEM T6: space rollups value a lot at its quantity (count is units since the final review, D-GEM-21)");
   const sched = gemSchedule6({ placements: pls, spaces: [], descOf: (id) => parts.find((p) => p.id === id)?.desc, wires: [] });
   ok(sched.sections[0].rows.find((r) => r.partId === "PIPE")!.qty === 240, "#GEM T6: the schedule counts a lot at its quantity");
   const graph = gemRiser6(pls, [], [], parts, []);
@@ -18370,4 +18370,153 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
   ok(rd9.startsWith('"use client"') && rd9.includes("<ConfirmButton") && rd9.includes("refillScopeAction(") && !gemValueImports(rd9).some((m) => /\/auto-estimate$|\/equipment-pricing$|^@\/lib\/stores\/|^@\/db\//.test(m)), "#GEM T9: the re-fill is confirmed (ConfirmButton) and the dialog imports no pricing/store value");
   const refillBody = act9.slice(act9.indexOf("export async function refillScopeAction"));
   ok(refillBody.includes("mergeScopeEstimate(") && refillBody.includes("fillAutoScopes(") && refillBody.includes("hasOption(") && pg9.includes("sellOnlyCards(autoCards)"), "#GEM T9: a re-fill merges one scope's choices and re-fills that scope in the current option; the page sends sell-only cards");
+}
+
+/* --- #GEM final review: I1–I6 + minors (D-GEM-19 … D-GEM-22) --- */
+import { designBudgetLabel as gemFrLabel, designNeedsPart as gemFrNeeds } from "@/lib/design/scope-targets";
+import { designOpenHref as gemFrHref } from "@/lib/design/design-links";
+import { fixtureOverridesFor as gemFrOverrides, quickDesignNeedsPart as gemFrQuickNeeds } from "@/lib/design/equipment-pricing";
+import { autoQuoteNeedsPart as gemFrAutoNeeds } from "@/lib/design/auto-estimate";
+import { keptUnitsByRow as gemFrKept, sanitizeAutoOrigin as gemFrOrigin, withoutAuto as gemFrNoAuto } from "@/lib/design/grid-auto-model";
+import { generateAutoLayout as gemFrLayout } from "@/lib/design/grid-auto-layout";
+import { normalizeUnit as gemFrUnit, unitMismatch as gemFrMismatch } from "@/lib/design/equipment-map-view";
+import { packageNeedsFixtures as gemFrPkgNeeds } from "@/lib/client-package";
+import { EQUIPMENT_ROWS as gemFrRows } from "@/lib/design/equipment-vocab";
+import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
+{
+  const money = (n: number) => `$${n}`;
+  // I1 — one label everywhere.
+  ok(gemFrLabel({ budget: 5000, incomplete: { needsPart: 2 } }, money) === "Incomplete" && gemFrLabel({ budget: 5000 }, money) === "$5000" && gemFrLabel({ budget: 5000, incomplete: { needsPart: 0 } }, money) === "$5000", "#GEM final review I1: designBudgetLabel — Incomplete while a line needs a part; a pre-#GEM record keeps its budget");
+  ok(gemFrNeeds({ incomplete: { needsPart: Number.NaN } }) === 0 && gemFrNeeds({}) === 0 && gemFrNeeds({ incomplete: { needsPart: 3 } }) === 3, "#GEM final review I1: designNeedsPart reads junk / missing as 0");
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const homeCards = read("src/app/(app)/_dashboard/widgets/home-cards.tsx");
+  const reviews = read("src/app/(app)/reviews/page.tsx");
+  const letter = read("src/app/(app)/design/engagements/letter/page.tsx");
+  ok(homeCards.includes("designBudgetLabel(d, shortMoney)") && reviews.includes("designBudgetLabel(d, shortMoney)") && letter.includes("designNeedsPart(d) > 0 ? \"To be confirmed\""), "#GEM final review I1: Home cards, the Reviews queue and the engagement letter all use the shared incomplete rule");
+  // I2 — Grid designs open in The Grid; Home promotes through the dashboard's branch.
+  ok(gemFrHref({ id: "D-1", layoutMode: "manual", gridProjectId: "GP-9" }) === "/design/grid/GP-9" && gemFrHref({ id: "D-2" }) === "/design/quick?design=D-2" && gemFrHref({ id: "D-3", layoutMode: "manual", gridProjectId: null }) === "/design/quick?design=D-3", "#GEM final review I2: designOpenHref — Grid designs open in The Grid");
+  ok(homeCards.includes("openHref: designOpenHref(d)") && reviews.includes("openHref: designOpenHref(d)"), "#GEM final review I2: Home and Reviews link through designOpenHref");
+  const homeAct = read("src/app/(app)/home-actions.ts");
+  const homeBody = homeAct.slice(homeAct.indexOf("export async function promoteDesignAction"));
+  ok(homeAct.includes('from "./design/designs/actions"') && homeBody.includes("promoteFromDesigns(designId)") && !homeAct.includes("promoteDesignToQuote"), "#GEM final review I2: Home's Add to Quotes delegates to the Designs dashboard's promoteDesignAction");
+  // I3 — fixture picks: server-priced, a needs-part pick stays needs-part.
+  const pickPrices = {
+    "fa-live": { status: "assembly" as const, ref: "fa-live", desc: "Live", unit: "ea", unitCost: 100, unitSell: 143 },
+    "fa-dead": { status: "needs-part" as const, reason: "no priced parts" },
+  };
+  const ov = gemFrOverrides({ par: "fa-live", front: "fa-dead", cyc: "fa-gone", side: "" }, pickPrices);
+  ok(ov["lighting:par"]?.status === "assembly" && ov["lighting:front"]?.status === "needs-part" && !("lighting:cyc" in ov) && !("lighting:side" in ov), "#GEM final review I3: fixtureOverridesFor — priced pick overrides, a needs-part pick stays needs-part, a deleted pick falls back to the map");
+  const qp = read("src/app/(app)/design/quick/page.tsx");
+  const qc = read("src/app/(app)/design/quick/quick-design-client.tsx");
+  ok(qp.includes("loadDesignPricing(") && !qp.includes("assemblyUnitTotals") && qc.includes("fixtureOverridesFor(a.fixtureAssemblies, fixturePrices)") && !qc.includes("hit.sell"), "#GEM final review I3: Quick Design prices fixture picks on the server (priceCell), never the list-only sum");
+  // I4 — the server's own count; the client's `incomplete` is never read.
+  const allAllow = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const emptyTable = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } };
+  const cfgFr = { ...gemFrDefault(10) } as unknown as Record<string, unknown>;
+  const recFr = { tier: "better", config: cfgFr };
+  ok(gemFrQuickNeeds(recFr, emptyTable, {}) > 0 && gemFrQuickNeeds(recFr, allAllow, {}) === 0, "#GEM final review I4: quickDesignNeedsPart — empty map counts lines, a fully mapped map counts none");
+  ok(gemFrQuickNeeds({ tier: "better", config: { ...cfgFr, fixtureAssemblies: { par: "fa-dead" } } }, allAllow, pickPrices) === 1, "#GEM final review I4: a needs-part fixture pick blocks even when its row is mapped");
+  ok(gemFrQuickNeeds({ name: "seed", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging"] }, emptyTable, {}) > 0, "#GEM final review I4 (D-GEM-19): a pre-config (pre-#GEM) record is re-priced from its display fields — and refused while unmapped");
+  const hostile = Object.defineProperty({}, "sys", { enumerable: true, get() { throw new Error("bad config"); } }) as Record<string, unknown>;
+  ok(gemFrQuickNeeds({ tier: "better", config: hostile }, allAllow, {}) === 1, "#GEM final review I4: a config that won't compute counts as incomplete, never throws");
+  const qa = read("src/app/(app)/design/quick/actions.ts");
+  const da = read("src/app/(app)/design/designs/actions.ts");
+  const qaAdd = qa.slice(qa.indexOf("export async function addToQuotesAction"));
+  const qaPersist = qa.slice(qa.indexOf("async function persistDesign"), qa.indexOf("/** Save / update the design"));
+  ok(qaAdd.includes("quickPromoteGuard(partial)") && !qaAdd.includes("partial.incomplete") && qaPersist.includes("withServerIncomplete(clientPartial"), "#GEM final review I4: Quick Design's promote re-prices on the server and every save derives `incomplete` server-side");
+  const daPromote = da.slice(da.indexOf("export async function promoteDesignAction"), da.indexOf("export async function deleteDesignAction"));
+  ok(daPromote.includes("quickPromoteGuard(d)") && !daPromote.includes("d.incomplete") && daPromote.includes("createDraftQuoteAction(d.gridProjectId, null)"), "#GEM final review I4: the dashboard's promote re-prices Quick designs on the server; Grid designs quote through The Grid without acceptIncomplete");
+  // I5 — client package: lot units, asm expansion, allowances out, no raw virtual ids.
+  const fxPkg = {
+    id: "SA-PKG", kind: "system" as const, label: "Rack", description: "", scope: "Audio" as const,
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "PKG-MIX", qty: 2 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const pkgProject = {
+    id: "GRD-PKG", name: "Pkg", createdAt: 1, quoteId: null,
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
+    placements: [
+      { id: "p1", optionId: "opt-a", partId: "PKG-PIPE", qty: 240 },
+      { id: "p2", optionId: "opt-a", partId: "PKG-PIPE" },
+      { id: "p3", optionId: "opt-a", partId: "asm:SA-PKG" },
+      { id: "p4", optionId: "opt-a", partId: "asm:SA-PKG", qty: 3 },
+      { id: "p5", optionId: "opt-a", partId: "allow:audio:subwoofer:better", qty: 4 },
+      { id: "p6", optionId: "opt-a", partId: "asm:SA-GONE" },
+    ],
+  };
+  const pkgCat = [
+    { id: "PKG-PIPE", sku: "PKG-PIPE", desc: "Pipe", category: "Rigging", unit: "ft", list: 12, cost: 8 },
+    { id: "PKG-MIX", sku: "PKG-MIX", desc: "Mixer", category: "Audio", unit: "ea", list: 800, cost: 500 },
+  ];
+  const pkg = buildClientPackageManifest(pkgProject as never, pkgCat as never, "opt-a", null, (id) => (id === "SA-PKG" ? fxPkg : undefined));
+  const bomBy = (sku: string) => pkg.bom.find((r) => r.sku === sku);
+  ok(bomBy("PKG-PIPE")?.qty === 241, "#GEM final review I5: a lot marker contributes its units to the package BOM");
+  ok(bomBy("PKG-MIX")?.qty === 8, "#GEM final review I5: an Auto assembly expands into its members (4 racks × 2 mixers)");
+  ok(!pkg.bom.some((r) => /^(asm|allow):/.test(r.sku) || /(asm|allow):/.test(r.desc)) && !pkg.items.some((i) => /^(asm|allow):/.test(i.sku)), "#GEM final review I5: no raw asm:/allow: id reaches the customer's package");
+  ok(pkg.bom.some((r) => r.sku === "" && /SA-GONE/.test(r.desc)), "#GEM final review I5: a deleted assembly stays one row under a readable name for the gap report");
+  ok(gemFrPkgNeeds(pkgProject.placements) && !gemFrPkgNeeds([{ partId: "PKG-PIPE" }, { partId: "allow:audio:subwoofer:good" }]), "#GEM final review I5: fixtures load only when an asm: placement exists");
+  const pkgSrv = read("src/lib/client-package-server.ts");
+  ok(pkgSrv.includes("reduce((n, p) => n + placementQty(p), 0)") && pkgSrv.includes("packageNeedsFixtures("), "#GEM final review I5: 'Placed devices' counts units and the package resolves assemblies");
+  // I6 — D-GEM-20: kept devices count toward the new quantity.
+  const tagged = { id: "x", optionId: "o1", partId: "P", auto: { scope: "lighting" as const, rowKey: "lighting:par", tier: "better" as const } };
+  const handTouched = gemFrNoAuto(tagged);
+  ok(!("auto" in handTouched) && JSON.stringify((handTouched as { autoOrigin?: unknown }).autoOrigin) === JSON.stringify({ scope: "lighting", rowKey: "lighting:par" }), "#GEM final review I6: withoutAuto records the origin scope + row (not an auto tag)");
+  ok(gemFrOrigin({ scope: "lighting", rowKey: "audio:subwoofer" }) === null && gemFrOrigin({ scope: "controls", rowKey: "controls:console" }) === null, "#GEM final review I6: an origin must be a real row of an Auto scope");
+  const kept = gemFrKept(
+    [
+      { ...handTouched, qty: undefined },
+      { optionId: "o1", autoOrigin: { scope: "lighting", rowKey: "lighting:par" } },
+      { optionId: "o1", autoOrigin: { scope: "rigging", rowKey: "rigging:pipe" }, qty: 40 },
+      { optionId: "o2", autoOrigin: { scope: "lighting", rowKey: "lighting:par" } },
+      { optionId: "o1", auto: tagged.auto, autoOrigin: { scope: "lighting", rowKey: "lighting:par" } },
+      { optionId: "o1" },
+    ],
+    ["lighting", "rigging"],
+    "o1"
+  );
+  ok(kept["lighting:par"] === 2 && kept["rigging:pipe"] === 40 && Object.keys(kept).length === 2, "#GEM final review I6: keptUnitsByRow counts units per row — this option only, never an auto-tagged or origin-less device");
+  const lineOf = (rowKey: string, scope: string, qty: number) => ({ rowKey, scope, label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref: "SKU-" + rowKey, unitCost: 1, unitSell: 2, total: 2 * qty, swapped: false });
+  const cardsFr = [
+    { scope: "lighting", tier: "best", lines: [lineOf("lighting:par", "lighting", 12)], total: 0, needsPart: 0, allowances: 0 },
+    { scope: "rigging", tier: "best", lines: [{ ...lineOf("rigging:pipe", "rigging", 240), place: "lot" }], total: 0, needsPart: 0, allowances: 0 },
+  ] as never;
+  const aFr = { ...gemFrDefault(0), venue: "school" };
+  const placedFor = (keptMap?: Record<string, number>) => {
+    const out = gemFrLayout(aFr, cardsFr, { electrics: 2, sets: 6, kept: keptMap });
+    return {
+      par: out.filter((s) => s.auto.rowKey === "lighting:par").length,
+      pipe: out.filter((s) => s.auto.rowKey === "rigging:pipe").reduce((n, s) => n + (s.qty ?? 1), 0),
+    };
+  };
+  ok(placedFor().par === 12 && placedFor({ "lighting:par": 3 }).par === 9 && placedFor({ "lighting:par": 12 }).par === 0 && placedFor({ "lighting:par": 20 }).par === 0, "#GEM final review I6: 12 called for, 3 kept → 9 placed; never below zero");
+  ok(placedFor({ "rigging:pipe": 40 }).pipe === 200, "#GEM final review I6: a lot row subtracts kept units (240 − 40 → one 200-unit lot)");
+  const rdFr = read("src/app/(app)/design/grid/[id]/refill-dialog.tsx");
+  ok(rdFr.includes("count toward") && rdFr.includes("keptUnits") && rdFr.includes("kept by hand in this scope"), "#GEM final review I6: the re-fill confirm says kept devices count toward the total, and how many");
+  // D-GEM-22 — Grid quote from an Auto design with needs-a-part lines.
+  const cardsQ = [
+    { scope: "lighting", lines: [{ status: "needs-part", qty: 4 }, { status: "part", qty: 2 }, { status: "needs-part", qty: 0 }] },
+    { scope: "audio", lines: [{ status: "needs-part", qty: 1 }] },
+  ] as never;
+  ok(gemFrAutoNeeds(cardsQ, { tierByScope: { lighting: "good" } }) === 1 && gemFrAutoNeeds(cardsQ, { tierByScope: { lighting: "good", audio: "best" } }) === 2, "#GEM final review D-GEM-22: autoQuoteNeedsPart counts chosen scopes' needs-a-part lines with qty > 0");
+  const gridAct = read("src/app/(app)/design/grid/[id]/actions.ts");
+  const quoteBody = gridAct.slice(gridAct.indexOf("export async function createDraftQuoteAction"));
+  const refillBodyFr = gridAct.slice(gridAct.indexOf("export async function refillScopeAction"));
+  ok(quoteBody.includes("acceptIncomplete") && quoteBody.includes("autoNeedsPart(project, resolvedOptionId)"), "#GEM final review D-GEM-22: the Grid quote refuses Auto needs-a-part lines unless the person confirmed");
+  const edFr = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(edFr.includes("Quote anyway") && edFr.includes("runQuote(true)"), "#GEM final review D-GEM-22: the editor asks before quoting an incomplete Auto design");
+  ok(refillBodyFr.indexOf("AUTO_SCOPES.includes(") > -1 && refillBodyFr.indexOf("AUTO_SCOPES.includes(") < refillBodyFr.indexOf("getProject("), "#GEM final review minor: refillScopeAction refuses a non-Auto scope before reading the project");
+  // Minors
+  ok(gemFrUnit("Sq. Ft") === "sqft" && gemFrUnit("EACH") === "ea" && gemFrUnit("LF") === "ft" && gemFrMismatch("ft", "ea") !== null && gemFrMismatch("ea", "each") === null && gemFrMismatch("ft", "") === null, "#GEM final review minor: the Equipment map flags a mapped part whose unit differs from the row's");
+  ok(qc.includes("breakdownAmount(selTot.matRev)") && qc.includes("breakdownAmount(selTot.contingency"), "#GEM final review minor: Quick Design's breakdown rows read Incomplete while incomplete");
+  const linkFr = read("src/components/design/equipment-map-link.tsx");
+  const cardFr = read("src/app/(app)/design/grid/[id]/equipment-card.tsx");
+  const spFr = read("src/app/(app)/design/grid/[id]/scope-panel.tsx");
+  ok(linkFr.includes("ask an admin to map it") && cardFr.includes("useCanMap()") && spFr.includes("<EquipmentMapLink") && !qc.includes('href="/design/grid/settings/equipment-map"') && read("src/app/(app)/design/grid/[id]/page.tsx").includes('canMap={can("manage_users", user.roles)}'), "#GEM final review minor: non-admins see 'ask an admin to map it' instead of a dead-end Equipment map link");
+  const hubFr = read("src/app/(app)/design/page.tsx");
+  const revFr = read("src/app/(app)/design/grid/[id]/revisions-panel.tsx");
+  const rollFr = bomBySpace([{ sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "LOT", qty: 40 }, { sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "ONE" }], [], []);
+  ok(rollFr[0]?.count === 41 && hubFr.includes("placementQty(pl)") && revFr.includes("placementQty(pl)") && revFr.includes("units ·"), "#GEM final review minor: space rollups, the design hub and revisions count units");
 }

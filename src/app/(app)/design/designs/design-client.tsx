@@ -1,5 +1,6 @@
 "use client";
 
+import { EquipmentMapLink } from "@/components/design/equipment-map-link";
 import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -139,6 +140,8 @@ export default function DesignClient({
   const [promoteToast, setPromoteToast] = useState(false);
   const [promotedId, setPromotedId] = useState<string | null>(null);
   const [promoteError, setPromoteError] = useState<string | null>(null);
+  /** The last refused promote was an incomplete estimate (D-GEM-19) — offer the Equipment map. */
+  const [promoteNeedsPart, setPromoteNeedsPart] = useState(false);
   const [rcOpen, setRcOpen] = useState(false);
   const [rcNote, setRcNote] = useState("");
   const [reviewerSel, setReviewerSel] = useState("queue");
@@ -192,10 +195,12 @@ export default function DesignClient({
 
   const promoteDesign = (id: string) => {
     setPromoteError(null);
+    setPromoteNeedsPart(false);
     startTransition(async () => {
       const res = await promoteDesignAction(id);
       if (!res.ok) {
         setPromoteError(res.error);
+        setPromoteNeedsPart(!!res.needsPart);
         return;
       }
       setPromotedId(res.quoteId);
@@ -407,9 +412,9 @@ export default function DesignClient({
                 </div>
                 {selIncomplete && (
                   <div style={{ marginTop: 6 }}>
-                    <Link href="/design/grid/settings/equipment-map" style={{ fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
+                    <EquipmentMapLink style={{ fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
                       {sel.incomplete!.needsPart} item{sel.incomplete!.needsPart === 1 ? "" : "s"} need{sel.incomplete!.needsPart === 1 ? "s" : ""} a part →
-                    </Link>
+                    </EquipmentMapLink>
                   </div>
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
@@ -447,7 +452,17 @@ export default function DesignClient({
                   )}
                 </div>
                 {promoteError && (
-                  <div style={{ marginTop: 9, fontSize: 12, color: "#b4543a", textAlign: "right" }}>{promoteError}</div>
+                  <div style={{ marginTop: 9, fontSize: 12, color: "#b4543a", textAlign: "right" }}>
+                    {promoteError}
+                    {promoteNeedsPart && (
+                      <>
+                        {" "}
+                        <EquipmentMapLink style={{ fontWeight: 600, color: "#a0442b" }} fallback="Ask an admin to map them.">
+                          Open the Equipment map →
+                        </EquipmentMapLink>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -531,9 +546,9 @@ export default function DesignClient({
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#a0442b", flexShrink: 0 }} />
                       <span style={{ fontSize: 11.5, color: "#a0442b", lineHeight: 1.4 }}>
                         Incomplete — {detail.needsPart} item{detail.needsPart === 1 ? "" : "s"} need{detail.needsPart === 1 ? "s" : ""} a part.{" "}
-                        <Link href="/design/grid/settings/equipment-map" style={{ fontWeight: 600, color: "#a0442b" }}>
+                        <EquipmentMapLink style={{ fontWeight: 600, color: "#a0442b" }} fallback="Ask an admin to map them in the Equipment map.">
                           Open the Equipment map →
-                        </Link>
+                        </EquipmentMapLink>
                       </span>
                     </div>
                   )}

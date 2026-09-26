@@ -134,6 +134,22 @@ export function autoEstimateCards(
   return cards;
 }
 
+/**
+ * The needs-a-part lines of an option's Auto choices that a quote would
+ * silently leave out (#GEM final review, D-GEM-22): Auto never places a
+ * needs-a-part line, so the Grid's BOM — and its quote — are missing that
+ * equipment. Only the scopes Auto was asked to fill (those with a chosen
+ * tier) count, and a line edited to qty 0 was dropped on purpose.
+ */
+export function autoQuoteNeedsPart(cards: ReadonlyArray<Pick<AutoCard, "scope" | "lines">>, est: Pick<AutoEstimate, "tierByScope">): number {
+  let n = 0;
+  for (const c of cards) {
+    if (!est.tierByScope[c.scope]) continue;
+    for (const l of c.lines) if (l.status === "needs-part" && l.qty > 0) n += 1;
+  }
+  return n;
+}
+
 function sellLine(l: AutoLine): SellLine {
   return {
     rowKey: l.rowKey,

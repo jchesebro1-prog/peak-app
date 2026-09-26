@@ -67,3 +67,27 @@ export function addToQuotesGuard(needsPart: number): string | null {
     needsPart === 1 ? "it" : "them"
   } in the Equipment map before adding to Quotes.`;
 }
+
+/**
+ * A saved design's needs-a-part count (#GEM D-GEM-10/D-GEM-19) — what the
+ * server derived at save time. A pre-#GEM record has no `incomplete` and
+ * reads as 0: its stored budget stays visible (it is still refused as a
+ * quote until the server re-price clears it — see design-pricing.ts).
+ */
+export function designNeedsPart(d: { incomplete?: { needsPart?: number } | null }): number {
+  const n = Number(d.incomplete?.needsPart);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
+/**
+ * The one budget label every design surface shows (#GEM final review I1):
+ * Home cards, the Reviews queue, the engagement letter. "Incomplete" while
+ * any line of the saved tier still needs a part — never the partial dollar
+ * figure, which reads as a (wrong) price.
+ */
+export function designBudgetLabel(
+  d: { budget?: number | null; incomplete?: { needsPart?: number } | null },
+  money: (n: number) => string
+): string {
+  return designNeedsPart(d) > 0 ? "Incomplete" : money(d.budget || 0);
+}

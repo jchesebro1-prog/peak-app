@@ -20,7 +20,7 @@ import {
   type RiserOp,
 } from "@/lib/design/grid-riser-doc";
 import { planRowQty } from "@/lib/design/grid-riser";
-import { AUTO_QTY_MAX, withoutAuto } from "@/lib/design/grid-auto-model";
+import { AUTO_QTY_MAX, sanitizeAutoOrigin, withoutAuto } from "@/lib/design/grid-auto-model";
 import type { GridPlacement, GridProject } from "./grid-projects";
 
 /**
@@ -268,6 +268,10 @@ export async function setNodeDeviceQty(
         return;
       }
       fresh = newPlacements(drop, input.partId, input.optionId, input.by, Date.now());
+      // D-GEM-20: markers added to an Auto-painted row stand in for that row
+      // too, so the row's whole edited unit count is kept on a re-fill.
+      const origin = cur.map((pl) => sanitizeAutoOrigin(pl.auto ?? pl.autoOrigin)).find((o) => o) ?? null;
+      if (origin) fresh = fresh.map((pl) => ({ ...pl, autoOrigin: origin }));
     }
     const gone = new Set(plan.remove);
     const row = new Set(cur.map((pl) => pl.id));

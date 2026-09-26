@@ -34,6 +34,7 @@ export default async function EquipmentMapPage() {
           <div style={{ fontSize: 15, fontWeight: 600 }}>Admin access required</div>
           <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6, lineHeight: 1.55 }}>
             The Equipment map decides what Auto designs are priced with, so it is limited to admins (same as Estimating Rules).
+            If a design says an item needs a part, ask an admin to map it here.
           </div>
         </div>
       </div>

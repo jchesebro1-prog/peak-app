@@ -5,6 +5,7 @@ import type { QuickScopeInputs, TierKey } from "@/app/(app)/design/quick/engine"
 import type { SellCard, SellLine } from "@/lib/design/auto-estimate";
 import { mergeScopeEstimate, reconcileQtyDraft, type AutoEstimate, type AutoOverride } from "@/lib/design/grid-auto-model";
 import { previewAutoEstimateAction, searchAutoEquipmentAction, type AutoEquipHit } from "./actions";
+import { ASK_ADMIN_HINT, useCanMap } from "@/components/design/equipment-map-link";
 
 /**
  * The Auto Equipment step (#GEM, spec §5) — shared by the intake and the
@@ -105,6 +106,8 @@ export function EquipmentCard({
 }) {
   const [swapping, setSwapping] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  // Only admins can edit the Equipment map; everyone else gets a hint, not a dead end.
+  const canMap = useCanMap();
   // Reconcile the qty draft against a fresh server re-price (#GEM fix wave 1,
   // M7) — comparing against the previous card's lines during render (the
   // "adjusting state when a prop changes" pattern, not an effect: this file
@@ -190,9 +193,13 @@ export function EquipmentCard({
                   {needs ? (
                     <>
                       Needs a part — {l.reason ?? "not mapped yet"} ·{" "}
-                      <a href={mapHref(l.rowKey)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>
-                        Map it
-                      </a>
+                      {canMap ? (
+                        <a href={mapHref(l.rowKey)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>
+                          Map it
+                        </a>
+                      ) : (
+                        <span title="Only an admin can edit the Equipment map">{ASK_ADMIN_HINT}</span>
+                      )}
                     </>
                   ) : (
                     `${l.refDesc ?? l.ref ?? ""}${l.swapped ? " · swapped for this design" : ""}`

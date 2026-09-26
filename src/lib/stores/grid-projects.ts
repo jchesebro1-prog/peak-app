@@ -32,9 +32,10 @@ import {
   withoutAuto,
   type AutoEstimate,
   type AutoEstimates,
+  type AutoOrigin,
   type AutoTag,
 } from "@/lib/design/grid-auto-model";
-export type { AutoEstimate, AutoEstimates, AutoTag } from "@/lib/design/grid-auto-model";
+export type { AutoEstimate, AutoEstimates, AutoOrigin, AutoTag } from "@/lib/design/grid-auto-model";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -110,6 +111,12 @@ export type GridPlacement = {
    * deletes it, so a hand-touched device is kept by every later re-fill.
    */
   auto?: AutoTag;
+  /**
+   * D-GEM-20: set when a hand edit cleared `auto` — the scope + row the
+   * device was painted for. Not an auto tag (re-fills keep the device), but
+   * a re-fill of that scope counts its units toward the row's quantity.
+   */
+  autoOrigin?: AutoOrigin;
   by: string;
   at: number;
 };

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { designNeedsPart } from "@/lib/design/scope-targets";
 import { requireUser } from "@/lib/session";
 import { get as getQuote } from "@/lib/stores/quotes";
 import {
@@ -328,7 +329,12 @@ export default async function ConsultingLetterPage({
                         {d.width && d.depth ? `${d.width}′ × ${d.depth}′${d.grid ? ` · ${d.grid}′ grid` : ""} · ` : ""}
                         {(d.systems || []).join(", ") || "—"}
                       </td>
-                      <td style={{ padding: "7px 4px", textAlign: "right" }}>{money(d.budget)}</td>
+                      {/* #GEM final review I1 — a customer document: an incomplete
+                          design (a line still needs a part) never prints its
+                          partial dollar figure. */}
+                      <td style={{ padding: "7px 4px", textAlign: "right" }}>
+                        {designNeedsPart(d) > 0 ? "To be confirmed" : money(d.budget)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

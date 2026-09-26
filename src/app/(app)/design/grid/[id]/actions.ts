@@ -46,7 +46,7 @@ import { getSite } from "@/lib/identity/sites";
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart, getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
-import { fillAutoScopes } from "@/lib/design/grid-auto-fill";
+import { autoNeedsPart, fillAutoScopes } from "@/lib/design/grid-auto-fill";
 import {
   AUTO_SCOPES,
   assemblySwapCandidates,
@@ -851,10 +851,11 @@ export async function deleteProjectAction(
 export async function createDraftQuoteAction(
   projectId: string,
   optionId: string | null,
-  laborLines?: Array<{ partId: string; hours: number }>
+  laborLines?: Array<{ partId: string; hours: number }>,
+  opts?: { acceptIncomplete?: boolean }
 ): Promise<
   | { ok: true; quoteId: string; updated: boolean; fallbackLines: string[] }
-  | { ok: false; error: string }
+  | { ok: false; error: string; needsPart?: number }
 > {
   const user = await requireUser();
   const project = await getProject(projectId);
@@ -862,6 +863,22 @@ export async function createDraftQuoteAction(
   const resolvedOptionId = resolveOptionId(project, optionId);
   if (optionId && resolvedOptionId !== optionId) return { ok: false, error: OPTION_GONE };
   const option = project.options!.find((o) => o.id === resolvedOptionId)!;
+
+  // #GEM D-GEM-22: an Auto design whose choices still have needs-a-part lines
+  // is missing that equipment on the plan (Auto never places one), so its
+  // quote would be short. Same rule as D-GEM-10: refused unless the person
+  // confirmed it in the editor (acceptIncomplete) — the dashboard and Home
+  // never pass it.
+  if (!opts?.acceptIncomplete) {
+    const needsPart = await autoNeedsPart(project, resolvedOptionId);
+    if (needsPart > 0) {
+      return {
+        ok: false,
+        needsPart,
+        error: `Incomplete — ${needsPart} Auto item${needsPart === 1 ? "" : "s"} still need${needsPart === 1 ? "s" : ""} a part, so ${needsPart === 1 ? "it isn’t" : "they aren’t"} on the plan or the quote. Map ${needsPart === 1 ? "it" : "them"} in the Equipment map and re-fill, or place ${needsPart === 1 ? "a device" : "devices"} by hand and quote from The Grid.`,
+      };
+    }
+  }
 
   const built = await buildGridQuote(project, resolvedOptionId, laborLines);
   if (!built.ok) return built;
@@ -933,8 +950,11 @@ export async function refillScopeAction(input: {
   scope: SysKey;
   tier: TierKey;
   overrides: Record<string, AutoOverride>;
-}): Promise<{ ok: true; added: number; removed: number; needsPart: number } | { ok: false; error: string }> {
+}): Promise<{ ok: true; added: number; removed: number; needsPart: number; kept: number } | { ok: false; error: string }> {
   const user = await requireUser();
+  // Only the five Auto scopes are ever filled (D-GEM-7) — refuse anything
+  // else before touching the project (final review minor).
+  if (!AUTO_SCOPES.includes(input?.scope)) return { ok: false, error: "Only Auto scopes can be re-filled." };
   const project = await getProject(input.projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };

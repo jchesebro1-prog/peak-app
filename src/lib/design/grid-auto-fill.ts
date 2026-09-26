@@ -1,17 +1,19 @@
 import { compute, defaultAState, type SysKey } from "@/app/(app)/design/quick/engine";
-import { getProject, replaceAutoPlacements } from "@/lib/stores/grid-projects";
+import { getProject, replaceAutoPlacements, type GridProject } from "@/lib/stores/grid-projects";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { ensureGridSymbolsFor } from "@/lib/stores/grid-catalog";
 import { buildEquipmentPriceTable } from "./equipment-map";
-import { autoEstimateCards, clampScopeInputs, priceOverrides } from "./auto-estimate";
+import { autoEstimateCards, autoQuoteNeedsPart, clampScopeInputs, priceOverrides } from "./auto-estimate";
 import { generateAutoLayout } from "./grid-auto-layout";
-import { autoEstimateFor, overrideRefs } from "./grid-auto-model";
+import { autoEstimateFor, keptUnitsByRow, overrideRefs } from "./grid-auto-model";
 import { defaultOptionId } from "./grid-options";
 
 // Server-only (the `server-only` package isn't installed here): fail loudly if a client bundle ever pulls it in.
 if (typeof window !== "undefined") throw new Error("grid-auto-fill is server-only");
 
-export type FillResult = { ok: true; added: number; removed: number; needsPart: number } | { ok: false; error: string };
+export type FillResult =
+  | { ok: true; added: number; removed: number; needsPart: number; /** units kept by hand that counted toward the rows (D-GEM-20) */ kept: number }
+  | { ok: false; error: string };
 
 /**
  * Auto fill (#GEM, spec §5): price the project's Auto choices from the
@@ -50,8 +52,31 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   // tighter cap (or was never clamped on write) sizes the layout differently
   // than the cards it's laying out.
   const C = compute({ ...defaultAState(0), ...clampScopeInputs(inputs), tier: "better" });
-  const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets });
+  // D-GEM-20: devices of these scopes kept by hand (auto cleared, origin
+  // recorded) count toward each row's new quantity. Read from the same
+  // project snapshot the fill priced; the replace below never removes them.
+  const kept = keptUnitsByRow(project.placements || [], scopes, optionId);
+  const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets, kept });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
   if (!res) return { ok: false, error: "That option was removed — refresh the page." };
-  return { ok: true, ...res, needsPart: cards.reduce((n, c) => n + c.needsPart, 0) };
+  return {
+    ok: true,
+    ...res,
+    needsPart: cards.reduce((n, c) => n + c.needsPart, 0),
+    kept: Object.values(kept).reduce((n, u) => n + u, 0),
+  };
+}
+
+/**
+ * The needs-a-part lines an option's Auto choices leave off the plan — and
+ * so off a Grid quote (#GEM final review, D-GEM-22). 0 for a Blank design or
+ * an option with no Auto choices. Reads only the map's SKUs and the swaps'.
+ */
+export async function autoNeedsPart(project: GridProject, optionId: string): Promise<number> {
+  const inputs = project.scopeInputs;
+  const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
+  if (!inputs || !est) return 0;
+  const refs = overrideRefs(est);
+  const { map, ctx } = await loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds });
+  return autoQuoteNeedsPart(autoEstimateCards(inputs, est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx)), est);
 }

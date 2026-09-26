@@ -123,6 +123,7 @@ function CellSummary({ cell }: { cell: EquipCellVM }) {
       )}
       {cell.confirmedBy && <div style={{ fontSize: 10.5, color: "#8a6d1f", marginTop: 2 }}>Confirmed by {cell.confirmedBy} · {day(cell.confirmedAt)}</div>}
       {cell.problem && <div style={{ fontSize: 11, color: "#a0442b", marginTop: 2 }}>{cell.problem}</div>}
+      {!cell.problem && cell.unitWarning && <div style={{ fontSize: 11, color: "#8a6d1f", marginTop: 2 }}>⚠ {cell.unitWarning}</div>}
     </div>
   );
 }

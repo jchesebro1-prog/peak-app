@@ -6,6 +6,8 @@ import { allEngagements } from "@/lib/stores/engagements";
 import { allUsers } from "@/lib/users";
 import { can, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import ReviewList, { type ReviewItem } from "./review-list";
+import { designBudgetLabel } from "@/lib/design/scope-targets";
+import { designOpenHref } from "@/lib/design/design-links";
 import type { ReviewKind } from "./actions";
 
 export const metadata = { title: "Reviews — Quartzite-6" };
@@ -46,6 +48,8 @@ type RawItem = {
   name: string;
   owner: string;
   value: number;
+  /** Pre-formatted value (#GEM: a design's "Incomplete"); else shortMoney(value). */
+  valueLabel?: string;
   review: QuoteReview;
   ts: number;
   openHref: string;
@@ -101,9 +105,12 @@ export default async function ReviewsPage({
       name: d.name,
       owner: d.owner,
       value: d.budget || 0,
+      // #GEM final review I1/I2: the shared incomplete label, and a Grid
+      // design opens in The Grid rather than as a Quick record.
+      valueLabel: designBudgetLabel(d, shortMoney),
       review: (d.review as QuoteReview) || NONE,
       ts: d.updatedAt || 0,
-      openHref: "/design/quick?design=" + encodeURIComponent(d.id),
+      openHref: designOpenHref(d),
     })),
     /* Consulting phase reviews (D90) — each phase carries its own
      * QuoteReview; the composite id "<engId>:<phaseId>" routes the
@@ -180,7 +187,7 @@ export default async function ReviewsPage({
       ownerInitials: initialsOf(x.owner),
       state: r.state,
       metaLine,
-      value: shortMoney(x.value),
+      value: x.valueLabel ?? shortMoney(x.value),
       note: r.note && r.state === "changes" ? r.note : "",
       openHref: x.openHref,
       canDecide: canApprove && tab !== "mine" && r.state === "in_review" && !isMine,

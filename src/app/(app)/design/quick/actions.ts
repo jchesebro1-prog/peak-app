@@ -10,7 +10,7 @@ import {
   promoteDesignToQuote,
   type DesignRecord,
 } from "@/lib/stores/designs";
-import { addToQuotesGuard } from "@/lib/design/scope-targets";
+import { quickPromoteGuard, withServerIncomplete } from "@/lib/stores/design-pricing";
 
 /**
  * Quick Design server actions — the screen computes budgetary math
@@ -30,9 +30,10 @@ export type DesignPartial = {
   systems: string[];
   budget: number;
   /** Equipment-map completeness of the chosen tier (#GEM D-GEM-10) —
-   *  makeDesign() always computes this from the priced systems; the
-   *  estimate is INCOMPLETE, never $0, while it's non-zero. */
-  incomplete: { needsPart: number };
+   *  makeDesign() computes it for the screen, but the server NEVER trusts it
+   *  (D-GEM-19): persistDesign re-derives it from `config` before writing,
+   *  so a stale or hand-built client value can't mark a design complete. */
+  incomplete?: { needsPart: number };
   customerId: string | null;
   locationId: string | null;
   customer: string;
@@ -42,9 +43,16 @@ export type DesignPartial = {
 
 async function persistDesign(
   id: string | null,
-  partial: DesignPartial,
-  owner: string
+  clientPartial: DesignPartial,
+  owner: string,
+  /** Already derived by the caller this request (Add to Quotes' guard). */
+  knownNeedsPart?: number
 ): Promise<DesignRecord> {
+  // #GEM D-GEM-19: `incomplete` is server-derived on every save — the
+  // Equipment map re-prices `config` here; whatever the client sent is
+  // dropped. updateDesign writes the whole partial, so this is the one place
+  // a client value could otherwise land on the record.
+  const partial: DesignPartial = await withServerIncomplete(clientPartial, knownNeedsPart);
   if (id) {
     const d = await updateDesign(id, partial);
     if (d) return d;
@@ -119,15 +127,16 @@ export async function saveRevisionAction(
 export async function addToQuotesAction(
   id: string | null,
   partial: DesignPartial
-): Promise<{ ok: true; quoteId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; quoteId: string } | { ok: false; error: string; needsPart?: number }> {
   const user = await requireUser();
-  // #GEM D-GEM-10: never promote an incomplete estimate — mirrors the
-  // client's own disabled-button guard so a stale client can't bypass it.
-  const guardMsg = addToQuotesGuard(partial.incomplete?.needsPart ?? 0);
-  if (guardMsg) return { ok: false, error: guardMsg };
+  // #GEM D-GEM-10/D-GEM-19: never promote an incomplete estimate. The server
+  // re-prices the design's config against the Equipment map — the client's
+  // `incomplete` is never read — so a stale or forged client can't bypass it.
+  const blocked = await quickPromoteGuard(partial);
+  if (blocked) return { ok: false, error: blocked.error, needsPart: blocked.needsPart };
   let saved: DesignRecord;
   try {
-    saved = await persistDesign(id, partial, user.name);
+    saved = await persistDesign(id, partial, user.name, 0);
   } catch (err) {
     console.error("addToQuotesAction: design mint failed", err);
     return { ok: false, error: "Couldn’t save that design for quoting — please try again." };

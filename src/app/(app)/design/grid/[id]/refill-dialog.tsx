@@ -23,6 +23,7 @@ export default function RefillDialog({
   inputs,
   estimate: initial,
   initialCards,
+  keptUnits = 0,
   onClose,
   onDone,
   onError,
@@ -33,6 +34,8 @@ export default function RefillDialog({
   inputs: QuickScopeInputs;
   estimate: AutoEstimate;
   initialCards: SellCard[];
+  /** Units of this scope kept by hand (D-GEM-20) — they count toward the new quantities. */
+  keptUnits?: number;
   onClose: () => void;
   onDone: () => void;
   onError: (msg: string) => void;
@@ -70,7 +73,16 @@ export default function RefillDialog({
           <button type="button" onClick={onClose} style={BTN}>Close</button>
         </div>
         <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "#5b616e", lineHeight: 1.5 }}>
-          Re-fills only this scope in the current option. Devices you moved or edited by hand stay where they are; the untouched Auto devices are replaced.
+          Re-fills only this scope in the current option. Devices you moved or edited by hand stay where they are and count toward
+          the new quantities — if a row now calls for 12 and you kept 3, Auto places 9. The untouched Auto devices are replaced.
+          {keptUnits > 0 && (
+            <>
+              {" "}
+              <strong>
+                {keptUnits} unit{keptUnits === 1 ? "" : "s"} kept by hand in this scope.
+              </strong>
+            </>
+          )}
         </p>
         {card ? (
           <EquipmentCard card={card} estimate={estimate} onChange={change} />
@@ -82,7 +94,11 @@ export default function RefillDialog({
           <button type="button" onClick={onClose} style={BTN}>Cancel</button>
           <ConfirmButton
             label="Apply & re-fill"
-            confirmLabel="Replace this scope's untouched Auto devices?"
+            confirmLabel={
+              keptUnits > 0
+                ? `Replace the untouched Auto devices? ${keptUnits} kept unit${keptUnits === 1 ? "" : "s"} count toward the total.`
+                : "Replace this scope's untouched Auto devices?"
+            }
             pendingLabel="Re-filling…"
             disabled={!card || preview.loading}
             style={PRIMARY}

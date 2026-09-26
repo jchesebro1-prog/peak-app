@@ -8,9 +8,10 @@ import { promoteDesignAction } from "./home-actions";
 
 /**
  * "My designs" sandbox strip — port of Home.dc.html's Design Dashboard card.
- * Client component because of the promote flow: Add to Quotes → creates a
- * real draft quote flagged for requote, removes the design, and shows the
- * promote toast (with "Requote now" → Estimator) for 6 seconds.
+ * Client component because of the promote flow: Add to Quotes → the Designs
+ * dashboard's promote path (#GEM final review I2 — Grid designs quote through
+ * The Grid, Quick designs are re-priced on the server first, D-GEM-19) and
+ * shows the promote toast (with "Requote now" → Estimator) for 6 seconds.
  */
 
 export type DesignCard = {
@@ -19,6 +20,8 @@ export type DesignCard = {
   name: string;
   meta: string;
   budget: string;
+  /** #GEM D-GEM-10: the saved tier still has needs-a-part lines — `budget` reads "Incomplete". */
+  incomplete?: boolean;
   tier: string;
   systemsLabel: string;
   edited: string;
@@ -34,6 +37,8 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
   const [, startTransition] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [promoted, setPromoted] = useState<string | null>(null);
+  /** A refused promote (#GEM D-GEM-19: the server re-price found a line that needs a part). */
+  const [promoteError, setPromoteError] = useState<{ id: string; msg: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -45,15 +50,18 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
 
   const promote = (id: string) => {
     setPendingId(id);
+    setPromoteError(null);
     startTransition(async () => {
       const res = await promoteDesignAction(id);
       setPendingId(null);
-      if (res.ok) {
-        setPromoted(res.id);
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => setPromoted(null), 6000);
-        router.refresh();
+      if (!res.ok) {
+        setPromoteError({ id, msg: res.error });
+        return;
       }
+      setPromoted(res.id);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setPromoted(null), 6000);
+      router.refresh();
     });
   };
 
@@ -199,12 +207,11 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 7, marginTop: 13 }}>
                 <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 20,
-                    fontWeight: 600,
-                    letterSpacing: "-.01em",
-                  }}
+                  style={
+                    d.incomplete
+                      ? { fontFamily: "var(--font-ui)", fontSize: 16, fontWeight: 700, color: "#a0442b" }
+                      : { fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 600, letterSpacing: "-.01em" }
+                  }
                 >
                   {d.budget}
                 </span>
@@ -241,7 +248,8 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
               </Link>
               <button
                 onClick={() => promote(d.id)}
-                disabled={pendingId !== null}
+                disabled={pendingId !== null || !!d.incomplete}
+                title={d.incomplete ? "Incomplete — every item needs a part before adding to Quotes" : undefined}
                 className="pkh-accbtn"
                 style={{
                   flex: 1,
@@ -253,16 +261,19 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
                   fontSize: 12.5,
                   fontWeight: 600,
                   color: "#fff",
-                  background: "var(--accent)",
+                  background: d.incomplete ? "#c7cbd3" : "var(--accent)",
                   border: "none",
                   padding: "9px 12px",
                   borderRadius: 8,
-                  cursor: "pointer",
+                  cursor: d.incomplete ? "default" : "pointer",
                 }}
               >
                 Add to Quotes →
               </button>
             </div>
+            {promoteError?.id === d.id && (
+              <div style={{ padding: "0 14px 12px", fontSize: 11.5, lineHeight: 1.4, color: "#b4543a" }}>{promoteError.msg}</div>
+            )}
           </div>
         ))}
 

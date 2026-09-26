@@ -1,5 +1,6 @@
 "use client";
 
+import { EquipmentMapLink } from "@/components/design/equipment-map-link";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -298,6 +299,9 @@ export default function GridEditor({
    *  impossible to miss, never refuses the quote. Cleared on every new
    *  mint/update so a fixed catalog makes the warning go away on its own. */
   const [tierFallbackLines, setTierFallbackLines] = useState<string[]>([]);
+  /** D-GEM-22: the server refused the quote because Auto lines still need a
+   *  part — the message, until the person confirms "Quote anyway" or leaves. */
+  const [incompleteQuote, setIncompleteQuote] = useState<string | null>(null);
   /** Members of the ACTIVE option only (Spec 1). Every read below goes
    *  through this slice; the whole-project arrays are used only for the
    *  switcher's per-option counts. */
@@ -639,6 +643,29 @@ export default function GridEditor({
   });
   const includedLabor = laborRows.filter((l) => l.included && l.hours > 0);
   const laborValue = includedLabor.reduce((a, l) => a + l.ext, 0);
+
+  /** Create / update the option's draft quote. D-GEM-22: the server refuses
+   *  an Auto design with needs-a-part lines until the person confirms. */
+  const runQuote = async (acceptIncomplete: boolean) => {
+    setErr(null);
+    setTierFallbackLines([]);
+    setBusy(true);
+    const r = await createDraftQuoteAction(
+      project.id,
+      activeOptionId,
+      includedLabor.map((l) => ({ partId: l.partId, hours: l.hours })),
+      { acceptIncomplete }
+    );
+    setBusy(false);
+    if (!r.ok) {
+      if (r.needsPart && !acceptIncomplete) setIncompleteQuote(r.error);
+      else setErr(r.error);
+    } else {
+      setIncompleteQuote(null);
+      setTierFallbackLines(r.fallbackLines);
+      router.refresh();
+    }
+  };
 
   const grandValue = totals.value + wires.value + laborValue + curtainValue;
   const spaceRollups = useMemo(
@@ -1534,6 +1561,7 @@ export default function GridEditor({
             targets={scopeTargets}
             optionId={activeOptionId}
             auto={auto}
+            placements={placements}
             defaultTier={activeOption.tier}
             onChanged={() => router.refresh()}
             onError={(m) => setErr(m)}
@@ -1925,26 +1953,26 @@ export default function GridEditor({
                 borderColor: "#16181d",
               }}
               disabled={busy || (lines.length === 0 && wires.lines.length === 0 && curtains.length === 0)}
-              onClick={async () => {
-                setErr(null);
-                setTierFallbackLines([]);
-                setBusy(true);
-                const r = await createDraftQuoteAction(
-                  project.id,
-                  activeOptionId,
-                  includedLabor.map((l) => ({ partId: l.partId, hours: l.hours }))
-                );
-                setBusy(false);
-                if (!r.ok) {
-                  setErr(r.error);
-                } else {
-                  setTierFallbackLines(r.fallbackLines);
-                  router.refresh();
-                }
-              }}
+              onClick={() => runQuote(false)}
             >
               {activeOption.quoteId ? `Update draft quote ${activeOption.quoteId}` : "Create draft quote"}
             </button>
+            {incompleteQuote && (
+              <div style={{ marginTop: 8, background: "#fbf0ea", border: "1px solid #f0d6cd", borderRadius: 8, padding: "8px 10px", fontSize: 11.5, color: "#a0442b", lineHeight: 1.45 }}>
+                <div>{incompleteQuote}</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 7, alignItems: "center", flexWrap: "wrap" }}>
+                  <button type="button" style={{ ...BTN, fontSize: 11.5, padding: "4px 9px" }} disabled={busy} onClick={() => runQuote(true)}>
+                    Quote anyway
+                  </button>
+                  <button type="button" style={{ ...BTN, fontSize: 11.5, padding: "4px 9px" }} onClick={() => setIncompleteQuote(null)}>
+                    Cancel
+                  </button>
+                  <EquipmentMapLink style={{ fontWeight: 600, color: "#a0442b" }} fallback="Ask an admin to map them in the Equipment map.">
+                    Open the Equipment map →
+                  </EquipmentMapLink>
+                </div>
+              </div>
+            )}
             {/* Punch #76 — non-blocking: the quote was still created/updated
                 above, this only says part of it priced at plain list instead
                 of the tier rate because the part had no usable cost. Same

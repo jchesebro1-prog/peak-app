@@ -31,6 +31,7 @@ import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
+import { CanMapProvider } from "@/components/design/equipment-map-link";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 
@@ -68,7 +69,11 @@ export default async function GridEditorPage({
   }
 
   if (project.intake && !project.intake.complete) {
-    return <GridIntake projectId={project.id} projectName={project.name} initialAutoConfig={project.intake.autoConfig} />;
+    return (
+      <CanMapProvider canMap={can("manage_users", user.roles)}>
+        <GridIntake projectId={project.id} projectName={project.name} initialAutoConfig={project.intake.autoConfig} />
+      </CanMapProvider>
+    );
   }
 
   const activeOptionId = resolveOptionId(project, requestedOption);
@@ -188,6 +193,7 @@ export default async function GridEditorPage({
     }));
 
   return (
+    <CanMapProvider canMap={can("manage_users", user.roles)}>
     <GridEditor
       canCreate={can("create", user.roles)}
       activeOptionId={activeOptionId}
@@ -229,5 +235,6 @@ export default async function GridEditorPage({
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
     />
+    </CanMapProvider>
   );
 }

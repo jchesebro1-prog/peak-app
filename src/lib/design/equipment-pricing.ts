@@ -12,8 +12,12 @@
 import { curtainCost, makingRateFor } from "./curtain-pricing";
 import {
   applyOverrides,
+  compute,
+  hydrateAState,
   scaleSets,
+  tierDefsDefault,
   type AState,
+  type DesignRecordLike,
   type BomItem,
   type ComputeResult,
   type DrapeGeom,
@@ -22,6 +26,7 @@ import {
   type TierKey,
 } from "@/app/(app)/design/quick/engine";
 import { sellFromCost, type EquipmentPriceTable, type UnitPrice } from "./equipment-map";
+import { needsPartCount } from "./scope-targets";
 
 /** One drape's make-it cost at a fabric's area rate — the shared two-term model (curtain-pricing.ts). */
 export function drapeUnitCost(drape: DrapeGeom, areaRate: number): number {
@@ -98,4 +103,52 @@ export function tierSystems(
   overrides: Record<string, UnitPrice> = {}
 ): SystemBlock[] {
   return applyOverrides(tierSystemsBase(C, s, tierKey, tierDefs, table, overrides), s, tierKey);
+}
+
+/**
+ * Quick Design fixture picks (fixture type → fixture id) → per-row price
+ * overrides (#GEM final review I3). `fixturePrices` is built on the SERVER
+ * with priceCell({ kind: "assembly", id }) — the same resolver the Equipment
+ * map prices an assembly cell with — so a pick sells at its included sell
+ * (or cost ÷ (1 − margin) when list-less), and a pick that prices
+ * needs-a-part STAYS needs-a-part. A pick with no entry at all (the assembly
+ * was deleted) leaves the row on its map price.
+ */
+export function fixtureOverridesFor(
+  picks: Record<string, string> | null | undefined,
+  fixturePrices: Record<string, UnitPrice>
+): Record<string, UnitPrice> {
+  const out: Record<string, UnitPrice> = {};
+  for (const [fixtureKey, id] of Object.entries(picks || {})) {
+    const hit = id ? fixturePrices[id] : undefined;
+    if (hit) out[`lighting:${fixtureKey}`] = hit;
+  }
+  return out;
+}
+
+const TIER_KEYS: readonly TierKey[] = ["good", "better", "best"];
+
+/**
+ * The server's own needs-a-part count for a saved (or about-to-be-saved)
+ * Quick Design record (#GEM D-GEM-19): hydrate its config (or reconstruct a
+ * pre-config seed record from its display fields), run the equations and
+ * price the chosen tier from the Equipment map. The client's `incomplete`
+ * is never read. Uses tierDefsDefault() — the per-browser line-sets dial
+ * only rescales rigging quantities, and the server never sees it (as
+ * D-GEM-5's Grid targets). A config that won't compute counts as 1 (never
+ * promotable) rather than throwing.
+ */
+export function quickDesignNeedsPart(
+  d: DesignRecordLike,
+  table: EquipmentPriceTable,
+  fixturePrices: Record<string, UnitPrice>
+): number {
+  try {
+    const s = hydrateAState(d, 0);
+    const tier = TIER_KEYS.includes(s.tier) ? s.tier : "better";
+    const systems = tierSystems(compute(s), s, tier, tierDefsDefault(), table, fixtureOverridesFor(s.fixtureAssemblies, fixturePrices));
+    return needsPartCount(systems);
+  } catch {
+    return 1;
+  }
 }

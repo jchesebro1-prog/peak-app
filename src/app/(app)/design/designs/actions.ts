@@ -17,7 +17,7 @@ import {
 } from "@/lib/stores/designs";
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
-import { addToQuotesGuard } from "@/lib/design/scope-targets";
+import { quickPromoteGuard } from "@/lib/stores/design-pricing";
 import { activeUsers } from "@/lib/users";
 import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, removeTask as removeTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
 import { applyTaskTemplate } from "@/lib/stores/task-templates";
@@ -58,25 +58,31 @@ export async function createManualDesignAction(): Promise<
 // Punch #75: shared flow lives in promoteDesignToQuote(); this used to be a near-identical duplicate of the other copy, which is how #65's missing tier stamp happened.
 export async function promoteDesignAction(
   id: string
-): Promise<{ ok: true; quoteId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; quoteId: string } | { ok: false; error: string; needsPart?: number }> {
   const user = await requireUser();
   const d = await getDesign(id);
   if (!d) return { ok: false, error: "Design not found." };
 
   if (d.layoutMode === "manual") {
     if (!d.gridProjectId) return { ok: false, error: "This design has no linked Grid project." };
+    // No acceptIncomplete here: an Auto design with needs-a-part lines is
+    // refused from the dashboard/Home (D-GEM-10); the Grid editor's own
+    // quote button is where a person can confirm quoting it anyway.
     const result = await createDraftQuoteAction(d.gridProjectId, null);
-    if (!result.ok) return { ok: false, error: result.error };
+    if (!result.ok) return result;
     await updateDesign(id, { quoteId: result.quoteId });
     revalidatePath("/design/designs");
     revalidatePath("/quotes");
     return { ok: true, quoteId: result.quoteId };
   }
 
-  // #GEM D-GEM-10: never promote an incomplete estimate — same rule and
-  // message as Quick Design's own "Add to Quotes" (quick/actions.ts).
-  const guardMsg = addToQuotesGuard(d.incomplete?.needsPart ?? 0);
-  if (guardMsg) return { ok: false, error: guardMsg };
+  // #GEM D-GEM-10/D-GEM-19: never promote an incomplete estimate. The server
+  // re-prices the saved record (its config, or a pre-config seed rebuilt from
+  // its display fields) against the live Equipment map — the stored
+  // `incomplete` is never trusted, so a design saved before #GEM is refused
+  // until its rows are mapped (its budget stays visible meanwhile).
+  const blocked = await quickPromoteGuard(d);
+  if (blocked) return { ok: false, error: blocked.error, needsPart: blocked.needsPart };
 
   const q = await promoteDesignToQuote(id, user.name);
   if (!q) return { ok: false, error: "Design not found." };

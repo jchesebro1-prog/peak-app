@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { placementQty } from "@/lib/design/grid-bom";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { designRedirect } from "@/lib/design-routes";
@@ -58,7 +59,8 @@ export default async function DesignOverviewPage({
     ...gridProjects
       .filter((p) => !linkedGridIds.has(p.id))
       .map((p) => {
-        const n = (p.placements || []).length;
+        // Units, not markers: an Auto lot marker stands for `qty` units (#GEM).
+        const n = (p.placements || []).reduce((sum, pl) => sum + (pl.curtain ? 1 : placementQty(pl)), 0);
         return {
           key: p.id,
           name: p.name || "Untitled design",

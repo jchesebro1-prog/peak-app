@@ -307,14 +307,14 @@ export type RollupPlacementLite = {
   qty?: number;
 };
 
-function addSlice(slices: RollupSlice[], key: string, value: number): void {
+function addSlice(slices: RollupSlice[], key: string, value: number, units = 1): void {
   const hit = slices.find((s) => s.key === key);
   if (hit) {
-    hit.count += 1;
+    hit.count += units;
     hit.value += value;
     return;
   }
-  slices.push({ key, count: 1, value });
+  slices.push({ key, count: units, value });
 }
 
 /**
@@ -352,12 +352,15 @@ export function bomBySpace(
     const value = pl.curtain
       ? (pl.id ? curtainPrices?.get(pl.id) : 0) || 0
       : (byId.get(pl.partId)?.list || 0) * placementQty(pl);
-    bucket.count += 1;
+    // Counts are UNITS (#GEM final review): a lot marker counts its qty,
+    // matching the BOM, schedule and riser; a curtain is one drop.
+    const units = pl.curtain ? 1 : placementQty(pl);
+    bucket.count += units;
     bucket.value += value;
     const scope: GridLayer = pl.curtain ? "Curtains" : scopeOfPart(byId.get(pl.partId));
-    addSlice(bucket.byScope, scope, value);
+    addSlice(bucket.byScope, scope, value, units);
     const category = normalizeCategory(pl.category);
-    if (category) addSlice(bucket.byCategory, category, value);
+    if (category) addSlice(bucket.byCategory, category, value, units);
   }
   const out = [...buckets.values()].filter((b) => b.count > 0);
   if (unassigned.count > 0) out.push(unassigned);

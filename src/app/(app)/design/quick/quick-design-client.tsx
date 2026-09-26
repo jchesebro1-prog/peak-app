@@ -1,5 +1,6 @@
 "use client";
 
+import { EquipmentMapLink } from "@/components/design/equipment-map-link";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -28,7 +29,7 @@ import {
   type TierKey,
   type ViewKey,
 } from "./engine";
-import { tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
+import { fixtureOverridesFor, tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
@@ -107,6 +108,7 @@ export default function QuickDesignClient({
   rates,
   reviewerNames,
   fixtureAssemblies,
+  fixturePrices,
 }: {
   me: string;
   canApprove: boolean;
@@ -115,7 +117,10 @@ export default function QuickDesignClient({
   prices: EquipmentPriceTable;
   rates: { installPct: number; freightPct: number; contingencyPct: number };
   reviewerNames: string[];
-  fixtureAssemblies: Array<{ id: string; name: string; cost: number; sell: number }>;
+  fixtureAssemblies: Array<{ id: string; name: string }>;
+  /** Server-priced fixture picks, keyed by fixture id (priceCell on an
+   *  assembly cell — final review I3). Never a list-only sum. */
+  fixturePrices: Record<string, UnitPrice>;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -181,15 +186,13 @@ export default function QuickDesignClient({
   const contPct = (a.contingency ?? 0) / 100;
 
   /** A per-design fixture pick (Assembly Builder) overrides that fixture row's
-   *  Equipment map price (#GEM) — the item keeps the equation's name. */
-  const fixtureOverrides = useMemo(() => {
-    const out: Record<string, UnitPrice> = {};
-    for (const [fixtureKey, id] of Object.entries(a.fixtureAssemblies || {})) {
-      const hit = fixtureAssemblies.find((f) => f.id === id);
-      if (hit) out[`lighting:${fixtureKey}`] = { status: "assembly", ref: hit.id, desc: hit.name, unit: "ea", unitCost: hit.cost, unitSell: hit.sell };
-    }
-    return out;
-  }, [a.fixtureAssemblies, fixtureAssemblies]);
+   *  Equipment map price (#GEM) — the item keeps the equation's name. The
+   *  price comes from the server (fixturePrices); a pick that prices
+   *  needs-a-part stays needs-a-part (final review I3). */
+  const fixtureOverrides = useMemo(
+    () => fixtureOverridesFor(a.fixtureAssemblies, fixturePrices),
+    [a.fixtureAssemblies, fixturePrices]
+  );
   const C = useMemo(() => compute(a), [a]);
   const selKey = (a.tier || "better") as TierKey;
   const selTd = TIERS.find((t) => t.key === selKey) || TIERS[1];
@@ -232,6 +235,17 @@ export default function QuickDesignClient({
       }),
     [C, a, tierDefs, prices, fixtureOverrides, laborPct, freightPct, contPct]
   );
+
+  /** A breakdown row's amount (#GEM final review): "Incomplete" while the
+   *  selected tier has any needs-a-part line — a partial materials figure
+   *  (and the install / freight / contingency derived from it) is not a
+   *  price, the same rule as the tier total. */
+  const breakdownAmount = (n: number, extra?: CSSProperties) =>
+    selNeedsPart > 0 ? (
+      <span style={{ fontFamily: UI, fontWeight: 600, fontSize: 12, color: "#a0442b", ...extra }}>Incomplete</span>
+    ) : (
+      <span style={{ fontFamily: MONO, fontWeight: 500, ...extra }}>{moneyRound(n)}</span>
+    );
 
   const venue = venueOf(a);
   const suffix = nameSuffix(a);
@@ -309,7 +323,7 @@ export default function QuickDesignClient({
     // #GEM D-GEM-10: block before even saving — the footer button is also
     // disabled while incomplete, but this guards a direct call (e.g. a
     // stale render) and matches the server-side check in addToQuotesAction.
-    const guardMsg = addToQuotesGuard(partial.incomplete.needsPart);
+    const guardMsg = addToQuotesGuard(partial.incomplete?.needsPart ?? 0);
     if (guardMsg) return toast(guardMsg);
     startTransition(async () => {
       const res = await addToQuotesAction(designId, partial);
@@ -739,9 +753,9 @@ export default function QuickDesignClient({
                           </span>
                         </span>
                         {r.needsPart > 0 ? (
-                          <Link href="/design/grid/settings/equipment-map" style={{ fontFamily: UI, fontSize: 12, fontWeight: 600, color: "#a0442b", flexShrink: 0, textDecoration: "none" }}>
+                          <EquipmentMapLink style={{ fontFamily: UI, fontSize: 12, fontWeight: 600, color: "#a0442b", flexShrink: 0, textDecoration: "none" }}>
                             Incomplete — {r.needsPart} need{r.needsPart === 1 ? "s" : ""} a part
-                          </Link>
+                          </EquipmentMapLink>
                         ) : (
                           <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{moneyRound(r.rev)}</span>
                         )}
@@ -761,23 +775,23 @@ export default function QuickDesignClient({
                         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#a0442b", flexShrink: 0 }} />
                         <span style={{ fontSize: 12, color: "#a0442b", lineHeight: 1.4 }}>
                           Incomplete — {selNeedsPart} item{selNeedsPart === 1 ? "" : "s"} need{selNeedsPart === 1 ? "s" : ""} a part.{" "}
-                          <Link href="/design/grid/settings/equipment-map" style={{ fontWeight: 600, color: "#a0442b" }}>
+                          <EquipmentMapLink style={{ fontWeight: 600, color: "#a0442b" }} fallback="Ask an admin to map them in the Equipment map.">
                             Open the Equipment map →
-                          </Link>
+                          </EquipmentMapLink>
                         </span>
                       </div>
                     )}
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 8 }}>
                       <span style={{ color: "#5b616e" }}>Materials &amp; equipment</span>
-                      <span style={{ fontFamily: MONO, fontWeight: 500 }}>{moneyRound(selTot.matRev)}</span>
+                      {breakdownAmount(selTot.matRev)}
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 8 }}>
                       <span style={{ color: "#5b616e" }}>Installation &amp; commissioning</span>
-                      <span style={{ fontFamily: MONO, fontWeight: 500 }}>{moneyRound(selTot.install)}</span>
+                      {breakdownAmount(selTot.install)}
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 11 }}>
                       <span style={{ color: "#5b616e" }}>Freight &amp; delivery</span>
-                      <span style={{ fontFamily: MONO, fontWeight: 500 }}>{moneyRound(selTot.freight)}</span>
+                      {breakdownAmount(selTot.freight)}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 13, paddingTop: 11, borderTop: "1px solid #f0f1f4" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 11, flex: 1, minWidth: 0 }}>
@@ -785,7 +799,7 @@ export default function QuickDesignClient({
                         <input type="range" min={0} max={25} step={1} value={a.contingency ?? 0} onChange={(e) => setContingency(e.target.value)} style={{ flex: 1, maxWidth: 200, accentColor: accentHex, cursor: "pointer" }} />
                         <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 600, color: ACCENT_INK, minWidth: 34 }}>{a.contingency ?? 0}%</span>
                       </div>
-                      <span style={{ fontFamily: MONO, fontWeight: 500, fontSize: 13, flexShrink: 0 }}>{moneyRound(selTot.contingency)}</span>
+                      {breakdownAmount(selTot.contingency, { fontSize: 13, flexShrink: 0 })}
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#16181d", color: "#fff", borderRadius: 9, padding: "13px 16px" }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>{selTd.label} total</span>
@@ -1008,12 +1022,12 @@ export default function QuickDesignClient({
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               {selNeedsPart > 0 && (
-                <Link
-                  href="/design/grid/settings/equipment-map"
+                <EquipmentMapLink
                   style={{ fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}
+                  fallback={`${selNeedsPart} item${selNeedsPart === 1 ? "" : "s"} need${selNeedsPart === 1 ? "s" : ""} a part — ask an admin to map ${selNeedsPart === 1 ? "it" : "them"}`}
                 >
                   {selNeedsPart} item{selNeedsPart === 1 ? "" : "s"} need{selNeedsPart === 1 ? "s" : ""} a part — Equipment map →
-                </Link>
+                </EquipmentMapLink>
               )}
               <button
                 onClick={onAddToQuotes}

@@ -10,7 +10,7 @@ import {
   statusFailureMessage,
   type QuoteStatus,
 } from "@/lib/stores/quotes";
-import { promoteDesignToQuote } from "@/lib/stores/designs";
+import { promoteDesignAction as promoteFromDesigns } from "./design/designs/actions";
 
 /**
  * Home dashboard mutations — port of Home.dc.html's Component methods
@@ -66,17 +66,17 @@ export async function removeQuoteAction(id: string) {
 
 /**
  * The bridge: promote a budgetary sandbox design into the formal pipeline.
- * Creates a real draft quote flagged for requote, then removes the design
- * from the sandbox (budgetary numbers do not carry forward as final).
- * Port of Home.dc.html promoteDesign().
+ * Port of Home.dc.html promoteDesign(). #GEM final review I2: delegates to
+ * the Designs dashboard's promoteDesignAction — the one path that branches
+ * Grid/manual designs to The Grid's own quote builder and re-prices Quick
+ * designs on the server against the Equipment map (D-GEM-19) — so Home can
+ * never promote a Grid design as if it were Quick, or an incomplete one.
  */
-// Punch #75: shared flow lives in promoteDesignToQuote(); this used to be a near-identical duplicate of the other copy, which is how #65's missing tier stamp happened.
 export async function promoteDesignAction(
   designId: string
-): Promise<{ ok: true; id: string } | { ok: false }> {
-  const user = await requireUser();
-  const q = await promoteDesignToQuote(designId, user.name);
-  if (!q) return { ok: false };
+): Promise<{ ok: true; id: string } | { ok: false; error: string; needsPart?: number }> {
+  const res = await promoteFromDesigns(designId);
+  if (!res.ok) return res;
   revalidatePath("/", "layout");
-  return { ok: true, id: q.id };
+  return { ok: true, id: res.quoteId };
 }

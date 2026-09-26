@@ -1,7 +1,9 @@
 import { dataUrlToBytes, getBlobStream, putBlob, safeName, blobEnabled } from "@/lib/blob";
 import { assemble, matchBom, type AssembledSpec, type SpecCatalogPart } from "@/lib/bid-spec";
 import { buildSpecDocx } from "@/lib/bid-spec-docx";
-import { buildClientPackageManifest, coveredNote, type ClientPackageGap } from "@/lib/client-package";
+import { buildClientPackageManifest, coveredNote, packageNeedsFixtures, type ClientPackageGap } from "@/lib/client-package";
+import { placementQty } from "@/lib/design/grid-bom";
+import { listFixtures } from "@/lib/stores/fixtures";
 import { renderLetterPdf, type FieldSheetDoc, type LetterDoc } from "@/lib/pdf";
 import { riserGraph } from "@/lib/design/grid-riser";
 import { list as listCatalog } from "@/lib/stores/catalog";
@@ -52,7 +54,8 @@ function roughDrawings(project: GridProject, catalog: SpecCatalogPart[], package
         {
           heading: "Derived plan summary",
           rows: [
-            { label: "Placed devices", value: String((project.placements || []).filter((p) => !p.curtain).length) },
+            // Units, not markers: an Auto lot marker stands for `qty` units (#GEM).
+            { label: "Placed devices", value: String((project.placements || []).filter((p) => !p.curtain).reduce((n, p) => n + placementQty(p), 0)) },
             { label: "Curtain drops", value: String((project.placements || []).filter((p) => !!p.curtain).length) },
             { label: "Spaces", value: String((project.spaces || []).length) },
             { label: "Wire runs", value: String((project.routes || []).length) },
@@ -177,7 +180,8 @@ export async function createClientPackage(
   if (!blobEnabled()) throw new Error("Client packages require Blob storage on this deployment.");
   const catalog = (await listCatalog()) as SpecCatalogPart[];
   const { index: docIndex } = await loadPartDocsState(catalog);
-  const manifest = buildClientPackageManifest(project, catalog, requestedOptionId, docIndex);
+  const fixtures = packageNeedsFixtures(project.placements || []) ? new Map((await listFixtures()).map((f) => [f.id, f])) : null;
+  const manifest = buildClientPackageManifest(project, catalog, requestedOptionId, docIndex, (id) => fixtures?.get(id));
   const matched = matchBom(manifest.bom, catalog);
   const sections = await allSections();
   const spec = assemble(matched.rows, sections, {

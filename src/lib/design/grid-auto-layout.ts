@@ -182,14 +182,25 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
 /**
  * Placement specs for the given cards (spec §5). `a` is the geometry the base
  * sheet was drawn from (intake.autoConfig); `opts` are that design's electric
- * and set counts (compute()). Every spec carries `auto: { scope, rowKey, tier }`.
+ * and set counts (compute()), plus `kept` — units per row already on the plan
+ * by hand (keptUnitsByRow, D-GEM-20), subtracted before placing. Every spec
+ * carries `auto: { scope, rowKey, tier }`.
  */
-export function generateAutoLayout(a: AState, cards: AutoCard[], opts: { electrics: number; sets: number }): AutoPlacementSpec[] {
+export function generateAutoLayout(
+  a: AState,
+  cards: AutoCard[],
+  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>> }
+): AutoPlacementSpec[] {
   const f = venueFrame(a);
   const out: AutoPlacementSpec[] = [];
   const lots = new Map<SysKey, number>();
   for (const card of cards) {
-    for (const line of card.lines) {
+    for (const rawLine of card.lines) {
+      // D-GEM-20: units of this row kept by hand (hand-moved / edited devices
+      // that still carry its autoOrigin) count toward the new quantity — only
+      // the difference is placed, never below zero.
+      const keptUnits = Math.max(0, Math.round(opts.kept?.[rawLine.rowKey] ?? 0));
+      const line = keptUnits ? { ...rawLine, qty: Math.max(0, rawLine.qty - keptUnits) } : rawLine;
       const partId = partIdForLine(line, card.tier);
       if (!partId) continue;
       const def = EQUIPMENT_ROW_BY_KEY.get(line.rowKey);

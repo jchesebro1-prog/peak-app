@@ -8,9 +8,18 @@
 import type { SysKey, TierKey } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
-import { PLACEMENT_QTY_MAX } from "./grid-bom";
+import { PLACEMENT_QTY_MAX, placementQty } from "./grid-bom";
 
 export type AutoTag = { scope: SysKey; rowKey: string; tier: TierKey };
+/**
+ * Where a hand-touched device came from (#GEM D-GEM-20): when a move, a
+ * category edit or a riser qty edit / part swap clears a placement's `auto`
+ * tag, the scope and row it was painted for are kept here. It is NOT an auto
+ * tag — a re-fill never removes it — but the re-fill counts its units toward
+ * that row's new quantity, so the total stays right. Absent on every
+ * placement touched before D-GEM-20 (those keep today's behaviour).
+ */
+export type AutoOrigin = { scope: SysKey; rowKey: string };
 export type AutoOverride = { sku?: string; assemblyId?: string; qty?: number };
 export type AutoEstimate = { tierByScope: Partial<Record<SysKey, TierKey>>; overrides: Record<string, AutoOverride> };
 
@@ -104,13 +113,51 @@ export function sanitizeAutoTag(raw: unknown): AutoTag | null {
   return { scope, rowKey, tier: r.tier };
 }
 
+/** A stored auto origin: a known equation row of one of the five Auto scopes. Anything else → null. */
+export function sanitizeAutoOrigin(raw: unknown): AutoOrigin | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const scope = r.scope as SysKey;
+  if (typeof r.scope !== "string" || !TRACKABLE_SYS_KEYS.includes(scope)) return null;
+  const rowKey = typeof r.rowKey === "string" ? r.rowKey : "";
+  const def = EQUIPMENT_ROW_BY_KEY.get(rowKey);
+  if (!def || def.system !== scope) return null;
+  return { scope, rowKey };
+}
+
 /** A hand-touched placement stops being "auto" (#GEM): later re-fills keep it.
- *  Returns the same object when there is no tag, else a copy without it. */
+ *  Returns the same object when there is no tag, else a copy without it that
+ *  records the tag's scope + row as `autoOrigin` (D-GEM-20), so the next
+ *  re-fill of that scope counts it toward the row's quantity. */
 export function withoutAuto<T extends { auto?: unknown }>(pl: T): T {
   if (!pl.auto) return pl;
-  const next = { ...pl };
+  const next = { ...pl } as T & { autoOrigin?: AutoOrigin };
+  const origin = sanitizeAutoOrigin(pl.auto);
   delete next.auto;
+  if (origin) next.autoOrigin = origin;
   return next;
+}
+
+/**
+ * Units kept by hand per equation row (#GEM D-GEM-20): every placement of
+ * `optionId` (any option when omitted) with no auto tag but an `autoOrigin`
+ * in one of `scopes`, counted by placementQty (a lot marker is its units).
+ * A re-fill subtracts these from the row's new quantity before placing.
+ */
+export function keptUnitsByRow(
+  placements: ReadonlyArray<{ optionId?: string; auto?: unknown; autoOrigin?: unknown; qty?: number }>,
+  scopes: ReadonlyArray<SysKey>,
+  optionId?: string
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const pl of placements) {
+    if (pl.auto) continue;
+    if (optionId !== undefined && pl.optionId !== optionId) continue;
+    const o = sanitizeAutoOrigin(pl.autoOrigin);
+    if (!o || !scopes.includes(o.scope)) continue;
+    out[o.rowKey] = (out[o.rowKey] ?? 0) + placementQty(pl);
+  }
+  return out;
 }
 
 /* ---------------- per-option estimates (#GEM fix wave 1, D1 / D-GEM-12) ---------------- */

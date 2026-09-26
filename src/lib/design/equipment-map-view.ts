@@ -30,6 +30,10 @@ export type EquipCellVM = {
   perSqft: boolean;
   /** Why a stored cell does not price (deleted part, unpriced assembly …). */
   problem: string | null;
+  /** A mapped part whose catalog unit differs from the row's (#GEM final
+   *  review): the equation's quantity is in the ROW's unit, so a per-foot row
+   *  priced by a per-each part (or the reverse) misprices. Advisory only. */
+  unitWarning?: string | null;
   confirmedBy?: string;
   confirmedAt?: number;
   /** What the editor re-posts for this tier. */
@@ -54,6 +58,25 @@ export type EquipRowVM = {
 
 export type AssemblyOption = { id: string; label: string; kind: "fixture" | "system"; scope: string; unitCost: number; unitSell: number };
 
+/** Unit spellings that mean the same thing, folded for the mismatch check. */
+const UNIT_ALIASES: Record<string, string> = {
+  ea: "ea", each: "ea", pc: "ea", pcs: "ea", piece: "ea", unit: "ea",
+  ft: "ft", lf: "ft", foot: "ft", feet: "ft", linft: "ft",
+  sqft: "sqft", sf: "sqft", ft2: "sqft",
+  lot: "lot", ls: "lot",
+};
+export function normalizeUnit(u: string | null | undefined): string {
+  const k = String(u ?? "").toLowerCase().replace(/[\s.'’_-]/g, "");
+  return UNIT_ALIASES[k] ?? k;
+}
+
+/** The mismatch warning for a mapped part, or null when the units agree (or the part has none). */
+export function unitMismatch(rowUnit: string, partUnit: string | null | undefined): string | null {
+  if (!partUnit || !String(partUnit).trim()) return null;
+  if (normalizeUnit(rowUnit) === normalizeUnit(partUnit)) return null;
+  return `Catalog unit is “${partUnit}” but this row counts in “${rowUnit}” — check the part prices per ${rowUnit}.`;
+}
+
 function cellVM(def: EquipRowDef, tier: TierKey, map: EquipmentMap, ctx: EquipPriceCtx): EquipCellVM {
   const cell = cellFor(map[def.key], tier);
   const perSqft = !!def.curtain;
@@ -62,8 +85,11 @@ function cellVM(def: EquipRowDef, tier: TierKey, map: EquipmentMap, ctx: EquipPr
   const priced = price.status === "needs-part" ? null : price;
   const problem = price.status === "needs-part" ? price.reason : null;
   if (cell.kind === "part") {
+    const part = ctx.parts.get(cell.sku);
     return {
       tier, kind: "part", title: cell.sku, detail: priced?.desc ?? "",
+      // Fabric rows price by area whatever the fabric's own unit — never warned.
+      unitWarning: perSqft || !part ? null : unitMismatch(def.unit, part.unit),
       unitCost: perSqft ? priced?.areaRate ?? null : priced?.unitCost ?? null,
       unitSell: perSqft ? null : priced?.unitSell ?? null,
       perSqft, problem, input: { kind: "part", sku: cell.sku },

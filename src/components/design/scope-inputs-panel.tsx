@@ -89,7 +89,7 @@ export default function ScopeInputsPanel({
   systems: SysKey[];
   /** Catalog-backed lighting assembly picker (Auto/Quick Design only) —
    * Manual-mode caller simply omits it and the sub-picker never renders. */
-  fixtureAssemblies?: Array<{ id: string; name: string; cost: number }>;
+  fixtureAssemblies?: Array<{ id: string; name: string }>;
   accentHex: string;
 }) {
   const [sec, setSec] = useState({ venue: true, size: true, dims: true, systems: true });

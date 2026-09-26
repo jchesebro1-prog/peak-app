@@ -6,6 +6,7 @@ import { activeUsers, reviewers } from "@/lib/users";
 import { tasksForDesign } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
+import { CanMapProvider } from "@/components/design/equipment-map-link";
 import DesignClient from "./design-client";
 import "./design.css";
 
@@ -55,6 +56,7 @@ export default async function Page({
   }
 
   return (
+    <CanMapProvider canMap={can("manage_users", user.roles)}>
     <DesignClient
       me={user.name}
       canApprove={can("approve", user.roles)}
@@ -69,5 +71,6 @@ export default async function Page({
       designTasks={designTasks}
       templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
     />
+    </CanMapProvider>
   );
 }

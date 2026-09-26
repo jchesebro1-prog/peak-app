@@ -1,5 +1,6 @@
 "use client";
 
+import { placementQty } from "@/lib/design/grid-bom";
 import { useState } from "react";
 import type { GridRevision } from "@/lib/stores/grid-projects";
 import { timeAgo } from "@/lib/format";
@@ -130,7 +131,7 @@ export default function RevisionsPanel({
                 )}
               </div>
               <div style={{ fontSize: 11, color: "#5b616e", marginTop: 1 }}>
-                {r.note || `${r.placements.length} devices · ${r.spaces.length} spaces`}
+                {r.note || `${r.placements.reduce((n, pl) => n + (pl.curtain ? 1 : placementQty(pl)), 0)} units · ${r.spaces.length} spaces`}
               </div>
             </div>
           ))}

@@ -3875,6 +3875,14 @@ async function main() {
     assert.deepEqual(await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [] }), { removed: 0, added: 0 }, "#GEM fix1 I2: a lighting re-fill removes nothing…");
     p = (await GP.getProject(p0.id))!;
     assert.equal(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").length, 2, "#GEM fix1 I2: …and the swapped devices stay");
+    // D-GEM-20 (final review): the swap recorded each device's origin row, and
+    // markers a riser qty edit ADDS to that row inherit it — the row's whole
+    // edited count is kept on a re-fill.
+    assert.ok(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").every((pl) => pl.autoOrigin?.rowKey === "lighting:front"), "#GEM D-GEM-20: a riser part swap records the origin row");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-FRONT2", qty: 4, by })).ok, "#GEM D-GEM-20: riser qty 2 → 4");
+    p = (await GP.getProject(p0.id))!;
+    const fronts = p.placements.filter((pl) => pl.partId === "GEMF-FRONT2");
+    assert.ok(fronts.length === 4 && fronts.every((pl) => !pl.auto && pl.autoOrigin?.scope === "lighting" && pl.autoOrigin.rowKey === "lighting:front"), "#GEM D-GEM-20: markers added by a riser qty edit inherit the row's origin");
 
     // M3: the store sanitizes what it writes.
     const m3 = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [
@@ -4048,14 +4056,140 @@ async function main() {
     const curEst = autoEstimateFor(p.autoEstimate, opt, opt)!;
     await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(curEst, "lighting", "best", { "lighting:par": { qty: 4 } }));
     const res = await fillAutoScopes(p0.id, opt, ["lighting"], by);
-    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 4, `#GEM T9: the re-fill replaced only the untouched pars (${JSON.stringify(res)})`);
+    // D-GEM-20 (final review): the hand-moved par counts toward the new 4 — 3 are placed.
+    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 3 && res.kept === 1, `#GEM T9: the re-fill replaced only the untouched pars, counting the kept one (${JSON.stringify(res)})`);
     p = (await GP.getProject(p0.id))!;
     const moved = p.placements.find((pl) => pl.id === pars[0].id);
     assert.ok(moved && !moved.auto && moved.x === 0.5, "#GEM T9: the hand-moved par stays where it was put");
     const fresh = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
-    assert.ok(fresh.length === 4 && fresh.every((pl) => pl.auto!.tier === "best"), "#GEM T9: the new pars follow the new tier and the edited quantity");
+    assert.ok(fresh.length === 3 && fresh.every((pl) => pl.auto!.tier === "best"), "#GEM T9: the new pars follow the new tier and the edited quantity (4 = 3 new + 1 kept, D-GEM-20)");
     assert.deepEqual(autoEstimateFor(p.autoEstimate, opt, opt), { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 4 } } }, "#GEM T9: the choices are saved, so Change equipment… re-opens with them");
     await EM.clearEquipmentRow("lighting:par");
+    // Final review minor: leave no GEM9 fixture behind for later blocks.
+    await Cat.remove("GEM9-PAR");
+    assert.equal((await Cat.getMany(["GEM9-PAR"])).length, 0, "#GEM T9: cleanup — the GEM9 catalog fixture is removed");
+  }
+
+  /* --- #GEM final review: D-GEM-20 — a re-fill counts devices kept by hand
+         toward the row's new quantity (12 → move 3 → re-fill → 12 total;
+         re-fill to 8 → 5 placed + 3 kept), and D-GEM-22's autoNeedsPart. --- */
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const EM = await import("@/lib/stores/equipment-map");
+    const Cat = await import("@/lib/stores/catalog");
+    const { fillAutoScopes, autoNeedsPart } = await import("@/lib/design/grid-auto-fill");
+    const { intakeScopeInputs } = await import("@/lib/design/grid-intake");
+    const { mergeScopeEstimate, autoEstimateFor } = await import("@/lib/design/grid-auto-model");
+    const { defaultAState } = await import("@/app/(app)/design/quick/engine");
+    const { resolveOptionId } = await import("@/lib/design/grid-options");
+    const by = "tester";
+    await Cat.upsert({ sku: "GEMK-PAR", desc: "GEMK LED par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
+    await EM.saveEquipmentRow("lighting:par", { sameAll: true, tiers: { good: { kind: "part", sku: "GEMK-PAR" } } }, by);
+    const a = {
+      ...defaultAState(0), venue: "school", size: "medium" as const, width: 40, depth: 30, grid: 24, wing: 12, ph: 20,
+      sys: { rigging: false, curtains: false, lighting: true, controls: false, audio: false, video: false, acoustical: false, pit: false },
+      fixtures: { par: true, front: false, cyc: false, side: false, automated: false },
+    };
+    const p0 = await GP.createProject({ name: "GEMK kept", customer: "", customerId: null, by });
+    const opt = resolveOptionId(p0, null);
+    await GP.saveGridIntake(p0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "", address: "", notes: "", autoConfig: a });
+    await GP.setScopeInputs(p0.id, intakeScopeInputs(a));
+    await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "better" }, overrides: { "lighting:par": { qty: 12 } } });
+    await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
+    const first = await fillAutoScopes(p0.id, opt, ["lighting"], by);
+    assert.ok(first.ok && first.added === 12 && first.kept === 0, `#GEM D-GEM-20: the first fill places 12 pars (${JSON.stringify(first)})`);
+    let p = (await GP.getProject(p0.id))!;
+    const pars = () => p.placements.filter((pl) => pl.partId === "GEMK-PAR");
+    const autoPars = pars().filter((pl) => pl.auto);
+    for (const pl of autoPars.slice(0, 3)) await GP.movePlacement(p0.id, pl.id, { x: 0.5, y: 0.5 });
+    p = (await GP.getProject(p0.id))!;
+    const moved = pars().filter((pl) => !pl.auto);
+    assert.ok(moved.length === 3 && moved.every((pl) => pl.autoOrigin?.scope === "lighting" && pl.autoOrigin.rowKey === "lighting:par"), "#GEM D-GEM-20: a move clears auto and records the device's origin row");
+    // New tier, still calling for 12 → 9 placed, 3 kept, 12 total.
+    let est = autoEstimateFor(p.autoEstimate, opt, opt)!;
+    await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(est, "lighting", "best", { "lighting:par": { qty: 12 } }));
+    const second = await fillAutoScopes(p0.id, opt, ["lighting"], by);
+    assert.ok(second.ok && second.added === 9 && second.removed === 9 && second.kept === 3, `#GEM D-GEM-20: 12 called for, 3 kept by hand → 9 placed (${JSON.stringify(second)})`);
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(pars().reduce((n, pl) => n + (pl.qty ?? 1), 0), 12, "#GEM D-GEM-20: …so the row totals 12, not 15");
+    assert.ok(pars().filter((pl) => pl.auto).every((pl) => pl.auto!.tier === "best"), "#GEM D-GEM-20: the placed ones follow the new tier");
+    // A tier calling for 8 → 5 placed + the 3 kept.
+    est = autoEstimateFor(p.autoEstimate, opt, opt)!;
+    await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(est, "lighting", "good", { "lighting:par": { qty: 8 } }));
+    const third = await fillAutoScopes(p0.id, opt, ["lighting"], by);
+    assert.ok(third.ok && third.added === 5 && third.kept === 3, `#GEM D-GEM-20: 8 called for, 3 kept → 5 placed (${JSON.stringify(third)})`);
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(pars().length, 8, "#GEM D-GEM-20: 5 placed + 3 kept = 8");
+    // Fewer called for than kept → nothing placed, the kept devices stay (never below zero).
+    est = autoEstimateFor(p.autoEstimate, opt, opt)!;
+    await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(est, "lighting", "good", { "lighting:par": { qty: 2 } }));
+    const fourth = await fillAutoScopes(p0.id, opt, ["lighting"], by);
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(fourth.ok && fourth.added === 0 && pars().length === 3, "#GEM D-GEM-20: fewer called for than kept → none placed, the kept 3 stay");
+    // A riser part swap / category edit also records the origin (withoutAuto everywhere).
+    await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(autoEstimateFor(p.autoEstimate, opt, opt)!, "lighting", "good", { "lighting:par": { qty: 5 } }));
+    await fillAutoScopes(p0.id, opt, ["lighting"], by);
+    p = (await GP.getProject(p0.id))!;
+    const oneAuto = pars().find((pl) => pl.auto)!;
+    await GP.setPlacementCategory(p0.id, oneAuto.id, "Front of house");
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(p.placements.find((pl) => pl.id === oneAuto.id)?.autoOrigin?.rowKey, "lighting:par", "#GEM D-GEM-20: a category edit records the origin too");
+    // D-GEM-22: only lighting is chosen and par is mapped → nothing missing; add an unmapped Auto scope → counted.
+    assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 0, "#GEM D-GEM-22: a fully mapped Auto design has no missing lines");
+    const b = { ...a, sys: { ...a.sys, audio: true } };
+    await GP.setScopeInputs(p0.id, intakeScopeInputs(b));
+    await GP.setAutoEstimate(p0.id, opt, { ...autoEstimateFor((await GP.getProject(p0.id))!.autoEstimate, opt, opt)!, tierByScope: { lighting: "good", audio: "better" } });
+    assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 3, "#GEM D-GEM-22: an unmapped Auto scope's lines (3 audio rows) are counted as missing from the quote");
+    await EM.clearEquipmentRow("lighting:par");
+    await Cat.remove("GEMK-PAR");
+  }
+
+  /* --- #GEM final review I3/I4 (D-GEM-19): the server re-prices a Quick
+         design before any promote, and derives `incomplete` on save. --- */
+  {
+    const EM = await import("@/lib/stores/equipment-map");
+    const DP = await import("@/lib/stores/design-pricing");
+    const Designs = await import("@/lib/stores/designs");
+    const Cat = await import("@/lib/stores/catalog");
+    const Fx = await import("@/lib/stores/fixtures");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+    const { defaultAState } = await import("@/app/(app)/design/quick/engine");
+    const { quickDesignNeedsPart } = await import("@/lib/design/equipment-pricing");
+    const by = "tester";
+    const cfg = { ...defaultAState(10), tier: "better" as const };
+    const rec = { name: "GEMFR", venue: "Conference", size: "large", tier: "better", width: 50, depth: 30, grid: 50, systems: ["Rigging"], config: cfg as unknown as Record<string, unknown> };
+    const n0 = await DP.serverDesignNeedsPart(rec);
+    assert.ok(n0 > 0, "#GEM D-GEM-19: with the map empty, the server counts needs-a-part lines");
+    const forged = await DP.quickPromoteGuard({ ...rec, incomplete: { needsPart: 0 } } as typeof rec);
+    assert.ok(forged && forged.needsPart === n0 && /^Incomplete — /.test(forged.error), "#GEM D-GEM-19: a client claiming complete is refused — the server re-prices");
+    const saved = await DP.withServerIncomplete({ ...rec, incomplete: { needsPart: 0 } });
+    assert.equal(saved.incomplete.needsPart, n0, "#GEM D-GEM-19: a save writes the server's count, never the client's");
+    const created = await Designs.createDesign({ ...saved, budget: 1234, owner: "Jeff Chesebro" });
+    assert.equal((await Designs.getDesign(created.id))?.incomplete?.needsPart, n0, "#GEM D-GEM-19: …and it round-trips on the record");
+    const legacy = await Designs.createDesign({ name: "GEMFR legacy", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging", "Audio"], budget: 99000, owner: "Jeff Chesebro" });
+    assert.ok(legacy.incomplete === undefined && (await DP.quickPromoteGuard(legacy)) !== null, "#GEM D-GEM-19: a pre-#GEM design (no incomplete, no config) is refused until its rows are mapped");
+    // I3 — fixture picks price through priceCell (catalog margin), a dead pick stays needs-a-part.
+    await Cat.upsert({ sku: "GEMFR-ENG", desc: "GEMFR engine", category: "Lighting Fixtures", unit: "ea", list: 0, cost: 500 });
+    const live = sanitizeFixtureInput({ kind: "fixture", label: "GEMFR live", description: "", lightEngineSku: "GEMFR-ENG", lensSku: null });
+    const dead = sanitizeFixtureInput({ kind: "fixture", label: "GEMFR dead", description: "", lightEngineSku: "GEMFR-NOPE", lensSku: null });
+    if (!live.ok || !dead.ok) throw new Error("fixture input");
+    const fxLive = await Fx.createFixture(live.value, by, { cost: 500, price: 0, pricedAt: null });
+    const fxDead = await Fx.createFixture(dead.value, by, { cost: 0, price: 0, pricedAt: null });
+    // Every row a confirmed allowance → nothing needs a part.
+    for (const r of EQUIPMENT_ROWS) await EM.saveEquipmentRow(r.key, { sameAll: true, tiers: { good: { kind: "allowance", amount: 100, confirmed: true } } }, by);
+    assert.equal(await DP.serverDesignNeedsPart(rec), 0, "#GEM D-GEM-19: every row mapped → complete");
+    assert.equal(await DP.quickPromoteGuard(legacy), null, "#GEM D-GEM-19: …and the pre-#GEM design can now become a quote");
+    const { table, fixturePrices } = await DP.loadDesignPricing([fxLive.id, fxDead.id]);
+    const pl = fixturePrices[fxLive.id];
+    assert.ok(pl.status === "assembly" && pl.unitCost === 500 && pl.unitSell > 500, `#GEM final review I3: a list-less fixture pick sells at cost ÷ (1 − margin), not a $0 list sum (${JSON.stringify(pl)})`);
+    assert.equal(fixturePrices[fxDead.id].status, "needs-part", "#GEM final review I3: a pick with no priced parts prices needs-a-part");
+    const withPick = (id: string) => ({ ...rec, config: { ...cfg, fixtureAssemblies: { par: id } } as unknown as Record<string, unknown> });
+    assert.equal(quickDesignNeedsPart(withPick(fxLive.id), table, fixturePrices), 0, "#GEM final review I3: a priced pick overrides the par row");
+    assert.equal(quickDesignNeedsPart(withPick(fxDead.id), table, fixturePrices), 1, "#GEM final review I3: a needs-a-part pick stays needs-a-part (the mapped row does not paper over it)");
+    assert.equal(await DP.serverDesignNeedsPart(withPick(fxDead.id)), 1, "#GEM D-GEM-19: the server guard sees the dead pick too");
+    for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
+    await Cat.remove("GEMFR-ENG");
   }
 
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems

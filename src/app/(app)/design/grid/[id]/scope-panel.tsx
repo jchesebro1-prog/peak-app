@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { EquipmentMapLink } from "@/components/design/equipment-map-link";
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import {
   SHORT,
@@ -15,7 +15,7 @@ import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { RollupSlice } from "@/lib/design/grid-bom";
 import type { ScopeTargets, ScopeTargetsByTier } from "@/lib/design/scope-targets";
 import type { SellCard } from "@/lib/design/auto-estimate";
-import type { AutoEstimate } from "@/lib/design/grid-auto-model";
+import { keptUnitsByRow, type AutoEstimate } from "@/lib/design/grid-auto-model";
 import { scopeColor, TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { setScopeInputsAction } from "./actions";
 import RefillDialog from "./refill-dialog";
@@ -124,9 +124,9 @@ function ProgressRow({
       {(needsPart > 0 || allowances > 0) && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 10.5 }}>
           {needsPart > 0 && (
-            <Link href="/design/grid/settings/equipment-map" style={{ color: "#a0442b", textDecoration: "none" }}>
+            <EquipmentMapLink style={{ color: "#a0442b", textDecoration: "none" }}>
               {needsPart} item{needsPart === 1 ? "" : "s"} need{needsPart === 1 ? "s" : ""} a part — not in the target
-            </Link>
+            </EquipmentMapLink>
           )}
           {allowances > 0 && (
             <span style={{ color: "#8a6d1f" }}>
@@ -146,6 +146,7 @@ export default function ScopePanel({
   targets,
   optionId,
   auto,
+  placements,
   defaultTier,
   onChanged,
   onError,
@@ -161,6 +162,9 @@ export default function ScopePanel({
   optionId: string;
   /** Auto designs (#GEM): chosen tiers + sell-only cards and targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
+  /** The active option's placements — the re-fill dialog counts the devices
+   *  kept by hand (D-GEM-20) that will count toward each row's quantity. */
+  placements?: ReadonlyArray<{ optionId?: string; auto?: unknown; autoOrigin?: unknown; qty?: number }>;
   /** Active option's tier (Spec 1) — the lens' initial value, never a gate. */
   defaultTier?: TierKey;
   onChanged: () => void;
@@ -335,6 +339,7 @@ export default function ScopePanel({
           inputs={scopeInputs}
           estimate={auto.estimate}
           initialCards={auto.cards}
+          keptUnits={Object.values(keptUnitsByRow(placements || [], [refill])).reduce((n, u) => n + u, 0)}
           onClose={() => setRefill(null)}
           onDone={() => {
             setRefill(null);
