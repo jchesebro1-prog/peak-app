@@ -13,6 +13,7 @@ import { SymbolColorsCard } from "./symbol-colors-card";
 import { CategoryIconsCard } from "./category-icons-card";
 import { WireTypesCard } from "./wire-types-card";
 import { LaborHoursCard } from "./labor-hours-card";
+import { StandardNotesCard } from "./standard-notes-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
 
 export const metadata = { title: "Grid settings — Quartzite-6" };
@@ -176,6 +177,8 @@ export default async function GridSettingsPage() {
       <WireTypesCard key={JSON.stringify(wireTypes)} wireTypes={wireTypes} />
 
       <LaborHoursCard value={laborValue} def={laborDef} />
+
+      <StandardNotesCard key={settings.gridStandardNotes ?? ""} value={settings.gridStandardNotes ?? ""} />
 
       <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
         <div style={{ fontSize: 14.5, fontWeight: 600 }}>Related settings</div>

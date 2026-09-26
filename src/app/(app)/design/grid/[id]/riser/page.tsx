@@ -84,6 +84,9 @@ export default async function RiserPage({
         >
           ← {project.name}
         </Link>
+        <Link href={`${base}/set${optionQuery}`} style={{ fontFamily: "var(--font-ui)", fontSize: 12.5, color: "var(--accent)", textDecoration: "none" }}>
+          Drawing set →
+        </Link>
         <PrintButton accent={accent} />
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>

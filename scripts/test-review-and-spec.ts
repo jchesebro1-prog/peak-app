@@ -15898,3 +15898,37 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
   const aspectSrc = readFileSync(join(process.cwd(), "src/components/design/sheet-aspect.ts"), "utf8");
   ok(aspectSrc.includes('import("pdfjs-dist")') && aspectSrc.includes("naturalHeight / img.naturalWidth"), "#GDS Connect: the sheet aspect is measured the way the editor measures it (image natural size, PDF viewport)");
 }
+
+/* --- #GDS grid drawing set — Task 7: the set route --- */
+{
+  const gdsClientFiles = [
+    "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx",
+    "src/app/(app)/design/grid/[id]/riser/riser-panels.tsx",
+    "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx",
+    "src/app/(app)/design/grid/[id]/set/set-settings-panel.tsx",
+    "src/app/(app)/design/grid/settings/standard-notes-card.tsx",
+    "src/components/drawing/riser-canvas.tsx",
+    "src/components/drawing/title-block.tsx",
+    "src/components/drawing/drawing-sheet.tsx",
+    "src/components/design/sheet-aspect.ts",
+    "src/lib/design/grid-drawing-set.ts",
+    "src/lib/design/grid-riser-doc.ts",
+    "src/lib/design/grid-schedule.ts",
+  ];
+  for (const rel of gdsClientFiles) {
+    const src = readFileSync(join(process.cwd(), rel), "utf8");
+    const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
+    ok(valueImports.length === 0, `#GDS client boundary: ${rel} imports no VALUE from @/lib/stores or @/db`);
+  }
+  const gdsSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  ok(gdsSetSrc.includes("printPageCss(size)") && gdsSetSrc.includes("buildSheetList(") && gdsSetSrc.includes("riserViewForOption(") && gdsSetSrc.includes("resolveOptionId(project, requestedOption)"),
+    "#GDS set page: one sheet list, @page from the size table, the saved riser, the same ?option= resolution as riser/schedule");
+  ok(gdsSetSrc.includes("<PrintButton") && !gdsSetSrc.includes("#b08d4a\"}") && gdsSetSrc.includes("resolveGeneralNotes(set, settings.gridStandardNotes)"),
+    "#GDS set page: printed with the existing PrintButton; general notes default to Grid Settings' standard notes");
+  const gdsSchedSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
+  ok(gdsSchedSrc.includes("buildSchedule(") && gdsSchedSrc.includes("riserViewForOption("), "#GDS schedule page: shares the set's schedule builder and lists RiserLinks");
+  const gdsSmokeSrc = readFileSync(join(process.cwd(), "scripts/smoke-routes.ts"), "utf8");
+  ok(gdsSmokeSrc.includes('"/design/grid/GRD-5001/set"') && gdsSmokeSrc.includes('"/design/grid/GRD-5001/set?size=d"'), "#GDS smoke: the set route is covered at both sizes");
+  const gdsFigSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx"), "utf8");
+  ok(gdsFigSrc.includes("data-plan-figure") && gdsFigSrc.includes("scaleNote(cal") && gdsFigSrc.includes("fitBox("), "#GDS plan figure: fitted to the drawing area, scale note from the calibration, ready flag for print");
+}

@@ -2,12 +2,15 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject } from "@/lib/stores/grid-projects";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
+import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
-import { spaceOf } from "@/lib/design/grid-geometry";
-import { riserGraph } from "@/lib/design/grid-riser";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
-import { curtainDesc } from "@/lib/design/grid-bom";
+import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { symbolContext } from "@/lib/design/grid-icons";
+import { riserViewForOption } from "@/lib/design/grid-riser-view";
+import { buildSchedule } from "@/lib/design/grid-schedule";
 import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Equipment schedule — Quartzite-6" };
@@ -15,10 +18,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * Per-space equipment schedule (D113 item 3) — the field document: what
- * hangs in which room, plus the wire runs between rooms. Deliberately NO
- * prices; this is the sheet you hand an electrician or GC, not a quote.
- * Derived on every load from the same computed assignment as the editor
- * (smallest containing polygon), so it can never drift from the plan.
+ * hangs in which room, plus the wire runs (routes and typed riser links,
+ * #GDS) between rooms. Deliberately NO prices. Built by the same
+ * buildSchedule the drawing set's E-60x sheets use, so the two never differ.
  */
 export default async function SchedulePage({
   params,
@@ -45,64 +47,26 @@ export default async function SchedulePage({
   const slice = optionSlice(project, optionId);
   const optionQuery = `?option=${encodeURIComponent(optionId)}`;
 
-  const [catalog, settings] = await Promise.all([listCatalog(), getSettings()]);
+  const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
-  const partById = new Map(catalog.map((p) => [p.id, p]));
-  const placements = slice.placements;
+  const parts = gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true });
+  const partById = new Map(parts.map((p) => [p.id, p]));
   const spaces = project.spaces || [];
-  const routes = slice.routes;
-
-  // Devices grouped per space (same computed assignment as everywhere else).
-  // `code` overrides the printed Part cell for rows with no SKU (curtains).
-  type Row = { partId: string; code?: string; desc: string; qty: number };
-  const bySpace = new Map<string | null, Row[]>();
-  for (const pl of placements) {
-    const home = spaceOf(pl, spaces);
-    const key = home ? home.id : null;
-    const rows = bySpace.get(key) || [];
-    // Curtains (punch #49) never group: each drop is its own made-to-size
-    // drape, so it gets its own row keyed by placement id, described by the
-    // name/type/size/fullness/fabric the designer specced.
-    if (pl.curtain) {
-      rows.push({
-        partId: pl.id,
-        code: "CURTAIN",
-        desc: curtainDesc(pl.curtain, partById.get(pl.curtain.fabricSku)?.desc),
-        qty: 1,
-      });
-      bySpace.set(key, rows);
-      continue;
-    }
-    const row = rows.find((r) => r.partId === pl.partId);
-    if (row) row.qty += 1;
-    else
-      rows.push({
-        partId: pl.partId,
-        desc: partById.get(pl.partId)?.desc || "(no longer in the catalog)",
-        qty: 1,
-      });
-    bySpace.set(key, rows);
-  }
-
-  // Wire runs with endpoints + lengths, via the same derivation as the riser.
-  const graph = riserGraph(
-    placements,
-    routes,
+  const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings) });
+  const nodeName = new Map(view.nodes.map((n) => [n.key, n.name]));
+  const { sections, wires, deviceCount, wireFeet } = buildSchedule({
+    placements: slice.placements,
     spaces,
-    catalog.map((p) => ({ id: p.id, sku: p.sku, desc: p.desc, category: p.category, unit: p.unit, list: p.list, cost: p.cost })),
-    project.calibrations || []
-  );
-
-  // Footer rollups: total devices + total footage per wire part.
-  // Curtains are counted separately from devices (punch #49).
-  const deviceCount = placements.filter((pl) => !pl.curtain).length;
-  const wireFeet = new Map<string, { ft: number; unit: string; unmeasured: number }>();
-  for (const e of graph.edges) {
-    const w = wireFeet.get(e.partId) || { ft: 0, unit: e.unit, unmeasured: 0 };
-    if (e.lengthFt === null) w.unmeasured += 1;
-    else w.ft += e.lengthFt;
-    wireFeet.set(e.partId, w);
-  }
+    descOf: (pid) => partById.get(pid)?.desc,
+    wires: view.edges.map((e) => ({
+      id: e.id,
+      partId: e.partId,
+      fromName: nodeName.get(e.from.key) || "Unassigned",
+      toName: nodeName.get(e.to.key) || "Unassigned",
+      lengthFt: e.lengthFt,
+      unit: e.unit,
+    })),
+  });
 
   const th: React.CSSProperties = {
     textAlign: "left",
@@ -120,13 +84,18 @@ export default async function SchedulePage({
     fontSize: "11.5pt",
     verticalAlign: "top",
   };
-
-  const sections: Array<{ key: string; name: string; rows: Row[] }> = [
-    ...spaces
-      .filter((s) => bySpace.has(s.id))
-      .map((s) => ({ key: s.id, name: s.name, rows: bySpace.get(s.id)! })),
-    ...(bySpace.has(null) ? [{ key: "un", name: "Unassigned", rows: bySpace.get(null)! }] : []),
-  ];
+  const sectionHead: React.CSSProperties = {
+    fontFamily: "var(--font-ui), sans-serif",
+    fontSize: "10.5pt",
+    fontWeight: 700,
+    letterSpacing: ".04em",
+    textTransform: "uppercase",
+    color: "#1a1a1a",
+    borderBottom: `2px solid ${accent}`,
+    display: "inline-block",
+    paddingBottom: 1,
+    marginBottom: 6,
+  };
 
   return (
     <div className="pk-content" style={{ padding: "26px 30px 64px" }}>
@@ -141,7 +110,6 @@ export default async function SchedulePage({
       </div>
 
       <div className="pk-doc-page">
-        {/* header */}
         <div style={{ borderBottom: `3px solid ${accent}`, paddingBottom: 10, marginBottom: 18 }}>
           <div style={{ fontFamily: "var(--font-mono), monospace", fontSize: "8pt", letterSpacing: ".14em", textTransform: "uppercase", color: "#666" }}>
             {settings.companyName || "Peak Systems Group"} · Equipment schedule
@@ -156,15 +124,13 @@ export default async function SchedulePage({
           </div>
         </div>
 
-        {sections.length === 0 && graph.edges.length === 0 ? (
+        {sections.length === 0 && wires.length === 0 ? (
           <p style={{ color: "#666" }}>Nothing on the plans yet.</p>
         ) : (
           <>
             {sections.map((sec) => (
               <div key={sec.key} style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "var(--font-ui), sans-serif", fontSize: "10.5pt", fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#1a1a1a", borderBottom: `2px solid ${accent}`, display: "inline-block", paddingBottom: 1, marginBottom: 6 }}>
-                  {sec.name}
-                </div>
+                <div style={sectionHead}>{sec.name}</div>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
@@ -186,11 +152,9 @@ export default async function SchedulePage({
               </div>
             ))}
 
-            {graph.edges.length > 0 && (
+            {wires.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: "var(--font-ui), sans-serif", fontSize: "10.5pt", fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#1a1a1a", borderBottom: `2px solid ${accent}`, display: "inline-block", paddingBottom: 1, marginBottom: 6 }}>
-                  Wire runs
-                </div>
+                <div style={sectionHead}>Wire runs</div>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
@@ -200,13 +164,11 @@ export default async function SchedulePage({
                     </tr>
                   </thead>
                   <tbody>
-                    {graph.edges.map((e) => (
-                      <tr key={e.routeId}>
+                    {wires.map((e) => (
+                      <tr key={e.id}>
                         <td style={{ ...td, fontFamily: "var(--font-mono), monospace", fontSize: "10pt" }}>{e.partId}</td>
                         <td style={td}>{e.fromName} → {e.toName}</td>
-                        <td style={td}>
-                          {e.lengthFt !== null ? formatMeasure(e.lengthFt, e.unit as MeasureUnit) : "unmeasured"}
-                        </td>
+                        <td style={td}>{e.lengthFt !== null ? formatMeasure(e.lengthFt, e.unit as MeasureUnit) : "unmeasured"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -214,14 +176,13 @@ export default async function SchedulePage({
               </div>
             )}
 
-            {/* footer rollup */}
             <div style={{ borderTop: "1.5px solid #1a1a1a", marginTop: 20, paddingTop: 8, fontSize: "10.5pt", color: "#444" }}>
               <strong>{deviceCount}</strong> device{deviceCount === 1 ? "" : "s"} across{" "}
               <strong>{sections.length}</strong> area{sections.length === 1 ? "" : "s"}
-              {[...wireFeet.entries()].map(([partId, w]) => (
-                <span key={partId}>
+              {wireFeet.map((w) => (
+                <span key={w.partId}>
                   {" · "}
-                  <strong>{Math.ceil(w.ft)} {w.unit}</strong> {partId}
+                  <strong>{Math.ceil(w.ft)} {w.unit}</strong> {w.partId}
                   {w.unmeasured > 0 ? ` (+${w.unmeasured} unmeasured)` : ""}
                 </span>
               ))}

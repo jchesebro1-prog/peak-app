@@ -1219,6 +1219,9 @@ export default function GridEditor({
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule?option=${encodeURIComponent(activeOptionId)}`} style={{ ...BTN, textDecoration: "none" }}>
           Schedule →
         </Link>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/set?option=${encodeURIComponent(activeOptionId)}`} style={{ ...BTN, textDecoration: "none" }}>
+          Drawing set →
+        </Link>
         <select
           value={project.linesetDesignId || ""}
           disabled={linesetBusy}
