@@ -13,9 +13,12 @@ import {
 import { getAccentHex, getAccentHexServer, subscribeAccent } from "@/app/(app)/design/quick/tierdefs-store";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import type { RollupSlice } from "@/lib/design/grid-bom";
-import type { ScopeTargetsByTier } from "@/lib/design/scope-targets";
+import type { ScopeTargets, ScopeTargetsByTier } from "@/lib/design/scope-targets";
+import type { SellCard } from "@/lib/design/auto-estimate";
+import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import { scopeColor, TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { setScopeInputsAction } from "./actions";
+import RefillDialog from "./refill-dialog";
 
 /**
  * Scope sidebar panel (D-manual-scope-targets) — Manual mode's placed-$
@@ -141,6 +144,8 @@ export default function ScopePanel({
   scopeInputs,
   byScope,
   targets,
+  optionId,
+  auto,
   defaultTier,
   onChanged,
   onError,
@@ -152,12 +157,17 @@ export default function ScopePanel({
   byScope: RollupSlice[];
   /** Sell-only Good/Better/Best targets per scope, computed server-side (#GEM). */
   targets: ScopeTargetsByTier | null;
+  /** The active option (a re-fill paints only this option). */
+  optionId: string;
+  /** Auto designs (#GEM): chosen tiers + sell-only cards and targets; null for Blank. */
+  auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
   /** Active option's tier (Spec 1) — the lens' initial value, never a gate. */
   defaultTier?: TierKey;
   onChanged: () => void;
   onError: (msg: string) => void;
 }) {
   const [tierKey, setTierKey] = useState<TierKey>(defaultTier ?? "better");
+  const [refill, setRefill] = useState<SysKey | null>(null);
   const [pending, startTransition] = useTransition();
   const accentHex = useSyncExternalStore(subscribeAccent, getAccentHex, getAccentHexServer);
 
@@ -284,16 +294,24 @@ export default function ScopePanel({
             {trackedKeys.map((k) => {
               const scopeKey = SYS_TO_GRID_SCOPE[k]!;
               const placed = placedByKey.get(scopeKey)?.value || 0;
+              const autoTier = auto?.estimate.tierByScope[k];
+              const t = autoTier ? auto?.targets[k] : tierTargets[k];
               return (
-                <ProgressRow
-                  key={k}
-                  label={SHORT[k]}
-                  color={scopeColor(scopeKey)}
-                  placed={placed}
-                  target={tierTargets[k]?.sell || 0}
-                  needsPart={tierTargets[k]?.needsPart || 0}
-                  allowances={tierTargets[k]?.allowances || 0}
-                />
+                <div key={k} style={{ display: "grid", gap: 4 }}>
+                  <ProgressRow
+                    label={autoTier ? `${SHORT[k]} · Auto ${TIERS.find((x) => x.key === autoTier)?.label ?? ""}` : SHORT[k]}
+                    color={scopeColor(scopeKey)}
+                    placed={placed}
+                    target={t?.sell || 0}
+                    needsPart={t?.needsPart || 0}
+                    allowances={t?.allowances || 0}
+                  />
+                  {autoTier && scopeInputs && (
+                    <button type="button" onClick={() => setRefill(k)} style={{ ...BTN, justifySelf: "start", padding: "3px 9px", fontSize: 11 }}>
+                      Change equipment…
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -308,6 +326,23 @@ export default function ScopePanel({
       </div>
 
       {pending && <div style={{ fontSize: 10.5, color: "#8c919c", marginTop: 6 }}>Saving…</div>}
+
+      {refill && auto && scopeInputs && (
+        <RefillDialog
+          projectId={projectId}
+          optionId={optionId}
+          scope={refill}
+          inputs={scopeInputs}
+          estimate={auto.estimate}
+          initialCards={auto.cards}
+          onClose={() => setRefill(null)}
+          onDone={() => {
+            setRefill(null);
+            onChanged();
+          }}
+          onError={onError}
+        />
+      )}
     </div>
   );
 }

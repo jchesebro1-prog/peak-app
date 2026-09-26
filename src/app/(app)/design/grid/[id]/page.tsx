@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
-import { resolveOptionId } from "@/lib/design/grid-options";
+import { defaultOptionId, resolveOptionId } from "@/lib/design/grid-options";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
@@ -26,6 +26,8 @@ import { tierSystems } from "@/lib/design/equipment-pricing";
 import { buildEquipmentPriceTable } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { scopeTargetsByTier } from "@/lib/design/scope-targets";
+import { autoEstimateCards, autoTargets, priceOverrides, sellOnlyCards } from "@/lib/design/auto-estimate";
+import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
@@ -122,6 +124,22 @@ export default async function GridEditorPage({
     ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable))
     : null;
 
+  // Auto designs (#GEM): the chosen cards, priced server-side; the editor
+  // gets sell-only lines + targets. Adapted for D-GEM-12 (not in the
+  // original brief): autoEstimate is stored PER OPTION, so the active
+  // option's choices are resolved with autoEstimateFor (a legacy
+  // single-value doc reads as the first option's) rather than a bare
+  // `project.autoEstimate`.
+  const optionAutoEstimate = autoEstimateFor(project.autoEstimate, activeOptionId, defaultOptionId(project));
+  const autoCards =
+    optionAutoEstimate && project.scopeInputs
+      ? autoEstimateCards(project.scopeInputs, optionAutoEstimate, equipTable, priceOverrides(optionAutoEstimate.overrides, equipCtx))
+      : null;
+  const auto =
+    autoCards && optionAutoEstimate
+      ? { estimate: optionAutoEstimate, cards: sellOnlyCards(autoCards), targets: autoTargets(autoCards) }
+      : null;
+
   /** Client payload: sheets without re-serialization surprises + PartLite slice
    *  (the one builder the riser, drawing set and schedule use too — #209). */
   // #207: "has a datasheet" = a stored datasheet document of the part's own;
@@ -201,6 +219,7 @@ export default async function GridEditorPage({
       parts={parts}
       fabrics={fabrics}
       scopeTargets={scopeTargets}
+      auto={auto}
       curtainCoeffs={curtainCoeffs}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}

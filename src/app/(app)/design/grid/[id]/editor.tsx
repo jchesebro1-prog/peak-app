@@ -52,7 +52,9 @@ import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-fil
 import { optionSlice } from "@/lib/design/grid-options";
 import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
 import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
-import type { ScopeTargetsByTier } from "@/lib/design/scope-targets";
+import type { ScopeTargets, ScopeTargetsByTier } from "@/lib/design/scope-targets";
+import type { SellCard } from "@/lib/design/auto-estimate";
+import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
   addRouteAction,
@@ -239,6 +241,7 @@ export default function GridEditor({
   parts,
   fabrics,
   scopeTargets,
+  auto,
   curtainCoeffs,
   laborParts,
   laborHoursPerDevice,
@@ -258,6 +261,8 @@ export default function GridEditor({
   /** Scope panel Good/Better/Best targets per scope (#GEM, D-GEM-5) — SELL
    *  numbers computed server-side (grid/[id]/page.tsx); no cost crosses. */
   scopeTargets: ScopeTargetsByTier | null;
+  /** Auto designs (#GEM): the chosen cards (sell-only) + their targets; null for Blank. */
+  auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
   /** Sell-side making coefficients for the live curtain price (punch #49). */
   curtainCoeffs: SellCoeffs;
   /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
@@ -1527,6 +1532,8 @@ export default function GridEditor({
             scopeInputs={project.scopeInputs}
             byScope={projectScopeRollup?.byScope || []}
             targets={scopeTargets}
+            optionId={activeOptionId}
+            auto={auto}
             defaultTier={activeOption.tier}
             onChanged={() => router.refresh()}
             onError={(m) => setErr(m)}

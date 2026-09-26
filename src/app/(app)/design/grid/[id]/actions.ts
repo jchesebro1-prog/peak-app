@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { findCalibration, type Calibration, type MeasureUnit, type Point } from "@/lib/annotations";
-import type { QuickScopeInputs } from "@/app/(app)/design/quick/engine";
+import type { QuickScopeInputs, SysKey, TierKey } from "@/app/(app)/design/quick/engine";
 import {
   addCurtainPlacement,
   addOption,
@@ -34,7 +34,7 @@ import {
   saveGridIntake,
   setAutoEstimate,
 } from "@/lib/stores/grid-projects";
-import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
+import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-options";
 import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import { can } from "@/lib/team";
@@ -60,8 +60,8 @@ import {
   type AutoEquipHit,
   type SellCard,
 } from "@/lib/design/auto-estimate";
-import { overrideRefs, sanitizeAutoEstimate, type AutoEstimate } from "@/lib/design/grid-auto-model";
-import { buildEquipmentPriceTable, sellFromCost } from "@/lib/design/equipment-map";
+import { autoEstimateFor, mergeScopeEstimate, overrideRefs, sanitizeAutoEstimate, type AutoEstimate, type AutoOverride } from "@/lib/design/grid-auto-model";
+import { buildEquipmentPriceTable, isTierKey, sellFromCost } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { getCatalogRates } from "@/lib/stores/pricing";
@@ -913,4 +913,37 @@ export async function createDraftQuoteAction(
   revalidatePath("/quotes");
   revalidatePath("/design/designs");
   return { ok: true, quoteId: q.id, updated: false, fallbackLines: build.fallbackLines };
+}
+
+/**
+ * "Change equipment…" (#GEM, spec §5): re-choose ONE Auto scope's tier,
+ * swaps and quantities, save them on the project, and re-fill only that
+ * scope in this option. Untouched Auto devices are replaced; devices moved or
+ * edited by hand stay. The UI confirms first (ConfirmButton).
+ *
+ * Adapted from the brief for D-GEM-12 (not in the original brief):
+ * autoEstimate is stored PER OPTION, so the current choices are read with
+ * autoEstimateFor(project.autoEstimate, optionId, defaultOptionId) and saved
+ * back with setAutoEstimate(projectId, optionId, …) rather than a single
+ * project-wide value.
+ */
+export async function refillScopeAction(input: {
+  projectId: string;
+  optionId: string;
+  scope: SysKey;
+  tier: TierKey;
+  overrides: Record<string, AutoOverride>;
+}): Promise<{ ok: true; added: number; removed: number; needsPart: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const project = await getProject(input.projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
+  const est = autoEstimateFor(project.autoEstimate, input.optionId, defaultOptionId(project));
+  if (!est || !est.tierByScope[input.scope]) return { ok: false, error: "Only Auto scopes can be re-filled." };
+  if (!isTierKey(input.tier)) return { ok: false, error: "Pick Good, Better or Best." };
+  await setAutoEstimate(input.projectId, input.optionId, mergeScopeEstimate(est, input.scope, input.tier, input.overrides || {}));
+  const res = await fillAutoScopes(input.projectId, input.optionId, [input.scope], user.name);
+  if (!res.ok) return res;
+  revalidatePath(editorPath(input.projectId));
+  return res;
 }

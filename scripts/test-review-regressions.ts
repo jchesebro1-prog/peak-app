@@ -4011,6 +4011,53 @@ async function main() {
     for (const k of ["lighting:par", "curtains:draw", "audio:mixerDsp", "audio:subwoofer"]) await EM.clearEquipmentRow(k);
   }
 
+  /* --- #GEM T9: a per-scope re-fill keeps hand-touched devices and honours
+         the new choices. Adapted from the brief for D-GEM-12 (not in the
+         original brief): autoEstimate is stored PER OPTION, so
+         setAutoEstimate takes the option id and the current choices are read
+         back with autoEstimateFor rather than a bare `p.autoEstimate`. --- */
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const EM = await import("@/lib/stores/equipment-map");
+    const Cat = await import("@/lib/stores/catalog");
+    const { fillAutoScopes } = await import("@/lib/design/grid-auto-fill");
+    const { intakeScopeInputs } = await import("@/lib/design/grid-intake");
+    const { mergeScopeEstimate, autoEstimateFor } = await import("@/lib/design/grid-auto-model");
+    const { defaultAState } = await import("@/app/(app)/design/quick/engine");
+    const { resolveOptionId } = await import("@/lib/design/grid-options");
+    const by = "tester";
+    await Cat.upsert({ sku: "GEM9-PAR", desc: "GEM9 LED par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
+    await EM.saveEquipmentRow("lighting:par", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM9-PAR" } } }, by);
+    const a = {
+      ...defaultAState(0), venue: "school", size: "medium" as const, width: 40, depth: 30, grid: 24, wing: 12, ph: 20,
+      sys: { rigging: false, curtains: false, lighting: true, controls: false, audio: false, video: false, acoustical: false, pit: false },
+      fixtures: { par: true, front: false, cyc: false, side: false, automated: false },
+    };
+    const p0 = await GP.createProject({ name: "GEM9 refill", customer: "", customerId: null, by });
+    const opt = resolveOptionId(p0, null);
+    await GP.saveGridIntake(p0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "", address: "", notes: "", autoConfig: a });
+    await GP.setScopeInputs(p0.id, intakeScopeInputs(a));
+    await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "better" }, overrides: {} });
+    await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
+    let p = (await GP.getProject(p0.id))!;
+    assert.ok((await fillAutoScopes(p0.id, opt, ["lighting"], by)).ok, "#GEM T9: first fill");
+    p = (await GP.getProject(p0.id))!;
+    const pars = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
+    assert.ok(pars.length > 2, "#GEM T9: pars were placed");
+    await GP.movePlacement(p0.id, pars[0].id, { x: 0.5, y: 0.5 });
+    const curEst = autoEstimateFor(p.autoEstimate, opt, opt)!;
+    await GP.setAutoEstimate(p0.id, opt, mergeScopeEstimate(curEst, "lighting", "best", { "lighting:par": { qty: 4 } }));
+    const res = await fillAutoScopes(p0.id, opt, ["lighting"], by);
+    assert.ok(res.ok && res.removed === pars.length - 1 && res.added === 4, `#GEM T9: the re-fill replaced only the untouched pars (${JSON.stringify(res)})`);
+    p = (await GP.getProject(p0.id))!;
+    const moved = p.placements.find((pl) => pl.id === pars[0].id);
+    assert.ok(moved && !moved.auto && moved.x === 0.5, "#GEM T9: the hand-moved par stays where it was put");
+    const fresh = p.placements.filter((pl) => pl.auto?.rowKey === "lighting:par");
+    assert.ok(fresh.length === 4 && fresh.every((pl) => pl.auto!.tier === "best"), "#GEM T9: the new pars follow the new tier and the edited quantity");
+    assert.deepEqual(autoEstimateFor(p.autoEstimate, opt, opt), { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 4 } } }, "#GEM T9: the choices are saved, so Change equipment… re-opens with them");
+    await EM.clearEquipmentRow("lighting:par");
+  }
+
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems
          (configuration, like the settings they used to live in) and the
          kept fixtures' accessory graph is rebuilt. LAST: it wipes every

@@ -18358,3 +18358,16 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
     "#GEM T8 fix wave 1 (M7): the card wires the reconciler in, still importing no pricing/store/DB value"
   );
 }
+
+/* --- #GEM T9: "Change equipment…" on Auto scopes --- */
+{
+  const dir = "src/app/(app)/design/grid/[id]";
+  const sp9 = readFileSync(join(process.cwd(), `${dir}/scope-panel.tsx`), "utf8");
+  const rd9 = readFileSync(join(process.cwd(), `${dir}/refill-dialog.tsx`), "utf8");
+  const act9 = readFileSync(join(process.cwd(), `${dir}/actions.ts`), "utf8");
+  const pg9 = readFileSync(join(process.cwd(), `${dir}/page.tsx`), "utf8");
+  ok(sp9.includes("Change equipment…") && sp9.includes("auto?.targets") && sp9.includes("<RefillDialog"), "#GEM T9: Auto scopes show their chosen target and a Change equipment… button");
+  ok(rd9.startsWith('"use client"') && rd9.includes("<ConfirmButton") && rd9.includes("refillScopeAction(") && !gemValueImports(rd9).some((m) => /\/auto-estimate$|\/equipment-pricing$|^@\/lib\/stores\/|^@\/db\//.test(m)), "#GEM T9: the re-fill is confirmed (ConfirmButton) and the dialog imports no pricing/store value");
+  const refillBody = act9.slice(act9.indexOf("export async function refillScopeAction"));
+  ok(refillBody.includes("mergeScopeEstimate(") && refillBody.includes("fillAutoScopes(") && refillBody.includes("hasOption(") && pg9.includes("sellOnlyCards(autoCards)"), "#GEM T9: a re-fill merges one scope's choices and re-fills that scope in the current option; the page sends sell-only cards");
+}
