@@ -411,7 +411,7 @@ export const GROUPS: PricingGroup[] = [
       rate("margin", "Flame-test margin", 30, "%", { min: 0, max: 60, step: 1, store: "flame", pctStored: true }),
       rate("travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "flame" }),
       rate("flame.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "flame", key: "flyCrew", help: "Default crew for a flame test priced as flights (Travel & mileage → fly threshold). Overridable on each quote." }),
-      formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ÷  (1 − margin)"),
+      formula("flame.total", "Flame-test total", "max( $base ,  miles × mileageRate  +  travelHrs × laborRate  +  curtains × curtainMin × (laborRate ÷ 60) )  ÷  (1 − margin)  ·  travel = flights when one trip's drive cost ≥ threshold"),
     ],
   },
   {
@@ -427,7 +427,7 @@ export const GROUPS: PricingGroup[] = [
       rate("repair.emergencyMult", "Emergency / after-hours ×", 1.5, "×", { min: 1, max: 3, step: 0.05, store: "repair", key: "emergencyMult", help: "Multiplies the labor rate for emergency or after-hours work." }),
       rate("repair.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "repair", key: "travelRoundMin" }),
       rate("repair.flyCrew", "Crew when the trip flies", 2, "people", { min: 1, max: 10, step: 1, store: "repair", key: "flyCrew", help: "Default crew for a repair priced as flights — never fewer than the quote's own crew size. Overridable on each quote." }),
-      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  +  parts ÷ (1 − partsMargin)"),
+      formula("repair.total", "Repair total", "max( $callout ,  (laborHrs × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  +  parts ÷ (1 − partsMargin)  ·  travel = flights when one trip's drive cost ≥ threshold"),
     ],
   },
   {
@@ -445,7 +445,7 @@ export const GROUPS: PricingGroup[] = [
       rate("inspection.travelRoundMin", "Round travel time up to", 15, "min", { min: 1, max: 60, step: 1, store: "inspection", key: "travelRoundMin" }),
       rate("inspection.flyCrew", "Crew when the trip flies", 1, "people", { min: 1, max: 10, step: 1, store: "inspection", key: "flyCrew", help: "Default crew for an inspection priced as flights. Overridable on each quote." }),
       formula("inspection.hours", "Inspection hours", "hours = ( baseHours + lineSets × lineSetMin ÷ 60 ) × (level 2 ? level2× : 1)"),
-      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )"),
+      formula("inspection.total", "Inspection total", "max( $minimum ,  (hours × laborRate  +  miles × mileageRate  +  travelHrs × laborRate)  ÷  (1 − margin) )  ·  travel = flights when one trip's drive cost ≥ threshold"),
     ],
   },
   {

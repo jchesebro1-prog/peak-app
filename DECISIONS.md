@@ -5713,10 +5713,24 @@ mode. The itemized airfare / lodging / per diem / car / travel labor stays build
 Renewal re-pricing (D69, current rates) carries the prior quote's travel override — mode, crew, nights — but drops
 its manual airfare, which is a one-year number; the allowance applies. When the renewal's mode differs from last
 year's, the email's "why the price changed" list gains "travel now being priced as flights, lodging & per diem
-instead of a drive" (or "…as a drive instead of flights").
+instead of a drive" (or "…as a drive instead of flights"). Branch review (I1): an inspection record re-prices
+exactly ONE venue, but the prior quote's `nights` may have covered however many venues shared last year's trip —
+carrying that count forward would overstate a single-venue trip's nights, so `nights` is dropped (mode and crew
+still carry) unless the prior quote was itself single-venue, mirroring the venue-count gate the mode-flip wording
+already used.
 
 ## D-TRV-5. The quote-builder previews use the live road factor and speed (#TRV, 2026-09-25)
 
 The three builders' inlined previews hardcoded 1.25 / 50 mph while the server re-priced with the Estimating Rules
 values. With a threshold on the drive total the two could disagree on drive vs fly, so the pages now hand the
 builders the live `travel_rates` blob and the previews use it. Server totals are unchanged.
+
+## D-TRV-6. Pre-feature sent quotes open on Drive, not Auto (#TRV, 2026-09-25)
+
+Branch review finding (I2): a service quote saved before flights-over-drive shipped recorded no travel choice at
+all. If such a quote is past draft (sent, won, lost — a customer may already have seen the price) and is reopened
+in the builder, Auto would silently re-price it as flights the moment the drive cost has since crept over the
+threshold, changing a price nobody agreed to. The three builder pages now seed the travel draft to `{ mode: "drive"
+}` whenever the saved doc has no `travel` override and no `trip.mode` — i.e., it predates the feature — and the
+quote is not a draft. A draft (no customer has seen a price yet) and any quote that already recorded a travel
+choice stay Auto / their own choice.

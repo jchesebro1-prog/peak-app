@@ -56,6 +56,7 @@ type RepairDoc = {
   contact?: RpContact;
   venues?: RpVenue[];
   travel?: unknown;
+  trip?: { mode?: string } | null;
 } | null;
 
 export default async function RepairQuotePage({
@@ -167,6 +168,12 @@ export default async function RepairQuotePage({
       }
     }
     const wonAlready = editQuote.status === "won";
+    // Flights over drive (D-TRV-6) shipped after some quotes were already past
+    // draft. Those never recorded a travel choice, so re-opening them under
+    // Auto could re-price a sent drive quote as flights. Seed Drive instead —
+    // drafts (no customer has seen a price yet) stay Auto.
+    const legacyDrive =
+      editQuote.status !== "draft" && !rp?.travel && !rp?.trip?.mode;
     initial = {
       editingId: editQuote.id,
       customerId: cid,
@@ -191,7 +198,7 @@ export default async function RepairQuotePage({
             : "",
       crewSize: String((rp && rp.crewSize) || 1),
       source: (rp && rp.source) || null,
-      travel: normalizeTravelOverride(rp && rp.travel) ?? null,
+      travel: normalizeTravelOverride(rp && rp.travel) ?? (legacyDrive ? { mode: "drive" } : null),
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,

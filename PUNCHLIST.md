@@ -8286,7 +8286,6 @@ primary look.
 the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
 lead's call (never against `.data/pglite`).
 
-
 ---
 
 ## #TRV. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D-TRV-1…D-TRV-5)

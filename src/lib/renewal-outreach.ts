@@ -52,6 +52,7 @@ import {
   savedTrip,
   travelLineAmount,
   travelModeChangeReason,
+  type TravelOverride,
 } from "@/lib/travel-plan";
 
 /**
@@ -215,7 +216,7 @@ type FlameTestDoc = {
 /** Customer-safe reasons why this year's flame price differs from last
  *  year's — diff of the rate snapshot stored on the prior quote vs today's
  *  rates, plus travel/scope movement. Margin changes stay generic (D69). */
-function flameChangeReasons(
+export function flameChangeReasons(
   priorFt: FlameTestDoc | null,
   r: FlameTestPricing
 ): string[] {
@@ -223,8 +224,12 @@ function flameChangeReasons(
   const old = priorFt?.rates || null;
   const cur = r.rates;
   let generic = false;
+  // M1: mileage rate / drive distance don't move a fly-mode price, so don't
+  // cite them when both years priced this trip as flights.
+  const priorMode = priorFt?.trip ? (priorFt.trip.mode === "fly" ? "fly" : "drive") : null;
+  const bothFly = priorMode === "fly" && r.trip.mode === "fly";
   if (old) {
-    if (old.mileageRate != null && old.mileageRate !== cur.mileageRate)
+    if (!bothFly && old.mileageRate != null && old.mileageRate !== cur.mileageRate)
       out.push(
         `the current federal mileage rate (${usd2(cur.mileageRate)}/mi, was ${usd2(old.mileageRate)})`
       );
@@ -245,13 +250,13 @@ function flameChangeReasons(
     generic = true;
   }
   const oldMiles = priorFt?.trip?.miles;
-  if (oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
+  if (!bothFly && oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
     out.push(
       `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
     );
   // Flights over drive (spec 2026-09-25 §5): say so when the mode flipped.
-  if (priorFt?.trip) {
-    const flip = travelModeChangeReason(priorFt.trip.mode === "fly" ? "fly" : "drive", r.trip.mode);
+  if (priorMode) {
+    const flip = travelModeChangeReason(priorMode, r.trip.mode);
     if (flip) out.push(flip);
   }
   const oldCurtains = priorFt?.curtainsTotal;
@@ -533,7 +538,7 @@ type InspectionDoc = {
 
 /** Customer-safe reasons why this year's inspection price differs — rate
  *  snapshot diff + travel/scope movement; margin stays generic (D69). */
-function inspectionChangeReasons(
+export function inspectionChangeReasons(
   priorIn: InspectionDoc | null,
   r: InspectionEstimate,
   venueLabel: string
@@ -542,12 +547,16 @@ function inspectionChangeReasons(
   const old = priorIn?.rates || null;
   const cur = r.rates;
   let generic = false;
+  // M1: mileage rate / drive distance don't move a fly-mode price, so don't
+  // cite them when both years priced this trip as flights.
+  const priorMode = priorIn?.trip ? (priorIn.trip.mode === "fly" ? "fly" : "drive") : null;
+  const bothFly = priorMode === "fly" && r.trip.mode === "fly";
   if (old) {
     if (old.laborRate != null && old.laborRate !== cur.laborRate)
       out.push(
         `our current labor rate ($${cur.laborRate}/hr, was $${old.laborRate})`
       );
-    if (old.mileageRate != null && old.mileageRate !== cur.mileageRate)
+    if (!bothFly && old.mileageRate != null && old.mileageRate !== cur.mileageRate)
       out.push(
         `the current federal mileage rate (${usd2(cur.mileageRate)}/mi, was ${usd2(old.mileageRate)})`
       );
@@ -590,19 +599,37 @@ function inspectionChangeReasons(
       `the inspection now covering ${r.lineSetsTotal} line set${r.lineSetsTotal === 1 ? "" : "s"} (was ${oldLineSets})`
     );
   const oldMiles = priorVenueCount === 1 ? priorIn?.trip?.miles : null;
-  if (oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
+  if (!bothFly && oldMiles != null && Math.abs(r.trip.miles - oldMiles) >= 2)
     out.push(
       `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
     );
   // Flights over drive (spec 2026-09-25 §5): say so when the mode flipped
   // (single-venue priors only — a combined trip is explained above).
-  if (priorVenueCount === 1 && priorIn?.trip) {
-    const flip = travelModeChangeReason(priorIn.trip.mode === "fly" ? "fly" : "drive", r.trip.mode);
+  if (priorVenueCount === 1 && priorMode) {
+    const flip = travelModeChangeReason(priorMode, r.trip.mode);
     if (flip) out.push(flip);
   }
   if (generic && !out.length) return []; // → "our current rates" fallback
   if (generic) out.push("our updated pricing");
   return out;
+}
+
+/** I1: an inspection record re-prices exactly ONE venue, but the prior
+ *  quote's carried `nights` may have covered however many venues shared that
+ *  trip last year — carrying that count forward would overstate a
+ *  single-venue trip's nights. Drop `nights` unless the prior quote was
+ *  itself single-venue (keep `mode`; keep `crew` — mirrors the flip-reason
+ *  gate in inspectionChangeReasons, which only explains the flip for
+ *  single-venue priors too). Exported for direct testing (pure). */
+export function carryInspectionTravelOverride(
+  raw: unknown,
+  priorVenueCount: number
+): TravelOverride | undefined {
+  const o = carryTravelOverride(raw);
+  if (!o || priorVenueCount === 1) return o;
+  const { nights: _priorNights, ...rest } = o;
+  void _priorNights;
+  return Object.keys(rest).length ? rest : undefined;
 }
 
 /** This cycle's renewal quote for a completed inspection — reused when it
@@ -646,7 +673,8 @@ async function ensureInspectionRenewalQuote(
   const rates = await getInspectionRates();
   const travelRates = await getTravelRates();
   // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
-  const travelOverride = carryTravelOverride(priorIn?.travel);
+  const priorVenueCount = priorIn?.venues?.length || 0;
+  const travelOverride = carryInspectionTravelOverride(priorIn?.travel, priorVenueCount);
   const r = computeInspection(
     {
       office: office || undefined,

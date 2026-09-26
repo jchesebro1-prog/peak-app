@@ -255,6 +255,13 @@ export function computeEstimate(
 
   const drive = tripTravel(opts.office, venues, C, opts.geo);
   const crew = Math.max(1, Math.round(Number(opts.crewSize) || 1));
+  // D-TRV-2: the flying crew is never fewer than the job's crew size. The
+  // default crew is already clamped above; a manual override could still
+  // understate it, so raise (never lower) an explicit override to match.
+  const travelOverride =
+    opts.travel?.crew != null && opts.travel.crew < crew
+      ? { ...opts.travel, crew }
+      : opts.travel;
   // Flights over drive: in drive mode plan.total IS drive.total (bit-for-bit).
   const plan = planTravel({
     drive,
@@ -262,7 +269,7 @@ export function computeEstimate(
     laborRate: C.laborRate,
     crewDefault: Math.max(C.flyCrew ?? FLY_CREW_DEFAULTS.repair, crew),
     rates: travel,
-    override: opts.travel,
+    override: travelOverride,
   });
   const trip = withMode(drive, plan);
   const serviceCost = laborCost + plan.total;

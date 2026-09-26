@@ -33,7 +33,12 @@ function one(v: string | string[] | undefined): string {
 /* flame-test quote subdoc shape (what actions.ts saves) */
 type FtVenue = { id?: string | null; label?: string; curtains?: number };
 type FtContact = { name?: string; role?: string; email?: string } | null;
-type FlameTestDoc = { venues?: FtVenue[]; contact?: FtContact; travel?: unknown } | null;
+type FlameTestDoc = {
+  venues?: FtVenue[];
+  contact?: FtContact;
+  travel?: unknown;
+  trip?: { mode?: string } | null;
+} | null;
 
 export default async function FlameTestQuotePage({
   searchParams,
@@ -135,6 +140,12 @@ export default async function FlameTestQuotePage({
       }
     }
     const wonAlready = editQuote.status === "won";
+    // Flights over drive (D-TRV-6) shipped after some quotes were already past
+    // draft. Those never recorded a travel choice, so re-opening them under
+    // Auto could re-price a sent drive quote as flights. Seed Drive instead —
+    // drafts (no customer has seen a price yet) stay Auto.
+    const legacyDrive =
+      editQuote.status !== "draft" && !ft?.travel && !ft?.trip?.mode;
     initial = {
       editingId: editQuote.id,
       customerId: cid,
@@ -149,7 +160,7 @@ export default async function FlameTestQuotePage({
       status: editQuote.status,
       replaces: "",
       nameLocked: false,
-      travel: normalizeTravelOverride(ft && ft.travel) ?? null,
+      travel: normalizeTravelOverride(ft && ft.travel) ?? (legacyDrive ? { mode: "drive" } : null),
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

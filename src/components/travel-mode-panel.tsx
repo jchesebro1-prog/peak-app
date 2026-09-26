@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import {
   autoSwitchNote,
+  fmtUsd,
   type TravelDraft,
   type TravelModeChoice,
   type TravelPlan,
@@ -27,12 +28,28 @@ const CHOICES: Array<{ key: TravelModeChoice; label: string }> = [
   { key: "fly", label: "Fly" },
 ];
 
-function money(n: number): string {
-  return "$" + Math.round(n || 0).toLocaleString("en-US");
-}
 function count(n: number, one: string, many: string): string {
   return n + " " + (n === 1 ? one : many);
 }
+
+/** M3: a typed crew/nights value that planTravel normalized away (below the
+ *  minimum → silently falls back to the default) or rounds (a fraction) is
+ *  otherwise invisible — the input just keeps showing what was typed while a
+ *  different number prices the quote. Surface that gap next to the field. */
+function normalizedHint(raw: string, effective: number, min: number): string | null {
+  if (raw.trim() === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min) return `Invalid entry — using ${effective}`;
+  if (Math.round(n) !== n) return `Rounded to ${effective}`;
+  return null;
+}
+
+const HINT: CSSProperties = {
+  display: "block",
+  fontSize: 10,
+  color: "#b4543a",
+  marginTop: 3,
+};
 
 const LABEL: CSSProperties = {
   display: "block",
@@ -143,6 +160,9 @@ export function TravelModePanel({
                 onChange={(e) => set({ crew: e.target.value })}
                 style={FIELD}
               />
+              {normalizedHint(draft.crew, flight.crew, 1) && (
+                <span style={HINT}>{normalizedHint(draft.crew, flight.crew, 1)}</span>
+              )}
             </label>
             <label>
               <span style={LABEL}>Nights</span>
@@ -155,6 +175,9 @@ export function TravelModePanel({
                 onChange={(e) => set({ nights: e.target.value })}
                 style={FIELD}
               />
+              {normalizedHint(draft.nights, flight.nights, 0) && (
+                <span style={HINT}>{normalizedHint(draft.nights, flight.nights, 0)}</span>
+              )}
             </label>
             <label>
               <span style={LABEL}>Airfare / pp</span>
@@ -170,24 +193,24 @@ export function TravelModePanel({
             </label>
           </div>
           <div style={{ marginTop: 10 }}>
-            <Row label={"Airfare · " + count(flight.crew, "person", "people")} value={money(flight.airfare)} />
+            <Row label={"Airfare · " + count(flight.crew, "person", "people")} value={fmtUsd(flight.airfare)} />
             <Row
               label={"Lodging · " + count(flight.crew, "room", "rooms") + " × " + count(flight.nights, "night", "nights")}
-              value={money(flight.lodging)}
+              value={fmtUsd(flight.lodging)}
             />
             <Row
               label={"Per diem · " + count(flight.crew, "person", "people") + " × " + count(flight.tripDays, "day", "days")}
-              value={money(flight.perDiem)}
+              value={fmtUsd(flight.perDiem)}
             />
             <Row
               label={"Rental car · " + count(Math.ceil(flight.crew / 2), "car", "cars") + " × " + count(flight.tripDays, "day", "days")}
-              value={money(flight.car)}
+              value={fmtUsd(flight.car)}
             />
             <Row
               label={"Travel labor · " + Math.round(flight.travelHours * 10) / 10 + " h"}
-              value={money(flight.travelLabor)}
+              value={fmtUsd(flight.travelLabor)}
             />
-            <Row label="Flights total" value={money(flight.total)} strong />
+            <Row label="Flights total" value={fmtUsd(flight.total)} strong />
           </div>
         </>
       )}
