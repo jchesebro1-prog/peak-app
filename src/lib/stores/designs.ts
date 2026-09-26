@@ -92,6 +92,11 @@ export type DesignRecord = {
   review: DesignReview;
   systems: string[];
   budget: number;
+  /** Equipment-map completeness of the chosen tier at save time (#GEM
+   *  D-GEM-10) — set whenever any line of that tier still needs a part.
+   *  Additive: missing/undefined on every pre-#GEM record reads as complete
+   *  (the dashboard and guard both treat a missing field as needsPart: 0). */
+  incomplete?: { needsPart: number };
   updatedAt: number;
   /** Revision history — travels WITH the design record so it persists. */
   revisions?: DesignRevision[];

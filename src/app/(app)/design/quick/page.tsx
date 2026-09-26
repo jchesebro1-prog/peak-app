@@ -14,8 +14,9 @@ import "./quick-design.css";
 /**
  * Quick Design — the budgetary estimate builder (sandbox), ported from
  * app/Quick Design.dc.html. Server shell: loads the saved design
- * (?design=D-###), the customer directory, catalog fabrics and the live
- * pricing-rule defaults; all estimating math runs client-side (engine.ts).
+ * (?design=D-###), the customer directory, the Equipment map price table
+ * (#GEM) and the live pricing-rule defaults; all estimating math runs
+ * client-side (engine.ts).
  */
 
 export const dynamic = "force-dynamic";
@@ -44,9 +45,9 @@ export default async function Page({
       listFixtures(),
       catalogList(),
     ]);
-  // The Equipment map price context (#GEM) — built from the catalog this
-  // request already loaded (no second load).
-  const prices = await loadEquipmentPriceTable({ catalog: catalogRows });
+  // The Equipment map price context (#GEM) — built from the catalog and
+  // fixtures this request already loaded (no second load of either).
+  const prices = await loadEquipmentPriceTable({ catalog: catalogRows, fixtures: fixtureRecords });
   // #210: fixtures (not systems) under their kept ids — included parts only.
   const fixtureAssemblies = fixtureAssembliesFrom(fixtureRecords, catalogRows).map((assembly) => {
     const totals = assemblyUnitTotals(assembly);

@@ -10,6 +10,7 @@ import {
   promoteDesignToQuote,
   type DesignRecord,
 } from "@/lib/stores/designs";
+import { addToQuotesGuard } from "@/lib/design/scope-targets";
 
 /**
  * Quick Design server actions — the screen computes budgetary math
@@ -28,6 +29,10 @@ export type DesignPartial = {
   grid: number;
   systems: string[];
   budget: number;
+  /** Equipment-map completeness of the chosen tier (#GEM D-GEM-10) —
+   *  makeDesign() always computes this from the priced systems; the
+   *  estimate is INCOMPLETE, never $0, while it's non-zero. */
+  incomplete: { needsPart: number };
   customerId: string | null;
   locationId: string | null;
   customer: string;
@@ -116,6 +121,10 @@ export async function addToQuotesAction(
   partial: DesignPartial
 ): Promise<{ ok: true; quoteId: string } | { ok: false; error: string }> {
   const user = await requireUser();
+  // #GEM D-GEM-10: never promote an incomplete estimate — mirrors the
+  // client's own disabled-button guard so a stale client can't bypass it.
+  const guardMsg = addToQuotesGuard(partial.incomplete?.needsPart ?? 0);
+  if (guardMsg) return { ok: false, error: guardMsg };
   let saved: DesignRecord;
   try {
     saved = await persistDesign(id, partial, user.name);

@@ -637,7 +637,7 @@ export default function GridEditor({
     () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
     [placements, parts, project.spaces, curtainPrices]
   );
-  /** Whole-project placed $/count by scope (D-manual-scope-targets) — feeds
+  /** Whole-project placed $/count by scope (#GEM, D-GEM-5) — feeds
    *  the Scope panel's "placed" column. Reuses bomBySpace with an EMPTY
    *  spaces array: every placement falls into the single "Unassigned"
    *  bucket bomBySpace already produces for placements outside any space,
@@ -1517,7 +1517,7 @@ export default function GridEditor({
             )}
           </div>
 
-          {/* scope targets (D-manual-scope-targets) */}
+          {/* scope targets (#GEM, D-GEM-5) */}
           <ScopePanel
             key={activeOptionId}
             projectId={project.id}

@@ -17,6 +17,7 @@ import {
 } from "@/lib/stores/designs";
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
+import { addToQuotesGuard } from "@/lib/design/scope-targets";
 import { activeUsers } from "@/lib/users";
 import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, removeTask as removeTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
 import { applyTaskTemplate } from "@/lib/stores/task-templates";
@@ -71,6 +72,11 @@ export async function promoteDesignAction(
     revalidatePath("/quotes");
     return { ok: true, quoteId: result.quoteId };
   }
+
+  // #GEM D-GEM-10: never promote an incomplete estimate — same rule and
+  // message as Quick Design's own "Add to Quotes" (quick/actions.ts).
+  const guardMsg = addToQuotesGuard(d.incomplete?.needsPart ?? 0);
+  if (guardMsg) return { ok: false, error: guardMsg };
 
   const q = await promoteDesignToQuote(id, user.name);
   if (!q) return { ok: false, error: "Design not found." };

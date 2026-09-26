@@ -143,12 +143,13 @@ export type AState = {
 
 /**
  * The basic-info slice of AState shared by Quick Design's inline config
- * panel and Grid Manual mode's Scope panel (D-manual-scope-targets):
+ * panel and Grid Manual mode's Scope panel (#GEM, D-GEM-5):
  * venue/size/dimensions plus the systems-in-scope toggles and their
  * sub-config (rig type, drape/fixture/control/shell picks, pit type).
  * Deliberately excludes the fields that only make sense for Quick Design's
  * own canvas/persistence: `view` (which tab is open), `tier` (Manual's
- * Scope panel treats tier as a lens, not stored input — see scopeTargets),
+ * Scope panel treats tier as a lens, not stored input — see
+ * scopeTargetsByTier in scope-targets.ts),
  * `contingency`/`qtyOverrides` (tier-total-only, not per-system), `mode`/
  * `placements` (Auto's own sandbox canvas state), and the plan-image/door
  * fields (Auto-canvas-only).
@@ -792,10 +793,44 @@ export function reconstruct(d: DesignRecordLike, base: AState): AState {
   return out;
 }
 
+/**
+ * A saved "Scenery track" qty override (qtyOverrides[tier].curtains["Scenery
+ * track"]) predates #GEM T5: it was a COUNT of track runs. The row now emits
+ * FEET (depth blocks × pipe length — see compute()), so an old override's
+ * number means something different than it did when it was saved. There is
+ * no safe conversion (we don't know the pipe length it was saved against),
+ * so hydrateAState drops the key rather than silently mis-applying it; the
+ * calculated (correct) feet quantity is used until the designer re-edits it.
+ */
+function dropStaleSceneryTrackOverride(qtyOverrides: AState["qtyOverrides"]): AState["qtyOverrides"] {
+  if (!qtyOverrides) return qtyOverrides;
+  let changed = false;
+  const next: AState["qtyOverrides"] = {};
+  for (const [tier, bySys] of Object.entries(qtyOverrides) as Array<[TierKey, Record<string, Record<string, number>>]>) {
+    if (bySys && bySys.curtains && Object.prototype.hasOwnProperty.call(bySys.curtains, "Scenery track")) {
+      changed = true;
+      const restCurtains = { ...bySys.curtains };
+      delete restCurtains["Scenery track"];
+      next[tier] = { ...bySys, curtains: restCurtains };
+    } else {
+      next[tier] = bySys;
+    }
+  }
+  return changed ? next : qtyOverrides;
+}
+
 /** hydrate designer state from a saved record: full config when present, else reconstruct. */
 export function hydrateAState(d: DesignRecordLike, contingencyPct: number): AState {
   const base = defaultAState(contingencyPct);
-  if (d.config) return { ...base, ...(d.config as Partial<AState>), sys: { ...base.sys, ...((d.config as Partial<AState>).sys || {}) } };
+  if (d.config) {
+    const cfg = d.config as Partial<AState>;
+    const merged: AState = { ...base, ...cfg, sys: { ...base.sys, ...(cfg.sys || {}) } };
+    // Only touch qtyOverrides when the saved config actually carries one —
+    // a config that never set the key must fall through to base's default
+    // ({}), exactly like every other omitted AState field here.
+    if (cfg.qtyOverrides !== undefined) merged.qtyOverrides = dropStaleSceneryTrackOverride(cfg.qtyOverrides);
+    return merged;
+  }
   return reconstruct(d, base);
 }
 

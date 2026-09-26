@@ -41,3 +41,29 @@ export function scopeTargetsByTier(inputs: QuickScopeInputs, price: PriceSystems
   const one = (tier: TierKey) => targetsFromSystems(price({ ...defaultAState(0), ...inputs, tier }, tier));
   return { good: one("good"), better: one("better"), best: one("best") };
 }
+
+/**
+ * Total needs-a-part lines across every in-scope system of one priced tier
+ * (#GEM D-GEM-10). With the Equipment map empty or partial, an estimate is
+ * INCOMPLETE — never $0: Quick Design and the Designs dashboard show this
+ * count in place of a bare dollar total, and "Add to Quotes" refuses to
+ * promote while it's non-zero (see addToQuotesGuard below).
+ */
+export function needsPartCount(systems: SystemBlock[]): number {
+  return Object.values(targetsFromSystems(systems)).reduce((n, t) => n + t.needsPart, 0);
+}
+
+/**
+ * The "Add to Quotes" guard (#GEM D-GEM-10) — pure so both the client's
+ * disabled-button check and the server actions (quick/actions.ts
+ * addToQuotesAction, designs/actions.ts promoteDesignAction) share the exact
+ * same rule and message. Returns the message to show, or null when the
+ * chosen tier is clear to promote (every line mapped or a confirmed
+ * allowance).
+ */
+export function addToQuotesGuard(needsPart: number): string | null {
+  if (!(needsPart > 0)) return null;
+  return `Incomplete — ${needsPart} item${needsPart === 1 ? "" : "s"} still need${needsPart === 1 ? "s" : ""} a part. Map ${
+    needsPart === 1 ? "it" : "them"
+  } in the Equipment map before adding to Quotes.`;
+}

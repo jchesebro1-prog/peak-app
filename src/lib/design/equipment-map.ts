@@ -199,7 +199,11 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
   if (!cell) return needs("Not mapped yet");
   if (cell.kind === "allowance") {
     if (!(cell.amount > 0) || !cell.confirmedBy || !(cell.confirmedAt > 0)) return needs("Allowance not confirmed");
-    return { status: "allowance", ref: def.key, desc: `${def.label} (allowance)`, unit: def.unit, unitCost: cell.amount, unitSell: sellFromCost(cell.amount, ctx.margin) };
+    // desc is bare (no "(allowance)" suffix here) — the one consumer that
+    // shows a mapped-part description alongside the row's own name (Quick
+    // Design's BOM label) already appends "· Allowance" from `status`; a
+    // suffix here would show it twice (#GEM M3).
+    return { status: "allowance", ref: def.key, desc: def.label, unit: def.unit, unitCost: cell.amount, unitSell: sellFromCost(cell.amount, ctx.margin) };
   }
   if (cell.kind === "part") {
     const p = ctx.parts.get(cell.sku);

@@ -30,6 +30,7 @@ import {
 } from "./engine";
 import { tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
+import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import { PlanSvg, buildPlan, churchGeom, currentDoors, houseDragPatch, prosGeom, type PlanHandle } from "./plan-svg";
 import {
@@ -213,12 +214,22 @@ export default function QuickDesignClient({
     });
   }, [selBase, a.qtyOverrides, selKey]);
   const selTot = useMemo(() => tierTotals(selSystems, selTd, laborPct, freightPct, contPct), [selSystems, selTd, laborPct, freightPct, contPct]);
+  /** Per-system needs-a-part counts for the SELECTED tier (#GEM D-GEM-10) —
+   *  the Equipment map is empty/partial → the estimate is INCOMPLETE, never
+   *  $0. Drives the per-system rows, the summary panel and the Add-to-Quotes
+   *  guard below. */
+  const selTargets = useMemo(() => targetsFromSystems(selSystems), [selSystems]);
+  const selNeedsPart = useMemo(() => needsPartCount(selSystems), [selSystems]);
   const tierCards = useMemo(
     () =>
-      TIERS.map((td) => ({
-        td,
-        tot: tierTotals(tierSystems(C, a, td.key, tierDefs, prices, fixtureOverrides), td, laborPct, freightPct, contPct),
-      })),
+      TIERS.map((td) => {
+        const sys = tierSystems(C, a, td.key, tierDefs, prices, fixtureOverrides);
+        return {
+          td,
+          tot: tierTotals(sys, td, laborPct, freightPct, contPct),
+          needsPart: needsPartCount(sys),
+        };
+      }),
     [C, a, tierDefs, prices, fixtureOverrides, laborPct, freightPct, contPct]
   );
 
@@ -252,6 +263,10 @@ export default function QuickDesignClient({
       grid: s.grid,
       systems: sysNames,
       budget: tot.grand,
+      // #GEM D-GEM-10: the chosen tier's own needs-a-part count, computed
+      // from the same priced systems the budget total came from — an
+      // incomplete estimate is marked, never silently priced at $0.
+      incomplete: { needsPart: needsPartCount(sysForTot) },
       customerId: linkedCustomerObj ? linkedCustomerObj.id : null,
       locationId: linkedCustomerObj ? linkedLocation || null : null,
       customer: linkedCustomerObj ? linkedCustomerObj.name : "",
@@ -291,6 +306,11 @@ export default function QuickDesignClient({
 
   const onAddToQuotes = () => {
     const partial = makeDesign();
+    // #GEM D-GEM-10: block before even saving — the footer button is also
+    // disabled while incomplete, but this guards a direct call (e.g. a
+    // stale render) and matches the server-side check in addToQuotesAction.
+    const guardMsg = addToQuotesGuard(partial.incomplete.needsPart);
+    if (guardMsg) return toast(guardMsg);
     startTransition(async () => {
       const res = await addToQuotesAction(designId, partial);
       if (!res.ok) return toast(res.error);
@@ -461,7 +481,7 @@ export default function QuickDesignClient({
     .map((x) => {
       const rev = x.rev * (x.tierFixed ? 1 : selTd.priceMul);
       const share = selTot.matRev > 0 ? (rev / selTot.matRev) * 100 : 0;
-      return { key: x.key, name: SHORT[x.key], rev, share, dot: x.dot };
+      return { key: x.key, name: SHORT[x.key], rev, share, dot: x.dot, needsPart: selTargets[x.key]?.needsPart || 0 };
     });
 
   const ovSel = (a.qtyOverrides && a.qtyOverrides[selKey]) || {};
@@ -477,7 +497,9 @@ export default function QuickDesignClient({
         const ext = up * qty;
         sub += ext;
         const upLabel = it.status === "needs-part" ? "Needs a part" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
-        const label = (it.refDesc ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "");
+        // An allowance's refDesc is just the row's own name (no distinct
+        // product) — the " · Allowance" suffix already says it once (#GEM M3).
+        const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "");
         return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext };
       });
       return { key: x.key, name: x.name, dot: x.dot, sub, rows, open: !!bomOpen[x.key] };
@@ -679,19 +701,25 @@ export default function QuickDesignClient({
               {!manualMode && view === "estimate" && (
                 <div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
-                    {tierCards.map(({ td, tot }) => {
+                    {tierCards.map(({ td, tot, needsPart }) => {
                       const on = td.key === selKey;
                       return (
-                        <button key={td.key} onClick={() => updA({ tier: td.key })} style={{ display: "flex", flexDirection: "column", textAlign: "left", padding: "13px 14px", borderRadius: 12, cursor: "pointer", background: on ? ACCENT_SOFT : "#fff", border: `1.5px solid ${on ? ACCENT : "#e8eaee"}`, boxShadow: on ? `0 1px 3px ${ACCENT_SOFT}` : undefined, fontFamily: UI }}>
+                        <button key={td.key} onClick={() => updA({ tier: td.key })} style={{ display: "flex", flexDirection: "column", textAlign: "left", padding: "13px 14px", borderRadius: 12, cursor: "pointer", background: on ? ACCENT_SOFT : "#fff", border: `1.5px solid ${needsPart > 0 ? "#f0d6cd" : on ? ACCENT : "#e8eaee"}`, boxShadow: on ? `0 1px 3px ${ACCENT_SOFT}` : undefined, fontFamily: UI }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 18 }}>
                             <span style={{ fontSize: 13, fontWeight: 700, color: on ? ACCENT_INK : "#16181d" }}>{td.label}</span>
                             {td.key === "better" && (
                               <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", background: ACCENT, padding: "2px 7px", borderRadius: 5, textTransform: "uppercase", letterSpacing: ".04em" }}>Pick</span>
                             )}
                           </div>
-                          <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 600, marginTop: 9, letterSpacing: "-.01em" }}>{moneyRound(tot.grand)}</div>
-                          <div style={{ fontSize: 10.5, color: "#9aa0ab", marginTop: 4, lineHeight: 1.35 }}>
-                            {(tierDefs[td.key] && tierDefs[td.key].blurb) || td.spec}
+                          {needsPart > 0 ? (
+                            <div style={{ fontFamily: UI, fontSize: 14, fontWeight: 700, color: "#a0442b", marginTop: 9 }}>Incomplete</div>
+                          ) : (
+                            <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 600, marginTop: 9, letterSpacing: "-.01em" }}>{moneyRound(tot.grand)}</div>
+                          )}
+                          <div style={{ fontSize: 10.5, color: needsPart > 0 ? "#a0442b" : "#9aa0ab", marginTop: 4, lineHeight: 1.35 }}>
+                            {needsPart > 0
+                              ? `${needsPart} item${needsPart === 1 ? "" : "s"} need${needsPart === 1 ? "s" : ""} a part`
+                              : (tierDefs[td.key] && tierDefs[td.key].blurb) || td.spec}
                           </div>
                         </button>
                       );
@@ -710,7 +738,13 @@ export default function QuickDesignClient({
                             <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: "#16181d" }}>{r.name}</span>
                           </span>
                         </span>
-                        <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{moneyRound(r.rev)}</span>
+                        {r.needsPart > 0 ? (
+                          <Link href="/design/grid/settings/equipment-map" style={{ fontFamily: UI, fontSize: 12, fontWeight: 600, color: "#a0442b", flexShrink: 0, textDecoration: "none" }}>
+                            Incomplete — {r.needsPart} need{r.needsPart === 1 ? "s" : ""} a part
+                          </Link>
+                        ) : (
+                          <span style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: "#16181d", flexShrink: 0 }}>{moneyRound(r.rev)}</span>
+                        )}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 9 }}>
                         <div style={{ flex: 1, height: 5, background: "#f1f2f5", borderRadius: 999, overflow: "hidden" }}>
@@ -722,6 +756,17 @@ export default function QuickDesignClient({
                   ))}
 
                   <div style={{ marginTop: 16, padding: "16px 17px", background: "#fbfbfc", border: "1px solid #f0f1f4", borderRadius: 12 }}>
+                    {selNeedsPart > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 13, padding: "9px 11px", background: "#fbf0ea", border: "1px solid #f0d6cd", borderRadius: 9 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#a0442b", flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: "#a0442b", lineHeight: 1.4 }}>
+                          Incomplete — {selNeedsPart} item{selNeedsPart === 1 ? "" : "s"} need{selNeedsPart === 1 ? "s" : ""} a part.{" "}
+                          <Link href="/design/grid/settings/equipment-map" style={{ fontWeight: 600, color: "#a0442b" }}>
+                            Open the Equipment map →
+                          </Link>
+                        </span>
+                      </div>
+                    )}
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 8 }}>
                       <span style={{ color: "#5b616e" }}>Materials &amp; equipment</span>
                       <span style={{ fontFamily: MONO, fontWeight: 500 }}>{moneyRound(selTot.matRev)}</span>
@@ -744,7 +789,13 @@ export default function QuickDesignClient({
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#16181d", color: "#fff", borderRadius: 9, padding: "13px 16px" }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>{selTd.label} total</span>
-                      <span style={{ fontFamily: MONO, fontSize: 19, fontWeight: 600 }}>{moneyRound(selTot.grand)}</span>
+                      {selNeedsPart > 0 ? (
+                        <span style={{ fontFamily: UI, fontSize: 13.5, fontWeight: 700, color: "#f0a487" }}>
+                          Incomplete — {selNeedsPart} item{selNeedsPart === 1 ? "" : "s"} need{selNeedsPart === 1 ? "s" : ""} a part
+                        </span>
+                      ) : (
+                        <span style={{ fontFamily: MONO, fontSize: 19, fontWeight: 600 }}>{moneyRound(selTot.grand)}</span>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 10, lineHeight: 1.5 }}>
                       {selTd.label} tier combines {selSystems.filter((x) => x.on).length} systems. Good / Better / Best swap the spec on every line — open in the Estimator to lock pricing against live catalog books.
@@ -955,9 +1006,42 @@ export default function QuickDesignClient({
                 </button>
               )}
             </div>
-            <button onClick={onAddToQuotes} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: UI, fontSize: 13.5, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 20px", borderRadius: 9, border: "none", cursor: "pointer" }}>
-              Add to Quotes <span style={{ fontSize: 15 }}>→</span>
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {selNeedsPart > 0 && (
+                <Link
+                  href="/design/grid/settings/equipment-map"
+                  style={{ fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}
+                >
+                  {selNeedsPart} item{selNeedsPart === 1 ? "" : "s"} need{selNeedsPart === 1 ? "s" : ""} a part — Equipment map →
+                </Link>
+              )}
+              <button
+                onClick={onAddToQuotes}
+                disabled={selNeedsPart > 0}
+                title={
+                  selNeedsPart > 0
+                    ? `Incomplete — ${selNeedsPart} item${selNeedsPart === 1 ? "" : "s"} still need${selNeedsPart === 1 ? "s" : ""} a part. Map ${selNeedsPart === 1 ? "it" : "them"} in the Equipment map first.`
+                    : undefined
+                }
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  fontFamily: UI,
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: selNeedsPart > 0 ? "#c7cbd3" : ACCENT,
+                  padding: "12px 20px",
+                  borderRadius: 9,
+                  border: "none",
+                  cursor: selNeedsPart > 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                Add to Quotes <span style={{ fontSize: 15 }}>→</span>
+              </button>
+            </div>
           </div>
         </div>
 

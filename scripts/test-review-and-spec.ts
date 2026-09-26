@@ -17819,8 +17819,43 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#GEM T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
   const sub = item("audio", "audio:subwoofer");
   ok(sub.status === "allowance" && sub.cost === 1200, "#GEM T5: a confirmed allowance prices as its unit cost");
+  // Fix wave 1 (M5): a curtain row mapped to a CONFIRMED ALLOWANCE (not a
+  // fabric part) prices at the flat allowance amount — the `it.drape &&
+  // p.status !== "allowance"` guard in equipment-pricing.ts's priceItem
+  // means the allowance branch never runs drapeUnitCost's area-rate math.
+  const allowTable = gemTable5(
+    {
+      "curtains:draw": {
+        tiers: { good: { kind: "allowance", amount: 850, confirmedBy: "Chris", confirmedAt: 5 } },
+        sameAll: true,
+        updatedBy: "t",
+        updatedAt: 1,
+      },
+    },
+    { parts, fixtures: new Map(), margin: 0.3 }
+  );
+  const allowBetter = gemTierSystems5(C, s, "better", gemTierDefs5(), allowTable);
+  const drawAllow = allowBetter.find((x) => x.key === "curtains")!.items.find((i) => i.key === "curtains:draw")!;
+  ok(
+    drawAllow.status === "allowance" && drawAllow.cost === 850 && drawAllow.price === Math.round((850 / 0.7) * 100) / 100,
+    "#GEM fix wave 1 (M5): a curtain row mapped to a confirmed allowance prices at the flat amount, not the area-rate drape formula"
+  );
   const rig = better.find((x) => x.key === "rigging")!;
-  ok(rig.tierFixed === true && rig.cost === rig.items.reduce((a, i) => a + i.qty * i.cost, 0), "#GEM T5: system totals sum only priced lines");
+  const rigNeedsPart = rig.items.filter((i) => i.status === "needs-part");
+  const rigPriced = rig.items.filter((i) => i.status !== "needs-part");
+  // Fix wave 1 (M5): the original assertion (`rig.cost === sum(qty*cost)`)
+  // was tautological — it recomputes from the SAME items.cost values it's
+  // checking, so it would still pass if a needs-part line carried a stray
+  // cost. Assert directly that every needs-part line is $0, and that the
+  // system total equals the sum of PRICED lines only.
+  ok(
+    rig.tierFixed === true &&
+      rigNeedsPart.length > 0 &&
+      rigNeedsPart.every((i) => i.cost === 0 && i.price === 0) &&
+      rig.cost === rigPriced.reduce((a, i) => a + i.qty * i.cost, 0) &&
+      rig.rev === rigPriced.reduce((a, i) => a + i.qty * i.price, 0),
+    "#GEM T5: system totals sum only priced lines — a needs-a-part line never contributes a cost"
+  );
   const good = gemTierSystems5(C, s, "good", gemTierDefs5(), table);
   ok(item("rigging", "rigging:headblock", good).status === "needs-part" && item("lighting", "lighting:par", good).price === 900, "#GEM T5: each tier resolves its own cells (same-for-all rows price every tier)");
   const ov = gemTierSystems5(C, s, "better", gemTierDefs5(), table, { "lighting:par": { status: "assembly", ref: "fa-par", desc: "House PAR assembly", unit: "ea", unitCost: 432, unitSell: 610 } });
@@ -17837,4 +17872,79 @@ import { readdirSync as gemReaddir5 } from "node:fs";
     .filter(({ src }) => src.startsWith('"use client"'));
   const leaks = gridClient.filter(({ src }) => gemValueImports(src).some((m) => /curtain-pricing|equipment-pricing|equipment-legacy-hints|^@\/lib\/stores\/|^@\/db\//.test(m)));
   ok(gridClient.length > 5 && leaks.length === 0, `#GEM T5: no Grid client file imports a cost-bearing module (leaks: ${leaks.map((l) => l.f.split("/src/")[1]).join(", ") || "none"})`);
+}
+
+/* --- #GEM fix wave 1: review findings on Task 5 — I1 (needs-a-part guard),
+ * M1 (stale scenery-track override survives hydrateAState) --- */
+import { hydrateAState as gemHydrate6, type SystemBlock as GemSystemBlock6 } from "@/app/(app)/design/quick/engine";
+import { needsPartCount as gemNeedsPartCount6, addToQuotesGuard as gemGuard6 } from "@/lib/design/scope-targets";
+{
+  // M1: a saved "Scenery track" qty override predates #GEM T5 — it was a
+  // COUNT of track runs; the row now emits FEET (depth blocks × pipe
+  // length). hydrateAState must drop the stale key (no safe conversion)
+  // rather than mis-apply it, while every other override survives untouched.
+  const qtyOverrides = {
+    better: {
+      curtains: { "Scenery track": 4, Draw: 2 },
+      lighting: { Par: 10 },
+    },
+    good: {
+      curtains: { "Scenery track": 6 },
+    },
+  } as const;
+  const hydrated = gemHydrate6({ config: { qtyOverrides } }, 10);
+  const bc = hydrated.qtyOverrides?.better?.curtains;
+  const bl = hydrated.qtyOverrides?.better?.lighting;
+  const gc = hydrated.qtyOverrides?.good?.curtains;
+  ok(
+    bc?.["Scenery track"] === undefined && bc?.Draw === 2 && bl?.Par === 10 && gc?.["Scenery track"] === undefined,
+    "#GEM fix wave 1 (M1): hydrateAState drops a stale Scenery-track override in every tier but keeps every other override"
+  );
+  const noOverrides = gemHydrate6({ config: { width: 40 } }, 10);
+  ok(
+    Object.keys(noOverrides.qtyOverrides || {}).length === 0,
+    "#GEM fix wave 1 (M1): a config with no qtyOverrides at all still falls through to the default ({}), not undefined"
+  );
+
+  // I1: needsPartCount is a straight sum of targetsFromSystems' per-system
+  // counts (qty-0 lines and off systems excluded, matching #GEM T4's rule).
+  type St = "part" | "assembly" | "allowance" | "needs-part";
+  const sys = (key: string, on: boolean, items: Array<{ key: string; qty: number; status?: St }>): GemSystemBlock6 => ({
+    key: key as GemSystemBlock6["key"],
+    name: key,
+    on,
+    m: 0.3,
+    dot: "",
+    rev: 0,
+    cost: 0,
+    items: items.map((i) => ({ key: i.key, desc: i.key, qty: i.qty, unit: "ea", cost: 0, price: 0, ...(i.status ? { status: i.status } : {}) })),
+  });
+  const systems: GemSystemBlock6[] = [
+    sys("lighting", true, [
+      { key: "lighting:par", qty: 4, status: "needs-part" },
+      { key: "lighting:front", qty: 2, status: "part" },
+      { key: "lighting:cyc", qty: 0, status: "needs-part" }, // qty 0 — excluded
+    ]),
+    sys("audio", true, [{ key: "audio:sub", qty: 1, status: "needs-part" }]),
+    sys("controls", false, [{ key: "controls:x", qty: 5, status: "needs-part" }]), // off — excluded
+  ];
+  ok(
+    gemNeedsPartCount6(systems) === 2,
+    "#GEM fix wave 1 (I1): needsPartCount sums needs-a-part lines across every ON system, skipping qty-0 lines and off systems"
+  );
+  ok(gemNeedsPartCount6([]) === 0, "#GEM fix wave 1 (I1): needsPartCount of no systems is 0");
+
+  // I1: the Add-to-Quotes guard — null (clear to promote) at 0, else a
+  // message naming the count, with singular/plural agreement.
+  ok(gemGuard6(0) === null, "#GEM fix wave 1 (I1): addToQuotesGuard clears a complete estimate (needsPart 0)");
+  const oneMsg = gemGuard6(1);
+  ok(
+    typeof oneMsg === "string" && /^Incomplete — 1 item still needs a part\. Map it in the Equipment map/.test(oneMsg),
+    `#GEM fix wave 1 (I1): addToQuotesGuard's singular message names the item (got ${JSON.stringify(oneMsg)})`
+  );
+  const manyMsg = gemGuard6(3);
+  ok(
+    typeof manyMsg === "string" && /^Incomplete — 3 items still need a part\. Map them in the Equipment map/.test(manyMsg),
+    `#GEM fix wave 1 (I1): addToQuotesGuard's plural message names the items (got ${JSON.stringify(manyMsg)})`
+  );
 }

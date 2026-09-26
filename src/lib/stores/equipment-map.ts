@@ -1,6 +1,6 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { getMany, type CatalogPart } from "@/lib/stores/catalog";
-import { listFixtures } from "@/lib/stores/fixtures";
+import { listFixtures, type FixtureRecord } from "@/lib/stores/fixtures";
 import { getCatalogRates } from "@/lib/stores/pricing";
 import { fixtureSkus } from "@/lib/fixture-assemblies";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
@@ -54,12 +54,23 @@ export async function clearEquipmentRow(rowKey: string): Promise<boolean> {
  * already holds the whole book for this request (the Grid editor page, Quick
  * Design); otherwise exactly the SKUs the map, `extraSkus` and the parts of
  * `extraFixtureIds` reference are read in ONE getMany — never the whole
- * ~37,400-part catalog, never one query per part.
+ * ~37,400-part catalog, never one query per part. Pass `fixtures` when the
+ * caller already ran its own listFixtures() this request (Quick Design loads
+ * fixtures for the Assembly Builder picker) so this never re-reads them.
  */
 export async function loadEquipPriceCtx(
-  opts: { catalog?: ReadonlyArray<CatalogPart>; extraSkus?: readonly string[]; extraFixtureIds?: readonly string[] } = {}
+  opts: {
+    catalog?: ReadonlyArray<CatalogPart>;
+    fixtures?: ReadonlyArray<FixtureRecord>;
+    extraSkus?: readonly string[];
+    extraFixtureIds?: readonly string[];
+  } = {}
 ): Promise<{ map: EquipmentMap; ctx: EquipPriceCtx; catalogParts: ReadonlyMap<string, CatalogPart> }> {
-  const [map, fixtureList, rates] = await Promise.all([getEquipmentMap(), listFixtures(), getCatalogRates()]);
+  const [map, fixtureList, rates] = await Promise.all([
+    getEquipmentMap(),
+    opts.fixtures ? Promise.resolve(opts.fixtures) : listFixtures(),
+    getCatalogRates(),
+  ]);
   const fixtures = new Map(fixtureList.map((f) => [f.id, f]));
   let catalogParts: Map<string, CatalogPart>;
   if (opts.catalog) {

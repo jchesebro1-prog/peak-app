@@ -3777,6 +3777,44 @@ async function main() {
     assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === `fixture:${kept.id}` && l.accessorySku === "FXB-KEEP-L"), "#210 final review M5: the reset's graph rebuild restores the kept fixture's accessory links");
   }
 
+  /* --- #GEM fix wave 1 (I1): a saved design's `incomplete` shape round-trips
+     through the real store. Additive field — a legacy record saved with no
+     `incomplete` at all must still read back without crashing. --- */
+  {
+    const Designs = await import("@/lib/stores/designs");
+    const created = await Designs.createDesign({
+      name: "GEM fix wave 1 save-shape test",
+      venue: "Test venue",
+      size: "medium",
+      tier: "better",
+      width: 40,
+      depth: 30,
+      grid: 24,
+      systems: ["Rigging"],
+      budget: 12345,
+      incomplete: { needsPart: 3 },
+      owner: "Jeff Chesebro",
+    });
+    assert.equal(created.incomplete?.needsPart, 3, "#GEM fix wave 1 (I1): createDesign persists the incomplete shape");
+    const reread = await Designs.getDesign(created.id);
+    assert.equal(reread?.incomplete?.needsPart, 3, "#GEM fix wave 1 (I1): getDesign reads it back unchanged");
+    const cleared = await Designs.updateDesign(created.id, { incomplete: { needsPart: 0 }, budget: 20000 });
+    assert.equal(cleared?.incomplete?.needsPart, 0, "#GEM fix wave 1 (I1): updateDesign overwrites incomplete once the design becomes complete");
+    const legacy = await Designs.createDesign({
+      name: "GEM fix wave 1 legacy design (no incomplete field)",
+      venue: "Test venue",
+      size: "medium",
+      tier: "better",
+      width: 10,
+      depth: 10,
+      grid: 10,
+      systems: [],
+      budget: 500,
+      owner: "Jeff Chesebro",
+    });
+    assert.equal(legacy.incomplete, undefined, "#GEM fix wave 1 (I1): a design saved without `incomplete` reads back as undefined, not a crash");
+  }
+
   console.log("review regression checks passed");
 }
 

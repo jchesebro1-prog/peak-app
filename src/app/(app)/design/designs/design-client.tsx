@@ -25,6 +25,7 @@ import {
 } from "../quick/engine";
 import { tierSystems } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable } from "@/lib/design/equipment-map";
+import { needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
 import {
   getAccentHex,
@@ -226,8 +227,13 @@ export default function DesignClient({
     return designs;
   }, [designs, scope, me]);
 
-  const totalBudget = raw.reduce((a, d) => a + (d.budget || 0), 0);
-  const avgBudget = raw.length ? totalBudget / raw.length : 0;
+  // #GEM D-GEM-10: an incomplete design's budget is not a real dollar figure
+  // (the Equipment map is empty/partial) — excluded from the roll-up rather
+  // than counted as $0 or as a real total.
+  const incompleteDesigns = useMemo(() => raw.filter((d) => (d.incomplete?.needsPart || 0) > 0), [raw]);
+  const completeDesigns = useMemo(() => raw.filter((d) => !((d.incomplete?.needsPart || 0) > 0)), [raw]);
+  const totalBudget = completeDesigns.reduce((a, d) => a + (d.budget || 0), 0);
+  const avgBudget = completeDesigns.length ? totalBudget / completeDesigns.length : 0;
   const venueCount = useMemo(() => {
     const venues: Record<string, number> = {};
     raw.forEach((d) => {
@@ -239,7 +245,14 @@ export default function DesignClient({
 
   const stats = [
     { label: "Active designs", value: String(raw.length), sub: "in the sandbox" },
-    { label: "Total budgetary", value: shortMoney(totalBudget), sub: "across all designs" },
+    {
+      label: "Total budgetary",
+      value: shortMoney(totalBudget),
+      sub:
+        incompleteDesigns.length > 0
+          ? `${incompleteDesigns.length} incomplete design${incompleteDesigns.length === 1 ? "" : "s"} excluded`
+          : "across all designs",
+    },
     { label: "Avg design", value: shortMoney(avgBudget), sub: "estimated value" },
     { label: "Venue types", value: String(venueCount), sub: "distinct contexts" },
   ];
@@ -308,6 +321,7 @@ export default function DesignClient({
     const td = TIERS.find((t) => t.key === tierKey) || TIERS[1];
     const systems = tierSystems(C, s, tierKey, tierDefs, prices);
     const tot = tierTotals(systems, td, 0, 0, 0);
+    const targets = targetsFromSystems(systems);
     const rows = systems
       .filter((x) => x.on)
       .map((x) => ({
@@ -316,9 +330,10 @@ export default function DesignClient({
         dot: x.dot,
         lines: x.items.length,
         sub: x.rev * (x.tierFixed ? 1 : td.priceMul),
+        needsPart: targets[x.key]?.needsPart || 0,
       }));
     const plan = buildPlan(s, gridSets(s, tierDefs), C.electrics, accentHex);
-    return { s, tierLabel: td.label, rows, matRev: tot.matRev, plan };
+    return { s, tierLabel: td.label, rows, matRev: tot.matRev, needsPart: needsPartCount(systems), plan };
   }, [sel, tierDefs, prices, accentHex]);
 
   /* --------------------------------- styles --------------------------------- */
@@ -339,6 +354,9 @@ export default function DesignClient({
 
   const review = sel ? sel.review || { state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" } : null;
   const isOwner = sel ? sel.owner === me : false;
+  /** #GEM D-GEM-10: the saved shape, not a live recompute — matches what
+   *  "Add to Quotes" actually gates (promoteDesignAction reads the record). */
+  const selIncomplete = !!sel && (sel.incomplete?.needsPart || 0) > 0;
   const rbMeta: Record<string, { bg: string; bd: string; ink: string; icon: string; title: string }> = {
     none: { bg: "#f4f5f7", bd: "#e4e7ec", ink: "#5b616e", icon: "○", title: "Not submitted for review" },
     in_review: { bg: "#eef3fc", bd: "#d4ddf3", ink: "#3155a8", icon: "◴", title: "In review" },
@@ -402,6 +420,11 @@ export default function DesignClient({
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={venueChip}>{sel.venue || "—"}</span>
               <span style={budgetaryChip}>BUDGETARY</span>
+              {selIncomplete && (
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#a0442b", background: "#fbf0ea", border: "1px solid #f0d6cd", padding: "2px 8px", borderRadius: 20 }}>
+                  Incomplete
+                </span>
+              )}
               {reviewPill(review.state) && <span style={reviewPill(review.state)!}>{REVIEW_PILL[review.state].label}</span>}
               <span style={{ flex: 1 }} />
               <Link href="/design/designs" title="Close details" style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #e4e7ec", background: "#fff", borderRadius: 7, color: "#5b616e", fontSize: 14, lineHeight: 1, textDecoration: "none" }}>
@@ -449,9 +472,20 @@ export default function DesignClient({
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, justifyContent: "flex-end" }}>
-                  <span style={{ fontFamily: MONO, fontSize: 26, fontWeight: 600, letterSpacing: "-.01em" }}>{shortMoney(sel.budget || 0)}</span>
+                  {selIncomplete ? (
+                    <span style={{ fontFamily: UI, fontSize: 18, fontWeight: 700, color: "#a0442b" }}>Incomplete</span>
+                  ) : (
+                    <span style={{ fontFamily: MONO, fontSize: 26, fontWeight: 600, letterSpacing: "-.01em" }}>{shortMoney(sel.budget || 0)}</span>
+                  )}
                   <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {(sel.tier || "better").replace(/^./, (c) => c.toUpperCase())}</span>
                 </div>
+                {selIncomplete && (
+                  <div style={{ marginTop: 6 }}>
+                    <Link href="/design/grid/settings/equipment-map" style={{ fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
+                      {sel.incomplete!.needsPart} item{sel.incomplete!.needsPart === 1 ? "" : "s"} need{sel.incomplete!.needsPart === 1 ? "s" : ""} a part →
+                    </Link>
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
                   <Link
                     href={sel.layoutMode === "manual" ? `/design/grid/${encodeURIComponent(sel.gridProjectId || "")}` : `/design/quick?design=${encodeURIComponent(sel.id)}`}
@@ -460,7 +494,13 @@ export default function DesignClient({
                   >
                     {sel.layoutMode === "manual" ? "Open in The Grid" : "Open in Quick Design"}
                   </Link>
-                  <button onClick={() => promoteDesign(sel.id)} disabled={pending} className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
+                  <button
+                    onClick={() => promoteDesign(sel.id)}
+                    disabled={pending || selIncomplete}
+                    title={selIncomplete ? "Incomplete — map every item to a part before adding to Quotes" : undefined}
+                    className="dd-accent-btn"
+                    style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#5b616e", background: "#fff", border: "1px solid #e4e7ec", padding: "9px 14px", borderRadius: 8, cursor: pending || selIncomplete ? "default" : "pointer", opacity: selIncomplete ? 0.55 : 1 }}
+                  >
                     {sel.quoteId ? "Update quote →" : "Add to Quotes →"}
                   </button>
                   {canCreate && (
@@ -560,6 +600,17 @@ export default function DesignClient({
               </div>
               {detail ? (
                 <>
+                  {detail.needsPart > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "9px 11px", background: "#fbf0ea", border: "1px solid #f0d6cd", borderRadius: 9 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#a0442b", flexShrink: 0 }} />
+                      <span style={{ fontSize: 11.5, color: "#a0442b", lineHeight: 1.4 }}>
+                        Incomplete — {detail.needsPart} item{detail.needsPart === 1 ? "" : "s"} need{detail.needsPart === 1 ? "s" : ""} a part.{" "}
+                        <Link href="/design/grid/settings/equipment-map" style={{ fontWeight: 600, color: "#a0442b" }}>
+                          Open the Equipment map →
+                        </Link>
+                      </span>
+                    </div>
+                  )}
                   {detail.rows.map((r) => (
                     <div key={r.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 0", borderBottom: "1px solid #f3f4f7" }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
@@ -567,12 +618,22 @@ export default function DesignClient({
                         <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.name}</span>
                         <span style={{ fontSize: 11, color: "#aab0bb", whiteSpace: "nowrap" }}>{r.lines} line{r.lines === 1 ? "" : "s"}</span>
                       </span>
-                      <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 600 }}>{moneyRound(r.sub)}</span>
+                      {r.needsPart > 0 ? (
+                        <span style={{ fontFamily: UI, fontSize: 11.5, fontWeight: 600, color: "#a0442b" }}>
+                          Incomplete — {r.needsPart}
+                        </span>
+                      ) : (
+                        <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 600 }}>{moneyRound(r.sub)}</span>
+                      )}
                     </div>
                   ))}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 0 0" }}>
                     <span style={{ fontSize: 12, color: "#5b616e" }}>Materials &amp; equipment</span>
-                    <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 600 }}>{moneyRound(detail.matRev)}</span>
+                    {detail.needsPart > 0 ? (
+                      <span style={{ fontFamily: UI, fontSize: 13, fontWeight: 700, color: "#a0442b" }}>Incomplete</span>
+                    ) : (
+                      <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 600 }}>{moneyRound(detail.matRev)}</span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: "#aab0bb", lineHeight: 1.5, marginTop: 8 }}>
                     Recomputed live from the saved configuration — install, freight and contingency roll up in Quick Design.
@@ -657,12 +718,20 @@ export default function DesignClient({
         <div className="dd-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
           {raw.map((d) => {
             const pill = reviewPill(d.review && d.review.state);
+            const incomplete = (d.incomplete?.needsPart || 0) > 0;
             return (
               <div key={d.id} style={{ display: "flex", flexDirection: "column", background: "#fff", border: "1px solid #ececf0", borderTop: `3px solid ${ACCENT}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", overflow: "hidden" }}>
                 <div style={{ padding: "15px 16px 0", flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", rowGap: 6 }}>
                     <span style={venueChip}>{d.venue || "—"}</span>
-                    <span style={budgetaryChip}>BUDGETARY</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {incomplete && (
+                        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#a0442b", background: "#fbf0ea", border: "1px solid #f0d6cd", padding: "2px 8px", borderRadius: 20 }}>
+                          Incomplete
+                        </span>
+                      )}
+                      <span style={budgetaryChip}>BUDGETARY</span>
+                    </span>
                   </div>
                   <Link href={`/design/designs?id=${encodeURIComponent(d.id)}`} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 38, fontSize: 14.5, fontWeight: 600, lineHeight: 1.3, marginTop: 12, color: "#16181d", textDecoration: "none" }}>
                     {d.name}
@@ -671,11 +740,17 @@ export default function DesignClient({
                     {d.id} · {d.width || "?"}&apos; × {d.depth || "?"}&apos; × {d.grid || "?"}&apos;
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 15 }}>
-                    <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, letterSpacing: "-.01em" }}>{shortMoney(d.budget || 0)}</span>
+                    {incomplete ? (
+                      <span style={{ fontFamily: UI, fontSize: 16, fontWeight: 700, color: "#a0442b" }}>Incomplete</span>
+                    ) : (
+                      <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 600, letterSpacing: "-.01em" }}>{shortMoney(d.budget || 0)}</span>
+                    )}
                     <span style={{ fontSize: 11, color: "#9aa0ab" }}>est. · {(d.tier || "better").replace(/^./, (c) => c.toUpperCase())}</span>
                   </div>
                   <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 7 }}>
-                    {(d.systems || []).length} systems · edited {timeAgoMs(d.updatedAt)}
+                    {incomplete
+                      ? `${d.incomplete!.needsPart} item${d.incomplete!.needsPart === 1 ? "" : "s"} need${d.incomplete!.needsPart === 1 ? "s" : ""} a part`
+                      : `${(d.systems || []).length} systems · edited ${timeAgoMs(d.updatedAt)}`}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11, paddingBottom: 14, borderBottom: "1px solid #f2f3f5" }}>
                     <span title={d.owner} style={{ width: 24, height: 24, borderRadius: "50%", background: colorOf(d.owner), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, fontWeight: 600, flexShrink: 0 }}>
@@ -695,7 +770,13 @@ export default function DesignClient({
                   >
                     Open
                   </Link>
-                  <button onClick={() => promoteDesign(d.id)} disabled={pending} className="dd-accent-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: pending ? "default" : "pointer" }}>
+                  <button
+                    onClick={() => promoteDesign(d.id)}
+                    disabled={pending || incomplete}
+                    title={incomplete ? "Incomplete — map every item to a part before adding to Quotes" : undefined}
+                    className="dd-accent-btn"
+                    style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#fff", background: incomplete ? "#c7cbd3" : ACCENT, border: "none", padding: "10px 12px", borderRadius: 8, cursor: pending || incomplete ? "default" : "pointer" }}
+                  >
                     {d.quoteId ? "Update quote →" : "Add to Quotes →"}
                   </button>
                 </div>
