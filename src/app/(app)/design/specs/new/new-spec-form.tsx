@@ -109,8 +109,10 @@ export default function NewSpecForm({
       </div>
 
       <div style={FIELD}>
-        <label style={LBL}>Customer (optional)</label>
-        <CustomerCombobox options={customerOptions} value={customerId} onChange={setCustomerId} />
+        <label style={LBL} htmlFor="new-spec-customer">
+          Customer (optional)
+        </label>
+        <CustomerCombobox id="new-spec-customer" options={customerOptions} value={customerId} onChange={setCustomerId} />
         {customerId && (
           <button
             type="button"

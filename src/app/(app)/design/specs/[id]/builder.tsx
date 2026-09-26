@@ -19,7 +19,7 @@ import {
   setSpecProductHeaderAction,
   type SpecPickerPart,
 } from "../builder-actions";
-import { CARD, CARD_SUB, CARD_TITLE, ERR, FillInsCard, HeaderCard, MUTED, SaveTracker, useSave } from "./header-fields";
+import { CARD, CARD_SUB, CARD_TITLE, ERR, FillInsCard, HeaderCard, MUTED, SaveTracker, useSave, type ActionResult } from "./header-fields";
 import Preview from "./preview";
 
 /**
@@ -153,7 +153,7 @@ function WriteSpecDialog({
     }
     setPending(true);
     try {
-      await track(async () => {
+      await track(async (): Promise<ActionResult> => {
         if (target.needsText) {
           // Keep the part's own (live) article; a part with no article at all
           // — or a deleted one — adopts the header picked here. A part whose
@@ -169,17 +169,18 @@ function WriteSpecDialog({
           });
           if (!w.ok) {
             setErr(w.error);
-            return;
+            return w;
           }
         }
         if (target.addToSpec) {
           const a = await addSpecProductAction(docId, target.sku, target.needsHeader && header ? header : undefined);
           if (!a.ok) {
             setErr(a.error);
-            return;
+            return a;
           }
         }
         onDone(target.sku);
+        return { ok: true };
       });
     } catch {
       setErr("Could not save. Try again.");
@@ -701,20 +702,22 @@ function ChecklistCard({ assembled }: { assembled: AssembledSection }) {
   );
 }
 
-/** Download Word — while a save is in flight it shows "Saving…" and a click
+/** Download Word — while a save is in flight it dims (aria-busy) and a click
  *  waits for the saves to land, then downloads, so the file never misses the
- *  last edit. */
+ *  last edit. The label never changes, so the button can't shift width
+ *  between a blur-save's mousedown and the click's mouseup. */
 function DownloadLink({ href, saving, onClick }: { href: string; saving: boolean; onClick: (e: MouseEvent<HTMLAnchorElement>) => void }) {
   return (
     <a
       href={href}
       download
       className="pk-btn-accent"
-      aria-disabled={saving || undefined}
+      aria-busy={saving || undefined}
+      title={saving ? "Saving — the download starts when it's done" : undefined}
       onClick={onClick}
       style={{ textDecoration: "none", opacity: saving ? 0.6 : 1, cursor: saving ? "progress" : "pointer" }}
     >
-      {saving ? "Saving…" : "Download Word"}
+      Download Word
     </a>
   );
 }
@@ -745,9 +748,12 @@ export default function Builder({
   const inFlight = useRef(0);
   const queued = useRef(false);
   const bump = useCallback(
-    (delta: number) => {
+    (delta: number, failed?: boolean) => {
       inFlight.current = Math.max(0, inFlight.current + delta);
       setSaving(inFlight.current);
+      // A failed save cancels a queued download: the error is on screen and
+      // the file would miss the edit — the owner clicks again when ready.
+      if (failed) queued.current = false;
       if (inFlight.current === 0 && queued.current) {
         queued.current = false;
         // A file download, not a page: click a throwaway download link.

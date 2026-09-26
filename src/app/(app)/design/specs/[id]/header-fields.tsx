@@ -28,9 +28,13 @@ export const ERR: CSSProperties = { fontSize: 12.5, color: "#b4543a" };
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 /** Counts saves in flight across every card, so the Builder can hold the
- *  Download Word link until the file would include them. The Builder
- *  provides it; the default is a no-op. */
-export const SaveTracker = createContext<(delta: number) => void>(() => {});
+ *  Download Word link until the file would include them. `failed` on the
+ *  closing bump cancels a queued download — the owner sees the error and
+ *  clicks again. The Builder provides it; the default is a no-op. */
+export const SaveTracker = createContext<(delta: number, failed?: boolean) => void>(() => {});
+
+/** A server call's answer counts as failed when it is `{ ok: false }`. */
+const failedResult = (r: unknown) => !!r && typeof r === "object" && (r as { ok?: unknown }).ok === false;
 
 /** The builder's one save hook. `run` saves, surfaces the error, refreshes
  *  on success; `track` wraps any other server call so it counts as a save
@@ -42,10 +46,13 @@ export function useSave() {
   const [pending, start] = useTransition();
   const track = async <T,>(p: () => Promise<T>): Promise<T> => {
     bump(1);
+    let failed = true;
     try {
-      return await p();
+      const r = await p();
+      failed = failedResult(r);
+      return r;
     } finally {
-      bump(-1);
+      bump(-1, failed);
     }
   };
   const run = (fn: () => Promise<ActionResult>, onOk?: () => void) => {
@@ -53,19 +60,21 @@ export function useSave() {
     // a blur already sees the save in flight.
     bump(1);
     start(async () => {
+      let failed = true;
       try {
         const r = await fn();
         if (!r.ok) {
           setErr(r.error);
           return;
         }
+        failed = false;
         setErr("");
         onOk?.();
         router.refresh();
       } catch {
         setErr("Could not save. Try again.");
       } finally {
-        bump(-1);
+        bump(-1, failed);
       }
     });
   };
