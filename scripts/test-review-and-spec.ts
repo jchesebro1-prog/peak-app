@@ -17641,3 +17641,78 @@ import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintTe
   const vocabSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-vocab.ts"), "utf8");
   ok(!/\$\s?\d/.test(vocabSrc) && !/\bcost\b/i.test(vocabSrc), "#GEM T1: the vocabulary is dollar-free");
 }
+
+/* --- #GEM T2: Equipment map resolution — part / assembly / allowance / empty, never a fallback $ --- */
+import {
+  ALLOWANCE_MAX as gemAllowMax2, buildEquipmentPriceTable as gemTable2, cellFor as gemCellFor2, mapSkus as gemMapSkus2,
+  mergeEquipRow as gemMerge2, priceCell as gemPriceCell2, rowStatus as gemRowStatus2, sanitizeEquipmentMap as gemSanitize2,
+  sellFromCost as gemSell2, type EquipmentMap as GemMap2,
+} from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-vocab";
+{
+  const def = (k: string) => gemRowByKey2.get(k)!;
+  const parts = new Map([
+    ["GEM-PAR", { sku: "GEM-PAR", desc: "LED par", unit: "ea", cost: 600, list: 900, category: "Lighting Fixtures" }],
+    ["GEM-HB", { sku: "GEM-HB", desc: "Headblock 8in", unit: "ea", cost: 500, list: 0, category: "Rigging Hardware" }],
+    ["GEM-NIL", { sku: "GEM-NIL", desc: "Unpriced", unit: "ea", cost: 0, list: 0, category: "Misc" }],
+    ["GEM-VEL", { sku: "GEM-VEL", desc: "Velour 25oz", unit: "sq ft", cost: 0, list: 0, category: "Fabric", curtainAreaRate: 3.5 }],
+    ["GEM-MUS", { sku: "GEM-MUS", desc: "Muslin", unit: "sq ft", cost: 0, list: 0, category: "Fabric", costPerSqft: 0.9 }],
+    ["GEM-BARE", { sku: "GEM-BARE", desc: "Rateless fabric", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }],
+    ["GEM-MIX", { sku: "GEM-MIX", desc: "Mixer", unit: "ea", cost: 5000, list: 7000, category: "Audio" }],
+    ["GEM-DSP", { sku: "GEM-DSP", desc: "DSP", unit: "ea", cost: 1500, list: 2100, category: "Audio" }],
+  ]);
+  const rack = {
+    id: "SA-GEM2", kind: "system" as const, label: "Mixer + DSP rack", description: "", scope: "Audio" as const,
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "GEM-MIX", qty: 1 }, { sku: "GEM-DSP", qty: 2 }],
+    createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
+  const p = (cell: Parameters<typeof gemPriceCell2>[0], key = "lighting:par") => gemPriceCell2(cell, def(key), ctx);
+  const par = p({ kind: "part", sku: "GEM-PAR" });
+  ok(par.status === "part" && par.unitCost === 600 && par.unitSell === 900, "#GEM T2: a part prices at live catalog cost / list");
+  const hb = p({ kind: "part", sku: "GEM-HB" }, "rigging:headblock");
+  ok(hb.status === "part" && hb.unitSell === gemSell2(500, 0.3) && hb.unitSell === 714.29, "#GEM T2: a part with no list sells at cost ÷ (1 − catalog margin)");
+  const gone = p({ kind: "part", sku: "GEM-GONE" });
+  ok(gone.status === "needs-part" && /no longer in the catalog/.test(gone.reason), "#GEM T2: a deleted part is needs-a-part, not $0");
+  ok(p({ kind: "part", sku: "GEM-NIL" }).status === "needs-part", "#GEM T2: an unpriced part is needs-a-part");
+  const asm = p({ kind: "assembly", id: "SA-GEM2" }, "audio:mixerDsp");
+  ok(asm.status === "assembly" && asm.unitCost === 8000 && asm.unitSell === 11200 && asm.desc === "Mixer + DSP rack", "#GEM T2: a System assembly prices at its included totals (resolveFixture)");
+  ok(p({ kind: "assembly", id: "SA-DELETED" }, "audio:mixerDsp").status === "needs-part", "#GEM T2: a deleted assembly is needs-a-part");
+  const allow = p({ kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 }, "audio:subwoofer");
+  ok(allow.status === "allowance" && allow.unitCost === 1200 && allow.unitSell === gemSell2(1200, 0.3), "#GEM T2: a confirmed allowance is a unit cost, sold through the catalog margin");
+  ok(p({ kind: "allowance", amount: 1200, confirmedBy: "", confirmedAt: 5 }, "audio:subwoofer").status === "needs-part", "#GEM T2: an unconfirmed allowance never prices");
+  const empty = p(null);
+  ok(empty.status === "needs-part" && empty.reason === "Not mapped yet", "#GEM T2: an empty cell is needs-a-part with no $");
+  const vel = p({ kind: "part", sku: "GEM-VEL" }, "curtains:draw");
+  ok(vel.status === "part" && vel.areaRate === 3.5 && vel.unitCost === 0, "#GEM T2: a fabric row resolves the mapped fabric's area rate");
+  const mus = p({ kind: "part", sku: "GEM-MUS" }, "curtains:draw");
+  ok(mus.status === "part" && mus.areaRate === 0.9, "#GEM T2: …falling back to the fabric's own cost per sq ft");
+  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#GEM T2: a rateless or non-fabric part on a fabric row is needs-a-part (no seed-rate fallback)");
+  ok(p({ kind: "assembly", id: "SA-GEM2" }, "curtains:draw").status === "needs-part", "#GEM T2: a fabric row never maps to an assembly");
+  const same = { tiers: { good: { kind: "part" as const, sku: "GEM-PAR" } }, sameAll: true, updatedBy: "t", updatedAt: 1 };
+  ok(gemCellFor2(same, "best")?.kind === "part" && gemCellFor2({ ...same, sameAll: false }, "best") === null, "#GEM T2: same-for-all reads the Good cell for every tier");
+  ok(gemRowStatus2(undefined) === "needs-part" && gemRowStatus2(same) === "mapped", "#GEM T2: row status — nothing mapped vs every tier mapped");
+  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" }, better: { kind: "allowance", amount: 5, confirmedBy: "J", confirmedAt: 1 }, best: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "allowance", "#GEM T2: any confirmed-allowance tier → Allowance");
+  ok(gemRowStatus2({ tiers: { good: { kind: "part", sku: "X" } }, updatedBy: "t", updatedAt: 1 }) === "needs-part", "#GEM T2: any empty tier → Needs a part");
+  const clean = gemSanitize2({ "lighting:par": same, "bogus:row": same, "audio:subwoofer": null, "rigging:arbor": { tiers: { good: { kind: "allowance", amount: -3, confirmedBy: "J", confirmedAt: 1 }, better: { kind: "part", sku: "  " } } } });
+  ok(Object.keys(clean).join(",") === "lighting:par,rigging:arbor" && Object.keys(clean["rigging:arbor"].tiers).length === 0, "#GEM T2: sanitize drops unknown rows, cleared rows and invalid cells");
+  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: 99, confirmed: false } } }, "Jeff", 10).ok, "#GEM T2: saving an unconfirmed allowance is refused");
+  const m2 = gemMerge2(undefined, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, note: "until the book lands", confirmed: true } } }, "Chris", 20);
+  ok(m2.ok && m2.row.tiers.best?.kind === "allowance" && m2.row.tiers.better?.kind === "allowance" && m2.row.updatedBy === "Chris", "#GEM T2: same-for-all writes the Good cell into every tier, stamped");
+  const prev2 = m2.ok ? m2.row : undefined;
+  const m3 = gemMerge2(prev2, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, note: "until the book lands", confirmed: true } } }, "Jeff", 30);
+  const c3 = m3.ok ? m3.row.tiers.good : null;
+  ok(m3.ok && c3?.kind === "allowance" && c3.confirmedBy === "Chris" && c3.confirmedAt === 20 && m3.row.updatedBy === "Jeff", "#GEM T2: re-saving an unchanged allowance keeps who confirmed it");
+  const m4 = gemMerge2(prev2, { sameAll: true, tiers: { good: { kind: "allowance", amount: 1300, confirmed: true } } }, "Jeff", 40);
+  const c4 = m4.ok ? m4.row.tiers.good : null;
+  ok(c4?.kind === "allowance" && c4.confirmedBy === "Jeff" && c4.confirmedAt === 40, "#GEM T2: changing the amount re-confirms it");
+  ok(!gemMerge2(undefined, { tiers: { good: { kind: "allowance", amount: gemAllowMax2 + 1, confirmed: true } } }, "J", 1).ok, "#GEM T2: an absurd allowance is refused");
+  const map: GemMap2 = { "lighting:par": same, "audio:mixerDsp": { tiers: { better: { kind: "assembly", id: "SA-GEM2" } }, updatedBy: "t", updatedAt: 1 } };
+  const table = gemTable2(map, ctx);
+  const allKeys = [...gemRowByKey2.keys()];
+  ok((["good", "better", "best"] as const).every((t) => allKeys.every((k) => !!table.byTier[t][k])) && table.margin === 0.3, "#GEM T2: the table has a price (or needs-a-part) for every row × tier");
+  ok(table.byTier.good["audio:mixerDsp"].status === "needs-part" && table.byTier.better["audio:mixerDsp"].status === "assembly", "#GEM T2: tiers resolve independently");
+  ok(allKeys.filter((k) => !map[k]).every((k) => table.byTier.better[k].status === "needs-part"), "#GEM T2: every unmapped row is needs-a-part — nothing is pre-mapped");
+  ok(gemMapSkus2(map, ctx.fixtures).sort().join(",") === "GEM-DSP,GEM-MIX,GEM-PAR", "#GEM T2: mapSkus names every part the map needs, assembly parts included");
+}

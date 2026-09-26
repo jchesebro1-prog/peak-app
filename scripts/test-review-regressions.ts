@@ -3721,6 +3721,40 @@ async function main() {
     );
   }
 
+  /* --- #GEM T2: the Equipment map store — starts empty, per-row atomic writes, who/when --- */
+  {
+    const EM = await import("@/lib/stores/equipment-map");
+    const Cat = await import("@/lib/stores/catalog");
+    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: the map starts empty — nothing is pre-mapped");
+    assert.equal((await EM.saveEquipmentRow("bogus:row", { tiers: {} }, "Jeff")).ok, false, "#GEM T2: an unknown row is refused");
+    const r1 = await EM.saveEquipmentRow("lighting:par", { tiers: { good: { kind: "part", sku: "GEM2-PAR" }, better: { kind: "part", sku: "GEM2-PAR" }, best: { kind: "part", sku: "GEM2-PAR" } } }, "Jeff", 1000);
+    const r2 = await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, "Chris", 2000);
+    assert.ok(r1.ok && r2.ok, "#GEM T2: two rows save");
+    await Promise.all([
+      EM.saveEquipmentRow("video:projector", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM2-PROJ" } } }, "Jeff", 3000),
+      EM.saveEquipmentRow("video:screen", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM2-SCR" } } }, "Chris", 3000),
+    ]);
+    let m = await EM.getEquipmentMap();
+    assert.deepEqual(Object.keys(m).sort(), ["audio:subwoofer", "lighting:par", "video:projector", "video:screen"], "#GEM T2: concurrent edits to different rows both survive (atomic per-key merge)");
+    assert.ok(m["lighting:par"].updatedBy === "Jeff" && m["lighting:par"].updatedAt === 1000, "#GEM T2: every save stamps who/when");
+    const sub = m["audio:subwoofer"].tiers.best;
+    assert.ok(sub?.kind === "allowance" && sub.confirmedBy === "Chris" && sub.confirmedAt === 2000 && sub.amount === 1200, "#GEM T2: a confirmed allowance stores who confirmed it and when");
+    assert.equal((await EM.saveEquipmentRow("audio:subwoofer", { tiers: { good: { kind: "allowance", amount: 5, confirmed: false } } }, "Jeff", 4000)).ok, false, "#GEM T2: an unconfirmed allowance is refused");
+    assert.equal((await EM.getEquipmentMap())["audio:subwoofer"].updatedAt, 2000, "#GEM T2: …and nothing was written");
+    await EM.clearEquipmentRow("video:projector");
+    m = await EM.getEquipmentMap();
+    assert.ok(!("video:projector" in m) && "video:screen" in m, "#GEM T2: clearing one row leaves the others");
+    await Cat.upsert({ sku: "GEM2-PAR", desc: "GEM2 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
+    const table = await EM.loadEquipmentPriceTable();
+    const par = table.byTier.best["lighting:par"];
+    assert.ok(par.status === "part" && par.unitSell === 900 && par.unitCost === 600, "#GEM T2: the table prices a mapped part from the live catalog (targeted read)");
+    assert.equal(table.byTier.best["video:screen"].status, "needs-part", "#GEM T2: a mapped SKU missing from the catalog is needs-a-part");
+    const allow = table.byTier.good["audio:subwoofer"];
+    assert.ok(allow.status === "allowance" && allow.unitCost === 1200, "#GEM T2: the allowance prices as its confirmed unit cost");
+    for (const k of ["lighting:par", "audio:subwoofer", "video:screen"]) await EM.clearEquipmentRow(k);
+    assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: cleanup — later blocks start from an empty map");
+  }
+
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems
          (configuration, like the settings they used to live in) and the
          kept fixtures' accessory graph is rebuilt. LAST: it wipes every
