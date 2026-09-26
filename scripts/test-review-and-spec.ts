@@ -312,6 +312,9 @@ import {
 import { toArticles, normalizeSection, partText } from "@/lib/specs/sections";
 import { fillInSlots, applyFillIns, staleFillInKeys } from "@/lib/specs/fill-ins";
 import { assembleSection, placeProduct, type SpecBuilderPart } from "@/lib/specs/assemble-section";
+import { longDate, specFileName } from "@/lib/specs/spec-file-name";
+import { buildSectionDocx } from "@/lib/specs/spec-docx";
+import JSZip from "jszip";
 import {
   normalizeCategoryKey, normalizeArticle, articleIdForPart, resolveSameAs, specStateOf,
   hasPrintableSpec, csiKey, resolveSectionRef, resolveArticleRef, adoptLegacySpecPointers,
@@ -10518,6 +10521,7 @@ seeded()
   .then(() => partDocsFetchAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
   .then(() => specDocumentsAsyncChecks())
+  .then(() => specDocxAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18968,4 +18972,74 @@ async function specDocumentsAsyncChecks(): Promise<void> {
   const empty = assembleSection({ section: sec, articles, sections: [sec], parts, doc: { ...doc, products: [] } });
   ok(!empty.warnings.some((w) => w.includes("{{articles}}")), "#205 spec builder: an empty spec does not warn about {{articles}}");
   ok(outlineLabel(0, 3) === "C." && outlineLabel(2, 1) === "a.", "#205 spec builder: outlineLabel is exported");
+}
+
+// #205 spec builder T3
+/**
+ * The Word writer: pure file-name/date checks plus the generated .docx's
+ * OOXML (real Word numbering, header/footer, table). Async because Packer is;
+ * DB-less, so it runs anywhere in the chain.
+ */
+async function specDocxAsyncChecks(): Promise<void> {
+  ok(longDate("2026-07-30") === "July 30, 2026" && longDate("") === "", "#205 spec builder: long issue date, no timezone shift");
+  const hdr = { projectName: "North HS: Auditorium", projectNumber: "3580", phase: "Construction Documents", issueDate: "2026-07-30", preparedBy: "" };
+  ok(specFileName(hdr, { number: "11 61 23", title: "Theatrical Rigging and Curtains" }) === "3580_North HS Auditorium_Spec 11 61 23_Theatrical Rigging and Curtains_07-30-2026.docx", "#205 spec builder: file name follows the North HS pattern, illegal characters dropped");
+  ok(specFileName({ ...hdr, projectName: "", projectNumber: "", issueDate: "" }, { number: "27 41 00", title: "Audio-Video Systems" }) === "Spec 27 41 00_Audio-Video Systems.docx", "#205 spec builder: blank header parts are dropped from the file name");
+
+  // The T2 fixtures, copied (blocks don't share scope).
+  const sec = normalizeSection({
+    id: "ss-t", number: "11 61 23", title: "Rigging", sort: 1,
+    part1: [
+      { id: "a1", title: "SECTION INCLUDES", body: "{{articles}}" },
+      { id: "a2", title: "SUBMITTALS", body: "Within [FILL IN: number of days] days.\nSamples within [FILL IN: number of days] days." },
+    ],
+    part3: [{ id: "a3", title: "WARRANTY", body: "Project {{project.name}} for [FILL IN: owner]." }],
+    part2Style: "paragraphs", quantities: "drawings", updatedAt: 0, updatedBy: "",
+  } as never);
+  const otherSec = normalizeSection({ id: "ss-o", number: "26 09 61", title: "Lighting", sort: 2, part1: [], part3: [], updatedAt: 0, updatedBy: "" } as never);
+  const art = (id: string, sectionId: string, sort: number, title: string, general = "", manufacturers: string[] = []) =>
+    ({ id, sectionId, sort, title, general, manufacturers, categoryKeys: [], updatedAt: 0, updatedBy: "" });
+  const articles = [
+    art("ar-d", "ss-t", 10, "DRAPES", "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}", ["Rose Brand", "KM"]),
+    art("ar-h", "ss-t", 20, "HOISTS", "General:\n  Purpose-built."),
+    art("ar-x", "ss-t", 30, "UNUSED"),
+    art("ar-l", "ss-o", 10, "LUMINAIRES"),
+  ];
+  const P = (o: Partial<SpecBuilderPart> & { sku: string }): SpecBuilderPart => ({ specState: "authored", ...o });
+  const parts = new Map<string, SpecBuilderPart>([
+    ["VAL", P({ sku: "VAL", desc: "Valance", specArticleId: "ar-d", specTitle: "VALANCE", specBody: "Material:\n  Velour" })],
+    ["LEG", P({ sku: "LEG", desc: "Legs", specArticleId: "ar-d", specSameAs: "VAL" })],
+    ["HST", P({ sku: "HST", desc: "Hoist", specArticleId: "ar-h", specTitle: "HOIST", specBody: "Basis of Design: P1" })],
+    ["DRF", P({ sku: "DRF", desc: "Draft", specArticleId: "ar-h", specBody: "x", specState: "draft" })],
+    ["FIX", P({ sku: "FIX", desc: "Fixture", specArticleId: "ar-l", specTitle: "FIX", specBody: "y" })],
+    ["NOA", P({ sku: "NOA", desc: "No article", specTitle: "N", specBody: "z" })],
+  ]);
+  const doc = normalizeSpecDocument({
+    id: "SP-1001", sectionId: "ss-t",
+    header: { projectName: "North HS", projectNumber: "3580", issueDate: "2026-07-30" },
+    source: { kind: "quote" }, printQuantities: true,
+    products: [{ sku: "HST", qty: 2 }, { sku: "VAL", qty: 1 }, { sku: "LEG" }, { sku: "DRF" }, { sku: "FIX" }, { sku: "NOA" }, { sku: "GONE" }],
+    fillIns: { "a2#1": "30", "a9#1": "stale" },
+  });
+  const a = assembleSection({ section: sec, articles, sections: [sec, otherSec], parts, doc });
+  const tableSec = { ...sec, part2Style: "table" as const };
+  const tAssembled = assembleSection({ section: tableSec, articles, sections: [tableSec, otherSec], parts: new Map([...parts, ["SHURE:ANX4", P({ sku: "Shure:ANX4", desc: "Receiver", mfr: "", specArticleId: "ar-h", specTitle: "Receiver", specBody: "Receiver" })]]), doc: withProduct(doc, { sku: "Shure:ANX4", qty: 3 }) });
+
+  const buf = await buildSectionDocx(a);
+  const zip = await JSZip.loadAsync(buf);
+  const docXml = await zip.file("word/document.xml")!.async("string");
+  const numXml = await zip.file("word/numbering.xml")!.async("string");
+  const files = Object.keys(zip.files);
+  const hdrXml = await zip.file(files.find((f) => /^word\/header\d*\.xml$/.test(f))!)!.async("string");
+  const ftrXml = await zip.file(files.find((f) => /^word\/footer\d*\.xml$/.test(f))!)!.async("string");
+  ok((docXml.match(/<w:numPr>/g) || []).length >= 10, "#205 spec builder: outline paragraphs carry real Word numbering (numPr)");
+  ok(!/<w:t[^>]*>[A-Z]\.\s*<\/w:t>/.test(docXml) && !docXml.includes(">1.01<"), "#205 spec builder: no typed-in outline labels");
+  ok((numXml.match(/<w:lvl /g) || []).length >= 7 && numXml.includes("PART %1"), "#205 spec builder: one multi-level list, PART → n.m → A. … a)");
+  ok(docXml.includes("SECTION 11 61 23") && docXml.includes("END OF SECTION 11 61 23"), "#205 spec builder: title and END OF SECTION");
+  ok(hdrXml.includes("North HS") && hdrXml.includes("Project No. 3580") && hdrXml.includes("July 30, 2026"), "#205 spec builder: running header carries project, number, date");
+  ok(/PAGE/.test(ftrXml) && ftrXml.includes("11 61 23 - "), "#205 spec builder: footer carries the section number and a PAGE field");
+  // Table style
+  const tBuf = await buildSectionDocx(tAssembled);
+  const tXml = await (await JSZip.loadAsync(tBuf)).file("word/document.xml")!.async("string");
+  ok(tXml.includes("<w:tbl>") && tXml.includes("ANX4"), "#205 spec builder: table style writes a real Word table");
 }
