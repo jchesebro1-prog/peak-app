@@ -1124,6 +1124,7 @@ export async function searchCatalog(
     cost: p.cost || 0,
     list: p.list || 0,
     mfr: p.mfr || "",
+    ...(p.pricedAt ? { pricedAt: p.pricedAt } : {}),
   }));
   return { hits, total: scored.length };
 }

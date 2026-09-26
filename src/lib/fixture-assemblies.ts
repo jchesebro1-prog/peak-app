@@ -299,6 +299,16 @@ export type ResolvedFixture = {
   pricesAsOf: number | null;
 };
 
+/**
+ * M1 (fix wave 1, #FXB) — the head line a light-engine/lens picker's `onPick`
+ * should keep: a DIFFERENT part starts fresh (its old label/qty/costOverride
+ * don't carry over onto the newly-picked part); re-picking the SAME part
+ * (`pickedSku === current`) leaves whatever is already there untouched.
+ */
+export function headLineForPick(current: string, pickedSku: string, existing: HeadLine): HeadLine {
+  return pickedSku === current ? existing : {};
+}
+
 function headToLine(sku: string, head?: HeadLine): FixtureLine {
   const qty = Number(head?.qty);
   return {
@@ -427,7 +437,11 @@ function cleanLine(raw: unknown): FixtureLine | null {
   };
 }
 
-function cleanHead(raw: unknown): HeadLine | undefined {
+/** `minQty` (M2, fix wave 1) floors an explicitly-provided qty — 1 for the
+ *  light engine line (a fixture always ships its own engine), 0 for lens.
+ *  Absent qty is untouched either way; resolveFixture's own default (1)
+ *  applies at read time, same as before. */
+function cleanHead(raw: unknown, minQty = 0): HeadLine | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const h = raw as HeadLine;
   const label = text(h.label, 160);
@@ -435,7 +449,7 @@ function cleanHead(raw: unknown): HeadLine | undefined {
   const override = h.costOverride == null ? NaN : Number(h.costOverride);
   const out: HeadLine = {
     ...(label ? { label } : {}),
-    ...(h.qty != null && Number.isFinite(qty) ? { qty: Math.max(0, Math.round(qty * 100) / 100) } : {}),
+    ...(h.qty != null && Number.isFinite(qty) ? { qty: Math.max(minQty, Math.round(qty * 100) / 100) } : {}),
     ...(Number.isFinite(override) && override >= 0 ? { costOverride: override } : {}),
   };
   return Object.keys(out).length ? out : undefined;
@@ -465,7 +479,7 @@ export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFi
   if (!lightEngineSku) return { ok: false, error: "Pick a light engine from the catalog." };
   const lensSku = text(i.lensSku, 160) || null;
   for (const box of FIXTURE_BOXES) lines[box] = cleanList(i.lines?.[box]);
-  const lightEngineLine = cleanHead(i.lightEngineLine);
+  const lightEngineLine = cleanHead(i.lightEngineLine, 1);
   const lensLine = lensSku ? cleanHead(i.lensLine) : undefined;
   const lamp = text(i.lamp, 120);
   const position = text(i.position, 120);

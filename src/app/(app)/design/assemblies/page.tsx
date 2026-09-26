@@ -2,7 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { list as listCatalog } from "@/lib/stores/catalog";
+import { listDocsByField } from "@/db/doc-store";
+import type { CatalogPart } from "@/lib/stores/catalog";
+import { fixtureSkus } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { fixturePairs, memberCoverageFor } from "@/lib/part-docs/assembly-graph";
@@ -24,7 +26,13 @@ export default async function AssemblyBuilderPage({
   await requireUser();
   const sp = await searchParams;
   if (sp.tab !== undefined) redirect("/design/assemblies");
-  const [settings, parts, fixtures] = await Promise.all([getSettings(), listCatalog(), listFixtures()]);
+  const [settings, fixtures] = await Promise.all([getSettings(), listFixtures()]);
+  // #FXB fix wave 1 (I1): only the parts saved fixtures actually reference —
+  // never the whole ~37,400-part catalog. New lines are priced by the
+  // pickers' own server search (searchAssemblyPartsAction), which merges its
+  // hits into the client's bySku seed below.
+  const skus = [...new Set(fixtures.flatMap(fixtureSkus))];
+  const parts = skus.length ? await listDocsByField<CatalogPart>("catalog_parts", "sku", skus) : [];
   // Part documents (#207): each saved line's datasheet coverage.
   const { index } = await loadPartDocsState(parts);
   const coverage = memberCoverageFor(index, fixtures.flatMap(fixturePairs));

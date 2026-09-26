@@ -60,3 +60,13 @@ export function catalogMatches<T extends CatalogLike>(
 ): T[] {
   return typeaheadMatches(q, parts, catalogFilter, catalogRank, max);
 }
+
+/**
+ * Pass-through filter/rank for a Typeahead whose `items` are already a
+ * server-searched, pre-capped result set (e.g. a debounced catalog search
+ * action) rather than a static in-memory list to filter here: every item is
+ * shown, in the order given. Module-level so identity is stable (see the
+ * Typeahead usage note above).
+ */
+export const passAllFilter = (): boolean => true;
+export const stableRank = (): number => 0;

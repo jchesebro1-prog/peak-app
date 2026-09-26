@@ -291,6 +291,7 @@ export type CatalogHit = {
   cost: number;
   list: number;
   mfr: string;
+  pricedAt?: number;
 };
 
 /** A page of catalog search results (total = matches before the display cap). */

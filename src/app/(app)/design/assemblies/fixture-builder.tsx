@@ -11,10 +11,14 @@ import FixtureForm, { draftFromRecord, draftResolvable, draftToInput, emptyDraft
 
 type Filter = "all" | FixtureKind;
 const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems" };
+const EDIT_BTN = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 } as const;
 
 /** #FXB — the one Assemblies list (fixtures + systems) and its form. */
-export default function FixtureBuilder({ initial, parts, priceListEffective, coverage }: {
+export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage }: {
   initial: FixtureRecord[];
+  /** The server's priced seed — every part currently referenced by a saved
+   *  fixture (I1, fix wave 1), never the whole catalog. Grown locally below
+   *  as the pickers' server search turns up parts not yet in any fixture. */
   parts: PartHit[];
   priceListEffective: Record<string, number>;
   /** #207 — each saved line's datasheet coverage, keyed by pairKey(). */
@@ -22,10 +26,35 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
+  // JSON snapshot of `draft` as loaded (new/edit), for the M5 dirty check —
+  // null whenever no draft is open or nothing has diverged from it yet.
+  const [draftOrigin, setDraftOrigin] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Session-grown parts: the server seed plus every hit a picker has turned
+  // up (I1). A fresh seed from the server (after save/delete → router.refresh)
+  // is merged in rather than replacing local state outright, so an unsaved
+  // draft's just-picked (not-yet-saved) parts keep pricing across a refresh
+  // triggered by editing/deleting a DIFFERENT row.
+  const [parts, setParts] = useState<PartHit[]>(seed);
+  const [prevSeed, setPrevSeed] = useState(seed);
+  if (seed !== prevSeed) {
+    setPrevSeed(seed);
+    setParts((prev) => {
+      const merged = new Map(seed.map((p) => [p.sku, p] as const));
+      for (const p of prev) if (!merged.has(p.sku)) merged.set(p.sku, p);
+      return [...merged.values()];
+    });
+  }
+  const mergePart = (hit: PartHit) => setParts((prev) => {
+    const existing = prev.find((p) => p.sku === hit.sku);
+    if (existing && existing.pricedAt === hit.pricedAt && existing.cost === hit.cost && existing.list === hit.list) return prev;
+    return [...prev.filter((p) => p.sku !== hit.sku), hit];
+  });
+
   const bySku = useMemo(() => toSkuMap(parts), [parts]);
   const settings = useMemo(() => ({ priceListEffective }), [priceListEffective]);
   const rows = useMemo(() => initial.map((rec) => ({ rec, live: resolveFixture(rec, bySku, settings) })), [initial, bySku, settings]);
@@ -36,12 +65,21 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
   };
   const shown = rows.filter((r) => filter === "all" || r.rec.kind === filter);
   const live = draft ? resolveFixture(draftResolvable(draft), bySku, settings) : null;
+  const dirty = draft != null && draftOrigin != null && JSON.stringify(draft) !== draftOrigin;
 
-  const start = (kind: FixtureKind) => { setChoosing(false); setError(null); setDraft(emptyDraft(kind)); };
+  const start = (kind: FixtureKind) => {
+    setChoosing(false);
+    setError(null);
+    const next = emptyDraft(kind);
+    setDraft(next);
+    setDraftOrigin(JSON.stringify(next));
+  };
   const edit = (rec: FixtureRecord) => {
     setChoosing(false);
     setError(null);
-    setDraft(draftFromRecord(rec));
+    const next = draftFromRecord(rec);
+    setDraft(next);
+    setDraftOrigin(JSON.stringify(next));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const save = async () => {
@@ -52,6 +90,7 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
       const result = await saveFixtureAction(draftToInput(draft));
       if (!result.ok) { setError(result.error); return; }
       setDraft(null);
+      setDraftOrigin(null);
       router.refresh();
     } finally {
       setBusy(false);
@@ -59,7 +98,7 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
   };
   const remove = async (rec: FixtureRecord) => {
     await deleteFixtureAction(rec.id);
-    if (draft?.id === rec.id) setDraft(null);
+    if (draft?.id === rec.id) { setDraft(null); setDraftOrigin(null); }
     router.refresh();
   };
 
@@ -96,14 +135,14 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
         <FixtureForm
           draft={draft}
           onChange={setDraft}
-          parts={parts}
           bySku={bySku}
+          onPickPart={mergePart}
           live={live}
           coverage={coverage}
           busy={busy}
           error={error}
           onSave={save}
-          onCancel={() => { setDraft(null); setError(null); }}
+          onCancel={() => { setDraft(null); setDraftOrigin(null); setError(null); }}
         />
       )}
 
@@ -119,6 +158,10 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
             {shown.map(({ rec, live: l }) => {
               const was = rec.snapshot?.cost;
               const drift = was != null && Math.abs(was - l.cost) >= 0.005;
+              // M3: the badge dates from when the snapshot was priced, not
+              // from the record's last save (a human edit that touches only
+              // the label, say, bumps updatedAt without repricing).
+              const builtAt = rec.snapshot?.pricedAt ?? rec.updatedAt;
               const head = l.parts.filter((p) => p.slot === "lightEngine" || p.slot === "lens").map((p) => p.label).join(" + ");
               const optional = l.parts.filter((p) => !p.included).length;
               return (
@@ -150,10 +193,23 @@ export default function FixtureBuilder({ initial, parts, priceListEffective, cov
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700 }}>{money(l.sell)}</div>
                     <div style={{ color: "#9aa0ab", fontSize: 10.5 }}>sell · cost {money(l.cost)} · {pricesNote(l.pricesAsOf)}</div>
-                    {drift && <div style={{ color: "#8a6d1f", fontSize: 10.5 }}>cost was {money(was ?? 0)} when built ({dateYear(rec.updatedAt)})</div>}
+                    {drift && <div style={{ color: "#8a6d1f", fontSize: 10.5 }}>cost was {money(was ?? 0)} when built ({dateYear(builtAt)})</div>}
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button type="button" onClick={() => edit(rec)} style={{ border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 }}>Edit</button>
+                    {/* M5: switching the open, unsaved draft to a different
+                       row would silently discard it — confirm first. */}
+                    {dirty && draft?.id !== rec.id ? (
+                      <ConfirmButton
+                        label="Edit"
+                        confirmLabel="Discard changes & edit?"
+                        pendingLabel="Discard changes & edit?"
+                        className=""
+                        style={EDIT_BTN}
+                        onConfirm={() => edit(rec)}
+                      />
+                    ) : (
+                      <button type="button" onClick={() => edit(rec)} style={EDIT_BTN}>Edit</button>
+                    )}
                     <ConfirmButton label="Delete" confirmLabel={`Delete ${rec.label}?`} style={{ fontSize: 11.5, padding: "6px 9px" }} onConfirm={() => remove(rec)} />
                   </div>
                 </div>

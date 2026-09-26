@@ -9,10 +9,43 @@ import { fixtureSkus, resolveFixture, sanitizeFixtureInput, type FixtureInput } 
 import { createFixture, getFixture, removeFixture, updateFixture } from "@/lib/stores/fixtures";
 import { fixturePairs, fixtureRef } from "@/lib/part-docs/assembly-graph";
 import { setOwnDatasheet, syncAccessoryLinks } from "@/lib/stores/part-accessory-links";
+import { searchCatalog } from "@/app/(app)/estimator/actions";
+import type { PartHit } from "./fixture-form";
 
 const revalidateConsumers = () => {
+  // Grid checked (fix wave 1, I1/M4): no Grid route reads live fixtures
+  // today. Grid's Scope panel wires the same ScopeInputsPanel fixture-picker
+  // Quick Design uses, but scope-panel.tsx never passes it a fixtureAssemblies
+  // list (the prop defaults to []), so the picker never renders there; and
+  // grid-intake.tsx's AState.fixtureAssemblies id map is stored but never
+  // read back against the live fixtures store within any Grid route. Add the
+  // Grid route(s) here once that wiring lands (roadmap phase 10).
   for (const path of ["/design/assemblies", "/estimator", "/design/quick", "/catalog/documents"]) revalidatePath(path);
 };
+
+/**
+ * The Assembly Builder's part pickers (#FXB fix wave 1, I1): a debounced
+ * server search over the catalog instead of shipping all ~37,400 parts to
+ * the client. Thin wrapper over the Estimator's `searchCatalog` (same
+ * requireUser + result cap), reshaped to `PartHit` (adds `pricedAt`, drops
+ * nothing `searchCatalog` already returns).
+ */
+export async function searchAssemblyPartsAction(query: string, limit = 40): Promise<{ hits: PartHit[]; total: number }> {
+  const { hits, total } = await searchCatalog(query, "", limit);
+  return {
+    hits: hits.map((h) => ({
+      sku: h.sku,
+      desc: h.desc,
+      category: h.category,
+      mfr: h.mfr,
+      unit: h.unit,
+      list: h.list,
+      cost: h.cost,
+      ...(h.pricedAt ? { pricedAt: h.pricedAt } : {}),
+    })),
+    total,
+  };
+}
 
 /**
  * Save a fixture or system (#FXB). Anyone signed in (spec §2.5); every save

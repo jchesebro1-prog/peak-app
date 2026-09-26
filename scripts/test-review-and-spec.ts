@@ -16223,8 +16223,8 @@ import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
    fixtureAssembliesFrom. Pure.
    ====================================================================== */
 import {
-  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, fixtureAssembliesFrom,
-  type FixtureRecord as FxbRecord,
+  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, fixtureAssembliesFrom, headLineForPick,
+  type FixtureRecord as FxbRecord, type HeadLine as HeadLineT,
 } from "@/lib/fixture-assemblies";
 {
   const cat = [
@@ -16276,6 +16276,24 @@ import {
   ok(!noParts.ok && /part/i.test(noParts.error), "#FXB sanitizeFixtureInput: a system needs at least one part");
   const sysOk = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 0 }], lightEngineSku: "IGNORED" });
   ok(sysOk.ok && sysOk.value.scope === "Audio" && sysOk.value.lightEngineSku === "" && sysOk.value.lensSku === null && (sysOk.value.parts || []).length === 1, "#FXB sanitizeFixtureInput: a system keeps scope + parts and no light engine");
+
+  /* ---- fix wave 1 (review findings) ---- */
+  // M1 — a light-engine/lens pick resets that head line unless it's a
+  // re-pick of the SAME part.
+  const kept: HeadLineT = { label: "Custom", qty: 3, costOverride: 12 };
+  ok(headLineForPick("FX-ENG", "FX-ENG", kept) === kept, "#FXB M1 headLineForPick: re-picking the same part keeps its head line untouched");
+  ok(JSON.stringify(headLineForPick("FX-ENG", "FX-OTHER", kept)) === "{}", "#FXB M1 headLineForPick: picking a DIFFERENT part starts the head line fresh");
+  ok(JSON.stringify(headLineForPick("", "FX-ENG", {})) === "{}", "#FXB M1 headLineForPick: picking the first light engine from empty is a no-op reset (nothing to lose)");
+
+  // M2 — an explicit engine qty clamps to a floor of 1; absent qty is left
+  // alone (resolveFixture's own default of 1 applies at read time); a lens
+  // qty of 0 is untouched (lens keeps the pre-existing floor of 0).
+  const engineZero = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lightEngineLine: { qty: 0 } });
+  ok(engineZero.ok && engineZero.value.lightEngineLine?.qty === 1, "#FXB M2 sanitizeFixtureInput: an explicit qty 0 on the light engine line clamps to 1");
+  const engineNoQty = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lightEngineLine: { label: "Custom" } });
+  ok(engineNoQty.ok && engineNoQty.value.lightEngineLine?.qty === undefined, "#FXB M2 sanitizeFixtureInput: no qty provided for the engine line is left alone, not forced to 1");
+  const lensZero = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lensLine: { qty: 0 } });
+  ok(lensZero.ok && lensZero.value.lensLine?.qty === 0, "#FXB M2 sanitizeFixtureInput: the lens line keeps its 0-floor — only the engine line gets the 1-floor");
 
   const fa = fixtureAssembliesFrom([rec, sys], cat);
   ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#FXB fixtureAssembliesFrom: fixtures only, id and label carried");

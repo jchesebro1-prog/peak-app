@@ -1,9 +1,10 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   FIXTURE_BOXES,
   FIXTURE_BOX_LABEL,
+  headLineForPick,
   SYSTEM_SCOPES,
   type FixtureBox,
   type FixtureInput,
@@ -17,9 +18,10 @@ import {
 } from "@/lib/fixture-assemblies";
 import { dateYear } from "@/lib/format";
 import { Typeahead } from "@/components/search/typeahead";
-import { catalogFilter, catalogRank } from "@/lib/search/typeahead-rank";
+import { passAllFilter, stableRank } from "@/lib/search/typeahead-rank";
 import { pairKey, type MemberCoverage } from "@/lib/part-docs/assembly-graph";
 import MemberCoverageChip from "./member-coverage";
+import { searchAssemblyPartsAction } from "./actions";
 
 /** The catalog slice the builder searches and prices from (#FXB). Cost is
  *  included: the footer shows the live included cost, as Subassemblies did. */
@@ -119,32 +121,84 @@ function PartRow({ part }: { part: PartHit }) {
   );
 }
 
-/** Catalog part picker (#121): results list inline while you type.
- *  `clearOnPick` is the add-another mode the line boxes use. */
-function PartPicker({ label, parts, value, onChange, clearOnPick = false }: { label: string; parts: PartHit[]; value: string; onChange: (sku: string) => void; clearOnPick?: boolean }) {
+/**
+ * Debounce + stale-response guard for a server-searched picker (#121/I1) —
+ * the same pattern as the Estimator's catalog-picker.tsx, generalized:
+ * `items`/`pending` are DERIVED from whether `resultQuery` (what the last
+ * completed search answered) still matches the live `query`, rather than
+ * reset with their own setState calls — an empty/changed query needs no
+ * effect-body state write, it just falls out of the comparison below.
+ */
+function usePartSearch(bySku: ReadonlyMap<string, PartHit>) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<PartHit[]>([]);
+  const [resultQuery, setResultQuery] = useState("");
+  const seq = useRef(0);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) return;
+    const my = ++seq.current;
+    const t = setTimeout(() => {
+      searchAssemblyPartsAction(q).then((res) => {
+        if (my !== seq.current) return; // a newer keystroke superseded this request
+        setResults(res.hits);
+        setResultQuery(q);
+      });
+    }, 220);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const trimmed = query.trim();
+  const fresh = trimmed !== "" && resultQuery === trimmed;
+  const items = fresh ? results : [];
+  const pending = trimmed !== "" && !fresh;
+  const emptyText = pending ? "Searching…" : trimmed ? "No parts match." : "Start typing to search the catalog.";
+  const resolveSelected = (key: string) => bySku.get(key) ?? null;
+  return { query, setQuery, items, emptyText, resolveSelected };
+}
+
+/** Catalog part picker (#121, I1): a debounced server search
+ *  (searchAssemblyPartsAction) over the live catalog, never a client-side
+ *  filter over the whole book. `clearOnPick` is the add-another mode the
+ *  line boxes use; `bySku` resolves the current selection's label even
+ *  though it may not be among the latest search results. */
+function PartPicker({ label, bySku, value, onPick, clearOnPick = false }: {
+  label: string;
+  bySku: ReadonlyMap<string, PartHit>;
+  value: string;
+  onPick: (hit: PartHit) => void;
+  clearOnPick?: boolean;
+}) {
+  const { setQuery, items, emptyText, resolveSelected } = usePartSearch(bySku);
   return (
     <div>
       <label style={LABEL}>{label}</label>
       <Typeahead
-        items={parts}
+        items={items}
         keyOf={partKey}
-        filter={catalogFilter}
-        rank={catalogRank}
+        filter={passAllFilter}
+        rank={stableRank}
         render={(p) => <PartRow part={p} />}
-        onPick={(p) => onChange(p.sku)}
+        onPick={onPick}
         labelOf={clearOnPick ? undefined : partLabel}
         selectedKey={clearOnPick ? null : value}
+        resolveSelected={resolveSelected}
         placeholder="Search name, manufacturer, or part #"
         ariaLabel={label}
         inputStyle={FIELD}
+        emptyText={emptyText}
+        onQueryChange={setQuery}
       />
     </div>
   );
 }
 
 /** One part line: part, label, qty (0 = optional), cost override, ↑ ↓ ×, and
- *  the datasheet coverage chip/toggle. */
-function LineRow({ line, part, fallbackName, onChange, onUp, onDown, onRemove, chip }: {
+ *  the datasheet coverage chip/toggle. `minQty` (M2) raises the floor for
+ *  the light engine's own line — every other line stays 0-floored (a 0 qty
+ *  line is a compatible optional add-on). */
+function LineRow({ line, part, fallbackName, onChange, onUp, onDown, onRemove, chip, minQty = 0 }: {
   line: FixtureLine;
   part?: PartHit;
   fallbackName?: string;
@@ -153,6 +207,7 @@ function LineRow({ line, part, fallbackName, onChange, onUp, onDown, onRemove, c
   onDown?: () => void;
   onRemove?: () => void;
   chip?: ReactNode;
+  minQty?: number;
 }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr) 64px 104px auto", gap: 6, alignItems: "start", padding: "7px 0", borderTop: "1px solid #f2f3f6" }}>
@@ -165,7 +220,7 @@ function LineRow({ line, part, fallbackName, onChange, onUp, onDown, onRemove, c
       </div>
       <input aria-label={`Label for ${line.sku}`} title="Name used in the Estimator and BOM (blank = catalog description)" value={line.label ?? ""} placeholder={part?.desc || "catalog description"} onChange={(e) => onChange({ ...line, label: e.target.value || undefined })} style={{ ...FIELD, padding: "6px 8px", fontSize: 12 }} />
       <div>
-        <input aria-label={`Quantity for ${line.sku}`} type="number" min={0} step={1} value={line.qty} onChange={(e) => onChange({ ...line, qty: Math.max(0, Number(e.target.value) || 0) })} style={{ ...FIELD, padding: "6px 6px", fontSize: 12 }} />
+        <input aria-label={`Quantity for ${line.sku}`} type="number" min={minQty} step={1} value={line.qty} onChange={(e) => onChange({ ...line, qty: Math.max(minQty, Number(e.target.value) || 0) })} style={{ ...FIELD, padding: "6px 6px", fontSize: 12 }} />
         {line.qty === 0 && <div style={{ fontSize: 10, color: "#8c919c", marginTop: 2 }}>optional</div>}
       </div>
       <input aria-label={`Cost override for ${line.sku}`} type="number" min={0} step="0.01" placeholder={part ? `cost ${money(part.cost)}` : "cost override"} value={line.costOverride ?? ""} onChange={(e) => onChange({ ...line, costOverride: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value) || 0) })} style={{ ...FIELD, padding: "6px 6px", fontSize: 12 }} />
@@ -178,12 +233,12 @@ function LineRow({ line, part, fallbackName, onChange, onUp, onDown, onRemove, c
   );
 }
 
-function LineBox({ title, lines, onLines, parts, bySku, names, chipFor }: {
+function LineBox({ title, lines, onLines, bySku, onPickPart, names, chipFor }: {
   title: string;
   lines: FixtureLine[];
   onLines: (next: FixtureLine[]) => void;
-  parts: PartHit[];
   bySku: ReadonlyMap<string, PartHit>;
+  onPickPart: (hit: PartHit) => void;
   names: Record<string, string>;
   chipFor?: (sku: string) => ReactNode;
 }) {
@@ -210,17 +265,25 @@ function LineBox({ title, lines, onLines, parts, bySku, names, chipFor }: {
         />
       ))}
       <div style={{ marginTop: 8 }}>
-        <PartPicker label="Add a part" parts={parts} value="" clearOnPick onChange={(sku) => onLines([...lines, { sku, qty: 1 }])} />
+        <PartPicker
+          label="Add a part"
+          bySku={bySku}
+          value=""
+          clearOnPick
+          onPick={(hit) => { onPickPart(hit); onLines([...lines, { sku: hit.sku, qty: 1 }]); }}
+        />
       </div>
     </div>
   );
 }
 
-export default function FixtureForm({ draft, onChange, parts, bySku, live, coverage, busy, error, onSave, onCancel }: {
+export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, coverage, busy, error, onSave, onCancel }: {
   draft: Draft;
   onChange: (next: Draft) => void;
-  parts: PartHit[];
   bySku: ReadonlyMap<string, PartHit>;
+  /** A picker turned up a part not yet in `bySku` — merge it upstream so
+   *  live pricing works for the new line (I1). */
+  onPickPart: (hit: PartHit) => void;
   live: ResolvedFixture;
   coverage: Record<string, MemberCoverage>;
   busy: boolean;
@@ -262,8 +325,26 @@ export default function FixtureForm({ draft, onChange, parts, bySku, live, cover
           </label>
         ) : (
           <>
-            <PartPicker label="Light engine" parts={parts} value={draft.lightEngineSku} onChange={(sku) => set({ lightEngineSku: sku })} />
-            <PartPicker label="Lens (optional)" parts={parts} value={draft.lensSku} onChange={(sku) => set({ lensSku: sku })} />
+            <PartPicker
+              label="Light engine"
+              bySku={bySku}
+              value={draft.lightEngineSku}
+              onPick={(hit) => {
+                onPickPart(hit);
+                // M1: a different light engine starts its head line fresh —
+                // the old part's label/qty/cost override don't carry over.
+                set({ lightEngineSku: hit.sku, lightEngineLine: headLineForPick(draft.lightEngineSku, hit.sku, draft.lightEngineLine) });
+              }}
+            />
+            <PartPicker
+              label="Lens (optional)"
+              bySku={bySku}
+              value={draft.lensSku}
+              onPick={(hit) => {
+                onPickPart(hit);
+                set({ lensSku: hit.sku, lensLine: headLineForPick(draft.lensSku, hit.sku, draft.lensLine) });
+              }}
+            />
             <label style={LABEL}>Lamp / wattage<input value={draft.lamp} onChange={(e) => set({ lamp: e.target.value })} placeholder="e.g. LED" style={{ ...FIELD, marginTop: 5 }} /></label>
             <label style={LABEL}>Default hang position<input value={draft.position} onChange={(e) => set({ position: e.target.value })} placeholder="e.g. FOH truss 1" style={{ ...FIELD, marginTop: 5 }} /></label>
             <label style={LABEL}>Default circuit<input value={draft.circuit} onChange={(e) => set({ circuit: e.target.value })} placeholder="e.g. 12" style={{ ...FIELD, marginTop: 5 }} /></label>
@@ -279,6 +360,7 @@ export default function FixtureForm({ draft, onChange, parts, bySku, live, cover
               part={bySku.get(draft.lightEngineSku)}
               fallbackName={names[draft.lightEngineSku]}
               onChange={(l) => set({ lightEngineLine: lineAsHead(l) })}
+              minQty={1}
               chip={<div style={{ fontSize: 11, color: "#999fa9" }}>Fixture — its datasheet covers the parts below</div>}
             />
           )}
@@ -296,7 +378,7 @@ export default function FixtureForm({ draft, onChange, parts, bySku, live, cover
       )}
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: isSystem ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         {isSystem ? (
-          <LineBox title="Parts" lines={draft.parts} onLines={(next) => set({ parts: next })} parts={parts} bySku={bySku} names={names} />
+          <LineBox title="Parts" lines={draft.parts} onLines={(next) => set({ parts: next })} bySku={bySku} onPickPart={onPickPart} names={names} />
         ) : (
           FIXTURE_BOXES.map((box) => (
             <LineBox
@@ -304,8 +386,8 @@ export default function FixtureForm({ draft, onChange, parts, bySku, live, cover
               title={FIXTURE_BOX_LABEL[box]}
               lines={draft.lines[box]}
               onLines={(next) => set({ lines: { ...draft.lines, [box]: next } })}
-              parts={parts}
               bySku={bySku}
+              onPickPart={onPickPart}
               names={names}
               chipFor={chipFor}
             />

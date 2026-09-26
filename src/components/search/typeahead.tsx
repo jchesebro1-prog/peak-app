@@ -21,6 +21,13 @@ export type TypeaheadProps<T> = {
   labelOf?: (item: T) => string;
   /** Controlled selection: when it changes the box re-syncs to labelOf(item), or clears. */
   selectedKey?: string | null;
+  /**
+   * Resolves the display item for `selectedKey` when `items` holds only a
+   * live, server-searched result set (so the currently-selected item may not
+   * be among them) rather than the full candidate pool. Falls back to
+   * `items.find(i => keyOf(i) === selectedKey)` when omitted.
+   */
+  resolveSelected?: (key: string) => T | null | undefined;
   /** Multi-pick lists keep the results open after a pick. */
   stayOpen?: boolean;
   max?: number;
@@ -28,6 +35,9 @@ export type TypeaheadProps<T> = {
   ariaLabel?: string;
   inputStyle?: CSSProperties;
   emptyText?: string;
+  /** Fires on every keystroke with the raw box text — for a parent that
+   *  debounces a server search action instead of filtering `items` here. */
+  onQueryChange?: (q: string) => void;
 };
 
 export function Typeahead<T>({
@@ -39,17 +49,19 @@ export function Typeahead<T>({
   onPick,
   labelOf,
   selectedKey,
+  resolveSelected,
   stayOpen = false,
   max = 8,
   placeholder = "Search…",
   ariaLabel,
   inputStyle,
   emptyText = "Nothing matches.",
+  onQueryChange,
 }: TypeaheadProps<T>) {
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
   const key = selectedKey ?? "";
-  const selected = key ? items.find((i) => keyOf(i) === key) ?? null : null;
+  const selected = key ? (resolveSelected ? resolveSelected(key) ?? null : items.find((i) => keyOf(i) === key) ?? null) : null;
   const textFor = (item: T | null) => (item && labelOf ? labelOf(item) : "");
   const [query, setQuery] = useState(textFor(selected));
   const [open, setOpen] = useState(false);
@@ -108,6 +120,7 @@ export function Typeahead<T>({
           setQuery(e.target.value);
           setOpen(true);
           setActive(0);
+          onQueryChange?.(e.target.value);
         }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") {
