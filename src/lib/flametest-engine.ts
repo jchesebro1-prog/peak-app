@@ -5,6 +5,14 @@ import {
   getTravelRates,
   type TravelRates,
 } from "@/lib/stores/pricing";
+import {
+  FLY_CREW_DEFAULTS,
+  planTravel,
+  withMode,
+  type TravelOverride,
+  type TravelPlan,
+  type TripMode,
+} from "@/lib/travel-plan";
 
 /**
  * FlameTest — auto-pricing engine for flame-test quotes. Server port of
@@ -27,6 +35,11 @@ import {
  *      It is not a per-venue or per-curtain charge.
  *   4. Margin — flat 30-point margin of the sell price on top:
  *        total = cost / (1 - margin)   (when 0 < margin < 1)
+ *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — when
+ *      the trip's drive cost reaches the travel_rates threshold (or the quote
+ *      forces Fly) travel prices as flights; the base fee and margin then
+ *      apply to that figure exactly as they do to the drive. Drive mode is
+ *      unchanged.
  *
  * Everything prices from an explicit rates object (pure functions);
  * getRates()/priceQuote() are the async wrappers that read the live,
@@ -58,6 +71,8 @@ export type FlameTestRates = {
   margin: number;
   /** Round total travel time up to the nearest N minutes. */
   travelRoundMin: number;
+  /** Default crew when the trip flies (FLY_CREW_DEFAULTS.flame when absent). */
+  flyCrew?: number;
 };
 
 const RATES_BLOB_ID = "flametest_rates";
@@ -171,6 +186,8 @@ export type VenuePrice = {
 export type FlameTestComputeOpts = {
   office?: FlameTestOffice | null;
   venues?: FlameTestVenueInput[];
+  /** Per-quote travel override (Auto · Drive · Fly, crew, nights, airfare). */
+  travel?: TravelOverride | null;
 };
 
 export type FlameTestPricing = {
@@ -181,8 +198,11 @@ export type FlameTestPricing = {
   venuesSubtotal: number;
   curtainsTotal: number;
   venueCount: number;
-  trip: TripTravel;
-  /** trip.total + testingSubtotal, before the base-fee floor. */
+  /** The drive numbers (trip.total is always the DRIVE cost) + mode/flight. */
+  trip: TripTravel & TripMode;
+  /** The travel plan — travel.total is the figure the quote prices. */
+  travel: TravelPlan;
+  /** travel.total + testingSubtotal, before the base-fee floor. */
   rawCost: number;
   baseFee: number;
   /** True when the whole-job cost was floored at baseFee. */
@@ -300,10 +320,20 @@ export function compute(
   const testingSubtotal = perVenue.reduce((a, v) => a + v.laborCost, 0);
   const curtainsTotal = perVenue.reduce((a, v) => a + v.curtains, 0);
 
-  const trip = tripTravel(opts.office, venues, C, travel);
+  const drive = tripTravel(opts.office, venues, C, travel);
+  // Flights over drive: in drive mode plan.total IS drive.total (bit-for-bit).
+  const plan = planTravel({
+    drive,
+    onSiteHours: (curtainsTotal * C.curtainMinutes) / 60,
+    laborRate: C.laborRate,
+    crewDefault: C.flyCrew ?? FLY_CREW_DEFAULTS.flame,
+    rates: travel,
+    override: opts.travel,
+  });
+  const trip = withMode(drive, plan);
   // Base $150 is a floor on the WHOLE job cost (mileage + travel + testing),
   // not a per-venue charge. Margin is applied on top of the floored cost.
-  const rawCost = trip.total + testingSubtotal;
+  const rawCost = plan.total + testingSubtotal;
   const baseFee = C.baseFee;
   const baseApplied = rawCost < baseFee;
   const cost = baseApplied ? baseFee : rawCost;
@@ -319,6 +349,7 @@ export function compute(
     curtainsTotal,
     venueCount: venues.length,
     trip,
+    travel: plan,
     rawCost,
     baseFee,
     baseApplied,

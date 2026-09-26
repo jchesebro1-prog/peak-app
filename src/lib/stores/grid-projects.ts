@@ -16,6 +16,10 @@ import {
   type GridOption,
 } from "@/lib/design/grid-options";
 export type { GridOption } from "@/lib/design/grid-options";
+import { copyRiserDoc, pruneRisers, type RiserDoc } from "@/lib/design/grid-riser-doc";
+import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
+export type { RiserDoc } from "@/lib/design/grid-riser-doc";
+export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import { compute, VENUES, type AState, type QuickScopeInputs, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 
@@ -125,6 +129,9 @@ export type GridRevision = {
   /** Option list at snapshot time (Spec 1). Absent on older snapshots —
    *  restore normalizes to a single default option. */
   options?: GridOption[];
+  /** Riser documents at snapshot time (#209). Absent on older snapshots —
+   *  restore then drops back to the auto layout. */
+  riser?: Record<string, RiserDoc>;
 };
 
 /**
@@ -204,6 +211,12 @@ export type GridProject = {
    *  fresh from whatever this currently holds. Absent on pre-D-manual-scope
    *  docs, read as null. */
   scopeInputs?: QuickScopeInputs | null;
+  /** Saved riser document per option id (#209) — node layout, level lines,
+   *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
+  riser?: Record<string, RiserDoc>;
+  /** Drawing-set settings (#209) — size, drawn/checked by, excluded sheets,
+   *  general notes, revision labels. Absent = defaults. */
+  drawingSet?: DrawingSetSettings;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -701,6 +714,8 @@ export async function removePlacement(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.placements = (p.placements || []).filter((pl) => pl.id !== placementId);
+    // A riser link or conduit that ended on this device goes with it (#209).
+    if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: new Set([placementId]) });
     p.updatedAt = Date.now();
   });
 }
@@ -780,6 +795,21 @@ export async function setScopeInputs(
   });
 }
 
+/** Merge drawing-set settings (#209). `resetGeneralNotes` drops the set's own
+ *  notes so the cover falls back to Grid Settings' standard notes. */
+export async function setDrawingSet(
+  projectId: string,
+  patch: DrawingSetSettings,
+  opts: { resetGeneralNotes?: boolean } = {}
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const next = cleanDrawingSet({ ...(p.drawingSet || {}), ...cleanDrawingSet(patch) });
+    if (opts.resetGeneralNotes) delete next.generalNotes;
+    p.drawingSet = next;
+    p.updatedAt = Date.now();
+  });
+}
+
 /** Soft-delete a project and its sheets (doc-store tombstones for sync). */
 export async function removeProject(id: string): Promise<void> {
   const sheets = await listSheets(id);
@@ -835,6 +865,8 @@ export async function removeSpace(
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.spaces = (p.spaces || []).filter((s) => s.id !== spaceId);
+    // Its riser box, and any link/conduit ending on it, go too (#209).
+    if (p.riser) p.riser = pruneRisers(p.riser, { spaceIds: new Set([spaceId]) });
     p.updatedAt = Date.now();
   });
 }
@@ -919,6 +951,12 @@ export async function addOption(
       });
       doc.placements = [...(doc.placements || []), ...copied.placements];
       doc.routes = [...(doc.routes || []), ...copied.routes];
+      // The copied option gets its own riser document, device ends re-pointed
+      // at the copied placements (#209).
+      const srcRiser = doc.riser?.[input.copyFromOptionId];
+      if (srcRiser) {
+        doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
+      }
     }
     p.updatedAt = at;
   });
@@ -975,6 +1013,11 @@ export async function removeOption(
     doc.placements = keepP;
     doc.routes = keepR;
     doc.options = doc.options.filter((o) => o.id !== optionId);
+    if (doc.riser && optionId in doc.riser) {
+      const riser = { ...doc.riser };
+      delete riser[optionId];
+      doc.riser = riser;
+    }
     syncQuoteMirror(doc);
     p.updatedAt = Date.now();
   });
@@ -1003,6 +1046,8 @@ function snapshotOf(
     calibrations: [...(p.calibrations || [])],
     spaces: [...(p.spaces || [])],
     routes: [...(p.routes || [])],
+    // Deep copy: the riser document is nested and patched in place later.
+    riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
     options: ensureOptions({
       options: p.options ? p.options.map((o) => ({ ...o })) : undefined,
       quoteId: p.quoteId,
@@ -1065,6 +1110,10 @@ export async function restoreRevision(
     doc.calibrations = [...target.calibrations];
     doc.spaces = [...target.spaces];
     doc.routes = [...(target.routes || [])];
+    // The riser document is design state like placements (#209): restored
+    // wholesale. A pre-#209 snapshot has none → back to the auto layout.
+    if (target.riser) doc.riser = JSON.parse(JSON.stringify(target.riser)) as Record<string, RiserDoc>;
+    else delete doc.riser;
     // sheetIds themselves are still never restored wholesale from the
     // snapshot (a sheet added since, or removed for reasons unrelated to
     // this revision, should stay exactly as it is) — but a sheet that WAS

@@ -27,6 +27,7 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
+import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -137,6 +138,9 @@ async function persist(formData: FormData): Promise<string | null> {
   // travel rates (roadFactor/mph), not driveMiles/driveMinutes' hardcoded
   // defaults.
   const travelRates = await getTravelRates();
+  // Flights over drive (spec 2026-09-25): the builder posts its Auto · Drive ·
+  // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
+  const travelOverride = parseTravelOverride(formData.get("travel"));
   const r = computeEstimate(
     {
       office: office || undefined,
@@ -144,12 +148,15 @@ async function persist(formData: FormData): Promise<string | null> {
       laborHours: hoursEach * crewSize,
       parts: partInputs,
       emergency,
+      crewSize,
+      travel: travelOverride,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
       },
     },
-    rates
+    rates,
+    travelRates
   );
 
   const custName = (await nameFor(customerId)) || cust?.name || "";
@@ -203,13 +210,8 @@ async function persist(formData: FormData): Promise<string | null> {
       crewSize,
       emergency: r.emergency,
       venues: venueInputs.map((v) => ({ id: v.id, label: v.label })),
-      trip: {
-        miles: r.trip.miles,
-        minutes: r.trip.minutes,
-        mileageCost: Math.round(r.trip.mileageCost),
-        timeCost: Math.round(r.trip.timeCost),
-        method: r.trip.method,
-      },
+      trip: savedTrip(r.trip),
+      ...(travelOverride ? { travel: travelOverride } : {}),
       laborCost: Math.round(r.laborCost),
       serviceCost: Math.round(r.serviceCost),
       serviceSell: Math.round(r.serviceSell),

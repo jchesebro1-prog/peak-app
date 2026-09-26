@@ -5782,6 +5782,132 @@ orphaned.
 never the old `/api/part-datasheet/<sku>` URL that 404'd for a part whose only datasheet was a researched link. The
 catalog ETag folds in documents and links, since attaching one moves no part's `updatedAt`.
 
+## D281. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#208, 2026-09-25)
+
+Jeff: "once we reach 1000 dollars in travel expenses, then it switches to flights and hotels with allowances." A pure,
+import-free planner (`src/lib/travel-plan.ts`) runs in the flame-test, repair and inspection engines, their builder
+previews, the save actions and renewal re-pricing, so every path applies one rule. Trigger: the engines' existing
+per-trip drive cost (`trip.total` = mileage + drive-time labor) ≥ `flyThreshold` (default $1,000; 0 = never fly),
+overridable per quote as Auto · Drive · Fly. Fly = crew × airfare + crew × nights × hotel + crew × (nights + 1) × per
+diem + ⌈crew ÷ 2⌉ × (nights + 1) × car + crew × hours each way × 2 × the service's labor rate; nights default to
+⌈on-site hours ÷ (crew × hours per day)⌉; crew, nights and airfare are editable on the quote (blank = default, shown
+as the placeholder). Flight rates live in the shared `travel_rates` blob and each service's default crew in its own
+rates blob (flame 1, repair 2, inspection 1), all in Estimating Rules; missing keys fall back to the defaults — no
+migration. Drive mode returns the drive total itself, so drive-mode prices are bit-for-bit unchanged, and saved
+quotes keep their stored price until someone re-prices them. `trip` keeps the drive numbers and gains `mode` (and
+`flight` when flying); the per-quote override is saved as `travel` on the service subdoc.
+
+## D282. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#208, 2026-09-25)
+
+The spec's default repair crew is 2, but a repair quote already carries a crew size. The flying crew defaults to
+`max(repair_rates.flyCrew, the quote's crew size)` so a crew of 3 is never priced as 2 flights. Travel-day labor
+bills at the service's base labor rate even on emergency quotes — the same rate drive time already uses; only
+on-site labor takes the emergency multiplier.
+
+## D283. Customers see one travel line, at travel's share of the sell price (#208, 2026-09-25)
+
+In fly mode the letters, quote documents and renewal PDFs print one line, "Travel (air, lodging & per diem)", with
+the flight cost marked up by the quote's margin (`flight.total ÷ (1 − margin)`, rounded) — never a bare cost figure
+next to an all-in price. It replaces the round-trip mobilization row (flame, inspection) and the distance sentence
+(repair); the hours column shows the travel-day hours. The proposals' `priceLine` says "the drive", so a new
+editable template field `priceLineFly` ("Everything above — travel (air, lodging & per diem), …") is used in fly
+mode. The itemized airfare / lodging / per diem / car / travel labor stays builder-only.
+
+## D284. Renewals keep last year's travel choice, not last year's airfare (#208, 2026-09-25)
+
+Renewal re-pricing (D69, current rates) carries the prior quote's travel override — mode, crew, nights — but drops
+its manual airfare, which is a one-year number; the allowance applies. When the renewal's mode differs from last
+year's, the email's "why the price changed" list gains "travel now being priced as flights, lodging & per diem
+instead of a drive" (or "…as a drive instead of flights"). Branch review (I1): an inspection record re-prices
+exactly ONE venue, but the prior quote's `nights` may have covered however many venues shared last year's trip —
+carrying that count forward would overstate a single-venue trip's nights, so `nights` is dropped (mode and crew
+still carry) unless the prior quote was itself single-venue, mirroring the venue-count gate the mode-flip wording
+already used.
+
+## D285. The quote-builder previews use the live road factor and speed (#208, 2026-09-25)
+
+The three builders' inlined previews hardcoded 1.25 / 50 mph while the server re-priced with the Estimating Rules
+values. With a threshold on the drive total the two could disagree on drive vs fly, so the pages now hand the
+builders the live `travel_rates` blob and the previews use it. Server totals are unchanged.
+
+## D286. Pre-feature sent quotes open on Drive, not Auto (#208, 2026-09-25)
+
+Branch review finding (I2): a service quote saved before flights-over-drive shipped recorded no travel choice at
+all. If such a quote is past draft (sent, won, lost — a customer may already have seen the price) and is reopened
+in the builder, Auto would silently re-price it as flights the moment the drive cost has since crept over the
+threshold, changing a price nobody agreed to. The three builder pages now seed the travel draft to `{ mode: "drive"
+}` whenever the saved doc has no `travel` override and no `trip.mode` — i.e., it predates the feature — and the
+quote is not a draft. A draft (no customer has seen a price yet) and any quote that already recorded a travel
+choice stay Auto / their own choice.
+
+## D287. The drawing set is a browser-print page with one size table (#209, 2026-09-25)
+
+`/design/grid/<id>/set` renders every sheet as an exact-size `.pk-drawing-sheet` (11×17 ANSI B default, 24×36 ARCH D
+per set) and prints through the shared `PrintButton`. `lib/design/grid-drawing-set.ts` is the only place sheet
+geometry lives: `DrawingSheet` turns it into CSS variables, the page turns it into `@page`, and the plan figure fits
+the plan to the same drawing area. 24×36 is the 11×17 layout scaled by 36/17 (borders, strip and type); the paper
+aspect differs slightly, so the drawing area absorbs it. `?size=` beats the saved size, which beats 11×17.
+
+## D288. Plan sheets: one per system per source page, plus G-101 for unscoped devices (#209, 2026-09-25)
+
+Systems map onto the Scope panel's own taxonomy (`DRAWING_SYSTEMS` in grid-scopes.ts): L = Lighting, A = Audio,
+V = Video, R = Rigging + Curtains. A system gets a sheet only where it has devices or wires. A wire belongs to the
+system of the device it was drawn from (else to); only a free wire falls back to its cable's own scope. Two
+additions the spec didn't list: devices and free wires with no scope print on a **G-101 General devices plan**
+rather than vanishing, and a system that spans several plan sheets/pages gets L-101, L-102 … titled with the source
+sheet. Sheet numbers are assigned before exclusions, so excluding L-101 never renumbers L-102; the cover index and
+"n of N" count only included sheets; all E-60x pages toggle together. "In scope" means "has placements" — the Scope
+panel's system toggles do not hide placed equipment from the drawings.
+
+## D289. Revision table, labels and the printed date (#209, 2026-09-25)
+
+Every Grid revision is lettered A, B, C … (then AA …) in cut order, including quote and restore bookkeeping
+revisions — they are real snapshots. The label is the revision's note, else a per-set label typed on the set page,
+else a plain reason ("Issued with quote"). The strip prints the newest six with "+n earlier". The title-block date is
+the print date; "drawn by" defaults to the project's creator, "checked by" to blank. The company block uses the
+quote-default office's address and phone; Settings has no website field, so none prints. T-001's general notes
+follow the same override pattern: a project-level notes field beats Grid Settings' "Standard general notes"
+default, and unticking a set's own notes on the set page reverts to that standard text rather than blanking the
+sheet.
+
+## D290. The riser document is per option, layout-only for derived things (#209, 2026-09-25)
+
+`GridProject.riser[optionId]` stores node boxes, level lines, conduits, notes and RiserLinks; devices, spaces and
+routes stay derived (D112). Nothing is written on first open — the auto layout is recomputed and saved positions win
+(`mergeLayout`); a new space takes the next free slot. Every space is a node, even an empty one, so devices can be
+added to it. Revisions snapshot and restore the whole riser map; option copy re-points device ends at the copied
+placements; option removal drops that option's document; deleting a device or space prunes the links/conduits that
+ended on it (and a space's saved box). Riser end references are canonicalized server-side — never trusted as the
+client shaped them — before any write, and the document is capped per option (50 levels, 500 conduits, 100 notes,
+1000 links) to keep the single JSONB document bounded. The riser's symbol legend is built from current placements
+rather than a fixed list, so it always matches what's actually drawn on the riser.
+
+## D291. + Device, qty edits and Space write ordinary plan geometry (#209, 2026-09-25)
+
++ Device spreads new placements on a 0.02 grid spiralling out from the space centroid, inside the polygon and clear
+of existing devices; Unassigned devices go along the first sheet's lower margin outside every space. Lowering a
+row's qty removes the newest placements in that space; raising it adds more the same way; the part swap re-points
+every placement in the row. The Space tool adds a 0.10 × 0.07 rectangle on the first-chosen sheet's lower margin
+through the existing `addSpaceAction`; reshaping happens on the plan.
+
+## D292. Connect: a measured route when possible, else a typed RiserLink; conduit is never priced (#209, 2026-09-25)
+
+Two different devices on the same sheet and page, with that page calibrated → a straight `GridRoute` through the
+existing `addRouteAction` (port validation, calibration gate, measured length; the page aspect is measured in the
+browser the way the editor does). Anything else — cross-sheet, a space end, or an uncalibrated page — stores a
+`RiserLink` with a typed length (≤ 5,000 ft, kept to 0.1 ft). A device row's end is its oldest placement. RiserLink
+footage is summed with routes of the same part before rounding up (`routeLines` 4th argument) on both the editor's
+live BOM and the draft quote, and never carries a connectionType. Conduits are annotations only and never reach
+the BOM.
+
+## D293. One PartLite builder and one schedule builder (#209, 2026-09-25)
+
+`gridPartsFrom` (lib/design/grid-parts.ts) replaces the inline builders in the plan page and the riser page; the
+riser, set and schedule use its catalog fallback so pre-library placements still resolve. `/schedule` and the E-60x
+sheets share `buildSchedule`; as a side effect `/schedule` now names Grid-library parts (it used to look up the
+pricing catalog only and printed "(no longer in the catalog)" for them) and lists RiserLinks with the wire runs.
+E-60x paginate at 30 rows per column, two columns per sheet, repeating a section head marked "(cont.)".
+
 ## D-FXB-1. Fixtures and systems are one record type in the `subassemblies` table, ids kept (#FXB, 2026-09-25)
 
 `FixtureRecord` (`src/lib/fixture-assemblies.ts`, store `src/lib/stores/fixtures.ts`) replaces both builders' records

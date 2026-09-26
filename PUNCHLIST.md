@@ -8286,6 +8286,8 @@ primary look.
 the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
 lead's call (never against `.data/pglite`).
 
+---
+
 ## 207. Part documents — datasheets and spec sheets, shared, with accessory coverage — DONE 2026-09-25 (D270–D280)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-part-documents-design.md` · **Plan:**
@@ -8322,6 +8324,63 @@ the function itself has not run hosted yet); then **Fetch links** in batches. Bl
 unreliable (see MASTER-HOWTO §9) — verify drag-and-drop on a preview deploy. **Follow-up:** an orphan sweep for stray
 part-document uploads (a blob uploaded but never attached, e.g. the browser closed mid-flow) is future work — nothing
 currently reclaims those Blob objects.
+
+---
+
+## 208. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D281…D286)
+
+**Reported:** 2026-09-25 (Jeff, brainstorm): "once we reach 1000 dollars in travel expenses, then it switches to
+flights and hotels with allowances." Spec: `docs/superpowers/specs/2026-09-25-travel-flights-design.md`; plan:
+`docs/superpowers/plans/2026-09-25-travel-flights.md`.
+
+**Done.**
+- **One rule everywhere** — `src/lib/travel-plan.ts` (pure, client-safe) prices flights when one trip's drive cost
+  reaches the threshold (default $1,000), used by the flame / repair / inspection engines, their builder previews,
+  the save actions and renewal re-pricing. Drive-mode prices are unchanged; saved quotes keep their price.
+- **Estimating Rules** — Travel & mileage gains the fly threshold, airfare allowance, hotel, per diem, rental car,
+  travel-day hours and on-site hours per day; each service group gains its default flying crew (1 / 2 / 1).
+- **Builders** — a Travel: Auto · Drive · Fly control; in fly mode crew / nights / airfare per person (defaults as
+  placeholders) and the itemized airfare / lodging / per diem / car / travel labor, plus "Drive would be $X — over
+  the $1,000 threshold, priced as flights." when Auto switched.
+- **Customer documents** — one "Travel (air, lodging & per diem)" line at travel's share of the sell price on the
+  flame / inspection / repair letters and both renewal PDFs; new `priceLineFly` template field.
+- **Renewals** — carry last year's travel choice (not its airfare) and say so when the mode flips.
+
+**Still open.** Live airfare lookup, per-venue split trips and Estimator mobilization stay out of scope (spec §7).
+A browser check of the three builders in fly mode on a scratch datadir is the lead's call (never against
+`.data/pglite`). Jeff to confirm the default allowances once real trips are priced.
+
+---
+
+## 209. The Grid — professional drawing set (title blocks) + editable riser — DONE 2026-09-25 (D287…D293)
+
+**Reported:** 2026-09-25 (Jeff, brainstorm with mockups): "talk through making the outputs look more professional …
+adding title blocks, and adding the ability to add via the riser." Spec:
+`docs/superpowers/specs/2026-09-25-grid-drawing-set-and-riser-editor-design.md`; plan:
+`docs/superpowers/plans/2026-09-25-grid-drawing-set-and-riser.md`.
+
+**Done.**
+- **Drawing set** at `/design/grid/<id>/set` (editor and riser toolbars link to it): T-001 cover (project, sheet
+  index, symbol legend, general notes), one plan sheet per system per source page (L/A/V/R, plus G-101 for
+  unscoped devices) with a scale note from the calibration, E-501 riser, E-60x equipment schedules — every sheet
+  with the architectural right-side title strip (logo, company, project, option, revision table, drawn/checked/
+  scale/date, quote, sheet title + number + n of N). 11×17 default, 24×36 per set; set settings (size, drawn/
+  checked, include/exclude sheets, general notes, revision labels) saved on the project; "Standard general notes"
+  in Grid Settings — unticking a set's own notes reverts to that standard text rather than blanking the sheet.
+- **Editable riser**: saved layout (drag nodes), + Device (lands on the plan inside the space), edit/delete device
+  rows (edits the placements), Space, Connect (a measured wire route on the plan, or a typed-length RiserLink that
+  prices like a route), Conduit (annotation, never priced), Level lines (drag), numbered notes. Revisions and option
+  copies carry the riser document. Riser end references are canonicalized server-side and the document is capped
+  per option (50 levels, 500 conduits, 100 notes, 1000 links); the riser legend now builds from current placements.
+- **`/schedule`** now names Grid-library parts (it used to fall back to "(no longer in the catalog)" for them) and
+  lists RiserLinks alongside routed wire runs, sharing `buildSchedule` with the E-60x sheets.
+- Verified by `scripts/fixture-grid-drawing-set.ts`: headless print-to-PDF of the set at both sizes — 6 pages each,
+  every page exactly 1224×792 pt (17×11 in, size B) and 2592×1728 pt (36×24 in, size D).
+
+**Still open.** Levels (upper/lower plan sheets), details/elevations sheets and DWG export stay out of scope. A
+real-project browser check on a scratch DB copy is the lead's call (never against `.data/pglite`).
+
+---
 
 ## #FXB. One fixture builder — the Subassemblies form with the Assemblies logic — DONE 2026-09-25 (D-FXB-1…D-FXB-7)
 

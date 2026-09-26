@@ -5427,8 +5427,9 @@ import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
   // shared builder.
   const gridPlanPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
   const gridRiserPageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/page.tsx"), "utf8");
-  ok(gridPlanPageSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridRiserPageSrc.includes("gridSymbolEntry(s, p, categoryMap)"),
-    "#206 final fix wave: the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry");
+  const gridPartsSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-parts.ts"), "utf8");
+  ok(gridPartsSrc.includes("gridSymbolEntry(s, p, categoryMap)") && gridPlanPageSrc.includes("gridPartsFrom(") && gridRiserPageSrc.includes("gridPartsFrom("),
+    "#206 final fix wave (moved by #209): the plan and the riser both build a Grid-symbol's SymbolEntry fields through gridSymbolEntry, via the shared gridPartsFrom");
 }
 
 /* --- #206 grid stock symbols — Task 3: the badge renderer --- */
@@ -10040,6 +10041,470 @@ async function teardownFixtures(): Promise<void> {
       /decision\.kind === "staleConflict"/.test(loadedIdBranch),
     "#180 review round 3: all three actionable decision kinds are handled — apply, stalePassive (ok:true + notice) and staleConflict (error)"
   );
+}
+
+/* --- #208 flights over drive — the pure planner, its rates and the Estimating
+   Rules rows (spec docs/superpowers/specs/2026-09-25-travel-flights-design.md §3, §6) --- */
+import {
+  FLY_RATE_DEFAULTS,
+  FLY_CREW_DEFAULTS,
+  TRAVEL_FLY_LINE,
+  planTravel,
+  resolveFlyRates,
+  normalizeTravelOverride,
+  parseTravelOverride,
+  carryTravelOverride,
+  draftFromOverride,
+  overrideFromDraft,
+  savedTrip,
+  flightOf,
+  travelLineAmount,
+  autoSwitchNote,
+  flyTravelSentence,
+  travelModeChangeReason,
+} from "@/lib/travel-plan";
+import {
+  FLAMETEST_RATE_DEFAULTS,
+  REPAIR_RATE_DEFAULTS,
+  INSPECTION_RATE_DEFAULTS,
+} from "@/lib/stores/pricing";
+{
+  const R = FLY_RATE_DEFAULTS;
+  ok(
+    R.flyThreshold === 1000 && R.airfarePerPerson === 450 && R.hotelPerNight === 140 &&
+      R.perDiemPerDay === 70 && R.carPerDay === 75 && R.flyTravelHoursEachWay === 4 && R.flyHoursPerDay === 8,
+    "#208: fly-rate defaults are exactly the spec table ($1,000 / $450 / $140 / $70 / $75 / 4 h / 8 h)"
+  );
+  ok(
+    FLY_CREW_DEFAULTS.flame === 1 && FLY_CREW_DEFAULTS.repair === 2 && FLY_CREW_DEFAULTS.inspection === 1,
+    "#208: default flying crew is flame 1 · repairs 2 · inspections 1"
+  );
+  ok(
+    TRAVEL_RATE_DEFAULTS.roadFactor === 1.25 && TRAVEL_RATE_DEFAULTS.mph === 50 &&
+      TRAVEL_RATE_DEFAULTS.flyThreshold === 1000 && TRAVEL_RATE_DEFAULTS.flyHoursPerDay === 8,
+    "#208: the travel_rates defaults keep 1.25 / 50 and carry every fly key"
+  );
+  ok(
+    FLAMETEST_RATE_DEFAULTS.flyCrew === 1 && REPAIR_RATE_DEFAULTS.flyCrew === 2 && INSPECTION_RATE_DEFAULTS.flyCrew === 1,
+    "#208: each service's rates blob defaults carry its flyCrew"
+  );
+  ok(TRAVEL_FLY_LINE === "Travel (air, lodging & per diem)", "#208: the customer-facing line is exactly 'Travel (air, lodging & per diem)'");
+
+  // threshold boundary (on-site 10 h, 1 person, $75/h)
+  const base = { onSiteHours: 10, laborRate: 75, crewDefault: 1, rates: R };
+  const p999 = planTravel({ ...base, drive: { total: 999.99 } });
+  ok(p999.mode === "drive" && p999.flight === null && p999.total === 999.99, "#208: a $999.99 drive stays a drive, total untouched");
+  const p1000 = planTravel({ ...base, drive: { total: 1000 } });
+  ok(p1000.mode === "fly" && p1000.autoMode === "fly" && p1000.choice === "auto" && p1000.flight !== null, "#208: a $1,000 drive flies (≥ threshold)");
+  const pNever = planTravel({ ...base, rates: { ...R, flyThreshold: 0 }, drive: { total: 50000 } });
+  ok(pNever.mode === "drive" && pNever.total === 50000, "#208: threshold 0 never flies");
+
+  // forced modes
+  const forcedDrive = planTravel({ ...base, drive: { total: 5000 }, override: { mode: "drive" } });
+  ok(forcedDrive.mode === "drive" && forcedDrive.autoMode === "fly" && forcedDrive.total === 5000 && forcedDrive.flight === null,
+    "#208: forced Drive over the threshold prices the drive");
+  const forcedFly = planTravel({ ...base, drive: { total: 100 }, override: { mode: "fly" } });
+  ok(forcedFly.mode === "fly" && forcedFly.autoMode === "drive" && forcedFly.choice === "fly" && forcedFly.total === 1765,
+    "#208: forced Fly under the threshold prices flights");
+
+  // formulas: 10 h on site, crew 1, 8 h/day → 2 work days, 2 nights, 3 trip days
+  const f = p1000.flight!;
+  ok(f.crew === 1 && f.workDays === 2 && f.nights === 2 && f.tripDays === 3, "#208: workDays = ceil(10 / 8) = 2, nights = workDays, tripDays = nights + 1");
+  ok(
+    f.airfare === 450 && f.lodging === 280 && f.perDiem === 210 && f.car === 225 &&
+      f.travelHours === 8 && f.travelLabor === 600 && f.total === 1765 && p1000.total === 1765,
+    "#208: airfare 450 + lodging 280 + per diem 210 + car 225 + travel labor 600 = 1,765"
+  );
+  ok(p1000.defaults.crew === 1 && p1000.defaults.nights === 2 && p1000.defaults.airfarePerPerson === 450, "#208: the plan reports the defaults the builder shows as placeholders");
+
+  // crew override 3 → 1 work day, 1 night, 2 trip days, ceil(3/2) = 2 cars
+  const c3 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 3 } }).flight!;
+  ok(
+    c3.crew === 3 && c3.workDays === 1 && c3.nights === 1 && c3.tripDays === 2 && c3.airfare === 1350 &&
+      c3.lodging === 420 && c3.perDiem === 420 && c3.car === 300 && c3.travelLabor === 1800 && c3.total === 4290,
+    "#208: a crew override of 3 re-derives work days and prices 2 cars (4,290)"
+  );
+  const c2 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 2 } }).flight!;
+  ok(c2.car === 150, "#208: 2 people share 1 car (ceil(2/2) × 2 days × $75)");
+
+  // nights override 0 → a same-day fly-in
+  const n0 = planTravel({ ...base, drive: { total: 2000 }, override: { nights: 0 } }).flight!;
+  ok(n0.workDays === 2 && n0.nights === 0 && n0.tripDays === 1 && n0.lodging === 0 && n0.perDiem === 70 && n0.car === 75,
+    "#208: a nights override replaces workDays; tripDays = nights + 1");
+
+  // airfare override
+  const air = planTravel({ ...base, drive: { total: 2000 }, override: { airfarePerPerson: 800 } }).flight!;
+  ok(air.airfare === 800 && air.total === 1765 - 450 + 800, "#208: the manual airfare replaces the allowance");
+
+  // travel labor uses the service's labor rate
+  const lab = planTravel({ ...base, laborRate: 100, drive: { total: 2000 } }).flight!;
+  ok(lab.travelLabor === 800, "#208: travel labor = crew × 4 h × 2 × the service's labor rate");
+
+  // zero on-site hours still books one work day
+  ok(planTravel({ ...base, onSiteHours: 0, drive: { total: 2000 } }).flight!.workDays === 1, "#208: zero on-site hours → 1 work day");
+
+  // missing blob keys fall back to the defaults
+  ok(JSON.stringify(resolveFlyRates(undefined)) === JSON.stringify(R), "#208: resolveFlyRates(undefined) = the defaults");
+  const partialRates = resolveFlyRates({ hotelPerNight: 200 });
+  ok(partialRates.hotelPerNight === 200 && partialRates.flyThreshold === 1000 && partialRates.carPerDay === 75,
+    "#208: a stored blob with only some fly keys keeps the defaults for the rest");
+  const pEmpty = planTravel({ ...base, rates: {}, drive: { total: 1000 } });
+  ok(pEmpty.mode === "fly" && pEmpty.total === 1765, "#208: an existing travel_rates blob with no fly keys prices with the defaults");
+
+  // override normalization / posting / drafts / carry-forward
+  ok(normalizeTravelOverride({ mode: "auto" }) === undefined, "#208: mode 'auto' with nothing else is no override");
+  ok(
+    JSON.stringify(normalizeTravelOverride({ mode: "fly", crew: "2", nights: "", airfarePerPerson: "abc" })) === JSON.stringify({ mode: "fly", crew: 2 }),
+    "#208: normalize keeps valid fields, coerces numeric strings, drops blanks and junk"
+  );
+  ok(normalizeTravelOverride({ crew: 0, nights: -1 }) === undefined && normalizeTravelOverride("junk") === undefined,
+    "#208: crew < 1, negative nights and non-objects are rejected");
+  ok(JSON.stringify(parseTravelOverride('{"mode":"drive","nights":3}')) === JSON.stringify({ mode: "drive", nights: 3 }) &&
+      parseTravelOverride("{not json") === undefined && parseTravelOverride(null) === undefined,
+    "#208: parseTravelOverride reads the posted JSON and tolerates garbage");
+  const d = draftFromOverride({ mode: "fly", crew: 3 });
+  ok(d.mode === "fly" && d.crew === "3" && d.nights === "" && d.airfare === "", "#208: draftFromOverride fills the builder inputs");
+  ok(JSON.stringify(overrideFromDraft(d)) === JSON.stringify({ mode: "fly", crew: 3 }) && overrideFromDraft(draftFromOverride(undefined)) === undefined,
+    "#208: overrideFromDraft round-trips; an untouched draft posts no override");
+  ok(JSON.stringify(carryTravelOverride({ mode: "fly", crew: 3, airfarePerPerson: 900 })) === JSON.stringify({ mode: "fly", crew: 3 }) &&
+      carryTravelOverride({ airfarePerPerson: 900 }) === undefined,
+    "#208: a renewal carries last year's mode/crew/nights but never last year's airfare");
+
+  // persisted trip + letters
+  const st = savedTrip({ miles: 1000, minutes: 960, mileageCost: 1000.4, timeCost: 1199.6, method: "estimate", mode: "fly", flight: { ...f, airfare: 450.4 } });
+  ok(st.mileageCost === 1000 && st.timeCost === 1200 && st.mode === "fly" && st.flight?.airfare === 450 && st.flight?.total === 1765,
+    "#208: savedTrip rounds money like today's trip block and keeps mode + flight");
+  const sd = savedTrip({ miles: 200, minutes: 240, mileageCost: 200, timeCost: 300, method: "route", mode: "drive" });
+  ok(sd.mode === "drive" && !("flight" in sd), "#208: a drive-mode saved trip carries mode 'drive' and no flight");
+  ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
+    "#208: flightOf returns a flight only for a fly-mode saved trip");
+  ok(travelLineAmount(1765, 0.3) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
+    "#208: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
+  ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
+    "#208: the builder note reads exactly as spec §5");
+  ok(
+    flyTravelSentence("Peak Systems Group (Milwaukee)", "Lakefront Theatre", 2521) ===
+      "Given the distance from Peak Systems Group (Milwaukee) to Lakefront Theatre, this visit is priced with air travel — Travel (air, lodging & per diem): $2,521.",
+    "#208: the letter sentence names the one travel line and its amount"
+  );
+  ok(
+    travelModeChangeReason("drive", "fly") === "travel now being priced as flights, lodging & per diem instead of a drive" &&
+      travelModeChangeReason("fly", "drive") === "travel now being priced as a drive instead of flights" &&
+      travelModeChangeReason("drive", "drive") === null && travelModeChangeReason("fly", "fly") === null,
+    "#208: renewal 'why the price changed' wording on a mode flip, silence otherwise"
+  );
+
+  // Estimating Rules rows (the page renders GROUPS generically)
+  const trvRows = (key: string): RateEntry[] =>
+    PRICING_GROUPS.find((g) => g.key === key)!.items.filter((it): it is RateEntry => it.kind === "rate");
+  const flyKeys = ["flyThreshold", "airfarePerPerson", "hotelPerNight", "perDiemPerDay", "carPerDay", "flyTravelHoursEachWay", "flyHoursPerDay"] as const;
+  ok(
+    flyKeys.every((k) => {
+      const row = trvRows("travel").find((it) => it.id === "travel." + k);
+      return !!row && row.store === "travel" && row.key === k && row.ref === false && row.def === FLY_RATE_DEFAULTS[k];
+    }),
+    "#208: Estimating Rules → Travel & mileage exposes all seven flight rates, live, keyed into travel_rates"
+  );
+  const crewRow = (g: string) => trvRows(g).find((it) => it.id === g + ".flyCrew");
+  ok(
+    crewRow("flame")?.store === "flame" && crewRow("flame")?.key === "flyCrew" && crewRow("flame")?.def === 1 &&
+      crewRow("repair")?.store === "repair" && crewRow("repair")?.def === 2 &&
+      crewRow("inspection")?.store === "inspection" && crewRow("inspection")?.def === 1,
+    "#208: each service group exposes its default flying crew"
+  );
+
+  const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
+  ok(!/^\s*import\s/m.test(trvSrc), "#208: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
+}
+
+/* --- #208 engines: drive mode unchanged vs before (hard-coded pre-change
+   figures), fly mode equals the hand-computed spec formula. All fixtures use
+   the no-coords estimate branch (trip = one-way × 2) so every number is exact. --- */
+import { computeEstimate as trvRepairEstimate } from "@/lib/repair-engine";
+import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engine";
+{
+  const near = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
+
+  // ---- flame (1 person) ----
+  const flameRates = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
+  const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
+  const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
+  ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.total, 575 / (1 - 0.3)),
+    "#208 flame: a $500 drive prices exactly as before (575 cost → 821.43)");
+  ok(fd.trip.mode === "drive" && !("flight" in fd.trip) && fd.travel?.total === fd.trip.total && fd.rawCost === fd.trip.total + fd.testingSubtotal,
+    "#208 flame: drive mode prices trip.total itself (bit-for-bit)");
+  const ff = computeFlameQuote({ venues: [flameFar] }, flameRates);
+  ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.total, 2515 / (1 - 0.3)),
+    "#208 flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
+  ok(ff.trip.flight?.crew === 1 && ff.trip.flight?.nights === 2 && ff.trip.flight?.tripDays === 3,
+    "#208 flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
+  const ffDrive = computeFlameQuote({ venues: [flameFar], travel: { mode: "drive" } }, flameRates);
+  ok(ffDrive.trip.mode === "drive" && ffDrive.rawCost === 2950, "#208 flame: forced Drive over the threshold prices the 2,200 drive");
+  const fdFly = computeFlameQuote({ venues: [flameNear], travel: { mode: "fly" } }, flameRates);
+  ok(fdFly.trip.mode === "fly" && fdFly.travel?.total === 1480 && fdFly.rawCost === 1555, "#208 flame: forced Fly under the threshold (1 night) = 1,480 travel");
+  const ffCrew2 = computeFlameQuote({ venues: [flameFar] }, { ...flameRates, flyCrew: 2 });
+  ok(ffCrew2.travel?.total === 2810, "#208 flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
+
+  // ---- repair (default crew 2) ----
+  const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
+  ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.total, 607.5 / (1 - 0.3)) && rd.trip.mode === "drive",
+    "#208 repair: a $307.50 drive prices exactly as before (607.50 service cost)");
+  const rf = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24 }, repairRates);
+  ok(rf.trip.mode === "fly" && rf.trip.flight?.crew === 2 && rf.travel?.total === 3305 && rf.serviceCost === 5105 && near(rf.total, 5105 / (1 - 0.3)),
+    "#208 repair: 24 crew-hours far away fly 2 people — 3,305 travel + 1,800 labor");
+  const rf3 = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3 }, repairRates);
+  ok(rf3.trip.flight?.crew === 3 && rf3.travel?.total === 4290, "#208 repair: a crew of 3 on the quote flies 3 (never fewer than the priced crew)");
+  const rfe = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, emergency: true }, repairRates);
+  ok(rfe.laborCost === 2700 && rfe.trip.flight?.travelLabor === 1200, "#208 repair: emergency multiplies on-site labor only — travel labor stays at the base $75");
+  const rfOverride = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, travel: { mode: "drive" } }, repairRates);
+  ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#208 repair: forced Drive keeps the drive");
+
+  // ---- inspection (1 person) ----
+  const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
+  ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.total, 832.5 / (1 - 0.3)) && idr.trip.mode === "drive",
+    "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
+  const ifl = trvInspectionEstimate({ venues: [{ id: "trv-i2", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 }] }, inspRates);
+  ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.total, 2665 / (1 - 0.3)),
+    "#208 inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
+}
+
+/* --- #208 save paths: every path that persists a service quote stores the
+   priced trip through savedTrip() (mode + flight) and the per-quote override --- */
+{
+  const trvSavers = [
+    "src/app/(app)/flame-tests/quote/actions.ts",
+    "src/app/(app)/repairs/quote/actions.ts",
+    "src/app/(app)/inspections/quote/actions.ts",
+    "src/lib/renewal-outreach.ts",
+  ];
+  for (const f of trvSavers) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(/trip: savedTrip\(r\.trip\)/.test(src) && !/mileageCost: Math\.round\(r\.trip\.mileageCost\)/.test(src),
+      `#208: ${f} persists the priced trip (mode + flight) through savedTrip()`);
+    ok(/travel: travelOverride/.test(src) && /\{ travel: travelOverride \}/.test(src),
+      `#208: ${f} prices with and persists the per-quote travel override`);
+  }
+  const renewalSrc = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
+  ok((renewalSrc.match(/carryTravelOverride\(/g) || []).length === 2 && (renewalSrc.match(/travelModeChangeReason\(/g) || []).length === 2,
+    "#208: flame + inspection renewals carry last year's travel choice and explain a mode flip");
+  const repairActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/repairs/quote/actions.ts"), "utf8");
+  ok(/crewSize,\s*\n\s*travel: travelOverride/.test(repairActionsSrc), "#208: the repair save passes the crew size so the flying crew is never smaller");
+}
+
+/* --- #208 builders: previews run the same planner with the live travel
+   rates, render the travel panel, post the override — and stay client-safe --- */
+{
+  for (const svc of ["flame-tests", "repairs", "inspections"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/controls.tsx`), "utf8");
+    ok(/from "@\/lib\/travel-plan"/.test(src) && /planTravel\(/.test(src) && /<TravelModePanel/.test(src),
+      `#208: the ${svc} builder previews through planTravel and renders the travel panel`);
+    ok(/fd\.set\("travel", JSON\.stringify\(overrideFromDraft\(travelDraft\) \?\? \{\}\)\)/.test(src),
+      `#208: the ${svc} builder posts its travel override`);
+    ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(src),
+      `#208: the ${svc} builder imports no value from @/lib/stores or @/db`);
+    ok(!/\* 1\.25\)/.test(src) && !/\/ 50\) \* 60/.test(src),
+      `#208: the ${svc} preview uses the live road factor / speed, not 1.25 / 50`);
+    const page = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
+    ok(/getTravelRates\(\)/.test(page) && /travelRates=\{travelRates\}/.test(page) && /normalizeTravelOverride\(/.test(page),
+      `#208: the ${svc} page hands the builder live travel rates and the saved override`);
+  }
+  const panelSrc = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
+  ok(/^"use client";/.test(panelSrc) && !/from "@\/(lib\/stores|db)\//.test(panelSrc) && /autoSwitchNote\(/.test(panelSrc),
+    "#208: the travel panel is a client component that imports only the pure planner");
+}
+
+/* --- #208 letters: fly mode prints ONE customer line, never the itemization --- */
+import { renderField as trvRenderField } from "@/lib/templates";
+{
+  ok(
+    trvRenderField(undefined, "flame_proposal", "priceLineFly", { curtainsLabel: "12 curtains", price: "$3,593" }) ===
+      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 12 curtains inspected and documented — comes to $3,593, all in.",
+    "#208: flame_proposal has a fly-mode price line that never says 'the drive'"
+  );
+  ok(
+    trvRenderField(undefined, "inspection_proposal", "priceLineFly", { lineSetsLabel: "40 line sets", price: "$3,807" }) ===
+      "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 40 line sets inspected and documented — comes to $3,807, all in.",
+    "#208: inspection_proposal has a fly-mode price line"
+  );
+  ok(!!getTemplateDef("flame_proposal")?.fields.some((fl) => fl.id === "priceLineFly") &&
+      !!getTemplateDef("inspection_proposal")?.fields.some((fl) => fl.id === "priceLineFly"),
+    "#208: the fly price line is an editable template field on both proposals");
+  const trvLetters: Array<[string, RegExp]> = [
+    ["src/app/(app)/flame-tests/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/inspections/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/repairs/letter/page.tsx", /flyTravelSentence\(/],
+    ["src/lib/renewal-outreach.ts", /flyTravelSentence\(/],
+  ];
+  for (const [f, line] of trvLetters) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(/flightOf\(/.test(src) && line.test(src) && /travelLineAmount\(/.test(src),
+      `#208: ${f} prints the one travel line at travel's share of the sell price in fly mode`);
+    ok(!/lodging|perDiem|airfare/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")),
+      `#208: ${f} never prints the itemized airfare / lodging / per diem`);
+  }
+  const renewalLetters = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
+  ok((renewalLetters.match(/flight \? "priceLineFly" : rtMiles > 0 \? "priceLine" : "priceLineNoTravel"/g) || []).length === 2,
+    "#208: both renewal PDFs pick the fly price line in fly mode");
+}
+
+/* --- #208 branch-review fixes (2026-09-25): I1 (renewal nights carry),
+   M1 (both-fly change-reason wording), M2 (repair crew clamp), M3 (travel
+   panel normalized-entry hint), M4 (Estimating Rules formula note) --- */
+import {
+  carryInspectionTravelOverride,
+  flameChangeReasons,
+  inspectionChangeReasons,
+} from "@/lib/renewal-outreach";
+{
+  // I1 — a prior inspection quote's carried override drops `nights` (keeps
+  // mode + crew) when that quote covered more than one venue; a single-venue
+  // prior still carries nights forward.
+  const multiVenuePrior = carryInspectionTravelOverride(
+    { mode: "fly", crew: 2, nights: 3, airfarePerPerson: 900 },
+    3
+  );
+  ok(
+    JSON.stringify(multiVenuePrior) === JSON.stringify({ mode: "fly", crew: 2 }),
+    "#208 I1: a multi-venue prior's carried override drops nights (and airfare), keeps mode + crew"
+  );
+  const singleVenuePrior = carryInspectionTravelOverride(
+    { mode: "fly", crew: 2, nights: 3, airfarePerPerson: 900 },
+    1
+  );
+  ok(
+    JSON.stringify(singleVenuePrior) === JSON.stringify({ mode: "fly", crew: 2, nights: 3 }),
+    "#208 I1: a single-venue prior's carried override keeps nights too"
+  );
+  ok(
+    carryInspectionTravelOverride({ nights: 4 }, 2) === undefined,
+    "#208 I1: dropping the only field a multi-venue override carried collapses to no override (falls back to Auto)"
+  );
+  ok(
+    JSON.stringify(carryInspectionTravelOverride({ mode: "drive" }, 0)) === JSON.stringify({ mode: "drive" }),
+    "#208 I1: an override with no nights to drop passes through unchanged regardless of venue count"
+  );
+}
+{
+  // M1 — mileage-rate / travel-distance reasons are dropped when both years
+  // priced this trip as flights; a mode flip still explains itself.
+  const flameRatesM1 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const farFlameVenue: FTVenue = { id: "trv-m1-flame-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
+  const fr = computeFlameQuote({ venues: [farFlameVenue] }, flameRatesM1);
+  ok(fr.trip.mode === "fly", "#208 M1 flame setup: the fixture actually flies this year");
+  const priorFlameBothFly = {
+    rates: { ...flameRatesM1, mileageRate: 2 },
+    trip: { miles: fr.trip.miles - 40, mode: "fly" },
+    curtainsTotal: fr.curtainsTotal,
+  };
+  const flameBothFly = flameChangeReasons(priorFlameBothFly, fr);
+  ok(
+    !flameBothFly.some((x) => /mileage rate/.test(x)) && !flameBothFly.some((x) => /travel distance/.test(x)),
+    "#208 M1 flame: mileage-rate and travel-distance changes are never cited when both years flew"
+  );
+  const priorFlameDrove = { ...priorFlameBothFly, trip: { miles: fr.trip.miles - 40, mode: "drive" } };
+  const flameFlip = flameChangeReasons(priorFlameDrove, fr);
+  ok(
+    flameFlip.some((x) => /mileage rate/.test(x)) &&
+      flameFlip.some((x) => /travel distance/.test(x)) &&
+      flameFlip.some((x) => /priced as flights/.test(x)),
+    "#208 M1 flame: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
+  );
+
+  const inspRatesM1 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const farInspVenue = { id: "trv-m1-insp-far", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 };
+  const ir = trvInspectionEstimate({ venues: [farInspVenue] }, inspRatesM1);
+  ok(ir.trip.mode === "fly", "#208 M1 inspection setup: the fixture actually flies this year");
+  const priorInspBothFly = {
+    rates: { ...inspRatesM1, mileageRate: 2 },
+    venues: [{ id: "trv-m1-insp-far", label: "Far", lineSets: 40 }],
+    lineSetsTotal: ir.lineSetsTotal,
+    trip: { miles: ir.trip.miles - 40, mode: "fly" },
+  };
+  const inspBothFly = inspectionChangeReasons(priorInspBothFly, ir, "Far");
+  ok(
+    !inspBothFly.some((x) => /mileage rate/.test(x)) && !inspBothFly.some((x) => /travel distance/.test(x)),
+    "#208 M1 inspection: mileage-rate and travel-distance changes are never cited when both years flew"
+  );
+  const priorInspDrove = { ...priorInspBothFly, trip: { miles: ir.trip.miles - 40, mode: "drive" } };
+  const inspFlip = inspectionChangeReasons(priorInspDrove, ir, "Far");
+  ok(
+    inspFlip.some((x) => /mileage rate/.test(x)) &&
+      inspFlip.some((x) => /travel distance/.test(x)) &&
+      inspFlip.some((x) => /priced as flights/.test(x)),
+    "#208 M1 inspection: a mode flip (drive → fly) still cites the mileage-rate/distance diff and calls out the flip"
+  );
+}
+{
+  // M2 — repair-engine.ts clamps a manual crew override up to crewSize
+  // (D282 "never fewer"); an override already at or above it is untouched.
+  const repairRatesM2 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rClamped = trvRepairEstimate(
+    { venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3, travel: { mode: "fly", crew: 1 } },
+    repairRatesM2
+  );
+  ok(
+    rClamped.trip.flight?.crew === 3,
+    "#208 M2: a manual crew override below the job's crew size is clamped up to crewSize, never lower"
+  );
+  const rNotClamped = trvRepairEstimate(
+    { venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 2, travel: { mode: "fly", crew: 5 } },
+    repairRatesM2
+  );
+  ok(rNotClamped.trip.flight?.crew === 5, "#208 M2: a manual crew override above crewSize is left alone");
+}
+{
+  // M3 — the travel panel flags a normalized (rounded) or invalid crew/nights
+  // entry instead of silently pricing a different number than what's shown,
+  // and prices with travel-plan's fmtUsd rather than a local money().
+  const panelSrc2 = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
+  ok(
+    /\bfmtUsd\b/.test(panelSrc2) && /from "@\/lib\/travel-plan"/.test(panelSrc2) && !/function money\(/.test(panelSrc2),
+    "#208 M3: the travel panel prices with travel-plan's fmtUsd, not a local money()"
+  );
+  ok(
+    /function normalizedHint\(/.test(panelSrc2) &&
+      /normalizedHint\(draft\.crew, flight\.crew, 1\)/.test(panelSrc2) &&
+      /normalizedHint\(draft\.nights, flight\.nights, 0\)/.test(panelSrc2),
+    "#208 M3: a typed crew/nights value is checked against its effective (normalized) value next to the field"
+  );
+  ok(
+    /Invalid entry — using \$\{effective\}/.test(panelSrc2) && /Rounded to \$\{effective\}/.test(panelSrc2),
+    "#208 M3: the hint names the effective value actually pricing the quote, or flags the entry invalid"
+  );
+}
+{
+  // I2 (D286) — a quote saved before this feature shipped (past draft,
+  // no recorded travel choice) opens the builder seeded to Drive so
+  // saving/approving keeps the price the customer already saw; drafts and
+  // quotes with a recorded choice are untouched (stay Auto / their choice).
+  const trvLegacyPages = [
+    "src/app/(app)/flame-tests/quote/page.tsx",
+    "src/app/(app)/repairs/quote/page.tsx",
+    "src/app/(app)/inspections/quote/page.tsx",
+  ];
+  for (const f of trvLegacyPages) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(
+      /const legacyDrive =\s*\n\s*editQuote\.status !== "draft" && !\w+\?\.travel && !\w+\?\.trip\?\.mode;/.test(src),
+      `#208 I2: ${f} computes legacyDrive only for a past-draft quote with no recorded travel choice`
+    );
+    ok(
+      /\?\? \(legacyDrive \? \{ mode: "drive" \} : null\)/.test(src),
+      `#208 I2: ${f} seeds the travel draft to { mode: "drive" } for that legacy case`
+    );
+  }
+}
+{
+  // M4 — the Estimating Rules formula strings name flights-over-drive.
+  const trvFormula = (key: string, id: string): string =>
+    (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
+  const trvFlyNote = "travel = flights when one trip's drive cost ≥ threshold";
+  ok(trvFormula("flame", "flame.total").includes(trvFlyNote), "#208 M4: flame.total's formula string notes flights-over-drive");
+  ok(trvFormula("repair", "repair.total").includes(trvFlyNote), "#208 M4: repair.total's formula string notes flights-over-drive");
+  ok(trvFormula("inspection", "inspection.total").includes(trvFlyNote), "#208 M4: inspection.total's formula string notes flights-over-drive");
 }
 
 seeded()
@@ -16573,4 +17038,564 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
     line.components.find((c) => c.sku === "T-GHOST")!.cost === 42 && line.components.find((c) => c.sku === "T-OPT")!.cost === 6,
     "#FXB Estimator parity: the missing part's and the qty-0 line's cost overrides both ride through unchanged"
   );
+}
+
+/* --- #209 grid drawing set — Task 1: sheet-set model --- */
+import {
+  SHEET_SIZES, REV_ROWS, drawingArea, resolveSheetSize, sheetCssVars, printPageCss, fitBox, scaleNote,
+  revLetter, revisionRows, revisionStatus, titleBlockData, cleanDrawingSet, cleanStandardNotes, resolveGeneralNotes,
+  placementScope, planSheetGroups, planContent, buildSheetList, toggleableSheets,
+} from "@/lib/design/grid-drawing-set";
+import { DRAWING_SYSTEMS, drawingSystemOf } from "@/lib/design/grid-scopes";
+import { buildSchedule, scheduleGroups, paginateSchedule, scheduleWiresFromView } from "@/lib/design/grid-schedule";
+
+{
+  // sizes
+  ok(JSON.stringify(drawingArea("b")) === JSON.stringify({ w: 13.3, h: 9.8 }), "#209 sizes: the 11×17 drawing area is 13.3 × 9.8 in");
+  ok(drawingArea("d").w > 2 * drawingArea("b").w && SHEET_SIZES.d.w === 36 && SHEET_SIZES.d.h === 24, "#209 sizes: 24×36 is the same layout scaled up");
+  ok(resolveSheetSize("d", "b") === "d" && resolveSheetSize("x", "d") === "d" && resolveSheetSize(undefined, undefined) === "b", "#209 sizes: ?size= wins, then the saved size, then 11×17");
+  ok(printPageCss("d").includes("size: 36in 24in") && printPageCss("b").includes("size: 17in 11in") && printPageCss("b").includes("margin: 0"), "#209 sizes: @page matches the sheet");
+  ok(sheetCssVars("b")["--dw-strip"] === "2.5in" && sheetCssVars("d")["--dw-w"] === "36in" && sheetCssVars("d")["--dw-k"] === "2.118", "#209 sizes: CSS variables come from one table");
+  ok(JSON.stringify(fitBox(13.3, 9.8, 0.5)) === JSON.stringify({ w: 13.3, h: 6.65 }) && JSON.stringify(fitBox(13.3, 9.8, 1)) === JSON.stringify({ w: 9.8, h: 9.8 }) && fitBox(10, 10, 0).w === 0, "#209 fit: a plan fits the drawing area by its limiting side");
+  ok(scaleNote({ scale: 100, unit: "ft" }, 10) === `1" = 10'-0"` && scaleNote(null, 10) === "NTS" && scaleNote({ scale: 100, unit: "ft" }, 0) === "NTS", "#209 scale: from the calibration and the printed width, NTS when uncalibrated");
+
+  // revisions
+  ok([0, 25, 26, 27].map(revLetter).join() === "A,Z,AA,AB", "#209 revisions: letters run A…Z, AA…");
+  const gdsRevs = [
+    { rev: 2, at: 2000, note: "", reason: "quote" as const },
+    { rev: 1, at: 1000, note: "Schematic", reason: "manual" as const },
+    { rev: 3, at: 3000, note: "", reason: "manual" as const },
+  ];
+  const gdsRows = revisionRows(gdsRevs, { "3": "Owner comments" });
+  ok(gdsRows.map((r) => `${r.letter}:${r.label}`).join("|") === "A:Schematic|B:Issued with quote|C:Owner comments", "#209 revisions: cut order; the note, else an editable label, else the reason");
+  ok(revisionStatus(gdsRows) === "Rev C" && revisionStatus([]) === "— Preliminary", "#209 revisions: the set is marked with the latest letter, or Preliminary");
+
+  // title-block data
+  const tbBase = {
+    company: {
+      name: "Peak Systems Group",
+      logoDark: null,
+      offices: [
+        { street: "1 A St", city: "Appleton", state: "WI", zip: "54911", phone: "920-555-0100" },
+        { street: "9 B St", city: "Madison", state: "WI", zip: "53703", phone: "608-555-0100", quoteDefault: true },
+      ],
+    },
+    project: { id: "GRD-5009", name: "Main Stage", customer: "Lakefront", siteName: "", intake: { venueName: "Lakefront PAC", address: "12 Shore Dr" }, createdBy: "Jeff" },
+    option: { name: "Better", quoteId: "Q-2100" },
+    optionCount: 1,
+    revisions: [],
+    set: undefined,
+    sheet: { number: "L-101", title: "Lighting plan", scale: "AS NOTED" },
+    index: 2,
+    total: 5,
+    now: 5000,
+  };
+  const tb0 = titleBlockData(tbBase);
+  ok(tb0.status === "— Preliminary" && tb0.revisions.length === 0, "#209 title block: no revisions → Preliminary");
+  ok(tb0.optionName === null && tb0.company.addressLines.join("|") === "9 B St|Madison, WI 53703" && tb0.company.phone === "608-555-0100", "#209 title block: one option hides the option row; the quote-default office supplies the address");
+  ok(tb0.project.venue === "Lakefront PAC" && tb0.project.address === "12 Shore Dr" && tb0.drawnBy === "Jeff" && tb0.checkedBy === "" && tb0.sheet.index === 2 && tb0.sheet.total === 5 && tb0.quoteId === "Q-2100", "#209 title block: venue falls back to intake, drawn-by to the creator");
+  const tbMany = revisionRows(Array.from({ length: 8 }, (_, i) => ({ rev: i + 1, at: i, note: `r${i + 1}`, reason: "manual" as const })));
+  const tb1 = titleBlockData({ ...tbBase, optionCount: 2, revisions: tbMany, set: { drawnBy: "SM", checkedBy: "JC" } });
+  ok(tb1.optionName === "Better" && tb1.revisions.length === REV_ROWS && tb1.revisions[0].letter === "H" && tb1.earlierRevisions === 2 && tb1.status === "Rev H", "#209 title block: newest revisions first, capped, with a count of earlier ones");
+  ok(tb1.drawnBy === "SM" && tb1.checkedBy === "JC", "#209 title block: set settings override drawn/checked");
+
+  // settings cleaning + notes
+  const gdsClean = cleanDrawingSet({ size: "z", drawnBy: "  Jeff  ", excluded: ["riser", "riser", 3, ""], generalNotes: "", revisionLabels: { "2": " Bid ", x: "no", "3": "" } });
+  ok(!("size" in gdsClean) && gdsClean.drawnBy === "Jeff" && JSON.stringify(gdsClean.excluded) === '["riser"]' && gdsClean.generalNotes === "" && JSON.stringify(gdsClean.revisionLabels) === '{"2":"Bid"}', "#209 set settings: cleaned, deduped, blank notes kept as an explicit empty");
+  ok(cleanStandardNotes("  \n ") === null && cleanStandardNotes(" 1. Verify ") === "1. Verify", "#209 standard notes: blank clears to null");
+  ok(resolveGeneralNotes(undefined, "1. Verify in field\n2) Coordinate with EC\n\n").join("|") === "Verify in field|Coordinate with EC" && resolveGeneralNotes({ generalNotes: "" }, "Std").length === 0, "#209 notes: the standard notes are the default, an explicit empty wins, numbering is stripped");
+
+  // systems + plan grouping
+  ok(DRAWING_SYSTEMS.map((s) => s.prefix).join("") === "LAVRG" && drawingSystemOf("Curtains") === "rigging" && drawingSystemOf("Unscoped") === "general", "#209 systems: L, A, V, R (rigging + curtains), G for unscoped");
+  const gdsParts = new Map<string, { group?: string; trade?: string }>([["FIX", { group: "Fixtures" }], ["SPK", { group: "Speakers" }], ["TRK", { trade: "Rigging" }], ["MYST", {}], ["CBL", {}]]);
+  ok(placementScope({ partId: "FIX", curtain: { name: "x" } }, gdsParts) === "Curtains", "#209 systems: a curtain is Curtains whatever its fabric part");
+  const gdsPl = [
+    { id: "p1", sheetId: "s1", page: 1, partId: "FIX" },
+    { id: "p2", sheetId: "s2", page: 1, partId: "FIX" },
+    { id: "p3", sheetId: "s1", page: 1, partId: "SPK" },
+    { id: "p4", sheetId: "s1", page: 2, partId: "TRK" },
+    { id: "p5", sheetId: "s1", page: 1, partId: "FAB", curtain: { name: "Main" } },
+    { id: "p6", sheetId: "s1", page: 1, partId: "MYST" },
+  ];
+  const gdsRt = [
+    { id: "r1", sheetId: "s1", page: 1, partId: "CBL", fromPlacementId: "p3" },
+    { id: "r2", sheetId: "s1", page: 1, partId: "CBL" },
+  ];
+  const gdsGroups = planSheetGroups({ sheetOrder: ["s2", "s1"], placements: gdsPl, routes: gdsRt, partById: gdsParts });
+  ok(gdsGroups.map((g) => `${g.system}:${g.sheetId}:${g.page}`).join("|") === "lighting:s2:1|lighting:s1:1|audio:s1:1|rigging:s1:1|rigging:s1:2|general:s1:1", "#209 plan sheets: one per system per source page, in sheet order");
+  const gdsAudio = planContent({ group: { system: "audio", sheetId: "s1", page: 1 }, placements: gdsPl, routes: gdsRt, spaces: [{ id: "sp", sheetId: "s1", page: 1 }, { id: "sp2", sheetId: "s1", page: 2 }], partById: gdsParts });
+  ok(gdsAudio.placements.map((p) => p.id).join() === "p3" && gdsAudio.routes.map((r) => r.id).join() === "r1" && gdsAudio.spaces.map((s) => s.id).join() === "sp", "#209 plan sheets: a system sheet shows its own devices, the wires they terminate, and that page's spaces");
+  const gdsGeneral = planContent({ group: { system: "general", sheetId: "s1", page: 1 }, placements: gdsPl, routes: gdsRt, spaces: [], partById: gdsParts });
+  ok(gdsGeneral.placements.map((p) => p.id).join() === "p6" && gdsGeneral.routes.map((r) => r.id).join() === "r2", "#209 plan sheets: unscoped devices and free unscoped wires go on the G sheet");
+
+  // sheet list
+  const gdsList = buildSheetList({ planGroups: gdsGroups, sourceNames: { s1: "Main floor", s2: "Balcony" }, schedulePages: 2, excluded: ["plan:lighting:s2:1", "schedule"] });
+  ok(gdsList.all.map((d) => d.number).join() === "T-001,L-101,L-102,A-101,R-101,R-102,G-101,E-501,E-601,E-602", "#209 sheet list: numbering T → L/A/V/R/G → E-501 → E-60x");
+  ok(gdsList.all[1].title === "Lighting plan — Balcony" && gdsList.all[3].title === "Audio plan" && gdsList.all[5].title === "Rigging & drapery plan — Main floor, p. 2", "#209 sheet list: titles name the source only when a system spans pages");
+  ok(gdsList.included.map((d) => d.number).join() === "T-001,L-102,A-101,R-101,R-102,G-101,E-501", "#209 sheet list: excluded sheets drop out, numbers stay stable");
+  const gdsToggles = toggleableSheets(gdsList.all);
+  ok(gdsToggles.filter((t) => t.key === "schedule").length === 1 && gdsToggles.length === gdsList.all.length - 1, "#209 sheet list: the schedule pages toggle as one");
+
+  // schedule
+  const gdsSch = buildSchedule({
+    placements: [
+      { id: "q1", sheetId: "s1", page: 1, x: 0.1, y: 0.1, partId: "FIX" },
+      { id: "q2", sheetId: "s1", page: 1, x: 0.2, y: 0.1, partId: "FIX" },
+      { id: "q3", sheetId: "s1", page: 1, x: 0.9, y: 0.9, partId: "GONE" },
+      { id: "q4", sheetId: "s1", page: 1, x: 0.3, y: 0.3, partId: "FAB", curtain: { type: "Draw", name: "Main", widthFt: 40, heightFt: 20, fullnessPct: 50, fabricSku: "FAB" } },
+    ],
+    spaces: [{ id: "sa", sheetId: "s1", page: 1, name: "Stage", points: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.5 }, { x: 0, y: 0.5 }] }],
+    descOf: (id) => ({ FIX: "Fixture", FAB: "Velour" } as Record<string, string>)[id],
+    wires: [
+      { id: "w1", partId: "W", fromName: "Stage", toName: "Unassigned", lengthFt: 10.5, unit: "ft" },
+      { id: "w2", partId: "W", fromName: "Stage", toName: "Stage", lengthFt: null, unit: "ft" },
+    ],
+  });
+  ok(gdsSch.sections.map((s) => s.name).join() === "Stage,Unassigned" && gdsSch.sections[0].rows[0].qty === 2 && gdsSch.sections[0].rows[1].code === "CURTAIN", "#209 schedule: per-space rows, curtains one per drop");
+  ok(gdsSch.sections[1].rows[0].desc === "(no longer in the catalog)" && gdsSch.deviceCount === 3, "#209 schedule: a missing part stays visible; curtains aren't counted as devices");
+  ok(gdsSch.wireFeet.length === 1 && gdsSch.wireFeet[0].ft === 10.5 && gdsSch.wireFeet[0].unmeasured === 1, "#209 schedule: footage rolls up per wire part");
+  ok(scheduleGroups(gdsSch).length === 3 && scheduleGroups(gdsSch)[2].head.kind === "wires", "#209 schedule: wire runs follow the spaces");
+  const gdsBig = [{ head: { kind: "section" as const, name: "Big", cont: false }, rows: Array.from({ length: 60 }, (_, i) => ({ kind: "row" as const, qty: 1, code: `P${i}`, desc: "d" })) }];
+  const gdsPages = paginateSchedule(gdsBig, 24, 2);
+  const gdsTop = gdsPages[1][0][0];
+  ok(gdsPages.length === 2 && gdsPages[0].length === 2 && gdsPages[1][0].length === 15 && gdsTop.kind === "section" && gdsTop.cont, "#209 schedule: rows paginate across E-60x sheets, repeating the section head");
+  const gdsTight = paginateSchedule([
+    { head: { kind: "section", name: "A", cont: false }, rows: Array.from({ length: 4 }, () => ({ kind: "row" as const, qty: 1, code: "a", desc: "a" })) },
+    { head: { kind: "section", name: "B", cont: false }, rows: [{ kind: "row", qty: 1, code: "b", desc: "b" }] },
+  ], 5, 2);
+  ok(gdsTight.every((pg) => pg.every((col) => !col.length || col[col.length - 1].kind === "row")), "#209 schedule: a section head never ends a column");
+  ok(paginateSchedule([], 24, 2).length === 1, "#209 schedule: an empty schedule is still one sheet");
+}
+
+/* --- #209 grid drawing set — Task 2: title block + sheet frame --- */
+import { TitleBlock } from "@/components/drawing/title-block";
+import { DrawingSheet } from "@/components/drawing/drawing-sheet";
+
+{
+  const tbSheet = titleBlockData({
+    company: { name: "Peak Systems Group", logoDark: null, offices: [] },
+    project: { id: "GRD-5009", name: "Main Stage", customer: "Lakefront", createdBy: "Jeff" },
+    option: { name: "Design", quoteId: null },
+    optionCount: 1,
+    revisions: [],
+    set: undefined,
+    sheet: { number: "A-101", title: "Audio plan", scale: "AS NOTED" },
+    index: 3,
+    total: 7,
+    now: Date.UTC(2026, 8, 25, 12),
+  });
+  const sheetHtml = symRender(symH(DrawingSheet, { size: "d", titleBlock: tbSheet, children: symH("p", null, "BODY") }));
+  ok(sheetHtml.includes('class="pk-drawing-sheet"') && sheetHtml.includes('data-size="d"') && sheetHtml.includes("--dw-w:36in") && sheetHtml.includes("--dw-k:2.118"), "#209 sheet: the frame carries its size variables");
+  ok(sheetHtml.includes("BODY") && sheetHtml.includes('class="pk-drawing-area"') && sheetHtml.includes('class="pk-title-strip"') && sheetHtml.includes('data-sheet="A-101"'), "#209 sheet: drawing area + right-side title strip");
+  ok(sheetHtml.includes("3 of 7 · — Preliminary") && sheetHtml.includes("Peak Systems Group") && !sheetHtml.includes("<img"), "#209 title block: n of N, Preliminary, the company name when there is no logo");
+  ok(!sheetHtml.includes(">Option<"), "#209 title block: no option row for a single-option design");
+  const tbRev = titleBlockData({
+    company: { name: "Peak", logoDark: "data:image/png;base64,AAAA", offices: [] },
+    project: { id: "GRD-5009", name: "Main Stage", customer: "", createdBy: "Jeff" },
+    option: { name: "Better", quoteId: "Q-2100" },
+    optionCount: 2,
+    revisions: revisionRows([{ rev: 1, at: 1000, note: "Bid set", reason: "manual" }, { rev: 2, at: 2000, note: "", reason: "quote" }]),
+    set: undefined,
+    sheet: { number: "T-001", title: "Cover sheet", scale: "NTS" },
+    index: 1,
+    total: 7,
+    now: 3000,
+  });
+  const tbHtml = symRender(symH(TitleBlock, { data: tbRev }));
+  ok(tbHtml.includes("<img") && tbHtml.includes("Bid set") && tbHtml.includes("Issued with quote") && tbHtml.includes("Rev B") && tbHtml.includes(">Option<") && tbHtml.includes("Q-2100"), "#209 title block: logo, revision table, latest letter, option row, quote number");
+  const gdsCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+  ok(gdsCss.includes(".pk-drawing-sheet {") && /\.pk-tb-accent\s*\{[^}]*var\(--accent\)/.test(gdsCss) && gdsCss.includes("print-color-adjust: exact") && gdsCss.includes(".pk-drawing-sheet:last-child"), "#209 CSS: sheet classes exist, the accent bar is var(--accent), sheets break one per page");
+}
+
+/* --- #209 grid drawing set — Task 3: riser document model --- */
+import {
+  RISER_H, UNASSIGNED_KEY, applyRiserOp, autoBox, buildRiserView, connectKind, copyRiserDoc, emptyRiserDoc,
+  marginPoints, marginSpaceRect, mergeLayout, nodeMinH, normalizeRiserDoc, pruneRiserEnds, riserLinksOf, spreadInSpace,
+  type RiserDoc,
+} from "@/lib/design/grid-riser-doc";
+
+{
+  // normalize
+  ok(JSON.stringify(normalizeRiserDoc(undefined)) === JSON.stringify(emptyRiserDoc()), "#209 riser: an absent doc reads as empty");
+  const rdBad = normalizeRiserDoc({
+    nodes: { a: { x: 0.1, y: 0.2, w: 0.2, h: 0.2 }, b: { x: "no" } },
+    links: [{ id: "lk-1", from: { kind: "space", spaceId: null }, to: { kind: "bogus" }, partId: "W", lengthFt: 3, by: "t", at: 1 }],
+    notes: "x",
+  });
+  ok(Object.keys(rdBad.nodes).join() === "a" && rdBad.links.length === 0 && rdBad.notes.length === 0, "#209 riser: malformed nodes/links/notes are dropped, never thrown on");
+
+  // layout merge
+  const rdMerged = mergeLayout(["a", "b", "c"], { a: autoBox(0), zombie: autoBox(5) });
+  ok(JSON.stringify(rdMerged.a) === JSON.stringify(autoBox(0)), "#209 layout: a saved position wins");
+  ok(JSON.stringify(rdMerged.b) === JSON.stringify(autoBox(1)) && JSON.stringify(rdMerged.c) === JSON.stringify(autoBox(2)), "#209 layout: new nodes take the next free auto slots");
+  ok(!("zombie" in rdMerged), "#209 layout: a saved box for a vanished node is ignored");
+  ok(JSON.stringify(mergeLayout(["a", "b"], { b: autoBox(0) }).a) === JSON.stringify(autoBox(1)), "#209 layout: an auto slot already taken by a saved box is skipped");
+
+  // reducer
+  let rdSeq = 0;
+  const rdMk = (p: string) => `${p}${++rdSeq}`;
+  let rd: RiserDoc = emptyRiserDoc();
+  let rdRes = applyRiserOp(rd, { op: "addLevel", label: "  Level 1 ", elevation: "EL 100", y: 0.9 }, rdMk);
+  ok(rdRes.changed && rdRes.doc.levels[0].label === "Level 1" && rdRes.doc.levels[0].id === "lv-1", "#209 op: addLevel trims and mints an id");
+  rd = rdRes.doc;
+  ok(!applyRiserOp(rd, { op: "addLevel", label: "   ", y: 0.5 }, rdMk).changed, "#209 op: a blank level label is refused");
+  rdRes = applyRiserOp(rd, { op: "updateLevel", id: rd.levels[0].id, y: 0.4, elevation: "" }, rdMk);
+  ok(rdRes.doc.levels[0].y === 0.4 && !("elevation" in rdRes.doc.levels[0]), "#209 op: updateLevel moves the line and clears the elevation");
+  rd = rdRes.doc;
+  ok(!applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: "sp-a" }, label: "EMT" }, rdMk).changed, "#209 op: a conduit from a node to itself is refused");
+  rdRes = applyRiserOp(rd, { op: "addConduit", from: { kind: "space", spaceId: "sp-a" }, to: { kind: "space", spaceId: null }, label: "1in EMT by EC" }, rdMk);
+  ok(rdRes.changed && rdRes.doc.conduits.length === 1, "#209 op: addConduit");
+  rd = rdRes.doc;
+  rd = applyRiserOp(rd, { op: "addNote", text: "First" }, rdMk).doc;
+  rd = applyRiserOp(rd, { op: "addNote", text: "Second" }, rdMk).doc;
+  rd = applyRiserOp(rd, { op: "removeNote", id: rd.notes[0].id }, rdMk).doc;
+  ok(rd.notes.length === 1 && rd.notes[0].n === 1 && rd.notes[0].text === "Second", "#209 op: notes renumber after a removal");
+  rdRes = applyRiserOp(rd, { op: "moveNode", key: "sp-a", box: { x: 1.5, y: -2, w: 0.01, h: 0.01 } }, rdMk);
+  const rdBox = rdRes.doc.nodes["sp-a"];
+  ok(rdRes.changed && rdBox.x + rdBox.w <= 1 && rdBox.y === 0 && rdBox.w >= 0.1, "#209 op: moveNode clamps into the canvas and to a minimum size");
+  ok(!applyRiserOp(rd, { op: "removeLink", id: "nope" }, rdMk).changed, "#209 op: removing an unknown id reports no change");
+  ok(rd.conduits.length === 1 && riserLinksOf({ o: rd }, "o").length === 0, "#209 op: conduits never become links (never priced)");
+
+  // device drops
+  const rdSq = [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.4 }, { x: 0.2, y: 0.4 }];
+  const rdPts = spreadInSpace(rdSq, 7, [{ x: 0.3, y: 0.3 }]);
+  ok(rdPts.length === 7 && rdPts.every((p) => pointInPolygon(p, rdSq)), "#209 +Device: every new device lands inside the space polygon");
+  ok(new Set(rdPts.map((p) => `${p.x},${p.y}`)).size === 7 && !rdPts.some((p) => p.x === 0.3 && p.y === 0.3), "#209 +Device: multiples spread out and avoid taken spots");
+  const rdBlock = [{ x: 0, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.5, y: 1 }, { x: 0, y: 1 }];
+  const rdMargin = marginPoints(3, [rdBlock], []);
+  ok(rdMargin.length === 3 && rdMargin.every((p) => p.y > 0.85 && !pointInPolygon(p, rdBlock)), "#209 +Device: Unassigned devices land on the lower margin, outside every space");
+  const rdRect = marginSpaceRect(2);
+  ok(rdRect.length === 4 && polygonArea(rdRect) > 0.005 && rdRect.every((p) => p.y >= 0.86), "#209 Space: a new riser space is a small rectangle on the plan's lower margin");
+
+  // connect rule
+  const rdPls = [{ id: "a", sheetId: "s1", page: 1 }, { id: "b", sheetId: "s1", page: 1 }, { id: "c", sheetId: "s2", page: 1 }];
+  const rdCals = [{ docId: "s1", page: 1 }];
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, rdCals) === "route", "#209 Connect: same calibrated sheet → a measured GridRoute");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "c" }, rdPls, rdCals) === "link", "#209 Connect: cross-sheet → a RiserLink");
+  ok(connectKind({ kind: "placement", placementId: "a" }, { kind: "placement", placementId: "b" }, rdPls, []) === "link", "#209 Connect: an uncalibrated page falls back to a typed-length RiserLink");
+  ok(connectKind({ kind: "space", spaceId: "x" }, { kind: "space", spaceId: "y" }, rdPls, rdCals) === "link", "#209 Connect: space → space is always a RiserLink");
+
+  // prune + copy
+  const rdWithLink: RiserDoc = {
+    ...rd,
+    nodes: { "sp-a": autoBox(0) },
+    links: [{ id: "lk-9", from: { kind: "placement", placementId: "a" }, to: { kind: "space", spaceId: null }, partId: "W", lengthFt: 10, by: "t", at: 1 }],
+  };
+  const rdPruned = pruneRiserEnds(rdWithLink, { placementIds: new Set(["a"]), spaceIds: new Set(["sp-a"]) });
+  ok(rdPruned.links.length === 0 && rdPruned.conduits.length === 0 && !("sp-a" in rdPruned.nodes), "#209 delete: removing a device/space prunes its links, conduits and saved box");
+  const rdCopied = copyRiserDoc(rdWithLink, new Map([["a", "a2"]]), rdMk, "copier", 9);
+  const rdCopiedFrom = rdCopied.links[0]?.from;
+  ok(rdCopied.links.length === 1 && rdCopiedFrom?.kind === "placement" && rdCopiedFrom.placementId === "a2" && rdCopied.links[0].id !== "lk-9" && rdCopied.links[0].by === "copier", "#209 option copy: links are re-pointed at the copied devices with new ids");
+  ok(copyRiserDoc(rdWithLink, new Map(), rdMk, "copier", 9).links.length === 0, "#209 option copy: a link whose device wasn't copied is dropped");
+
+  // RiserLink footage in the BOM (routeLines 4th arg); conduits never reach it
+  const rdLinkParts = [{ id: "W", sku: "W", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1 }];
+  const rdBom = routeLines([], rdLinkParts, [], [{ partId: "W", lengthFt: 10.2 }, { partId: "W", lengthFt: 5 }, { partId: "W", lengthFt: Number.NaN }]);
+  ok(rdBom.lines.length === 1 && rdBom.lines[0].qty === 16 && rdBom.lines[0].ext === 32 && rdBom.unmeasured === 1 && !rdBom.lines[0].connectionType, "#209 BOM: RiserLink lengths sum per part, round up, price like a route, never stamp a connectionType");
+  ok(routeLines([], rdLinkParts, []).lines.length === 0, "#209 BOM: routeLines without links is unchanged");
+
+  // copyOptionMembers exposes its id map
+  const rdCm = copyOptionMembers({ placements: [{ id: "gp-1", optionId: "o1" }], routes: [], fromOptionId: "o1", toOptionId: "o2", makeId: (p) => `${p}x`, by: "t", at: 1 });
+  ok(rdCm.idMap.get("gp-1") === "gp-x", "#209: copyOptionMembers returns its old → new placement id map");
+
+  // the view
+  const rdSpaces = [
+    { id: "sp-a", sheetId: "s1", page: 1, name: "Stage", color: "#8a6d3b", points: rdSq },
+    { id: "sp-b", sheetId: "s1", page: 1, name: "Empty room", color: "#3b7a8a", points: [{ x: 0.6, y: 0.6 }, { x: 0.8, y: 0.6 }, { x: 0.8, y: 0.8 }, { x: 0.6, y: 0.8 }] },
+  ];
+  const rdPl = [
+    { id: "p1", sheetId: "s1", page: 1, x: 0.25, y: 0.25, partId: "FIX", at: 2 },
+    { id: "p2", sheetId: "s1", page: 1, x: 0.3, y: 0.25, partId: "FIX", at: 1 },
+  ];
+  const rdParts = [{ id: "FIX", sku: "FIX", desc: "Fixture", category: "Fixtures", unit: "ea", list: 1, cost: 1 }, ...rdLinkParts];
+  const rdGraph = riserGraph(rdPl, [], rdSpaces, rdParts, []);
+  const rdDoc: RiserDoc = { ...emptyRiserDoc(), links: [{ id: "lk-1", from: { kind: "placement", placementId: "p1" }, to: { kind: "space", spaceId: null }, partId: "W", lengthFt: 25, by: "t", at: 1 }] };
+  const rdView = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: rdDoc, partDesc: (id) => rdParts.find((p) => p.id === id)?.desc || id });
+  ok(rdView.nodes.map((n) => n.key).join() === `sp-a,sp-b,${UNASSIGNED_KEY}`, "#209 riser view: every space is a node (empty ones too, so devices can be added), plus Unassigned when a link lands there");
+  ok(rdView.nodes[0].groups[0].ids.join() === "p2,p1", "#209 riser view: a device row knows its placements, oldest first");
+  const rdEdge = rdView.edges[0];
+  ok(rdView.edges.length === 1 && rdEdge.kind === "link" && rdEdge.from.key === "sp-a" && rdEdge.from.partId === "FIX" && rdEdge.to.key === UNASSIGNED_KEY && rdEdge.desc === "Cable" && rdEdge.lengthFt === 25, "#209 riser view: a RiserLink is an edge anchored on its device row");
+  ok(rdView.nodes.every((n) => n.box.h >= nodeMinH(n.groups.length) - 1e-9) && rdView.height >= RISER_H, "#209 riser view: boxes never clip their rows");
+  const rdDangling = buildRiserView({ graph: rdGraph, spaces: rdSpaces, placements: rdPl, routes: [], doc: { ...rdDoc, links: [{ ...rdDoc.links[0], from: { kind: "placement", placementId: "gone" } }] } });
+  ok(rdDangling.edges.length === 0 && !rdDangling.nodes.some((n) => n.key === UNASSIGNED_KEY), "#209 riser view: a link to a vanished device is not drawn");
+}
+
+/* --- #209 grid drawing set — Task 4: RiserLinks reach the quote and the editor BOM --- */
+{
+  const gdsQuoteSrc = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
+  ok(gdsQuoteSrc.includes("const riserLinks = riserLinksOf(project.riser, optionId);") && gdsQuoteSrc.includes("routeLines(routes, tierCatalog, project.calibrations || [], riserLinks)"), "#209 quote: RiserLinks price as wire lines on the draft quote");
+  const gdsEditorSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  ok(gdsEditorSrc.includes("routeLines(routes || [], parts, project.calibrations, riserLinks)"), "#209 editor: the live BOM sidebar counts RiserLinks too");
+  const gdsStoreSrc = readFileSync(join(process.cwd(), "src/lib/stores/grid-projects.ts"), "utf8");
+  ok(gdsStoreSrc.includes("riser: p.riser ? (JSON.parse(JSON.stringify(p.riser))"), "#209 revisions: snapshotOf copies the riser document");
+  const gdsActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/actions.ts"), "utf8");
+  ok((gdsActionsSrc.match(/await requireUser\(\)/g) || []).length === 6, "#209 riser actions: every one is behind requireUser, the Grid editing gate");
+}
+
+/* --- #209 grid drawing set — Task 5: parts builder, riser view, riser canvas --- */
+import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { riserViewForOption, type RiserProjectLite } from "@/lib/design/grid-riser-view";
+import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
+
+{
+  const gpSym = { id: "GS-1", name: "Wash light", manufacturer: "ETC", modelNumber: "W1", scope: "Lighting", category: "Fixtures", width: 48, height: 34, ports: [], pricingPartId: "CAT-1", createdBy: "t", createdAt: 1, updatedAt: 1 };
+  const gpCat = [
+    { id: "CAT-1", sku: "W1", desc: "Wash", category: "Fixtures", unit: "ea", list: 900, cost: 500 },
+    { id: "CAT-2", sku: "C2", desc: "Cable", category: "Wire", unit: "ft", list: 2, cost: 1 },
+  ];
+  const gpLib = gridPartsFrom([gpSym] as never, gpCat as never, {});
+  ok(gpLib.length === 1 && gpLib[0].id === "GS-1" && gpLib[0].list === 900 && gpLib[0].desc === "Wash light" && gpLib[0].symbolWidth === 48, "#209 parts: a Grid-library entry prices from its linked catalog row");
+  const gpAll = gridPartsFrom([gpSym] as never, gpCat as never, {}, { catalogFallback: true });
+  ok(gpAll.map((p) => p.id).join() === "GS-1,CAT-1,CAT-2", "#209 parts: the catalog fallback resolves pre-library placements");
+  // Merge with #207: the editor passes the part-documents check; the default
+  // stays the legacy blob check. A stale legacy key must not win over it.
+  const gpLegacyCat = gpCat.map((c) => (c.id === "CAT-1" ? { ...c, datasheetBlobKey: "part-datasheets/W1/old.pdf" } : c));
+  ok(gridPartsFrom([gpSym] as never, gpLegacyCat as never, {})[0].hasDatasheet === true && gpLib[0].hasDatasheet === undefined,
+    "#209 parts: by default hasDatasheet is the legacy blob check");
+  ok(gridPartsFrom([gpSym] as never, gpLegacyCat as never, {}, { hasDatasheet: () => false })[0].hasDatasheet === undefined
+    && gridPartsFrom([gpSym] as never, gpCat as never, {}, { hasDatasheet: (p) => p.sku === "W1" })[0].hasDatasheet === true,
+    "#209 parts: a caller's hasDatasheet (the #207 part-documents check) replaces the legacy blob check");
+  const gpPlanSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
+  ok(gpPlanSrc.includes("gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile })") && gpPlanSrc.includes("ownFiles(docIndex, p.sku, \"datasheet\")"),
+    "#209 parts: the plan editor flags datasheets from part documents (#207), not the legacy blob key");
+
+  const gpProj: RiserProjectLite = {
+    placements: [{ id: "v1", sheetId: "s1", page: 1, x: 0.3, y: 0.3, partId: "GS-1", optionId: "opt-base", by: "t", at: 1 }],
+    routes: [],
+    spaces: [{ id: "sp-v", sheetId: "s1", page: 1, name: "Stage", color: "#8a6d3b", points: [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.2 }, { x: 0.4, y: 0.4 }, { x: 0.2, y: 0.4 }], by: "t", at: 1 }],
+    calibrations: [],
+    options: [{ id: "opt-base", name: "Design", quoteId: null, createdAt: 1 }],
+    riser: {
+      "opt-base": {
+        nodes: {},
+        levels: [{ id: "lv-1", label: "Level 1", elevation: "EL 100", y: 0.9 }],
+        conduits: [{ id: "cd-1", from: { kind: "space", spaceId: "sp-v" }, to: { kind: "space", spaceId: null }, label: "EMT by EC" }],
+        notes: [{ id: "nt-1", n: 1, text: "Verify in field" }],
+        links: [{ id: "lk-1", from: { kind: "placement", placementId: "v1" }, to: { kind: "space", spaceId: null }, partId: "CAT-2", lengthFt: 40, by: "t", at: 1 }],
+      },
+    },
+  };
+  const gpView = riserViewForOption({ project: gpProj, optionId: "opt-base", parts: gpAll, symCtx: symbolContext(null) });
+  ok(gpView.nodes.map((n) => n.key).join() === "sp-v,unassigned" && gpView.nodes[0].groups[0].qty === 1 && gpView.nodes[0].groups[0].ids.join() === "v1", "#209 riser view: spaces + Unassigned (linked), groups carry their placement ids");
+  ok(gpView.edges.length === 1 && gpView.edges[0].kind === "link" && gpView.edges[0].from.partId === "GS-1" && gpView.edges[0].desc === "Cable", "#209 riser view: RiserLinks become edges anchored on the device row");
+  const gpHtml = symRender(symH(RiserCanvas, { view: gpView }));
+  ok(gpHtml.includes("Stage") && gpHtml.includes("1× Wash light") && gpHtml.includes("Unassigned"), "#209 canvas: nodes and device rows");
+  ok(gpHtml.includes("Level 1 · EL 100") && gpHtml.includes("EMT by EC") && gpHtml.includes('data-edge="link"') && gpHtml.includes("(typed)"), "#209 canvas: level line, conduit annotation, typed-length link");
+  ok(!gpHtml.includes("cursor"), "#209 canvas: the print render has no interactive affordances");
+  const gpNotes = symRender(symH(RiserNotes, { notes: gpView.notes }));
+  ok(gpNotes.includes("<ol") && gpNotes.includes("Verify in field"), "#209 canvas: numbered riser notes");
+}
+
+/* --- #209 grid drawing set — Task 6: riser tools wiring --- */
+{
+  const reSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx"), "utf8");
+  ok(reSrc.includes("connectKind(from, to, placements, calibrations)") && reSrc.includes("addRouteAction(") && reSrc.includes("addRiserLinkAction(") && reSrc.includes("measureSheetAspect("),
+    "#209 Connect: two devices on one calibrated page draw a measured GridRoute; anything else stores a typed RiserLink");
+  ok(['op: "addConduit"', 'op: "addLevel"', 'op: "updateLevel"', 'op: "addNote"', 'op: "removeLink"'].every((s) => reSrc.includes(s)),
+    "#209 tools: conduit, level line, note and link removal all write through patchRiserAction");
+  const aspectSrc = readFileSync(join(process.cwd(), "src/components/design/sheet-aspect.ts"), "utf8");
+  ok(aspectSrc.includes('import("pdfjs-dist")') && aspectSrc.includes("naturalHeight / img.naturalWidth"), "#209 Connect: the sheet aspect is measured the way the editor measures it (image natural size, PDF viewport)");
+}
+
+/* --- #209 grid drawing set — Task 7: the set route --- */
+{
+  const gdsClientFiles = [
+    "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx",
+    "src/app/(app)/design/grid/[id]/riser/riser-panels.tsx",
+    "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx",
+    "src/app/(app)/design/grid/[id]/set/set-settings-panel.tsx",
+    "src/app/(app)/design/grid/settings/standard-notes-card.tsx",
+    "src/components/drawing/riser-canvas.tsx",
+    "src/components/drawing/title-block.tsx",
+    "src/components/drawing/drawing-sheet.tsx",
+    "src/components/design/sheet-aspect.ts",
+    "src/lib/design/grid-drawing-set.ts",
+    "src/lib/design/grid-riser-doc.ts",
+    "src/lib/design/grid-schedule.ts",
+  ];
+  for (const rel of gdsClientFiles) {
+    const src = readFileSync(join(process.cwd(), rel), "utf8");
+    const valueImports = src.match(/^import\s+(?!type\b)[^;]*?from\s+"@\/(?:lib\/stores|db)[^"]*";/gm) || [];
+    ok(valueImports.length === 0, `#209 client boundary: ${rel} imports no VALUE from @/lib/stores or @/db`);
+  }
+  const gdsSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  ok(gdsSetSrc.includes("printPageCss(size)") && gdsSetSrc.includes("buildSheetList(") && gdsSetSrc.includes("riserViewForOption(") && gdsSetSrc.includes("resolveOptionId(project, requestedOption)"),
+    "#209 set page: one sheet list, @page from the size table, the saved riser, the same ?option= resolution as riser/schedule");
+  ok(gdsSetSrc.includes("<PrintButton") && !gdsSetSrc.includes("#b08d4a\"}") && gdsSetSrc.includes("resolveGeneralNotes(set, settings.gridStandardNotes)"),
+    "#209 set page: printed with the existing PrintButton; general notes default to Grid Settings' standard notes");
+  const gdsSchedSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
+  ok(gdsSchedSrc.includes("buildSchedule(") && gdsSchedSrc.includes("riserViewForOption("), "#209 schedule page: shares the set's schedule builder and lists RiserLinks");
+  const gdsSmokeSrc = readFileSync(join(process.cwd(), "scripts/smoke-routes.ts"), "utf8");
+  ok(gdsSmokeSrc.includes('"/design/grid/GRD-5001/set"') && gdsSmokeSrc.includes('"/design/grid/GRD-5001/set?size=d"'), "#209 smoke: the set route is covered at both sizes");
+  const gdsFigSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx"), "utf8");
+  ok(gdsFigSrc.includes("data-plan-figure") && gdsFigSrc.includes("scaleNote(cal") && gdsFigSrc.includes("fitBox("), "#209 plan figure: fitted to the drawing area, scale note from the calibration, ready flag for print");
+}
+
+/* --- #209 Task 7 fix wave 1 — I3: one shared wire-schedule mapping --- */
+{
+  const swProj: RiserProjectLite = {
+    placements: [{ id: "sw1", sheetId: "s1", page: 1, x: 0.2, y: 0.2, partId: "DEV-A", optionId: "opt-sw", by: "t", at: 1 }],
+    routes: [],
+    spaces: [{ id: "sp-sw", sheetId: "s1", page: 1, name: "Stage", color: "#8a6d3b", points: [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }], by: "t", at: 1 }],
+    calibrations: [],
+    options: [{ id: "opt-sw", name: "Design", quoteId: null, createdAt: 1 }],
+    riser: {
+      "opt-sw": {
+        nodes: {},
+        levels: [],
+        conduits: [],
+        notes: [],
+        links: [{ id: "lk-sw", from: { kind: "placement", placementId: "sw1" }, to: { kind: "space", spaceId: null }, partId: "WIRE-SW", lengthFt: 30, by: "t", at: 1 }],
+      },
+    },
+  };
+  const swParts = [
+    { id: "DEV-A", sku: "A", desc: "Device A", category: "Fixtures", unit: "ea", list: 1, cost: 1 },
+    { id: "WIRE-SW", sku: "W", desc: "Cable", category: "Wire", unit: "ft", list: 1, cost: 1 },
+  ];
+  const swView = riserViewForOption({ project: swProj, optionId: "opt-sw", parts: swParts as never, symCtx: symbolContext(null) });
+  const swWires = scheduleWiresFromView(swView);
+  ok(
+    swWires.length === 1 && swWires[0].fromName === "Stage" && swWires[0].toName === "Unassigned" && swWires[0].partId === "WIRE-SW" && swWires[0].lengthFt === 30,
+    "#209 scheduleWiresFromView: names each edge's ends from the view's nodes ('Unassigned' when the edge lands there)"
+  );
+  const gdsSetPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  const gdsSchedPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
+  ok(
+    gdsSetPageSrc2.includes("scheduleWiresFromView(view)") && gdsSchedPageSrc2.includes("scheduleWiresFromView(view)"),
+    "#209 scheduleWiresFromView: the set and schedule pages both call the one shared helper instead of duplicating the edge→name mapping"
+  );
+}
+
+/* --- #209 final review — I1 numbered notes, I2 riser chips, I3 plan marks, I4 drop spacing, I6 PDF zoom --- */
+import {
+  assignTypeMarks, bezierAt, placeChip, placeLabels, planKeyLayout, printZoom, rectsHit, segmentHitsRect, symbolRect,
+  type Bezier, type Rect as DlRect,
+} from "@/lib/design/drawing-labels";
+import { decodeDataUrl } from "@/lib/grid-sheet-file";
+import { DROP_STEP, MAX_CONDUITS as GDS_MAX_CONDUITS } from "@/lib/design/grid-riser-doc";
+
+{
+  // I1 — explicit note numbers (preflight strips <ol> markers)
+  const fnNotes = symRender(symH(RiserNotes, { notes: [{ id: "a", n: 1, text: "First" }, { id: "b", n: 2, text: "Second" }] }));
+  ok(fnNotes.includes('<span class="pk-dw-num">1.</span>') && fnNotes.includes('<span class="pk-dw-num">2.</span>'), "#209 I1: riser notes print explicit numbers");
+  const fnSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  ok(fnSetSrc.includes('<span className="pk-dw-num">{`${i + 1}.`}</span>'), "#209 I1: cover general notes print explicit numbers");
+  const fnCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+  ok(/\.pk-dw-notes,\s*\.pk-riser-notes\s*\{[^}]*list-style: none/.test(fnCss) && /\.pk-dw-num\s*\{[^}]*min-width: 1\.6em/.test(fnCss), "#209 I1: note lists drop markers; .pk-dw-num holds the number");
+
+  // I2 — placeChip
+  const fnLine: Bezier = [{ x: 0, y: 100 }, { x: 100, y: 100 }, { x: 200, y: 100 }, { x: 300, y: 100 }];
+  const fnMid = bezierAt(fnLine, 0.5);
+  ok(Math.abs(fnMid.x - 150) < 1e-9 && fnMid.y === 100, "#209 I2: bezierAt evaluates the curve");
+  const fnFree = placeChip({ pts: fnLine }, 60, 16, []);
+  ok(!!fnFree && fnFree.x === 120 && fnFree.y === 92, "#209 I2: an unobstructed chip centres on the curve's midpoint");
+  const fnBox: DlRect = { x: 110, y: 80, w: 80, h: 40 };
+  const fnMoved = placeChip({ pts: fnLine }, 60, 16, [fnBox]);
+  ok(!!fnMoved && !rectsHit(fnMoved, fnBox), "#209 I2: a chip moves off a node box sitting on the midpoint");
+  const fnPrev = placeChip({ pts: fnLine }, 60, 16, [fnBox, fnMoved!]);
+  ok(!!fnPrev && !rectsHit(fnPrev, fnBox) && !rectsHit(fnPrev, fnMoved!), "#209 I2: a second chip clears the node and the first chip");
+  ok(placeChip({ pts: fnLine }, 60, 16, [{ x: -1000, y: -1000, w: 3000, h: 3000 }]) === null, "#209 I2: fully blocked → null (the caller falls back to a W-tag)");
+  const fnLoop: Bezier = [{ x: 500, y: 100 }, { x: 540, y: 100 }, { x: 540, y: 116 }, { x: 500, y: 116 }];
+  const fnNode: DlRect = { x: 300, y: 60, w: 200, h: 100 };
+  const fnLoopChip = placeChip({ pts: fnLoop, side: 1 }, 90, 16, [fnNode]);
+  ok(!!fnLoopChip && fnLoopChip.x >= 500 && !rectsHit(fnLoopChip, fnNode), "#209 I2: a same-side loop's chip anchors outside the box");
+  const fnCanvasSrc = readFileSync(join(process.cwd(), "src/components/drawing/riser-canvas.tsx"), "utf8");
+  ok(
+    fnCanvasSrc.indexOf("{edgeCurves.map(") < fnCanvasSrc.indexOf("{view.nodes.map(") && fnCanvasSrc.indexOf("{view.nodes.map(") < fnCanvasSrc.indexOf("{chips.map("),
+    "#209 I2: render order — paths, then nodes (masking them), then chips"
+  );
+  const fnView = buildRiserView({
+    graph: { nodes: [], edges: [] } as never,
+    spaces: [
+      { id: "sp-1", sheetId: "s", page: 1, name: "Stage", points: [{ x: 0, y: 0 }, { x: 0.1, y: 0 }, { x: 0.1, y: 0.1 }] },
+      { id: "sp-2", sheetId: "s", page: 1, name: "House", points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 }, { x: 0.6, y: 0.6 }] },
+    ],
+    placements: [],
+    routes: [],
+    doc: { ...emptyRiserDoc(), links: [{ id: "lk-1", from: { kind: "space", spaceId: "sp-1" }, to: { kind: "space", spaceId: "sp-2" }, partId: "CAB-1", lengthFt: 40, by: "t", at: 1 }] },
+    partDesc: () => "A very long cable description that would never fit a chip",
+    partCode: () => "SC-18",
+  });
+  ok(fnView.edges[0].code === "SC-18", "#209 I2: riser edges carry the cable's short code");
+  const fnHtml = symRender(symH(RiserCanvas, { view: fnView }));
+  ok(fnHtml.includes("SC-18 · 40&#x27;-0&quot; (typed)") || fnHtml.includes("SC-18 · 40'-0\" (typed)"), "#209 I2: the chip reads code · length, not the long description");
+  ok(!fnHtml.includes("A very long cable description"), "#209 I2: the long description stays off the chip");
+  ok(autoBox(2).y === autoBox(0).y && autoBox(3).y > autoBox(0).y && autoBox(0).w >= 0.22, "#209 I2: the auto layout runs three wide columns");
+
+  // I3 — type marks + label collision pass
+  const fnMarks = assignTypeMarks([{ key: "P2", desc: "Wash" }, { key: "P1", desc: "Spot" }, { key: "P2", desc: "Wash" }, { key: "P3", desc: "Beam" }], "L");
+  ok(fnMarks.rows.map((r) => `${r.tag}:${r.key}:${r.qty}`).join() === "L1:P2:2,L2:P1:1,L3:P3:1" && fnMarks.tags.get("P1") === "L2", "#209 I3: one mark per part, first-seen order, system-letter prefix, qty counted");
+  ok(assignTypeMarks([], "A").rows.length === 0, "#209 I3: no devices → no key rows");
+  const fnSym = (x: number, y: number) => ({ x, y, w: 40, h: 30, tw: 20, th: 12 });
+  const fnOne = placeLabels({ symbols: [fnSym(100, 100)], gap: 2 });
+  ok(fnOne[0].x >= 120 && fnOne[0].y < 85, "#209 I3: a lone mark sits above-right of its symbol");
+  const fnRow = [fnSym(100, 100), fnSym(142, 100), fnSym(184, 100), fnSym(100, 132)];
+  const fnPlaced = placeLabels({ symbols: fnRow, gap: 2 });
+  const fnBoxes = fnRow.map(symbolRect);
+  ok(fnPlaced.every((r) => !fnBoxes.some((b) => rectsHit(r, b))), "#209 I3: no mark lands on a symbol in a tight cluster");
+  ok(fnPlaced.every((r, i) => fnPlaced.every((q, j) => i === j || !rectsHit(r, q))), "#209 I3: no two marks overlap");
+  const fnWire = placeLabels({ symbols: [fnSym(100, 100)], segments: [[{ x: 115, y: 70 }, { x: 200, y: 70 }]], gap: 2 });
+  ok(!segmentHitsRect({ x: 115, y: 70 }, { x: 200, y: 70 }, fnWire[0]), "#209 I3: a mark steps off a wire when it can");
+  const fnName: DlRect = { x: 118, y: 70, w: 60, h: 20 };
+  const fnAvoidName = placeLabels({ symbols: [fnSym(100, 100)], obstacles: [fnName], gap: 2 });
+  ok(!rectsHit(fnAvoidName[0], fnName), "#209 I3: marks avoid space names");
+  ok(segmentHitsRect({ x: 0, y: 5 }, { x: 10, y: 5 }, { x: 4, y: 0, w: 2, h: 10 }) && !segmentHitsRect({ x: 0, y: 20 }, { x: 10, y: 20 }, { x: 4, y: 0, w: 2, h: 10 }), "#209 I3: segment/rect test");
+  const fnSide = planKeyLayout({ areaW: 13.3, areaH: 9.8, captionH: 0.35, aspect: 0.65, rows: 12, k: 1 });
+  ok(fnSide.side && fnSide.planW < 13.3 && fnSide.keyW > 0, "#209 I3: a long device key goes in a column beside the plan");
+  const fnNoKey = planKeyLayout({ areaW: 13.3, areaH: 9.8, captionH: 0.35, aspect: 0.65, rows: 0, k: 1 });
+  ok(fnNoKey.planW === 13.3 && fnNoKey.keyW === 0, "#209 I3: no key, full-width plan");
+  const fnFigSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx"), "utf8");
+  ok(fnFigSrc.includes("placeLabels(") && fnFigSrc.includes('paintOrder="stroke"') && fnFigSrc.includes("Device key"), "#209 I3: plan marks are collision-placed, haloed, and keyed");
+
+  // I4 — drops are a symbol apart
+  const fnBig = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }];
+  const fnDrops = spreadInSpace(fnBig, 9);
+  const fnMinGap = Math.min(...fnDrops.flatMap((a, i) => fnDrops.slice(i + 1).map((b) => Math.hypot(a.x - b.x, a.y - b.y))));
+  ok(DROP_STEP >= 0.05 && fnMinGap >= DROP_STEP * 0.75, "#209 I4: + Device multiples land at least a symbol apart");
+  const fnTiny = [{ x: 0.5, y: 0.5 }, { x: 0.56, y: 0.5 }, { x: 0.56, y: 0.56 }, { x: 0.5, y: 0.56 }];
+  const fnTinyDrops = spreadInSpace(fnTiny, 4);
+  ok(new Set(fnTinyDrops.map((p) => `${p.x},${p.y}`)).size === 4, "#209 I4: a small space still spreads its drops (finer spacing before stacking)");
+  const fnMargin = marginPoints(5, [], []);
+  const fnMarginGap = Math.min(...fnMargin.flatMap((a, i) => fnMargin.slice(i + 1).map((b) => Math.hypot(a.x - b.x, a.y - b.y))));
+  ok(fnMarginGap >= DROP_STEP * 0.75 && fnMargin.every((p) => p.y > 0.85), "#209 I4: Unassigned margin drops are a symbol apart, on the lower margin");
+
+  // I6 — PDF raster zoom + data-URL sheets through the proxy
+  const fnZb = printZoom(1224, 792, 13.3, 9.45);
+  ok(Math.abs(fnZb - (13.3 * 200) / 1224) < 0.002, "#209 I6: ≈200 dpi across the fitted width at 11×17");
+  const fnZd = printZoom(1224, 792, 28.2, 20);
+  ok(1224 * 792 * fnZd * fnZd <= 12e6 + 1 && fnZd < (28.2 * 200) / 1224, "#209 I6: capped at 12 MP per canvas at 24×36");
+  ok(printZoom(1224, 792, 2, 2) === 1 && printZoom(0, 0, 1, 1) === 2, "#209 I6: floored at screen resolution; bad input keeps the old zoom");
+  const fnSvg = decodeDataUrl("data:image/svg+xml;charset=utf-8,%3Csvg%2F%3E");
+  const fnPng = decodeDataUrl("data:image/png;base64,iVBORw0KGgo=");
+  ok(!!fnSvg && fnSvg.mime === "image/svg+xml" && new TextDecoder().decode(fnSvg.bytes) === "<svg/>", "#209 I6: a url-encoded data-URL decodes");
+  ok(!!fnPng && fnPng.mime === "image/png" && fnPng.bytes[1] === 0x50 && fnPng.bytes.length === 8 && decodeDataUrl("https://x") === null, "#209 I6: a base64 data-URL decodes; a plain URL doesn't");
+  ok(fnSetSrc.includes("src: `/api/grid-sheets/${encodeURIComponent(src.id)}`") && !fnSetSrc.includes("src.dataUrl"), "#209 I6: the set loads every sheet through the proxy, never inlining a data-URL");
+  const fnRouteSrc = readFileSync(join(process.cwd(), "src/app/api/grid-sheets/[id]/route.ts"), "utf8");
+  ok(fnRouteSrc.includes("decodeDataUrl(sheet.dataUrl)") && fnRouteSrc.includes("sandbox"), "#209 I6: the proxy serves in-database sheets, SVG under a sandbox CSP");
+  const fnPdfSrc = readFileSync(join(process.cwd(), "src/components/design/pdf-canvas.tsx"), "utf8");
+  ok(fnPdfSrc.includes("const docCache = new Map<string, Promise<PdfDoc>>()") && fnPdfSrc.includes("printZoom("), "#209 I6: one parsed PDF per source; print-sized raster");
+
+  // Minors
+  ok(fnSetSrc.includes('<PrintButton accent={accent} waitFor="[data-plan-figure]" />'), "#209 minor: Print waits for every plan figure");
+  const fnTb = readFileSync(join(process.cwd(), "src/components/drawing/title-block.tsx"), "utf8");
+  ok(fnTb.includes("timeZone: DEFAULT_TZ"), "#209 minor: the title-block date is in the app's default zone");
+  const fnFx = readFileSync(join(process.cwd(), "scripts/fixture-grid-drawing-set.ts"), "utf8");
+  ok(fnFx.includes("if (process.env.DATABASE_URL) throw"), "#209 minor: the print fixture refuses DATABASE_URL");
+  ok(readFileSync(join(process.cwd(), "src/lib/design/grid-part-lookup.ts"), "utf8").includes('typeof window !== "undefined"'), "#209 minor: grid-part-lookup guards against a client bundle");
+  let fnSeq = 0;
+  const fnFull = { ...emptyRiserDoc(), conduits: Array.from({ length: GDS_MAX_CONDUITS }, (_, i) => ({ id: `cd-${i}`, from: { kind: "space" as const, spaceId: "a" }, to: { kind: "space" as const, spaceId: "b" }, label: "c" })) };
+  ok(!applyRiserOp(fnFull, { op: "addConduit", from: { kind: "space", spaceId: "a" }, to: { kind: "space", spaceId: "b" }, label: "x" }, (p) => `${p}${++fnSeq}`).changed, "#209 minor: addConduit refuses past MAX_CONDUITS");
+}
+
+/* --- #209 final review — I3 space names sit in a clear corner --- */
+import { spaceNameRect } from "@/lib/design/drawing-labels";
+{
+  const snPoly = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }];
+  const snFree = spaceNameRect(snPoly, 50, 12, [], 5);
+  ok(snFree.x === 5 && snFree.y === 5, "#209 I3: a space name sits in its space's top-left corner");
+  const snBlocked = spaceNameRect(snPoly, 50, 12, [{ x: 0, y: 0, w: 60, h: 30 }], 5);
+  ok(snBlocked.x === 145 && snBlocked.y === 5, "#209 I3: a symbol in that corner pushes the name to the next clear corner");
+  const snNone = spaceNameRect(snPoly, 50, 12, [{ x: -10, y: -10, w: 300, h: 300 }], 5);
+  ok(snNone.x === 75 && snNone.y === 44, "#209 I3: no clear corner → the centre");
 }

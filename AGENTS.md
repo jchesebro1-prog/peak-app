@@ -183,6 +183,18 @@ See `.env.example`.
    `projects/peak-system-designer.md`; what remains is Jeff-gated data/infra
    (symbol+datasheet metadata, palette seeding, blob storage). Suite renamed
    **Quartzite** (D107) alongside slice 1.
+   ✅ Drawing set + editable riser (#209, Sep 25): a title-blocked drawing set
+   at `/design/grid/<id>/set` — T-001 cover (sheet index, symbol legend,
+   general notes), one plan sheet per system per source page (L/A/V/R, plus
+   G-101 for unscoped devices) with a calibration-derived scale note, E-501
+   riser, paginated E-60x equipment schedules — printed at 11×17 or 24×36
+   through the shared `PrintButton`. The riser gained + Device, Space,
+   Connect (a measured route or a typed RiserLink that prices like one),
+   Conduit (annotation, never priced), draggable level lines and numbered
+   notes, backed by a capped, server-canonicalized per-option riser document
+   that revisions and option copies carry; its legend now builds from
+   current placements. `/schedule` now names Grid-library parts and lists
+   RiserLinks alongside routed wire runs. Decisions D287–D293.
 11. ✅ **Consulting project management** (#145, D164–D172, D178, D175–D177) —
     task templates gain a phase/discipline scope and proportional %/%
     scheduling within phase windows; a pure scheduling engine
@@ -244,6 +256,19 @@ See `.env.example`.
     Remaining is Jeff-gated: run the DaVinci pre-fill + link fetch on
     production, verify Blob upload on a preview deploy. Decisions
     D270–D280; punch item #207.
+15. ✅ **Flights over drive** (#208, D281–D286) — a pure planner
+    (`src/lib/travel-plan.ts`) prices flights instead of a drive once one
+    trip's drive cost reaches a threshold (default $1,000), applied
+    everywhere a flame-test, repair or inspection quote is priced: the
+    three engines, their builder previews, save actions and renewal
+    re-pricing. Auto · Drive · Fly override with editable crew / nights /
+    airfare per quote; new Estimating Rules for the fly allowances and each
+    service's default flying crew. Customer letters, quote documents and
+    renewal PDFs print one "Travel (air, lodging & per diem)" line; renewals
+    carry last year's travel choice, not its airfare, and call out a mode
+    flip. Not in scope: the Estimator, rentals, consulting, live airfare
+    lookup, per-venue split trips. Decisions D281–D286; punch item
+    #208.
 15. ✅ **One fixture builder** (#FXB, D-FXB-1…D-FXB-6) — the Assembly
     Builder's two tabs merged: one `FixtureRecord` type (Fixture or
     System) in the existing `subassemblies` doc table

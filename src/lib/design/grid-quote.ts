@@ -16,6 +16,7 @@ import { bomLines, bomTotals, curtainLines, routeLines, type BomLine } from "@/l
 import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options";
+import { riserLinksOf } from "@/lib/design/grid-riser-doc";
 
 export type GridQuoteSpecLine = {
   sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true;
@@ -40,7 +41,9 @@ export async function buildGridQuote(
   if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
   const option = ensureOptions(project).options.find((o) => o.id === optionId)!;
   const { placements, routes } = optionSlice(project, optionId);
-  if (!placements.length && !routes.length)
+  // Typed-length riser connections (#209) price exactly like wire routes.
+  const riserLinks = riserLinksOf(project.riser, optionId);
+  if (!placements.length && !routes.length && !riserLinks.length)
     return { ok: false, error: "Place a device or route a wire first." };
 
   // Unresolved seed placeholders (D147) must not silently price at $0 (#64 idiom).
@@ -78,7 +81,7 @@ export async function buildGridQuote(
 
   const devLines = bomLines(placements, tierCatalog);
   const devTotals = bomTotals(placements, tierCatalog);
-  const wires = routeLines(routes, tierCatalog, project.calibrations || []);
+  const wires = routeLines(routes, tierCatalog, project.calibrations || [], riserLinks);
 
   const curtainPrices = priceGridCurtains(placements, catalog, tier.margin);
   const fabricNames = new Map(catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const));

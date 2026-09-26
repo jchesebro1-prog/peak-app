@@ -11,6 +11,7 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
+import { flightOf, flyTravelSentence, travelLineAmount } from "@/lib/travel-plan";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -63,6 +64,7 @@ type RepairDoc = {
   warrantyMonths?: number;
   office?: string;
   trip?: { miles?: number; minutes?: number } | null;
+  rates?: { margin?: number } | null;
   total?: number | null;
 };
 
@@ -201,18 +203,8 @@ export default async function RepairLetterPage({
   const crewSize = rp.crewSize || 1;
   const hoursEach = rp.hoursEach != null ? rp.hoursEach : crewSize ? laborHours / crewSize : laborHours;
   const originCity = rp.office || "our office";
-  const travelParagraph =
-    "The distance from " +
-    companyName +
-    " (" +
-    originCity +
-    ") to " +
-    venueName +
-    " is approximately " +
-    num1(oneWayMiles) +
-    " miles, or about " +
-    num1(oneWayHours) +
-    " hours each way. We estimate approximately " +
+  const crewSentence =
+    " We estimate approximately " +
     num1(laborHours) +
     " crew-hour" +
     (laborHours === 1 ? "" : "s") +
@@ -221,6 +213,27 @@ export default async function RepairLetterPage({
       ? " (" + num1(hoursEach) + " hours × crew of " + crewSize + ")"
       : "") +
     ".";
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(rp.trip);
+  const travelMargin = typeof rp.rates?.margin === "number" ? rp.rates.margin : quote.margin || 0;
+  const travelParagraph = flight
+    ? flyTravelSentence(
+        companyName + " (" + originCity + ")",
+        venueName,
+        travelLineAmount(flight.total, travelMargin)
+      ) + crewSentence
+    : "The distance from " +
+      companyName +
+      " (" +
+      originCity +
+      ") to " +
+      venueName +
+      " is approximately " +
+      num1(oneWayMiles) +
+      " miles, or about " +
+      num1(oneWayHours) +
+      " hours each way." +
+      crewSentence;
 
   const warrantyMonths =
     rp.warrantyMonths != null ? rp.warrantyMonths : DEFAULT_WARRANTY_MONTHS;

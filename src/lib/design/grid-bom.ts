@@ -389,7 +389,12 @@ export function routeLengthFt(route: RouteLite, cals: Calibration[]): number | n
 export function routeLines(
   routes: RouteLite[],
   parts: PartLite[],
-  cals: Calibration[]
+  cals: Calibration[],
+  /** RiserLinks (#209) — typed-length cable runs from the riser. Summed with
+   *  the measured routes of the same part BEFORE rounding up, so a part's
+   *  footage is bought whole once. They carry no validated connectionType,
+   *  so a line they touch is never annotated with one. */
+  links: ReadonlyArray<{ partId: string; lengthFt: number }> = []
 ): { lines: BomLine[]; value: number; cost: number; unmeasured: number } {
   const byId = new Map(parts.map((p) => [p.id, p]));
   const feet = new Map<string, number>();
@@ -416,6 +421,14 @@ export function routeLines(
     } else {
       hasUnstamped.add(r.partId);
     }
+  }
+  for (const l of links) {
+    if (!(l.lengthFt > 0) || !Number.isFinite(l.lengthFt)) {
+      unmeasured++;
+      continue;
+    }
+    feet.set(l.partId, (feet.get(l.partId) || 0) + l.lengthFt);
+    hasUnstamped.add(l.partId);
   }
   const lines: BomLine[] = [];
   let value = 0;

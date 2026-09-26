@@ -157,3 +157,36 @@ export function isLayerVisible(
   if (category && hidden.has(categoryLayerKey(category))) return false;
   return true;
 }
+
+/* ---------------------------- drawing systems ---------------------------- */
+
+/**
+ * Drawing-set systems (drawing set spec 2026-09-25 §3, #209). One plan-sheet
+ * family per system, keyed off the SAME scope taxonomy the Scope panel uses
+ * (scopeOfPart above), so re-mapping a catalog category re-files its devices
+ * on the drawings too. Curtains print with rigging on the R-sheets. `general`
+ * is the catch-all for Unscoped devices (D288): the spec lists four
+ * systems, but a device with no scope must never silently vanish from a set.
+ */
+export type DrawingSystemKey = "lighting" | "audio" | "video" | "rigging" | "general";
+
+export type DrawingSystem = {
+  key: DrawingSystemKey;
+  /** Sheet-number prefix: L-101, A-101, V-101, R-101, G-101. */
+  prefix: string;
+  title: string;
+  scopes: readonly GridLayer[];
+};
+
+/** Sheet order in the set. */
+export const DRAWING_SYSTEMS: readonly DrawingSystem[] = [
+  { key: "lighting", prefix: "L", title: "Lighting plan", scopes: ["Lighting"] },
+  { key: "audio", prefix: "A", title: "Audio plan", scopes: ["Audio"] },
+  { key: "video", prefix: "V", title: "Video plan", scopes: ["Video"] },
+  { key: "rigging", prefix: "R", title: "Rigging & drapery plan", scopes: ["Rigging", "Curtains"] },
+  { key: "general", prefix: "G", title: "General devices plan", scopes: [UNSCOPED] },
+];
+
+export function drawingSystemOf(scope: GridLayer): DrawingSystemKey {
+  return DRAWING_SYSTEMS.find((s) => s.scopes.includes(scope))?.key ?? "general";
+}

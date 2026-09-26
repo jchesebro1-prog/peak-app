@@ -48,6 +48,7 @@ import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { optionSlice } from "@/lib/design/grid-options";
+import { riserLinksOf, type RiserDoc } from "@/lib/design/grid-riser-doc";
 import type { FabricOption, QuickScopeInputs } from "@/app/(app)/design/quick/engine";
 import type { GridOption, GridPlacement, GridRevision, GridRoute, GridSpace } from "@/lib/stores/grid-projects";
 import {
@@ -220,6 +221,8 @@ export type ProjectLite = {
   revisions: GridRevision[];
   scopeInputs: QuickScopeInputs | null;
   linesetDesignId: string | null;
+  /** Riser documents per option (#209) — the sidebar BOM counts RiserLinks. */
+  riser: Record<string, RiserDoc>;
 };
 
 type Pending =
@@ -578,9 +581,10 @@ export default function GridEditor({
 
   const lines = useMemo(() => bomLines(placements, parts), [placements, parts]);
   const totals = useMemo(() => bomTotals(placements, parts), [placements, parts]);
+  const riserLinks = useMemo(() => riserLinksOf(project.riser, activeOptionId), [project.riser, activeOptionId]);
   const wires = useMemo(
-    () => routeLines(routes || [], parts, project.calibrations),
-    [routes, parts, project.calibrations]
+    () => routeLines(routes || [], parts, project.calibrations, riserLinks),
+    [routes, parts, project.calibrations, riserLinks]
   );
 
   /* ------------------------------ curtains (#49) ------------------------------ */
@@ -1214,6 +1218,9 @@ export default function GridEditor({
         </Link>
         <Link href={`/design/grid/${encodeURIComponent(project.id)}/schedule?option=${encodeURIComponent(activeOptionId)}`} style={{ ...BTN, textDecoration: "none" }}>
           Schedule →
+        </Link>
+        <Link href={`/design/grid/${encodeURIComponent(project.id)}/set?option=${encodeURIComponent(activeOptionId)}`} style={{ ...BTN, textDecoration: "none" }}>
+          Drawing set →
         </Link>
         <select
           value={project.linesetDesignId || ""}

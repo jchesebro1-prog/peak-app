@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
+import { TRAVEL_FLY_LINE, flightOf, travelLineAmount } from "@/lib/travel-plan";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -76,6 +77,7 @@ type InspectionDoc = {
   lineSetsTotal?: number;
   inspectHours?: number;
   trip?: { miles?: number; minutes?: number } | null;
+  rates?: { margin?: number } | null;
   total?: number | null;
 };
 
@@ -205,7 +207,10 @@ export default async function InspectionLetterPage({
   const mph = travelRates.mph || 50;
   const oneWayHours = mph ? rtMiles / 2 / mph : 0;
   const inspectHours = insp.inspectHours || 0;
-  const travelHours = 2 * oneWayHours;
+  // Flights over drive (spec 2026-09-25 §5): one customer-facing travel line.
+  const flight = flightOf(insp.trip);
+  const travelMargin = typeof insp.rates?.margin === "number" ? insp.rates.margin : quote.margin || 0;
+  const travelHours = flight ? flight.travelHours : 2 * oneWayHours;
   const totalHours = travelHours + inspectHours;
   const originCity = insp.office || "our office";
   const hasTrip = rtMiles > 0;
@@ -259,7 +264,15 @@ export default async function InspectionLetterPage({
     qty: lineSetsLabel,
     hours: num1(inspectHours) + " hrs",
   });
-  if (hasTrip) {
+  if (flight) {
+    scopeRows.push({
+      item: pad2(sr++),
+      desc: TRAVEL_FLY_LINE,
+      sub: "From " + originCity,
+      qty: money(travelLineAmount(flight.total, travelMargin)),
+      hours: num1(flight.travelHours) + " hrs",
+    });
+  } else if (hasTrip) {
     scopeRows.push({
       item: pad2(sr++),
       desc: "Round-trip site mobilization from " + originCity,
@@ -290,7 +303,7 @@ export default async function InspectionLetterPage({
   const priceHeadline = renderField(
     tpl,
     "inspection_proposal",
-    hasTrip ? "priceLine" : "priceLineNoTravel",
+    flight ? "priceLineFly" : hasTrip ? "priceLine" : "priceLineNoTravel",
     { lineSetsLabel, price: totalLabel }
   );
   const priceSupport = renderField(tpl, "inspection_proposal", "costTail", {});
