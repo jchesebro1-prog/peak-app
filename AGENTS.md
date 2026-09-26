@@ -223,6 +223,19 @@ See `.env.example`.
     external Displays API. Phase B (the generator, the four doors, docx/zip
     output, a print view) and Phase C (the `spec-writer` skill, the North HS
     seed) remain. Decisions D254–D261; punch item #205.
+14. ✅ **Flights over drive** (#TRV, D-TRV-1–D-TRV-5) — a pure planner
+    (`src/lib/travel-plan.ts`) prices flights instead of a drive once one
+    trip's drive cost reaches a threshold (default $1,000), applied
+    everywhere a flame-test, repair or inspection quote is priced: the
+    three engines, their builder previews, save actions and renewal
+    re-pricing. Auto · Drive · Fly override with editable crew / nights /
+    airfare per quote; new Estimating Rules for the fly allowances and each
+    service's default flying crew. Customer letters, quote documents and
+    renewal PDFs print one "Travel (air, lodging & per diem)" line; renewals
+    carry last year's travel choice, not its airfare, and call out a mode
+    flip. Not in scope: the Estimator, rentals, consulting, live airfare
+    lookup, per-venue split trips. Decisions D-TRV-1–D-TRV-5; punch item
+    #TRV — placeholders, renumbered at merge.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

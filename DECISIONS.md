@@ -5676,3 +5676,47 @@ but `createGridAssembly` clears it whenever an `icon` is given, so a caller can'
 category default is labelled "<category> — <desc>" (the #131 riser rule). Curtains are left out of the plan legend
 because they draw their own drape glyph, not a badge. The plan legend's open/closed state lives in `localStorage`
 through `useSyncExternalStore` (no hydration mismatch, no setState in an effect) and its rows always print.
+
+## D-TRV-1. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#TRV, 2026-09-25)
+
+Jeff: "once we reach 1000 dollars in travel expenses, then it switches to flights and hotels with allowances." A pure,
+import-free planner (`src/lib/travel-plan.ts`) runs in the flame-test, repair and inspection engines, their builder
+previews, the save actions and renewal re-pricing, so every path applies one rule. Trigger: the engines' existing
+per-trip drive cost (`trip.total` = mileage + drive-time labor) ≥ `flyThreshold` (default $1,000; 0 = never fly),
+overridable per quote as Auto · Drive · Fly. Fly = crew × airfare + crew × nights × hotel + crew × (nights + 1) × per
+diem + ⌈crew ÷ 2⌉ × (nights + 1) × car + crew × hours each way × 2 × the service's labor rate; nights default to
+⌈on-site hours ÷ (crew × hours per day)⌉; crew, nights and airfare are editable on the quote (blank = default, shown
+as the placeholder). Flight rates live in the shared `travel_rates` blob and each service's default crew in its own
+rates blob (flame 1, repair 2, inspection 1), all in Estimating Rules; missing keys fall back to the defaults — no
+migration. Drive mode returns the drive total itself, so drive-mode prices are bit-for-bit unchanged, and saved
+quotes keep their stored price until someone re-prices them. `trip` keeps the drive numbers and gains `mode` (and
+`flight` when flying); the per-quote override is saved as `travel` on the service subdoc.
+
+## D-TRV-2. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#TRV, 2026-09-25)
+
+The spec's default repair crew is 2, but a repair quote already carries a crew size. The flying crew defaults to
+`max(repair_rates.flyCrew, the quote's crew size)` so a crew of 3 is never priced as 2 flights. Travel-day labor
+bills at the service's base labor rate even on emergency quotes — the same rate drive time already uses; only
+on-site labor takes the emergency multiplier.
+
+## D-TRV-3. Customers see one travel line, at travel's share of the sell price (#TRV, 2026-09-25)
+
+In fly mode the letters, quote documents and renewal PDFs print one line, "Travel (air, lodging & per diem)", with
+the flight cost marked up by the quote's margin (`flight.total ÷ (1 − margin)`, rounded) — never a bare cost figure
+next to an all-in price. It replaces the round-trip mobilization row (flame, inspection) and the distance sentence
+(repair); the hours column shows the travel-day hours. The proposals' `priceLine` says "the drive", so a new
+editable template field `priceLineFly` ("Everything above — travel (air, lodging & per diem), …") is used in fly
+mode. The itemized airfare / lodging / per diem / car / travel labor stays builder-only.
+
+## D-TRV-4. Renewals keep last year's travel choice, not last year's airfare (#TRV, 2026-09-25)
+
+Renewal re-pricing (D69, current rates) carries the prior quote's travel override — mode, crew, nights — but drops
+its manual airfare, which is a one-year number; the allowance applies. When the renewal's mode differs from last
+year's, the email's "why the price changed" list gains "travel now being priced as flights, lodging & per diem
+instead of a drive" (or "…as a drive instead of flights").
+
+## D-TRV-5. The quote-builder previews use the live road factor and speed (#TRV, 2026-09-25)
+
+The three builders' inlined previews hardcoded 1.25 / 50 mph while the server re-priced with the Estimating Rules
+values. With a threshold on the drive total the two could disagree on drive vs fly, so the pages now hand the
+builders the live `travel_rates` blob and the previews use it. Server totals are unchanged.

@@ -8285,3 +8285,29 @@ primary look.
 **Still open.** Per-model product artwork and admin icon uploads stay out of scope (D154). Wire routes still take
 the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
 lead's call (never against `.data/pglite`).
+
+
+---
+
+## #TRV. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D-TRV-1…D-TRV-5)
+
+**Reported:** 2026-09-25 (Jeff, brainstorm): "once we reach 1000 dollars in travel expenses, then it switches to
+flights and hotels with allowances." Spec: `docs/superpowers/specs/2026-09-25-travel-flights-design.md`; plan:
+`docs/superpowers/plans/2026-09-25-travel-flights.md`.
+
+**Done.**
+- **One rule everywhere** — `src/lib/travel-plan.ts` (pure, client-safe) prices flights when one trip's drive cost
+  reaches the threshold (default $1,000), used by the flame / repair / inspection engines, their builder previews,
+  the save actions and renewal re-pricing. Drive-mode prices are unchanged; saved quotes keep their price.
+- **Estimating Rules** — Travel & mileage gains the fly threshold, airfare allowance, hotel, per diem, rental car,
+  travel-day hours and on-site hours per day; each service group gains its default flying crew (1 / 2 / 1).
+- **Builders** — a Travel: Auto · Drive · Fly control; in fly mode crew / nights / airfare per person (defaults as
+  placeholders) and the itemized airfare / lodging / per diem / car / travel labor, plus "Drive would be $X — over
+  the $1,000 threshold, priced as flights." when Auto switched.
+- **Customer documents** — one "Travel (air, lodging & per diem)" line at travel's share of the sell price on the
+  flame / inspection / repair letters and both renewal PDFs; new `priceLineFly` template field.
+- **Renewals** — carry last year's travel choice (not its airfare) and say so when the mode flips.
+
+**Still open.** Live airfare lookup, per-venue split trips and Estimator mobilization stay out of scope (spec §7).
+A browser check of the three builders in fly mode on a scratch datadir is the lead's call (never against
+`.data/pglite`). Jeff to confirm the default allowances once real trips are priced.
