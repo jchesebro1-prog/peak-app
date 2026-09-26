@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft } from "./types";
+import { optionalToggleQty } from "./fixture-bom";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, Stat } from "./est-ui";
 
 function totals(assembly: ResolvedFixtureAssembly | undefined, quantities: Record<string, string>) {
@@ -42,8 +43,31 @@ export default function FixtureModal({
       ) : <>
         <div style={{ marginBottom: 16 }}><label style={LBL}>Assembly</label><select value={draft.assemblyId} onChange={(event) => onAssembly(event.target.value)} style={{ ...FIELD, background: "#fff" }}><option value="">— Select an assembly —</option>{assemblies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
         {assembly && <div style={{ marginBottom: 16 }}>
-          <label style={LBL}>Components <span style={{ color: "#aab0bb", textTransform: "none", letterSpacing: 0 }}>· set optional items from 0 when needed</span></label>
-          <div style={{ border: "1px solid #e4e7ec", borderRadius: 10, overflow: "hidden" }}>{assembly.components.map((part) => <div key={part.sku} style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 12, alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f0f1f4" }}><div><div style={{ fontSize: 13, fontWeight: 650 }}>{part.label}</div><div style={{ fontSize: 11.5, color: part.found ? "#8c919c" : "#b4543a" }}>{part.sku} · {part.role} · {part.desc}{!part.found ? " — missing from catalog" : ""}</div></div><input aria-label={`${part.label} quantity`} type="number" min="0" step="1" value={draft.componentQty[part.sku] ?? String(part.defaultQty)} onChange={(event) => onComponentQty(part.sku, event.target.value)} style={{ ...NUMFIELD, width: "100%" }} /></div>)}</div>
+          <label style={LBL}>Components <span style={{ color: "#aab0bb", textTransform: "none", letterSpacing: 0 }}>· tick an optional add-on to include it</span></label>
+          <div style={{ border: "1px solid #e4e7ec", borderRadius: 10, overflow: "hidden" }}>{assembly.components.map((part) => {
+            const optional = part.defaultQty === 0;
+            const current = draft.componentQty[part.sku] ?? String(part.defaultQty);
+            const on = Number(current) > 0;
+            return (
+              <div key={part.sku} style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 12, alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f0f1f4", background: optional && !on ? "#fbfbfc" : "#fff" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 650 }}>{part.label}{optional && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: "#8c919c" }}>optional add-on</span>}</div>
+                  <div style={{ fontSize: 11.5, color: part.found ? "#8c919c" : "#b4543a" }}>{part.sku} · {part.role} · {part.desc}{!part.found ? " — missing from catalog" : ""}</div>
+                </div>
+                {optional && !on ? (
+                  <label style={{ display: "inline-flex", gap: 5, alignItems: "center", justifySelf: "end", fontSize: 12, color: "#5b616e", cursor: "pointer" }}>
+                    <input type="checkbox" aria-label={`Add ${part.label}`} checked={false} onChange={() => onComponentQty(part.sku, optionalToggleQty(true))} />
+                    Add
+                  </label>
+                ) : (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {optional && <input type="checkbox" aria-label={`Remove ${part.label}`} checked onChange={() => onComponentQty(part.sku, optionalToggleQty(false))} />}
+                    <input aria-label={`${part.label} quantity`} type="number" min="0" step="1" value={current} onChange={(event) => onComponentQty(part.sku, event.target.value)} style={{ ...NUMFIELD, width: "100%" }} />
+                  </div>
+                )}
+              </div>
+            );
+          })}</div>
         </div>}
         <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr", gap: 12 }}><div><label style={LBL}>Fixture qty</label><input value={draft.qty} onChange={(event) => onSet("qty", event.target.value)} style={NUMFIELD} /></div><div><label style={LBL}>Hang position</label><input value={draft.position} onChange={(event) => onSet("position", event.target.value)} style={FIELD} /></div><div><label style={LBL}>Circuit #</label><input value={draft.circuit} onChange={(event) => onSet("circuit", event.target.value)} style={FIELD} /></div></div>
       </>}

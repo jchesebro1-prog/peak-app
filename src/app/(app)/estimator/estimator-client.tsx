@@ -75,7 +75,7 @@ import type {
   VendorQuote,
 } from "./types";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
-import { assemblyDescription } from "@/lib/fixture-assemblies";
+import { fixtureBomLine } from "./fixture-bom";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import { saveEstimatorCustomPartAction } from "./actions";
@@ -1365,6 +1365,9 @@ export default function EstimatorClient({
         ...freshFixture(),
         assemblyId: first?.id || "",
         componentQty: Object.fromEntries((first?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
+        // #FXB: the fixture's default hang position / circuit.
+        position: first?.position || "",
+        circuit: first?.circuit || "",
       });
     } else if (kind === "labor") {
       // Resolve travel before seeding the draft (punch #89): the estimate is
@@ -1652,6 +1655,9 @@ export default function EstimatorClient({
       ...draft,
       assemblyId,
       componentQty: Object.fromEntries((assembly?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
+      // #FXB: a fixture's default position / circuit fills an empty field only.
+      position: draft.position || assembly?.position || "",
+      circuit: draft.circuit || assembly?.circuit || "",
     }));
   };
   const setFixtureComponentQty = (sku: string, value: string) =>
@@ -1660,33 +1666,13 @@ export default function EstimatorClient({
     const d = fixtureDraft;
     const assembly = fixtureAssemblies.find((item) => item.id === d.assemblyId);
     if (!assembly) return;
-    const components = assembly.components.map((part) => ({
-      sku: part.sku,
-      label: part.label,
-      role: part.role,
-      qty: Math.max(0, Number(d.componentQty[part.sku] ?? part.defaultQty) || 0),
-      unit: part.unit,
-      cost: part.cost,
-      price: part.list,
-    }));
-    const included = components.filter((part) => part.qty > 0);
-    const unitCost = included.reduce((sum, part) => sum + part.cost * part.qty, 0);
-    const unitSell = included.reduce((sum, part) => sum + part.price * part.qty, 0);
-    if (unitSell <= 0) return;
-    const pc: string[] = [];
-    if ((d.position || "").trim()) pc.push("Pos " + d.position.trim());
-    if ((d.circuit || "").trim()) pc.push("Ckt " + d.circuit.trim());
-    let desc = assemblyDescription({
-      ...assembly,
-      components: assembly.components.map((part) => ({
-        ...part,
-        defaultQty: Math.max(0, Number(d.componentQty[part.sku] ?? part.defaultQty) || 0),
-      })),
-    });
-    if (pc.length) desc += " (" + pc.join(" / ") + ")";
+    // #FXB: the BOM math lives in fixture-bom.ts (pure, parity-tested);
+    // the line's shape is unchanged.
+    const line = fixtureBomLine(assembly, d);
+    if (!line) return;
     const qty = Math.max(1, Number.parseInt(d.qty, 10) || 1);
     pushItems(secId, [
-      { id: nextId(), sku: assembly.id, desc, qty, unit: "ea", cost: unitCost, price: unitSell, fixture: true, components },
+      { id: nextId(), sku: assembly.id, desc: line.desc, qty, unit: "ea", cost: line.cost, price: line.price, fixture: true, components: line.components },
     ]);
     closeInput();
   };

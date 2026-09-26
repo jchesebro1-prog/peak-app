@@ -16368,3 +16368,30 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
   ok(fixturePairs({ kind: "system", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } }).length === 0, "#FXB graph: systems don't feed the graph");
   ok(fixtureRef("fa-1") === "fixture:fa-1" && FIXTURE_REF_PREFIX === "fixture:" && LEGACY_ASSEMBLY_REF_PREFIXES.join() === "assembly:,subassembly:", "#FXB graph: one fixture:<id> scope; the two legacy prefixes are named for retirement");
 }
+
+/* --- #FXB — the Estimator BOM line over a converted assembly is unchanged;
+       an optional add-on switched on adds qty 1. Pure. --- */
+import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture-bom";
+{
+  const asm = { id: "fa-bom", name: "Wash", components: [
+    { sku: "B-ENG", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+    { sku: "B-CBL", label: "Cable", role: "power" as const, defaultQty: 2, costOverride: 7 },
+    { sku: "B-BARN", label: "Barn door", role: "accessory" as const, defaultQty: 0 },
+  ] };
+  const cat = [
+    { sku: "B-ENG", desc: "Wash engine", unit: "ea", cost: 800, list: 1200 },
+    { sku: "B-CBL", desc: "Cable", unit: "ea", cost: 10, list: 15 },
+    { sku: "B-BARN", desc: "Barn door", unit: "ea", cost: 60, list: 90 },
+  ];
+  const before = resolveFixtureAssemblies([asm], cat)[0];
+  const after = fixtureAssembliesFrom([assemblyToFixture(asm, 1)], cat)[0];
+  const draft = { componentQty: {}, position: "FOH", circuit: "4" };
+  const b = fixtureBomLine(before, draft)!;
+  const a = fixtureBomLine(after, draft)!;
+  ok(!!b && !!a && b.cost === a.cost && b.price === a.price && a.cost === 814 && a.price === 1230, "#FXB Estimator: a converted assembly's BOM line totals are identical");
+  ok(a.desc === "Wash — Engine; Cable ×2 (Pos FOH / Ckt 4)" && a.components.length === 3, "#FXB Estimator: description and components[] keep today's shape");
+  const on = fixtureBomLine(after, { ...draft, componentQty: { "B-BARN": optionalToggleQty(true) } })!;
+  ok(on.price === a.price + 90 && on.cost === a.cost + 60 && on.components.find((c) => c.sku === "B-BARN")!.qty === 1, "#FXB Estimator: switching an optional add-on on adds it at qty 1");
+  ok(optionalToggleQty(false) === "0", "#FXB Estimator: switching it off returns it to 0");
+  ok(fixtureBomLine(after, { ...draft, componentQty: { "B-ENG": "0", "B-CBL": "0" } }) === null, "#FXB Estimator: a line with no sell is refused, as before");
+}

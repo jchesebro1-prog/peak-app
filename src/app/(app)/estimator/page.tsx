@@ -2,7 +2,8 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { get as getQuote, type Quote, type QuoteReview } from "@/lib/stores/quotes";
 import { byCategory, list as catalogList } from "@/lib/stores/catalog";
-import { resolveFixtureAssemblies } from "@/lib/fixture-assemblies";
+import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
+import { listFixtures } from "@/lib/stores/fixtures";
 import {
   all as allCustomers,
   resolveId,
@@ -213,7 +214,7 @@ export default async function EstimatorPage({
 
   const q = (rawId ? await getQuote(rawId) : null) as QuoteDoc | null;
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -224,6 +225,7 @@ export default async function EstimatorPage({
       activeUsers(),
       catalogList(),
       loadPipelines(),
+      listFixtures(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -330,7 +332,7 @@ export default async function EstimatorPage({
       fabrics={fabrics}
       laborRates={laborRates}
       fixtureRates={fixtureRates}
-      fixtureAssemblies={resolveFixtureAssemblies(settings.fixtureAssemblies, catalogRows)}
+      fixtureAssemblies={fixtureAssembliesFrom(fixtures, catalogRows)}
       vendors={vendorNames}
       blobUploads={blobEnabled()}
       customers={customers}
