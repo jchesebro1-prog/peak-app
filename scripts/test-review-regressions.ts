@@ -3082,6 +3082,53 @@ async function main() {
     assert.equal((await Acc.allAccessoryLinks()).find((l) => l.sourceRef === "assembly:fw-conc" && l.accessorySku === "FW-A")?.ownDatasheet, true, "final fix I6: an already-live row's own-datasheet flag is never touched by the add-only pass");
   }
 
+  /* --- #FXB fixture builder: the store — first-read conversion, create /
+         update / delete, save rules, who/when stamps --- */
+  {
+    const Fx = await import("@/lib/stores/fixtures");
+    const Mig = await import("@/lib/fixtures-migrate");
+    const DS = await import("@/db/doc-store");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const { assemblyToFixture } = await import("@/lib/fixtures-convert");
+
+    await Mig.resetFixturesConversion();
+    assert.equal(await Mig.fixturesConverted(), false, "#FXB store: resetFixturesConversion re-arms the conversion (the go-live reset path)");
+    await setSettings({ fixtureAssemblies: [{ id: "fa-fxb-store", name: "Store probe", components: [{ sku: "FXB-E", label: "E", role: "fixture", defaultQty: 1 }] }] });
+    const first = await Fx.listFixtures();
+    assert(first.some((f) => f.id === "fa-fxb-store"), "#FXB store: listFixtures converts on its first read");
+    assert.equal(await Mig.fixturesConverted(), true, "#FXB store: …and marks the conversion complete");
+    const labels = first.map((f) => f.label);
+    assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)), "#FXB store: the list is sorted by label");
+    await setSettings({ fixtureAssemblies: [] });
+
+    const clean = sanitizeFixtureInput({ kind: "fixture", label: "FXB Store", description: "", lightEngineSku: "FXB-NOT-IN-CATALOG", lines: { power: [{ sku: "FXB-CBL", qty: 1 }] } });
+    assert(clean.ok, "#FXB store: a light engine missing from the catalog does not block a save");
+    if (!clean.ok) throw new Error("unreachable");
+    const snap = { cost: 0, price: 0, pricedAt: null };
+    const made = await Fx.createFixture(clean.value, "Jeff", snap, 1_700_000_000_000);
+    assert.match(made.id, /^SA-[0-9A-Z]+$/, "#FXB store: new records get an SA-<TS36> id");
+    assert(made.createdBy === "Jeff" && made.updatedBy === "Jeff" && made.createdAt === 1_700_000_000_000 && made.updatedAt === 1_700_000_000_000, "#FXB store: create stamps who/when");
+    const twin = await Fx.createFixture(clean.value, "Jeff", snap, 1_700_000_000_000);
+    assert.notEqual(twin.id, made.id, "#FXB store: a same-millisecond create never overwrites (collision-safe id)");
+    const edited = sanitizeFixtureInput({ kind: "fixture", label: "FXB Store v2", description: "", lightEngineSku: "FXB-ENG" });
+    if (!edited.ok) throw new Error("unreachable");
+    const upd = await Fx.updateFixture(made, edited.value, "Sam", snap, 1_700_000_100_000);
+    assert(upd.id === made.id && upd.label === "FXB Store v2" && upd.createdBy === "Jeff" && upd.createdAt === made.createdAt && upd.updatedBy === "Sam" && upd.updatedAt === 1_700_000_100_000, "#FXB store: update keeps id + created*, stamps updated*");
+    assert.equal((await Fx.getFixture(made.id))?.label, "FXB Store v2", "#FXB store: the update is read back");
+    await Fx.removeFixture(made.id);
+    assert.equal(await Fx.getFixture(made.id), null, "#FXB store: delete is a soft delete the reader no longer sees");
+    assert(!(await Fx.listFixtures()).some((f) => f.id === made.id), "#FXB store: …and the list drops it");
+
+    const flagged = assemblyToFixture({ id: "fa-fxb-nr", name: "Kit", components: [{ sku: "K1", label: "Cable", role: "cable", defaultQty: 1 }] }, 1);
+    await DS.insertDocIfAbsent("subassemblies", flagged);
+    const nr = (await Fx.getFixture("fa-fxb-nr"))!;
+    assert.equal(nr.needsReview, true, "#FXB store: a converted assembly with no fixture member reads as needs-review");
+    const reviewed = sanitizeFixtureInput({ kind: "fixture", label: "Kit", description: "", lightEngineSku: "K1" });
+    if (!reviewed.ok) throw new Error("unreachable");
+    const cleared = await Fx.updateFixture(nr, reviewed.value, "Jeff", snap);
+    assert(cleared.needsReview === undefined && cleared.legacy?.from === "assembly" && cleared.id === "fa-fxb-nr", "#FXB store: a human save clears needs-review and keeps the id + provenance");
+  }
+
   console.log("review regression checks passed");
 }
 

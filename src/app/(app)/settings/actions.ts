@@ -337,6 +337,12 @@ export async function clearDemoDataAction(confirm: string) {
   }
   const { clearDemoData } = await import("@/db/seed-data");
   const cleared = await clearDemoData();
+  // #FXB: fixtures live in a doc table the reset just wiped; re-arm the
+  // one-time conversion so the settings-backed assemblies (configuration,
+  // which this reset keeps) come back on the next read, as they did when
+  // they lived in settings.
+  const { resetFixturesConversion } = await import("@/lib/fixtures-migrate");
+  await resetFixturesConversion();
   await setSettings({ seedDemo: false });
   revalidatePath("/", "layout");
   return { ok: true as const, cleared };
