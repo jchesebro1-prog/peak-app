@@ -8421,5 +8421,8 @@ memory and rewrites it on its next save. Rows only the new builder wrote (new `S
 conversion flag stays set, so settings edits made on main during a rollback are never re-imported by a later re-merge —
 re-enter them in the builder. During cutover, previews of any branch cut before this merge still run the old code against the
 shared production database and keep writing the old shapes (settings assemblies, `options`-only subassembly rows,
-`assembly:`/`subassembly:` graph rows); the new code reads each of those, and a legacy-shaped row converts on the
-next pass — but an `fa-…` assembly added in settings after the flag is set is not picked up.
+`assembly:`/`subassembly:` graph rows). Once the conversion flag is set no further pass runs: a legacy-shaped row they
+write is normalized in memory on every read and rewritten (legacy fields kept) on its next save in the builder, an
+`assembly:`/`subassembly:` graph row they write stays live beside the `fixture:` one until `fixtures:convert -- --commit`
+(or `part-docs:backfill -- --commit`) is run again, which retires it, and an `fa-…` assembly they add to settings is
+never picked up.
