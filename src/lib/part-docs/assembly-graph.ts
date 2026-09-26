@@ -1,5 +1,5 @@
-import type { FixtureAssembly } from "@/lib/fixture-assemblies";
-import type { FixtureSubassembly } from "@/lib/stores/subassemblies";
+import { FIXTURE_BOXES, type FixtureAssembly, type FixtureRecord, type HeadLine } from "@/lib/fixture-assemblies";
+import type { LegacySubassembly } from "@/lib/fixtures-convert";
 import { ownFiles, slotCoverage, type CoverageIndex, type SlotState } from "./coverage";
 import type { AccessoryPair } from "./types";
 
@@ -32,7 +32,7 @@ export function fixtureAssemblyPairs(a: Pick<FixtureAssembly, "components">): Ac
 }
 
 /** A subassembly's lens and data/power/mounting/accessory options. */
-export function subassemblyPairs(s: Pick<FixtureSubassembly, "lightEngineSku" | "lensSku" | "options">): AccessoryPair[] {
+export function subassemblyPairs(s: Pick<LegacySubassembly, "lightEngineSku" | "lensSku" | "options">): AccessoryPair[] {
   const parentSku = s.lightEngineSku;
   if (!parentSku) return [];
   const out: AccessoryPair[] = [];
@@ -78,4 +78,30 @@ export function memberCoverageLabel(c: MemberCoverage | undefined): string {
   if (c.state === "own") return "Own datasheet attached";
   if (c.parentHasDatasheet) return "Covered by fixture datasheet";
   return "Fixture has no datasheet yet";
+}
+
+/* ---- #FXB — one fixture builder, one scope ---------------------------- */
+
+/** The merged builder's scope. The two part-documents scopes above are
+ *  retired (soft-deleted) once the fixture: scope is written. */
+export const FIXTURE_REF_PREFIX = "fixture:";
+export const fixtureRef = (id: string) => `${FIXTURE_REF_PREFIX}${id}`;
+export const LEGACY_ASSEMBLY_REF_PREFIXES = [ASSEMBLY_REF_PREFIX, SUBASSEMBLY_REF_PREFIX] as const;
+
+/**
+ * A fixture record's accessory pairs (spec §5): parent = light engine;
+ * accessories = lens + every box line, included (qty ≥ 1, maxQty = qty) or
+ * optional (qty 0, un-included link). Systems feed nothing.
+ */
+export function fixturePairs(r: Pick<FixtureRecord, "kind" | "lightEngineSku" | "lensSku" | "lines"> & { lensLine?: HeadLine }): AccessoryPair[] {
+  if (r.kind !== "fixture" || !r.lightEngineSku) return [];
+  const parentSku = r.lightEngineSku;
+  const out: AccessoryPair[] = [];
+  const push = (sku: string, qty: number) => {
+    if (!sku || sku === parentSku) return;
+    out.push({ parentSku, accessorySku: sku, ...(qty > 0 ? { maxQty: qty, included: true } : {}) });
+  };
+  if (r.lensSku) push(r.lensSku, r.lensLine?.qty ?? 1);
+  for (const box of FIXTURE_BOXES) for (const l of r.lines?.[box] || []) push(l.sku, Number(l.qty) || 0);
+  return out;
 }

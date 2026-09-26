@@ -16282,3 +16282,89 @@ import {
   ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#FXB fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
   ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#FXB fixtureAssembliesFrom: the override rides through as the component cost");
 }
+
+/* ======================================================================
+   #FXB — conversion (role mapping, ids kept, idempotent), converted-assembly
+   parity, and the fixture: graph scope. Pure.
+   ====================================================================== */
+import { assemblyToFixture, subassemblyToFixture, isLegacySubassembly, planFixtureConversion, normalizeFixtureRow } from "@/lib/fixtures-convert";
+import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFIXES } from "@/lib/part-docs/assembly-graph";
+{
+  const asm = {
+    id: "fa-conv", name: "House S4", components: [
+      { sku: "C-LENS", label: "Lens", role: "lens" as const, defaultQty: 1 },
+      { sku: "C-ENG", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+      { sku: "C-ENG2", label: "Second body", role: "fixture" as const, defaultQty: 0 },
+      { sku: "C-LENS2", label: "Alt lens", role: "lens" as const, defaultQty: 0 },
+      { sku: "C-DATA", label: "DMX", role: "data" as const, defaultQty: 2 },
+      { sku: "C-PWR", label: "Power", role: "power" as const, defaultQty: 1, costOverride: 12 },
+      { sku: "C-MNT", label: "Clamp", role: "mount" as const, defaultQty: 1 },
+      { sku: "C-ACC", label: "Iris", role: "accessory" as const, defaultQty: 0 },
+      { sku: "C-CBL", label: "Safety", role: "cable" as const, defaultQty: 1 },
+      { sku: "C-LAMP", label: "Lamp", role: "lamp" as const, defaultQty: 1 },
+      { sku: "C-OTH", label: "Misc", role: "other" as const, defaultQty: 1 },
+    ],
+  };
+  const f = assemblyToFixture(asm, 1000);
+  ok(f.id === "fa-conv" && f.kind === "fixture" && f.label === "House S4" && f.legacy?.from === "assembly" && f.createdAt === 1000, "#FXB convert: an assembly keeps its fa- id and name");
+  ok(f.lightEngineSku === "C-ENG" && f.lightEngineLine?.label === "Engine" && f.lightEngineLine?.qty === 1 && f.lensSku === "C-LENS" && f.lensLine?.label === "Lens", "#FXB convert: first fixture → light engine, first lens → lens (label and qty kept)");
+  ok(f.lines.data.map((l) => `${l.sku}x${l.qty}`).join() === "C-DATAx2" && f.lines.power[0].costOverride === 12 && f.lines.mounting.map((l) => l.sku).join() === "C-MNT", "#FXB convert: data/power/mount → Data/Power/Mounting, qty and override carried");
+  ok(f.lines.accessories.map((l) => l.sku).join(",") === "C-ENG2,C-LENS2,C-ACC,C-CBL,C-LAMP,C-OTH", "#FXB convert: extra fixture/lens members + accessory/cable/lamp/other → Accessories, order kept");
+  ok(!f.needsReview, "#FXB convert: an assembly with a fixture member needs no review");
+  const kit = assemblyToFixture({ id: "fa-ne", name: "Cable kit", components: [{ sku: "K1", label: "Cable", role: "cable", defaultQty: 3 }, { sku: "K2", label: "Clamp", role: "mount", defaultQty: 1 }] }, 1000);
+  ok(kit.lightEngineSku === "K1" && kit.lightEngineLine?.qty === 3 && kit.needsReview === true && kit.lines.mounting[0].sku === "K2" && kit.lines.accessories.length === 0, "#FXB convert: no fixture member → the first component becomes the light engine, flagged needsReview");
+
+  // Parity: the converted record yields the same Estimator / Quick Design numbers.
+  const cat = [
+    { sku: "C-ENG", desc: "Engine", unit: "ea", cost: 1000, list: 1500 },
+    { sku: "C-ENG2", desc: "Body 2", unit: "ea", cost: 900, list: 1400 },
+    { sku: "C-LENS", desc: "Lens", unit: "ea", cost: 200, list: 300 },
+    { sku: "C-LENS2", desc: "Lens 2", unit: "ea", cost: 250, list: 350 },
+    { sku: "C-DATA", desc: "DMX", unit: "ea", cost: 5, list: 9 },
+    { sku: "C-PWR", desc: "Power", unit: "ea", cost: 40, list: 60 },
+    { sku: "C-MNT", desc: "Clamp", unit: "ea", cost: 10, list: 20 },
+    { sku: "C-ACC", desc: "Iris", unit: "ea", cost: 30, list: 45 },
+    { sku: "C-CBL", desc: "Safety", unit: "ea", cost: 8, list: 12 },
+    { sku: "C-LAMP", desc: "Lamp", unit: "ea", cost: 50, list: 80 },
+    { sku: "C-OTH", desc: "Misc", unit: "ea", cost: 3, list: 5 },
+  ];
+  const before = resolveFixtureAssemblies([asm], cat)[0];
+  const after = fixtureAssembliesFrom([f], cat)[0];
+  const bt = assemblyUnitTotals(before);
+  const at = assemblyUnitTotals(after);
+  ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#FXB parity: a converted assembly keeps its id, name and unit cost/sell");
+  const key = (c: { sku: string; label: string; defaultQty: number; cost: number; list: number; found: boolean }) => `${c.sku}|${c.label}|${c.defaultQty}|${c.cost}|${c.list}|${c.found}`;
+  ok(JSON.stringify(before.components.map(key).sort()) === JSON.stringify(after.components.map(key).sort()), "#FXB parity: the same component set (sku, label, qty, cost, sell)");
+  const pick = (a: typeof before) => ({ name: a.name, cost: assemblyUnitTotals(a).cost });
+  ok(JSON.stringify(pick(before)) === JSON.stringify(pick(after)), "#FXB parity: the Quick Design / Grid pick under this id prices the same");
+
+  // Legacy subassembly rows.
+  const legacy = {
+    id: "SA-OLD", kind: "fixture" as const, label: "Old", description: "d",
+    lightEngineSku: "C-ENG", lightEngineName: "Engine (old)", lightEngineCost: 900,
+    lensSku: "C-LENS", lensName: "Lens (old)", lensCost: 150,
+    lamp: "LED", position: "FOH", circuit: "12",
+    options: { data: [{ sku: "C-DATA", name: "DMX (old)", cost: 5, qty: 2 }], power: [], mounting: [], accessories: [{ sku: "C-GONE", name: "Gone part", cost: 3, qty: 1 }] },
+    cost: 1065, price: 1065, snapshot: { cost: 1065, price: 1065, pricedAt: null }, createdAt: 5, updatedAt: 6,
+  };
+  ok(isLegacySubassembly(legacy), "#FXB convert: a pre-#FXB subassembly row is recognised");
+  const s = subassemblyToFixture(legacy);
+  ok(s.id === "SA-OLD" && s.lensSku === "C-LENS" && s.lines.data[0].qty === 2 && s.lines.accessories[0].sku === "C-GONE" && s.lamp === "LED" && s.position === "FOH" && s.circuit === "12" && s.createdAt === 5 && s.updatedAt === 6 && s.legacy?.from === "subassembly", "#FXB convert: a subassembly is rewritten to the new shape, id and fields kept");
+  ok(!isLegacySubassembly(s as unknown as Record<string, unknown>) && !("options" in s) && !("lightEngineName" in s), "#FXB convert: a converted row is no longer legacy and drops the stored-name fields");
+  const gone = resolveFixture(s, cat).parts.find((p) => p.sku === "C-GONE")!;
+  ok(!gone.found && gone.label === "Gone part", "#FXB convert: a converted row's old stored name is the fallback display for a missing part");
+  ok(normalizeFixtureRow(legacy as unknown as Record<string, unknown> & { id: string }).lines.data[0].sku === "C-DATA", "#FXB normalizeFixtureRow: a legacy row reads as the new shape in memory");
+
+  const rows = [legacy as unknown as Record<string, unknown> & { id: string }];
+  const p1 = planFixtureConversion([asm], rows, 1000);
+  ok(p1.inserts.map((r) => r.id).join() === "fa-conv" && p1.rewrites.map((r) => r.id).join() === "SA-OLD", "#FXB plan: settings assemblies insert, legacy rows rewrite");
+  const applied = [...p1.rewrites, ...p1.inserts] as unknown as Array<Record<string, unknown> & { id: string }>;
+  const p2 = planFixtureConversion([asm], applied, 2000);
+  ok(p2.inserts.length === 0 && p2.rewrites.length === 0, "#FXB plan: running the conversion twice changes nothing");
+
+  // The accessory graph: one fixture: scope; systems feed nothing.
+  const pairs = fixturePairs({ kind: "fixture", lightEngineSku: "G-ENG", lensSku: "G-LENS", lines: { data: [{ sku: "G-DMX", qty: 2 }], power: [], mounting: [{ sku: "G-CLAMP", qty: 0 }], accessories: [{ sku: "G-ENG", qty: 1 }] } });
+  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? p.maxQty : "opt"}`).join(",") === "G-ENG>G-LENS:1,G-ENG>G-DMX:2,G-ENG>G-CLAMP:opt", "#FXB graph: lens + every box line (optional ones un-included) under the light engine; the engine itself skipped");
+  ok(fixturePairs({ kind: "system", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } }).length === 0, "#FXB graph: systems don't feed the graph");
+  ok(fixtureRef("fa-1") === "fixture:fa-1" && FIXTURE_REF_PREFIX === "fixture:" && LEGACY_ASSEMBLY_REF_PREFIXES.join() === "assembly:,subassembly:", "#FXB graph: one fixture:<id> scope; the two legacy prefixes are named for retirement");
+}
