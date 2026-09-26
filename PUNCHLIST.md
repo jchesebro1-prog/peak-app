@@ -8285,3 +8285,31 @@ primary look.
 **Still open.** Per-model product artwork and admin icon uploads stay out of scope (D154). Wire routes still take
 the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
 lead's call (never against `.data/pglite`).
+
+## #GDS. The Grid — professional drawing set (title blocks) + editable riser — DONE 2026-09-25 (D-GDS-1…D-GDS-7)
+
+**Reported:** 2026-09-25 (Jeff, brainstorm with mockups): "talk through making the outputs look more professional …
+adding title blocks, and adding the ability to add via the riser." Spec:
+`docs/superpowers/specs/2026-09-25-grid-drawing-set-and-riser-editor-design.md`; plan:
+`docs/superpowers/plans/2026-09-25-grid-drawing-set-and-riser.md`.
+
+**Done.**
+- **Drawing set** at `/design/grid/<id>/set` (editor and riser toolbars link to it): T-001 cover (project, sheet
+  index, symbol legend, general notes), one plan sheet per system per source page (L/A/V/R, plus G-101 for
+  unscoped devices) with a scale note from the calibration, E-501 riser, E-60x equipment schedules — every sheet
+  with the architectural right-side title strip (logo, company, project, option, revision table, drawn/checked/
+  scale/date, quote, sheet title + number + n of N). 11×17 default, 24×36 per set; set settings (size, drawn/
+  checked, include/exclude sheets, general notes, revision labels) saved on the project; "Standard general notes"
+  in Grid Settings — unticking a set's own notes reverts to that standard text rather than blanking the sheet.
+- **Editable riser**: saved layout (drag nodes), + Device (lands on the plan inside the space), edit/delete device
+  rows (edits the placements), Space, Connect (a measured wire route on the plan, or a typed-length RiserLink that
+  prices like a route), Conduit (annotation, never priced), Level lines (drag), numbered notes. Revisions and option
+  copies carry the riser document. Riser end references are canonicalized server-side and the document is capped
+  per option (50 levels, 500 conduits, 100 notes, 1000 links); the riser legend now builds from current placements.
+- **`/schedule`** now names Grid-library parts (it used to fall back to "(no longer in the catalog)" for them) and
+  lists RiserLinks alongside routed wire runs, sharing `buildSchedule` with the E-60x sheets.
+- Verified by `scripts/fixture-grid-drawing-set.ts`: headless print-to-PDF of the set at both sizes — 6 pages each,
+  every page exactly 1224×792 pt (17×11 in, size B) and 2592×1728 pt (36×24 in, size D).
+
+**Still open.** Levels (upper/lower plan sheets), details/elevations sheets and DWG export stay out of scope. A
+real-project browser check on a scratch DB copy is the lead's call (never against `.data/pglite`).

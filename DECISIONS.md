@@ -5676,3 +5676,71 @@ but `createGridAssembly` clears it whenever an `icon` is given, so a caller can'
 category default is labelled "<category> — <desc>" (the #131 riser rule). Curtains are left out of the plan legend
 because they draw their own drape glyph, not a badge. The plan legend's open/closed state lives in `localStorage`
 through `useSyncExternalStore` (no hydration mismatch, no setState in an effect) and its rows always print.
+
+## D-GDS-1. The drawing set is a browser-print page with one size table (#GDS, 2026-09-25)
+
+`/design/grid/<id>/set` renders every sheet as an exact-size `.pk-drawing-sheet` (11×17 ANSI B default, 24×36 ARCH D
+per set) and prints through the shared `PrintButton`. `lib/design/grid-drawing-set.ts` is the only place sheet
+geometry lives: `DrawingSheet` turns it into CSS variables, the page turns it into `@page`, and the plan figure fits
+the plan to the same drawing area. 24×36 is the 11×17 layout scaled by 36/17 (borders, strip and type); the paper
+aspect differs slightly, so the drawing area absorbs it. `?size=` beats the saved size, which beats 11×17.
+
+## D-GDS-2. Plan sheets: one per system per source page, plus G-101 for unscoped devices (#GDS, 2026-09-25)
+
+Systems map onto the Scope panel's own taxonomy (`DRAWING_SYSTEMS` in grid-scopes.ts): L = Lighting, A = Audio,
+V = Video, R = Rigging + Curtains. A system gets a sheet only where it has devices or wires. A wire belongs to the
+system of the device it was drawn from (else to); only a free wire falls back to its cable's own scope. Two
+additions the spec didn't list: devices and free wires with no scope print on a **G-101 General devices plan**
+rather than vanishing, and a system that spans several plan sheets/pages gets L-101, L-102 … titled with the source
+sheet. Sheet numbers are assigned before exclusions, so excluding L-101 never renumbers L-102; the cover index and
+"n of N" count only included sheets; all E-60x pages toggle together. "In scope" means "has placements" — the Scope
+panel's system toggles do not hide placed equipment from the drawings.
+
+## D-GDS-3. Revision table, labels and the printed date (#GDS, 2026-09-25)
+
+Every Grid revision is lettered A, B, C … (then AA …) in cut order, including quote and restore bookkeeping
+revisions — they are real snapshots. The label is the revision's note, else a per-set label typed on the set page,
+else a plain reason ("Issued with quote"). The strip prints the newest six with "+n earlier". The title-block date is
+the print date; "drawn by" defaults to the project's creator, "checked by" to blank. The company block uses the
+quote-default office's address and phone; Settings has no website field, so none prints. T-001's general notes
+follow the same override pattern: a project-level notes field beats Grid Settings' "Standard general notes"
+default, and unticking a set's own notes on the set page reverts to that standard text rather than blanking the
+sheet.
+
+## D-GDS-4. The riser document is per option, layout-only for derived things (#GDS, 2026-09-25)
+
+`GridProject.riser[optionId]` stores node boxes, level lines, conduits, notes and RiserLinks; devices, spaces and
+routes stay derived (D112). Nothing is written on first open — the auto layout is recomputed and saved positions win
+(`mergeLayout`); a new space takes the next free slot. Every space is a node, even an empty one, so devices can be
+added to it. Revisions snapshot and restore the whole riser map; option copy re-points device ends at the copied
+placements; option removal drops that option's document; deleting a device or space prunes the links/conduits that
+ended on it (and a space's saved box). Riser end references are canonicalized server-side — never trusted as the
+client shaped them — before any write, and the document is capped per option (50 levels, 500 conduits, 100 notes,
+1000 links) to keep the single JSONB document bounded. The riser's symbol legend is built from current placements
+rather than a fixed list, so it always matches what's actually drawn on the riser.
+
+## D-GDS-5. + Device, qty edits and Space write ordinary plan geometry (#GDS, 2026-09-25)
+
++ Device spreads new placements on a 0.02 grid spiralling out from the space centroid, inside the polygon and clear
+of existing devices; Unassigned devices go along the first sheet's lower margin outside every space. Lowering a
+row's qty removes the newest placements in that space; raising it adds more the same way; the part swap re-points
+every placement in the row. The Space tool adds a 0.10 × 0.07 rectangle on the first-chosen sheet's lower margin
+through the existing `addSpaceAction`; reshaping happens on the plan.
+
+## D-GDS-6. Connect: a measured route when possible, else a typed RiserLink; conduit is never priced (#GDS, 2026-09-25)
+
+Two different devices on the same sheet and page, with that page calibrated → a straight `GridRoute` through the
+existing `addRouteAction` (port validation, calibration gate, measured length; the page aspect is measured in the
+browser the way the editor does). Anything else — cross-sheet, a space end, or an uncalibrated page — stores a
+`RiserLink` with a typed length (≤ 5,000 ft, kept to 0.1 ft). A device row's end is its oldest placement. RiserLink
+footage is summed with routes of the same part before rounding up (`routeLines` 4th argument) on both the editor's
+live BOM and the draft quote, and never carries a connectionType. Conduits are annotations only and never reach
+the BOM.
+
+## D-GDS-7. One PartLite builder and one schedule builder (#GDS, 2026-09-25)
+
+`gridPartsFrom` (lib/design/grid-parts.ts) replaces the inline builders in the plan page and the riser page; the
+riser, set and schedule use its catalog fallback so pre-library placements still resolve. `/schedule` and the E-60x
+sheets share `buildSchedule`; as a side effect `/schedule` now names Grid-library parts (it used to look up the
+pricing catalog only and printed "(no longer in the catalog)" for them) and lists RiserLinks with the wire runs.
+E-60x paginate at 30 rows per column, two columns per sheet, repeating a section head marked "(cont.)".
