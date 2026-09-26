@@ -157,6 +157,14 @@ export default function RiserEditor({
     });
   }
 
+  function dropLiveLevel(id: string) {
+    setLiveLevels((l) => {
+      const next = { ...l };
+      delete next[id];
+      return next;
+    });
+  }
+
   /** A device row → its oldest placement (a representative device end); a
    *  node header → the space itself. */
   function endOf(nodeKey: string, partId: string | null): End | null {
@@ -176,6 +184,16 @@ export default function RiserEditor({
     }
     if (!first) {
       setFirst(end);
+      return;
+    }
+    const sameEnd =
+      first.ref.kind === end.ref.kind &&
+      (first.ref.kind === "placement"
+        ? first.ref.placementId === (end.ref as EndRef & { kind: "placement" }).placementId
+        : first.ref.spaceId === (end.ref as EndRef & { kind: "space" }).spaceId);
+    if (sameEnd) {
+      setErr("Pick two different ends.");
+      setFirst(null);
       return;
     }
     setPanel({ kind: "pair", tool: tool === "conduit" ? "conduit" : "connect", from: first.ref, to: end.ref, fromLabel: first.label, toLabel: end.label });
@@ -302,7 +320,9 @@ export default function RiserEditor({
       }
       const y = liveLevels[d.id];
       if (y === undefined) return;
-      void patch({ op: "updateLevel", id: d.id, y });
+      void patch({ op: "updateLevel", id: d.id, y }).then((ok) => {
+        if (!ok) dropLiveLevel(d.id);
+      });
     },
   };
 
