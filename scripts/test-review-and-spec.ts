@@ -19756,3 +19756,123 @@ import { parseInbound as ip214ParseInbound, headerValue as ip214Header } from "@
     "#214 Cc: getMessageMetadata asks Gmail for headers only (format=metadata)"
   );
 }
+
+/* ====== #214 Inbox Link popup — signature reader (Task 2) ======
+   Deterministic (D89): realistic bodies in, name/title/company/phones out;
+   what a known contact lacks; the exact-name company match; label mapping. */
+import {
+  extractSignature as sig214Extract,
+  missingContactFields as sig214Missing,
+  companyByExactName as sig214Company,
+  stripQuotedHistory as sig214Strip,
+  channelLabelFor as sig214Label,
+} from "@/lib/inbox-signature-parse";
+{
+  const j = (x: unknown) => JSON.stringify(x);
+
+  // 1 — a reply with quoted history (CRLF), mobile + office phones, website.
+  const reply = [
+    "Hi Jeff,", "", "Yes — Tuesday at 10 works for the walkthrough.", "", "Thanks,", "Brenda Gauchel",
+    "Technical Director", "Lakefront Public Schools", "m: 218-555-0142", "o: (218) 555-0100 x204",
+    "www.lakefront.k12.mn.us", "",
+    "On Mon, Sep 21, 2026 at 3:02 PM Jeff Chesebro <jeff@peaksystemsgroup.com> wrote:",
+    "> Hi Brenda,", "> Does Tuesday work?", ">", "> Jeff Chesebro", "> Peak Systems Group", "> (612) 555-0199",
+  ].join("\r\n");
+  const s1 = sig214Extract(reply, { name: "Brenda Gauchel", email: "brenda@lakefront.k12.mn.us" });
+  ok(s1?.name === "Brenda Gauchel" && s1.title === "Technical Director" && s1.company === "Lakefront Public Schools", "#214 signature: reply — name, title, company after the sign-off");
+  ok(
+    j(s1?.phones) === j([{ label: "mobile", number: "(218) 555-0142" }, { label: "office", number: "(218) 555-0100 x204" }]),
+    "#214 signature: reply — m:/o: labels, extension kept, the quoted (612) number ignored"
+  );
+  ok(s1?.website === "www.lakefront.k12.mn.us" && s1.email === undefined, "#214 signature: reply — website read, no email in the block");
+
+  // 2 — "Sent from my iPhone" and nothing else → null.
+  ok(
+    sig214Extract("Sounds good — see you Tuesday.\n\nSent from my iPhone", { name: "Brenda Gauchel", email: "brenda@lakefront.k12.mn.us" }) === null,
+    "#214 signature: a phone footer alone is no signature"
+  );
+  // 3 — no signature at all → null.
+  ok(
+    sig214Extract("Can you send the revised quote by Friday? The board meets Monday.", { name: "Pat Kim", email: "pkim@x.org" }) === null,
+    "#214 signature: a body with no signature → null"
+  );
+
+  // 4 — "-- " delimiter, credentials, Direct | Cell on one line, Outlook history cut.
+  const outlook = [
+    "Chris,", "", "Attached is the rigging plot.", "", "-- ", "Chris Hale, AIA", "Principal", "Hale Arch Studio",
+    "Direct 612.555.0123 | Cell 612.555.0456", "chris.hale@halearchstudio.com", "", "-----Original Message-----",
+    "From: Jeff Chesebro <jeff@peaksystemsgroup.com>", "Sent: Monday, September 21, 2026 3:02 PM", "To: Chris Hale",
+    "Subject: Plot", "", "Jeff Chesebro | 612-555-0199",
+  ].join("\n");
+  const s4 = sig214Extract(outlook, { name: "Chris Hale", email: "chris.hale@halearchstudio.com" });
+  ok(s4?.name === "Chris Hale" && s4.title === "Principal" && s4.company === "Hale Arch Studio", "#214 signature: '-- ' delimiter — credentials dropped from the name, company matched to the email domain");
+  ok(
+    j(s4?.phones) === j([{ label: "office", number: "(612) 555-0123" }, { label: "mobile", number: "(612) 555-0456" }]),
+    "#214 signature: Direct → office, Cell → mobile, two numbers on one line; the Original Message history is cut"
+  );
+  ok(s4?.email === "chris.hale@halearchstudio.com" && s4.website === undefined, "#214 signature: an email address is not mistaken for a website");
+
+  // 5 — no sign-off: the block starts at the sender's name; "Title | Company".
+  const s5 = sig214Extract(
+    "Please call me when you get a chance.\n\nDana Whitfield\nTheatre Manager | Orpheum Theatre\nT 952-555-0177",
+    { name: "Dana Whitfield", email: "dwhitfield@orpheum.org" }
+  );
+  ok(
+    s5?.name === "Dana Whitfield" && s5.title === "Theatre Manager" && s5.company === "Orpheum Theatre" &&
+      j(s5.phones) === j([{ label: "office", number: "(952) 555-0177" }]),
+    "#214 signature: no sign-off — found by the sender's name; 'Title | Company' split; T → office"
+  );
+
+  // 6 — webmail sender with no display name: capitalized name line, title keyword.
+  const s6 = sig214Extract(
+    "Got it, thank you.\n\nThank you!\nSam Ortiz\nProduction Coordinator\nNorthfield Arts Guild\ncell: 507.555.0190",
+    { name: "", email: "samortiz88@gmail.com" }
+  );
+  ok(
+    s6?.name === "Sam Ortiz" && s6.title === "Production Coordinator" && s6.company === "Northfield Arts Guild" &&
+      j(s6.phones) === j([{ label: "mobile", number: "(507) 555-0190" }]),
+    "#214 signature: webmail sender — the capitalized line is the name, 'Coordinator' marks the title"
+  );
+
+  // 7 — only an email under the sign-off → null.
+  ok(
+    sig214Extract("See attached.\n\nThanks,\nbrenda@lakefront.k12.mn.us", { name: "Brenda", email: "brenda@lakefront.k12.mn.us" }) === null,
+    "#214 signature: nothing beyond an email → null"
+  );
+
+  // 8 — company right under the name (no title), unlabelled phone → other.
+  const s8 = sig214Extract("Here you go.\n\nBest regards,\nPat Kim\nLakefront Public Schools\n(218) 555-0111", {
+    name: "Pat Kim",
+    email: "pkim@lakefront.k12.mn.us",
+  });
+  ok(
+    s8?.name === "Pat Kim" && s8.title === undefined && s8.company === "Lakefront Public Schools" &&
+      j(s8.phones) === j([{ label: "other", number: "(218) 555-0111" }]),
+    "#214 signature: a line matching the email domain is the company, not a title; an unlabelled phone is 'other'"
+  );
+
+  // 9 — first name only expands to the sender's full display name.
+  const s9 = sig214Extract("Works for me.\n\nThanks,\nBrenda\nTechnical Director", { name: "Brenda Gauchel", email: "brenda@lakefront.k12.mn.us" });
+  ok(s9?.name === "Brenda Gauchel" && s9.title === "Technical Director", "#214 signature: a signed first name takes the sender's full name");
+  ok(sig214Strip("a\r\n> b\r\nc") === "a\nc", "#214 signature: quoted '>' lines are dropped, CRLF normalised");
+
+  // What a known contact lacks — never an overwrite.
+  const miss = sig214Missing({ title: "", phones: ["218-555-0142"] }, s1);
+  ok(
+    miss.title === "Technical Director" && j(miss.phones) === j([{ label: "office", number: "(218) 555-0100 x204" }]),
+    "#214 signature: missing = a blank title + phones whose digits aren't on file"
+  );
+  ok(
+    j(sig214Missing({ title: "TD", phones: ["(218) 555-0142", "2185550100 ext 9"] }, s1)) === j({ phones: [] }),
+    "#214 signature: a title already set and phones already on file (any format) propose nothing"
+  );
+  ok(j(sig214Missing({ title: "", phones: [] }, null)) === j({ phones: [] }), "#214 signature: no signature → nothing missing");
+
+  ok(
+    sig214Company("Lakefront Public Schools", [{ id: "lakefront", name: "Lakefront Public Schools" }, { id: "x", name: "Lakefront" }]) === "lakefront",
+    "#214 signature: the signature company matches one company by exact name"
+  );
+  ok(sig214Company("Lakefront", [{ id: "a", name: "Lakefront" }, { id: "b", name: "LAKEFRONT." }]) === null, "#214 signature: two companies with that name → no pick");
+  ok(sig214Company("", [{ id: "a", name: "" }]) === null, "#214 signature: a blank company never matches");
+  ok(sig214Label("office") === "work" && sig214Label("mobile") === "mobile" && sig214Label("other") === "other", "#214 signature: office → the identity core's 'work' label");
+}
