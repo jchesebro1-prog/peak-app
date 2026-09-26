@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -19,7 +19,7 @@ import {
   setSpecProductHeaderAction,
   type SpecPickerPart,
 } from "../builder-actions";
-import { CARD, CARD_SUB, CARD_TITLE, ERR, FillInsCard, HeaderCard, MUTED } from "./header-fields";
+import { CARD, CARD_SUB, CARD_TITLE, ERR, FillInsCard, HeaderCard, MUTED, SaveTracker, useSave } from "./header-fields";
 import Preview from "./preview";
 
 /**
@@ -28,7 +28,8 @@ import Preview from "./preview";
  * Word, Delete. Everything saves as it changes through the builder's server
  * actions; router.refresh() re-runs the page's assembly so the preview and
  * checklist always show what the Word file will hold. Nothing here blocks the
- * download — gaps are listed, never enforced (design decision 4).
+ * download — gaps are listed, never enforced (design decision 4) — but a
+ * Download click waits for saves still in flight (SaveTracker).
  *
  * Writing spec text for a part saves it TO THE PART (the catalog Spec
  * panel's writePartSpecFieldsAction), so the next spec gets it for free.
@@ -45,16 +46,19 @@ export type SpecProductRow = {
   leftOutReason: LeftOutReason | null;
   /** For "other-section": the title of the article the part does belong to. */
   otherArticleTitle: string | null;
+  /** The part's own resolved article (explicit or category default), any section. */
+  ownArticleId: string | null;
   specArticleId: string | null;
+  /** specArticleId names an article that no longer exists. */
+  deadArticle: boolean;
+  specSameAs: string;
   specTitle: string;
   specBody: string;
   specSort: number | null;
-  /** The part carries spec text of its own (a draft counts). */
-  hasOwnText: boolean;
 };
 
-type ActionResult = { ok: true } | { ok: false; error: string };
 type ArticleOption = { id: string; title: string };
+type RunFn = ReturnType<typeof useSave>["run"];
 
 const ROW: CSSProperties = {
   display: "grid",
@@ -84,38 +88,23 @@ const REASON_TEXT: Record<LeftOutReason, string> = {
   "not-in-catalog": "Part no longer in catalog",
 };
 
-/** Run one save; surface its error, refresh on success. */
-function useRun() {
-  const router = useRouter();
-  const [err, setErr] = useState("");
-  const [pending, start] = useTransition();
-  const run = (fn: () => Promise<ActionResult>, onOk?: () => void) =>
-    start(async () => {
-      const r = await fn();
-      if (!r.ok) {
-        setErr(r.error);
-        return;
-      }
-      setErr("");
-      onOk?.();
-      router.refresh();
-    });
-  return { err, setErr, pending, run };
-}
-
 /** The part a Write spec box is for — a picker result or a product row. */
 type WriteTarget = {
   sku: string;
   desc: string;
+  /** The part's explicit article, when it still exists. */
   specArticleId: string | null;
-  /** The part's resolved article (own or category default), any section. */
-  resolvedArticleId: string | null;
+  /** The part's own resolved article (explicit or category default), any section. */
+  ownArticleId: string | null;
+  /** The part's explicit article was deleted from the library. */
+  deadArticle: boolean;
+  specSameAs: string;
   specTitle: string;
   specBody: string;
   specSort: number | null;
   /** Needs spec text written (false = it has an approved spec already). */
   needsText: boolean;
-  /** Needs a header in this section picked (false = it has one). */
+  /** Needs a header in this spec (it isn't in this section on its own). */
   needsHeader: boolean;
   /** Add it to the spec after saving (picker) vs. it is already on it (row). */
   addToSpec: boolean;
@@ -135,51 +124,76 @@ function WriteSpecDialog({
   onClose: () => void;
   onDone: (sku: string) => void;
 }) {
+  const { track } = useSave();
   const [title, setTitle] = useState(target.specTitle);
   const [body, setBody] = useState(target.specBody);
   const [header, setHeader] = useState("");
   const [err, setErr] = useState("");
-  const [pending, start] = useTransition();
+  const [pending, setPending] = useState(false);
+  const dirty = title !== target.specTitle || body !== target.specBody || header !== "";
+  // A dead article needs a new one picked, even when the part is already on the spec.
+  const showHeader = target.needsHeader || (target.needsText && target.deadArticle);
 
-  const save = () => {
+  // Escape closes only when nothing was typed; otherwise it asks first. A
+  // click on the scrim never closes — it would throw away written text.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || pending) return;
+      if (!dirty || window.confirm("Discard what you wrote here?")) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dirty, pending, onClose]);
+
+  const save = async () => {
     setErr("");
     if (target.needsText && !body.trim()) {
       setErr("Write the spec text first.");
       return;
     }
-    start(async () => {
-      if (target.needsText) {
-        // Keep the part's own article; a part with no article at all adopts
-        // the header picked here. A part whose category puts it in another
-        // section keeps that — the header below goes on this spec only.
-        const specArticleId = target.specArticleId || (!target.resolvedArticleId && header ? header : undefined);
-        const w = await writePartSpecFieldsAction({
-          sku: target.sku,
-          specArticleId,
-          specTitle: title,
-          specBody: body,
-          ...(target.specSort != null ? { specSort: target.specSort } : {}),
-        });
-        if (!w.ok) {
-          setErr(w.error);
-          return;
+    setPending(true);
+    try {
+      await track(async () => {
+        if (target.needsText) {
+          // Keep the part's own (live) article; a part with no article at all
+          // — or a deleted one — adopts the header picked here. A part whose
+          // category puts it in another section keeps that; the header then
+          // goes on this spec only.
+          const specArticleId = target.specArticleId || (!target.ownArticleId && header ? header : undefined);
+          const w = await writePartSpecFieldsAction({
+            sku: target.sku,
+            specArticleId,
+            specTitle: title,
+            specBody: body,
+            ...(target.specSort != null ? { specSort: target.specSort } : {}),
+          });
+          if (!w.ok) {
+            setErr(w.error);
+            return;
+          }
         }
-      }
-      if (target.addToSpec) {
-        const a = await addSpecProductAction(docId, target.sku, target.needsHeader && header ? header : undefined);
-        if (!a.ok) {
-          setErr(a.error);
-          return;
+        if (target.addToSpec) {
+          const a = await addSpecProductAction(docId, target.sku, target.needsHeader && header ? header : undefined);
+          if (!a.ok) {
+            setErr(a.error);
+            return;
+          }
         }
-      }
-      onDone(target.sku);
-    });
+        onDone(target.sku);
+      });
+    } catch {
+      setErr("Could not save. Try again.");
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
-    <div className="pk-modal-scrim" onClick={onClose}>
-      <div className="pk-modal" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>{target.needsText ? "Write spec" : "Pick a header"}</div>
+    <div className="pk-modal-scrim">
+      <div className="pk-modal" role="dialog" aria-modal="true" aria-labelledby="write-spec-heading" style={{ width: 620 }}>
+        <div id="write-spec-heading" style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>
+          {target.needsText ? "Write spec" : "Pick a header"}
+        </div>
         <div style={{ ...MUTED, marginBottom: 14 }}>
           <span style={SKU}>{target.sku}</span> {target.desc}
         </div>
@@ -190,6 +204,9 @@ function WriteSpecDialog({
               This text is saved to the part in the catalog, so every future spec gets it too.
               {target.specBody.trim() && " The part already has draft text — review it; saving approves it."}
             </div>
+            {target.specSameAs && (
+              <div style={{ ...WARN, marginBottom: 12 }}>This replaces the &apos;same as {target.specSameAs}&apos; link.</div>
+            )}
             <label className="pk-field-label" htmlFor="write-spec-title" style={{ display: "block" }}>
               Title (the product&apos;s heading in the spec)
             </label>
@@ -215,11 +232,14 @@ function WriteSpecDialog({
           </>
         )}
 
-        {target.needsHeader && (
+        {showHeader && (
           <>
             <label className="pk-field-label" htmlFor="write-spec-header" style={{ display: "block" }}>
               Header in this spec
             </label>
+            {target.deadArticle && (
+              <div style={{ ...MUTED, marginBottom: 6 }}>This part&apos;s header was deleted from the library — pick one from this section.</div>
+            )}
             <select id="write-spec-header" className="pk-input" value={header} onChange={(e) => setHeader(e.target.value)} style={{ marginBottom: 12 }}>
               <option value="">— Decide later —</option>
               {sectionArticles.map((a) => (
@@ -276,21 +296,29 @@ function Picker({
     const mine = ++seq.current;
     const t = setTimeout(async () => {
       setLoading(true);
-      const r = await searchSpecPartsAction(docId, q, showAll);
-      if (mine !== seq.current) return;
-      setLoading(false);
-      if (r.ok) {
-        setResults(r.parts);
-        setErr("");
-      } else setErr(r.error);
+      try {
+        const r = await searchSpecPartsAction(docId, q, showAll);
+        if (mine !== seq.current) return;
+        if (r.ok) {
+          setResults(r.parts);
+          setErr("");
+        } else setErr(r.error);
+      } catch {
+        if (mine === seq.current) setErr("Search failed — check your connection and try again.");
+      } finally {
+        if (mine === seq.current) setLoading(false);
+      }
     }, 250);
     return () => clearTimeout(t);
   }, [docId, q, showAll]);
 
   const pick = async (p: SpecPickerPart) => {
     setBusySku(p.sku);
-    await onPick(p);
-    setBusySku("");
+    try {
+      await onPick(p);
+    } finally {
+      setBusySku("");
+    }
   };
   const shown = results.filter((r) => !hidden.includes(r.sku));
 
@@ -300,6 +328,7 @@ function Picker({
         <input
           className="pk-input"
           autoFocus
+          aria-label="Search parts to add"
           placeholder="Search by SKU, description or manufacturer…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -319,13 +348,13 @@ function Picker({
           : "Parts with an approved spec that belong to this section."}
       </div>
       {err && (
-        <div role="alert" style={ERR}>
+        <div role="alert" style={{ ...ERR, marginBottom: 8 }}>
           {err}
         </div>
       )}
       <div style={{ maxHeight: 360, overflowY: "auto", background: "#fff", border: "1px solid #f0f1f4", borderRadius: 8 }}>
         {loading && shown.length === 0 && <div style={{ ...MUTED, padding: 12 }}>Searching…</div>}
-        {!loading && shown.length === 0 && (
+        {!loading && !err && shown.length === 0 && (
           <div style={{ ...MUTED, padding: 12 }}>
             {showAll ? "No parts match." : "No parts with an approved spec in this section match. Try Show all catalog parts."}
           </div>
@@ -354,11 +383,25 @@ function Picker({
   );
 }
 
-function HeaderSelect({ docId, sku, sectionArticles, run }: { docId: string; sku: string; sectionArticles: ArticleOption[]; run: ReturnType<typeof useRun>["run"] }) {
+function HeaderSelect({
+  docId,
+  sku,
+  sectionArticles,
+  run,
+  pending,
+}: {
+  docId: string;
+  sku: string;
+  sectionArticles: ArticleOption[];
+  run: RunFn;
+  pending: boolean;
+}) {
   return (
     <select
       className="pk-input"
+      aria-label={`Header for ${sku}`}
       value=""
+      disabled={pending}
       onChange={(e) => e.target.value && run(() => setSpecProductHeaderAction(docId, sku, e.target.value))}
       style={{ width: "auto", padding: "5px 8px", fontSize: 12.5 }}
     >
@@ -386,11 +429,12 @@ function ProductsCard({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const { err, setErr, pending, run } = useRun();
+  const { err, setErr, pending, run, track } = useSave();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [writing, setWriting] = useState<WriteTarget | null>(null);
   const [added, setAdded] = useState<string[]>([]);
   const fromBom = doc.source.kind !== "scratch";
+  const closeWriting = useCallback(() => setWriting(null), []);
 
   const groups: Array<{ key: string; title: string; rows: SpecProductRow[]; attention?: boolean }> = [];
   if (hasSection) {
@@ -417,11 +461,23 @@ function ProductsCard({
     run(() => reorderSpecProductsAction(doc.id, order));
   };
 
+  // A removed product goes back into the picker's offer.
+  const remove = (sku: string) =>
+    run(
+      () => removeSpecProductAction(doc.id, sku),
+      () => setAdded((a) => a.filter((s) => s.toUpperCase() !== sku.toUpperCase()))
+    );
+
   const onPick = async (p: SpecPickerPart): Promise<void> => {
     if (p.hasSpec && p.inSection) {
-      const r = await addSpecProductAction(doc.id, p.sku);
-      if (!r.ok) {
-        setErr(r.error);
+      try {
+        const r = await track(() => addSpecProductAction(doc.id, p.sku));
+        if (!r.ok) {
+          setErr(r.error);
+          return;
+        }
+      } catch {
+        setErr("Could not add the part. Try again.");
         return;
       }
       setErr("");
@@ -432,8 +488,10 @@ function ProductsCard({
     setWriting({
       sku: p.sku,
       desc: p.desc,
-      specArticleId: p.specArticleId,
-      resolvedArticleId: p.articleId,
+      specArticleId: p.articleId ? p.specArticleId : null,
+      ownArticleId: p.articleId,
+      deadArticle: !!p.specArticleId && !p.articleId,
+      specSameAs: p.specSameAs,
       specTitle: p.specTitle,
       specBody: p.specBody,
       specSort: p.specSort,
@@ -457,8 +515,10 @@ function ProductsCard({
                   setWriting({
                     sku: r.sku,
                     desc: r.desc,
-                    specArticleId: r.specArticleId,
-                    resolvedArticleId: r.placedArticleId,
+                    specArticleId: r.deadArticle ? null : r.specArticleId,
+                    ownArticleId: r.ownArticleId,
+                    deadArticle: r.deadArticle,
+                    specSameAs: r.specSameAs,
                     specTitle: r.specTitle,
                     specBody: r.specBody,
                     specSort: r.specSort,
@@ -479,14 +539,14 @@ function ProductsCard({
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             Pick a header
-            {canEdit && <HeaderSelect docId={doc.id} sku={r.sku} sectionArticles={sectionArticles} run={run} />}
+            {canEdit && <HeaderSelect docId={doc.id} sku={r.sku} sectionArticles={sectionArticles} run={run} pending={pending} />}
           </span>
         );
       case "other-section":
         return (
           <span style={{ ...WARN, display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             Belongs to {r.otherArticleTitle || "another article"}&apos;s section — Use a header here
-            {canEdit && <HeaderSelect docId={doc.id} sku={r.sku} sectionArticles={sectionArticles} run={run} />}
+            {canEdit && <HeaderSelect docId={doc.id} sku={r.sku} sectionArticles={sectionArticles} run={run} pending={pending} />}
           </span>
         );
       case "not-in-catalog":
@@ -567,7 +627,7 @@ function ProductsCard({
                   >
                     ↓
                   </button>
-                  <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending} onClick={() => run(() => removeSpecProductAction(doc.id, r.sku))}>
+                  <button type="button" className="pk-btn-outline" style={SMALL_BTN} disabled={pending} onClick={() => remove(r.sku)}>
                     Remove
                   </button>
                 </div>
@@ -590,7 +650,7 @@ function ProductsCard({
           docId={doc.id}
           target={writing}
           sectionArticles={sectionArticles}
-          onClose={() => setWriting(null)}
+          onClose={closeWriting}
           onDone={(sku) => {
             if (writing.addToSpec) setAdded((a) => [...a, sku]);
             setWriting(null);
@@ -641,6 +701,24 @@ function ChecklistCard({ assembled }: { assembled: AssembledSection }) {
   );
 }
 
+/** Download Word — while a save is in flight it shows "Saving…" and a click
+ *  waits for the saves to land, then downloads, so the file never misses the
+ *  last edit. */
+function DownloadLink({ href, saving, onClick }: { href: string; saving: boolean; onClick: (e: MouseEvent<HTMLAnchorElement>) => void }) {
+  return (
+    <a
+      href={href}
+      download
+      className="pk-btn-accent"
+      aria-disabled={saving || undefined}
+      onClick={onClick}
+      style={{ textDecoration: "none", opacity: saving ? 0.6 : 1, cursor: saving ? "progress" : "pointer" }}
+    >
+      {saving ? "Saving…" : "Download Word"}
+    </a>
+  );
+}
+
 export default function Builder({
   doc,
   section,
@@ -661,69 +739,92 @@ export default function Builder({
   const router = useRouter();
   const downloadHref = `/api/spec-documents/${encodeURIComponent(doc.id)}/docx`;
 
+  // Saves in flight across every card (SaveTracker). A Download click while
+  // any are pending is queued and fires when the count returns to zero.
+  const [saving, setSaving] = useState(0);
+  const inFlight = useRef(0);
+  const queued = useRef(false);
+  const bump = useCallback(
+    (delta: number) => {
+      inFlight.current = Math.max(0, inFlight.current + delta);
+      setSaving(inFlight.current);
+      if (inFlight.current === 0 && queued.current) {
+        queued.current = false;
+        // A file download, not a page: click a throwaway download link.
+        const link = document.createElement("a");
+        link.href = downloadHref;
+        link.download = "";
+        link.click();
+      }
+    },
+    [downloadHref]
+  );
+  const onDownload = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (inFlight.current > 0) {
+      e.preventDefault();
+      queued.current = true;
+    }
+  };
+
   return (
-    <div className="pk-content" style={{ maxWidth: 980, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
-        <div>
-          <Link href="/design/specs" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
-            ← Specs
-          </Link>
-          <div className="pk-page-title" style={{ marginTop: 6 }}>
-            <span style={{ fontFamily: "var(--font-mono)" }}>{doc.id}</span>
-            {section ? ` · ${section.number} ${section.title}` : ""}
+    <SaveTracker.Provider value={bump}>
+      <div className="pk-content" style={{ maxWidth: 980, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+          <div>
+            <Link href="/design/specs" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
+              ← Specs
+            </Link>
+            <div className="pk-page-title" style={{ marginTop: 6 }}>
+              <span style={{ fontFamily: "var(--font-mono)" }}>{doc.id}</span>
+              {section ? ` · ${section.number} ${section.title}` : ""}
+            </div>
+            <div className="pk-page-sub">Fill it in top to bottom — everything saves as you go. Download Word when it looks right.</div>
           </div>
-          <div className="pk-page-sub">Fill it in top to bottom — everything saves as you go. Download Word when it looks right.</div>
+          {section && <DownloadLink href={downloadHref} saving={saving > 0} onClick={onDownload} />}
         </div>
-        {section && (
-          <a href={downloadHref} download className="pk-btn-accent" style={{ textDecoration: "none" }}>
-            Download Word
-          </a>
+
+        {!section && (
+          <div className="pk-card" style={{ ...CARD, background: "#fbf3dd", borderColor: "#f0e2bd", color: "#8a6d1f", fontSize: 13 }}>
+            This section is no longer in the library, so this spec can&apos;t be previewed or downloaded. Its header and product
+            list are kept below.
+          </div>
+        )}
+
+        <HeaderCard doc={doc} customerOptions={customerOptions} canEdit={canEdit} />
+
+        {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} checklist={assembled.checklist} canEdit={canEdit} />}
+
+        <ProductsCard doc={doc} hasSection={!!section} sectionArticles={sectionArticles} productRows={productRows} canEdit={canEdit} />
+
+        {assembled && <ChecklistCard assembled={assembled} />}
+
+        {section && assembled && (
+          <div className="pk-card" style={CARD}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+              <div>
+                <div style={CARD_TITLE}>Preview</div>
+                <div style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>{specFileName(doc.header, section)}</div>
+              </div>
+              <DownloadLink href={downloadHref} saving={saving > 0} onClick={onDownload} />
+            </div>
+            <Preview assembled={assembled} />
+          </div>
+        )}
+
+        {canEdit && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <ConfirmButton
+              label="Delete spec"
+              confirmLabel="Delete this spec"
+              onConfirm={async () => {
+                const r = await deleteSpecDocumentAction(doc.id);
+                if (!r.ok) throw new Error(r.error);
+                router.push("/design/specs");
+              }}
+            />
+          </div>
         )}
       </div>
-
-      {!section && (
-        <div className="pk-card" style={{ ...CARD, background: "#fbf3dd", borderColor: "#f0e2bd", color: "#8a6d1f", fontSize: 13 }}>
-          This section is no longer in the library, so this spec can&apos;t be previewed or downloaded. Its header and product
-          list are kept below.
-        </div>
-      )}
-
-      <HeaderCard doc={doc} customerOptions={customerOptions} canEdit={canEdit} />
-
-      {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} checklist={assembled.checklist} canEdit={canEdit} />}
-
-      <ProductsCard doc={doc} hasSection={!!section} sectionArticles={sectionArticles} productRows={productRows} canEdit={canEdit} />
-
-      {assembled && <ChecklistCard assembled={assembled} />}
-
-      {section && assembled && (
-        <div className="pk-card" style={CARD}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-            <div>
-              <div style={CARD_TITLE}>Preview</div>
-              <div style={{ ...MUTED, fontFamily: "var(--font-mono)" }}>{specFileName(doc.header, section)}</div>
-            </div>
-            <a href={downloadHref} download className="pk-btn-accent" style={{ textDecoration: "none" }}>
-              Download Word
-            </a>
-          </div>
-          <Preview assembled={assembled} />
-        </div>
-      )}
-
-      {canEdit && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-          <ConfirmButton
-            label="Delete spec"
-            confirmLabel="Delete this spec"
-            onConfirm={async () => {
-              const r = await deleteSpecDocumentAction(doc.id);
-              if (!r.ok) throw new Error(r.error);
-              router.push("/design/specs");
-            }}
-          />
-        </div>
-      )}
-    </div>
+    </SaveTracker.Provider>
   );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { allSpecDocuments } from "@/lib/stores/spec-documents";
 import { allSections } from "@/lib/stores/spec-sections";
 import { dateYear, timeAgo } from "@/lib/format";
@@ -40,7 +41,8 @@ function updatedLabel(ms: number): string {
 }
 
 export default async function SpecsIndex() {
-  const [, docs, sections] = await Promise.all([requireUser(), allSpecDocuments(), allSections()]);
+  const [user, docs, sections] = await Promise.all([requireUser(), allSpecDocuments(), allSections()]);
+  const canCreate = can("create", user.roles);
   const sectionById = new Map(sections.map((s) => [s.id, s]));
   const rows = [...docs].sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -58,9 +60,11 @@ export default async function SpecsIndex() {
           <Link href="/design/specs/templates" className="pk-btn-outline" style={{ textDecoration: "none" }}>
             Templates
           </Link>
-          <Link href="/design/specs/new" className="pk-btn-accent" style={{ textDecoration: "none" }}>
-            + New spec
-          </Link>
+          {canCreate && (
+            <Link href="/design/specs/new" className="pk-btn-accent" style={{ textDecoration: "none" }}>
+              + New spec
+            </Link>
+          )}
         </div>
       </div>
 
@@ -122,7 +126,7 @@ export default async function SpecsIndex() {
         })}
         {rows.length === 0 && (
           <div style={{ padding: "36px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 13 }}>
-            No specs yet — start one with + New spec.
+            {canCreate ? "No specs yet — start one with + New spec." : "No specs yet."}
           </div>
         )}
       </div>

@@ -21,6 +21,7 @@ export function CustomerCombobox({
   disabled = false,
   inputStyle,
   canChange,
+  id,
 }: {
   options: CustomerComboboxOption[];
   value: string;
@@ -30,6 +31,8 @@ export function CustomerCombobox({
   inputStyle?: React.CSSProperties;
   /** Optional veto (D206 won-quote confirm). Returning false keeps the current pick and restores its name in the input. */
   canChange?: (id: string) => boolean;
+  /** Optional id for the text input, so a caller's <label htmlFor> can name it. */
+  id?: string;
 }) {
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -87,6 +90,7 @@ export function CustomerCombobox({
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <input
+        id={id}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={open}

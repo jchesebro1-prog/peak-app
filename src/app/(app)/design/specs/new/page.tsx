@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/team";
 import { allSections } from "@/lib/stores/spec-sections";
 import { getEngagement } from "@/lib/stores/engagements";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -35,7 +36,24 @@ export default async function NewSpecPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const [, sp, sections, customerOptions] = await Promise.all([requireUser(), searchParams, allSections(), specCustomerOptions()]);
+  const [user, sp, sections, customerOptions] = await Promise.all([requireUser(), searchParams, allSections(), specCustomerOptions()]);
+  if (!can("create", user.roles)) {
+    // Creating is requirePerm("create") on the server anyway; say so plainly
+    // instead of showing a form whose button would bounce.
+    return (
+      <div className="pk-content" style={{ maxWidth: 720, margin: "0 auto" }}>
+        <Link href="/design/specs" style={{ fontSize: 12, color: "#8c919c", textDecoration: "none" }}>
+          ← Specs
+        </Link>
+        <div className="pk-page-title" style={{ marginTop: 6, marginBottom: 18 }}>
+          New spec
+        </div>
+        <div className="pk-card" style={{ padding: 20, fontSize: 13, color: "#3a3f4a" }}>
+          Your role can view and download specs but not create them. Ask an admin for create access.
+        </div>
+      </div>
+    );
+  }
   const quoteParam = one(sp.quote);
   const gridParam = one(sp.grid);
   const engagementParam = one(sp.engagement);

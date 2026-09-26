@@ -19172,7 +19172,8 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const b = read("src/app/(app)/design/specs/[id]/builder.tsx");
   const f = read("src/app/(app)/design/specs/new/new-spec-form.tsx");
-  for (const [name, text] of [["builder", b], ["new-spec-form", f]] as const) {
+  const h = read("src/app/(app)/design/specs/[id]/header-fields.tsx");
+  for (const [name, text] of [["builder", b], ["new-spec-form", f], ["header-fields", h]] as const) {
     ok(text.startsWith('"use client"') && !/@\/lib\/stores\/|@\/db\/|from "docx"|exceljs/.test(text.replace(/import type[^;]*;/g, "")), `#205 spec builder: ${name} is a client file with no store/db/docx imports`);
   }
   ok(b.includes("/api/spec-documents/") && b.includes("searchSpecPartsAction") && b.includes("writePartSpecFieldsAction"), "#205 spec builder: builder downloads, searches and writes part specs");
@@ -19180,4 +19181,16 @@ async function specBuilderActionsAsyncChecks(): Promise<void> {
   ok(!list.includes('redirect("/design/specs/library")') && list.includes("/design/specs/new"), "#205 spec builder: /design/specs is the saved-spec list with + New spec");
   const smoke = read("scripts/smoke-routes.ts");
   ok(smoke.includes('"/design/specs/new"'), "#205 spec builder: smoke covers the new-spec page");
+}
+
+// #205 spec builder T5 fix wave
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const b = read("src/app/(app)/design/specs/[id]/builder.tsx");
+  ok(!/pk-modal-scrim"[^>]*onClick/.test(b) && b.includes('role="dialog"') && b.includes('aria-modal="true"'), "#205 spec builder: the Write spec dialog is a labelled modal a scrim click can't discard");
+  ok(/removeSpecProductAction\([^)]*\),\s*\(\) => setAdded\(/.test(b), "#205 spec builder: removing a product makes it re-addable from the picker");
+  ok(!b.includes("hasOwnText") && b.includes("SaveTracker.Provider") && b.includes("useSave"), "#205 spec builder: one shared save hook, and Download waits on saves in flight");
+  const list = read("src/app/(app)/design/specs/page.tsx");
+  const nw = read("src/app/(app)/design/specs/new/page.tsx");
+  ok(list.includes('can("create"') && nw.includes('can("create"'), "#205 spec builder: + New spec and the New spec form are gated on create");
 }

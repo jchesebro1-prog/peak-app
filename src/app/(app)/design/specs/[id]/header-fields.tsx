@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
+import { createContext, useContext, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CustomerCombobox, type CustomerComboboxOption } from "@/components/customer-combobox";
 import type { SpecDocHeader, SpecDocSource, SpecDocument } from "@/lib/specs/spec-document";
@@ -25,25 +25,51 @@ export const CARD_SUB: CSSProperties = { fontSize: 12, color: "#8c919c", marginB
 export const MUTED: CSSProperties = { fontSize: 12, color: "#9aa0ab" };
 export const ERR: CSSProperties = { fontSize: 12.5, color: "#b4543a" };
 
-type ActionResult = { ok: true } | { ok: false; error: string };
+export type ActionResult = { ok: true } | { ok: false; error: string };
 
-/** Run one save; surface its error, refresh on success. */
-function useSave() {
+/** Counts saves in flight across every card, so the Builder can hold the
+ *  Download Word link until the file would include them. The Builder
+ *  provides it; the default is a no-op. */
+export const SaveTracker = createContext<(delta: number) => void>(() => {});
+
+/** The builder's one save hook. `run` saves, surfaces the error, refreshes
+ *  on success; `track` wraps any other server call so it counts as a save
+ *  in flight too. */
+export function useSave() {
   const router = useRouter();
+  const bump = useContext(SaveTracker);
   const [err, setErr] = useState("");
   const [pending, start] = useTransition();
-  const run = (fn: () => Promise<ActionResult>, onOk?: () => void) =>
+  const track = async <T,>(p: () => Promise<T>): Promise<T> => {
+    bump(1);
+    try {
+      return await p();
+    } finally {
+      bump(-1);
+    }
+  };
+  const run = (fn: () => Promise<ActionResult>, onOk?: () => void) => {
+    // Counted before the transition starts, so a Download click right after
+    // a blur already sees the save in flight.
+    bump(1);
     start(async () => {
-      const r = await fn();
-      if (!r.ok) {
-        setErr(r.error);
-        return;
+      try {
+        const r = await fn();
+        if (!r.ok) {
+          setErr(r.error);
+          return;
+        }
+        setErr("");
+        onOk?.();
+        router.refresh();
+      } catch {
+        setErr("Could not save. Try again.");
+      } finally {
+        bump(-1);
       }
-      setErr("");
-      onOk?.();
-      router.refresh();
     });
-  return { err, pending, run };
+  };
+  return { err, setErr, pending, run, track };
 }
 
 /** Enter in a one-line field commits it (blur → save) instead of doing nothing. */
@@ -132,12 +158,12 @@ export function HeaderCard({
           />
         </div>
         <div>
-          <label className="pk-field-label" style={{ display: "block" }}>
+          <label className="pk-field-label" htmlFor="spec-h-customer" style={{ display: "block" }}>
             Customer
           </label>
           {canEdit ? (
             <>
-              <CustomerCombobox options={customerOptions} value={customerId} onChange={pickCustomer} />
+              <CustomerCombobox id="spec-h-customer" options={customerOptions} value={customerId} onChange={pickCustomer} />
               {customerId && (
                 <button
                   type="button"
@@ -149,7 +175,7 @@ export function HeaderCard({
               )}
             </>
           ) : (
-            <input className="pk-input" value={doc.customer || "—"} disabled readOnly />
+            <input id="spec-h-customer" className="pk-input" value={doc.customer || "—"} disabled readOnly />
           )}
         </div>
       </div>

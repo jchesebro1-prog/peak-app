@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
+import { articleIdForPart } from "@/lib/specs/articles";
 import { getManyAnyCase } from "@/lib/stores/catalog";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -53,11 +54,13 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       placedArticleId: placement?.ok ? placement.articleId : null,
       leftOutReason: leftOut?.reason ?? null,
       otherArticleTitle: otherArticleId ? articleTitle.get(otherArticleId) || null : null,
+      ownArticleId: part ? articleIdForPart(part, articles, sections) : null,
       specArticleId: part?.specArticleId || null,
+      deadArticle: !!part?.specArticleId && !articleTitle.has(part.specArticleId),
+      specSameAs: (part?.specSameAs || "").trim(),
       specTitle: part?.specTitle || "",
       specBody: part?.specBody || "",
       specSort: typeof part?.specSort === "number" && Number.isFinite(part.specSort) ? part.specSort : null,
-      hasOwnText: !!(part?.specBody || "").trim(),
     };
   });
 

@@ -231,6 +231,8 @@ export type SpecPickerPart = {
   specTitle: string;
   specBody: string;
   specSort: number | null;
+  /** The part's "same spec as" pointer, if any — Write spec replaces it. */
+  specSameAs: string;
 };
 
 /** Search the catalog for products to add to a spec. Default: parts with an
@@ -291,6 +293,7 @@ export async function searchSpecPartsAction(
       specTitle: part.specTitle || "",
       specBody: part.specBody || "",
       specSort: typeof part.specSort === "number" && Number.isFinite(part.specSort) ? part.specSort : null,
+      specSameAs: (part.specSameAs || "").trim(),
     });
   }
   out.sort((a, b) => (a.inSection === b.inSection ? a.sku.localeCompare(b.sku) : a.inSection ? -1 : 1));
