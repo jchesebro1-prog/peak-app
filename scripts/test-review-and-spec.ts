@@ -10522,6 +10522,7 @@ seeded()
   .then(() => gridSymbolLookAsyncChecks())
   .then(() => specDocumentsAsyncChecks())
   .then(() => specDocxAsyncChecks())
+  .then(() => specBuilderActionsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18111,8 +18112,10 @@ import {
     (id) => ctx7.fixtures.get(id)
   );
   ok(spec7.map((r) => `${r.sku}|${r.desc}|${r.qty}`).join(";") === "PAR-1|Par|4;MIX-7|MIX-7 (Live rack)|6;|Gone rack|1", "#211 fix1 M4: bid-spec rows drop allowances and expand an assembly into its members under its label");
-  const specAct7 = readFileSync(join(process.cwd(), "src/app/(app)/design/engagements/spec/actions.ts"), "utf8");
-  ok(specAct7.includes("gridSpecBomRows(gridLines"), "#211 fix1 M4: the bid-spec action reads Grid lines through gridSpecBomRows");
+  // #205 spec builder T4 moved this into the shared bomFromQuote, which the
+  // bid-spec action now delegates to (see the T4 block's own delegation check).
+  const specAct7 = readFileSync(join(process.cwd(), "src/lib/specs/quote-bom.ts"), "utf8");
+  ok(specAct7.includes("gridSpecBomRows(gridLines"), "#211 fix1 M4: the shared quote BOM reads Grid lines through gridSpecBomRows");
   // M3 — store-side sanitizers
   ok(gemLotQty7(240) === 240 && gemLotQty7(1) === undefined && gemLotQty7(Number.NaN) === undefined && gemLotQty7("12") === 12 && gemLotQty7(1e9) === gemAutoMax7 && gemLotQty7(-4) === undefined && gemAutoMax7 === gemQtyMax7, "#211 fix1 M3: lot qty is finite, whole, ≥2 or absent, and capped");
   ok(gemQty7({ qty: 1e9 }) === gemQtyMax7, "#211 fix1 M3: readers cap a stored lot too");
@@ -19066,4 +19069,45 @@ async function specDocxAsyncChecks(): Promise<void> {
   registerFixture("catalog_parts", ciSku);
   const ci = await getManyAnyCase([ciSku.toLowerCase(), ciSku.toUpperCase(), "NO-SUCH-SKU-T3"]);
   ok(ci.length >= 1 && ci.every((p) => p.sku === ciSku), "#205 spec builder: getManyAnyCase finds a part by SKU in any case, and nothing for an unknown SKU");
+}
+
+// #205 spec builder T4
+/**
+ * Server actions + shared quote BOM. Actions need a session, so this is
+ * mostly source-text checks (every mutation gates on requirePerm("create"),
+ * the module is "use server", the D94 action delegates to the shared
+ * bomFromQuote) plus one DB-backed check of bomFromQuote itself refusing an
+ * unknown quote — no fixture needed, since a missing doc reads as null
+ * regardless of what else is seeded.
+ */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const src = read("src/app/(app)/design/specs/builder-actions.ts");
+  const mutations = [
+    "createSpecDocumentAction",
+    "updateSpecHeaderAction",
+    "setSpecCustomerAction",
+    "setSpecFillInAction",
+    "addSpecProductAction",
+    "removeSpecProductAction",
+    "reorderSpecProductsAction",
+    "setSpecProductHeaderAction",
+    "setSpecPrintQuantitiesAction",
+    "deleteSpecDocumentAction",
+  ];
+  for (const name of mutations) {
+    const start = src.indexOf(`export async function ${name}`);
+    const next = src.indexOf("export async function", start + 1);
+    const body = src.slice(start, next === -1 ? undefined : next);
+    ok(body.includes('requirePerm("create")'), `#205 spec builder: ${name} requires create`);
+  }
+  ok(src.startsWith('"use server"'), "#205 spec builder: builder-actions is a server-action module");
+  const old = read("src/app/(app)/design/engagements/spec/actions.ts");
+  ok(old.includes("bomFromQuote(") && !old.includes("gridSpecBomRows("), "#205 spec builder: the D94 action delegates to the shared bomFromQuote");
+}
+
+async function specBuilderActionsAsyncChecks(): Promise<void> {
+  const { bomFromQuote } = await import("@/lib/specs/quote-bom");
+  const miss = await bomFromQuote("Q-NOPE-0000");
+  ok(!miss.ok && /not found/i.test(miss.error), "#205 spec builder: bomFromQuote reports an unknown quote");
 }
