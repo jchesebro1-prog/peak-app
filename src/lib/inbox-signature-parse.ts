@@ -21,6 +21,13 @@ export type ParsedSignature = {
 export type SignatureSender = { name?: string; email: string };
 
 const MAX_BLOCK_LINES = 12;
+// A signature is always short. Bounding the work up front — the tail of the
+// (already de-quoted) body, and any single line within it — makes the
+// per-line regexes below O(1) per line no matter how large or adversarial
+// the inbound body is (#214 review: unbounded line length made EMAIL_RE's
+// and URL_RE's unanchored, greedy matching quadratic on a single huge line).
+const MAX_TAIL_CHARS = 4000;
+const MAX_LINE_CHARS = 200;
 
 const SIGN_OFF_RE =
   /^(--|—|thanks( so much| again)?|thank you( so much)?|many thanks|best( regards| wishes)?|all the best|regards|kind regards|warm regards|warmly|sincerely|cheers|respectfully|take care)[\s,.!]*$/i;
@@ -50,9 +57,13 @@ const PUBLIC_ROOTS = new Set([
   "comcast", "me", "mac", "protonmail", "proton", "ymail", "att", "sbcglobal", "verizon",
 ]);
 
-const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+// Bounded quantifiers ({1,64} etc., matching the real-world length limits
+// for an email local part / DNS label) so a run of "word" characters with no
+// '@' or no matching TLD fails in bounded time instead of backtracking over
+// the whole line (#214 review).
+const EMAIL_RE = /[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,255}\.[A-Z]{2,24}/i;
 const URL_RE =
-  /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|org|net|edu|us|gov|io|co|biz|info|church|theater|theatre|arts)(?:\/[^\s|,]*)?/i;
+  /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?){0,10}\.(?:com|org|net|edu|us|gov|io|co|biz|info|church|theater|theatre|arts)(?:\/[^\s|,]{0,200})?/i;
 const PHONE_RE =
   /(?:\+?1[\s.-]?)?\(?([2-9]\d{2})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})(?:\s*(?:x|ext\.?|extension)\s*(\d{1,6}))?/gi;
 const MOBILE_TOKEN_RE = /(?:^|[^a-z])(m|c|cell|mobile|mob)\.?\s*[:.]?\s*$/i;
@@ -121,6 +132,23 @@ function isNameShaped(line: string): boolean {
   return n >= 1 && n <= 5;
 }
 
+const DISCLAIMER_WORDS = ["confidential", "intended", "privileged", "recipient", "disclaimer", "unsubscribe"];
+
+/** A sentence — legal boilerplate, not a company name. Mirrors
+ *  isNameShaped's punctuation guard, plus a lowercase start (boilerplate
+ *  reads as prose, not a proper noun) and the disclaimer vocabulary.
+ *  Used to stop the company fallback from reading into a confidentiality
+ *  footer (#214 review: "This email ... are addressed." was mistaken for
+ *  a company). */
+function isBoilerplateLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return true;
+  if (/[.?!:;]$/.test(t)) return true;
+  if (/^[a-z]/.test(t)) return true;
+  if (hasWord(t, DISCLAIMER_WORDS)) return true;
+  return false;
+}
+
 /** "Chris Hale, AIA" → "Chris Hale" (credentials after a comma go). */
 function cleanName(line: string): string {
   const comma = line.indexOf(",");
@@ -144,10 +172,16 @@ export function extractSignature(
   body: string,
   sender: SignatureSender
 ): ParsedSignature | null {
-  const lines = stripQuotedHistory(body)
+  const stripped = stripQuotedHistory(body);
+  // Only the tail can hold a signature, and a signature line is never long
+  // — bound both so a sender-controlled body of any size costs the same to
+  // scan (#214 review: an unbounded body/line let EMAIL_RE/URL_RE/PHONE_RE
+  // backtrack quadratically).
+  const tail = stripped.length > MAX_TAIL_CHARS ? stripped.slice(-MAX_TAIL_CHARS) : stripped;
+  const lines = tail
     .split("\n")
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => l.length > 0 && l.length <= MAX_LINE_CHARS);
   if (!lines.length) return null;
 
   const senderTokens = words(sender.name || "").filter((w) => w.length >= 2);
@@ -239,7 +273,12 @@ export function extractSignature(
         }
       }
       if (!company) {
-        const candidates = rest.slice(afterTitle);
+        // Stop at the first boilerplate-shaped line — a confidentiality
+        // footer often continues for several more lines that would
+        // otherwise still look like a short, digit-free "company" line.
+        const rawCandidates = rest.slice(afterTitle);
+        const cutIdx = rawCandidates.findIndex((l) => isBoilerplateLine(l));
+        const candidates = cutIdx >= 0 ? rawCandidates.slice(0, cutIdx) : rawCandidates;
         company =
           candidates.find((l) => matchesDomain(l, root)) ||
           candidates.find((l) => l.split(/\s+/).length <= 8 && !/\d/.test(l));

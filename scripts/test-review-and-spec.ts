@@ -19875,4 +19875,54 @@ import {
   ok(sig214Company("Lakefront", [{ id: "a", name: "Lakefront" }, { id: "b", name: "LAKEFRONT." }]) === null, "#214 signature: two companies with that name → no pick");
   ok(sig214Company("", [{ id: "a", name: "" }]) === null, "#214 signature: a blank company never matches");
   ok(sig214Label("office") === "work" && sig214Label("mobile") === "mobile" && sig214Label("other") === "other", "#214 signature: office → the identity core's 'work' label");
+
+  // Fix wave 1 — bounded work on adversarial/huge bodies; disclaimer text
+  // must not read as a company.
+  const someSender = { name: "X", email: "x@example.com" };
+
+  // 10 — a single 200,000-char line with no structure at all: bounded, null.
+  {
+    const t0 = performance.now();
+    const r = sig214Extract("a".repeat(200000), someSender);
+    const ms = performance.now() - t0;
+    ok(r === null && ms < 250, `#214 signature: 200k-char single line is bounded (${ms.toFixed(1)}ms) and returns null`);
+  }
+
+  // 11 — "a" + ".a"×50000 + "!": adversarial for the old unbounded URL/email
+  // regexes (many dots, one trailing sentence-ending char). Bounded, null.
+  {
+    const t0 = performance.now();
+    const r = sig214Extract("a" + ".a".repeat(50000) + "!", someSender);
+    const ms = performance.now() - t0;
+    ok(r === null && ms < 250, `#214 signature: dotted 100k-char line is bounded (${ms.toFixed(1)}ms) and returns null`);
+  }
+
+  // 12 — 200 KB of normal short lines ending in a real signature: still
+  // finds it, and still bounded (only the tail is scanned).
+  {
+    const filler = Array.from({ length: 1000 }, (_, i) => `Line ${i} of ordinary reply text, nothing special here.`);
+    const body = filler.join("\n") + "\n\nThanks,\nBrenda Gauchel\nTechnical Director\nLakefront Public Schools\n(218) 555-0142";
+    const t0 = performance.now();
+    const r = sig214Extract(body, { name: "Brenda Gauchel", email: "brenda@lakefront.k12.mn.us" });
+    const ms = performance.now() - t0;
+    ok(
+      r?.name === "Brenda Gauchel" && r.title === "Technical Director" && r.company === "Lakefront Public Schools" && ms < 250,
+      `#214 signature: 200KB of short lines + a real trailing signature still parses (${ms.toFixed(1)}ms)`
+    );
+  }
+
+  // 13 — a confidentiality footer must never be read as the company.
+  const disclaimer = sig214Extract(
+    "Best regards,\nPat Kim\n\nThis email and any files transmitted with it are confidential\nand intended solely for the use of the individual to whom they\nare addressed.",
+    { name: "Pat Kim", email: "pkim@x.org" }
+  );
+  ok(
+    disclaimer?.name === "Pat Kim" && disclaimer.company === undefined,
+    "#214 signature: a confidentiality disclaimer is never read as the company"
+  );
+
+  // 14 — legit fixtures (Title | Company, and a standalone company line)
+  // are unaffected by the boilerplate guard.
+  ok(s5?.title === "Theatre Manager" && s5.company === "Orpheum Theatre", "#214 signature: fix wave 1 — 'Title | Company' still splits correctly");
+  ok(s8?.company === "Lakefront Public Schools", "#214 signature: fix wave 1 — a standalone company line still parses correctly");
 }
