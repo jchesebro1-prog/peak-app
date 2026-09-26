@@ -16217,3 +16217,68 @@ import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
   ok(mostSelectiveToken(["etc", "s4", "lustr"]) === "lustr", "part docs search T7: the longest token filters in SQL");
   ok(mostSelectiveToken(["abcd", "wxyz"]) === "abcd" && mostSelectiveToken([]) === "", "part docs search T7: ties keep the first; no tokens, no filter");
 }
+
+/* ======================================================================
+   #FXB — one fixture builder: resolveFixture / sanitizeFixtureInput /
+   fixtureAssembliesFrom. Pure.
+   ====================================================================== */
+import {
+  resolveFixture, fixtureDescription, fixtureSkus, sanitizeFixtureInput, fixtureAssembliesFrom,
+  type FixtureRecord as FxbRecord,
+} from "@/lib/fixture-assemblies";
+{
+  const cat = [
+    { sku: "FX-ENG", desc: "Engine", unit: "ea", cost: 1000, list: 1500 },
+    { sku: "FX-LENS", desc: "Lens 26°", unit: "ea", cost: 200, list: 300 },
+    { sku: "FX-CBL", desc: "Power cable", unit: "ea", cost: 40, list: 60 },
+    { sku: "FX-CLAMP", desc: "C-clamp", unit: "ea", cost: 10, list: 20 },
+  ];
+  const rec: FxbRecord = {
+    id: "SA-T1", kind: "fixture", label: "S4 LED", description: "",
+    lightEngineSku: "FX-ENG", lensSku: "FX-LENS",
+    lines: {
+      data: [],
+      power: [{ sku: "FX-CBL", qty: 1, costOverride: 25 }],
+      mounting: [{ sku: "FX-CLAMP", qty: 0 }],
+      accessories: [{ sku: "FX-GONE", label: "Iris", qty: 1 }],
+    },
+    createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const r = resolveFixture(rec, cat);
+  ok(r.parts.map((p) => `${p.slot}:${p.sku}`).join(",") === "lightEngine:FX-ENG,lens:FX-LENS,power:FX-CBL,mounting:FX-CLAMP,accessories:FX-GONE", "#FXB resolveFixture: engine, lens, then the boxes in Data/Power/Mounting/Accessories order");
+  ok(r.parts[2].cost === 25 && r.parts[2].sell === 60, "#FXB resolveFixture: a cost override beats the catalog cost; sell stays the catalog list");
+  ok(r.cost === 1000 + 200 + 25 && r.sell === 1500 + 300 + 60, "#FXB resolveFixture: included totals skip qty-0 optional lines and missing parts");
+  const clamp = r.parts.find((p) => p.sku === "FX-CLAMP")!;
+  ok(!clamp.included && clamp.cost === 10 && clamp.sell === 20, "#FXB resolveFixture: an optional (qty 0) line lists its unit cost/sell but adds nothing");
+  const gone = r.parts.find((p) => p.sku === "FX-GONE")!;
+  ok(!gone.found && gone.cost === 0 && gone.sell === 0 && r.missing.join(",") === "FX-GONE" && gone.label === "Iris", "#FXB resolveFixture: a missing part is found:false, priced 0, listed in missing");
+  ok(fixtureDescription(r) === "S4 LED — Engine; Lens 26°; Power cable; Iris", "#FXB fixtureDescription: 'Label — part; part' over included parts");
+  ok(fixtureSkus(rec).join(",") === "FX-ENG,FX-LENS,FX-CBL,FX-CLAMP,FX-GONE", "#FXB fixtureSkus: every SKU the record prices, once, in form order");
+
+  const sys: FxbRecord = {
+    id: "SA-T2", kind: "system", label: "Audio rack", description: "", scope: "Audio",
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "FX-CBL", qty: 2 }, { sku: "FX-CLAMP", qty: 0 }],
+    createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const s = resolveFixture(sys, cat);
+  ok(s.parts.length === 2 && s.parts.every((p) => p.slot === "parts") && s.cost === 80 && s.sell === 120, "#FXB resolveFixture: a system prices its one parts list with the same line logic");
+
+  const noLabel = sanitizeFixtureInput({ kind: "fixture", label: "  ", description: "" });
+  ok(!noLabel.ok && noLabel.error.includes("label"), "#FXB sanitizeFixtureInput: a label is required");
+  const noEngine = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "" });
+  ok(!noEngine.ok && /light engine/i.test(noEngine.error), "#FXB sanitizeFixtureInput: a fixture needs a light engine");
+  const good = sanitizeFixtureInput({ kind: "fixture", label: " X ", description: "", lightEngineSku: "FX-GONE", lensSku: "", lines: { power: [{ sku: " FX-CBL ", qty: -3 }, { sku: "", qty: 1 }] } });
+  ok(good.ok && good.value.label === "X" && good.value.lensSku === null && good.value.lightEngineSku === "FX-GONE" && good.value.lines.power.length === 1 && good.value.lines.power[0].sku === "FX-CBL" && good.value.lines.power[0].qty === 0 && good.value.lines.data.length === 0, "#FXB sanitizeFixtureInput: lens optional, a part missing from the catalog does not block, qty clamps at 0, blank lines drop");
+  const badScope = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Plumbing", parts: [{ sku: "A", qty: 1 }] });
+  ok(!badScope.ok && /scope/i.test(badScope.error), "#FXB sanitizeFixtureInput: a system needs one of the nine scopes");
+  const noParts = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [] });
+  ok(!noParts.ok && /part/i.test(noParts.error), "#FXB sanitizeFixtureInput: a system needs at least one part");
+  const sysOk = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 0 }], lightEngineSku: "IGNORED" });
+  ok(sysOk.ok && sysOk.value.scope === "Audio" && sysOk.value.lightEngineSku === "" && sysOk.value.lensSku === null && (sysOk.value.parts || []).length === 1, "#FXB sanitizeFixtureInput: a system keeps scope + parts and no light engine");
+
+  const fa = fixtureAssembliesFrom([rec, sys], cat);
+  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#FXB fixtureAssembliesFrom: fixtures only, id and label carried");
+  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#FXB fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
+  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#FXB fixtureAssembliesFrom: the override rides through as the component cost");
+}
