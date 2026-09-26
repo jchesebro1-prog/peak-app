@@ -32,9 +32,10 @@ import {
   setSheetCalibration,
   setVenue,
   saveGridIntake,
+  setAutoEstimate,
 } from "@/lib/stores/grid-projects";
 import { hasOption, resolveOptionId } from "@/lib/design/grid-options";
-import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
+import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import { can } from "@/lib/team";
 import { getAllDesigns, removeDesign, updateDesign } from "@/lib/stores/designs";
@@ -43,8 +44,17 @@ import { getSite } from "@/lib/identity/sites";
 // into lib/design/grid-quote.ts (D186) so a quote can be built per option on a
 // scratch DB; the blob upload this action used to do moved to
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
-import { get as getPart } from "@/lib/stores/catalog";
+import { get as getPart, getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
+import { fillAutoScopes } from "@/lib/design/grid-auto-fill";
+import { AUTO_SCOPES, autoEstimateCards, clampScopeInputs, priceOverrides, sellOnlyCards, type SellCard } from "@/lib/design/auto-estimate";
+import { overrideRefs, sanitizeAutoEstimate, type AutoEstimate } from "@/lib/design/grid-auto-model";
+import { buildEquipmentPriceTable, sellFromCost } from "@/lib/design/equipment-map";
+import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
+import { listFixtures } from "@/lib/stores/fixtures";
+import { getCatalogRates } from "@/lib/stores/pricing";
+import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
+import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { partForGrid } from "@/lib/design/grid-part-lookup";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
@@ -125,20 +135,80 @@ export async function removeGridAssemblyAction(id: string): Promise<Result> {
   return { ok: true };
 }
 
+/**
+ * The Equipment step's live cards (#GEM, spec §5): the equations for the
+ * given scope inputs, priced at each scope's tier from the Equipment map (or
+ * this design's swaps), SELL-ONLY — no unit cost crosses to the client. Reads
+ * only the SKUs the map and the swaps reference.
+ */
+export async function previewAutoEstimateAction(input: {
+  inputs: QuickScopeInputs;
+  estimate: AutoEstimate;
+}): Promise<{ ok: true; cards: SellCard[] } | { ok: false; error: string }> {
+  await requireUser();
+  if (!input?.inputs) return { ok: false, error: "Missing venue inputs." };
+  const est = sanitizeAutoEstimate(input.estimate);
+  const refs = overrideRefs(est);
+  const { map, ctx } = await loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds });
+  const cards = autoEstimateCards(clampScopeInputs(input.inputs), est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx));
+  return { ok: true, cards: sellOnlyCards(cards) };
+}
+
+export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: string; unit: string; unitSell: number };
+
+/**
+ * Swap picker search (#GEM): catalog parts (server-side search, capped) and
+ * fixtures/systems whose label matches — SELL numbers only.
+ */
+export async function searchAutoEquipmentAction(query: string): Promise<{ hits: AutoEquipHit[] }> {
+  await requireUser();
+  const q = String(query ?? "").trim();
+  if (q.length < 2) return { hits: [] };
+  const [{ hits }, fixtures, rates] = await Promise.all([searchCatalog(q, "", 15), listFixtures(), getCatalogRates()]);
+  const m = rates.defaultMargin;
+  const partHits: AutoEquipHit[] = hits
+    .filter((h) => h.cost > 0 || h.list > 0)
+    .map((h) => ({ kind: "part", ref: h.sku, desc: h.desc, unit: h.unit, unitSell: h.list > 0 ? h.list : sellFromCost(h.cost, m) }));
+  const ql = q.toLowerCase();
+  const matched = fixtures.filter((f) => `${f.label} ${f.description}`.toLowerCase().includes(ql)).slice(0, 10);
+  const fxParts = matched.length ? await getCatalogParts([...new Set(matched.flatMap((f) => fixtureSkus(f)))]) : [];
+  const asmHits: AutoEquipHit[] = matched.map((f) => {
+    const r = resolveFixture(f, fxParts);
+    return { kind: "assembly", ref: f.id, desc: `${f.label} (${f.kind})`, unit: "ea", unitSell: r.sell > 0 ? r.sell : sellFromCost(r.cost, m) };
+  });
+  return { hits: [...asmHits, ...partHits] };
+}
+
 export async function saveGridIntakeAction(input: {
   projectId: string;
-  mode: "manual";
+  /** "auto" = Auto (equations); "manual" = Blank (stored as before, D-GEM-7). */
+  mode: "manual" | "auto";
   venueName: string;
   locationName: string;
   address: string;
   notes: string;
   autoConfig: AState;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+  estimate?: AutoEstimate;
+}): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
-  if (input.mode !== "manual") return { ok: false, error: "Auto-estimate lands in the next release — choose Manual placement for now." };
+  if (input.mode !== "manual" && input.mode !== "auto") return { ok: false, error: "Choose Auto or Blank." };
+  const scopeInputs = intakeScopeInputs(input.autoConfig);
+  const autoScopes = input.mode === "auto" ? AUTO_SCOPES.filter((k) => scopeInputs.sys[k]) : [];
+  if (input.mode === "auto" && autoScopes.length === 0) return { ok: false, error: "Pick at least one scope for Auto to fill." };
+  const est: AutoEstimate | null =
+    input.mode === "auto"
+      ? (() => {
+          const clean = sanitizeAutoEstimate(input.estimate);
+          return {
+            tierByScope: Object.fromEntries(autoScopes.map((k) => [k, clean.tierByScope[k] ?? "better"])),
+            overrides: Object.fromEntries(Object.entries(clean.overrides).filter(([k]) => autoScopes.some((s) => k.startsWith(`${s}:`)))),
+          };
+        })()
+      : null;
   const project = await getProject(input.projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
+  const optionId = resolveOptionId(project, null);
   const saved = await saveGridIntake(input.projectId, {
     complete: true,
     measurementBased: true,
@@ -150,20 +220,16 @@ export async function saveGridIntakeAction(input: {
     autoConfig: input.autoConfig,
   });
   if (!saved) return { ok: false, error: "That design could not be found." };
-  // First-save gate (D145): the base sheet is generated exactly once. The
-  // same gate now also seeds the Scope panel's inputs and the linked design
-  // record's dims (Spec 1) — a later re-save of venue details changes none
-  // of them, so a designer's later Scope edits are never overwritten.
-  // Order matters: `sheetIds` becoming non-empty is the sentinel that marks
-  // this block done, and generateBaseSheet() is what flips it — so it runs
-  // LAST. The other three steps (setScopeInputs, the DesignRecord patch,
-  // renameProject) are idempotent re-applies of the same input, so they run
-  // FIRST: if any of them throws, sheetIds is still empty and the next save
-  // re-runs the whole block instead of leaving the project stuck without
-  // Scope inputs or its rename.
+  // First-save gate (D145) — see the pre-#GEM comment: idempotent re-applies
+  // first, generateBaseSheet (the sentinel) last. The Auto fill (#GEM) runs
+  // after the sheet exists; if it fails the plan still opens, with a warning,
+  // and "Change equipment…" re-fills. `est`, when present, is stored under
+  // THIS option (D-GEM-12 — autoEstimate is per option, not project-wide).
+  let warning: string | undefined;
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
-    await setScopeInputs(input.projectId, manualScopeInputs(input.autoConfig));
+    await setScopeInputs(input.projectId, scopeInputs);
+    if (est) await setAutoEstimate(input.projectId, optionId, est);
     const patch = designPatchFromIntake({
       projectName: project.name,
       venueName: input.venueName,
@@ -174,10 +240,19 @@ export async function saveGridIntakeAction(input: {
     for (const d of linked) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
     await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
+    if (est) {
+      const fresh = await getProject(input.projectId);
+      const res = fresh
+        ? await fillAutoScopes(input.projectId, resolveOptionId(fresh, null), autoScopes, user.name)
+        : ({ ok: false, error: "That design could not be found." } as const);
+      if (!res.ok) warning = `The plan is ready, but Auto could not fill it: ${res.error} Use “Change equipment…” in the Scope panel to try again.`;
+      else if (res.needsPart > 0)
+        warning = `${res.needsPart} line${res.needsPart === 1 ? "" : "s"} still need${res.needsPart === 1 ? "s" : ""} a part in the Equipment map and ${res.needsPart === 1 ? "was" : "were"} left off the plan.`;
+    }
   }
   revalidatePath(editorPath(input.projectId));
   revalidatePath("/design/designs");
-  return { ok: true };
+  return { ok: true, ...(warning ? { warning } : {}) };
 }
 
 /** Link the Grid to a saved Lineset Builder design. The schedule remains a

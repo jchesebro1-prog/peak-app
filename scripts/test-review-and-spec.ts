@@ -18210,3 +18210,23 @@ import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake"
   const G = gemProsGeom7(a);
   ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#GEM T7: the frame is the base sheet's own geometry");
 }
+
+/* --- #GEM T8: one intake — Auto or Blank; sell-only previews; New design → the Grid intake --- */
+import { intakeScopeInputs as gemIntakeInputs8 } from "@/lib/design/grid-intake";
+import { defaultAState as gemDefault8 } from "@/app/(app)/design/quick/engine";
+{
+  const a8 = { ...gemDefault8(0), venue: "pac", sys: { rigging: false, curtains: true, lighting: true, controls: true, audio: false, video: true, acoustical: true, pit: true } };
+  const si = gemIntakeInputs8(a8);
+  ok(si.sys.curtains && si.sys.lighting && si.sys.video && !si.sys.rigging && !si.sys.audio && !si.sys.controls && !si.sys.pit && si.venue === "pac", "#GEM T8: the intake's scopes are the designer's picks, limited to the five Grid scopes");
+  const dir = "src/app/(app)/design/grid/[id]";
+  const intakeSrc = readFileSync(join(process.cwd(), `${dir}/grid-intake.tsx`), "utf8");
+  ok(!/next release/i.test(intakeSrc) && intakeSrc.includes("Auto (equations)") && intakeSrc.includes("Blank") && intakeSrc.includes("EquipmentCards"), "#GEM T8: the intake offers Auto (equations) or Blank, and Auto has an Equipment step");
+  const clientFiles = ["grid-intake.tsx", "equipment-card.tsx", "scope-picker.tsx"].map((f) => readFileSync(join(process.cwd(), `${dir}/${f}`), "utf8"));
+  ok(clientFiles.every((s) => s.startsWith('"use client"') && !gemValueImports(s).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m))), "#GEM T8: the intake's client files import no pricing, store or DB value (types only)");
+  const act8 = readFileSync(join(process.cwd(), `${dir}/actions.ts`), "utf8");
+  const searchBody = act8.slice(act8.indexOf("export async function searchAutoEquipmentAction"), act8.indexOf("export async function saveGridIntakeAction"));
+  ok(act8.includes("sellOnlyCards(") && searchBody.includes("unitSell") && !/\bcost:\s*h\.cost/.test(searchBody), "#GEM T8: previews and part search return sell numbers only");
+  const dc = readFileSync(join(process.cwd(), "src/app/(app)/design/designs/design-client.tsx"), "utf8");
+  const hm = readFileSync(join(process.cwd(), "src/app/(app)/home-my-designs.tsx"), "utf8");
+  ok(!dc.includes("NewDesignSplit") && !dc.includes('href="/design/quick"') && dc.includes("<NewDesignButton") && hm.includes("<NewDesignButton") && !hm.includes('href="/design/quick"'), "#GEM T8: every New design control opens the Grid intake; the Quick Design canvas is retired from New design");
+}

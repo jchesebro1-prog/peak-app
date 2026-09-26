@@ -3945,6 +3945,71 @@ async function main() {
     }
   }
 
+  /* --- #GEM T8: the Auto fill paints the generated base sheet from the Equipment map --- */
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const EM = await import("@/lib/stores/equipment-map");
+    const Cat = await import("@/lib/stores/catalog");
+    const Fx = await import("@/lib/stores/fixtures");
+    const GC = await import("@/lib/stores/grid-catalog");
+    const { sanitizeFixtureInput } = await import("@/lib/fixture-assemblies");
+    const { fillAutoScopes } = await import("@/lib/design/grid-auto-fill");
+    const { intakeScopeInputs } = await import("@/lib/design/grid-intake");
+    const { defaultAState, compute } = await import("@/app/(app)/design/quick/engine");
+    const { resolveOptionId } = await import("@/lib/design/grid-options");
+    const { buildGridQuote } = await import("@/lib/design/grid-quote");
+    const by = "tester";
+    await Cat.upsert({ sku: "GEM8-PAR", desc: "GEM8 LED par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
+    await Cat.upsert({ sku: "GEM8-VEL", desc: "GEM8 velour", category: "Fabric", unit: "sq ft", list: 0, cost: 0, curtainAreaRate: 3.5 });
+    await Cat.upsert({ sku: "GEM8-MIX", desc: "GEM8 mixer", category: "Audio", unit: "ea", list: 7000, cost: 5000 });
+    const sysIn = sanitizeFixtureInput({ kind: "system", label: "GEM8 mixer rack", description: "", scope: "Audio", parts: [{ sku: "GEM8-MIX", qty: 1 }] });
+    if (!sysIn.ok) throw new Error(sysIn.error);
+    const rack = await Fx.createFixture(sysIn.value, by, { cost: 5000, price: 7000, pricedAt: null });
+    await EM.saveEquipmentRow("lighting:par", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM8-PAR" } } }, by);
+    await EM.saveEquipmentRow("curtains:draw", { sameAll: true, tiers: { good: { kind: "part", sku: "GEM8-VEL" } } }, by);
+    await EM.saveEquipmentRow("audio:mixerDsp", { sameAll: true, tiers: { good: { kind: "assembly", id: rack.id } } }, by);
+    await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, by);
+    const a = {
+      ...defaultAState(0), venue: "school", size: "medium" as const, width: 40, depth: 30, grid: 24, wing: 12, ph: 20,
+      sys: { rigging: false, curtains: true, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false },
+      drape: { draw: true, legs: false, border: false, scenerytrack: false, fullstage: false },
+      fixtures: { par: true, front: false, cyc: false, side: false, automated: false },
+    };
+    const p0 = await GP.createProject({ name: "GEM8 auto", customer: "", customerId: null, by });
+    // #GEM D-GEM-12 (post-brief): autoEstimate is stored PER OPTION —
+    // resolveOptionId's virtual default id is known before the project ever
+    // persists an `options` list, so it's captured once here and reused for
+    // both setAutoEstimate and fillAutoScopes below.
+    const opt = resolveOptionId(p0, null);
+    await GP.saveGridIntake(p0.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "HS", address: "", notes: "", autoConfig: a });
+    await GP.setScopeInputs(p0.id, intakeScopeInputs(a));
+    await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "better", curtains: "better", audio: "better" }, overrides: {} });
+    await GP.generateBaseSheet(p0.id, a, "#3a3f4a", by);
+    let p = (await GP.getProject(p0.id))!;
+    const res = await fillAutoScopes(p0.id, opt, ["lighting", "curtains", "audio"], by);
+    assert.ok(res.ok, `#GEM T8: the fill runs (${res.ok ? "" : res.error})`);
+    p = (await GP.getProject(p0.id))!;
+    const eq = compute({ ...a, tier: "better" });
+    const qtyOf = (key: string) => eq.systems.flatMap((s) => s.items).find((i) => i.key === key)!.qty;
+    const autoPl = p.placements.filter((pl) => pl.auto);
+    const placed = (key: string) => autoPl.filter((pl) => pl.auto!.rowKey === key).reduce((n, pl) => n + (pl.qty ?? 1), 0);
+    assert.equal(placed("lighting:par"), qtyOf("lighting:par"), "#GEM T8: every par the equations call for is on the plan");
+    assert.equal(placed("curtains:draw"), qtyOf("curtains:draw"), "#GEM T8: every draw the equations call for is on the plan");
+    assert.ok(autoPl.filter((pl) => pl.auto!.rowKey === "curtains:draw").every((pl) => pl.curtain?.fabricSku === "GEM8-VEL" && pl.curtain.type === "Draw"), "#GEM T8: draws are curtain drop-ins on the mapped fabric");
+    assert.equal(placed("audio:lineArray"), 0, "#GEM T8: an unmapped row is never placed — no fallback dollar, no placeholder");
+    assert.ok(autoPl.some((pl) => pl.partId === `asm:${rack.id}`) && autoPl.some((pl) => pl.partId === "allow:audio:subwoofer:better"), "#GEM T8: the System assembly and the allowance land as virtual parts");
+    assert.ok(autoPl.every((pl) => pl.sheetId === p.sheetIds[0] && pl.optionId === opt), "#GEM T8: everything lands on the generated base sheet, in the current option");
+    assert.ok(res.ok && res.needsPart >= 1, "#GEM T8: the fill reports the needs-a-part lines");
+    assert.ok(await GC.getGridSymbol("GEM8-PAR"), "#GEM T8: a mapped part gets its Grid library entry at fill time");
+    const q = await buildGridQuote(p, opt);
+    assert.ok(q.ok, "#GEM T8: the Auto design quotes");
+    if (q.ok) {
+      assert.ok(q.build.spec.lines.some((l) => l.allowance === true && l.qty === qtyOf("audio:subwoofer")), "#GEM T8: the allowance reaches the quote, flagged");
+      assert.ok(q.build.value > 0, "#GEM T8: the quote carries value");
+    }
+    for (const k of ["lighting:par", "curtains:draw", "audio:mixerDsp", "audio:subwoofer"]) await EM.clearEquipmentRow(k);
+  }
+
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems
          (configuration, like the settings they used to live in) and the
          kept fixtures' accessory graph is rebuilt. LAST: it wipes every

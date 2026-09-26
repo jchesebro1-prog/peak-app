@@ -3,12 +3,13 @@
 import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import { IDENTITY, deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import type { DesignRecord, DesignRevision } from "@/lib/stores/designs";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import { TasksCard } from "@/components/tasks-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
+import { NewDesignButton } from "@/components/design/new-design-button";
 import {
   SHORT,
   SYSCOLOR,
@@ -41,7 +42,6 @@ import {
   applyDesignTemplateAction,
   approveDesignAction,
   claimDesignReviewAction,
-  createManualDesignAction,
   deleteDesignAction,
   promoteDesignAction,
   requestDesignChangesAction,
@@ -88,80 +88,6 @@ const REVIEW_PILL: Record<string, { ink: string; soft: string; bd: string; label
 };
 
 type RosterEntry = { name: string; initials: string; color: string };
-
-/** "New design" trigger with a Quick canvas / Manual (Grid) split, in place
- *  of the old bare link to /design/quick (D-grid-merge). Renders as an
- *  arbitrary trigger (via `style`/`children`) so each of the three call
- *  sites keeps its existing look. */
-function NewDesignSplit({
-  style,
-  className,
-  children,
-}: {
-  style: CSSProperties;
-  className?: string;
-  children: ReactNode;
-}) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-
-  const startManual = () => {
-    setOpen(false);
-    startTransition(async () => {
-      const res = await createManualDesignAction();
-      if (res.ok) router.push(`/design/grid/${encodeURIComponent(res.gridProjectId)}`);
-    });
-  };
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      className={className}
-      onClick={() => setOpen((o) => !o)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          setOpen((o) => !o);
-        }
-      }}
-      style={{ ...style, position: "relative", cursor: "pointer" }}
-    >
-      {children}
-      {open && (
-        <>
-          <div
-            onClick={(e) => { e.stopPropagation(); setOpen(false); }}
-            style={{ position: "fixed", inset: 0, zIndex: 70 }}
-          />
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 212, background: "#fff", border: "1px solid #e4e7ec", borderRadius: 10, boxShadow: "0 10px 26px rgba(0,0,0,.16)", overflow: "hidden", zIndex: 71, textAlign: "left" }}
-          >
-            <Link
-              href="/design/quick"
-              onClick={() => setOpen(false)}
-              style={{ display: "block", padding: "10px 13px", fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#16181d", textDecoration: "none", borderBottom: "1px solid #f0f1f4" }}
-            >
-              Quick canvas
-              <div style={{ fontSize: 11, fontWeight: 500, color: "#9aa0ab", marginTop: 2 }}>Free-form sandbox editor</div>
-            </Link>
-            <button
-              type="button"
-              onClick={startManual}
-              disabled={pending}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 13px", fontFamily: UI, fontSize: 12.5, fontWeight: 600, color: "#16181d", background: "#fff", border: "none", cursor: pending ? "default" : "pointer" }}
-            >
-              {pending ? "Starting…" : "Manual layout · The Grid"}
-              <div style={{ fontSize: 11, fontWeight: 500, color: "#9aa0ab", marginTop: 2 }}>Paint devices onto a plan sheet</div>
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 export default function DesignClient({
   me,
@@ -397,9 +323,9 @@ export default function DesignClient({
             Budgetary system designs — explored freely, separate from Quotes until you promote them.
           </div>
         </div>
-        <NewDesignSplit className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 17px", borderRadius: 9, boxShadow: `0 1px 3px ${ACCENT_SOFT}`, flexShrink: 0 }}>
+        <NewDesignButton className="dd-accent-btn" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "12px 17px", borderRadius: 9, boxShadow: `0 1px 3px ${ACCENT_SOFT}`, flexShrink: 0 }}>
           <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New design
-        </NewDesignSplit>
+        </NewDesignButton>
       </div>
 
       {/* stat tiles */}
@@ -710,9 +636,9 @@ export default function DesignClient({
           <div style={{ fontSize: 13, color: "#9aa0ab", marginTop: 6, lineHeight: 1.5, maxWidth: 340, marginLeft: "auto", marginRight: "auto" }}>
             Start a budgetary design in the sandbox — explore systems and pricing without touching your quote pipeline.
           </div>
-          <NewDesignSplit className="dd-accent-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 18, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "11px 18px", borderRadius: 9 }}>
+          <NewDesignButton className="dd-accent-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 18, fontSize: 13, fontWeight: 600, color: "#fff", background: ACCENT, padding: "11px 18px", borderRadius: 9 }}>
             <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> New design
-          </NewDesignSplit>
+          </NewDesignButton>
         </div>
       ) : (
         <div className="dd-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
@@ -784,11 +710,11 @@ export default function DesignClient({
             );
           })}
 
-          <NewDesignSplit className="dd-newtile" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 9, background: "transparent", border: "1.5px dashed #d6d9e0", borderRadius: 12, color: "#9aa0ab", minHeight: 210 }}>
+          <NewDesignButton className="dd-newtile" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 9, background: "transparent", border: "1.5px dashed #d6d9e0", borderRadius: 12, color: "#9aa0ab", minHeight: 210 }}>
             <span style={{ width: 38, height: 38, borderRadius: 10, background: "#f1f2f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, lineHeight: 1 }}>+</span>
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>New design</span>
-            <span style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4, maxWidth: 150 }}>Quick canvas or manual layout in The Grid</span>
-          </NewDesignSplit>
+            <span style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4, maxWidth: 150 }}>Auto from the equations or a blank plan, in The Grid</span>
+          </NewDesignButton>
         </div>
       )}
 

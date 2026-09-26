@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { NewDesignButton } from "@/components/design/new-design-button";
 import { promoteDesignAction } from "./home-actions";
 
 /**
@@ -92,8 +93,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
             Budgetary only — separate from Quotes until you add them
           </span>
         </div>
-        <Link
-          href="/design/quick"
+        <NewDesignButton
           className="pkh-actions pkh-softbtn"
           style={{
             display: "flex",
@@ -112,7 +112,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
           }}
         >
           <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> New design
-        </Link>
+        </NewDesignButton>
       </div>
 
       <div
@@ -266,8 +266,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
           </div>
         ))}
 
-        <Link
-          href="/design/quick"
+        <NewDesignButton
           className="pkh-newdesign"
           style={{
             flex: "0 0 188px",
@@ -307,7 +306,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
             <br />
             in the sandbox
           </span>
-        </Link>
+        </NewDesignButton>
       </div>
 
       {promoted && (
