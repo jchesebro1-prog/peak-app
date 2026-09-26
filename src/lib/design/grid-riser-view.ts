@@ -46,5 +46,6 @@ export function riserViewForOption(input: {
       return { iconId: l.iconId, color: l.color };
     },
     partDesc: (id) => partById.get(id)?.desc || id,
+    partCode: (id) => partById.get(id)?.sku || id,
   });
 }

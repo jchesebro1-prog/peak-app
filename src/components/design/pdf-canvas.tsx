@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { printZoom } from "@/lib/design/drawing-labels";
 
 /**
  * PDF page renderer (D95). Loads pdf.js lazily on the client and paints one
@@ -29,10 +30,55 @@ type PdfDoc = {
   }>;
 };
 
+/**
+ * Parsed documents, shared per source (#GDS final review I6): a drawing set
+ * puts the same PDF sheet on several plan pages (one per system), and each
+ * used to download and parse it again. Small LRU — a session rarely has more
+ * than a handful of plan sheets open; a failed load is evicted so a retry
+ * can succeed.
+ */
+const DOC_CACHE_MAX = 6;
+const docCache = new Map<string, Promise<PdfDoc>>();
+
+function loadDoc(dataUrl: string): Promise<PdfDoc> {
+  const hit = docCache.get(dataUrl);
+  if (hit) {
+    docCache.delete(dataUrl);
+    docCache.set(dataUrl, hit);
+    return hit;
+  }
+  const p = (async () => {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    // The document arrives either as a base64 data-URL (in-database
+    // sheets) or as a plain URL (Blob storage via the sheet proxy, D116).
+    const src = dataUrl.startsWith("data:")
+      ? { data: Uint8Array.from(atob(dataUrl.split(",")[1] || ""), (c) => c.charCodeAt(0)) }
+      : { url: dataUrl };
+    return (await pdfjs.getDocument({
+      ...src,
+      // Render glyphs as paths instead of installing @font-face rules.
+      // pdf.js otherwise awaits document.fonts, which can never settle in
+      // embedded/headless browsers — the render promise then hangs
+      // forever and the page stays blank with no error. Paths cost a
+      // little speed and buy a viewer that always paints.
+      disableFontFace: true,
+      useSystemFonts: false,
+    }).promise) as unknown as PdfDoc;
+  })();
+  p.catch(() => {
+    if (docCache.get(dataUrl) === p) docCache.delete(dataUrl);
+  });
+  docCache.set(dataUrl, p);
+  while (docCache.size > DOC_CACHE_MAX) docCache.delete(docCache.keys().next().value as string);
+  return p;
+}
+
 export default function PdfCanvas({
   dataUrl,
   page,
   zoom,
+  printBox,
   onLoaded,
   onSize,
   onRendered,
@@ -41,6 +87,10 @@ export default function PdfCanvas({
   dataUrl: string;
   page: number;
   zoom: number;
+  /** Print sizing (#GDS I6): when set, `zoom` is ignored and the page is
+   *  rasterized at about 200 dpi across the width it prints at inside this
+   *  inch box, capped at 12 MP (drawing-labels printZoom). */
+  printBox?: { w: number; h: number };
   onLoaded: (pages: number) => void;
   onSize: (w: number, h: number) => void;
   /** Fired once the requested page has actually finished painting to the
@@ -65,23 +115,7 @@ export default function PdfCanvas({
     (async () => {
       try {
         setLoading(true);
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-        // The document arrives either as a base64 data-URL (in-database
-        // sheets) or as a plain https URL (Blob storage, D116).
-        const src = dataUrl.startsWith("data:")
-          ? { data: Uint8Array.from(atob(dataUrl.split(",")[1] || ""), (c) => c.charCodeAt(0)) }
-          : { url: dataUrl };
-        const doc = (await pdfjs.getDocument({
-          ...src,
-          // Render glyphs as paths instead of installing @font-face rules.
-          // pdf.js otherwise awaits document.fonts, which can never settle in
-          // embedded/headless browsers — the render promise then hangs
-          // forever and the page stays blank with no error. Paths cost a
-          // little speed and buy a viewer that always paints.
-          disableFontFace: true,
-          useSystemFonts: false,
-        }).promise) as unknown as PdfDoc;
+        const doc = await loadDoc(dataUrl);
         if (dead) return;
         docRef.current = doc;
         onLoaded(doc.numPages);
@@ -115,7 +149,9 @@ export default function PdfCanvas({
       try {
         const pg = await doc.getPage(Math.min(page, doc.numPages));
         if (cancelled) return;
-        const viewport = pg.getViewport({ scale: zoom });
+        const base = printBox ? pg.getViewport({ scale: 1 }) : null;
+        const scale = base && printBox ? printZoom(base.width, base.height, printBox.w, printBox.h) : zoom;
+        const viewport = pg.getViewport({ scale });
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         canvas.width = Math.floor(viewport.width);
@@ -144,7 +180,7 @@ export default function PdfCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, zoom, loading]);
+  }, [page, zoom, loading, printBox?.w, printBox?.h]);
 
   if (err) {
     return (

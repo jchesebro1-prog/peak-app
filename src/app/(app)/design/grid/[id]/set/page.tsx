@@ -11,6 +11,8 @@ import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
 import { markerColor } from "@/lib/design/grid-symbols";
+import { DRAWING_SYSTEMS } from "@/lib/design/grid-scopes";
+import { assignTypeMarks } from "@/lib/design/drawing-labels";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
 import { buildSchedule, paginateSchedule, scheduleGroups, scheduleWiresFromView, type ScheduleItem } from "@/lib/design/grid-schedule";
@@ -171,6 +173,9 @@ export default async function DrawingSetPage({
       iconId: look.iconId,
       color: pl.curtain ? symCtx.colors.Curtains : look.color,
       label: pl.curtain ? pl.curtain.name : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category || pl.partId : pl.partId),
+      // One type mark per part; each named curtain is its own type.
+      key: pl.curtain ? `curtain:${pl.curtain.name}` : pl.partId,
+      tag: "",
       w: part?.symbolWidth || 44,
       h: part?.symbolHeight || 30,
       curtain: Boolean(pl.curtain),
@@ -193,7 +198,9 @@ export default async function DrawingSetPage({
           {notes.length ? (
             <ol className="pk-dw-notes">
               {notes.map((n, i) => (
-                <li key={i}>{n}</li>
+                <li key={i}>
+                  <span className="pk-dw-num">{`${i + 1}.`}</span> {n}
+                </li>
               ))}
             </ol>
           ) : (
@@ -249,16 +256,26 @@ export default async function DrawingSetPage({
       if (!src) return <p>That plan sheet is no longer on this design.</p>;
       const c = planContent({ group: { system: d.system, sheetId: d.sheetId, page: d.page }, placements: slice.placements, routes: slice.routes, spaces, partById });
       const cal = findCalibration(cals, d.sheetId, d.page);
+      const figs = c.placements.map(figPlacement);
+      const marks = assignTypeMarks(
+        figs.map((f) => ({ key: f.key, desc: f.label })),
+        DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || ""
+      );
       return (
         <PlanSheetFigure
-          sheet={{ name: src.name, mime: src.mime, src: src.blobPath ? `/api/grid-sheets/${encodeURIComponent(src.id)}` : src.dataUrl }}
+          // Every sheet streams through the authenticated proxy — Blob and
+          // in-database alike — so a sheet shared by several plan pages is
+          // one cached download, never a data-URL inlined once per page.
+          sheet={{ name: src.name, mime: src.mime, src: `/api/grid-sheets/${encodeURIComponent(src.id)}` }}
           page={d.page}
           areaW={area.w}
           areaH={area.h}
           captionH={Math.round(0.35 * k * 1000) / 1000}
+          k={k}
           spaces={c.spaces.map((s) => ({ id: s.id, points: s.points, name: s.name, color: s.color }))}
           routes={c.routes.map((r) => ({ id: r.id, points: r.points, color: markerColor(partById.get(r.partId)?.category || "Wire") }))}
-          placements={c.placements.map(figPlacement)}
+          placements={figs.map((f) => ({ ...f, tag: marks.tags.get(f.key) || "" }))}
+          keyRows={marks.rows.map((r) => ({ tag: r.tag, qty: r.qty, desc: r.desc }))}
           cal={cal ? { scale: cal.scale, unit: cal.unit } : null}
         />
       );
@@ -323,7 +340,8 @@ export default async function DrawingSetPage({
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: "#8c919c", fontFamily: "var(--font-ui)" }}>
           {`${SHEET_SIZES[size].label} · ${included.length} sheet${included.length === 1 ? "" : "s"}${options.length > 1 ? ` · ${option.name}` : ""}`}
         </span>
-        <PrintButton accent={accent} />
+        {/* Disabled until every plan figure has painted (or failed). */}
+        <PrintButton accent={accent} waitFor="[data-plan-figure]" />
       </div>
       <SetSettingsPanel
         projectId={project.id}

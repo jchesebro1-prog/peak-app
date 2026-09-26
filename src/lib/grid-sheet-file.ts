@@ -66,3 +66,27 @@ export function sheetMimeVerdict(mime: string): "ok" | "svg" | "other" {
   if (m === "image/svg+xml" || m === "image/svg") return "svg";
   return m.startsWith("image/") ? "ok" : "other";
 }
+
+/**
+ * Decode an in-database sheet's data-URL (`data:<mime>[;params][;base64],…`)
+ * so the sheet proxy can stream it like a Blob sheet (#GDS final review I6 —
+ * the drawing set loads every sheet by URL, once, instead of inlining the
+ * data-URL into each plan page). Null for anything that isn't a data-URL.
+ */
+export function decodeDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } | null {
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return null;
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  const meta = dataUrl.slice(5, comma).split(";");
+  const mime = (meta[0] || "application/octet-stream").trim().toLowerCase();
+  const base64 = meta.slice(1).some((m) => m.trim().toLowerCase() === "base64");
+  const payload = dataUrl.slice(comma + 1);
+  try {
+    // atob/TextEncoder, not Buffer: this module stays platform-neutral (the
+    // editor, a client component, imports it for the size constants).
+    const bytes = base64 ? Uint8Array.from(atob(payload.replace(/\s+/g, "")), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(payload));
+    return { mime, bytes };
+  } catch {
+    return null;
+  }
+}

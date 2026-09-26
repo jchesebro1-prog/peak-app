@@ -1068,10 +1068,32 @@ button.pk-searchbar-glass {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pk-dw-notes {
+/* Notes print explicit numbers (.pk-dw-num) — Tailwind's preflight sets
+   list-style: none, so an <ol>'s own markers never reach the paper. */
+.pk-dw-notes,
+.pk-riser-notes {
+  list-style: none;
   margin: 0;
-  padding-left: calc(14pt * var(--dw-k));
+  padding-left: 0;
   line-height: 1.45;
+}
+.pk-dw-notes li,
+.pk-riser-notes li {
+  padding-left: 1.6em;
+  text-indent: -1.6em;
+}
+.pk-dw-num {
+  display: inline-block;
+  min-width: 1.6em;
+  text-indent: 0;
+  font-weight: 600;
+}
+/* A plan sheet's device key (type mark · qty · description). */
+.pk-dw-key {
+  font-size: calc(7.5pt * var(--dw-k));
+}
+.pk-dw-key .pk-dw-table {
+  font-size: inherit;
 }
 .pk-dw-foot {
   border-top: calc(1pt * var(--dw-k)) solid #16181d;
@@ -1092,11 +1114,6 @@ button.pk-searchbar-glass {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #3d424e;
-}
-.pk-riser-notes {
-  margin: 0;
-  padding-left: 1.4em;
-  line-height: 1.45;
 }
 @media print {
   .pk-drawing-set {

@@ -209,14 +209,16 @@ export function nodeMinH(groupCount: number): number {
 
 /* -------------------------------- layout -------------------------------- */
 
-const COLS = 4;
-const BOX_W = 0.2;
+/** Three wide columns (#GDS final review I2): room between nodes for the
+ *  edge chips, and device rows long enough to read. */
+const COLS = 3;
+const BOX_W = 0.22;
 const GAP_X = (1 - COLS * BOX_W) / (COLS + 1);
 const BOX_H = 0.24;
 const ROW_STEP = 0.34;
 const TOP = 0.08;
 
-/** The auto layout's n-th slot: four columns, rows downward. */
+/** The auto layout's n-th slot: three columns, rows downward. */
 export function autoBox(slot: number): RiserNodeBox {
   const c = slot % COLS;
   const row = Math.floor(slot / COLS);
@@ -368,40 +370,52 @@ export function applyRiserOp(
 
 /* ---------------------------- device drops ---------------------------- */
 
+/** Device-drop spacing, normalized to the page width: a plan symbol is
+ *  ~44 px on the editor's 900 px page (≈ 0.05), so drops a little further
+ *  apart than that never stack (#GDS final review I4). */
+export const DROP_STEP = 0.06;
+
 /**
  * `n` points inside a space polygon for "+ Device": a square spiral out from
  * the centroid on a `step` grid, skipping points outside the polygon or too
  * close to anything already there, so multiples never stack. A polygon too
- * small to hold them all falls back to the centroid for the rest.
+ * small for them all at `step` tries again at half, then a quarter, the
+ * spacing; only then does the rest fall back to the centroid.
  */
-export function spreadInSpace(poly: Point[], n: number, taken: Point[] = [], step = 0.02): Point[] {
+export function spreadInSpace(poly: Point[], n: number, taken: Point[] = [], step = DROP_STEP): Point[] {
   const c = polygonCentroid(poly);
   const out: Point[] = [];
-  const free = (p: Point) => [...taken, ...out].every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= step * 0.75);
-  for (let ring = 0; ring <= 25 && out.length < n; ring++) {
-    for (let dy = -ring; dy <= ring && out.length < n; dy++) {
-      for (let dx = -ring; dx <= ring && out.length < n; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
-        const p = { x: r4(c.x + dx * step), y: r4(c.y + dy * step) };
-        if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) continue;
-        if (pointInPolygon(p, poly) && free(p)) out.push(p);
+  for (const s of [step, step / 2, step / 4]) {
+    const free = (p: Point) => [...taken, ...out].every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= s * 0.75);
+    const rings = Math.ceil(1 / s);
+    for (let ring = 0; ring <= rings && out.length < n; ring++) {
+      for (let dy = -ring; dy <= ring && out.length < n; dy++) {
+        for (let dx = -ring; dx <= ring && out.length < n; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+          const p = { x: r4(c.x + dx * s), y: r4(c.y + dy * s) };
+          if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) continue;
+          if (pointInPolygon(p, poly) && free(p)) out.push(p);
+        }
       }
     }
+    if (out.length >= n) break;
   }
   while (out.length < n) out.push({ x: r4(c.x), y: r4(c.y) });
   return out;
 }
 
 /** `n` points along the plan's lower margin, outside every space on that
- *  page — where "+ Device" on the Unassigned node lands. */
+ *  page — where "+ Device" on the Unassigned node lands. Rows and columns
+ *  are a symbol apart (DROP_STEP across, 0.05 down). */
 export function marginPoints(n: number, blockers: Point[][], taken: Point[] = []): Point[] {
   const out: Point[] = [];
   const clear = (p: Point) =>
     !blockers.some((poly) => pointInPolygon(p, poly)) &&
-    [...taken, ...out].every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= 0.02);
-  for (const y of [0.965, 0.935, 0.905]) {
-    for (let i = 0; i <= 30 && out.length < n; i++) {
-      const p = { x: r4(0.04 + i * 0.03), y };
+    [...taken, ...out].every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= DROP_STEP * 0.75);
+  const cols = Math.floor(0.92 / DROP_STEP);
+  for (const y of [0.965, 0.915, 0.865]) {
+    for (let i = 0; i <= cols && out.length < n; i++) {
+      const p = { x: r4(0.04 + i * DROP_STEP), y };
       if (clear(p)) out.push(p);
     }
     if (out.length >= n) break;
@@ -525,6 +539,8 @@ export type RiserViewEdge = {
   kind: "route" | "link";
   partId: string;
   desc: string;
+  /** Short code for the riser chip — the part's SKU, else its id. */
+  code: string;
   from: EndAnchor;
   to: EndAnchor;
   lengthFt: number | null;
@@ -556,10 +572,12 @@ export function buildRiserView(input: {
   doc: RiserDoc | null | undefined;
   look?: (g: RiserGroup) => { iconId: string; color: string };
   partDesc?: (partId: string) => string;
+  partCode?: (partId: string) => string;
 }): RiserView {
   const doc = normalizeRiserDoc(input.doc);
   const look = input.look || (() => ({ iconId: "device", color: "#8c919c" }));
   const desc = input.partDesc || ((id: string) => id);
+  const code = input.partCode || ((id: string) => id);
   const byId = new Map(input.placements.map((p) => [p.id, p]));
   const homeKey = (pl: { sheetId: string; page: number; x: number; y: number }) => nodeKeyOf(spaceOf(pl, input.spaces)?.id ?? null);
 
@@ -586,12 +604,12 @@ export function buildRiserView(input: {
     const r = routeById.get(e.routeId);
     const from = (r?.fromPlacementId ? anchor({ kind: "placement", placementId: r.fromPlacementId }) : null) || { key: nodeKeyOf(e.fromSpaceId), partId: null };
     const to = (r?.toPlacementId ? anchor({ kind: "placement", placementId: r.toPlacementId }) : null) || { key: nodeKeyOf(e.toSpaceId), partId: null };
-    edges.push({ id: e.routeId, kind: "route", partId: e.partId, desc: desc(e.partId), from, to, lengthFt: e.lengthFt, unit: e.unit });
+    edges.push({ id: e.routeId, kind: "route", partId: e.partId, desc: desc(e.partId), code: code(e.partId), from, to, lengthFt: e.lengthFt, unit: e.unit });
   }
   for (const l of doc.links) {
     const from = anchor(l.from);
     const to = anchor(l.to);
-    if (from && to) edges.push({ id: l.id, kind: "link", partId: l.partId, desc: desc(l.partId), from, to, lengthFt: l.lengthFt, unit: "ft" });
+    if (from && to) edges.push({ id: l.id, kind: "link", partId: l.partId, desc: desc(l.partId), code: code(l.partId), from, to, lengthFt: l.lengthFt, unit: "ft" });
   }
   const conduits: RiserViewConduit[] = [];
   for (const c of doc.conduits) {

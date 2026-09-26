@@ -6,8 +6,8 @@
  *
  *   D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D/pglite npx tsx scripts/fixture-grid-drawing-set.ts
  *
- * Refuses to run without PGLITE_PATH, or against any .data/ directory (the
- * real dev book lives there). PGlite is single-process: this must exit
+ * Refuses to run with DATABASE_URL set, without PGLITE_PATH, or against any
+ * .data/ directory (the real dev book lives there). PGlite is single-process: this must exit
  * before a dev server opens the same datadir.
  */
 import { getDb } from "@/db";
@@ -39,6 +39,7 @@ const SVG =
   '<text x="850" y="800" font-size="48" text-anchor="middle" fill="#777">HOUSE</text></svg>';
 
 async function main() {
+  if (process.env.DATABASE_URL) throw new Error("Refusing to run: DATABASE_URL is set — this fixture only ever writes a scratch PGlite (run it under `env -u DATABASE_URL`).");
   const dir = process.env.PGLITE_PATH || "";
   if (!dir || /(^|\/)\.data(\/|$)/.test(dir)) throw new Error("Refusing to run: set PGLITE_PATH to a scratch directory (never .data/).");
   await seedIfEmpty(await getDb());
@@ -48,6 +49,8 @@ async function main() {
   const catalog = await listCatalog();
   const scoped = (scope: string) => symbols.find((s) => s.scope === scope);
   const light = scoped("Lighting") || symbols[0];
+  // A second lighting type, so L-101 carries L1 and L2 marks.
+  const light2 = symbols.filter((s) => s.scope === "Lighting" && s.id !== light.id)[0] || light;
   const audio = scoped("Audio") || symbols[1] || symbols[0];
   const video = scoped("Video") || audio;
   if (!light || !audio || !video) throw new Error("The seeded Grid library is empty.");
@@ -85,6 +88,12 @@ async function main() {
       { x: 0.25, y: 0.6, partId: audio.id },
       { x: 0.75, y: 0.6, partId: audio.id },
       { x: 0.5, y: 0.85, partId: video.id },
+      // A tight cluster (a symbol apart) — the label collision pass has to
+      // keep every mark off its neighbours (final review I3).
+      { x: 0.36, y: 0.33, partId: light2.id },
+      { x: 0.41, y: 0.33, partId: light2.id },
+      { x: 0.36, y: 0.39, partId: light.id },
+      { x: 0.41, y: 0.39, partId: light2.id },
     ],
   });
   p = (await getProject(p0.id))!;

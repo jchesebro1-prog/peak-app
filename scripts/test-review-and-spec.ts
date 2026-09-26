@@ -15968,3 +15968,136 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     "#GDS scheduleWiresFromView: the set and schedule pages both call the one shared helper instead of duplicating the edge→name mapping"
   );
 }
+
+/* --- #GDS final review — I1 numbered notes, I2 riser chips, I3 plan marks, I4 drop spacing, I6 PDF zoom --- */
+import {
+  assignTypeMarks, bezierAt, placeChip, placeLabels, planKeyLayout, printZoom, rectsHit, segmentHitsRect, symbolRect,
+  type Bezier, type Rect as DlRect,
+} from "@/lib/design/drawing-labels";
+import { decodeDataUrl } from "@/lib/grid-sheet-file";
+import { DROP_STEP, MAX_CONDUITS as GDS_MAX_CONDUITS } from "@/lib/design/grid-riser-doc";
+
+{
+  // I1 — explicit note numbers (preflight strips <ol> markers)
+  const fnNotes = symRender(symH(RiserNotes, { notes: [{ id: "a", n: 1, text: "First" }, { id: "b", n: 2, text: "Second" }] }));
+  ok(fnNotes.includes('<span class="pk-dw-num">1.</span>') && fnNotes.includes('<span class="pk-dw-num">2.</span>'), "#GDS I1: riser notes print explicit numbers");
+  const fnSetSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  ok(fnSetSrc.includes('<span className="pk-dw-num">{`${i + 1}.`}</span>'), "#GDS I1: cover general notes print explicit numbers");
+  const fnCss = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+  ok(/\.pk-dw-notes,\s*\.pk-riser-notes\s*\{[^}]*list-style: none/.test(fnCss) && /\.pk-dw-num\s*\{[^}]*min-width: 1\.6em/.test(fnCss), "#GDS I1: note lists drop markers; .pk-dw-num holds the number");
+
+  // I2 — placeChip
+  const fnLine: Bezier = [{ x: 0, y: 100 }, { x: 100, y: 100 }, { x: 200, y: 100 }, { x: 300, y: 100 }];
+  const fnMid = bezierAt(fnLine, 0.5);
+  ok(Math.abs(fnMid.x - 150) < 1e-9 && fnMid.y === 100, "#GDS I2: bezierAt evaluates the curve");
+  const fnFree = placeChip({ pts: fnLine }, 60, 16, []);
+  ok(!!fnFree && fnFree.x === 120 && fnFree.y === 92, "#GDS I2: an unobstructed chip centres on the curve's midpoint");
+  const fnBox: DlRect = { x: 110, y: 80, w: 80, h: 40 };
+  const fnMoved = placeChip({ pts: fnLine }, 60, 16, [fnBox]);
+  ok(!!fnMoved && !rectsHit(fnMoved, fnBox), "#GDS I2: a chip moves off a node box sitting on the midpoint");
+  const fnPrev = placeChip({ pts: fnLine }, 60, 16, [fnBox, fnMoved!]);
+  ok(!!fnPrev && !rectsHit(fnPrev, fnBox) && !rectsHit(fnPrev, fnMoved!), "#GDS I2: a second chip clears the node and the first chip");
+  ok(placeChip({ pts: fnLine }, 60, 16, [{ x: -1000, y: -1000, w: 3000, h: 3000 }]) === null, "#GDS I2: fully blocked → null (the caller falls back to a W-tag)");
+  const fnLoop: Bezier = [{ x: 500, y: 100 }, { x: 540, y: 100 }, { x: 540, y: 116 }, { x: 500, y: 116 }];
+  const fnNode: DlRect = { x: 300, y: 60, w: 200, h: 100 };
+  const fnLoopChip = placeChip({ pts: fnLoop, side: 1 }, 90, 16, [fnNode]);
+  ok(!!fnLoopChip && fnLoopChip.x >= 500 && !rectsHit(fnLoopChip, fnNode), "#GDS I2: a same-side loop's chip anchors outside the box");
+  const fnCanvasSrc = readFileSync(join(process.cwd(), "src/components/drawing/riser-canvas.tsx"), "utf8");
+  ok(
+    fnCanvasSrc.indexOf("{edgeCurves.map(") < fnCanvasSrc.indexOf("{view.nodes.map(") && fnCanvasSrc.indexOf("{view.nodes.map(") < fnCanvasSrc.indexOf("{chips.map("),
+    "#GDS I2: render order — paths, then nodes (masking them), then chips"
+  );
+  const fnView = buildRiserView({
+    graph: { nodes: [], edges: [] } as never,
+    spaces: [
+      { id: "sp-1", sheetId: "s", page: 1, name: "Stage", points: [{ x: 0, y: 0 }, { x: 0.1, y: 0 }, { x: 0.1, y: 0.1 }] },
+      { id: "sp-2", sheetId: "s", page: 1, name: "House", points: [{ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.5 }, { x: 0.6, y: 0.6 }] },
+    ],
+    placements: [],
+    routes: [],
+    doc: { ...emptyRiserDoc(), links: [{ id: "lk-1", from: { kind: "space", spaceId: "sp-1" }, to: { kind: "space", spaceId: "sp-2" }, partId: "CAB-1", lengthFt: 40, by: "t", at: 1 }] },
+    partDesc: () => "A very long cable description that would never fit a chip",
+    partCode: () => "SC-18",
+  });
+  ok(fnView.edges[0].code === "SC-18", "#GDS I2: riser edges carry the cable's short code");
+  const fnHtml = symRender(symH(RiserCanvas, { view: fnView }));
+  ok(fnHtml.includes("SC-18 · 40&#x27;-0&quot; (typed)") || fnHtml.includes("SC-18 · 40'-0\" (typed)"), "#GDS I2: the chip reads code · length, not the long description");
+  ok(!fnHtml.includes("A very long cable description"), "#GDS I2: the long description stays off the chip");
+  ok(autoBox(2).y === autoBox(0).y && autoBox(3).y > autoBox(0).y && autoBox(0).w >= 0.22, "#GDS I2: the auto layout runs three wide columns");
+
+  // I3 — type marks + label collision pass
+  const fnMarks = assignTypeMarks([{ key: "P2", desc: "Wash" }, { key: "P1", desc: "Spot" }, { key: "P2", desc: "Wash" }, { key: "P3", desc: "Beam" }], "L");
+  ok(fnMarks.rows.map((r) => `${r.tag}:${r.key}:${r.qty}`).join() === "L1:P2:2,L2:P1:1,L3:P3:1" && fnMarks.tags.get("P1") === "L2", "#GDS I3: one mark per part, first-seen order, system-letter prefix, qty counted");
+  ok(assignTypeMarks([], "A").rows.length === 0, "#GDS I3: no devices → no key rows");
+  const fnSym = (x: number, y: number) => ({ x, y, w: 40, h: 30, tw: 20, th: 12 });
+  const fnOne = placeLabels({ symbols: [fnSym(100, 100)], gap: 2 });
+  ok(fnOne[0].x >= 120 && fnOne[0].y < 85, "#GDS I3: a lone mark sits above-right of its symbol");
+  const fnRow = [fnSym(100, 100), fnSym(142, 100), fnSym(184, 100), fnSym(100, 132)];
+  const fnPlaced = placeLabels({ symbols: fnRow, gap: 2 });
+  const fnBoxes = fnRow.map(symbolRect);
+  ok(fnPlaced.every((r) => !fnBoxes.some((b) => rectsHit(r, b))), "#GDS I3: no mark lands on a symbol in a tight cluster");
+  ok(fnPlaced.every((r, i) => fnPlaced.every((q, j) => i === j || !rectsHit(r, q))), "#GDS I3: no two marks overlap");
+  const fnWire = placeLabels({ symbols: [fnSym(100, 100)], segments: [[{ x: 115, y: 70 }, { x: 200, y: 70 }]], gap: 2 });
+  ok(!segmentHitsRect({ x: 115, y: 70 }, { x: 200, y: 70 }, fnWire[0]), "#GDS I3: a mark steps off a wire when it can");
+  const fnName: DlRect = { x: 118, y: 70, w: 60, h: 20 };
+  const fnAvoidName = placeLabels({ symbols: [fnSym(100, 100)], obstacles: [fnName], gap: 2 });
+  ok(!rectsHit(fnAvoidName[0], fnName), "#GDS I3: marks avoid space names");
+  ok(segmentHitsRect({ x: 0, y: 5 }, { x: 10, y: 5 }, { x: 4, y: 0, w: 2, h: 10 }) && !segmentHitsRect({ x: 0, y: 20 }, { x: 10, y: 20 }, { x: 4, y: 0, w: 2, h: 10 }), "#GDS I3: segment/rect test");
+  const fnSide = planKeyLayout({ areaW: 13.3, areaH: 9.8, captionH: 0.35, aspect: 0.65, rows: 12, k: 1 });
+  ok(fnSide.side && fnSide.planW < 13.3 && fnSide.keyW > 0, "#GDS I3: a long device key goes in a column beside the plan");
+  const fnNoKey = planKeyLayout({ areaW: 13.3, areaH: 9.8, captionH: 0.35, aspect: 0.65, rows: 0, k: 1 });
+  ok(fnNoKey.planW === 13.3 && fnNoKey.keyW === 0, "#GDS I3: no key, full-width plan");
+  const fnFigSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx"), "utf8");
+  ok(fnFigSrc.includes("placeLabels(") && fnFigSrc.includes('paintOrder="stroke"') && fnFigSrc.includes("Device key"), "#GDS I3: plan marks are collision-placed, haloed, and keyed");
+
+  // I4 — drops are a symbol apart
+  const fnBig = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }];
+  const fnDrops = spreadInSpace(fnBig, 9);
+  const fnMinGap = Math.min(...fnDrops.flatMap((a, i) => fnDrops.slice(i + 1).map((b) => Math.hypot(a.x - b.x, a.y - b.y))));
+  ok(DROP_STEP >= 0.05 && fnMinGap >= DROP_STEP * 0.75, "#GDS I4: + Device multiples land at least a symbol apart");
+  const fnTiny = [{ x: 0.5, y: 0.5 }, { x: 0.56, y: 0.5 }, { x: 0.56, y: 0.56 }, { x: 0.5, y: 0.56 }];
+  const fnTinyDrops = spreadInSpace(fnTiny, 4);
+  ok(new Set(fnTinyDrops.map((p) => `${p.x},${p.y}`)).size === 4, "#GDS I4: a small space still spreads its drops (finer spacing before stacking)");
+  const fnMargin = marginPoints(5, [], []);
+  const fnMarginGap = Math.min(...fnMargin.flatMap((a, i) => fnMargin.slice(i + 1).map((b) => Math.hypot(a.x - b.x, a.y - b.y))));
+  ok(fnMarginGap >= DROP_STEP * 0.75 && fnMargin.every((p) => p.y > 0.85), "#GDS I4: Unassigned margin drops are a symbol apart, on the lower margin");
+
+  // I6 — PDF raster zoom + data-URL sheets through the proxy
+  const fnZb = printZoom(1224, 792, 13.3, 9.45);
+  ok(Math.abs(fnZb - (13.3 * 200) / 1224) < 0.002, "#GDS I6: ≈200 dpi across the fitted width at 11×17");
+  const fnZd = printZoom(1224, 792, 28.2, 20);
+  ok(1224 * 792 * fnZd * fnZd <= 12e6 + 1 && fnZd < (28.2 * 200) / 1224, "#GDS I6: capped at 12 MP per canvas at 24×36");
+  ok(printZoom(1224, 792, 2, 2) === 1 && printZoom(0, 0, 1, 1) === 2, "#GDS I6: floored at screen resolution; bad input keeps the old zoom");
+  const fnSvg = decodeDataUrl("data:image/svg+xml;charset=utf-8,%3Csvg%2F%3E");
+  const fnPng = decodeDataUrl("data:image/png;base64,iVBORw0KGgo=");
+  ok(!!fnSvg && fnSvg.mime === "image/svg+xml" && new TextDecoder().decode(fnSvg.bytes) === "<svg/>", "#GDS I6: a url-encoded data-URL decodes");
+  ok(!!fnPng && fnPng.mime === "image/png" && fnPng.bytes[1] === 0x50 && fnPng.bytes.length === 8 && decodeDataUrl("https://x") === null, "#GDS I6: a base64 data-URL decodes; a plain URL doesn't");
+  ok(fnSetSrc.includes("src: `/api/grid-sheets/${encodeURIComponent(src.id)}`") && !fnSetSrc.includes("src.dataUrl"), "#GDS I6: the set loads every sheet through the proxy, never inlining a data-URL");
+  const fnRouteSrc = readFileSync(join(process.cwd(), "src/app/api/grid-sheets/[id]/route.ts"), "utf8");
+  ok(fnRouteSrc.includes("decodeDataUrl(sheet.dataUrl)") && fnRouteSrc.includes("sandbox"), "#GDS I6: the proxy serves in-database sheets, SVG under a sandbox CSP");
+  const fnPdfSrc = readFileSync(join(process.cwd(), "src/components/design/pdf-canvas.tsx"), "utf8");
+  ok(fnPdfSrc.includes("const docCache = new Map<string, Promise<PdfDoc>>()") && fnPdfSrc.includes("printZoom("), "#GDS I6: one parsed PDF per source; print-sized raster");
+
+  // Minors
+  ok(fnSetSrc.includes('<PrintButton accent={accent} waitFor="[data-plan-figure]" />'), "#GDS minor: Print waits for every plan figure");
+  const fnTb = readFileSync(join(process.cwd(), "src/components/drawing/title-block.tsx"), "utf8");
+  ok(fnTb.includes("timeZone: DEFAULT_TZ"), "#GDS minor: the title-block date is in the app's default zone");
+  const fnFx = readFileSync(join(process.cwd(), "scripts/fixture-grid-drawing-set.ts"), "utf8");
+  ok(fnFx.includes("if (process.env.DATABASE_URL) throw"), "#GDS minor: the print fixture refuses DATABASE_URL");
+  ok(readFileSync(join(process.cwd(), "src/lib/design/grid-part-lookup.ts"), "utf8").includes('typeof window !== "undefined"'), "#GDS minor: grid-part-lookup guards against a client bundle");
+  let fnSeq = 0;
+  const fnFull = { ...emptyRiserDoc(), conduits: Array.from({ length: GDS_MAX_CONDUITS }, (_, i) => ({ id: `cd-${i}`, from: { kind: "space" as const, spaceId: "a" }, to: { kind: "space" as const, spaceId: "b" }, label: "c" })) };
+  ok(!applyRiserOp(fnFull, { op: "addConduit", from: { kind: "space", spaceId: "a" }, to: { kind: "space", spaceId: "b" }, label: "x" }, (p) => `${p}${++fnSeq}`).changed, "#GDS minor: addConduit refuses past MAX_CONDUITS");
+}
+
+/* --- #GDS final review — I3 space names sit in a clear corner --- */
+import { spaceNameRect } from "@/lib/design/drawing-labels";
+{
+  const snPoly = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }];
+  const snFree = spaceNameRect(snPoly, 50, 12, [], 5);
+  ok(snFree.x === 5 && snFree.y === 5, "#GDS I3: a space name sits in its space's top-left corner");
+  const snBlocked = spaceNameRect(snPoly, 50, 12, [{ x: 0, y: 0, w: 60, h: 30 }], 5);
+  ok(snBlocked.x === 145 && snBlocked.y === 5, "#GDS I3: a symbol in that corner pushes the name to the next clear corner");
+  const snNone = spaceNameRect(snPoly, 50, 12, [{ x: -10, y: -10, w: 300, h: 300 }], 5);
+  ok(snNone.x === 75 && snNone.y === 44, "#GDS I3: no clear corner → the centre");
+}
