@@ -7,8 +7,9 @@
  * cost, scope) appended to the page's parts, so the BOM, space rollups, riser,
  * schedule, drawing set and quote price and label them with no second code
  * path. `virtual` keeps them out of the device palette; `allowance` flags the
- * line internally (its desc is the row's plain label — customer text stays
- * normal, D315). A virtual part with nothing real behind it — a deleted
+ * line internally (its desc is the allowance's description, else the row's
+ * plain label — customer text stays normal, D315, #212). A virtual part with
+ * nothing real behind it — a deleted
  * assembly, an assembly with no priced member, an allowance no longer
  * confirmed — prices $0, says why in its desc and carries `virtualDead`: the
  * quote refuses it by name and the editor says "needs a part" (D313).
@@ -90,10 +91,12 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
     const def = EQUIPMENT_ROW_BY_KEY.get(ref.rowKey)!;
     const cell = cellFor(map[ref.rowKey], ref.tier);
     const amount = cell?.kind === "allowance" && cell.amount > 0 ? cell.amount : 0;
+    // #212: the allowance's customer-facing description, else the row's label.
+    const label = cell?.kind === "allowance" && cell.description ? cell.description : def.label;
     out.push({
       id,
       sku: "ALLOWANCE",
-      desc: amount > 0 ? def.label : `${def.label} (allowance no longer confirmed)`,
+      desc: amount > 0 ? label : `${label} (allowance no longer confirmed)`,
       category: "Allowance",
       unit: def.unit,
       list: amount > 0 ? sellFromCost(amount, ctx.margin) : 0,

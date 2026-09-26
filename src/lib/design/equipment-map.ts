@@ -32,7 +32,9 @@ export const ALLOWANCE_MAX = 10_000_000;
 export type EquipCell =
   | { kind: "part"; sku: string }
   | { kind: "assembly"; id: string }
-  | { kind: "allowance"; amount: number; confirmedBy: string; confirmedAt: number; note?: string };
+  /** `note` is the internal "why"; `description` (#212) is the customer-facing
+   *  line text for a product with no catalog row. Both trimmed, ≤ 200, absent when empty. */
+  | { kind: "allowance"; amount: number; confirmedBy: string; confirmedAt: number; note?: string; description?: string };
 
 export type EquipRow = {
   tiers: Partial<Record<TierKey, EquipCell>>;
@@ -49,7 +51,7 @@ export type EquipRowStatus = "mapped" | "allowance" | "needs-part";
 export type EquipCellInput =
   | { kind: "part"; sku: string }
   | { kind: "assembly"; id: string }
-  | { kind: "allowance"; amount: number; note?: string; confirmed: boolean }
+  | { kind: "allowance"; amount: number; note?: string; description?: string; confirmed: boolean }
   | null;
 export type EquipRowInput = { tiers: Partial<Record<TierKey, EquipCellInput>>; sameAll?: boolean };
 
@@ -76,7 +78,8 @@ export function sanitizeEquipCell(raw: unknown): EquipCell | null {
     const confirmedAt = Number(r.confirmedAt);
     if (!(amount > 0) || amount > ALLOWANCE_MAX || !confirmedBy || !(confirmedAt > 0)) return null;
     const note = String(r.note ?? "").trim().slice(0, 200);
-    return { kind: "allowance", amount, confirmedBy, confirmedAt, ...(note ? { note } : {}) };
+    const description = String(r.description ?? "").trim().slice(0, 200);
+    return { kind: "allowance", amount, confirmedBy, confirmedAt, ...(note ? { note } : {}), ...(description ? { description } : {}) };
   }
   return null;
 }
@@ -139,6 +142,9 @@ export function mergeEquipRow(
       const amount = round2(Number(c.amount));
       if (!(amount > 0) || amount > ALLOWANCE_MAX) return { ok: false, error: "An allowance needs a unit cost above $0." };
       const note = String(c.note ?? "").trim().slice(0, 200);
+      // #212: the customer-facing text. Changing it alone does not re-stamp
+      // the confirmation — that attests to the amount and its reason.
+      const description = String(c.description ?? "").trim().slice(0, 200);
       const old = cellFor(prev, t);
       const unchanged = old?.kind === "allowance" && old.amount === amount && (old.note ?? "") === note;
       tiers[t] = {
@@ -147,6 +153,7 @@ export function mergeEquipRow(
         confirmedBy: unchanged ? old.confirmedBy : by,
         confirmedAt: unchanged ? old.confirmedAt : now,
         ...(note ? { note } : {}),
+        ...(description ? { description } : {}),
       };
       continue;
     }

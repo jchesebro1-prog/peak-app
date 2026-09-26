@@ -163,6 +163,7 @@ function RowEditor({ row, assemblies, onClose }: { row: EquipRowVM; assemblies: 
             <div style={LABEL}>{sameAll ? "All tiers" : t.label}</div>
             <CellEditor
               rowKey={row.key}
+              label={row.label}
               curtain={row.curtain}
               value={cells[t.key]}
               assemblies={assemblies}
@@ -199,12 +200,15 @@ function RowEditor({ row, assemblies, onClose }: { row: EquipRowVM; assemblies: 
 
 function CellEditor({
   rowKey,
+  label,
   curtain,
   value,
   assemblies,
   onChange,
 }: {
   rowKey: string;
+  /** The row's own name — the placeholder for the quote description (#212). */
+  label: string;
   curtain: boolean;
   value: EquipCellInput;
   assemblies: AssemblyOption[];
@@ -215,7 +219,7 @@ function CellEditor({
     onChange(
       k === "part" ? { kind: "part", sku: "" }
         : k === "assembly" ? { kind: "assembly", id: "" }
-          : k === "allowance" ? { kind: "allowance", amount: 0, note: "", confirmed: false }
+          : k === "allowance" ? { kind: "allowance", amount: 0, note: "", description: "", confirmed: false }
             : null
     );
   return (
@@ -249,6 +253,16 @@ function CellEditor({
             style={INPUT}
           />
           <input value={value.note ?? ""} placeholder="Why (e.g. waiting on the vendor's price book)" onChange={(e) => onChange({ ...value, note: e.target.value })} style={INPUT} />
+          <div>
+            <div style={LABEL}>Quote description (optional)</div>
+            <input
+              value={value.description ?? ""}
+              maxLength={200}
+              placeholder={label}
+              onChange={(e) => onChange({ ...value, description: e.target.value })}
+              style={INPUT}
+            />
+          </div>
           <label style={{ display: "flex", gap: 6, fontSize: 11.5, color: "#5b616e", alignItems: "flex-start" }}>
             <input type="checkbox" checked={value.confirmed} onChange={(e) => onChange({ ...value, confirmed: e.target.checked })} style={{ accentColor: "var(--accent)" }} />
             I confirm this allowance. It prices Auto designs, flagged internally, until a real part is mapped.

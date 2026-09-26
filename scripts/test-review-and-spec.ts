@@ -18847,3 +18847,54 @@ import {
   ok(activeKeyFor("/templates") === "settings" && activeKeyFor("/import") === "settings" && activeKeyFor("/settings") === "settings",
     "#213: the other Settings doors are unchanged");
 }
+
+/* --- #212 (a): an Equipment-map allowance carries a customer-facing description --- */
+import {
+  mergeEquipRow as ci212Merge, sanitizeEquipCell as ci212SanitizeCell, type EquipmentMap as Ci212Map,
+} from "@/lib/design/equipment-map";
+import { equipmentMapView as ci212View } from "@/lib/design/equipment-map-view";
+import { allowancePartId as ci212AllowId, virtualPartsFor as ci212Virtual } from "@/lib/design/grid-virtual-parts";
+import { EQUIPMENT_ROW_BY_KEY as ci212RowByKey } from "@/lib/design/equipment-vocab";
+{
+  const m = ci212Merge(undefined, { tiers: { good: { kind: "allowance", amount: 500, note: "no book", description: "  Acme MC-9 motor controller  ", confirmed: true } } }, "Jeff", 10);
+  const c = m.ok ? m.row.tiers.good : undefined;
+  ok(c?.kind === "allowance" && c.description === "Acme MC-9 motor controller" && c.note === "no book",
+    "#212: an allowance saves a trimmed quote description beside its internal note");
+  const long = ci212Merge(undefined, { tiers: { good: { kind: "allowance", amount: 5, description: "x".repeat(250), confirmed: true } } }, "J", 1);
+  const lc = long.ok ? long.row.tiers.good : undefined;
+  ok(lc?.kind === "allowance" && lc.description?.length === 200, "#212: the description is capped at 200 characters");
+  const blank = ci212Merge(undefined, { tiers: { good: { kind: "allowance", amount: 5, description: "   ", confirmed: true } } }, "J", 1);
+  const bc = blank.ok ? blank.row.tiers.good : undefined;
+  ok(bc?.kind === "allowance" && !("description" in bc), "#212: a blank description is absent, not an empty string");
+  const m2 = ci212Merge(m.ok ? m.row : undefined, { tiers: { good: { kind: "allowance", amount: 500, note: "no book", description: "Acme MC-9 controller", confirmed: true } } }, "Chris", 20);
+  const c2 = m2.ok ? m2.row.tiers.good : undefined;
+  ok(c2?.kind === "allowance" && c2.description === "Acme MC-9 controller" && c2.confirmedBy === "Jeff" && c2.confirmedAt === 10,
+    "#212: editing only the description keeps who confirmed the amount");
+  const sc = ci212SanitizeCell({ kind: "allowance", amount: 5, confirmedBy: "J", confirmedAt: 1, description: " Stage lift " });
+  ok(sc?.kind === "allowance" && sc.description === "Stage lift", "#212: the stored blob keeps a sanitized description");
+
+  const label = ci212RowByKey.get("audio:subwoofer")!.label;
+  const map: Ci212Map = {
+    "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7, description: "Acme SUB-18 subwoofer" } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
+  };
+  const plain: Ci212Map = {
+    "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 7 } }, sameAll: true, updatedBy: "Chris", updatedAt: 7 },
+  };
+  const ctx = { parts: new Map(), fixtures: new Map(), margin: 0.3 };
+  const [withDesc] = ci212Virtual([ci212AllowId("audio:subwoofer", "good")], map, ctx);
+  ok(withDesc?.desc === "Acme SUB-18 subwoofer" && withDesc.allowance === true && !withDesc.virtualDead,
+    "#212: an allowance virtual part prints its description");
+  const [noDesc] = ci212Virtual([ci212AllowId("audio:subwoofer", "better")], plain, ctx);
+  ok(noDesc?.desc === label, "#212: with no description the virtual part keeps the row label");
+  const [dead] = ci212Virtual([ci212AllowId("audio:subwoofer", "good")], {}, ctx);
+  ok(dead?.desc === `${label} (allowance no longer confirmed)` && dead.virtualDead === true,
+    "#212: the dead-allowance suffix still applies");
+
+  const view = ci212View(map, ctx, {});
+  const subIn = view.find((r) => r.key === "audio:subwoofer")!.cells[0].input;
+  ok(subIn?.kind === "allowance" && subIn.description === "Acme SUB-18 subwoofer",
+    "#212: the editor re-posts the saved description");
+  const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
+  ok(emc.includes("Quote description (optional)") && emc.includes("placeholder={label}") && emc.includes("maxLength={200}"),
+    "#212: the Equipment map editor shows a Quote description input, placeholder = the row label");
+}

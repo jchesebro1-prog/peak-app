@@ -105,10 +105,11 @@ function cellVM(def: EquipRowDef, tier: TierKey, map: EquipmentMap, ctx: EquipPr
     };
   }
   return {
-    tier, kind: "allowance", title: "Allowance", detail: cell.note ?? "",
+    tier, kind: "allowance", title: "Allowance",
+    detail: [cell.description ? `Quote: ${cell.description}` : "", cell.note ?? ""].filter(Boolean).join(" · "),
     unitCost: cell.amount, unitSell: priced?.unitSell ?? null, perSqft, problem,
     confirmedBy: cell.confirmedBy, confirmedAt: cell.confirmedAt,
-    input: { kind: "allowance", amount: cell.amount, note: cell.note ?? "", confirmed: true },
+    input: { kind: "allowance", amount: cell.amount, note: cell.note ?? "", description: cell.description ?? "", confirmed: true },
   };
 }
 
