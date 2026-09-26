@@ -2758,58 +2758,66 @@ async function main() {
     assert.deepEqual(dvLinks.map((l) => `${l.documentId}:${l.kind}`), [`${davinciDocumentId(sharedUrl)}:datasheet`], "final fix M2: the part gets a DaVinci datasheet document, not the spec sheet sharing its URL");
     assert(!dvLinks.some((l) => l.documentId === specByUrl!.id), "final fix M2: …the spec sheet is not linked");
 
-    // I2: the one-time Assembly Builder → graph sync.
+    // I2 → #FXB: the one-time fixture conversion — settings assemblies and
+    // legacy subassemblies become fixture records (ids kept), and the graph
+    // moves from assembly:/subassembly: to one fixture:<id> scope.
     const { setSettings } = await import("@/lib/settings");
     const { insertDocIfAbsent } = DS;
-    const { ensureAssemblyGraphSynced, syncAllAssemblyGraphs, assemblyGraphSynced, GRAPH_SYNC_BLOB_ID } = await import("@/lib/part-docs/assembly-sync");
+    const Mig = await import("@/lib/fixtures-migrate");
     const { getDb } = await import("@/db");
     const { blobs } = await import("@/db/doc-tables");
     const { eq } = await import("drizzle-orm");
-    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
     const { getSettings } = await import("@/lib/settings");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
     const priorAssemblies = ((await getSettings()).fixtureAssemblies ?? []) as unknown[];
-    assert.equal(priorAssemblies.length, 0, "final fix I2: the test database starts with no fixture assemblies");
-    await setSettings({
-      fixtureAssemblies: [
-        { id: "fw-asm", name: "FW assembly", components: [
-          { sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 },
-          { sku: "FW-LENS", label: "Lens", role: "lens", defaultQty: 1 },
-          { sku: "FW-CLAMP", label: "Clamp", role: "mount", defaultQty: 0 },
-        ] },
-      ],
-    });
+    assert.equal(priorAssemblies.length, 0, "#FXB: the test database starts with no fixture assemblies");
+    const fwAssemblies = [
+      { id: "fw-asm", name: "FW assembly", components: [
+        { sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 },
+        { sku: "FW-LENS", label: "Lens", role: "lens", defaultQty: 1 },
+        { sku: "FW-CLAMP", label: "Clamp", role: "mount", defaultQty: 0 },
+      ] },
+    ];
+    await setSettings({ fixtureAssemblies: fwAssemblies });
     await insertDocIfAbsent("subassemblies", {
       id: "SA-FW", kind: "fixture", label: "FW sub", description: "", lightEngineSku: "FW-S4", lightEngineName: "", lightEngineCost: 0,
       lensSku: "FW-LENS2", lensName: "", lensCost: 0, options: { data: [{ sku: "FW-DATA", name: "", cost: 0, qty: 2 }], power: [], mounting: [], accessories: [] },
       cost: 0, price: 0, createdAt: 1, updatedAt: 1,
     });
-    // A pre-existing link of another, unlisted assembly scope must survive,
-    // and a human's own-datasheet flag on a pair must carry over.
+    // The part-documents build's scopes as a database that ran its one-time
+    // sync holds them, a deleted assembly's leftovers, DaVinci's scope, and a
+    // human's own-datasheet flag on one pair.
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-asm" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS", maxQty: 1, included: true }, { parentSku: "FW-S4", accessorySku: "FW-CLAMP" }]);
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-FW" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS2", maxQty: 1, included: true }, { parentSku: "FW-S4", accessorySku: "FW-DATA", maxQty: 2, included: true }]);
     await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-gone" }, [{ parentSku: "FW-OLD", accessorySku: "FW-OLDACC" }]);
     await Acc.syncAccessoryLinks({ source: "davinci", sourceRef: "TY-FWX" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS" }]);
     await Acc.setOwnDatasheet("FW-S4", "FW-LENS", true);
-    assert.equal(await assemblyGraphSynced(), false, "final fix I2: a fresh database has not synced the assembly graph");
-    const g1 = await ensureAssemblyGraphSynced();
-    assert(g1 && g1.complete && g1.written === 4 && g1.removed === 0 && g1.assemblies === 1 && g1.subassemblies === 1, `final fix I2: the first read syncs every assembly and subassembly (got ${JSON.stringify(g1)})`);
+    assert.equal(await Mig.fixturesConverted(), false, "#FXB: a fresh database has not converted");
+    const r1 = await Mig.convertFixtures();
+    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4 && r1.graphRemoved >= 5, `#FXB: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
+    assert.equal(await Mig.fixturesConverted(), true, "#FXB: a completed conversion sets the flag");
+    const fw = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "fw-asm"))!;
+    const fwLines = fw.lines as Record<string, Array<{ sku: string; qty: number }>>;
+    assert(fw && fw.lightEngineSku === "FW-S4" && fw.lensSku === "FW-LENS" && fwLines.mounting[0]?.sku === "FW-CLAMP" && fwLines.mounting[0]?.qty === 0, "#FXB: the settings assembly converted by role, keeping its fa-style id");
+    const sa = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FW"))!;
+    assert(!!sa.lines && sa.options === undefined, "#FXB: the legacy subassembly row is rewritten in place under its SA- id");
+    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 1, "#FXB: settings.fixtureAssemblies is left untouched as a backup");
     const live = await Acc.allAccessoryLinks();
     const has = (ref: string, parent: string, acc: string) => live.some((l) => l.source === "assembly" && l.sourceRef === ref && l.parentSku === parent && l.accessorySku === acc);
-    assert(has("assembly:fw-asm", "FW-S4", "FW-LENS") && has("assembly:fw-asm", "FW-S4", "FW-CLAMP") && has("subassembly:SA-FW", "FW-S4", "FW-LENS2") && has("subassembly:SA-FW", "FW-S4", "FW-DATA"), "final fix I2: assembly:<id> and subassembly:<id> scopes hold each builder's pairs");
-    assert(live.find((l) => l.sourceRef === "assembly:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet === true, "final fix I2: the pair's own-datasheet flag carries over");
-    assert(has("assembly:fw-gone", "FW-OLD", "FW-OLDACC"), "final fix I2: an unlisted scope's links are never pruned by the one-time sync");
-    assert.equal(await assemblyGraphSynced(), true, "final fix I2: a completed sync sets the flag");
-    assert.equal(await ensureAssemblyGraphSynced(), null, "final fix I2: every later page read is a no-op (one flag read)");
-    const g2 = await syncAllAssemblyGraphs();
-    assert(g2.written === 0 && g2.removed === 0 && g2.complete, "final fix I2: the explicit (script) sync is idempotent — a re-run writes nothing");
-    // A run cut short by its budget leaves the flag unset, and the next
-    // read finishes the job.
-    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
-    await setSettings({ fixtureAssemblies: [...priorAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
-    const cut = await ensureAssemblyGraphSynced(0, () => 0);
-    assert(cut && !cut.complete && cut.written === 0, "final fix I2: a sync out of budget stops before writing and says so");
-    assert.equal(await assemblyGraphSynced(), false, "final fix I2: …and leaves the flag unset");
-    const resumed = await ensureAssemblyGraphSynced();
-    assert(resumed && resumed.complete && resumed.written === 1, "final fix I2: the next read finishes the rest");
-    assert.equal(await assemblyGraphSynced(), true, "final fix I2: …and sets the flag");
+    assert(has("fixture:fw-asm", "FW-S4", "FW-LENS") && has("fixture:fw-asm", "FW-S4", "FW-CLAMP") && has("fixture:SA-FW", "FW-S4", "FW-LENS2") && has("fixture:SA-FW", "FW-S4", "FW-DATA"), "#FXB: every fixture's pairs live under one fixture:<id> scope");
+    assert(!live.some((l) => l.source === "assembly" && /^(assembly|subassembly):/.test(l.sourceRef ?? "")), "#FXB: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
+    assert.equal(live.find((l) => l.sourceRef === "fixture:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet, true, "#FXB: the pair's own-datasheet flag carries onto the fixture: row");
+    assert(live.some((l) => l.source === "davinci" && l.sourceRef === "TY-FWX"), "#FXB: DaVinci's scope is never touched");
+    assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: every later read is a no-op (one flag read)");
+    const again = await Mig.convertFixtures();
+    assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#FXB: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
+    // A run cut short by its budget leaves the flag unset; the next read finishes.
+    await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
+    await setSettings({ fixtureAssemblies: [...fwAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
+    assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB: a conversion out of budget reports incomplete");
+    assert.equal(await Mig.fixturesConverted(), false, "#FXB: …and leaves the flag unset");
+    assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: the next read finishes the job");
+    assert(!!(await DS.getDoc("subassemblies", "fw-asm2")) && (await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "fixture:fw-asm2" && l.accessorySku === "FW-IRIS"), "#FXB: …writing the rest, graph included");
     await setSettings({ fixtureAssemblies: priorAssemblies });
   }
 
@@ -2888,21 +2896,21 @@ async function main() {
     );
     assert.equal((await getSettingsStrict()).companyName, "Strict Settings Probe", "final fix I5: app_settings is intact after both probes roll back");
 
-    // End to end: the one-time assembly-graph sync itself now propagates a
-    // settings-read failure instead of syncing subassemblies-only and
-    // marking itself complete.
-    const { syncAllAssemblyGraphs, assemblyGraphSynced, GRAPH_SYNC_BLOB_ID } = await import("@/lib/part-docs/assembly-sync");
-    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
-    assert.equal(await assemblyGraphSynced(), false, "final fix I5 setup: the flag starts unset");
+    // End to end: the fixture conversion (which now owns the one-time graph
+    // sync, #FXB) propagates a settings-read failure instead of converting
+    // the subassemblies only and marking itself complete.
+    const Mig = await import("@/lib/fixtures-migrate");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
+    assert.equal(await Mig.fixturesConverted(), false, "final fix I5 setup: the flag starts unset");
     await assert.rejects(
       withTransaction(async () => {
         const db = await getDb();
         await db.execute(sql`DROP TABLE app_settings`);
-        await syncAllAssemblyGraphs();
+        await Mig.convertFixtures();
       }),
-      "final fix I5: a settings-read failure during the one-time sync propagates — it must not silently sync subassemblies only",
+      "final fix I5: a settings-read failure during the one-time conversion propagates — it must not silently convert subassemblies only",
     );
-    assert.equal(await assemblyGraphSynced(), false, "final fix I5: …and the completion flag stays unset after the throw");
+    assert.equal(await Mig.fixturesConverted(), false, "final fix I5: …and the completion flag stays unset after the throw");
   }
 
   /* --- part documents (#207) final fix wave 2, I6: the one-time graph sync

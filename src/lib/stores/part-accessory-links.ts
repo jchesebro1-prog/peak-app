@@ -175,6 +175,26 @@ async function syncScopes(
  * is not); `changed` is the number of rows rewritten — 0 when the flag
  * already had that value, which is not an error (final fix wave, M1).
  */
+/**
+ * Soft-delete every live link of `source` whose sourceRef starts with one of
+ * `prefixes` — the fixture builder's retirement of the part-documents build's
+ * `assembly:` / `subassembly:` scopes (#FXB). Run it AFTER the replacement
+ * scopes are written: syncScopes carries "has its own datasheet" from any
+ * live link of the same pair, so writing first keeps the flag.
+ */
+export async function retireAccessoryScopes(
+  source: AccessoryLinkSource,
+  prefixes: readonly string[],
+  opts: DocBatchOpts = {}
+): Promise<{ removed: number; complete: boolean }> {
+  const stale = (await allAccessoryLinks())
+    .filter((l) => l.source === source && prefixes.some((p) => (l.sourceRef ?? "").startsWith(p)))
+    .map((l) => l.id);
+  if (!stale.length) return { removed: 0, complete: true };
+  const r = await softDeleteDocs("part_accessory_links", stale, opts);
+  return { removed: r.ids.length, complete: r.complete };
+}
+
 export async function setOwnDatasheet(parentSku: string, accessorySku: string, own: boolean): Promise<{ linked: boolean; changed: number }> {
   const rows = (await allAccessoryLinks()).filter((l) => l.parentSku === parentSku && l.accessorySku === accessorySku);
   let changed = 0;
