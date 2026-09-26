@@ -1,4 +1,4 @@
-import { clearCollection, getDoc, getDocRows, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
+import { clearCollection, getDoc, getDocRows, getDocsByIdAnyCase, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
 import type { DocNotNeeded } from "@/lib/part-docs/types";
@@ -193,6 +193,16 @@ export async function get(sku: string): Promise<CatalogPart | null> {
  *  and deleted SKUs are simply absent. */
 export async function getMany(skus: readonly string[]): Promise<CatalogPart[]> {
   return (await getDocRows<CatalogPart>("catalog_parts", skus)).filter((r) => !r.deleted).map((r) => r.doc);
+}
+
+/** getMany, ignoring SKU case: exact primary-key reads first, then one
+ *  case-insensitive query for only the SKUs that missed (#205 spec builder). */
+export async function getManyAnyCase(skus: readonly string[]): Promise<CatalogPart[]> {
+  const found = await getMany(skus);
+  const have = new Set(found.map((p) => p.sku.toUpperCase()));
+  const missed = skus.filter((s) => s && !have.has(s.toUpperCase()));
+  if (!missed.length) return found;
+  return [...found, ...(await getDocsByIdAnyCase<CatalogPart>("catalog_parts", missed))];
 }
 
 /** Rows of a given category (port of window.catalogByCategory). */

@@ -96,6 +96,7 @@ const ROUTES = [
   "/settings?section=admin",
   "/design/grid/settings", // #131 Grid symbols card moved here (Grid settings build); also port rules review, wire types, install labor
   "/design/grid/settings/equipment-map", // #211 Equipment map tab (admin; read-only on load)
+  "/design/specs/new", // #205 spec builder (T5) — the New spec form
   "/design/specs/library", // Specs module (#205) — the library index
   "/design/specs/templates", // Specs module (#205) — the template list
   "/design/specs/library/product-specs", // Specs module (#205) — the product spec import
@@ -203,10 +204,12 @@ const DYNAMIC_ROUTES: Array<{ route: string; reject?: string }> = [
   { route: "/design/grid/GRD-5001", reject: "no longer exists" },
   // #207: the part editor with its Documents section (a seeded fabric SKU).
   { route: "/catalog?edit=RB-MV-MN" },
-  // Specs module (#205): /design/specs redirects to the library (Phase A —
-  // the Generated list is Phase B), so it needs no reject — the harness
-  // follows the redirect and judges the final /design/specs/library page.
+  // Specs module (#205): /design/specs is the saved-spec list (Phase B T5 —
+  // it used to redirect to the library); an empty list renders its empty
+  // state, so it needs no reject.
   { route: "/design/specs" },
+  // New spec from a quote: the seeded draft Q-2041 resolves as the source.
+  { route: "/design/specs/new?quote=Q-2041", reject: "was not found" },
   { route: "/design/specs/templates/fixtures" }, // the starter formula's slug
   { route: "/design/specs/templates/curtain-Leg" }, // the starter curtain template
   // CE-1001 is not seeded directly: it is lazily minted by

@@ -8225,7 +8225,7 @@ part's MAP. Fix with the file's own `str(v.x) ? {...} : {}` preserve-when-absent
 
 **Done 2026-09-25.** The MAP guard checked `!== undefined` on a number field the parser coerces to 0, so it was always true; MAP is now written only when the row carries a value. The price-book importer already guarded it.
 
-## 205. Specs module — Phase A (library) — DONE 2026-09-25 (D254…D261)
+## 205. Specs module — Phase A (library) + Phase B (generator) — DONE 2026-09-26 (D254…D261, D329–D332)
 
 **Shipped.** The library half of the Specs module: three new doc-store collections (`spec_articles`,
 `spec_templates`, `spec_curtain_templates`) alongside an upgraded `spec_sections` (titled Part 1/Part 3 articles, a
@@ -8245,20 +8245,33 @@ while any part or article still points at one); and a live nav entry (Design →
 library, the template list, and one starter formula and one starter curtain template. Full decision record in
 `DECISIONS.md` D254…D261.
 
-**Still open.** Phase B: the generator (assembling a full spec from a project's BOM), the four doors (however a
-spec gets entered — see the build spec), docx-per-section output, zip output, and a print view — including
-rendering `{{articles}}`/`{{manufacturers}}` and the category articles, which today's D94 generator does not read.
-Phase C: the `spec-writer` skill. **North HS seed DONE 2026-09-26 (D326, D327):** six sections' Part 1/Part 3 and 30
-Part 2 category headers in `docs/specs-seed/northhs-2026-07-30/spec-library.json` (loaded in dev; production is one
-Import library click), review list in its `REVIEW-NOTES.md`. **Product specs by MFR # DONE 2026-09-26 (D328):**
-the same script writes `product-specs-template.xlsx` (45 product entries + the de-duplicated 27 41 00 AV list,
-MFR # pre-filled there); Jeff fills the MFR # column and loads it at Specs → Library → **Import product specs**
-(preview → import, matched parts only, never creates a part). Remaining from the seed: Jeff's fill of the
-template, then the production import (library first, then product specs); the drapes article's curtain blocks as
-curtain templates. Also open from this branch: **#204** (a
-price-only Import-hub catalog import resets MAP to $0 — found while amending this plan, unrelated to spec fields,
-fix already scoped) and any Minor a reviewer carried during the branch (see the per-task reports in
-`.superpowers/sdd/task-*-report.md`).
+**Phase B (generator) DONE 2026-09-26 (D329–D332):** a new builder at `/design/specs` replaces the D94 generator's
+entry points — one CSI section per Word file, saved as `spec_documents` (`SP-####`); Parts 1/3 read live from the
+library at preview/download time (the downloaded file is a snapshot); `/design/specs/new` opens from a plain +
+New spec, the quotes hub's "Spec from this quote →" (system quotes), the Grid editor's "Spec from this design →"
+(any option with a draft quote, no engagement required), and the consulting engagement's "Bid specification →";
+old saved D94 specs stay viewable at `/design/engagements/spec/[id]`. The builder: a fill-in form for each
+`[FILL IN: …]` blank (answered per spec, unanswered prints as written, stale answers shown and never re-applied);
+a product picker (approved-spec parts in the section by default, **Show all catalog parts** to write spec text
+onto a part on the spot via the Spec panel's own action); a per-spec header override that never touches the part;
+a checklist of left-out products (no spec / needs a header / other section / deleted) that warns but never blocks;
+quantities from a BOM only, behind **Print quantities** (off by default); a live preview; and a Word download with
+one real multi-level numbering definition (PART → n.m → A. → 1. → a. → 1) → a)) so a spec renumbers itself when
+edited in Word, header/footer/file name matching the North HS originals.
+
+**Still open.** Phase C: the `spec-writer` skill. Grid curtains print via curtain templates later, not this
+builder — left out and listed in the checklist for now. Zip download of several sections in one file. A real-Word
+check of the generated numbering (insert a paragraph, confirm it renumbers) on Jeff's own machine. **North HS seed
+DONE 2026-09-26 (D326, D327):** six sections' Part 1/Part 3 and 30 Part 2 category headers in
+`docs/specs-seed/northhs-2026-07-30/spec-library.json` (loaded in dev; production is one Import library click),
+review list in its `REVIEW-NOTES.md`. **Product specs by MFR # DONE 2026-09-26 (D328):** the same script writes
+`product-specs-template.xlsx` (45 product entries + the de-duplicated 27 41 00 AV list, MFR # pre-filled there);
+Jeff fills the MFR # column and loads it at Specs → Library → **Import product specs** (preview → import, matched
+parts only, never creates a part). Remaining from the seed: Jeff's fill of the template, then the production
+import (library first, then product specs); the drapes article's curtain blocks as curtain templates. Also open
+from this branch: **#204** (a price-only Import-hub catalog import resets MAP to $0 — found while amending this
+plan, unrelated to spec fields, fix already scoped) and any Minor a reviewer carried during the branch (see the
+per-task reports in `.superpowers/sdd/task-*-report.md`).
 
 
 ---

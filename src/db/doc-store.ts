@@ -69,6 +69,47 @@ export async function searchDocs<T extends Doc = Doc>(
 }
 
 /**
+ * Live rows narrowed in SQL by two optional filters (#205 spec builder final
+ * fix 6 — the product picker, so a keystroke never reads the whole catalog):
+ *
+ * - `text` + `textFields`: the lowercased haystack `f1 f2 f3` (each field
+ *   coalesced to "", joined by single spaces — the same string a JS
+ *   `${a} ${b || ""} ${c || ""}` builds) contains `text`, case-insensitively;
+ * - `nonEmpty`: at least one of these top-level fields is a non-empty string.
+ *
+ * Both are supersets of the caller's exact JS check, which re-runs on the
+ * result. Field names are code constants, passed as bound parameters.
+ * `limit` caps the rows (id order); omit it for no cap.
+ */
+export async function listDocsFiltered<T extends Doc = Doc>(
+  coll: CollectionName,
+  opts: { textFields?: readonly string[]; text?: string; nonEmpty?: readonly string[]; limit?: number }
+): Promise<T[]> {
+  const db = await getDb();
+  const t = table(coll);
+  const where = [eq(t.deleted, false)];
+  const text = (opts.text || "").trim().toLowerCase();
+  if (text && opts.textFields?.length) {
+    const pattern = "%" + text.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+    const hay = sql.join(
+      opts.textFields.map((f) => sql`coalesce(${t.doc}->>${f}, '')`),
+      sql` || ' ' || `
+    );
+    where.push(sql`lower(${hay}) LIKE ${pattern}`);
+  }
+  if (opts.nonEmpty?.length) {
+    const anyNonEmpty = sql.join(
+      opts.nonEmpty.map((f) => sql`coalesce(${t.doc}->>${f}, '') <> ''`),
+      sql` OR `
+    );
+    where.push(sql`(${anyNonEmpty})`);
+  }
+  const q = db.select().from(t).where(and(...where)).orderBy(asc(t.id));
+  const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
+  return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+}
+
+/**
  * Rows by id, live AND soft-deleted, each with its `deleted` flag — one
  * statement per DOC_BATCH_CHUNK ids (#207 final fix wave: attachDocument's
  * fan-out reads its deterministic link ids in one go instead of one getDoc
@@ -86,6 +127,33 @@ export async function getDocRows<T extends Doc = Doc>(
   for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
     const rows = await db.select().from(t).where(inArray(t.id, unique.slice(i, i + DOC_BATCH_CHUNK)));
     for (const r of rows) out.push({ id: r.id, deleted: r.deleted, doc: { ...(r.doc as T), id: r.id } });
+  }
+  return out;
+}
+
+/**
+ * Live rows whose id matches one of `ids` ignoring case — the fallback for a
+ * SKU typed in a different case than the part's real id (#205 spec builder:
+ * specs match SKUs case-insensitively). Filtered in SQL (`lower(id) IN …`),
+ * so it never materializes the collection; callers try the exact
+ * (primary-key) lookup first and only send the misses here.
+ */
+export async function getDocsByIdAnyCase<T extends Doc = Doc>(
+  coll: CollectionName,
+  ids: readonly string[]
+): Promise<T[]> {
+  const unique = [...new Set(ids.map((i) => i.toLowerCase()))].filter(Boolean);
+  if (!unique.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const out: T[] = [];
+  for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
+    const rows = await db
+      .select()
+      .from(t)
+      .where(and(eq(t.deleted, false), inArray(sql<string>`lower(${t.id})`, unique.slice(i, i + DOC_BATCH_CHUNK))))
+      .orderBy(asc(t.id));
+    for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
   }
   return out;
 }
