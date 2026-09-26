@@ -83,3 +83,27 @@ export function pickContactHit(
   if (customerIds.length > 1) return { ambiguous: customerIds };
   return { contactId: live[0].contactId, customerId: live[0].customerId };
 }
+
+/** #214 — the Link popup's people search: contacts with an address
+ *  containing `fragment` (case-insensitive), as contactId → matching
+ *  addresses. Soft-deleted contacts are skipped; capped at `limit` rows.
+ *  Fragments under 2 characters match nothing. */
+export async function emailsMatching(fragment: string, limit = 200): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const f = (fragment || "").trim().toLowerCase();
+  if (f.length < 2) return out;
+  const like = "%" + f.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
+  const db = await getDb();
+  const rows = await db
+    .select({ contactId: contactEmails.contactId, email: sql<string>`lower(${contactEmails.email})` })
+    .from(contactEmails)
+    .innerJoin(contacts, eq(contacts.id, contactEmails.contactId))
+    .where(and(sql`lower(${contactEmails.email}) like ${like}`, eq(contacts.deleted, false)))
+    .limit(limit);
+  for (const r of rows) {
+    const list = out.get(r.contactId) ?? [];
+    list.push(r.email);
+    out.set(r.contactId, list);
+  }
+  return out;
+}

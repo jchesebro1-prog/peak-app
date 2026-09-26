@@ -19926,3 +19926,80 @@ import {
   ok(s5?.title === "Theatre Manager" && s5.company === "Orpheum Theatre", "#214 signature: fix wave 1 — 'Title | Company' still splits correctly");
   ok(s8?.company === "Lakefront Public Schools", "#214 signature: fix wave 1 — a standalone company line still parses correctly");
 }
+/* ====== #214 Inbox Link popup — linked people + link search (Task 3) ======
+   The thread's linked-people rules (add / remove / primary promotion / cap)
+   and the three-group search ranking, both pure. */
+import {
+  applyContactLink as tc214Apply,
+  linkedContactIdsOf as tc214Ids,
+  MAX_LINKED_CONTACTS as tc214Max,
+} from "@/lib/inbox-thread-contacts";
+import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/inbox-link-targets";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const j = (x: unknown) => JSON.stringify(x);
+  ok(j(tc214Ids({})) === "[]", "#214 linked people: none");
+  ok(j(tc214Ids({ resolvedContactId: "ct-a" })) === j(["ct-a"]), "#214 linked people: a pre-#214 thread reads as its primary");
+  ok(j(tc214Ids({ resolvedContactId: "ct-b", linkedContactIds: ["ct-a", "ct-b", "", "ct-a"] })) === j(["ct-b", "ct-a"]), "#214 linked people: primary first, deduped, blanks dropped");
+  const a1 = tc214Apply({}, "ct-a", true);
+  ok(a1.ok && j(a1.linkedContactIds) === j(["ct-a"]) && a1.resolvedContactId === "ct-a", "#214 linked people: the first person linked becomes primary");
+  const a2 = tc214Apply({ linkedContactIds: ["ct-a"], resolvedContactId: "ct-a" }, "ct-b", true);
+  ok(a2.ok && j(a2.linkedContactIds) === j(["ct-a", "ct-b"]) && a2.resolvedContactId === "ct-a", "#214 linked people: a second person keeps the primary");
+  const a3 = tc214Apply({ linkedContactIds: ["ct-a", "ct-b"], resolvedContactId: "ct-a" }, "ct-a", true);
+  ok(a3.ok && j(a3.linkedContactIds) === j(["ct-a", "ct-b"]), "#214 linked people: linking twice is a no-op");
+  const r1 = tc214Apply({ linkedContactIds: ["ct-a", "ct-b", "ct-c"], resolvedContactId: "ct-a" }, "ct-a", false);
+  ok(r1.ok && j(r1.linkedContactIds) === j(["ct-b", "ct-c"]) && r1.resolvedContactId === "ct-b", "#214 linked people: unlinking the primary promotes the next one");
+  const r2 = tc214Apply({ linkedContactIds: ["ct-a", "ct-b"], resolvedContactId: "ct-a" }, "ct-b", false);
+  ok(r2.ok && j(r2.linkedContactIds) === j(["ct-a"]) && r2.resolvedContactId === "ct-a", "#214 linked people: unlinking someone else leaves the primary");
+  const r3 = tc214Apply({ linkedContactIds: ["ct-a"], resolvedContactId: "ct-a" }, "ct-a", false);
+  ok(r3.ok && j(r3.linkedContactIds) === "[]" && r3.resolvedContactId === null, "#214 linked people: unlinking the last person clears the primary");
+  const legacy = tc214Apply({ resolvedContactId: "ct-p" }, "ct-q", true);
+  ok(legacy.ok && j(legacy.linkedContactIds) === j(["ct-p", "ct-q"]) && legacy.resolvedContactId === "ct-p", "#214 linked people: an old primary is carried into the list");
+  const full = Array.from({ length: tc214Max }, (_, i) => "ct-" + i);
+  const capped = tc214Apply({ linkedContactIds: full, resolvedContactId: "ct-0" }, "ct-new", true);
+  ok(tc214Max === 25 && !capped.ok && capped.error.includes("25"), "#214 linked people: a 26th person is refused");
+  ok(tc214Apply({ linkedContactIds: full, resolvedContactId: "ct-0" }, "ct-3", true).ok, "#214 linked people: re-linking someone already in a full list is fine");
+  ok(!tc214Apply({}, "  ", true).ok, "#214 linked people: a blank id is refused");
+
+  const data = {
+    companies: [
+      { id: "lakefront", name: "Lakefront Public Schools", city: "Duluth", state: "MN" },
+      { id: "orpheum", name: "Orpheum Theatre", city: "Minneapolis", state: "MN" },
+      { id: "north", name: "North Lakefront Church", city: "Two Harbors", state: "MN" },
+    ],
+    sites: [
+      { id: "loc1", companyId: "lakefront", name: "Lakefront High School Auditorium", address: "100 Main St", city: "Duluth", state: "MN" },
+      { id: "st-orpheum-1", companyId: "orpheum", name: "Main Stage", city: "Minneapolis", state: "MN" },
+      { id: "st-gone-1", companyId: "deleted-co", name: "Lakefront Annex" },
+    ],
+    people: [
+      { id: "ct-1", name: "Brenda Gauchel", title: "Technical Director", companyId: "lakefront", emails: ["brenda@lakefront.k12.mn.us"] },
+      { id: "ct-2", name: "Dana Whitfield", title: "", companyId: "orpheum", emails: ["dwhitfield@orpheum.org"] },
+    ],
+  };
+  const g1 = lt214Rank("lakefront", data);
+  ok(g1.companies.map((c) => c.id).join() === "lakefront,north", "#214 link search: a name that starts with the query ranks first");
+  ok(
+    g1.venues.map((v) => v.id).join() === "loc1" && g1.venues[0].companyId === "lakefront" && g1.venues[0].companyName === "Lakefront Public Schools" && g1.venues[0].sub.includes("100 Main St"),
+    "#214 link search: a venue carries its company; a venue whose company is gone is dropped"
+  );
+  ok(
+    g1.people.map((p) => p.id).join() === "ct-1" && g1.people[0].sub === "Technical Director · Lakefront Public Schools" && g1.people[0].companyId === "lakefront",
+    "#214 link search: a person matches by email and shows title · home company"
+  );
+  ok(lt214Rank("main", data).venues.map((v) => v.id).join() === "st-orpheum-1,loc1", "#214 link search: a venue named for the query beats one that only has it in the address");
+  const g3 = lt214Rank("dana orph", data);
+  ok(g3.people.length === 1 && g3.people[0].id === "ct-2" && g3.companies.length === 0, "#214 link search: every word must match");
+  ok(j(lt214Rank("l", data)) === j({ companies: [], venues: [], people: [] }), "#214 link search: under 2 letters searches nothing");
+  const g4 = lt214Rank("lakefront", data, "company");
+  ok(g4.companies.length === 2 && g4.venues.length === 0 && g4.people.length === 0, "#214 link search: `only` narrows to one group");
+  const many = { companies: Array.from({ length: 12 }, (_, i) => ({ id: "c" + i, name: "Acme " + i })), sites: [], people: [] };
+  ok(lt214Rank("acme", many).companies.length === 8, "#214 link search: at most 8 per group");
+  ok(lt214NameRank("orph", "Orpheum Theatre") === 0 && lt214NameRank("thea", "Orpheum Theatre") === 1 && lt214NameRank("heat", "Orpheum Theatre") === 2, "#214 link search: starts-with < word-start < anywhere");
+
+  const comms214 = read("src/lib/stores/comms.ts");
+  ok(/linkedContactIds\?: string\[\];/.test(comms214) && /ccFetched\?: true;/.test(comms214) && /\n  cc\?: string;\n  \/\*\* #214 — set once/.test(comms214), "#214 store: CommThread.linkedContactIds and CommMessage.cc / ccFetched are optional (old docs read unchanged)");
+  const lookup214 = read("src/lib/identity/lookup.ts");
+  const em214 = lookup214.slice(lookup214.indexOf("export async function emailsMatching"));
+  ok(em214.includes("eq(contacts.deleted, false)") && em214.includes(".limit(limit)") && em214.includes("if (f.length < 2) return out;"), "#214 link search: emailsMatching skips deleted contacts, is capped, and ignores 1-letter fragments");
+}

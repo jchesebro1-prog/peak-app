@@ -296,7 +296,13 @@ export type CommThread = {
   resolution?: "linked" | "suggested" | "ambiguous" | "unknown";
   suggestedCustomerId?: string | null;
   candidates?: Array<{ customerId: string; name: string }>;
+  /** The primary linked person (#96). #214: always one of the linked
+   *  people below — see lib/inbox-thread-contacts for the rules. */
   resolvedContactId?: string | null;
+  /** #214 — every person linked to this thread (contact ids, deduped,
+   *  capped at 25). Absent on older threads: they read as just
+   *  resolvedContactId (linkedContactIdsOf). */
+  linkedContactIds?: string[];
   /** "Not them" on a suggestion — stop offering it for this thread. */
   suggestionDismissed?: boolean;
   /** #96 §3 — last time the Peak → Gmail label writer applied a real change
