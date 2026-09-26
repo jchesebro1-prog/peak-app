@@ -2,10 +2,10 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { allEngagements } from "@/lib/stores/engagements";
-import { byCategory } from "@/lib/stores/catalog";
 import { activeUsers, reviewers } from "@/lib/users";
 import { tasksForDesign } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
+import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
 import DesignClient from "./design-client";
 import "./design.css";
 
@@ -16,6 +16,9 @@ import "./design.css";
  */
 
 export const dynamic = "force-dynamic";
+/** #210: listFixtures() (via loadEquipmentPriceTable) can run the one-time
+ *  fixture conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). */
+export const maxDuration = 60;
 
 export default async function Page({
   searchParams,
@@ -25,11 +28,11 @@ export default async function Page({
   const user = await requireUser();
   const sp = await searchParams;
 
-  const [designs, engagements, roster, fabricParts, reviewerRows, templateSets] = await Promise.all([
+  const [designs, engagements, roster, prices, reviewerRows, templateSets] = await Promise.all([
     getAllDesigns(),
     allEngagements(),
     activeUsers(),
-    byCategory("Fabric"),
+    loadEquipmentPriceTable(),
     reviewers(),
     taskTemplateSetsFor("design"),
   ]);
@@ -59,11 +62,7 @@ export default async function Page({
       designs={designs}
       selectedId={sp.id || null}
       roster={roster.map((u) => ({ name: u.name, initials: u.initials, color: u.color }))}
-      fabrics={fabricParts.map((p) => ({
-        sku: p.sku,
-        desc: p.desc,
-        costPerSqft: p.costPerSqft != null ? p.costPerSqft : null,
-      }))}
+      prices={prices}
       reviewerNames={reviewerRows.map((u) => u.name)}
       engagementsForDesign={engagementsForDesign}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}

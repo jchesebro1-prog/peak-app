@@ -20,17 +20,16 @@ import {
   nameSuffix,
   rigSetsFor,
   tierDefsDefault,
-  tierSystems,
-  tierSystemsBase,
   tierTotals,
   venueOf,
   type AState,
-  type FabricOption,
   type SysKey,
   type TierDefs,
   type TierKey,
   type ViewKey,
 } from "./engine";
+import { tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
+import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
 import { PlanSvg, buildPlan, churchGeom, currentDoors, houseDragPatch, prosGeom, type PlanHandle } from "./plan-svg";
 import {
@@ -103,7 +102,7 @@ export default function QuickDesignClient({
   canApprove,
   initialDesign,
   customers,
-  fabrics,
+  prices,
   rates,
   reviewerNames,
   fixtureAssemblies,
@@ -112,10 +111,10 @@ export default function QuickDesignClient({
   canApprove: boolean;
   initialDesign: DesignRecord | null;
   customers: CustomerOpt[];
-  fabrics: FabricOption[];
+  prices: EquipmentPriceTable;
   rates: { installPct: number; freightPct: number; contingencyPct: number };
   reviewerNames: string[];
-  fixtureAssemblies: Array<{ id: string; name: string; cost: number }>;
+  fixtureAssemblies: Array<{ id: string; name: string; cost: number; sell: number }>;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -180,14 +179,23 @@ export default function QuickDesignClient({
   const freightPct = rates.freightPct / 100;
   const contPct = (a.contingency ?? 0) / 100;
 
-  const assemblyOptions = useMemo(
-    () => Object.fromEntries(fixtureAssemblies.map((assembly) => [assembly.id, { name: assembly.name, cost: assembly.cost }])),
-    [fixtureAssemblies]
-  );
-  const C = useMemo(() => compute(a, assemblyOptions), [a, assemblyOptions]);
+  /** A per-design fixture pick (Assembly Builder) overrides that fixture row's
+   *  Equipment map price (#GEM) — the item keeps the equation's name. */
+  const fixtureOverrides = useMemo(() => {
+    const out: Record<string, UnitPrice> = {};
+    for (const [fixtureKey, id] of Object.entries(a.fixtureAssemblies || {})) {
+      const hit = fixtureAssemblies.find((f) => f.id === id);
+      if (hit) out[`lighting:${fixtureKey}`] = { status: "assembly", ref: hit.id, desc: hit.name, unit: "ea", unitCost: hit.cost, unitSell: hit.sell };
+    }
+    return out;
+  }, [a.fixtureAssemblies, fixtureAssemblies]);
+  const C = useMemo(() => compute(a), [a]);
   const selKey = (a.tier || "better") as TierKey;
   const selTd = TIERS.find((t) => t.key === selKey) || TIERS[1];
-  const selBase = useMemo(() => tierSystemsBase(C, a, selKey, tierDefs, fabrics), [C, a, selKey, tierDefs, fabrics]);
+  const selBase = useMemo(
+    () => tierSystemsBase(C, a, selKey, tierDefs, prices, fixtureOverrides),
+    [C, a, selKey, tierDefs, prices, fixtureOverrides]
+  );
   const selSystems = useMemo(() => {
     const ov = (a.qtyOverrides && a.qtyOverrides[selKey]) || {};
     return selBase.map((sys) => {
@@ -209,9 +217,9 @@ export default function QuickDesignClient({
     () =>
       TIERS.map((td) => ({
         td,
-        tot: tierTotals(tierSystems(C, a, td.key, tierDefs, fabrics), td, laborPct, freightPct, contPct),
+        tot: tierTotals(tierSystems(C, a, td.key, tierDefs, prices, fixtureOverrides), td, laborPct, freightPct, contPct),
       })),
-    [C, a, tierDefs, fabrics, laborPct, freightPct, contPct]
+    [C, a, tierDefs, prices, fixtureOverrides, laborPct, freightPct, contPct]
   );
 
   const venue = venueOf(a);
@@ -229,8 +237,8 @@ export default function QuickDesignClient({
   const makeDesign = (): DesignPartial => {
     const s = a;
     const td = TIERS.find((t) => t.key === (s.tier || "better")) || TIERS[1];
-    const Cx = compute(s, assemblyOptions);
-    const sysForTot = tierSystems(Cx, s, td.key, tierDefs, fabrics);
+    const Cx = compute(s);
+    const sysForTot = tierSystems(Cx, s, td.key, tierDefs, prices, fixtureOverrides);
     const tot = tierTotals(sysForTot, td, laborPct, freightPct, (s.contingency ?? 0) / 100);
     const v = venueOf(s);
     const sysNames = Cx.systems.filter((x) => x.on).map((x) => SHORT[x.key] || x.name);
@@ -468,8 +476,9 @@ export default function QuickDesignClient({
         const up = it.price * (x.tierFixed ? 1 : selTd.priceMul);
         const ext = up * qty;
         sub += ext;
-        const upLabel = up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
-        return { desc: it.desc, unit: it.unit, qty, edited: hasOv, upLabel, ext };
+        const upLabel = it.status === "needs-part" ? "Needs a part" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
+        const label = (it.refDesc ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "");
+        return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext };
       });
       return { key: x.key, name: x.name, dot: x.dot, sub, rows, open: !!bomOpen[x.key] };
     });
@@ -774,7 +783,7 @@ export default function QuickDesignClient({
                           </div>
                           {g.rows.map((it) => (
                             <div key={it.desc} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 124px 88px 92px", gap: 8, padding: "9px 16px", fontSize: 12.5, alignItems: "center", borderBottom: "1px solid #f5f6f8" }}>
-                              <span style={{ lineHeight: 1.3 }}>{it.desc}</span>
+                              <span style={{ lineHeight: 1.3 }}>{it.label}</span>
                               <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
                                 <input
                                   type="number"

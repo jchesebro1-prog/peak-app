@@ -2,11 +2,12 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getDesign } from "@/lib/stores/designs";
 import { all as allCustomers } from "@/lib/stores/customers";
-import { byCategory, list as catalogList } from "@/lib/stores/catalog";
+import { list as catalogList } from "@/lib/stores/catalog";
 import { assemblyUnitTotals, fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
 import { num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
+import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
 import QuickDesignClient from "./quick-design-client";
 import "./quick-design.css";
 
@@ -32,11 +33,10 @@ export default async function Page({
   const sp = await searchParams;
   const designId = sp.design || null;
 
-  const [design, customers, fabricParts, installPct, freightPct, contingencyPct, reviewerRows, fixtureRecords, catalogRows] =
+  const [design, customers, installPct, freightPct, contingencyPct, reviewerRows, fixtureRecords, catalogRows] =
     await Promise.all([
       designId ? getDesign(designId) : Promise.resolve(null),
       allCustomers(),
-      byCategory("Fabric"),
       num("system.installPct", 18),
       num("system.freightPct", 5),
       num("system.contingencyPct", 10),
@@ -44,12 +44,14 @@ export default async function Page({
       listFixtures(),
       catalogList(),
     ]);
+  // The Equipment map price context (#GEM) — built from the catalog this
+  // request already loaded (no second load).
+  const prices = await loadEquipmentPriceTable({ catalog: catalogRows });
   // #210: fixtures (not systems) under their kept ids — included parts only.
-  const fixtureAssemblies = fixtureAssembliesFrom(fixtureRecords, catalogRows).map((assembly) => ({
-    id: assembly.id,
-    name: assembly.name,
-    cost: assemblyUnitTotals(assembly).cost,
-  }));
+  const fixtureAssemblies = fixtureAssembliesFrom(fixtureRecords, catalogRows).map((assembly) => {
+    const totals = assemblyUnitTotals(assembly);
+    return { id: assembly.id, name: assembly.name, cost: totals.cost, sell: totals.sell };
+  });
 
   return (
     <QuickDesignClient
@@ -68,11 +70,7 @@ export default async function Page({
           primary: !!l.primary,
         })),
       }))}
-      fabrics={fabricParts.map((p) => ({
-        sku: p.sku,
-        desc: p.desc,
-        costPerSqft: p.costPerSqft != null ? p.costPerSqft : null,
-      }))}
+      prices={prices}
       rates={{ installPct, freightPct, contingencyPct }}
       reviewerNames={reviewerRows.map((u) => u.name)}
       fixtureAssemblies={fixtureAssemblies}

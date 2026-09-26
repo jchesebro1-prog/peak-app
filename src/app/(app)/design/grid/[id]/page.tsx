@@ -21,9 +21,11 @@ import { symbolContext } from "@/lib/design/grid-icons";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveWireTypes } from "@/lib/catalog-connect";
 import type { FabricSell } from "@/lib/curtain-geom";
-import { compute, tierDefsDefault, tierSystems } from "@/app/(app)/design/quick/engine";
+import { compute, tierDefsDefault } from "@/app/(app)/design/quick/engine";
+import { tierSystems } from "@/lib/design/equipment-pricing";
+import { buildEquipmentPriceTable } from "@/lib/design/equipment-map";
+import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { scopeTargetsByTier } from "@/lib/design/scope-targets";
-import type { FabricOption } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
@@ -31,6 +33,9 @@ import GridIntake from "./grid-intake";
 
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
+/** #210: listFixtures() (via loadEquipPriceCtx) can run the one-time fixture
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). */
+export const maxDuration = 60;
 
 /**
  * The Grid editor route (D108) — full-width like the markup screen: laying
@@ -132,13 +137,13 @@ export default async function GridEditorPage({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  // Scope targets (#GEM, D-GEM-5) — computed HERE; only sell numbers reach the
-  // editor. The cost-bearing fabric rows below never leave the server.
-  const engineFabrics: FabricOption[] = catalog
-    .filter((p) => p.category === "Fabric")
-    .map((p) => ({ sku: p.sku, desc: p.desc, costPerSqft: p.costPerSqft ?? null }));
+  // The Equipment map price context (#GEM) — built from the catalog this
+  // request already loaded (no second load). Server-only; the editor gets sell
+  // numbers only (scope targets now; virtual parts in Task 6).
+  const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
+  const equipTable = buildEquipmentPriceTable(equipMap, equipCtx);
   const scopeTargets = project.scopeInputs
-    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), engineFabrics))
+    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable))
     : null;
 
   const curtainCoeffs = sellCoeffs(tier.margin);

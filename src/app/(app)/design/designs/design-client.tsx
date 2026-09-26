@@ -18,13 +18,13 @@ import {
   hydrateAState,
   moneyRound,
   shortMoney,
-  tierSystems,
   tierTotals,
   venueOf,
-  type FabricOption,
   type SysKey,
   type TierKey,
 } from "../quick/engine";
+import { tierSystems } from "@/lib/design/equipment-pricing";
+import type { EquipmentPriceTable } from "@/lib/design/equipment-map";
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
 import {
   getAccentHex,
@@ -169,7 +169,7 @@ export default function DesignClient({
   designs: initialDesigns,
   selectedId,
   roster,
-  fabrics,
+  prices,
   reviewerNames,
   engagementsForDesign,
   people,
@@ -183,7 +183,7 @@ export default function DesignClient({
   designs: DesignRecord[];
   selectedId: string | null;
   roster: RosterEntry[];
-  fabrics: FabricOption[];
+  prices: EquipmentPriceTable;
   reviewerNames: string[];
   /** Reverse lookup (derived server-side, not stored) — every engagement, if any, this design feeds. */
   engagementsForDesign: Record<string, Array<{ id: string; name: string }>>;
@@ -306,7 +306,7 @@ export default function DesignClient({
     const C = compute(s);
     const tierKey = (s.tier || "better") as TierKey;
     const td = TIERS.find((t) => t.key === tierKey) || TIERS[1];
-    const systems = tierSystems(C, s, tierKey, tierDefs, fabrics);
+    const systems = tierSystems(C, s, tierKey, tierDefs, prices);
     const tot = tierTotals(systems, td, 0, 0, 0);
     const rows = systems
       .filter((x) => x.on)
@@ -319,7 +319,7 @@ export default function DesignClient({
       }));
     const plan = buildPlan(s, gridSets(s, tierDefs), C.electrics, accentHex);
     return { s, tierLabel: td.label, rows, matRev: tot.matRev, plan };
-  }, [sel, tierDefs, fabrics, accentHex]);
+  }, [sel, tierDefs, prices, accentHex]);
 
   /* --------------------------------- styles --------------------------------- */
 

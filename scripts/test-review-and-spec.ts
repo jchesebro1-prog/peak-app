@@ -2792,54 +2792,14 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
   ok(ov.costEach === 2080, "a Rose Brand cost override replaces the make cost in the quote");
 }
 
-/* --- Quick Design budget curtain block on the shared model (task 6) --- */
-import { compute as computeQuick, defaultAState, tierSystems, curtainMakeCost, tierDefsDefault } from "@/app/(app)/design/quick/engine";
+import { defaultAState } from "@/app/(app)/design/quick/engine";
 import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFor as makingForQ } from "@/lib/design/curtain-pricing";
-{
-  const base = defaultAState(0);
-  const s = { ...base, venue: "school", width: 40, ph: 20, depth: 30, tier: "better" as const, sys: { ...base.sys, curtains: true }, drape: { draw: true, legs: false, border: false, scenerytrack: false, fullstage: false } };
-  const res = computeQuick(s);
-  const curtains = res.systems.find((x) => x.key === "curtains")!;
-  const drawItem = curtains.items.find((it) => it.desc === "Draw")!;
-  // Expected unit cost = one Draw (a pair) priced through the shared model at the venue geometry.
-  const dims = { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 64, stageDepthFt: 30 };
-  const rule = drapeRuleQ("Draw", dims, "better")!;
-  const expected = curtainCostQ(
-    { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
-    { fabricRate: RATES_Q[rule.fabricSku], makingRate: makingForQ(rule.fullness) }
-  ).costTotal;
-  ok(Math.abs(drawItem.cost - Math.round(expected)) < 1, `Quick Design Draw cost = shared model make cost (got ${drawItem.cost}, expected ${Math.round(expected)})`);
-}
-{
-  const base = defaultAState(0);
-  const state = { ...base, fixtureAssemblies: { ...base.fixtureAssemblies, par: "fa-par" } };
-  const fixtures = computeQuick(state, { "fa-par": { name: "House PAR assembly", cost: 432 } })
-    .systems.find((system) => system.key === "lighting")!.items;
-  const par = fixtures.find((item) => item.desc === "House PAR assembly")!;
-  ok(par?.cost === 432, "Quick Design BOM prices a selected fixture from Assembly Builder");
-}
-
-/* --- the tier pipeline (what the screen renders) uses the two-term curtain
- * cost, not tierDefs.fabrics + area × costPerSqft (task 6 integration fix) ---
- * The assertion above only inspects compute()'s raw output. The Quick Design
- * SCREEN never reads that directly — it renders tierSystems/tierSystemsBase,
- * which run compute()'s systems through applyFabrics per tier column. Before
- * this fix, applyFabrics silently overwrote every curtain item's cost with
- * the old one-term formula, so the budget and the rendered tier grid priced
- * curtains two different ways. This drives the SAME "Draw" item through the
- * full tier pipeline and checks it against curtainMakeCost directly. */
-{
-  const base2 = defaultAState(0);
-  const s2 = { ...base2, venue: "school", width: 40, ph: 20, depth: 30, tier: "better" as const, sys: { ...base2.sys, curtains: true }, drape: { draw: true, legs: false, border: false, scenerytrack: false, fullstage: false } };
-  const tiered = tierSystems(computeQuick(s2), s2, "better", tierDefsDefault(), []);
-  const dims2 = { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 60, stageDepthFt: 30 };
-  const expected2 = curtainMakeCost("draw", dims2, "better")!.cost;
-  const cur = tiered.find((x) => x.key === "curtains")!.items.find((it) => it.desc === "Draw")!;
-  ok(Math.abs(cur.cost - expected2) < 1, `tier-pipeline Draw cost = two-term make cost, not the old area×costPerSqft (got ${cur.cost}, expected ${expected2})`);
-}
+/* The three pre-#GEM blocks that stood here (compute()'s own curtain cost, a
+ * Quick Design fixture pick, the tier pipeline's curtain cost) moved into the
+ * "#GEM T5" block at EOF: compute() no longer carries dollars (D-GEM-4). */
 
 /* --- budget and quote agree on the same drape (task 7) --- */
 {
@@ -17808,4 +17768,73 @@ import { defaultAState as gemDefault4, type SystemBlock as GemSystemBlock4 } fro
   const actSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/actions.ts"), "utf8");
   ok(!seedSrc.includes("quick/engine") && !seedSrc.includes("deriveSeedPlacements") && seedSrc.includes("export function isSeedPlaceholder"), "#GEM T4: grid-seed keeps only the placeholder helpers");
   ok(!actSrc.includes("seedStartingLayoutAction") && !actSrc.includes("deriveSeedPlacements"), "#GEM T4: the old seeding action is removed");
+}
+
+/* --- #GEM T5: the estimate prices only through the Equipment map — no built-in dollars --- */
+import { compute as gemCompute5, defaultAState as gemDefault5, tierDefsDefault as gemTierDefs5, type AState as GemAState5 } from "@/app/(app)/design/quick/engine";
+import { applyEquipment as gemApply5, drapeUnitCost as gemDrape5, tierSystems as gemTierSystems5 } from "@/lib/design/equipment-pricing";
+import { buildEquipmentPriceTable as gemTable5 } from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as gemRowByKey5 } from "@/lib/design/equipment-vocab";
+import { curtainCost as gemCurtainCost5, makingRateFor as gemMaking5 } from "@/lib/design/curtain-pricing";
+import { drapeRule as gemDrapeRule5 } from "@/lib/design/goods";
+import { readdirSync as gemReaddir5 } from "node:fs";
+{
+  const base = gemDefault5(0);
+  const s: GemAState5 = {
+    ...base, venue: "school", size: "medium", width: 40, depth: 30, grid: 24, wing: 12, ph: 20, rigType: "counterweight", tier: "better",
+    sys: { ...base.sys, rigging: true, curtains: true, lighting: true, audio: true, video: false, controls: false, acoustical: false, pit: false },
+    drape: { draw: true, legs: false, border: false, scenerytrack: true, fullstage: false },
+    fixtures: { par: true, front: false, cyc: false, side: false, automated: false },
+  };
+  const C = gemCompute5(s);
+  const all = C.systems.flatMap((x) => x.items);
+  ok(all.length > 0 && all.every((it) => it.cost === 0 && it.price === 0) && C.systems.every((x) => x.rev === 0 && x.cost === 0), "#GEM T5: compute() carries quantities only — no built-in dollars");
+  ok(all.every((it) => gemRowByKey5.get(it.key)?.unit === it.unit), "#GEM T5: every item's unit is its Equipment map row's unit");
+  const track = all.find((it) => it.key === "curtains:scenerytrack")!;
+  ok(track.unit === "ft" && track.qty === 3 * 44, `#GEM T5: the scenery track emits feet — depth blocks × pipe length (got ${track.qty})`);
+  const draw = all.find((it) => it.key === "curtains:draw")!;
+  const rule = gemDrapeRule5("Draw", { proWidthFt: 40, proHeightFt: 20, stageWidthFt: 64, stageDepthFt: 30 }, "better")!;
+  ok(!!draw.drape && draw.drape.w === rule.w && draw.drape.h === rule.h && draw.drape.fullness === rule.fullness && draw.drape.qty === rule.qty, "#GEM T5: a drape item carries the goods.ts geometry the quote side uses");
+  const parts = new Map<string, { sku: string; desc: string; unit: string; cost: number; list: number; category: string; curtainAreaRate?: number }>([
+    ["GEM5-PAR", { sku: "GEM5-PAR", desc: "LED par", unit: "ea", cost: 600, list: 900, category: "Lighting Fixtures" }],
+    ["GEM5-HB", { sku: "GEM5-HB", desc: "Headblock", unit: "ea", cost: 500, list: 0, category: "Rigging Hardware" }],
+    ["GEM5-VEL", { sku: "GEM5-VEL", desc: "Velour", unit: "sq ft", cost: 0, list: 0, category: "Fabric", curtainAreaRate: 3.5 }],
+  ]);
+  const table = gemTable5({
+    "lighting:par": { tiers: { good: { kind: "part", sku: "GEM5-PAR" } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
+    "rigging:headblock": { tiers: { better: { kind: "part", sku: "GEM5-HB" } }, updatedBy: "t", updatedAt: 1 },
+    "curtains:draw": { tiers: { good: { kind: "part", sku: "GEM5-VEL" } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
+    "audio:subwoofer": { tiers: { good: { kind: "allowance", amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 },
+  }, { parts, fixtures: new Map(), margin: 0.3 });
+  const better = gemTierSystems5(C, s, "better", gemTierDefs5(), table);
+  const item = (sys: string, key: string, list = better) => list.find((x) => x.key === sys)!.items.find((i) => i.key === key)!;
+  const par = item("lighting", "lighting:par");
+  ok(par.cost === 600 && par.price === 900 && par.status === "part" && par.refDesc === "LED par", "#GEM T5: a mapped part prices from the live catalog");
+  const hb = item("rigging", "rigging:headblock");
+  ok(hb.cost === 500 && hb.price === 714.29, "#GEM T5: a list-less part sells at cost ÷ (1 − catalog margin)");
+  const arbor = item("rigging", "rigging:arbor");
+  ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#GEM T5: an unmapped item is needs-a-part — never a fallback dollar");
+  const d = item("curtains", "curtains:draw");
+  const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5, makingRate: gemMaking5(rule.fullness) }).costTotal);
+  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#GEM T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
+  const sub = item("audio", "audio:subwoofer");
+  ok(sub.status === "allowance" && sub.cost === 1200, "#GEM T5: a confirmed allowance prices as its unit cost");
+  const rig = better.find((x) => x.key === "rigging")!;
+  ok(rig.tierFixed === true && rig.cost === rig.items.reduce((a, i) => a + i.qty * i.cost, 0), "#GEM T5: system totals sum only priced lines");
+  const good = gemTierSystems5(C, s, "good", gemTierDefs5(), table);
+  ok(item("rigging", "rigging:headblock", good).status === "needs-part" && item("lighting", "lighting:par", good).price === 900, "#GEM T5: each tier resolves its own cells (same-for-all rows price every tier)");
+  const ov = gemTierSystems5(C, s, "better", gemTierDefs5(), table, { "lighting:par": { status: "assembly", ref: "fa-par", desc: "House PAR assembly", unit: "ea", unitCost: 432, unitSell: 610 } });
+  const opar = item("lighting", "lighting:par", ov);
+  ok(opar.cost === 432 && opar.price === 610 && opar.refDesc === "House PAR assembly" && opar.desc === "Par", "#GEM T5: a per-design pick overrides the map for that row, keeping the equation's name");
+  const once = gemApply5(C.systems, "better", table);
+  ok(once.every((x) => x.tierFixed) && once.find((x) => x.key === "lighting")!.rev === par.qty * 900, "#GEM T5: applyEquipment prices every system per tier (tier multipliers are inert)");
+  const engSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/engine.ts"), "utf8");
+  ok(!/TIER_SKUS|SEED_FABRIC_RATES/.test(engSrc) && !gemValueImports(engSrc).some((m) => /curtain-pricing|equipment-pricing/.test(m)) && !/\bcost:\s*(0\.\d|[1-9]|Math)/.test(engSrc), "#GEM T5: engine.ts holds no dollars and imports nothing cost-bearing");
+  const walk = (dir: string): string[] =>
+    gemReaddir5(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+  const gridClient = [...walk(join(process.cwd(), "src/app/(app)/design/grid")), ...walk(join(process.cwd(), "src/components/design"))]
+    .map((f) => ({ f, src: readFileSync(f, "utf8") }))
+    .filter(({ src }) => src.startsWith('"use client"'));
+  const leaks = gridClient.filter(({ src }) => gemValueImports(src).some((m) => /curtain-pricing|equipment-pricing|equipment-legacy-hints|^@\/lib\/stores\/|^@\/db\//.test(m)));
+  ok(gridClient.length > 5 && leaks.length === 0, `#GEM T5: no Grid client file imports a cost-bearing module (leaks: ${leaks.map((l) => l.f.split("/src/")[1]).join(", ") || "none"})`);
 }

@@ -1,17 +1,17 @@
 /**
- * Quick Design estimating engine — exact port of the logic class embedded in
- * app/Quick Design.dc.html (the budgetary auto-estimate path). Every venue
- * preset, dimension schema, sizing equation, tier SKU table and roll-up
- * formula is carried over verbatim; this module is the single source shared
- * by the Quick Design screen and the Design dashboard's detail summary.
+ * Quick Design estimating engine — port of the logic class embedded in
+ * app/Quick Design.dc.html (the budgetary auto-estimate path). Venue presets,
+ * dimension schemas, sizing equations and roll-up formulas are carried over;
+ * the prototype's DOLLARS are not (#GEM, D-GEM-4): compute() emits item keys +
+ * quantities only, and src/lib/design/equipment-pricing.ts prices them from
+ * the catalog-backed Equipment map. This module holds no cost data, so the
+ * Grid's client components can import its presets and sizing safely.
  *
- * Pure data + math — no React, no I/O. The manual-layout placement engine is
- * NOT ported (plan-drawing editor deferred with the spatial-estimating work).
+ * Pure data + math — no React, no I/O.
  */
 
 import { drapeRule } from "@/lib/design/goods";
-import { curtainCost, SEED_FABRIC_RATES, makingRateFor } from "@/lib/design/curtain-pricing";
-import { battenLenFt, venueDimsFromEstimator, type VenueDims } from "@/lib/design/venue-dims";
+import { battenLenFt, venueDimsFromEstimator } from "@/lib/design/venue-dims";
 
 /* ---------------------------------- types ---------------------------------- */
 
@@ -44,19 +44,26 @@ export type VenueDef = {
   sys: Record<SysKey, boolean>;
 };
 
+/** A drape's finished geometry (goods.ts drapeRule) — per panel width, panels on the line. */
+export type DrapeGeom = { w: number; h: number; fullness: number; qty: number };
+
 export type BomItem = {
   /** Equipment map row key, `system:itemKey` (#GEM, equipment-vocab.ts). */
   key: string;
+  /** The equation's own item name (= the row label). */
   desc: string;
   qty: number;
   unit: string;
+  /** Unit cost / unit sell — 0 until equipment-pricing.ts prices the item. */
   cost: number;
   price: number;
-  area?: number;
-  fabricKey?: string | null;
-  sku?: boolean;
   /** Set by the Equipment map pricing step (#GEM): how this line priced. */
   status?: "part" | "assembly" | "allowance" | "needs-part";
+  /** What priced it: SKU, fixture id or row key — and its description. */
+  ref?: string;
+  refDesc?: string;
+  /** Curtain drapes only: the geometry the per-drape cost is computed from. */
+  drape?: DrapeGeom;
 };
 
 export type SystemBlock = {
@@ -98,8 +105,6 @@ export type TierDef = {
   fabrics: Record<string, string>;
 };
 export type TierDefs = Record<TierKey, TierDef>;
-
-export type FabricOption = { sku: string; desc: string; costPerSqft: number | null };
 
 /** The designer state the prototype keeps on state.a — persisted whole as `config`. */
 export type AState = {
@@ -299,38 +304,6 @@ export const TIERS: TierMeta[] = [
   { key: "best", label: "Best", costMul: 1.3, priceMul: 1.42, spec: "Premium spec — top-tier, future-proof" },
 ];
 
-/**
- * Per-tier equipment SKUs (drive price by gear choice, not just a multiplier).
- * Keyed tier → system → item desc → unit cost. 'better' equals the base
- * catalog cost. Lines with no SKU entry fall back to the global multiplier.
- */
-export const TIER_SKUS: Record<TierKey, Partial<Record<SysKey, Record<string, number>>>> = {
-  good: {
-    lighting: { Par: 500, Front: 1600, Cyc: 1200, "Side light": 1250, Automated: 2100 },
-    controls: { Console: 4800, "Console touch screen": 1400, "Battery backup": 20, Processor: 7000, Button: 180, "Architectural touch screen": 1400, "Input station": 70, "Output station": 90, "Distro system": 2100 },
-    audio: { "Line-array loudspeaker": 1000, Subwoofer: 1300, "Digital mixer, DSP & amplifiers": 9900 },
-    video: { "Laser projector, 4K": 13000, "Video processor & switcher": 6800 },
-    acoustical: { Tower: 7000, Ceiling: 14000, Transport: 700 },
-    pit: { "Legged pit filler deck": 100, "Clear-span pit filler deck": 120 },
-  },
-  better: {
-    lighting: { Par: 750, Front: 2250, Cyc: 1750, "Side light": 1800, Automated: 3000 },
-    controls: { Console: 7000, "Console touch screen": 2000, "Battery backup": 30, Processor: 10000, Button: 250, "Architectural touch screen": 2000, "Input station": 100, "Output station": 125, "Distro system": 3000 },
-    audio: { "Line-array loudspeaker": 1450, Subwoofer: 1850, "Digital mixer, DSP & amplifiers": 14200 },
-    video: { "Laser projector, 4K": 18500, "Video processor & switcher": 9800 },
-    acoustical: { Tower: 10000, Ceiling: 20000, Transport: 1000 },
-    pit: { "Legged pit filler deck": 125, "Clear-span pit filler deck": 150 },
-  },
-  best: {
-    lighting: { Par: 1150, Front: 3400, Cyc: 2600, "Side light": 2700, Automated: 4600 },
-    controls: { Console: 10500, "Console touch screen": 3000, "Battery backup": 45, Processor: 15000, Button: 380, "Architectural touch screen": 3000, "Input station": 150, "Output station": 190, "Distro system": 4500 },
-    audio: { "Line-array loudspeaker": 2200, Subwoofer: 2800, "Digital mixer, DSP & amplifiers": 21500 },
-    video: { "Laser projector, 4K": 28000, "Video processor & switcher": 14800 },
-    acoustical: { Tower: 15000, Ceiling: 30000, Transport: 1500 },
-    pit: { "Legged pit filler deck": 165, "Clear-span pit filler deck": 200 },
-  },
-};
-
 /** Authored Good / Better / Best spec descriptions per system: [good, better, best]. */
 const SPEC_DEFAULTS: Record<SysKey, [string, string, string]> = {
   rigging: ["Manual counterweight, basic line sets", "Counterweight / motor-assist, T-track guides", "Fully automated hoists, variable-speed control & monitoring"],
@@ -453,36 +426,19 @@ export function gridSets(s: AState, tierDefs: TierDefs): number {
   return Math.max(1, Math.round(td && td.sets != null ? td.sets : base));
 }
 
-/** Quick Design's curtain toggle keys (`drape.draw` etc.), mapped to the
- *  drape TYPE goods.ts's FABRIC_BY_TYPE_TIER / drapeRule key on. */
+/** Quick Design's curtain toggle keys (`drape.draw` etc.) → the goods.ts drape TYPE whose geometry drapeRule() returns. */
 const CURTAIN_KEY_TO_TYPE: Record<string, string> = { draw: "Draw", legs: "Legs", border: "Border", fullstage: "Rear" };
-
-/**
- * One curtain drape's two-term make cost + sewn area at a given tier, keyed
- * by Quick Design's fabricKey. Shared by compute() (at s.tier) and
- * applyFabrics (per tier column) so the budget and the tier grid price
- * curtains identically — the tier column is no longer allowed to fall back
- * to the old area × costPerSqft formula.
- */
-export function curtainMakeCost(fabricKey: string, dims: VenueDims, tierKey: TierKey): { cost: number; area: number } | null {
-  const type = CURTAIN_KEY_TO_TYPE[fabricKey];
-  if (!type) return null;
-  const rule = drapeRule(type, dims, tierKey);
-  if (!rule) return null;
-  const cc = curtainCost(
-    { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
-    { fabricRate: SEED_FABRIC_RATES[rule.fabricSku] ?? 0, makingRate: makingRateFor(rule.fullness) }
-  );
-  return { cost: Math.round(cc.costTotal), area: Math.round(cc.sewnAreaSqft) };
-}
 
 /* --------------------------------- compute --------------------------------- */
 
-/** Pure function of the designer state — the refined BOM equations. */
-export function compute(
-  s: AState,
-  assemblyOptions: Record<string, { name: string; cost: number }> = {}
-): ComputeResult {
+/**
+ * Pure function of the designer state — the refined BOM equations (#GEM:
+ * QUANTITIES ONLY). Every item carries its Equipment map key (equipment-
+ * vocab.ts) and no dollars; equipment-pricing.ts prices them. Sizing math is
+ * unchanged, except the scenery track, which now emits FEET (count × pipe
+ * length) so a per-foot catalog track can price it (D-GEM-1).
+ */
+export function compute(s: AState): ComputeResult {
   const C = clamp;
   const lineSets = C(Math.round(s.depth * 1.5), 12, 72);
   // Electrics are spaced by stage depth (~one per 12 ft), clamped 2–5.
@@ -493,7 +449,7 @@ export function compute(
   const subs = C(Math.round(s.width / 12), 2, 8);
   const projectors = C(Math.round(s.width / 24), 1, 4);
 
-  // ---- Refined BOM equations (feet; floor blocks; flat 30% margin) ----
+  // ---- Refined BOM equations (feet; floor blocks) ----
   const fl = Math.floor;
   const W = s.width;
   const D = s.depth;
@@ -506,37 +462,34 @@ export function compute(
    * Pipe (batten) length per line set, ft. Jeff, punch #50: "It is Pro Width,
    * plus 2ft on each side, so 4ft total." The rule lives in battenLenFt()
    * (venue-dims.ts) so the lineset builder and this BOM cannot disagree.
-   *
-   * Gated on the venue kind ON PURPOSE. `s.width` is the proscenium opening
-   * only for kind "proscenium": church / flat / blackbox / arena measure wall
-   * to wall and gym measures sideline to sideline (DIMSCHEMA above). Adding
-   * 4 ft to those would compound a mapping that is already too wide, so they
-   * keep exactly today's `sets * W` until Jeff says what a non-proscenium
-   * room's pipe should span. Only the pipe is gated; nothing else changes.
+   * Gated on the venue kind ON PURPOSE: `s.width` is the proscenium opening
+   * only for kind "proscenium"; the other kinds keep `sets * W`.
    */
   const pipeLenFt = venueOf(s).kind === "proscenium" ? battenLenFt(W) : W;
 
+  type Eq = { key: string; desc: string; unit: string; qty: number; drape?: DrapeGeom };
+  const eq = (key: string, desc: string, unit: string, qty: number): Eq => ({ key, desc, unit, qty });
+
   // Rigging — single type
-  type EqItem = { key: string; desc: string; unit: string; qty: number; cost: number; area?: number; fabricKey?: string | null };
   const rigType = s.rigType || "counterweight";
-  let rigItems: EqItem[];
+  let rigItems: Eq[];
   if (rigType === "motorized") {
     const m = pick({ el: 2, lo: 2, hi: 2, vs: 0 }, { el: 3, lo: 3, hi: 3, vs: 1 }, { el: 4, lo: 4, hi: 2, vs: 2 });
     rigItems = [
-      { key: "rigging:electricHoist", desc: "Electric hoist", unit: "ea", qty: m.el * Math.max(2, fl(D / 30)), cost: 60000 },
-      { key: "rigging:lowCapHoist", desc: "Low-capacity hoist", unit: "ea", qty: m.lo * dBlk, cost: 15000 },
-      { key: "rigging:highCapHoist", desc: "High-capacity hoist", unit: "ea", qty: m.hi * dBlk, cost: 40000 },
+      eq("rigging:electricHoist", "Electric hoist", "ea", m.el * Math.max(2, fl(D / 30))),
+      eq("rigging:lowCapHoist", "Low-capacity hoist", "ea", m.lo * dBlk),
+      eq("rigging:highCapHoist", "High-capacity hoist", "ea", m.hi * dBlk),
     ];
-    if (m.vs) rigItems.push({ key: "rigging:varSpeedHoist", desc: "Variable-speed hoist", unit: "ea", qty: m.vs * dBlk, cost: 60000 });
+    if (m.vs) rigItems.push(eq("rigging:varSpeedHoist", "Variable-speed hoist", "ea", m.vs * dBlk));
   } else if (rigType === "deadhung") {
     const sets = pick(5, 6, 7) * dBlk;
     const points = sets * fl(W / 10);
     rigItems = [
-      { key: "rigging:riggingPoint", desc: "Rigging point", unit: "ea", qty: points, cost: 20 },
-      { key: "rigging:pipe", desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
-      { key: "rigging:aircraftCable", desc: "Aircraft cable", unit: "ft", qty: points * G, cost: 0.02 },
-      { key: "rigging:chainWrap", desc: "Chain wrap, 3 ft", unit: "ea", qty: points, cost: 1 },
-      { key: "rigging:terminationKit", desc: "Termination kit", unit: "ea", qty: points * 2, cost: 1 },
+      eq("rigging:riggingPoint", "Rigging point", "ea", points),
+      eq("rigging:pipe", "Pipe", "ft", sets * pipeLenFt),
+      eq("rigging:aircraftCable", "Aircraft cable", "ft", points * G),
+      eq("rigging:chainWrap", "Chain wrap, 3 ft", "ea", points),
+      eq("rigging:terminationKit", "Termination kit", "ea", points * 2),
     ];
   } else {
     // Counterweight — driven by the number of line sets.
@@ -544,103 +497,96 @@ export function compute(
     const loftPerSet = Math.max(1, fl(W / 10)); // 1 loftblock per 10 ft of pro width, per set
     const loft = sets * loftPerSet;
     rigItems = [
-      { key: "rigging:headblock", desc: "Headblock", unit: "ea", qty: sets, cost: 550 },
-      { key: "rigging:footblock", desc: "Footblock", unit: "ea", qty: sets, cost: 350 },
-      { key: "rigging:arbor", desc: "Arbor", unit: "ea", qty: sets, cost: 700 },
-      { key: "rigging:tbarTrack", desc: "T-bar track", unit: "ea", qty: sets, cost: 100 },
-      { key: "rigging:lockRail", desc: "Lock rail", unit: "ea", qty: sets, cost: 30 },
-      { key: "rigging:handline", desc: "Handline", unit: "ft", qty: sets * 2 * G, cost: 3 },
-      { key: "rigging:pipe", desc: "Pipe", unit: "ft", qty: sets * pipeLenFt, cost: 8 },
-      { key: "rigging:loftblock", desc: "Loftblock", unit: "ea", qty: loft, cost: 250 },
-      { key: "rigging:aircraftCable", desc: "Aircraft cable", unit: "ft", qty: loft * (2 * G + W), cost: 0.02 },
-      { key: "rigging:terminationKit", desc: "Termination kit", unit: "ea", qty: loft * 2, cost: 1 },
-      { key: "rigging:chainWrap", desc: "Chain wrap, 3 ft", unit: "ea", qty: loft, cost: 1 },
+      eq("rigging:headblock", "Headblock", "ea", sets),
+      eq("rigging:footblock", "Footblock", "ea", sets),
+      eq("rigging:arbor", "Arbor", "ea", sets),
+      eq("rigging:tbarTrack", "T-bar track", "ea", sets),
+      eq("rigging:lockRail", "Lock rail", "ea", sets),
+      eq("rigging:handline", "Handline", "ft", sets * 2 * G),
+      eq("rigging:pipe", "Pipe", "ft", sets * pipeLenFt),
+      eq("rigging:loftblock", "Loftblock", "ea", loft),
+      eq("rigging:aircraftCable", "Aircraft cable", "ft", loft * (2 * G + W)),
+      eq("rigging:terminationKit", "Termination kit", "ea", loft * 2),
+      eq("rigging:chainWrap", "Chain wrap, 3 ft", "ea", loft),
     ];
   }
 
-  // Curtains — multi. The four fabric drapes (Draw/Legs/Border/Rear) price
-  // through the shared two-term make-it model, from the same goods.ts drape
-  // geometry the quote side and the lineset weights use; qty per 10-ft depth
-  // block. Scenery track is hardware, not soft goods, and keeps its lump
-  // per-ft price via addCurtain.
+  // Curtains — the four fabric drapes carry the goods.ts drape geometry
+  // (finished width/height, fullness, panels) so equipment-pricing.ts costs
+  // each one from the mapped fabric's area rate + making; qty per depth block.
   const drape = s.drape || {};
-  const curtainItems: EqItem[] = [];
-  const addCurtain = (on: boolean | undefined, key: string, desc: string, count: number, area: number, rate: number, fabricKey: string | null) => {
-    if (on && count > 0) curtainItems.push({ key, desc, unit: "ea", qty: count, cost: Math.round(area * rate), area, fabricKey });
-  };
-  // `proscenium` gates the wing addition inside venueDimsFromEstimator (#66):
-  // wing space is only OUTSIDE `width` for a real proscenium opening, same
-  // venue-kind test `pipeLenFt` above already uses for the batten overhang.
+  const curtainItems: Eq[] = [];
+  // `proscenium` gates the wing addition inside venueDimsFromEstimator (#66).
   const gdims = venueDimsFromEstimator({ ...s, proscenium: venueOf(s).kind === "proscenium" });
-  const priceDrape = (on: boolean | undefined, desc: string, count: number, fabricKey: string) => {
+  const addDrape = (on: boolean | undefined, key: string, desc: string, count: number, fabricKey: string) => {
     if (!on || count <= 0) return;
-    const r = curtainMakeCost(fabricKey, gdims, s.tier);
-    if (!r) return;
-    curtainItems.push({ key: `curtains:${fabricKey}`, desc, unit: "ea", qty: count, cost: r.cost, area: r.area, fabricKey });
+    const type = CURTAIN_KEY_TO_TYPE[fabricKey];
+    const rule = type ? drapeRule(type, gdims, "better") : null; // geometry is tier-independent
+    if (!rule) return;
+    curtainItems.push({ key, desc, unit: "ea", qty: count, drape: { w: rule.w, h: rule.h, fullness: rule.fullness, qty: rule.qty } });
   };
-  priceDrape(drape.draw, "Draw", dBlk * 1, "draw");
-  priceDrape(drape.legs, "Leg", dBlk * 2, "legs");
-  priceDrape(drape.border, "Border", dBlk * 1, "border");
-  priceDrape(drape.fullstage, "Full stage", dBlk * 1, "fullstage");
-  // Track hardware, not soft goods. Jeff 2026-07-27: it follows the pipe rule,
-  // so it spans the same length as the batten it parallels (PRO width + 4 ft in
-  // a proscenium house, room width elsewhere) rather than raw stage width.
-  addCurtain(drape.scenerytrack, "curtains:scenerytrack", "Scenery track", dBlk * 1, pipeLenFt * 1, 3, null);
+  addDrape(drape.draw, "curtains:draw", "Draw", dBlk * 1, "draw");
+  addDrape(drape.legs, "curtains:legs", "Leg", dBlk * 2, "legs");
+  addDrape(drape.border, "curtains:border", "Border", dBlk * 1, "border");
+  addDrape(drape.fullstage, "curtains:fullstage", "Full stage", dBlk * 1, "fullstage");
+  // Track hardware, not soft goods. Jeff 2026-07-27: it follows the pipe rule
+  // (PRO width + 4 ft in a proscenium house, room width elsewhere). One run per
+  // depth block, measured in FEET so a per-foot catalog track prices it.
+  if (drape.scenerytrack && dBlk > 0) curtainItems.push(eq("curtains:scenerytrack", "Scenery track", "ft", dBlk * pipeLenFt));
 
   // Fixtures — multi. E = unified electric count; wUnit ≈ 1 per 8 ft of width.
   const fx = s.fixtures || {};
   const E = Math.max(1, electrics);
   const wUnit = Math.max(1, Math.round(W / 8));
-  const lightItems: EqItem[] = [];
-  const addFix = (key: string, on: boolean | undefined, desc: string, qty: number, cost: number) => {
-    const selected = assemblyOptions[s.fixtureAssemblies?.[key] || ""];
-    if (on && qty > 0) lightItems.push({ key: `lighting:${key}`, desc: selected?.name || desc, unit: "ea", qty, cost: selected?.cost || cost });
+  const lightItems: Eq[] = [];
+  const addFix = (key: string, on: boolean | undefined, desc: string, qty: number) => {
+    if (on && qty > 0) lightItems.push(eq(`lighting:${key}`, desc, "ea", qty));
   };
-  addFix("par", fx.par, "Par", Math.round(E * wUnit * pick(0.7, 1, 1.2)), 750);
-  addFix("front", fx.front, "Front", Math.round(wUnit * pick(2, 2.5, 3)), 2250);
-  addFix("cyc", fx.cyc, "Cyc", Math.round(wUnit * pick(1, 1.25, 1.5)), 1750);
-  addFix("side", fx.side, "Side light", Math.round(E * wUnit * pick(0, 0.5, 0.75)), 1800);
+  addFix("par", fx.par, "Par", Math.round(E * wUnit * pick(0.7, 1, 1.2)));
+  addFix("front", fx.front, "Front", Math.round(wUnit * pick(2, 2.5, 3)));
+  addFix("cyc", fx.cyc, "Cyc", Math.round(wUnit * pick(1, 1.25, 1.5)));
+  addFix("side", fx.side, "Side light", Math.round(E * wUnit * pick(0, 0.5, 0.75)));
   const automatedQty = Math.round(E * wUnit * pick(0, 0.5, 0.9));
-  addFix("automated", fx.automated, "Automated", automatedQty, 3000);
+  addFix("automated", fx.automated, "Automated", automatedQty);
   // dimmer racks derive from the real conventional-fixture total (movers are non-dim, DMX)
   const convFixTotal = lightItems.reduce((a, it) => a + it.qty, 0) - (fx.automated ? automatedQty : 0);
   dimmerRacks = s.sys.lighting ? Math.max(1, Math.ceil(convFixTotal / 48)) : 0;
 
   // Controls — multi (Console / Architectural / Data groups)
   const ctrl = s.ctrl || {};
-  const ctrlItems: EqItem[] = [];
+  const ctrlItems: Eq[] = [];
   if (ctrl.console) {
-    ctrlItems.push({ key: "controls:console", desc: "Console", unit: "ea", qty: 1, cost: 7000 });
-    ctrlItems.push({ key: "controls:consoleTouch", desc: "Console touch screen", unit: "ea", qty: pick(1, 2, 2), cost: 2000 });
-    if (size === "large") ctrlItems.push({ key: "controls:batteryBackup", desc: "Battery backup", unit: "ea", qty: 1, cost: 30 });
+    ctrlItems.push(eq("controls:console", "Console", "ea", 1));
+    ctrlItems.push(eq("controls:consoleTouch", "Console touch screen", "ea", pick(1, 2, 2)));
+    if (size === "large") ctrlItems.push(eq("controls:batteryBackup", "Battery backup", "ea", 1));
   }
   if (ctrl.architectural) {
-    ctrlItems.push({ key: "controls:processor", desc: "Processor", unit: "ea", qty: 1, cost: 10000 });
-    ctrlItems.push({ key: "controls:button", desc: "Button", unit: "ea", qty: pick(fl(W / 20), fl(W / 10), fl(W / 5)), cost: 250 });
-    if (size === "large") ctrlItems.push({ key: "controls:archTouch", desc: "Architectural touch screen", unit: "ea", qty: 1, cost: 2000 });
+    ctrlItems.push(eq("controls:processor", "Processor", "ea", 1));
+    ctrlItems.push(eq("controls:button", "Button", "ea", pick(fl(W / 20), fl(W / 10), fl(W / 5))));
+    if (size === "large") ctrlItems.push(eq("controls:archTouch", "Architectural touch screen", "ea", 1));
   }
   if (ctrl.data) {
-    ctrlItems.push({ key: "controls:inputStation", desc: "Input station", unit: "ea", qty: pick(1, 2, 4), cost: 100 });
-    ctrlItems.push({ key: "controls:outputStation", desc: "Output station", unit: "ea", qty: pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3)), cost: 125 });
-    ctrlItems.push({ key: "controls:distro", desc: "Distro system", unit: "ea", qty: 1, cost: 3000 });
+    ctrlItems.push(eq("controls:inputStation", "Input station", "ea", pick(1, 2, 4)));
+    ctrlItems.push(eq("controls:outputStation", "Output station", "ea", pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3))));
+    ctrlItems.push(eq("controls:distro", "Distro system", "ea", 1));
   }
 
   // Acoustical shell — multi (size-independent)
   const shell = s.shell || {};
-  const shellItems: EqItem[] = [];
-  if (shell.towers) shellItems.push({ key: "acoustical:tower", desc: "Tower", unit: "ea", qty: fl(W / 10) + 2 * fl(D / 10), cost: 10000 });
-  if (shell.ceiling) shellItems.push({ key: "acoustical:ceiling", desc: "Ceiling", unit: "ea", qty: fl(D / 10), cost: 20000 });
-  if (shell.transport) shellItems.push({ key: "acoustical:transport", desc: "Transport", unit: "ea", qty: fl(D / 10), cost: 1000 });
+  const shellItems: Eq[] = [];
+  if (shell.towers) shellItems.push(eq("acoustical:tower", "Tower", "ea", fl(W / 10) + 2 * fl(D / 10)));
+  if (shell.ceiling) shellItems.push(eq("acoustical:ceiling", "Ceiling", "ea", fl(D / 10)));
+  if (shell.transport) shellItems.push(eq("acoustical:transport", "Transport", "ea", fl(D / 10)));
 
   // Pit filler — single. Per-sqft over Pro Width × 10 ft.
   const pitType = s.pitType || "legged";
   const pitArea = W * 10;
-  const pitItems: EqItem[] =
+  const pitItems: Eq[] =
     pitType === "clearspan"
-      ? [{ key: "pit:clearspan", desc: "Clear-span pit filler deck", unit: "sqft", qty: pitArea, cost: 150 }]
-      : [{ key: "pit:legged", desc: "Legged pit filler deck", unit: "sqft", qty: pitArea, cost: 125 }];
+      ? [eq("pit:clearspan", "Clear-span pit filler deck", "sqft", pitArea)]
+      : [eq("pit:legged", "Legged pit filler deck", "sqft", pitArea)];
 
-  const defs: Array<{ key: SysKey; name: string; on: boolean; m: number; dot: string; items: EqItem[] }> = [
+  const defs: Array<{ key: SysKey; name: string; on: boolean; m: number; dot: string; items: Eq[] }> = [
     { key: "rigging", name: "Rigging", on: s.sys.rigging, m: 0.3, dot: "#7b3f8a", items: rigItems },
     { key: "curtains", name: "Curtains", on: s.sys.curtains, m: 0.3, dot: "#b4543a", items: curtainItems },
     { key: "lighting", name: "Fixtures", on: s.sys.lighting, m: 0.3, dot: "#c98a2b", items: lightItems },
@@ -650,31 +596,26 @@ export function compute(
     {
       key: "audio", name: "Audio", on: s.sys.audio, m: 0.3, dot: "#3155a8",
       items: [
-        { key: "audio:lineArray", desc: "Line-array loudspeaker", unit: "ea", qty: arrayBoxes, cost: 1450 },
-        { key: "audio:subwoofer", desc: "Subwoofer", unit: "ea", qty: subs, cost: 1850 },
-        { key: "audio:mixerDsp", desc: "Digital mixer, DSP & amplifiers", unit: "lot", qty: 1, cost: 14200 },
+        eq("audio:lineArray", "Line-array loudspeaker", "ea", arrayBoxes),
+        eq("audio:subwoofer", "Subwoofer", "ea", subs),
+        eq("audio:mixerDsp", "Digital mixer, DSP & amplifiers", "lot", 1),
       ],
     },
     {
       key: "video", name: "Video", on: s.sys.video, m: 0.31, dot: "#2a7d8a",
       items: [
-        { key: "video:projector", desc: "Laser projector, 4K", unit: "ea", qty: projectors, cost: 18500 },
-        { key: "video:screen", desc: "Projection screen / LED wall", unit: "lot", qty: 1, cost: Math.round(s.width * 260) },
-        { key: "video:processor", desc: "Video processor & switcher", unit: "lot", qty: 1, cost: 9800 },
+        eq("video:projector", "Laser projector, 4K", "ea", projectors),
+        eq("video:screen", "Projection screen / LED wall", "lot", 1),
+        eq("video:processor", "Video processor & switcher", "lot", 1),
       ],
     },
   ];
-  const systems: SystemBlock[] = defs.map((d) => {
-    let rev = 0;
-    let cost = 0;
-    const items: BomItem[] = d.items.map((it) => {
-      const price = it.cost / (1 - d.m);
-      rev += it.qty * price;
-      cost += it.qty * it.cost;
-      return { key: it.key, desc: it.desc, qty: it.qty, unit: it.unit || "ea", cost: it.cost, price, area: it.area, fabricKey: it.fabricKey };
-    });
-    return { ...d, items, rev, cost };
-  });
+  const systems: SystemBlock[] = defs.map((d) => ({
+    ...d,
+    items: d.items.map((it): BomItem => ({ ...it, cost: 0, price: 0 })),
+    rev: 0,
+    cost: 0,
+  }));
   return { lineSets, electrics, drapeArea, dimmerRacks, rigType, systems, rigSets: rigSetsFor(s) };
 }
 
@@ -733,84 +674,6 @@ export function scaleSets(systems: SystemBlock[], C: ComputeResult, tierKey: Tie
   });
 }
 
-export function fabricRate(fabrics: FabricOption[], sku: string | undefined): number {
-  const f = fabrics.find((p) => p.sku === sku);
-  return f && f.costPerSqft != null ? f.costPerSqft : 3.0;
-}
-
-/**
- * Recompute the curtains system's fabric items for the active tier.
- *
- * Curtains price through the SAME two-term make-it model compute() uses,
- * keyed by FABRIC_BY_TYPE_TIER[type][tierKey] (goods.ts) via curtainMakeCost
- * — NOT tierDefs[tierKey].fabrics + area × costPerSqft. That old path is what
- * the Quick Design SCREEN rendered through tierSystems/tierSystemsBase even
- * after compute() moved to the shared model (task 6 integration defect): the
- * budget priced curtains one way and the rendered tier grid another. tierDefs
- * and fabrics are kept as parameters (other systems / callers still pass
- * them) but are no longer consulted for curtains.
- */
-export function applyFabrics(systems: SystemBlock[], tierKey: TierKey, tierDefs: TierDefs, fabrics: FabricOption[], s: AState): SystemBlock[] {
-  const margin = 0.3;
-  // Same venue-kind gate as compute()'s gdims (#66) — otherwise the tier grid
-  // would price curtains off a DIFFERENT stage width than the budget did.
-  const dims = venueDimsFromEstimator({ ...s, proscenium: venueOf(s).kind === "proscenium" });
-  return systems.map((sys) => {
-    if (sys.key !== "curtains") return sys;
-    let rev = 0;
-    let cost = 0;
-    const items = sys.items.map((it) => {
-      if (!it.fabricKey || it.area == null) {
-        rev += it.qty * it.price;
-        cost += it.qty * it.cost;
-        return it;
-      }
-      const r = curtainMakeCost(it.fabricKey, dims, tierKey);
-      const c = r ? r.cost : it.cost;
-      const area = r ? r.area : it.area;
-      const price = c / (1 - margin);
-      rev += it.qty * price;
-      cost += it.qty * c;
-      return { ...it, cost: c, price, area };
-    });
-    return { ...sys, items, rev, cost, tierFixed: true };
-  });
-}
-
-/**
- * recompute the OTHER systems from the tier's per-item SKU costs — each priced
- * line becomes gear-driven, and the system is marked tierFixed so tierTotals
- * doesn't re-apply the global multiplier. Lines with no SKU keep the multiplier.
- */
-export function applySkus(systems: SystemBlock[], tierKey: TierKey): SystemBlock[] {
-  const table = TIER_SKUS[tierKey] || {};
-  const tierMul = TIERS.find((t) => t.key === tierKey) || TIERS[1];
-  return systems.map((sys) => {
-    const skus = table[sys.key];
-    if (!skus) return sys;
-    const margin = typeof sys.m === "number" ? sys.m : 0.3;
-    let rev = 0;
-    let cost = 0;
-    const items = sys.items.map((it) => {
-      const skuCost = skus[it.desc];
-      if (skuCost == null) {
-        // no SKU for this line — keep multiplier behavior
-        const c = Math.round(it.cost * tierMul.costMul);
-        const p = it.price * tierMul.priceMul;
-        rev += it.qty * p;
-        cost += it.qty * c;
-        return { ...it, cost: c, price: p };
-      }
-      const c = Math.round(skuCost);
-      const p = c / (1 - margin);
-      rev += it.qty * p;
-      cost += it.qty * c;
-      return { ...it, cost: c, price: p, sku: true };
-    });
-    return { ...sys, items, rev, cost, tierFixed: true };
-  });
-}
-
 /** apply the tier's per-item manual quantity overrides */
 export function applyOverrides(systems: SystemBlock[], s: AState, tierKey: TierKey): SystemBlock[] {
   const ov = (s.qtyOverrides && s.qtyOverrides[tierKey]) || {};
@@ -827,28 +690,6 @@ export function applyOverrides(systems: SystemBlock[], s: AState, tierKey: TierK
     });
     return { ...sys, items, rev, cost };
   });
-}
-
-/** the full per-tier pipeline: scaleSets → applyFabrics → applySkus → applyOverrides */
-export function tierSystems(
-  C: ComputeResult,
-  s: AState,
-  tierKey: TierKey,
-  tierDefs: TierDefs,
-  fabrics: FabricOption[]
-): SystemBlock[] {
-  return applyOverrides(applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics, s), tierKey), s, tierKey);
-}
-
-/** same pipeline without overrides (the BOM's base rows). */
-export function tierSystemsBase(
-  C: ComputeResult,
-  s: AState,
-  tierKey: TierKey,
-  tierDefs: TierDefs,
-  fabrics: FabricOption[]
-): SystemBlock[] {
-  return applySkus(applyFabrics(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, tierDefs, fabrics, s), tierKey);
 }
 
 /* --------------------------------- riser --------------------------------- */
