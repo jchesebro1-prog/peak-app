@@ -1980,11 +1980,10 @@ ok(
   "the top-level chips are Home, EST, PM, CRM, DESIGN, KNOWLEDGE in order (#55 put Home back, D124; #136 added KNOWLEDGE)",
 );
 ok(
-  activeKeyFor("/catalog") === "settings" &&
-    activeKeyFor("/templates") === "settings" &&
+  activeKeyFor("/templates") === "settings" &&
     activeKeyFor("/estimating-rules") === "settings" &&
     activeKeyFor("/import") === "settings",
-  "catalog, templates, estimating-rules, import all light Settings",
+  "templates, estimating-rules, import all light Settings (catalog moved under Estimating, #213)",
 );
 
 // ---- Operations merge (D100): Installs + Service → Operations (now PM, D117) ----
@@ -2873,8 +2872,8 @@ ok(accentContrast("#b4543a") === "#fff", "red accent carries white text");
 const d117Est = NAV.find((e) => e.kind === "group" && e.key === "est");
 ok(
   !!(d117Est && d117Est.kind === "group" &&
-    d117Est.children.map((c) => c.key).join(",") === "quotes,myquotes,estimator,reviews"),
-  "EST = Quotes, My Quotes, Estimator, Reviews in order (#22)",
+    d117Est.children.map((c) => c.key).join(",") === "quotes,myquotes,estimator,reviews,catalog"),
+  "EST = Quotes, My Quotes, Estimator, Reviews, Catalog in order (#22, #213)",
 );
 ok(activeKeyFor("/estimator") === "estimator", "/estimator lights its own EST child");
 ok(
@@ -18832,4 +18831,19 @@ import {
   const pureImports = [...read("src/lib/specs/product-spec-import.ts").matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
   ok(JSON.stringify(pureImports) === JSON.stringify(["@/lib/specs/articles"]), "#205 product specs: the rules module stays pure — its only import is the spec articles rules");
   ok(read("src/app/(app)/design/specs/library/page.tsx").includes('href="/design/specs/library/product-specs"'), "#205 product specs: the library page links to the import");
+}
+
+/* --- #213: Catalog under Estimating --- */
+{
+  const est213 = NAV.find((e) => e.kind === "group" && e.key === "est");
+  const kids213 = est213 && est213.kind === "group" ? est213.children : [];
+  const last213 = kids213[kids213.length - 1];
+  ok(!!last213 && last213.key === "catalog" && last213.label === "Catalog" && last213.href === "/catalog",
+    "#213: Catalog is the last child of Estimating → /catalog");
+  ok(activeKeyFor("/catalog") === "catalog" && activeKeyFor("/catalog/documents") === "catalog" && activeKeyFor("/catalog/documents/upload") === "catalog",
+    "#213: every /catalog route lights the Catalog child");
+  ok(parentGroupOf(activeKeyFor("/catalog")) === "est",
+    "#213: /catalog lights the Estimating group pill, not Settings");
+  ok(activeKeyFor("/templates") === "settings" && activeKeyFor("/import") === "settings" && activeKeyFor("/settings") === "settings",
+    "#213: the other Settings doors are unchanged");
 }

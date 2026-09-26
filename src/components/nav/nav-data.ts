@@ -45,6 +45,10 @@ export const NAV: NavEntry[] = [
       { key: "myquotes", label: "My Quotes", href: "/quotes?who=mine" },
       { key: "estimator", label: "Estimator", href: "/estimator" },
       { key: "reviews", label: "Reviews", href: "/reviews" },
+      /* #213: the parts catalog is an estimating tool — last EST child. The
+       * Settings → Company "Catalog" link stays as a second door; /catalog
+       * gates its own admin parts, so no permission check here. */
+      { key: "catalog", label: "Catalog", href: "/catalog" },
     ],
   },
   {
@@ -159,7 +163,7 @@ export function activeKeyFor(pathname: string): string {
     "/venues": "venues",
     "/customers": "companies", // legacy route redirects to /companies (D85)
     "/venue-assessments": "field",
-    "/catalog": "settings",
+    "/catalog": "catalog", // #213 — lights the Catalog child of Estimating
     "/reports": "reports",
     "/templates": "settings",
     "/estimating-rules": "settings",
