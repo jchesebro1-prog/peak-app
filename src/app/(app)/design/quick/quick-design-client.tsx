@@ -284,7 +284,12 @@ export default function QuickDesignClient({
       customerId: linkedCustomerObj ? linkedCustomerObj.id : null,
       locationId: linkedCustomerObj ? linkedLocation || null : null,
       customer: linkedCustomerObj ? linkedCustomerObj.name : "",
-      config: JSON.parse(JSON.stringify(s)) as Record<string, unknown>,
+      // D-GEM-23: the server prices `config` itself (budget + incomplete), so
+      // the line-sets dial this browser used travels with it.
+      config: {
+        ...(JSON.parse(JSON.stringify(s)) as Record<string, unknown>),
+        tierSets: { good: tierDefs.good.sets, better: tierDefs.better.sets, best: tierDefs.best.sets },
+      },
     };
   };
 

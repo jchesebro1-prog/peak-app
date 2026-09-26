@@ -67,16 +67,59 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   };
 }
 
+/** The price context autoNeedsPart reads — the map plus the parts/fixtures its
+ *  rows and the designs' swaps reference. Load it ONCE per request and share. */
+export type AutoNeedsCtx = Awaited<ReturnType<typeof loadEquipPriceCtx>>;
+
+type AutoNeedsItem = { project: GridProject; optionId: string };
+
+function autoChoices({ project, optionId }: AutoNeedsItem) {
+  const inputs = project.scopeInputs;
+  const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
+  return inputs && est ? { inputs, est } : null;
+}
+
+/** One price context for a set of Auto designs: the map's SKUs plus every
+ *  design's swapped parts/assemblies, in a single getMany. */
+export async function loadAutoNeedsCtx(items: ReadonlyArray<AutoNeedsItem>): Promise<AutoNeedsCtx> {
+  const skus = new Set<string>();
+  const fixtureIds = new Set<string>();
+  for (const it of items) {
+    const c = autoChoices(it);
+    if (!c) continue;
+    const refs = overrideRefs(c.est);
+    refs.skus.forEach((x) => skus.add(x));
+    refs.assemblyIds.forEach((x) => fixtureIds.add(x));
+  }
+  return loadEquipPriceCtx({ extraSkus: [...skus], extraFixtureIds: [...fixtureIds] });
+}
+
 /**
  * The needs-a-part lines an option's Auto choices leave off the plan — and
  * so off a Grid quote (#GEM final review, D-GEM-22). 0 for a Blank design or
  * an option with no Auto choices. Reads only the map's SKUs and the swaps'.
+ * Pass `loaded` (loadAutoNeedsCtx) when the request prices several designs.
  */
-export async function autoNeedsPart(project: GridProject, optionId: string): Promise<number> {
-  const inputs = project.scopeInputs;
-  const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
-  if (!inputs || !est) return 0;
-  const refs = overrideRefs(est);
-  const { map, ctx } = await loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds });
-  return autoQuoteNeedsPart(autoEstimateCards(inputs, est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx)), est);
+export async function autoNeedsPart(project: GridProject, optionId: string, loaded?: AutoNeedsCtx): Promise<number> {
+  const c = autoChoices({ project, optionId });
+  if (!c) return 0;
+  const { map, ctx } = loaded ?? (await loadAutoNeedsCtx([{ project, optionId }]));
+  return autoQuoteNeedsPart(autoEstimateCards(c.inputs, c.est, buildEquipmentPriceTable(map, ctx), priceOverrides(c.est.overrides, ctx)), c.est);
+}
+
+/**
+ * autoNeedsPart for many designs with ONE shared price context (wave 2, I2):
+ * null for a design with no Auto choices (a Blank design), else its count.
+ * No Auto design → nothing is loaded.
+ */
+export async function autoNeedsPartMany(items: ReadonlyArray<AutoNeedsItem>): Promise<Array<number | null>> {
+  const isAuto = items.map((it) => autoChoices(it) !== null);
+  if (!isAuto.some(Boolean)) return items.map(() => null);
+  const loaded = await loadAutoNeedsCtx(items.filter((_, i) => isAuto[i]));
+  const table = buildEquipmentPriceTable(loaded.map, loaded.ctx);
+  return items.map((it, i) => {
+    if (!isAuto[i]) return null;
+    const c = autoChoices(it)!;
+    return autoQuoteNeedsPart(autoEstimateCards(c.inputs, c.est, table, priceOverrides(c.est.overrides, loaded.ctx)), c.est);
+  });
 }

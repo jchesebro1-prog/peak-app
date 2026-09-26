@@ -65,7 +65,7 @@ export default async function DesignOverviewPage({
           key: p.id,
           name: p.name || "Untitled design",
           href: `/design/grid/${encodeURIComponent(p.id)}`,
-          meta: [p.customer || "No customer", `${n} device${n === 1 ? "" : "s"}`, shortDate(p.updatedAt)].join(" · "),
+          meta: [p.customer || "No customer", `${n} unit${n === 1 ? "" : "s"}`, shortDate(p.updatedAt)].join(" · "),
           updatedAt: p.updatedAt,
         };
       }),

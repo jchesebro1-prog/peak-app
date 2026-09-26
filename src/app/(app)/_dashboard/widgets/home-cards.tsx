@@ -5,7 +5,7 @@
  * through ctx.data so a store loads once per request however many widgets
  * share it.
  */
-import { designBudgetLabel, designNeedsPart } from "@/lib/design/scope-targets";
+import { designBudgetLabel, designNeedsPart, designRefreshHint } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
 import { deriveInitials, fallbackColor } from "@/lib/team";
 import { timeAgo as designTimeAgo } from "@/lib/stores/designs";
@@ -139,6 +139,9 @@ export const HOME_RENDERERS = {
       // of the saved tier still needs a part, never a partial dollar figure.
       budget: designBudgetLabel(d, shortMoney),
       incomplete: designNeedsPart(d) > 0,
+      // #GEM wave 2 (M5): an incomplete Quick design's stored price is from
+      // its last save — say how to refresh it once the rows are mapped.
+      hint: designRefreshHint(d) || undefined,
       meta: `${d.id} · ${d.width || "?"}' × ${d.depth || "?"}' × ${d.grid || "?"}'`,
       systemsLabel: `${(d.systems || []).length} systems`, edited: designTimeAgo(d.updatedAt),
       // #GEM final review I2: a Grid (manual-layout) design opens in The Grid.

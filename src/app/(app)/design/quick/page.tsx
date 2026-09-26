@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { getDesign } from "@/lib/stores/designs";
@@ -46,6 +47,11 @@ export default async function Page({
       listFixtures(),
       catalogList(),
     ]);
+  // Final review M1: a Grid (manual-layout) design is never opened in Quick
+  // Design — its record has no `config`, and a save here would overwrite it.
+  if (design?.layoutMode === "manual") {
+    redirect(design.gridProjectId ? `/design/grid/${encodeURIComponent(design.gridProjectId)}` : "/design/designs");
+  }
   // #210: fixtures (not systems) under their kept ids — included parts only.
   const fixtureList = fixtureAssembliesFrom(fixtureRecords, catalogRows);
   // The Equipment map price table (#GEM) plus each pickable fixture's price,

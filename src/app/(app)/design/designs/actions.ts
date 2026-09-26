@@ -17,7 +17,7 @@ import {
 } from "@/lib/stores/designs";
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
-import { quickPromoteGuard } from "@/lib/stores/design-pricing";
+import { quickPromoteCheck } from "@/lib/stores/design-pricing";
 import { activeUsers } from "@/lib/users";
 import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, removeTask as removeTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
 import { applyTaskTemplate } from "@/lib/stores/task-templates";
@@ -76,15 +76,16 @@ export async function promoteDesignAction(
     return { ok: true, quoteId: result.quoteId };
   }
 
-  // #GEM D-GEM-10/D-GEM-19: never promote an incomplete estimate. The server
-  // re-prices the saved record (its config, or a pre-config seed rebuilt from
-  // its display fields) against the live Equipment map — the stored
-  // `incomplete` is never trusted, so a design saved before #GEM is refused
-  // until its rows are mapped (its budget stays visible meanwhile).
-  const blocked = await quickPromoteGuard(d);
+  // #GEM D-GEM-10/D-GEM-19/D-GEM-23: never promote an incomplete estimate.
+  // The server re-prices the saved record (its config, or a pre-config seed
+  // rebuilt from its display fields) against the live Equipment map — the
+  // stored `incomplete` and `budget` are never trusted, so a design saved
+  // before #GEM is refused until its rows are mapped (its budget stays
+  // visible meanwhile), and the quote's value is the server's re-price.
+  const { price, blocked } = await quickPromoteCheck(d);
   if (blocked) return { ok: false, error: blocked.error, needsPart: blocked.needsPart };
 
-  const q = await promoteDesignToQuote(id, user.name);
+  const q = await promoteDesignToQuote(id, user.name, price);
   if (!q) return { ok: false, error: "Design not found." };
   revalidatePath("/design/designs");
   revalidatePath("/quotes");

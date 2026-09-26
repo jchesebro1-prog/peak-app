@@ -27,7 +27,7 @@ import {
 } from "../quick/engine";
 import { tierSystems } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable } from "@/lib/design/equipment-map";
-import { needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
+import { designRefreshHint, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
 import {
   getAccentHex,
@@ -415,6 +415,13 @@ export default function DesignClient({
                     <EquipmentMapLink style={{ fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
                       {sel.incomplete!.needsPart} item{sel.incomplete!.needsPart === 1 ? "" : "s"} need{sel.incomplete!.needsPart === 1 ? "s" : ""} a part →
                     </EquipmentMapLink>
+                    {/* #GEM wave 2 (M5): the stored price is from the last save (D-GEM-23). */}
+                    {designRefreshHint(sel) && (
+                      <Link href={`/design/quick?design=${encodeURIComponent(sel.id)}`} style={{ display: "block", marginTop: 4, fontSize: 11.5, fontWeight: 600, color: "#a0442b", textDecoration: "none" }}>
+                        {detail && detail.needsPart === 0 ? "Every item is mapped now — " : ""}
+                        {designRefreshHint(sel)} →
+                      </Link>
+                    )}
                   </div>
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
@@ -693,6 +700,11 @@ export default function DesignClient({
                       ? `${d.incomplete!.needsPart} item${d.incomplete!.needsPart === 1 ? "" : "s"} need${d.incomplete!.needsPart === 1 ? "s" : ""} a part`
                       : `${(d.systems || []).length} systems · edited ${timeAgoMs(d.updatedAt)}`}
                   </div>
+                  {designRefreshHint(d) && (
+                    <Link href={`/design/quick?design=${encodeURIComponent(d.id)}`} style={{ display: "block", fontSize: 11, lineHeight: 1.35, fontWeight: 600, color: "#a0442b", marginTop: 5, textDecoration: "none" }}>
+                      {designRefreshHint(d)} →
+                    </Link>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11, paddingBottom: 14, borderBottom: "1px solid #f2f3f5" }}>
                     <span title={d.owner} style={{ width: 24, height: 24, borderRadius: "50%", background: colorOf(d.owner), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9.5, fontWeight: 600, flexShrink: 0 }}>
                       {initialsOf(d.owner)}

@@ -4163,10 +4163,10 @@ async function main() {
     assert.ok(n0 > 0, "#GEM D-GEM-19: with the map empty, the server counts needs-a-part lines");
     const forged = await DP.quickPromoteGuard({ ...rec, incomplete: { needsPart: 0 } } as typeof rec);
     assert.ok(forged && forged.needsPart === n0 && /^Incomplete — /.test(forged.error), "#GEM D-GEM-19: a client claiming complete is refused — the server re-prices");
-    const saved = await DP.withServerIncomplete({ ...rec, incomplete: { needsPart: 0 } });
-    assert.equal(saved.incomplete.needsPart, n0, "#GEM D-GEM-19: a save writes the server's count, never the client's");
-    const created = await Designs.createDesign({ ...saved, budget: 1234, owner: "Jeff Chesebro" });
-    assert.equal((await Designs.getDesign(created.id))?.incomplete?.needsPart, n0, "#GEM D-GEM-19: …and it round-trips on the record");
+    const savedRes = await DP.saveQuickDesign(null, { ...rec, incomplete: { needsPart: 0 }, budget: 1234 }, "Jeff Chesebro");
+    if (!savedRes.ok) throw new Error(savedRes.error);
+    assert.equal(savedRes.record.incomplete?.needsPart, n0, "#GEM D-GEM-19: a save writes the server's count, never the client's");
+    assert.equal((await Designs.getDesign(savedRes.record.id))?.incomplete?.needsPart, n0, "#GEM D-GEM-19: …and it round-trips on the record");
     const legacy = await Designs.createDesign({ name: "GEMFR legacy", venue: "Auditorium", size: "medium", tier: "better", width: 40, depth: 30, grid: 24, systems: ["Rigging", "Audio"], budget: 99000, owner: "Jeff Chesebro" });
     assert.ok(legacy.incomplete === undefined && (await DP.quickPromoteGuard(legacy)) !== null, "#GEM D-GEM-19: a pre-#GEM design (no incomplete, no config) is refused until its rows are mapped");
     // I3 — fixture picks price through priceCell (catalog margin), a dead pick stays needs-a-part.
@@ -4190,6 +4190,103 @@ async function main() {
     assert.equal(await DP.serverDesignNeedsPart(withPick(fxDead.id)), 1, "#GEM D-GEM-19: the server guard sees the dead pick too");
     for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
     await Cat.remove("GEMFR-ENG");
+  }
+
+  /* --- #GEM final review, fix wave 2 — I2: a Grid Auto design carries its
+         live `incomplete` on every read (one shared price context); a Blank
+         Grid design carries none. --- */
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const Designs = await import("@/lib/stores/designs");
+    const { autoNeedsPart } = await import("@/lib/design/grid-auto-fill");
+    const { intakeScopeInputs } = await import("@/lib/design/grid-intake");
+    const { defaultAState } = await import("@/app/(app)/design/quick/engine");
+    const { resolveOptionId } = await import("@/lib/design/grid-options");
+    const { designBudgetLabel, designNeedsPart } = await import("@/lib/design/scope-targets");
+    const by = "tester";
+    const a = {
+      ...defaultAState(0), venue: "school", size: "medium" as const, width: 40, depth: 30, grid: 24, wing: 12, ph: 20,
+      sys: { rigging: false, curtains: false, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false },
+      fixtures: { par: true, front: false, cyc: false, side: false, automated: false },
+    };
+    const mkAuto = async (name: string) => {
+      const p = await GP.createProject({ name, customer: "", customerId: null, by });
+      const opt = resolveOptionId(p, null);
+      await GP.saveGridIntake(p.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "", address: "", notes: "", autoConfig: a });
+      await GP.setScopeInputs(p.id, intakeScopeInputs(a));
+      await GP.setAutoEstimate(p.id, opt, { tierByScope: { lighting: "better", audio: "good" }, overrides: {} });
+      const d = await Designs.createDesign({ name, owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: p.id });
+      return { p, opt, d };
+    };
+    const one = await mkAuto("GEMW2 auto one");
+    const two = await mkAuto("GEMW2 auto two");
+    const blankP = await GP.createProject({ name: "GEMW2 blank", customer: "", customerId: null, by });
+    const blank = await Designs.createDesign({ name: "GEMW2 blank", owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: blankP.id });
+    const expected = await autoNeedsPart((await GP.getProject(one.p.id))!, one.opt);
+    assert.ok(expected > 0, `#GEM wave 2 I2: with the map empty the Auto design has needs-a-part lines (${expected})`);
+    const all = await Designs.getAllDesigns();
+    const got = (id: string) => all.find((d) => d.id === id)!;
+    assert.equal(got(one.d.id).incomplete?.needsPart, expected, "#GEM wave 2 I2: getAllDesigns stamps a Grid Auto design's needs-a-part count");
+    assert.equal(got(two.d.id).incomplete?.needsPart, expected, "#GEM wave 2 I2: …for every Auto design in the read (one shared context)");
+    assert.equal(got(blank.id).incomplete, undefined, "#GEM wave 2 I2: a Blank Grid design carries no incomplete");
+    assert.equal(designBudgetLabel(got(one.d.id), (n) => `$${n}`), "Incomplete", "#GEM wave 2 I2: Home / Reviews read Incomplete for it (and Home's Add to Quotes is disabled by the same count)");
+    assert.equal(designNeedsPart((await Designs.getDesign(one.d.id))!), expected, "#GEM wave 2 I2: getDesign stamps it too (the engagement letter prints To be confirmed)");
+    assert.equal((await Designs.getDesign(one.d.id))!.incomplete?.needsPart, expected, "#GEM wave 2 I2: never stored — read live");
+  }
+
+  /* --- #GEM final review, fix wave 2 — I1 (D-GEM-23), M1, M2: the server
+         derives `budget` as well as `incomplete` on every save and promote;
+         the save writes only whitelisted fields; Quick refuses a Grid record. --- */
+  {
+    const EM = await import("@/lib/stores/equipment-map");
+    const DP = await import("@/lib/stores/design-pricing");
+    const Designs = await import("@/lib/stores/designs");
+    const Quotes = await import("@/lib/stores/quotes");
+    const { EQUIPMENT_ROWS } = await import("@/lib/design/equipment-vocab");
+    const { defaultAState, compute, hydrateAState, tierTotals, TIERS } = await import("@/app/(app)/design/quick/engine");
+    const { tierSystems, tierDefsFor } = await import("@/lib/design/equipment-pricing");
+    const by = "tester";
+    // Every row a confirmed allowance EXCEPT lighting:par — the design uses it.
+    for (const r of EQUIPMENT_ROWS) if (r.key !== "lighting:par") await EM.saveEquipmentRow(r.key, { sameAll: true, tiers: { good: { kind: "allowance", amount: 100, confirmed: true } } }, by);
+    const cfg = { ...defaultAState(10), tier: "better" as const };
+    const rec = { name: "GEMW2 quick", venue: "Conference", size: "large", tier: "better", width: 50, depth: 30, grid: 50, systems: ["Rigging", "Lighting"], customer: "", customerId: null, locationId: null, config: cfg as unknown as Record<string, unknown> };
+    const unmapped = await DP.serverDesignPrice(rec);
+    assert.ok(unmapped.needsPart === 1, `#GEM wave 2 I1: one unmapped row → 1 needs-a-part line (${unmapped.needsPart})`);
+    // A stale tab: the client claims complete with a partial budget, and tries to set server-owned fields.
+    const forged = { ...rec, budget: 7, incomplete: { needsPart: 0 }, review: { state: "approved", reviewer: "Mallory", submittedBy: null, submittedAt: null, decidedBy: "Mallory", decidedAt: 1, note: "" }, quoteId: "Q-FORGED", owner: "Mallory", layoutMode: "manual", gridProjectId: "GP-FORGED", revisions: [{ rev: 99, at: 1 }] };
+    const created = await DP.saveQuickDesign(null, forged, "Jeff Chesebro");
+    if (!created.ok) throw new Error(created.error);
+    const c0 = (await Designs.getDesign(created.record.id))!;
+    assert.equal(c0.incomplete?.needsPart, 1, "#GEM wave 2 I1: the stale-tab save stores the server's incomplete count, not the client's 0");
+    assert.equal(c0.budget, unmapped.budget, "#GEM wave 2 I1: …and the server's budget, not the client's partial figure");
+    assert.notEqual(c0.budget, 7, "#GEM wave 2 I1: the client budget is never stored");
+    assert.ok(c0.review.state === "none" && !c0.quoteId && c0.owner === "Jeff Chesebro" && c0.layoutMode === undefined && !c0.gridProjectId && !c0.revisions, "#GEM wave 2 M2: a create ignores review / quoteId / owner / layoutMode / gridProjectId / revisions from the client");
+    await Designs.submitDesignForReview(c0.id, { by: "Jeff Chesebro", reviewer: "Pat" });
+    const upd = await DP.saveQuickDesign(c0.id, forged, "Someone Else");
+    if (!upd.ok) throw new Error(upd.error);
+    const c1 = (await Designs.getDesign(c0.id))!;
+    assert.ok(c1.review.state === "in_review" && c1.review.reviewer === "Pat" && !c1.quoteId && c1.owner === "Jeff Chesebro" && c1.layoutMode === undefined && !c1.gridProjectId, "#GEM wave 2 M2: an update ignores review / quoteId / owner / layoutMode / gridProjectId from the client");
+    // Map the row → the promote re-prices and quotes the SERVER figure.
+    await EM.saveEquipmentRow("lighting:par", { sameAll: true, tiers: { good: { kind: "allowance", amount: 250, confirmed: true } } }, by);
+    const { price, blocked } = await DP.quickPromoteCheck(c1);
+    assert.ok(blocked === null && price.needsPart === 0 && price.budget > 0 && price.budget !== c1.budget, `#GEM wave 2 I1: once mapped, the promote re-derives both (${JSON.stringify(price)} vs stored ${c1.budget})`);
+    // The server figure is the screen's figure: tierTotals over the same pipeline with the page's default rates.
+    const s = hydrateAState(c1, 10);
+    const { table } = await DP.loadDesignPricing([]);
+    const screen = tierTotals(tierSystems(compute(s), s, "better", tierDefsFor(s), table, {}), TIERS[1], 0.18, 0.05, (s.contingency || 0) / 100).grand;
+    assert.equal(price.budget, Math.round(screen), "#GEM wave 2 I1: the server budget equals Quick Design's own total (whole dollars, as the screen shows it)");
+    const q = await Designs.promoteDesignToQuote(c1.id, "Jeff Chesebro", price);
+    assert.ok(q, "#GEM wave 2 I1: promoted");
+    assert.equal((await Quotes.get(q!.id))?.value, price.budget, "#GEM wave 2 I1: the quote's value is the server's re-price, not the stored (stale) budget");
+    const c2 = (await Designs.getDesign(c1.id))!;
+    assert.ok(c2.budget === price.budget && c2.incomplete?.needsPart === 0 && c2.quoteId === q!.id, "#GEM wave 2 I1: the promote writes the fresh budget/incomplete back to the design");
+    // M1 — a Grid (manual) record is never saved or promoted through Quick Design.
+    const grid = await Designs.createDesign({ name: "GEMW2 grid", owner: "Jeff Chesebro", layoutMode: "manual", gridProjectId: "GP-GEMW2-NONE" });
+    const refused = await DP.saveQuickDesign(grid.id, rec, "Jeff Chesebro");
+    assert.ok(!refused.ok && refused.error === DP.GRID_DESIGN_REFUSAL, "#GEM wave 2 M1: saving a Grid record through Quick Design is refused");
+    const g1 = (await Designs.getDesign(grid.id))!;
+    assert.ok(!g1.config && g1.layoutMode === "manual" && g1.gridProjectId === "GP-GEMW2-NONE", "#GEM wave 2 M1: …and the record is untouched");
+    for (const r of EQUIPMENT_ROWS) await EM.clearEquipmentRow(r.key);
   }
 
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems

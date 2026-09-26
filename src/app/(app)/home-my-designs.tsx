@@ -22,6 +22,8 @@ export type DesignCard = {
   budget: string;
   /** #GEM D-GEM-10: the saved tier still has needs-a-part lines — `budget` reads "Incomplete". */
   incomplete?: boolean;
+  /** #GEM wave 2 (M5): "Open in Quick Design and save to refresh its price" for an incomplete Quick design. */
+  hint?: string;
   tier: string;
   systemsLabel: string;
   edited: string;
@@ -220,6 +222,11 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
               <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 6 }}>
                 {d.systemsLabel} · {d.edited}
               </div>
+              {d.hint && (
+                <Link href={d.openHref} style={{ display: "block", fontSize: 11, lineHeight: 1.35, fontWeight: 600, color: "#a0442b", marginTop: 6, textDecoration: "none" }}>
+                  {d.hint} →
+                </Link>
+              )}
             </div>
             <div
               style={{

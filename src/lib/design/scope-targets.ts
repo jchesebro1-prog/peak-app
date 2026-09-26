@@ -79,6 +79,18 @@ export function designNeedsPart(d: { incomplete?: { needsPart?: number } | null 
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
 }
 
+/** What a person does to bring a Quick design's stored price up to date
+ *  (#GEM wave 2, M5): the record's `incomplete`/`budget` are what the server
+ *  derived at its last save (D-GEM-23), so after the missing rows are mapped
+ *  it still reads Incomplete until it is re-saved. */
+export const REFRESH_PRICE_HINT = "Open in Quick Design and save to refresh its price";
+
+/** The refresh hint for an incomplete QUICK design (a Grid design's
+ *  completeness is read live — D-GEM-22 — so it never goes stale). */
+export function designRefreshHint(d: { layoutMode?: string | null; incomplete?: { needsPart?: number } | null }): string | null {
+  return d.layoutMode !== "manual" && designNeedsPart(d) > 0 ? REFRESH_PRICE_HINT : null;
+}
+
 /**
  * The one budget label every design surface shows (#GEM final review I1):
  * Home cards, the Reviews queue, the engagement letter. "Incomplete" while

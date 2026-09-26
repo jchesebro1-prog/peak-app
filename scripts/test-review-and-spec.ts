@@ -18426,9 +18426,9 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   const da = read("src/app/(app)/design/designs/actions.ts");
   const qaAdd = qa.slice(qa.indexOf("export async function addToQuotesAction"));
   const qaPersist = qa.slice(qa.indexOf("async function persistDesign"), qa.indexOf("/** Save / update the design"));
-  ok(qaAdd.includes("quickPromoteGuard(partial)") && !qaAdd.includes("partial.incomplete") && qaPersist.includes("withServerIncomplete(clientPartial"), "#GEM final review I4: Quick Design's promote re-prices on the server and every save derives `incomplete` server-side");
+  ok(qaAdd.includes("quickPromoteCheck(") && !qaAdd.includes("partial.incomplete") && !qaAdd.includes("partial.budget") && qaAdd.includes("promoteDesignToQuote(saved.id, user.name, price)") && qaPersist.includes("saveQuickDesign(id, clientPartial"), "#GEM final review I4 / wave 2 I1: Quick Design's promote re-prices on the server (budget too) and every save derives `incomplete` + `budget` server-side");
   const daPromote = da.slice(da.indexOf("export async function promoteDesignAction"), da.indexOf("export async function deleteDesignAction"));
-  ok(daPromote.includes("quickPromoteGuard(d)") && !daPromote.includes("d.incomplete") && daPromote.includes("createDraftQuoteAction(d.gridProjectId, null)"), "#GEM final review I4: the dashboard's promote re-prices Quick designs on the server; Grid designs quote through The Grid without acceptIncomplete");
+  ok(daPromote.includes("quickPromoteCheck(d)") && daPromote.includes("promoteDesignToQuote(id, user.name, price)") && !daPromote.includes("d.incomplete") && daPromote.includes("createDraftQuoteAction(d.gridProjectId, null)"), "#GEM final review I4 / wave 2 I1: the dashboard's promote re-prices Quick designs on the server and quotes the server's figure; Grid designs quote through The Grid without acceptIncomplete");
   // I5 — client package: lot units, asm expansion, allowances out, no raw virtual ids.
   const fxPkg = {
     id: "SA-PKG", kind: "system" as const, label: "Rack", description: "", scope: "Audio" as const,
@@ -18456,7 +18456,7 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   ok(bomBy("PKG-PIPE")?.qty === 241, "#GEM final review I5: a lot marker contributes its units to the package BOM");
   ok(bomBy("PKG-MIX")?.qty === 8, "#GEM final review I5: an Auto assembly expands into its members (4 racks × 2 mixers)");
   ok(!pkg.bom.some((r) => /^(asm|allow):/.test(r.sku) || /(asm|allow):/.test(r.desc)) && !pkg.items.some((i) => /^(asm|allow):/.test(i.sku)), "#GEM final review I5: no raw asm:/allow: id reaches the customer's package");
-  ok(pkg.bom.some((r) => r.sku === "" && /SA-GONE/.test(r.desc)), "#GEM final review I5: a deleted assembly stays one row under a readable name for the gap report");
+  ok(!pkg.bom.some((r) => /SA-GONE/.test(r.desc) || r.sku === "") && !pkg.items.some((i) => /SA-GONE/.test(i.description)) && pkg.gaps.some((g) => g.kind === "missing-catalog" && /SA-GONE/.test(g.description) && g.qty === 1), "#GEM wave 2 M3: a deleted assembly lands in the gap report only — never the customer's BOM or items");
   ok(gemFrPkgNeeds(pkgProject.placements) && !gemFrPkgNeeds([{ partId: "PKG-PIPE" }, { partId: "allow:audio:subwoofer:good" }]), "#GEM final review I5: fixtures load only when an asm: placement exists");
   const pkgSrv = read("src/lib/client-package-server.ts");
   ok(pkgSrv.includes("reduce((n, p) => n + placementQty(p), 0)") && pkgSrv.includes("packageNeedsFixtures("), "#GEM final review I5: 'Placed devices' counts units and the package resolves assemblies");
@@ -18519,4 +18519,52 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   const revFr = read("src/app/(app)/design/grid/[id]/revisions-panel.tsx");
   const rollFr = bomBySpace([{ sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "LOT", qty: 40 }, { sheetId: "s", page: 1, x: 0.5, y: 0.5, partId: "ONE" }], [], []);
   ok(rollFr[0]?.count === 41 && hubFr.includes("placementQty(pl)") && revFr.includes("placementQty(pl)") && revFr.includes("units ·"), "#GEM final review minor: space rollups, the design hub and revisions count units");
+}
+
+/* --- #GEM final review, fix wave 2 (D-GEM-23): the server is the Quick
+       budget's authority; save whitelist; Grid records refused by Quick;
+       Auto Grid completeness on every read; refresh hint. --- */
+import { quickDesignPrice as gemW2Price, tierDefsFor as gemW2TierDefs, tierSystems as gemW2TierSystems } from "@/lib/design/equipment-pricing";
+import { quickSaveFields as gemW2Fields, QUICK_SAVE_KEYS as gemW2Keys } from "@/lib/stores/design-pricing";
+import { designRefreshHint as gemW2Hint, REFRESH_PRICE_HINT as gemW2HintText } from "@/lib/design/scope-targets";
+import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as gemW2Totals, TIERS as gemW2Tiers } from "@/app/(app)/design/quick/engine";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const table = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(gemFrRows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const rates = { installPct: 18, freightPct: 5, contingencyPct: 10 };
+  const cfg = { ...gemFrDefault(10), tier: "better" } as unknown as Record<string, unknown>;
+  const rec = { tier: "better", config: cfg };
+  // I1 — the server budget is exactly the screen's makeDesign() total.
+  const s0 = gemW2Hydrate(rec, 10);
+  const screen = gemW2Totals(gemW2TierSystems(gemW2Compute(s0), s0, "better", gemW2TierDefs(s0), table, {}), gemW2Tiers[1], 0.18, 0.05, 0.1).grand;
+  const p0 = gemW2Price(rec, table, {}, rates);
+  ok(p0.needsPart === 0 && p0.budget > 0 && p0.budget === Math.round(screen), `#GEM wave 2 I1: quickDesignPrice totals exactly as Quick Design's screen does (${p0.budget} vs ${screen})`);
+  const pSets = gemW2Price({ tier: "better", config: { ...cfg, tierSets: { better: 23 } } }, table, {}, rates);
+  ok(pSets.budget !== p0.budget && gemW2TierDefs({ tierSets: { better: 2, good: -1, best: Number.NaN } as never }).better.sets === 2 && gemW2TierDefs({ tierSets: { good: -1 } as never }).good.sets === null, "#GEM wave 2 I1: the design's own line-set dial (config.tierSets) reaches the server price; junk is ignored");
+  ok(gemW2Price(rec, { margin: 0.3, byTier: { good: {}, better: {}, best: {} } }, {}, rates).needsPart > 0, "#GEM wave 2 I1: an empty map still prices needs-a-part");
+  const hostile = Object.defineProperty({}, "sys", { enumerable: true, get() { throw new Error("bad config"); } }) as Record<string, unknown>;
+  const ph = gemW2Price({ tier: "better", config: hostile }, table, {}, rates);
+  ok(ph.needsPart === 1 && ph.budget === 0, "#GEM wave 2 I1: a config that won't compute is incomplete at $0, never throws");
+  // M2 — the save whitelist.
+  const f = gemW2Fields({ name: "N", venue: "V", size: "large", tier: "best", width: "40", depth: 30, grid: null, systems: ["Rigging", 3], customer: "C", customerId: "CU-1", locationId: null, config: { a: 1 }, budget: 1, incomplete: { needsPart: 0 }, review: { state: "approved" }, quoteId: "Q-1", owner: "Mallory", layoutMode: "manual", gridProjectId: "GP-1", id: "D-999", revisions: [], updatedAt: 1 });
+  ok(Object.keys(f).every((k) => (gemW2Keys as readonly string[]).includes(k)) && !("budget" in f) && !("incomplete" in f) && !("review" in f) && !("quoteId" in f) && !("owner" in f) && !("layoutMode" in f) && !("gridProjectId" in f) && !("id" in f), "#GEM wave 2 M2: a Quick save writes only whitelisted design fields — never review/quoteId/owner/layoutMode/gridProjectId/budget/incomplete");
+  ok(f.width === 40 && !("grid" in f) && JSON.stringify(f.systems) === '["Rigging"]' && f.locationId === null && f.customerId === "CU-1" && JSON.stringify(f.config) === '{"a":1}', "#GEM wave 2 M2: whitelisted fields are type-checked");
+  ok(Object.keys(gemW2Fields({ config: [1], systems: "x" })).length === 0 && Object.keys(gemW2Fields(null)).length === 0, "#GEM wave 2 M2: junk payloads write nothing");
+  // M1 — Quick Design refuses / redirects a Grid record.
+  const qp = read("src/app/(app)/design/quick/page.tsx");
+  const qa = read("src/app/(app)/design/quick/actions.ts");
+  const dp = read("src/lib/stores/design-pricing.ts");
+  ok(qp.includes('design?.layoutMode === "manual"') && qp.includes("redirect(") && qa.includes('existing?.layoutMode === "manual"') && dp.includes('existing?.layoutMode === "manual"'), "#GEM wave 2 M1: Quick Design's page redirects a Grid record to The Grid; its save / Add to Quotes refuse one");
+  ok(read("src/app/(app)/design/quick/quick-design-client.tsx").includes("tierSets: { good: tierDefs.good.sets"), "#GEM wave 2 I1: Quick Design sends its line-set dial with the config");
+  // I2 — Auto Grid designs carry live completeness through one shared ctx.
+  const ds = read("src/lib/stores/designs.ts");
+  const gaf = read("src/lib/design/grid-auto-fill.ts");
+  ok(ds.includes("autoNeedsPartMany(") && gaf.includes("export async function autoNeedsPartMany") && gaf.includes("loaded?: AutoNeedsCtx"), "#GEM wave 2 I2: getAllDesigns stamps Auto Grid completeness with ONE shared price context");
+  // M4 / M5
+  ok(read("src/app/(app)/design/page.tsx").includes("unit${n === 1") && !read("src/app/(app)/design/page.tsx").includes("device${n === 1"), "#GEM wave 2 M4: the design hub counts units");
+  ok(gemW2Hint({ incomplete: { needsPart: 2 } }) === gemW2HintText && gemW2Hint({ layoutMode: "manual", incomplete: { needsPart: 2 } }) === null && gemW2Hint({ incomplete: { needsPart: 0 } }) === null && gemW2HintText === "Open in Quick Design and save to refresh its price", "#GEM wave 2 M5: the refresh hint is for incomplete Quick designs only");
+  ok(read("src/app/(app)/_dashboard/widgets/home-cards.tsx").includes("hint: designRefreshHint(d)") && read("src/app/(app)/home-my-designs.tsx").includes("{d.hint} →") && read("src/app/(app)/design/designs/design-client.tsx").includes("designRefreshHint(d)"), "#GEM wave 2 M5: Home and the Designs dashboard say how to refresh a stale incomplete price");
 }

@@ -139,6 +139,11 @@ export type AState = {
   planImage?: string | null;
   planName?: string | null;
   showGen?: boolean;
+  /** The line-set count per tier the designer dialled (TierDefs[t].sets) at
+   *  save time — carried in `config` so the SERVER prices the same rigging
+   *  quantities the screen showed (#GEM D-GEM-23). Missing = the equation's
+   *  own count (tierDefsDefault). */
+  tierSets?: Partial<Record<TierKey, number | null>>;
 };
 
 /**
@@ -169,6 +174,7 @@ export type QuickScopeInputs = Omit<
   | "planImage"
   | "planName"
   | "showGen"
+  | "tierSets"
 >;
 
 /* -------------------------------- constants -------------------------------- */

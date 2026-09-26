@@ -7,7 +7,7 @@ import {
   upsertDoc,
 } from "@/db/doc-store";
 import { create as createQuote, update as updateQuote, get as getQuoteById, type Quote } from "@/lib/stores/quotes";
-import { getProject } from "@/lib/stores/grid-projects";
+import { getProject, type GridProject } from "@/lib/stores/grid-projects";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 
 /**
@@ -172,21 +172,19 @@ function normalizeDesign(d: DesignRecord): DesignRecord {
 export async function getAllDesigns(): Promise<DesignRecord[]> {
   const list = await listDocs<DesignRecord>("designs");
   const designs = list.map(normalizeDesign).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  return Promise.all(designs.map(withLiveGridBudget));
+  return withLiveGrid(designs);
 }
 
 export async function getDesign(id: string): Promise<DesignRecord | null> {
   const d = await getDoc<DesignRecord>("designs", id);
-  return d ? withLiveGridBudget(normalizeDesign(d)) : null;
+  return d ? (await withLiveGrid([normalizeDesign(d)]))[0] : null;
 }
 
 /** Manual/Grid designs do not have a reliable parametric `budget` snapshot.
  * Read their current BOM total instead, so the Designs dashboard cannot show
  * the creation-time zero after a designer has placed equipment. Quick Design
- * records retain their saved equation result. */
-async function withLiveGridBudget(d: DesignRecord): Promise<DesignRecord> {
-  if (d.layoutMode !== "manual" || !d.gridProjectId) return d;
-  const project = await getProject(d.gridProjectId);
+ * records retain their saved (server-derived, D-GEM-23) equation result. */
+async function withLiveGridBudget(d: DesignRecord, project: GridProject | null): Promise<DesignRecord> {
   if (!project) return d;
   const optionId = project.options?.[0]?.id;
   if (!optionId) return d;
@@ -198,6 +196,39 @@ async function withLiveGridBudget(d: DesignRecord): Promise<DesignRecord> {
     // currently be priced; the persisted budget remains the safe fallback.
   }
   return d;
+}
+
+/**
+ * The live Grid read (#GEM final review wave 2, I2): every manual design gets
+ * its live BOM budget, and an AUTO one also gets `incomplete: { needsPart }`
+ * — the chosen scopes' needs-a-part lines Auto left off the plan
+ * (autoNeedsPart, D-GEM-22) — so Home, Reviews, the dashboard and the
+ * engagement letter read "Incomplete" / "To be confirmed" for it exactly as
+ * for a Quick design. ONE price context serves every Auto design in the read
+ * (not one per design); a list with no Auto design loads none. A Blank Grid
+ * design carries no `incomplete`, as before.
+ */
+async function withLiveGrid(designs: DesignRecord[]): Promise<DesignRecord[]> {
+  const projects = await Promise.all(
+    designs.map((d) => (d.layoutMode === "manual" && d.gridProjectId ? getProject(d.gridProjectId) : Promise.resolve(null)))
+  );
+  const out = await Promise.all(designs.map((d, i) => withLiveGridBudget(d, projects[i])));
+  const autoIdx = projects.flatMap((p, i) => (p && p.scopeInputs && p.autoEstimate ? [i] : []));
+  if (!autoIdx.length) return out;
+  try {
+    const { autoNeedsPartMany } = await import("@/lib/design/grid-auto-fill");
+    const { defaultOptionId } = await import("@/lib/design/grid-options");
+    const needs = await autoNeedsPartMany(autoIdx.map((i) => ({ project: projects[i]!, optionId: defaultOptionId(projects[i]!) })));
+    autoIdx.forEach((i, k) => {
+      const n = needs[k];
+      if (n !== null) out[i] = { ...out[i], incomplete: { needsPart: n } };
+    });
+  } catch (err) {
+    // A read must not fail because the map can't be priced right now; the
+    // server still refuses an incomplete Auto quote on promote (D-GEM-22).
+    console.error("getAllDesigns: Auto completeness check failed", err);
+  }
+  return out;
 }
 
 export async function createDesign(
@@ -367,7 +398,12 @@ async function customerNameFor(id: string): Promise<string> {
  * the Estimator's freshLabor()/curtain draft seed hardcodes 30% whenever
  * tierMargin is missing, which silently mispriced every non-Base tier.
  */
-export async function designToQuotePartial(id: string): Promise<DesignQuotePartial | null> {
+export async function designToQuotePartial(
+  id: string,
+  /** The server's price of the design this request (D-GEM-23) — the quote's
+   *  value. Omitted: the stored budget, itself server-derived on every save. */
+  opts: { value?: number } = {}
+): Promise<DesignQuotePartial | null> {
   const d = await getDesign(id);
   if (!d) return null;
   const cid = d.customerId || (await resolveCustomerId(d.customer)) || null;
@@ -379,7 +415,7 @@ export async function designToQuotePartial(id: string): Promise<DesignQuoteParti
     customerId: cid,
     locationId: d.locationId || null,
     customer: cname,
-    value: d.budget,
+    value: opts.value ?? d.budget,
     margin: 0,
     source: "sandbox",
     requote: true,
@@ -418,16 +454,21 @@ export async function designToQuotePartial(id: string): Promise<DesignQuoteParti
  */
 export async function promoteDesignToQuote(
   id: string,
-  owner: string
+  owner: string,
+  /** The server's re-price this request (D-GEM-23): the quote's value, and
+   *  written back to the record so its stored budget/incomplete are fresh. */
+  price?: { needsPart: number; budget: number }
 ): Promise<Quote | null> {
   const d = await getDesign(id);
   if (!d) return null;
-  const partial = await designToQuotePartial(id);
+  const partial = await designToQuotePartial(id, price ? { value: price.budget } : {});
   if (!partial) return null;
+  const fresh = price ? { budget: price.budget, incomplete: { needsPart: price.needsPart } } : {};
 
   const existing = d.quoteId ? await getQuoteById(d.quoteId) : null;
   if (existing && existing.status === "draft") {
     const q = await updateQuote(existing.id, { ...(partial as unknown as Partial<Quote>), owner });
+    if (price) await updateDesign(id, fresh);
     return q;
   }
 
@@ -437,7 +478,7 @@ export async function promoteDesignToQuote(
   if (partial.requote) {
     await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
   }
-  await updateDesign(id, { quoteId: q.id });
+  await updateDesign(id, { ...fresh, quoteId: q.id });
   return q;
 }
 

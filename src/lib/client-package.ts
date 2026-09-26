@@ -107,13 +107,20 @@ export function buildClientPackageManifest(
         : part?.desc || placement.category || placement.partId;
     deviceLines.push({ sku: placement.partId, desc, qty: placementQty(placement) });
   }
+  // Final review wave 2 (M3): a row with no SKU — a deleted assembly, or one
+  // with no included parts — is not equipment the customer can buy. It goes
+  // to the gap report only (one line per name, units summed), never the BOM.
+  const unresolved = new Map<string, BomRow>();
   for (const row of gridSpecBomRows(deviceLines, (id) => fixtureOf?.(id))) {
-    addBom(bomMap, row.sku || `desc:${row.desc}`, row);
+    if (row.sku) addBom(bomMap, row.sku, row);
+    else addBom(unresolved, row.desc, row);
   }
 
   const bom = [...bomMap.values()].sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
   const items: ClientPackageItem[] = [];
-  const gaps: ClientPackageGap[] = [];
+  const gaps: ClientPackageGap[] = [...unresolved.values()]
+    .sort((a, b) => a.desc.localeCompare(b.desc))
+    .map((row) => ({ kind: "missing-catalog" as const, sku: "", description: row.desc, qty: row.qty, catalogId: null }));
   const catalogSkus = bom.map((row) => (byId.get(row.sku) || bySku.get(row.sku))?.sku).filter((s): s is string => !!s);
   const packageDocs = resolvePackageDocs(docs, catalogSkus);
 

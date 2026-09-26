@@ -6202,3 +6202,24 @@ Equipment map link; the Designs dashboard and Home never pass it, so there it bl
 Also: `refillScopeAction` refuses any scope that is not one of the five Auto scopes; the Equipment map flags a mapped
 part whose catalog unit differs from the row's unit (advisory; fabric rows exempt); "Map it" / "Incomplete" links show
 non-admins "ask an admin to map it" instead of a dead-end link (`EquipmentMapLink`, `CanMapProvider`).
+
+## D-GEM-23. The server is the Quick Design budget's authority (#GEM, 2026-09-26)
+
+Extends D-GEM-19 from `incomplete` to `budget`. Every Quick Design save (`saveQuickDesign`,
+`src/lib/stores/design-pricing.ts`) derives BOTH `incomplete` and `budget` on the server from the record's `config`
+— one `loadEquipPriceCtx` for the map + fixture picks, the chosen tier's systems, and `tierTotals` with the same
+install / freight / contingency percentages the Quick Design page reads (`quickDesignPrice`, whole dollars, as the
+screen shows it). The client's `budget` and `incomplete` are sent but never stored or used; a revision snapshot records
+the server's budget. Every promote path (Quick Design's Add to Quotes, the Designs dashboard, Home via the dashboard)
+re-derives both, refuses on any needs-a-part line, quotes the server's figure (`promoteDesignToQuote(…, price)` →
+`designToQuotePartial` value) and writes the fresh budget/incomplete back to the record. The per-browser line-sets
+dial now travels in `config.tierSets` (a rigging quantity, like `qtyOverrides`), so the server prices the same
+quantities the screen showed — this closes D-GEM-19's `tierDefsDefault()` gap. A Quick save writes only the design
+fields (`QUICK_SAVE_KEYS`: name, venue, size, tier, width, depth, grid, systems, customer, customerId, locationId,
+config) — never review, quoteId, owner, layoutMode, gridProjectId or revisions — and Quick Design refuses a Grid
+(manual-layout) record: its save/Add to Quotes return an error and its page redirects to The Grid. Grid Auto designs
+carry a live `incomplete` on every design read (`getAllDesigns`/`getDesign` via `autoNeedsPartMany`, one shared price
+context per read, never stored), so Home, Reviews, the dashboard and the engagement letter treat them like an
+incomplete Quick design. Because a Quick design's stored price is from its last save, an incomplete one on Home and
+the dashboard says "Open in Quick Design and save to refresh its price". A deleted (or part-less) assembly in a client
+package lands in the gap report only, never the customer's BOM.

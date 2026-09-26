@@ -16,6 +16,8 @@ import {
   hydrateAState,
   scaleSets,
   tierDefsDefault,
+  tierTotals,
+  TIERS,
   type AState,
   type DesignRecordLike,
   type BomItem,
@@ -128,27 +130,64 @@ export function fixtureOverridesFor(
 
 const TIER_KEYS: readonly TierKey[] = ["good", "better", "best"];
 
+/** The pricing-rule percentages a Quick Design total uses (Settings → system.*Pct). */
+export type QuickRates = { installPct: number; freightPct: number; contingencyPct: number };
+
+/** A Quick design's server-derived price (#GEM D-GEM-19/D-GEM-23). */
+export type QuickDesignPrice = { needsPart: number; budget: number };
+
 /**
- * The server's own needs-a-part count for a saved (or about-to-be-saved)
- * Quick Design record (#GEM D-GEM-19): hydrate its config (or reconstruct a
- * pre-config seed record from its display fields), run the equations and
- * price the chosen tier from the Equipment map. The client's `incomplete`
- * is never read. Uses tierDefsDefault() — the per-browser line-sets dial
- * only rescales rigging quantities, and the server never sees it (as
- * D-GEM-5's Grid targets). A config that won't compute counts as 1 (never
- * promotable) rather than throwing.
+ * tierDefsDefault() with the design's own line-set counts (`config.tierSets`,
+ * D-GEM-23) — the per-browser line-sets dial, snapshotted at save. It only
+ * rescales rigging QUANTITIES (like qtyOverrides, which `config` already
+ * carries); no price comes from the client.
  */
+export function tierDefsFor(s: Pick<AState, "tierSets">): TierDefs {
+  const td = tierDefsDefault();
+  const sets = s.tierSets;
+  if (sets && typeof sets === "object") {
+    for (const t of TIER_KEYS) {
+      const v = (sets as Record<string, unknown>)[t];
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0) td[t].sets = Math.min(Math.round(v), 999);
+    }
+  }
+  return td;
+}
+
+/**
+ * The server's own price for a saved (or about-to-be-saved) Quick Design
+ * record (#GEM D-GEM-19, D-GEM-23): hydrate its config (or reconstruct a
+ * pre-config seed record from its display fields), run the equations, price
+ * the chosen tier from the Equipment map and total it exactly as the screen
+ * does (tierTotals with the install / freight / contingency percentages).
+ * Neither the client's `incomplete` nor its `budget` is ever read. A config
+ * that won't compute counts as 1 needs-a-part line and $0 (never promotable)
+ * rather than throwing.
+ */
+export function quickDesignPrice(
+  d: DesignRecordLike,
+  table: EquipmentPriceTable,
+  fixturePrices: Record<string, UnitPrice>,
+  rates: QuickRates
+): QuickDesignPrice {
+  try {
+    const s = hydrateAState(d, rates.contingencyPct);
+    const tier = TIER_KEYS.includes(s.tier) ? s.tier : "better";
+    const td = TIERS.find((t) => t.key === tier) || TIERS[1];
+    const systems = tierSystems(compute(s), s, tier, tierDefsFor(s), table, fixtureOverridesFor(s.fixtureAssemblies, fixturePrices));
+    const tot = tierTotals(systems, td, rates.installPct / 100, rates.freightPct / 100, (Number(s.contingency) || 0) / 100);
+    // Whole dollars — what the screen shows (moneyRound) and what a quote stores.
+    return { needsPart: needsPartCount(systems), budget: Number.isFinite(tot.grand) ? Math.round(tot.grand) : 0 };
+  } catch {
+    return { needsPart: 1, budget: 0 };
+  }
+}
+
+/** The needs-a-part half of quickDesignPrice (D-GEM-19). */
 export function quickDesignNeedsPart(
   d: DesignRecordLike,
   table: EquipmentPriceTable,
   fixturePrices: Record<string, UnitPrice>
 ): number {
-  try {
-    const s = hydrateAState(d, 0);
-    const tier = TIER_KEYS.includes(s.tier) ? s.tier : "better";
-    const systems = tierSystems(compute(s), s, tier, tierDefsDefault(), table, fixtureOverridesFor(s.fixtureAssemblies, fixturePrices));
-    return needsPartCount(systems);
-  } catch {
-    return 1;
-  }
+  return quickDesignPrice(d, table, fixturePrices, { installPct: 0, freightPct: 0, contingencyPct: 0 }).needsPart;
 }
