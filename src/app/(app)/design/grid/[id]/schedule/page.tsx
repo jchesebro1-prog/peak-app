@@ -10,7 +10,7 @@ import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { symbolContext } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
-import { buildSchedule } from "@/lib/design/grid-schedule";
+import { buildSchedule, scheduleWiresFromView } from "@/lib/design/grid-schedule";
 import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Equipment schedule — Quartzite-6" };
@@ -53,19 +53,11 @@ export default async function SchedulePage({
   const partById = new Map(parts.map((p) => [p.id, p]));
   const spaces = project.spaces || [];
   const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings) });
-  const nodeName = new Map(view.nodes.map((n) => [n.key, n.name]));
   const { sections, wires, deviceCount, wireFeet } = buildSchedule({
     placements: slice.placements,
     spaces,
     descOf: (pid) => partById.get(pid)?.desc,
-    wires: view.edges.map((e) => ({
-      id: e.id,
-      partId: e.partId,
-      fromName: nodeName.get(e.from.key) || "Unassigned",
-      toName: nodeName.get(e.to.key) || "Unassigned",
-      lengthFt: e.lengthFt,
-      unit: e.unit,
-    })),
+    wires: scheduleWiresFromView(view),
   });
 
   const th: React.CSSProperties = {

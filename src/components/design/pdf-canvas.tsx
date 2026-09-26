@@ -35,12 +35,24 @@ export default function PdfCanvas({
   zoom,
   onLoaded,
   onSize,
+  onRendered,
+  onError,
 }: {
   dataUrl: string;
   page: number;
   zoom: number;
   onLoaded: (pages: number) => void;
   onSize: (w: number, h: number) => void;
+  /** Fired once the requested page has actually finished painting to the
+   *  canvas. Unlike `onSize` (fired as soon as the canvas is sized, before
+   *  the render promise resolves — see the render effect below), this is
+   *  safe for a caller that needs the plan to be visibly on screen, e.g. a
+   *  print-readiness flag (#GDS). Optional — existing callers are unaffected. */
+  onRendered?: () => void;
+  /** Fired when the document fails to load, or the requested page fails to
+   *  render (a genuine failure — never for an in-flight render cancelled by
+   *  paging/unmount). Optional. */
+  onError?: (message: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const docRef = useRef<PdfDoc | null>(null);
@@ -75,7 +87,11 @@ export default function PdfCanvas({
         onLoaded(doc.numPages);
         setErr(null);
       } catch (e) {
-        if (!dead) setErr(e instanceof Error ? e.message : "Could not open this PDF.");
+        if (!dead) {
+          const msg = e instanceof Error ? e.message : "Could not open this PDF.";
+          setErr(msg);
+          onError?.(msg);
+        }
       } finally {
         if (!dead) setLoading(false);
       }
@@ -108,11 +124,15 @@ export default function PdfCanvas({
         const t = pg.render({ canvasContext: ctx, viewport, canvas });
         task = t;
         await t.promise;
+        if (!cancelled) onRendered?.();
       } catch (e) {
         // A cancelled render throws and is expected when paging quickly; any
         // other failure must surface rather than leaving a blank page.
         const msg = e instanceof Error ? e.message : String(e);
-        if (!cancelled && !/cancel/i.test(msg)) setErr(msg);
+        if (!cancelled && !/cancel/i.test(msg)) {
+          setErr(msg);
+          onError?.(msg);
+        }
       }
     })();
     return () => {

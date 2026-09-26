@@ -15560,7 +15560,7 @@ import {
   placementScope, planSheetGroups, planContent, buildSheetList, toggleableSheets,
 } from "@/lib/design/grid-drawing-set";
 import { DRAWING_SYSTEMS, drawingSystemOf } from "@/lib/design/grid-scopes";
-import { buildSchedule, scheduleGroups, paginateSchedule } from "@/lib/design/grid-schedule";
+import { buildSchedule, scheduleGroups, paginateSchedule, scheduleWiresFromView } from "@/lib/design/grid-schedule";
 
 {
   // sizes
@@ -15931,4 +15931,40 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
   ok(gdsSmokeSrc.includes('"/design/grid/GRD-5001/set"') && gdsSmokeSrc.includes('"/design/grid/GRD-5001/set?size=d"'), "#GDS smoke: the set route is covered at both sizes");
   const gdsFigSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/plan-sheet-figure.tsx"), "utf8");
   ok(gdsFigSrc.includes("data-plan-figure") && gdsFigSrc.includes("scaleNote(cal") && gdsFigSrc.includes("fitBox("), "#GDS plan figure: fitted to the drawing area, scale note from the calibration, ready flag for print");
+}
+
+/* --- #GDS Task 7 fix wave 1 — I3: one shared wire-schedule mapping --- */
+{
+  const swProj: RiserProjectLite = {
+    placements: [{ id: "sw1", sheetId: "s1", page: 1, x: 0.2, y: 0.2, partId: "DEV-A", optionId: "opt-sw", by: "t", at: 1 }],
+    routes: [],
+    spaces: [{ id: "sp-sw", sheetId: "s1", page: 1, name: "Stage", color: "#8a6d3b", points: [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.1 }, { x: 0.4, y: 0.4 }, { x: 0.1, y: 0.4 }], by: "t", at: 1 }],
+    calibrations: [],
+    options: [{ id: "opt-sw", name: "Design", quoteId: null, createdAt: 1 }],
+    riser: {
+      "opt-sw": {
+        nodes: {},
+        levels: [],
+        conduits: [],
+        notes: [],
+        links: [{ id: "lk-sw", from: { kind: "placement", placementId: "sw1" }, to: { kind: "space", spaceId: null }, partId: "WIRE-SW", lengthFt: 30, by: "t", at: 1 }],
+      },
+    },
+  };
+  const swParts = [
+    { id: "DEV-A", sku: "A", desc: "Device A", category: "Fixtures", unit: "ea", list: 1, cost: 1 },
+    { id: "WIRE-SW", sku: "W", desc: "Cable", category: "Wire", unit: "ft", list: 1, cost: 1 },
+  ];
+  const swView = riserViewForOption({ project: swProj, optionId: "opt-sw", parts: swParts as never, symCtx: symbolContext(null) });
+  const swWires = scheduleWiresFromView(swView);
+  ok(
+    swWires.length === 1 && swWires[0].fromName === "Stage" && swWires[0].toName === "Unassigned" && swWires[0].partId === "WIRE-SW" && swWires[0].lengthFt === 30,
+    "#GDS scheduleWiresFromView: names each edge's ends from the view's nodes ('Unassigned' when the edge lands there)"
+  );
+  const gdsSetPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  const gdsSchedPageSrc2 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/schedule/page.tsx"), "utf8");
+  ok(
+    gdsSetPageSrc2.includes("scheduleWiresFromView(view)") && gdsSchedPageSrc2.includes("scheduleWiresFromView(view)"),
+    "#GDS scheduleWiresFromView: the set and schedule pages both call the one shared helper instead of duplicating the edge→name mapping"
+  );
 }

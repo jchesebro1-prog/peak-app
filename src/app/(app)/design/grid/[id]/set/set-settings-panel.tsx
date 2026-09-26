@@ -83,7 +83,16 @@ export default function SetSettingsPanel({
   }
 
   async function saveAll() {
-    if (await save({ drawnBy, checkedBy, excluded, revisionLabels: labels, ...(ownNotes ? { generalNotes: notes } : {}) })) router.refresh();
+    // Unticking "own notes" must actually revert the cover to the standard
+    // notes, not just stop sending generalNotes — a bare merge patch would
+    // leave the previously-saved custom text in place (#GDS review I1).
+    if (
+      await save(
+        { drawnBy, checkedBy, excluded, revisionLabels: labels, ...(ownNotes ? { generalNotes: notes } : {}) },
+        { resetGeneralNotes: !ownNotes }
+      )
+    )
+      router.refresh();
   }
 
   // Not named useStandard() — a leading "use" reads as a custom Hook to

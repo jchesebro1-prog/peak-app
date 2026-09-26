@@ -2614,6 +2614,36 @@ async function main() {
     }
   }
 
+  // #GDS Task 7 fix wave 1 — I1: unticking "own notes" and saving reverts the
+  // cover to the standard notes. SetSettingsPanel.saveAll() must send
+  // resetGeneralNotes: !ownNotes to setDrawingSet — a bare merge patch with
+  // no generalNotes field left the previously-saved custom text in place.
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const { resolveGeneralNotes } = await import("@/lib/design/grid-drawing-set");
+    const by = "tester";
+    const standard = "Standard note one.\nStandard note two.";
+    await setSettings({ gridStandardNotes: standard });
+
+    const p0 = await GP.createProject({ name: "GDS T7 fix-wave-1 notes", customer: "", customerId: null, by });
+    await GP.setDrawingSet(p0.id, { generalNotes: "Custom note for this set." });
+    let p = (await GP.getProject(p0.id))!;
+    assert.deepEqual(resolveGeneralNotes(p.drawingSet, standard), ["Custom note for this set."], "#GDS T7 I1 setup: the set has its own notes");
+
+    // The exact shape SetSettingsPanel.saveAll() now sends when "own notes"
+    // was just unticked: an ordinary patch with no generalNotes key at all,
+    // plus resetGeneralNotes: true — not only the standalone "Use the
+    // standard notes" button's bare {} patch, which already worked.
+    await GP.setDrawingSet(p0.id, { drawnBy: "JC", checkedBy: "", excluded: [], revisionLabels: {} }, { resetGeneralNotes: true });
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(!("generalNotes" in (p.drawingSet || {})), "#GDS T7 I1: unticking + Save set settings drops the set's own notes");
+    assert.deepEqual(
+      resolveGeneralNotes(p.drawingSet, standard),
+      ["Standard note one.", "Standard note two."],
+      "#GDS T7 I1: resolveGeneralNotes now falls back to the standard notes"
+    );
+  }
+
   console.log("review regression checks passed");
 }
 

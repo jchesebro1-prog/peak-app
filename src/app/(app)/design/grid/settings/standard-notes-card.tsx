@@ -12,15 +12,25 @@ export function StandardNotesCard({ value }: { value: string }) {
   const [saved, setSaved] = useState(value);
   const [pending, startTransition] = useTransition();
   const [justSaved, setJustSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const dirty = draft.trim() !== saved.trim();
 
   const save = (text: string) =>
     startTransition(async () => {
-      await saveStandardNotesAction(text);
-      setDraft(text.trim());
-      setSaved(text.trim());
-      setJustSaved(true);
-      router.refresh();
+      setError(null);
+      try {
+        const res = await saveStandardNotesAction(text);
+        if (!res.ok) {
+          setError("Save failed — please try again.");
+          return;
+        }
+        setDraft(text.trim());
+        setSaved(text.trim());
+        setJustSaved(true);
+        router.refresh();
+      } catch {
+        setError("Save failed — please try again.");
+      }
     });
 
   return (
@@ -38,6 +48,7 @@ export function StandardNotesCard({ value }: { value: string }) {
           onChange={(e) => {
             setDraft(e.target.value);
             setJustSaved(false);
+            setError(null);
           }}
           rows={7}
           aria-label="Standard general notes"
@@ -51,8 +62,13 @@ export function StandardNotesCard({ value }: { value: string }) {
           <button type="button" className="pk-btn-outline" disabled={pending || !saved} onClick={() => save("")}>
             Clear
           </button>
-          {justSaved && !dirty && <span style={{ fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>✓ Saved</span>}
+          {justSaved && !dirty && !error && <span style={{ fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>✓ Saved</span>}
         </div>
+        {error && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "#b4543a", background: "#f9ece8", border: "1px solid #f0d6cd", borderRadius: 8, padding: "9px 12px" }}>
+            {error}
+          </div>
+        )}
       </div>
     </div>
   );

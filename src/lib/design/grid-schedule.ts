@@ -7,6 +7,7 @@
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { spaceOf, type SpaceLite } from "./grid-geometry";
 import { curtainDesc, type GridCurtain } from "./grid-bom";
+import type { RiserView } from "./grid-riser-doc";
 
 /** `code` overrides the printed Part cell for rows with no SKU (curtains). */
 export type ScheduleRow = { partId: string; code?: string; desc: string; qty: number };
@@ -18,6 +19,25 @@ export type ScheduleData = {
   deviceCount: number;
   wireFeet: Array<{ partId: string; ft: number; unit: string; unmeasured: number }>;
 };
+
+/**
+ * The wire runs a RiserView draws (#GDS) as schedule rows: each route/
+ * RiserLink edge, named by the human node ("Unassigned" for an edge that
+ * lands there) on either end. Shared by /schedule and the set's E-60x
+ * sheets so the two wire tables — set/page.tsx and schedule/page.tsx — can
+ * never drift onto separately-maintained copies of this mapping.
+ */
+export function scheduleWiresFromView(view: RiserView): ScheduleWire[] {
+  const nodeName = new Map(view.nodes.map((n) => [n.key, n.name]));
+  return view.edges.map((e) => ({
+    id: e.id,
+    partId: e.partId,
+    fromName: nodeName.get(e.from.key) || "Unassigned",
+    toName: nodeName.get(e.to.key) || "Unassigned",
+    lengthFt: e.lengthFt,
+    unit: e.unit,
+  }));
+}
 
 /**
  * Devices grouped per space (the same computed smallest-wins assignment as

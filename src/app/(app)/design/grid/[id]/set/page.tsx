@@ -13,7 +13,7 @@ import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/d
 import { markerColor } from "@/lib/design/grid-symbols";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
-import { buildSchedule, paginateSchedule, scheduleGroups, type ScheduleItem } from "@/lib/design/grid-schedule";
+import { buildSchedule, paginateSchedule, scheduleGroups, scheduleWiresFromView, type ScheduleItem } from "@/lib/design/grid-schedule";
 import {
   SHEET_SIZES,
   buildSheetList,
@@ -125,19 +125,11 @@ export default async function DrawingSetPage({
 
   // E-501 + E-60x
   const view = riserViewForOption({ project, optionId, parts, symCtx });
-  const nodeName = new Map(view.nodes.map((n) => [n.key, n.name]));
   const schedule = buildSchedule({
     placements: slice.placements,
     spaces,
     descOf: (pid) => partById.get(pid)?.desc,
-    wires: view.edges.map((e) => ({
-      id: e.id,
-      partId: e.partId,
-      fromName: nodeName.get(e.from.key) || "Unassigned",
-      toName: nodeName.get(e.to.key) || "Unassigned",
-      lengthFt: e.lengthFt,
-      unit: e.unit,
-    })),
+    wires: scheduleWiresFromView(view),
   });
   const schedulePages = paginateSchedule(scheduleGroups(schedule), SCHEDULE_ROWS_PER_COLUMN, 2);
 

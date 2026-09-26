@@ -50,7 +50,14 @@ export default function PlanSheetFigure({
   cal: { scale: number; unit: MeasureUnit } | null;
 }) {
   const [aspect, setAspect] = useState<number | null>(null);
+  const [rendered, setRendered] = useState(false);
+  const [error, setError] = useState(false);
   const isPdf = sheet.mime === "application/pdf" || sheet.name.toLowerCase().endsWith(".pdf");
+  // A PDF's canvas is sized (giving us the aspect) before it has actually
+  // painted — an image's data-ready is fine gated on load alone, but a PDF
+  // sheet also has to wait for PdfCanvas's onRendered so the print harness
+  // never captures a blank page (#GDS review I2).
+  const ready = isPdf ? aspect !== null && rendered : aspect !== null;
   const fit = aspect ? fitBox(areaW, areaH - captionH, aspect) : null;
   const H = aspect ? U * aspect : 0;
   // The functional update returns the same value when nothing changed — the
@@ -63,11 +70,24 @@ export default function PlanSheetFigure({
   const pts = (ps: Point[]) => ps.map((p) => `${Math.round(p.x * U * 10) / 10},${Math.round(p.y * H * 10) / 10}`).join(" ");
 
   return (
-    <div data-plan-figure="" data-ready={aspect ? "1" : "0"} style={{ width: `${areaW}in`, height: `${areaH}in`, display: "flex", flexDirection: "column" }}>
+    <div
+      data-plan-figure=""
+      data-ready={ready ? "1" : "0"}
+      data-error={error ? "1" : "0"}
+      style={{ width: `${areaW}in`, height: `${areaH}in`, display: "flex", flexDirection: "column" }}
+    >
       <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         <div className="pk-plan-fig" style={{ position: "relative", width: fit ? `${fit.w}in` : "100%", height: fit ? `${fit.h}in` : "100%" }}>
           {isPdf ? (
-            <PdfCanvas dataUrl={sheet.src} page={page} zoom={2} onLoaded={() => {}} onSize={onAspect} />
+            <PdfCanvas
+              dataUrl={sheet.src}
+              page={page}
+              zoom={2}
+              onLoaded={() => {}}
+              onSize={onAspect}
+              onRendered={() => setRendered(true)}
+              onError={() => setError(true)}
+            />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -77,6 +97,7 @@ export default function PlanSheetFigure({
                 if (el && el.complete && el.naturalWidth) onAspect(el.naturalWidth, el.naturalHeight);
               }}
               onLoad={(e) => onAspect(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+              onError={() => setError(true)}
               style={{ display: "block", width: "100%", height: fit ? "100%" : "auto", objectFit: "contain" }}
             />
           )}
