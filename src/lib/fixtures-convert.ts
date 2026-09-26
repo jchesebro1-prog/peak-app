@@ -11,15 +11,15 @@ import {
 } from "./fixture-assemblies";
 
 /**
- * #FXB conversion — pure. The Assemblies tab's `settings.fixtureAssemblies`
+ * #210 conversion — pure. The Assemblies tab's `settings.fixtureAssemblies`
  * entries and the Subassemblies tab's rows become one FixtureRecord shape,
  * keeping their ids (spec §3). The server runner is src/lib/fixtures-migrate.ts.
  */
 
-/** The Subassemblies tab's stored option (pre-#FXB, #129). */
+/** The Subassemblies tab's stored option (pre-#210, #129). */
 export type LegacyOption = { sku: string; name: string; cost: number; qty: number };
 
-/** The Subassemblies tab's stored row (pre-#FXB). */
+/** The Subassemblies tab's stored row (pre-#210). */
 export type LegacySubassembly = {
   id: string;
   kind: "fixture";
@@ -99,7 +99,7 @@ export function assemblyToFixture(a: FixtureAssembly, at: number): FixtureRecord
   };
 }
 
-/** A row in the pre-#FXB shape (no `lines` object). */
+/** A row in the pre-#210 shape (no `lines` object). */
 export function isLegacySubassembly(row: Record<string, unknown>): boolean {
   const lines = row.lines;
   return !(lines && typeof lines === "object");

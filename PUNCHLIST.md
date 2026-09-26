@@ -8382,7 +8382,7 @@ real-project browser check on a scratch DB copy is the lead's call (never agains
 
 ---
 
-## #FXB. One fixture builder — the Subassemblies form with the Assemblies logic — DONE 2026-09-25 (D-FXB-1…D-FXB-7)
+## 210. One fixture builder — the Subassemblies form with the Assemblies logic — DONE 2026-09-25 (D294…D300)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-fixture-builder-merge-design.md` · **Plan:**
 `docs/superpowers/plans/2026-09-25-fixture-builder-merge.md` · **Follows:** #129, #130, #207.
@@ -8397,7 +8397,7 @@ Existing assemblies (`fa-…`) and subassemblies (`SA-…`) convert once, keepin
 or automatically on first read) — additively (legacy fields ride untouched until a human resaves that record) and
 race-safe (rev-guarded, skipped on Vercel previews); `settings.fixtureAssemblies` stays as an untouched backup. The
 Estimator and Quick Design read fixtures with identical totals for converted records (parts listed in form order,
-D-FXB-7); the Estimator offers optional add-ons as a switch. The accessory graph moved to one `fixture:<id>` scope, the
+D300); the Estimator offers optional add-ons as a switch. The accessory graph moved to one `fixture:<id>` scope, the
 old `assembly:` / `subassembly:` rows retired with their own-datasheet flags carried; systems don't feed the graph and
 aren't offered in the Estimator or Quick Design. The builder's part pickers search the catalog server-side rather than
 shipping the whole ~37,400-row book to the client.

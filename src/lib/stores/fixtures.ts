@@ -5,7 +5,7 @@ import { assemblyToFixture, normalizeFixtureRow, type RawFixtureRow } from "@/li
 import { ensureFixturesConverted, fixturesConverted } from "@/lib/fixtures-migrate";
 
 /**
- * Fixtures and systems (#FXB, spec §3) — one record type in the existing
+ * Fixtures and systems (#210, spec §3) — one record type in the existing
  * `subassemblies` doc table (no new table, no SQL migration). Converted
  * Assemblies-tab records keep their `fa-…` ids, Subassemblies their `SA-…`
  * ids; new records get `SA-<TS36>`. Pure shapes/pricing live in

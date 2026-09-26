@@ -5,7 +5,7 @@ import { fixturePairs, fixtureRef, LEGACY_ASSEMBLY_REF_PREFIXES } from "./assemb
 
 /**
  * Fixture builder → accessory graph, one pass (#207 final fix wave I2,
- * reshaped by #FXB). Server-only.
+ * reshaped by #210). Server-only.
  *
  * Every fixture record (systems feed nothing) gets its `fixture:<id>` scope,
  * written ADD-ONLY through `syncAccessoryScopeSet`: a row that is already

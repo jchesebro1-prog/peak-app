@@ -7,7 +7,7 @@ import { assemblyComponentTotals, optionalToggleQty } from "./fixture-bom";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, Stat } from "./est-ui";
 
 /** Header totals — delegates to fixture-bom.ts's shared qty/cost/sell math
- *  (#FXB) rather than keeping a second copy of it here. */
+ *  (#210) rather than keeping a second copy of it here. */
 function totals(assembly: ResolvedFixtureAssembly | undefined, quantities: Record<string, string>) {
   if (!assembly) return { cost: 0, sell: 0 };
   const { cost, price } = assemblyComponentTotals(assembly, quantities);

@@ -80,7 +80,7 @@ export function memberCoverageLabel(c: MemberCoverage | undefined): string {
   return "Fixture has no datasheet yet";
 }
 
-/* ---- #FXB — one fixture builder, one scope ---------------------------- */
+/* ---- #210 — one fixture builder, one scope ---------------------------- */
 
 /** The merged builder's scope. The two part-documents scopes above are
  *  retired (soft-deleted) once the fixture: scope is written. */

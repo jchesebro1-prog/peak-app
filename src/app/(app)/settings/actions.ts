@@ -337,7 +337,7 @@ export async function clearDemoDataAction(confirm: string) {
     return { ok: false as const, error: 'Type CLEAR to confirm.' };
   }
   const { clearDemoData } = await import("@/db/seed-data");
-  // #FXB: fixtures and systems (the `subassemblies` table) are configuration
+  // #210: fixtures and systems (the `subassemblies` table) are configuration
   // and survive the reset (CONFIG_COLLECTIONS), so the one-time conversion
   // is not re-armed here. Their accessory graph lives in a table the reset
   // does wipe, so rebuild it (add-only) from the kept fixtures.

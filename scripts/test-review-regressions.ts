@@ -2758,7 +2758,7 @@ async function main() {
     assert.deepEqual(dvLinks.map((l) => `${l.documentId}:${l.kind}`), [`${davinciDocumentId(sharedUrl)}:datasheet`], "final fix M2: the part gets a DaVinci datasheet document, not the spec sheet sharing its URL");
     assert(!dvLinks.some((l) => l.documentId === specByUrl!.id), "final fix M2: …the spec sheet is not linked");
 
-    // I2 → #FXB: the one-time fixture conversion — settings assemblies and
+    // I2 → #210: the one-time fixture conversion — settings assemblies and
     // legacy subassemblies become fixture records (ids kept), and the graph
     // moves from assembly:/subassembly: to one fixture:<id> scope.
     const { setSettings } = await import("@/lib/settings");
@@ -2782,7 +2782,7 @@ async function main() {
     const fp = async () => JSON.stringify([await tableFp(), await (await getDb()).select().from(blobs).where(inArray(blobs.id, flagIds)).orderBy(blobs.id)]);
     await clearFlags();
     const priorAssemblies = ((await getSettings()).fixtureAssemblies ?? []) as unknown[];
-    assert.equal(priorAssemblies.length, 0, "#FXB: the test database starts with no fixture assemblies");
+    assert.equal(priorAssemblies.length, 0, "#210: the test database starts with no fixture assemblies");
     const fwAssemblies = [
       { id: "fw-asm", name: "FW assembly", components: [
         { sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 },
@@ -2810,7 +2810,7 @@ async function main() {
     await Acc.syncAccessoryLinks({ source: "davinci", sourceRef: "TY-FWX" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS" }]);
     await Acc.setOwnDatasheet("FW-S4", "FW-LENS", true);
     await Acc.setOwnDatasheet("FW-S4", "FW-DATA", true);
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB: a fresh database has not converted");
+    assert.equal(await Mig.fixturesConverted(), false, "#210: a fresh database has not converted");
 
     // Fix wave 1, C1(a): a Vercel preview (shares production's database)
     // never converts on a page read — nothing is written at all.
@@ -2818,8 +2818,8 @@ async function main() {
     process.env.VERCEL_ENV = "preview";
     try {
       const before = await fp();
-      assert.equal(await Mig.ensureFixturesConverted(), false, "#FXB fix C1: a preview deploy's page read does not convert");
-      assert.equal(await fp(), before, "#FXB fix C1: …and writes nothing (rows, graph and flags untouched)");
+      assert.equal(await Mig.ensureFixturesConverted(), false, "#210 fix C1: a preview deploy's page read does not convert");
+      assert.equal(await fp(), before, "#210 fix C1: …and writes nothing (rows, graph and flags untouched)");
     } finally {
       if (priorVercelEnv === undefined) delete process.env.VERCEL_ENV;
       else process.env.VERCEL_ENV = priorVercelEnv;
@@ -2827,64 +2827,64 @@ async function main() {
     // Fix wave 1, M3: a pass out of budget before its first chunk writes nothing.
     {
       const before = await fp();
-      assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB fix M3: an out-of-budget pass reports incomplete");
-      assert.equal(await fp(), before, "#FXB fix M3: …and writes nothing — no insert, no rewrite, no graph row, no flag");
+      assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#210 fix M3: an out-of-budget pass reports incomplete");
+      assert.equal(await fp(), before, "#210 fix M3: …and writes nothing — no insert, no rewrite, no graph row, no flag");
     }
 
     const isLegacyRef = (l: { source?: string; sourceRef?: string }) => l.source === "assembly" && /^(assembly|subassembly):/.test(l.sourceRef ?? "");
     const legacyLive = (await Acc.allAccessoryLinks()).filter(isLegacyRef).length;
-    assert(legacyLive >= 5, `#FXB setup: at least this section's five legacy rows are live (got ${legacyLive})`);
+    assert(legacyLive >= 5, `#210 setup: at least this section's five legacy rows are live (got ${legacyLive})`);
     const r1 = await Mig.convertFixtures();
-    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4, `#FXB: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
-    assert.equal(r1.graphRemoved, legacyLive, "#FXB fix M3: graphRemoved is exactly the live legacy rows retired");
-    assert.equal(await Mig.fixturesConverted(), true, "#FXB: a completed conversion sets the flag");
-    assert((await DS.getBlob(Mig.LEGACY_GRAPH_SYNC_BLOB_ID, { assembliesSyncedAt: 0 })).assembliesSyncedAt > 0, "#FXB fix M1: …and the part-documents build's graph flag, so an older build can't re-create assembly:/subassembly: rows");
-    assert.equal(await DS.getDoc("subassemblies", "fw-del"), null, "#FXB fix I1: a converted assembly a user deleted stays deleted (never revived)");
+    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4, `#210: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
+    assert.equal(r1.graphRemoved, legacyLive, "#210 fix M3: graphRemoved is exactly the live legacy rows retired");
+    assert.equal(await Mig.fixturesConverted(), true, "#210: a completed conversion sets the flag");
+    assert((await DS.getBlob(Mig.LEGACY_GRAPH_SYNC_BLOB_ID, { assembliesSyncedAt: 0 })).assembliesSyncedAt > 0, "#210 fix M1: …and the part-documents build's graph flag, so an older build can't re-create assembly:/subassembly: rows");
+    assert.equal(await DS.getDoc("subassemblies", "fw-del"), null, "#210 fix I1: a converted assembly a user deleted stays deleted (never revived)");
     const fw = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "fw-asm"))!;
     const fwLines = fw.lines as Record<string, Array<{ sku: string; qty: number }>>;
-    assert(fw && fw.lightEngineSku === "FW-S4" && fw.lensSku === "FW-LENS" && fwLines.mounting[0]?.sku === "FW-CLAMP" && fwLines.mounting[0]?.qty === 0, "#FXB: the settings assembly converted by role, keeping its fa-style id");
+    assert(fw && fw.lightEngineSku === "FW-S4" && fw.lensSku === "FW-LENS" && fwLines.mounting[0]?.sku === "FW-CLAMP" && fwLines.mounting[0]?.qty === 0, "#210: the settings assembly converted by role, keeping its fa-style id");
     const saRow = (await DS.getDocRows("subassemblies", ["SA-FW"]))[0];
     const sa = saRow.doc as Record<string, unknown> & { id: string };
     const saLines = sa.lines as Record<string, Array<{ sku: string; qty: number }>>;
-    assert(!saRow.deleted && saLines?.data?.[0]?.sku === "FW-DATA" && saLines.data[0].qty === 2 && sa.createdBy === CONVERTED_BY, "#FXB: the legacy subassembly row gains the fixture fields in place under its SA- id");
+    assert(!saRow.deleted && saLines?.data?.[0]?.sku === "FW-DATA" && saLines.data[0].qty === 2 && sa.createdBy === CONVERTED_BY, "#210: the legacy subassembly row gains the fixture fields in place under its SA- id");
     // Fix wave 1, C1(b): the rewrite is additive — every original field survives.
-    for (const [k, v] of Object.entries(saOriginal)) assert.deepEqual(sa[k], v, `#FXB fix C1: the old row's ${k} survives the conversion unchanged`);
+    for (const [k, v] of Object.entries(saOriginal)) assert.deepEqual(sa[k], v, `#210 fix C1: the old row's ${k} survives the conversion unchanged`);
     // …so a main-style reader (the old Subassemblies tab: options per box,
     // stored names, stored cost/price) still reads the same record.
     type OldShape = { id: string; lightEngineName: string; lensName: string; options: Record<string, Array<{ sku: string; name: string; qty: number }>>; price: number; cost: number };
     const oldRead = (await DS.listDocs<OldShape>("subassemblies")).find((r) => r.id === "SA-FW")!;
-    assert(oldRead.lightEngineName === "S4 engine" && oldRead.lensName === "Lens two" && oldRead.options.data.map((o) => `${o.sku}:${o.name}:${o.qty}`).join() === "FW-DATA:Data cable:2" && oldRead.price === 90 && oldRead.cost === 51, "#FXB fix C1: a main-style reader still sees the old shape's fields");
+    assert(oldRead.lightEngineName === "S4 engine" && oldRead.lensName === "Lens two" && oldRead.options.data.map((o) => `${o.sku}:${o.name}:${o.qty}`).join() === "FW-DATA:Data cable:2" && oldRead.price === 90 && oldRead.cost === 51, "#210 fix C1: a main-style reader still sees the old shape's fields");
     const norm = normalizeFixtureRow(sa);
-    assert(norm.kind === "fixture" && norm.lensSku === "FW-LENS2" && norm.lines.data[0]?.sku === "FW-DATA" && norm.legacy?.from === "subassembly", "#FXB fix C1: …and the new reader normalizes the merged row as a converted fixture");
-    assert.equal((await DS.listSince("subassemblies", 0, 10_000)).changes.find((c) => c.id === "SA-FW")?.rev, 2, "#FXB fix I1: the in-place merge bumps rev exactly once");
-    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 2, "#FXB: settings.fixtureAssemblies is left untouched as a backup");
+    assert(norm.kind === "fixture" && norm.lensSku === "FW-LENS2" && norm.lines.data[0]?.sku === "FW-DATA" && norm.legacy?.from === "subassembly", "#210 fix C1: …and the new reader normalizes the merged row as a converted fixture");
+    assert.equal((await DS.listSince("subassemblies", 0, 10_000)).changes.find((c) => c.id === "SA-FW")?.rev, 2, "#210 fix I1: the in-place merge bumps rev exactly once");
+    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 2, "#210: settings.fixtureAssemblies is left untouched as a backup");
     const live = await Acc.allAccessoryLinks();
     const has = (ref: string, parent: string, acc: string) => live.some((l) => l.source === "assembly" && l.sourceRef === ref && l.parentSku === parent && l.accessorySku === acc);
-    assert(has("fixture:fw-asm", "FW-S4", "FW-LENS") && has("fixture:fw-asm", "FW-S4", "FW-CLAMP") && has("fixture:SA-FW", "FW-S4", "FW-LENS2") && has("fixture:SA-FW", "FW-S4", "FW-DATA"), "#FXB: every fixture's pairs live under one fixture:<id> scope");
-    assert(!live.some(isLegacyRef), "#FXB: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
-    assert.equal(live.find((l) => l.sourceRef === "fixture:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet, true, "#FXB: the pair's own-datasheet flag carries onto the fixture: row");
-    assert.equal(live.find((l) => l.sourceRef === "fixture:SA-FW" && l.accessorySku === "FW-DATA")?.ownDatasheet, true, "#FXB fix M3: …a subassembly:-origin pair's flag too");
-    assert(live.some((l) => l.source === "davinci" && l.sourceRef === "TY-FWX"), "#FXB: DaVinci's scope is never touched");
+    assert(has("fixture:fw-asm", "FW-S4", "FW-LENS") && has("fixture:fw-asm", "FW-S4", "FW-CLAMP") && has("fixture:SA-FW", "FW-S4", "FW-LENS2") && has("fixture:SA-FW", "FW-S4", "FW-DATA"), "#210: every fixture's pairs live under one fixture:<id> scope");
+    assert(!live.some(isLegacyRef), "#210: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
+    assert.equal(live.find((l) => l.sourceRef === "fixture:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet, true, "#210: the pair's own-datasheet flag carries onto the fixture: row");
+    assert.equal(live.find((l) => l.sourceRef === "fixture:SA-FW" && l.accessorySku === "FW-DATA")?.ownDatasheet, true, "#210 fix M3: …a subassembly:-origin pair's flag too");
+    assert(live.some((l) => l.source === "davinci" && l.sourceRef === "TY-FWX"), "#210: DaVinci's scope is never touched");
     {
       const before = await fp();
-      assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: every later read reports converted");
-      assert.equal(await fp(), before, "#FXB fix M3: …and is a true no-op — nothing written, flags included");
+      assert.equal(await Mig.ensureFixturesConverted(), true, "#210: every later read reports converted");
+      assert.equal(await fp(), before, "#210 fix M3: …and is a true no-op — nothing written, flags included");
       const beforeTables = await tableFp();
       const again = await Mig.convertFixtures();
-      assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#FXB: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
-      assert.equal(await tableFp(), beforeTables, "#FXB fix M3: …no row in either table is touched");
+      assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#210: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
+      assert.equal(await tableFp(), beforeTables, "#210 fix M3: …no row in either table is touched");
     }
     // A run cut short by its budget leaves the flag unset; the next read finishes.
     await clearFlags();
     await setSettings({ fixtureAssemblies: [...fwAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
     {
       const before = await fp();
-      assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB: a conversion out of budget reports incomplete");
-      assert.equal(await fp(), before, "#FXB fix M3: …writes nothing");
+      assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#210: a conversion out of budget reports incomplete");
+      assert.equal(await fp(), before, "#210 fix M3: …writes nothing");
     }
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB: …and leaves the flag unset");
-    assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: the next read finishes the job");
-    assert(!!(await DS.getDoc("subassemblies", "fw-asm2")) && (await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "fixture:fw-asm2" && l.accessorySku === "FW-IRIS"), "#FXB: …writing the rest, graph included");
+    assert.equal(await Mig.fixturesConverted(), false, "#210: …and leaves the flag unset");
+    assert.equal(await Mig.ensureFixturesConverted(), true, "#210: the next read finishes the job");
+    assert(!!(await DS.getDoc("subassemblies", "fw-asm2")) && (await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "fixture:fw-asm2" && l.accessorySku === "FW-IRIS"), "#210: …writing the rest, graph included");
 
     // Fix wave 1, I1: a save or delete landing between the pass's read and its
     // write is never overwritten or revived — the pass reports incomplete and
@@ -2903,17 +2903,17 @@ async function main() {
         await DS.softDeleteDoc("subassemblies", "SA-RACE-DEL"); // a delete
       },
     });
-    assert(!race.complete && race.rewritten === 0, `#FXB fix I1: a pass that lost every race rewrites nothing and stays incomplete (got ${JSON.stringify(race)})`);
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB fix I1: …so the flag stays unset");
+    assert(!race.complete && race.rewritten === 0, `#210 fix I1: a pass that lost every race rewrites nothing and stays incomplete (got ${JSON.stringify(race)})`);
+    assert.equal(await Mig.fixturesConverted(), false, "#210 fix I1: …so the flag stays unset");
     const oldSaved = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-RACE-OLD"))!;
-    assert(oldSaved.lines === undefined && JSON.stringify(oldSaved.options).includes("FW-RACE-OLDSAVE"), "#FXB fix I1: an older build's concurrent save is not overwritten from the stale snapshot");
-    assert.deepEqual(await DS.getDoc("subassemblies", "SA-RACE-NEW"), newSave, "#FXB fix I1: a concurrent builder save is left exactly as saved");
+    assert(oldSaved.lines === undefined && JSON.stringify(oldSaved.options).includes("FW-RACE-OLDSAVE"), "#210 fix I1: an older build's concurrent save is not overwritten from the stale snapshot");
+    assert.deepEqual(await DS.getDoc("subassemblies", "SA-RACE-NEW"), newSave, "#210 fix I1: a concurrent builder save is left exactly as saved");
     const delRow = (await DS.getDocRows("subassemblies", ["SA-RACE-DEL"]))[0];
-    assert(delRow.deleted && delRow.doc.lines === undefined, "#FXB fix I1: a concurrent delete is not revived (or rewritten)");
+    assert(delRow.deleted && delRow.doc.lines === undefined, "#210 fix I1: a concurrent delete is not revived (or rewritten)");
     const race2 = await Mig.convertFixtures();
-    assert(race2.complete && race2.rewritten === 1, `#FXB fix I1: the next pass converts the re-saved row and completes (got ${JSON.stringify(race2)})`);
+    assert(race2.complete && race2.rewritten === 1, `#210 fix I1: the next pass converts the re-saved row and completes (got ${JSON.stringify(race2)})`);
     const oldConverted = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-RACE-OLD"))!;
-    assert.equal((oldConverted.lines as Record<string, Array<{ sku: string }>>).data[0]?.sku, "FW-RACE-OLDSAVE", "#FXB fix I1: …from the user's latest save, not the stale read");
+    assert.equal((oldConverted.lines as Record<string, Array<{ sku: string }>>).data[0]?.sku, "FW-RACE-OLDSAVE", "#210 fix I1: …from the user's latest save, not the stale read");
 
     // Fix wave 1, M3: two concurrent passes end in the same state as one —
     // each insert and rewrite lands once, nothing revived or clobbered.
@@ -2922,16 +2922,16 @@ async function main() {
     await insertDocIfAbsent("subassemblies", legacyRow("SA-PAR", "FW-PAR-D"));
     await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-PAR" }, [{ parentSku: "FW-RACE-E", accessorySku: "FW-PAR-D", maxQty: 1, included: true }]);
     const [p1, p2] = await Promise.all([Mig.convertFixtures(), Mig.convertFixtures()]);
-    assert.equal(p1.inserted + p2.inserted, 1, `#FXB fix M3: two concurrent passes insert the new assembly once (got ${JSON.stringify([p1, p2])})`);
-    assert.equal(p1.rewritten + p2.rewritten, 1, "#FXB fix M3: …and rewrite the legacy row once");
-    assert.equal(p1.graphWritten + p2.graphWritten, 2, "#FXB fix M3: …and write each new fixture: row once");
-    assert(p1.complete || p2.complete || (await Mig.convertFixtures()).complete, "#FXB fix M3: the pair (or one more pass) completes");
+    assert.equal(p1.inserted + p2.inserted, 1, `#210 fix M3: two concurrent passes insert the new assembly once (got ${JSON.stringify([p1, p2])})`);
+    assert.equal(p1.rewritten + p2.rewritten, 1, "#210 fix M3: …and rewrite the legacy row once");
+    assert.equal(p1.graphWritten + p2.graphWritten, 2, "#210 fix M3: …and write each new fixture: row once");
+    assert(p1.complete || p2.complete || (await Mig.convertFixtures()).complete, "#210 fix M3: the pair (or one more pass) completes");
     const parRow = (await DS.getDocRows("subassemblies", ["SA-PAR"]))[0];
-    assert(!parRow.deleted && (parRow.doc.lines as Record<string, Array<{ sku: string }>>).data[0]?.sku === "FW-PAR-D" && JSON.stringify(parRow.doc.options).includes("FW-PAR-D"), "#FXB fix M3: the legacy row is converted once, additively");
-    assert.equal((await DS.listSince("subassemblies", 0, 10_000)).changes.find((c) => c.id === "SA-PAR")?.rev, 2, "#FXB fix M3: …its rev bumped exactly once across both passes");
-    assert.equal(await DS.getDoc("subassemblies", "fw-del"), null, "#FXB fix M3: the deleted assembly is still not revived");
+    assert(!parRow.deleted && (parRow.doc.lines as Record<string, Array<{ sku: string }>>).data[0]?.sku === "FW-PAR-D" && JSON.stringify(parRow.doc.options).includes("FW-PAR-D"), "#210 fix M3: the legacy row is converted once, additively");
+    assert.equal((await DS.listSince("subassemblies", 0, 10_000)).changes.find((c) => c.id === "SA-PAR")?.rev, 2, "#210 fix M3: …its rev bumped exactly once across both passes");
+    assert.equal(await DS.getDoc("subassemblies", "fw-del"), null, "#210 fix M3: the deleted assembly is still not revived");
     const parLive = await Acc.allAccessoryLinks();
-    assert(parLive.some((l) => l.sourceRef === "fixture:fw-par" && l.accessorySku === "FW-PAR-L") && parLive.some((l) => l.sourceRef === "fixture:SA-PAR" && l.accessorySku === "FW-PAR-D") && !parLive.some(isLegacyRef), "#FXB fix M3: …the graph ends fully moved");
+    assert(parLive.some((l) => l.sourceRef === "fixture:fw-par" && l.accessorySku === "FW-PAR-L") && parLive.some((l) => l.sourceRef === "fixture:SA-PAR" && l.accessorySku === "FW-PAR-D") && !parLive.some(isLegacyRef), "#210 fix M3: …the graph ends fully moved");
 
     // Fix wave 1, M3: a pass cut off after the fixture: rows landed but before
     // the retire resumes on the next run. The only graph work is one fixture:
@@ -2943,12 +2943,12 @@ async function main() {
     let checks = 0;
     const cut = await Mig.convertFixtures({ shouldStop: () => ++checks >= 2 });
     const cutLive = await Acc.allAccessoryLinks();
-    assert(!cut.complete && cut.graphWritten === 1 && cut.graphRemoved === 0, `#FXB fix M3: the cut pass wrote the fixture: row but retired nothing (got ${JSON.stringify(cut)})`);
-    assert(cutLive.some((l) => l.sourceRef === "fixture:SA-RES") && cutLive.some((l) => l.sourceRef === "subassembly:SA-RES"), "#FXB fix M3: …both scopes are live at the cut");
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB fix M3: …and the flag is unset");
+    assert(!cut.complete && cut.graphWritten === 1 && cut.graphRemoved === 0, `#210 fix M3: the cut pass wrote the fixture: row but retired nothing (got ${JSON.stringify(cut)})`);
+    assert(cutLive.some((l) => l.sourceRef === "fixture:SA-RES") && cutLive.some((l) => l.sourceRef === "subassembly:SA-RES"), "#210 fix M3: …both scopes are live at the cut");
+    assert.equal(await Mig.fixturesConverted(), false, "#210 fix M3: …and the flag is unset");
     const resumed = await Mig.convertFixtures();
-    assert(resumed.complete && resumed.graphWritten === 0 && resumed.graphRemoved === 1, `#FXB fix M3: the re-run retires the one leftover and completes (got ${JSON.stringify(resumed)})`);
-    assert(await Mig.fixturesConverted(), "#FXB fix M3: …setting the flag");
+    assert(resumed.complete && resumed.graphWritten === 0 && resumed.graphRemoved === 1, `#210 fix M3: the re-run retires the one leftover and completes (got ${JSON.stringify(resumed)})`);
+    assert(await Mig.fixturesConverted(), "#210 fix M3: …setting the flag");
     await setSettings({ fixtureAssemblies: priorAssemblies });
   }
 
@@ -3028,7 +3028,7 @@ async function main() {
     assert.equal((await getSettingsStrict()).companyName, "Strict Settings Probe", "final fix I5: app_settings is intact after both probes roll back");
 
     // End to end: the fixture conversion (which now owns the one-time graph
-    // sync, #FXB) propagates a settings-read failure instead of converting
+    // sync, #210) propagates a settings-read failure instead of converting
     // the subassemblies only and marking itself complete.
     const Mig = await import("@/lib/fixtures-migrate");
     await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
@@ -3082,7 +3082,7 @@ async function main() {
     assert.equal((await Acc.allAccessoryLinks()).find((l) => l.sourceRef === "assembly:fw-conc" && l.accessorySku === "FW-A")?.ownDatasheet, true, "final fix I6: an already-live row's own-datasheet flag is never touched by the add-only pass");
   }
 
-  /* --- #FXB fixture builder: the store — first-read conversion, create /
+  /* --- #210 fixture builder: the store — first-read conversion, create /
          update / delete, save rules, who/when stamps --- */
   {
     const Fx = await import("@/lib/stores/fixtures");
@@ -3092,44 +3092,44 @@ async function main() {
     const { assemblyToFixture } = await import("@/lib/fixtures-convert");
 
     await Mig.resetFixturesConversion();
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB store: resetFixturesConversion re-arms the conversion (the go-live reset path)");
+    assert.equal(await Mig.fixturesConverted(), false, "#210 store: resetFixturesConversion re-arms the conversion (the go-live reset path)");
     await setSettings({ fixtureAssemblies: [{ id: "fa-fxb-store", name: "Store probe", components: [{ sku: "FXB-E", label: "E", role: "fixture", defaultQty: 1 }] }] });
     const first = await Fx.listFixtures();
-    assert(first.some((f) => f.id === "fa-fxb-store"), "#FXB store: listFixtures converts on its first read");
-    assert.equal(await Mig.fixturesConverted(), true, "#FXB store: …and marks the conversion complete");
+    assert(first.some((f) => f.id === "fa-fxb-store"), "#210 store: listFixtures converts on its first read");
+    assert.equal(await Mig.fixturesConverted(), true, "#210 store: …and marks the conversion complete");
     const labels = first.map((f) => f.label);
-    assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)), "#FXB store: the list is sorted by label");
+    assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)), "#210 store: the list is sorted by label");
     await setSettings({ fixtureAssemblies: [] });
 
     const clean = sanitizeFixtureInput({ kind: "fixture", label: "FXB Store", description: "", lightEngineSku: "FXB-NOT-IN-CATALOG", lines: { power: [{ sku: "FXB-CBL", qty: 1 }] } });
-    assert(clean.ok, "#FXB store: a light engine missing from the catalog does not block a save");
+    assert(clean.ok, "#210 store: a light engine missing from the catalog does not block a save");
     if (!clean.ok) throw new Error("unreachable");
     const snap = { cost: 0, price: 0, pricedAt: null };
     const made = await Fx.createFixture(clean.value, "Jeff", snap, 1_700_000_000_000);
-    assert.match(made.id, /^SA-[0-9A-Z]+$/, "#FXB store: new records get an SA-<TS36> id");
-    assert(made.createdBy === "Jeff" && made.updatedBy === "Jeff" && made.createdAt === 1_700_000_000_000 && made.updatedAt === 1_700_000_000_000, "#FXB store: create stamps who/when");
+    assert.match(made.id, /^SA-[0-9A-Z]+$/, "#210 store: new records get an SA-<TS36> id");
+    assert(made.createdBy === "Jeff" && made.updatedBy === "Jeff" && made.createdAt === 1_700_000_000_000 && made.updatedAt === 1_700_000_000_000, "#210 store: create stamps who/when");
     const twin = await Fx.createFixture(clean.value, "Jeff", snap, 1_700_000_000_000);
-    assert.notEqual(twin.id, made.id, "#FXB store: a same-millisecond create never overwrites (collision-safe id)");
+    assert.notEqual(twin.id, made.id, "#210 store: a same-millisecond create never overwrites (collision-safe id)");
     const edited = sanitizeFixtureInput({ kind: "fixture", label: "FXB Store v2", description: "", lightEngineSku: "FXB-ENG" });
     if (!edited.ok) throw new Error("unreachable");
     const upd = await Fx.updateFixture(made, edited.value, "Sam", snap, 1_700_000_100_000);
-    assert(upd.id === made.id && upd.label === "FXB Store v2" && upd.createdBy === "Jeff" && upd.createdAt === made.createdAt && upd.updatedBy === "Sam" && upd.updatedAt === 1_700_000_100_000, "#FXB store: update keeps id + created*, stamps updated*");
-    assert.equal((await Fx.getFixture(made.id))?.label, "FXB Store v2", "#FXB store: the update is read back");
+    assert(upd.id === made.id && upd.label === "FXB Store v2" && upd.createdBy === "Jeff" && upd.createdAt === made.createdAt && upd.updatedBy === "Sam" && upd.updatedAt === 1_700_000_100_000, "#210 store: update keeps id + created*, stamps updated*");
+    assert.equal((await Fx.getFixture(made.id))?.label, "FXB Store v2", "#210 store: the update is read back");
     await Fx.removeFixture(made.id);
-    assert.equal(await Fx.getFixture(made.id), null, "#FXB store: delete is a soft delete the reader no longer sees");
-    assert(!(await Fx.listFixtures()).some((f) => f.id === made.id), "#FXB store: …and the list drops it");
+    assert.equal(await Fx.getFixture(made.id), null, "#210 store: delete is a soft delete the reader no longer sees");
+    assert(!(await Fx.listFixtures()).some((f) => f.id === made.id), "#210 store: …and the list drops it");
 
     const flagged = assemblyToFixture({ id: "fa-fxb-nr", name: "Kit", components: [{ sku: "K1", label: "Cable", role: "cable", defaultQty: 1 }] }, 1);
     await DS.insertDocIfAbsent("subassemblies", flagged);
     const nr = (await Fx.getFixture("fa-fxb-nr"))!;
-    assert.equal(nr.needsReview, true, "#FXB store: a converted assembly with no fixture member reads as needs-review");
+    assert.equal(nr.needsReview, true, "#210 store: a converted assembly with no fixture member reads as needs-review");
     const reviewed = sanitizeFixtureInput({ kind: "fixture", label: "Kit", description: "", lightEngineSku: "K1" });
     if (!reviewed.ok) throw new Error("unreachable");
     const cleared = await Fx.updateFixture(nr, reviewed.value, "Jeff", snap);
-    assert(cleared.needsReview === undefined && cleared.legacy?.from === "assembly" && cleared.id === "fa-fxb-nr", "#FXB store: a human save clears needs-review and keeps the id + provenance");
+    assert(cleared.needsReview === undefined && cleared.legacy?.from === "assembly" && cleared.id === "fa-fxb-nr", "#210 store: a human save clears needs-review and keeps the id + provenance");
   }
 
-  /* --- #FXB fix wave 1: updateFixture must not drop a converted SA- row's
+  /* --- #210 fix wave 1: updateFixture must not drop a converted SA- row's
          legacy-only keys (options, lightEngineName, lensName,
          lightEngineCost, lensCost, cost, price, snapshot-era keys…) on the
          first human save. upsertDoc is a full-record replace, and `rec` used
@@ -3169,11 +3169,11 @@ async function main() {
     };
     const convertedShape = subassemblyToFixture(rawLegacy as never);
     const legacyRow = { ...rawLegacy, ...additiveFixturePatch(rawLegacy as never, convertedShape), needsReview: true };
-    assert(await DS.insertDocIfAbsent("subassemblies", legacyRow), "#FXB fix wave 1 setup: the converted-shaped legacy row inserts");
+    assert(await DS.insertDocIfAbsent("subassemblies", legacyRow), "#210 fix wave 1 setup: the converted-shaped legacy row inserts");
 
     const before = (await Fx.getFixture("SA-FXB-LEGACY"))!;
-    assert.equal(before.position, "FOH", "#FXB fix wave 1 setup: the row reads back its legacy optional fields");
-    assert.equal(before.needsReview, true, "#FXB fix wave 1 setup: …and its needs-review flag");
+    assert.equal(before.position, "FOH", "#210 fix wave 1 setup: the row reads back its legacy optional fields");
+    assert.equal(before.needsReview, true, "#210 fix wave 1 setup: …and its needs-review flag");
 
     // Edit through the form: rename, keep the light engine + circuit, but
     // leave lamp/position blank — sanitizeFixtureInput omits a blank optional
@@ -3188,34 +3188,34 @@ async function main() {
       lensSku: "FXB-LENS-L",
       circuit: "A1",
     });
-    assert(edited.ok, "#FXB fix wave 1: the edited input sanitizes");
+    assert(edited.ok, "#210 fix wave 1: the edited input sanitizes");
     if (!edited.ok) throw new Error("unreachable");
     const snap = { cost: 0, price: 0, pricedAt: null };
     const saved = await Fx.updateFixture(before, edited.value, "Jeff", snap, 1_700_000_200_000);
 
-    assert.equal(saved.label, "Legacy Fixture — edited", "#FXB fix wave 1: the new-shape field reflects the edit");
-    assert.equal(saved.circuit, "A1", "#FXB fix wave 1: a kept optional survives the save");
-    assert.equal(saved.lamp, undefined, "#FXB fix wave 1: a cleared optional (lamp) stays cleared — not resurrected from existing");
-    assert.equal(saved.position, undefined, "#FXB fix wave 1: a cleared optional (position) stays cleared — not resurrected from existing");
-    assert.equal(saved.needsReview, undefined, "#FXB fix wave 1: a human save clears needs-review");
+    assert.equal(saved.label, "Legacy Fixture — edited", "#210 fix wave 1: the new-shape field reflects the edit");
+    assert.equal(saved.circuit, "A1", "#210 fix wave 1: a kept optional survives the save");
+    assert.equal(saved.lamp, undefined, "#210 fix wave 1: a cleared optional (lamp) stays cleared — not resurrected from existing");
+    assert.equal(saved.position, undefined, "#210 fix wave 1: a cleared optional (position) stays cleared — not resurrected from existing");
+    assert.equal(saved.needsReview, undefined, "#210 fix wave 1: a human save clears needs-review");
 
     const stored = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FXB-LEGACY"))!;
-    assert.equal(stored.cost, 55, "#FXB fix wave 1: legacy `cost` survives the save");
-    assert.equal(stored.price, 55, "#FXB fix wave 1: legacy `price` survives the save");
-    assert.equal(stored.lightEngineName, "Legacy Engine", "#FXB fix wave 1: legacy `lightEngineName` survives the save");
-    assert.equal(stored.lensName, "Legacy Lens", "#FXB fix wave 1: legacy `lensName` survives the save");
-    assert.equal(stored.lightEngineCost, 40, "#FXB fix wave 1: legacy `lightEngineCost` survives the save");
-    assert.equal(stored.lensCost, 10, "#FXB fix wave 1: legacy `lensCost` survives the save");
+    assert.equal(stored.cost, 55, "#210 fix wave 1: legacy `cost` survives the save");
+    assert.equal(stored.price, 55, "#210 fix wave 1: legacy `price` survives the save");
+    assert.equal(stored.lightEngineName, "Legacy Engine", "#210 fix wave 1: legacy `lightEngineName` survives the save");
+    assert.equal(stored.lensName, "Legacy Lens", "#210 fix wave 1: legacy `lensName` survives the save");
+    assert.equal(stored.lightEngineCost, 40, "#210 fix wave 1: legacy `lightEngineCost` survives the save");
+    assert.equal(stored.lensCost, 10, "#210 fix wave 1: legacy `lensCost` survives the save");
     assert.deepEqual(
       (stored.options as Record<string, unknown[]>).power,
       [{ sku: "FXB-CBL-L", name: "Legacy Cable", cost: 5, qty: 1 }],
-      "#FXB fix wave 1: legacy `options` survives the save"
+      "#210 fix wave 1: legacy `options` survives the save"
     );
-    assert(!("lamp" in stored), "#FXB fix wave 1: the cleared optional is actually gone from storage, not just from the returned value");
-    assert(!("needsReview" in stored), "#FXB fix wave 1: needs-review is actually gone from storage");
+    assert(!("lamp" in stored), "#210 fix wave 1: the cleared optional is actually gone from storage, not just from the returned value");
+    assert(!("needsReview" in stored), "#210 fix wave 1: needs-review is actually gone from storage");
   }
 
-  /* --- #FXB final review I1: updateFixture carries legacy-only keys from the
+  /* --- #210 final review I1: updateFixture carries legacy-only keys from the
          RAW stored row. A row still in the OLD shape (a preview; production
          before/while the conversion runs; a row an older build re-saved)
          normalizes without options/lightEngineName/…, so carrying from the
@@ -3244,9 +3244,9 @@ async function main() {
       createdAt: 1_600_000_000_000,
       updatedAt: 1_600_000_000_000,
     };
-    assert(await DS.insertDocIfAbsent("subassemblies", raw), "#FXB final review I1 setup: an UNCONVERTED legacy row inserts");
+    assert(await DS.insertDocIfAbsent("subassemblies", raw), "#210 final review I1 setup: an UNCONVERTED legacy row inserts");
     const existing = (await Fx.getFixture("SA-FXB-RAW"))!;
-    assert(existing && !("options" in existing) && existing.lines.data[0]?.sku === "FXB-RAW-D", "#FXB final review I1 setup: it reads back normalized (no legacy keys on the record)");
+    assert(existing && !("options" in existing) && existing.lines.data[0]?.sku === "FXB-RAW-D", "#210 final review I1 setup: it reads back normalized (no legacy keys on the record)");
     const edited = sanitizeFixtureInput({
       kind: "fixture",
       label: "Raw legacy — edited",
@@ -3260,14 +3260,14 @@ async function main() {
     await Fx.updateFixture(existing, edited.value, "Jeff", { cost: 0, price: 0, pricedAt: null }, 1_700_000_300_000);
     const stored = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FXB-RAW"))!;
     for (const k of ["options", "lightEngineName", "lightEngineCost", "lensName", "lensCost", "cost", "price"]) {
-      assert.deepEqual(stored[k], raw[k], `#FXB final review I1: saving an unconverted legacy row keeps its old \`${k}\``);
+      assert.deepEqual(stored[k], raw[k], `#210 final review I1: saving an unconverted legacy row keeps its old \`${k}\``);
     }
     const lines = stored.lines as Record<string, Array<{ sku: string; qty: number }>>;
-    assert(stored.label === "Raw legacy — edited" && lines.data[0]?.qty === 3 && lines.power[0]?.sku === "FXB-RAW-P" && stored.updatedBy === "Jeff" && stored.updatedAt === 1_700_000_300_000, "#FXB final review I1: …and writes the new fields");
-    assert(!("lamp" in stored) && stored.position === "Cat 1", "#FXB final review I1: …a cleared optional (lamp) stays cleared, a kept one stays");
+    assert(stored.label === "Raw legacy — edited" && lines.data[0]?.qty === 3 && lines.power[0]?.sku === "FXB-RAW-P" && stored.updatedBy === "Jeff" && stored.updatedAt === 1_700_000_300_000, "#210 final review I1: …and writes the new fields");
+    assert(!("lamp" in stored) && stored.position === "Cat 1", "#210 final review I1: …a cleared optional (lamp) stays cleared, a kept one stays");
   }
 
-  /* --- #FXB final review M4: while unconverted (every Vercel preview) the
+  /* --- #210 final review M4: while unconverted (every Vercel preview) the
          settings-backed fa- records served in memory are first-class: get
          finds them, a save creates their row under the same id, a delete
          leaves a soft-deleted row (so neither the list nor a later
@@ -3286,40 +3286,40 @@ async function main() {
     process.env.VERCEL_ENV = "preview";
     try {
       const list0 = await Fx.listFixtures();
-      assert(["fa-mem-1", "fa-mem-2", "fa-mem-3"].every((id) => list0.some((f) => f.id === id)), "#FXB final review M4 setup: an unconverted database lists the settings assemblies in memory");
-      assert.equal((await DS.getDocRows("subassemblies", ["fa-mem-1", "fa-mem-2", "fa-mem-3"])).length, 0, "#FXB final review M4 setup: …with no rows behind them");
+      assert(["fa-mem-1", "fa-mem-2", "fa-mem-3"].every((id) => list0.some((f) => f.id === id)), "#210 final review M4 setup: an unconverted database lists the settings assemblies in memory");
+      assert.equal((await DS.getDocRows("subassemblies", ["fa-mem-1", "fa-mem-2", "fa-mem-3"])).length, 0, "#210 final review M4 setup: …with no rows behind them");
 
       const mem1 = await Fx.getFixture("fa-mem-1");
-      assert(mem1 && mem1.label === "Mem one" && mem1.lines.power[0]?.sku === "fa-mem-1-C", "#FXB final review M4: getFixture finds the in-memory fa- record listFixtures serves");
+      assert(mem1 && mem1.label === "Mem one" && mem1.lines.power[0]?.sku === "fa-mem-1-C", "#210 final review M4: getFixture finds the in-memory fa- record listFixtures serves");
       const v = sanitizeFixtureInput({ kind: "fixture", label: "Mem one — edited", description: "", lightEngineSku: "fa-mem-1-E", lines: { power: [{ sku: "fa-mem-1-C", qty: 3 }] } });
       if (!v.ok) throw new Error(`unreachable: ${v.error}`);
       await Fx.updateFixture(mem1!, v.value, "Jeff", snap, 1_700_000_400_000);
       const [row1] = await DS.getDocRows<Record<string, unknown> & { id: string }>("subassemblies", ["fa-mem-1"]);
-      assert(row1 && !row1.deleted && row1.doc.label === "Mem one — edited" && (row1.doc.legacy as { from?: string })?.from === "assembly" && row1.doc.createdBy === CONVERTED_BY && row1.doc.createdAt === 1_700_000_400_000 && row1.doc.updatedBy === "Jeff", "#FXB final review M4: saving an in-memory fa- record creates its row under the same id, in the conversion's shape");
+      assert(row1 && !row1.deleted && row1.doc.label === "Mem one — edited" && (row1.doc.legacy as { from?: string })?.from === "assembly" && row1.doc.createdBy === CONVERTED_BY && row1.doc.createdAt === 1_700_000_400_000 && row1.doc.updatedBy === "Jeff", "#210 final review M4: saving an in-memory fa- record creates its row under the same id, in the conversion's shape");
       const list1 = await Fx.listFixtures();
-      assert.equal(list1.filter((f) => f.id === "fa-mem-1").length, 1, "#FXB final review M4: …listed once (the row, not the in-memory copy too)");
-      assert.equal(list1.find((f) => f.id === "fa-mem-1")?.label, "Mem one — edited", "#FXB final review M4: …with the saved edit");
+      assert.equal(list1.filter((f) => f.id === "fa-mem-1").length, 1, "#210 final review M4: …listed once (the row, not the in-memory copy too)");
+      assert.equal(list1.find((f) => f.id === "fa-mem-1")?.label, "Mem one — edited", "#210 final review M4: …with the saved edit");
 
       await Fx.removeFixture("fa-mem-2");
       const [row2] = await DS.getDocRows("subassemblies", ["fa-mem-2"]);
-      assert(row2 && row2.deleted, "#FXB final review M4: deleting an in-memory fa- record writes a soft-deleted row");
-      assert.equal(await Fx.getFixture("fa-mem-2"), null, "#FXB final review M4: …getFixture no longer finds it");
-      assert(!(await Fx.listFixtures()).some((f) => f.id === "fa-mem-2"), "#FXB final review M4: …and the in-memory list no longer re-shows it");
+      assert(row2 && row2.deleted, "#210 final review M4: deleting an in-memory fa- record writes a soft-deleted row");
+      assert.equal(await Fx.getFixture("fa-mem-2"), null, "#210 final review M4: …getFixture no longer finds it");
+      assert(!(await Fx.listFixtures()).some((f) => f.id === "fa-mem-2"), "#210 final review M4: …and the in-memory list no longer re-shows it");
 
       const mem3 = (await Fx.getFixture("fa-mem-3"))!;
       await Fx.removeFixture("fa-mem-3");
       const v3 = sanitizeFixtureInput({ kind: "fixture", label: "Mem three", description: "", lightEngineSku: "fa-mem-3-E" });
       if (!v3.ok) throw new Error("unreachable");
-      await assert.rejects(Fx.updateFixture(mem3, v3.value, "Jeff", snap), /deleted/, "#FXB final review M4: a save of an in-memory record deleted meanwhile is refused, not revived");
-      assert((await DS.getDocRows("subassemblies", ["fa-mem-3"]))[0]?.deleted, "#FXB final review M4: …the row stays deleted");
+      await assert.rejects(Fx.updateFixture(mem3, v3.value, "Jeff", snap), /deleted/, "#210 final review M4: a save of an in-memory record deleted meanwhile is refused, not revived");
+      assert((await DS.getDocRows("subassemblies", ["fa-mem-3"]))[0]?.deleted, "#210 final review M4: …the row stays deleted");
     } finally {
       if (priorVercelEnv === undefined) delete process.env.VERCEL_ENV;
       else process.env.VERCEL_ENV = priorVercelEnv;
     }
     const conv = await Mig.convertFixtures();
-    assert(conv.complete, `#FXB final review M4: the conversion then completes (got ${JSON.stringify(conv)})`);
-    assert((await DS.getDocRows("subassemblies", ["fa-mem-2"]))[0]?.deleted, "#FXB final review M4: …and does not re-insert the deleted fa- record");
-    assert.equal((await Fx.getFixture("fa-mem-1"))?.label, "Mem one — edited", "#FXB final review M4: …nor overwrite the saved one");
+    assert(conv.complete, `#210 final review M4: the conversion then completes (got ${JSON.stringify(conv)})`);
+    assert((await DS.getDocRows("subassemblies", ["fa-mem-2"]))[0]?.deleted, "#210 final review M4: …and does not re-insert the deleted fa- record");
+    assert.equal((await Fx.getFixture("fa-mem-1"))?.label, "Mem one — edited", "#210 final review M4: …nor overwrite the saved one");
     await setSettings({ fixtureAssemblies: [] });
   }
 
@@ -3721,7 +3721,7 @@ async function main() {
     );
   }
 
-  /* --- #FXB final review M5: the go-live reset keeps fixtures and systems
+  /* --- #210 final review M5: the go-live reset keeps fixtures and systems
          (configuration, like the settings they used to live in) and the
          kept fixtures' accessory graph is rebuilt. LAST: it wipes every
          other doc collection in this harness database. --- */
@@ -3737,10 +3737,10 @@ async function main() {
     const kept = await Fx.createFixture(v.value, "Jeff", { cost: 0, price: 0, pricedAt: null });
     const flagBefore = await Mig.fixturesConverted();
     await clearDemoData();
-    assert.equal((await Fx.getFixture(kept.id))?.label, "Kept across reset", "#FXB final review M5: the go-live reset keeps fixtures");
-    assert.equal(await Mig.fixturesConverted(), flagBefore, "#FXB final review M5: …and leaves the conversion flag as it was");
+    assert.equal((await Fx.getFixture(kept.id))?.label, "Kept across reset", "#210 final review M5: the go-live reset keeps fixtures");
+    assert.equal(await Mig.fixturesConverted(), flagBefore, "#210 final review M5: …and leaves the conversion flag as it was");
     await syncAllAssemblyGraphs();
-    assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === `fixture:${kept.id}` && l.accessorySku === "FXB-KEEP-L"), "#FXB final review M5: the reset's graph rebuild restores the kept fixture's accessory links");
+    assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === `fixture:${kept.id}` && l.accessorySku === "FXB-KEEP-L"), "#210 final review M5: the reset's graph rebuild restores the kept fixture's accessory links");
   }
 
   console.log("review regression checks passed");

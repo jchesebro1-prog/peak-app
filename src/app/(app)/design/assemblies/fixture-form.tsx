@@ -23,7 +23,7 @@ import { pairKey, type MemberCoverage } from "@/lib/part-docs/assembly-graph";
 import MemberCoverageChip from "./member-coverage";
 import { searchAssemblyPartsAction } from "./actions";
 
-/** The catalog slice the builder searches and prices from (#FXB). Cost is
+/** The catalog slice the builder searches and prices from (#210). Cost is
  *  included: the footer shows the live included cost, as Subassemblies did. */
 export type PartHit = { sku: string; desc: string; category: string; mfr: string; unit: string; list: number; cost: number; pricedAt?: number };
 

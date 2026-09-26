@@ -93,7 +93,7 @@ export type AppSettingsData = {
   /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
    * over the source-sheet defaults in lib/venue-doctrine.ts. */
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;
-  /** Pre-#FXB Assemblies-tab records. Since the fixture builder they are
+  /** Pre-#210 Assemblies-tab records. Since the fixture builder they are
    *  converted into `subassemblies` fixture rows (src/lib/fixtures-migrate.ts)
    *  and this array is a read-only backup — never written by the app. */
   fixtureAssemblies?: import("@/lib/fixture-assemblies").FixtureAssembly[];

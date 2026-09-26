@@ -269,7 +269,7 @@ See `.env.example`.
     flip. Not in scope: the Estimator, rentals, consulting, live airfare
     lookup, per-venue split trips. Decisions D281–D286; punch item
     #208.
-15. ✅ **One fixture builder** (#FXB, D-FXB-1…D-FXB-6) — the Assembly
+16. ✅ **One fixture builder** (#210, D294–D300) — the Assembly
     Builder's two tabs merged: one `FixtureRecord` type (Fixture or
     System) in the existing `subassemblies` doc table
     (`src/lib/stores/fixtures.ts`; pure model, `resolveFixture` and save
@@ -281,7 +281,8 @@ See `.env.example`.
     and moves the accessory graph to one `fixture:<id>` scope. Estimator
     and Quick Design read fixtures through `fixtureAssembliesFrom()` with
     identical totals. Remaining is Jeff-gated: run the conversion on
-    production and review any "needs review" fixtures.
+    production and review any "needs review" fixtures. Decisions
+    D294–D300; punch item #210.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

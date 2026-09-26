@@ -148,7 +148,7 @@ export async function seedDemoCollections(): Promise<number> {
 /**
  * Doc collections that hold configuration, not demo business records, and so
  * survive the go-live reset like settings do. `subassemblies` holds the
- * Assembly Builder's fixtures and systems (#FXB) — before the merge those
+ * Assembly Builder's fixtures and systems (#210) — before the merge those
  * assemblies lived in settings, which the reset has always kept.
  */
 export const CONFIG_COLLECTIONS: readonly CollectionName[] = ["subassemblies"];

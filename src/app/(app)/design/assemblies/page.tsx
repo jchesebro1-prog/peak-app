@@ -12,12 +12,12 @@ import type { PartHit } from "./fixture-form";
 
 export const metadata = { title: "Assembly Builder — Quartzite-6" };
 export const dynamic = "force-dynamic";
-/** #FXB: this page's first listFixtures() can run the one-time fixture
+/** #210: this page's first listFixtures() can run the one-time fixture
  *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS) — 60 s keeps
  *  that well inside the function limit, like the Datasheets page. */
 export const maxDuration = 60;
 
-/** #FXB — one builder for fixtures and systems (spec
+/** #210 — one builder for fixtures and systems (spec
  *  2026-09-25-fixture-builder-merge-design.md). The #130 `?tab=` switch is
  *  gone; a stale `?tab=` link lands on the one list. Everything prices from
  *  the live catalog, loaded once here. */
@@ -30,7 +30,7 @@ export default async function AssemblyBuilderPage({
   const sp = await searchParams;
   if (sp.tab !== undefined) redirect("/design/assemblies");
   const [settings, fixtures] = await Promise.all([getSettings(), listFixtures()]);
-  // #FXB fix wave 1 (I1): only the parts saved fixtures actually reference —
+  // #210 fix wave 1 (I1): only the parts saved fixtures actually reference —
   // never the whole ~37,400-part catalog. New lines are priced by the
   // pickers' own server search (searchAssemblyPartsAction), which merges its
   // hits into the client's bySku seed below.

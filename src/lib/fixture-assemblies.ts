@@ -32,7 +32,7 @@ export type ResolvedAssemblyComponent = FixtureAssemblyComponent & {
 };
 export type ResolvedFixtureAssembly = Omit<FixtureAssembly, "components"> & {
   components: ResolvedAssemblyComponent[];
-  /** #FXB — the fixture's default hang position / circuit (Estimator pre-fill). */
+  /** #210 — the fixture's default hang position / circuit (Estimator pre-fill). */
   position?: string;
   circuit?: string;
 };
@@ -107,7 +107,7 @@ export function assemblyDescription(assembly: ResolvedFixtureAssembly): string {
 
 export const FIXTURE_OPTION_CATEGORIES: readonly FixtureOptionCategory[] = ["data", "power", "mounting", "accessories"];
 
-/** A catalog as an array or an already-built SKU map (#FXB — the builder
+/** A catalog as an array or an already-built SKU map (#210 — the builder
  *  resolves many records against ~37k parts; build the map once). */
 export type SkuLookup<P extends { sku: string }> = ReadonlyArray<P> | ReadonlyMap<string, P>;
 
@@ -198,7 +198,7 @@ export function resolveSubassembly(
 
 
 /* ======================================================================
-   #FXB — one fixture builder (spec 2026-09-25-fixture-builder-merge-design.md).
+   #210 — one fixture builder (spec 2026-09-25-fixture-builder-merge-design.md).
    One record type for fixtures and systems, stored in the `subassemblies`
    doc table (src/lib/stores/fixtures.ts). Pure: client components import
    the constants, the resolver and the input sanitizer.
@@ -206,7 +206,7 @@ export function resolveSubassembly(
 
 export const FIXTURE_BOXES = ["data", "power", "mounting", "accessories"] as const;
 export type FixtureBox = (typeof FIXTURE_BOXES)[number];
-/** Pre-#FXB name for the four boxes (the Subassemblies option categories). */
+/** Pre-#210 name for the four boxes (the Subassemblies option categories). */
 export type FixtureOptionCategory = FixtureBox;
 export const FIXTURE_BOX_LABEL: Record<FixtureBox, string> = {
   data: "Data",
@@ -300,7 +300,7 @@ export type ResolvedFixture = {
 };
 
 /**
- * M1 (fix wave 1, #FXB) — the head line a light-engine/lens picker's `onPick`
+ * M1 (fix wave 1, #210) — the head line a light-engine/lens picker's `onPick`
  * should keep: a DIFFERENT part starts fresh (its old label/qty/costOverride
  * don't carry over onto the newly-picked part); re-picking the SAME part
  * (`pickedSku === current`) leaves whatever is already there untouched.

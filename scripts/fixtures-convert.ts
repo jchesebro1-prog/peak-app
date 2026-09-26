@@ -1,5 +1,5 @@
 /**
- * Fixture builder conversion (#FXB, spec 2026-09-25-fixture-builder-merge-design.md §3):
+ * Fixture builder conversion (#210, spec 2026-09-25-fixture-builder-merge-design.md §3):
  * settings.fixtureAssemblies + legacy subassembly rows → fixture records
  * (ids kept), and the accessory graph moved to one `fixture:<id>` scope.
  * Idempotent; the app runs the same step on its first read.

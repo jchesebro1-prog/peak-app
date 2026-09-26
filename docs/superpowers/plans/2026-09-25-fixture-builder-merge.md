@@ -28,7 +28,7 @@
 - Destructive UI goes through `ConfirmButton`. Accent-coloured UI uses `var(--accent)` and is never hardcoded.
 - Production has ~37,400 catalog parts. Load the catalog once per request and never make one query per part (no N+1).
 - Timestamps are epoch-ms numbers (AGENTS.md).
-- Punch and decision numbers are placeholders: `#FXB` and `D-FXB-n`. The lead renumbers them at merge.
+- Punch and decision numbers are placeholders at plan time, renumbered at merge to `#210` and `D294`…`D300`.
 - Work only in `/Users/sm/Downloads/peak-app/.claude/worktrees/fixture-builder`. Never `cd` to `/Users/sm/Downloads/peak-app`. Never open a real `.data/pglite`, never `git stash`, and never start a dev server by hand (`test:smoke` boots its own on a scratch datadir).
 
 ## Worktree setup (once, before Task 1)
@@ -86,7 +86,7 @@ Gate commands used below:
 ### Task 1: The pure fixture model and pricing
 
 **Files:**
-- Modify: `src/lib/fixture-assemblies.ts` (line 2 import; `ResolvedFixtureAssembly`; `pricesAsOf`; append the #FXB block)
+- Modify: `src/lib/fixture-assemblies.ts` (line 2 import; `ResolvedFixtureAssembly`; `pricesAsOf`; append the #210 block)
 - Test: `scripts/test-review-and-spec.ts` (append block at EOF)
 
 **Interfaces:**
@@ -113,7 +113,7 @@ Gate commands used below:
 
 ```ts
 /* ======================================================================
-   #FXB — one fixture builder: resolveFixture / sanitizeFixtureInput /
+   #210 — one fixture builder: resolveFixture / sanitizeFixtureInput /
    fixtureAssembliesFrom. Pure.
    ====================================================================== */
 import {
@@ -139,15 +139,15 @@ import {
     createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
   const r = resolveFixture(rec, cat);
-  ok(r.parts.map((p) => `${p.slot}:${p.sku}`).join(",") === "lightEngine:FX-ENG,lens:FX-LENS,power:FX-CBL,mounting:FX-CLAMP,accessories:FX-GONE", "#FXB resolveFixture: engine, lens, then the boxes in Data/Power/Mounting/Accessories order");
-  ok(r.parts[2].cost === 25 && r.parts[2].sell === 60, "#FXB resolveFixture: a cost override beats the catalog cost; sell stays the catalog list");
-  ok(r.cost === 1000 + 200 + 25 && r.sell === 1500 + 300 + 60, "#FXB resolveFixture: included totals skip qty-0 optional lines and missing parts");
+  ok(r.parts.map((p) => `${p.slot}:${p.sku}`).join(",") === "lightEngine:FX-ENG,lens:FX-LENS,power:FX-CBL,mounting:FX-CLAMP,accessories:FX-GONE", "#210 resolveFixture: engine, lens, then the boxes in Data/Power/Mounting/Accessories order");
+  ok(r.parts[2].cost === 25 && r.parts[2].sell === 60, "#210 resolveFixture: a cost override beats the catalog cost; sell stays the catalog list");
+  ok(r.cost === 1000 + 200 + 25 && r.sell === 1500 + 300 + 60, "#210 resolveFixture: included totals skip qty-0 optional lines and missing parts");
   const clamp = r.parts.find((p) => p.sku === "FX-CLAMP")!;
-  ok(!clamp.included && clamp.cost === 10 && clamp.sell === 20, "#FXB resolveFixture: an optional (qty 0) line lists its unit cost/sell but adds nothing");
+  ok(!clamp.included && clamp.cost === 10 && clamp.sell === 20, "#210 resolveFixture: an optional (qty 0) line lists its unit cost/sell but adds nothing");
   const gone = r.parts.find((p) => p.sku === "FX-GONE")!;
-  ok(!gone.found && gone.cost === 0 && gone.sell === 0 && r.missing.join(",") === "FX-GONE" && gone.label === "Iris", "#FXB resolveFixture: a missing part is found:false, priced 0, listed in missing");
-  ok(fixtureDescription(r) === "S4 LED — Engine; Lens 26°; Power cable; Iris", "#FXB fixtureDescription: 'Label — part; part' over included parts");
-  ok(fixtureSkus(rec).join(",") === "FX-ENG,FX-LENS,FX-CBL,FX-CLAMP,FX-GONE", "#FXB fixtureSkus: every SKU the record prices, once, in form order");
+  ok(!gone.found && gone.cost === 0 && gone.sell === 0 && r.missing.join(",") === "FX-GONE" && gone.label === "Iris", "#210 resolveFixture: a missing part is found:false, priced 0, listed in missing");
+  ok(fixtureDescription(r) === "S4 LED — Engine; Lens 26°; Power cable; Iris", "#210 fixtureDescription: 'Label — part; part' over included parts");
+  ok(fixtureSkus(rec).join(",") === "FX-ENG,FX-LENS,FX-CBL,FX-CLAMP,FX-GONE", "#210 fixtureSkus: every SKU the record prices, once, in form order");
 
   const sys: FxbRecord = {
     id: "SA-T2", kind: "system", label: "Audio rack", description: "", scope: "Audio",
@@ -156,25 +156,25 @@ import {
     createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
   const s = resolveFixture(sys, cat);
-  ok(s.parts.length === 2 && s.parts.every((p) => p.slot === "parts") && s.cost === 80 && s.sell === 120, "#FXB resolveFixture: a system prices its one parts list with the same line logic");
+  ok(s.parts.length === 2 && s.parts.every((p) => p.slot === "parts") && s.cost === 80 && s.sell === 120, "#210 resolveFixture: a system prices its one parts list with the same line logic");
 
   const noLabel = sanitizeFixtureInput({ kind: "fixture", label: "  ", description: "" });
-  ok(!noLabel.ok && noLabel.error.includes("label"), "#FXB sanitizeFixtureInput: a label is required");
+  ok(!noLabel.ok && noLabel.error.includes("label"), "#210 sanitizeFixtureInput: a label is required");
   const noEngine = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "" });
-  ok(!noEngine.ok && /light engine/i.test(noEngine.error), "#FXB sanitizeFixtureInput: a fixture needs a light engine");
+  ok(!noEngine.ok && /light engine/i.test(noEngine.error), "#210 sanitizeFixtureInput: a fixture needs a light engine");
   const good = sanitizeFixtureInput({ kind: "fixture", label: " X ", description: "", lightEngineSku: "FX-GONE", lensSku: "", lines: { power: [{ sku: " FX-CBL ", qty: -3 }, { sku: "", qty: 1 }] } });
-  ok(good.ok && good.value.label === "X" && good.value.lensSku === null && good.value.lightEngineSku === "FX-GONE" && good.value.lines.power.length === 1 && good.value.lines.power[0].sku === "FX-CBL" && good.value.lines.power[0].qty === 0 && good.value.lines.data.length === 0, "#FXB sanitizeFixtureInput: lens optional, a part missing from the catalog does not block, qty clamps at 0, blank lines drop");
+  ok(good.ok && good.value.label === "X" && good.value.lensSku === null && good.value.lightEngineSku === "FX-GONE" && good.value.lines.power.length === 1 && good.value.lines.power[0].sku === "FX-CBL" && good.value.lines.power[0].qty === 0 && good.value.lines.data.length === 0, "#210 sanitizeFixtureInput: lens optional, a part missing from the catalog does not block, qty clamps at 0, blank lines drop");
   const badScope = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Plumbing", parts: [{ sku: "A", qty: 1 }] });
-  ok(!badScope.ok && /scope/i.test(badScope.error), "#FXB sanitizeFixtureInput: a system needs one of the nine scopes");
+  ok(!badScope.ok && /scope/i.test(badScope.error), "#210 sanitizeFixtureInput: a system needs one of the nine scopes");
   const noParts = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [] });
-  ok(!noParts.ok && /part/i.test(noParts.error), "#FXB sanitizeFixtureInput: a system needs at least one part");
+  ok(!noParts.ok && /part/i.test(noParts.error), "#210 sanitizeFixtureInput: a system needs at least one part");
   const sysOk = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 0 }], lightEngineSku: "IGNORED" });
-  ok(sysOk.ok && sysOk.value.scope === "Audio" && sysOk.value.lightEngineSku === "" && sysOk.value.lensSku === null && (sysOk.value.parts || []).length === 1, "#FXB sanitizeFixtureInput: a system keeps scope + parts and no light engine");
+  ok(sysOk.ok && sysOk.value.scope === "Audio" && sysOk.value.lightEngineSku === "" && sysOk.value.lensSku === null && (sysOk.value.parts || []).length === 1, "#210 sanitizeFixtureInput: a system keeps scope + parts and no light engine");
 
   const fa = fixtureAssembliesFrom([rec, sys], cat);
-  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#FXB fixtureAssembliesFrom: fixtures only, id and label carried");
-  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#FXB fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
-  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#FXB fixtureAssembliesFrom: the override rides through as the component cost");
+  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#210 fixtureAssembliesFrom: fixtures only, id and label carried");
+  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#210 fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
+  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#210 fixtureAssembliesFrom: the override rides through as the component cost");
 }
 ```
 
@@ -198,7 +198,7 @@ with nothing. (`FixtureOptionCategory` is now defined locally in 3d. `@/lib/stor
 ```ts
 export type ResolvedFixtureAssembly = Omit<FixtureAssembly, "components"> & {
   components: ResolvedAssemblyComponent[];
-  /** #FXB — the fixture's default hang position / circuit (Estimator pre-fill). */
+  /** #210 — the fixture's default hang position / circuit (Estimator pre-fill). */
   position?: string;
   circuit?: string;
 };
@@ -207,7 +207,7 @@ export type ResolvedFixtureAssembly = Omit<FixtureAssembly, "components"> & {
 3c. Replace the whole `pricesAsOf` function (signature through closing brace) with:
 
 ```ts
-/** A catalog as an array or an already-built SKU map (#FXB — the builder
+/** A catalog as an array or an already-built SKU map (#210 — the builder
  *  resolves many records against ~37k parts; build the map once). */
 export type SkuLookup<P extends { sku: string }> = ReadonlyArray<P> | ReadonlyMap<string, P>;
 
@@ -239,7 +239,7 @@ export function pricesAsOf(
 
 ```ts
 /* ======================================================================
-   #FXB — one fixture builder (spec 2026-09-25-fixture-builder-merge-design.md).
+   #210 — one fixture builder (spec 2026-09-25-fixture-builder-merge-design.md).
    One record type for fixtures and systems, stored in the `subassemblies`
    doc table (src/lib/stores/fixtures.ts). Pure: client components import
    the constants, the resolver and the input sanitizer.
@@ -247,7 +247,7 @@ export function pricesAsOf(
 
 export const FIXTURE_BOXES = ["data", "power", "mounting", "accessories"] as const;
 export type FixtureBox = (typeof FIXTURE_BOXES)[number];
-/** Pre-#FXB name for the four boxes (the Subassemblies option categories). */
+/** Pre-#210 name for the four boxes (the Subassemblies option categories). */
 export type FixtureOptionCategory = FixtureBox;
 export const FIXTURE_BOX_LABEL: Record<FixtureBox, string> = {
   data: "Data",
@@ -579,14 +579,14 @@ export function fixtureAssembliesFrom(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx tsc --noEmit && npm run test:specs 2>&1 | grep -E "FAIL|#FXB|ALL PASSED|FAILED" | tail -30`
-Expected: every `#FXB` line is `PASS`, the existing `#129 pricesAsOf` lines still pass, and the run ends with `ALL PASSED`.
+Run: `npx tsc --noEmit && npm run test:specs 2>&1 | grep -E "FAIL|#210|ALL PASSED|FAILED" | tail -30`
+Expected: every `#210` line is `PASS`, the existing `#129 pricesAsOf` lines still pass, and the run ends with `ALL PASSED`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/lib/fixture-assemblies.ts scripts/test-review-and-spec.ts
-git commit -m "feat(fixtures): pure fixture model, live resolver and save rules (#FXB)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(fixtures): pure fixture model, live resolver and save rules (#210)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -608,7 +608,7 @@ git commit -m "feat(fixtures): pure fixture model, live resolver and save rules 
 
 ```ts
 /* ======================================================================
-   #FXB — conversion (role mapping, ids kept, idempotent), converted-assembly
+   #210 — conversion (role mapping, ids kept, idempotent), converted-assembly
    parity, and the fixture: graph scope. Pure.
    ====================================================================== */
 import { assemblyToFixture, subassemblyToFixture, isLegacySubassembly, planFixtureConversion, normalizeFixtureRow } from "@/lib/fixtures-convert";
@@ -630,13 +630,13 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
     ],
   };
   const f = assemblyToFixture(asm, 1000);
-  ok(f.id === "fa-conv" && f.kind === "fixture" && f.label === "House S4" && f.legacy?.from === "assembly" && f.createdAt === 1000, "#FXB convert: an assembly keeps its fa- id and name");
-  ok(f.lightEngineSku === "C-ENG" && f.lightEngineLine?.label === "Engine" && f.lightEngineLine?.qty === 1 && f.lensSku === "C-LENS" && f.lensLine?.label === "Lens", "#FXB convert: first fixture → light engine, first lens → lens (label and qty kept)");
-  ok(f.lines.data.map((l) => `${l.sku}x${l.qty}`).join() === "C-DATAx2" && f.lines.power[0].costOverride === 12 && f.lines.mounting.map((l) => l.sku).join() === "C-MNT", "#FXB convert: data/power/mount → Data/Power/Mounting, qty and override carried");
-  ok(f.lines.accessories.map((l) => l.sku).join(",") === "C-ENG2,C-LENS2,C-ACC,C-CBL,C-LAMP,C-OTH", "#FXB convert: extra fixture/lens members + accessory/cable/lamp/other → Accessories, order kept");
-  ok(!f.needsReview, "#FXB convert: an assembly with a fixture member needs no review");
+  ok(f.id === "fa-conv" && f.kind === "fixture" && f.label === "House S4" && f.legacy?.from === "assembly" && f.createdAt === 1000, "#210 convert: an assembly keeps its fa- id and name");
+  ok(f.lightEngineSku === "C-ENG" && f.lightEngineLine?.label === "Engine" && f.lightEngineLine?.qty === 1 && f.lensSku === "C-LENS" && f.lensLine?.label === "Lens", "#210 convert: first fixture → light engine, first lens → lens (label and qty kept)");
+  ok(f.lines.data.map((l) => `${l.sku}x${l.qty}`).join() === "C-DATAx2" && f.lines.power[0].costOverride === 12 && f.lines.mounting.map((l) => l.sku).join() === "C-MNT", "#210 convert: data/power/mount → Data/Power/Mounting, qty and override carried");
+  ok(f.lines.accessories.map((l) => l.sku).join(",") === "C-ENG2,C-LENS2,C-ACC,C-CBL,C-LAMP,C-OTH", "#210 convert: extra fixture/lens members + accessory/cable/lamp/other → Accessories, order kept");
+  ok(!f.needsReview, "#210 convert: an assembly with a fixture member needs no review");
   const kit = assemblyToFixture({ id: "fa-ne", name: "Cable kit", components: [{ sku: "K1", label: "Cable", role: "cable", defaultQty: 3 }, { sku: "K2", label: "Clamp", role: "mount", defaultQty: 1 }] }, 1000);
-  ok(kit.lightEngineSku === "K1" && kit.lightEngineLine?.qty === 3 && kit.needsReview === true && kit.lines.mounting[0].sku === "K2" && kit.lines.accessories.length === 0, "#FXB convert: no fixture member → the first component becomes the light engine, flagged needsReview");
+  ok(kit.lightEngineSku === "K1" && kit.lightEngineLine?.qty === 3 && kit.needsReview === true && kit.lines.mounting[0].sku === "K2" && kit.lines.accessories.length === 0, "#210 convert: no fixture member → the first component becomes the light engine, flagged needsReview");
 
   // Parity: the converted record yields the same Estimator / Quick Design numbers.
   const cat = [
@@ -656,11 +656,11 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
   const after = fixtureAssembliesFrom([f], cat)[0];
   const bt = assemblyUnitTotals(before);
   const at = assemblyUnitTotals(after);
-  ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#FXB parity: a converted assembly keeps its id, name and unit cost/sell");
+  ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#210 parity: a converted assembly keeps its id, name and unit cost/sell");
   const key = (c: { sku: string; label: string; defaultQty: number; cost: number; list: number; found: boolean }) => `${c.sku}|${c.label}|${c.defaultQty}|${c.cost}|${c.list}|${c.found}`;
-  ok(JSON.stringify(before.components.map(key).sort()) === JSON.stringify(after.components.map(key).sort()), "#FXB parity: the same component set (sku, label, qty, cost, sell)");
+  ok(JSON.stringify(before.components.map(key).sort()) === JSON.stringify(after.components.map(key).sort()), "#210 parity: the same component set (sku, label, qty, cost, sell)");
   const pick = (a: typeof before) => ({ name: a.name, cost: assemblyUnitTotals(a).cost });
-  ok(JSON.stringify(pick(before)) === JSON.stringify(pick(after)), "#FXB parity: the Quick Design / Grid pick under this id prices the same");
+  ok(JSON.stringify(pick(before)) === JSON.stringify(pick(after)), "#210 parity: the Quick Design / Grid pick under this id prices the same");
 
   // Legacy subassembly rows.
   const legacy = {
@@ -671,26 +671,26 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
     options: { data: [{ sku: "C-DATA", name: "DMX (old)", cost: 5, qty: 2 }], power: [], mounting: [], accessories: [{ sku: "C-GONE", name: "Gone part", cost: 3, qty: 1 }] },
     cost: 1065, price: 1065, snapshot: { cost: 1065, price: 1065, pricedAt: null }, createdAt: 5, updatedAt: 6,
   };
-  ok(isLegacySubassembly(legacy), "#FXB convert: a pre-#FXB subassembly row is recognised");
+  ok(isLegacySubassembly(legacy), "#210 convert: a pre-#210 subassembly row is recognised");
   const s = subassemblyToFixture(legacy);
-  ok(s.id === "SA-OLD" && s.lensSku === "C-LENS" && s.lines.data[0].qty === 2 && s.lines.accessories[0].sku === "C-GONE" && s.lamp === "LED" && s.position === "FOH" && s.circuit === "12" && s.createdAt === 5 && s.updatedAt === 6 && s.legacy?.from === "subassembly", "#FXB convert: a subassembly is rewritten to the new shape, id and fields kept");
-  ok(!isLegacySubassembly(s as unknown as Record<string, unknown>) && !("options" in s) && !("lightEngineName" in s), "#FXB convert: a converted row is no longer legacy and drops the stored-name fields");
+  ok(s.id === "SA-OLD" && s.lensSku === "C-LENS" && s.lines.data[0].qty === 2 && s.lines.accessories[0].sku === "C-GONE" && s.lamp === "LED" && s.position === "FOH" && s.circuit === "12" && s.createdAt === 5 && s.updatedAt === 6 && s.legacy?.from === "subassembly", "#210 convert: a subassembly is rewritten to the new shape, id and fields kept");
+  ok(!isLegacySubassembly(s as unknown as Record<string, unknown>) && !("options" in s) && !("lightEngineName" in s), "#210 convert: a converted row is no longer legacy and drops the stored-name fields");
   const gone = resolveFixture(s, cat).parts.find((p) => p.sku === "C-GONE")!;
-  ok(!gone.found && gone.label === "Gone part", "#FXB convert: a converted row's old stored name is the fallback display for a missing part");
-  ok(normalizeFixtureRow(legacy as unknown as Record<string, unknown> & { id: string }).lines.data[0].sku === "C-DATA", "#FXB normalizeFixtureRow: a legacy row reads as the new shape in memory");
+  ok(!gone.found && gone.label === "Gone part", "#210 convert: a converted row's old stored name is the fallback display for a missing part");
+  ok(normalizeFixtureRow(legacy as unknown as Record<string, unknown> & { id: string }).lines.data[0].sku === "C-DATA", "#210 normalizeFixtureRow: a legacy row reads as the new shape in memory");
 
   const rows = [legacy as unknown as Record<string, unknown> & { id: string }];
   const p1 = planFixtureConversion([asm], rows, 1000);
-  ok(p1.inserts.map((r) => r.id).join() === "fa-conv" && p1.rewrites.map((r) => r.id).join() === "SA-OLD", "#FXB plan: settings assemblies insert, legacy rows rewrite");
+  ok(p1.inserts.map((r) => r.id).join() === "fa-conv" && p1.rewrites.map((r) => r.id).join() === "SA-OLD", "#210 plan: settings assemblies insert, legacy rows rewrite");
   const applied = [...p1.rewrites, ...p1.inserts] as unknown as Array<Record<string, unknown> & { id: string }>;
   const p2 = planFixtureConversion([asm], applied, 2000);
-  ok(p2.inserts.length === 0 && p2.rewrites.length === 0, "#FXB plan: running the conversion twice changes nothing");
+  ok(p2.inserts.length === 0 && p2.rewrites.length === 0, "#210 plan: running the conversion twice changes nothing");
 
   // The accessory graph: one fixture: scope; systems feed nothing.
   const pairs = fixturePairs({ kind: "fixture", lightEngineSku: "G-ENG", lensSku: "G-LENS", lines: { data: [{ sku: "G-DMX", qty: 2 }], power: [], mounting: [{ sku: "G-CLAMP", qty: 0 }], accessories: [{ sku: "G-ENG", qty: 1 }] } });
-  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? p.maxQty : "opt"}`).join(",") === "G-ENG>G-LENS:1,G-ENG>G-DMX:2,G-ENG>G-CLAMP:opt", "#FXB graph: lens + every box line (optional ones un-included) under the light engine; the engine itself skipped");
-  ok(fixturePairs({ kind: "system", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } }).length === 0, "#FXB graph: systems don't feed the graph");
-  ok(fixtureRef("fa-1") === "fixture:fa-1" && FIXTURE_REF_PREFIX === "fixture:" && LEGACY_ASSEMBLY_REF_PREFIXES.join() === "assembly:,subassembly:", "#FXB graph: one fixture:<id> scope; the two legacy prefixes are named for retirement");
+  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? p.maxQty : "opt"}`).join(",") === "G-ENG>G-LENS:1,G-ENG>G-DMX:2,G-ENG>G-CLAMP:opt", "#210 graph: lens + every box line (optional ones un-included) under the light engine; the engine itself skipped");
+  ok(fixturePairs({ kind: "system", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } }).length === 0, "#210 graph: systems don't feed the graph");
+  ok(fixtureRef("fa-1") === "fixture:fa-1" && FIXTURE_REF_PREFIX === "fixture:" && LEGACY_ASSEMBLY_REF_PREFIXES.join() === "assembly:,subassembly:", "#210 graph: one fixture:<id> scope; the two legacy prefixes are named for retirement");
 }
 ```
 
@@ -715,15 +715,15 @@ import {
 } from "./fixture-assemblies";
 
 /**
- * #FXB conversion — pure. The Assemblies tab's `settings.fixtureAssemblies`
+ * #210 conversion — pure. The Assemblies tab's `settings.fixtureAssemblies`
  * entries and the Subassemblies tab's rows become one FixtureRecord shape,
  * keeping their ids (spec §3). The server runner is src/lib/fixtures-migrate.ts.
  */
 
-/** The Subassemblies tab's stored option (pre-#FXB, #129). */
+/** The Subassemblies tab's stored option (pre-#210, #129). */
 export type LegacyOption = { sku: string; name: string; cost: number; qty: number };
 
-/** The Subassemblies tab's stored row (pre-#FXB). */
+/** The Subassemblies tab's stored row (pre-#210). */
 export type LegacySubassembly = {
   id: string;
   kind: "fixture";
@@ -803,7 +803,7 @@ export function assemblyToFixture(a: FixtureAssembly, at: number): FixtureRecord
   };
 }
 
-/** A row in the pre-#FXB shape (no `lines` object). */
+/** A row in the pre-#210 shape (no `lines` object). */
 export function isLegacySubassembly(row: Record<string, unknown>): boolean {
   const lines = row.lines;
   return !(lines && typeof lines === "object");
@@ -903,7 +903,7 @@ In `subassemblyPairs`, change the parameter type from `Pick<FixtureSubassembly, 
 Append at the end of the file:
 
 ```ts
-/* ---- #FXB — one fixture builder, one scope ---------------------------- */
+/* ---- #210 — one fixture builder, one scope ---------------------------- */
 
 /** The merged builder's scope. The two part-documents scopes above are
  *  retired (soft-deleted) once the fixture: scope is written. */
@@ -932,14 +932,14 @@ export function fixturePairs(r: Pick<FixtureRecord, "kind" | "lightEngineSku" | 
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx tsc --noEmit && npm run test:specs 2>&1 | grep -E "FAIL|#FXB|part docs assemblies|ALL PASSED|FAILED" | tail -40`
-Expected: all `#FXB` lines and the existing `part docs assemblies:` lines are `PASS`, ending with `ALL PASSED`.
+Run: `npx tsc --noEmit && npm run test:specs 2>&1 | grep -E "FAIL|#210|part docs assemblies|ALL PASSED|FAILED" | tail -40`
+Expected: all `#210` lines and the existing `part docs assemblies:` lines are `PASS`, ending with `ALL PASSED`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/lib/fixtures-convert.ts src/lib/part-docs/assembly-graph.ts scripts/test-review-and-spec.ts
-git commit -m "feat(fixtures): pure conversion keeping ids, fixture: graph pairs (#FXB)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(fixtures): pure conversion keeping ids, fixture: graph pairs (#210)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -965,7 +965,7 @@ git commit -m "feat(fixtures): pure conversion keeping ids, fixture: graph pairs
 1a. Replace every line from `    // I2: the one-time Assembly Builder → graph sync.` through `    await setSettings({ fixtureAssemblies: priorAssemblies });` (inclusive; the `  }` that follows stays) with:
 
 ```ts
-    // I2 → #FXB: the one-time fixture conversion — settings assemblies and
+    // I2 → #210: the one-time fixture conversion — settings assemblies and
     // legacy subassemblies become fixture records (ids kept), and the graph
     // moves from assembly:/subassembly: to one fixture:<id> scope.
     const { setSettings } = await import("@/lib/settings");
@@ -977,7 +977,7 @@ git commit -m "feat(fixtures): pure conversion keeping ids, fixture: graph pairs
     const { getSettings } = await import("@/lib/settings");
     await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
     const priorAssemblies = ((await getSettings()).fixtureAssemblies ?? []) as unknown[];
-    assert.equal(priorAssemblies.length, 0, "#FXB: the test database starts with no fixture assemblies");
+    assert.equal(priorAssemblies.length, 0, "#210: the test database starts with no fixture assemblies");
     const fwAssemblies = [
       { id: "fw-asm", name: "FW assembly", components: [
         { sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 },
@@ -999,32 +999,32 @@ git commit -m "feat(fixtures): pure conversion keeping ids, fixture: graph pairs
     await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-gone" }, [{ parentSku: "FW-OLD", accessorySku: "FW-OLDACC" }]);
     await Acc.syncAccessoryLinks({ source: "davinci", sourceRef: "TY-FWX" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS" }]);
     await Acc.setOwnDatasheet("FW-S4", "FW-LENS", true);
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB: a fresh database has not converted");
+    assert.equal(await Mig.fixturesConverted(), false, "#210: a fresh database has not converted");
     const r1 = await Mig.convertFixtures();
-    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4 && r1.graphRemoved >= 5, `#FXB: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
-    assert.equal(await Mig.fixturesConverted(), true, "#FXB: a completed conversion sets the flag");
+    assert(r1.complete && r1.inserted === 1 && r1.rewritten === 1 && r1.graphWritten === 4 && r1.graphRemoved >= 5, `#210: the first run converts one assembly + one subassembly and moves the graph (got ${JSON.stringify(r1)})`);
+    assert.equal(await Mig.fixturesConverted(), true, "#210: a completed conversion sets the flag");
     const fw = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "fw-asm"))!;
     const fwLines = fw.lines as Record<string, Array<{ sku: string; qty: number }>>;
-    assert(fw && fw.lightEngineSku === "FW-S4" && fw.lensSku === "FW-LENS" && fwLines.mounting[0]?.sku === "FW-CLAMP" && fwLines.mounting[0]?.qty === 0, "#FXB: the settings assembly converted by role, keeping its fa-style id");
+    assert(fw && fw.lightEngineSku === "FW-S4" && fw.lensSku === "FW-LENS" && fwLines.mounting[0]?.sku === "FW-CLAMP" && fwLines.mounting[0]?.qty === 0, "#210: the settings assembly converted by role, keeping its fa-style id");
     const sa = (await DS.getDoc<Record<string, unknown> & { id: string }>("subassemblies", "SA-FW"))!;
-    assert(!!sa.lines && sa.options === undefined, "#FXB: the legacy subassembly row is rewritten in place under its SA- id");
-    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 1, "#FXB: settings.fixtureAssemblies is left untouched as a backup");
+    assert(!!sa.lines && sa.options === undefined, "#210: the legacy subassembly row is rewritten in place under its SA- id");
+    assert.equal(((await getSettings()).fixtureAssemblies ?? []).length, 1, "#210: settings.fixtureAssemblies is left untouched as a backup");
     const live = await Acc.allAccessoryLinks();
     const has = (ref: string, parent: string, acc: string) => live.some((l) => l.source === "assembly" && l.sourceRef === ref && l.parentSku === parent && l.accessorySku === acc);
-    assert(has("fixture:fw-asm", "FW-S4", "FW-LENS") && has("fixture:fw-asm", "FW-S4", "FW-CLAMP") && has("fixture:SA-FW", "FW-S4", "FW-LENS2") && has("fixture:SA-FW", "FW-S4", "FW-DATA"), "#FXB: every fixture's pairs live under one fixture:<id> scope");
-    assert(!live.some((l) => l.source === "assembly" && /^(assembly|subassembly):/.test(l.sourceRef ?? "")), "#FXB: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
-    assert.equal(live.find((l) => l.sourceRef === "fixture:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet, true, "#FXB: the pair's own-datasheet flag carries onto the fixture: row");
-    assert(live.some((l) => l.source === "davinci" && l.sourceRef === "TY-FWX"), "#FXB: DaVinci's scope is never touched");
-    assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: every later read is a no-op (one flag read)");
+    assert(has("fixture:fw-asm", "FW-S4", "FW-LENS") && has("fixture:fw-asm", "FW-S4", "FW-CLAMP") && has("fixture:SA-FW", "FW-S4", "FW-LENS2") && has("fixture:SA-FW", "FW-S4", "FW-DATA"), "#210: every fixture's pairs live under one fixture:<id> scope");
+    assert(!live.some((l) => l.source === "assembly" && /^(assembly|subassembly):/.test(l.sourceRef ?? "")), "#210: the old assembly:/subassembly: rows are soft-deleted, a deleted assembly's leftovers included");
+    assert.equal(live.find((l) => l.sourceRef === "fixture:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet, true, "#210: the pair's own-datasheet flag carries onto the fixture: row");
+    assert(live.some((l) => l.source === "davinci" && l.sourceRef === "TY-FWX"), "#210: DaVinci's scope is never touched");
+    assert.equal(await Mig.ensureFixturesConverted(), true, "#210: every later read is a no-op (one flag read)");
     const again = await Mig.convertFixtures();
-    assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#FXB: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
+    assert(again.complete && again.inserted === 0 && again.rewritten === 0 && again.graphWritten === 0 && again.graphRemoved === 0, `#210: an explicit re-run changes nothing (got ${JSON.stringify(again)})`);
     // A run cut short by its budget leaves the flag unset; the next read finishes.
     await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
     await setSettings({ fixtureAssemblies: [...fwAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
-    assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#FXB: a conversion out of budget reports incomplete");
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB: …and leaves the flag unset");
-    assert.equal(await Mig.ensureFixturesConverted(), true, "#FXB: the next read finishes the job");
-    assert(!!(await DS.getDoc("subassemblies", "fw-asm2")) && (await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "fixture:fw-asm2" && l.accessorySku === "FW-IRIS"), "#FXB: …writing the rest, graph included");
+    assert.equal(await Mig.ensureFixturesConverted(0, () => 0), false, "#210: a conversion out of budget reports incomplete");
+    assert.equal(await Mig.fixturesConverted(), false, "#210: …and leaves the flag unset");
+    assert.equal(await Mig.ensureFixturesConverted(), true, "#210: the next read finishes the job");
+    assert(!!(await DS.getDoc("subassemblies", "fw-asm2")) && (await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "fixture:fw-asm2" && l.accessorySku === "FW-IRIS"), "#210: …writing the rest, graph included");
     await setSettings({ fixtureAssemblies: priorAssemblies });
 ```
 
@@ -1032,7 +1032,7 @@ git commit -m "feat(fixtures): pure conversion keeping ids, fixture: graph pairs
 
 ```ts
     // End to end: the fixture conversion (which now owns the one-time graph
-    // sync, #FXB) propagates a settings-read failure instead of converting
+    // sync, #210) propagates a settings-read failure instead of converting
     // the subassemblies only and marking itself complete.
     const Mig = await import("@/lib/fixtures-migrate");
     await (await getDb()).delete(blobs).where(eq(blobs.id, Mig.FIXTURES_CONVERT_BLOB_ID));
@@ -1059,7 +1059,7 @@ Expected: FAIL with `Cannot find module '@/lib/fixtures-migrate'`.
 /**
  * Soft-delete every live link of `source` whose sourceRef starts with one of
  * `prefixes` — the fixture builder's retirement of the part-documents build's
- * `assembly:` / `subassembly:` scopes (#FXB). Run it AFTER the replacement
+ * `assembly:` / `subassembly:` scopes (#210). Run it AFTER the replacement
  * scopes are written: syncScopes carries "has its own datasheet" from any
  * live link of the same pair, so writing first keeps the flag.
  */
@@ -1087,7 +1087,7 @@ import { fixturePairs, fixtureRef, LEGACY_ASSEMBLY_REF_PREFIXES } from "./assemb
 
 /**
  * Fixture builder → accessory graph, one pass (#207 final fix wave I2,
- * reshaped by #FXB). Server-only.
+ * reshaped by #210). Server-only.
  *
  * Every fixture record (systems feed nothing) gets its `fixture:<id>` scope,
  * written ADD-ONLY through `syncAccessoryScopeSet`: a row that is already
@@ -1126,7 +1126,7 @@ import { planFixtureConversion, type RawFixtureRow } from "@/lib/fixtures-conver
 import { syncAllAssemblyGraphs } from "@/lib/part-docs/assembly-sync";
 
 /**
- * The fixture builder's one-time conversion (#FXB, spec §3 and §5).
+ * The fixture builder's one-time conversion (#210, spec §3 and §5).
  * Server-only.
  *
  * 1. Each `settings.fixtureAssemblies` entry becomes a fixture row with the
@@ -1211,7 +1211,7 @@ export async function resetFixturesConversion(): Promise<void> {
 
 ```ts
 /**
- * Fixture builder conversion (#FXB, spec 2026-09-25-fixture-builder-merge-design.md §3):
+ * Fixture builder conversion (#210, spec 2026-09-25-fixture-builder-merge-design.md §3):
  * settings.fixtureAssemblies + legacy subassembly rows → fixture records
  * (ids kept), and the accessory graph moved to one `fixture:<id>` scope.
  * Idempotent; the app runs the same step on its first read.
@@ -1272,7 +1272,7 @@ with
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
 ```
 
-In the `Promise.all` there, replace `    ensureAssemblyGraphSynced(),` with `    ensureFixturesConverted(),`. In the comment above it, change "The one-time Assembly Builder → graph sync (final fix wave, I2)" to "The one-time fixture conversion + graph move (#FXB; was the I2 graph sync)".
+In the `Promise.all` there, replace `    ensureAssemblyGraphSynced(),` with `    ensureFixturesConverted(),`. In the comment above it, change "The one-time Assembly Builder → graph sync (final fix wave, I2)" to "The one-time fixture conversion + graph move (#210; was the I2 graph sync)".
 
 In `scripts/part-docs-backfill.ts`:
 - Replace `import { assemblyGraphSynced, syncAllAssemblyGraphs } from "../src/lib/part-docs/assembly-sync";` with `import { convertFixtures, fixturesConverted } from "../src/lib/fixtures-migrate";`.
@@ -1287,7 +1287,7 @@ In `scripts/part-docs-backfill.ts`:
   );
 ```
 
-- Update the header comment's second paragraph so it reads: "Also runs the fixture builder's one-time conversion (#FXB): assemblies and subassemblies become fixture records and the graph moves to `fixture:<id>`."
+- Update the header comment's second paragraph so it reads: "Also runs the fixture builder's one-time conversion (#210): assemblies and subassemblies become fixture records and the graph moves to `fixture:<id>`."
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1303,7 +1303,7 @@ Expected: tsc is clean. The regressions end with `review regression checks passe
 
 ```bash
 git add src/lib/stores/part-accessory-links.ts src/lib/part-docs/assembly-sync.ts src/lib/fixtures-migrate.ts scripts/fixtures-convert.ts package.json "src/app/(app)/catalog/documents/page.tsx" scripts/part-docs-backfill.ts scripts/test-review-regressions.ts
-git commit -m "feat(fixtures): one-time conversion keeping ids; graph moves to fixture:<id> (#FXB)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(fixtures): one-time conversion keeping ids; graph moves to fixture:<id> (#210)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1328,7 +1328,7 @@ git commit -m "feat(fixtures): one-time conversion keeping ids; graph moves to f
 - [ ] **Step 1: Write the failing test.** Insert before `  console.log("review regression checks passed");`:
 
 ```ts
-  /* --- #FXB fixture builder: the store — first-read conversion, create /
+  /* --- #210 fixture builder: the store — first-read conversion, create /
          update / delete, save rules, who/when stamps --- */
   {
     const Fx = await import("@/lib/stores/fixtures");
@@ -1338,41 +1338,41 @@ git commit -m "feat(fixtures): one-time conversion keeping ids; graph moves to f
     const { assemblyToFixture } = await import("@/lib/fixtures-convert");
 
     await Mig.resetFixturesConversion();
-    assert.equal(await Mig.fixturesConverted(), false, "#FXB store: resetFixturesConversion re-arms the conversion (the go-live reset path)");
+    assert.equal(await Mig.fixturesConverted(), false, "#210 store: resetFixturesConversion re-arms the conversion (the go-live reset path)");
     await setSettings({ fixtureAssemblies: [{ id: "fa-fxb-store", name: "Store probe", components: [{ sku: "FXB-E", label: "E", role: "fixture", defaultQty: 1 }] }] });
     const first = await Fx.listFixtures();
-    assert(first.some((f) => f.id === "fa-fxb-store"), "#FXB store: listFixtures converts on its first read");
-    assert.equal(await Mig.fixturesConverted(), true, "#FXB store: …and marks the conversion complete");
+    assert(first.some((f) => f.id === "fa-fxb-store"), "#210 store: listFixtures converts on its first read");
+    assert.equal(await Mig.fixturesConverted(), true, "#210 store: …and marks the conversion complete");
     const labels = first.map((f) => f.label);
-    assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)), "#FXB store: the list is sorted by label");
+    assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)), "#210 store: the list is sorted by label");
     await setSettings({ fixtureAssemblies: [] });
 
     const clean = sanitizeFixtureInput({ kind: "fixture", label: "FXB Store", description: "", lightEngineSku: "FXB-NOT-IN-CATALOG", lines: { power: [{ sku: "FXB-CBL", qty: 1 }] } });
-    assert(clean.ok, "#FXB store: a light engine missing from the catalog does not block a save");
+    assert(clean.ok, "#210 store: a light engine missing from the catalog does not block a save");
     if (!clean.ok) throw new Error("unreachable");
     const snap = { cost: 0, price: 0, pricedAt: null };
     const made = await Fx.createFixture(clean.value, "Jeff", snap, 1_700_000_000_000);
-    assert.match(made.id, /^SA-[0-9A-Z]+$/, "#FXB store: new records get an SA-<TS36> id");
-    assert(made.createdBy === "Jeff" && made.updatedBy === "Jeff" && made.createdAt === 1_700_000_000_000 && made.updatedAt === 1_700_000_000_000, "#FXB store: create stamps who/when");
+    assert.match(made.id, /^SA-[0-9A-Z]+$/, "#210 store: new records get an SA-<TS36> id");
+    assert(made.createdBy === "Jeff" && made.updatedBy === "Jeff" && made.createdAt === 1_700_000_000_000 && made.updatedAt === 1_700_000_000_000, "#210 store: create stamps who/when");
     const twin = await Fx.createFixture(clean.value, "Jeff", snap, 1_700_000_000_000);
-    assert.notEqual(twin.id, made.id, "#FXB store: a same-millisecond create never overwrites (collision-safe id)");
+    assert.notEqual(twin.id, made.id, "#210 store: a same-millisecond create never overwrites (collision-safe id)");
     const edited = sanitizeFixtureInput({ kind: "fixture", label: "FXB Store v2", description: "", lightEngineSku: "FXB-ENG" });
     if (!edited.ok) throw new Error("unreachable");
     const upd = await Fx.updateFixture(made, edited.value, "Sam", snap, 1_700_000_100_000);
-    assert(upd.id === made.id && upd.label === "FXB Store v2" && upd.createdBy === "Jeff" && upd.createdAt === made.createdAt && upd.updatedBy === "Sam" && upd.updatedAt === 1_700_000_100_000, "#FXB store: update keeps id + created*, stamps updated*");
-    assert.equal((await Fx.getFixture(made.id))?.label, "FXB Store v2", "#FXB store: the update is read back");
+    assert(upd.id === made.id && upd.label === "FXB Store v2" && upd.createdBy === "Jeff" && upd.createdAt === made.createdAt && upd.updatedBy === "Sam" && upd.updatedAt === 1_700_000_100_000, "#210 store: update keeps id + created*, stamps updated*");
+    assert.equal((await Fx.getFixture(made.id))?.label, "FXB Store v2", "#210 store: the update is read back");
     await Fx.removeFixture(made.id);
-    assert.equal(await Fx.getFixture(made.id), null, "#FXB store: delete is a soft delete the reader no longer sees");
-    assert(!(await Fx.listFixtures()).some((f) => f.id === made.id), "#FXB store: …and the list drops it");
+    assert.equal(await Fx.getFixture(made.id), null, "#210 store: delete is a soft delete the reader no longer sees");
+    assert(!(await Fx.listFixtures()).some((f) => f.id === made.id), "#210 store: …and the list drops it");
 
     const flagged = assemblyToFixture({ id: "fa-fxb-nr", name: "Kit", components: [{ sku: "K1", label: "Cable", role: "cable", defaultQty: 1 }] }, 1);
     await DS.insertDocIfAbsent("subassemblies", flagged);
     const nr = (await Fx.getFixture("fa-fxb-nr"))!;
-    assert.equal(nr.needsReview, true, "#FXB store: a converted assembly with no fixture member reads as needs-review");
+    assert.equal(nr.needsReview, true, "#210 store: a converted assembly with no fixture member reads as needs-review");
     const reviewed = sanitizeFixtureInput({ kind: "fixture", label: "Kit", description: "", lightEngineSku: "K1" });
     if (!reviewed.ok) throw new Error("unreachable");
     const cleared = await Fx.updateFixture(nr, reviewed.value, "Jeff", snap);
-    assert(cleared.needsReview === undefined && cleared.legacy?.from === "assembly" && cleared.id === "fa-fxb-nr", "#FXB store: a human save clears needs-review and keeps the id + provenance");
+    assert(cleared.needsReview === undefined && cleared.legacy?.from === "assembly" && cleared.id === "fa-fxb-nr", "#210 store: a human save clears needs-review and keeps the id + provenance");
   }
 ```
 
@@ -1391,7 +1391,7 @@ import { assemblyToFixture, normalizeFixtureRow, type RawFixtureRow } from "@/li
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
 
 /**
- * Fixtures and systems (#FXB, spec §3) — one record type in the existing
+ * Fixtures and systems (#210, spec §3) — one record type in the existing
  * `subassemblies` doc table (no new table, no SQL migration). Converted
  * Assemblies-tab records keep their `fa-…` ids, Subassemblies their `SA-…`
  * ids; new records get `SA-<TS36>`. Pure shapes/pricing live in
@@ -1467,7 +1467,7 @@ export async function removeFixture(id: string): Promise<void> {
 - [ ] **Step 3b: Go-live reset.** In `src/app/(app)/settings/actions.ts` → `clearDemoDataAction`, directly after `const cleared = await clearDemoData();` insert:
 
 ```ts
-  // #FXB: fixtures live in a doc table the reset just wiped; re-arm the
+  // #210: fixtures live in a doc table the reset just wiped; re-arm the
   // one-time conversion so the settings-backed assemblies (configuration,
   // which this reset keeps) come back on the next read, as they did when
   // they lived in settings.
@@ -1484,7 +1484,7 @@ export async function removeFixture(id: string): Promise<void> {
 with
 
 ```ts
-  /** Pre-#FXB Assemblies-tab records. Since the fixture builder they are
+  /** Pre-#210 Assemblies-tab records. Since the fixture builder they are
    *  converted into `subassemblies` fixture rows (src/lib/fixtures-migrate.ts)
    *  and this array is a read-only backup — never written by the app. */
 ```
@@ -1498,7 +1498,7 @@ Expected: tsc is clean, and the run ends with `review regression checks passed`.
 
 ```bash
 git add src/lib/stores/fixtures.ts "src/app/(app)/settings/actions.ts" src/lib/settings.ts scripts/test-review-regressions.ts
-git commit -m "feat(fixtures): fixtures store — first-read conversion, stamps, collision-safe ids (#FXB)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(fixtures): fixtures store — first-read conversion, stamps, collision-safe ids (#210)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1518,7 +1518,7 @@ git commit -m "feat(fixtures): fixtures store — first-read conversion, stamps,
 - [ ] **Step 1: Write the failing test** (append at EOF of `scripts/test-review-and-spec.ts`)
 
 ```ts
-/* --- #FXB — the Estimator BOM line over a converted assembly is unchanged;
+/* --- #210 — the Estimator BOM line over a converted assembly is unchanged;
        an optional add-on switched on adds qty 1. Pure. --- */
 import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture-bom";
 {
@@ -1537,12 +1537,12 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
   const draft = { componentQty: {}, position: "FOH", circuit: "4" };
   const b = fixtureBomLine(before, draft)!;
   const a = fixtureBomLine(after, draft)!;
-  ok(!!b && !!a && b.cost === a.cost && b.price === a.price && a.cost === 814 && a.price === 1230, "#FXB Estimator: a converted assembly's BOM line totals are identical");
-  ok(a.desc === "Wash — Engine; Cable ×2 (Pos FOH / Ckt 4)" && a.components.length === 3, "#FXB Estimator: description and components[] keep today's shape");
+  ok(!!b && !!a && b.cost === a.cost && b.price === a.price && a.cost === 814 && a.price === 1230, "#210 Estimator: a converted assembly's BOM line totals are identical");
+  ok(a.desc === "Wash — Engine; Cable ×2 (Pos FOH / Ckt 4)" && a.components.length === 3, "#210 Estimator: description and components[] keep today's shape");
   const on = fixtureBomLine(after, { ...draft, componentQty: { "B-BARN": optionalToggleQty(true) } })!;
-  ok(on.price === a.price + 90 && on.cost === a.cost + 60 && on.components.find((c) => c.sku === "B-BARN")!.qty === 1, "#FXB Estimator: switching an optional add-on on adds it at qty 1");
-  ok(optionalToggleQty(false) === "0", "#FXB Estimator: switching it off returns it to 0");
-  ok(fixtureBomLine(after, { ...draft, componentQty: { "B-ENG": "0", "B-CBL": "0" } }) === null, "#FXB Estimator: a line with no sell is refused, as before");
+  ok(on.price === a.price + 90 && on.cost === a.cost + 60 && on.components.find((c) => c.sku === "B-BARN")!.qty === 1, "#210 Estimator: switching an optional add-on on adds it at qty 1");
+  ok(optionalToggleQty(false) === "0", "#210 Estimator: switching it off returns it to 0");
+  ok(fixtureBomLine(after, { ...draft, componentQty: { "B-ENG": "0", "B-CBL": "0" } }) === null, "#210 Estimator: a line with no sell is refused, as before");
 }
 ```
 
@@ -1557,7 +1557,7 @@ Expected: aborts with `Cannot find module '@/app/(app)/estimator/fixture-bom'`.
 import { assemblyDescription, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft, SpecItem } from "./types";
 
-/** The fixture configurator's BOM line (#FXB) — moved out of
+/** The fixture configurator's BOM line (#210) — moved out of
  *  estimator-client.tsx unchanged so it is testable: included components at
  *  the draft's quantities, aggregate unit cost/sell, "Name — part; part"
  *  plus "(Pos … / Ckt …)". Pure. */
@@ -1618,7 +1618,7 @@ with
 
 ```ts
         componentQty: Object.fromEntries((first?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
-        // #FXB: the fixture's default hang position / circuit.
+        // #210: the fixture's default hang position / circuit.
         position: first?.position || "",
         circuit: first?.circuit || "",
       });
@@ -1633,7 +1633,7 @@ Replace the whole `setFixtureAssembly` function with:
       ...draft,
       assemblyId,
       componentQty: Object.fromEntries((assembly?.components || []).map((part) => [part.sku, String(part.defaultQty)])),
-      // #FXB: a fixture's default position / circuit fills an empty field only.
+      // #210: a fixture's default position / circuit fills an empty field only.
       position: draft.position || assembly?.position || "",
       circuit: draft.circuit || assembly?.circuit || "",
     }));
@@ -1647,7 +1647,7 @@ Replace the whole `addFixture` function (from `  const addFixture = (secId: stri
     const d = fixtureDraft;
     const assembly = fixtureAssemblies.find((item) => item.id === d.assemblyId);
     if (!assembly) return;
-    // #FXB: the BOM math lives in fixture-bom.ts (pure, parity-tested);
+    // #210: the BOM math lives in fixture-bom.ts (pure, parity-tested);
     // the line's shape is unchanged.
     const line = fixtureBomLine(assembly, d);
     if (!line) return;
@@ -1727,7 +1727,7 @@ In the destructure, rename `settings` to `fixtureRecords` and replace `      get
 with
 
 ```ts
-  // #FXB: fixtures (not systems) under their kept ids — included parts only.
+  // #210: fixtures (not systems) under their kept ids — included parts only.
   const fixtureAssemblies = fixtureAssembliesFrom(fixtureRecords, catalogRows).map((assembly) => ({
 ```
 
@@ -1735,17 +1735,17 @@ with
 
 ```bash
 npx tsc --noEmit
-npm run test:specs 2>&1 | grep -E "FAIL|#FXB Estimator|ALL PASSED|FAILED"
+npm run test:specs 2>&1 | grep -E "FAIL|#210 Estimator|ALL PASSED|FAILED"
 env -u DATABASE_URL NEXT_TELEMETRY_DISABLED=1 npm run build 2>&1 | tail -5 && rm -rf .next
 ```
 
-Expected: tsc is clean. The `#FXB Estimator` lines are `PASS`, followed by `ALL PASSED`. The build succeeds; a client file pulling a store would only show up here.
+Expected: tsc is clean. The `#210 Estimator` lines are `PASS`, followed by `ALL PASSED`. The build succeeds; a client file pulling a store would only show up here.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add "src/app/(app)/estimator/fixture-bom.ts" "src/app/(app)/estimator/estimator-client.tsx" "src/app/(app)/estimator/fixture-modal.tsx" "src/app/(app)/estimator/page.tsx" "src/app/(app)/design/quick/page.tsx" scripts/test-review-and-spec.ts
-git commit -m "feat(estimator,quick): read fixtures; optional add-on switch; default position/circuit (#FXB)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(estimator,quick): read fixtures; optional add-on switch; default position/circuit (#210)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1777,11 +1777,11 @@ with
 
 ```ts
 ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies",
-  "#130/#FXB /design/subassemblies redirects to the one Assembly Builder list");
+  "#130/#210 /design/subassemblies redirects to the one Assembly Builder list");
 ```
 
 Run: `npm run test:specs 2>&1 | grep -E "FAIL"`
-Expected: `FAIL #130/#FXB /design/subassemblies redirects to the one Assembly Builder list`.
+Expected: `FAIL #130/#210 /design/subassemblies redirects to the one Assembly Builder list`.
 
 - [ ] **Step 2: Redirects.** In `src/lib/design-routes.ts` replace
 
@@ -1794,7 +1794,7 @@ with
 
 ```ts
   // Subassemblies became a tab of the Assembly Builder (#130), then merged
-  // into its one list (#FXB).
+  // into its one list (#210).
   if (pathname === "/design/subassemblies") return "/design/assemblies";
 ```
 
@@ -1808,8 +1808,8 @@ In `scripts/smoke-routes.ts` replace
 with
 
 ```ts
-  "/design/assemblies?tab=subassemblies", // #FXB — the retired tab link redirects to the one list
-  "/design/subassemblies", // #130/#FXB — redirect to /design/assemblies; must stay 3xx
+  "/design/assemblies?tab=subassemblies", // #210 — the retired tab link redirects to the one list
+  "/design/subassemblies", // #130/#210 — redirect to /design/assemblies; must stay 3xx
 ```
 
 - [ ] **Step 3: Replace `src/app/(app)/design/assemblies/actions.ts` entirely**
@@ -1832,7 +1832,7 @@ const revalidateConsumers = () => {
 };
 
 /**
- * Save a fixture or system (#FXB). Anyone signed in (spec §2.5); every save
+ * Save a fixture or system (#210). Anyone signed in (spec §2.5); every save
  * stamps who/when. The snapshot ("was $X when built") prices from the live
  * catalog, read for THIS record's SKUs only — never the whole ~37k book. A
  * part missing from the catalog does not block the save. A fixture's lens
@@ -1909,7 +1909,7 @@ import { catalogFilter, catalogRank } from "@/lib/search/typeahead-rank";
 import { pairKey, type MemberCoverage } from "@/lib/part-docs/assembly-graph";
 import MemberCoverageChip from "./member-coverage";
 
-/** The catalog slice the builder searches and prices from (#FXB). Cost is
+/** The catalog slice the builder searches and prices from (#210). Cost is
  *  included: the footer shows the live included cost, as Subassemblies did. */
 export type PartHit = { sku: string; desc: string; category: string; mfr: string; unit: string; list: number; cost: number; pricedAt?: number };
 
@@ -2234,7 +2234,7 @@ import FixtureForm, { draftFromRecord, draftResolvable, draftToInput, emptyDraft
 type Filter = "all" | FixtureKind;
 const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems" };
 
-/** #FXB — the one Assemblies list (fixtures + systems) and its form. */
+/** #210 — the one Assemblies list (fixtures + systems) and its form. */
 export default function FixtureBuilder({ initial, parts, priceListEffective, coverage }: {
   initial: FixtureRecord[];
   parts: PartHit[];
@@ -2406,7 +2406,7 @@ import type { PartHit } from "./fixture-form";
 export const metadata = { title: "Assembly Builder — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
-/** #FXB — one builder for fixtures and systems (spec
+/** #210 — one builder for fixtures and systems (spec
  *  2026-09-25-fixture-builder-merge-design.md). The #130 `?tab=` switch is
  *  gone; a stale `?tab=` link lands on the one list. Everything prices from
  *  the live catalog, loaded once here. */
@@ -2456,9 +2456,9 @@ Replace `src/lib/stores/subassemblies.ts` entirely with:
 
 ```ts
 /**
- * @deprecated #FXB — fixtures and systems live in src/lib/stores/fixtures.ts
+ * @deprecated #210 — fixtures and systems live in src/lib/stores/fixtures.ts
  * (same `subassemblies` doc table). These names stay as aliases so an older
- * reader still compiles; the pre-#FXB row shape is `LegacySubassembly` in
+ * reader still compiles; the pre-#210 row shape is `LegacySubassembly` in
  * src/lib/fixtures-convert.ts.
  */
 export type { FixtureRecord as FixtureSubassembly, FixtureRecord as Subassembly, FixtureOptionCategory } from "@/lib/fixture-assemblies";
@@ -2491,7 +2491,7 @@ Expected: tsc is clean and specs end `ALL PASSED`. Regressions end `review regre
 
 ```bash
 git add -A "src/app/(app)/design/assemblies" "src/app/(app)/design/subassemblies" src/lib/stores/subassemblies.ts src/lib/design-routes.ts scripts/smoke-routes.ts scripts/test-review-and-spec.ts
-git commit -m "feat(assemblies): one builder — Fixture/System form, one list, live pricing (#FXB)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(assemblies): one builder — Fixture/System form, one list, live pricing (#210)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2507,7 +2507,7 @@ git commit -m "feat(assemblies): one builder — Fixture/System form, one list, 
 
 ```markdown
 
-## D-FXB-1. Fixtures and systems are one record type in the `subassemblies` table, ids kept (#FXB, 2026-09-25)
+## D294. Fixtures and systems are one record type in the `subassemblies` table, ids kept (#210, 2026-09-25)
 
 `FixtureRecord` (`src/lib/fixture-assemblies.ts`, store `src/lib/stores/fixtures.ts`) replaces both builders' records
 in the existing `subassemblies` doc table — no new table, no SQL migration. A one-time, idempotent conversion
@@ -2520,7 +2520,7 @@ not completed, `listFixtures()` serves the settings-backed assemblies in memory 
 resolving. The go-live reset wipes the table but keeps settings, so it re-arms the flag and the assemblies return as
 they did when they lived in settings. New records mint `SA-<TS36>` with `-2`, `-3`… on a same-millisecond collision.
 
-## D-FXB-2. Pricing is the Assemblies rule; a missing part keeps its cost override (#FXB, 2026-09-25)
+## D295. Pricing is the Assemblies rule; a missing part keeps its cost override (#210, 2026-09-25)
 
 Unit cost = line cost override ?? catalog cost, unit sell = catalog list; only qty ≥ 1 lines count, qty 0 lines are
 optional add-ons listed with their unit numbers. A part missing from the catalog is `found: false`, sells at 0 and costs
@@ -2528,7 +2528,7 @@ its override or 0 — the spec says "contributes 0", but the Assemblies resolver
 part and converted totals must not move. The list's "was $X when built" badge compares **cost**: converted
 subassemblies' snapshot `price` was their cost (the old price = cost rule), so a sell comparison would flag every one.
 
-## D-FXB-3. Light engine and lens carry optional label / qty / override (#FXB, 2026-09-25)
+## D296. Light engine and lens carry optional label / qty / override (#210, 2026-09-25)
 
 The spec stores `lightEngineSku` / `lensSku`; a converted Assemblies-tab fixture member can have its own label, a
 quantity other than 1, or an override, and dropping those would change Estimator descriptions and totals. They live in
@@ -2538,7 +2538,7 @@ totals, components and ids are identical (parity-tested). Converted cable/lamp/o
 their Estimator component role reads `accessory`. Old stored names survive only as `legacy.names`, fallback display for a
 missing part.
 
-## D-FXB-4. The accessory graph moves to one `fixture:<id>` scope (#FXB, 2026-09-25)
+## D297. The accessory graph moves to one `fixture:<id>` scope (#210, 2026-09-25)
 
 Fixtures only: parent = light engine; lens and every box line (qty 0 = un-included link) are accessories. The
 conversion writes the `fixture:` scopes add-only (a live row and its flag are never rewritten), then soft-deletes every
@@ -2546,7 +2546,7 @@ conversion writes the `fixture:` scopes add-only (a live row and its flag are ne
 This replaces D276's two scopes and its `part_docs_graph_sync` flag (production had already set that one, so the move
 needed its own flag). Saves reconcile `fixture:<id>`; deletes empty it. Systems never feed the graph.
 
-## D-FXB-5. Consumers read fixtures; systems wait for the Grid Equipment map (#FXB, 2026-09-25)
+## D298. Consumers read fixtures; systems wait for the Grid Equipment map (#210, 2026-09-25)
 
 The Estimator configurator and Quick Design list fixture records through `fixtureAssembliesFrom()`, which returns
 today's `ResolvedFixtureAssembly` shape, so their code paths are unchanged. Systems are not offered there (spec §5 lists
@@ -2555,7 +2555,7 @@ intake carries the id map, which keeps resolving because ids are kept — no Gri
 optional add-on as an off switch (on = qty 1) and pre-fills a fixture's default hang position / circuit into an empty
 field. The fixture BOM line moved to `estimator/fixture-bom.ts`, unchanged.
 
-## D-FXB-6. Anyone signed in edits; kind is fixed; a human save clears needs-review (#FXB, 2026-09-25)
+## D299. Anyone signed in edits; kind is fixed; a human save clears needs-review (#210, 2026-09-25)
 
 `requireUser()` on save / delete / the datasheet toggle (the Subassemblies tab needed `manage_users`). Every save stamps
 `updatedAt` / `updatedBy`, and create also stamps `createdAt` / `createdBy`. A record cannot switch between fixture and system.
@@ -2568,7 +2568,7 @@ whole book. `/design/assemblies?tab=…` and `/design/subassemblies` redirect to
 
 ```markdown
 
-## #FXB. One fixture builder — the Subassemblies form with the Assemblies logic — DONE 2026-09-25 (D-FXB-1…D-FXB-6)
+## #210. One fixture builder — the Subassemblies form with the Assemblies logic — DONE 2026-09-25 (D294…D300)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-fixture-builder-merge-design.md` · **Plan:**
 `docs/superpowers/plans/2026-09-25-fixture-builder-merge.md` · **Follows:** #129, #130, #207.
@@ -2602,7 +2602,7 @@ with
 
 ```markdown
     D270–D280; punch item #207.
-15. ✅ **One fixture builder** (#FXB, D-FXB-1…D-FXB-6) — the Assembly
+15. ✅ **One fixture builder** (#210, D294…D300) — the Assembly
     Builder's two tabs merged: one `FixtureRecord` type (Fixture or
     System) in the existing `subassemblies` doc table
     (`src/lib/stores/fixtures.ts`; pure model, `resolveFixture` and save
@@ -2644,7 +2644,7 @@ Expected results:
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md AGENTS.md
-git commit -m "docs: one fixture builder (#FXB), D-FXB-1…D-FXB-6" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "docs: one fixture builder (#210), D294…D300" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2666,12 +2666,12 @@ git commit -m "docs: one fixture builder (#FXB), D-FXB-1…D-FXB-6" -m "Co-Autho
 | §4 `resolveFixture`, `fixtureDescription` | Task 1 |
 | §5 Estimator | Task 5 |
 | §5 Quick Design | Task 5 |
-| §5 Grid (ids kept, no picker today) | Task 5, D-FXB-5 |
+| §5 Grid (ids kept, no picker today) | Task 5, D298 |
 | §5 Grid Equipment map | future work; systems stored, ready |
 | §5 accessory graph | Tasks 2–3 |
 | §6 UI | Task 6 |
 | §7 tests | Tasks 1–6 |
 
-**Placeholder scan.** `#FXB` and `D-FXB-n` are deliberate lead-renumbered placeholders. No TBDs are left, and every code step carries code.
+**Placeholder scan.** The punch and decision numbers were lead-renumbered placeholders (now `#210`, `D294`…`D300`). No TBDs are left, and every code step carries code.
 
 **Type consistency.** `FixtureRecord`, `CleanFixture`, `FixtureResolvable`, `RawFixtureRow`, `FixtureSnapshot`, `fixturePairs`, `fixtureRef`, `convertFixtures`, `ensureFixturesConverted` (returns `Promise<boolean>`), `fixturesConverted`, `resetFixturesConversion`, `listFixtures`, `getFixture`, `createFixture(value, by, snapshot, now?)`, `updateFixture(existing, value, by, snapshot, now?)`, `removeFixture`, `fixtureBomLine` and `optionalToggleQty` are used with the same names and signatures in every task.

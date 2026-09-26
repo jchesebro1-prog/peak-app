@@ -194,7 +194,7 @@ export async function setOwnDatasheet(parentSku: string, accessorySku: string, o
 /**
  * Soft-delete every live link of `source` whose sourceRef starts with one of
  * `prefixes` — the fixture builder's retirement of the part-documents build's
- * `assembly:` / `subassembly:` scopes (#FXB). Run it AFTER the replacement
+ * `assembly:` / `subassembly:` scopes (#210). Run it AFTER the replacement
  * scopes are written: syncScopes carries "has its own datasheet" from any
  * live link of the same pair, so writing first keeps the flag.
  */

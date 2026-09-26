@@ -1013,7 +1013,7 @@ ok(
 );
 ok(
   CONFIG_COLLECTIONS.join() === "subassemblies" && !resetCollections.includes("subassemblies"),
-  "#FXB final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
+  "#210 final review M5: the go-live reset keeps the Assembly Builder's fixtures/systems (configuration, like settings)"
 );
 {
   const settingsActions = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
@@ -1021,7 +1021,7 @@ ok(
   const resetBody = reset.slice(0, reset.indexOf("\n}\n"));
   ok(
     !resetBody.includes("resetFixturesConversion") && resetBody.includes("syncAllAssemblyGraphs"),
-    "#FXB final review M5: the go-live reset no longer re-arms the fixture conversion, and rebuilds the kept fixtures' accessory graph"
+    "#210 final review M5: the go-live reset no longer re-arms the fixture conversion, and rebuilds the kept fixtures' accessory graph"
   );
 }
 ok(
@@ -1784,7 +1784,7 @@ ok(designRedirect("/quotes", {}) === null,
 ok(designRedirect("/consulting/CE-1001", { tab: "bogus" }) === "/design/engagements/CE-1001?tab=bogus",
   "unknown tab values pass through — the destination validates, not the redirect");
 ok(designRedirect("/design/subassemblies", {}) === "/design/assemblies",
-  "#130/#FXB /design/subassemblies redirects to the one Assembly Builder list");
+  "#130/#210 /design/subassemblies redirects to the one Assembly Builder list");
 
 /* --- design module nav (D97) --- */
 import { activeKeyFor, NAV, parentGroupOf } from "@/components/nav/nav-data";
@@ -16697,7 +16697,7 @@ import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
 }
 
 /* ======================================================================
-   #FXB — one fixture builder: resolveFixture / sanitizeFixtureInput /
+   #210 — one fixture builder: resolveFixture / sanitizeFixtureInput /
    fixtureAssembliesFrom. Pure.
    ====================================================================== */
 import {
@@ -16724,15 +16724,15 @@ import {
     createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
   const r = resolveFixture(rec, cat);
-  ok(r.parts.map((p) => `${p.slot}:${p.sku}`).join(",") === "lightEngine:FX-ENG,lens:FX-LENS,power:FX-CBL,mounting:FX-CLAMP,accessories:FX-GONE", "#FXB resolveFixture: engine, lens, then the boxes in Data/Power/Mounting/Accessories order");
-  ok(r.parts[2].cost === 25 && r.parts[2].sell === 60, "#FXB resolveFixture: a cost override beats the catalog cost; sell stays the catalog list");
-  ok(r.cost === 1000 + 200 + 25 && r.sell === 1500 + 300 + 60, "#FXB resolveFixture: included totals skip qty-0 optional lines and missing parts");
+  ok(r.parts.map((p) => `${p.slot}:${p.sku}`).join(",") === "lightEngine:FX-ENG,lens:FX-LENS,power:FX-CBL,mounting:FX-CLAMP,accessories:FX-GONE", "#210 resolveFixture: engine, lens, then the boxes in Data/Power/Mounting/Accessories order");
+  ok(r.parts[2].cost === 25 && r.parts[2].sell === 60, "#210 resolveFixture: a cost override beats the catalog cost; sell stays the catalog list");
+  ok(r.cost === 1000 + 200 + 25 && r.sell === 1500 + 300 + 60, "#210 resolveFixture: included totals skip qty-0 optional lines and missing parts");
   const clamp = r.parts.find((p) => p.sku === "FX-CLAMP")!;
-  ok(!clamp.included && clamp.cost === 10 && clamp.sell === 20, "#FXB resolveFixture: an optional (qty 0) line lists its unit cost/sell but adds nothing");
+  ok(!clamp.included && clamp.cost === 10 && clamp.sell === 20, "#210 resolveFixture: an optional (qty 0) line lists its unit cost/sell but adds nothing");
   const gone = r.parts.find((p) => p.sku === "FX-GONE")!;
-  ok(!gone.found && gone.cost === 0 && gone.sell === 0 && r.missing.join(",") === "FX-GONE" && gone.label === "Iris", "#FXB resolveFixture: a missing part is found:false, priced 0, listed in missing");
-  ok(fixtureDescription(r) === "S4 LED — Engine; Lens 26°; Power cable; Iris", "#FXB fixtureDescription: 'Label — part; part' over included parts");
-  ok(fixtureSkus(rec).join(",") === "FX-ENG,FX-LENS,FX-CBL,FX-CLAMP,FX-GONE", "#FXB fixtureSkus: every SKU the record prices, once, in form order");
+  ok(!gone.found && gone.cost === 0 && gone.sell === 0 && r.missing.join(",") === "FX-GONE" && gone.label === "Iris", "#210 resolveFixture: a missing part is found:false, priced 0, listed in missing");
+  ok(fixtureDescription(r) === "S4 LED — Engine; Lens 26°; Power cable; Iris", "#210 fixtureDescription: 'Label — part; part' over included parts");
+  ok(fixtureSkus(rec).join(",") === "FX-ENG,FX-LENS,FX-CBL,FX-CLAMP,FX-GONE", "#210 fixtureSkus: every SKU the record prices, once, in form order");
 
   const sys: FxbRecord = {
     id: "SA-T2", kind: "system", label: "Audio rack", description: "", scope: "Audio",
@@ -16741,54 +16741,54 @@ import {
     createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
   };
   const s = resolveFixture(sys, cat);
-  ok(s.parts.length === 2 && s.parts.every((p) => p.slot === "parts") && s.cost === 80 && s.sell === 120, "#FXB resolveFixture: a system prices its one parts list with the same line logic");
+  ok(s.parts.length === 2 && s.parts.every((p) => p.slot === "parts") && s.cost === 80 && s.sell === 120, "#210 resolveFixture: a system prices its one parts list with the same line logic");
 
   const noLabel = sanitizeFixtureInput({ kind: "fixture", label: "  ", description: "" });
-  ok(!noLabel.ok && noLabel.error.includes("label"), "#FXB sanitizeFixtureInput: a label is required");
+  ok(!noLabel.ok && noLabel.error.includes("label"), "#210 sanitizeFixtureInput: a label is required");
   const noEngine = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "" });
-  ok(!noEngine.ok && /light engine/i.test(noEngine.error), "#FXB sanitizeFixtureInput: a fixture needs a light engine");
+  ok(!noEngine.ok && /light engine/i.test(noEngine.error), "#210 sanitizeFixtureInput: a fixture needs a light engine");
   const good = sanitizeFixtureInput({ kind: "fixture", label: " X ", description: "", lightEngineSku: "FX-GONE", lensSku: "", lines: { power: [{ sku: " FX-CBL ", qty: -3 }, { sku: "", qty: 1 }] } });
-  ok(good.ok && good.value.label === "X" && good.value.lensSku === null && good.value.lightEngineSku === "FX-GONE" && good.value.lines.power.length === 1 && good.value.lines.power[0].sku === "FX-CBL" && good.value.lines.power[0].qty === 0 && good.value.lines.data.length === 0, "#FXB sanitizeFixtureInput: lens optional, a part missing from the catalog does not block, qty clamps at 0, blank lines drop");
+  ok(good.ok && good.value.label === "X" && good.value.lensSku === null && good.value.lightEngineSku === "FX-GONE" && good.value.lines.power.length === 1 && good.value.lines.power[0].sku === "FX-CBL" && good.value.lines.power[0].qty === 0 && good.value.lines.data.length === 0, "#210 sanitizeFixtureInput: lens optional, a part missing from the catalog does not block, qty clamps at 0, blank lines drop");
   const badScope = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Plumbing", parts: [{ sku: "A", qty: 1 }] });
-  ok(!badScope.ok && /scope/i.test(badScope.error), "#FXB sanitizeFixtureInput: a system needs one of the nine scopes");
+  ok(!badScope.ok && /scope/i.test(badScope.error), "#210 sanitizeFixtureInput: a system needs one of the nine scopes");
   const noParts = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [] });
-  ok(!noParts.ok && /part/i.test(noParts.error), "#FXB sanitizeFixtureInput: a system needs at least one part");
+  ok(!noParts.ok && /part/i.test(noParts.error), "#210 sanitizeFixtureInput: a system needs at least one part");
   const sysOk = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 0 }], lightEngineSku: "IGNORED" });
-  ok(sysOk.ok && sysOk.value.scope === "Audio" && sysOk.value.lightEngineSku === "" && sysOk.value.lensSku === null && (sysOk.value.parts || []).length === 1, "#FXB sanitizeFixtureInput: a system keeps scope + parts and no light engine");
+  ok(sysOk.ok && sysOk.value.scope === "Audio" && sysOk.value.lightEngineSku === "" && sysOk.value.lensSku === null && (sysOk.value.parts || []).length === 1, "#210 sanitizeFixtureInput: a system keeps scope + parts and no light engine");
 
   /* ---- fix wave 1 (review findings) ---- */
   // M1 — a light-engine/lens pick resets that head line unless it's a
   // re-pick of the SAME part.
   const kept: HeadLineT = { label: "Custom", qty: 3, costOverride: 12 };
-  ok(headLineForPick("FX-ENG", "FX-ENG", kept) === kept, "#FXB M1 headLineForPick: re-picking the same part keeps its head line untouched");
-  ok(JSON.stringify(headLineForPick("FX-ENG", "FX-OTHER", kept)) === "{}", "#FXB M1 headLineForPick: picking a DIFFERENT part starts the head line fresh");
-  ok(JSON.stringify(headLineForPick("", "FX-ENG", {})) === "{}", "#FXB M1 headLineForPick: picking the first light engine from empty is a no-op reset (nothing to lose)");
+  ok(headLineForPick("FX-ENG", "FX-ENG", kept) === kept, "#210 M1 headLineForPick: re-picking the same part keeps its head line untouched");
+  ok(JSON.stringify(headLineForPick("FX-ENG", "FX-OTHER", kept)) === "{}", "#210 M1 headLineForPick: picking a DIFFERENT part starts the head line fresh");
+  ok(JSON.stringify(headLineForPick("", "FX-ENG", {})) === "{}", "#210 M1 headLineForPick: picking the first light engine from empty is a no-op reset (nothing to lose)");
 
   // M2 — an explicit engine qty clamps to a floor of 1; absent qty is left
   // alone (resolveFixture's own default of 1 applies at read time); a lens
   // qty of 0 is untouched (lens keeps the pre-existing floor of 0).
   const engineZero = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lightEngineLine: { qty: 0 } });
-  ok(engineZero.ok && engineZero.value.lightEngineLine?.qty === 1, "#FXB M2 sanitizeFixtureInput: an explicit qty 0 on the light engine line clamps to 1");
+  ok(engineZero.ok && engineZero.value.lightEngineLine?.qty === 1, "#210 M2 sanitizeFixtureInput: an explicit qty 0 on the light engine line clamps to 1");
   const engineNoQty = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lightEngineLine: { label: "Custom" } });
-  ok(engineNoQty.ok && engineNoQty.value.lightEngineLine?.qty === undefined, "#FXB M2 sanitizeFixtureInput: no qty provided for the engine line is left alone, not forced to 1");
+  ok(engineNoQty.ok && engineNoQty.value.lightEngineLine?.qty === undefined, "#210 M2 sanitizeFixtureInput: no qty provided for the engine line is left alone, not forced to 1");
   const lensZero = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lensLine: { qty: 0 } });
-  ok(lensZero.ok && lensZero.value.lensLine?.qty === 0, "#FXB M2 sanitizeFixtureInput: the lens line keeps its 0-floor — only the engine line gets the 1-floor");
+  ok(lensZero.ok && lensZero.value.lensLine?.qty === 0, "#210 M2 sanitizeFixtureInput: the lens line keeps its 0-floor — only the engine line gets the 1-floor");
 
   /* ---- final review ---- */
   // M1 — the Estimator keys component quantities by SKU, so one SKU on two
   // lines is refused, naming the part.
   const dupBox = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { data: [{ sku: "FX-CBL", label: "Power cable", qty: 1 }], power: [{ sku: "FX-CBL", qty: 2 }] } });
-  ok(!dupBox.ok && dupBox.error.includes("FX-CBL") && dupBox.error.includes("Power cable") && /two lines/.test(dupBox.error), "#FXB final review M1: the same SKU in two boxes is refused, naming the part");
+  ok(!dupBox.ok && dupBox.error.includes("FX-CBL") && dupBox.error.includes("Power cable") && /two lines/.test(dupBox.error), "#210 final review M1: the same SKU in two boxes is refused, naming the part");
   const dupEngine = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { accessories: [{ sku: "FX-ENG", qty: 1 }] } });
-  ok(!dupEngine.ok && dupEngine.error.includes("FX-ENG"), "#FXB final review M1: a box line repeating the light engine is refused");
+  ok(!dupEngine.ok && dupEngine.error.includes("FX-ENG"), "#210 final review M1: a box line repeating the light engine is refused");
   const dupLens = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lines: { mounting: [{ sku: "FX-LENS", qty: 0 }] } });
-  ok(!dupLens.ok && dupLens.error.includes("FX-LENS"), "#FXB final review M1: a box line repeating the lens is refused (even as an optional qty-0 line)");
+  ok(!dupLens.ok && dupLens.error.includes("FX-LENS"), "#210 final review M1: a box line repeating the lens is refused (even as an optional qty-0 line)");
   const sameEngineLens = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-ENG" });
-  ok(!sameEngineLens.ok && sameEngineLens.error.includes("FX-ENG"), "#FXB final review M1: the lens can't be the light engine's own SKU");
+  ok(!sameEngineLens.ok && sameEngineLens.error.includes("FX-ENG"), "#210 final review M1: the lens can't be the light engine's own SKU");
   const dupSys = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: [{ sku: "A", qty: 1 }, { sku: "A", qty: 3 }] });
-  ok(!dupSys.ok && dupSys.error.includes("A"), "#FXB final review M1: a system's parts list refuses a repeated SKU too");
+  ok(!dupSys.ok && dupSys.error.includes("A"), "#210 final review M1: a system's parts list refuses a repeated SKU too");
   const distinct = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lensSku: "FX-LENS", lines: { data: [{ sku: "FX-DMX", qty: 1 }], power: [{ sku: "FX-CBL", qty: 1 }] } });
-  ok(distinct.ok, "#FXB final review M1: distinct SKUs still save");
+  ok(distinct.ok, "#210 final review M1: distinct SKUs still save");
   // M1 scope — conversion is never re-validated: a legacy row with a
   // repeated SKU still converts (it only fails on its next human save).
   const legacyDup = subassemblyToFixture({
@@ -16797,39 +16797,39 @@ import {
     options: { data: [{ sku: "C-X", name: "", cost: 0, qty: 1 }], power: [{ sku: "C-X", name: "", cost: 0, qty: 2 }], mounting: [], accessories: [] },
     cost: 0, price: 0, createdAt: 1, updatedAt: 1,
   });
-  ok(legacyDup.lines.data[0]?.sku === "C-X" && legacyDup.lines.power[0]?.sku === "C-X", "#FXB final review M1: a converted legacy row with a repeated SKU still converts unchanged");
+  ok(legacyDup.lines.data[0]?.sku === "C-X" && legacyDup.lines.power[0]?.sku === "C-X", "#210 final review M1: a converted legacy row with a repeated SKU still converts unchanged");
   // M9 — at most 200 lines / parts per assembly.
   const manyLines = (n: number, pfx: string) => Array.from({ length: n }, (_, i) => ({ sku: `${pfx}-${i}`, qty: 1 }));
-  ok(FIXTURE_MAX_LINES === 200, "#FXB final review M9: the per-assembly line cap is 200");
+  ok(FIXTURE_MAX_LINES === 200, "#210 final review M9: the per-assembly line cap is 200");
   const at200 = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { data: manyLines(100, "D"), accessories: manyLines(100, "A") } });
-  ok(at200.ok, "#FXB final review M9: 200 box lines save");
+  ok(at200.ok, "#210 final review M9: 200 box lines save");
   const over200 = sanitizeFixtureInput({ kind: "fixture", label: "X", description: "", lightEngineSku: "FX-ENG", lines: { data: manyLines(100, "D"), accessories: manyLines(101, "A") } });
-  ok(!over200.ok && /200/.test(over200.error), "#FXB final review M9: 201 box lines across the boxes are refused");
+  ok(!over200.ok && /200/.test(over200.error), "#210 final review M9: 201 box lines across the boxes are refused");
   const sys201 = sanitizeFixtureInput({ kind: "system", label: "S", description: "", scope: "Audio", parts: manyLines(201, "P") });
-  ok(!sys201.ok && /200/.test(sys201.error), "#FXB final review M9: a system with 201 parts is refused");
+  ok(!sys201.ok && /200/.test(sys201.error), "#210 final review M9: a system with 201 parts is refused");
   // M2 — the picker's client-supplied limit is clamped.
-  ok(clampPickerLimit(40) === 40 && clampPickerLimit(0) === 1 && clampPickerLimit(-5) === 1 && clampPickerLimit(10_000) === 100 && clampPickerLimit("abc") === 40 && clampPickerLimit(12.9) === 12, "#FXB final review M2: the picker search limit clamps to 1..100");
+  ok(clampPickerLimit(40) === 40 && clampPickerLimit(0) === 1 && clampPickerLimit(-5) === 1 && clampPickerLimit(10_000) === 100 && clampPickerLimit("abc") === 40 && clampPickerLimit(12.9) === 12, "#210 final review M2: the picker search limit clamps to 1..100");
   {
     const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/actions.ts"), "utf8");
-    ok(actionsSrc.includes("clampPickerLimit(limit)"), "#FXB final review M2: searchAssemblyPartsAction clamps the client limit");
+    ok(actionsSrc.includes("clampPickerLimit(limit)"), "#210 final review M2: searchAssemblyPartsAction clamps the client limit");
     const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/page.tsx"), "utf8");
-    ok(!/listDocsByField/.test(pageSrc + actionsSrc) && pageSrc.includes("getCatalogParts(") && actionsSrc.includes("getCatalogParts("), "#FXB final review M3: the builder page and save read catalog parts by id (the SKU), not a doc-field scan");
+    ok(!/listDocsByField/.test(pageSrc + actionsSrc) && pageSrc.includes("getCatalogParts(") && actionsSrc.includes("getCatalogParts("), "#210 final review M3: the builder page and save read catalog parts by id (the SKU), not a doc-field scan");
     for (const rel of ["src/app/(app)/estimator/page.tsx", "src/app/(app)/design/quick/page.tsx", "src/app/(app)/design/assemblies/page.tsx"]) {
-      ok(/^export const maxDuration = 60;$/m.test(readFileSync(join(process.cwd(), rel), "utf8")), `#FXB final review M8: ${rel} (can run the first-load conversion) sets maxDuration = 60`);
+      ok(/^export const maxDuration = 60;$/m.test(readFileSync(join(process.cwd(), rel), "utf8")), `#210 final review M8: ${rel} (can run the first-load conversion) sets maxDuration = 60`);
     }
     const builderSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/fixture-builder.tsx"), "utf8");
     const removeFn = builderSrc.slice(builderSrc.indexOf("const remove = async"), builderSrc.indexOf("const remove = async") + 600);
-    ok(/try \{\s*await deleteFixtureAction/.test(removeFn) && removeFn.includes("setListError(") && builderSrc.includes("{listError &&"), "#FXB final review M10: a rejected delete is caught and shown on the list");
+    ok(/try \{\s*await deleteFixtureAction/.test(removeFn) && removeFn.includes("setListError(") && builderSrc.includes("{listError &&"), "#210 final review M10: a rejected delete is caught and shown on the list");
   }
 
   const fa = fixtureAssembliesFrom([rec, sys], cat);
-  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#FXB fixtureAssembliesFrom: fixtures only, id and label carried");
-  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#FXB fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
-  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#FXB fixtureAssembliesFrom: the override rides through as the component cost");
+  ok(fa.length === 1 && fa[0].id === "SA-T1" && fa[0].name === "S4 LED", "#210 fixtureAssembliesFrom: fixtures only, id and label carried");
+  ok(fa[0].components.map((c) => `${c.role}:${c.defaultQty}`).join(",") === "fixture:1,lens:1,power:1,mount:0,accessory:1", "#210 fixtureAssembliesFrom: slots map back to Estimator roles and default quantities");
+  ok(fa[0].components[2].cost === 25 && fa[0].components[2].list === 60 && fa[0].components[2].costOverride === 25, "#210 fixtureAssembliesFrom: the override rides through as the component cost");
 }
 
 /* ======================================================================
-   #FXB — conversion (role mapping, ids kept, idempotent), converted-assembly
+   #210 — conversion (role mapping, ids kept, idempotent), converted-assembly
    parity, and the fixture: graph scope. Pure.
    ====================================================================== */
 import { assemblyToFixture, subassemblyToFixture, isLegacySubassembly, planFixtureConversion, normalizeFixtureRow } from "@/lib/fixtures-convert";
@@ -16851,13 +16851,13 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
     ],
   };
   const f = assemblyToFixture(asm, 1000);
-  ok(f.id === "fa-conv" && f.kind === "fixture" && f.label === "House S4" && f.legacy?.from === "assembly" && f.createdAt === 1000, "#FXB convert: an assembly keeps its fa- id and name");
-  ok(f.lightEngineSku === "C-ENG" && f.lightEngineLine?.label === "Engine" && f.lightEngineLine?.qty === 1 && f.lensSku === "C-LENS" && f.lensLine?.label === "Lens", "#FXB convert: first fixture → light engine, first lens → lens (label and qty kept)");
-  ok(f.lines.data.map((l) => `${l.sku}x${l.qty}`).join() === "C-DATAx2" && f.lines.power[0].costOverride === 12 && f.lines.mounting.map((l) => l.sku).join() === "C-MNT", "#FXB convert: data/power/mount → Data/Power/Mounting, qty and override carried");
-  ok(f.lines.accessories.map((l) => l.sku).join(",") === "C-ENG2,C-LENS2,C-ACC,C-CBL,C-LAMP,C-OTH", "#FXB convert: extra fixture/lens members + accessory/cable/lamp/other → Accessories, order kept");
-  ok(!f.needsReview, "#FXB convert: an assembly with a fixture member needs no review");
+  ok(f.id === "fa-conv" && f.kind === "fixture" && f.label === "House S4" && f.legacy?.from === "assembly" && f.createdAt === 1000, "#210 convert: an assembly keeps its fa- id and name");
+  ok(f.lightEngineSku === "C-ENG" && f.lightEngineLine?.label === "Engine" && f.lightEngineLine?.qty === 1 && f.lensSku === "C-LENS" && f.lensLine?.label === "Lens", "#210 convert: first fixture → light engine, first lens → lens (label and qty kept)");
+  ok(f.lines.data.map((l) => `${l.sku}x${l.qty}`).join() === "C-DATAx2" && f.lines.power[0].costOverride === 12 && f.lines.mounting.map((l) => l.sku).join() === "C-MNT", "#210 convert: data/power/mount → Data/Power/Mounting, qty and override carried");
+  ok(f.lines.accessories.map((l) => l.sku).join(",") === "C-ENG2,C-LENS2,C-ACC,C-CBL,C-LAMP,C-OTH", "#210 convert: extra fixture/lens members + accessory/cable/lamp/other → Accessories, order kept");
+  ok(!f.needsReview, "#210 convert: an assembly with a fixture member needs no review");
   const kit = assemblyToFixture({ id: "fa-ne", name: "Cable kit", components: [{ sku: "K1", label: "Cable", role: "cable", defaultQty: 3 }, { sku: "K2", label: "Clamp", role: "mount", defaultQty: 1 }] }, 1000);
-  ok(kit.lightEngineSku === "K1" && kit.lightEngineLine?.qty === 3 && kit.needsReview === true && kit.lines.mounting[0].sku === "K2" && kit.lines.accessories.length === 0, "#FXB convert: no fixture member → the first component becomes the light engine, flagged needsReview");
+  ok(kit.lightEngineSku === "K1" && kit.lightEngineLine?.qty === 3 && kit.needsReview === true && kit.lines.mounting[0].sku === "K2" && kit.lines.accessories.length === 0, "#210 convert: no fixture member → the first component becomes the light engine, flagged needsReview");
 
   // Parity: the converted record yields the same Estimator / Quick Design numbers.
   const cat = [
@@ -16877,11 +16877,11 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
   const after = fixtureAssembliesFrom([f], cat)[0];
   const bt = assemblyUnitTotals(before);
   const at = assemblyUnitTotals(after);
-  ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#FXB parity: a converted assembly keeps its id, name and unit cost/sell");
+  ok(after.id === before.id && after.name === before.name && bt.cost === at.cost && bt.sell === at.sell && bt.cost === 1293 && bt.sell === 1995, "#210 parity: a converted assembly keeps its id, name and unit cost/sell");
   const key = (c: { sku: string; label: string; defaultQty: number; cost: number; list: number; found: boolean }) => `${c.sku}|${c.label}|${c.defaultQty}|${c.cost}|${c.list}|${c.found}`;
-  ok(JSON.stringify(before.components.map(key).sort()) === JSON.stringify(after.components.map(key).sort()), "#FXB parity: the same component set (sku, label, qty, cost, sell)");
+  ok(JSON.stringify(before.components.map(key).sort()) === JSON.stringify(after.components.map(key).sort()), "#210 parity: the same component set (sku, label, qty, cost, sell)");
   const pick = (a: typeof before) => ({ name: a.name, cost: assemblyUnitTotals(a).cost });
-  ok(JSON.stringify(pick(before)) === JSON.stringify(pick(after)), "#FXB parity: the Quick Design / Grid pick under this id prices the same");
+  ok(JSON.stringify(pick(before)) === JSON.stringify(pick(after)), "#210 parity: the Quick Design / Grid pick under this id prices the same");
 
   // Legacy subassembly rows.
   const legacy = {
@@ -16892,31 +16892,31 @@ import { fixturePairs, fixtureRef, FIXTURE_REF_PREFIX, LEGACY_ASSEMBLY_REF_PREFI
     options: { data: [{ sku: "C-DATA", name: "DMX (old)", cost: 5, qty: 2 }], power: [], mounting: [], accessories: [{ sku: "C-GONE", name: "Gone part", cost: 3, qty: 1 }] },
     cost: 1065, price: 1065, snapshot: { cost: 1065, price: 1065, pricedAt: null }, createdAt: 5, updatedAt: 6,
   };
-  ok(isLegacySubassembly(legacy), "#FXB convert: a pre-#FXB subassembly row is recognised");
+  ok(isLegacySubassembly(legacy), "#210 convert: a pre-#210 subassembly row is recognised");
   const s = subassemblyToFixture(legacy);
-  ok(s.id === "SA-OLD" && s.lensSku === "C-LENS" && s.lines.data[0].qty === 2 && s.lines.accessories[0].sku === "C-GONE" && s.lamp === "LED" && s.position === "FOH" && s.circuit === "12" && s.createdAt === 5 && s.updatedAt === 6 && s.legacy?.from === "subassembly", "#FXB convert: a subassembly is rewritten to the new shape, id and fields kept");
-  ok(!isLegacySubassembly(s as unknown as Record<string, unknown>) && !("options" in s) && !("lightEngineName" in s), "#FXB convert: a converted row is no longer legacy and drops the stored-name fields");
+  ok(s.id === "SA-OLD" && s.lensSku === "C-LENS" && s.lines.data[0].qty === 2 && s.lines.accessories[0].sku === "C-GONE" && s.lamp === "LED" && s.position === "FOH" && s.circuit === "12" && s.createdAt === 5 && s.updatedAt === 6 && s.legacy?.from === "subassembly", "#210 convert: a subassembly is rewritten to the new shape, id and fields kept");
+  ok(!isLegacySubassembly(s as unknown as Record<string, unknown>) && !("options" in s) && !("lightEngineName" in s), "#210 convert: a converted row is no longer legacy and drops the stored-name fields");
   const gone = resolveFixture(s, cat).parts.find((p) => p.sku === "C-GONE")!;
-  ok(!gone.found && gone.label === "Gone part", "#FXB convert: a converted row's old stored name is the fallback display for a missing part");
-  ok(normalizeFixtureRow(legacy as unknown as Record<string, unknown> & { id: string }).lines.data[0].sku === "C-DATA", "#FXB normalizeFixtureRow: a legacy row reads as the new shape in memory");
+  ok(!gone.found && gone.label === "Gone part", "#210 convert: a converted row's old stored name is the fallback display for a missing part");
+  ok(normalizeFixtureRow(legacy as unknown as Record<string, unknown> & { id: string }).lines.data[0].sku === "C-DATA", "#210 normalizeFixtureRow: a legacy row reads as the new shape in memory");
 
   const rows = [legacy as unknown as Record<string, unknown> & { id: string }];
   const p1 = planFixtureConversion([asm], rows, 1000);
-  ok(p1.inserts.map((r) => r.id).join() === "fa-conv" && p1.rewrites.map((r) => r.id).join() === "SA-OLD", "#FXB plan: settings assemblies insert, legacy rows rewrite");
+  ok(p1.inserts.map((r) => r.id).join() === "fa-conv" && p1.rewrites.map((r) => r.id).join() === "SA-OLD", "#210 plan: settings assemblies insert, legacy rows rewrite");
   const applied = [...p1.rewrites, ...p1.inserts] as unknown as Array<Record<string, unknown> & { id: string }>;
   const p2 = planFixtureConversion([asm], applied, 2000);
-  ok(p2.inserts.length === 0 && p2.rewrites.length === 0, "#FXB plan: running the conversion twice changes nothing");
+  ok(p2.inserts.length === 0 && p2.rewrites.length === 0, "#210 plan: running the conversion twice changes nothing");
   const p3 = planFixtureConversion([asm], [], 3000, new Set(["fa-conv"]));
-  ok(p3.inserts.length === 0, "#FXB final review M11: a soft-deleted assembly id is not planned (nor reported) as an insert");
+  ok(p3.inserts.length === 0, "#210 final review M11: a soft-deleted assembly id is not planned (nor reported) as an insert");
 
   // The accessory graph: one fixture: scope; systems feed nothing.
   const pairs = fixturePairs({ kind: "fixture", lightEngineSku: "G-ENG", lensSku: "G-LENS", lines: { data: [{ sku: "G-DMX", qty: 2 }], power: [], mounting: [{ sku: "G-CLAMP", qty: 0 }], accessories: [{ sku: "G-ENG", qty: 1 }] } });
-  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? p.maxQty : "opt"}`).join(",") === "G-ENG>G-LENS:1,G-ENG>G-DMX:2,G-ENG>G-CLAMP:opt", "#FXB graph: lens + every box line (optional ones un-included) under the light engine; the engine itself skipped");
-  ok(fixturePairs({ kind: "system", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } }).length === 0, "#FXB graph: systems don't feed the graph");
-  ok(fixtureRef("fa-1") === "fixture:fa-1" && FIXTURE_REF_PREFIX === "fixture:" && LEGACY_ASSEMBLY_REF_PREFIXES.join() === "assembly:,subassembly:", "#FXB graph: one fixture:<id> scope; the two legacy prefixes are named for retirement");
+  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? p.maxQty : "opt"}`).join(",") === "G-ENG>G-LENS:1,G-ENG>G-DMX:2,G-ENG>G-CLAMP:opt", "#210 graph: lens + every box line (optional ones un-included) under the light engine; the engine itself skipped");
+  ok(fixturePairs({ kind: "system", lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] } }).length === 0, "#210 graph: systems don't feed the graph");
+  ok(fixtureRef("fa-1") === "fixture:fa-1" && FIXTURE_REF_PREFIX === "fixture:" && LEGACY_ASSEMBLY_REF_PREFIXES.join() === "assembly:,subassembly:", "#210 graph: one fixture:<id> scope; the two legacy prefixes are named for retirement");
 }
 
-/* --- #FXB — the Estimator BOM line over a converted assembly is unchanged;
+/* --- #210 — the Estimator BOM line over a converted assembly is unchanged;
        an optional add-on switched on adds qty 1. Pure. --- */
 import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture-bom";
 {
@@ -16935,15 +16935,15 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
   const draft = { componentQty: {}, position: "FOH", circuit: "4" };
   const b = fixtureBomLine(before, draft)!;
   const a = fixtureBomLine(after, draft)!;
-  ok(!!b && !!a && b.cost === a.cost && b.price === a.price && a.cost === 814 && a.price === 1230, "#FXB Estimator: a converted assembly's BOM line totals are identical");
-  ok(a.desc === "Wash — Engine; Cable ×2 (Pos FOH / Ckt 4)" && a.components.length === 3, "#FXB Estimator: description and components[] keep today's shape");
+  ok(!!b && !!a && b.cost === a.cost && b.price === a.price && a.cost === 814 && a.price === 1230, "#210 Estimator: a converted assembly's BOM line totals are identical");
+  ok(a.desc === "Wash — Engine; Cable ×2 (Pos FOH / Ckt 4)" && a.components.length === 3, "#210 Estimator: description and components[] keep today's shape");
   const on = fixtureBomLine(after, { ...draft, componentQty: { "B-BARN": optionalToggleQty(true) } })!;
-  ok(on.price === a.price + 90 && on.cost === a.cost + 60 && on.components.find((c) => c.sku === "B-BARN")!.qty === 1, "#FXB Estimator: switching an optional add-on on adds it at qty 1");
-  ok(optionalToggleQty(false) === "0", "#FXB Estimator: switching it off returns it to 0");
-  ok(fixtureBomLine(after, { ...draft, componentQty: { "B-ENG": "0", "B-CBL": "0" } }) === null, "#FXB Estimator: a line with no sell is refused, as before");
+  ok(on.price === a.price + 90 && on.cost === a.cost + 60 && on.components.find((c) => c.sku === "B-BARN")!.qty === 1, "#210 Estimator: switching an optional add-on on adds it at qty 1");
+  ok(optionalToggleQty(false) === "0", "#210 Estimator: switching it off returns it to 0");
+  ok(fixtureBomLine(after, { ...draft, componentQty: { "B-ENG": "0", "B-CBL": "0" } }) === null, "#210 Estimator: a line with no sell is refused, as before");
 }
 
-/* --- #FXB Estimator parity (D-FXB-7) — a realistic converted assembly, its
+/* --- #210 Estimator parity (D300) — a realistic converted assembly, its
        components stored in NON-canonical order: a lens, a cable, a lamp, an
        "other", a missing catalog part carrying a cost override, and a qty-0
        line with its own override. The new fixtureBomLine's cost/price must
@@ -17002,10 +17002,10 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
   });
   if (oldPc.length) oldDesc += " (" + oldPc.join(" / ") + ")";
 
-  ok(oldCost === 659 && oldPrice === 932, "#FXB Estimator parity: old math's own totals (sanity)");
+  ok(oldCost === 659 && oldPrice === 932, "#210 Estimator parity: old math's own totals (sanity)");
   ok(
     oldDesc === "Batten Strip — Cable ×3; Ghost; Engine; Lens; Lamp; Other ×2 (Pos FOH / Ckt 4)",
-    "#FXB Estimator parity: old description keeps the stored (non-canonical) order"
+    "#210 Estimator parity: old description keeps the stored (non-canonical) order"
   );
 
   // NEW math: convert, then run fixture-bom.ts's fixtureBomLine over the
@@ -17015,11 +17015,11 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
 
   ok(
     !!line && line.cost === oldCost && line.price === oldPrice,
-    "#FXB Estimator parity: converted totals are EXACTLY equal to the old math's (cost/price unaffected by reordering)"
+    "#210 Estimator parity: converted totals are EXACTLY equal to the old math's (cost/price unaffected by reordering)"
   );
   ok(
     line.desc === "Batten Strip — Engine; Lens; Cable ×3; Ghost; Lamp; Other ×2 (Pos FOH / Ckt 4)",
-    "#FXB Estimator parity (D-FXB-7): the new description lists parts in form order — light engine, lens, Data, Power, Mounting, Accessories"
+    "#210 Estimator parity (D300): the new description lists parts in form order — light engine, lens, Data, Power, Mounting, Accessories"
   );
   ok(
     JSON.stringify(line.components.map((c) => ({ sku: c.sku, role: c.role, qty: c.qty }))) ===
@@ -17032,11 +17032,11 @@ import { fixtureBomLine, optionalToggleQty } from "@/app/(app)/estimator/fixture
         { sku: "T-LAMP", role: "accessory", qty: 1 },
         { sku: "T-OTH", role: "accessory", qty: 2 },
       ]),
-    "#FXB Estimator parity (D-FXB-7): components[] land in form order with box roles — cable/lamp/other → accessory"
+    "#210 Estimator parity (D300): components[] land in form order with box roles — cable/lamp/other → accessory"
   );
   ok(
     line.components.find((c) => c.sku === "T-GHOST")!.cost === 42 && line.components.find((c) => c.sku === "T-OPT")!.cost === 6,
-    "#FXB Estimator parity: the missing part's and the qty-0 line's cost overrides both ride through unchanged"
+    "#210 Estimator parity: the missing part's and the qty-0 line's cost overrides both ride through unchanged"
   );
 }
 

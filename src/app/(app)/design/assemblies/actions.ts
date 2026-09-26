@@ -23,7 +23,7 @@ const revalidateConsumers = () => {
 };
 
 /**
- * The Assembly Builder's part pickers (#FXB fix wave 1, I1): a debounced
+ * The Assembly Builder's part pickers (#210 fix wave 1, I1): a debounced
  * server search over the catalog instead of shipping all ~37,400 parts to
  * the client. Thin wrapper over the Estimator's `searchCatalog` (same
  * requireUser + result cap), reshaped to `PartHit` (adds `pricedAt`, drops
@@ -48,7 +48,7 @@ export async function searchAssemblyPartsAction(query: string, limit = 40): Prom
 }
 
 /**
- * Save a fixture or system (#FXB). Anyone signed in (spec §2.5); every save
+ * Save a fixture or system (#210). Anyone signed in (spec §2.5); every save
  * stamps who/when. The snapshot ("was $X when built") prices from the live
  * catalog, read for THIS record's SKUs only — never the whole ~37k book. A
  * part missing from the catalog does not block the save. A fixture's lens

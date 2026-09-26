@@ -8,7 +8,7 @@ import type { FixtureRecord } from "@/lib/fixture-assemblies";
 import { syncAllAssemblyGraphs } from "@/lib/part-docs/assembly-sync";
 
 /**
- * The fixture builder's one-time conversion (#FXB, spec §3 and §5).
+ * The fixture builder's one-time conversion (#210, spec §3 and §5).
  * Server-only.
  *
  * 1. Each `settings.fixtureAssemblies` entry becomes a fixture row with the

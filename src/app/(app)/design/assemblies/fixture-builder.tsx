@@ -13,7 +13,7 @@ type Filter = "all" | FixtureKind;
 const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems" };
 const EDIT_BTN = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 } as const;
 
-/** #FXB — the one Assemblies list (fixtures + systems) and its form. */
+/** #210 — the one Assemblies list (fixtures + systems) and its form. */
 export default function FixtureBuilder({ initial, parts: seed, priceListEffective, coverage }: {
   initial: FixtureRecord[];
   /** The server's priced seed — every part currently referenced by a saved

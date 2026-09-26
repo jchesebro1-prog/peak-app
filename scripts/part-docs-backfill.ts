@@ -4,7 +4,7 @@
  * "legacy") and a link. The Datasheets page runs the same idempotent step on
  * every read; this is the explicit, reportable version.
  *
- * Also runs the fixture builder's one-time conversion (#FXB): assemblies and
+ * Also runs the fixture builder's one-time conversion (#210): assemblies and
  * subassemblies become fixture records and the graph moves to `fixture:<id>`.
  *
  *   npm run part-docs:backfill              → report, writes nothing

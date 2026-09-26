@@ -1,7 +1,7 @@
 import { assemblyDescription, type ResolvedFixtureAssembly } from "@/lib/fixture-assemblies";
 import type { FixtureDraft, SpecItem } from "./types";
 
-/** The fixture configurator's BOM line (#FXB) — moved out of
+/** The fixture configurator's BOM line (#210) — moved out of
  *  estimator-client.tsx unchanged so it is testable: included components at
  *  the draft's quantities, aggregate unit cost/sell, "Name — part; part"
  *  plus "(Pos … / Ckt …)". Pure. */

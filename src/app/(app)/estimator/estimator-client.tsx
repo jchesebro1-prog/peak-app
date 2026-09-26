@@ -540,7 +540,7 @@ export default function EstimatorClient({
      cleared by discardDraft, so an abandoned edit can never leak into the next
      plain "+ Vendor quote". */
   const vendorEditRef = useRef<string | null>(null);
-  /* #FXB: the position/circuit values last auto-filled from a fixture's
+  /* #210: the position/circuit values last auto-filled from a fixture's
      defaults, so switching the assembly can tell "still what we prefilled"
      apart from "the user typed something" and never clobber the latter. */
   const fixturePrefillRef = useRef<{ position: string; circuit: string }>({ position: "", circuit: "" });
@@ -1365,7 +1365,7 @@ export default function EstimatorClient({
       setVendorDraft(rec ? vendorDraftFromRecord(rec) : freshVendor());
     } else if (kind === "fixture") {
       const first = fixtureAssemblies[0];
-      // #FXB: the fixture's default hang position / circuit.
+      // #210: the fixture's default hang position / circuit.
       const position = first?.position || "";
       const circuit = first?.circuit || "";
       fixturePrefillRef.current = { position, circuit };
@@ -1660,7 +1660,7 @@ export default function EstimatorClient({
     const assembly = fixtureAssemblies.find((item) => item.id === assemblyId);
     const nextPosition = assembly?.position || "";
     const nextCircuit = assembly?.circuit || "";
-    // #FXB: only replace position/circuit when the field still equals what
+    // #210: only replace position/circuit when the field still equals what
     // was last prefilled (i.e. the user never touched it) — never overwrite
     // a value the user typed.
     const prefill = fixturePrefillRef.current;
@@ -1679,7 +1679,7 @@ export default function EstimatorClient({
     const d = fixtureDraft;
     const assembly = fixtureAssemblies.find((item) => item.id === d.assemblyId);
     if (!assembly) return;
-    // #FXB: the BOM math lives in fixture-bom.ts (pure, parity-tested);
+    // #210: the BOM math lives in fixture-bom.ts (pure, parity-tested);
     // the line's shape is unchanged.
     const line = fixtureBomLine(assembly, d);
     if (!line) return;

@@ -53,7 +53,7 @@ export function designRedirect(
   }
 
   // Subassemblies became a tab of the Assembly Builder (#130), then merged
-  // into its one list (#FXB).
+  // into its one list (#210).
   if (pathname === "/design/subassemblies") return "/design/assemblies";
   if (KNOWLEDGE_MOVES[pathname]) return KNOWLEDGE_MOVES[pathname];
 

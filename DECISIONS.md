@@ -5908,7 +5908,7 @@ sheets share `buildSchedule`; as a side effect `/schedule` now names Grid-librar
 pricing catalog only and printed "(no longer in the catalog)" for them) and lists RiserLinks with the wire runs.
 E-60x paginate at 30 rows per column, two columns per sheet, repeating a section head marked "(cont.)".
 
-## D-FXB-1. Fixtures and systems are one record type in the `subassemblies` table, ids kept (#FXB, 2026-09-25)
+## D294. Fixtures and systems are one record type in the `subassemblies` table, ids kept (#210, 2026-09-25)
 
 `FixtureRecord` (`src/lib/fixture-assemblies.ts`, store `src/lib/stores/fixtures.ts`) replaces both builders' records
 in the existing `subassemblies` doc table — no new table, no SQL migration. A one-time, idempotent conversion
@@ -5934,7 +5934,7 @@ legacy `SA-…` rewrite is `additiveFixturePatch(original, converted)`, which ad
 never overwrites one it already has, applied through a conditional atomic `UPDATE … WHERE id = X AND rev = <read rev>
 AND deleted = false AND <legacy shape>` per row — a save or delete landing between read and write loses the race
 harmlessly and that row just converts on the next pass. Completion also stamps `part_docs_graph_sync.assembliesSyncedAt`
-so D276's older backfill treats the moved graph as already synced (see D-FXB-4). A converted row's legacy-only fields
+so D276's older backfill treats the moved graph as already synced (see D297). A converted row's legacy-only fields
 (`options`, `lightEngineName`, `lensName`, `lightEngineCost`, `lensCost`, `cost`, `price`, snapshot-era keys…) then ride
 untouched until a human resaves that exact record through the new form: `updateFixture` preserves every field the new
 `CleanFixture` value doesn't own, read from the **raw stored row** — a row still in the old shape (every preview,
@@ -5942,7 +5942,7 @@ production before or while the conversion runs, a row an older build re-saved) n
 are never taken from the normalized record — with an explicit optional-field list so a field the user actually cleared
 (e.g. `lamp`) reads back absent rather than resurrected from the legacy copy.
 
-## D-FXB-2. Pricing is the Assemblies rule; a missing part keeps its cost override (#FXB, 2026-09-25)
+## D295. Pricing is the Assemblies rule; a missing part keeps its cost override (#210, 2026-09-25)
 
 Unit cost = line cost override ?? catalog cost, unit sell = catalog list; only qty ≥ 1 lines count, qty 0 lines are
 optional add-ons listed with their unit numbers. A part missing from the catalog is `found: false`, sells at 0 and costs
@@ -5950,7 +5950,7 @@ its override or 0 — the spec says "contributes 0", but the Assemblies resolver
 part and converted totals must not move. The list's "was $X when built" badge compares **cost**: converted
 subassemblies' snapshot `price` was their cost (the old price = cost rule), so a sell comparison would flag every one.
 
-## D-FXB-3. Light engine and lens carry optional label / qty / override (#FXB, 2026-09-25)
+## D296. Light engine and lens carry optional label / qty / override (#210, 2026-09-25)
 
 The spec stores `lightEngineSku` / `lensSku`; a converted Assemblies-tab fixture member can have its own label, a
 quantity other than 1, or an override, and dropping those would change Estimator descriptions and totals. They live in
@@ -5960,7 +5960,7 @@ totals, components and ids are identical (parity-tested). Converted cable/lamp/o
 their Estimator component role reads `accessory`. Old stored names survive only as `legacy.names`, fallback display for a
 missing part.
 
-## D-FXB-4. The accessory graph moves to one `fixture:<id>` scope (#FXB, 2026-09-25)
+## D297. The accessory graph moves to one `fixture:<id>` scope (#210, 2026-09-25)
 
 Fixtures only: parent = light engine; lens and every box line (qty 0 = un-included link) are accessories. The
 conversion writes the `fixture:` scopes add-only (a live row and its flag are never rewritten), then soft-deletes every
@@ -5968,7 +5968,7 @@ conversion writes the `fixture:` scopes add-only (a live row and its flag are ne
 This replaces D276's two scopes and its `part_docs_graph_sync` flag (production had already set that one, so the move
 needed its own flag). Saves reconcile `fixture:<id>`; deletes empty it. Systems never feed the graph.
 
-## D-FXB-5. Consumers read fixtures; systems wait for the Grid Equipment map (#FXB, 2026-09-25)
+## D298. Consumers read fixtures; systems wait for the Grid Equipment map (#210, 2026-09-25)
 
 The Estimator configurator and Quick Design list fixture records through `fixtureAssembliesFrom()`, which returns
 today's `ResolvedFixtureAssembly` shape, so their code paths are unchanged. Systems are not offered there (spec §5 lists
@@ -5979,7 +5979,7 @@ field. The fixture BOM line moved to `estimator/fixture-bom.ts`, unchanged. `lis
 id), where main listed settings assemblies in their stored order: the Estimator's default pick (the first fixture) and
 the order of Quick Design's fixture dropdown change accordingly — no price or id changes.
 
-## D-FXB-6. Anyone signed in edits; kind is fixed; a human save clears needs-review (#FXB, 2026-09-25)
+## D299. Anyone signed in edits; kind is fixed; a human save clears needs-review (#210, 2026-09-25)
 
 `requireUser()` on save / delete / the datasheet toggle (the Subassemblies tab needed `manage_users`). Every save stamps
 `updatedAt` / `updatedBy`, and create also stamps `createdAt` / `createdBy`. A record cannot switch between fixture and system.
@@ -6000,7 +6000,7 @@ the Estimator's: `searchCatalog` loads the catalog on the server for each call a
 keystroke's server cost does scale with the catalog (existing Estimator behaviour, unchanged here) — only the result
 sent to the browser is capped.
 
-## D-FXB-7. Converted lines list parts in form order, with box roles; totals are unchanged (#FXB, 2026-09-25)
+## D300. Converted lines list parts in form order, with box roles; totals are unchanged (#210, 2026-09-25)
 
 For a converted assembly, new Estimator lines list parts in the builder's form order (light engine, lens, Data, Power,
 Mounting, Accessories), and `components[]` carry box roles — cable/lamp/other → accessory. Totals (cost, price) stay
