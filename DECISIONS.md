@@ -5782,7 +5782,7 @@ orphaned.
 never the old `/api/part-datasheet/<sku>` URL that 404'd for a part whose only datasheet was a researched link. The
 catalog ETag folds in documents and links, since attaching one moves no part's `updatedAt`.
 
-## D-TRV-1. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#TRV, 2026-09-25)
+## D281. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#208, 2026-09-25)
 
 Jeff: "once we reach 1000 dollars in travel expenses, then it switches to flights and hotels with allowances." A pure,
 import-free planner (`src/lib/travel-plan.ts`) runs in the flame-test, repair and inspection engines, their builder
@@ -5797,14 +5797,14 @@ migration. Drive mode returns the drive total itself, so drive-mode prices are b
 quotes keep their stored price until someone re-prices them. `trip` keeps the drive numbers and gains `mode` (and
 `flight` when flying); the per-quote override is saved as `travel` on the service subdoc.
 
-## D-TRV-2. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#TRV, 2026-09-25)
+## D282. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#208, 2026-09-25)
 
 The spec's default repair crew is 2, but a repair quote already carries a crew size. The flying crew defaults to
 `max(repair_rates.flyCrew, the quote's crew size)` so a crew of 3 is never priced as 2 flights. Travel-day labor
 bills at the service's base labor rate even on emergency quotes — the same rate drive time already uses; only
 on-site labor takes the emergency multiplier.
 
-## D-TRV-3. Customers see one travel line, at travel's share of the sell price (#TRV, 2026-09-25)
+## D283. Customers see one travel line, at travel's share of the sell price (#208, 2026-09-25)
 
 In fly mode the letters, quote documents and renewal PDFs print one line, "Travel (air, lodging & per diem)", with
 the flight cost marked up by the quote's margin (`flight.total ÷ (1 − margin)`, rounded) — never a bare cost figure
@@ -5813,7 +5813,7 @@ next to an all-in price. It replaces the round-trip mobilization row (flame, ins
 editable template field `priceLineFly` ("Everything above — travel (air, lodging & per diem), …") is used in fly
 mode. The itemized airfare / lodging / per diem / car / travel labor stays builder-only.
 
-## D-TRV-4. Renewals keep last year's travel choice, not last year's airfare (#TRV, 2026-09-25)
+## D284. Renewals keep last year's travel choice, not last year's airfare (#208, 2026-09-25)
 
 Renewal re-pricing (D69, current rates) carries the prior quote's travel override — mode, crew, nights — but drops
 its manual airfare, which is a one-year number; the allowance applies. When the renewal's mode differs from last
@@ -5824,13 +5824,13 @@ carrying that count forward would overstate a single-venue trip's nights, so `ni
 still carry) unless the prior quote was itself single-venue, mirroring the venue-count gate the mode-flip wording
 already used.
 
-## D-TRV-5. The quote-builder previews use the live road factor and speed (#TRV, 2026-09-25)
+## D285. The quote-builder previews use the live road factor and speed (#208, 2026-09-25)
 
 The three builders' inlined previews hardcoded 1.25 / 50 mph while the server re-priced with the Estimating Rules
 values. With a threshold on the drive total the two could disagree on drive vs fly, so the pages now hand the
 builders the live `travel_rates` blob and the previews use it. Server totals are unchanged.
 
-## D-TRV-6. Pre-feature sent quotes open on Drive, not Auto (#TRV, 2026-09-25)
+## D286. Pre-feature sent quotes open on Drive, not Auto (#208, 2026-09-25)
 
 Branch review finding (I2): a service quote saved before flights-over-drive shipped recorded no travel choice at
 all. If such a quote is past draft (sent, won, lost — a customer may already have seen the price) and is reopened

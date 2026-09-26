@@ -140,7 +140,7 @@ export default async function FlameTestQuotePage({
       }
     }
     const wonAlready = editQuote.status === "won";
-    // Flights over drive (D-TRV-6) shipped after some quotes were already past
+    // Flights over drive (D286) shipped after some quotes were already past
     // draft. Those never recorded a travel choice, so re-opening them under
     // Auto could re-price a sent drive quote as flights. Seed Drive instead —
     // drafts (no customer has seen a price yet) stay Auto.

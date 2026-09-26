@@ -245,7 +245,7 @@ See `.env.example`.
     production, verify Blob upload on a preview deploy. Decisions
     D270–D280; punch item #207.
 
-14. ✅ **Flights over drive** (#TRV, D-TRV-1–D-TRV-5) — a pure planner
+15. ✅ **Flights over drive** (#208, D281–D286) — a pure planner
     (`src/lib/travel-plan.ts`) prices flights instead of a drive once one
     trip's drive cost reaches a threshold (default $1,000), applied
     everywhere a flame-test, repair or inspection quote is priced: the
@@ -256,8 +256,8 @@ See `.env.example`.
     renewal PDFs print one "Travel (air, lodging & per diem)" line; renewals
     carry last year's travel choice, not its airfare, and call out a mode
     flip. Not in scope: the Estimator, rentals, consulting, live airfare
-    lookup, per-venue split trips. Decisions D-TRV-1–D-TRV-5; punch item
-    #TRV — placeholders, renumbered at merge.
+    lookup, per-venue split trips. Decisions D281–D286; punch item
+    #208.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

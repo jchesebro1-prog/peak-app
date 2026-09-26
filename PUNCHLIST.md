@@ -8327,7 +8327,7 @@ currently reclaims those Blob objects.
 
 ---
 
-## #TRV. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D-TRV-1…D-TRV-5)
+## 208. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D281…D286)
 
 **Reported:** 2026-09-25 (Jeff, brainstorm): "once we reach 1000 dollars in travel expenses, then it switches to
 flights and hotels with allowances." Spec: `docs/superpowers/specs/2026-09-25-travel-flights-design.md`; plan:

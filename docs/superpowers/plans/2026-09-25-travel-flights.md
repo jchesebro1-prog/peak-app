@@ -28,7 +28,7 @@ From the spec and the project's binding rules — every task's requirements impl
 - **Client-bundle rule (breaks `next build`, invisible to tsc):** a `"use client"` file must never import a VALUE from `@/lib/stores/*` or `@/db/*`. `src/lib/travel-plan.ts` has **no import statements at all** so the builders can import it.
 - Timestamps, if any are added, are epoch-ms numbers. No hardcoded accent colours: accent-coloured UI uses the `accent` prop the pages already pass from `settings.accent`.
 - **Worktree only.** Work in `/Users/sm/Downloads/peak-app/.claude/worktrees/travel-flights` (branch `feat/travel-flights`). Never `cd` to `/Users/sm/Downloads/peak-app`, never open its `.data/pglite`, never `git stash` (the stash is shared across worktrees — commit instead), never start a dev server by hand. `test:specs`, the regressions harness and `test:smoke` each run on their own `mktemp -d` datadir.
-- **Harness rule:** new pure blocks in `scripts/test-review-and-spec.ts` are inserted **immediately above the line `seeded()`** that starts the async promise chain (so they append in task order). ES imports inside the file are hoisted and module-scoped: bindings the harness already imports — `ok`, `readFileSync`, `join`, `PRICING_GROUPS`, `TRAVEL_RATE_DEFAULTS`, `RateEntry`, `computeFlameQuote`, `FTVenue`, `getTemplateDef` — must be **reused, never re-imported** (a duplicate binding is a SyntaxError that kills the whole suite). Every new check message starts with `#TRV`.
+- **Harness rule:** new pure blocks in `scripts/test-review-and-spec.ts` are inserted **immediately above the line `seeded()`** that starts the async promise chain (so they append in task order). ES imports inside the file are hoisted and module-scoped: bindings the harness already imports — `ok`, `readFileSync`, `join`, `PRICING_GROUPS`, `TRAVEL_RATE_DEFAULTS`, `RateEntry`, `computeFlameQuote`, `FTVenue`, `getTemplateDef` — must be **reused, never re-imported** (a duplicate binding is a SyntaxError that kills the whole suite). Every new check message starts with `#208`.
 - **Gates** (report real numbers): `npx tsc --noEmit` (0 errors) · `npx eslint` (baseline **111 warnings / 0 errors**; 0 errors and no new warnings) · `npm run test:specs` (0 FAIL) · `D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts` · `npm run test:smoke` · `env -u DATABASE_URL NEXT_TELEMETRY_DISABLED=1 npm run build` then `rm -rf .next`.
 
 ### Worktree setup (once, before Task 1)
@@ -66,8 +66,8 @@ npx eslint 2>&1 | tail -3                        # expect "111 problems (0 error
 | `src/app/(app)/{flame-tests,repairs,inspections}/quote/page.tsx` | Modify | Load `getTravelRates()`, seed `initial.travel` from the saved subdoc. |
 | `src/lib/templates.ts` | Modify | New `priceLineFly` field on `flame_proposal` and `inspection_proposal`. |
 | `src/app/(app)/{flame-tests,inspections,repairs}/letter/page.tsx` | Modify | Fly mode prints the one travel line (scope row / paragraph) and the fly price line. |
-| `scripts/test-review-and-spec.ts` | Modify | `#TRV` pure checks per spec §6 (one block per task). |
-| `DECISIONS.md`, `PUNCHLIST.md` | Modify | Placeholder-numbered entries (`D-TRV-1…D-TRV-5`, `#TRV`) — renumbered by the controller at merge. |
+| `scripts/test-review-and-spec.ts` | Modify | `#208` pure checks per spec §6 (one block per task). |
+| `DECISIONS.md`, `PUNCHLIST.md` | Modify | Placeholder-numbered entries (`D281…D285`, `#208`) — renumbered by the controller at merge. |
 
 ---
 
@@ -107,7 +107,7 @@ npx eslint 2>&1 | tail -3                        # expect "111 problems (0 error
 Insert this block in `scripts/test-review-and-spec.ts` immediately above the line `seeded()` (the start of the `.then(...)` chain near the end of the file):
 
 ```ts
-/* --- #TRV flights over drive — the pure planner, its rates and the Estimating
+/* --- #208 flights over drive — the pure planner, its rates and the Estimating
    Rules rows (spec docs/superpowers/specs/2026-09-25-travel-flights-design.md §3, §6) --- */
 import {
   FLY_RATE_DEFAULTS,
@@ -137,125 +137,125 @@ import {
   ok(
     R.flyThreshold === 1000 && R.airfarePerPerson === 450 && R.hotelPerNight === 140 &&
       R.perDiemPerDay === 70 && R.carPerDay === 75 && R.flyTravelHoursEachWay === 4 && R.flyHoursPerDay === 8,
-    "#TRV: fly-rate defaults are exactly the spec table ($1,000 / $450 / $140 / $70 / $75 / 4 h / 8 h)"
+    "#208: fly-rate defaults are exactly the spec table ($1,000 / $450 / $140 / $70 / $75 / 4 h / 8 h)"
   );
   ok(
     FLY_CREW_DEFAULTS.flame === 1 && FLY_CREW_DEFAULTS.repair === 2 && FLY_CREW_DEFAULTS.inspection === 1,
-    "#TRV: default flying crew is flame 1 · repairs 2 · inspections 1"
+    "#208: default flying crew is flame 1 · repairs 2 · inspections 1"
   );
   ok(
     TRAVEL_RATE_DEFAULTS.roadFactor === 1.25 && TRAVEL_RATE_DEFAULTS.mph === 50 &&
       TRAVEL_RATE_DEFAULTS.flyThreshold === 1000 && TRAVEL_RATE_DEFAULTS.flyHoursPerDay === 8,
-    "#TRV: the travel_rates defaults keep 1.25 / 50 and carry every fly key"
+    "#208: the travel_rates defaults keep 1.25 / 50 and carry every fly key"
   );
   ok(
     FLAMETEST_RATE_DEFAULTS.flyCrew === 1 && REPAIR_RATE_DEFAULTS.flyCrew === 2 && INSPECTION_RATE_DEFAULTS.flyCrew === 1,
-    "#TRV: each service's rates blob defaults carry its flyCrew"
+    "#208: each service's rates blob defaults carry its flyCrew"
   );
-  ok(TRAVEL_FLY_LINE === "Travel (air, lodging & per diem)", "#TRV: the customer-facing line is exactly 'Travel (air, lodging & per diem)'");
+  ok(TRAVEL_FLY_LINE === "Travel (air, lodging & per diem)", "#208: the customer-facing line is exactly 'Travel (air, lodging & per diem)'");
 
   // threshold boundary (on-site 10 h, 1 person, $75/h)
   const base = { onSiteHours: 10, laborRate: 75, crewDefault: 1, rates: R };
   const p999 = planTravel({ ...base, drive: { total: 999.99 } });
-  ok(p999.mode === "drive" && p999.flight === null && p999.total === 999.99, "#TRV: a $999.99 drive stays a drive, total untouched");
+  ok(p999.mode === "drive" && p999.flight === null && p999.total === 999.99, "#208: a $999.99 drive stays a drive, total untouched");
   const p1000 = planTravel({ ...base, drive: { total: 1000 } });
-  ok(p1000.mode === "fly" && p1000.autoMode === "fly" && p1000.choice === "auto" && p1000.flight !== null, "#TRV: a $1,000 drive flies (≥ threshold)");
+  ok(p1000.mode === "fly" && p1000.autoMode === "fly" && p1000.choice === "auto" && p1000.flight !== null, "#208: a $1,000 drive flies (≥ threshold)");
   const pNever = planTravel({ ...base, rates: { ...R, flyThreshold: 0 }, drive: { total: 50000 } });
-  ok(pNever.mode === "drive" && pNever.total === 50000, "#TRV: threshold 0 never flies");
+  ok(pNever.mode === "drive" && pNever.total === 50000, "#208: threshold 0 never flies");
 
   // forced modes
   const forcedDrive = planTravel({ ...base, drive: { total: 5000 }, override: { mode: "drive" } });
   ok(forcedDrive.mode === "drive" && forcedDrive.autoMode === "fly" && forcedDrive.total === 5000 && forcedDrive.flight === null,
-    "#TRV: forced Drive over the threshold prices the drive");
+    "#208: forced Drive over the threshold prices the drive");
   const forcedFly = planTravel({ ...base, drive: { total: 100 }, override: { mode: "fly" } });
   ok(forcedFly.mode === "fly" && forcedFly.autoMode === "drive" && forcedFly.choice === "fly" && forcedFly.total === 1765,
-    "#TRV: forced Fly under the threshold prices flights");
+    "#208: forced Fly under the threshold prices flights");
 
   // formulas: 10 h on site, crew 1, 8 h/day → 2 work days, 2 nights, 3 trip days
   const f = p1000.flight!;
-  ok(f.crew === 1 && f.workDays === 2 && f.nights === 2 && f.tripDays === 3, "#TRV: workDays = ceil(10 / 8) = 2, nights = workDays, tripDays = nights + 1");
+  ok(f.crew === 1 && f.workDays === 2 && f.nights === 2 && f.tripDays === 3, "#208: workDays = ceil(10 / 8) = 2, nights = workDays, tripDays = nights + 1");
   ok(
     f.airfare === 450 && f.lodging === 280 && f.perDiem === 210 && f.car === 225 &&
       f.travelHours === 8 && f.travelLabor === 600 && f.total === 1765 && p1000.total === 1765,
-    "#TRV: airfare 450 + lodging 280 + per diem 210 + car 225 + travel labor 600 = 1,765"
+    "#208: airfare 450 + lodging 280 + per diem 210 + car 225 + travel labor 600 = 1,765"
   );
-  ok(p1000.defaults.crew === 1 && p1000.defaults.nights === 2 && p1000.defaults.airfarePerPerson === 450, "#TRV: the plan reports the defaults the builder shows as placeholders");
+  ok(p1000.defaults.crew === 1 && p1000.defaults.nights === 2 && p1000.defaults.airfarePerPerson === 450, "#208: the plan reports the defaults the builder shows as placeholders");
 
   // crew override 3 → 1 work day, 1 night, 2 trip days, ceil(3/2) = 2 cars
   const c3 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 3 } }).flight!;
   ok(
     c3.crew === 3 && c3.workDays === 1 && c3.nights === 1 && c3.tripDays === 2 && c3.airfare === 1350 &&
       c3.lodging === 420 && c3.perDiem === 420 && c3.car === 300 && c3.travelLabor === 1800 && c3.total === 4290,
-    "#TRV: a crew override of 3 re-derives work days and prices 2 cars (4,290)"
+    "#208: a crew override of 3 re-derives work days and prices 2 cars (4,290)"
   );
   const c2 = planTravel({ ...base, drive: { total: 2000 }, override: { crew: 2 } }).flight!;
-  ok(c2.car === 150, "#TRV: 2 people share 1 car (ceil(2/2) × 2 days × $75)");
+  ok(c2.car === 150, "#208: 2 people share 1 car (ceil(2/2) × 2 days × $75)");
 
   // nights override 0 → a same-day fly-in
   const n0 = planTravel({ ...base, drive: { total: 2000 }, override: { nights: 0 } }).flight!;
   ok(n0.workDays === 2 && n0.nights === 0 && n0.tripDays === 1 && n0.lodging === 0 && n0.perDiem === 70 && n0.car === 75,
-    "#TRV: a nights override replaces workDays; tripDays = nights + 1");
+    "#208: a nights override replaces workDays; tripDays = nights + 1");
 
   // airfare override
   const air = planTravel({ ...base, drive: { total: 2000 }, override: { airfarePerPerson: 800 } }).flight!;
-  ok(air.airfare === 800 && air.total === 1765 - 450 + 800, "#TRV: the manual airfare replaces the allowance");
+  ok(air.airfare === 800 && air.total === 1765 - 450 + 800, "#208: the manual airfare replaces the allowance");
 
   // travel labor uses the service's labor rate
   const lab = planTravel({ ...base, laborRate: 100, drive: { total: 2000 } }).flight!;
-  ok(lab.travelLabor === 800, "#TRV: travel labor = crew × 4 h × 2 × the service's labor rate");
+  ok(lab.travelLabor === 800, "#208: travel labor = crew × 4 h × 2 × the service's labor rate");
 
   // zero on-site hours still books one work day
-  ok(planTravel({ ...base, onSiteHours: 0, drive: { total: 2000 } }).flight!.workDays === 1, "#TRV: zero on-site hours → 1 work day");
+  ok(planTravel({ ...base, onSiteHours: 0, drive: { total: 2000 } }).flight!.workDays === 1, "#208: zero on-site hours → 1 work day");
 
   // missing blob keys fall back to the defaults
-  ok(JSON.stringify(resolveFlyRates(undefined)) === JSON.stringify(R), "#TRV: resolveFlyRates(undefined) = the defaults");
+  ok(JSON.stringify(resolveFlyRates(undefined)) === JSON.stringify(R), "#208: resolveFlyRates(undefined) = the defaults");
   const partialRates = resolveFlyRates({ hotelPerNight: 200 });
   ok(partialRates.hotelPerNight === 200 && partialRates.flyThreshold === 1000 && partialRates.carPerDay === 75,
-    "#TRV: a stored blob with only some fly keys keeps the defaults for the rest");
+    "#208: a stored blob with only some fly keys keeps the defaults for the rest");
   const pEmpty = planTravel({ ...base, rates: {}, drive: { total: 1000 } });
-  ok(pEmpty.mode === "fly" && pEmpty.total === 1765, "#TRV: an existing travel_rates blob with no fly keys prices with the defaults");
+  ok(pEmpty.mode === "fly" && pEmpty.total === 1765, "#208: an existing travel_rates blob with no fly keys prices with the defaults");
 
   // override normalization / posting / drafts / carry-forward
-  ok(normalizeTravelOverride({ mode: "auto" }) === undefined, "#TRV: mode 'auto' with nothing else is no override");
+  ok(normalizeTravelOverride({ mode: "auto" }) === undefined, "#208: mode 'auto' with nothing else is no override");
   ok(
     JSON.stringify(normalizeTravelOverride({ mode: "fly", crew: "2", nights: "", airfarePerPerson: "abc" })) === JSON.stringify({ mode: "fly", crew: 2 }),
-    "#TRV: normalize keeps valid fields, coerces numeric strings, drops blanks and junk"
+    "#208: normalize keeps valid fields, coerces numeric strings, drops blanks and junk"
   );
   ok(normalizeTravelOverride({ crew: 0, nights: -1 }) === undefined && normalizeTravelOverride("junk") === undefined,
-    "#TRV: crew < 1, negative nights and non-objects are rejected");
+    "#208: crew < 1, negative nights and non-objects are rejected");
   ok(JSON.stringify(parseTravelOverride('{"mode":"drive","nights":3}')) === JSON.stringify({ mode: "drive", nights: 3 }) &&
       parseTravelOverride("{not json") === undefined && parseTravelOverride(null) === undefined,
-    "#TRV: parseTravelOverride reads the posted JSON and tolerates garbage");
+    "#208: parseTravelOverride reads the posted JSON and tolerates garbage");
   const d = draftFromOverride({ mode: "fly", crew: 3 });
-  ok(d.mode === "fly" && d.crew === "3" && d.nights === "" && d.airfare === "", "#TRV: draftFromOverride fills the builder inputs");
+  ok(d.mode === "fly" && d.crew === "3" && d.nights === "" && d.airfare === "", "#208: draftFromOverride fills the builder inputs");
   ok(JSON.stringify(overrideFromDraft(d)) === JSON.stringify({ mode: "fly", crew: 3 }) && overrideFromDraft(draftFromOverride(undefined)) === undefined,
-    "#TRV: overrideFromDraft round-trips; an untouched draft posts no override");
+    "#208: overrideFromDraft round-trips; an untouched draft posts no override");
   ok(JSON.stringify(carryTravelOverride({ mode: "fly", crew: 3, airfarePerPerson: 900 })) === JSON.stringify({ mode: "fly", crew: 3 }) &&
       carryTravelOverride({ airfarePerPerson: 900 }) === undefined,
-    "#TRV: a renewal carries last year's mode/crew/nights but never last year's airfare");
+    "#208: a renewal carries last year's mode/crew/nights but never last year's airfare");
 
   // persisted trip + letters
   const st = savedTrip({ miles: 1000, minutes: 960, mileageCost: 1000.4, timeCost: 1199.6, method: "estimate", mode: "fly", flight: { ...f, airfare: 450.4 } });
   ok(st.mileageCost === 1000 && st.timeCost === 1200 && st.mode === "fly" && st.flight?.airfare === 450 && st.flight?.total === 1765,
-    "#TRV: savedTrip rounds money like today's trip block and keeps mode + flight");
+    "#208: savedTrip rounds money like today's trip block and keeps mode + flight");
   const sd = savedTrip({ miles: 200, minutes: 240, mileageCost: 200, timeCost: 300, method: "route", mode: "drive" });
-  ok(sd.mode === "drive" && !("flight" in sd), "#TRV: a drive-mode saved trip carries mode 'drive' and no flight");
+  ok(sd.mode === "drive" && !("flight" in sd), "#208: a drive-mode saved trip carries mode 'drive' and no flight");
   ok(flightOf(st)?.total === 1765 && flightOf({ miles: 10 }) === null && flightOf({ mode: "drive", flight: f }) === null && flightOf(null) === null,
-    "#TRV: flightOf returns a flight only for a fly-mode saved trip");
+    "#208: flightOf returns a flight only for a fly-mode saved trip");
   ok(travelLineAmount(1765, 0.3) === Math.round(1765 / (1 - 0.3)) && travelLineAmount(1765, 0) === 1765,
-    "#TRV: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
+    "#208: the customer line is travel's share of the sell price (÷ (1 − margin)), rounded");
   ok(autoSwitchNote(2200, 1000) === "Drive would be $2,200 — over the $1,000 threshold, priced as flights.",
-    "#TRV: the builder note reads exactly as spec §5");
+    "#208: the builder note reads exactly as spec §5");
   ok(
     flyTravelSentence("Peak Systems Group (Milwaukee)", "Lakefront Theatre", 2521) ===
       "Given the distance from Peak Systems Group (Milwaukee) to Lakefront Theatre, this visit is priced with air travel — Travel (air, lodging & per diem): $2,521.",
-    "#TRV: the letter sentence names the one travel line and its amount"
+    "#208: the letter sentence names the one travel line and its amount"
   );
   ok(
     travelModeChangeReason("drive", "fly") === "travel now being priced as flights, lodging & per diem instead of a drive" &&
       travelModeChangeReason("fly", "drive") === "travel now being priced as a drive instead of flights" &&
       travelModeChangeReason("drive", "drive") === null && travelModeChangeReason("fly", "fly") === null,
-    "#TRV: renewal 'why the price changed' wording on a mode flip, silence otherwise"
+    "#208: renewal 'why the price changed' wording on a mode flip, silence otherwise"
   );
 
   // Estimating Rules rows (the page renders GROUPS generically)
@@ -267,18 +267,18 @@ import {
       const row = trvRows("travel").find((it) => it.id === "travel." + k);
       return !!row && row.store === "travel" && row.key === k && row.ref === false && row.def === FLY_RATE_DEFAULTS[k];
     }),
-    "#TRV: Estimating Rules → Travel & mileage exposes all seven flight rates, live, keyed into travel_rates"
+    "#208: Estimating Rules → Travel & mileage exposes all seven flight rates, live, keyed into travel_rates"
   );
   const crewRow = (g: string) => trvRows(g).find((it) => it.id === g + ".flyCrew");
   ok(
     crewRow("flame")?.store === "flame" && crewRow("flame")?.key === "flyCrew" && crewRow("flame")?.def === 1 &&
       crewRow("repair")?.store === "repair" && crewRow("repair")?.def === 2 &&
       crewRow("inspection")?.store === "inspection" && crewRow("inspection")?.def === 1,
-    "#TRV: each service group exposes its default flying crew"
+    "#208: each service group exposes its default flying crew"
   );
 
   const trvSrc = readFileSync(join(process.cwd(), "src/lib/travel-plan.ts"), "utf8");
-  ok(!/^\s*import\s/m.test(trvSrc), "#TRV: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
+  ok(!/^\s*import\s/m.test(trvSrc), "#208: travel-plan.ts imports nothing — safe for the 'use client' builder previews");
 }
 ```
 
@@ -890,8 +890,8 @@ with
 Run: `npx tsc --noEmit; echo "tsc exit $?"`
 Expected: `tsc exit 0` (geo.ts, flametest-engine.ts, customers.ts and travel-bulk.ts keep compiling — `TravelRates` only gained optional keys and `ResolvedTravelRates` is assignable to it).
 
-Run: `npm run test:specs 2>&1 | grep -E "#TRV|#60-67|FAIL|ALL PASSED" | tail -60`
-Expected: every `#TRV` and `#60-67` line starts with `PASS`; the last line is `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#208|#60-67|FAIL|ALL PASSED" | tail -60`
+Expected: every `#208` and `#60-67` line starts with `PASS`; the last line is `ALL PASSED`.
 
 Run: `npx eslint 2>&1 | tail -3`
 Expected: `0 errors`, warnings ≤ the baseline recorded at setup.
@@ -936,7 +936,7 @@ EOF
 Insert above the line `seeded()`:
 
 ```ts
-/* --- #TRV engines: drive mode unchanged vs before (hard-coded pre-change
+/* --- #208 engines: drive mode unchanged vs before (hard-coded pre-change
    figures), fly mode equals the hand-computed spec formula. All fixtures use
    the no-coords estimate branch (trip = one-way × 2) so every number is exact. --- */
 import { computeEstimate as trvRepairEstimate } from "@/lib/repair-engine";
@@ -950,50 +950,50 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
   const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
   ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.total, 575 / (1 - 0.3)),
-    "#TRV flame: a $500 drive prices exactly as before (575 cost → 821.43)");
+    "#208 flame: a $500 drive prices exactly as before (575 cost → 821.43)");
   ok(fd.trip.mode === "drive" && !("flight" in fd.trip) && fd.travel?.total === fd.trip.total && fd.rawCost === fd.trip.total + fd.testingSubtotal,
-    "#TRV flame: drive mode prices trip.total itself (bit-for-bit)");
+    "#208 flame: drive mode prices trip.total itself (bit-for-bit)");
   const ff = computeFlameQuote({ venues: [flameFar] }, flameRates);
   ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.total, 2515 / (1 - 0.3)),
-    "#TRV flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
+    "#208 flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
   ok(ff.trip.flight?.crew === 1 && ff.trip.flight?.nights === 2 && ff.trip.flight?.tripDays === 3,
-    "#TRV flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
+    "#208 flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
   const ffDrive = computeFlameQuote({ venues: [flameFar], travel: { mode: "drive" } }, flameRates);
-  ok(ffDrive.trip.mode === "drive" && ffDrive.rawCost === 2950, "#TRV flame: forced Drive over the threshold prices the 2,200 drive");
+  ok(ffDrive.trip.mode === "drive" && ffDrive.rawCost === 2950, "#208 flame: forced Drive over the threshold prices the 2,200 drive");
   const fdFly = computeFlameQuote({ venues: [flameNear], travel: { mode: "fly" } }, flameRates);
-  ok(fdFly.trip.mode === "fly" && fdFly.travel?.total === 1480 && fdFly.rawCost === 1555, "#TRV flame: forced Fly under the threshold (1 night) = 1,480 travel");
+  ok(fdFly.trip.mode === "fly" && fdFly.travel?.total === 1480 && fdFly.rawCost === 1555, "#208 flame: forced Fly under the threshold (1 night) = 1,480 travel");
   const ffCrew2 = computeFlameQuote({ venues: [flameFar] }, { ...flameRates, flyCrew: 2 });
-  ok(ffCrew2.travel?.total === 2810, "#TRV flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
+  ok(ffCrew2.travel?.total === 2810, "#208 flame: flame_rates.flyCrew 2 flies two people (1 night) = 2,810");
 
   // ---- repair (default crew 2) ----
   const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
   const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
   ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.total, 607.5 / (1 - 0.3)) && rd.trip.mode === "drive",
-    "#TRV repair: a $307.50 drive prices exactly as before (607.50 service cost)");
+    "#208 repair: a $307.50 drive prices exactly as before (607.50 service cost)");
   const rf = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24 }, repairRates);
   ok(rf.trip.mode === "fly" && rf.trip.flight?.crew === 2 && rf.travel?.total === 3305 && rf.serviceCost === 5105 && near(rf.total, 5105 / (1 - 0.3)),
-    "#TRV repair: 24 crew-hours far away fly 2 people — 3,305 travel + 1,800 labor");
+    "#208 repair: 24 crew-hours far away fly 2 people — 3,305 travel + 1,800 labor");
   const rf3 = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3 }, repairRates);
-  ok(rf3.trip.flight?.crew === 3 && rf3.travel?.total === 4290, "#TRV repair: a crew of 3 on the quote flies 3 (never fewer than the priced crew)");
+  ok(rf3.trip.flight?.crew === 3 && rf3.travel?.total === 4290, "#208 repair: a crew of 3 on the quote flies 3 (never fewer than the priced crew)");
   const rfe = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, emergency: true }, repairRates);
-  ok(rfe.laborCost === 2700 && rfe.trip.flight?.travelLabor === 1200, "#TRV repair: emergency multiplies on-site labor only — travel labor stays at the base $75");
+  ok(rfe.laborCost === 2700 && rfe.trip.flight?.travelLabor === 1200, "#208 repair: emergency multiplies on-site labor only — travel labor stays at the base $75");
   const rfOverride = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, travel: { mode: "drive" } }, repairRates);
-  ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#TRV repair: forced Drive keeps the drive");
+  ok(rfOverride.trip.mode === "drive" && rfOverride.serviceCost === 1800 + 2200, "#208 repair: forced Drive keeps the drive");
 
   // ---- inspection (1 person) ----
   const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
   const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
   ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.total, 832.5 / (1 - 0.3)) && idr.trip.mode === "drive",
-    "#TRV inspection: a $307.50 drive prices exactly as before (832.50 cost)");
+    "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
   const ifl = trvInspectionEstimate({ venues: [{ id: "trv-i2", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 }] }, inspRates);
   ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.total, 2665 / (1 - 0.3)),
-    "#TRV inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
+    "#208 inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
 }
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "#TRV (flame|repair|inspection)" | head -20`
+Run: `npm run test:specs 2>&1 | grep -E "#208 (flame|repair|inspection)" | head -20`
 Expected: the drive-fixture lines that check only old fields may already `PASS`; every line that checks `trip.mode`, `travel`, `flight` or a fly total prints `FAIL`.
 
 - [ ] **Step 3: Flame engine**
@@ -1531,7 +1531,7 @@ with
 Run: `npx tsc --noEmit; echo "tsc exit $?"`
 Expected: `tsc exit 0`. (Callers compile unchanged: the new opts/param are optional; `r.trip.miles`/`.minutes`/`.mileageCost`/`.timeCost`/`.method` still exist.)
 
-Run: `npm run test:specs 2>&1 | grep -E "#TRV|#60-67|FAIL|ALL PASSED" | tail -70`
+Run: `npm run test:specs 2>&1 | grep -E "#208|#60-67|FAIL|ALL PASSED" | tail -70`
 Expected: all `PASS`, last line `ALL PASSED`.
 
 Run: `npx eslint 2>&1 | tail -3` — expected `0 errors`, warnings ≤ baseline.
@@ -1574,7 +1574,7 @@ EOF
 Insert above the line `seeded()`:
 
 ```ts
-/* --- #TRV save paths: every path that persists a service quote stores the
+/* --- #208 save paths: every path that persists a service quote stores the
    priced trip through savedTrip() (mode + flight) and the per-quote override --- */
 {
   const trvSavers = [
@@ -1586,21 +1586,21 @@ Insert above the line `seeded()`:
   for (const f of trvSavers) {
     const src = readFileSync(join(process.cwd(), f), "utf8");
     ok(/trip: savedTrip\(r\.trip\)/.test(src) && !/mileageCost: Math\.round\(r\.trip\.mileageCost\)/.test(src),
-      `#TRV: ${f} persists the priced trip (mode + flight) through savedTrip()`);
+      `#208: ${f} persists the priced trip (mode + flight) through savedTrip()`);
     ok(/travel: travelOverride/.test(src) && /\{ travel: travelOverride \}/.test(src),
-      `#TRV: ${f} prices with and persists the per-quote travel override`);
+      `#208: ${f} prices with and persists the per-quote travel override`);
   }
   const renewalSrc = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
   ok((renewalSrc.match(/carryTravelOverride\(/g) || []).length === 2 && (renewalSrc.match(/travelModeChangeReason\(/g) || []).length === 2,
-    "#TRV: flame + inspection renewals carry last year's travel choice and explain a mode flip");
+    "#208: flame + inspection renewals carry last year's travel choice and explain a mode flip");
   const repairActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/repairs/quote/actions.ts"), "utf8");
-  ok(/crewSize,\s*\n\s*travel: travelOverride/.test(repairActionsSrc), "#TRV: the repair save passes the crew size so the flying crew is never smaller");
+  ok(/crewSize,\s*\n\s*travel: travelOverride/.test(repairActionsSrc), "#208: the repair save passes the crew size so the flying crew is never smaller");
 }
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "#TRV: (src|flame \+|the repair save)" | head`
+Run: `npm run test:specs 2>&1 | grep -E "#208: (src|flame \+|the repair save)" | head`
 Expected: every line `FAIL`.
 
 - [ ] **Step 3: Flame save action** (`src/app/(app)/flame-tests/quote/actions.ts`)
@@ -1963,7 +1963,7 @@ with
 - [ ] **Step 7: Run the tests and type-check**
 
 Run: `npx tsc --noEmit; echo "tsc exit $?"` — expected `tsc exit 0`.
-Run: `npm run test:specs 2>&1 | grep -E "#TRV|FAIL|ALL PASSED" | tail -80` — expected all `PASS`, `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#208|FAIL|ALL PASSED" | tail -80` — expected all `PASS`, `ALL PASSED`.
 Run: `D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts 2>&1 | tail -5` — expected no assertion failure (exit 0).
 Run: `npx eslint 2>&1 | tail -3` — expected `0 errors`, warnings ≤ baseline.
 
@@ -2005,32 +2005,32 @@ EOF
 Insert above the line `seeded()`:
 
 ```ts
-/* --- #TRV builders: previews run the same planner with the live travel
+/* --- #208 builders: previews run the same planner with the live travel
    rates, render the travel panel, post the override — and stay client-safe --- */
 {
   for (const svc of ["flame-tests", "repairs", "inspections"]) {
     const src = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/controls.tsx`), "utf8");
     ok(/from "@\/lib\/travel-plan"/.test(src) && /planTravel\(/.test(src) && /<TravelModePanel/.test(src),
-      `#TRV: the ${svc} builder previews through planTravel and renders the travel panel`);
+      `#208: the ${svc} builder previews through planTravel and renders the travel panel`);
     ok(/fd\.set\("travel", JSON\.stringify\(overrideFromDraft\(travelDraft\) \?\? \{\}\)\)/.test(src),
-      `#TRV: the ${svc} builder posts its travel override`);
+      `#208: the ${svc} builder posts its travel override`);
     ok(!/^import (?!type )[^;]*from "@\/(lib\/stores|db)\//m.test(src),
-      `#TRV: the ${svc} builder imports no value from @/lib/stores or @/db`);
+      `#208: the ${svc} builder imports no value from @/lib/stores or @/db`);
     ok(!/\* 1\.25\)/.test(src) && !/\/ 50\) \* 60/.test(src),
-      `#TRV: the ${svc} preview uses the live road factor / speed, not 1.25 / 50`);
+      `#208: the ${svc} preview uses the live road factor / speed, not 1.25 / 50`);
     const page = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
     ok(/getTravelRates\(\)/.test(page) && /travelRates=\{travelRates\}/.test(page) && /normalizeTravelOverride\(/.test(page),
-      `#TRV: the ${svc} page hands the builder live travel rates and the saved override`);
+      `#208: the ${svc} page hands the builder live travel rates and the saved override`);
   }
   const panelSrc = readFileSync(join(process.cwd(), "src/components/travel-mode-panel.tsx"), "utf8");
   ok(/^"use client";/.test(panelSrc) && !/from "@\/(lib\/stores|db)\//.test(panelSrc) && /autoSwitchNote\(/.test(panelSrc),
-    "#TRV: the travel panel is a client component that imports only the pure planner");
+    "#208: the travel panel is a client component that imports only the pure planner");
 }
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "#TRV: the (flame|repairs|inspections|travel panel)" | head -20`
+Run: `npm run test:specs 2>&1 | grep -E "#208: the (flame|repairs|inspections|travel panel)" | head -20`
 Expected: the harness crashes with `ENOENT … travel-mode-panel.tsx` or the builder lines print `FAIL` (only the "imports no value" lines may already `PASS`).
 
 - [ ] **Step 3: Create `src/components/travel-mode-panel.tsx`**
@@ -2991,7 +2991,7 @@ and replace `        rates={rates}` with the `rates` + `travelRates` version fro
 - [ ] **Step 9: Run the tests, type-check, lint and BUILD**
 
 Run: `npx tsc --noEmit; echo "tsc exit $?"` — expected `tsc exit 0`.
-Run: `npm run test:specs 2>&1 | grep -E "#TRV|FAIL|ALL PASSED" | tail -90` — expected all `PASS`, `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#208|FAIL|ALL PASSED" | tail -90` — expected all `PASS`, `ALL PASSED`.
 Run: `npx eslint 2>&1 | tail -3` — expected `0 errors`, warnings ≤ baseline.
 Run: `env -u DATABASE_URL NEXT_TELEMETRY_DISABLED=1 npm run build 2>&1 | tail -25; rm -rf .next`
 Expected: `✓ Compiled successfully` and the route table; no `Module not found: Can't resolve 'fs'` / `'net'` / `'tls'` (that error means a client file pulled a store).
@@ -3035,22 +3035,22 @@ EOF
 Insert above the line `seeded()`:
 
 ```ts
-/* --- #TRV letters: fly mode prints ONE customer line, never the itemization --- */
+/* --- #208 letters: fly mode prints ONE customer line, never the itemization --- */
 import { renderField as trvRenderField } from "@/lib/templates";
 {
   ok(
     trvRenderField(undefined, "flame_proposal", "priceLineFly", { curtainsLabel: "12 curtains", price: "$3,593" }) ===
       "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 12 curtains inspected and documented — comes to $3,593, all in.",
-    "#TRV: flame_proposal has a fly-mode price line that never says 'the drive'"
+    "#208: flame_proposal has a fly-mode price line that never says 'the drive'"
   );
   ok(
     trvRenderField(undefined, "inspection_proposal", "priceLineFly", { lineSetsLabel: "40 line sets", price: "$3,807" }) ===
       "Everything above — travel (air, lodging & per diem), the on-site hours, and every one of your 40 line sets inspected and documented — comes to $3,807, all in.",
-    "#TRV: inspection_proposal has a fly-mode price line"
+    "#208: inspection_proposal has a fly-mode price line"
   );
   ok(!!getTemplateDef("flame_proposal")?.fields.some((fl) => fl.id === "priceLineFly") &&
       !!getTemplateDef("inspection_proposal")?.fields.some((fl) => fl.id === "priceLineFly"),
-    "#TRV: the fly price line is an editable template field on both proposals");
+    "#208: the fly price line is an editable template field on both proposals");
   const trvLetters: Array<[string, RegExp]> = [
     ["src/app/(app)/flame-tests/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
     ["src/app/(app)/inspections/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
@@ -3060,19 +3060,19 @@ import { renderField as trvRenderField } from "@/lib/templates";
   for (const [f, line] of trvLetters) {
     const src = readFileSync(join(process.cwd(), f), "utf8");
     ok(/flightOf\(/.test(src) && line.test(src) && /travelLineAmount\(/.test(src),
-      `#TRV: ${f} prints the one travel line at travel's share of the sell price in fly mode`);
+      `#208: ${f} prints the one travel line at travel's share of the sell price in fly mode`);
     ok(!/lodging|perDiem|airfare/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")),
-      `#TRV: ${f} never prints the itemized airfare / lodging / per diem`);
+      `#208: ${f} never prints the itemized airfare / lodging / per diem`);
   }
   const renewalLetters = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
   ok((renewalLetters.match(/flight \? "priceLineFly" : rtMiles > 0 \? "priceLine" : "priceLineNoTravel"/g) || []).length === 2,
-    "#TRV: both renewal PDFs pick the fly price line in fly mode");
+    "#208: both renewal PDFs pick the fly price line in fly mode");
 }
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm run test:specs 2>&1 | grep -E "#TRV: (flame_proposal|inspection_proposal|the fly price|src/|both renewal)" | head -20`
+Run: `npm run test:specs 2>&1 | grep -E "#208: (flame_proposal|inspection_proposal|the fly price|src/|both renewal)" | head -20`
 Expected: the `priceLineFly` and `flightOf` lines print `FAIL`.
 
 - [ ] **Step 3: Template fields** (`src/lib/templates.ts`)
@@ -3450,7 +3450,7 @@ with
 - [ ] **Step 8: Run the tests, type-check, lint, smoke**
 
 Run: `npx tsc --noEmit; echo "tsc exit $?"` — expected `tsc exit 0`.
-Run: `npm run test:specs 2>&1 | grep -E "#TRV|FAIL|ALL PASSED" | tail -100` — expected all `PASS`, `ALL PASSED`.
+Run: `npm run test:specs 2>&1 | grep -E "#208|FAIL|ALL PASSED" | tail -100` — expected all `PASS`, `ALL PASSED`.
 Run: `npx eslint 2>&1 | tail -3` — expected `0 errors`, warnings ≤ baseline.
 Run: `npm run test:smoke 2>&1 | tail -8` — expected `ALL PASSED` (covers `/flame-tests/letter?id=FT-3001` and the other letters).
 
@@ -3484,13 +3484,13 @@ EOF
 - Consumes: everything above (for the write-up).
 - Produces: nothing code-facing.
 
-**Numbering:** use the placeholders **`D-TRV-1` … `D-TRV-5`** and **`#TRV`** exactly as written below. Do NOT pick real D-numbers or punch numbers — two sessions write to `main` in parallel and numbers collide within the hour; **the controller renumbers these at merge time** from `origin/main` (and rewrites the `#TRV` / `D-TRV-n` references in the test messages, code comments and commit-free docs in the same pass).
+**Numbering:** use the placeholders **`D281` … `D285`** and **`#208`** exactly as written below. Do NOT pick real D-numbers or punch numbers — two sessions write to `main` in parallel and numbers collide within the hour; **the controller renumbers these at merge time** from `origin/main` (and rewrites the `#208` / `D281…D286` references in the test messages, code comments and commit-free docs in the same pass).
 
 - [ ] **Step 1: Append to `DECISIONS.md`**
 
 ```markdown
 
-## D-TRV-1. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#TRV, 2026-09-25)
+## D281. Auto-priced service quotes fly once one trip's drive cost reaches a threshold (#208, 2026-09-25)
 
 Jeff: "once we reach 1000 dollars in travel expenses, then it switches to flights and hotels with allowances." A pure,
 import-free planner (`src/lib/travel-plan.ts`) runs in the flame-test, repair and inspection engines, their builder
@@ -3505,14 +3505,14 @@ migration. Drive mode returns the drive total itself, so drive-mode prices are b
 quotes keep their stored price until someone re-prices them. `trip` keeps the drive numbers and gains `mode` (and
 `flight` when flying); the per-quote override is saved as `travel` on the service subdoc.
 
-## D-TRV-2. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#TRV, 2026-09-25)
+## D282. Repairs fly at least the crew the labor is priced for; travel labor bills at the base rate (#208, 2026-09-25)
 
 The spec's default repair crew is 2, but a repair quote already carries a crew size. The flying crew defaults to
 `max(repair_rates.flyCrew, the quote's crew size)` so a crew of 3 is never priced as 2 flights. Travel-day labor
 bills at the service's base labor rate even on emergency quotes — the same rate drive time already uses; only
 on-site labor takes the emergency multiplier.
 
-## D-TRV-3. Customers see one travel line, at travel's share of the sell price (#TRV, 2026-09-25)
+## D283. Customers see one travel line, at travel's share of the sell price (#208, 2026-09-25)
 
 In fly mode the letters, quote documents and renewal PDFs print one line, "Travel (air, lodging & per diem)", with
 the flight cost marked up by the quote's margin (`flight.total ÷ (1 − margin)`, rounded) — never a bare cost figure
@@ -3521,14 +3521,14 @@ next to an all-in price. It replaces the round-trip mobilization row (flame, ins
 editable template field `priceLineFly` ("Everything above — travel (air, lodging & per diem), …") is used in fly
 mode. The itemized airfare / lodging / per diem / car / travel labor stays builder-only.
 
-## D-TRV-4. Renewals keep last year's travel choice, not last year's airfare (#TRV, 2026-09-25)
+## D284. Renewals keep last year's travel choice, not last year's airfare (#208, 2026-09-25)
 
 Renewal re-pricing (D69, current rates) carries the prior quote's travel override — mode, crew, nights — but drops
 its manual airfare, which is a one-year number; the allowance applies. When the renewal's mode differs from last
 year's, the email's "why the price changed" list gains "travel now being priced as flights, lodging & per diem
 instead of a drive" (or "…as a drive instead of flights").
 
-## D-TRV-5. The quote-builder previews use the live road factor and speed (#TRV, 2026-09-25)
+## D285. The quote-builder previews use the live road factor and speed (#208, 2026-09-25)
 
 The three builders' inlined previews hardcoded 1.25 / 50 mph while the server re-priced with the Estimating Rules
 values. With a threshold on the drive total the two could disagree on drive vs fly, so the pages now hand the
@@ -3542,7 +3542,7 @@ builders the live `travel_rates` blob and the previews use it. Server totals are
 
 ---
 
-## #TRV. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D-TRV-1…D-TRV-5)
+## 208. Auto-priced service quotes — flights over drive past a drive-cost threshold — DONE 2026-09-25 (D281…D286)
 
 **Reported:** 2026-09-25 (Jeff, brainstorm): "once we reach 1000 dollars in travel expenses, then it switches to
 flights and hotels with allowances." Spec: `docs/superpowers/specs/2026-09-25-travel-flights-design.md`; plan:
@@ -3572,21 +3572,21 @@ A browser check of the three builders in fly mode on a scratch datadir is the le
 npx tsc --noEmit; echo "tsc exit $?"
 npx eslint 2>&1 | tail -3
 npm run test:specs 2>&1 | tail -3
-npm run test:specs 2>&1 | grep -c "^PASS #TRV"
+npm run test:specs 2>&1 | grep -c "^PASS #208"
 D=$(mktemp -d); env -u DATABASE_URL PGLITE_PATH=$D npx tsx scripts/test-review-regressions.ts 2>&1 | tail -5; echo "regressions exit $?"
 npm run test:smoke 2>&1 | tail -5
 env -u DATABASE_URL NEXT_TELEMETRY_DISABLED=1 npm run build 2>&1 | tail -20; rm -rf .next
 git status --short   # must show only DECISIONS.md and PUNCHLIST.md (next-env.d.ts / .env.local are gitignored)
 ```
 
-Expected: tsc exit 0 · eslint `0 errors` and warnings = baseline · test:specs `ALL PASSED` with every `#TRV` check passing · regressions exit 0 · smoke `ALL PASSED` · build compiles with the route table · `.next` removed.
+Expected: tsc exit 0 · eslint `0 errors` and warnings = baseline · test:specs `ALL PASSED` with every `#208` check passing · regressions exit 0 · smoke `ALL PASSED` · build compiles with the route table · `.next` removed.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add DECISIONS.md PUNCHLIST.md
 git commit -m "$(cat <<'EOF'
-docs: flights over drive — decisions D-TRV-1…5 and punch #TRV (placeholders)
+docs: flights over drive — decisions D281…D285 and punch #208 (placeholders)
 
 Placeholder numbers; renumber from origin/main at merge time.
 
@@ -3613,6 +3613,6 @@ EOF
 - §6 tests: boundary (999.99 / 1000 / 0), forced drive over / forced fly under, workDays/nights/tripDays incl. crew + nights overrides, airfare override, `ceil(crew/2)`, labor rate, each engine drive-unchanged + fly hand-computed, renewal flip wording, missing keys → Tasks 1-2; gates → every task, all six in Task 6.
 - §7 out of scope → PUNCHLIST "Still open".
 
-**Placeholder scan.** No TBD/TODO. `D-TRV-n` / `#TRV` are deliberate, flagged for the controller to renumber.
+**Placeholder scan.** No TBD/TODO. `D281…D286` / `#208` were placeholders, renumbered at merge.
 
 **Type consistency.** `TravelPlan.total/flight/mode/choice/autoMode/driveTotal/threshold/defaults`, `FlightPlan.travelHours`, `TripMode`, `TravelOverride`, `TravelDraft` are defined in Task 1 and used with the same names in Tasks 2-5. Engine results expose `trip` (drive + `mode`/`flight`) and `travel` (plan) in all three engines and all three previews. `computeEstimate(opts, C, travel?)` third param is `Partial<FlyRates> | null` in repair and inspection; flame keeps `travel: TravelRates`. `BuilderTravelRates` is per-builder and structurally equals `ResolvedTravelRates`.

@@ -255,7 +255,7 @@ export function computeEstimate(
 
   const drive = tripTravel(opts.office, venues, C, opts.geo);
   const crew = Math.max(1, Math.round(Number(opts.crewSize) || 1));
-  // D-TRV-2: the flying crew is never fewer than the job's crew size. The
+  // D282: the flying crew is never fewer than the job's crew size. The
   // default crew is already clamped above; a manual override could still
   // understate it, so raise (never lower) an explicit override to match.
   const travelOverride =
