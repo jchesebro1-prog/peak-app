@@ -29,6 +29,7 @@ import {
   type PartDocKind,
 } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
+import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
 
 /**
  * Part documents (#207) — every write from the Datasheets page, the bulk
@@ -200,6 +201,9 @@ export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: 
  * error on one slot can't take the rest of the batch down with it.
  */
 export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActionResult<{ results: FetchOutcome[] }>> {
+  // Final fix wave (I4): the budget starts before anything else, so the
+  // catalog list and the one state load count against it too.
+  const budget = createFetchBudget(FETCH_ACTION_BUDGET_MS);
   const user = await requireUser();
   if (!blobEnabled()) {
     return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be fetched on this deployment." };
@@ -207,7 +211,6 @@ export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActio
   const batch = (targets || []).filter((t) => t && typeof t.sku === "string" && isPartDocKind(t.kind)).slice(0, FETCH_BATCH_SIZE);
   if (!batch.length) return { ok: true, results: [] };
   const ctx = buildFetchContext(await loadPartDocsState(await listCatalog()));
-  const budget = createFetchBudget(FETCH_ACTION_BUDGET_MS);
   const results: FetchOutcome[] = [];
   for (const t of batch) {
     const target = { sku: t.sku.trim(), kind: t.kind };
@@ -273,13 +276,16 @@ export async function matchFilesAction(fileNames: string[]): Promise<DocActionRe
 }
 
 /** Part search for an unmatched or ambiguous bulk-drop row. SQL-side
- *  candidate filter (never materializes the catalog), then a token match. */
+ *  candidate filter (never materializes the catalog), then a token match.
+ *  The SQL filter uses the LONGEST token — the most selective one — so a
+ *  query like "etc s4 lustr" isn't cut off by the 200-row cap on a
+ *  common first token (final fix wave, T7). */
 export async function searchPartsAction(q: string): Promise<DocActionResult<{ hits: PartHit[] }>> {
   await requireUser();
   const query = String(q || "").trim();
   if (query.length < 2) return { ok: true, hits: [] };
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const candidates = await searchDocs<CatalogPart>("catalog_parts", tokens[0], 200);
+  const candidates = await searchDocs<CatalogPart>("catalog_parts", mostSelectiveToken(tokens), 200);
   const hits = candidates
     .filter((p) => {
       const hay = `${p.sku} ${p.desc} ${p.mfr || ""} ${p.manufacturerPartNumber || ""} ${p.manufacturerModelNumber || ""}`.toLowerCase();

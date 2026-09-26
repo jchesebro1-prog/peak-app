@@ -1,4 +1,5 @@
 import {
+  COVERED_COLLAPSE,
   slotCoverage,
   type CoverageIndex,
   type DocRef,
@@ -18,7 +19,11 @@ export type PartRef = { sku: string; desc: string };
 export type SlotView =
   | { state: "own"; docs: DocRef[] }
   | { state: "not-needed" }
-  | { state: "covered"; docs: DocRef[]; parents: PartRef[] }
+  /** Final fix wave (M7): a popular accessory can sit under hundreds of
+   *  fixtures, so the server ships only the first COVERED_COLLAPSE parents
+   *  and parent documents plus the full counts (`docCount` is the N of
+   *  "Covered on N fixture datasheets"). */
+  | { state: "covered"; docs: DocRef[]; docCount: number; parents: PartRef[]; parentCount: number }
   | { state: "link-only"; docs: DocRef[]; urls: string[]; error: string | null }
   | { state: "missing" };
 
@@ -29,7 +34,13 @@ export function toSlotView(s: SlotCoverage, index: CoverageIndex, descOf: (sku: 
     case "missing":
       return s;
     case "covered":
-      return { state: "covered", docs: s.docs, parents: s.parents.map((sku) => ({ sku, desc: descOf(sku) })) };
+      return {
+        state: "covered",
+        docs: s.docs.slice(0, COVERED_COLLAPSE),
+        docCount: s.docs.length,
+        parents: s.parents.slice(0, COVERED_COLLAPSE).map((sku) => ({ sku, desc: descOf(sku) })),
+        parentCount: s.parents.length,
+      };
     case "link-only": {
       let error: string | null = null;
       let at = -1;

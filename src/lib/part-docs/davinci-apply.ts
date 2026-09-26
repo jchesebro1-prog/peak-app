@@ -73,7 +73,10 @@ export async function applyPrefill(plan: PrefillPlan, by: string, opts: PrefillO
   const batch = { shouldStop: opts.shouldStop };
   const everIds = new Set((await listDocs("part_documents", { includeDeleted: true })).map((d) => d.id));
   const byUrl = new Map<string, string>();
-  for (const d of await allDocuments()) if (d.sourceUrl && !byUrl.has(d.sourceUrl)) byUrl.set(d.sourceUrl, d.id);
+  // Only a datasheet document may stand in for a DaVinci datasheet — a spec
+  // sheet that happens to share the URL must not be linked as one (final
+  // fix wave, M2).
+  for (const d of await allDocuments()) if (d.kind === "datasheet" && d.sourceUrl && !byUrl.has(d.sourceUrl)) byUrl.set(d.sourceUrl, d.id);
 
   // Phase 1 — the documents no run has ever minted, in one batch.
   const toCreate: NewPartDocument[] = [];

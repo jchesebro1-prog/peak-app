@@ -2324,7 +2324,7 @@ async function main() {
       { parentSku: "DOC-FIX", accessorySku: "DOC-LENS" },
       { parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true },
     ]), { written: 0, removed: 0 }, "part docs graph: an unchanged re-sync writes nothing");
-    assert.equal(await Acc.setOwnDatasheet("DOC-FIX", "DOC-CLAMP", true), 1, "part docs graph: the own-datasheet toggle flags the pair");
+    assert.deepEqual(await Acc.setOwnDatasheet("DOC-FIX", "DOC-CLAMP", true), { linked: true, changed: 1 }, "part docs graph: the own-datasheet toggle flags the pair");
     const r2 = await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [{ parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true }]);
     assert.deepEqual(r2, { written: 0, removed: 1 }, "part docs graph: a pair the assembly dropped is removed");
     assert.equal((await Acc.allAccessoryLinks()).find((l) => l.accessorySku === "DOC-CLAMP")?.ownDatasheet, true, "part docs graph: re-saving keeps the own-datasheet flag");
@@ -2675,6 +2675,142 @@ async function main() {
     assert.equal(stop2(), false, "part docs prefill: stopper — a chunk that fits starts");
     clock = 7_001;
     assert.equal(stop2(), true, "part docs prefill: stopper — a chunk that would overrun does not");
+  }
+
+  /* --- part documents (#207) final fix wave: bridge, batched attach, graph
+         sync, toggle no-op, DaVinci kind filter --- */
+  {
+    const DS = await import("@/db/doc-store");
+    const Docs = await import("@/lib/stores/part-documents");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const { resolvePartDatasheet, partsWithOwnDatasheet } = await import("@/lib/part-docs/datasheet-bridge");
+    const { backfillLegacyDatasheets, legacyDocumentId } = await import("@/lib/part-docs/legacy");
+    const { upsert: upsertPart, get: getPart } = await import("@/lib/stores/catalog");
+
+    // doc-store helpers: rows by id with their deleted flag; SQL field filter.
+    const hd = await Docs.createDocument({ kind: "datasheet", fileName: "h.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/h/h.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    assert.equal(await Docs.attachDocument(hd!.id, ["FW-H1", "FW-H2"], "Jeff"), 2, "final fix: attach two");
+    await Docs.detachDocument(hd!.id, "FW-H2");
+    const rows = await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-H1", hd!.id), Docs.documentLinkId("FW-H2", hd!.id), "PDL-nope"]);
+    assert.deepEqual(rows.map((r) => `${r.doc.partSku}:${r.deleted}`).sort(), ["FW-H1:false", "FW-H2:true"], "final fix: getDocRows returns live and detached rows with their flag, skips missing ids");
+    assert.deepEqual((await DS.listDocsByField("part_document_links", "partSku", ["FW-H1", "FW-H2", "FW-NONE"])).map((l) => l.partSku), ["FW-H1"], "final fix: listDocsByField filters by a doc field in SQL, live rows only");
+    assert.deepEqual(await DS.listDocsByField("part_document_links", "partSku", []), [], "final fix: listDocsByField with no values reads nothing");
+
+    // I3: the batched fan-out keeps attachDocument's semantics exactly.
+    const ad = await Docs.createDocument({ kind: "specsheet", fileName: "a.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/a/a.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    assert.equal(await Docs.attachDocument(ad!.id, ["FW-A1", " FW-A1 ", "", "FW-A2"], "Jeff", 100), 2, "final fix I3: new links counted once each, blanks and trimmed duplicates skipped");
+    const a1 = (await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-A1", ad!.id)]))[0].doc as Record<string, unknown>;
+    assert(a1.kind === "specsheet" && a1.createdBy === "Jeff" && a1.createdAt === 100 && a1.documentId === ad!.id, "final fix I3: a new link carries the document's kind and who/when");
+    await Docs.detachDocument(ad!.id, "FW-A2");
+    assert.equal(await Docs.attachDocument(ad!.id, ["FW-A1", "FW-A2", "FW-A3"], "Chris", 200), 2, "final fix I3: live left alone, detached revived, new inserted — two added");
+    const a2 = (await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-A2", ad!.id)]))[0];
+    assert(!a2.deleted && a2.doc.createdBy === "Chris" && a2.doc.createdAt === 200, "final fix I3: a revived link is live again with fresh who/when stamps");
+    const a1b = (await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-A1", ad!.id)]))[0].doc as Record<string, unknown>;
+    assert(a1b.createdBy === "Jeff" && a1b.createdAt === 100, "final fix I3: a live link is never rewritten");
+    assert.equal(await Docs.attachDocument(ad!.id, ["FW-A1", "FW-A2", "FW-A3"], "Chris"), 0, "final fix I3: attaching all again is a no-op");
+    assert.equal(await Docs.attachDocument("PD-000000000000", ["FW-A1"], "Chris"), 0, "final fix I3: an unknown document links nothing");
+    const many = Array.from({ length: 1200 }, (_, i) => `FW-MANY-${i}`);
+    assert.equal(await Docs.attachDocument(ad!.id, many, "Jeff"), 1200, "final fix I3: a large fan-out (past one chunk) links every part");
+
+    // I1: the SKU bridge follows the part's live datasheet documents.
+    await upsertPart({ sku: "FW-LEG", desc: "Legacy", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/FW-LEG/old.pdf", datasheetName: "old.pdf" });
+    const leg = (await getPart("FW-LEG"))!;
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "legacy", blobKey: "part-datasheets/FW-LEG/old.pdf" }, "final fix I1: before the backfill reaches it, the legacy blob streams");
+    assert((await partsWithOwnDatasheet([leg])).has("FW-LEG"), "final fix M5: …and the catalog marker shows it");
+    await backfillLegacyDatasheets([leg]);
+    const legId = legacyDocumentId("FW-LEG");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: legId }, "final fix I1: once backfilled, the bridge redirects to the legacy document");
+    await Docs.replaceDocumentFile(legId, { blobKey: `part-docs/${legId}/new.pdf`, fileName: "new.pdf", contentType: "application/pdf", size: 3 }, "Chris");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: legId }, "final fix I1: after a replace it still goes to the document (its new file), never the stale datasheetBlobKey");
+    await Docs.detachDocument(legId, "FW-LEG");
+    assert.equal(await resolvePartDatasheet(leg), null, "final fix I1: a detached legacy document stays detached — no stale file");
+    assert(!(await partsWithOwnDatasheet([leg])).has("FW-LEG"), "final fix M5: …and the catalog marker drops it");
+    const linkOnly = await Docs.createDocument({ kind: "datasheet", fileName: "l.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: "https://x.example/l.pdf", source: "fetch", by: "Jeff" });
+    await Docs.attachDocument(linkOnly!.id, ["FW-LEG"], "Jeff");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: linkOnly!.id }, "final fix I1: a link-only datasheet is served when there is no stored one");
+    assert(!(await partsWithOwnDatasheet([leg])).has("FW-LEG"), "final fix M5: a link-only datasheet is not the part's own file");
+    const spec = await Docs.createDocument({ kind: "specsheet", fileName: "s.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/s/s.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    await Docs.attachDocument(spec!.id, ["FW-LEG"], "Jeff");
+    const stored = await Docs.createDocument({ kind: "datasheet", fileName: "d.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/d/d.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    await Docs.attachDocument(stored!.id, ["FW-LEG"], "Jeff");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: stored!.id }, "final fix I1: a stored datasheet wins over link-only; a spec sheet is never served as the datasheet");
+    assert((await partsWithOwnDatasheet([leg, { sku: "FW-NOTHING" }])).has("FW-LEG"), "final fix M5: a stored datasheet shows the marker");
+    assert.equal(await resolvePartDatasheet({ sku: "FW-NOTHING" }), null, "final fix I1: a part with nothing gets nothing");
+
+    // M1: the own-datasheet toggle distinguishes "not linked" from "no change".
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-m1" }, [{ parentSku: "FW-FIX", accessorySku: "FW-ACC" }]);
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-ACC", false), { linked: true, changed: 0 }, "final fix M1: setting the flag to its current value is a linked no-op, not 'save first'");
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-ACC", true), { linked: true, changed: 1 }, "final fix M1: setting it changes the row");
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-ACC", true), { linked: true, changed: 0 }, "final fix M1: setting it again is still a linked no-op");
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-UNSAVED", true), { linked: false, changed: 0 }, "final fix M1: an unsaved member reports not linked");
+
+    // M2: the DaVinci pre-fill never reuses a spec sheet as a datasheet.
+    const { applyPrefill, davinciDocumentId } = await import("@/lib/part-docs/davinci-apply");
+    const sharedUrl = "https://etc.example/shared-guide.pdf";
+    const specByUrl = await Docs.createDocument({ kind: "specsheet", fileName: "g.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: sharedUrl, source: "fetch", by: "Jeff" });
+    await applyPrefill({
+      libraryTimestamp: "t",
+      documents: [{ url: sharedUrl, label: "Shared", typeId: "TY-FW", skus: ["FW-DV"] }],
+      accessoryPairs: [],
+      stats: { parts: 1, typesMatched: 1, documents: 1, documentLinks: 1, accessoryPairs: 0, accessoryLinksUnmatched: 0 },
+    }, "DaVinci pre-fill");
+    const dvLinks = (await Docs.allDocumentLinks()).filter((l) => l.partSku === "FW-DV");
+    assert.deepEqual(dvLinks.map((l) => `${l.documentId}:${l.kind}`), [`${davinciDocumentId(sharedUrl)}:datasheet`], "final fix M2: the part gets a DaVinci datasheet document, not the spec sheet sharing its URL");
+    assert(!dvLinks.some((l) => l.documentId === specByUrl!.id), "final fix M2: …the spec sheet is not linked");
+
+    // I2: the one-time Assembly Builder → graph sync.
+    const { setSettings } = await import("@/lib/settings");
+    const { insertDocIfAbsent } = DS;
+    const { ensureAssemblyGraphSynced, syncAllAssemblyGraphs, assemblyGraphSynced, GRAPH_SYNC_BLOB_ID } = await import("@/lib/part-docs/assembly-sync");
+    const { getDb } = await import("@/db");
+    const { blobs } = await import("@/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
+    const { getSettings } = await import("@/lib/settings");
+    const priorAssemblies = ((await getSettings()).fixtureAssemblies ?? []) as unknown[];
+    assert.equal(priorAssemblies.length, 0, "final fix I2: the test database starts with no fixture assemblies");
+    await setSettings({
+      fixtureAssemblies: [
+        { id: "fw-asm", name: "FW assembly", components: [
+          { sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 },
+          { sku: "FW-LENS", label: "Lens", role: "lens", defaultQty: 1 },
+          { sku: "FW-CLAMP", label: "Clamp", role: "mount", defaultQty: 0 },
+        ] },
+      ],
+    });
+    await insertDocIfAbsent("subassemblies", {
+      id: "SA-FW", kind: "fixture", label: "FW sub", description: "", lightEngineSku: "FW-S4", lightEngineName: "", lightEngineCost: 0,
+      lensSku: "FW-LENS2", lensName: "", lensCost: 0, options: { data: [{ sku: "FW-DATA", name: "", cost: 0, qty: 2 }], power: [], mounting: [], accessories: [] },
+      cost: 0, price: 0, createdAt: 1, updatedAt: 1,
+    });
+    // A pre-existing link of another, unlisted assembly scope must survive,
+    // and a human's own-datasheet flag on a pair must carry over.
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-gone" }, [{ parentSku: "FW-OLD", accessorySku: "FW-OLDACC" }]);
+    await Acc.syncAccessoryLinks({ source: "davinci", sourceRef: "TY-FWX" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS" }]);
+    await Acc.setOwnDatasheet("FW-S4", "FW-LENS", true);
+    assert.equal(await assemblyGraphSynced(), false, "final fix I2: a fresh database has not synced the assembly graph");
+    const g1 = await ensureAssemblyGraphSynced();
+    assert(g1 && g1.complete && g1.written === 4 && g1.removed === 0 && g1.assemblies === 1 && g1.subassemblies === 1, `final fix I2: the first read syncs every assembly and subassembly (got ${JSON.stringify(g1)})`);
+    const live = await Acc.allAccessoryLinks();
+    const has = (ref: string, parent: string, acc: string) => live.some((l) => l.source === "assembly" && l.sourceRef === ref && l.parentSku === parent && l.accessorySku === acc);
+    assert(has("assembly:fw-asm", "FW-S4", "FW-LENS") && has("assembly:fw-asm", "FW-S4", "FW-CLAMP") && has("subassembly:SA-FW", "FW-S4", "FW-LENS2") && has("subassembly:SA-FW", "FW-S4", "FW-DATA"), "final fix I2: assembly:<id> and subassembly:<id> scopes hold each builder's pairs");
+    assert(live.find((l) => l.sourceRef === "assembly:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet === true, "final fix I2: the pair's own-datasheet flag carries over");
+    assert(has("assembly:fw-gone", "FW-OLD", "FW-OLDACC"), "final fix I2: an unlisted scope's links are never pruned by the one-time sync");
+    assert.equal(await assemblyGraphSynced(), true, "final fix I2: a completed sync sets the flag");
+    assert.equal(await ensureAssemblyGraphSynced(), null, "final fix I2: every later page read is a no-op (one flag read)");
+    const g2 = await syncAllAssemblyGraphs();
+    assert(g2.written === 0 && g2.removed === 0 && g2.complete, "final fix I2: the explicit (script) sync is idempotent — a re-run writes nothing");
+    // A run cut short by its budget leaves the flag unset, and the next
+    // read finishes the job.
+    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
+    await setSettings({ fixtureAssemblies: [...priorAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
+    const cut = await ensureAssemblyGraphSynced(0, () => 0);
+    assert(cut && !cut.complete && cut.written === 0, "final fix I2: a sync out of budget stops before writing and says so");
+    assert.equal(await assemblyGraphSynced(), false, "final fix I2: …and leaves the flag unset");
+    const resumed = await ensureAssemblyGraphSynced();
+    assert(resumed && resumed.complete && resumed.written === 1, "final fix I2: the next read finishes the rest");
+    assert.equal(await assemblyGraphSynced(), true, "final fix I2: …and sets the flag");
+    await setSettings({ fixtureAssemblies: priorAssemblies });
   }
 
   console.log("review regression checks passed");

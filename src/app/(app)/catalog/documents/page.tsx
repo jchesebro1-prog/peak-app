@@ -7,6 +7,7 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { listProjects } from "@/lib/stores/grid-projects";
 import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { loadPartDocsState } from "@/lib/part-docs/load";
+import { ensureAssemblyGraphSynced } from "@/lib/part-docs/assembly-sync";
 import { quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
 import {
   DOCUMENTS_SHOW,
@@ -38,7 +39,17 @@ const PAGE = 200;
  */
 export default async function DocumentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [user, sp] = await Promise.all([requireUser(), searchParams]);
-  const [parts, quotes, gridProjects, generated] = await Promise.all([listCatalog(), allQuotes(), listProjects(), allGeneratedSpecs()]);
+  // The one-time Assembly Builder → graph sync (final fix wave, I2) rides
+  // alongside the first reads: one flag read once it has run, and it lands
+  // before loadPartDocsState reads the graph (whose own first-read step is
+  // the legacy datasheet backfill).
+  const [parts, quotes, gridProjects, generated] = await Promise.all([
+    listCatalog(),
+    allQuotes(),
+    listProjects(),
+    allGeneratedSpecs(),
+    ensureAssemblyGraphSynced(),
+  ]);
   const state = await loadPartDocsState(parts);
 
   const bySku = new Map(parts.map((p) => [p.sku, p]));

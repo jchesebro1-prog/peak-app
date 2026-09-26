@@ -80,6 +80,23 @@ export async function syncAccessoryScopes(
   return { written, removed };
 }
 
+/**
+ * Sync exactly the listed scopes in ONE pass (one read of the graph, batched
+ * writes) — each scope ends up as its `pairs`, and links of any scope NOT
+ * listed are left alone (no prefix pruning). The one-time assembly graph
+ * sync (final fix wave, I2) uses this, so a settings read that comes back
+ * empty can never wipe the graph.
+ */
+export async function syncAccessoryScopeSet(
+  source: AccessoryLinkSource,
+  scopes: ReadonlyArray<{ sourceRef: string; pairs: readonly AccessoryPair[] }>,
+  opts: DocBatchOpts = {}
+): Promise<{ written: number; removed: number; complete: boolean }> {
+  const refs = new Set(scopes.map((s) => s.sourceRef));
+  if (!refs.size) return { written: 0, removed: 0, complete: true };
+  return syncScopes(source, (l) => refs.has(l.sourceRef ?? ""), scopes, opts);
+}
+
 async function syncScopes(
   source: AccessoryLinkSource,
   owns: (l: PartAccessoryLink) => boolean,
@@ -131,10 +148,12 @@ async function syncScopes(
 /**
  * The Assembly Builder's "has its own datasheet" toggle: set or clear the
  * flag on every live link of the pair (a pair can be linked by several
- * assemblies and by DaVinci at once — coverage reads them as one). Returns
- * the number of rows changed.
+ * assemblies and by DaVinci at once — coverage reads them as one).
+ * `linked` says whether the pair is in the graph at all (an unsaved member
+ * is not); `changed` is the number of rows rewritten — 0 when the flag
+ * already had that value, which is not an error (final fix wave, M1).
  */
-export async function setOwnDatasheet(parentSku: string, accessorySku: string, own: boolean): Promise<number> {
+export async function setOwnDatasheet(parentSku: string, accessorySku: string, own: boolean): Promise<{ linked: boolean; changed: number }> {
   const rows = (await allAccessoryLinks()).filter((l) => l.parentSku === parentSku && l.accessorySku === accessorySku);
   let changed = 0;
   for (const l of rows) {
@@ -147,5 +166,5 @@ export async function setOwnDatasheet(parentSku: string, accessorySku: string, o
     });
     changed++;
   }
-  return changed;
+  return { linked: rows.length > 0, changed };
 }

@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmButton } from "@/components/confirm-button";
 import { acceptFor } from "@/lib/part-docs/files";
-import { collapseList, coveredLabel } from "@/lib/part-docs/coverage";
+import { coveredLabel } from "@/lib/part-docs/coverage";
 import type { SlotView } from "@/lib/part-docs/views";
 import type { PartDocKind } from "@/lib/part-docs/types";
 import { detachDocumentAction, fetchLinksAction, setNotNeededAction } from "./actions";
@@ -127,27 +127,32 @@ export default function SlotCell({
           </div>
         );
       case "covered": {
-        const { shown, more } = collapseList(view.parents);
+        // The server already collapsed the lists to the first
+        // COVERED_COLLAPSE entries; the counts carry the rest (M7).
+        const moreParents = Math.max(0, view.parentCount - view.parents.length);
+        const moreDocs = Math.max(0, view.docCount - view.docs.length);
         return (
           <div>
             <button type="button" style={{ ...link, color: "#3a5fb4" }} onClick={() => setOpen((o) => !o)}>
-              {coveredLabel(view.docs.length, kind)}
+              {coveredLabel(view.docCount, kind)}
             </button>
             {open && (
               <div style={{ marginTop: 4, display: "grid", gap: 2 }}>
-                {(open ? view.parents : shown).map((p) => (
+                {view.parents.map((p) => (
                   <span key={p.sku} style={muted}>
                     on <b style={{ color: "#3d424e" }}>{p.sku}</b> {p.desc}
                   </span>
                 ))}
+                {moreParents > 0 && <span style={muted}>+{moreParents} more fixture{moreParents === 1 ? "" : "s"}</span>}
                 {view.docs.map((d) => (
                   <a key={d.id} href={docHref(d.id)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--accent)" }}>
                     {d.title}
                   </a>
                 ))}
+                {moreDocs > 0 && <span style={muted}>+{moreDocs} more document{moreDocs === 1 ? "" : "s"}</span>}
               </div>
             )}
-            {!open && more > 0 && <span style={muted}> · {shown.map((p) => p.sku).join(", ")} +{more} more</span>}
+            {!open && moreParents > 0 && <span style={muted}> · {view.parents.map((p) => p.sku).join(", ")} +{moreParents} more</span>}
           </div>
         );
       }

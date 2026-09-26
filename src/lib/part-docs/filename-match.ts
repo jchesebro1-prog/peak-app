@@ -89,3 +89,15 @@ export function matchFileRows(
     return { fileName, kind: guessKind(fileName), confidence: m.confidence, skus: m.skus };
   });
 }
+
+/**
+ * The token a part search hands to its SQL candidate filter (final fix wave,
+ * T7): the longest — the most selective — so a common first word can't fill
+ * the candidate cap before the real match is reached. Ties keep the first.
+ * The caller still requires every token on the candidates.
+ */
+export function mostSelectiveToken(tokens: readonly string[]): string {
+  let best = "";
+  for (const t of tokens) if (t.length > best.length) best = t;
+  return best;
+}

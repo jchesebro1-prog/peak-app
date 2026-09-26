@@ -1,5 +1,16 @@
 import { createHash } from "node:crypto";
-import { getDoc, insertDocIfAbsent, insertDocsIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, type DocBatchOpts } from "@/db/doc-store";
+import {
+  getDoc,
+  getDocRows,
+  insertDocIfAbsent,
+  insertDocsIfAbsent,
+  listDocs,
+  listDocsByField,
+  patchDoc,
+  softDeleteDoc,
+  upsertDocs,
+  type DocBatchOpts,
+} from "@/db/doc-store";
 import {
   isDocumentId,
   newDocumentId,
@@ -143,21 +154,66 @@ export async function recordFetchResult(id: string, result: { ok: boolean; error
 
 /**
  * Link a document to parts. Returns how many links are NEW. A link that
- * exists (live) is left alone; one that was detached is revived.
+ * exists (live) is left alone; one that was detached is revived (with fresh
+ * who/when stamps, as before).
+ *
+ * Final fix wave (I3): the fan-out used to be a getDoc + upsertDoc per SKU,
+ * sequentially — a shared URL's fetch can link hundreds of parts. Now: one
+ * read of the deterministic link ids, new links inserted in one batch
+ * (ON CONFLICT DO NOTHING, so a concurrent attach of the same pair is not
+ * counted twice), detached ones revived in one batch.
  */
 export async function attachDocument(documentId: string, skus: readonly string[], by: string, at = Date.now()): Promise<number> {
   const doc = await getDocument(documentId);
   if (!doc) return 0;
-  let added = 0;
-  for (const raw of new Set(skus)) {
+  const wanted = new Map<string, PartDocumentLink>();
+  for (const raw of skus) {
     const partSku = String(raw || "").trim();
     if (!partSku) continue;
     const id = documentLinkId(partSku, documentId);
-    if (await getDoc("part_document_links", id)) continue;
-    await upsertDoc<PartDocumentLink>("part_document_links", { id, partSku, documentId, kind: doc.kind, createdAt: at, createdBy: by });
-    added++;
+    if (!wanted.has(id)) wanted.set(id, { id, partSku, documentId, kind: doc.kind, createdAt: at, createdBy: by });
   }
-  return added;
+  if (!wanted.size) return 0;
+  const rows = await getDocRows("part_document_links", [...wanted.keys()]);
+  const state = new Map(rows.map((r) => [r.id, r.deleted]));
+  const fresh: PartDocumentLink[] = [];
+  const revive: PartDocumentLink[] = [];
+  for (const [id, link] of wanted) {
+    const deleted = state.get(id);
+    if (deleted === undefined) fresh.push(link);
+    else if (deleted) revive.push(link);
+  }
+  const inserted = fresh.length ? (await insertDocsIfAbsent<PartDocumentLink>("part_document_links", fresh)).ids.length : 0;
+  const revived = revive.length ? (await upsertDocs<PartDocumentLink>("part_document_links", revive)).ids.length : 0;
+  return inserted + revived;
+}
+
+/** Live links of these parts, filtered in SQL — a per-request lookup that
+ *  never lists the whole link table (final fix wave, I1/M5). */
+export async function documentLinksForParts(skus: readonly string[]): Promise<PartDocumentLink[]> {
+  return listDocsByField<PartDocumentLink>("part_document_links", "partSku", skus);
+}
+
+/** Live documents by id (missing and non-document ids are skipped). */
+export async function getDocuments(ids: readonly string[]): Promise<PartDocument[]> {
+  const valid = [...new Set(ids)].filter(isDocumentId);
+  return (await getDocRows<PartDocument>("part_documents", valid)).filter((r) => !r.deleted).map((r) => r.doc);
+}
+
+/** Each part's live linked documents of `kind` (the document's own kind is
+ *  authoritative, as in the coverage index). Two small reads, no scan. */
+export async function linkedDocumentsForParts(skus: readonly string[], kind: PartDocKind): Promise<Map<string, PartDocument[]>> {
+  const links = await documentLinksForParts(skus);
+  const docs = new Map((await getDocuments(links.map((l) => l.documentId))).map((d) => [d.id, d]));
+  const out = new Map<string, PartDocument[]>();
+  for (const l of links) {
+    const d = docs.get(l.documentId);
+    if (!d || d.kind !== kind) continue;
+    const list = out.get(l.partSku);
+    if (!list) out.set(l.partSku, [d]);
+    else if (!list.some((x) => x.id === d.id)) list.push(d);
+  }
+  return out;
 }
 
 /**

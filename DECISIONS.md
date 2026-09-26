@@ -5727,6 +5727,11 @@ wrote `datasheetBlobKey`) are removed; the Documents section uploads direct to B
 Nothing writes `datasheetBlobKey` any more. It stays readable: the idempotent backfill turns it into a `legacy`
 document on first read, and `/api/part-datasheet/<sku>` keeps streaming it — and otherwise redirects to the part's
 datasheet document — so older links (the Grid editor, the pre-v1 Displays route, bookmarks) keep working.
+Final fix wave: the bridge checks the part's own live datasheet documents FIRST (a stored file, else a link-only one)
+and streams `datasheetBlobKey` only when the part has no live datasheet link and its legacy document was never minted —
+so after a replace or detach of the backfilled legacy document, the Grid's "Datasheet" link never opens the stale
+file. The lookup is keyed by SKU in SQL, not a scan of every link and document. The catalog list's "Datasheet" marker
+follows the same rule (the part's own datasheet file).
 
 ## D276. Both Assembly Builder tabs feed the accessory graph (#207, 2026-09-25)
 
@@ -5734,7 +5739,14 @@ Assemblies tab: the `fixture`-role component is the parent and every other compo
 above zero = `included`), scoped `assembly:<id>`; a save syncs every assembly in one pass and soft-deletes the links of
 assemblies removed from the list. Subassemblies tab: the light engine is the parent, the lens and every option an
 accessory, scoped `subassembly:<id>`, synced on save and cleared on delete. The toggle is enabled once a member is
-saved (the pair must exist in the graph).
+saved (the pair must exist in the graph); setting it to the value it already has is a no-op success, and only a pair
+missing from the graph asks for a save first.
+Final fix wave: assemblies saved before part documents shipped are brought into the graph by a one-time, idempotent
+sync of every fixture assembly and subassembly (`src/lib/part-docs/assembly-sync.ts`), the same pairs and scopes a
+save writes. It syncs exactly the scopes that exist and prunes nothing else — a deleted assembly's links stay the save
+action's job, and a settings read that comes back empty can never wipe the graph. It runs from
+`npm run part-docs:backfill -- --commit` and on the Datasheets page's first read under a 15 s budget; a blob flag
+(`part_docs_graph_sync`) set only on completion makes later reads a single-row check.
 
 ## D277. DaVinci pre-fill: English datasheets keyed by URL, the graph in the committed extract (#207, 2026-09-25)
 

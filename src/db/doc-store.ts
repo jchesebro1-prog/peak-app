@@ -68,6 +68,55 @@ export async function searchDocs<T extends Doc = Doc>(
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
 
+/**
+ * Rows by id, live AND soft-deleted, each with its `deleted` flag — one
+ * statement per DOC_BATCH_CHUNK ids (#207 final fix wave: attachDocument's
+ * fan-out reads its deterministic link ids in one go instead of one getDoc
+ * per SKU). Missing ids are simply absent from the result.
+ */
+export async function getDocRows<T extends Doc = Doc>(
+  coll: CollectionName,
+  ids: readonly string[]
+): Promise<Array<{ id: string; deleted: boolean; doc: T }>> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (!unique.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const out: Array<{ id: string; deleted: boolean; doc: T }> = [];
+  for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
+    const rows = await db.select().from(t).where(inArray(t.id, unique.slice(i, i + DOC_BATCH_CHUNK)));
+    for (const r of rows) out.push({ id: r.id, deleted: r.deleted, doc: { ...(r.doc as T), id: r.id } });
+  }
+  return out;
+}
+
+/**
+ * Live rows whose top-level string field `field` is one of `values` —
+ * filtered in SQL (`doc->>field IN (…)`) so a per-request lookup (one SKU's
+ * links, a page of SKUs) never materializes the whole collection (#207
+ * final fix wave). `field` is a code constant, passed as a bound parameter.
+ */
+export async function listDocsByField<T extends Doc = Doc>(
+  coll: CollectionName,
+  field: string,
+  values: readonly string[]
+): Promise<T[]> {
+  const unique = [...new Set(values)].filter(Boolean);
+  if (!unique.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const out: T[] = [];
+  for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
+    const rows = await db
+      .select()
+      .from(t)
+      .where(and(eq(t.deleted, false), inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK))))
+      .orderBy(asc(t.id));
+    for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
+  }
+  return out;
+}
+
 export async function getDoc<T extends Doc = Doc>(
   coll: CollectionName,
   id: string

@@ -8286,7 +8286,7 @@ primary look.
 the old hashed `markerColor`. Browser check of the two Settings cards and the plan legend on a scratch DB is the
 lead's call (never against `.data/pglite`).
 
-## #207. Part documents — datasheets and spec sheets, shared, with accessory coverage — DONE 2026-09-25 (D270–D280)
+## 207. Part documents — datasheets and spec sheets, shared, with accessory coverage — DONE 2026-09-25 (D270–D280)
 
 **Spec:** `docs/superpowers/specs/2026-09-25-part-documents-design.md` · **Plan:**
 `docs/superpowers/plans/2026-09-25-part-documents.md` · **Closes:** #40 (a) and the population half of (c).
@@ -8304,6 +8304,17 @@ batch left off) — one document per URL; the doc store's batch writers (`insert
 with per-member coverage and a has-its-own-datasheet toggle; the DaVinci accessory graph in the committed extract plus
 an admin/CLI pre-fill of link-only ETC datasheets; Specs coverage, client packages (once per document, coverage in
 context, "covered by <fixture>") and the Displays API reading the rule.
+
+**Existing assemblies (final fix wave).** Assemblies and subassemblies saved before this shipped have no graph links
+until re-saved, so a one-time, idempotent sync (`src/lib/part-docs/assembly-sync.ts`) writes every fixture assembly
+(`assembly:<id>`) and subassembly (`subassembly:<id>`) into `part_accessory_links` — the save actions' own pairs,
+through the batched sync core, carrying any "has its own datasheet" flag, pruning nothing it did not list. It runs from
+`npm run part-docs:backfill -- --commit` and automatically on the Datasheets page's first read (15 s budget, alongside
+the page's first reads); a blob flag (`part_docs_graph_sync.assembliesSyncedAt`) makes every later read one
+single-row check, and is only set once a run completes (a cut-short run resumes on the next read). The SKU bridge
+`/api/part-datasheet/<sku>` (Grid "Datasheet" links) now follows the part's live datasheet documents and falls back to
+the legacy `datasheetBlobKey` only while the backfill has not reached the part, so a replaced or detached legacy file
+never resurfaces (D275).
 
 **Still open (Jeff-gated).** Run **Pre-fill from DaVinci** on production (admin button on `/catalog/documents`) and
 confirm on a Vercel preview that the traced `data/davinci-extract.json` is present (the build's `.nft.json` lists it;

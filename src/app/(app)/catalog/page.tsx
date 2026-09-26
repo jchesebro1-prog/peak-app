@@ -24,9 +24,14 @@ import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-template
 import { articleIdForPart } from "@/lib/specs/articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { partDocsView, type PartDocsView } from "@/lib/part-docs/views";
+import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
+// Part documents (#207): the part editor's slot cell calls fetchLinksAction
+// from this route, and that action runs a 45s wall-clock budget
+// (FETCH_ACTION_BUDGET_MS) — the function limit must sit above it.
+export const maxDuration = 60;
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -149,6 +154,10 @@ export default async function CatalogPage({
   const matchCount = rows.length;
   const truncated = matchCount > PAGE;
   rows = rows.slice(0, PAGE);
+  // #207: the row's "Datasheet" marker is the coverage rule's own datasheet
+  // file (not the legacy single-file key alone) — two reads keyed by the
+  // rendered page's SKUs, never a per-row load or a whole-collection scan.
+  const ownDatasheet = await partsWithOwnDatasheet(rows);
 
   const catalogMeta = `${parts.length} parts · ${manufacturers.length} manufacturer${manufacturers.length === 1 ? "" : "s"}`;
   const resultLabel =
@@ -448,7 +457,7 @@ export default async function CatalogPage({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}>{p.desc}</span>
-                    {(p.note || p.datasheetBlobKey || (p.ports?.length ?? 0) > 0 || p.docs?.length) && (
+                    {(p.note || ownDatasheet.has(p.sku) || (p.ports?.length ?? 0) > 0 || p.docs?.length) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (
                           <span
@@ -468,7 +477,7 @@ export default async function CatalogPage({
                             ⚠ {p.note}
                           </span>
                         )}
-                        {p.datasheetBlobKey && (
+                        {ownDatasheet.has(p.sku) && (
                           <span style={{ fontSize: 10.5, color: "#8c919c" }}>Datasheet</span>
                         )}
                         {(p.ports?.length ?? 0) > 0 && (

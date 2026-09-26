@@ -16193,3 +16193,27 @@ import { publicDatasheets } from "@/lib/displays-api";
   ok(catalogEtag([part] as never, { sections: [], articles: [], docs: idx }) !== noDocs, "part docs displays: attaching a document changes the catalog ETag with no part touched");
   ok(publicCatalogPart(part as never, { sections: [], articles: [], docs: idx }).datasheets[0].url === "/api/part-documents/PD-dispds00000", "part docs displays: publicCatalogPart carries the viewer links");
 }
+
+/* --- Part documents (#207) — final fix wave: covered cells collapse on the
+       server (M7); part search's SQL token is the most selective (T7) --- */
+import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
+{
+  const parents = Array.from({ length: 8 }, (_, i) => `COLP-${i}`);
+  const idx = buildCoverageIndex({
+    documents: parents.map((p, i): PdDoc => ({
+      id: `PD-col${String(i).padStart(9, "0")}`, kind: "datasheet", title: p, fileName: `${p}.pdf`, contentType: "application/pdf", size: 1,
+      blobKey: `part-docs/x/${p}.pdf`, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+    })),
+    links: parents.map((p, i) => ({ id: `l${i}`, partSku: p, documentId: `PD-col${String(i).padStart(9, "0")}`, kind: "datasheet" as const, createdAt: 1, createdBy: "t" })),
+    accessoryLinks: parents.map((p, i) => ({ id: `a${i}`, parentSku: p, accessorySku: "COL-ACC", source: "davinci" as const })),
+    parts: [],
+  });
+  const v = slotViewFor(idx, "COL-ACC", "datasheet", (s) => `${s} desc`);
+  ok(v.state === "covered" && v.parents.length === 5 && v.parentCount === 8 && v.docs.length === 5 && v.docCount === 8, "part docs views M7: a covered cell ships the first 5 parents and documents plus the full counts");
+  ok(v.state === "covered" && v.parents[0].sku === "COLP-0" && v.parents[0].desc === "COLP-0 desc", "part docs views M7: …in order, with descriptions");
+  const one = slotViewFor(idx, "COLP-0", "datasheet", () => "");
+  ok(one.state === "own", "part docs views M7: a parent's own slot is unaffected");
+
+  ok(mostSelectiveToken(["etc", "s4", "lustr"]) === "lustr", "part docs search T7: the longest token filters in SQL");
+  ok(mostSelectiveToken(["abcd", "wxyz"]) === "abcd" && mostSelectiveToken([]) === "", "part docs search T7: ties keep the first; no tokens, no filter");
+}

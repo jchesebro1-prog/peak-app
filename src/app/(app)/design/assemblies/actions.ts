@@ -28,8 +28,10 @@ export async function saveFixtureAssembliesAction(value: FixtureAssembly[]) {
  *  stops (or resumes) counting the fixture's datasheet as the member's. */
 export async function setOwnDatasheetAction(parentSku: string, accessorySku: string, own: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireUser();
-  const changed = await setOwnDatasheet(String(parentSku || ""), String(accessorySku || ""), !!own);
-  if (!changed) return { ok: false, error: "Save the assembly first — this part isn't linked to the fixture yet." };
+  const { linked } = await setOwnDatasheet(String(parentSku || ""), String(accessorySku || ""), !!own);
+  // Only a pair missing from the graph is an error; setting the flag to the
+  // value it already has is a no-op success (final fix wave, M1).
+  if (!linked) return { ok: false, error: "Save the assembly first — this part isn't linked to the fixture yet." };
   revalidatePath("/design/assemblies");
   revalidatePath("/catalog/documents");
   return { ok: true };
