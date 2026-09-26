@@ -3,7 +3,7 @@ import { getProject, replaceAutoPlacements } from "@/lib/stores/grid-projects";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { ensureGridSymbolsFor } from "@/lib/stores/grid-catalog";
 import { buildEquipmentPriceTable } from "./equipment-map";
-import { autoEstimateCards, priceOverrides } from "./auto-estimate";
+import { autoEstimateCards, clampScopeInputs, priceOverrides } from "./auto-estimate";
 import { generateAutoLayout } from "./grid-auto-layout";
 import { autoEstimateFor, overrideRefs } from "./grid-auto-model";
 import { defaultOptionId } from "./grid-options";
@@ -45,7 +45,11 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
     cards.flatMap((c) => c.lines.filter((l) => l.status === "part" && !l.drape && l.ref && l.qty > 0).map((l) => l.ref as string))
   );
   await ensureGridSymbolsFor([...catalogParts.values()].filter((p) => deviceSkus.has(p.sku)), by);
-  const C = compute({ ...defaultAState(0), ...inputs, tier: "better" });
+  // #GEM fix wave 1 (M2): the layout's geometry must clamp `inputs` the same
+  // way autoEstimateCards() does, or a stored scopeInputs that predates a
+  // tighter cap (or was never clamped on write) sizes the layout differently
+  // than the cards it's laying out.
+  const C = compute({ ...defaultAState(0), ...clampScopeInputs(inputs), tier: "better" });
   const items = generateAutoLayout(a, cards, { electrics: C.electrics, sets: C.rigSets });
   const res = await replaceAutoPlacements(projectId, { optionId, scopes, sheetId, page: 1, items, by });
   if (!res) return { ok: false, error: "That option was removed — refresh the page." };

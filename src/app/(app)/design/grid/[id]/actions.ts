@@ -47,7 +47,19 @@ import { getSite } from "@/lib/identity/sites";
 import { get as getPart, getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
 import { fillAutoScopes } from "@/lib/design/grid-auto-fill";
-import { AUTO_SCOPES, autoEstimateCards, clampScopeInputs, priceOverrides, sellOnlyCards, type SellCard } from "@/lib/design/auto-estimate";
+import {
+  AUTO_SCOPES,
+  assemblySwapCandidates,
+  autoEstimateCards,
+  clampScopeInputs,
+  curtainSwapHits,
+  partSwapHits,
+  priceOverrides,
+  scopeLabelOf,
+  sellOnlyCards,
+  type AutoEquipHit,
+  type SellCard,
+} from "@/lib/design/auto-estimate";
 import { overrideRefs, sanitizeAutoEstimate, type AutoEstimate } from "@/lib/design/grid-auto-model";
 import { buildEquipmentPriceTable, sellFromCost } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
@@ -55,6 +67,7 @@ import { listFixtures } from "@/lib/stores/fixtures";
 import { getCatalogRates } from "@/lib/stores/pricing";
 import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
+import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { partForGrid } from "@/lib/design/grid-part-lookup";
 import { getDesign } from "@/lib/stores/studio-designs";
 import { createClientPackage } from "@/lib/client-package-server";
@@ -154,23 +167,39 @@ export async function previewAutoEstimateAction(input: {
   return { ok: true, cards: sellOnlyCards(cards) };
 }
 
-export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: string; unit: string; unitSell: number };
+export type { AutoEquipHit } from "@/lib/design/auto-estimate";
 
 /**
- * Swap picker search (#GEM): catalog parts (server-side search, capped) and
- * fixtures/systems whose label matches — SELL numbers only.
+ * Swap picker search (#GEM; curtain-row scoping #GEM fix wave 1 I2/M1):
+ * `rowKey` picks the branch. A curtain row (equipment-vocab's `curtain`
+ * shape) swaps only to a Fabric part priced by area rate — never an
+ * assembly, and never the generic cost>0||list>0 filter, which would hide
+ * the normal case of a list-less, cost-less fabric. Every other row keeps
+ * the part search as before, plus a System/Fixture assembly search now
+ * scoped to the row's own SysKey (a System by its `scope`; a Fixture only on
+ * a Lighting row) instead of matching on label text alone. SELL numbers only.
  */
-export async function searchAutoEquipmentAction(query: string): Promise<{ hits: AutoEquipHit[] }> {
+export async function searchAutoEquipmentAction(query: string, rowKey: string): Promise<{ hits: AutoEquipHit[] }> {
   await requireUser();
   const q = String(query ?? "").trim();
   if (q.length < 2) return { hits: [] };
+  const def = EQUIPMENT_ROW_BY_KEY.get(String(rowKey ?? ""));
+  if (def?.curtain) {
+    const { hits } = await searchCatalog(q, "Fabric", 15);
+    if (!hits.length) return { hits: [] };
+    const parts = await getCatalogParts(hits.map((h) => h.sku));
+    const bySku = new Map(parts.map((p) => [p.sku, p]));
+    return { hits: curtainSwapHits(hits.map((h) => ({ sku: h.sku, desc: h.desc, curtainAreaRate: bySku.get(h.sku)?.curtainAreaRate }))) };
+  }
   const [{ hits }, fixtures, rates] = await Promise.all([searchCatalog(q, "", 15), listFixtures(), getCatalogRates()]);
   const m = rates.defaultMargin;
-  const partHits: AutoEquipHit[] = hits
-    .filter((h) => h.cost > 0 || h.list > 0)
-    .map((h) => ({ kind: "part", ref: h.sku, desc: h.desc, unit: h.unit, unitSell: h.list > 0 ? h.list : sellFromCost(h.cost, m) }));
+  const partHits = partSwapHits(hits, m);
   const ql = q.toLowerCase();
-  const matched = fixtures.filter((f) => `${f.label} ${f.description}`.toLowerCase().includes(ql)).slice(0, 10);
+  const scopeLabel = def ? scopeLabelOf(def.system) : "";
+  const matched = assemblySwapCandidates(
+    fixtures.filter((f) => `${f.label} ${f.description}`.toLowerCase().includes(ql)),
+    scopeLabel
+  ).slice(0, 10);
   const fxParts = matched.length ? await getCatalogParts([...new Set(matched.flatMap((f) => fixtureSkus(f)))]) : [];
   const asmHits: AutoEquipHit[] = matched.map((f) => {
     const r = resolveFixture(f, fxParts);
@@ -229,7 +258,17 @@ export async function saveGridIntakeAction(input: {
   const isFirstSave = (saved.sheetIds || []).length === 0;
   if (isFirstSave) {
     await setScopeInputs(input.projectId, scopeInputs);
-    if (est) await setAutoEstimate(input.projectId, optionId, est);
+    // #GEM fix wave 1 (M6): setAutoEstimate refuses (null) when the option it
+    // was resolved against is already gone — a specific warning instead of
+    // silently proceeding to fill from an estimate that was never saved.
+    let estimateSaved = true;
+    if (est) {
+      const savedEstimate = await setAutoEstimate(input.projectId, optionId, est);
+      if (!savedEstimate) {
+        estimateSaved = false;
+        warning = "The plan is ready, but your equipment choices could not be saved — that option may have been removed. Use “Change equipment…” in the Scope panel to try again.";
+      }
+    }
     const patch = designPatchFromIntake({
       projectName: project.name,
       venueName: input.venueName,
@@ -240,11 +279,22 @@ export async function saveGridIntakeAction(input: {
     for (const d of linked) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
     await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
-    if (est) {
-      const fresh = await getProject(input.projectId);
-      const res = fresh
-        ? await fillAutoScopes(input.projectId, resolveOptionId(fresh, null), autoScopes, user.name)
-        : ({ ok: false, error: "That design could not be found." } as const);
+    if (est && estimateSaved) {
+      // #GEM fix wave 1 (I1): a thrown error here (not just a returned
+      // {ok:false}) must not fail the whole save — the base sheet, scope
+      // inputs and autoEstimate are already persisted, so the plan still
+      // opens, with the same "Change equipment…" recovery as a returned
+      // failure.
+      let res: Awaited<ReturnType<typeof fillAutoScopes>>;
+      try {
+        const fresh = await getProject(input.projectId);
+        res = fresh
+          ? await fillAutoScopes(input.projectId, resolveOptionId(fresh, null), autoScopes, user.name)
+          : { ok: false, error: "That design could not be found." };
+      } catch (error) {
+        console.error("saveGridIntakeAction: Auto fill threw", error);
+        res = { ok: false, error: error instanceof Error ? error.message : "Something went wrong." };
+      }
       if (!res.ok) warning = `The plan is ready, but Auto could not fill it: ${res.error} Use “Change equipment…” in the Scope panel to try again.`;
       else if (res.needsPart > 0)
         warning = `${res.needsPart} line${res.needsPart === 1 ? "" : "s"} still need${res.needsPart === 1 ? "s" : ""} a part in the Equipment map and ${res.needsPart === 1 ? "was" : "were"} left off the plan.`;

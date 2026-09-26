@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition, type CSSProperties } from "react";
 import type { QuickScopeInputs, TierKey } from "@/app/(app)/design/quick/engine";
 import type { SellCard, SellLine } from "@/lib/design/auto-estimate";
-import { mergeScopeEstimate, type AutoEstimate, type AutoOverride } from "@/lib/design/grid-auto-model";
+import { mergeScopeEstimate, reconcileQtyDraft, type AutoEstimate, type AutoOverride } from "@/lib/design/grid-auto-model";
 import { previewAutoEstimateAction, searchAutoEquipmentAction, type AutoEquipHit } from "./actions";
 
 /**
@@ -51,7 +51,15 @@ export function useAutoPreview(initial: SellCard[] | null = null) {
   return { cards, error, loading, run };
 }
 
-export function EquipmentPicker({ onPick, onClose }: { onPick: (hit: AutoEquipHit) => void; onClose: () => void }) {
+export function EquipmentPicker({
+  rowKey,
+  onPick,
+  onClose,
+}: {
+  rowKey: string;
+  onPick: (hit: AutoEquipHit) => void;
+  onClose: () => void;
+}) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<AutoEquipHit[]>([]);
   const [pending, start] = useTransition();
@@ -62,7 +70,7 @@ export function EquipmentPicker({ onPick, onClose }: { onPick: (hit: AutoEquipHi
     timer.current = setTimeout(
       () =>
         start(async () => {
-          const r = await searchAutoEquipmentAction(v);
+          const r = await searchAutoEquipmentAction(v, rowKey);
           setHits(r.hits);
         }),
       250
@@ -97,6 +105,17 @@ export function EquipmentCard({
 }) {
   const [swapping, setSwapping] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  // Reconcile the qty draft against a fresh server re-price (#GEM fix wave 1,
+  // M7) — comparing against the previous card's lines during render (the
+  // "adjusting state when a prop changes" pattern, not an effect: this file
+  // runs no effects). `card.lines` is a fresh array from every preview
+  // response, so this runs on every re-price; reconcileQtyDraft is a no-op
+  // (same reference back) unless a draft actually went stale.
+  const [seenLines, setSeenLines] = useState(card.lines);
+  if (seenLines !== card.lines) {
+    setSeenLines(card.lines);
+    setDraft((d) => reconcileQtyDraft(d, card.lines));
+  }
   const writeRow = (rowKey: string, o: AutoOverride, delay = 0) => {
     const overrides = { ...estimate.overrides };
     if (o.sku || o.assemblyId || o.qty !== undefined) overrides[rowKey] = o;
@@ -197,7 +216,7 @@ export function EquipmentCard({
                 <button type="button" onClick={() => setSwapping(swapping === l.rowKey ? null : l.rowKey)} style={BTN}>Swap…</button>
                 {edited && <button type="button" onClick={() => reset(l)} title="Back to the equation and the map" style={BTN}>↺</button>}
               </span>
-              {swapping === l.rowKey && <EquipmentPicker onPick={(hit) => swap(l, hit)} onClose={() => setSwapping(null)} />}
+              {swapping === l.rowKey && <EquipmentPicker rowKey={l.rowKey} onPick={(hit) => swap(l, hit)} onClose={() => setSwapping(null)} />}
             </div>
           );
         })}

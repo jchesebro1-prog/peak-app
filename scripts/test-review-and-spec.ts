@@ -18230,3 +18230,131 @@ import { defaultAState as gemDefault8 } from "@/app/(app)/design/quick/engine";
   const hm = readFileSync(join(process.cwd(), "src/app/(app)/home-my-designs.tsx"), "utf8");
   ok(!dc.includes("NewDesignSplit") && !dc.includes('href="/design/quick"') && dc.includes("<NewDesignButton") && hm.includes("<NewDesignButton") && !hm.includes('href="/design/quick"'), "#GEM T8: every New design control opens the Grid intake; the Quick Design canvas is retired from New design");
 }
+
+/* --- #GEM T8 fix wave 1: review findings — I2 (curtain swap picker:
+       Fabric-only, area-rate basis, no assemblies), M1 (assembly search
+       scoped to the card's SysKey) and M7 (qty draft reconciled against a
+       fresh re-price) pulled out as pure, unit-tested helpers. --- */
+import {
+  assemblySwapCandidates as gemAsmCand9,
+  curtainSwapHits as gemCurtainHits9,
+  partSwapHits as gemPartHits9,
+  scopeLabelOf as gemScopeLabel9,
+} from "@/lib/design/auto-estimate";
+import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model";
+{
+  // I2: a Fabric part with a positive area rate is findable even with no
+  // list/cost at all (the normal case); a Fabric part with no rate isn't a
+  // candidate; nothing here is ever an assembly — the caller for this branch
+  // never even fetches one.
+  const fabricHits9 = gemCurtainHits9([
+    { sku: "GEM9-VEL", desc: "GEM9 velour", curtainAreaRate: 3.5 },
+    { sku: "GEM9-RATELESS", desc: "GEM9 unrated fabric" },
+  ]);
+  ok(
+    fabricHits9.length === 1 &&
+      fabricHits9[0].kind === "part" &&
+      fabricHits9[0].ref === "GEM9-VEL" &&
+      fabricHits9[0].unit === "sq ft" &&
+      fabricHits9[0].unitSell === 3.5,
+    "#GEM T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown at that rate — a list-less, cost-less fabric is still findable"
+  );
+  ok(
+    gemCurtainHits9([{ sku: "GEM9-RATELESS", desc: "x" }]).length === 0,
+    "#GEM T8 fix wave 1 (I2): a Fabric part with no area rate at all is never a curtain-row candidate"
+  );
+
+  // The generic (non-curtain) part filter is unchanged: cost>0 or list>0.
+  const partHits9 = gemPartHits9(
+    [
+      { sku: "GEM9-COST", desc: "priced by cost", unit: "ea", cost: 100, list: 0 },
+      { sku: "GEM9-LIST", desc: "priced by list", unit: "ea", cost: 0, list: 250 },
+      { sku: "GEM9-FREE", desc: "unpriced", unit: "ea", cost: 0, list: 0 },
+    ],
+    0.3
+  );
+  ok(
+    partHits9.length === 2 && partHits9.every((h) => h.ref !== "GEM9-FREE") && partHits9.find((h) => h.ref === "GEM9-LIST")!.unitSell === 250,
+    "#GEM T8 fix wave 1 (I2): a non-curtain row keeps the cost>0||list>0 filter, and a list price wins over a cost-derived one"
+  );
+
+  // M1: a System assembly is a candidate only on its own scope; a Fixture
+  // assembly is a candidate only on a Lighting row.
+  const assemblies9 = [
+    { kind: "system" as const, scope: "Audio", id: "sys-audio" },
+    { kind: "system" as const, scope: "Lighting", id: "sys-lighting" },
+    { kind: "fixture" as const, id: "fx-par" },
+  ];
+  ok(
+    gemAsmCand9(assemblies9, gemScopeLabel9("audio"))
+      .map((f) => f.id)
+      .join(",") === "sys-audio",
+    "#GEM T8 fix wave 1 (M1): an Audio row's assembly candidates are the Audio system only — no fixture, no other system"
+  );
+  const lightingCands9 = gemAsmCand9(assemblies9, gemScopeLabel9("lighting")).map((f) => f.id);
+  ok(
+    lightingCands9.includes("sys-lighting") && lightingCands9.includes("fx-par") && !lightingCands9.includes("sys-audio"),
+    "#GEM T8 fix wave 1 (M1): a Lighting row's assembly candidates are the Lighting system AND fixtures — the one scope where a bare fixture is a sensible swap"
+  );
+  ok(
+    gemScopeLabel9("curtains") === "Curtains" && gemScopeLabel9("video") === "Video",
+    "#GEM T8 fix wave 1 (M1): scopeLabelOf capitalizes the SysKey to the SystemScope label a System assembly's `scope` field stores"
+  );
+
+  // M7: a qty draft survives a re-price that still agrees with it; drops
+  // when the server's qty for that row has moved (a swap, a tier reset, a
+  // concurrent "Change equipment…") or the row is gone from the card.
+  const draft9 = { "audio:lineArray": "6", "audio:subwoofer": "2" };
+  const linesUnchanged9 = [
+    { rowKey: "audio:lineArray", qty: 6 },
+    { rowKey: "audio:subwoofer", qty: 2 },
+  ];
+  ok(gemReconcile9(draft9, linesUnchanged9) === draft9, "#GEM T8 fix wave 1 (M7): nothing stale — the SAME object comes back so the caller can skip its setState");
+  const linesMoved9 = [
+    { rowKey: "audio:lineArray", qty: 9 },
+    { rowKey: "audio:subwoofer", qty: 2 },
+  ];
+  const reconciled9 = gemReconcile9(draft9, linesMoved9);
+  ok(
+    !("audio:lineArray" in reconciled9) && reconciled9["audio:subwoofer"] === "2",
+    "#GEM T8 fix wave 1 (M7): a row whose server qty moved away from the draft drops out; an untouched row's draft survives"
+  );
+  const linesGone9 = [{ rowKey: "audio:subwoofer", qty: 2 }];
+  ok(!("audio:lineArray" in gemReconcile9(draft9, linesGone9)), "#GEM T8 fix wave 1 (M7): a row dropped from the card entirely drops its draft too");
+}
+
+/* --- #GEM T8 fix wave 1 — source checks for I1/M2/M3/M5/M6, plus proof the
+       search action actually wires in the pure helpers proven above. --- */
+{
+  const dir9 = "src/app/(app)/design/grid/[id]";
+  const act9 = readFileSync(join(process.cwd(), `${dir9}/actions.ts`), "utf8");
+  const saveBody9 = act9.slice(act9.indexOf("export async function saveGridIntakeAction"));
+  ok(/try\s*{[^]*?fillAutoScopes\([^]*?}\s*catch/.test(saveBody9), "#GEM T8 fix wave 1 (I1): saveGridIntakeAction wraps the fillAutoScopes call in try/catch");
+  ok(/console\.error\(/.test(saveBody9), "#GEM T8 fix wave 1 (I1): a thrown Auto-fill error is logged server-side");
+  ok(
+    /setAutoEstimate\(/.test(saveBody9) && /equipment choices could not be saved/i.test(saveBody9),
+    "#GEM T8 fix wave 1 (M6): a refused setAutoEstimate (null) gets its own specific warning, not a silent fall-through to the generic fill-failure message"
+  );
+  const searchBody9 = act9.slice(act9.indexOf("export async function searchAutoEquipmentAction"), act9.indexOf("export async function saveGridIntakeAction"));
+  ok(
+    /searchAutoEquipmentAction\(query: string, rowKey: string\)/.test(act9) && searchBody9.includes("curtainSwapHits(") && searchBody9.includes("assemblySwapCandidates("),
+    "#GEM T8 fix wave 1 (I2/M1): the search action takes the row key and wires in the curtain and scope-matching helpers"
+  );
+
+  const fillSrc9 = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
+  ok(/compute\(\{[^}]*clampScopeInputs\(inputs\)/.test(fillSrc9), "#GEM T8 fix wave 1 (M2): the layout's compute() clamps scopeInputs the same way the cards do");
+
+  const ndbSrc9 = readFileSync(join(process.cwd(), "src/components/design/new-design-button.tsx"), "utf8");
+  ok(/\{error &&/.test(ndbSrc9) && !/title=\{error/.test(ndbSrc9), "#GEM T8 fix wave 1 (M3): a create failure renders inline, not only inside the title tooltip");
+
+  const intakeSrc9 = readFileSync(join(process.cwd(), `${dir9}/grid-intake.tsx`), "utf8");
+  ok(/preview\.error[^]*?Retry/.test(intakeSrc9), "#GEM T8 fix wave 1 (M5): the Equipment step offers a Retry when the preview fails");
+
+  const cardSrc9 = readFileSync(join(process.cwd(), `${dir9}/equipment-card.tsx`), "utf8");
+  ok(
+    cardSrc9.includes("reconcileQtyDraft(") &&
+      cardSrc9.startsWith('"use client"') &&
+      !gemValueImports(cardSrc9).some((m) => /\/auto-estimate$|\/equipment-pricing$|\/lib\/design\/equipment-map$|^@\/lib\/stores\/|^@\/db\//.test(m)),
+    "#GEM T8 fix wave 1 (M7): the card wires the reconciler in, still importing no pricing/store/DB value"
+  );
+}

@@ -3996,6 +3996,7 @@ async function main() {
     assert.equal(placed("lighting:par"), qtyOf("lighting:par"), "#GEM T8: every par the equations call for is on the plan");
     assert.equal(placed("curtains:draw"), qtyOf("curtains:draw"), "#GEM T8: every draw the equations call for is on the plan");
     assert.ok(autoPl.filter((pl) => pl.auto!.rowKey === "curtains:draw").every((pl) => pl.curtain?.fabricSku === "GEM8-VEL" && pl.curtain.type === "Draw"), "#GEM T8: draws are curtain drop-ins on the mapped fabric");
+    assert.ok(qtyOf("audio:lineArray") > 0, "#GEM T8 fix wave 1 (M4): the equations actually call for line-array boxes here, so the next check is a real guard, not a vacuous zero-equals-zero");
     assert.equal(placed("audio:lineArray"), 0, "#GEM T8: an unmapped row is never placed — no fallback dollar, no placeholder");
     assert.ok(autoPl.some((pl) => pl.partId === `asm:${rack.id}`) && autoPl.some((pl) => pl.partId === "allow:audio:subwoofer:better"), "#GEM T8: the System assembly and the allowance land as virtual parts");
     assert.ok(autoPl.every((pl) => pl.sheetId === p.sheetIds[0] && pl.optionId === opt), "#GEM T8: everything lands on the generated base sheet, in the current option");

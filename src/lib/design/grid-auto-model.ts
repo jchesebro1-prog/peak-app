@@ -142,3 +142,30 @@ export function autoEstimatesOf(raw: unknown, firstOptionId: string): AutoEstima
 export function autoEstimateFor(raw: unknown, optionId: string, firstOptionId: string): AutoEstimate | null {
   return autoEstimatesOf(raw, firstOptionId)[optionId] ?? null;
 }
+
+/* ---------------- client-safe UI helpers (#GEM fix wave 1, M7) ---------------- */
+
+/**
+ * The Equipment card's in-flight qty draft, reconciled against a fresh
+ * server re-price — pure, so it's testable without mounting the card, and
+ * safe for a client file to import as a VALUE (this module carries no
+ * pricing). A rowKey's typed text survives only while it still agrees with
+ * what the server now says that line's quantity is; a swap, a tier reset, or
+ * "Change equipment…" landing on the same project elsewhere can move a
+ * line's qty without going through this draft, and a row dropped from the
+ * card entirely drops out too. Returns the SAME object when nothing is
+ * stale, so a caller can skip its setState.
+ */
+export function reconcileQtyDraft(draft: Record<string, string>, lines: ReadonlyArray<{ rowKey: string; qty: number }>): Record<string, string> {
+  if (!Object.keys(draft).length) return draft;
+  const byRow = new Map(lines.map((l) => [l.rowKey, l.qty]));
+  let changed = false;
+  const next: Record<string, string> = {};
+  for (const [rowKey, raw] of Object.entries(draft)) {
+    const qty = byRow.get(rowKey);
+    const drafted = Math.max(0, Math.round(Number(raw) || 0));
+    if (qty !== undefined && qty === drafted) next[rowKey] = raw;
+    else changed = true;
+  }
+  return changed ? next : draft;
+}

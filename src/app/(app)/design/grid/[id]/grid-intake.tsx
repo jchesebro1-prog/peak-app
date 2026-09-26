@@ -229,6 +229,13 @@ export default function GridIntake({
           {step === 3 && (
             <>
               <EquipmentCards cards={preview.cards} estimate={estimate} onChange={changeEstimate} loading={preview.loading} error={preview.error} />
+              {preview.error && !preview.loading && (
+                <div style={{ marginTop: 10 }}>
+                  <button type="button" onClick={() => preview.run(scopeInputs, estimate)} style={ghost}>
+                    Retry
+                  </button>
+                </div>
+              )}
               {error && <div style={{ marginTop: 12, color: "#b4543a", fontSize: 12 }}>{error}</div>}
               {warning ? (
                 <div style={{ marginTop: 16, border: "1px solid #f0dcbb", background: "#fdf4e7", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, color: "#7a5a1c" }}>

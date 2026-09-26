@@ -18,7 +18,7 @@ import {
   type TierKey,
 } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_ROW_BY_KEY, type EquipPlace } from "./equipment-vocab";
-import { priceCell, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
+import { priceCell, sellFromCost, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
 import { applyEquipment } from "./equipment-pricing";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
 import type { AutoEstimate, AutoOverride } from "./grid-auto-model";
@@ -164,4 +164,52 @@ export function autoTargets(cards: Array<AutoCard | SellCard>): ScopeTargets {
   const out: ScopeTargets = {};
   for (const c of cards) out[c.scope] = { sell: c.total, needsPart: c.needsPart, allowances: c.allowances };
   return out;
+}
+
+/* ---------------- swap picker pure helpers (#GEM fix wave 1, I2/M1) ---------------- */
+
+export type AutoEquipHit = { kind: "part" | "assembly"; ref: string; desc: string; unit: string; unitSell: number };
+
+/**
+ * A curtain row's swap candidates (I2): a Fabric part is a candidate only
+ * when it has a positive area rate — a list-less, cost-less fabric priced
+ * only by area rate (the normal case) is still findable, and nothing here is
+ * ever an assembly (a curtain row maps to a Fabric part, never a System).
+ * The rate itself is shown as the unit sell basis: a fabric has no per-each
+ * sell price until a drape's geometry is known, so there is no cost-to-sell
+ * conversion to make here.
+ */
+export function curtainSwapHits(parts: ReadonlyArray<{ sku: string; desc: string; curtainAreaRate?: number }>): AutoEquipHit[] {
+  return parts
+    .filter((p) => Number(p.curtainAreaRate ?? 0) > 0)
+    .map((p) => ({ kind: "part", ref: p.sku, desc: p.desc, unit: "sq ft", unitSell: Number(p.curtainAreaRate) }));
+}
+
+/** A non-curtain row's part candidates: priced (a cost or a list), sell-only. */
+export function partSwapHits(
+  hits: ReadonlyArray<{ sku: string; desc: string; unit: string; cost: number; list: number }>,
+  margin: number
+): AutoEquipHit[] {
+  return hits
+    .filter((h) => h.cost > 0 || h.list > 0)
+    .map((h) => ({ kind: "part", ref: h.sku, desc: h.desc, unit: h.unit, unitSell: h.list > 0 ? h.list : sellFromCost(h.cost, margin) }));
+}
+
+/**
+ * Which fixtures/systems are swap candidates for a scope (M1): a System
+ * assembly only when its own scope matches the card's (`f.scope`, the
+ * capitalized SysKey label — "Lighting", "Audio", …); a Fixture assembly only
+ * on a Lighting row, the one scope where a bare light fixture is a sensible
+ * swap for an equation line.
+ */
+export function assemblySwapCandidates<F extends { kind: "fixture" | "system"; scope?: string }>(
+  fixtures: ReadonlyArray<F>,
+  scopeLabel: string
+): F[] {
+  return fixtures.filter((f) => (f.kind === "fixture" ? scopeLabel === "Lighting" : f.scope === scopeLabel));
+}
+
+/** A SysKey ("lighting") → the capitalized SystemScope label ("Lighting") a System assembly's `scope` field stores. */
+export function scopeLabelOf(scope: SysKey): string {
+  return scope.charAt(0).toUpperCase() + scope.slice(1);
 }
