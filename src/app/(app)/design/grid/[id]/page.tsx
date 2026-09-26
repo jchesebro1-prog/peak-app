@@ -4,6 +4,8 @@ import { can } from "@/lib/team";
 import { getProject, listSheets } from "@/lib/stores/grid-projects";
 import { resolveOptionId } from "@/lib/design/grid-options";
 import { list as listCatalog } from "@/lib/stores/catalog";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { allEngagements } from "@/lib/stores/engagements";
 import { isOpenEngagement } from "@/lib/consulting-review";
@@ -101,6 +103,13 @@ export default async function GridEditorPage({
 
   /** Client payload: sheets without re-serialization surprises + PartLite slice. */
   const pricingById = new Map(catalog.map((p) => [p.id, p]));
+  // #207: "has a datasheet" = a stored datasheet document of the part's own;
+  // the editor's link goes through /api/part-datasheet/<sku>, which bridges
+  // to the part-document viewer. loadPartDocsState runs the legacy backfill
+  // first, so a legacy blob is a document by now — and a replaced or
+  // detached legacy file no longer counts (final fix wave, I1).
+  const { index: docIndex } = await loadPartDocsState(catalog);
+  const hasDatasheetFile = (p: (typeof catalog)[number]) => ownFiles(docIndex, p.sku, "datasheet").length > 0;
   const parts: PartLite[] = gridSymbols.map((s) => {
     const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
     // Prefer the LIVE catalog part's ports over the grid_catalog symbol's
@@ -120,7 +129,7 @@ export default async function GridEditorPage({
       list: p?.list || 0,
       cost: p?.cost || 0,
       ...(ports.length > 0 ? { ports } : {}),
-      ...(p?.datasheetBlobKey ? { hasDatasheet: true } : {}),
+      ...(p && hasDatasheetFile(p) ? { hasDatasheet: true } : {}),
       // Category, icon/colour/shape overrides, Grid scope and the pricing
       // part's group/trade — the same builder the riser uses, so a device
       // draws the same badge on both (final fix wave #3).

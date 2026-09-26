@@ -11,6 +11,8 @@ import {
 import { Typeahead } from "@/components/search/typeahead";
 import { catalogFilter, catalogRank } from "@/lib/search/typeahead-rank";
 import { saveFixtureAssembliesAction } from "./actions";
+import { fixtureParentSku, pairKey, type MemberCoverage } from "@/lib/part-docs/assembly-graph";
+import MemberCoverageChip from "./member-coverage";
 
 /** The catalog slice the picker searches and shows (#121) — no cost. */
 export type Hit = { sku: string; desc: string; category: string; mfr: string; list: number };
@@ -32,7 +34,18 @@ const ROLE_SECTIONS: { role: AssemblyRole; label: string; multi: boolean }[] = [
   { role: "cable", label: "Safety cable", multi: true },
 ];
 
-export default function AssemblyBuilder({ initial, parts, priceDates }: { initial: FixtureAssembly[]; parts: Hit[]; priceDates: Record<string, number | null> }) {
+export default function AssemblyBuilder({
+  initial,
+  parts,
+  priceDates,
+  coverage,
+}: {
+  initial: FixtureAssembly[];
+  parts: Hit[];
+  priceDates: Record<string, number | null>;
+  /** #207 — each saved member's datasheet coverage, keyed by pairKey(). */
+  coverage: Record<string, MemberCoverage>;
+}) {
   const [assemblies, setAssemblies] = useState(initial);
   const [saved, setSaved] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -83,7 +96,18 @@ export default function AssemblyBuilder({ initial, parts, priceDates }: { initia
           <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
             {assembly.components.map((component, index) => (
               <div key={`${component.sku}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(160px,1.2fr) minmax(140px,1fr) 120px 90px 110px 84px", gap: 8, alignItems: "center" }}>
-                <div><div style={{ fontSize: 12.5, fontWeight: 650 }}>{component.sku}</div><div style={{ fontSize: 11, color: "#999fa9" }}>Catalog component</div></div>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 650 }}>{component.sku}</div>
+                  {component.role === "fixture" || !fixtureParentSku(assembly) ? (
+                    <div style={{ fontSize: 11, color: "#999fa9" }}>{component.role === "fixture" ? "Fixture — its datasheet covers the members" : "Catalog component"}</div>
+                  ) : (
+                    <MemberCoverageChip
+                      parentSku={fixtureParentSku(assembly)!}
+                      accessorySku={component.sku}
+                      coverage={coverage[pairKey(fixtureParentSku(assembly)!, component.sku)]}
+                    />
+                  )}
+                </div>
                 <input aria-label="Builder label" title="Name used in the estimator and BOM" value={component.label} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, label: event.target.value } : item) })} style={input} />
                 <select value={component.role} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, role: event.target.value as AssemblyRole } : item) })} style={input}>{ASSEMBLY_ROLES.map((role) => <option key={role}>{role}</option>)}</select>
                 <input aria-label="Default quantity" type="number" min="0" step="1" value={component.defaultQty} onChange={(event) => patch(assembly.id, { components: assembly.components.map((item, i) => i === index ? { ...item, defaultQty: Math.max(0, Number(event.target.value) || 0) } : item) })} style={input} />

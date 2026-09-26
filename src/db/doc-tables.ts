@@ -92,6 +92,9 @@ export const vendorProfiles = docTable("vendor_profiles"); // Vendors module (#1
 export const specArticles = docTable("spec_articles"); // Specs module (#205) — Part 2 category articles: manufacturers + the "A. General" clause; migration 0025_spec_library
 export const specTemplates = docTable("spec_templates"); // Specs module (#205) — per-category authoring formulas (headings + guidance + a worked example); migration 0025_spec_library
 export const specCurtainTemplates = docTable("spec_curtain_templates"); // Specs module (#205) — one document per Grid curtain type; migration 0025_spec_library
+export const partDocuments = docTable("part_documents"); // Part documents (#207) — shared datasheet/spec-sheet records, one file attached to many parts; migration 0026_part_documents
+export const partDocumentLinks = docTable("part_document_links"); // Part documents (#207) — one row per part↔document, soft-deleted to detach; migration 0026_part_documents
+export const partAccessoryLinks = docTable("part_accessory_links"); // Part documents (#207) — the fixture→accessory graph that computes accessory coverage; migration 0026_part_documents
 
 export const DOC_TABLES = {
   quotes,
@@ -126,6 +129,9 @@ export const DOC_TABLES = {
   spec_articles: specArticles,
   spec_templates: specTemplates,
   spec_curtain_templates: specCurtainTemplates,
+  part_documents: partDocuments,
+  part_document_links: partDocumentLinks,
+  part_accessory_links: partAccessoryLinks,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;

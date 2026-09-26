@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
@@ -66,6 +66,55 @@ export async function searchDocs<T extends Doc = Doc>(
     .orderBy(asc(t.id))
     .limit(limit);
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
+}
+
+/**
+ * Rows by id, live AND soft-deleted, each with its `deleted` flag — one
+ * statement per DOC_BATCH_CHUNK ids (#207 final fix wave: attachDocument's
+ * fan-out reads its deterministic link ids in one go instead of one getDoc
+ * per SKU). Missing ids are simply absent from the result.
+ */
+export async function getDocRows<T extends Doc = Doc>(
+  coll: CollectionName,
+  ids: readonly string[]
+): Promise<Array<{ id: string; deleted: boolean; doc: T }>> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (!unique.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const out: Array<{ id: string; deleted: boolean; doc: T }> = [];
+  for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
+    const rows = await db.select().from(t).where(inArray(t.id, unique.slice(i, i + DOC_BATCH_CHUNK)));
+    for (const r of rows) out.push({ id: r.id, deleted: r.deleted, doc: { ...(r.doc as T), id: r.id } });
+  }
+  return out;
+}
+
+/**
+ * Live rows whose top-level string field `field` is one of `values` —
+ * filtered in SQL (`doc->>field IN (…)`) so a per-request lookup (one SKU's
+ * links, a page of SKUs) never materializes the whole collection (#207
+ * final fix wave). `field` is a code constant, passed as a bound parameter.
+ */
+export async function listDocsByField<T extends Doc = Doc>(
+  coll: CollectionName,
+  field: string,
+  values: readonly string[]
+): Promise<T[]> {
+  const unique = [...new Set(values)].filter(Boolean);
+  if (!unique.length) return [];
+  const db = await getDb();
+  const t = table(coll);
+  const out: T[] = [];
+  for (let i = 0; i < unique.length; i += DOC_BATCH_CHUNK) {
+    const rows = await db
+      .select()
+      .from(t)
+      .where(and(eq(t.deleted, false), inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK))))
+      .orderBy(asc(t.id));
+    for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
+  }
+  return out;
 }
 
 export async function getDoc<T extends Doc = Doc>(
@@ -137,6 +186,159 @@ export async function insertDocIfAbsent<T extends Doc>(
     .onConflictDoNothing()
     .returning({ id: t.id });
   return rows.length > 0;
+}
+
+/* ---------- batched writes (#207 review fix wave 1) ----------
+ *
+ * Multi-row counterparts of upsertDoc / insertDocIfAbsent / softDeleteDoc for
+ * writers that hold thousands of rows at once (the DaVinci pre-fill writes
+ * ~360 documents, ~4k links and ~6.7k graph rows). One awaited statement per
+ * row is a network round trip per row on Neon — minutes, past Vercel's
+ * function limit. These write DOC_BATCH_CHUNK rows per statement instead.
+ *
+ * Per-row semantics are EXACTLY the single-row versions': the same columns
+ * and values, the same conflict clause, and every UPDATE still fires the
+ * table's `_seq_bump` BEFORE UPDATE trigger once per row (Postgres row
+ * triggers are per row, not per statement), so pull-sync's `seq > cursor`
+ * sees each change. Each chunk is one statement, so it is atomic on its own;
+ * the batch as a whole is not (neither is a loop of single-row calls).
+ *
+ * `shouldStop` is checked before every chunk (the first included) so a
+ * caller with a wall-clock budget can stop cleanly between chunks;
+ * `complete` says whether every chunk ran. Parameter count per statement is
+ * 7 × chunk (3,500 at 500) — well under Postgres's 65,535.
+ */
+
+export const DOC_BATCH_CHUNK = 500;
+
+export type DocBatchOpts = { chunkSize?: number; shouldStop?: () => boolean };
+export type DocBatchResult = { ids: string[]; complete: boolean };
+
+function chunksOf<T>(items: readonly T[], size: number): T[][] {
+  const n = Math.max(1, Math.floor(size) || DOC_BATCH_CHUNK);
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += n) out.push(items.slice(i, i + n));
+  return out;
+}
+
+/**
+ * insertDocIfAbsent for many rows: ON CONFLICT (id) DO NOTHING — an existing
+ * row (live or soft-deleted) is never touched. `ids` are the rows actually
+ * inserted. A duplicate id inside the batch behaves like two sequential
+ * calls: the first is inserted, the second is a no-op.
+ */
+export async function insertDocsIfAbsent<T extends Doc>(
+  coll: CollectionName,
+  docs: readonly T[],
+  opts: DocBatchOpts = {}
+): Promise<DocBatchResult> {
+  const db = await getDb();
+  const t = table(coll);
+  const ids: string[] = [];
+  for (const chunk of chunksOf(docs, opts.chunkSize ?? DOC_BATCH_CHUNK)) {
+    if (opts.shouldStop?.()) return { ids, complete: false };
+    const now = Date.now();
+    const rows = await db
+      .insert(t)
+      .values(
+        chunk.map((doc) => ({
+          id: doc.id,
+          doc: { ...doc },
+          rev: 1,
+          updatedAt: now,
+          receivedAt: now,
+          review: { state: "new" },
+          deleted: false,
+        }))
+      )
+      .onConflictDoNothing()
+      .returning({ id: t.id });
+    for (const r of rows) ids.push(r.id);
+  }
+  return { ids, complete: true };
+}
+
+/**
+ * upsertDoc for many rows: insert, or fully replace `doc`, bump rev, stamp
+ * updatedAt/receivedAt and revive a soft-deleted row (review untouched on
+ * replace). Postgres refuses one statement that updates the same row twice,
+ * so a duplicate id inside the batch keeps its LAST document (what a
+ * sequential loop leaves behind; rev is bumped once, not per duplicate).
+ * `ids` are every row written.
+ */
+export async function upsertDocs<T extends Doc>(
+  coll: CollectionName,
+  docs: readonly T[],
+  opts: DocBatchOpts = {}
+): Promise<DocBatchResult> {
+  const db = await getDb();
+  const t = table(coll);
+  const last = new Map<string, T>();
+  for (const d of docs) {
+    last.delete(d.id);
+    last.set(d.id, d);
+  }
+  const ids: string[] = [];
+  for (const chunk of chunksOf([...last.values()], opts.chunkSize ?? DOC_BATCH_CHUNK)) {
+    if (opts.shouldStop?.()) return { ids, complete: false };
+    const now = Date.now();
+    await db
+      .insert(t)
+      .values(
+        chunk.map((doc) => ({
+          id: doc.id,
+          doc: { ...doc },
+          rev: 1,
+          updatedAt: now,
+          receivedAt: now,
+          review: { state: "new" },
+          deleted: false,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: t.id,
+        set: {
+          doc: sql`excluded.doc`,
+          rev: sql`${t.rev} + 1`,
+          updatedAt: now,
+          receivedAt: now,
+          deleted: false,
+        },
+      });
+    for (const d of chunk) ids.push(d.id);
+  }
+  return { ids, complete: true };
+}
+
+/**
+ * softDeleteDoc for many ids: deleted:true, rev+1, updatedAt/receivedAt
+ * stamped — on whatever rows exist, already-deleted ones included (exactly
+ * what softDeleteDoc does). `ids` are the rows that matched.
+ */
+export async function softDeleteDocs(
+  coll: CollectionName,
+  ids: readonly string[],
+  opts: DocBatchOpts = {}
+): Promise<DocBatchResult> {
+  const db = await getDb();
+  const t = table(coll);
+  const done: string[] = [];
+  for (const chunk of chunksOf([...new Set(ids)], opts.chunkSize ?? DOC_BATCH_CHUNK)) {
+    if (opts.shouldStop?.()) return { ids: done, complete: false };
+    const now = Date.now();
+    const rows = await db
+      .update(t)
+      .set({
+        deleted: true,
+        rev: sql`${t.rev} + 1`,
+        updatedAt: now,
+        receivedAt: now,
+      })
+      .where(inArray(t.id, chunk))
+      .returning({ id: t.id });
+    for (const r of rows) done.push(r.id);
+  }
+  return { ids: done, complete: true };
 }
 
 /** Read-modify-write with rev bump; returns null if the doc doesn't exist. */

@@ -317,7 +317,7 @@ import { validateSameAs, optionalPartFields, specSortValue } from "@/app/(app)/c
 import { publicCatalogPart, catalogEtag } from "@/lib/displays-api";
 import { buildClientPackageManifest } from "@/lib/client-package";
 import {
-  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, hasDatasheet, coverageRows, filterCoverage, articleIdMapForParts,
+  ON_BOM_WINDOW_MS, skusFromQuoteSpec, skusOnBomSince, coverageRows, filterCoverage, articleIdMapForParts,
 } from "@/app/(app)/design/specs/coverage";
 
 let fail = 0;
@@ -10531,6 +10531,8 @@ seeded()
   .then(() => deletePartAAsyncChecks())
   .then(() => deletePartBAsyncChecks())
   .then(() => deleteRound2AsyncChecks())
+  .then(() => partDocsUploadAsyncChecks())
+  .then(() => partDocsFetchAsyncChecks())
   .then(() => gridSymbolLookAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -15688,12 +15690,11 @@ async function deletePartBAsyncChecks(): Promise<void> {
     { sku: "P4", desc: "Pointer", category: "Fixtures", specSameAs: "P1" },
     { sku: "P5", desc: "Unmapped", category: "Nothing" },
   ];
-  ok(hasDatasheet({ sku: "D1", docs: [{ kind: "datasheet" }] }), "coverage: a DaVinci datasheet link counts as a datasheet");
-  ok(!hasDatasheet({ sku: "D2", docs: [{ kind: "manual" }] }), "coverage: a manual alone is not a datasheet");
-  ok(hasDatasheet({ sku: "D3", productMetadata: { datasheets: [{ kind: "cut-sheet" }] } }), "coverage: a researched cut sheet counts");
-  ok(!hasDatasheet({ sku: "D4", productMetadata: { datasheets: [{ kind: "guide-spec" }] } }), "coverage: a guide spec alone is not a datasheet");
+  // #207: whether a part "has a datasheet" is the part-documents coverage
+  // rule's answer (datasheetSatisfiedSkus, tested in the #207 blocks); the
+  // table only reports the set it is handed. A link-only URL no longer counts.
   const articleIdBySku = articleIdMapForParts(parts as never, articles, sections);
-  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]));
+  const rows = coverageRows(parts as never, articleIdBySku, new Set(["P1", "P3"]), new Set(["P1"]));
   ok(rows.length === 5, "coverage: every part gets a row, mapped or not");
   ok(rows.find((r) => r.sku === "P1")!.state === "authored", "coverage: an authored part reads authored");
   ok(rows.find((r) => r.sku === "P2")!.state === "draft", "coverage: a draft reads draft, never authored");
@@ -16014,4 +16015,669 @@ async function gridSymbolLookAsyncChecks(): Promise<void> {
   const cleared = await GridCat.setGridSymbolLook(asm.id, { icon: null, color: null });
   ok(cleared?.icon === null && cleared?.color === null, "#206 store: null clears both back to the defaults");
   ok((await GridCat.setGridSymbolLook("GRID-NOPE-404", { color: "#000000" })) === null, "#206 store: an unknown entry returns null");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 1: document ids and blob paths. Pure.
+   ====================================================================== */
+import { newDocumentId, isDocumentId, partDocBlobPath, blobPathBelongsTo, safeDocFileName } from "@/lib/part-docs/types";
+
+{
+  const id = newDocumentId();
+  ok(/^PD-[0-9a-f]{12}$/.test(id) && isDocumentId(id) && newDocumentId() !== id, "part docs ids: PD- + 12 hex, random");
+  ok(!isDocumentId("PD-../x") && !isDocumentId("Q-2041") && !isDocumentId(null), "part docs ids: anything else is refused");
+  ok(safeDocFileName("ETC S4 / Datasheet (EN).pdf") === "ETC_S4_Datasheet_EN_.pdf" && safeDocFileName("") === "file", "part docs ids: file names are made path-safe");
+  ok(partDocBlobPath("PD-abcdef123456", "a b.pdf") === "part-docs/PD-abcdef123456/a_b.pdf", "part docs ids: the blob path is part-docs/<id>/<file>");
+  ok(blobPathBelongsTo("part-docs/PD-abcdef123456/a_b-Xy12.pdf", "PD-abcdef123456"), "part docs ids: a suffixed pathname under the id belongs to it");
+  ok(!blobPathBelongsTo("part-docs/PD-other123456/a.pdf", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/../x", "PD-abcdef123456") && !blobPathBelongsTo("part-docs/PD-abcdef123456/sub/x.pdf", "PD-abcdef123456"), "part docs ids: another document's path, traversal and nesting are refused");
+}
+
+/* ======================================================================
+   Part documents (#207) — Fix wave: blobPathBelongsTo tightened to a
+   strict file-segment allow-list (a blocklist of literal ".." and "/"
+   can be bypassed once @vercel/blob's `get` concatenates the pathname
+   into a URL — WHATWG parsing treats "\" as "/" and can percent-decode
+   "%2e%2e"/"%2f" before dot-segment removal). No test here calls Blob;
+   this is pure string-rule coverage of the tightened regex.
+   ====================================================================== */
+{
+  const ID = "PD-abcdef123456";
+  ok(!blobPathBelongsTo(`part-docs/${ID}/%2e%2e\\PD-000000000000/x.pdf`, ID), "part docs ids: an encoded-dot-dot + backslash traversal payload is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a%2Fb.pdf`, ID), "part docs ids: a percent-encoded slash in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a?.pdf`, ID), "part docs ids: a literal ? in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a#.pdf`, ID), "part docs ids: a literal # in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/a\\b.pdf`, ID), "part docs ids: a bare backslash in the file segment is refused");
+  ok(!blobPathBelongsTo(`part-docs/${ID}/ .pdf`, ID), "part docs ids: a space in the file segment is refused");
+  ok(blobPathBelongsTo(`part-docs/${ID}/guide-spec-ab12CD34.docx`, ID), "part docs ids: a legit Blob-suffixed file name is accepted");
+  ok(safeDocFileName(".hidden.pdf") === "hidden.pdf", "part docs ids: safeDocFileName strips a leading dot rather than leave one");
+  ok(blobPathBelongsTo(partDocBlobPath(ID, ".hidden.pdf"), ID) && blobPathBelongsTo(partDocBlobPath(ID, "...pdf"), ID), "part docs ids: whatever safeDocFileName produces always satisfies the strict segment rule, even from an all-dot name");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 2: the coverage rule, the quoted-parts
+   counter, the filename matcher and the kind guesser. All pure.
+   ====================================================================== */
+import {
+  buildCoverageIndex, slotCoverage, slotSatisfied, coveredLabel, collapseList, datasheetSatisfiedSkus, urlKindOf,
+  COVERED_COLLAPSE,
+} from "@/lib/part-docs/coverage";
+import { quoteLineSkus, quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
+import { buildFilenameIndex, matchFileName, guessKind, normalizeFileName, MIN_MATCH_KEY } from "@/lib/part-docs/filename-match";
+import type { PartDocument as PdDoc, PartDocumentLink as PdLink, PartAccessoryLink as PdAcc } from "@/lib/part-docs/types";
+
+{
+  const doc = (id: string, kind: "datasheet" | "specsheet", file: boolean, url: string | null = null): PdDoc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1,
+    blobKey: file ? `part-docs/${id}/${id}.pdf` : null, sourceUrl: url, source: file ? "upload" : "davinci",
+    uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const link = (partSku: string, d: PdDoc): PdLink => ({ id: `L-${partSku}-${d.id}`, partSku, documentId: d.id, kind: d.kind, createdAt: 1, createdBy: "t" });
+  const acc = (parentSku: string, accessorySku: string, ownDatasheet = false): PdAcc => ({ id: `A-${parentSku}-${accessorySku}`, parentSku, accessorySku, source: "assembly", ownDatasheet });
+
+  const F1 = doc("PD-fix1aaaaaaa", "datasheet", true);
+  const F2 = doc("PD-fix2aaaaaaa", "datasheet", true);
+  const LENS = doc("PD-lensaaaaaaa", "datasheet", true);
+  const LINK = doc("PD-linkaaaaaaa", "datasheet", false, "https://example.com/x.pdf");
+  const SPEC = doc("PD-specaaaaaaa", "specsheet", true);
+  const index = buildCoverageIndex({
+    documents: [F1, F2, LENS, LINK, SPEC],
+    links: [link("FIX1", F1), link("FIX1", SPEC), link("FIX2", F2), link("LENSOWN", LENS), link("LINKY", LINK), link("FIX1", F1)],
+    accessoryLinks: [
+      acc("FIX1", "LENS"), acc("FIX2", "LENS"), acc("FIX1", "CLAMP"), acc("FIX1", "LENSOWN"),
+      acc("FIX1", "OPTOUT", true), acc("NODOC", "ORPHAN"), acc("FIX1", "FIX1"),
+    ],
+    parts: [
+      { sku: "NN", docNotNeeded: { datasheet: true } },
+      { sku: "URLONLY", docs: [{ kind: "datasheet", url: "https://etc.example/ds.pdf" }, { kind: "manual", url: "https://etc.example/m.pdf" }] },
+      { sku: "GUIDE", productMetadata: { datasheets: [{ kind: "guide-spec", sourceUrl: "https://mfr.example/guide.docx" }] } },
+      { sku: "LINKY", docs: [{ kind: "datasheet", url: "https://example.com/x.pdf" }] },
+    ],
+  });
+
+  // 1. own
+  const own = slotCoverage(index, "FIX1", "datasheet");
+  ok(own.state === "own" && own.docs.length === 1, "part docs coverage: an own file is 'own' (a duplicate link row counts once)");
+  ok(slotCoverage(index, "FIX1", "specsheet").state === "own", "part docs coverage: kinds are independent slots");
+  // 2. not needed
+  ok(slotCoverage(index, "NN", "datasheet").state === "not-needed", "part docs coverage: a not-needed mark satisfies its kind");
+  ok(slotCoverage(index, "NN", "specsheet").state === "missing", "part docs coverage: …and only its kind");
+  // 3. covered
+  const lens = slotCoverage(index, "LENS", "datasheet");
+  ok(lens.state === "covered" && lens.parents.join(",") === "FIX1,FIX2" && lens.docs.length === 2, "part docs coverage: an accessory is covered by every parent's own datasheet, N = distinct parent documents");
+  ok(slotCoverage(index, "LENSOWN", "datasheet").state === "own", "part docs coverage: an accessory's own file wins over coverage");
+  ok(slotCoverage(index, "OPTOUT", "datasheet").state === "missing", "part docs coverage: an ownDatasheet pair never covers");
+  ok(slotCoverage(index, "ORPHAN", "datasheet").state === "missing", "part docs coverage: a parent without a file covers nothing");
+  ok(slotCoverage(index, "CLAMP", "specsheet").state === "covered", "part docs coverage: spec sheets ride the same graph");
+  ok(slotCoverage(index, "FIX1", "datasheet").state === "own" && !index.parentsOf.has("FIX1"), "part docs coverage: a self-link is dropped");
+  // context
+  const inQuote = slotCoverage(index, "LENS", "datasheet", new Set(["LENS", "FIX2"]));
+  ok(inQuote.state === "covered" && inQuote.parents.join(",") === "FIX2", "part docs coverage: in a quote only parents on that quote cover");
+  ok(slotCoverage(index, "LENS", "datasheet", new Set(["LENS"])).state === "missing", "part docs coverage: an accessory quoted without any fixture is not covered on that quote");
+  // 4. link only
+  const urlOnly = slotCoverage(index, "URLONLY", "datasheet");
+  ok(urlOnly.state === "link-only" && urlOnly.urls.join(",") === "https://etc.example/ds.pdf", "part docs coverage: a catalog datasheet URL is link-only (a manual is not)");
+  ok(slotCoverage(index, "GUIDE", "specsheet").state === "link-only", "part docs coverage: a Guide Spec URL feeds the spec-sheet slot");
+  const linky = slotCoverage(index, "LINKY", "datasheet");
+  ok(linky.state === "link-only" && linky.docs.length === 1 && linky.urls.length === 0, "part docs coverage: a URL already on a linked document is not listed twice");
+  // 5. missing
+  ok(slotCoverage(index, "NOTHING", "datasheet").state === "missing", "part docs coverage: nothing at all is missing");
+  // helpers
+  ok(slotSatisfied(own) && slotSatisfied(lens) && !slotSatisfied(urlOnly) && !slotSatisfied({ state: "missing" }), "part docs coverage: own/covered satisfy, link-only/missing do not");
+  ok(slotSatisfied({ state: "not-needed" }), "part docs coverage: not-needed satisfies");
+  const sat = datasheetSatisfiedSkus(index, ["FIX1", "LENS", "URLONLY", "NN", "NOTHING"]);
+  ok([...sat].sort().join(",") === "FIX1,LENS,NN", "part docs coverage: datasheetSatisfiedSkus applies the rule, link-only excluded");
+  ok(COVERED_COLLAPSE === 5, "part docs coverage: the covered list collapses above 5");
+  const c = collapseList([1, 2, 3, 4, 5, 6, 7]);
+  ok(c.shown.length === 5 && c.more === 2 && collapseList([1, 2]).more === 0, "part docs coverage: collapseList shows 5 and counts the rest");
+  ok(coveredLabel(1, "datasheet") === "Covered on 1 fixture datasheet" && coveredLabel(3, "specsheet") === "Covered on 3 fixture spec sheets", "part docs coverage: the covered label pluralizes");
+  ok(urlKindOf("cut-sheet") === "datasheet" && urlKindOf("guide-spec") === "specsheet" && urlKindOf("manual") === null, "part docs coverage: URL kinds map to slots");
+}
+
+{
+  ok(quoteLineSkus({ sections: [{ kind: "labor", items: [{ sku: "LAB" }] }, { items: [{ sku: "A" }, { sku: "A" }, { sku: "MOB", labor: true }, { sku: " B " }] }] }).join(",") === "A,B", "part docs quoted: labor sections and labor lines are skipped, SKUs are distinct and trimmed");
+  ok(quoteLineSkus({ kind: "grid", lines: [{ sku: "G1" }, {}] }).join(",") === "G1", "part docs quoted: the Grid's flat lines count");
+  ok(quoteLineSkus(null).length === 0 && quoteLineSkus("junk").length === 0, "part docs quoted: junk yields nothing");
+
+  const catalog = new Set(["A", "B", "C", "G", "S"]);
+  const stats = quotedPartStats(
+    {
+      quotes: [
+        { updatedAt: 100, status: "lost", spec: { sections: [{ items: [{ sku: "A" }, { sku: "B" }] }] } },
+        { createdAt: 300, spec: { sections: [{ items: [{ sku: "A" }, { sku: "A" }, { sku: "NOT-IN-CATALOG" }] }] } },
+        { updatedAt: 1, spec: { kind: "grid", lines: [{ sku: "C" }] } },
+      ],
+      gridProjects: [
+        { placements: [{ partId: "G" }, { partId: "G" }, { partId: "A" }, { partId: "CURT", curtain: { type: "Border" } }] },
+        { placements: [{ partId: "G" }] },
+      ],
+      generated: [{ bom: [{ sku: "S" }] }, { rows: [{ row: { sku: "S" } }, { row: { sku: "S" } }] }],
+    },
+    (sku) => catalog.has(sku)
+  );
+  ok(stats.get("A")?.quotes === 2 && stats.get("A")?.lastQuotedAt === 300, "part docs quoted: quotes of any status count once each; lastQuotedAt is the newest");
+  ok(stats.get("A")?.grid === 1 && stats.get("G")?.grid === 2 && stats.get("G")?.quotes === 0, "part docs quoted: Grid placements count once per project");
+  ok(stats.get("S")?.bidSpecs === 2, "part docs quoted: both bid-spec shapes count, once per spec");
+  ok(!stats.has("NOT-IN-CATALOG") && !stats.has("CURT"), "part docs quoted: only catalog parts, never a curtain placement");
+  const ranked = rankQuotedParts(stats.values()).map((s) => s.sku);
+  ok(ranked.join(",") === "A,B,C,G,S", "part docs quoted: most-quoted first, then Grid/bid-spec use, then SKU");
+}
+
+{
+  const idx = buildFilenameIndex([
+    { sku: "ETC:S4LED-S3-LUSTR", manufacturerModelNumber: "S4LED S3 Lustr" },
+    { sku: "ETC:S4LED", manufacturerPartNumber: "7460A1001" },
+    { sku: "450" },
+    { sku: "DUP-A", manufacturerPartNumber: "SHARED-99" },
+    { sku: "DUP-B", manufacturerPartNumber: "SHARED-99" },
+  ]);
+  ok(MIN_MATCH_KEY === 4 && !idx.keys.has("450"), "part docs filenames: keys under 4 characters are never indexed");
+  ok(normalizeFileName("folder/S4LED-S3 Lustr_Datasheet.pdf") === "S4LEDS3LUSTRDATASHEET", "part docs filenames: path, extension and punctuation are dropped");
+  const long = matchFileName("S4LED-S3-Lustr_Datasheet.pdf", idx);
+  ok(long.confidence === "high" && long.skus.join(",") === "ETC:S4LED-S3-LUSTR", "part docs filenames: the longest match wins over a shorter prefix");
+  const pn = matchFileName("7460A1001 spec.pdf", idx);
+  ok(pn.confidence === "high" && pn.skus.join(",") === "ETC:S4LED", "part docs filenames: a MFR P/N matches");
+  const amb = matchFileName("shared_99.pdf", idx);
+  ok(amb.confidence === "ambiguous" && amb.skus.join(",") === "DUP-A,DUP-B", "part docs filenames: one key on two parts is ambiguous");
+  ok(matchFileName("brochure.pdf", idx).confidence === "none", "part docs filenames: nothing found is none");
+  ok(guessKind("S4LED Guide Spec.pdf") === "specsheet" && guessKind("x-specification.PDF") === "specsheet", "part docs kind: spec/guide/specification → spec sheet");
+  ok(guessKind("anything.docx") === "specsheet" && guessKind("anything.DOC") === "specsheet", "part docs kind: Word → spec sheet");
+  ok(guessKind("S4LED Datasheet.pdf") === "datasheet", "part docs kind: everything else → datasheet");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 4: magic bytes and the upload check.
+   verifyUploadedBlob runs against fake Blob deps — no token, no network.
+   ====================================================================== */
+import {
+  sniffDocumentType, checkDocumentBytes, contentDisposition, contentTypeForFileName, acceptFor, CONTENT_TYPES,
+} from "@/lib/part-docs/files";
+import { verifyUploadedBlob, displayFileName } from "@/lib/part-docs/verify-upload";
+
+const pdDocBytes = (s: string, pad = 0) => new Uint8Array([...new Array(pad).fill(0x20), ...[...s].map((c) => c.charCodeAt(0))]);
+const pdDocx = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."[Content_Types].xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."word/document.xml"].map((c) => c.charCodeAt(0)), 60);
+  return b;
+};
+// A ZIP that names a word/ path but is not an OOXML package at all (no
+// [Content_Types].xml) — Fix wave: requiring both markers must still
+// refuse this, not just a plain non-Word ZIP like pdXlsx below.
+const pdWordLikeZipNotOoxml = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."word/not-really-office.txt"].map((c) => c.charCodeAt(0)), 30);
+  return b;
+};
+const pdXlsx = () => {
+  const b = new Uint8Array(200);
+  b.set([0x50, 0x4b, 0x03, 0x04], 0);
+  b.set([..."[Content_Types].xml"].map((c) => c.charCodeAt(0)), 30);
+  b.set([..."xl/workbook.xml"].map((c) => c.charCodeAt(0)), 60);
+  return b;
+};
+const pdOle = () => new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
+
+ok(sniffDocumentType(pdDocBytes("%PDF-1.7\n")) === "pdf", "part docs bytes: %PDF- is a PDF");
+ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 500)) === "pdf", "part docs bytes: %PDF- after leading junk (inside 1 KB) is still a PDF");
+ok(sniffDocumentType(pdDocBytes("%PDF-1.4", 2000)) === null, "part docs bytes: …but not past the first 1 KB");
+ok(sniffDocumentType(pdOle()) === "doc", "part docs bytes: the OLE2 magic is a Word .doc");
+ok(sniffDocumentType(pdDocx()) === "docx", "part docs bytes: a ZIP naming both [Content_Types].xml and word/ is a .docx");
+ok(sniffDocumentType(pdXlsx()) === null, "part docs bytes: a ZIP that is not Word is refused");
+ok(sniffDocumentType(pdWordLikeZipNotOoxml()) === null, "part docs bytes: a ZIP naming word/ WITHOUT [Content_Types].xml (not really OOXML) is refused");
+ok(sniffDocumentType(pdDocBytes("<!DOCTYPE html><html>")) === null, "part docs bytes: an HTML error page is refused");
+const pdCheck = checkDocumentBytes("datasheet", pdDocx());
+ok(!pdCheck.ok && pdCheck.error === "Datasheets must be PDF files.", "part docs bytes: a datasheet slot refuses Word");
+ok(checkDocumentBytes("specsheet", pdDocx()).ok && checkDocumentBytes("specsheet", pdOle()).ok, "part docs bytes: a spec-sheet slot takes Word");
+ok(contentTypeForFileName("A.DOCX") === CONTENT_TYPES.docx && contentTypeForFileName("a.pdf") === "application/pdf", "part docs bytes: content type by name for history files");
+ok(contentDisposition('Ünïcode "x".pdf') === `inline; filename="_n_code _x_.pdf"; filename*=UTF-8''${encodeURIComponent('Ünïcode "x".pdf')}`, "part docs bytes: the disposition carries an ASCII fallback and the UTF-8 name");
+ok(acceptFor("datasheet") === ".pdf,application/pdf" && acceptFor("specsheet").includes(".docx"), "part docs bytes: the file picker accept list follows the slot");
+ok(displayFileName("S4 Datasheet", "pdf") === "S4 Datasheet.pdf" && displayFileName("guide.PDF", "pdf") === "guide.PDF" && displayFileName("guide.pdf", "docx") === "guide.docx", "part docs bytes: the display name ends in the real extension");
+
+async function partDocsUploadAsyncChecks(): Promise<void> {
+  const removed: string[] = [];
+  const fake = (bytes: Uint8Array | null, size = 1000) => ({
+    head: async () => (bytes ? { bytes, size } : null),
+    remove: async (p: string) => { removed.push(p); },
+  });
+  const ID = "PD-abcdef123456";
+  const good = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/ds-Ab12.pdf`, fileName: "ds.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7")));
+  ok(good.ok && good.file.blobKey === `part-docs/${ID}/ds-Ab12.pdf` && good.file.size === 1000 && good.file.contentType === "application/pdf", "part docs upload: a real PDF under its own path is accepted");
+  const foreign = await verifyUploadedBlob({ documentId: ID, blobPathname: "part-docs/PD-000000000000/x.pdf", fileName: "x.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7")));
+  ok(!foreign.ok && removed.length === 0, "part docs upload: another document's pathname is refused without touching it");
+  const missing = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, fake(null));
+  ok(!missing.ok && missing.error.includes("didn't arrive"), "part docs upload: a blob that isn't there is refused");
+  const html = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, fake(pdDocBytes("<html>")));
+  ok(!html.ok && removed.includes(`part-docs/${ID}/x.pdf`), "part docs upload: a file that is not a PDF is refused and its blob deleted");
+  const big = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/big.pdf`, fileName: "big.pdf", kind: "datasheet" }, fake(pdDocBytes("%PDF-1.7"), 26 * 1024 * 1024));
+  ok(!big.ok && big.error === "That file is over 25 MB.", "part docs upload: over 25 MB is refused");
+  const word = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/g.docx`, fileName: "Guide Spec.docx", kind: "specsheet" }, fake(pdDocx()));
+  ok(word.ok && word.file.contentType === CONTENT_TYPES.docx && word.file.fileName === "Guide Spec.docx", "part docs upload: a Word spec sheet is accepted");
+
+  // Fix wave: a Blob read failure (network, BlobError, …) is not "never
+  // arrived" and must never leak the vendor's own error text.
+  const blobDown = {
+    head: async () => { throw new Error("BlobError: fetch failed, connect ECONNREFUSED 127.0.0.1:443"); },
+    remove: async (p: string) => { removed.push(p); },
+  };
+  const readFailure = await verifyUploadedBlob({ documentId: ID, blobPathname: `part-docs/${ID}/x.pdf`, fileName: "x.pdf", kind: "datasheet" }, blobDown);
+  ok(!readFailure.ok && readFailure.error === "Couldn't read the uploaded file — try again", "part docs upload: a Blob read failure is refused with a generic message, not the vendor's own text");
+}
+
+/* ======================================================================
+   Part documents (#207) — Fix wave 2, security re-review: the fix-wave-1
+   orphan cleanup itself opened a hole. attachUploadedDocumentAction's two
+   early refusals (bad kind, no live SKUs) called cleanupOrphan(documentId,
+   blobPathname) BEFORE the "does this document already exist" check —
+   `blobPathBelongsTo` only proves the pathname sits under
+   `part-docs/<documentId>/…`, not that it's the CALLER's own new upload.
+   Any signed-in user can read an existing document's real blobKey (or a
+   history entry's) through sync pull, then call the action with that
+   existing documentId, that real blobPathname, and a deliberately bad
+   kind — the live file was deleted before the exists-check ever ran.
+
+   requireUser() throws outside a request scope (same constraint used
+   throughout this suite — see refusedAdvanceAsyncChecks,
+   estimatorUpdateStatusGateAsyncChecks above), so
+   attachUploadedDocumentAction itself can't be called from this harness.
+   Proven structurally instead, the same way #180/#181 above prove their
+   server-action fixes: read the source, and confirm (a) neither early
+   refusal can reach a delete, and (b) the only code that CAN delete an
+   uploaded blob (verifyUploadedBlob's own refusal path) is positioned
+   strictly after the exists-check in source order, so it is unreachable
+   until the document is confirmed new.
+   ====================================================================== */
+{
+  const docActionsSrc = readFileSync(
+    join(process.cwd(), "src/app/(app)/catalog/documents/actions.ts"),
+    "utf8"
+  );
+  // `\(` (not a bare word match) so these don't trip on the prose above
+  // explaining what used to be here — they check for an actual function
+  // definition or call, not a mention in a comment.
+  ok(!/cleanupOrphan\(/.test(docActionsSrc), "part docs actions: the vulnerable cleanupOrphan helper (and every call to it) is gone, not just unused");
+  ok(!/deleteBlob\(/.test(docActionsSrc), "part docs actions: this file never calls deleteBlob directly — the only blob delete anywhere in the upload path is verifyUploadedBlob's own gated refusal");
+
+  const fnStart = docActionsSrc.indexOf("export async function attachUploadedDocumentAction");
+  const fnEnd = docActionsSrc.indexOf("\nexport async function replaceDocumentFileAction");
+  ok(fnStart >= 0 && fnEnd > fnStart, "part docs actions fixture: attachUploadedDocumentAction is still where the test expects it");
+  const fnBody = docActionsSrc.slice(fnStart, fnEnd);
+
+  const existsCheckAt = fnBody.indexOf("await getDocument(input.documentId)");
+  const verifyCallAt = fnBody.indexOf("await verifyUploadedBlob(input)");
+  ok(existsCheckAt >= 0 && verifyCallAt >= 0, "part docs actions fixture: both the exists-check and the verifyUploadedBlob call are still present");
+  ok(verifyCallAt > existsCheckAt, "part docs actions: verifyUploadedBlob (the only call in this function that can delete a blob) runs strictly AFTER the exists-check — unreachable while the document already exists");
+
+  const beforeExistsCheck = fnBody.slice(0, existsCheckAt);
+  ok(!/verifyUploadedBlob\(|deleteBlob\(|cleanupOrphan\(/.test(beforeExistsCheck), "part docs actions: nothing before the exists-check can touch Blob at all — the bad-kind and no-live-SKU refusals just return {ok:false}");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 5: the guarded fetcher. A fake fetch and
+   IP-literal hosts keep every case offline (a public literal IP needs no
+   DNS; a private one is refused before any request).
+   ====================================================================== */
+import { fetchDocumentBytes } from "@/lib/part-docs/fetch";
+import { fileNameForFetched } from "@/lib/part-docs/files";
+
+ok(fileNameForFetched(`attachment; filename="S4 LED.pdf"`, "https://x.example/a", "t", "pdf") === "S4 LED.pdf", "part docs fetch names: Content-Disposition filename wins");
+ok(fileNameForFetched(`attachment; filename*=UTF-8''Gu%C3%ADa.pdf`, "https://x.example/a", "t", "pdf") === "Guía.pdf", "part docs fetch names: the RFC 5987 name is decoded");
+ok(fileNameForFetched(null, "https://x.example/docs/S4_Datasheet.pdf?v=2", "t", "pdf") === "S4_Datasheet.pdf", "part docs fetch names: else the URL's file name");
+ok(fileNameForFetched(null, "https://www.etcconnect.com/WorkArea/DownloadAsset.aspx?id=1", "Source Four LED", "pdf") === "Source Four LED.pdf", "part docs fetch names: an .aspx endpoint falls back to the title");
+ok(fileNameForFetched(`inline; filename="guide.pdf"`, "https://x.example/a", "t", "docx") === "guide.docx", "part docs fetch names: the extension follows the real bytes");
+
+async function partDocsFetchAsyncChecks(): Promise<void> {
+  const pdf = new TextEncoder().encode("%PDF-1.7\n...");
+  const calls: string[] = [];
+  const fakeFetch = (routes: Record<string, () => Response>) =>
+    (async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      const r = routes[url];
+      return r ? r() : new Response("nope", { status: 404 });
+    }) as typeof fetch;
+  const neverUnsafe = async () => false;
+
+  const scheme = await fetchDocumentBytes("file:///etc/passwd");
+  ok(!scheme.ok && scheme.error === "Only http(s) links can be fetched.", "part docs fetch: a non-http scheme is refused");
+  const loop = await fetchDocumentBytes("http://127.0.0.1/x.pdf", { fetchImpl: fakeFetch({}) });
+  ok(!loop.ok && calls.length === 0, "part docs fetch: a loopback literal is refused before any request (venue-calendar guard)");
+  const meta = await fetchDocumentBytes("http://169.254.169.254/latest", { fetchImpl: fakeFetch({}) });
+  ok(!meta.ok && calls.length === 0, "part docs fetch: the cloud metadata address is refused");
+
+  const hop = await fetchDocumentBytes("http://93.184.216.34/ds.pdf", {
+    fetchImpl: fakeFetch({ "http://93.184.216.34/ds.pdf": () => new Response(null, { status: 302, headers: { location: "http://10.0.0.5/ds.pdf" } }) }),
+  });
+  ok(!hop.ok && !calls.includes("http://10.0.0.5/ds.pdf"), "part docs fetch: a redirect to a private address is refused and never requested");
+
+  const rebind = await fetchDocumentBytes("https://docs.example.com/ds.pdf", { fetchImpl: fakeFetch({}), isUnsafeHost: async () => true });
+  ok(!rebind.ok && rebind.error === "That host isn't reachable from the server.", "part docs fetch: a hostname resolving to a private address is refused");
+
+  const good = await fetchDocumentBytes("http://93.184.216.34/a", {
+    isUnsafeHost: neverUnsafe,
+    fetchImpl: fakeFetch({
+      "http://93.184.216.34/a": () => new Response(null, { status: 301, headers: { location: "/files/ds.pdf" } }),
+      "http://93.184.216.34/files/ds.pdf": () => new Response(pdf, { status: 200, headers: { "content-disposition": 'attachment; filename="ds.pdf"' } }),
+    }),
+  });
+  ok(good.ok && good.file.finalUrl === "http://93.184.216.34/files/ds.pdf" && good.file.bytes.byteLength === pdf.byteLength && good.file.contentDisposition!.includes("ds.pdf"), "part docs fetch: a relative redirect is re-validated, followed, and the bytes returned");
+
+  const big = await fetchDocumentBytes("http://93.184.216.34/big", {
+    isUnsafeHost: neverUnsafe,
+    maxBytes: 4,
+    fetchImpl: fakeFetch({ "http://93.184.216.34/big": () => new Response(pdf, { status: 200 }) }),
+  });
+  ok(!big.ok && big.error === "That file is over 25 MB.", "part docs fetch: the streaming size cap refuses an oversized body");
+  const missing = await fetchDocumentBytes("http://93.184.216.34/404", { isUnsafeHost: neverUnsafe, fetchImpl: fakeFetch({}) });
+  ok(!missing.ok && missing.error === "The link returned HTTP 404.", "part docs fetch: an HTTP error is reported with its status");
+  const loops = await fetchDocumentBytes("http://93.184.216.34/r0", {
+    isUnsafeHost: neverUnsafe,
+    fetchImpl: (async (input: string | URL | Request) => {
+      const n = Number(String(input).split("/r").pop()) + 1;
+      return new Response(null, { status: 302, headers: { location: `/r${n}` } });
+    }) as typeof fetch,
+  });
+  ok(!loops.ok && loops.error === "Too many redirects.", "part docs fetch: a redirect loop stops");
+
+  // Review fix wave 1, M7(c): a body that never finishes must be refused by
+  // the timeout, not hang the request forever. The fake response's stream
+  // only ever settles when the AbortController's signal fires — exactly
+  // what guardedFetchBytes's timer drives — so this proves the timeout
+  // actually tears down an in-progress body read, not just a pre-body wait.
+  const slow = await fetchDocumentBytes("http://93.184.216.34/slow", {
+    isUnsafeHost: neverUnsafe,
+    timeoutMs: 20,
+    fetchImpl: (async (_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch,
+  });
+  ok(!slow.ok && slow.error === "The link took too long to respond.", "part docs fetch: a slow body hitting the timeout is refused, not left hanging");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 6: the to-do list's view models and the
+   "Also covers…" suggestions. Pure.
+   ====================================================================== */
+import {
+  documentRow, documentRowMatches, parseDocumentsFilter, progressLine, slotViewFor, viewSatisfied, type DocumentRow,
+} from "@/lib/part-docs/views";
+import { alsoCoversSuggestions, commonPrefixLength, familyKey, isSameFamily } from "@/lib/part-docs/suggest";
+
+{
+  const docs: PdDoc[] = [
+    { id: "PD-ownaaaaaaaa", kind: "datasheet", title: "Own", fileName: "own.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-ownaaaaaaaa/own.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] },
+    { id: "PD-failaaaaaaa", kind: "datasheet", title: "Broken", fileName: "b.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: "https://x.example/b.pdf", source: "fetch", uploadedAt: 1, uploadedBy: "t", history: [], lastFetch: { at: 9, ok: false, error: "HTTP 404" } },
+  ];
+  const idx = buildCoverageIndex({
+    documents: docs,
+    links: [
+      { id: "l1", partSku: "FIXV", documentId: "PD-ownaaaaaaaa", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "l2", partSku: "LINKV", documentId: "PD-failaaaaaaa", kind: "datasheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [{ id: "a", parentSku: "FIXV", accessorySku: "LENSV", source: "assembly" }],
+    parts: [],
+  });
+  const descOf = (s: string) => ({ FIXV: "Fixture V" } as Record<string, string>)[s] ?? "";
+  const covered = slotViewFor(idx, "LENSV", "datasheet", descOf);
+  ok(covered.state === "covered" && covered.parents[0].desc === "Fixture V", "part docs views: a covered slot names its parents with descriptions");
+  const linkOnly = slotViewFor(idx, "LINKV", "datasheet", descOf);
+  ok(linkOnly.state === "link-only" && linkOnly.error === "HTTP 404", "part docs views: a link-only slot carries the last fetch failure");
+  ok(viewSatisfied(covered) && !viewSatisfied(linkOnly), "part docs views: satisfied matches the coverage rule");
+
+  const stat = (sku: string, quotes: number) => ({ sku, quotes, lastQuotedAt: 5, grid: 0, bidSpecs: 0 });
+  const rows: DocumentRow[] = [
+    documentRow(stat("FIXV", 9), { sku: "FIXV", desc: "Fixture V", category: "Lighting", mfr: "ETC", manufacturerModelNumber: "S4V" }, idx, descOf),
+    documentRow(stat("LENSV", 4), { sku: "LENSV", desc: "Lens V", category: "Lenses", mfr: "ETC" }, idx, descOf),
+    documentRow(stat("LINKV", 2), { sku: "LINKV", desc: "Link V", category: "Lighting", mfr: "Altman" }, idx, descOf),
+    documentRow(stat("NONEV", 1), { sku: "NONEV", desc: "None V", category: "Lighting", mfr: "Altman" }, idx, descOf),
+  ];
+  ok(rows[0].model === "S4V" && rows[0].datasheet.state === "own" && rows[0].specsheet.state === "missing", "part docs views: a row carries both slots");
+  const f = (sp: Record<string, string>) => rows.filter((r) => documentRowMatches(r, parseDocumentsFilter(sp))).map((r) => r.sku).join(",");
+  ok(f({}) === "FIXV,LENSV,LINKV,NONEV", "part docs views: no filter keeps every quoted part");
+  ok(f({ show: "missing-datasheet" }) === "LINKV,NONEV", "part docs views: missing datasheet = link-only or missing");
+  ok(f({ show: "link" }) === "LINKV" && f({ show: "covered" }) === "LENSV", "part docs views: link and covered filters");
+  ok(f({ mfr: "Altman", q: "none" }) === "NONEV" && f({ cat: "Lenses" }) === "LENSV", "part docs views: manufacturer, category and search compose");
+  ok(parseDocumentsFilter({ show: "bogus" }).show === "all", "part docs views: an unknown show falls back to all");
+  ok(progressLine(rows, "datasheet") === "2 of 4 quoted parts have a datasheet", "part docs views: the progress line counts satisfied slots");
+}
+
+{
+  ok(familyKey({ sku: "ETC:S4LED-S3-L", manufacturerModelNumber: "" }) === "S4LEDS3L", "part docs suggest: the family key is the normalized model, else SKU");
+  ok(commonPrefixLength("S4LEDS3LUSTR", "S4LEDS3DAYLT") === 7, "part docs suggest: common prefix");
+  ok(isSameFamily("S4LEDS3LUSTR", "S4LEDS3DAYLT") && !isSameFamily("S4LED", "S4PAR") && !isSameFamily("ABCDEFGHIJKL", "ABCDEZZZZZZZ"), "part docs suggest: family needs ≥5 shared and at least half the shorter key");
+  const parts = [
+    { sku: "S4LED-S3-LUSTR", desc: "Lustr", mfr: "ETC" },
+    { sku: "S4LED-S3-DAYLT", desc: "Daylight", mfr: "ETC" },
+    { sku: "S4LED-S3-TUNGS", desc: "Tungsten", mfr: "E.T.C." },
+    { sku: "S4LED-S3-OTHER", desc: "Other brand", mfr: "Altman" },
+    { sku: "LENS-19", desc: "19 deg lens", mfr: "ETC" },
+    { sku: "S4PAR", desc: "PAR", mfr: "ETC" },
+  ];
+  const s = alsoCoversSuggestions(parts[0], parts, ["LENS-19", "GHOST"], new Set(["S4LED-S3-TUNGS"]));
+  ok(s.map((x) => `${x.sku}:${x.reason}`).join(",") === "LENS-19:accessory,S4LED-S3-DAYLT:family", "part docs suggest: accessories first, then same-manufacturer family; linked, other-brand and unrelated parts are left out");
+  ok(alsoCoversSuggestions(parts[0], parts, [], new Set(), 1).length === 1, "part docs suggest: the list is capped");
+}
+
+/* --- Part documents (#207) — Task 7: bulk-drop review rows --- */
+import { matchFileRows } from "@/lib/part-docs/filename-match";
+{
+  const rows = matchFileRows(
+    ["ColorSource PAR Datasheet.pdf", "CSPAR guide spec.docx", "random.pdf"],
+    [{ sku: "ETC:CSPAR", manufacturerModelNumber: "ColorSource PAR" }]
+  );
+  ok(rows.map((r) => `${r.confidence}:${r.kind}:${r.skus.join("|")}`).join(",") === "high:datasheet:ETC:CSPAR,high:specsheet:ETC:CSPAR,none:datasheet:", "part docs bulk: one review row per file, in order, with kind and matched SKUs");
+}
+
+/* --- Part documents (#207) — Task 8: the part editor's Documents view --- */
+import { partDocsView } from "@/lib/part-docs/views";
+{
+  const file = (id: string, kind: "datasheet" | "specsheet", at: number): PdDoc => ({
+    id, kind, title: id, fileName: `${id}.pdf`, contentType: "application/pdf", size: 1, blobKey: `part-docs/${id}/f.pdf`, sourceUrl: null,
+    source: "upload", uploadedAt: at, uploadedBy: "Jeff",
+    history: [{ blobKey: `part-docs/${id}/old.pdf`, fileName: "old.pdf", size: 1, replacedAt: at - 1, replacedBy: "Chris" }],
+  });
+  const idx = buildCoverageIndex({
+    documents: [file("PD-edfixds0000", "datasheet", 10), file("PD-edfixss0000", "specsheet", 20), file("PD-edlens00000", "datasheet", 5)],
+    links: [
+      { id: "1", partSku: "EDFIX", documentId: "PD-edfixds0000", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "2", partSku: "EDFIX", documentId: "PD-edfixss0000", kind: "specsheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [
+      { id: "a", parentSku: "EDFIX", accessorySku: "EDLENS", source: "assembly" },
+      { id: "b", parentSku: "EDFIX", accessorySku: "EDCLAMP", source: "davinci" },
+      { id: "c", parentSku: "EDBARE", accessorySku: "EDLENS", source: "davinci" },
+    ],
+    parts: [],
+  });
+  const desc = (s: string) => `${s} desc`;
+  const fix = partDocsView(idx, "EDFIX", desc);
+  ok(fix.documents.map((d) => d.id).join(",") === "PD-edfixss0000,PD-edfixds0000", "part docs editor: the part's documents, newest first");
+  ok(fix.documents[0].history[0].fileName === "old.pdf" && fix.documents[0].history[0].index === 0, "part docs editor: replaced files are listed for viewing");
+  ok(fix.accessories.map((a) => a.sku).join(",") === "EDLENS,EDCLAMP" && fix.coveredBy.length === 0, "part docs editor: a fixture lists the accessories it covers");
+  const lens = partDocsView(idx, "EDLENS", desc);
+  ok(lens.coveredBy.length === 1 && lens.coveredBy[0].sku === "EDFIX" && lens.coveredBy[0].kinds.join(",") === "datasheet,specsheet", "part docs editor: an accessory shows which fixtures cover it, and for which kinds (a parent without a file is left out)");
+  ok(lens.slots.datasheet.state === "covered" && lens.slots.specsheet.state === "covered" && lens.documents.length === 0, "part docs editor: both slots read covered");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 9: Assembly Builder ↔ accessory graph. Pure.
+   ====================================================================== */
+import {
+  assemblyRef, subassemblyRef, fixtureParentSku, fixtureAssemblyPairs, subassemblyPairs, memberCoverageFor, memberCoverageLabel, pairKey,
+} from "@/lib/part-docs/assembly-graph";
+{
+  const asm = {
+    components: [
+      { sku: "S4LED", label: "Engine", role: "fixture" as const, defaultQty: 1 },
+      { sku: "LENS19", label: "Lens", role: "lens" as const, defaultQty: 1 },
+      { sku: "CLAMP", label: "Clamp", role: "mount" as const, defaultQty: 0 },
+      { sku: "S4LED", label: "dup", role: "other" as const, defaultQty: 1 },
+    ],
+  };
+  ok(fixtureParentSku(asm) === "S4LED" && fixtureParentSku({ components: [] }) === null, "part docs assemblies: the fixture component is the parent");
+  const pairs = fixtureAssemblyPairs(asm);
+  ok(pairs.map((p) => `${p.parentSku}>${p.accessorySku}:${p.included ? "in" : "opt"}`).join(",") === "S4LED>LENS19:in,S4LED>CLAMP:opt", "part docs assemblies: every other component is an accessory; qty 0 is optional, the fixture itself is skipped");
+  ok(fixtureAssemblyPairs({ components: [{ sku: "X", label: "x", role: "lens", defaultQty: 1 }] }).length === 0, "part docs assemblies: no fixture, no links");
+  const sub = subassemblyPairs({ lightEngineSku: "ENG", lensSku: "L1", options: { data: [{ sku: "D1", name: "d", cost: 1, qty: 2 }], power: [], mounting: [{ sku: "M1", name: "m", cost: 1, qty: 1 }], accessories: [] } });
+  ok(sub.map((p) => `${p.accessorySku}x${p.maxQty}`).join(",") === "L1x1,D1x2,M1x1" && sub.every((p) => p.parentSku === "ENG"), "part docs assemblies: a subassembly's lens and options are the light engine's accessories");
+  ok(assemblyRef("fa-1") === "assembly:fa-1" && subassemblyRef("SA-1") === "subassembly:SA-1", "part docs assemblies: the two builders keep separate sourceRef namespaces");
+
+  const idx = buildCoverageIndex({
+    documents: [{ id: "PD-engds000000", kind: "datasheet", title: "E", fileName: "e.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-engds000000/e.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] }],
+    links: [{ id: "1", partSku: "S4LED", documentId: "PD-engds000000", kind: "datasheet", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [
+      { id: "a", parentSku: "S4LED", accessorySku: "LENS19", source: "assembly", sourceRef: "assembly:fa-1" },
+      { id: "b", parentSku: "S4LED", accessorySku: "CLAMP", source: "assembly", sourceRef: "assembly:fa-1", ownDatasheet: true },
+    ],
+    parts: [],
+  });
+  const cov = memberCoverageFor(idx, [...pairs, { parentSku: "S4LED", accessorySku: "NEW" }]);
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "LENS19")]) === "Covered by fixture datasheet", "part docs assemblies: a member reads covered by the fixture datasheet by default");
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "CLAMP")]) === "Has its own datasheet — none attached yet", "part docs assemblies: the own-datasheet toggle opts the member out");
+  ok(memberCoverageLabel(cov[pairKey("S4LED", "NEW")]) === "Save to link it to the fixture" && !cov[pairKey("S4LED", "NEW")].linked, "part docs assemblies: an unsaved member is not linked yet");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 10: the DaVinci accessory graph in the
+   extract, and the pre-fill plan. Pure.
+   ====================================================================== */
+import { planDavinciPrefill } from "@/lib/part-docs/davinci-prefill";
+{
+  const LIBDOC = {
+    ...LIB162,
+    constants: {
+      ...LIB162.constants,
+      productClassifications: [{ productClassificationId: "PC-P", text: "Product" }, { productClassificationId: "PC-A", text: "Accessory" }],
+    },
+    types: [
+      { ...LIB162.types[0], typeInformation: { ...LIB162.types[0].typeInformation, productClassificationId: "PC-P" },
+        accessories: [{ typeId: "TY-LENS", maxQuantity: 2, userDefinable: true }, { typeId: "TY-LENS", maxQuantity: 2, userDefinable: true }, { typeId: "TY-X", maxQuantity: 1, userDefinable: false }, { typeId: "TY-GHOST", maxQuantity: 1 }] },
+      LIB162.types[1],
+      // A lens tube: no ports, no documents — dropped from records, kept for the graph.
+      { typeId: "TY-LENS", typeInformation: { displayName: "19 deg lens tube", categoryId: "C-1", manufacturerId: "M-ETC", productClassificationId: "PC-A" },
+        partInformation: { generatorData: { lookupData: [{ modelNumber: "419LT", partNumber: "7060A1017" }] } }, documents: [], ports: [], accessories: [] },
+    ],
+  };
+  const ex = extractLibrary(LIBDOC);
+  ok(ex.records.length === 1 && !ex.records.some((r) => r.typeId === "TY-LENS"), "#207 extract: records still drop contentless types");
+  ok(JSON.stringify(ex.accessoryLinks) === JSON.stringify([{ parentTypeId: "TY-1", accessoryTypeId: "TY-LENS", maxQuantity: 2, userDefinable: true }]), "#207 extract: accessory links are kept once, never to the internal category or an unknown type");
+  ok(ex.accessoryTypes?.["TY-LENS"]?.classification === "Accessory" && ex.accessoryTypes["TY-LENS"].modelNumbers.join(",") === "419LT,7060A1017", "#207 extract: both ends carry classification and normalized model numbers");
+  ok(ex.accessoryTypes?.["TY-1"]?.manufacturer === "ETC" && !ex.accessoryTypes["TY-X"], "#207 extract: the parent is described too; the excluded type is not");
+  ok(extractLibrary(LIB162).accessoryLinks?.length === 0, "#207 extract: a library with no accessories yields an empty graph");
+
+  const allowEtc = (m: string) => m === "ETC" || m === "High End Systems";
+  const plan = planDavinciPrefill(ex, [{ sku: "ETC:CSPAR" }, { sku: "CSPAR" }, { sku: "419LT" }, { sku: "ETC:7060A1017" }, { sku: "UNRELATED" }], allowEtc);
+  ok(plan.documents.length === 1 && plan.documents[0].url === "https://example.test/ds-en.pdf", "#207 prefill: one document per English datasheet URL (the reissued duplicate is one)");
+  ok(plan.documents[0].skus.join(",") === "CSPAR,ETC:CSPAR", "#207 prefill: the document links to every Peak SKU of the type");
+  ok(
+    plan.accessoryPairs.map((p) => `${p.parentSku}>${p.accessorySku}x${p.maxQty}`).sort().join(",") ===
+      "CSPAR>419LTx2,CSPAR>ETC:7060A1017x2,ETC:CSPAR>419LTx2,ETC:CSPAR>ETC:7060A1017x2",
+    "#207 prefill: a DaVinci link fans out to every matching Peak SKU on both ends"
+  );
+  ok(plan.stats.typesMatched === 2 && plan.stats.accessoryPairs === 4 && plan.stats.accessoryLinksUnmatched === 0, "#207 prefill: the report counts matched types and pairs");
+  const gated = planDavinciPrefill(ex, [{ sku: "CSPAR" }, { sku: "419LT" }], () => false);
+  ok(gated.documents.length === 0 && gated.accessoryPairs.length === 0 && gated.stats.accessoryLinksUnmatched === 1, "#207 prefill: the manufacturer gate refuses every record");
+  const noLens = planDavinciPrefill(ex, [{ sku: "CSPAR" }], allowEtc);
+  ok(noLens.accessoryPairs.length === 0 && noLens.stats.accessoryLinksUnmatched === 1, "#207 prefill: a link with no Peak part on one end writes nothing");
+}
+
+/* ======================================================================
+   Part documents (#207) — Task 11: the client package carries each
+   document once, covers accessories only in context, and says so.
+   ====================================================================== */
+import { resolvePackageDocs, packageEntryName } from "@/lib/part-docs/package";
+import { coveredNote } from "@/lib/client-package";
+{
+  const file = (id: string, kind: "datasheet" | "specsheet", name: string): PdDoc => ({
+    id, kind, title: name, fileName: name, contentType: "application/pdf", size: 1, blobKey: `part-docs/${id}/${name}`, sourceUrl: null,
+    source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+  });
+  const idx = buildCoverageIndex({
+    documents: [file("PD-pkgfix00000", "datasheet", "S4 Datasheet.pdf"), file("PD-pkgspec0000", "specsheet", "S4 Guide.docx")],
+    links: [
+      { id: "1", partSku: "PKG-FIX", documentId: "PD-pkgfix00000", kind: "datasheet", createdAt: 1, createdBy: "t" },
+      { id: "2", partSku: "PKG-FIX", documentId: "PD-pkgspec0000", kind: "specsheet", createdAt: 1, createdBy: "t" },
+    ],
+    accessoryLinks: [
+      { id: "a", parentSku: "PKG-FIX", accessorySku: "PKG-LENS", source: "assembly" },
+      { id: "b", parentSku: "PKG-FIX", accessorySku: "PKG-CLAMP", source: "davinci" },
+    ],
+    parts: [{ sku: "PKG-NN", docNotNeeded: { datasheet: true } }],
+  });
+  const withFix = resolvePackageDocs(idx, ["PKG-FIX", "PKG-LENS", "PKG-CLAMP", "PKG-NN"]);
+  ok(withFix.documents.length === 2 && withFix.documents.find((d) => d.kind === "datasheet")!.skus.join(",") === "PKG-FIX,PKG-LENS,PKG-CLAMP", "part docs package: the fixture datasheet is listed once, serving the fixture and its accessories");
+  ok(withFix.bySku.get("PKG-LENS")!.datasheetCoveredBy.join(",") === "PKG-FIX" && withFix.bySku.get("PKG-LENS")!.datasheetOk, "part docs package: an accessory on the same quote is covered by its fixture");
+  ok(withFix.bySku.get("PKG-NN")!.datasheetOk && !withFix.bySku.get("PKG-NN")!.datasheet, "part docs package: not-needed is no gap and no file");
+  const alone = resolvePackageDocs(idx, ["PKG-LENS"]);
+  ok(!alone.bySku.get("PKG-LENS")!.datasheetOk && alone.documents.length === 0, "part docs package: an accessory quoted without its fixture is not covered on that quote");
+  ok(!resolvePackageDocs(null, ["PKG-FIX"]).bySku.get("PKG-FIX")!.datasheetOk, "part docs package: no index means no documents");
+  const used = new Set<string>();
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  ok(packageEntryName({ documentId: "PD-a", kind: "datasheet", name: "S4 Datasheet.pdf" }, used, safe) === "datasheets/S4_Datasheet.pdf", "part docs package: datasheets go under datasheets/");
+  ok(packageEntryName({ documentId: "PD-b", kind: "datasheet", name: "S4 Datasheet.pdf" }, used, safe) === "datasheets/PD-b-S4_Datasheet.pdf", "part docs package: a clashing name is prefixed with its id");
+  ok(packageEntryName({ documentId: "PD-c", kind: "specsheet", name: "g.docx" }, used, safe) === "specsheets/g.docx", "part docs package: spec sheets go under specsheets/");
+  ok(coveredNote("PKG-LENS", ["PKG-FIX"]).note === "covered by PKG-FIX", "part docs package: the gap report says covered by <fixture>");
+
+  const part = (sku: string) => ({ id: sku, sku, desc: sku, category: "Lighting", unit: "ea", list: 1, cost: 1 });
+  const grid = (placements: string[]) => ({
+    id: "GRD-PKG", name: "P", createdAt: 1, quoteId: null,
+    options: [{ id: "opt-a", name: "Base", quoteId: null, createdAt: 1 }],
+    placements: placements.map((partId, i) => ({ id: `gp-${i}`, optionId: "opt-a", partId })),
+  });
+  const m = buildClientPackageManifest(grid(["PKG-FIX", "PKG-LENS", "PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
+  ok(!m.gaps.some((g) => g.kind === "missing-datasheet"), "part docs package: a Grid design with the fixture has no datasheet gap for its lens");
+  ok(m.covered.length === 1 && m.covered[0].note === "covered by PKG-FIX" && m.documents.length === 2 && m.counts.datasheets === 1, "part docs package: the manifest lists the covered accessory and each document once");
+  const lensOnly = buildClientPackageManifest(grid(["PKG-LENS"]) as never, [part("PKG-FIX"), part("PKG-LENS")] as never, "opt-a", idx);
+  ok(lensOnly.gaps.some((g) => g.kind === "missing-datasheet" && g.sku === "PKG-LENS"), "part docs package: a lens placed without its fixture is a missing-datasheet gap on that design");
+}
+
+/* --- Part documents (#207) — Task 12: Displays API datasheet links --- */
+import { publicDatasheets } from "@/lib/displays-api";
+{
+  const idx = buildCoverageIndex({
+    documents: [
+      { id: "PD-dispds00000", kind: "datasheet", title: "S4", fileName: "S4.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/PD-dispds00000/S4.pdf", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [] },
+    ],
+    links: [{ id: "1", partSku: "DISP-A", documentId: "PD-dispds00000", kind: "datasheet", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [],
+    parts: [{ sku: "DISP-B", productMetadata: { datasheets: [{ kind: "datasheet", sourceUrl: "https://mfr.example/b.pdf" }] } }],
+  });
+  ok(JSON.stringify(publicDatasheets("DISP-A", idx)) === JSON.stringify([{ name: "S4.pdf", url: "/api/part-documents/PD-dispds00000" }]), "part docs displays: a linked datasheet points at the document viewer");
+  ok(JSON.stringify(publicDatasheets("DISP-B", idx)) === JSON.stringify([{ name: "b.pdf", url: "https://mfr.example/b.pdf" }]), "part docs displays: an unfetched researched link is the manufacturer URL, not a 404 proxy");
+  ok(publicDatasheets("DISP-C", idx).length === 0 && publicDatasheets("DISP-A").length === 0, "part docs displays: nothing linked, nothing listed");
+  const part = { id: "DISP-A", sku: "DISP-A", desc: "A", category: "Lighting", unit: "ea", list: 1, cost: 1, updatedAt: 5 };
+  const noDocs = catalogEtag([part] as never, { sections: [], articles: [] });
+  ok(catalogEtag([part] as never, { sections: [], articles: [], docs: idx }) !== noDocs, "part docs displays: attaching a document changes the catalog ETag with no part touched");
+  ok(publicCatalogPart(part as never, { sections: [], articles: [], docs: idx }).datasheets[0].url === "/api/part-documents/PD-dispds00000", "part docs displays: publicCatalogPart carries the viewer links");
+}
+
+/* --- Part documents (#207) — final fix wave: covered cells collapse on the
+       server (M7); part search's SQL token is the most selective (T7) --- */
+import { mostSelectiveToken } from "@/lib/part-docs/filename-match";
+{
+  const parents = Array.from({ length: 8 }, (_, i) => `COLP-${i}`);
+  const idx = buildCoverageIndex({
+    documents: parents.map((p, i): PdDoc => ({
+      id: `PD-col${String(i).padStart(9, "0")}`, kind: "datasheet", title: p, fileName: `${p}.pdf`, contentType: "application/pdf", size: 1,
+      blobKey: `part-docs/x/${p}.pdf`, sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+    })),
+    links: parents.map((p, i) => ({ id: `l${i}`, partSku: p, documentId: `PD-col${String(i).padStart(9, "0")}`, kind: "datasheet" as const, createdAt: 1, createdBy: "t" })),
+    accessoryLinks: parents.map((p, i) => ({ id: `a${i}`, parentSku: p, accessorySku: "COL-ACC", source: "davinci" as const })),
+    parts: [],
+  });
+  const v = slotViewFor(idx, "COL-ACC", "datasheet", (s) => `${s} desc`);
+  ok(v.state === "covered" && v.parents.length === 5 && v.parentCount === 8 && v.docs.length === 5 && v.docCount === 8, "part docs views M7: a covered cell ships the first 5 parents and documents plus the full counts");
+  ok(v.state === "covered" && v.parents[0].sku === "COLP-0" && v.parents[0].desc === "COLP-0 desc", "part docs views M7: …in order, with descriptions");
+  const one = slotViewFor(idx, "COLP-0", "datasheet", () => "");
+  ok(one.state === "own", "part docs views M7: a parent's own slot is unaffected");
+
+  ok(mostSelectiveToken(["etc", "s4", "lustr"]) === "lustr", "part docs search T7: the longest token filters in SQL");
+  ok(mostSelectiveToken(["abcd", "wxyz"]) === "abcd" && mostSelectiveToken([]) === "", "part docs search T7: ties keep the first; no tokens, no filter");
 }

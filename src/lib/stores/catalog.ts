@@ -1,6 +1,7 @@
 import { clearCollection, getDoc, listDocs, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import { nextPricedAt } from "@/lib/catalog-books";
 import type { Port } from "@/lib/catalog-connect";
+import type { DocNotNeeded } from "@/lib/part-docs/types";
 
 export type CatalogProductMetadata = {
   productFamily?: string;
@@ -106,11 +107,17 @@ export type CatalogPart = {
    *  bytes live in Vercel Blob, never in this doc (10.7k parts × MB-scale
    *  jsonb is exactly the anti-pattern D116 exists to avoid); this is just
    *  the blob's pathname, streamed by the authenticated
-   *  /api/part-datasheet/<sku> proxy. Always set/cleared together with
-   *  datasheetName by uploadPartDatasheetAction/removePartDatasheetAction. */
+   *  /api/part-datasheet/<sku> proxy. LEGACY since part documents (#207):
+   *  nothing writes it any more; the backfill (src/lib/part-docs/legacy.ts)
+   *  turns it into a shared `part_documents` row, and it stays readable
+   *  for the readers that have not switched. */
   datasheetBlobKey?: string;
   /** Original filename of the attached datasheet, for display. */
   datasheetName?: string;
+  /** Part documents (#207): "this part needs no datasheet / spec sheet" —
+   *  satisfies that slot in the coverage rule (src/lib/part-docs/coverage.ts).
+   *  Written only through mergeUpsert (setDocNotNeeded). */
+  docNotNeeded?: DocNotNeeded;
   /** Researched, provenance-aware fields used by the Specs builder and read-only Displays API. */
   productMetadata?: CatalogProductMetadata;
   /** Manufacturer document links (#162). Distinct from `datasheetBlobKey`,

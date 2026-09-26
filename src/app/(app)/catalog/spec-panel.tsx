@@ -24,8 +24,8 @@ import { writePartSpecFieldsAction } from "./actions";
  * local state, which is what lets router.refresh() after a save bring it
  * current ("Authored") without remounting the textarea.
  *
- * Lives inside `<form action={upsertPart}>` like PartDatasheetControl
- * beside it: every button is type="button", no input/select/textarea here
+ * Lives inside `<form action={upsertPart}>` like the Documents section
+ * (part-documents-section.tsx) beside it: every button is type="button", no input/select/textarea here
  * carries a `name` (nothing leaks into upsertPart's FormData), and Enter in
  * a single-line field is preventDefault-ed so it can never submit the
  * surrounding part form.

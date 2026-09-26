@@ -6,7 +6,7 @@ import { list, get, type CatalogPart } from "@/lib/stores/catalog";
 import { dateYear, money } from "@/lib/format";
 import { effectivePriceDate, isoDateOf, mfrKey, priceBooks } from "@/lib/catalog-books";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
-import { CatalogControls, CatalogImportPanel, PartDatasheetControl } from "./controls";
+import { CatalogControls, CatalogImportPanel } from "./controls";
 import CatalogDangerZone from "./catalog-danger-zone";
 import { TaxonomyCard } from "./taxonomy-card";
 import { PriceDateBanner } from "./price-date-banner";
@@ -22,8 +22,16 @@ import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
 import { articleIdForPart } from "@/lib/specs/articles";
+import { loadPartDocsState } from "@/lib/part-docs/load";
+import { partDocsView, type PartDocsView } from "@/lib/part-docs/views";
+import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
+import PartDocumentsSection from "./part-documents-section";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
+// Part documents (#207): the part editor's slot cell calls fetchLinksAction
+// from this route, and that action runs a 45s wall-clock budget
+// (FETCH_ACTION_BUDGET_MS) — the function limit must sit above it.
+export const maxDuration = 60;
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -146,6 +154,10 @@ export default async function CatalogPage({
   const matchCount = rows.length;
   const truncated = matchCount > PAGE;
   rows = rows.slice(0, PAGE);
+  // #207: the row's "Datasheet" marker is the coverage rule's own datasheet
+  // file (not the legacy single-file key alone) — two reads keyed by the
+  // rendered page's SKUs, never a per-row load or a whole-collection scan.
+  const ownDatasheet = await partsWithOwnDatasheet(rows);
 
   const catalogMeta = `${parts.length} parts · ${manufacturers.length} manufacturer${manufacturers.length === 1 ? "" : "s"}`;
   const resultLabel =
@@ -187,6 +199,12 @@ export default async function CatalogPage({
   const defaultArticleId = editingPart
     ? articleIdForPart({ ...editingPart, specArticleId: undefined }, specArticleDocs, specSections)
     : null;
+  // Part documents (#207): the Documents section's view, computed only when a
+  // part is open — one load of the three document collections.
+  const descBySku = editingPart ? new Map(parts.map((p) => [p.sku, p.desc])) : null;
+  const partDocs = editingPart
+    ? partDocsView((await loadPartDocsState(parts)).index, editingPart.sku, (s) => descBySku!.get(s) ?? "")
+    : null;
 
   return (
     <div className="pk-content">
@@ -209,6 +227,22 @@ export default async function CatalogPage({
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 5 }}>{catalogMeta}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          {/* Part documents (#207) — the datasheet / spec-sheet to-do list. */}
+          <Link
+            href="/catalog/documents"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#16181d",
+              background: "#fff",
+              border: "1px solid #e4e7ec",
+              borderRadius: 9,
+              padding: "10px 15px",
+              textDecoration: "none",
+            }}
+          >
+            Datasheets
+          </Link>
           <Link
             href="/catalog?new=1"
             style={{
@@ -423,7 +457,7 @@ export default async function CatalogPage({
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}>{p.desc}</span>
-                    {(p.note || p.datasheetBlobKey || (p.ports?.length ?? 0) > 0 || p.docs?.length) && (
+                    {(p.note || ownDatasheet.has(p.sku) || (p.ports?.length ?? 0) > 0 || p.docs?.length) && (
                       <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                         {p.note && (
                           <span
@@ -443,7 +477,7 @@ export default async function CatalogPage({
                             ⚠ {p.note}
                           </span>
                         )}
-                        {p.datasheetBlobKey && (
+                        {ownDatasheet.has(p.sku) && (
                           <span style={{ fontSize: 10.5, color: "#8c919c" }}>Datasheet</span>
                         )}
                         {(p.ports?.length ?? 0) > 0 && (
@@ -528,6 +562,7 @@ export default async function CatalogPage({
           specArticles={specArticles}
           specTemplates={specTemplates}
           defaultArticleId={defaultArticleId}
+          partDocs={partDocs}
           error={partError}
         />
       )}
@@ -639,6 +674,7 @@ function PartFormModal({
   specArticles,
   specTemplates,
   defaultArticleId,
+  partDocs,
   error,
 }: {
   part: CatalogPart | null;
@@ -646,17 +682,18 @@ function PartFormModal({
   priceDate: number | null;
   categories: string[];
   manufacturers: string[];
-  /** Datasheet attach/replace/remove (punch #39, Task 5) is admin-gated —
-   *  same convention as the Categories & trades card. */
+  /** Deleting a part is admin-gated — same convention as the Categories &
+   *  trades card. (Documents are not: anyone signed in, D275.) */
   isAdmin: boolean;
   /** Task 13 — the Spec panel shows for anyone who can `create` (owner
-   *  decision 3), not admin-only like the datasheet control above, because
-   *  the datasheet control writes Peak's own blob storage and the spec
-   *  write is gated by requirePerm("create") inside the action itself. */
+   *  decision 3); the spec write is gated by requirePerm("create") inside
+   *  the action itself. */
   canCreate: boolean;
   specArticles: SpecPanelArticle[];
   specTemplates: SpecPanelTemplate[];
   defaultArticleId: string | null;
+  /** Part documents (#207) — null for a new, unsaved part. */
+  partDocs: PartDocsView | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
 }) {
@@ -902,12 +939,13 @@ function PartFormModal({
               </div>
             )}
 
-            {/* Datasheet attach/replace/remove (punch #39, Task 5) — admin
-                only, and only once the part exists (its SKU is the doc id
-                the blob pathname is keyed under). */}
-            {isAdmin && editing && part && (
+            {/* Part documents (#207) — the datasheet / spec-sheet slots,
+                this part's documents and its accessory coverage. Anyone
+                signed in (spec §2.4); only once the part exists. Replaces
+                the admin-only single-datasheet control (D275). */}
+            {editing && part && partDocs && (
               <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
-                <PartDatasheetControl sku={part.sku} datasheetName={part.datasheetName} />
+                <PartDocumentsSection key={part.sku} view={partDocs} />
               </div>
             )}
 

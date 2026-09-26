@@ -5,7 +5,7 @@
  *
  * Reads `data/davinci/source/<newest timestamp>/library.json` (42 MB of the
  * 116 MB export — the rest is 73 MB of images this script never touches),
- * gitignored, this machine only, and writes the ~1.39 MB extract that IS
+ * gitignored, this machine only, and writes the ~2.65 MB extract that IS
  * committed. Touches no database. Re-run when ETC ships a new export; if it has
  * added a port protocol or port direction, the extract will throw with the new
  * UUID or label rather than mis-typing or silently dropping its ports.
@@ -43,6 +43,7 @@ function main() {
       `${extract.records.reduce((a, r) => a + r.modelNumbers.length, 0)} identifiers · ` +
       `${extract.records.reduce((a, r) => a + r.ports.length, 0)} ports · ` +
       `${extract.records.reduce((a, r) => a + r.docs.length, 0)} docs · ` +
+      `${extract.accessoryLinks?.length ?? 0} accessory links over ${Object.keys(extract.accessoryTypes ?? {}).length} types · ` +
       `${collisions} contested identifiers · ` +
       `${(bytes / 1048576).toFixed(2)} MB → ${OUT}`
   );

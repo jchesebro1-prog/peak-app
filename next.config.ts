@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
   // reject it with an opaque error before our check runs — leave room so the
   // app's own clear error always wins.
   experimental: { serverActions: { bodySizeLimit: "1200kb" } },
+  // Part documents (#207): the Datasheets page's admin "Pre-fill from
+  // DaVinci" action reads the committed extract with fs at run time, which
+  // file tracing cannot see — ship it with that route's function.
+  outputFileTracingIncludes: { "/catalog/documents": ["./data/davinci-extract.json"] },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy
   // needs to be tuned against Leaflet/Three/inline styles and verified in a
