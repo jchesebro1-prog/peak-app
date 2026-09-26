@@ -86,8 +86,9 @@ export function pickContactHit(
 
 /** #214 — the Link popup's people search: contacts with an address
  *  containing `fragment` (case-insensitive), as contactId → matching
- *  addresses. Soft-deleted contacts are skipped; capped at `limit` rows.
- *  Fragments under 2 characters match nothing. */
+ *  addresses. Soft-deleted contacts, and contacts whose home company is
+ *  soft-deleted, are skipped — same rule as contactByEmail/contactsByEmails
+ *  above; capped at `limit` rows. Fragments under 2 characters match nothing. */
 export async function emailsMatching(fragment: string, limit = 200): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   const f = (fragment || "").trim().toLowerCase();
@@ -98,7 +99,16 @@ export async function emailsMatching(fragment: string, limit = 200): Promise<Map
     .select({ contactId: contactEmails.contactId, email: sql<string>`lower(${contactEmails.email})` })
     .from(contactEmails)
     .innerJoin(contacts, eq(contacts.id, contactEmails.contactId))
-    .where(and(sql`lower(${contactEmails.email}) like ${like}`, eq(contacts.deleted, false)))
+    .leftJoin(companies, eq(companies.id, contacts.homeCompanyId))
+    .where(
+      and(
+        sql`lower(${contactEmails.email}) like ${like}`,
+        eq(contacts.deleted, false),
+        // left join: a company row that exists and is soft-deleted hides its
+        // contacts; a missing row (legacy id) behaves as before.
+        sql`${companies.deleted} IS NOT TRUE`
+      )
+    )
     .limit(limit);
   for (const r of rows) {
     const list = out.get(r.contactId) ?? [];

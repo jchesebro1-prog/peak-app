@@ -10525,6 +10525,7 @@ seeded()
   .then(() => specDocxAsyncChecks())
   .then(() => specBuilderActionsAsyncChecks())
   .then(() => specBuilderFinalFixAsyncChecks())
+  .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -20002,4 +20003,86 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   const lookup214 = read("src/lib/identity/lookup.ts");
   const em214 = lookup214.slice(lookup214.indexOf("export async function emailsMatching"));
   ok(em214.includes("eq(contacts.deleted, false)") && em214.includes(".limit(limit)") && em214.includes("if (f.length < 2) return out;"), "#214 link search: emailsMatching skips deleted contacts, is capped, and ignores 1-letter fragments");
+}
+/* ====== #214 Inbox Link popup — server actions (Task 4) ======
+   The actions touch the DB and (lazily) Gmail, so their guard rails are
+   checked as source text: every export signs in and scopes to the user's
+   mailbox, the Cc fetch is env-gated with a lazy bridge import, and
+   "Add missing details" only ever fills blanks. */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acts214 = read("src/app/(app)/inbox/link-popup-actions.ts");
+  const fn214 = (name: string) => {
+    const at = acts214.indexOf(`export async function ${name}(`);
+    return at < 0 ? "" : acts214.slice(at, acts214.indexOf("\n}\n", at));
+  };
+  const names214 = [
+    "linkPopupDataAction",
+    "fetchMessageCcAction",
+    "setThreadContactsAction",
+    "searchLinkTargetsAction",
+    "fillContactBlanksAction",
+  ];
+  ok(acts214.startsWith('"use server"'), "#214 actions: link-popup-actions.ts is a server-actions module");
+  ok(names214.every((n) => fn214(n).includes("await requireUser()")), "#214 actions: every popup action requires a signed-in user");
+  ok(
+    ["linkPopupDataAction", "fetchMessageCcAction", "fillContactBlanksAction"].every((n) => fn214(n).includes("loadThread(")) &&
+      acts214.includes("if (!t || !visibleTo(t, me.name)) return { ok: false, error: \"Thread not found.\" };") &&
+      fn214("setThreadContactsAction").includes("visibleTo(t, me.name)"),
+    "#214 actions: thread actions only reach threads in the user's own mailbox"
+  );
+  const cc214 = fn214("fetchMessageCcAction");
+  ok(
+    cc214.includes("gmailEnabled()") && cc214.includes('await import("@/lib/gmail/bridge")') && !/^import[^\n]*"@\/lib\/gmail\/bridge"/m.test(acts214),
+    "#214 actions: the Cc fetch is gated on GMAIL_ENABLED and loads the bridge lazily"
+  );
+  ok(cc214.includes("ccPending: false"), "#214 actions: a failed Cc fetch never makes the popup ask again");
+  const set214 = fn214("setThreadContactsAction");
+  ok(
+    set214.includes("applyContactLink(d, contactId, on)") && set214.includes("d.linkedContactIds = next.linkedContactIds") && set214.includes("d.resolvedContactId = next.resolvedContactId"),
+    "#214 actions: link/unlink writes through the pure rules on the fresh doc"
+  );
+  ok(
+    set214.includes("!(t.customerId || (await resolveCustomerId(t)))") && set214.includes("linkThread(threadId, c.homeCompanyId"),
+    "#214 actions: linking a person on a thread with no company links their home company"
+  );
+  const fill214 = fn214("fillContactBlanksAction");
+  ok(
+    /if \(miss\.title\) \{\s*await saveContact\(\{ \.\.\.c, title: miss\.title \}\);/.test(fill214) &&
+      fill214.includes("...phones.map((p) => ({ value: p.phone, label: p.label, isPrimary: p.isPrimary }))") &&
+      fill214.includes("missingContactFields(") &&
+      fill214.includes("extractSignature(r.m.body"),
+    "#214 actions: Add missing details re-reads the signature on the server, writes a title only into a blank one, and keeps every existing phone"
+  );
+  ok(fn214("searchLinkTargetsAction").includes("rankLinkTargets(") && fn214("searchLinkTargetsAction").includes("docLocId(s)"), "#214 actions: search ranks through the pure helper; venue ids are the CustomerLocation ids threads store");
+  const page214 = read("src/app/(app)/inbox/page.tsx");
+  ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n    \};/.test(page214), "#214 page: the reader VM carries the linked people");
+}
+
+/* ====== #214 Inbox Link popup — emailsMatching excludes a soft-deleted
+   company's contacts (Task 3 review follow-up). Real DB, scratch datadir. ====== */
+async function emailsMatchingCompanyDeletedAsyncChecks(): Promise<void> {
+  const { saveCompany, softDeleteCompany } = await import("@/lib/identity/companies");
+  const { saveContact, setEmails } = await import("@/lib/identity/contacts");
+  const { emailsMatching } = await import("@/lib/identity/lookup");
+
+  const liveCo = "co214-live";
+  const goneCo = "co214-gone";
+  await saveCompany({ id: liveCo, name: "214 Live Co" });
+  await saveCompany({ id: goneCo, name: "214 Gone Co" });
+
+  const liveContact = "ct214-live";
+  const goneContact = "ct214-gone";
+  await saveContact({ id: liveContact, firstName: "Live214", lastName: "Person", homeCompanyId: liveCo, title: "" });
+  await saveContact({ id: goneContact, firstName: "Gone214", lastName: "Person", homeCompanyId: goneCo, title: "" });
+  await setEmails(liveContact, [{ value: "live214match@example.test", label: "work", isPrimary: true }]);
+  await setEmails(goneContact, [{ value: "gone214match@example.test", label: "work", isPrimary: true }]);
+
+  await softDeleteCompany(goneCo);
+
+  const hits = await emailsMatching("214match");
+  ok(
+    hits.has(liveContact) && !hits.has(goneContact),
+    "#214 link search: emailsMatching drops a contact whose home company is soft-deleted"
+  );
 }

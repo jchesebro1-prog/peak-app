@@ -23,6 +23,8 @@ import {
 import { getConnectionInfo, listCachedLabels } from "@/lib/gmail/connections";
 import { customersForDomain } from "@/lib/gmail/domains";
 import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
+import { linkedContactIdsOf } from "@/lib/inbox-thread-contacts";
+import { displayName as contactDisplayName, getContact } from "@/lib/identity/contacts";
 import { rowName } from "@/lib/inbox-rows";
 import {
   boxMeta,
@@ -780,6 +782,14 @@ export default async function InboxPage({
         }
       : null;
 
+    // #214 — the sidebar's linked-people chips (primary first; ≤ 25 ids).
+    const linkedIds = linkedContactIdsOf(sel);
+    const linkedPeople: ReaderVM["linkedPeople"] = (
+      await Promise.all(linkedIds.map((id) => getContact(id)))
+    )
+      .filter((c): c is NonNullable<typeof c> => !!c)
+      .map((c) => ({ id: c.id, name: contactDisplayName(c), primary: c.id === linkedIds[0] }));
+
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
       author: m.author,
@@ -872,6 +882,7 @@ export default async function InboxPage({
             ? candidates.map((c) => customers.find((x) => x.id === c.customerId))
             : []
       ),
+      linkedPeople,
     };
   }
 

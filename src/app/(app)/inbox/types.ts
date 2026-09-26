@@ -4,6 +4,8 @@
  * comms store (db-backed) can never be imported into a client bundle.
  */
 import type { LinkWorkType } from "@/lib/inbox-links";
+import type { ParsedSignature, SigPhone } from "@/lib/inbox-signature-parse";
+import type { ParticipantRole } from "@/lib/inbox-participants";
 
 export type Opt = { value: string; label: string };
 
@@ -245,6 +247,55 @@ export type ReaderVM = {
   /** contacts of the linked/suggested customer (value = contact name — the
    *  doc-shape contact carries no id) */
   contactOptions: Opt[];
+  /** #214 — every person linked to the thread, primary first (the
+   *  sidebar's chips). */
+  linkedPeople: Array<{ id: string; name: string; primary: boolean }>;
+};
+
+/** #214 — one address on the Link popup's message, matched to a contact. */
+export type PopupParticipant = {
+  name: string;
+  email: string;
+  role: ParticipantRole;
+  /** the one live contact with this address, else null */
+  contactId: string | null;
+  contactName: string;
+  companyId: string | null;
+  companyName: string;
+  /** the address belongs to contacts at more than one company */
+  ambiguous: boolean;
+  /** contactId is among the thread's linked people */
+  linked: boolean;
+};
+
+/** #214 — everything the Link popup shows for one message (built on the
+ *  server by linkPopupDataAction; no store ever reaches the client). */
+export type LinkPopupData = {
+  messageId: string;
+  /** "Brenda Gauchel · in · Sep 21, 3:02 PM" */
+  messageLabel: string;
+  inbound: boolean;
+  participants: PopupParticipant[];
+  /** linked people who are not on this message */
+  otherLinked: Array<{ id: string; name: string; companyName: string }>;
+  /** Gmail message whose Cc was never fetched — the popup calls
+   *  fetchMessageCcAction once, then shows the fuller list */
+  ccPending: boolean;
+  /** the parsed signature of an inbound message's sender, else null */
+  signature: ParsedSignature | null;
+  /** the sender is one known contact — they can take "Add missing details" */
+  senderContactId: string | null;
+  /** fields that contact lacks and the signature has (never overwrites) */
+  missing: { title?: string; phones: SigPhone[] };
+  /** unknown sender — "Add as contact" starts from these */
+  prefill: {
+    name: string;
+    title: string;
+    email: string;
+    phone: string;
+    companyId: string | null;
+    companyName: string;
+  } | null;
 };
 
 export type CustomerVM = {
