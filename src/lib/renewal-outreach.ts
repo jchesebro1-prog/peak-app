@@ -45,6 +45,11 @@ import {
   type LetterDoc,
 } from "@/lib/pdf";
 import { renderField } from "@/lib/templates";
+import {
+  carryTravelOverride,
+  savedTrip,
+  travelModeChangeReason,
+} from "@/lib/travel-plan";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -196,7 +201,9 @@ type FlameTestDoc = {
   curtainsTotal?: number | null;
   contact?: FtContact;
   origin?: { name?: string; street?: string; city?: string; state?: string; zip?: string } | null;
-  trip?: { miles?: number; minutes?: number } | null;
+  trip?: { miles?: number; minutes?: number; mode?: string; flight?: unknown } | null;
+  /** Per-quote travel override (travel-plan.ts TravelOverride). */
+  travel?: unknown;
   /** Rate snapshot the quote was priced with (persist saves r.rates). */
   rates?: Partial<FlameTestRates> | null;
   total?: number | null;
@@ -239,6 +246,11 @@ function flameChangeReasons(
     out.push(
       `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
     );
+  // Flights over drive (spec 2026-09-25 §5): say so when the mode flipped.
+  if (priorFt?.trip) {
+    const flip = travelModeChangeReason(priorFt.trip.mode === "fly" ? "fly" : "drive", r.trip.mode);
+    if (flip) out.push(flip);
+  }
   const oldCurtains = priorFt?.curtainsTotal;
   if (oldCurtains != null && oldCurtains !== r.curtainsTotal)
     out.push(
@@ -306,8 +318,10 @@ async function ensureFlameRenewalQuote(
 
   const rates = await getFlameRates();
   const travelRates = await getTravelRates();
+  // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
+  const travelOverride = carryTravelOverride(priorFt?.travel);
   const r = computeFlame(
-    { office: office || undefined, venues: venueInputs },
+    { office: office || undefined, venues: venueInputs, travel: travelOverride },
     rates,
     travelRates
   );
@@ -345,13 +359,8 @@ async function ensureFlameRenewalQuote(
         testingCost: Math.round(v.laborCost),
       })),
       curtainsTotal: r.curtainsTotal,
-      trip: {
-        miles: r.trip.miles,
-        minutes: r.trip.minutes,
-        mileageCost: Math.round(r.trip.mileageCost),
-        timeCost: Math.round(r.trip.timeCost),
-        method: r.trip.method,
-      },
+      trip: savedTrip(r.trip),
+      ...(travelOverride ? { travel: travelOverride } : {}),
       rawCost: Math.round(r.rawCost),
       baseFee: Math.round(r.baseFee),
       baseApplied: r.baseApplied,
@@ -499,7 +508,9 @@ type InspectionDoc = {
   venues?: InVenue[];
   lineSetsTotal?: number | null;
   inspectHours?: number | null;
-  trip?: { miles?: number; minutes?: number } | null;
+  trip?: { miles?: number; minutes?: number; mode?: string; flight?: unknown } | null;
+  /** Per-quote travel override (travel-plan.ts TravelOverride). */
+  travel?: unknown;
   /** Rate snapshot the quote was priced with (persist saves r.rates). */
   rates?: Partial<InspectionRates> | null;
   total?: number | null;
@@ -569,6 +580,12 @@ function inspectionChangeReasons(
     out.push(
       `updated travel distance (${r.trip.miles} mi round trip, was ${Math.round(oldMiles)})`
     );
+  // Flights over drive (spec 2026-09-25 §5): say so when the mode flipped
+  // (single-venue priors only — a combined trip is explained above).
+  if (priorVenueCount === 1 && priorIn?.trip) {
+    const flip = travelModeChangeReason(priorIn.trip.mode === "fly" ? "fly" : "drive", r.trip.mode);
+    if (flip) out.push(flip);
+  }
   if (generic && !out.length) return []; // → "our current rates" fallback
   if (generic) out.push("our updated pricing");
   return out;
@@ -614,17 +631,21 @@ async function ensureInspectionRenewalQuote(
   const level = levelMeta(rec.level).key;
   const rates = await getInspectionRates();
   const travelRates = await getTravelRates();
+  // Last year's travel CHOICE (mode/crew/nights) carries; its airfare doesn't (D69: current rates).
+  const travelOverride = carryTravelOverride(priorIn?.travel);
   const r = computeInspection(
     {
       office: office || undefined,
       venues: [venueInput],
       level,
+      travel: travelOverride,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
       },
     },
-    rates
+    rates,
+    travelRates
   );
 
   const contact: FtContact = rec.contact
@@ -660,13 +681,8 @@ async function ensureInspectionRenewalQuote(
       inspectHours: r.inspectHours,
       baseHours: r.baseHours,
       levelMult: r.levelMult,
-      trip: {
-        miles: r.trip.miles,
-        minutes: r.trip.minutes,
-        mileageCost: Math.round(r.trip.mileageCost),
-        timeCost: Math.round(r.trip.timeCost),
-        method: r.trip.method,
-      },
+      trip: savedTrip(r.trip),
+      ...(travelOverride ? { travel: travelOverride } : {}),
       laborCost: Math.round(r.laborCost),
       cost: Math.round(r.cost),
       minFee: r.minFee,

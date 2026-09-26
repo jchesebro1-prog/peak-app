@@ -16,6 +16,7 @@ import { getTravelRates } from "@/lib/stores/pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { coordsOf, quoteOrigin } from "@/lib/geo";
+import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
 
 /**
  * Flame-test quote mutations (server port of Flame Test Quote.dc.html
@@ -93,7 +94,14 @@ async function persist(formData: FormData): Promise<string | null> {
   const office = quoteOrigin(offices);
 
   const travelRates = await getTravelRates();
-  const r = compute({ office: office || undefined, venues: venueInputs }, rates, travelRates);
+  // Flights over drive (spec 2026-09-25): the builder posts its Auto · Drive ·
+  // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
+  const travelOverride = parseTravelOverride(formData.get("travel"));
+  const r = compute(
+    { office: office || undefined, venues: venueInputs, travel: travelOverride },
+    rates,
+    travelRates
+  );
 
   const custName = (await nameFor(customerId)) || cust?.name || "";
   const contact = contactName
@@ -135,13 +143,8 @@ async function persist(formData: FormData): Promise<string | null> {
         testingCost: Math.round(v.laborCost),
       })),
       curtainsTotal: r.curtainsTotal,
-      trip: {
-        miles: r.trip.miles,
-        minutes: r.trip.minutes,
-        mileageCost: Math.round(r.trip.mileageCost),
-        timeCost: Math.round(r.trip.timeCost),
-        method: r.trip.method,
-      },
+      trip: savedTrip(r.trip),
+      ...(travelOverride ? { travel: travelOverride } : {}),
       rawCost: Math.round(r.rawCost),
       baseFee: Math.round(r.baseFee),
       baseApplied: r.baseApplied,

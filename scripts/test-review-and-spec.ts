@@ -10257,6 +10257,29 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
     "#TRV inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
 }
 
+/* --- #TRV save paths: every path that persists a service quote stores the
+   priced trip through savedTrip() (mode + flight) and the per-quote override --- */
+{
+  const trvSavers = [
+    "src/app/(app)/flame-tests/quote/actions.ts",
+    "src/app/(app)/repairs/quote/actions.ts",
+    "src/app/(app)/inspections/quote/actions.ts",
+    "src/lib/renewal-outreach.ts",
+  ];
+  for (const f of trvSavers) {
+    const src = readFileSync(join(process.cwd(), f), "utf8");
+    ok(/trip: savedTrip\(r\.trip\)/.test(src) && !/mileageCost: Math\.round\(r\.trip\.mileageCost\)/.test(src),
+      `#TRV: ${f} persists the priced trip (mode + flight) through savedTrip()`);
+    ok(/travel: travelOverride/.test(src) && /\{ travel: travelOverride \}/.test(src),
+      `#TRV: ${f} prices with and persists the per-quote travel override`);
+  }
+  const renewalSrc = readFileSync(join(process.cwd(), "src/lib/renewal-outreach.ts"), "utf8");
+  ok((renewalSrc.match(/carryTravelOverride\(/g) || []).length === 2 && (renewalSrc.match(/travelModeChangeReason\(/g) || []).length === 2,
+    "#TRV: flame + inspection renewals carry last year's travel choice and explain a mode flip");
+  const repairActionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/repairs/quote/actions.ts"), "utf8");
+  ok(/crewSize,\s*\n\s*travel: travelOverride/.test(repairActionsSrc), "#TRV: the repair save passes the crew size so the flying crew is never smaller");
+}
+
 seeded()
   .then(() => fixtureLeakChecks())
   .then(() => recordingsAsyncChecks())
