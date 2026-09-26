@@ -5,10 +5,27 @@ import type { PartSpecFields } from "@/lib/bid-spec";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { hasPrintableSpec, type SpecCategoryArticle } from "@/lib/specs/articles";
 import type { SpecSection } from "@/lib/specs/sections";
+import { linkedDocuments, type CoverageIndex } from "@/lib/part-docs/coverage";
 
 /** Sections + articles the Displays API needs to resolve canonical ids to the
- *  printable CSI number / title it has always returned (D258). */
-export type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[] };
+ *  printable CSI number / title it has always returned (D258), plus the part
+ *  documents index (#207) its datasheet links now come from. */
+export type SpecLookup = { sections: SpecSection[]; articles: SpecCategoryArticle[]; docs?: CoverageIndex };
+
+/**
+ * A part's datasheet links for external consumers (#207, spec §7): every
+ * linked datasheet document through the authenticated viewer route (which
+ * streams the file, or redirects a link-only one to its source), else the
+ * manufacturer URLs the catalog row carries. Never a private blob key, and
+ * never the old /api/part-datasheet/<sku> URL that 404'd for a part whose
+ * only "datasheet" was a researched link.
+ */
+export function publicDatasheets(sku: string, docs?: CoverageIndex): Array<{ name: string; url: string }> {
+  if (!docs) return [];
+  const linked = linkedDocuments(docs, sku, "datasheet");
+  if (linked.length) return linked.map((d) => ({ name: d.fileName, url: `/api/part-documents/${encodeURIComponent(d.id)}` }));
+  return (docs.catalogUrls.get(sku)?.datasheet ?? []).map((url) => ({ name: url.split("/").pop() || "Datasheet", url }));
+}
 
 /**
  * Read-only Displays Manager boundary. A deployment may provide a dedicated
@@ -72,9 +89,7 @@ export function publicCatalogPart(part: CatalogPart & PartSpecFields, lib?: Spec
     trade: part.trade || null,
     listPrice: part.list,
     mapPrice: part.mapPrice ?? null,
-    datasheets: part.datasheetName
-      ? [{ name: part.datasheetName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` }]
-      : (part.productMetadata?.datasheets || []).map((file) => ({ name: file.fileName, url: `/api/part-datasheet/${encodeURIComponent(part.sku)}` })),
+    datasheets: publicDatasheets(part.sku, lib?.docs),
     productMetadata: publicProductMetadata(part, lib),
     spec: hasPrintableSpec(part)
       ? { sectionId: part.specSectionId || null, articleId: part.specArticleId || null, title: part.specTitle || null, body: part.specBody!.trim() }
@@ -105,7 +120,15 @@ export function catalogEtag(parts: CatalogPart[], lib?: SpecLookup): string {
     .map((a) => `${a.id}:${a.updatedAt || 0}`)
     .sort()
     .join("|");
-  const source = `${partsPart}::${sectionsPart}::${articlesPart}`;
+  // #207: attaching or fetching a document moves no part's updatedAt, so the
+  // documents and their links are folded in too.
+  const docsPart = lib?.docs
+    ? [...lib.docs.docsBySku]
+        .map(([sku, k]) => `${sku}:${[...k.datasheet, ...k.specsheet].map((d) => `${d.id}.${d.uploadedAt}.${d.blobKey ? 1 : 0}`).join(",")}`)
+        .sort()
+        .join("|")
+    : "";
+  const source = `${partsPart}::${sectionsPart}::${articlesPart}::${docsPart}`;
   return `"${createHash("sha1").update(source).digest("hex")}"`;
 }
 

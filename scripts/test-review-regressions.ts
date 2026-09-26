@@ -2276,6 +2276,673 @@ async function main() {
     assert.equal(r3row.secondary, "Brenda, me (2)", "#128 review: …and collapses into the 'me' chain slot regardless of its stamped author name");
   }
 
+  /* --- part documents (#207): stores, links, accessory graph, legacy backfill --- */
+  {
+    const Docs = await import("@/lib/stores/part-documents");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const { backfillLegacyDatasheets, legacyDocumentId } = await import("@/lib/part-docs/legacy");
+    const { loadPartDocsState } = await import("@/lib/part-docs/load");
+    const { slotCoverage } = await import("@/lib/part-docs/coverage");
+    const { setDocNotNeeded } = await import("@/lib/part-docs/not-needed");
+    const { upsert: upsertPart, get: getPart } = await import("@/lib/stores/catalog");
+    const { listDocs } = await import("@/db/doc-store");
+
+    const d = await Docs.createDocument({
+      kind: "datasheet", fileName: "S4_LED_Datasheet.pdf", contentType: "application/pdf", size: 10,
+      blobKey: "part-docs/PD-x/S4_LED_Datasheet.pdf", sourceUrl: null, source: "upload", by: "Jeff",
+    });
+    assert(d && /^PD-[0-9a-f]{12}$/.test(d.id), "part docs store: createDocument mints a PD- id");
+    assert.equal(d!.title, "S4 LED Datasheet", "part docs store: the title defaults from the file name");
+    assert.equal(await Docs.createDocument({ id: d!.id, kind: "datasheet", fileName: "x.pdf", contentType: "application/pdf", size: 1, blobKey: null, sourceUrl: null, source: "upload", by: "Jeff" }), null, "part docs store: an existing id is never overwritten");
+
+    assert.equal(await Docs.attachDocument(d!.id, ["DOC-FIX", "DOC-FIX", "DOC-LENS2"], "Jeff"), 2, "part docs store: attach links each part once");
+    assert.equal(await Docs.attachDocument(d!.id, ["DOC-FIX"], "Jeff"), 0, "part docs store: attaching again is a no-op");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.documentId === d!.id).length, 2, "part docs store: one link row per part↔document");
+    assert.equal(await Docs.detachDocument(d!.id, "DOC-LENS2"), true, "part docs store: detach removes a live link");
+    assert.equal(await Docs.detachDocument(d!.id, "DOC-LENS2"), false, "part docs store: detaching twice reports nothing removed");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.documentId === d!.id).length, 1, "part docs store: a detached link leaves the live list");
+    assert.equal(await Docs.attachDocument(d!.id, ["DOC-LENS2"], "Jeff"), 1, "part docs store: re-attaching revives the same row");
+    assert.equal(await Docs.ensureLinks([{ partSku: "DOC-OTHER", documentId: d!.id, kind: "datasheet" }], "Jeff"), 1, "part docs store: ensureLinks adds a new pair");
+    await Docs.detachDocument(d!.id, "DOC-OTHER");
+    assert.equal(await Docs.ensureLinks([{ partSku: "DOC-OTHER", documentId: d!.id, kind: "datasheet" }], "Jeff"), 0, "part docs store: ensureLinks never re-attaches a pair a human detached");
+
+    const replaced = await Docs.replaceDocumentFile(d!.id, { blobKey: "part-docs/PD-x/v2.pdf", fileName: "v2.pdf", contentType: "application/pdf", size: 20 }, "Chris", 5000);
+    assert.equal(replaced?.blobKey, "part-docs/PD-x/v2.pdf", "part docs store: replace points at the new file");
+    assert.deepEqual(replaced?.history, [{ blobKey: "part-docs/PD-x/S4_LED_Datasheet.pdf", fileName: "S4_LED_Datasheet.pdf", size: 10, replacedAt: 5000, replacedBy: "Chris" }], "part docs store: the replaced file is kept in history");
+    await Docs.recordFetchResult(d!.id, { ok: false, error: "HTTP 404" }, 6000);
+    assert.deepEqual((await Docs.getDocument(d!.id))?.lastFetch, { at: 6000, ok: false, error: "HTTP 404" }, "part docs store: a fetch failure is remembered with its reason");
+    assert.equal(await Docs.getDocument("../etc"), null, "part docs store: a non-id never reaches the table");
+
+    // accessory graph
+    const r1 = await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [
+      { parentSku: "DOC-FIX", accessorySku: "DOC-LENS" },
+      { parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true },
+      { parentSku: "DOC-FIX", accessorySku: "DOC-FIX" },
+    ]);
+    assert.deepEqual(r1, { written: 2, removed: 0 }, "part docs graph: sync writes each pair once and drops a self-link");
+    assert.deepEqual(await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [
+      { parentSku: "DOC-FIX", accessorySku: "DOC-LENS" },
+      { parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true },
+    ]), { written: 0, removed: 0 }, "part docs graph: an unchanged re-sync writes nothing");
+    assert.deepEqual(await Acc.setOwnDatasheet("DOC-FIX", "DOC-CLAMP", true), { linked: true, changed: 1 }, "part docs graph: the own-datasheet toggle flags the pair");
+    const r2 = await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-1" }, [{ parentSku: "DOC-FIX", accessorySku: "DOC-CLAMP", included: true }]);
+    assert.deepEqual(r2, { written: 0, removed: 1 }, "part docs graph: a pair the assembly dropped is removed");
+    assert.equal((await Acc.allAccessoryLinks()).find((l) => l.accessorySku === "DOC-CLAMP")?.ownDatasheet, true, "part docs graph: re-saving keeps the own-datasheet flag");
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "fa-doc-2" }, [{ parentSku: "DOC-FIX", accessorySku: "DOC-LENS" }]);
+    assert.equal((await Acc.allAccessoryLinks()).filter((l) => l.sourceRef === "fa-doc-1").length, 1, "part docs graph: another assembly's sync never touches this one's links");
+
+    // coverage over the stored graph, via the one-load loader
+    await upsertPart({ sku: "DOC-FIX", desc: "Fixture", category: "Lighting", unit: "ea", list: 1, cost: 1 });
+    await upsertPart({ sku: "DOC-LENS", desc: "Lens", category: "Lighting", unit: "ea", list: 1, cost: 1 });
+    const parts = [(await getPart("DOC-FIX"))!, (await getPart("DOC-LENS"))!];
+    const state = await loadPartDocsState(parts);
+    assert.equal(slotCoverage(state.index, "DOC-LENS", "datasheet").state, "covered", "part docs graph: an assembly member is covered by the fixture's datasheet");
+
+    // not-needed marks ride on the catalog part through mergeUpsert
+    assert.equal(await setDocNotNeeded(["DOC-LENS", "NO-SUCH-PART"], "specsheet", true), 1, "part docs not-needed: marks live parts only");
+    const lens = await getPart("DOC-LENS");
+    assert.deepEqual(lens?.docNotNeeded, { specsheet: true }, "part docs not-needed: the mark is on the part");
+    assert.equal(lens?.desc, "Lens", "part docs not-needed: mergeUpsert leaves the rest of the part alone");
+    assert.equal(await getPart("NO-SUCH-PART"), null, "part docs not-needed: never creates a part");
+    await setDocNotNeeded(["DOC-LENS"], "specsheet", false);
+    assert.equal((await getPart("DOC-LENS"))?.docNotNeeded, undefined, "part docs not-needed: clearing the last mark removes the field");
+
+    // legacy backfill
+    await upsertPart({ sku: "DOC-LEGACY", desc: "Legacy", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/DOC-LEGACY/old.pdf", datasheetName: "old.pdf" });
+    const legacy = (await getPart("DOC-LEGACY"))!;
+    assert.deepEqual(await backfillLegacyDatasheets([legacy]), { created: 1 }, "part docs legacy: a datasheetBlobKey becomes a shared document");
+    const ldoc = await Docs.getDocument(legacyDocumentId("DOC-LEGACY"));
+    assert(ldoc?.source === "legacy" && ldoc.blobKey === "part-datasheets/DOC-LEGACY/old.pdf" && ldoc.fileName === "old.pdf", "part docs legacy: the document keeps the old blob and name");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-LEGACY").length, 1, "part docs legacy: and is linked to its part");
+    assert.deepEqual(await backfillLegacyDatasheets([legacy]), { created: 0 }, "part docs legacy: a second run writes nothing");
+    await Docs.detachDocument(legacyDocumentId("DOC-LEGACY"), "DOC-LEGACY");
+    await backfillLegacyDatasheets([legacy]);
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-LEGACY").length, 0, "part docs legacy: a detached legacy document stays detached");
+    assert.equal((await getPart("DOC-LEGACY"))?.datasheetBlobKey, "part-datasheets/DOC-LEGACY/old.pdf", "part docs legacy: datasheetBlobKey stays readable");
+    assert((await listDocs("part_documents")).some((x) => x.id === legacyDocumentId("DOC-LEGACY")), "part docs legacy: the document itself is never deleted");
+  }
+
+  /* --- part documents (#207): fetch from links, shared per URL --- */
+  {
+    const { upsert: upsertPart, list: listParts } = await import("@/lib/stores/catalog");
+    const { loadPartDocsState } = await import("@/lib/part-docs/load");
+    const { buildFetchContext, fetchSlot } = await import("@/lib/part-docs/fetch-links");
+    const { slotCoverage } = await import("@/lib/part-docs/coverage");
+    const Docs = await import("@/lib/stores/part-documents");
+    const U1 = "https://etc.example/s4-datasheet.pdf";
+    const U2 = "https://etc.example/broken.pdf";
+    await upsertPart({ sku: "FETCH-A", desc: "A", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U1 }] });
+    await upsertPart({ sku: "FETCH-B", desc: "B", category: "Lighting", unit: "ea", list: 1, cost: 1, productMetadata: { datasheets: [{ kind: "datasheet", fileName: "ds.pdf", sourceUrl: U1 }] } });
+    await upsertPart({ sku: "FETCH-C", desc: "C", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U2 }] });
+    await upsertPart({ sku: "FETCH-D", desc: "D", category: "Lighting", unit: "ea", list: 1, cost: 1 });
+
+    const fetched: string[] = [];
+    let brokenWorks = false;
+    const ALWAYS_BROKEN_URLS = new Set(["https://etc.example/always-broken.pdf"]);
+    const deps = {
+      fetchDoc: async (url: string) => {
+        fetched.push(url);
+        if ((url === U2 && !brokenWorks) || ALWAYS_BROKEN_URLS.has(url)) return { ok: true as const, file: { bytes: new TextEncoder().encode("<html>error</html>"), contentDisposition: null, finalUrl: url } };
+        return { ok: true as const, file: { bytes: new TextEncoder().encode("%PDF-1.7 x"), contentDisposition: null, finalUrl: url } };
+      },
+      putFile: async (pathname: string) => ({ pathname: pathname.replace(/\.pdf$/, "-rnd.pdf") }),
+    };
+    const ctxFor = async () => buildFetchContext(await loadPartDocsState(await listParts()));
+
+    const a = await fetchSlot(await ctxFor(), { sku: "FETCH-A", kind: "datasheet" }, "Jeff", deps);
+    assert(a.ok && a.documentId && a.alsoLinked === 2, "part docs fetch: a fetched URL is attached to every part that referenced it");
+    const doc = await Docs.getDocument(a.documentId!);
+    assert(doc?.source === "fetch" && doc.sourceUrl === U1 && doc.blobKey?.startsWith(`part-docs/${doc.id}/`) && doc.lastFetch?.ok === true, "part docs fetch: the document stores the file privately under part-docs/<id>/ and remembers the URL");
+    const state = await loadPartDocsState(await listParts());
+    assert.equal(slotCoverage(state.index, "FETCH-B", "datasheet").state, "own", "part docs fetch: the other part is satisfied without a second download");
+    const b = await fetchSlot(await ctxFor(), { sku: "FETCH-B", kind: "datasheet" }, "Jeff", deps);
+    assert(b.ok && fetched.filter((u) => u === U1).length === 1, "part docs fetch: a URL is downloaded once, ever");
+
+    const c1 = await fetchSlot(await ctxFor(), { sku: "FETCH-C", kind: "datasheet" }, "Jeff", deps);
+    assert(!c1.ok && c1.error === "That file is not a PDF.", "part docs fetch: bytes that aren't a PDF are refused with the reason");
+    const cState = await loadPartDocsState(await listParts());
+    const cSlot = slotCoverage(cState.index, "FETCH-C", "datasheet");
+    assert(cSlot.state === "link-only" && cSlot.docs.length === 1, "part docs fetch: the failed URL becomes a link-only document on the part");
+    const failedDoc = await Docs.getDocument(cSlot.state === "link-only" ? cSlot.docs[0].id : "");
+    assert.deepEqual([failedDoc?.lastFetch?.ok, failedDoc?.lastFetch?.error], [false, "That file is not a PDF."], "part docs fetch: …carrying the failure reason for the page to list");
+    brokenWorks = true;
+    const c2 = await fetchSlot(await ctxFor(), { sku: "FETCH-C", kind: "datasheet" }, "Jeff", deps);
+    assert(c2.ok && c2.documentId === failedDoc?.id, "part docs fetch: a retry that succeeds fills the same document");
+    assert.equal((await Docs.getDocument(failedDoc!.id))?.lastFetch?.ok, true, "part docs fetch: …and clears the failure");
+
+    const d = await fetchSlot(await ctxFor(), { sku: "FETCH-D", kind: "datasheet" }, "Jeff", deps);
+    assert(!d.ok && d.error === "No link to fetch.", "part docs fetch: a part with no link says so");
+
+    /* --- review fix wave 1, M1: kind-keyed dedupe — a URL fetched as a
+       datasheet for one part must never reuse or attach to a spec-sheet
+       document for another part referencing the SAME url, and vice versa. --- */
+    {
+      const U3 = "https://etc.example/shared-doc.pdf";
+      await upsertPart({ sku: "FETCH-F", desc: "F", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U3 }] });
+      await upsertPart({ sku: "FETCH-G", desc: "G", category: "Lighting", unit: "ea", list: 1, cost: 1, productMetadata: { datasheets: [{ kind: "guide-spec", fileName: "spec.pdf", sourceUrl: U3 }] } });
+
+      const f = await fetchSlot(await ctxFor(), { sku: "FETCH-F", kind: "datasheet" }, "Jeff", deps);
+      assert(f.ok && !!f.documentId, "part docs fetch M1: the datasheet slot for a shared URL fetches fine");
+      const g = await fetchSlot(await ctxFor(), { sku: "FETCH-G", kind: "specsheet" }, "Jeff", deps);
+      assert(g.ok && !!g.documentId && g.documentId !== f.documentId, "part docs fetch M1: the SAME url fetched for a different kind makes its own document, not the other kind's");
+      const gDoc = await Docs.getDocument(g.documentId!);
+      assert.equal(gDoc?.kind, "specsheet", "part docs fetch M1: the new document carries the kind it was fetched for");
+
+      const links = await Docs.allDocumentLinks();
+      assert(!links.some((l) => l.partSku === "FETCH-F" && l.documentId === g.documentId), "part docs fetch M1: the datasheet part is never linked to the spec-sheet document from the same url");
+      assert(!links.some((l) => l.partSku === "FETCH-G" && l.documentId === f.documentId), "part docs fetch M1: the spec-sheet part is never linked to the datasheet document from the same url");
+    }
+
+    /* --- review fix wave 1, M2: a failed URL is shared with every part
+       that referenced it, and never re-downloaded within the SAME call --- */
+    {
+      const U4 = "https://etc.example/always-broken.pdf";
+      await upsertPart({ sku: "FETCH-E1", desc: "E1", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U4 }] });
+      await upsertPart({ sku: "FETCH-E2", desc: "E2", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: U4 }] });
+
+      const sharedCtx = await ctxFor(); // ONE context reused across both calls — same as one fetchLinksAction batch
+      const before = fetched.filter((u) => u === U4).length;
+      const e1 = await fetchSlot(sharedCtx, { sku: "FETCH-E1", kind: "datasheet" }, "Jeff", deps);
+      assert(!e1.ok && e1.error === "That file is not a PDF.", "part docs fetch M2: the first part sharing a broken url fails normally");
+      const e2 = await fetchSlot(sharedCtx, { sku: "FETCH-E2", kind: "datasheet" }, "Jeff", deps);
+      assert(!e2.ok && e2.error === "That file is not a PDF.", "part docs fetch M2: the second part sharing the SAME broken url in the same call reports the same failure");
+      assert.equal(fetched.filter((u) => u === U4).length, before + 1, "part docs fetch M2: the broken url is downloaded only once across both parts in the same call");
+
+      const eState = await loadPartDocsState(await listParts());
+      const e1Slot = slotCoverage(eState.index, "FETCH-E1", "datasheet");
+      const e2Slot = slotCoverage(eState.index, "FETCH-E2", "datasheet");
+      assert(e1Slot.state === "link-only" && e2Slot.state === "link-only" && e1Slot.docs[0].id === e2Slot.docs[0].id, "part docs fetch M2: both parts sharing the broken url end up pointing at the SAME failed link-only document");
+    }
+
+    /* --- review fix wave 1, M3: a thrown store/blob write is caught and
+       isolated — the slot reports a fixed refusal, the batch continues --- */
+    {
+      await upsertPart({ sku: "FETCH-H", desc: "H", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/throws.pdf" }] });
+      await upsertPart({ sku: "FETCH-I", desc: "I", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/fine.pdf" }] });
+      const throwingDeps = { fetchDoc: deps.fetchDoc, putFile: async (): Promise<{ pathname: string }> => { throw new Error("blob store is down"); } };
+
+      const h = await fetchSlot(await ctxFor(), { sku: "FETCH-H", kind: "datasheet" }, "Jeff", throwingDeps);
+      assert(!h.ok && h.error === "Could not store the file.", "part docs fetch M3: a thrown putFile is caught and reported, never thrown out of fetchSlot");
+      const i = await fetchSlot(await ctxFor(), { sku: "FETCH-I", kind: "datasheet" }, "Jeff", deps);
+      assert(i.ok && !!i.documentId, "part docs fetch M3: a later slot in the same batch still succeeds after an isolated throw");
+    }
+
+    /* --- review fix wave 1, I1: the per-call wall-clock budget — a target
+       past the deadline is never attempted and says so with fixed text --- */
+    {
+      const { createFetchBudget, NOT_ATTEMPTED_ERROR } = await import("@/lib/part-docs/fetch-links");
+      await upsertPart({ sku: "FETCH-J1", desc: "J1", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/j1.pdf" }] });
+      await upsertPart({ sku: "FETCH-J2", desc: "J2", category: "Lighting", unit: "ea", list: 1, cost: 1, docs: [{ kind: "datasheet", label: "DS", url: "https://etc.example/j2.pdf" }] });
+
+      let clock = 0;
+      const budget = createFetchBudget(1000, () => clock); // a budget far smaller than one fetch's 30s worst case
+      const jCtx = await ctxFor();
+      const before = fetched.length;
+
+      const j1 = await fetchSlot(jCtx, { sku: "FETCH-J1", kind: "datasheet" }, "Jeff", deps, budget);
+      assert(j1.ok, "part docs fetch I1: the very first fetch of a call always runs, even under a budget smaller than one worst case");
+      assert.equal(fetched.length, before + 1, "part docs fetch I1: …and it actually fetched");
+
+      clock += 999; // only 1ms of the 1000ms budget left — nowhere near FETCH_WORST_CASE_MS
+      const j2 = await fetchSlot(jCtx, { sku: "FETCH-J2", kind: "datasheet" }, "Jeff", deps, budget);
+      assert(!j2.ok && j2.error === NOT_ATTEMPTED_ERROR, "part docs fetch I1: a target past the deadline comes back as not attempted, with the fixed text");
+      assert.equal(fetched.length, before + 1, "part docs fetch I1: …and no fetch was made for it");
+    }
+  }
+
+  /* --- part documents (#207): Assembly Builder saves sync the graph in one pass --- */
+  {
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const first = await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fa-sync-1", pairs: [{ parentSku: "SYNC-FIX", accessorySku: "SYNC-LENS" }] },
+      { sourceRef: "assembly:fa-sync-2", pairs: [{ parentSku: "SYNC-FIX2", accessorySku: "SYNC-CLAMP" }] },
+    ]);
+    assert.deepEqual(first, { written: 2, removed: 0 }, "part docs graph: one save writes every assembly's links");
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "subassembly:SA-sync" }, [{ parentSku: "SYNC-FIX", accessorySku: "SYNC-OPT" }]);
+    const second = await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fa-sync-1", pairs: [{ parentSku: "SYNC-FIX", accessorySku: "SYNC-LENS" }] },
+    ]);
+    assert.deepEqual(second, { written: 0, removed: 1 }, "part docs graph: an assembly deleted from the list loses its links");
+    assert((await Acc.allAccessoryLinks()).some((l) => l.sourceRef === "subassembly:SA-sync"), "part docs graph: a subassembly's links are outside the assemblies prefix and survive");
+  }
+
+  /* --- part documents (#207): DaVinci pre-fill apply is idempotent --- */
+  {
+    const { applyPrefill, davinciDocumentId } = await import("@/lib/part-docs/davinci-apply");
+    const Docs = await import("@/lib/stores/part-documents");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const url = "https://etc.example/prefill-ds.pdf";
+    const plan = {
+      libraryTimestamp: "t",
+      documents: [{ url, label: "CSPAR Datasheet", typeId: "TY-1", skus: ["PF-CSPAR", "PF-CSPAR2"] }],
+      accessoryPairs: [{ parentSku: "PF-CSPAR", accessorySku: "PF-LENS", maxQty: 2, sourceRef: "TY-1" }],
+      stats: { parts: 3, typesMatched: 2, documents: 1, documentLinks: 2, accessoryPairs: 1, accessoryLinksUnmatched: 0 },
+    };
+    const first = await applyPrefill(plan, "DaVinci pre-fill");
+    assert.deepEqual(first, { documentsCreated: 1, linksCreated: 2, accessoryWritten: 1, accessoryRemoved: 0, complete: true }, "part docs prefill: documents, links and the graph are written");
+    const doc = await Docs.getDocument(davinciDocumentId(url));
+    assert(doc && doc.source === "davinci" && doc.blobKey === null && doc.sourceUrl === url && doc.language === "en" && doc.title === "CSPAR Datasheet", "part docs prefill: a link-only DaVinci document — nothing downloaded");
+    assert.deepEqual(await applyPrefill(plan, "DaVinci pre-fill"), { documentsCreated: 0, linksCreated: 0, accessoryWritten: 0, accessoryRemoved: 0, complete: true }, "part docs prefill: a second run writes nothing");
+    await Docs.detachDocument(doc!.id, "PF-CSPAR2");
+    await applyPrefill(plan, "DaVinci pre-fill");
+    assert(!(await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-CSPAR2"), "part docs prefill: a human's detach survives a re-run");
+    const dropped = await applyPrefill({ ...plan, accessoryPairs: [] }, "DaVinci pre-fill");
+    assert.equal(dropped.accessoryRemoved, 1, "part docs prefill: a pair ETC dropped from the library is removed");
+    assert(!(await Acc.allAccessoryLinks()).some((l) => l.source === "davinci" && l.accessorySku === "PF-LENS"), "part docs prefill: …from the live graph");
+
+    const fetchedUrl = "https://etc.example/already-fetched.pdf";
+    const fetched = await Docs.createDocument({ kind: "datasheet", fileName: "f.pdf", contentType: "application/pdf", size: 5, blobKey: "part-docs/x/f.pdf", sourceUrl: fetchedUrl, source: "fetch", by: "Jeff" });
+    await applyPrefill({ ...plan, documents: [{ url: fetchedUrl, label: "F", typeId: "TY-2", skus: ["PF-F"] }] }, "DaVinci pre-fill");
+    assert.equal(await Docs.getDocument(davinciDocumentId(fetchedUrl)), null, "part docs prefill: a URL someone already fetched gets no second document");
+    assert((await Docs.allDocumentLinks()).some((l) => l.partSku === "PF-F" && l.documentId === fetched!.id), "part docs prefill: …the part is linked to the fetched one instead");
+  }
+
+  /* --- part documents (#207) review fix wave 1: batched doc-store writes
+         mean exactly what their single-row versions mean --- */
+  {
+    const DS = await import("@/db/doc-store");
+    const { getDb } = await import("@/db");
+    const { DOC_TABLES } = await import("@/db/doc-tables");
+    const { inArray } = await import("drizzle-orm");
+    const coll = "review_snapshots" as const;
+    const t = DOC_TABLES[coll];
+    const rowsOf = async (ids: string[]) => {
+      const db = await getDb();
+      const rows = await db.select().from(t).where(inArray(t.id, ids));
+      return new Map(rows.map((r) => [r.id, r]));
+    };
+    // Twin rows: S-* go through the single-row API, B-* through the batch one.
+    const seedBoth = async (suffix: string, doc: Record<string, unknown>) => {
+      await DS.upsertDoc(coll, { id: `S-${suffix}`, ...doc });
+      await DS.upsertDoc(coll, { id: `B-${suffix}`, ...doc });
+    };
+    await seedBoth("live", { v: 1 });
+    await seedBoth("gone", { v: 1 });
+    await DS.softDeleteDoc(coll, "S-gone");
+    await DS.softDeleteDoc(coll, "B-gone");
+    await DS.setReview(coll, "S-live", { state: "seen" });
+    await DS.setReview(coll, "B-live", { state: "seen" });
+    const same = async (suffixes: string[], label: string) => {
+      const rows = await rowsOf(suffixes.flatMap((x) => [`S-${x}`, `B-${x}`]));
+      for (const x of suffixes) {
+        const a = rows.get(`S-${x}`);
+        const b = rows.get(`B-${x}`);
+        assert(a && b, `${label}: both twins exist (${x})`);
+        const strip = (d: unknown) => { const { id: _id, ...rest } = d as Record<string, unknown>; void _id; return rest; };
+        assert.deepEqual(
+          // review.at is setReview's own clock stamp — the twins were triaged a millisecond apart.
+          { doc: strip(b!.doc), rev: b!.rev, deleted: b!.deleted, review: { ...(b!.review ?? {}), at: 0 } },
+          { doc: strip(a!.doc), rev: a!.rev, deleted: a!.deleted, review: { ...(a!.review ?? {}), at: 0 } },
+          `${label}: the batch row matches its single-row twin (${x})`
+        );
+      }
+    };
+
+    // insertDocsIfAbsent ≡ insertDocIfAbsent: new → inserted; live or
+    // soft-deleted → untouched; a duplicate inside the batch → first wins.
+    const singleIns = [
+      await DS.insertDocIfAbsent(coll, { id: "S-new", v: 2 }),
+      await DS.insertDocIfAbsent(coll, { id: "S-live", v: 2 }),
+      await DS.insertDocIfAbsent(coll, { id: "S-gone", v: 2 }),
+      await DS.insertDocIfAbsent(coll, { id: "S-dup", v: "first" }),
+      await DS.insertDocIfAbsent(coll, { id: "S-dup", v: "second" }),
+    ];
+    assert.deepEqual(singleIns, [true, false, false, true, false], "batch writes: the single-row baseline behaves as documented");
+    const ins = await DS.insertDocsIfAbsent(coll, [
+      { id: "B-new", v: 2 }, { id: "B-live", v: 2 }, { id: "B-gone", v: 2 }, { id: "B-dup", v: "first" }, { id: "B-dup", v: "second" },
+    ]);
+    assert.deepEqual({ ids: [...ins.ids].sort(), complete: ins.complete }, { ids: ["B-dup", "B-new"], complete: true }, "batch writes: insertDocsIfAbsent reports only the rows it inserted");
+    await same(["new", "live", "gone", "dup"], "batch writes: insertDocsIfAbsent");
+    assert.equal(await DS.getDoc(coll, "B-gone"), null, "batch writes: insertDocsIfAbsent never revives a soft-deleted row");
+
+    // upsertDocs ≡ upsertDoc: replace the doc, bump rev, revive a soft-deleted
+    // row, keep review; a duplicate id inside the batch keeps the LAST doc.
+    const seqBefore = await rowsOf(["B-live", "B-gone"]);
+    await DS.upsertDoc(coll, { id: "S-live", v: 3 });
+    await DS.upsertDoc(coll, { id: "S-gone", v: 3 });
+    await DS.upsertDoc(coll, { id: "S-fresh", v: 3 });
+    const up = await DS.upsertDocs(coll, [{ id: "B-live", v: 3 }, { id: "B-gone", v: 3 }, { id: "B-fresh", v: 3 }]);
+    assert.deepEqual({ n: up.ids.length, complete: up.complete }, { n: 3, complete: true }, "batch writes: upsertDocs reports every row written");
+    await same(["live", "gone", "fresh"], "batch writes: upsertDocs");
+    const seqAfter = await rowsOf(["B-live", "B-gone"]);
+    assert(Number(seqAfter.get("B-live")!.seq) > Number(seqBefore.get("B-live")!.seq) && Number(seqAfter.get("B-gone")!.seq) > Number(seqBefore.get("B-gone")!.seq), "batch writes: the _seq_bump trigger fires per row on a multi-row upsert");
+    await DS.upsertDocs(coll, [{ id: "B-last", v: "a" }, { id: "B-last", v: "b" }]);
+    assert.equal((await DS.getDoc<{ id: string; v: string }>(coll, "B-last"))?.v, "b", "batch writes: a duplicate id in one upsertDocs keeps the last document");
+
+    // softDeleteDocs ≡ softDeleteDoc, and pull-sync sees every batched change.
+    const cursor = Math.max(...[...(await rowsOf(["S-live", "B-live", "S-new", "B-new", "S-fresh", "B-fresh"])).values()].map((r) => Number(r.seq)));
+    await DS.softDeleteDoc(coll, "S-live");
+    await DS.softDeleteDoc(coll, "S-new");
+    await DS.softDeleteDoc(coll, "S-missing");
+    const del = await DS.softDeleteDocs(coll, ["B-live", "B-new", "B-missing", "B-live"]);
+    assert.deepEqual({ ids: [...del.ids].sort(), complete: del.complete }, { ids: ["B-live", "B-new"], complete: true }, "batch writes: softDeleteDocs reports the rows that matched");
+    await same(["live", "new"], "batch writes: softDeleteDocs");
+    const pulled = await DS.listSince(coll, cursor, 1000);
+    assert(["B-live", "B-new"].every((id) => pulled.changes.some((c) => c.id === id && c.deleted)), "batch writes: pull-sync (listSince) sees batched soft-deletes");
+    const pulled2 = await DS.listSince(coll, 0, 5000);
+    assert(["B-fresh", "B-dup"].every((id) => pulled2.changes.some((c) => c.id === id)), "batch writes: pull-sync sees batched inserts");
+
+    // Chunking + the between-chunks stop.
+    let chunks = 0;
+    const many = Array.from({ length: 7 }, (_, i) => ({ id: `B-chunk-${i}`, v: i }));
+    const stopped = await DS.insertDocsIfAbsent(coll, many, { chunkSize: 3, shouldStop: () => ++chunks > 1 });
+    assert.deepEqual({ n: stopped.ids.length, complete: stopped.complete }, { n: 3, complete: false }, "batch writes: shouldStop halts cleanly between chunks");
+    const rest = await DS.insertDocsIfAbsent(coll, many, { chunkSize: 3 });
+    assert.deepEqual({ n: rest.ids.length, complete: rest.complete }, { n: 4, complete: true }, "batch writes: a re-run writes exactly the rest");
+    assert.deepEqual(await DS.upsertDocs(coll, []), { ids: [], complete: true }, "batch writes: an empty batch is a complete no-op");
+  }
+
+  /* --- part documents (#207) review fix wave 1: the pre-fill at production
+         scale is batched, budgeted, and resumable --- */
+  {
+    const { applyPrefill, createPrefillStopper } = await import("@/lib/part-docs/davinci-apply");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    // Production-sized (spec review: ~362 documents, ~3,959 links, ~6,666
+    // pairs): 400 documents × 10 parts, 7,000 pairs — many 500-row chunks.
+    const documents = Array.from({ length: 400 }, (_, i) => ({
+      url: `https://etc.example/bulk/${i}.pdf`, label: `Bulk ${i} Datasheet`, typeId: `TY-B${i}`,
+      skus: Array.from({ length: 10 }, (_, j) => `PFB-${i}-${j}`),
+    }));
+    const accessoryPairs = Array.from({ length: 7000 }, (_, i) => ({ parentSku: `PFB-${i % 400}-0`, accessorySku: `PFB-ACC-${i}`, maxQty: 1, sourceRef: `TY-B${i % 400}` }));
+    const plan = { libraryTimestamp: "t", documents, accessoryPairs, stats: { parts: 4000, typesMatched: 400, documents: 400, documentLinks: 4000, accessoryPairs: 7000, accessoryLinksUnmatched: 0 } };
+    const priorDavinci = (await Acc.allAccessoryLinks()).filter((l) => l.source === "davinci").length;
+
+    // A budget that allows 5 chunks: the documents (1) + 4 of the 8 link chunks.
+    let allowed = 5;
+    const cut = await applyPrefill(plan, "DaVinci pre-fill", { shouldStop: () => allowed-- <= 0 });
+    assert.deepEqual(cut, { documentsCreated: 400, linksCreated: 2000, accessoryWritten: 0, accessoryRemoved: 0, complete: false }, "part docs prefill (scale): a run out of budget stops cleanly between chunks and says so");
+    let t0 = Date.now();
+    const resumed = await applyPrefill(plan, "DaVinci pre-fill");
+    const resumeMs = Date.now() - t0;
+    assert.deepEqual(resumed, { documentsCreated: 0, linksCreated: 2000, accessoryWritten: 7000, accessoryRemoved: priorDavinci, complete: true }, "part docs prefill (scale): clicking again finishes exactly the rest");
+    t0 = Date.now();
+    const again = await applyPrefill(plan, "DaVinci pre-fill");
+    const rerunMs = Date.now() - t0;
+    assert.deepEqual(again, { documentsCreated: 0, linksCreated: 0, accessoryWritten: 0, accessoryRemoved: 0, complete: true }, "part docs prefill (scale): a finished pre-fill re-runs as a no-op");
+    console.log(`  part docs prefill (scale): resume 2,000 links + 7,000 pairs ${resumeMs} ms; no-op re-run ${rerunMs} ms`);
+
+    // The action's stopper: the first chunk always runs; later ones only
+    // while a worst-case chunk still fits in the budget.
+    let clock = 0;
+    const stop = createPrefillStopper(10_000, 3_000, () => clock);
+    clock = 20_000;
+    assert.equal(stop(), false, "part docs prefill: the first chunk runs even past the budget (forward progress)");
+    assert.equal(stop(), true, "part docs prefill: a later chunk past the budget does not start");
+    clock = 0;
+    const stop2 = createPrefillStopper(10_000, 3_000, () => clock);
+    assert.equal(stop2(), false, "part docs prefill: stopper — first chunk");
+    clock = 6_999;
+    assert.equal(stop2(), false, "part docs prefill: stopper — a chunk that fits starts");
+    clock = 7_001;
+    assert.equal(stop2(), true, "part docs prefill: stopper — a chunk that would overrun does not");
+  }
+
+  /* --- part documents (#207) final fix wave: bridge, batched attach, graph
+         sync, toggle no-op, DaVinci kind filter --- */
+  {
+    const DS = await import("@/db/doc-store");
+    const Docs = await import("@/lib/stores/part-documents");
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    const { resolvePartDatasheet, partsWithOwnDatasheet } = await import("@/lib/part-docs/datasheet-bridge");
+    const { backfillLegacyDatasheets, legacyDocumentId } = await import("@/lib/part-docs/legacy");
+    const { upsert: upsertPart, get: getPart } = await import("@/lib/stores/catalog");
+
+    // doc-store helpers: rows by id with their deleted flag; SQL field filter.
+    const hd = await Docs.createDocument({ kind: "datasheet", fileName: "h.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/h/h.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    assert.equal(await Docs.attachDocument(hd!.id, ["FW-H1", "FW-H2"], "Jeff"), 2, "final fix: attach two");
+    await Docs.detachDocument(hd!.id, "FW-H2");
+    const rows = await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-H1", hd!.id), Docs.documentLinkId("FW-H2", hd!.id), "PDL-nope"]);
+    assert.deepEqual(rows.map((r) => `${r.doc.partSku}:${r.deleted}`).sort(), ["FW-H1:false", "FW-H2:true"], "final fix: getDocRows returns live and detached rows with their flag, skips missing ids");
+    assert.deepEqual((await DS.listDocsByField("part_document_links", "partSku", ["FW-H1", "FW-H2", "FW-NONE"])).map((l) => l.partSku), ["FW-H1"], "final fix: listDocsByField filters by a doc field in SQL, live rows only");
+    assert.deepEqual(await DS.listDocsByField("part_document_links", "partSku", []), [], "final fix: listDocsByField with no values reads nothing");
+
+    // I3: the batched fan-out keeps attachDocument's semantics exactly.
+    const ad = await Docs.createDocument({ kind: "specsheet", fileName: "a.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/a/a.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    assert.equal(await Docs.attachDocument(ad!.id, ["FW-A1", " FW-A1 ", "", "FW-A2"], "Jeff", 100), 2, "final fix I3: new links counted once each, blanks and trimmed duplicates skipped");
+    const a1 = (await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-A1", ad!.id)]))[0].doc as Record<string, unknown>;
+    assert(a1.kind === "specsheet" && a1.createdBy === "Jeff" && a1.createdAt === 100 && a1.documentId === ad!.id, "final fix I3: a new link carries the document's kind and who/when");
+    await Docs.detachDocument(ad!.id, "FW-A2");
+    assert.equal(await Docs.attachDocument(ad!.id, ["FW-A1", "FW-A2", "FW-A3"], "Chris", 200), 2, "final fix I3: live left alone, detached revived, new inserted — two added");
+    const a2 = (await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-A2", ad!.id)]))[0];
+    assert(!a2.deleted && a2.doc.createdBy === "Chris" && a2.doc.createdAt === 200, "final fix I3: a revived link is live again with fresh who/when stamps");
+    const a1b = (await DS.getDocRows("part_document_links", [Docs.documentLinkId("FW-A1", ad!.id)]))[0].doc as Record<string, unknown>;
+    assert(a1b.createdBy === "Jeff" && a1b.createdAt === 100, "final fix I3: a live link is never rewritten");
+    assert.equal(await Docs.attachDocument(ad!.id, ["FW-A1", "FW-A2", "FW-A3"], "Chris"), 0, "final fix I3: attaching all again is a no-op");
+    assert.equal(await Docs.attachDocument("PD-000000000000", ["FW-A1"], "Chris"), 0, "final fix I3: an unknown document links nothing");
+    const many = Array.from({ length: 1200 }, (_, i) => `FW-MANY-${i}`);
+    assert.equal(await Docs.attachDocument(ad!.id, many, "Jeff"), 1200, "final fix I3: a large fan-out (past one chunk) links every part");
+
+    // I1: the SKU bridge follows the part's live datasheet documents.
+    await upsertPart({ sku: "FW-LEG", desc: "Legacy", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/FW-LEG/old.pdf", datasheetName: "old.pdf" });
+    const leg = (await getPart("FW-LEG"))!;
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "legacy", blobKey: "part-datasheets/FW-LEG/old.pdf" }, "final fix I1: before the backfill reaches it, the legacy blob streams");
+    assert((await partsWithOwnDatasheet([leg])).has("FW-LEG"), "final fix M5: …and the catalog marker shows it");
+    await backfillLegacyDatasheets([leg]);
+    const legId = legacyDocumentId("FW-LEG");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: legId }, "final fix I1: once backfilled, the bridge redirects to the legacy document");
+    await Docs.replaceDocumentFile(legId, { blobKey: `part-docs/${legId}/new.pdf`, fileName: "new.pdf", contentType: "application/pdf", size: 3 }, "Chris");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: legId }, "final fix I1: after a replace it still goes to the document (its new file), never the stale datasheetBlobKey");
+    await Docs.detachDocument(legId, "FW-LEG");
+    assert.equal(await resolvePartDatasheet(leg), null, "final fix I1: a detached legacy document stays detached — no stale file");
+    assert(!(await partsWithOwnDatasheet([leg])).has("FW-LEG"), "final fix M5: …and the catalog marker drops it");
+    const linkOnly = await Docs.createDocument({ kind: "datasheet", fileName: "l.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: "https://x.example/l.pdf", source: "fetch", by: "Jeff" });
+    await Docs.attachDocument(linkOnly!.id, ["FW-LEG"], "Jeff");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: linkOnly!.id }, "final fix I1: a link-only datasheet is served when there is no stored one");
+    assert(!(await partsWithOwnDatasheet([leg])).has("FW-LEG"), "final fix M5: a link-only datasheet is not the part's own file");
+    const spec = await Docs.createDocument({ kind: "specsheet", fileName: "s.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/s/s.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    await Docs.attachDocument(spec!.id, ["FW-LEG"], "Jeff");
+    const stored = await Docs.createDocument({ kind: "datasheet", fileName: "d.pdf", contentType: "application/pdf", size: 1, blobKey: "part-docs/d/d.pdf", sourceUrl: null, source: "upload", by: "Jeff" });
+    await Docs.attachDocument(stored!.id, ["FW-LEG"], "Jeff");
+    assert.deepEqual(await resolvePartDatasheet(leg), { kind: "document", documentId: stored!.id }, "final fix I1: a stored datasheet wins over link-only; a spec sheet is never served as the datasheet");
+    assert((await partsWithOwnDatasheet([leg, { sku: "FW-NOTHING" }])).has("FW-LEG"), "final fix M5: a stored datasheet shows the marker");
+    assert.equal(await resolvePartDatasheet({ sku: "FW-NOTHING" }), null, "final fix I1: a part with nothing gets nothing");
+
+    // M1: the own-datasheet toggle distinguishes "not linked" from "no change".
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-m1" }, [{ parentSku: "FW-FIX", accessorySku: "FW-ACC" }]);
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-ACC", false), { linked: true, changed: 0 }, "final fix M1: setting the flag to its current value is a linked no-op, not 'save first'");
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-ACC", true), { linked: true, changed: 1 }, "final fix M1: setting it changes the row");
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-ACC", true), { linked: true, changed: 0 }, "final fix M1: setting it again is still a linked no-op");
+    assert.deepEqual(await Acc.setOwnDatasheet("FW-FIX", "FW-UNSAVED", true), { linked: false, changed: 0 }, "final fix M1: an unsaved member reports not linked");
+
+    // M2: the DaVinci pre-fill never reuses a spec sheet as a datasheet.
+    const { applyPrefill, davinciDocumentId } = await import("@/lib/part-docs/davinci-apply");
+    const sharedUrl = "https://etc.example/shared-guide.pdf";
+    const specByUrl = await Docs.createDocument({ kind: "specsheet", fileName: "g.pdf", contentType: "application/pdf", size: 0, blobKey: null, sourceUrl: sharedUrl, source: "fetch", by: "Jeff" });
+    await applyPrefill({
+      libraryTimestamp: "t",
+      documents: [{ url: sharedUrl, label: "Shared", typeId: "TY-FW", skus: ["FW-DV"] }],
+      accessoryPairs: [],
+      stats: { parts: 1, typesMatched: 1, documents: 1, documentLinks: 1, accessoryPairs: 0, accessoryLinksUnmatched: 0 },
+    }, "DaVinci pre-fill");
+    const dvLinks = (await Docs.allDocumentLinks()).filter((l) => l.partSku === "FW-DV");
+    assert.deepEqual(dvLinks.map((l) => `${l.documentId}:${l.kind}`), [`${davinciDocumentId(sharedUrl)}:datasheet`], "final fix M2: the part gets a DaVinci datasheet document, not the spec sheet sharing its URL");
+    assert(!dvLinks.some((l) => l.documentId === specByUrl!.id), "final fix M2: …the spec sheet is not linked");
+
+    // I2: the one-time Assembly Builder → graph sync.
+    const { setSettings } = await import("@/lib/settings");
+    const { insertDocIfAbsent } = DS;
+    const { ensureAssemblyGraphSynced, syncAllAssemblyGraphs, assemblyGraphSynced, GRAPH_SYNC_BLOB_ID } = await import("@/lib/part-docs/assembly-sync");
+    const { getDb } = await import("@/db");
+    const { blobs } = await import("@/db/doc-tables");
+    const { eq } = await import("drizzle-orm");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
+    const { getSettings } = await import("@/lib/settings");
+    const priorAssemblies = ((await getSettings()).fixtureAssemblies ?? []) as unknown[];
+    assert.equal(priorAssemblies.length, 0, "final fix I2: the test database starts with no fixture assemblies");
+    await setSettings({
+      fixtureAssemblies: [
+        { id: "fw-asm", name: "FW assembly", components: [
+          { sku: "FW-S4", label: "Engine", role: "fixture", defaultQty: 1 },
+          { sku: "FW-LENS", label: "Lens", role: "lens", defaultQty: 1 },
+          { sku: "FW-CLAMP", label: "Clamp", role: "mount", defaultQty: 0 },
+        ] },
+      ],
+    });
+    await insertDocIfAbsent("subassemblies", {
+      id: "SA-FW", kind: "fixture", label: "FW sub", description: "", lightEngineSku: "FW-S4", lightEngineName: "", lightEngineCost: 0,
+      lensSku: "FW-LENS2", lensName: "", lensCost: 0, options: { data: [{ sku: "FW-DATA", name: "", cost: 0, qty: 2 }], power: [], mounting: [], accessories: [] },
+      cost: 0, price: 0, createdAt: 1, updatedAt: 1,
+    });
+    // A pre-existing link of another, unlisted assembly scope must survive,
+    // and a human's own-datasheet flag on a pair must carry over.
+    await Acc.syncAccessoryLinks({ source: "assembly", sourceRef: "assembly:fw-gone" }, [{ parentSku: "FW-OLD", accessorySku: "FW-OLDACC" }]);
+    await Acc.syncAccessoryLinks({ source: "davinci", sourceRef: "TY-FWX" }, [{ parentSku: "FW-S4", accessorySku: "FW-LENS" }]);
+    await Acc.setOwnDatasheet("FW-S4", "FW-LENS", true);
+    assert.equal(await assemblyGraphSynced(), false, "final fix I2: a fresh database has not synced the assembly graph");
+    const g1 = await ensureAssemblyGraphSynced();
+    assert(g1 && g1.complete && g1.written === 4 && g1.removed === 0 && g1.assemblies === 1 && g1.subassemblies === 1, `final fix I2: the first read syncs every assembly and subassembly (got ${JSON.stringify(g1)})`);
+    const live = await Acc.allAccessoryLinks();
+    const has = (ref: string, parent: string, acc: string) => live.some((l) => l.source === "assembly" && l.sourceRef === ref && l.parentSku === parent && l.accessorySku === acc);
+    assert(has("assembly:fw-asm", "FW-S4", "FW-LENS") && has("assembly:fw-asm", "FW-S4", "FW-CLAMP") && has("subassembly:SA-FW", "FW-S4", "FW-LENS2") && has("subassembly:SA-FW", "FW-S4", "FW-DATA"), "final fix I2: assembly:<id> and subassembly:<id> scopes hold each builder's pairs");
+    assert(live.find((l) => l.sourceRef === "assembly:fw-asm" && l.accessorySku === "FW-LENS")?.ownDatasheet === true, "final fix I2: the pair's own-datasheet flag carries over");
+    assert(has("assembly:fw-gone", "FW-OLD", "FW-OLDACC"), "final fix I2: an unlisted scope's links are never pruned by the one-time sync");
+    assert.equal(await assemblyGraphSynced(), true, "final fix I2: a completed sync sets the flag");
+    assert.equal(await ensureAssemblyGraphSynced(), null, "final fix I2: every later page read is a no-op (one flag read)");
+    const g2 = await syncAllAssemblyGraphs();
+    assert(g2.written === 0 && g2.removed === 0 && g2.complete, "final fix I2: the explicit (script) sync is idempotent — a re-run writes nothing");
+    // A run cut short by its budget leaves the flag unset, and the next
+    // read finishes the job.
+    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
+    await setSettings({ fixtureAssemblies: [...priorAssemblies, { id: "fw-asm2", name: "FW two", components: [{ sku: "FW-S5", label: "E", role: "fixture", defaultQty: 1 }, { sku: "FW-IRIS", label: "I", role: "accessory", defaultQty: 1 }] }] });
+    const cut = await ensureAssemblyGraphSynced(0, () => 0);
+    assert(cut && !cut.complete && cut.written === 0, "final fix I2: a sync out of budget stops before writing and says so");
+    assert.equal(await assemblyGraphSynced(), false, "final fix I2: …and leaves the flag unset");
+    const resumed = await ensureAssemblyGraphSynced();
+    assert(resumed && resumed.complete && resumed.written === 1, "final fix I2: the next read finishes the rest");
+    assert.equal(await assemblyGraphSynced(), true, "final fix I2: …and sets the flag");
+    await setSettings({ fixtureAssemblies: priorAssemblies });
+  }
+
+  /* --- part documents (#207) final fix wave 2, I4: an interrupted legacy
+         backfill (document minted, link never written) must not 404 --- */
+  {
+    const Docs = await import("@/lib/stores/part-documents");
+    const { resolvePartDatasheet, partsWithOwnDatasheet } = await import("@/lib/part-docs/datasheet-bridge");
+    const { backfillLegacyDatasheets, legacyDocumentId } = await import("@/lib/part-docs/legacy");
+    const { upsert: upsertPart, get: getPart } = await import("@/lib/stores/catalog");
+
+    await upsertPart({ sku: "DOC-INTERRUPT", desc: "Interrupted", category: "Lighting", unit: "ea", list: 1, cost: 1, datasheetBlobKey: "part-datasheets/DOC-INTERRUPT/old.pdf", datasheetName: "old.pdf" });
+    const part = (await getPart("DOC-INTERRUPT"))!;
+    const docId = legacyDocumentId("DOC-INTERRUPT");
+    // Simulate legacy.ts stopping between "create the document" and
+    // "ensureLinks" (two separate writes): the document exists, its link
+    // never does.
+    const minted = await Docs.createDocument({
+      id: docId, kind: "datasheet", fileName: "old.pdf", contentType: "application/pdf", size: 0,
+      blobKey: "part-datasheets/DOC-INTERRUPT/old.pdf", sourceUrl: null, source: "legacy", sourceRef: "DOC-INTERRUPT", by: "Legacy datasheet backfill",
+    });
+    assert(minted, "final fix I4 setup: the interrupted state — the document exists, unlinked");
+
+    assert.deepEqual(await resolvePartDatasheet(part), { kind: "legacy", blobKey: "part-datasheets/DOC-INTERRUPT/old.pdf" }, "final fix I4: a minted-but-unlinked legacy document must not 404 — the link never existed, so the legacy blob still streams");
+    assert((await partsWithOwnDatasheet([part])).has("DOC-INTERRUPT"), "final fix I4: …and the catalog marker still shows it");
+
+    const repaired = await backfillLegacyDatasheets([part]);
+    assert.deepEqual(repaired, { created: 0 }, "final fix I4: the backfill repairs the missing link without minting a second document");
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-INTERRUPT" && l.documentId === docId).length, 1, "final fix I4: the missing link now exists");
+    assert.deepEqual(await resolvePartDatasheet(part), { kind: "document", documentId: docId }, "final fix I4: the bridge now redirects to the (now-linked) legacy document");
+
+    // A human's detach afterwards must still stick — the repair pass must
+    // never make a detached link un-detachable, and must never resurrect it
+    // on a later run.
+    await Docs.detachDocument(docId, "DOC-INTERRUPT");
+    assert.equal(await resolvePartDatasheet(part), null, "final fix I4: once linked and then detached, it 404s as before");
+    await backfillLegacyDatasheets([part]);
+    assert.equal((await Docs.allDocumentLinks()).filter((l) => l.partSku === "DOC-INTERRUPT").length, 0, "final fix I4: …confirmed — the repair pass itself never revives a link a human detached");
+  }
+
+  /* --- part documents (#207) final fix wave 2, I5: the one-time graph sync
+         uses a STRICT settings read — a DB error must propagate, not read
+         as "no fixture assemblies" and mark the pass complete --- */
+  {
+    const { getDb, withTransaction } = await import("@/db");
+    const { sql, eq } = await import("drizzle-orm");
+    const { blobs } = await import("@/db/doc-tables");
+    const { getSettingsPatch, getSettingsPatchStrict, getSettingsStrict } = await import("@/lib/settings");
+
+    // settings.ts: the strict readers agree with the lenient ones when the
+    // DB is healthy…
+    await setSettings({ companyName: "Strict Settings Probe" });
+    assert.equal((await getSettingsStrict()).companyName, "Strict Settings Probe", "final fix I5: getSettingsStrict matches getSettings when the DB is healthy");
+
+    // …but a genuine DB error propagates from the strict reader (never
+    // resolves to `{}`), while the lenient one still swallows it exactly as
+    // documented (unchanged) — both probed inside a transaction so the
+    // DROP is rolled back and never actually lands.
+    await assert.rejects(
+      withTransaction(async () => {
+        const db = await getDb();
+        await db.execute(sql`DROP TABLE app_settings`);
+        await getSettingsPatchStrict();
+      }),
+      "final fix I5: getSettingsPatchStrict propagates a DB error instead of resolving to {}",
+    );
+    await assert.rejects(
+      withTransaction(async () => {
+        const db = await getDb();
+        await db.execute(sql`DROP TABLE app_settings`);
+        assert.deepEqual(await getSettingsPatch(), {}, "final fix I5: the lenient reader still swallows the same failure (documented behavior, unchanged)");
+        throw new Error("I5-lenient-probe-rollback");
+      }),
+      /I5-lenient-probe-rollback/,
+      "final fix I5: probe transaction rolled back cleanly",
+    );
+    assert.equal((await getSettingsStrict()).companyName, "Strict Settings Probe", "final fix I5: app_settings is intact after both probes roll back");
+
+    // End to end: the one-time assembly-graph sync itself now propagates a
+    // settings-read failure instead of syncing subassemblies-only and
+    // marking itself complete.
+    const { syncAllAssemblyGraphs, assemblyGraphSynced, GRAPH_SYNC_BLOB_ID } = await import("@/lib/part-docs/assembly-sync");
+    await (await getDb()).delete(blobs).where(eq(blobs.id, GRAPH_SYNC_BLOB_ID));
+    assert.equal(await assemblyGraphSynced(), false, "final fix I5 setup: the flag starts unset");
+    await assert.rejects(
+      withTransaction(async () => {
+        const db = await getDb();
+        await db.execute(sql`DROP TABLE app_settings`);
+        await syncAllAssemblyGraphs();
+      }),
+      "final fix I5: a settings-read failure during the one-time sync propagates — it must not silently sync subassemblies only",
+    );
+    assert.equal(await assemblyGraphSynced(), false, "final fix I5: …and the completion flag stays unset after the throw");
+  }
+
+  /* --- part documents (#207) final fix wave 2, I6: the one-time graph sync
+         is strictly add-only — it can never overwrite a concurrent Assembly
+         Builder save --- */
+  {
+    const Acc = await import("@/lib/stores/part-accessory-links");
+    // Seed the scope the way a normal (reconcile) save would.
+    await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }, { parentSku: "FW-CONC", accessorySku: "FW-B" }] },
+    ]);
+    // A concurrent save lands "during" the one-time sync's window: it drops
+    // FW-B and adds FW-C.
+    await Acc.syncAccessoryScopes("assembly", "assembly:", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }, { parentSku: "FW-CONC", accessorySku: "FW-C" }] },
+    ]);
+    const before = (await Acc.allAccessoryLinks()).filter((l) => l.sourceRef === "assembly:fw-conc").map((l) => l.accessorySku).sort();
+    assert.deepEqual(before, ["FW-A", "FW-C"], "final fix I6 setup: the concurrent save's drop+add landed");
+
+    // The one-time sync now runs off ITS OWN stale settings snapshot — read
+    // before the concurrent save above, so it still thinks the scope is
+    // [FW-A, FW-B] and knows nothing of FW-C. A reconcile sync would
+    // soft-delete FW-C (not in its stale desired set) — overwriting the
+    // concurrent save; add-only must never remove anything.
+    const r = await Acc.syncAccessoryScopeSet("assembly", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }, { parentSku: "FW-CONC", accessorySku: "FW-B" }] },
+    ]);
+    assert.equal(r.removed, 0, "final fix I6: the one-time sync never soft-deletes anything");
+    const after = (await Acc.allAccessoryLinks()).filter((l) => l.sourceRef === "assembly:fw-conc").map((l) => l.accessorySku).sort();
+    assert(after.includes("FW-C"), "final fix I6: the concurrent save's FW-C addition survives the one-time sync's stale, add-only pass — never overwritten");
+
+    // An already-live row (and its own-datasheet flag) is left completely
+    // alone by the add-only pass, never rewritten.
+    await Acc.setOwnDatasheet("FW-CONC", "FW-A", true);
+    await Acc.syncAccessoryScopeSet("assembly", [
+      { sourceRef: "assembly:fw-conc", pairs: [{ parentSku: "FW-CONC", accessorySku: "FW-A" }] },
+    ]);
+    assert.equal((await Acc.allAccessoryLinks()).find((l) => l.sourceRef === "assembly:fw-conc" && l.accessorySku === "FW-A")?.ownDatasheet, true, "final fix I6: an already-live row's own-datasheet flag is never touched by the add-only pass");
+  }
+
   console.log("review regression checks passed");
 }
 

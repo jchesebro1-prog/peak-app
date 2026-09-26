@@ -1,4 +1,4 @@
-import { del, get, put } from "@vercel/blob";
+import { del, get, head, put } from "@vercel/blob";
 
 /**
  * Vercel Blob seam (D116, MASTER-HOWTO §9) — file bytes out of the
@@ -34,6 +34,52 @@ export async function putBlob(
     addRandomSuffix: true,
   });
   return { url: res.url, pathname: res.pathname };
+}
+
+/**
+ * The first `max` bytes of a private blob, plus its stored size — enough to
+ * sniff what a client-uploaded file really is (part documents, #207) without
+ * pulling a 25 MB file through the function. Null when the blob is missing.
+ */
+export async function getBlobHead(
+  pathname: string,
+  max: number
+): Promise<{ bytes: Uint8Array; size: number } | null> {
+  const res = await get(pathname, { access: "private" });
+  if (!res || res.statusCode !== 200 || !res.stream) return null;
+  const reader = res.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
+  }
+  const bytes = new Uint8Array(Math.min(total, max));
+  let at = 0;
+  for (const c of chunks) {
+    const take = Math.min(c.byteLength, bytes.length - at);
+    if (take <= 0) break;
+    bytes.set(c.subarray(0, take), at);
+    at += take;
+  }
+  // `get`'s own reported size (res.blob.size, from Content-Length) is not
+  // trustworthy for the cap callers enforce on this number (part documents,
+  // #207: 25 MB) — Content-Length can be the COMPRESSED size when the
+  // response was transferred with content-encoding, understating the real
+  // byte count, and some responses omit it entirely (reporting 0). Always
+  // ask `head` for the store's own listed (uncompressed) size instead.
+  const meta = await head(pathname);
+  return { bytes, size: meta.size };
 }
 
 /** Stream a private blob's bytes (server-side; the proxy route's engine). */

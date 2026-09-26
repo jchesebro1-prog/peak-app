@@ -4,6 +4,7 @@ import { apiEnvelope, authorizeDisplaysRequest, catalogEtag, decodeDisplaysCurso
 import type { SpecCatalogPart } from "@/lib/bid-spec";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
+import { loadPartDocsState } from "@/lib/part-docs/load";
 
 export async function GET(req: Request) {
   try {
@@ -25,8 +26,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Invalid cursor." }, { status: 400, headers: displaysRateHeaders(rate) });
   }
   const [sections, articles] = await Promise.all([allSections(), allArticles()]);
-  const lib = { sections, articles };
   const parts = (await listCatalog()) as SpecCatalogPart[];
+  const lib = { sections, articles, docs: (await loadPartDocsState(parts)).index };
   const etag = catalogEtag(parts, lib);
   if (req.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers: { etag, ...displaysRateHeaders(rate) } });
   const filteredParts = parts
