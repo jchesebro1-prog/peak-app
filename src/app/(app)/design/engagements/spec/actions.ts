@@ -18,6 +18,8 @@ import { allArticles } from "@/lib/stores/spec-articles";
 import { saveGeneratedSpec } from "@/lib/stores/generated-specs";
 import { toArticles } from "@/lib/specs/sections";
 import { hasPrintableSpec } from "@/lib/specs/articles";
+import { gridSpecBomRows, parseVirtualPartId } from "@/lib/design/grid-virtual-parts";
+import { listFixtures } from "@/lib/stores/fixtures";
 
 /**
  * Bid-spec generator actions (D94). The catalog is the spec library: a
@@ -33,7 +35,7 @@ type QuoteSpecDoc = {
   id: string;
   spec?: {
     sections?: Array<{ items?: Array<{ sku?: string; desc?: string; qty?: number; option?: boolean; labor?: boolean }> }>;
-    lines?: Array<{ sku?: string; desc?: string; qty?: number }>;
+    lines?: Array<{ sku?: string; desc?: string; qty?: number; allowance?: boolean }>;
   };
 };
 
@@ -57,7 +59,14 @@ export async function bomFromQuoteAction(quoteId: string): Promise<Result<{ bom:
       push(it.sku, it.desc, it.qty);
     }
   }
-  for (const it of q.spec?.lines || []) push(it.sku, it.desc, it.qty);
+  // The Grid's flat lines (#GEM, D-GEM-16): allowances are left out like the
+  // estimator's allowance/labor lines; an Auto assembly (asm:) expands into
+  // its members. Fixtures load once, and only when an assembly line exists.
+  const gridLines = q.spec?.lines || [];
+  const fixtures = gridLines.some((l) => parseVirtualPartId(String(l.sku || "").trim())?.kind === "assembly")
+    ? new Map((await listFixtures()).map((f) => [f.id, f]))
+    : new Map();
+  for (const it of gridSpecBomRows(gridLines, (id) => fixtures.get(id))) push(it.sku, it.desc, it.qty);
   if (!rows.length) {
     return { ok: false, error: `Quote ${quoteId} has no equipment lines to specify.` };
   }

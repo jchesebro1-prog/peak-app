@@ -27,7 +27,7 @@ const MESSAGES: Record<string, string> = {
   invalid: "That edit isn't valid — check the label and try again.",
   "no-such-space": "That space was removed — refresh the page.",
   "no-sheet": "Upload or generate a plan sheet first — devices need a plan to land on.",
-  "bad-qty": "Quantity must be a whole number from 1 to 200.",
+  "bad-qty": "Quantity must be a whole number from 1 to 200 devices (a lot row goes up to 100,000).",
   "no-devices": "Those devices are no longer in this space — refresh the page.",
   "bad-end": "One end of that connection is no longer on the design — refresh the page.",
   "bad-length": "Type the cable length in feet (up to 5,000).",

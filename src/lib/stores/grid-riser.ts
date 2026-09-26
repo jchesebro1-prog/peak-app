@@ -19,6 +19,8 @@ import {
   type EndRef,
   type RiserOp,
 } from "@/lib/design/grid-riser-doc";
+import { planRowQty } from "@/lib/design/grid-riser";
+import { AUTO_QTY_MAX, withoutAuto } from "@/lib/design/grid-auto-model";
 import type { GridPlacement, GridProject } from "./grid-projects";
 
 /**
@@ -219,15 +221,23 @@ export async function addDevicesToNode(
   return r ? { ok: false, reason: r } : { ok: true, added: qty };
 }
 
-/** Edit a device row's qty: add placements inside the space, or remove the
- *  newest ones (their riser links/conduits go with them). */
+/**
+ * Edit a device row's qty — the row's UNIT count, lot markers included
+ * (#GEM fix wave 1, I1 / D-GEM-11; the rule is planRowQty): a plain row
+ * adds placements inside the space or removes the newest ones (their riser
+ * links/conduits go with them); a row holding a lot marker edits the lot's
+ * qty instead and never gains markers. A plain row stays capped at
+ * MAX_NODE_QTY markers; a lot row may go to AUTO_QTY_MAX units. A real
+ * change is a hand edit: every placement left in the row loses its `auto`
+ * tag, so a later per-scope re-fill keeps the edited row.
+ */
 export async function setNodeDeviceQty(
   projectId: string,
   input: { optionId: string; nodeKey: string; partId: string; qty: number; by: string }
 ): Promise<{ ok: true; added: number; removed: number } | { ok: false; reason: Missing | DropRefusal | "bad-qty" | "no-devices" }> {
-  const qty = Math.floor(input.qty);
-  if (!(qty >= 1 && qty <= MAX_NODE_QTY)) return { ok: false, reason: "bad-qty" };
-  let refusal: Missing | DropRefusal | "no-devices" | null = null;
+  const qty = Math.floor(Number(input.qty));
+  if (!(Number.isFinite(qty) && qty >= 1 && qty <= AUTO_QTY_MAX)) return { ok: false, reason: "bad-qty" };
+  let refusal: Missing | DropRefusal | "bad-qty" | "no-devices" | null = null;
   let added = 0;
   let removed = 0;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
@@ -240,28 +250,55 @@ export async function setNodeDeviceQty(
       refusal = "no-devices";
       return;
     }
-    if (qty > cur.length) {
-      const drop = dropPoints(p, input.nodeKey, qty - cur.length);
+    const plan = planRowQty(cur, qty);
+    if (!plan) {
+      refusal = "bad-qty";
+      return;
+    }
+    if (plan.add > 0 && cur.length + plan.add > MAX_NODE_QTY) {
+      refusal = "bad-qty";
+      return;
+    }
+    if (!plan.add && !plan.remove.length && !plan.set.size) return; // nothing changed
+    let fresh: GridPlacement[] = [];
+    if (plan.add > 0) {
+      const drop = dropPoints(p, input.nodeKey, plan.add);
       if (typeof drop === "string") {
         refusal = drop;
         return;
       }
-      p.placements = [...(p.placements || []), ...newPlacements(drop, input.partId, input.optionId, input.by, Date.now())];
-      added = qty - cur.length;
-    } else if (qty < cur.length) {
-      const gone = new Set(cur.slice(qty).map((pl) => pl.id));
-      p.placements = (p.placements || []).filter((pl) => !gone.has(pl.id));
-      if (p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
-      removed = gone.size;
+      fresh = newPlacements(drop, input.partId, input.optionId, input.by, Date.now());
     }
+    const gone = new Set(plan.remove);
+    const row = new Set(cur.map((pl) => pl.id));
+    p.placements = [
+      ...(p.placements || [])
+        .filter((pl) => !gone.has(pl.id))
+        .map((pl) => {
+          if (!row.has(pl.id)) return pl;
+          const next = withoutAuto({ ...pl });
+          const q = plan.set.get(pl.id);
+          if (q !== undefined) {
+            if (q > 1) next.qty = q;
+            else delete next.qty;
+          }
+          return next;
+        }),
+      ...fresh,
+    ];
+    if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    added = fresh.length;
+    removed = gone.size;
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
-  const r = refusal as Missing | DropRefusal | "no-devices" | null;
+  const r = refusal as Missing | DropRefusal | "bad-qty" | "no-devices" | null;
   return r ? { ok: false, reason: r } : { ok: true, added, removed };
 }
 
-/** Swap the catalog part on every placement of a device row. */
+/** Swap the catalog part on every placement of a device row. A swap is a
+ *  hand edit (#GEM, D-GEM-11): the row's placements lose their `auto` tag, so
+ *  a later per-scope re-fill keeps the chosen part. Lot qty is kept. */
 export async function replaceNodeDevicePart(
   projectId: string,
   input: { optionId: string; nodeKey: string; fromPartId: string; toPartId: string }
@@ -278,7 +315,7 @@ export async function replaceNodeDevicePart(
       refusal = "no-devices";
       return;
     }
-    p.placements = (p.placements || []).map((pl) => (ids.has(pl.id) ? { ...pl, partId: input.toPartId } : pl));
+    p.placements = (p.placements || []).map((pl) => (ids.has(pl.id) ? { ...withoutAuto(pl), partId: input.toPartId } : pl));
     changed = ids.size;
     p.updatedAt = Date.now();
   });

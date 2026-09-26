@@ -9,6 +9,7 @@ import { findCalibration } from "@/lib/annotations";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { placementQty } from "@/lib/design/grid-bom";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
 import { markerColor } from "@/lib/design/grid-symbols";
@@ -40,6 +41,8 @@ import SetSettingsPanel from "./set-settings-panel";
 
 export const metadata = { title: "Drawing set — Quartzite-6" };
 export const dynamic = "force-dynamic";
+// Virtual parts (#GEM) reach listFixtures() on this page — same budget as the editor.
+export const maxDuration = 60;
 
 /** Schedule rows per column; two columns per E-60x sheet (the whole sheet,
  *  type included, scales with the size, so this holds at 24×36 too). */
@@ -167,16 +170,21 @@ export default async function DrawingSetPage({
       now,
     });
 
-  const figPlacement = (pl: GridPlacement): FigurePlacement => {
+  // `desc` feeds the device key; `qty` is the marker's unit count (#GEM: a
+  // lot stands for many) — summed into the key and shown as ×N on the symbol
+  // label, as the editor draws it.
+  const figPlacement = (pl: GridPlacement): { fig: FigurePlacement; desc: string; qty: number } => {
     const part = partById.get(pl.partId);
     const look = part ? symbolLook(part, symCtx) : symbolLook({ category: pl.category }, symCtx);
-    return {
+    const desc = pl.curtain ? pl.curtain.name : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category || pl.partId : pl.partId);
+    const qty = pl.curtain ? 1 : placementQty(pl);
+    const fig: FigurePlacement = {
       id: pl.id,
       x: pl.x,
       y: pl.y,
       iconId: look.iconId,
       color: pl.curtain ? symCtx.colors.Curtains : look.color,
-      label: pl.curtain ? pl.curtain.name : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category || pl.partId : pl.partId),
+      label: qty > 1 ? `${desc} ×${qty}` : desc,
       // One type mark per part; each named curtain is its own type.
       key: pl.curtain ? `curtain:${pl.curtain.name}` : pl.partId,
       tag: "",
@@ -184,6 +192,7 @@ export default async function DrawingSetPage({
       h: part?.symbolHeight || 30,
       curtain: Boolean(pl.curtain),
     };
+    return { fig, desc, qty };
   };
 
   const cover = (
@@ -262,7 +271,7 @@ export default async function DrawingSetPage({
       const cal = findCalibration(cals, d.sheetId, d.page);
       const figs = c.placements.map(figPlacement);
       const marks = assignTypeMarks(
-        figs.map((f) => ({ key: f.key, desc: f.label })),
+        figs.map((f) => ({ key: f.fig.key, desc: f.desc, qty: f.qty })),
         DRAWING_SYSTEMS.find((s) => s.key === d.system)?.prefix || ""
       );
       return (
@@ -278,7 +287,12 @@ export default async function DrawingSetPage({
           k={k}
           spaces={c.spaces.map((s) => ({ id: s.id, points: s.points, name: s.name, color: s.color }))}
           routes={c.routes.map((r) => ({ id: r.id, points: r.points, color: markerColor(partById.get(r.partId)?.category || "Wire") }))}
-          placements={figs.map((f) => ({ ...f, tag: marks.tags.get(f.key) || "" }))}
+          placements={figs.map(({ fig, qty }) => {
+            // The printed mark carries the lot count too (L3 ×240) — the
+            // collision pass sizes the mark from this text.
+            const tag = marks.tags.get(fig.key) || "";
+            return { ...fig, tag: tag && qty > 1 ? `${tag} ×${qty}` : tag };
+          })}
           keyRows={marks.rows.map((r) => ({ tag: r.tag, qty: r.qty, desc: r.desc }))}
           cal={cal ? { scale: cal.scale, unit: cal.unit } : null}
         />
@@ -323,7 +337,7 @@ export default async function DrawingSetPage({
         )}
         {last && !empty && (
           <div className="pk-dw-foot">
-            {`${schedule.deviceCount} device${schedule.deviceCount === 1 ? "" : "s"} across ${schedule.sections.length} area${schedule.sections.length === 1 ? "" : "s"}`}
+            {`${schedule.unitCount} unit${schedule.unitCount === 1 ? "" : "s"} across ${schedule.sections.length} area${schedule.sections.length === 1 ? "" : "s"}`}
             {schedule.wireFeet.map((w) => ` · ${Math.ceil(w.ft)} ${w.unit} ${w.partId}${w.unmeasured ? ` (+${w.unmeasured} unmeasured)` : ""}`).join("")}
           </div>
         )}

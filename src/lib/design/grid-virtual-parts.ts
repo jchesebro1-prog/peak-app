@@ -7,15 +7,18 @@
  * cost, scope) appended to the page's parts, so the BOM, space rollups, riser,
  * schedule, drawing set and quote price and label them with no second code
  * path. `virtual` keeps them out of the device palette; `allowance` flags the
- * line internally. An allowance whose map cell is no longer a confirmed
- * allowance prices $0 and says so — never a stale dollar.
+ * line internally (its desc is the row's plain label — customer text stays
+ * normal, D-GEM-15). A virtual part with nothing real behind it — a deleted
+ * assembly, an assembly with no priced member, an allowance no longer
+ * confirmed — prices $0, says why in its desc and carries `virtualDead`: the
+ * quote refuses it by name and the editor says "needs a part" (D-GEM-13).
  */
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "./grid-bom";
 import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
 import { GRID_SCOPE_OF_SYS, UNSCOPED, type GridLayer } from "./grid-scopes";
-import { resolveFixture } from "@/lib/fixture-assemblies";
+import { resolveFixture, type FixtureCatalogPart, type FixtureResolvable } from "@/lib/fixture-assemblies";
 
 export const ASSEMBLY_PART_PREFIX = "asm:";
 export const ALLOWANCE_PART_PREFIX = "allow:";
@@ -66,18 +69,21 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
     if (ref.kind === "assembly") {
       const f = ctx.fixtures.get(ref.id);
       const r = f ? resolveFixture(f, ctx.parts) : null;
-      const cost = r?.cost ?? 0;
+      // Dead: deleted, or not one included member resolves to a cost or a sell.
+      const dead = !r || !(r.cost > 0 || r.sell > 0);
+      const cost = dead ? 0 : r.cost;
       out.push({
         id,
         sku: ref.id,
-        desc: f ? f.label : `${ref.id} (assembly deleted — replace this device)`,
+        desc: !f ? `${ref.id} (assembly deleted)` : dead ? `${f.label} (assembly has no priced parts)` : f.label,
         category: "Assembly",
         unit: "ea",
-        list: r ? (r.sell > 0 ? r.sell : cost > 0 ? sellFromCost(cost, ctx.margin) : 0) : 0,
+        list: dead ? 0 : r.sell > 0 ? r.sell : sellFromCost(cost, ctx.margin),
         cost,
         gridScope: f?.kind === "system" ? SYSTEM_SCOPE_LAYER[f.scope || ""] ?? UNSCOPED : "Lighting",
         kind: "device",
         virtual: true,
+        ...(dead ? { virtualDead: true as const } : {}),
       });
       continue;
     }
@@ -87,7 +93,7 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
     out.push({
       id,
       sku: "ALLOWANCE",
-      desc: amount > 0 ? `${def.label} (allowance)` : `${def.label} (allowance no longer confirmed — re-fill or replace)`,
+      desc: amount > 0 ? def.label : `${def.label} (allowance no longer confirmed)`,
       category: "Allowance",
       unit: def.unit,
       list: amount > 0 ? sellFromCost(amount, ctx.margin) : 0,
@@ -96,7 +102,46 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
       kind: "device",
       virtual: true,
       allowance: true,
+      ...(amount > 0 ? {} : { virtualDead: true as const }),
     });
   }
   return out;
+}
+
+/**
+ * A Grid quote's flat `spec.lines` → bid-spec BOM rows (#GEM fix wave 1, M4,
+ * D-GEM-16), pure. The bid spec specifies products, so:
+ *  - allowance lines (flagged, or an `allow:` sku on an older quote) are
+ *    left out, as the estimator path leaves out its allowance/labor lines;
+ *  - an `asm:` line is expanded into its assembly's included members (SKU,
+ *    "member (assembly label)", line qty × member qty), which match the
+ *    catalog like any part. An assembly that no longer resolves stays one
+ *    row under its quoted description, for the person to map or waive.
+ * Every other line passes through unchanged.
+ */
+export function gridSpecBomRows(
+  lines: ReadonlyArray<{ sku?: string; desc?: string; qty?: number; allowance?: boolean }>,
+  fixtureOf: (id: string) => FixtureResolvable | null | undefined
+): Array<{ sku: string; desc: string; qty: number }> {
+  const rows: Array<{ sku: string; desc: string; qty: number }> = [];
+  for (const l of lines) {
+    const sku = String(l.sku || "").trim();
+    const desc = String(l.desc || "").trim();
+    const qty = Number(l.qty) || 0;
+    if (l.allowance || sku.startsWith(ALLOWANCE_PART_PREFIX)) continue;
+    const ref = sku ? parseVirtualPartId(sku) : null;
+    if (ref?.kind === "assembly") {
+      const f = fixtureOf(ref.id);
+      const members = f ? resolveFixture(f, new Map<string, FixtureCatalogPart>()).parts.filter((m) => m.included && m.sku) : [];
+      if (f && members.length) {
+        for (const m of members) rows.push({ sku: m.sku, desc: `${m.label} (${f.label})`, qty: qty * m.qty });
+        continue;
+      }
+      rows.push({ sku: "", desc: desc || f?.label || ref.id, qty });
+      continue;
+    }
+    if (!sku && !desc) continue;
+    rows.push({ sku, desc, qty });
+  }
+  return rows;
 }

@@ -17112,7 +17112,7 @@ import { buildSchedule, scheduleGroups, paginateSchedule, scheduleWiresFromView 
     ],
   });
   ok(gdsSch.sections.map((s) => s.name).join() === "Stage,Unassigned" && gdsSch.sections[0].rows[0].qty === 2 && gdsSch.sections[0].rows[1].code === "CURTAIN", "#209 schedule: per-space rows, curtains one per drop");
-  ok(gdsSch.sections[1].rows[0].desc === "(no longer in the catalog)" && gdsSch.deviceCount === 3, "#209 schedule: a missing part stays visible; curtains aren't counted as devices");
+  ok(gdsSch.sections[1].rows[0].desc === "(no longer in the catalog)" && gdsSch.unitCount === 3, "#209 schedule: a missing part stays visible; curtains aren't counted as devices");
   ok(gdsSch.wireFeet.length === 1 && gdsSch.wireFeet[0].ft === 10.5 && gdsSch.wireFeet[0].unmeasured === 1, "#209 schedule: footage rolls up per wire part");
   ok(scheduleGroups(gdsSch).length === 3 && scheduleGroups(gdsSch)[2].head.kind === "wires", "#209 schedule: wire runs follow the spaces");
   const gdsBig = [{ head: { kind: "section" as const, name: "Big", cont: false }, rows: Array.from({ length: 60 }, (_, i) => ({ kind: "row" as const, qty: 1, code: `P${i}`, desc: "d" })) }];
@@ -18021,4 +18021,97 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
   ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#GEM T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
+}
+
+/* --- #GEM T6 fix wave 1: lot-aware riser rows, lot units on the drawing set + schedule, dead virtual parts, bid-spec rows, store sanitizers, per-option estimates --- */
+import { planRowQty as gemPlanRow7, riserGraph as gemRiser7 } from "@/lib/design/grid-riser";
+import { assignTypeMarks as gemMarks7 } from "@/lib/design/drawing-labels";
+import { buildSchedule as gemSchedule7 } from "@/lib/design/grid-schedule";
+import { PLACEMENT_QTY_MAX as gemQtyMax7, placementQty as gemQty7 } from "@/lib/design/grid-bom";
+import { gridSpecBomRows as gemSpecRows7, virtualPartsFor as gemVirtual7 } from "@/lib/design/grid-virtual-parts";
+import {
+  AUTO_QTY_MAX as gemAutoMax7, autoEstimateFor as gemEstFor7, autoEstimatesOf as gemEsts7, cleanLotQty as gemLotQty7,
+  sanitizeAutoTag as gemTag7, withoutAuto as gemNoAuto7,
+} from "@/lib/design/grid-auto-model";
+{
+  // I1 — planRowQty
+  const one = gemPlanRow7([{ id: "a", qty: 12 }], 11)!;
+  ok(one.set.get("a") === 11 && !one.remove.length && one.add === 0, "#GEM fix1 I1: a 12-unit lot edited to 11 → the one marker holds 11");
+  const up = gemPlanRow7([{ id: "a", qty: 240 }], 300)!;
+  ok(up.set.get("a") === 300 && up.add === 0, "#GEM fix1 I1: a lot row goes past 200 and never gains markers");
+  const mixUp = gemPlanRow7([{ id: "a", qty: 5 }, { id: "b" }, { id: "c", qty: 3 }, { id: "d" }], 14)!;
+  ok(mixUp.set.size === 1 && mixUp.set.get("c") === 7 && mixUp.add === 0 && !mixUp.remove.length, "#GEM fix1 I1: a mixed row's increase goes onto the NEWEST lot marker");
+  const mixDown = gemPlanRow7([{ id: "a", qty: 5 }, { id: "b" }, { id: "c", qty: 3 }, { id: "d" }], 5)!;
+  ok(mixDown.set.get("c") === 1 && mixDown.set.get("a") === 2 && !mixDown.remove.length, "#GEM fix1 I1: a decrease shrinks lots newest-first, keeping every marker while it can");
+  const mixFloor = gemPlanRow7([{ id: "a", qty: 5 }, { id: "b" }, { id: "c", qty: 3 }, { id: "d" }], 2)!;
+  ok(mixFloor.set.get("a") === 1 && mixFloor.set.get("b") === undefined && mixFloor.remove.join(",") === "c,d", "#GEM fix1 I1: past every lot's floor, the newest markers come off");
+  const plain = gemPlanRow7([{ id: "a" }, { id: "b" }, { id: "c" }], 1)!;
+  const plainUp = gemPlanRow7([{ id: "a" }], 4)!;
+  ok(plain.remove.join(",") === "b,c" && plainUp.add === 3 && !plainUp.set.size, "#GEM fix1 I1: a row without a lot keeps one-marker-per-unit");
+  ok(gemPlanRow7([{ id: "a", qty: 5 }], gemQtyMax7 + 1) === null && gemPlanRow7([{ id: "a", qty: 5 }], gemQtyMax7)?.set.get("a") === gemQtyMax7, "#GEM fix1 I1: a lot is capped at the placement qty cap");
+  const g7 = gemRiser7([{ sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 }, { sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" }], [], [], [], []);
+  ok(g7.nodes[0].groups.find((g) => g.partId === "PIPE")!.lot === true && g7.nodes[0].groups.find((g) => g.partId === "PAR")!.lot === undefined, "#GEM fix1 I1: the riser marks a row holding a lot");
+  const panels7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-panels.tsx"), "utf8");
+  const riserEd7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/riser/riser-editor.tsx"), "utf8");
+  ok(panels7.includes("lot ? PLACEMENT_QTY_MAX : 200") && riserEd7.includes("lot={Boolean(rowGroup.lot)}"), "#GEM fix1 I1: the row panel lifts the 200 cap for a lot row");
+  // I3 — drawing-set device key sums units
+  const m7 = gemMarks7([{ key: "PIPE", desc: "Pipe", qty: 240 }, { key: "PAR", desc: "Par" }, { key: "PIPE", desc: "Pipe", qty: 10 }, { key: "PAR", desc: "Par", qty: 0 }], "R");
+  ok(m7.rows.map((r) => `${r.tag}:${r.qty}`).join(",") === "R1:250,R2:2", "#GEM fix1 I3: the device key adds each symbol's unit count");
+  const set7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/set/page.tsx"), "utf8");
+  ok(set7.includes("qty: f.qty") && set7.includes("`${desc} ×${qty}`") && set7.includes("`${tag} ×${qty}`"), "#GEM fix1 I3: the plan sheet carries lot qty into the key and labels the symbol ×N");
+  // M2 — schedule counts units
+  const sch7 = gemSchedule7({ placements: [{ id: "a", sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 }, { id: "b", sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" }], spaces: [], descOf: () => "x", wires: [] });
+  ok(sch7.unitCount === 241, "#GEM fix1 M2: the schedule total counts units, not markers");
+  // I4 / I5 — dead virtual parts, plain allowance desc
+  const rackDead = {
+    id: "SA-DEAD7", kind: "system" as const, label: "Empty rack", description: "", scope: "Audio" as const,
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "NOPE-7", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const rackLive = { ...rackDead, id: "SA-LIVE7", label: "Live rack", parts: [{ sku: "MIX-7", qty: 2 }] };
+  const ctx7 = {
+    parts: new Map([["MIX-7", { sku: "MIX-7", desc: "Mixer", unit: "ea", cost: 500, list: 800 }]]),
+    fixtures: new Map([[rackDead.id, rackDead], [rackLive.id, rackLive]]),
+    margin: 0.3,
+  };
+  const map7 = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
+  const v7 = gemVirtual7(["asm:SA-DEAD7", "asm:SA-GONE7", "asm:SA-LIVE7", "allow:audio:subwoofer:good", "allow:video:screen:good"], map7, ctx7);
+  const vOf = (id: string) => v7.find((p) => p.id === id)!;
+  ok(vOf("asm:SA-DEAD7").virtualDead === true && vOf("asm:SA-DEAD7").list === 0 && vOf("asm:SA-DEAD7").cost === 0 && /no priced parts/.test(vOf("asm:SA-DEAD7").desc), "#GEM fix1 I4: an assembly with no priced member is dead");
+  ok(vOf("asm:SA-GONE7").virtualDead === true && /deleted/.test(vOf("asm:SA-GONE7").desc), "#GEM fix1 I4: a deleted assembly is dead");
+  ok(vOf("allow:video:screen:good").virtualDead === true && !("tierFallback" in vOf("allow:video:screen:good")), "#GEM fix1 I4: an unconfirmed allowance is dead (its own flag, not a tier fallback)");
+  ok(vOf("asm:SA-LIVE7").virtualDead === undefined && vOf("asm:SA-LIVE7").cost === 1000 && vOf("asm:SA-LIVE7").list === 1600, "#GEM fix1 I4: a priced assembly is live");
+  ok(vOf("allow:audio:subwoofer:good").desc === "Subwoofer" && vOf("allow:audio:subwoofer:good").allowance === true && vOf("allow:audio:subwoofer:good").virtualDead === undefined, "#GEM fix1 I5: a live allowance's desc is the row's plain label");
+  const quote7 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
+  const ed7 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  ok(quote7.includes("virtualDead") && quote7.includes("need") && ed7.includes("Needs a part") && ed7.includes("VIRTUAL_DEAD_HINT"), "#GEM fix1 I4: the quote refuses dead lines; the editor flags them 'Needs a part'");
+  // M4 — bid-spec rows
+  const spec7 = gemSpecRows7(
+    [
+      { sku: "PAR-1", desc: "Par", qty: 4 },
+      { sku: "allow:audio:subwoofer:good", desc: "Subwoofer", qty: 2, allowance: true },
+      { sku: "allow:video:screen:good", desc: "Screen", qty: 1 },
+      { sku: "asm:SA-LIVE7", desc: "Live rack", qty: 3 },
+      { sku: "asm:SA-GONE7", desc: "Gone rack", qty: 1 },
+    ],
+    (id) => ctx7.fixtures.get(id)
+  );
+  ok(spec7.map((r) => `${r.sku}|${r.desc}|${r.qty}`).join(";") === "PAR-1|Par|4;MIX-7|MIX-7 (Live rack)|6;|Gone rack|1", "#GEM fix1 M4: bid-spec rows drop allowances and expand an assembly into its members under its label");
+  const specAct7 = readFileSync(join(process.cwd(), "src/app/(app)/design/engagements/spec/actions.ts"), "utf8");
+  ok(specAct7.includes("gridSpecBomRows(gridLines"), "#GEM fix1 M4: the bid-spec action reads Grid lines through gridSpecBomRows");
+  // M3 — store-side sanitizers
+  ok(gemLotQty7(240) === 240 && gemLotQty7(1) === undefined && gemLotQty7(Number.NaN) === undefined && gemLotQty7("12") === 12 && gemLotQty7(1e9) === gemAutoMax7 && gemLotQty7(-4) === undefined && gemAutoMax7 === gemQtyMax7, "#GEM fix1 M3: lot qty is finite, whole, ≥2 or absent, and capped");
+  ok(gemQty7({ qty: 1e9 }) === gemQtyMax7, "#GEM fix1 M3: readers cap a stored lot too");
+  const tg = gemTag7({ scope: "rigging", rowKey: "rigging:pipe", tier: "best", extra: 1 });
+  ok(JSON.stringify(tg) === '{"scope":"rigging","rowKey":"rigging:pipe","tier":"best"}' && gemTag7({ scope: "lighting", rowKey: "rigging:pipe", tier: "best" }) === null && gemTag7({ scope: "controls", rowKey: "controls:console", tier: "good" }) === null && gemTag7({ scope: "rigging", rowKey: "rigging:pipe", tier: "gold" }) === null && gemTag7("x") === null, "#GEM fix1 M3: an auto tag is rebuilt from a known scope, a row of that scope and a real tier");
+  const tagged = { id: "a", auto: tg };
+  const plainPl: { id: string; auto?: unknown } = { id: "b" };
+  ok(!("auto" in gemNoAuto7(tagged)) && "auto" in tagged && gemNoAuto7(plainPl) === plainPl, "#GEM fix1 I2: withoutAuto copies without the tag and leaves an untagged placement alone");
+  // D1 — per-option estimates
+  const legacy = { tierByScope: { lighting: "best" }, overrides: {} };
+  ok(JSON.stringify(gemEsts7(legacy, "opt-base")) === '{"opt-base":{"tierByScope":{"lighting":"best"},"overrides":{}}}' && gemEstFor7(legacy, "opt-2", "opt-base") === null, "#GEM fix1 D1: a legacy single estimate reads as the first option's only");
+  const perOpt = { "opt-a": { tierByScope: { audio: "good" }, overrides: {} }, "opt-b": "junk" };
+  ok(gemEstFor7(perOpt, "opt-a", "opt-a")?.tierByScope.audio === "good" && !("opt-b" in gemEsts7(perOpt, "opt-a")) && JSON.stringify(gemEsts7(null, "x")) === "{}", "#GEM fix1 D1: the per-option map is read per option, junk dropped");
+  // M5 — maxDuration on the virtual-part pages
+  ok(["riser", "set", "schedule"].every((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8").includes("export const maxDuration = 60")), "#GEM fix1 M5: riser, set and schedule pages get the editor's 60 s budget");
 }

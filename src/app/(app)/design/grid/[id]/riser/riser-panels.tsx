@@ -3,6 +3,7 @@
 import { useState, type CSSProperties, type RefObject } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { RiserNote } from "@/lib/design/grid-riser-doc";
+import { PLACEMENT_QTY_MAX } from "@/lib/design/grid-bom";
 
 /** Riser editor tool panels (#209). Plain controlled forms; the editor owns
  *  every server call and passes busy/callbacks in. */
@@ -100,6 +101,7 @@ export function RowPanel({
   partId: currentPart,
   desc,
   qty: currentQty,
+  lot = false,
   devices,
   busy,
   onSave,
@@ -110,6 +112,8 @@ export function RowPanel({
   partId: string;
   desc: string;
   qty: number;
+  /** #GEM: the row holds a lot marker — its qty edits the lot, up to PLACEMENT_QTY_MAX. */
+  lot?: boolean;
   devices: RiserPartOption[];
   busy: boolean;
   onSave: (partId: string, qty: number) => void;
@@ -119,7 +123,10 @@ export function RowPanel({
   const [partId, setPartId] = useState(currentPart);
   const [qty, setQty] = useState(String(currentQty));
   const n = Math.floor(Number(qty));
-  const valid = Boolean(partId) && n >= 1 && n <= 200;
+  // A lot row (#GEM) can hold far more units than 200 markers — a 240 ft pipe
+  // lot must stay editable and swappable.
+  const maxQty = lot ? PLACEMENT_QTY_MAX : 200;
+  const valid = Boolean(partId) && n >= 1 && n <= maxQty;
   const dirty = partId !== currentPart || n !== currentQty;
   return (
     <div style={PANEL}>
@@ -127,7 +134,7 @@ export function RowPanel({
       <PartPicker label="Part" options={devices} value={partId} onChange={setPartId} />
       <label style={FIELD}>
         Qty
-        <input style={{ ...INPUT, width: 72 }} type="number" min={1} max={200} value={qty} onChange={(e) => setQty(e.target.value)} />
+        <input style={{ ...INPUT, width: 72 }} type="number" min={1} max={maxQty} value={qty} onChange={(e) => setQty(e.target.value)} />
       </label>
       <button type="button" className="pk-btn-accent" disabled={!valid || !dirty || busy} onClick={() => onSave(partId, n)}>
         Save
@@ -136,7 +143,11 @@ export function RowPanel({
       <button type="button" className="pk-btn-outline" disabled={busy} onClick={onCancel}>
         Close
       </button>
-      <div style={HINT}>Edits the placements on the plan — a lower qty removes the newest ones in this space.</div>
+      <div style={HINT}>
+        {lot
+          ? "Edits the lot on the plan — the qty changes the lot's count; no markers are added."
+          : "Edits the placements on the plan — a lower qty removes the newest ones in this space."}
+      </div>
     </div>
   );
 }

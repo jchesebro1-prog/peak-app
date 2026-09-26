@@ -3804,8 +3804,8 @@ async function main() {
       );
     }
     assert.equal(await GP.replaceAutoPlacements(p0.id, { optionId: "opt-gone", scopes: ["lighting"], sheetId, page: 1, by, items: [] }), null, "#GEM T6: an unknown option is refused");
-    await GP.setAutoEstimate(p0.id, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } });
-    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } }, "#GEM T6: the Auto choices persist on the project");
+    await GP.setAutoEstimate(p0.id, opt, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } });
+    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } } }, "#GEM T6: the Auto choices persist on the project, per option");
     await Cat.upsert({ sku: "GEM6-PAR", desc: "GEM6 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
     await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, by);
     const subTag = { scope: "audio" as const, rowKey: "audio:subwoofer", tier: "better" as const };
@@ -3819,9 +3819,130 @@ async function main() {
     if (q.ok) {
       const allowLine = q.build.spec.lines.find((l) => l.sku === "allow:audio:subwoofer:better");
       assert.ok(allowLine && allowLine.allowance === true && allowLine.qty === 2 && allowLine.price > 0, "#GEM T6: the allowance reaches the quote at its live price, flagged");
+      assert.equal(allowLine?.desc, "Subwoofer", "#GEM fix1 I5: the allowance's quote line reads as the row's plain label");
       assert.ok(!q.build.spec.lines.some((l) => l.sku !== "allow:audio:subwoofer:better" && l.allowance), "#GEM T6: …and only the allowance is flagged");
     }
     await EM.clearEquipmentRow("audio:subwoofer");
+  }
+
+  /* --- #GEM T6 fix wave 1: lot-aware riser qty, riser swap clears auto, per-option estimates, dead virtual lines refused, store sanitizers --- */
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const GR = await import("@/lib/stores/grid-riser");
+    const { resolveOptionId, optionSlice } = await import("@/lib/design/grid-options");
+    const { bomLines } = await import("@/lib/design/grid-bom");
+    const { buildGridQuote } = await import("@/lib/design/grid-quote");
+    const by = "tester";
+    const node = "unassigned";
+    const p0 = await GP.createProject({ name: "GEM fix1", customer: "", customerId: null, by });
+    await GP.addSheet(p0.id, { name: "Generated base plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,%3Csvg%2F%3E", by });
+    let p = (await GP.getProject(p0.id))!;
+    const opt = resolveOptionId(p, null);
+    const sheetId = p.sheetIds[0];
+    const pipeTag = { scope: "rigging" as const, rowKey: "rigging:pipe", tier: "good" as const };
+    await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [{ x: 0.9, y: 0.9, partId: "GEMF-PIPE", qty: 12, auto: pipeTag }] });
+
+    // I1: a 12-unit lot edited to 11 on the riser → ONE marker holding 11, BOM 11, auto cleared.
+    const pipes = () => optionSlice(p, opt).placements.filter((pl) => pl.partId === "GEMF-PIPE");
+    const r11 = await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 11, by });
+    assert.deepEqual(r11, { ok: true, added: 0, removed: 0 }, "#GEM fix1 I1: a lot qty edit adds and removes no markers");
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(pipes().length === 1 && pipes()[0].qty === 11 && !pipes()[0].auto, "#GEM fix1 I1: 12-unit lot edited to 11 → one marker, qty 11, auto cleared");
+    const pipePart = [{ id: "GEMF-PIPE", sku: "GEMF-PIPE", desc: "Pipe", category: "Rigging", unit: "ft", list: 12, cost: 8 }];
+    assert.equal(bomLines(optionSlice(p, opt).placements, pipePart).find((l) => l.partId === "GEMF-PIPE")?.qty, 11, "#GEM fix1 I1: …and the BOM bills 11");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 240, by })).ok, "#GEM fix1 I1: a lot row goes past 200");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 300, by })).ok, "#GEM fix1 I1: …and on up");
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(pipes().length === 1 && pipes()[0].qty === 300, "#GEM fix1 I1: still one marker, now 300");
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 100_001, by }), { ok: false, reason: "bad-qty" }, "#GEM fix1 I1: a lot is capped at the placement qty cap");
+    assert.ok((await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PIPE", qty: 1, by })).ok, "#GEM fix1 I1: a lot can come down to one unit");
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(pipes().length === 1 && pipes()[0].qty === undefined, "#GEM fix1 I1: a one-unit lot is a plain marker (qty dropped)");
+    // A plain row keeps one-marker-per-unit and its 200 cap.
+    assert.ok((await GR.addDevicesToNode(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 3, by })).ok, "#GEM fix1 I1: three plain devices");
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 250, by }), { ok: false, reason: "bad-qty" }, "#GEM fix1 I1: a plain row stays capped at 200 markers");
+    assert.deepEqual(await GR.setNodeDeviceQty(p0.id, { optionId: opt, nodeKey: node, partId: "GEMF-PAR", qty: 2, by }), { ok: true, added: 0, removed: 1 }, "#GEM fix1 I1: a plain row still removes the newest marker");
+
+    // I2: a riser part swap is a hand edit — the next per-scope re-fill keeps the swapped devices.
+    const frontTag = { scope: "lighting" as const, rowKey: "lighting:front", tier: "good" as const };
+    await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [
+      { x: 0.8, y: 0.95, partId: "GEMF-FRONT", auto: frontTag },
+      { x: 0.85, y: 0.95, partId: "GEMF-FRONT", auto: frontTag },
+    ] });
+    assert.ok((await GR.replaceNodeDevicePart(p0.id, { optionId: opt, nodeKey: node, fromPartId: "GEMF-FRONT", toPartId: "GEMF-FRONT2" })).ok, "#GEM fix1 I2: riser part swap");
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").every((pl) => !pl.auto), "#GEM fix1 I2: the swap clears the auto tag");
+    assert.deepEqual(await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [] }), { removed: 0, added: 0 }, "#GEM fix1 I2: a lighting re-fill removes nothing…");
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(p.placements.filter((pl) => pl.partId === "GEMF-FRONT2").length, 2, "#GEM fix1 I2: …and the swapped devices stay");
+
+    // M3: the store sanitizes what it writes.
+    const m3 = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [
+      { x: 0.1, y: 0.95, partId: "GEMF-HUGE", qty: 1e9, auto: pipeTag },
+      { x: 0.15, y: 0.95, partId: "GEMF-NAN", qty: Number.NaN, auto: pipeTag },
+      { x: 0.2, y: 0.95, partId: "GEMF-BOGUS", auto: { scope: "rigging", rowKey: "lighting:par", tier: "good" } },
+      { x: 0.25, y: 0.95, partId: "GEMF-EXTRA", auto: { ...pipeTag, extra: "x" } as typeof pipeTag },
+    ] });
+    p = (await GP.getProject(p0.id))!;
+    const byPart = (id: string) => p.placements.find((pl) => pl.partId === id);
+    assert.equal(m3?.added, 3, "#GEM fix1 M3: an item whose auto tag doesn't sanitize is dropped");
+    assert.ok(byPart("GEMF-HUGE")?.qty === 100_000 && byPart("GEMF-NAN")?.qty === undefined && !byPart("GEMF-BOGUS"), "#GEM fix1 M3: lot qty clamped / dropped");
+    assert.deepEqual(byPart("GEMF-EXTRA")?.auto, pipeTag, "#GEM fix1 M3: the stored tag is rebuilt, extra keys gone");
+    await GP.addPlacements(p0.id, { sheetId, page: 1, optionId: opt, by, items: [{ x: 0.3, y: 0.95, partId: "GEMF-ADD", qty: 0.4, auto: { scope: "nope", rowKey: "x", tier: "good" } as unknown as typeof pipeTag }] });
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(byPart("GEMF-ADD") && byPart("GEMF-ADD")!.qty === undefined && byPart("GEMF-ADD")!.auto === undefined, "#GEM fix1 M3: addPlacements drops a junk qty and tag");
+
+    // D1: Auto choices are per option — copied with an option, snapshotted, restored, removed with it.
+    const estA = { tierByScope: { lighting: "best" as const }, overrides: { "lighting:par": { qty: 7 } } };
+    const estB = { tierByScope: { audio: "good" as const }, overrides: {} };
+    await GP.setAutoEstimate(p0.id, opt, { ...estA, overrides: { ...estA.overrides, "bogus:row": { qty: 1 } } } as typeof estA);
+    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA }, "#GEM fix1 D1/M3: stored under the option, sanitized");
+    assert.equal(await GP.setAutoEstimate(p0.id, "opt-gone", estB), null, "#GEM fix1 D1: an unknown option is refused");
+    const copy = await GP.addOption(p0.id, { name: "Copy", copyFromOptionId: opt, by });
+    assert.ok(copy.ok, "#GEM fix1 D1: option copy");
+    if (copy.ok) {
+      const opt2 = copy.option.id;
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA, [opt2]: estA }, "#GEM fix1 D1: a copied option carries the source option's Auto choices");
+      await GP.setAutoEstimate(p0.id, opt2, estB);
+      const rev = await GP.addRevision(p0.id, { by, note: "fix1" });
+      assert.deepEqual(rev?.autoEstimate, { [opt]: estA, [opt2]: estB }, "#GEM fix1 D1: a revision snapshots every option's Auto choices");
+      await GP.setAutoEstimate(p0.id, opt, null);
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt2]: estB }, "#GEM fix1 D1: clearing one option leaves the other");
+      assert.ok((await GP.restoreRevision(p0.id, rev!.rev, by)).ok, "#GEM fix1 D1: restore");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA, [opt2]: estB }, "#GEM fix1 D1: restoring a revision brings its Auto choices back");
+      assert.ok((await GP.removeOption(p0.id, opt2, by)).ok, "#GEM fix1 D1: remove the copy");
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estA }, "#GEM fix1 D1: removing an option drops its Auto choices");
+    }
+    // A legacy single value (pre per-option) reads — and migrates — as the first option's.
+    await patchDoc<{ id: string; autoEstimate?: unknown }>("grid_projects", p0.id, (d) => {
+      d.autoEstimate = estB;
+    });
+    const legacyRev = await GP.addRevision(p0.id, { by, note: "legacy" });
+    assert.deepEqual(legacyRev?.autoEstimate, { [opt]: estB }, "#GEM fix1 D1: a legacy single estimate snapshots as the first option's");
+    const alt = await GP.addOption(p0.id, { name: "Alt", by });
+    if (alt.ok) {
+      await GP.setAutoEstimate(p0.id, alt.option.id, estA);
+      assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { [opt]: estB, [alt.option.id]: estA }, "#GEM fix1 D1: the next write migrates the legacy value to the per-option map");
+    }
+
+    // I4: a dead virtual line (unconfirmed allowance, deleted assembly) makes the quote refuse, by name.
+    const d0 = await GP.createProject({ name: "GEM fix1 dead", customer: "", customerId: null, by });
+    await GP.addSheet(d0.id, { name: "Generated base plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,%3Csvg%2F%3E", by });
+    let d = (await GP.getProject(d0.id))!;
+    const dOpt = resolveOptionId(d, null);
+    await GP.replaceAutoPlacements(d0.id, { optionId: dOpt, scopes: ["video"], sheetId: d.sheetIds[0], page: 1, by, items: [
+      { x: 0.2, y: 0.2, partId: "allow:video:screen:good", auto: { scope: "video", rowKey: "video:screen", tier: "good" } },
+      { x: 0.3, y: 0.2, partId: "asm:SA-GONE-FIX1", auto: { scope: "video", rowKey: "video:processor", tier: "good" } },
+    ] });
+    d = (await GP.getProject(d0.id))!;
+    const dq = await buildGridQuote(d, dOpt);
+    assert.ok(!dq.ok, "#GEM fix1 I4: a design with dead virtual lines does not quote");
+    if (!dq.ok) {
+      assert.match(dq.error, /2 devices need a part — replace or re-fill them/, "#GEM fix1 I4: the refusal says what to do");
+      assert.match(dq.error, /Projection screen \/ LED wall \(allowance no longer confirmed\)/, "#GEM fix1 I4: …naming the dead allowance");
+      assert.match(dq.error, /SA-GONE-FIX1 \(assembly deleted\)/, "#GEM fix1 I4: …and the deleted assembly");
+      assert.doesNotMatch(dq.error, /priced at list/, "#GEM fix1 I4: never reported as a tier fallback");
+    }
   }
 
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems

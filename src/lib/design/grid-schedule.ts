@@ -16,7 +16,8 @@ export type ScheduleWire = { id: string; partId: string; fromName: string; toNam
 export type ScheduleData = {
   sections: ScheduleSection[];
   wires: ScheduleWire[];
-  deviceCount: number;
+  /** Device UNITS (#GEM: a lot marker counts its qty), curtains excluded. */
+  unitCount: number;
   wireFeet: Array<{ partId: string; ft: number; unit: string; unmeasured: number }>;
 };
 
@@ -78,7 +79,7 @@ export function buildSchedule(input: {
   return {
     sections,
     wires: input.wires,
-    deviceCount: input.placements.filter((pl) => !pl.curtain).length,
+    unitCount: input.placements.reduce((a, pl) => (pl.curtain ? a : a + placementQty(pl)), 0),
     wireFeet: [...feet.values()],
   };
 }

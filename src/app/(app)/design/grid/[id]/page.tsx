@@ -111,8 +111,11 @@ export default async function GridEditorPage({
   const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
 
   // The Equipment map price context (#GEM) — built from the catalog this
-  // request already loaded (no second load). Server-only; the editor gets sell
-  // numbers only (scope targets, and virtual assembly/allowance parts).
+  // request already loaded (no second load). The map and its context stay
+  // server-side: the editor gets scope-target sell numbers, plus one PartLite
+  // per virtual assembly/allowance the design actually places — and those rows
+  // carry `cost` exactly like the Grid-library PartLite rows already do
+  // (PartLite.cost is part of the existing payload), nothing more.
   const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
   const equipTable = buildEquipmentPriceTable(equipMap, equipCtx);
   const scopeTargets = project.scopeInputs

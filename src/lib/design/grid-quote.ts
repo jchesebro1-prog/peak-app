@@ -64,7 +64,23 @@ export async function buildGridQuote(
   const catalog = await listCatalog();
   const symbols = await listGridSymbols();
   // #GEM: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
+  // They are then tier-priced like every other Grid part (D-GEM-14): a quoted
+  // assembly's own sell is replaced by cost ÷ (1 − the customer's tier margin).
   const virtual = await loadVirtualParts(placements.map((p) => p.partId), catalog);
+  // A dead virtual part (deleted assembly, assembly with no priced member,
+  // allowance no longer confirmed) must not price at $0 or at "list" — the
+  // #64 seed-placeholder refusal, by name (D-GEM-13).
+  const deadIds = new Set(virtual.filter((v) => v.virtualDead).map((v) => v.id));
+  if (deadIds.size) {
+    const dead = placements.filter((p) => deadIds.has(p.partId));
+    const names = Array.from(new Set(virtual.filter((v) => v.virtualDead).map((v) => v.desc))).sort();
+    return {
+      ok: false,
+      error:
+        `${dead.length} device${dead.length === 1 ? "" : "s"} need${dead.length === 1 ? "s" : ""} a part — ` +
+        `replace or re-fill ${dead.length === 1 ? "it" : "them"} before this can price: ${names.join(", ")}.`,
+    };
+  }
   const allowanceIds = new Set(virtual.filter((v) => v.allowance).map((v) => v.id));
   const virtualRows = virtual.map((v) => ({
     id: v.id, sku: v.sku, desc: v.desc, category: v.category, unit: v.unit, list: v.list, cost: v.cost, role: undefined as string | undefined,

@@ -1,6 +1,6 @@
 import type { Calibration } from "@/lib/annotations";
 import { spaceOf, type SpaceLite } from "./grid-geometry";
-import { placementQty, routeLengthFt, type PartLite, type RouteLite } from "./grid-bom";
+import { PLACEMENT_QTY_MAX, placementQty, routeLengthFt, type PartLite, type RouteLite } from "./grid-bom";
 
 /* ------------------------------------------------------------------ *
  * The Grid — riser sketch derivation (D112). Pure and dependency-free
@@ -14,7 +14,52 @@ import { placementQty, routeLengthFt, type PartLite, type RouteLite } from "./gr
  * share one "Unassigned" node, so nothing silently disappears.
  * ------------------------------------------------------------------ */
 
-export type RiserGroup = { partId: string; desc: string; qty: number; category: string; shape: string | null };
+/** `qty` counts UNITS (a lot marker adds its qty). `lot` = at least one of
+ *  the row's markers is a lot (#GEM) — the row editor then edits the lot's
+ *  quantity rather than adding/removing markers, up to PLACEMENT_QTY_MAX. */
+export type RiserGroup = { partId: string; desc: string; qty: number; category: string; shape: string | null; lot?: true };
+
+/**
+ * A riser row's qty edit (#GEM fix wave 1, I1 / D-GEM-11), pure. `devices`
+ * are the row's markers OLDEST first; `target` is the new unit count.
+ *  - No lot marker in the row: one marker per unit, as before — add
+ *    `target − units` markers, or remove the newest ones.
+ *  - A row with a lot marker never gains markers: an increase goes onto the
+ *    NEWEST lot marker; a decrease shrinks lot markers newest-first (a lot
+ *    never below 1 unit) and only then removes the newest markers.
+ * `set` = marker id → its new unit count (1 = drop the lot qty). null when
+ * the edit would push a lot past PLACEMENT_QTY_MAX.
+ */
+export function planRowQty(
+  devices: ReadonlyArray<{ id: string; qty?: number | null }>,
+  target: number
+): { set: Map<string, number>; remove: string[]; add: number } | null {
+  const set = new Map<string, number>();
+  const units = devices.reduce((a, d) => a + placementQty(d), 0);
+  const lots = devices.filter((d) => placementQty(d) > 1);
+  if (!lots.length) {
+    if (target >= units) return { set, remove: [], add: target - units };
+    return { set, remove: devices.slice(target).map((d) => d.id), add: 0 };
+  }
+  if (target >= units) {
+    const newest = lots[lots.length - 1];
+    const next = placementQty(newest) + (target - units);
+    if (next > PLACEMENT_QTY_MAX) return null;
+    if (target > units) set.set(newest.id, next);
+    return { set, remove: [], add: 0 };
+  }
+  let excess = units - target;
+  for (let i = lots.length - 1; i >= 0 && excess > 0; i--) {
+    const q = placementQty(lots[i]);
+    const take = Math.min(excess, q - 1);
+    set.set(lots[i].id, q - take);
+    excess -= take;
+  }
+  // Every lot is down to one unit: the rest come off as whole markers, newest first.
+  const remove = excess > 0 ? devices.slice(devices.length - excess).map((d) => d.id) : [];
+  for (const id of remove) set.delete(id);
+  return { set, remove, add: 0 };
+}
 
 export type RiserNode = {
   /** null = the Unassigned node. */
@@ -82,13 +127,22 @@ export function riserGraph(
     const node = nodeById.get(home ? home.id : null)!;
     const part = partById.get(pl.partId);
     const g = node.groups.find((x) => x.partId === pl.partId);
-    if (g) g.qty += placementQty(pl);
-    else {
+    if (g) {
+      g.qty += placementQty(pl);
+      if (placementQty(pl) > 1) g.lot = true;
+    } else {
       // No linked part (a seeded-but-unassigned placement, #38): fall back
       // to the placement's own category, the same as the plan does
       // (editor.tsx symbolLook({ category: pl.category }, …)).
       const category = part?.category || pl.category || "";
-      node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: placementQty(pl), category, shape: part?.shape ?? null });
+      node.groups.push({
+        partId: pl.partId,
+        desc: part?.desc || pl.partId,
+        qty: placementQty(pl),
+        category,
+        shape: part?.shape ?? null,
+        ...(placementQty(pl) > 1 ? { lot: true as const } : {}),
+      });
     }
   }
 

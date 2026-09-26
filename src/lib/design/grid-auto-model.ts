@@ -8,12 +8,14 @@
 import type { SysKey, TierKey } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
+import { PLACEMENT_QTY_MAX } from "./grid-bom";
 
 export type AutoTag = { scope: SysKey; rowKey: string; tier: TierKey };
 export type AutoOverride = { sku?: string; assemblyId?: string; qty?: number };
 export type AutoEstimate = { tierByScope: Partial<Record<SysKey, TierKey>>; overrides: Record<string, AutoOverride> };
 
-export const AUTO_QTY_MAX = 100_000;
+/** One cap for every Auto quantity: an override qty and a lot marker's qty. */
+export const AUTO_QTY_MAX = PLACEMENT_QTY_MAX;
 
 const isTier = (v: unknown): v is TierKey => v === "good" || v === "better" || v === "best";
 
@@ -73,4 +75,70 @@ export function overrideRefs(est: AutoEstimate): { skus: string[]; assemblyIds: 
     if (o.assemblyId) assemblyIds.add(o.assemblyId);
   }
   return { skus: [...skus], assemblyIds: [...assemblyIds] };
+}
+
+/* ---------------- store-side sanitizers (#GEM fix wave 1, M3) ---------------- */
+
+/**
+ * A lot marker's stored qty: a whole number in [2, AUTO_QTY_MAX], or
+ * undefined for a plain one-unit marker (absent = 1). Non-finite, ≤ 1 or
+ * junk input → undefined; anything above the cap is clamped to it.
+ */
+export function cleanLotQty(raw: unknown): number | undefined {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n <= 1) return undefined;
+  return Math.min(n, AUTO_QTY_MAX);
+}
+
+/** A stored auto tag: one of the five Auto scopes, a known equation row OF
+ *  that scope, and a real tier — rebuilt as a fresh object. Anything else → null. */
+export function sanitizeAutoTag(raw: unknown): AutoTag | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const scope = r.scope as SysKey;
+  if (typeof r.scope !== "string" || !TRACKABLE_SYS_KEYS.includes(scope)) return null;
+  const rowKey = typeof r.rowKey === "string" ? r.rowKey : "";
+  const def = EQUIPMENT_ROW_BY_KEY.get(rowKey);
+  if (!def || def.system !== scope) return null;
+  if (!isTier(r.tier)) return null;
+  return { scope, rowKey, tier: r.tier };
+}
+
+/** A hand-touched placement stops being "auto" (#GEM): later re-fills keep it.
+ *  Returns the same object when there is no tag, else a copy without it. */
+export function withoutAuto<T extends { auto?: unknown }>(pl: T): T {
+  if (!pl.auto) return pl;
+  const next = { ...pl };
+  delete next.auto;
+  return next;
+}
+
+/* ---------------- per-option estimates (#GEM fix wave 1, D1 / D-GEM-12) ---------------- */
+
+/** Stored shape: one AutoEstimate per option id. A pre-D-GEM-12 doc stored a
+ *  single AutoEstimate — read (and migrated on the next write) as the FIRST
+ *  option's, the only option Auto could have filled before options mattered. */
+export type AutoEstimates = Record<string, AutoEstimate>;
+
+function isLegacyEstimate(raw: Record<string, unknown>): boolean {
+  return "tierByScope" in raw || "overrides" in raw;
+}
+
+/** Normalize whatever is stored (map, legacy single value, junk) into a clean
+ *  per-option map. `firstOptionId` owns a legacy single value. */
+export function autoEstimatesOf(raw: unknown, firstOptionId: string): AutoEstimates {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const r = raw as Record<string, unknown>;
+  if (isLegacyEstimate(r)) return { [firstOptionId]: sanitizeAutoEstimate(r) };
+  const out: AutoEstimates = {};
+  for (const [optionId, v] of Object.entries(r)) {
+    if (!optionId || !v || typeof v !== "object") continue;
+    out[optionId] = sanitizeAutoEstimate(v);
+  }
+  return out;
+}
+
+/** The option's saved Auto choices, or null when it has none. */
+export function autoEstimateFor(raw: unknown, optionId: string, firstOptionId: string): AutoEstimate | null {
+  return autoEstimatesOf(raw, firstOptionId)[optionId] ?? null;
 }

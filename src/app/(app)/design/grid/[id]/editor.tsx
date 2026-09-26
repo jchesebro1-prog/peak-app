@@ -24,6 +24,7 @@ import {
   GRID_CURTAIN_TYPES,
   isPerLengthUnit,
   placementQty,
+  VIRTUAL_DEAD_HINT,
   routeLengthFt,
   routeLines,
   type GridCurtain,
@@ -1779,10 +1780,20 @@ export default function GridEditor({
                     >
                       {partById.get(l.partId)?.virtual ? l.desc : l.partId}
                     </span>
-                    {partById.get(l.partId)?.allowance && (
-                      <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
-                        Allowance
+                    {partById.get(l.partId)?.virtualDead ? (
+                      // #GEM D-GEM-13: nothing real behind it — the quote refuses it by name.
+                      <span
+                        title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
+                        style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
+                      >
+                        Needs a part
                       </span>
+                    ) : (
+                      partById.get(l.partId)?.allowance && (
+                        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                          Allowance
+                        </span>
+                      )
                     )}
                     {partById.get(l.partId)?.hasDatasheet && (
                       <a

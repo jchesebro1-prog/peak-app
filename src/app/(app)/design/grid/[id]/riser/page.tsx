@@ -17,6 +17,8 @@ import RiserEditor from "./riser-editor";
 
 export const metadata = { title: "Riser — Quartzite-6" };
 export const dynamic = "force-dynamic";
+// Virtual parts (#GEM) reach listFixtures() on this page — same budget as the editor.
+export const maxDuration = 60;
 
 /**
  * The riser (D112 → editable, #209). Devices, spaces and wire runs are still

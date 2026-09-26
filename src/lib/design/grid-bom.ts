@@ -74,7 +74,15 @@ export type PartLite = {
   virtual?: true;
   /** #GEM: an Equipment map allowance line — flagged internally ("Allowance"). */
   allowance?: true;
+  /** #GEM (D-GEM-13): a virtual part with nothing real behind it — a deleted
+   *  assembly, an assembly with no priced members, or an allowance that is no
+   *  longer confirmed. Prices $0; the quote refuses it by name and the editor
+   *  flags it "Needs a part" (never "priced at list"). */
+  virtualDead?: true;
 };
+
+/** What the editor tells a person to do with a `virtualDead` part (#GEM). */
+export const VIRTUAL_DEAD_HINT = "needs a part — replace or re-fill";
 
 /* -------------------------------- curtains -------------------------------- */
 
@@ -125,11 +133,15 @@ export function isCurtainPlacement(pl: { curtain?: GridCurtain | null }): boolea
   return Boolean(pl.curtain);
 }
 
+/** The most units one lot marker may stand for (#GEM) — the store writers
+ *  clamp to it and every reader caps at it. */
+export const PLACEMENT_QTY_MAX = 100_000;
+
 /** A placement's unit count (#GEM): an Auto "lot" marker carries `qty` (count
  *  or length hardware); every other placement is one unit. */
 export function placementQty(pl: { qty?: number | null }): number {
   const n = Math.round(Number(pl.qty));
-  return Number.isFinite(n) && n > 1 ? n : 1;
+  return Number.isFinite(n) && n > 1 ? Math.min(n, PLACEMENT_QTY_MAX) : 1;
 }
 
 /** GridCurtain -> the shared all-strings CurtainSpec the curtain pricing

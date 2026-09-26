@@ -10,6 +10,8 @@ import { calibrationScale, clamp01, type Calibration, type Point } from "@/lib/a
 import type { GridCurtain } from "@/lib/design/grid-bom";
 import {
   copyOptionMembers,
+  DEFAULT_OPTION_ID,
+  defaultOptionId,
   ensureOptions,
   hasOption,
   syncQuoteMirror,
@@ -22,8 +24,17 @@ export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
-import type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
-export type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
+import {
+  autoEstimatesOf,
+  cleanLotQty,
+  sanitizeAutoEstimate,
+  sanitizeAutoTag,
+  withoutAuto,
+  type AutoEstimate,
+  type AutoEstimates,
+  type AutoTag,
+} from "@/lib/design/grid-auto-model";
+export type { AutoEstimate, AutoEstimates, AutoTag } from "@/lib/design/grid-auto-model";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -147,6 +158,9 @@ export type GridRevision = {
   /** Riser documents at snapshot time (#209). Absent on older snapshots —
    *  restore then drops back to the auto layout. */
   riser?: Record<string, RiserDoc>;
+  /** Auto intake choices per option at snapshot time (#GEM, D-GEM-12).
+   *  Absent on older snapshots — restore then clears them. */
+  autoEstimate?: AutoEstimates;
 };
 
 /**
@@ -226,8 +240,11 @@ export type GridProject = {
    *  fresh from whatever this currently holds. Absent on pre-D-manual-scope
    *  docs, read as null. */
   scopeInputs?: QuickScopeInputs | null;
-  /** Auto intake choices (#GEM): tier per scope + per-row swaps/qty. Absent on Blank designs. */
-  autoEstimate?: AutoEstimate;
+  /** Auto intake choices PER OPTION (#GEM, D-GEM-12): option id → tier per
+   *  scope + per-row swaps/qty. Absent on Blank designs. A doc written before
+   *  D-GEM-12 holds one bare AutoEstimate — always read through
+   *  autoEstimatesOf()/autoEstimateFor(), which treat it as the first option's. */
+  autoEstimate?: AutoEstimates | AutoEstimate;
   /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
@@ -589,9 +606,8 @@ export async function addPlacements(
       optionId: input.optionId,
       ...(item.category ? { category: item.category } : {}),
       ...(item.seededFrom ? { seededFrom: item.seededFrom } : {}),
-      ...(item.qty && item.qty > 1 ? { qty: Math.round(item.qty) } : {}),
+      ...lotAndTag(item.qty, item.auto),
       ...(item.curtain ? { curtain: item.curtain } : {}),
-      ...(item.auto ? { auto: item.auto } : {}),
       by: input.by,
       at,
     }));
@@ -602,6 +618,15 @@ export async function addPlacements(
 }
 
 export type AutoPlacementInput = { x: number; y: number; partId: string; qty?: number; curtain?: GridCurtain; auto: AutoTag };
+
+/** Store-side clean of a written lot qty and auto tag (#GEM M3): qty clamped
+ *  to [2, AUTO_QTY_MAX] or dropped (absent = 1); the tag rebuilt from known
+ *  scopes/rows/tiers or dropped. Never trusts a caller's raw value. */
+function lotAndTag(qty: unknown, auto: unknown): { qty?: number; auto?: AutoTag } {
+  const q = cleanLotQty(qty);
+  const tag = auto === undefined ? null : sanitizeAutoTag(auto);
+  return { ...(q !== undefined ? { qty: q } : {}), ...(tag ? { auto: tag } : {}) };
+}
 
 /**
  * Auto fill / per-scope re-fill (#GEM, spec §5), atomically in ONE patch:
@@ -631,22 +656,29 @@ export async function replaceAutoPlacements(
       if (drop) gone.add(pl.id);
       return !drop;
     });
-    const fresh: GridPlacement[] = input.items
-      .filter((it) => scopes.has(it.auto.scope))
-      .map((it) => ({
-        id: rid("gp-"),
-        sheetId: input.sheetId,
-        page: input.page,
-        x: clamp01(it.x),
-        y: clamp01(it.y),
-        partId: it.partId,
-        optionId: input.optionId,
-        ...(it.qty && it.qty > 1 ? { qty: Math.round(it.qty) } : {}),
-        ...(it.curtain ? { curtain: it.curtain } : {}),
-        auto: it.auto,
-        by: input.by,
-        at,
-      }));
+    // An item whose tag doesn't sanitize is dropped: an untagged device
+    // would survive every later re-fill as if a person had placed it.
+    const fresh: GridPlacement[] = input.items.flatMap((it) => {
+      const tag = sanitizeAutoTag(it.auto);
+      if (!tag || !scopes.has(tag.scope)) return [];
+      const q = cleanLotQty(it.qty);
+      return [
+        {
+          id: rid("gp-"),
+          sheetId: input.sheetId,
+          page: input.page,
+          x: clamp01(it.x),
+          y: clamp01(it.y),
+          partId: it.partId,
+          optionId: input.optionId,
+          ...(q !== undefined ? { qty: q } : {}),
+          ...(it.curtain ? { curtain: it.curtain } : {}),
+          auto: tag,
+          by: input.by,
+          at,
+        },
+      ];
+    });
     p.placements = [...kept, ...fresh];
     if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
     removed = gone.size;
@@ -656,21 +688,28 @@ export async function replaceAutoPlacements(
   return refused || !updated ? null : { removed, added };
 }
 
-/** Persist (or clear, with null) the Auto intake's choices (#GEM). */
-export async function setAutoEstimate(projectId: string, est: AutoEstimate | null): Promise<GridProject | null> {
-  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    if (est) p.autoEstimate = est;
+/**
+ * Persist (or clear, with null) ONE option's Auto intake choices (#GEM,
+ * D-GEM-12). The input is sanitized here, whatever the caller sent. A legacy
+ * single stored value is migrated to the per-option map (as the first
+ * option's) in the same patch. null = the project or the option is gone.
+ */
+export async function setAutoEstimate(projectId: string, optionId: string, est: AutoEstimate | null): Promise<GridProject | null> {
+  const clean = est ? sanitizeAutoEstimate(est) : null;
+  let refused = false;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, optionId)) {
+      refused = true;
+      return;
+    }
+    const all = autoEstimatesOf(p.autoEstimate, defaultOptionId(p));
+    if (clean) all[optionId] = clean;
+    else delete all[optionId];
+    if (Object.keys(all).length) p.autoEstimate = all;
     else delete p.autoEstimate;
     p.updatedAt = Date.now();
   });
-}
-
-/** A hand-touched placement stops being "auto" (#GEM): later re-fills keep it. */
-function withoutAuto(pl: GridPlacement): GridPlacement {
-  if (!pl.auto) return pl;
-  const next = { ...pl };
-  delete next.auto;
-  return next;
+  return refused ? null : updated;
 }
 
 /**
@@ -1050,6 +1089,11 @@ export async function addOption(
       if (srcRiser) {
         doc.riser = { ...doc.riser, [option.id]: copyRiserDoc(srcRiser, copied.idMap, (prefix) => rid(prefix), input.by, at) };
       }
+      // The copied placements keep their auto tags, so the copy carries the
+      // source option's Auto choices with them (#GEM, D-GEM-12).
+      const ests = autoEstimatesOf(doc.autoEstimate, doc.options[0].id);
+      const src = ests[input.copyFromOptionId];
+      if (src) doc.autoEstimate = { ...ests, [option.id]: JSON.parse(JSON.stringify(src)) as AutoEstimate };
     }
     p.updatedAt = at;
   });
@@ -1111,6 +1155,13 @@ export async function removeOption(
       delete riser[optionId];
       doc.riser = riser;
     }
+    // A legacy single estimate belongs to the pre-removal first option (#GEM, D-GEM-12).
+    if (doc.autoEstimate) {
+      const ests = autoEstimatesOf(doc.autoEstimate, opts[0].id);
+      delete ests[optionId];
+      if (Object.keys(ests).length) doc.autoEstimate = ests;
+      else delete doc.autoEstimate;
+    }
     syncQuoteMirror(doc);
     p.updatedAt = Date.now();
   });
@@ -1141,6 +1192,9 @@ function snapshotOf(
     routes: [...(p.routes || [])],
     // Deep copy: the riser document is nested and patched in place later.
     riser: p.riser ? (JSON.parse(JSON.stringify(p.riser)) as Record<string, RiserDoc>) : {},
+    // Auto choices are design state like the riser (#GEM, D-GEM-12) —
+    // normalized (a legacy single value lands as the first option's) and deep-copied.
+    autoEstimate: JSON.parse(JSON.stringify(autoEstimatesOf(p.autoEstimate, p.options?.[0]?.id ?? DEFAULT_OPTION_ID))) as AutoEstimates,
     options: ensureOptions({
       options: p.options ? p.options.map((o) => ({ ...o })) : undefined,
       quoteId: p.quoteId,
@@ -1231,6 +1285,15 @@ export async function restoreRevision(
       ? target.options.map((o) => ({ ...o, quoteId: currentQuotes.has(o.id) ? currentQuotes.get(o.id)! : o.quoteId }))
       : undefined;
     ensureOptions(doc);
+    // Auto choices come back with the placements they describe (#GEM,
+    // D-GEM-12), kept only for options that exist after the restore. A
+    // pre-D-GEM-12 snapshot has none → cleared (the snapshot just pushed above
+    // still holds the current ones).
+    const restoredEsts = autoEstimatesOf(target.autoEstimate, doc.options![0].id);
+    const liveOptionIds = new Set(doc.options!.map((o) => o.id));
+    for (const k of Object.keys(restoredEsts)) if (!liveOptionIds.has(k)) delete restoredEsts[k];
+    if (Object.keys(restoredEsts).length) doc.autoEstimate = restoredEsts;
+    else delete doc.autoEstimate;
     syncQuoteMirror(doc);
     pushRevision(doc, by, "restore", `Recalled v${rev}`);
     doc.updatedAt = Date.now();

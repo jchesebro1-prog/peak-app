@@ -393,6 +393,7 @@ export default function RiserEditor({
             partId={rowGroup.partId}
             desc={rowGroup.desc}
             qty={rowGroup.qty}
+            lot={Boolean(rowGroup.lot)}
             devices={devices}
             busy={busy}
             onCancel={() => setPanel(null)}

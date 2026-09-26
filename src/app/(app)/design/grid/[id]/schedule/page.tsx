@@ -16,6 +16,8 @@ import { PrintButton } from "@/components/letter/print-button";
 
 export const metadata = { title: "Equipment schedule — Quartzite-6" };
 export const dynamic = "force-dynamic";
+// Virtual parts (#GEM) reach listFixtures() on this page — same budget as the editor.
+export const maxDuration = 60;
 
 /**
  * Per-space equipment schedule (D113 item 3) — the field document: what
@@ -57,7 +59,7 @@ export default async function SchedulePage({
   const partById = new Map(parts.map((p) => [p.id, p]));
   const spaces = project.spaces || [];
   const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings) });
-  const { sections, wires, deviceCount, wireFeet } = buildSchedule({
+  const { sections, wires, unitCount, wireFeet } = buildSchedule({
     placements: slice.placements,
     spaces,
     descOf: (pid) => partById.get(pid)?.desc,
@@ -173,7 +175,7 @@ export default async function SchedulePage({
             )}
 
             <div style={{ borderTop: "1.5px solid #1a1a1a", marginTop: 20, paddingTop: 8, fontSize: "10.5pt", color: "#444" }}>
-              <strong>{deviceCount}</strong> device{deviceCount === 1 ? "" : "s"} across{" "}
+              <strong>{unitCount}</strong> unit{unitCount === 1 ? "" : "s"} across{" "}
               <strong>{sections.length}</strong> area{sections.length === 1 ? "" : "s"}
               {wireFeet.map((w) => (
                 <span key={w.partId}>

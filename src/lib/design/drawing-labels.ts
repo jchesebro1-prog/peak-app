@@ -63,14 +63,24 @@ export function placeChip(curve: { pts: Bezier; side?: 1 | -1 }, w: number, h: n
 
 /* ---------------------------------- plan ---------------------------------- */
 
-export type TypeMarkItem = { key: string; desc: string };
+/** `qty` = the symbol's unit count (#GEM: a lot marker stands for many
+ *  units); absent = 1. */
+export type TypeMarkItem = { key: string; desc: string; qty?: number };
+
+/** A symbol's unit count — grid-bom placementQty's rule, inlined to keep this
+ *  module dependency-free. */
+function unitsOf(qty: number | undefined): number {
+  const n = Math.round(Number(qty));
+  return Number.isFinite(n) && n > 1 ? n : 1;
+}
 export type TypeMarkRow = { tag: string; key: string; desc: string; qty: number };
 
 /**
  * Per-sheet type marks: one tag per distinct part (key), numbered in the
  * order the parts are first seen and prefixed with the sheet's system letter
  * (L1, L2 … on L-101; A1 … on A-101). Returns each key's tag and the device
- * key rows (tag · qty · description) in tag order.
+ * key rows (tag · qty · description) in tag order. A row's qty sums UNITS,
+ * so a 240-unit lot marker counts 240, not 1 (#GEM fix wave 1, I3).
  */
 export function assignTypeMarks(items: readonly TypeMarkItem[], prefix: string): { tags: Map<string, string>; rows: TypeMarkRow[] } {
   const tags = new Map<string, string>();
@@ -79,10 +89,10 @@ export function assignTypeMarks(items: readonly TypeMarkItem[], prefix: string):
   for (const it of items) {
     const hit = byKey.get(it.key);
     if (hit) {
-      hit.qty += 1;
+      hit.qty += unitsOf(it.qty);
       continue;
     }
-    const row: TypeMarkRow = { tag: `${prefix}${rows.length + 1}`, key: it.key, desc: it.desc, qty: 1 };
+    const row: TypeMarkRow = { tag: `${prefix}${rows.length + 1}`, key: it.key, desc: it.desc, qty: unitsOf(it.qty) };
     rows.push(row);
     byKey.set(it.key, row);
     tags.set(it.key, row.tag);
