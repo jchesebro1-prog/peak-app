@@ -5,13 +5,17 @@ import { hasOption } from "@/lib/design/grid-options";
 import {
   UNASSIGNED_KEY,
   applyRiserOp,
-  isEndRef,
+  MAX_CONDUITS,
+  MAX_LEVELS,
+  MAX_LINKS,
+  MAX_NOTES,
   marginPoints,
   nodeKeyOf,
   normalizeRiserDoc,
   pruneRisers,
   sameEnd,
   spreadInSpace,
+  toEndRef,
   type EndRef,
   type RiserOp,
 } from "@/lib/design/grid-riser-doc";
@@ -53,6 +57,17 @@ function nodeDevices(p: GridProject, optionId: string, nodeKey: string, partId: 
     .sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
 }
 
+/** Whether an end reference actually resolves in this project/option — a
+ *  space that exists (or the unassigned `null`), or a placement that exists
+ *  AND belongs to this option. Shared by `addRiserLink` and `patchRiser`'s
+ *  `addConduit`, so a forged or cross-option end is refused the same way
+ *  wherever it's written (review I1). */
+function liveEnd(p: GridProject, optionId: string, e: EndRef): boolean {
+  return e.kind === "space"
+    ? e.spaceId === null || (p.spaces || []).some((s) => s.id === e.spaceId)
+    : (p.placements || []).some((pl) => pl.id === e.placementId && pl.optionId === optionId);
+}
+
 function takenOn(p: GridProject, sheetId: string, page: number): Point[] {
   return (p.placements || []).filter((pl) => pl.sheetId === sheetId && pl.page === page).map((pl) => ({ x: pl.x, y: pl.y }));
 }
@@ -90,14 +105,41 @@ export async function patchRiser(
   projectId: string,
   optionId: string,
   op: RiserOp
-): Promise<{ ok: true } | { ok: false; reason: Missing | "invalid" }> {
-  let refusal: Missing | "invalid" | null = null;
+): Promise<{ ok: true } | { ok: false; reason: Missing | "invalid" | "cap" }> {
+  let refusal: Missing | "invalid" | "cap" | null = null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, optionId)) {
       refusal = "no-such-option";
       return;
     }
-    const res = applyRiserOp(normalizeRiserDoc(p.riser?.[optionId]), op, (prefix) => rid(prefix));
+    const current = normalizeRiserDoc(p.riser?.[optionId]);
+    // The pure reducer (applyRiserOp) has no project to check an end or a
+    // moveNode key against — that live check happens here, against the
+    // same rules addRiserLink uses (review I1, M1).
+    if (op.op === "addConduit") {
+      const from = toEndRef(op.from);
+      const to = toEndRef(op.to);
+      if (!from || !to || !liveEnd(p, optionId, from) || !liveEnd(p, optionId, to)) {
+        refusal = "invalid";
+        return;
+      }
+    }
+    if (op.op === "moveNode" && op.key !== UNASSIGNED_KEY && !(p.spaces || []).some((s) => s.id === op.key)) {
+      refusal = "invalid";
+      return;
+    }
+    // Per-option document caps (review M3) — refused here with a specific
+    // reason rather than falling through to applyRiserOp's generic
+    // changed:false (which still guards the same caps defensively).
+    if (
+      (op.op === "addLevel" && current.levels.length >= MAX_LEVELS) ||
+      (op.op === "addConduit" && current.conduits.length >= MAX_CONDUITS) ||
+      (op.op === "addNote" && current.notes.length >= MAX_NOTES)
+    ) {
+      refusal = "cap";
+      return;
+    }
+    const res = applyRiserOp(current, op, (prefix) => rid(prefix));
     if (!res.changed) {
       refusal = "invalid";
       return;
@@ -106,7 +148,7 @@ export async function patchRiser(
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
-  const r = refusal as Missing | "invalid" | null;
+  const r = refusal as Missing | "invalid" | "cap" | null;
   return r ? { ok: false, reason: r } : { ok: true };
 }
 
@@ -115,34 +157,38 @@ export async function patchRiser(
 export async function addRiserLink(
   projectId: string,
   input: { optionId: string; from: EndRef; to: EndRef; partId: string; lengthFt: number; by: string }
-): Promise<{ ok: true; id: string } | { ok: false; reason: Missing | "bad-end" | "bad-length" }> {
-  if (!Number.isFinite(input.lengthFt) || !(input.lengthFt > 0) || input.lengthFt > MAX_LINK_FT) return { ok: false, reason: "bad-length" };
-  if (!isEndRef(input.from) || !isEndRef(input.to) || sameEnd(input.from, input.to)) return { ok: false, reason: "bad-end" };
+): Promise<{ ok: true; id: string } | { ok: false; reason: Missing | "bad-end" | "bad-length" | "cap" }> {
+  // Validate the ROUNDED length (review M2) — a raw value that rounds down
+  // to 0 ft (e.g. 0.04) must be refused, not stored as a zero-length cable.
+  const lengthFt = Math.round(Number(input.lengthFt) * 10) / 10;
+  if (!(lengthFt > 0) || lengthFt > MAX_LINK_FT) return { ok: false, reason: "bad-length" };
+  // Canonicalize both ends into fresh objects (review I1) — never the raw
+  // client value, which may carry extra properties.
+  const from = toEndRef(input.from);
+  const to = toEndRef(input.to);
+  if (!from || !to || sameEnd(from, to)) return { ok: false, reason: "bad-end" };
   const id = rid("lk-");
-  let refusal: Missing | "bad-end" | null = null;
+  let refusal: Missing | "bad-end" | "cap" | null = null;
   const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     if (!hasOption(p, input.optionId)) {
       refusal = "no-such-option";
       return;
     }
-    const live = (e: EndRef) =>
-      e.kind === "space"
-        ? e.spaceId === null || (p.spaces || []).some((s) => s.id === e.spaceId)
-        : (p.placements || []).some((pl) => pl.id === e.placementId && pl.optionId === input.optionId);
-    if (!live(input.from) || !live(input.to)) {
+    if (!liveEnd(p, input.optionId, from) || !liveEnd(p, input.optionId, to)) {
       refusal = "bad-end";
       return;
     }
     const doc = normalizeRiserDoc(p.riser?.[input.optionId]);
-    doc.links = [
-      ...doc.links,
-      { id, from: input.from, to: input.to, partId: input.partId, lengthFt: Math.round(input.lengthFt * 10) / 10, by: input.by, at: Date.now() },
-    ];
+    if (doc.links.length >= MAX_LINKS) {
+      refusal = "cap";
+      return;
+    }
+    doc.links = [...doc.links, { id, from, to, partId: input.partId, lengthFt, by: input.by, at: Date.now() }];
     p.riser = { ...(p.riser || {}), [input.optionId]: doc };
     p.updatedAt = Date.now();
   });
   if (!updated) return { ok: false, reason: "not-found" };
-  const r = refusal as Missing | "bad-end" | null;
+  const r = refusal as Missing | "bad-end" | "cap" | null;
   return r ? { ok: false, reason: r } : { ok: true, id };
 }
 

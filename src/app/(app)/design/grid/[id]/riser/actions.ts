@@ -31,6 +31,7 @@ const MESSAGES: Record<string, string> = {
   "no-devices": "Those devices are no longer in this space — refresh the page.",
   "bad-end": "One end of that connection is no longer on the design — refresh the page.",
   "bad-length": "Type the cable length in feet (up to 5,000).",
+  cap: "This riser already has the maximum number of these — remove one before adding another.",
 };
 
 function fail(reason: string): { ok: false; error: string } {

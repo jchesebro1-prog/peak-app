@@ -68,11 +68,23 @@ const MIN_W = 0.1;
 const MIN_H = 0.06;
 /** How far down a riser may grow, in canvas heights. */
 const MAX_Y = 3;
+/** Longest an id may be once canonicalized (review I1) — generous for any
+ *  real `gp-`/`sp-`/`lk-`… id, small enough to cap a forged one. */
+const ID_MAX = 100;
+/** Per-option document caps (review M3) — generous for any real design,
+ *  bounded so a corrupt or hostile document can't grow without limit.
+ *  normalizeRiserDoc enforces these on every read; patchRiser/addRiserLink
+ *  refuse an op that would cross one on write. */
+export const MAX_LEVELS = 50;
+export const MAX_CONDUITS = 500;
+export const MAX_NOTES = 100;
+export const MAX_LINKS = 1000;
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const capId = (v: string) => v.slice(0, ID_MAX);
 
 export function emptyRiserDoc(): RiserDoc {
   return { nodes: {}, levels: [], conduits: [], notes: [], links: [] };
@@ -92,6 +104,22 @@ export function sameEnd(a: EndRef, b: EndRef): boolean {
   return false;
 }
 
+/**
+ * Canonicalize a client- or storage-supplied end reference into a FRESH
+ * object holding only the valid shape's own fields, ids length-capped
+ * (review I1). Never the raw value — which may carry extra properties, or a
+ * `__proto__`/`constructor` key — and never trusted against the project
+ * until the caller checks it actually lives there (see grid-riser.ts's
+ * `liveEnd`, shared by `addRiserLink` and `patchRiser`'s `addConduit`).
+ */
+export function toEndRef(v: unknown): EndRef | null {
+  if (!isEndRef(v)) return null;
+  const e = v as { kind: "space" | "placement"; spaceId?: string | null; placementId?: string };
+  return e.kind === "space"
+    ? { kind: "space", spaceId: e.spaceId === null ? null : capId(e.spaceId as string) }
+    : { kind: "placement", placementId: capId(e.placementId as string) };
+}
+
 function isBox(v: unknown): v is RiserNodeBox {
   if (!v || typeof v !== "object") return false;
   const b = v as Record<string, unknown>;
@@ -101,7 +129,47 @@ function isBox(v: unknown): v is RiserNodeBox {
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** Defensive read of a stored (or absent) document — never throws. */
+/** Rebuild a stored level as a fresh object of only its own fields — never
+ *  a blind cast of whatever the raw record happened to carry. */
+function cleanLevel(raw: Record<string, unknown>): RiserLevel | null {
+  if (!isStr(raw.id) || !isStr(raw.label) || !isNum(raw.y)) return null;
+  const level: RiserLevel = { id: capId(raw.id), label: text(raw.label, LABEL_MAX), y: raw.y };
+  if (isStr(raw.elevation) && raw.elevation.trim()) level.elevation = text(raw.elevation, ELEVATION_MAX);
+  return level;
+}
+
+/** Same rebuild for a conduit — its ends go through `toEndRef` so a forged
+ *  or extra-property end never survives a read (review I1). */
+function cleanConduit(raw: Record<string, unknown>): RiserConduit | null {
+  const from = toEndRef(raw.from);
+  const to = toEndRef(raw.to);
+  if (!isStr(raw.id) || !isStr(raw.label) || !from || !to) return null;
+  return { id: capId(raw.id), from, to, label: text(raw.label, LABEL_MAX) };
+}
+
+function cleanNote(raw: Record<string, unknown>): RiserNote | null {
+  if (!isStr(raw.id) || !isStr(raw.text) || !isNum(raw.n)) return null;
+  return { id: capId(raw.id), n: raw.n, text: text(raw.text, NOTE_MAX) };
+}
+
+function cleanLink(raw: Record<string, unknown>): RiserLink | null {
+  const from = toEndRef(raw.from);
+  const to = toEndRef(raw.to);
+  if (!isStr(raw.id) || !isStr(raw.partId) || !isNum(raw.lengthFt) || !from || !to) return null;
+  return {
+    id: capId(raw.id),
+    from,
+    to,
+    partId: capId(raw.partId),
+    lengthFt: raw.lengthFt,
+    by: isStr(raw.by) ? text(raw.by, LABEL_MAX) : "",
+    at: isNum(raw.at) ? raw.at : 0,
+  };
+}
+
+/** Defensive read of a stored (or absent) document — never throws. Every
+ *  item is rebuilt fresh (never a blind cast), ends are canonicalized
+ *  through `toEndRef`, and each array is capped (review I1, M3). */
 export function normalizeRiserDoc(raw: unknown): RiserDoc {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const arr = (v: unknown): Array<Record<string, unknown>> =>
@@ -109,17 +177,19 @@ export function normalizeRiserDoc(raw: unknown): RiserDoc {
   const nodes: Record<string, RiserNodeBox> = {};
   if (r.nodes && typeof r.nodes === "object" && !Array.isArray(r.nodes)) {
     for (const [k, b] of Object.entries(r.nodes as Record<string, unknown>)) {
+      // A key of "__proto__" written via `nodes[k] = …` sets the object's
+      // OWN prototype, not merely an entry — skip it and its siblings
+      // rather than build `nodes` on a null-prototype object (review M1).
+      if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
       if (isBox(b)) nodes[k] = { x: b.x, y: b.y, w: b.w, h: b.h };
     }
   }
   return {
     nodes,
-    levels: arr(r.levels).filter((l) => isStr(l.id) && isStr(l.label) && isNum(l.y)) as unknown as RiserLevel[],
-    conduits: arr(r.conduits).filter((c) => isStr(c.id) && isStr(c.label) && isEndRef(c.from) && isEndRef(c.to)) as unknown as RiserConduit[],
-    notes: arr(r.notes).filter((n) => isStr(n.id) && isStr(n.text) && isNum(n.n)) as unknown as RiserNote[],
-    links: arr(r.links).filter(
-      (l) => isStr(l.id) && isStr(l.partId) && isNum(l.lengthFt) && isEndRef(l.from) && isEndRef(l.to)
-    ) as unknown as RiserLink[],
+    levels: arr(r.levels).map(cleanLevel).filter((l): l is RiserLevel => l !== null).slice(0, MAX_LEVELS),
+    conduits: arr(r.conduits).map(cleanConduit).filter((c): c is RiserConduit => c !== null).slice(0, MAX_CONDUITS),
+    notes: arr(r.notes).map(cleanNote).filter((n): n is RiserNote => n !== null).slice(0, MAX_NOTES),
+    links: arr(r.links).map(cleanLink).filter((l): l is RiserLink => l !== null).slice(0, MAX_LINKS),
   };
 }
 
@@ -220,6 +290,7 @@ export function applyRiserOp(
     case "addLevel": {
       const label = text(op.label, LABEL_MAX);
       if (!label || !isNum(op.y)) return same;
+      if (doc.levels.length >= MAX_LEVELS) return same;
       const elevation = text(op.elevation, ELEVATION_MAX);
       const level: RiserLevel = { id: makeId("lv-"), label, ...(elevation ? { elevation } : {}), y: r3(clamp(op.y, 0, MAX_Y)) };
       return { doc: { ...doc, levels: [...doc.levels, level] }, changed: true };
@@ -251,10 +322,17 @@ export function applyRiserOp(
       return { doc: { ...doc, levels: doc.levels.filter((l) => l.id !== op.id) }, changed: true };
     }
     case "addConduit": {
-      if (!isEndRef(op.from) || !isEndRef(op.to) || sameEnd(op.from, op.to)) return same;
+      // Canonicalize both ends (review I1) — a raw client value may carry
+      // extra properties, or reference something that isn't actually in
+      // this project; the latter is checked by the caller (patchRiser),
+      // which has the project to check it against.
+      const from = toEndRef(op.from);
+      const to = toEndRef(op.to);
+      if (!from || !to || sameEnd(from, to)) return same;
       const label = text(op.label, LABEL_MAX);
       if (!label) return same;
-      return { doc: { ...doc, conduits: [...doc.conduits, { id: makeId("cd-"), from: op.from, to: op.to, label }] }, changed: true };
+      if (doc.conduits.length >= MAX_CONDUITS) return same;
+      return { doc: { ...doc, conduits: [...doc.conduits, { id: makeId("cd-"), from, to, label }] }, changed: true };
     }
     case "updateConduit": {
       const label = text(op.label, LABEL_MAX);
@@ -268,6 +346,7 @@ export function applyRiserOp(
     case "addNote": {
       const t = text(op.text, NOTE_MAX);
       if (!t) return same;
+      if (doc.notes.length >= MAX_NOTES) return same;
       return { doc: { ...doc, notes: renumber([...doc.notes, { id: makeId("nt-"), n: 0, text: t }]) }, changed: true };
     }
     case "updateNote": {

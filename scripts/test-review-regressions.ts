@@ -2383,6 +2383,237 @@ async function main() {
     assert.ok(!("generalNotes" in ds) && ds.size === "d", "#GDS 'Use standard notes' removes the set's own notes");
   }
 
+
+  // #GDS fix wave 1 — review findings I1/M1/M2/M3/M4 (scratch DB).
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const GR = await import("@/lib/stores/grid-riser");
+    const GRD = await import("@/lib/design/grid-riser-doc");
+    const by = "tester";
+
+    const p0 = await GP.createProject({ name: "GDS fix-wave-1 riser", customer: "", customerId: null, by });
+    const sheet = (await GP.addSheet(p0.id, {
+      name: "Plan",
+      mime: "image/svg+xml",
+      dataUrl: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E",
+      by,
+    }))!;
+    await GP.addSpace(p0.id, { sheetId: sheet.id, page: 1, name: "Stage", points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }, { x: 0.1, y: 0.5 }], by });
+    await GP.addSpace(p0.id, { sheetId: sheet.id, page: 1, name: "Booth", points: [{ x: 0.6, y: 0.1 }, { x: 0.8, y: 0.1 }, { x: 0.8, y: 0.3 }, { x: 0.6, y: 0.3 }], by });
+    let p = (await GP.getProject(p0.id))!;
+    const opt = p.options![0].id;
+    const [stage, booth] = p.spaces!;
+
+    // I1 — a conduit end that names a placement not on the design at all is refused, never stored.
+    assert.deepEqual(
+      await GR.patchRiser(p0.id, opt, { op: "addConduit", from: { kind: "placement", placementId: "gp-forged" }, to: { kind: "space", spaceId: booth.id }, label: "forged" }),
+      { ok: false, reason: "invalid" },
+      "#GDS I1: addConduit refuses a forged placement end"
+    );
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(!p.riser?.[opt]?.conduits.length, "#GDS I1: the refused forged conduit was never stored");
+
+    // I1 — a well-shaped but dirty end (extra property) is accepted, but rebuilt fresh — the extra property never reaches storage.
+    const dirtyFrom: { kind: "space"; spaceId: string } = { kind: "space", spaceId: stage.id };
+    (dirtyFrom as Record<string, unknown>).evil = "DROP TABLE";
+    const addRes = await GR.patchRiser(p0.id, opt, { op: "addConduit", from: dirtyFrom, to: { kind: "space", spaceId: booth.id }, label: "clean me" });
+    assert.ok(addRes.ok, "#GDS I1: addConduit with a well-shaped-but-dirty end still succeeds");
+    p = (await GP.getProject(p0.id))!;
+    const savedConduit = p.riser![opt].conduits[0];
+    assert.deepEqual(savedConduit.from, { kind: "space", spaceId: stage.id }, "#GDS I1: the stored end is rebuilt fresh — the extra 'evil' property never made it in");
+
+    // I1 — a placement that exists, but in a DIFFERENT option, is refused as an end for both addConduit and addRiserLink.
+    const copy2 = await GP.addOption(p0.id, { name: "Other", copyFromOptionId: opt, by });
+    assert.ok(copy2.ok, "#GDS setup: second option for the cross-option check");
+    if (copy2.ok) {
+      const otherOpt = copy2.option.id;
+      await GR.addDevicesToNode(p0.id, { optionId: otherOpt, nodeKey: "unassigned", partId: "DEV-X", qty: 1, by });
+      p = (await GP.getProject(p0.id))!;
+      const otherPl = p.placements.find((pl) => pl.optionId === otherOpt && pl.partId === "DEV-X")!;
+      assert.deepEqual(
+        await GR.patchRiser(p0.id, opt, { op: "addConduit", from: { kind: "placement", placementId: otherPl.id }, to: { kind: "space", spaceId: booth.id }, label: "cross-option" }),
+        { ok: false, reason: "invalid" },
+        "#GDS I1: addConduit refuses a placement that belongs to a different option"
+      );
+      assert.deepEqual(
+        await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "placement", placementId: otherPl.id }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 10, by }),
+        { ok: false, reason: "bad-end" },
+        "#GDS I1: addRiserLink also refuses a cross-option placement end"
+      );
+    }
+
+    // M1 — moveNode.key must be UNASSIGNED_KEY or an existing space id.
+    assert.deepEqual(
+      await GR.patchRiser(p0.id, opt, { op: "moveNode", key: "sp-not-real", box: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } }),
+      { ok: false, reason: "invalid" },
+      "#GDS M1: moveNode refuses an unknown space key"
+    );
+    assert.deepEqual(
+      await GR.patchRiser(p0.id, opt, { op: "moveNode", key: "unassigned", box: { x: 0.05, y: 0.9, w: 0.2, h: 0.1 } }),
+      { ok: true },
+      "#GDS M1: moveNode still accepts the UNASSIGNED_KEY"
+    );
+
+    // M1 — normalizeRiserDoc never adopts a __proto__/constructor/prototype node key. JSON.parse
+    // produces those as ordinary OWN keys (no actual prototype change) — it's a naive
+    // `nodes[k] = …` afterward that would turn one into a real prototype write.
+    const rawDoc = JSON.parse(
+      '{"nodes":{"__proto__":{"x":0,"y":0,"w":1,"h":1},"constructor":{"x":0,"y":0,"w":1,"h":1},"prototype":{"x":0,"y":0,"w":1,"h":1},"sp-ok":{"x":0.2,"y":0.2,"w":0.1,"h":0.1}},"levels":[],"conduits":[],"notes":[],"links":[]}'
+    );
+    const cleaned = GRD.normalizeRiserDoc(rawDoc);
+    assert.deepEqual(Object.keys(cleaned.nodes), ["sp-ok"], "#GDS M1: __proto__/constructor/prototype node keys are dropped; a legitimate one is kept");
+    assert.equal(Object.getPrototypeOf(cleaned.nodes), Object.prototype, "#GDS M1: the rebuilt nodes object's own prototype was never touched");
+
+    // M2 — addRiserLink validates the ROUNDED length, not the raw input: a value that rounds
+    // down to 0 ft (0.04 -> 0.0) must be refused, not stored as a zero-length cable.
+    assert.deepEqual(
+      await GR.addRiserLink(p0.id, { optionId: opt, from: { kind: "space", spaceId: stage.id }, to: { kind: "space", spaceId: booth.id }, partId: "WIRE-X", lengthFt: 0.04, by }),
+      { ok: false, reason: "bad-length" },
+      "#GDS M2: a length that rounds down to 0 ft is refused"
+    );
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(!(p.riser?.[opt]?.links || []).some((l) => l.lengthFt === 0), "#GDS M2: no zero-length link was stored");
+
+    // M3 — per-option document caps: an add beyond the cap is refused with a distinct "cap" reason.
+    for (let i = 0; i < GRD.MAX_NOTES; i++) {
+      const r = await GR.patchRiser(p0.id, opt, { op: "addNote", text: `note ${i}` });
+      assert.ok(r.ok, `#GDS M3 setup: note ${i} of ${GRD.MAX_NOTES} added`);
+    }
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(p.riser![opt].notes.length, GRD.MAX_NOTES, "#GDS M3: exactly the cap's worth of notes were stored");
+    assert.deepEqual(
+      await GR.patchRiser(p0.id, opt, { op: "addNote", text: "one too many" }),
+      { ok: false, reason: "cap" },
+      "#GDS M3: a note beyond the cap is refused with a distinct 'cap' reason"
+    );
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(p.riser![opt].notes.length, GRD.MAX_NOTES, "#GDS M3: the refused note was never stored");
+
+    // M3 — normalizeRiserDoc itself slices an over-cap document defensively (legacy/corrupt data).
+    const overCapRaw = {
+      nodes: {},
+      levels: Array.from({ length: GRD.MAX_LEVELS + 5 }, (_, i) => ({ id: `lv-${i}`, label: `L${i}`, y: i * 0.1 })),
+      conduits: Array.from({ length: GRD.MAX_CONDUITS + 5 }, (_, i) => ({ id: `cd-${i}`, from: { kind: "space", spaceId: null }, to: { kind: "placement", placementId: `gp-${i}` }, label: `c${i}` })),
+      notes: Array.from({ length: GRD.MAX_NOTES + 20 }, (_, i) => ({ id: `nt-${i}`, n: i + 1, text: `n${i}` })),
+      links: Array.from({ length: GRD.MAX_LINKS + 5 }, (_, i) => ({ id: `lk-${i}`, from: { kind: "space", spaceId: null }, to: { kind: "placement", placementId: `gp-${i}` }, partId: "WIRE-X", lengthFt: 5, by: "x", at: 0 })),
+    };
+    const capped = GRD.normalizeRiserDoc(overCapRaw);
+    assert.equal(capped.levels.length, GRD.MAX_LEVELS, "#GDS M3: normalizeRiserDoc slices over-cap levels");
+    assert.equal(capped.conduits.length, GRD.MAX_CONDUITS, "#GDS M3: normalizeRiserDoc slices over-cap conduits");
+    assert.equal(capped.notes.length, GRD.MAX_NOTES, "#GDS M3: normalizeRiserDoc slices over-cap notes");
+    assert.equal(capped.links.length, GRD.MAX_LINKS, "#GDS M3: normalizeRiserDoc slices over-cap links");
+
+    // M4 — buildGridQuote prices RiserLink footage summed with same-cable routes BEFORE the
+    // per-part ceiling, and is unchanged (matches plain route math) when there are no links.
+    {
+      const { buildGridQuote } = await import("@/lib/design/grid-quote");
+      const pq = await GP.createProject({ name: "GDS fix-wave-1 quote", customer: "", customerId: null, by });
+      const qSheet = (await GP.addSheet(pq.id, {
+        name: "Plan",
+        mime: "image/svg+xml",
+        dataUrl: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E",
+        by,
+      }))!;
+      let pp = (await GP.getProject(pq.id))!;
+      const qOpt = pp.options![0].id;
+      await GP.setSheetCalibration(pq.id, { docId: qSheet.id, page: 1, scale: 102, unit: "ft", refLength: 30.6, by, at: Date.now() });
+      await GP.addRoute(pq.id, { sheetId: qSheet.id, page: 1, partId: "WIRE-X", points: [{ x: 0, y: 0.5 }, { x: 0.3, y: 0.5 }], aspect: 1, optionId: qOpt, by });
+      // Route alone: 0.3 page-widths * 102 ft/pw = 30.6 ft -> ceil 31.
+      pp = (await GP.getProject(pq.id))!;
+      const baseline = await buildGridQuote(pp, qOpt);
+      assert.ok(baseline.ok, "#GDS M4: buildGridQuote prices a route with no riser links at all");
+      if (baseline.ok) {
+        const wireLine = baseline.build.lines.find((l) => l.partId === "WIRE-X");
+        assert.equal(wireLine?.qty, 31, "#GDS M4: totals with no links match plain route math (ceil(30.6) = 31) — RiserLink wiring doesn't perturb the no-link case");
+      }
+
+      // Add a RiserLink on the SAME part: route 30.6 + link 20.3 = 50.9 -> ceil 51, one LESS
+      // than ceil(30.6) + ceil(20.3) = 31 + 21 = 52 — proof the two are summed before rounding,
+      // not rounded independently and added.
+      await GR.addDevicesToNode(pq.id, { optionId: qOpt, nodeKey: "unassigned", partId: "DEV-Q", qty: 1, by });
+      pp = (await GP.getProject(pq.id))!;
+      const devQ = pp.placements.find((pl) => pl.partId === "DEV-Q")!;
+      const linkRes = await GR.addRiserLink(pq.id, { optionId: qOpt, from: { kind: "placement", placementId: devQ.id }, to: { kind: "space", spaceId: null }, partId: "WIRE-X", lengthFt: 20.3, by });
+      assert.ok(linkRes.ok, "#GDS M4 setup: the RiserLink is stored");
+      pp = (await GP.getProject(pq.id))!;
+      const withLink = await buildGridQuote(pp, qOpt);
+      assert.ok(withLink.ok, "#GDS M4: buildGridQuote still prices with a RiserLink present");
+      if (withLink.ok) {
+        const wireLine = withLink.build.lines.find((l) => l.partId === "WIRE-X");
+        assert.equal(wireLine?.qty, 51, "#GDS M4: RiserLink footage is summed with the same-cable route BEFORE the per-part ceiling (51, not 52)");
+      }
+    }
+
+    // M4 — GP.removePlacement (not just the riser-aware removeNodeDevices) prunes any riser
+    // link/conduit that ended on the single removed placement.
+    {
+      const pr = await GP.createProject({ name: "GDS fix-wave-1 removePlacement", customer: "", customerId: null, by });
+      const rSheet = (await GP.addSheet(pr.id, {
+        name: "Plan",
+        mime: "image/svg+xml",
+        dataUrl: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E",
+        by,
+      }))!;
+      let pp = (await GP.getProject(pr.id))!;
+      const rOpt = pp.options![0].id;
+      await GP.addPlacement(pr.id, { sheetId: rSheet.id, page: 1, x: 0.2, y: 0.2, partId: "DEV-R", optionId: rOpt, by });
+      pp = (await GP.getProject(pr.id))!;
+      const devR = pp.placements.find((pl) => pl.partId === "DEV-R")!;
+      const linkR = await GR.addRiserLink(pr.id, { optionId: rOpt, from: { kind: "placement", placementId: devR.id }, to: { kind: "space", spaceId: null }, partId: "WIRE-X", lengthFt: 12, by });
+      assert.ok(linkR.ok, "#GDS M4 setup: a RiserLink ends on the single placement");
+      assert.deepEqual(
+        await GR.patchRiser(pr.id, rOpt, { op: "addConduit", from: { kind: "placement", placementId: devR.id }, to: { kind: "space", spaceId: null }, label: "conduit on it" }),
+        { ok: true },
+        "#GDS M4 setup: a conduit also ends on the single placement"
+      );
+      pp = (await GP.getProject(pr.id))!;
+      assert.equal(pp.riser![rOpt].links.length, 1, "#GDS M4 setup: link stored");
+      assert.equal(pp.riser![rOpt].conduits.length, 1, "#GDS M4 setup: conduit stored");
+      await GP.removePlacement(pr.id, devR.id);
+      pp = (await GP.getProject(pr.id))!;
+      assert.equal(pp.riser![rOpt].links.length, 0, "#GDS M4: GP.removePlacement prunes the riser link that ended on the removed placement");
+      assert.equal(pp.riser![rOpt].conduits.length, 0, "#GDS M4: GP.removePlacement also prunes the conduit that ended on it");
+    }
+
+    // M4 — restoring a pre-#GDS revision (a snapshot with no `riser` key at all, since
+    // snapshotOf now always writes at least `{}`) still works, and the live riser document
+    // falls back to the auto layout rather than erroring or leaving stale data.
+    {
+      const pv = await GP.createProject({ name: "GDS fix-wave-1 legacy revision", customer: "", customerId: null, by });
+      let pp = (await GP.getProject(pv.id))!;
+      const vOpt = pp.options![0].id;
+      await GR.patchRiser(pv.id, vOpt, { op: "addNote", text: "current-state note" });
+      pp = (await GP.getProject(pv.id))!;
+      assert.equal(pp.riser?.[vOpt]?.notes.length, 1, "#GDS M4 setup: the live design has a riser document");
+
+      // Fabricate an old-format revision, as if cut before #GDS shipped — its snapshot never
+      // got a `riser` key at all (bypasses GP.addRevision, which always writes one now).
+      await patchDoc("grid_projects", pv.id, (doc) => {
+        const legacyRev = {
+          rev: 1,
+          at: Date.now(),
+          by,
+          reason: "manual",
+          note: "pre-#GDS",
+          name: doc.name,
+          sheetIds: [...(((doc.sheetIds as unknown[]) || []))],
+          placements: [...(((doc.placements as unknown[]) || []))],
+          calibrations: [...(((doc.calibrations as unknown[]) || []))],
+          spaces: [...(((doc.spaces as unknown[]) || []))],
+          routes: [...(((doc.routes as unknown[]) || []))],
+          options: (((doc.options as Array<Record<string, unknown>>) || [])).map((o) => ({ ...o })),
+          // deliberately no `riser` key
+        };
+        doc.revisions = [legacyRev];
+      });
+
+      const rr = await GP.restoreRevision(pv.id, 1, by);
+      assert.ok(rr.ok, "#GDS M4: restoring a pre-#GDS revision (no riser key in the snapshot) still succeeds");
+      pp = (await GP.getProject(pv.id))!;
+      assert.ok(!pp.riser || !(vOpt in pp.riser), "#GDS M4: …and the live riser document falls back to the auto layout (no saved document left for this option)");
+    }
+  }
+
   console.log("review regression checks passed");
 }
 
