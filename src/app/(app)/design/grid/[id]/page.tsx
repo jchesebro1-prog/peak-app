@@ -26,6 +26,7 @@ import { tierSystems } from "@/lib/design/equipment-pricing";
 import { buildEquipmentPriceTable } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { scopeTargetsByTier } from "@/lib/design/scope-targets";
+import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import GridEditor from "./editor";
@@ -109,6 +110,15 @@ export default async function GridEditorPage({
   const sites = project.customerId ? await sitesForCompany(project.customerId) : [];
   const venues = sites.map((s) => ({ id: s.id, name: s.name || "Unnamed venue" }));
 
+  // The Equipment map price context (#GEM) — built from the catalog this
+  // request already loaded (no second load). Server-only; the editor gets sell
+  // numbers only (scope targets, and virtual assembly/allowance parts).
+  const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
+  const equipTable = buildEquipmentPriceTable(equipMap, equipCtx);
+  const scopeTargets = project.scopeInputs
+    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable))
+    : null;
+
   /** Client payload: sheets without re-serialization surprises + PartLite slice
    *  (the one builder the riser, drawing set and schedule use too — #209). */
   // #207: "has a datasheet" = a stored datasheet document of the part's own;
@@ -118,7 +128,11 @@ export default async function GridEditorPage({
   // detached legacy file no longer counts (final fix wave, I1).
   const { index: docIndex } = await loadPartDocsState(catalog);
   const hasDatasheetFile = (p: (typeof catalog)[number]) => ownFiles(docIndex, p.sku, "datasheet").length > 0;
-  const parts: PartLite[] = gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile });
+  // #GEM: assemblies and allowances placed by Auto resolve live into PartLite rows.
+  const parts: PartLite[] = [
+    ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile }),
+    ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),
+  ];
 
   /**
    * Curtain drop-in (punch #49): the fabric list and the sell coefficients for
@@ -136,15 +150,6 @@ export default async function GridEditorPage({
       pricePerSqft: fabricSellPerSqft(fabricAreaRate(p), tier.margin),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-
-  // The Equipment map price context (#GEM) — built from the catalog this
-  // request already loaded (no second load). Server-only; the editor gets sell
-  // numbers only (scope targets now; virtual parts in Task 6).
-  const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
-  const equipTable = buildEquipmentPriceTable(equipMap, equipCtx);
-  const scopeTargets = project.scopeInputs
-    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable))
-    : null;
 
   const curtainCoeffs = sellCoeffs(tier.margin);
   const laborParts: LaborPartLite[] = catalog

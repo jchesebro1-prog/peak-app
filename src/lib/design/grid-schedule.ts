@@ -6,7 +6,7 @@
 
 import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { spaceOf, type SpaceLite } from "./grid-geometry";
-import { curtainDesc, type GridCurtain } from "./grid-bom";
+import { curtainDesc, placementQty, type GridCurtain } from "./grid-bom";
 import type { RiserView } from "./grid-riser-doc";
 
 /** `code` overrides the printed Part cell for rows with no SKU (curtains). */
@@ -45,7 +45,7 @@ export function scheduleWiresFromView(view: RiserView): ScheduleWire[] {
  * group: each drop is its own made-to-size drape.
  */
 export function buildSchedule(input: {
-  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null }>;
+  placements: Array<{ id: string; sheetId: string; page: number; x: number; y: number; partId: string; curtain?: GridCurtain | null; qty?: number }>;
   spaces: Array<SpaceLite & { name: string }>;
   descOf: (partId: string) => string | undefined;
   wires: ScheduleWire[];
@@ -59,8 +59,8 @@ export function buildSchedule(input: {
       rows.push({ partId: pl.id, code: "CURTAIN", desc: curtainDesc(pl.curtain, input.descOf(pl.curtain.fabricSku)), qty: 1 });
     } else {
       const row = rows.find((r) => r.partId === pl.partId && !r.code);
-      if (row) row.qty += 1;
-      else rows.push({ partId: pl.partId, desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: 1 });
+      if (row) row.qty += placementQty(pl);
+      else rows.push({ partId: pl.partId, desc: input.descOf(pl.partId) || "(no longer in the catalog)", qty: placementQty(pl) });
     }
     bySpace.set(key, rows);
   }

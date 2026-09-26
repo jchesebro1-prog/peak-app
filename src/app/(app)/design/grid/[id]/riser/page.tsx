@@ -8,6 +8,7 @@ import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { isPerLengthUnit, type PartLite } from "@/lib/design/grid-bom";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
 import { legendRows, symbolContext, type SymbolEntry } from "@/lib/design/grid-icons";
 import { SymbolIcon } from "@/components/design/symbol-shape";
@@ -56,7 +57,10 @@ export default async function RiserPage({
   const symCtx = symbolContext(settings);
   // `library` = what can be placed; `parts` also resolves pre-library placements.
   const library = gridPartsFrom(gridSymbols, catalog, categoryMap);
-  const parts = gridPartsFrom(gridSymbols, catalog, categoryMap, { catalogFallback: true });
+  const parts = [
+    ...gridPartsFrom(gridSymbols, catalog, categoryMap, { catalogFallback: true }),
+    ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
+  ];
   const view = riserViewForOption({ project, optionId, parts, symCtx });
 
   // Legend (#206 rule): one row per icon+colour actually drawn.

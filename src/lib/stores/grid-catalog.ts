@@ -1,5 +1,5 @@
 import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catalog";
-import { listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
+import { insertDocIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
 import type { GridShape } from "@/lib/design/grid-symbols";
 
@@ -172,4 +172,21 @@ export async function setGridSymbolLook(
     if ("color" in look) d.color = look.color ?? null;
     d.updatedAt = Date.now();
   });
+}
+
+/**
+ * Make sure each pricing part has a Grid library entry (#GEM Auto fill) — the
+ * same `fromPricing` shape the first-use seed writes, inserted ONLY where
+ * missing (insert-if-absent: never overwrites an entry someone restyled).
+ * Called from the Auto fill (a user action), never on page load.
+ */
+export async function ensureGridSymbolsFor(parts: CatalogPart[], by: string): Promise<number> {
+  if (!parts.length) return 0;
+  const have = new Set((await listGridSymbols(by)).map((s) => s.id));
+  let added = 0;
+  for (const p of parts) {
+    if (have.has(p.id) || p.category === "Fabric" || p.category === "Labor") continue;
+    if (await insertDocIfAbsent<GridSymbol>("grid_catalog", fromPricing(p, by))) added += 1;
+  }
+  return added;
 }

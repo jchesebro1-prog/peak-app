@@ -17948,3 +17948,77 @@ import { needsPartCount as gemNeedsPartCount6, addToQuotesGuard as gemGuard6 } f
     `#GEM fix wave 1 (I1): addToQuotesGuard's plural message names the items (got ${JSON.stringify(manyMsg)})`
   );
 }
+
+/* --- #GEM T6: lot quantities, virtual parts (assemblies + allowances), the Auto estimate model --- */
+import { bomBySpace as gemBySpace6, bomLines as gemBomLines6, bomTotals as gemBomTotals6, placementQty as gemQty6, type PartLite as GemPartLite6 } from "@/lib/design/grid-bom";
+import { allowancePartId as gemAllowId6, assemblyPartId as gemAsmId6, parseVirtualPartId as gemParseV6, virtualPartsFor as gemVirtual6 } from "@/lib/design/grid-virtual-parts";
+import { mergeScopeEstimate as gemMergeEst6, overrideRefs as gemRefs6, sanitizeAutoEstimate as gemSanEst6 } from "@/lib/design/grid-auto-model";
+import { buildSchedule as gemSchedule6 } from "@/lib/design/grid-schedule";
+import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
+{
+  ok(gemQty6({}) === 1 && gemQty6({ qty: 240 }) === 240 && gemQty6({ qty: 0 }) === 1 && gemQty6({ qty: Number.NaN }) === 1, "#GEM T6: a placement counts 1 unless it is a lot");
+  const parts: GemPartLite6[] = [
+    { id: "PIPE", sku: "PIPE", desc: "Pipe", category: "Rigging", unit: "ft", list: 12, cost: 8 },
+    { id: "PAR", sku: "PAR", desc: "Par", category: "Lighting", unit: "ea", list: 900, cost: 600 },
+  ];
+  const pls = [
+    { id: "a", sheetId: "s", page: 1, x: 0.1, y: 0.1, partId: "PIPE", qty: 240 },
+    { id: "b", sheetId: "s", page: 1, x: 0.2, y: 0.1, partId: "PAR" },
+    { id: "c", sheetId: "s", page: 1, x: 0.3, y: 0.1, partId: "PAR" },
+  ];
+  const lines = gemBomLines6(pls, parts);
+  const pipe = lines.find((l) => l.partId === "PIPE")!;
+  ok(pipe.qty === 240 && pipe.ext === 2880 && lines.find((l) => l.partId === "PAR")!.qty === 2, "#GEM T6: a lot marker bills its quantity on the BOM");
+  const tot = gemBomTotals6(pls, parts);
+  ok(tot.value === 4680 && tot.cost === 3120, "#GEM T6: totals multiply by the lot quantity");
+  const roll = gemBySpace6(pls, parts, [])[0];
+  ok(roll.count === 3 && roll.value === 4680, "#GEM T6: space rollups value a lot at its quantity (count stays markers)");
+  const sched = gemSchedule6({ placements: pls, spaces: [], descOf: (id) => parts.find((p) => p.id === id)?.desc, wires: [] });
+  ok(sched.sections[0].rows.find((r) => r.partId === "PIPE")!.qty === 240, "#GEM T6: the schedule counts a lot at its quantity");
+  const graph = gemRiser6(pls, [], [], parts, []);
+  ok(graph.nodes[0].groups.find((g) => g.partId === "PIPE")!.qty === 240, "#GEM T6: the riser counts a lot at its quantity");
+  ok(gemAsmId6("SA-1") === "asm:SA-1" && gemAllowId6("audio:subwoofer", "best") === "allow:audio:subwoofer:best", "#GEM T6: virtual part ids");
+  const pv = gemParseV6("allow:audio:subwoofer:best");
+  ok(pv?.kind === "allowance" && pv.rowKey === "audio:subwoofer" && pv.tier === "best" && gemParseV6("asm:SA-1")?.kind === "assembly" && gemParseV6("allow:bogus:row:best") === null && gemParseV6("GEM-PAR") === null, "#GEM T6: parse round-trips and rejects unknown rows and plain SKUs");
+  const rack = {
+    id: "SA-GEM6", kind: "system" as const, label: "GEM6 rack", description: "", scope: "Audio" as const,
+    lightEngineSku: "", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    parts: [{ sku: "GEM6-MIX", qty: 1 }], createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const fx = {
+    id: "fa-gem6", kind: "fixture" as const, label: "House PAR", description: "",
+    lightEngineSku: "GEM6-PAR", lensSku: null, lines: { data: [], power: [], mounting: [], accessories: [] },
+    createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const ctx = {
+    parts: new Map([
+      ["GEM6-MIX", { sku: "GEM6-MIX", desc: "Mixer", unit: "ea", cost: 5000, list: 7000 }],
+      ["GEM6-PAR", { sku: "GEM6-PAR", desc: "Par", unit: "ea", cost: 600, list: 900 }],
+    ]),
+    fixtures: new Map<string, typeof rack | typeof fx>([[rack.id, rack], [fx.id, fx]]),
+    margin: 0.3,
+  };
+  const map = { "audio:subwoofer": { tiers: { good: { kind: "allowance" as const, amount: 1200, confirmedBy: "Chris", confirmedAt: 5 } }, sameAll: true, updatedBy: "t", updatedAt: 1 } };
+  const v = gemVirtual6(["asm:SA-GEM6", "asm:fa-gem6", "allow:audio:subwoofer:better", "allow:video:screen:good", "PLAIN", "asm:SA-GEM6"], map, ctx);
+  ok(v.length === 4 && v.every((p) => p.virtual === true), "#GEM T6: one virtual part per distinct virtual id; plain SKUs are not virtual");
+  const vr = v.find((p) => p.id === "asm:SA-GEM6")!;
+  ok(vr.list === 7000 && vr.cost === 5000 && vr.gridScope === "Audio" && vr.desc === "GEM6 rack", "#GEM T6: a System assembly resolves live, in its system's scope");
+  ok(v.find((p) => p.id === "asm:fa-gem6")!.gridScope === "Lighting", "#GEM T6: a fixture assembly is Lighting");
+  const va = v.find((p) => p.id === "allow:audio:subwoofer:better")!;
+  ok(va.allowance === true && va.cost === 1200 && va.list === 1714.29 && va.gridScope === "Audio", "#GEM T6: a confirmed allowance prices live, flagged Allowance");
+  const dead = v.find((p) => p.id === "allow:video:screen:good")!;
+  ok(dead.list === 0 && dead.cost === 0 && /no longer confirmed/.test(dead.desc), "#GEM T6: an allowance that is no longer confirmed prices $0 and says so");
+  const est = gemSanEst6({
+    tierByScope: { lighting: "best", controls: "good", audio: "nope" },
+    overrides: { "lighting:par": { sku: " GEM-PAR ", qty: 12.4 }, "controls:console": { sku: "X" }, "bogus:row": { sku: "Y" }, "audio:subwoofer": { assemblyId: "SA-1", sku: "" }, "video:screen": {} },
+  });
+  ok(JSON.stringify(est.tierByScope) === '{"lighting":"best"}' && est.overrides["lighting:par"].sku === "GEM-PAR" && est.overrides["lighting:par"].qty === 12 && est.overrides["audio:subwoofer"].assemblyId === "SA-1" && !("controls:console" in est.overrides) && !("bogus:row" in est.overrides) && !("video:screen" in est.overrides), "#GEM T6: sanitizeAutoEstimate keeps Grid scopes, known rows and real overrides only");
+  const merged = gemMergeEst6(est, "lighting", "good", { "lighting:front": { qty: 3 }, "audio:lineArray": { qty: 9 } });
+  ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#GEM T6: re-choosing one scope replaces only that scope's overrides");
+  const refs = gemRefs6(est);
+  ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#GEM T6: overrideRefs names the SKUs and assemblies to load");
+  const ed6 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
+  const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
+  const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
+  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#GEM T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
+}

@@ -68,6 +68,12 @@ export type PartLite = {
   kind?: "device" | "assembly";
   assemblyMembers?: Array<{ symbolId: string; qty: number; x: number; y: number }>;
   pricingPartId?: string | null;
+  /** #GEM virtual part (asm:/allow: ids, grid-virtual-parts.ts) — resolved
+   *  server-side from an assembly or an Equipment map allowance; never offered
+   *  in the device palette. */
+  virtual?: true;
+  /** #GEM: an Equipment map allowance line — flagged internally ("Allowance"). */
+  allowance?: true;
 };
 
 /* -------------------------------- curtains -------------------------------- */
@@ -117,6 +123,13 @@ export type CurtainPlacementLite = {
 
 export function isCurtainPlacement(pl: { curtain?: GridCurtain | null }): boolean {
   return Boolean(pl.curtain);
+}
+
+/** A placement's unit count (#GEM): an Auto "lot" marker carries `qty` (count
+ *  or length hardware); every other placement is one unit. */
+export function placementQty(pl: { qty?: number | null }): number {
+  const n = Math.round(Number(pl.qty));
+  return Number.isFinite(n) && n > 1 ? n : 1;
 }
 
 /** GridCurtain -> the shared all-strings CurtainSpec the curtain pricing
@@ -208,7 +221,7 @@ export type BomLine = {
  * human deletes the markers or restores the part deliberately.
  */
 export function bomLines(
-  placements: Array<{ partId: string; curtain?: GridCurtain | null }>,
+  placements: Array<{ partId: string; curtain?: GridCurtain | null; qty?: number }>,
   parts: PartLite[]
 ): BomLine[] {
   const byId = new Map(parts.map((p) => [p.id, p]));
@@ -218,7 +231,7 @@ export function bomLines(
   // partId here would quietly bill the fabric row a second time.
   for (const pl of placements) {
     if (pl.curtain) continue;
-    qty.set(pl.partId, (qty.get(pl.partId) || 0) + 1);
+    qty.set(pl.partId, (qty.get(pl.partId) || 0) + placementQty(pl));
   }
   const lines: BomLine[] = [];
   for (const [partId, n] of qty) {
@@ -279,6 +292,7 @@ export type RollupPlacementLite = {
   partId: string;
   curtain?: GridCurtain | null;
   category?: string;
+  qty?: number;
 };
 
 function addSlice(slices: RollupSlice[], key: string, value: number): void {
@@ -325,7 +339,7 @@ export function bomBySpace(
     const bucket = home ? buckets.get(home.id)! : unassigned;
     const value = pl.curtain
       ? (pl.id ? curtainPrices?.get(pl.id) : 0) || 0
-      : byId.get(pl.partId)?.list || 0;
+      : (byId.get(pl.partId)?.list || 0) * placementQty(pl);
     bucket.count += 1;
     bucket.value += value;
     const scope: GridLayer = pl.curtain ? "Curtains" : scopeOfPart(byId.get(pl.partId));
@@ -458,7 +472,7 @@ export function routeLines(
 
 /** Sell value, internal cost, and blended margin for a set of placements. */
 export function bomTotals(
-  placements: Array<{ partId: string; curtain?: GridCurtain | null }>,
+  placements: Array<{ partId: string; curtain?: GridCurtain | null; qty?: number }>,
   parts: PartLite[]
 ): { value: number; cost: number; margin: number } {
   const byId = new Map(parts.map((p) => [p.id, p]));
@@ -468,8 +482,9 @@ export function bomTotals(
     if (pl.curtain) continue; // priced separately - see curtainLines
     const part = byId.get(pl.partId);
     if (!part) continue;
-    value += part.list;
-    cost += part.cost;
+    const q = placementQty(pl);
+    value += part.list * q;
+    cost += part.cost * q;
   }
   return { value, cost, margin: value > 0 ? (value - cost) / value : 0 };
 }

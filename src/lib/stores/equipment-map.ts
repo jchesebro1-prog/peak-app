@@ -16,6 +16,8 @@ import {
   type EquipRow,
   type EquipRowInput,
 } from "@/lib/design/equipment-map";
+import { parseVirtualPartId, virtualPartsFor } from "@/lib/design/grid-virtual-parts";
+import type { PartLite } from "@/lib/design/grid-bom";
 
 /**
  * The Equipment map store (#GEM, D-GEM-2): one settings blob, one top-level
@@ -89,4 +91,20 @@ export async function loadEquipPriceCtx(
 export async function loadEquipmentPriceTable(opts?: Parameters<typeof loadEquipPriceCtx>[0]): Promise<EquipmentPriceTable> {
   const { map, ctx } = await loadEquipPriceCtx(opts);
   return buildEquipmentPriceTable(map, ctx);
+}
+
+/**
+ * The virtual parts (asm:/allow:) a set of placements references, resolved
+ * live (#GEM). No virtual id → nothing is loaded at all, so a design without
+ * Auto devices pays nothing. Pass `catalog` when the request already holds it.
+ */
+export async function loadVirtualParts(partIds: Iterable<string>, catalog?: ReadonlyArray<CatalogPart>): Promise<PartLite[]> {
+  const ids = [...new Set(partIds)].filter((id) => parseVirtualPartId(id) !== null);
+  if (!ids.length) return [];
+  const assemblyIds = ids.flatMap((id) => {
+    const r = parseVirtualPartId(id);
+    return r?.kind === "assembly" ? [r.id] : [];
+  });
+  const { map, ctx } = await loadEquipPriceCtx(catalog ? { catalog } : { extraFixtureIds: assemblyIds });
+  return virtualPartsFor(ids, map, ctx);
 }

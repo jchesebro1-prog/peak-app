@@ -3755,6 +3755,75 @@ async function main() {
     assert.deepEqual(Object.keys(await EM.getEquipmentMap()), [], "#GEM T2: cleanup — later blocks start from an empty map");
   }
 
+  /* --- #GEM T6: auto placements — per-scope replace, hand-touched kept, lots + virtual parts on the quote --- */
+  {
+    const GP = await import("@/lib/stores/grid-projects");
+    const EM = await import("@/lib/stores/equipment-map");
+    const Cat = await import("@/lib/stores/catalog");
+    const { resolveOptionId } = await import("@/lib/design/grid-options");
+    const { buildGridQuote } = await import("@/lib/design/grid-quote");
+    const by = "tester";
+    const p0 = await GP.createProject({ name: "GEM T6", customer: "", customerId: null, by });
+    await GP.addSheet(p0.id, { name: "Generated base plan", mime: "image/svg+xml", dataUrl: "data:image/svg+xml,%3Csvg%2F%3E", by });
+    let p = (await GP.getProject(p0.id))!;
+    const opt = resolveOptionId(p, null);
+    const sheetId = p.sheetIds[0];
+    const tag = (rowKey: string) => ({ scope: "lighting" as const, rowKey, tier: "better" as const });
+    const pipeTag = { scope: "rigging" as const, rowKey: "rigging:pipe", tier: "better" as const };
+    const first = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [
+      { x: 0.1, y: 0.1, partId: "GEM6-PAR", auto: tag("lighting:par") },
+      { x: 0.2, y: 0.1, partId: "GEM6-PAR", auto: tag("lighting:par") },
+      { x: 0.3, y: 0.1, partId: "GEM6-PAR", auto: tag("lighting:par") },
+      { x: 0.9, y: 0.9, partId: "GEM6-PIPE", qty: 240, auto: pipeTag },
+    ] });
+    assert.deepEqual(first, { removed: 0, added: 3 }, "#GEM T6: a fill adds only the items of the scopes it was asked to fill");
+    await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["rigging"], sheetId, page: 1, by, items: [{ x: 0.9, y: 0.9, partId: "GEM6-PIPE", qty: 240, auto: pipeTag }] });
+    await GP.addPlacement(p0.id, { sheetId, page: 1, x: 0.5, y: 0.5, partId: "GEM6-PAR", optionId: opt, by });
+    p = (await GP.getProject(p0.id))!;
+    const autoPars = p.placements.filter((pl) => pl.auto?.scope === "lighting");
+    await GP.movePlacement(p0.id, autoPars[0].id, { x: 0.15, y: 0.2 });
+    await GP.setPlacementCategory(p0.id, autoPars[1].id, "FOH");
+    p = (await GP.getProject(p0.id))!;
+    assert.ok(!p.placements.find((pl) => pl.id === autoPars[0].id)!.auto && !p.placements.find((pl) => pl.id === autoPars[1].id)!.auto, "#GEM T6: a move or a category edit clears the auto tag");
+    const second = await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["lighting"], sheetId, page: 1, by, items: [
+      { x: 0.1, y: 0.3, partId: "GEM6-PAR", auto: tag("lighting:par") },
+      { x: 0.2, y: 0.3, partId: "GEM6-PAR", auto: tag("lighting:par") },
+    ] });
+    assert.deepEqual(second, { removed: 1, added: 2 }, "#GEM T6: a re-fill replaces only the untouched auto devices of that scope");
+    p = (await GP.getProject(p0.id))!;
+    assert.equal(p.placements.filter((pl) => pl.partId === "GEM6-PAR").length, 5, "#GEM T6: two hand-touched + one hand-placed + two new");
+    const lot = p.placements.find((pl) => pl.partId === "GEM6-PIPE")!;
+    assert.ok(lot.qty === 240 && lot.auto?.scope === "rigging", "#GEM T6: another scope's lot is untouched, its qty kept");
+    const other = await GP.addOption(p0.id, { name: "Alt", by });
+    assert.ok(other.ok, "#GEM T6: a second option");
+    if (other.ok) {
+      assert.deepEqual(
+        await GP.replaceAutoPlacements(p0.id, { optionId: other.option.id, scopes: ["lighting"], sheetId, page: 1, by, items: [] }),
+        { removed: 0, added: 0 },
+        "#GEM T6: a re-fill in one option never touches another option's devices"
+      );
+    }
+    assert.equal(await GP.replaceAutoPlacements(p0.id, { optionId: "opt-gone", scopes: ["lighting"], sheetId, page: 1, by, items: [] }), null, "#GEM T6: an unknown option is refused");
+    await GP.setAutoEstimate(p0.id, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } });
+    assert.deepEqual((await GP.getProject(p0.id))!.autoEstimate, { tierByScope: { lighting: "best" }, overrides: { "lighting:par": { qty: 7 } } }, "#GEM T6: the Auto choices persist on the project");
+    await Cat.upsert({ sku: "GEM6-PAR", desc: "GEM6 par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
+    await EM.saveEquipmentRow("audio:subwoofer", { sameAll: true, tiers: { good: { kind: "allowance", amount: 1200, confirmed: true } } }, by);
+    const subTag = { scope: "audio" as const, rowKey: "audio:subwoofer", tier: "better" as const };
+    await GP.replaceAutoPlacements(p0.id, { optionId: opt, scopes: ["audio"], sheetId, page: 1, by, items: [
+      { x: 0.4, y: 0.6, partId: "allow:audio:subwoofer:better", auto: subTag },
+      { x: 0.6, y: 0.6, partId: "allow:audio:subwoofer:better", auto: subTag },
+    ] });
+    p = (await GP.getProject(p0.id))!;
+    const q = await buildGridQuote(p, opt);
+    assert.ok(q.ok, "#GEM T6: the design quotes");
+    if (q.ok) {
+      const allowLine = q.build.spec.lines.find((l) => l.sku === "allow:audio:subwoofer:better");
+      assert.ok(allowLine && allowLine.allowance === true && allowLine.qty === 2 && allowLine.price > 0, "#GEM T6: the allowance reaches the quote at its live price, flagged");
+      assert.ok(!q.build.spec.lines.some((l) => l.sku !== "allow:audio:subwoofer:better" && l.allowance), "#GEM T6: …and only the allowance is flagged");
+    }
+    await EM.clearEquipmentRow("audio:subwoofer");
+  }
+
   /* --- #210 final review M5: the go-live reset keeps fixtures and systems
          (configuration, like the settings they used to live in) and the
          kept fixtures' accessory graph is rebuilt. LAST: it wipes every

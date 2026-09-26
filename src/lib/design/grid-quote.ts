@@ -11,6 +11,7 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { isTierPriced } from "@/lib/tier-pricing";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
+import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import type { GridProject } from "@/lib/stores/grid-projects";
 import { bomLines, bomTotals, curtainLines, routeLines, type BomLine } from "@/lib/design/grid-bom";
 import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
@@ -19,7 +20,7 @@ import { ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options
 import { riserLinksOf } from "@/lib/design/grid-riser-doc";
 
 export type GridQuoteSpecLine = {
-  sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true;
+  sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true;
 };
 
 export type GridQuoteBuild = {
@@ -62,13 +63,20 @@ export async function buildGridQuote(
   const tier = await resolveTier(project.customerId);
   const catalog = await listCatalog();
   const symbols = await listGridSymbols();
+  // #GEM: Auto's assemblies and allowances (asm:/allow:) price live, with their real cost.
+  const virtual = await loadVirtualParts(placements.map((p) => p.partId), catalog);
+  const allowanceIds = new Set(virtual.filter((v) => v.allowance).map((v) => v.id));
+  const virtualRows = virtual.map((v) => ({
+    id: v.id, sku: v.sku, desc: v.desc, category: v.category, unit: v.unit, list: v.list, cost: v.cost, role: undefined as string | undefined,
+  }));
   const pricingById = new Map(catalog.map((p) => [p.id, p]));
-  const gridCatalog = symbols.map((s) => {
+  const symbolRows = symbols.map((s) => {
     const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
     return p
       ? { ...p, id: s.id, sku: s.modelNumber || p.sku, desc: s.name }
       : { id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category, unit: "ea", list: 0, cost: 0, ports: s.ports };
   });
+  const gridCatalog = [...symbolRows, ...virtualRows];
   const tierSource = [...gridCatalog, ...catalog.filter((p) => (p.role || "").toLowerCase() === "labor")];
   const tierCatalog = tierSource.map((p) => ({
     ...p,
@@ -123,6 +131,7 @@ export async function buildGridQuote(
       price: l.list,
       ext: l.ext,
       ...(isFallbackLine(l) ? { tierFallback: true as const } : {}),
+      ...(allowanceIds.has(l.partId) ? { allowance: true as const } : {}),
     })),
   };
   const manyOptions = ensureOptions(project).options.length > 1;

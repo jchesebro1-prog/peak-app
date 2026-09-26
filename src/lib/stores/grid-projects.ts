@@ -20,8 +20,10 @@ import { copyRiserDoc, pruneRisers, type RiserDoc } from "@/lib/design/grid-rise
 import { cleanDrawingSet, type DrawingSetSettings } from "@/lib/design/grid-drawing-set";
 export type { RiserDoc } from "@/lib/design/grid-riser-doc";
 export type { DrawingSetSettings } from "@/lib/design/grid-drawing-set";
-import { compute, VENUES, type AState, type QuickScopeInputs, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
+import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
+import type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
+export type { AutoEstimate, AutoTag } from "@/lib/design/grid-auto-model";
 
 /**
  * The Grid (D108) — system-design projects: plan sheets, painted catalog
@@ -84,6 +86,19 @@ export type GridPlacement = {
    * still the same seeded instance.
    */
   seededFrom?: string;
+  /**
+   * Lot quantity (#GEM, D-GEM-6): one marker standing for `qty` units of its
+   * part — Auto lands count/length hardware (pipe, cable, arbors …) this way.
+   * Absent = 1. The BOM, schedule, riser and space rollups multiply by
+   * placementQty(); labor suggestions count the marker once.
+   */
+  qty?: number;
+  /**
+   * Auto-fill tag (#GEM, spec §5): set on a placement the Auto intake or a
+   * per-scope "Change equipment…" re-fill painted. Any move or category edit
+   * deletes it, so a hand-touched device is kept by every later re-fill.
+   */
+  auto?: AutoTag;
   by: string;
   at: number;
 };
@@ -211,6 +226,8 @@ export type GridProject = {
    *  fresh from whatever this currently holds. Absent on pre-D-manual-scope
    *  docs, read as null. */
   scopeInputs?: QuickScopeInputs | null;
+  /** Auto intake choices (#GEM): tier per scope + per-row swaps/qty. Absent on Blank designs. */
+  autoEstimate?: AutoEstimate;
   /** Saved riser document per option id (#209) — node layout, level lines,
    *  conduit annotations, riser notes and RiserLinks. Absent = auto layout. */
   riser?: Record<string, RiserDoc>;
@@ -553,7 +570,7 @@ export async function addPlacements(
     sheetId: string;
     page: number;
     optionId: string;
-    items: Array<{ x: number; y: number; partId: string; category?: string; seededFrom?: string }>;
+    items: Array<{ x: number; y: number; partId: string; category?: string; seededFrom?: string; qty?: number; auto?: AutoTag; curtain?: GridCurtain }>;
     by: string;
   }
 ): Promise<GridProject | null> {
@@ -572,6 +589,9 @@ export async function addPlacements(
       optionId: input.optionId,
       ...(item.category ? { category: item.category } : {}),
       ...(item.seededFrom ? { seededFrom: item.seededFrom } : {}),
+      ...(item.qty && item.qty > 1 ? { qty: Math.round(item.qty) } : {}),
+      ...(item.curtain ? { curtain: item.curtain } : {}),
+      ...(item.auto ? { auto: item.auto } : {}),
       by: input.by,
       at,
     }));
@@ -579,6 +599,78 @@ export async function addPlacements(
     p.updatedAt = at;
   });
   return refused ? null : updated;
+}
+
+export type AutoPlacementInput = { x: number; y: number; partId: string; qty?: number; curtain?: GridCurtain; auto: AutoTag };
+
+/**
+ * Auto fill / per-scope re-fill (#GEM, spec §5), atomically in ONE patch:
+ * every placement of `optionId` still carrying an `auto` tag in one of
+ * `scopes` is removed (its riser links go with it, as removePlacement does),
+ * then `items` (only those whose auto.scope is in `scopes`) are added.
+ * Hand-touched devices (auto cleared) and other options are never touched.
+ * null = the project or the option is gone.
+ */
+export async function replaceAutoPlacements(
+  projectId: string,
+  input: { optionId: string; scopes: SysKey[]; sheetId: string; page: number; items: AutoPlacementInput[]; by: string }
+): Promise<{ removed: number; added: number } | null> {
+  const at = Date.now();
+  const scopes = new Set(input.scopes);
+  let refused = false;
+  let removed = 0;
+  let added = 0;
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (!hasOption(p, input.optionId)) {
+      refused = true;
+      return;
+    }
+    const gone = new Set<string>();
+    const kept = (p.placements || []).filter((pl) => {
+      const drop = pl.optionId === input.optionId && !!pl.auto && scopes.has(pl.auto.scope);
+      if (drop) gone.add(pl.id);
+      return !drop;
+    });
+    const fresh: GridPlacement[] = input.items
+      .filter((it) => scopes.has(it.auto.scope))
+      .map((it) => ({
+        id: rid("gp-"),
+        sheetId: input.sheetId,
+        page: input.page,
+        x: clamp01(it.x),
+        y: clamp01(it.y),
+        partId: it.partId,
+        optionId: input.optionId,
+        ...(it.qty && it.qty > 1 ? { qty: Math.round(it.qty) } : {}),
+        ...(it.curtain ? { curtain: it.curtain } : {}),
+        auto: it.auto,
+        by: input.by,
+        at,
+      }));
+    p.placements = [...kept, ...fresh];
+    if (gone.size && p.riser) p.riser = pruneRisers(p.riser, { placementIds: gone });
+    removed = gone.size;
+    added = fresh.length;
+    p.updatedAt = at;
+  });
+  return refused || !updated ? null : { removed, added };
+}
+
+/** Persist (or clear, with null) the Auto intake's choices (#GEM). */
+export async function setAutoEstimate(projectId: string, est: AutoEstimate | null): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    if (est) p.autoEstimate = est;
+    else delete p.autoEstimate;
+    p.updatedAt = Date.now();
+  });
+}
+
+/** A hand-touched placement stops being "auto" (#GEM): later re-fills keep it. */
+function withoutAuto(pl: GridPlacement): GridPlacement {
+  if (!pl.auto) return pl;
+  const next = { ...pl };
+  delete next.auto;
+  return next;
 }
 
 /**
@@ -642,7 +734,7 @@ export async function setPlacementCategory(
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.placements = (p.placements || []).map((pl) => {
       if (pl.id !== placementId) return pl;
-      const next = { ...pl };
+      const next = withoutAuto({ ...pl });
       if (label) next.category = label;
       else delete next.category;
       return next;
@@ -666,6 +758,7 @@ export async function setPlacementCategory(
  *
  * Deliberately does NOT cut a revision: revisions are manual/quote/restore
  * (addRevision below), and a drag is a gesture, not a design decision.
+ * A move clears the #GEM auto tag, so a re-fill keeps the device.
  */
 export async function movePlacement(
   projectId: string,
@@ -684,7 +777,7 @@ export async function movePlacement(
 
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.placements = (p.placements || []).map((pl) =>
-      pl.id === placementId ? { ...pl, x, y } : pl
+      pl.id === placementId ? withoutAuto({ ...pl, x, y }) : pl
     );
     // Guarded so a pre-D110 doc with no `routes` key doesn't grow an empty one.
     if (p.routes?.length) p.routes = p.routes.map((r) => {

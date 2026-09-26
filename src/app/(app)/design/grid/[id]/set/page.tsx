@@ -9,6 +9,7 @@ import { findCalibration } from "@/lib/annotations";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { loadVirtualParts } from "@/lib/stores/equipment-map";
 import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
 import { markerColor } from "@/lib/design/grid-symbols";
 import { DRAWING_SYSTEMS } from "@/lib/design/grid-scopes";
@@ -114,7 +115,10 @@ export default async function DrawingSetPage({
   const [sheets, catalog, gridSymbols, settings] = await Promise.all([listSheets(project.id), listCatalog(), listGridSymbols(), getSettings()]);
   const accent = settings.accent || "#b08d4a";
   const symCtx = symbolContext(settings);
-  const parts = gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true });
+  const parts = [
+    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true }),
+    ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
+  ];
   const partById = new Map(parts.map((p) => [p.id, p]));
   const set = project.drawingSet || {};
   const size = resolveSheetSize(requestedSize, set.size);

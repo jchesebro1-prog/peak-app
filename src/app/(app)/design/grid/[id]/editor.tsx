@@ -23,6 +23,7 @@ import {
   curtainSpecOf,
   GRID_CURTAIN_TYPES,
   isPerLengthUnit,
+  placementQty,
   routeLengthFt,
   routeLines,
   type GridCurtain,
@@ -427,6 +428,7 @@ export default function GridEditor({
   const filteredParts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return parts
+      .filter((p) => !p.virtual)
       .filter((p) => {
         if (!scopeFilter) return true; // All - identical to pre-Task-6 behavior.
         // Fabric/Labor rows aren't placeable devices. "All" already showed
@@ -1624,7 +1626,9 @@ export default function GridEditor({
                   ? selectedPlacement.curtain.name
                   : isSeedPlaceholder(selectedPlacement.partId)
                     ? selectedPlacement.category || "Unassigned device"
-                    : selectedPlacement.partId}
+                    : partById.get(selectedPlacement.partId)?.virtual
+                      ? partById.get(selectedPlacement.partId)!.desc
+                      : selectedPlacement.partId}
               </div>
               <div style={{ fontSize: 11.5, color: "#5b616e", marginTop: 2 }}>
                 {selectedPlacement.curtain
@@ -1773,8 +1777,13 @@ export default function GridEditor({
                       style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                       title={`${l.partId} — ${l.desc}`}
                     >
-                      {l.partId}
+                      {partById.get(l.partId)?.virtual ? l.desc : l.partId}
                     </span>
+                    {partById.get(l.partId)?.allowance && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                        Allowance
+                      </span>
+                    )}
                     {partById.get(l.partId)?.hasDatasheet && (
                       <a
                         href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
@@ -2201,9 +2210,12 @@ export default function GridEditor({
                   // human system-function label grid-seed.ts stamped it
                   // with — reads far better on the plan than the raw
                   // placeholder partId.
-                  const label = pl.curtain
-                    ? pl.curtain.name
-                    : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category : undefined) || pl.partId;
+                  const q = placementQty(pl);
+                  const label =
+                    (pl.curtain
+                      ? pl.curtain.name
+                      : part?.desc || part?.sku || (isSeedPlaceholder(pl.partId) ? pl.category : undefined) || pl.partId) +
+                    (q > 1 ? ` ×${q}` : "");
                   return (
                     <g key={pl.id}>
                       {pl.curtain ? (

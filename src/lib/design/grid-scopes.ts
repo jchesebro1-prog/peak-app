@@ -48,6 +48,15 @@ export type GridLayer = GridScope | typeof UNSCOPED;
 /** Display order for every scope filter, layer list, and rollup. */
 export const GRID_LAYERS: GridLayer[] = [...GRID_SCOPES, UNSCOPED];
 
+/** The five trackable systems → their Grid scope (#GEM; the Scope panel's SYS_TO_GRID_SCOPE). */
+export const GRID_SCOPE_OF_SYS: Partial<Record<SysKey, GridScope>> = {
+  rigging: "Rigging",
+  curtains: "Curtains",
+  lighting: "Lighting",
+  audio: "Audio",
+  video: "Video",
+};
+
 /** Type guard for the six valid layer values — a server action taking a
  *  free-text `scope` from a client validates against this before storing it
  *  (final fix wave: an unvalidated scope like "constructor" reaching

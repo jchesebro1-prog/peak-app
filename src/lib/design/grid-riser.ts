@@ -1,6 +1,6 @@
 import type { Calibration } from "@/lib/annotations";
 import { spaceOf, type SpaceLite } from "./grid-geometry";
-import { routeLengthFt, type PartLite, type RouteLite } from "./grid-bom";
+import { placementQty, routeLengthFt, type PartLite, type RouteLite } from "./grid-bom";
 
 /* ------------------------------------------------------------------ *
  * The Grid — riser sketch derivation (D112). Pure and dependency-free
@@ -60,6 +60,7 @@ export function riserGraph(
     /** Curtain drop-ins (punch #49) are goods, not signal devices - they have
      *  no ports and terminate no wire, so they are left off the one-line. */
     curtain?: unknown;
+    qty?: number;
   }>,
   routes: RouteLite[],
   spaces: Array<SpaceLite & { name: string; color?: string }>,
@@ -81,13 +82,13 @@ export function riserGraph(
     const node = nodeById.get(home ? home.id : null)!;
     const part = partById.get(pl.partId);
     const g = node.groups.find((x) => x.partId === pl.partId);
-    if (g) g.qty += 1;
+    if (g) g.qty += placementQty(pl);
     else {
       // No linked part (a seeded-but-unassigned placement, #38): fall back
       // to the placement's own category, the same as the plan does
       // (editor.tsx symbolLook({ category: pl.category }, …)).
       const category = part?.category || pl.category || "";
-      node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: 1, category, shape: part?.shape ?? null });
+      node.groups.push({ partId: pl.partId, desc: part?.desc || pl.partId, qty: placementQty(pl), category, shape: part?.shape ?? null });
     }
   }
 
