@@ -6,7 +6,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { acceptFor } from "@/lib/part-docs/files";
 import { coveredLabel } from "@/lib/part-docs/coverage";
 import type { SlotView } from "@/lib/part-docs/views";
-import type { PartDocKind } from "@/lib/part-docs/types";
+import type { DocSlotKind } from "@/lib/part-docs/types";
 import { detachDocumentAction, fetchLinksAction, setNotNeededAction } from "./actions";
 import { uploadNewDocument, uploadReplacement } from "./upload-client";
 
@@ -31,7 +31,7 @@ export default function SlotCell({
   onUploaded,
 }: {
   sku: string;
-  kind: PartDocKind;
+  kind: DocSlotKind;
   view: SlotView;
   /** Called after a NEW document lands (the "Also covers…" step). */
   onUploaded?: (sku: string, documentId: string, fileName: string) => void;

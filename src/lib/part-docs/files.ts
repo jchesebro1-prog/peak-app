@@ -6,23 +6,30 @@ import type { PartDocKind } from "./types";
  * the real bytes; the extension and the browser's MIME are never trusted.
  */
 
-export type SniffedType = "pdf" | "doc" | "docx";
+export type SniffedType = "pdf" | "doc" | "docx" | "png" | "jpeg" | "webp";
 
 export const CONTENT_TYPES: Record<SniffedType, string> = {
   pdf: "application/pdf",
   doc: "application/msword",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  png: "image/png",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
 };
 
-/** What each slot accepts: a datasheet is a PDF; a spec sheet is PDF or Word (§2.2). */
+/** What each slot accepts: a datasheet is a PDF; a spec sheet is PDF or Word
+ *  (§2.2); an image is PNG, JPEG, or WebP (#242) — never SVG. */
 export const ALLOWED_TYPES: Record<PartDocKind, readonly SniffedType[]> = {
   datasheet: ["pdf"],
   specsheet: ["pdf", "doc", "docx"],
+  image: ["png", "jpeg", "webp"],
 };
 
 /** The `accept` attribute for a slot's file input. */
 export function acceptFor(kind: PartDocKind): string {
-  return kind === "datasheet" ? ".pdf,application/pdf" : ".pdf,.doc,.docx,application/pdf,application/msword," + CONTENT_TYPES.docx;
+  if (kind === "datasheet") return ".pdf,application/pdf";
+  if (kind === "image") return ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp";
+  return ".pdf,.doc,.docx,application/pdf,application/msword," + CONTENT_TYPES.docx;
 }
 
 /** Every content type the upload token may be issued for (the bytes are checked after). */
@@ -72,8 +79,28 @@ export function sniffDocumentType(bytes: Uint8Array): SniffedType | null {
 /** How many leading bytes sniffing needs. */
 export const SNIFF_BYTES = 64 * 1024;
 
+/**
+ * What the bytes really are, for the three image kinds part documents
+ * accept (#242): PNG (the 8-byte PNG signature), JPEG (the JFIF/EXIF SOI
+ * marker `FF D8 FF`), or WebP (a RIFF container whose form type is `WEBP`
+ * at offset 8). An SVG (text, not one of these signatures) or any other
+ * file never sniffs as an image here — SVG is never an accepted image type.
+ */
+export function sniffImageType(b: Uint8Array): "image/png" | "image/jpeg" | "image/webp" | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
+  return null;
+}
+
 /** Refusal text for bytes a slot does not accept, or null when they fit. */
 export function checkDocumentBytes(kind: PartDocKind, bytes: Uint8Array): { ok: true; type: SniffedType; contentType: string } | { ok: false; error: string } {
+  if (kind === "image") {
+    const imageType = sniffImageType(bytes);
+    if (!imageType) return { ok: false, error: "That file is not a PNG, JPEG, or WebP image." };
+    const type: SniffedType = imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp";
+    return { ok: true, type, contentType: imageType };
+  }
   const type = sniffDocumentType(bytes);
   if (!type) return { ok: false, error: kind === "datasheet" ? "That file is not a PDF." : "That file is not a PDF or Word document." };
   if (!ALLOWED_TYPES[kind].includes(type)) return { ok: false, error: "Datasheets must be PDF files." };

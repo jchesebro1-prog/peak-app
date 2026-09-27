@@ -69,10 +69,12 @@ export function matchFileName(fileName: string, index: FilenameIndex): FilenameM
   return { keys: [], skus: [], confidence: "none" };
 }
 
-/** Spec sheet when the name says spec/guide/specification or the file is
- *  Word; otherwise Datasheet (spec §3). */
+/** Image when the extension is PNG/JPEG/WebP (#242); else spec sheet when
+ *  the name says spec/guide/specification or the file is Word; otherwise
+ *  Datasheet (spec §3). */
 export function guessKind(fileName: string): PartDocKind {
   const name = String(fileName ?? "").toLowerCase();
+  if (/\.(png|jpe?g|webp)$/i.test(name)) return "image";
   if (/\.docx?$/.test(name)) return "specsheet";
   const base = name.replace(/\.[a-z0-9]{1,5}$/, "");
   return /spec|guide/.test(base) ? "specsheet" : "datasheet";

@@ -10,7 +10,7 @@ import { linkedDocuments, ownFiles } from "./coverage";
 import { fetchDocumentBytes } from "./fetch";
 import { checkDocumentBytes, fileNameForFetched } from "./files";
 import type { PartDocsState } from "./load";
-import { MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath, type PartDocKind, type PartDocument } from "./types";
+import { MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath, type DocSlotKind, type PartDocKind, type PartDocument } from "./types";
 
 /**
  * "Fetch from links" (#207, spec §3/§6). Server-only. For one part and one
@@ -27,7 +27,7 @@ import { MAX_FETCH_TIMEOUT_MS, newDocumentId, partDocBlobPath, type PartDocKind,
  * catalog URL that had none) so the page can list it with its reason.
  */
 
-export type FetchTarget = { sku: string; kind: PartDocKind };
+export type FetchTarget = { sku: string; kind: DocSlotKind };
 export type FetchOutcome = FetchTarget & { ok: boolean; documentId?: string; error?: string; alsoLinked?: number };
 
 export type FetchLinksDeps = {

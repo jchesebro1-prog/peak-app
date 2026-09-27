@@ -10527,6 +10527,7 @@ seeded()
   .then(() => estimate223SweepDAsyncChecks())
   .then(() => daylite241AsyncChecks())
   .then(() => portal242RulesAsyncChecks())
+  .then(() => portal242ImageLinksAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27423,4 +27424,69 @@ import { sectionFreightDefault as d242SecFr, applyAutoFreight as d242ApplyFr } f
   ];
   const out = d242ApplyFr(secs as never, { pct: 4 });
   ok(out[0].freightPct === 4 && out[1].freightPct === 7 && out[2].freightPct === 5, "#242 estimator: venue change re-applies only to untouched (auto) sections; saved quotes without the flag never change");
+}
+
+/* ======================================================================
+   Portal catalog — images as a third part-document kind (#242, Task 3;
+   spec 2026-09-27-portal-catalog-design.md). Pure checks below; the DB
+   check that image links round-trip through visibleImagesForParts is
+   registered in the async chain as portal242ImageLinksAsyncChecks().
+   ====================================================================== */
+import { sniffImageType as d242Sniff } from "@/lib/part-docs/files";
+import { isPartDocKind as d242IsKind, maxBytesFor as d242Max, PART_DOC_KINDS as d242Kinds } from "@/lib/part-docs/types";
+{
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+  const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+  const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
+  const svg = new TextEncoder().encode("<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+  const pdf = new TextEncoder().encode("%PDF-1.7");
+  ok(d242Sniff(png) === "image/png" && d242Sniff(jpg) === "image/jpeg" && d242Sniff(webp) === "image/webp", "#242 images: PNG/JPEG/WebP magic bytes recognised");
+  ok(d242Sniff(svg) === null && d242Sniff(pdf) === null, "#242 images: SVG and PDF are never images");
+  ok(d242IsKind("image") && !d242IsKind("photo"), "#242 images: image is a part-document kind");
+  ok(d242Max("image") === 10 * 1024 * 1024 && d242Max("datasheet") === 25 * 1024 * 1024, "#242 images: 10 MB image cap, datasheets keep 25 MB");
+  ok(!(d242Kinds as readonly string[]).includes("image"), "#242 images: coverage slots stay datasheet + spec sheet");
+}
+
+import {
+  attachDocument as d242Attach,
+  createDocument as d242CreateDoc,
+  documentLinkId as d242LinkId,
+  setDocumentLinkDisplay as d242SetDisplay,
+  visibleImagesForParts as d242VisibleImages,
+} from "@/lib/stores/part-documents";
+async function portal242ImageLinksAsyncChecks(): Promise<void> {
+  const sku = fixtureId(242, "sku-img");
+
+  const upload = await d242CreateDoc({
+    kind: "image", fileName: "upload.jpg", contentType: "image/jpeg", size: 1000,
+    blobKey: "part-docs/PD-fixture-up/upload.jpg", sourceUrl: null, source: "upload", by: "Test",
+  });
+  const render = await d242CreateDoc({
+    kind: "image", fileName: "render.png", contentType: "image/png", size: 1000,
+    blobKey: "part-docs/PD-fixture-rn/render.png", sourceUrl: null, source: "datasheet-render", by: "Test",
+  });
+  const datasheet = await d242CreateDoc({
+    kind: "datasheet", fileName: "ds.pdf", contentType: "application/pdf", size: 1000,
+    blobKey: "part-docs/PD-fixture-ds/ds.pdf", sourceUrl: null, source: "upload", by: "Test",
+  });
+  if (!upload || !render || !datasheet) throw new Error("#242 images: fixture documents failed to create");
+  registerFixture("part_documents", upload.id);
+  registerFixture("part_documents", render.id);
+  registerFixture("part_documents", datasheet.id);
+
+  await d242Attach(upload.id, [sku], "Test");
+  await d242Attach(render.id, [sku], "Test");
+  await d242Attach(datasheet.id, [sku], "Test");
+  registerFixture("part_document_links", d242LinkId(sku, upload.id));
+  registerFixture("part_document_links", d242LinkId(sku, render.id));
+  registerFixture("part_document_links", d242LinkId(sku, datasheet.id));
+
+  ok(await d242SetDisplay(render.id, sku, { hidden: true }), "#242 images: setDocumentLinkDisplay hides the render link");
+  const hidden = await d242VisibleImages([sku]);
+  ok((hidden.get(sku) ?? []).map((d) => d.id).join(",") === upload.id, "#242 images: a hidden image never appears in visibleImagesForParts");
+
+  ok(await d242SetDisplay(render.id, sku, { hidden: false }), "#242 images: setDocumentLinkDisplay unhides the render link");
+  const shown = await d242VisibleImages([sku]);
+  ok((shown.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: unhidden — upload before datasheet-render, by source rank");
+  ok(!(shown.get(sku) ?? []).some((d) => d.id === datasheet.id), "#242 images: a datasheet never appears in the image map");
 }

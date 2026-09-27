@@ -6,7 +6,7 @@ import {
   type SlotCoverage,
 } from "./coverage";
 import type { QuotedPartStat } from "./quoted-parts";
-import type { PartDocKind } from "./types";
+import type { DocSlotKind, PartDocKind } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
@@ -56,7 +56,7 @@ export function toSlotView(s: SlotCoverage, index: CoverageIndex, descOf: (sku: 
   }
 }
 
-export function slotViewFor(index: CoverageIndex, sku: string, kind: PartDocKind, descOf: (sku: string) => string): SlotView {
+export function slotViewFor(index: CoverageIndex, sku: string, kind: DocSlotKind, descOf: (sku: string) => string): SlotView {
   return toSlotView(slotCoverage(index, sku, kind), index, descOf);
 }
 
@@ -130,7 +130,7 @@ export function documentRowMatches(r: DocumentRow, f: DocumentsFilter): boolean 
 }
 
 /** "412 of 1,180 quoted parts have a datasheet" (spec §3). */
-export function progressLine(rows: readonly DocumentRow[], kind: PartDocKind): string {
+export function progressLine(rows: readonly DocumentRow[], kind: DocSlotKind): string {
   const done = rows.filter((r) => viewSatisfied(r[kind])).length;
   const noun = kind === "datasheet" ? "a datasheet" : "a spec sheet";
   return `${done.toLocaleString("en-US")} of ${rows.length.toLocaleString("en-US")} quoted parts have ${noun}`;
@@ -152,7 +152,7 @@ export type PartDocRow = {
 /** The part editor's Documents section (#207, spec §3). */
 export type PartDocsView = {
   sku: string;
-  slots: Record<PartDocKind, SlotView>;
+  slots: Record<DocSlotKind, SlotView>;
   /** Every document linked to this part, either kind, newest first. */
   documents: PartDocRow[];
   /** Fixtures whose documents cover this part, and for which kinds. */

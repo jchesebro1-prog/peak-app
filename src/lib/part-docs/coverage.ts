@@ -1,4 +1,4 @@
-import type { DocNotNeeded, PartAccessoryLink, PartDocKind, PartDocument, PartDocumentLink } from "./types";
+import type { DocNotNeeded, DocSlotKind, PartAccessoryLink, PartDocument, PartDocumentLink } from "./types";
 
 /**
  * The coverage rule (#207, spec §4) — pure, so the to-do page, the part
@@ -59,7 +59,7 @@ export const COVERED_COLLAPSE = 5;
 const empty = <T,>(): ByKind<T> => ({ datasheet: [], specsheet: [] });
 
 /** Which slot a catalog-held URL feeds. Manuals and "other" feed neither. */
-export function urlKindOf(kind: string): PartDocKind | null {
+export function urlKindOf(kind: string): DocSlotKind | null {
   if (kind === "datasheet" || kind === "cut-sheet") return "datasheet";
   if (kind === "guide-spec") return "specsheet";
   return null;
@@ -83,6 +83,7 @@ export function buildCoverageIndex(input: {
   for (const l of input.links) {
     const doc = docsById.get(l.documentId);
     if (!doc) continue; // a link to a removed document covers nothing
+    if (doc.kind === "image") continue; // images never cover or satisfy a slot (#242)
     const key = `${l.partSku}\u0000${doc.id}`;
     if (seenLink.has(key)) continue;
     seenLink.add(key);
@@ -118,7 +119,7 @@ export function buildCoverageIndex(input: {
     const linked = docsBySku.get(part.sku);
     for (const d of [...(linked?.datasheet ?? []), ...(linked?.specsheet ?? [])]) if (d.sourceUrl) known.add(d.sourceUrl);
     let urls: ByKind<string> | null = null;
-    const add = (kind: PartDocKind | null, url: string | undefined) => {
+    const add = (kind: DocSlotKind | null, url: string | undefined) => {
       const u = (url || "").trim();
       if (!kind || !/^https?:\/\//i.test(u) || known.has(u)) return;
       known.add(u);
@@ -134,17 +135,17 @@ export function buildCoverageIndex(input: {
 }
 
 /** Every live document of kind K linked to this part, file or not. */
-export function linkedDocuments(index: CoverageIndex, sku: string, kind: PartDocKind): PartDocument[] {
+export function linkedDocuments(index: CoverageIndex, sku: string, kind: DocSlotKind): PartDocument[] {
   return index.docsBySku.get(sku)?.[kind] ?? [];
 }
 
 /** The part's own documents of kind K that hold a stored file. */
-export function ownFiles(index: CoverageIndex, sku: string, kind: PartDocKind): PartDocument[] {
+export function ownFiles(index: CoverageIndex, sku: string, kind: DocSlotKind): PartDocument[] {
   return linkedDocuments(index, sku, kind).filter((d) => !!d.blobKey);
 }
 
 /** The SKUs whose documents cover `sku` for kind K — before any context filter. */
-export function coveringParents(index: CoverageIndex, sku: string, kind: PartDocKind): string[] {
+export function coveringParents(index: CoverageIndex, sku: string, kind: DocSlotKind): string[] {
   const out: string[] = [];
   for (const p of index.parentsOf.get(sku) ?? []) {
     if (p.ownDatasheet) continue;
@@ -156,7 +157,7 @@ export function coveringParents(index: CoverageIndex, sku: string, kind: PartDoc
 export function slotCoverage(
   index: CoverageIndex,
   sku: string,
-  kind: PartDocKind,
+  kind: DocSlotKind,
   context?: ReadonlySet<string> | null
 ): SlotCoverage {
   const own = ownFiles(index, sku, kind);
@@ -198,7 +199,7 @@ export function collapseList<T>(items: readonly T[], max = COVERED_COLLAPSE): { 
 }
 
 /** "Covered on 1 fixture datasheet" / "Covered on 3 fixture spec sheets". */
-export function coveredLabel(n: number, kind: PartDocKind): string {
+export function coveredLabel(n: number, kind: DocSlotKind): string {
   const noun = kind === "datasheet" ? "datasheet" : "spec sheet";
   return `Covered on ${n} fixture ${noun}${n === 1 ? "" : "s"}`;
 }

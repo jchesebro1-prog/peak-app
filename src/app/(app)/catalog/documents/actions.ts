@@ -174,7 +174,9 @@ export async function attachExistingDocumentAction(documentId: string, skus: str
 /** Mark (or unmark) parts as needing no document of one kind. */
 export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: boolean): Promise<DocActionResult<{ changed: number }>> {
   await requireUser();
-  if (!isPartDocKind(kind)) return { ok: false, error: "Pick Datasheet or Spec sheet." };
+  // Not-needed is a coverage-slot concept only (#242) — narrows kind to
+  // DocSlotKind for setDocNotNeeded below; an image is never "not needed".
+  if (kind !== "datasheet" && kind !== "specsheet") return { ok: false, error: "Pick Datasheet or Spec sheet." };
   const changed = await setDocNotNeeded((skus || []).slice(0, MAX_SKUS_PER_CALL), kind, !!on);
   revalidate();
   return { ok: true, changed };

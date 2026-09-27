@@ -1,5 +1,5 @@
 import { get as getPart, mergeUpsert } from "@/lib/stores/catalog";
-import type { DocNotNeeded, PartDocKind } from "./types";
+import type { DocNotNeeded, DocSlotKind } from "./types";
 
 /**
  * Set or clear a part's "not needed" mark for one kind (#207, spec §4 step 2).
@@ -8,7 +8,7 @@ import type { DocNotNeeded, PartDocKind } from "./types";
  * catalog, because mergeUpsert would otherwise create a malformed part.
  * Returns how many parts changed.
  */
-export async function setDocNotNeeded(skus: readonly string[], kind: PartDocKind, on: boolean): Promise<number> {
+export async function setDocNotNeeded(skus: readonly string[], kind: DocSlotKind, on: boolean): Promise<number> {
   let changed = 0;
   for (const sku of new Set(skus)) {
     const part = await getPart(sku);

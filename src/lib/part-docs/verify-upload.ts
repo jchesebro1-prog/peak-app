@@ -1,7 +1,7 @@
 import { deleteBlob, getBlobHead } from "@/lib/blob";
 import type { StoredFile } from "@/lib/stores/part-documents";
-import { checkDocumentBytes, CONTENT_TYPES, SNIFF_BYTES } from "./files";
-import { blobPathBelongsTo, MAX_PART_DOC_BYTES, type PartDocKind } from "./types";
+import { checkDocumentBytes, CONTENT_TYPES, SNIFF_BYTES, type SniffedType } from "./files";
+import { blobPathBelongsTo, maxBytesFor, type PartDocKind } from "./types";
 
 /**
  * Accept a browser-uploaded blob as a part document's file (#207, spec §6).
@@ -20,9 +20,9 @@ export type VerifyDeps = {
 const liveDeps: VerifyDeps = { head: getBlobHead, remove: deleteBlob };
 
 /** Keep the user's name for display, capped, with an extension that matches the bytes. */
-export function displayFileName(raw: string, type: "pdf" | "doc" | "docx"): string {
+export function displayFileName(raw: string, type: SniffedType): string {
   const name = String(raw ?? "").split(/[\\/]/).pop()!.trim().slice(0, 180) || "document";
-  return new RegExp(`\\.${type}$`, "i").test(name) ? name : `${name.replace(/\.(pdf|docx?)$/i, "")}.${type}`;
+  return new RegExp(`\\.${type}$`, "i").test(name) ? name : `${name.replace(/\.(pdf|docx?|png|jpe?g|webp)$/i, "")}.${type}`;
 }
 
 export async function verifyUploadedBlob(
@@ -50,7 +50,8 @@ export async function verifyUploadedBlob(
     }
     return { ok: false as const, error };
   };
-  if (head.size > MAX_PART_DOC_BYTES) return refuse("That file is over 25 MB.");
+  const cap = maxBytesFor(input.kind);
+  if (head.size > cap) return refuse(`That file is over ${Math.round(cap / (1024 * 1024))} MB.`);
   const check = checkDocumentBytes(input.kind, head.bytes);
   if (!check.ok) return refuse(check.error);
   return {

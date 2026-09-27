@@ -259,3 +259,60 @@ export async function detachDocument(documentId: string, partSku: string): Promi
   await softDeleteDoc("part_document_links", id);
   return true;
 }
+
+/** Gallery display for one image link (#242) — `sort`/`hidden` on the
+ *  part↔document link row, never on the shared document. True when a live
+ *  link was patched. */
+export async function setDocumentLinkDisplay(documentId: string, partSku: string, patch: { sort?: number; hidden?: boolean }): Promise<boolean> {
+  const id = documentLinkId(partSku, documentId);
+  const updated = await patchDoc<PartDocumentLink>("part_document_links", id, (d) => ({
+    ...d,
+    ...("sort" in patch ? { sort: patch.sort } : {}),
+    ...("hidden" in patch ? { hidden: patch.hidden } : {}),
+  }));
+  return !!updated;
+}
+
+/** Source rank for gallery ordering (#242) — lower sorts first. */
+const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
+  upload: 0,
+  fetch: 1,
+  davinci: 2,
+  "datasheet-render": 3,
+  legacy: 4,
+};
+
+/**
+ * Each part's non-hidden, live image links (#242), ordered by source rank
+ * (upload, fetch, davinci, datasheet-render, legacy), then by `sort`
+ * (missing sorts last), then by upload time. A datasheet or spec-sheet
+ * document never appears here — only `kind === "image"` links qualify.
+ */
+export async function visibleImagesForParts(skus: readonly string[]): Promise<Map<string, PartDocument[]>> {
+  const links = (await documentLinksForParts(skus)).filter((l) => l.kind === "image" && !l.hidden);
+  const docs = new Map((await getDocuments(links.map((l) => l.documentId))).map((d) => [d.id, d]));
+  const bySku = new Map<string, Array<{ doc: PartDocument; link: PartDocumentLink }>>();
+  for (const l of links) {
+    const doc = docs.get(l.documentId);
+    if (!doc || doc.kind !== "image") continue;
+    const list = bySku.get(l.partSku);
+    if (list) {
+      if (!list.some((x) => x.doc.id === doc.id)) list.push({ doc, link: l });
+    } else {
+      bySku.set(l.partSku, [{ doc, link: l }]);
+    }
+  }
+  const out = new Map<string, PartDocument[]>();
+  for (const [sku, entries] of bySku) {
+    entries.sort((a, b) => {
+      const rank = IMAGE_SOURCE_RANK[a.doc.source] - IMAGE_SOURCE_RANK[b.doc.source];
+      if (rank) return rank;
+      const sortA = a.link.sort ?? Infinity;
+      const sortB = b.link.sort ?? Infinity;
+      if (sortA !== sortB) return sortA - sortB;
+      return a.doc.uploadedAt - b.doc.uploadedAt;
+    });
+    out.set(sku, entries.map((e) => e.doc));
+  }
+  return out;
+}

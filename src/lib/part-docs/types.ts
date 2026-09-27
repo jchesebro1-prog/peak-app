@@ -9,15 +9,35 @@
  * accessory. Spec: docs/superpowers/specs/2026-09-25-part-documents-design.md §5.
  */
 
-export type PartDocKind = "datasheet" | "specsheet";
-export const PART_DOC_KINDS: readonly PartDocKind[] = ["datasheet", "specsheet"];
-export const PART_DOC_KIND_LABEL: Record<PartDocKind, string> = { datasheet: "Datasheet", specsheet: "Spec sheet" };
+export type PartDocKind = "datasheet" | "specsheet" | "image";
+
+/** The two coverage slots — a datasheet/spec-sheet document can satisfy a
+ *  part's requirement; an image never can (#242). Existing screens iterate
+ *  this (not ALL_PART_DOC_KINDS) so they keep showing exactly these two
+ *  columns without change. */
+export const DOC_SLOT_KINDS = ["datasheet", "specsheet"] as const;
+
+/** The narrow two-value type every coverage-slot function is keyed by —
+ *  distinct from the wider `PartDocKind` so a `Record`/switch keyed by it
+ *  stays exhaustive with only "datasheet" and "specsheet" (#242). */
+export type DocSlotKind = (typeof DOC_SLOT_KINDS)[number];
+
+/** Every part-document kind, coverage slots plus the gallery-only `image`
+ *  kind (#242). */
+export const ALL_PART_DOC_KINDS = ["datasheet", "specsheet", "image"] as const;
+
+/** Alias of DOC_SLOT_KINDS — kept so every pre-#242 call site keeps today's
+ *  two slots unchanged. Typed to the narrow DocSlotKind (not the wider
+ *  PartDocKind) so iterating it never introduces "image" into a two-key
+ *  Record or a DocumentRow index. */
+export const PART_DOC_KINDS: readonly DocSlotKind[] = DOC_SLOT_KINDS;
+export const PART_DOC_KIND_LABEL: Record<PartDocKind, string> = { datasheet: "Datasheet", specsheet: "Spec sheet", image: "Image" };
 
 export function isPartDocKind(v: unknown): v is PartDocKind {
-  return v === "datasheet" || v === "specsheet";
+  return v === "datasheet" || v === "specsheet" || v === "image";
 }
 
-export type PartDocumentSource = "upload" | "fetch" | "davinci" | "legacy";
+export type PartDocumentSource = "upload" | "fetch" | "davinci" | "legacy" | "datasheet-render";
 
 /** A file this document used to hold. Replacing never deletes the blob (§2.4). */
 export type PartDocumentHistoryEntry = {
@@ -58,6 +78,10 @@ export type PartDocumentLink = {
   kind: PartDocKind;
   createdAt: number;
   createdBy: string;
+  /** Gallery order for an image link (#242) — missing sorts last. */
+  sort?: number;
+  /** Hide an image from the gallery without detaching it (#242). */
+  hidden?: boolean;
 };
 
 export type AccessoryLinkSource = "assembly" | "davinci" | "manual";
@@ -89,6 +113,14 @@ export type DocNotNeeded = { datasheet?: true; specsheet?: true };
 
 /** Upload and fetch ceiling (§6). */
 export const MAX_PART_DOC_BYTES = 25 * 1024 * 1024;
+
+/** Image cap (#242) — tighter than the datasheet/spec-sheet ceiling. */
+export const MAX_PART_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/** The byte ceiling for a slot's kind (#242). */
+export function maxBytesFor(kind: PartDocKind): number {
+  return kind === "image" ? MAX_PART_IMAGE_BYTES : MAX_PART_DOC_BYTES;
+}
 
 /** Slots fetched per server-action call — each can take up to the fetcher's
  *  30 s timeout, so the page loops over a selection in batches this size. */
