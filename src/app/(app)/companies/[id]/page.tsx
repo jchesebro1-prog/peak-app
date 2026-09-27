@@ -7,6 +7,7 @@ import { deriveInitials, fallbackColor } from "@/lib/team";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { visitsForCustomer } from "@/lib/stores/site-visits";
 import { CustomerRecordingsCard } from "@/components/recordings/recordings-card";
+import { DocumentsCard } from "@/components/documents/documents-card";
 import { RecordingCountBadge } from "@/components/recordings/record-control-link";
 import { recordingCountByParent } from "../../recordings/data";
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
@@ -551,6 +552,9 @@ export default async function CustomerDetailPage({
             </div>
           )}
         </div>
+
+        {/* documents (#218) — company files; customer uploads show as New */}
+        <DocumentsCard customerId={cust.id} />
 
         {/* projects & orders */}
         <div style={card}>

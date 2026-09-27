@@ -40,6 +40,7 @@ export const CATEGORIES = [
   { key: "leads",       label: "Leads needing follow-up",      desc: "New and open leads overdue for a first response or follow-up." },
   { key: "portal",      label: "Portal acceptances to confirm", desc: "Quotes a customer accepted in the portal — non-binding until you confirm by marking them Won." },
   { key: "tasks",       label: "Tasks assigned to you or overdue", desc: "Open tasks assigned to you, plus any task past its due date." },
+  { key: "documents",   label: "New documents from customers", desc: "Files customers sent through the portal that nobody on the team has opened yet." },
 ] as const;
 
 export type NotifCategoryKey = (typeof CATEGORIES)[number]["key"];

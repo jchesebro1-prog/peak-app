@@ -16,6 +16,7 @@ import { dateYear } from "@/lib/format";
 import { fmtMiles, fmtTime } from "@/lib/geo";
 import { getVenueCalendar } from "@/lib/stores/venue-calendars";
 import VenueCalendarCard from "./calendar-card";
+import { DocumentsCard } from "@/components/documents/documents-card";
 import { ACCENT_INK, ACCENT_SOFT, cityState, mono } from "../../companies/lib";
 
 /**
@@ -347,6 +348,9 @@ export default async function VenuePage({
           </div>
         )}
       </div>
+
+      {/* documents (#218) — this venue's files; uploads default to it */}
+      <DocumentsCard customerId={site.companyId} siteId={locationId} />
 
       {/* contacts */}
       <div style={card}>

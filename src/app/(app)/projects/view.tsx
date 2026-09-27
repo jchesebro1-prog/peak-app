@@ -54,6 +54,7 @@ import {
   setProjectValueAction,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
+import { DocumentsCard } from "@/components/documents/documents-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { SegmentedToggle } from "@/components/ui";
 import { OwnerSelect } from "@/components/owner-select";
@@ -920,6 +921,7 @@ function ProjectDetail({
         ["deliveries", "Deliveries", 0],
         ["timeline", "Timeline", 0],
         ["packet", "Handoff packet", 0],
+        ["documents", "Documents", 0],
         ["signoff", "Sign-off", 0],
       ]
     : [
@@ -929,6 +931,7 @@ function ProjectDetail({
         ["crew", "Crew & schedule", 0],
         ["timeline", "Timeline", 0],
         ["packet", "Handoff packet", 0],
+        ["documents", "Documents", 0],
         ["signoff", "Sign-off", 0],
       ];
   const curTab = tabDefs.some((t) => t[0] === tab) ? tab : "overview";
@@ -1190,6 +1193,9 @@ function ProjectDetail({
         )}
         {curTab === "timeline" && <TimelineTab p={p} isOrder={isOrder} />}
         {curTab === "packet" && <HandoffPacketTab p={p} taskRows={taskRows} />}
+        {curTab === "documents" && (
+          <DocumentsCard customerId={p.customerId} siteId={p.locationId} projectId={p.id} />
+        )}
         {curTab === "signoff" && <SignoffTab p={p} meta={meta} pipeline={pipeline} />}
       </div>
     </>

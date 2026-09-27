@@ -15,6 +15,9 @@ import { allVisits } from "@/lib/stores/site-visits";
 import { getAll as allComms, waitHours, unreadCountFrom } from "@/lib/stores/comms";
 import { getPrefs } from "@/lib/stores/notif-prefs";
 import { allTasks, taskBellItems, isOverdue } from "@/lib/stores/tasks";
+import { unseenCustomerDocuments } from "@/lib/stores/documents";
+import { nameFor as customerNameFor } from "@/lib/stores/customers";
+import { customerUploadBell } from "@/lib/document-rules";
 import { shortDate } from "@/lib/format";
 import type {
   NavCounts,
@@ -49,6 +52,7 @@ export async function navData(me: string): Promise<{
     renewalRows,
     taskRows,
     prefs,
+    unseenDocs,
   ] = await Promise.all([
     allQuotes(),
     // Fix wave 3 (I3): the badge needs review / owner only — a plain record
@@ -65,6 +69,8 @@ export async function navData(me: string): Promise<{
     renewals({ dueOnly: true }),
     allTasks(),
     getPrefs(me),
+    // #218 — one SQL-filtered read (source = customer), usually empty.
+    unseenCustomerDocuments(),
   ]);
   // Everything below is derived from the arrays already fetched above — no
   // extra table scans. Previously these re-fetched inspections+repairs
@@ -274,6 +280,19 @@ export async function navData(me: string): Promise<{
     href: t.projectId ? `/projects/${t.projectId}` : "/field-work",
     letter: "T",
     color: "#b45309",
+  })));
+
+  // #218 — one item per company with customer uploads nobody has opened;
+  // downloading one (or "Mark seen" on the card) clears it.
+  const docBell = customerUploadBell(unseenDocs);
+  const docNames = await Promise.all(docBell.map((b) => customerNameFor(b.customerId)));
+  push("documents", "New documents from customers", docBell.map((b, i) => ({
+    id: "docs-" + b.customerId,
+    title: docNames[i] || b.customerId,
+    sub: b.count === 1 ? "1 new document" : `${b.count} new documents`,
+    href: `/companies/${encodeURIComponent(b.customerId)}#documents`,
+    letter: "D",
+    color: "#3155a8",
   })));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);

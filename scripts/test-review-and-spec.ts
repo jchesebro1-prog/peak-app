@@ -24517,3 +24517,26 @@ async function documentsUploadAsyncChecks(): Promise<void> {
   const liveRace = (await d218ForCustomer(CO)).filter((d) => d.blobPath === raceIn.blobPath);
   ok(race.filter((r) => r.ok).length === 1 && liveRace.length === 1 && !removed.includes(raceIn.blobPath), "#218 upload: concurrent finalizes of one upload record it exactly once and never delete the blob");
 }
+
+/* ======================================================================
+   Documents (#218) — Task 4: team screens + the to-do bell (structural).
+   ====================================================================== */
+{
+  const src218u = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(src218u("src/app/(app)/companies/[id]/page.tsx").includes("<DocumentsCard customerId={cust.id} />"), "#218 UI: the company page shows the Documents card");
+  ok(src218u("src/app/(app)/venues/[id]/page.tsx").includes("<DocumentsCard customerId={site.companyId} siteId={locationId} />"), "#218 UI: the venue page shows the card scoped to the venue");
+  const view218 = src218u("src/app/(app)/projects/view.tsx");
+  ok((view218.match(/\["documents", "Documents", 0\]/g) || []).length === 2 && view218.includes("<DocumentsCard customerId={p.customerId} siteId={p.locationId} projectId={p.id} />"), "#218 UI: projects and orders gain a Documents tab");
+  for (const f of ["src/components/documents/documents-card-client.tsx", "src/components/documents/upload-client.ts"]) {
+    const s = src218u(f);
+    ok(!/from "@\/lib\/stores\//.test(s) && !/from "@\/db\//.test(s) && !/from "@\/lib\/blob"/.test(s), `#218 UI: ${f} never imports a store, the DB or the Blob SDK's server half`);
+  }
+  ok(src218u("src/components/documents/documents-card-client.tsx").startsWith('"use client"') && src218u("src/components/documents/documents-card-client.tsx").includes('id="documents"'), "#218 UI: the client card is a client component and carries the bell's #documents anchor");
+  ok(CATEGORIES.some((c) => c.key === "documents" && c.label === "New documents from customers"), "#218 bell: New documents from customers is a to-do category");
+  ok(src218u("src/lib/nav-counts.ts").includes('push("documents", "New documents from customers"'), "#218 bell: nav-counts pushes one documents group");
+  // A finalize retried after a lost response comes back "already saved" —
+  // the uploader counts that as done, and its string tracks the server's.
+  const saved218 = /const ALREADY_SAVED = "([^"]+)"/.exec(src218u("src/lib/documents-upload.ts"))?.[1];
+  const client218 = /export const ALREADY_SAVED_ERROR = "([^"]+)"/.exec(src218u("src/components/documents/upload-client.ts"))?.[1];
+  ok(!!saved218 && saved218 === client218 && /if \(r\.ok \|\| isAlreadySaved\(r\)\)/.test(src218u("src/components/documents/documents-card-client.tsx")), "#218 UI: an already-saved finalize (retry after a lost response) is a success, not a failure");
+}
