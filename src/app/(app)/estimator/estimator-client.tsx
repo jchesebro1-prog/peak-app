@@ -79,6 +79,8 @@ import { fixtureBomLine } from "./fixture-bom";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import type { QuotePdfView } from "@/lib/quote-pdf/state";
+import { pdfDocKey, withSavedMeta, type PdfDocKeyInput } from "./pdf-doc-key";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
@@ -348,8 +350,6 @@ const INSTALL_TIMEFRAMES = ["ASAP", "Under 1 month", "1–3 months", "3–6 mont
 export default function EstimatorClient({
   initial,
   pipelines,
-  companyName,
-  logoDark,
   fabrics,
   laborRates,
   fixtureRates,
@@ -480,7 +480,7 @@ export default function EstimatorClient({
   const [category, setCategory] = useState(initial.category);
   const categorySaved = useRef(initial.category);
   const [revNum, setRevNum] = useState(initial.revNum);
-  const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
+  const [, setRevDateMs] = useState(initial.revDateMs);
   const [pdfQty, setPdfQty] = useState(initial.pdfOptions.pdfQty);
   const [pdfNotes, setPdfNotes] = useState(initial.pdfOptions.pdfNotes);
   const [pdfCover, setPdfCover] = useState(initial.pdfOptions.pdfCover);
@@ -692,6 +692,35 @@ export default function EstimatorClient({
     });
   };
 
+  /* #222 — the saved PDF is the customer preview. `docInput` is what the
+     customer document shows; the preview reads "Unsaved changes" while its
+     key differs from `savedDoc`, the document as last written — by a Save,
+     or by a header autosave, which re-renders the PDF from the saved quote
+     with just those fields changed (withSavedMeta). The Show-on-PDF controls
+     are part of the key, so flipping one asks for a Save. */
+  const [pdf, setPdf] = useState<QuotePdfView | null>(initial.pdf);
+  const docCustName = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
+  const docInput = useMemo<PdfDocKeyInput>(
+    () => ({
+      projectName,
+      custName: docCustName,
+      customerId,
+      locationId,
+      contactName,
+      quoteNote,
+      assumptions,
+      paymentTerms,
+      sections,
+      vendorQuotes,
+      pdfOptions: pdfOpts,
+    }),
+    [projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, vendorQuotes, pdfOpts]
+  );
+  const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
+  const [savedDoc, setSavedDoc] = useState<PdfDocKeyInput>(docInput);
+  const savedDocKey = useMemo(() => pdfDocKey(savedDoc), [savedDoc]);
+  const pdfDirty = !!loadedId && docKey !== savedDocKey;
+
   /* ---------------- persistence ---------------- */
   const persistMeta = (meta: Parameters<typeof updateQuoteMetaAction>[1]) => {
     if (!loadedId) return;
@@ -700,6 +729,10 @@ export default function EstimatorClient({
       const r = await updateQuoteMetaAction(id, meta);
       // Customer/contact changes re-stamp the tier server-side (item 11).
       if (r && typeof r.tierMargin === "number") setTierMargin(r.tierMargin);
+      if (r && r.ok) {
+        setSavedDoc((d) => withSavedMeta(d, meta));
+        if (r.pdf) setPdf(r.pdf);
+      }
     });
   };
 
@@ -766,6 +799,7 @@ export default function EstimatorClient({
   };
 
   const doSave = () => {
+    const docAtSave = docInput;
     const cname = customerId
       ? customers.find((c) => c.id === customerId)?.name || custName
       : custName;
@@ -805,6 +839,8 @@ export default function EstimatorClient({
         // minted a second quote for the same draft.
         if (res.id) {
           setLoadedId(res.id);
+          setSavedDoc(docAtSave);
+          if (res.pdf) setPdf(res.pdf);
           setQuoteId(res.id);
           // The server may have moved attachments into Blob storage — take its
           // version back so the next save doesn't re-upload the same bytes.
@@ -1887,10 +1923,6 @@ export default function EstimatorClient({
   const contactOptions = [{ value: "", label: "— No contact —" }].concat(
     contacts.map((c) => ({ value: c.name, label: c.name + (c.role ? " · " + c.role : "") }))
   );
-  const hasAttn = currentContact ? true : !!contactName;
-  const attnLine = currentContact
-    ? currentContact.name + (currentContact.role ? " · " + currentContact.role : "")
-    : contactName || "";
 
   const curtainSec = sections.find((s) => s.id === curtainFor);
   const fixtureSec = sections.find((s) => s.id === fixtureFor);
@@ -3549,36 +3581,20 @@ export default function EstimatorClient({
         </div>
       )}
 
-      {/* ===================== PREVIEW MODE (customer quote) ===================== */}
+      {/* ===================== PREVIEW MODE (the saved customer PDF, #222) ===================== */}
       {isPreview && (
         <PreviewDoc
           phone={phone}
           canBuild={!phone}
           onBack={() => setMode("build")}
-          quoteId={quoteId}
-          revNum={revNum}
-          revDateMs={revDateMs}
-          custName={
-            customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName
-          }
-          hasAttn={hasAttn}
-          attnLine={attnLine}
-          projectName={projectName}
-          venueLabel={(() => {
-            const l = locations.find((x) => x.id === locationId);
-            if (!l) return "";
-            return [l.label, l.city].filter(Boolean).join(" — ");
-          })()}
-          ownerName={initial.owner || me}
-          companyName={companyName}
-          logoDark={logoDark}
-          quoteNote={quoteNote}
-          assumptions={assumptions}
+          savedQuoteId={loadedId}
+          pdf={pdf}
+          onPdf={setPdf}
+          dirty={pdfDirty}
+          onSave={doSave}
+          saveDisabled={statusChanging}
           sections={sections}
           setSectionPresentation={(id, value) => setSystemPresentation(id, value)}
-          vendorQuotes={vendorQuotes}
-          t={t}
-          taxRatePct={TAX_RATE_PCT}
           detail={detail}
           setDetail={setDetail}
           pdfQty={pdfQty}

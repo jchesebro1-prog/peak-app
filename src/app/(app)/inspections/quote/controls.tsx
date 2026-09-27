@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { SavedPdfButton } from "@/components/quote-pdf/saved-pdf-button";
+import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { useMemo, useState, useTransition } from "react";
 import { venueTravelAction, type VenueTravel } from "../../quote-builder-travel";
 import type { CSSProperties } from "react";
@@ -300,6 +302,7 @@ export function QuoteBuilder({
   levels,
   initial,
   accent,
+  pdf = null,
 }: {
   customers: BuilderCustomer[];
   offices: BuilderOffice[];
@@ -309,6 +312,8 @@ export function QuoteBuilder({
   initial: BuilderInitial;
   me: string;
   accent: string;
+  /** #222 — the saved quote's PDF state (null for an unsaved quote). */
+  pdf?: QuotePdfView | null;
 }) {
   const [customerId, setCustomerId] = useState(initial.customerId);
   const [quoteName, setQuoteName] = useState(initial.quoteName);
@@ -1266,28 +1271,13 @@ export function QuoteBuilder({
               )}
 
               {letterHref && (
-                <Link
-                  href={letterHref}
-                  style={{
-                    marginTop: 9,
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 7,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: accent,
-                    background: "#fff",
-                    border: "1px solid #e4e7ec",
-                    borderRadius: 10,
-                    padding: 11,
-                    textDecoration: "none",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  Preview quote letter →
-                </Link>
+                <SavedPdfButton
+                  key={pdf ? `${pdf.status}-${pdf.at}` : "none"}
+                  quoteId={savedId}
+                  initialPdf={pdf}
+                  accent={accent}
+                  letterHref={letterHref}
+                />
               )}
 
               {savedFlag && savedId && (

@@ -10524,6 +10524,7 @@ seeded()
   .then(() => quotePdfFix222AsyncChecks())
   .then(() => quotePdfRoutes222AsyncChecks())
   .then(() => quotePdfT4Fix222AsyncChecks())
+  .then(() => quotePdfCoalesce222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23898,7 +23899,7 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
   ok(quoteContentKey222t4({ spec: { a: 1 } }) !== quoteContentKey222t4({ spec: { a: 2 } }) && quoteContentKey222t4({ status: "sent" } as never) === quoteContentKey222t4({}), "#222 T4 fix: quoteContentKey changes with the spec and ignores status");
 
   // 2. The portal serves only sent copies once a quote has been sent.
-  const sentNoCopy = [{ rev: 1, at: 1, reason: "sent", pdfBlobPath: "r1" }, { rev: 2, at: 2, reason: "sent" }];
+  const sentNoCopy = [{ rev: 1, at: 1, reason: "sent", pdfBlobPath: "r1" }, { rev: 2, at: 25, reason: "sent" }];
   ok(portalPdfSource({ revisions: sentNoCopy, pdf: ready }) === null, "#222 T4 fix: portal — the latest sent revision has no copy → 404, not the older sent copy, not the current file");
   ok(portalPdfPreparing222t4({ revisions: sentNoCopy, pdf: ready }) && !portalPdfPreparing222t4({ revisions: [sentNoCopy[0]], pdf: ready }) && !portalPdfPreparing222t4({ revisions: [], pdf: ready }), "#222 T4 fix: portal — 'being prepared' only while the latest sent revision lacks its copy");
   ok(portalPdfSource({ revisions: [sentNoCopy[0], { rev: 2, at: 2, reason: "manual" }], pdf: ready })?.path === "r1", "#222 T4 fix: portal — a manual revision after a send never unlocks the current file");
@@ -23961,7 +23962,7 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
   const renewal = src("src/lib/renewal-outreach.ts");
   ok((renewal.match(/await scheduleRenewalPdf\(quote\.id\);/g) || []).length === 2, "#222 T4 fix: both renewal re-prices schedule the new quote's PDF");
   const est = src("src/app/(app)/estimator/actions.ts");
-  ok(/await scheduleQuotePdf\(updated\.id\);/.test(est) && /await scheduleQuotePdf\(created\.id\);\n  refresh\(\);\n  return \{ ok: true, targetId: created\.id/.test(est) && /if \(q && q\.contentChangedAt === q\.updatedAt\) await scheduleQuotePdf\(q\.id\);/.test(est), "#222 T4 fix: Estimator move-system (both targets) and header edits schedule the PDF");
+  ok(/await scheduleQuotePdf\(updated\.id\);/.test(est) && /await scheduleQuotePdf\(created\.id\);\n  refresh\(\);\n  return \{ ok: true, targetId: created\.id/.test(est) && /const pdf = q && q\.contentChangedAt === q\.updatedAt \? await scheduleQuotePdf\(q\.id\) : undefined;/.test(est), "#222 T4 fix: Estimator move-system (both targets) and header edits schedule the PDF");
   ok(/if \(res\.ok\) await scheduleQuotePdf\(id\);/.test(src("src/app/(app)/quotes/actions.ts")), "#222 T4 fix: recalling a revision schedules the PDF");
   ok(/markQuotePdfStale\(updated\.id, updated\.contentChangedAt\)/.test(src("src/app/(app)/import/registry.ts")), "#222 T4 fix: the CSV import marks a changed quote's PDF stale");
   const gen = src("src/lib/quote-pdf/generate.ts");
@@ -24046,12 +24047,144 @@ async function quotePdfT4Fix222AsyncChecks(): Promise<void> {
       await q222Update(nid, { value: 999 });
       const view = await scheduleQuotePdf222t4(nid);
       const marked = (await q222Get(nid))?.pdf;
-      ok(view?.status === "pending" && marked?.status === "pending" && marked.savedAt > 2_000 && marked.blobPath === first?.blobPath, "#222 T4 fix: outside a request, scheduleQuotePdf marks the PDF pending for a newer save and keeps the last good file");
+      ok(view?.status === "failed" && !!view.outOfDate && marked?.status === "pending" && marked.stale === true && marked.savedAt > 2_000 && marked.blobPath === first?.blobPath, "#222 T4 fix: outside a request, scheduleQuotePdf marks the PDF stale (pending, no render behind it) for a newer save and keeps the last good file");
       await q222SetStatus(nid, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
       ok(!latestSentRevision((await q222Get(nid))?.revisions)?.pdfBlobPath, "#222 T4 fix: a send while the PDF is marked stale copies nothing");
       const before = (await q222Get(nid))?.pdf;
       await markQuotePdfStale222t4(nid, 1_500);
       ok(JSON.stringify((await q222Get(nid))?.pdf) === JSON.stringify(before), "#222 T4 fix: markQuotePdfStale never moves a PDF back to an older save");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+/* ============ #222 Task 5 — the preview is the saved PDF ============ */
+import { pdfDocKey, withSavedMeta as withSavedMeta222 } from "@/app/(app)/estimator/pdf-doc-key";
+import { pdfBanner as pdfBanner222, pdfCanRetry as pdfCanRetry222 } from "@/components/quote-pdf/pdf-banner";
+import { PDF_COALESCE_MS as PDF_COALESCE_MS222 } from "@/lib/quote-pdf/generate";
+import type { QuotePdfView as QuotePdfView222 } from "@/lib/quote-pdf/state";
+import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t5, pdfView as pdfView222t5, portalPdfPreparing as portalPdfPreparing222t5, portalPdfUnavailable as portalPdfUnavailable222, stalePdf as stalePdf222 } from "@/lib/quote-pdf/state";
+{
+  const base = {
+    projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "",
+    paymentTerms: "Unknown", sections: [],
+    vendorQuotes: [{ id: "vq1", vendor: "V", quoteNumber: "1", description: "d", display: "single" as const, lines: [], terms: "", notes: "", total: 1, includesFreight: false }],
+    pdfOptions: DEFAULT_PDF_OPTIONS,
+  };
+  ok(pdfDocKey(base) === pdfDocKey({ ...base }), "#222 pdfDocKey: the same document gives the same key");
+  ok(pdfDocKey(base) !== pdfDocKey({ ...base, pdfOptions: { ...DEFAULT_PDF_OPTIONS, pdfPrices: false } }), "#222 pdfDocKey: flipping a Show-on-PDF toggle marks the PDF stale");
+  ok(pdfDocKey(base) !== pdfDocKey({ ...base, quoteNote: "Hello" }), "#222 pdfDocKey: a cover-note edit marks the PDF stale");
+  ok(
+    pdfDocKey(base) === pdfDocKey({ ...base, vendorQuotes: [{ ...base.vendorQuotes[0], attachment: { blobPath: "x" }, terms: "t", notes: "n", total: 9 }] }),
+    "#222 pdfDocKey: internal vendor fields (attachment, terms, notes, cost) never mark the PDF stale"
+  );
+  const s5 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const pd = s5("src/app/(app)/estimator/preview-doc.tsx");
+  ok(!pd.includes("window.print") && pd.includes("<QuotePdfViewer") && pd.includes("?download=1"), "#222 PreviewDoc: shows the saved PDF and downloads the saved file — no window.print()");
+  const clientFiles = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/preview-doc.tsx", "src/components/quote-pdf/quote-pdf-viewer.tsx", "src/components/quote-pdf/saved-pdf-button.tsx", "src/components/quote-pdf/use-quote-pdf.ts", "src/components/quote-pdf/pdf-banner.ts"];
+  ok(
+    clientFiles.every((f) => !/^import (?!type)[^\n]*from "@\/(lib\/stores|db|lib\/quote-pdf\/(token|storage|render|generate|schedule|portal-access|quote-document-data))/m.test(s5(f))),
+    "#222 client files import no store, DB or server-only PDF module"
+  );
+  for (const k of ["flame-tests", "repairs", "inspections"]) {
+    ok(/<SavedPdfButton/.test(s5(`src/app/(app)/${k}/quote/controls.tsx`)) && /pdf=\{editQuote \? pdfView\(editQuote\.pdf, Date\.now\(\)\) : null\}/.test(s5(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the letter button opens the saved PDF`);
+  }
+
+  // Header autosaves re-render from the SAVED quote: the baseline takes exactly the written fields.
+  const meta222 = { quoteNote: "Hi", name: "  P2 ", customer: "C2", customerId: "c9", locationId: "l1", contactName: "Ann", category: "Rigging", installTimeframe: "ASAP" };
+  ok(
+    pdfDocKey(withSavedMeta222(base, meta222)) === pdfDocKey({ ...base, quoteNote: "Hi", projectName: "P2", custName: "C2", customerId: "c9", locationId: "l1", contactName: "Ann" }),
+    "#222 T5 withSavedMeta: an autosaved header field moves the saved-PDF baseline — category/timeframe don't print"
+  );
+  ok(pdfDocKey(withSavedMeta222(base, { name: "   " })) === pdfDocKey(base) && pdfDocKey(withSavedMeta222(base, {})) === pdfDocKey(base), "#222 T5 withSavedMeta: a blank name never clears one; an empty autosave changes nothing");
+  const est5 = s5("src/app/(app)/estimator/estimator-client.tsx");
+  const act5 = s5("src/app/(app)/estimator/actions.ts");
+  ok(/setSavedDoc\(\(d\) => withSavedMeta\(d, meta\)\)/.test(est5) && /if \(r\.pdf\) setPdf\(r\.pdf\)/.test(est5) && /\.\.\.\(pdf \? \{ pdf \} : \{\}\)/.test(act5), "#222 T5: an autosave hands its PDF state back and moves the preview's baseline");
+
+  // Retry only for a failed or given-up render — never while one is being polled.
+  const v5 = (status: QuotePdfView222["status"], error: string | null = null): QuotePdfView222 => ({ status, at: 1, savedAt: 1, error, hasFile: true });
+  const acts = (pdf: QuotePdfView222 | null, timedOut = false, dirty = false, retrying = false) =>
+    pdfBanner222({ quoteId: "Q-1", pdf, dirty, timedOut, retrying }).map((n) => `${n.text}|${n.action || ""}`).join(";");
+  ok(acts(v5("pending")) === "Updating PDF…|" && !pdfCanRetry222(v5("pending"), false, false), "#222 T5 banner: a render being polled says Updating PDF… and offers no Retry");
+  ok(acts(v5("pending"), true).endsWith("|Retry") && pdfCanRetry222(v5("pending"), true, false), "#222 T5 banner: once polling gives up, Retry is offered");
+  ok(acts(v5("failed", "boom")) === "boom|Retry" && pdfCanRetry222(v5("failed"), false, false) && !pdfCanRetry222(v5("failed"), false, true), "#222 T5 banner: a failed render shows its reason with Retry (not while a retry runs)");
+  ok(acts(v5("ready")) === "" && !pdfCanRetry222(v5("ready"), false, false), "#222 T5 banner: a ready PDF shows no banner and no Retry");
+  ok(acts(v5("ready"), false, true) === "Unsaved changes — save to update the PDF.|", "#222 T5 banner: unsaved edits say so, exactly");
+  ok(pdfBanner222({ quoteId: null, pdf: null, dirty: false, timedOut: false, retrying: false })[0]?.text === "Save this estimate to create its PDF.", "#222 T5 banner: a never-saved estimate asks for a save");
+  const hook5 = s5("src/components/quote-pdf/use-quote-pdf.ts");
+  ok(/PDF_POLL_MS = 2000/.test(hook5) && /PDF_POLL_LIMIT_MS = 60_000/.test(hook5), "#222 T5 hook: polls every 2 s for up to 60 s");
+  const viewer5 = s5("src/components/quote-pdf/quote-pdf-viewer.tsx");
+  ok(/-webkit-touch-callout/.test(viewer5) && viewer5.includes("Open PDF ↗"), "#222 T5 viewer: iOS gets an Open PDF ↗ link (the iframe may show only page 1)");
+  const pd5 = s5("src/app/(app)/estimator/preview-doc.tsx");
+  ok(/p\.togglePdf\("pdfPrices"\)/.test(pd5) && /p\.setDetail\("sectioned"\)/.test(pd5) && /Save & update PDF/.test(pd5), "#222 T5 preview: the Show-on-PDF controls stay editable and a Save re-renders");
+
+  // Coalescing: the scheduled job waits for a burst of saves before launching Chrome.
+  ok(/coalesceMs: PDF_COALESCE_MS/.test(s5("src/lib/quote-pdf/schedule.ts")), "#222 T5 schedule: the after() render coalesces");
+  ok(PDF_COALESCE_MS222 >= 2_000 && PDF_COALESCE_MS222 + 2 * 30_000 < 120_000, "#222 T5 schedule: the coalescing wait plus Chrome's timeouts stays inside the 120 s maxDuration");
+
+  // Task 4 re-review fixes.
+  // (1) "Being prepared" only while a sent copy can still arrive.
+  const sentAt10 = [{ rev: 1, at: 10, reason: "sent" }];
+  const legacySent = { revisions: sentAt10, pdf: null };
+  const editedAfterSend = { revisions: sentAt10, pdf: { status: "ready" as const, at: 30, savedAt: 30, blobPath: "quote-pdfs/Q-1/30.pdf" } };
+  const reRendering = { revisions: sentAt10, pdf: { status: "pending" as const, at: 31, savedAt: 30, blobPath: "quote-pdfs/Q-1/30.pdf" } };
+  const owed = { revisions: sentAt10, pdf: { status: "pending" as const, at: 11, savedAt: 9 } };
+  ok(!portalPdfPreparing222t5(legacySent) && portalPdfUnavailable222(legacySent), "#222 T4 re-review: a quote sent before saved PDFs is not 'being prepared' — it is unavailable");
+  ok(!portalPdfPreparing222t5(editedAfterSend) && !portalPdfPreparing222t5(reRendering) && portalPdfUnavailable222(editedAfterSend), "#222 T4 re-review: a quote edited after its send is not 'being prepared' (its PDF belongs to a newer save)");
+  ok(portalPdfPreparing222t5(owed) && !portalPdfUnavailable222(owed), "#222 T4 re-review: a send whose own save is still rendering is 'being prepared'");
+  ok(!portalPdfUnavailable222({ revisions: [], pdf: null }) && !portalPdfUnavailable222({ revisions: [{ rev: 1, at: 10, reason: "sent", pdfBlobPath: "r1" }], pdf: null }), "#222 T4 re-review: never-sent quotes and sent copies on file are never 'unavailable'");
+  const proute5 = s5("src/app/portal/quotes/[id]/pdf/route.ts");
+  ok(proute5.includes("No PDF is available for this version — please contact your rep.") && /portalQuotePdfUnavailable\(q, session\.customerId\)/.test(proute5) && /portalListsQuote\(q, customerId\) && portalPdfUnavailable\(q\)/.test(s5("src/lib/quote-pdf/portal-access.ts")), "#222 T4 re-review: the portal route says to contact the rep when a sent copy will never come");
+  // (2) A stale mark has no render behind it: out of date, and Retry reschedules at once.
+  const mark5 = stalePdf222({ status: "ready", at: 5, savedAt: 5, blobPath: "quote-pdfs/Q-1/5.pdf" }, 50, 1_000);
+  const mv5 = pdfView222t5(mark5, 1_000 + 200_000);
+  ok(mark5.status === "pending" && mark5.stale === true && mark5.blobPath === "quote-pdfs/Q-1/5.pdf", "#222 T4 re-review: a stale mark is pending, flagged stale, and keeps the last good file");
+  ok(mv5?.status === "failed" && mv5.outOfDate === true && mv5.error === PDF_OUT_OF_DATE222 && mv5.hasFile, "#222 T4 re-review: the browser sees a stale mark as out of date (never 'didn't finish rendering')");
+  const rp5 = pdfRetryPlan222t5({ pdf: mark5, contentChangedAt: 50 }, 1_001);
+  ok("savedAt" in rp5 && rp5.savedAt === 50, "#222 T4 re-review: Retry on a stale mark reschedules immediately for its save");
+  ok("wait" in pdfRetryPlan222t5({ pdf: { status: "pending", at: 1_000, savedAt: 50 } }, 1_001), "#222 T4 re-review: Retry still leaves a real in-flight render alone");
+  ok(acts(mv5).startsWith("Out of date") && acts(mv5).endsWith("|Retry") && pdfBanner222({ quoteId: "Q-1", pdf: mv5, dirty: false, timedOut: false, retrying: false })[0]?.tone === "warn", "#222 T4 re-review: the preview says 'Out of date' with Retry for a stale mark");
+  ok(/stalePdf\(cur, savedAt, Date\.now\(\)\)/.test(s5("src/lib/quote-pdf/schedule.ts")), "#222 T4 re-review: markQuotePdfStale writes the stale mark");
+  // (3) DEPLOY.md matches the pages' budget.
+  const deploy5 = s5("DEPLOY.md");
+  ok(deploy5.includes("maxDuration = 120") && !deploy5.includes("maxDuration = 60"), "#222 T4 re-review: DEPLOY.md documents the 120 s render budget");
+}
+
+async function quotePdfCoalesce222AsyncChecks(): Promise<void> {
+  await withPdfEnv222(async () => {
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.VERCEL;
+    const root = mkdtempSync(join(tmpdir(), "quote-pdfs-222t5-"));
+    process.env.QUOTE_PDF_DIR = root;
+    try {
+      const origin = "http://print.test";
+      const secret = "spec-secret-222t5";
+      const id = fixtureId222("222", "t5-coalesce");
+      registerFixture222("quotes", id);
+      await q222Create({ id, name: "#222 t5 coalesce", customer: "Spec fixture", owner: "spec" });
+      await q222UpdatePdf(id, (cur) => pendingPdf(cur, 100, 100));
+      let rendered = 0;
+      const waits: number[] = [];
+      const superseded = await generateQuotePdf({
+        quoteId: id, savedAt: 100, origin, secret, coalesceMs: PDF_COALESCE_MS222,
+        // A newer save lands while this render waits.
+        sleep: async (ms) => { waits.push(ms); await q222UpdatePdf(id, (cur) => pendingPdf(cur, 200, 200)); },
+        render: async () => { rendered++; return Buffer.from("%PDF-1.4 superseded"); },
+      });
+      ok(superseded === null && rendered === 0 && waits.join(",") === String(PDF_COALESCE_MS222), "#222 T5 coalesce: a save superseded during the wait never launches Chrome");
+      ok((await q222Get(id))?.pdf?.status === "pending" && (await q222Get(id))?.pdf?.savedAt === 200, "#222 T5 coalesce: the newer save's pending state stands");
+      const order: string[] = [];
+      const landed = await generateQuotePdf({
+        quoteId: id, savedAt: 200, origin, secret, coalesceMs: PDF_COALESCE_MS222,
+        sleep: async () => { order.push("sleep"); },
+        render: async () => { order.push("render"); return Buffer.from("%PDF-1.4 latest"); },
+      });
+      ok(landed?.status === "ready" && landed.savedAt === 200 && order.join(",") === "sleep,render", "#222 T5 coalesce: the latest save waits once, then renders");
+      let slept = false;
+      await q222UpdatePdf(id, (cur) => pendingPdf(cur, 300, 300));
+      const direct = await generateQuotePdf({ quoteId: id, savedAt: 300, origin, secret, sleep: async () => { slept = true; }, render: async () => Buffer.from("%PDF-1.4 direct") });
+      ok(direct?.status === "ready" && !slept, "#222 T5 coalesce: a direct call (no coalesceMs) renders without waiting");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

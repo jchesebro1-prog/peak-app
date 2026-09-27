@@ -658,7 +658,7 @@ export async function updateQuoteMetaAction(
     category?: string;
     name?: string;
   }
-): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number }> {
+): Promise<{ ok: boolean; pricingTier?: string; tierMargin?: number; pdf?: QuotePdfView | null }> {
   await requireUser();
   if (!id) return { ok: false };
   // Allowlist the header fields only — never forward the raw client object.
@@ -702,9 +702,10 @@ export async function updateQuoteMetaAction(
   // #222 fix wave 1: header fields print on the customer document — a write
   // that changed one (patchQuote stamps contentChangedAt with this write's
   // updatedAt) re-renders it; a category-only edit doesn't.
-  if (q && q.contentChangedAt === q.updatedAt) await scheduleQuotePdf(q.id);
+  // The preview takes the scheduled state back so it shows "Updating PDF…".
+  const pdf = q && q.contentChangedAt === q.updatedAt ? await scheduleQuotePdf(q.id) : undefined;
   refresh();
-  return { ok: !!q, ...(stamped ?? {}) };
+  return { ok: !!q, ...(stamped ?? {}), ...(pdf ? { pdf } : {}) };
 }
 
 export async function setStatusAction(

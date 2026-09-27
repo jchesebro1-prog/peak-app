@@ -26,6 +26,7 @@ import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
+import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -127,6 +128,7 @@ async function initialFrom(
       vendorQuotes: [],
       replaces: "",
       pdfOptions: { ...DEFAULT_PDF_OPTIONS },
+      pdf: null,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -186,6 +188,7 @@ async function initialFrom(
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),
+    pdf: pdfView(q.pdf, Date.now()),
   };
 }
 

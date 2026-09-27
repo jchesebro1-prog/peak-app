@@ -286,8 +286,9 @@ Every quote save renders the customer document to a PDF after the response
 - **`VERCEL_AUTOMATION_BYPASS_SECRET`** — only if preview deployments sit
   behind Deployment Protection, so the headless browser can reach the print
   page.
-- Pages whose saves render a PDF set `maxDuration = 60` (the render runs in
-  `after()` inside that budget).
+- Pages whose saves render a PDF set `maxDuration = 120` (the render runs in
+  `after()` inside that budget, after a 4 s wait that lets a burst of saves
+  settle so only the latest one launches Chrome).
 
 ## Afterwards
 

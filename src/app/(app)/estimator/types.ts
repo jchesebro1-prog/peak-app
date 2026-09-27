@@ -2,6 +2,7 @@ import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import type { FixtureRates } from "@/lib/stores/pricing";
 import type { TaskRecord } from "@/lib/stores/tasks";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 import type { Pipelines } from "@/lib/pipelines";
 
@@ -361,6 +362,8 @@ export type InitialQuote = {
   replaces: string;
   /** Saved Show-on-PDF choices (#222) — DEFAULT_PDF_OPTIONS for a new estimate. */
   pdfOptions: QuotePdfOptions;
+  /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
+  pdf: QuotePdfView | null;
 };
 
 /**

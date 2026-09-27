@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { travelForCustomerVenues } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -235,6 +236,7 @@ export default async function FlameTestQuotePage({
         rates={rates}
         travelRates={travelRates}
         initial={initial}
+        pdf={editQuote ? pdfView(editQuote.pdf, Date.now()) : null}
         accent={settings.accent || "#7b3f8a"}
       />
     </>

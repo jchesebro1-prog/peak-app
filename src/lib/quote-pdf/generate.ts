@@ -45,7 +45,28 @@ export type GenerateInput = {
   render?: (url: string) => Promise<Buffer>;
   /** Spec-harness seam for the settle write; defaults to updateQuotePdf. */
   updatePdf?: typeof updateQuotePdf;
+  /**
+   * Coalescing wait before Chrome launches (#222 Task 5). The Estimator
+   * autosaves header fields on a ~500 ms debounce and every save schedules a
+   * render, so a burst of typing would start one Chromium per keystroke pause.
+   * The scheduled job (schedule.ts) passes PDF_COALESCE_MS: the render waits,
+   * re-reads the quote, and exits without rendering when a newer save has
+   * taken the pending state meanwhile. 0 / absent = no wait (direct callers).
+   */
+  coalesceMs?: number;
+  /** Spec-harness seam for the coalescing wait; defaults to setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
 };
+
+/**
+ * How long a scheduled render waits for a newer save before launching Chrome
+ * (#222 Task 5). Budget: this + Chrome's navigation and print timeouts (30 s
+ * each in production, render.ts) stays well inside the rendering pages'
+ * 120 s maxDuration.
+ */
+export const PDF_COALESCE_MS = 4_000;
+
+const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** The origin a render may print from, or why not. */
 export function printOriginProblem(origin: unknown): string | null {
@@ -76,9 +97,16 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
     return res && res.changed ? res.after : null;
   };
   try {
-    const q = await getQuote(quoteId);
+    let q = await getQuote(quoteId);
     if (!q) return null;
     if (!isPendingFor(q.pdf, savedAt)) return null; // a newer save owns the state, or this one already settled
+    const coalesceMs = input.coalesceMs ?? 0;
+    if (coalesceMs > 0) {
+      // Let a burst of saves settle: only the latest pending save renders.
+      await (input.sleep ?? realSleep)(coalesceMs);
+      q = await getQuote(quoteId);
+      if (!q || !isPendingFor(q.pdf, savedAt)) return null;
+    }
     const kind = pdfKindForQuoteType(q.quoteType);
     if (!kind) return await settleFailed("This kind of quote has no PDF.");
     const badOrigin = printOriginProblem(input.origin);

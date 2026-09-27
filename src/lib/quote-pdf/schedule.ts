@@ -1,9 +1,9 @@
 import { after } from "next/server";
 import { headers } from "next/headers";
 import { get as getQuote, updateQuotePdf } from "@/lib/stores/quotes";
-import { generateQuotePdf } from "./generate";
+import { generateQuotePdf, PDF_COALESCE_MS } from "./generate";
 import { printOriginFor } from "./origin";
-import { canHavePdf, failedPdf, pdfView, pendingPdf, type QuotePdfView } from "./state";
+import { canHavePdf, failedPdf, pdfView, pendingPdf, stalePdf, type QuotePdfView } from "./state";
 
 /**
  * Mark a just-saved quote's PDF pending and render it after the response
@@ -48,7 +48,7 @@ export async function scheduleQuotePdf(quoteId: string, opts: { savedAt?: number
     const res = await updateQuotePdf(quoteId, (cur) => pendingPdf(cur, savedAt, Date.now()));
     if (!res || res.after?.status !== "pending" || res.after.savedAt !== savedAt) return pdfView(res?.after, Date.now());
     after(async () => {
-      await generateQuotePdf({ quoteId, savedAt, origin });
+      await generateQuotePdf({ quoteId, savedAt, origin, coalesceMs: PDF_COALESCE_MS });
     });
     return pdfView(res.after, Date.now());
   } catch (e) {
@@ -59,14 +59,16 @@ export async function scheduleQuotePdf(quoteId: string, opts: { savedAt?: number
 
 /**
  * Mark an existing PDF stale for a newer save without rendering (#222 fix
- * wave 1): pending for `savedAt`, keeping the last good file for the preview.
+ * wave 1): pending for `savedAt`, keeping the last good file for the preview,
+ * and marked `stale` — nothing renders it, so the preview reads "Out of date"
+ * with Retry, and Retry reschedules at once (pdfRetryPlan).
  * For writers with no request to render in (scripts) or that change many
  * quotes at once (the CSV import). A quote with no PDF yet, or whose PDF
  * state is already for this save or a newer one, is left alone. Never throws.
  */
 export async function markQuotePdfStale(quoteId: string, savedAt: number = Date.now()): Promise<QuotePdfView | null> {
   try {
-    const res = await updateQuotePdf(quoteId, (cur) => (cur && cur.savedAt < savedAt ? pendingPdf(cur, savedAt, Date.now()) : undefined));
+    const res = await updateQuotePdf(quoteId, (cur) => (cur && cur.savedAt < savedAt ? stalePdf(cur, savedAt, Date.now()) : undefined));
     return pdfView(res?.after, Date.now());
   } catch (e) {
     console.error("[quote-pdf] marking stale failed", quoteId, e);
