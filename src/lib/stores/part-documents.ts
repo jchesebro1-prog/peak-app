@@ -311,18 +311,23 @@ export async function visibleImagesForParts(skus: readonly string[]): Promise<Ma
  * Reassign a sku's whole image-gallery order in one call (#242 review fix
  * M3) — replaces N sequential setDocumentLinkDisplay writes from the client
  * with one server round trip; each link still gets its own DB write
- * (parallelized), but the caller only awaits once. Refuses (returns false,
- * writing nothing) if any id in `documentIds` isn't currently a live image
- * link of `sku` — a stale or foreign id never partially reorders the rest.
+ * (parallelized), but the caller only awaits once.
+ *
+ * Refuses (returns false, writing nothing) unless `documentIds` is EXACTLY
+ * the part's live image links — same set, no duplicates, nothing missing
+ * and nothing foreign (fix round 2): a caller silently omitting one image
+ * would otherwise leave it at its old `sort`, ambiguously interleaved with
+ * the reordered ones, and a duplicated id would silently collapse to one
+ * write — neither is "reordered", both are refused instead of guessed at.
  */
 export async function setImageOrder(sku: string, documentIds: readonly string[]): Promise<boolean> {
-  const ids = [...new Set(documentIds)];
-  if (!ids.length) return false;
+  if (new Set(documentIds).size !== documentIds.length) return false;
   const links = (await documentLinksForParts([sku])).filter((l) => l.kind === "image");
   const linkIdByDoc = new Map(links.map((l) => [l.documentId, documentLinkId(sku, l.documentId)]));
-  if (ids.some((id) => !linkIdByDoc.has(id))) return false;
+  if (!documentIds.length || documentIds.length !== linkIdByDoc.size) return false;
+  if (documentIds.some((id) => !linkIdByDoc.has(id))) return false;
   await Promise.all(
-    ids.map((id, i) => patchDoc<PartDocumentLink>("part_document_links", linkIdByDoc.get(id)!, (d) => ({ ...d, sort: i })))
+    documentIds.map((id, i) => patchDoc<PartDocumentLink>("part_document_links", linkIdByDoc.get(id)!, (d) => ({ ...d, sort: i })))
   );
   return true;
 }

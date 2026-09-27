@@ -362,10 +362,15 @@ export async function setImageOrderAction(input: { sku: string; documentIds: str
   await requireUser();
   const sku = String(input.sku || "").trim();
   if (!sku) return { ok: false, error: "Missing part." };
-  const ids = (input.documentIds || []).filter(isDocumentId);
-  if (!ids.length) return { ok: false, error: "Nothing to reorder." };
+  const raw = input.documentIds || [];
+  const ids = raw.filter(isDocumentId);
+  // Fix round 2: a malformed id (not `raw.filter`ed silently away) must
+  // refuse the whole call rather than reorder against a silently-shortened
+  // list — a caller with a stale/corrupted id list would otherwise have no
+  // way to tell its request was only partially honored.
+  if (!ids.length || ids.length !== raw.length) return { ok: false, error: "That image list isn't valid." };
   const ok = await setImageOrder(sku, ids);
-  if (!ok) return { ok: false, error: "One of those images isn't linked to this part." };
+  if (!ok) return { ok: false, error: "That isn't exactly this part's own set of image links." };
   revalidate();
   return { ok: true };
 }

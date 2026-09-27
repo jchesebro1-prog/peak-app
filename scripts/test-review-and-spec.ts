@@ -16293,29 +16293,37 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
   // definition or call, not a mention in a comment.
   ok(!/cleanupOrphan\(/.test(docActionsSrc), "part docs actions: the vulnerable cleanupOrphan helper (and every call to it) is gone, not just unused");
 
+  // Fix round 2: restore FILE-WIDE deleteBlob coverage. Round 1 had
+  // rescoped this to attachUploadedDocumentAction's own body alone (to
+  // accommodate #242 review fix M7's legitimate deleteBlob call in
+  // addImageFromUrlAction) — but that let a THIRD, unreviewed deleteBlob
+  // call land anywhere else in the file undetected. The real invariant is
+  // narrower and file-wide: exactly one deleteBlob( call exists at all,
+  // and it is M7's own — addImageFromUrlAction cleaning up the blob it
+  // just wrote itself, under a fresh server-minted documentId (never a
+  // client-supplied pathname or an existing document's real blobKey, the
+  // fix-wave-2 hole's shape). A second, unreviewed call anywhere —
+  // including inside attachUploadedDocumentAction — fails this.
+  const deleteBlobCalls = docActionsSrc.match(/deleteBlob\(/g) || [];
+  ok(deleteBlobCalls.length === 1, "part docs actions: exactly one deleteBlob( call in the whole file — attachUploadedDocumentAction's upload path must never gain one, and no other function may either");
+
+  const addFromUrlStart = docActionsSrc.indexOf("export async function addImageFromUrlAction");
+  ok(addFromUrlStart >= 0, "part docs actions fixture: addImageFromUrlAction is present");
+  const nextFnAfterAddFromUrl = docActionsSrc.indexOf("\nexport async function", addFromUrlStart + 1);
+  const addFromUrlEnd = nextFnAfterAddFromUrl >= 0 ? nextFnAfterAddFromUrl : docActionsSrc.length;
+  const addFromUrlBody = docActionsSrc.slice(addFromUrlStart, addFromUrlEnd);
+  const soleDeleteAt = docActionsSrc.indexOf("deleteBlob(");
+  ok(soleDeleteAt >= addFromUrlStart && soleDeleteAt < addFromUrlEnd, "part docs actions: the file's one deleteBlob( call sits inside addImageFromUrlAction — nowhere else, attachUploadedDocumentAction included");
+  ok(addFromUrlBody.includes("deleteBlob(stored.pathname)"), "part docs actions: addImageFromUrlAction's deleteBlob call is exactly deleteBlob(stored.pathname) — the blob it just wrote itself, not any client- or document-supplied path");
+
+  const createCallAt = addFromUrlBody.indexOf("await createDocument(");
+  const m7DeleteAt = addFromUrlBody.indexOf("await deleteBlob(stored.pathname)");
+  ok(createCallAt >= 0 && m7DeleteAt >= 0 && m7DeleteAt > createCallAt, "part docs actions: addImageFromUrlAction's M7 deleteBlob runs only after createDocument, cleaning up the blob it just wrote itself when createDocument fails");
+
   const fnStart = docActionsSrc.indexOf("export async function attachUploadedDocumentAction");
   const fnEnd = docActionsSrc.indexOf("\nexport async function replaceDocumentFileAction");
   ok(fnStart >= 0 && fnEnd > fnStart, "part docs actions fixture: attachUploadedDocumentAction is still where the test expects it");
   const fnBody = docActionsSrc.slice(fnStart, fnEnd);
-
-  // Scoped to attachUploadedDocumentAction alone — the function the
-  // fix-wave-2 hole was actually in. #242 review fix M7 added a SEPARATE,
-  // safe deleteBlob call elsewhere in this file (addImageFromUrlAction,
-  // cleaning up a blob it just wrote itself, this same call, under a fresh
-  // server-minted documentId — never a client-supplied pathname or an
-  // existing document's real blobKey), so the assertion can no longer be
-  // "this file never calls deleteBlob" at all.
-  ok(!/deleteBlob\(/.test(fnBody), "part docs actions: attachUploadedDocumentAction never calls deleteBlob directly — the only blob delete in ITS upload path is verifyUploadedBlob's own gated refusal");
-
-  // #242 review fix M7: addImageFromUrlAction deletes the blob it just
-  // stored when createDocument then fails, rather than leaving it orphaned
-  // — the delete call is present and runs strictly after createDocument.
-  const addFromUrlStart = docActionsSrc.indexOf("export async function addImageFromUrlAction");
-  ok(addFromUrlStart >= 0, "part docs actions fixture: addImageFromUrlAction is present");
-  const addFromUrlBody = docActionsSrc.slice(addFromUrlStart);
-  const createCallAt = addFromUrlBody.indexOf("await createDocument(");
-  const m7DeleteAt = addFromUrlBody.indexOf("await deleteBlob(stored.pathname)");
-  ok(createCallAt >= 0 && m7DeleteAt >= 0 && m7DeleteAt > createCallAt, "part docs actions: addImageFromUrlAction's M7 deleteBlob runs only after createDocument, cleaning up the blob it just wrote itself when createDocument fails");
 
   const existsCheckAt = fnBody.indexOf("await getDocument(input.documentId)");
   const verifyCallAt = fnBody.indexOf("await verifyUploadedBlob(input)");
@@ -27673,6 +27681,24 @@ async function portal242ImagesTask4AsyncChecks(): Promise<void> {
   ok(await d242SetOrder(sku2, [imgA.id, imgB.id]), "#242 images order: setImageOrder accepts a full reorder of the part's own image links");
   const afterSetOrder = await d242VisibleImages([sku2]);
   ok((afterSetOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: setImageOrder's order (A, B) is what visibleImagesForParts reads back");
+
+  // Fix round 2: setImageOrder now requires EXACT-SET coverage — a
+  // datasheet linked to this same sku (never an image link) is refused,
+  // and so is a merely partial list of the part's own image links; both
+  // leave real state ambiguous rather than silently reordering a subset.
+  const dsSameSku = await d242CreateDoc({
+    kind: "datasheet", fileName: "ds2.pdf", contentType: "application/pdf", size: 10,
+    blobKey: "part-docs/PD-t4-ds2/ds2.pdf", sourceUrl: null, source: "upload", by: "Test",
+  });
+  if (!dsSameSku) throw new Error("#242 images order: fixture datasheet failed to create");
+  registerFixture("part_documents", dsSameSku.id);
+  await d242Attach(dsSameSku.id, [sku2], "Test");
+  registerFixture("part_document_links", d242LinkId(sku2, dsSameSku.id));
+
+  ok(!(await d242SetOrder(sku2, [imgA.id, imgB.id, dsSameSku.id])), "#242 images order: setImageOrder refuses a datasheet linked to the same sku (not an image link)");
+  ok(!(await d242SetOrder(sku2, [imgA.id])), "#242 images order: setImageOrder refuses a partial list (missing imgB)");
+  const afterRefusals = await d242VisibleImages([sku2]);
+  ok((afterRefusals.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: both refused calls wrote nothing — the order from before them stands");
 
   // setImageDisplayAction-level validation lives in actions.ts (M2) and
   // can't run from this harness (server actions need requireUser()'s
