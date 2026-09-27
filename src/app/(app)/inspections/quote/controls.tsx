@@ -19,6 +19,14 @@ import {
   type TravelOverride,
   type TravelPlan,
 } from "@/lib/travel-plan";
+import { ServiceTotalField } from "@/components/service-total-field";
+import {
+  finishInspection,
+  fmtPts,
+  normalizePriceOverride,
+  sliderPts,
+  type InspectionFinish,
+} from "@/lib/service-pricing";
 
 /**
  * QuoteBuilder — the auto-priced rigging-inspection quote estimator
@@ -87,6 +95,11 @@ export type BuilderInitial = {
   replaces: string;
   /** The saved travel override (flights over drive) — absent = auto. */
   travel?: TravelOverride | null;
+  /** #217: the typed total to reopen with (null = auto). */
+  priceOverride?: number | null;
+  /** #217 D286: true when priceOverride above is only the reopen-seed for an
+   *  old off-grid sent price — not something anyone actually typed. */
+  priceOverrideSeeded?: boolean;
 };
 
 /* ---------- inlined pure pricing (port of inspection-engine.ts) ---------- */
@@ -138,7 +151,7 @@ type Trip = {
   timeCost: number;
   total: number;
 };
-type Pricing = {
+type Pricing = InspectionFinish & {
   perVenue: PerVenue[];
   lineSetsTotal: number;
   venueCount: number;
@@ -147,12 +160,6 @@ type Pricing = {
   baseCost: number;
   laborCost: number;
   trip: Trip;
-  cost: number;
-  sellRaw: number;
-  minApplied: boolean;
-  margin: number;
-  marginAmount: number;
-  total: number;
   /** Flights over drive — travel.total is the figure the quote prices. */
   travel: TravelPlan;
 };
@@ -199,7 +206,8 @@ function computePricing(
   level: number,
   rates: BuilderRates,
   tr: BuilderTravelRates,
-  override: TravelOverride | undefined
+  override: TravelOverride | undefined,
+  priceOverride: number | undefined
 ): Pricing {
   const levelMult = level === 2 ? rates.level2Mult || 1 : 1;
   const perVenue: PerVenue[] = venues.map((v) => {
@@ -222,11 +230,13 @@ function computePricing(
     rates: tr,
     override,
   });
-  const cost = laborCost + travel.total;
-  const margin = rates.margin;
-  const sellRaw = margin > 0 && margin < 1 ? cost / (1 - margin) : cost;
-  const minApplied = sellRaw < rates.minFee;
-  const total = minApplied ? rates.minFee : sellRaw;
+  // #217: the engine's finish — min fee floor, margin, $25 rounding, typed total.
+  const fin = finishInspection({
+    cost: laborCost + travel.total,
+    minFee: rates.minFee,
+    margin: rates.margin,
+    priceOverride,
+  });
   return {
     perVenue,
     lineSetsTotal,
@@ -236,13 +246,8 @@ function computePricing(
     baseCost,
     laborCost,
     trip,
-    cost,
-    sellRaw,
-    minApplied,
-    margin,
-    marginAmount: total - cost,
-    total,
     travel,
+    ...fin,
   };
 }
 
@@ -318,6 +323,15 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [travelDraft, setTravelDraft] = useState<TravelDraft>(() => draftFromOverride(initial.travel));
+  /* #217: the typed Total ("" = auto — rounded to the nearest $25). */
+  const [priceText, setPriceText] = useState(
+    initial.priceOverride != null ? String(initial.priceOverride) : ""
+  );
+  /** #217 D286: true while the typed total is still the untouched reopen-seed
+   *  for an old off-grid sent price — not something anyone actually typed.
+   *  Clears on any edit to the total, Reset to auto, or a new customer, so
+   *  it's never mistaken for a real hand-set price next year. */
+  const [priceOverrideSeeded, setPriceOverrideSeeded] = useState(!!initial.priceOverrideSeeded);
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
 
@@ -383,6 +397,8 @@ export function QuoteBuilder({
         setMarginPts(Math.round(seeded * 100));
     }
     setVenueSel(sel);
+    setPriceText(""); // a new customer is a new price
+    setPriceOverrideSeeded(false);
     setQuoteName(c ? c.name + " — Rigging inspection" : "");
     setContactSel(primary ? primary.name : "");
     setContactManual("");
@@ -427,11 +443,20 @@ export function QuoteBuilder({
     }));
   const hasCustomer = !!customer;
   const office = offices.find((o) => o.quoteDefault) || offices[0] || null;
+  const priceOverride = normalizePriceOverride(priceText);
   const r =
     hasCustomer && selectedVenues.length
-      ? computePricing(office, selectedVenues, level, liveRates, travelRates, overrideFromDraft(travelDraft))
+      ? computePricing(office, selectedVenues, level, liveRates, travelRates, overrideFromDraft(travelDraft), priceOverride)
       : null;
   const chargeById = new Map((r?.perVenue || []).map((p) => [p.id, p]));
+
+  /** #217 — back to the auto total; the slider stays where the typed total put it. */
+  function resetToAuto() {
+    if (r?.overridden) setMarginPts(sliderPts(r.effectiveMargin));
+    setPriceText("");
+    setPriceOverrideSeeded(false);
+    dirty();
+  }
 
   const canSave = hasCustomer && selectedVenues.length > 0;
   const showApprove = canSave && !isApproved;
@@ -467,6 +492,8 @@ export function QuoteBuilder({
     fd.set("mileageRate", mileageRate);
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
+    fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
+    fd.set("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded ? "1" : "");
     fd.set(
       "venues",
       JSON.stringify(
@@ -986,7 +1013,9 @@ export function QuoteBuilder({
                     marginBottom: 5,
                   }}
                 >
-                  <span style={{ color: "#5b616e" }}>Margin · {marginPts} pts</span>
+                  <span style={{ color: "#5b616e" }}>
+                    Margin · {r?.overridden ? fmtPts(r.effectiveMargin) : marginPts} pts
+                  </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money(r?.marginAmount || 0)}
                   </span>
@@ -996,9 +1025,11 @@ export function QuoteBuilder({
                   min={10}
                   max={50}
                   step={1}
-                  value={marginPts}
+                  value={r?.overridden ? sliderPts(r.effectiveMargin) : marginPts}
                   onChange={(e) => {
                     setMarginPts(Math.round(+e.target.value));
+                    setPriceText("");
+                    setPriceOverrideSeeded(false);
                     dirty();
                   }}
                   style={{ width: "100%", accentColor: accent, cursor: "pointer", margin: "2px 0 0" }}
@@ -1015,21 +1046,22 @@ export function QuoteBuilder({
                   <span>10 pts</span>
                   <span>50 pts</span>
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "baseline",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    marginTop: 4,
-                    paddingTop: 9,
-                    borderTop: "1px solid #f0f1f4",
+                <ServiceTotalField
+                  total={total}
+                  autoTotal={r?.autoTotal ?? 0}
+                  cost={r?.cost ?? 0}
+                  margin={r?.effectiveMargin ?? 0}
+                  overridden={!!r?.overridden}
+                  text={priceText}
+                  onText={(t) => {
+                    setPriceText(t);
+                    setPriceOverrideSeeded(false);
+                    dirty();
                   }}
-                >
-                  <span>Total</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{money(total)}</span>
-                </div>
+                  onReset={resetToAuto}
+                  disabled={!r}
+                  accent={accent}
+                />
               </div>
 
               <button

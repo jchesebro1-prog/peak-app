@@ -21696,3 +21696,86 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(para4.includes("reflects a longer curtain run") && para4.includes("hand-set at $850"),
     "#217 renewal wording: a specific reason still prints alongside the hand-set sentence");
 }
+
+/* ====================================================================
+   #217 T4 — repairs + inspections builders preview through the engines'
+   finish, the Total is an input, and reopening restores a typed total.
+   ==================================================================== */
+{
+  const strip217 = (s: string): string => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  const rc = readFileSync(join(process.cwd(), "src/app/(app)/repairs/quote/controls.tsx"), "utf8");
+  ok(/from "@\/lib\/service-pricing"/.test(rc) && /finishRepair\(\{/.test(strip217(rc)) && !/\/ \(1 - margin\)/.test(strip217(rc)) && !/\/ \(1 - pMargin\)/.test(strip217(rc)),
+    "#217 repair builder: the preview finishes through finishRepair(), no inlined margin math");
+  ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(rc) && /<ServiceTotalField/.test(rc),
+    "#217 repair builder: the Total is an input and the typed total is posted");
+  ok(/value=\{r\?\.overridden \? sliderPts\(r\.serviceMargin\) : marginPts\}/.test(rc) &&
+      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(rc) &&
+      /function resetToAuto\(\)/.test(rc),
+    "#217 repair builder: the slider follows the back-solved SERVICE margin; moving it or Reset clears the override");
+  const ic = readFileSync(join(process.cwd(), "src/app/(app)/inspections/quote/controls.tsx"), "utf8");
+  ok(/from "@\/lib\/service-pricing"/.test(ic) && /finishInspection\(\{/.test(strip217(ic)) && !/\/ \(1 - margin\)/.test(strip217(ic)),
+    "#217 inspection builder: the preview finishes through finishInspection(), no inlined margin math");
+  ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(ic) && /<ServiceTotalField/.test(ic),
+    "#217 inspection builder: the Total is an input and the typed total is posted");
+  ok(/value=\{r\?\.overridden \? sliderPts\(r\.effectiveMargin\) : marginPts\}/.test(ic) &&
+      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(ic) &&
+      /function resetToAuto\(\)/.test(ic),
+    "#217 inspection builder: the slider follows a typed total; moving it or Reset clears the override");
+  for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
+    const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
+    ok(new RegExp(`priceOverride: seedPriceOverride\\(editQuote\\.status, editQuote\\.value, ${sub} && ${sub}\\.priceOverride\\),`).test(pg),
+      `#217 ${svc} page: reopening restores the typed total (old sent prices stay put)`);
+  }
+
+  // ---- addendum: the D286 priceOverrideSeeded marker (added alongside the
+  // flame builder in Task 3, aaa63769) is wired the same way through repairs
+  // and inspections — the builder tracks it, clears it on any edit, posts it,
+  // the save action stores it, and the page reopens it — so a re-opened old
+  // off-grid sent price is never mistaken for a real hand-set price by next
+  // year's renewal-outreach math (priorHandSetPrice, currently flame- and
+  // inspection-only, but the marker itself must exist on repairs too for
+  // #217 D286 parity across all three services).
+  ok(/setPriceOverrideSeeded\(false\)/.test(rc) &&
+      /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(rc),
+    "#217 repair builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
+  ok(/fd\.set\("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded \? "1" : ""\);/.test(rc),
+    "#217 repair builder: the typed total's seeded-ness posts alongside the total itself");
+  ok(/onReset=\{resetToAuto\}/.test(rc) &&
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.serviceMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(rc),
+    "#217 repair builder: Reset to auto also clears the seeded flag");
+  ok(/onText=\{\(t\) => \{\s*setPriceText\(t\);\s*setPriceOverrideSeeded\(false\);/.test(rc),
+    "#217 repair builder: typing into the Total field clears the seeded flag");
+  ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(rc),
+    "#217 repair builder: picking a different customer clears the seeded flag too");
+
+  ok(/setPriceOverrideSeeded\(false\)/.test(ic) &&
+      /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(ic),
+    "#217 inspection builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
+  ok(/fd\.set\("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded \? "1" : ""\);/.test(ic),
+    "#217 inspection builder: the typed total's seeded-ness posts alongside the total itself");
+  ok(/onReset=\{resetToAuto\}/.test(ic) &&
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(ic),
+    "#217 inspection builder: Reset to auto also clears the seeded flag");
+  ok(/onText=\{\(t\) => \{\s*setPriceText\(t\);\s*setPriceOverrideSeeded\(false\);/.test(ic),
+    "#217 inspection builder: typing into the Total field clears the seeded flag");
+  ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(ic),
+    "#217 inspection builder: picking a different customer clears the seeded flag too");
+
+  for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
+    const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
+    ok(new RegExp(`priceOverrideSeeded: seedPriceOverrideIsLegacy\\(editQuote\\.status, editQuote\\.value, ${sub} && ${sub}\\.priceOverride\\),`).test(pg),
+      `#217 ${svc} page: reopening also seeds whether that typed total is a D286 legacy artifact`);
+    const ac = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/actions.ts`), "utf8");
+    ok(/const priceOverrideSeeded = String\(formData\.get\("priceOverrideSeeded"\) \|\| ""\) === "1";/.test(ac) &&
+        /\.\.\.\(r\.priceOverride != null && priceOverrideSeeded \? \{ priceOverrideSeeded: true \} : \{\}\),/.test(ac),
+      `#217 ${svc} save: a seeded typed total is stored flagged, never as a real hand-set price`);
+  }
+
+  // ---- the repairs-only "below parts price" warning: a typed total under
+  // what the parts alone are selling for warns sharper than below-cost.
+  const stf217 = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
+  ok(/partsSell/.test(stf217) && /typedPriceWarning\(total, cost, margin, partsSell\)/.test(stf217),
+    "#217: the shared Total field threads an optional partsSell into typedPriceWarning() for repairs");
+  ok(/partsSell=\{r\?\.partsSell/.test(rc),
+    "#217 repair builder: the Total field is given the service's partsSell for the below-parts-price warning");
+}

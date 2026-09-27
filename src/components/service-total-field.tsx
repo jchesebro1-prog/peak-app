@@ -15,6 +15,7 @@ export function ServiceTotalField({
   autoTotal,
   cost,
   margin,
+  partsSell,
   overridden,
   text,
   onText,
@@ -28,6 +29,8 @@ export function ServiceTotalField({
   cost: number;
   /** The margin the builder's slider shows (the service margin on repairs). */
   margin: number;
+  /** Repairs only — a typed total under this warns sharper than below-cost. */
+  partsSell?: number | null;
   overridden: boolean;
   /** The typed text ("" = auto). */
   text: string;
@@ -42,7 +45,7 @@ export function ServiceTotalField({
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? (text !== "" ? text : String(Math.round(autoTotal)));
   const invalid = text.trim() !== "" && !overridden;
-  const warning = overridden ? typedPriceWarning(total, cost, margin) : null;
+  const warning = overridden ? typedPriceWarning(total, cost, margin, partsSell) : null;
   return (
     <div style={{ marginTop: 4, paddingTop: 9, borderTop: "1px solid #f0f1f4", ...style }}>
       <div

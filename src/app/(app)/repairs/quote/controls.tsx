@@ -19,6 +19,14 @@ import {
   type TravelOverride,
   type TravelPlan,
 } from "@/lib/travel-plan";
+import { ServiceTotalField } from "@/components/service-total-field";
+import {
+  finishRepair,
+  fmtPts,
+  normalizePriceOverride,
+  sliderPts,
+  type RepairFinish,
+} from "@/lib/service-pricing";
 
 /**
  * QuoteBuilder — the auto-priced repair estimator (repair twin of the
@@ -98,6 +106,11 @@ export type BuilderInitial = {
   replaces: string;
   /** The saved travel override (flights over drive) — absent = auto. */
   travel?: TravelOverride | null;
+  /** #217: the typed total to reopen with (null = auto). */
+  priceOverride?: number | null;
+  /** #217 D286: true when priceOverride above is only the reopen-seed for an
+   *  old off-grid sent price — not something anyone actually typed. */
+  priceOverrideSeeded?: boolean;
 };
 
 /* ---------- inlined pure pricing (port of repair-engine.ts) ---------- */
@@ -148,22 +161,13 @@ type Trip = {
   timeCost: number;
   total: number;
 };
-type Pricing = {
+type Pricing = RepairFinish & {
   laborHours: number;
   laborRate: number;
   laborCost: number;
   emergency: boolean;
   trip: Trip;
-  serviceCost: number;
-  serviceSellRaw: number;
-  serviceSell: number;
-  calloutApplied: boolean;
   parts: Array<PartIn & { extCost: number }>;
-  partsCost: number;
-  partsSell: number;
-  cost: number;
-  total: number;
-  marginAmount: number;
   /** Flights over drive — travel.total is the figure the quote prices. */
   travel: TravelPlan;
 };
@@ -213,7 +217,8 @@ function computePricing(
   emergency: boolean,
   rates: BuilderRates,
   tr: BuilderTravelRates,
-  override: TravelOverride | undefined
+  override: TravelOverride | undefined,
+  priceOverride: number | undefined
 ): Pricing {
   const hours = Math.max(0, Number(laborHours) || 0);
   const laborRate = rates.laborRate * (emergency ? rates.emergencyMult || 1 : 1);
@@ -230,39 +235,30 @@ function computePricing(
     override,
   });
   const serviceCost = laborCost + travel.total;
-  const margin = rates.margin;
-  const serviceSellRaw =
-    margin > 0 && margin < 1 ? serviceCost / (1 - margin) : serviceCost;
-  const calloutApplied = serviceSellRaw < rates.minCallout;
-  const serviceSell = calloutApplied ? rates.minCallout : serviceSellRaw;
   const priced = parts.map((p) => {
     const qty = Math.max(0, Number(p.qty) || 0);
     const cost = Math.max(0, Number(p.cost) || 0);
     return { name: p.name || "Part", qty, cost, extCost: qty * cost };
   });
   const partsCost = priced.reduce((a, p) => a + p.extCost, 0);
-  const pMargin = rates.partsMargin;
-  const partsSell =
-    pMargin > 0 && pMargin < 1 ? partsCost / (1 - pMargin) : partsCost;
-  const total = serviceSell + partsSell;
-  const cost = serviceCost + partsCost;
+  // #217: the engine's finish — call-out floor, both margins, $25 rounding, typed total.
+  const fin = finishRepair({
+    serviceCost,
+    minCallout: rates.minCallout,
+    margin: rates.margin,
+    partsCost,
+    partsMargin: rates.partsMargin,
+    priceOverride,
+  });
   return {
     laborHours: hours,
     laborRate,
     laborCost,
     emergency,
     trip,
-    serviceCost,
-    serviceSellRaw,
-    serviceSell,
-    calloutApplied,
     parts: priced,
-    partsCost,
-    partsSell,
-    cost,
-    total,
-    marginAmount: total - cost,
     travel,
+    ...fin,
   };
 }
 
@@ -364,6 +360,15 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [travelDraft, setTravelDraft] = useState<TravelDraft>(() => draftFromOverride(initial.travel));
+  /* #217: the typed Total ("" = auto — rounded to the nearest $25). */
+  const [priceText, setPriceText] = useState(
+    initial.priceOverride != null ? String(initial.priceOverride) : ""
+  );
+  /** #217 D286: true while the typed total is still the untouched reopen-seed
+   *  for an old off-grid sent price — not something anyone actually typed.
+   *  Clears on any edit to the total, Reset to auto, or a new customer, so
+   *  it's never mistaken for a real hand-set price next year. */
+  const [priceOverrideSeeded, setPriceOverrideSeeded] = useState(!!initial.priceOverrideSeeded);
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
 
@@ -430,6 +435,8 @@ export function QuoteBuilder({
         setMarginPts(Math.round(seeded * 100));
     }
     setVenueSel(sel);
+    setPriceText(""); // a new customer is a new price
+    setPriceOverrideSeeded(false);
     setQuoteName(c ? c.name + " — Repair" : "");
     setContactSel(primary ? primary.name : "");
     setContactManual("");
@@ -487,10 +494,19 @@ export function QuoteBuilder({
   const partsIn: PartIn[] = parts
     .filter((p) => p.name.trim() !== "" || p.qty !== "" || p.cost !== "")
     .map((p) => ({ name: p.name.trim(), qty: +p.qty || 0, cost: +p.cost || 0 }));
+  const priceOverride = normalizePriceOverride(priceText);
   const r =
     hasCustomer && selectedVenues.length
-      ? computePricing(office, selectedVenues, crewHours, crew, partsIn, emergency, liveRates, travelRates, overrideFromDraft(travelDraft))
+      ? computePricing(office, selectedVenues, crewHours, crew, partsIn, emergency, liveRates, travelRates, overrideFromDraft(travelDraft), priceOverride)
       : null;
+
+  /** #217 — back to the auto total; the slider stays where the typed total put it. */
+  function resetToAuto() {
+    if (r?.overridden) setMarginPts(sliderPts(r.serviceMargin));
+    setPriceText("");
+    setPriceOverrideSeeded(false);
+    dirty();
+  }
 
   const canSave = hasCustomer && selectedVenues.length > 0;
   const showApprove = canSave && !isApproved;
@@ -538,6 +554,8 @@ export function QuoteBuilder({
       JSON.stringify(scopeItems.map((s) => s.trim()).filter(Boolean))
     );
     fd.set("parts", JSON.stringify(partsIn));
+    fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
+    fd.set("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded ? "1" : "");
     fd.set("sourceKind", source?.kind || "");
     fd.set("sourceRef", source?.refId || "");
     fd.set("sourceLog", source?.logId != null ? String(source.logId) : "");
@@ -1201,7 +1219,9 @@ export function QuoteBuilder({
                     marginBottom: 5,
                   }}
                 >
-                  <span style={{ color: "#5b616e" }}>Margin · {marginPts} pts</span>
+                  <span style={{ color: "#5b616e" }}>
+                    Margin · {r?.overridden ? fmtPts(r.serviceMargin) : marginPts} pts
+                  </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money((r?.serviceSell || 0) - (r?.serviceCost || 0))}
                   </span>
@@ -1211,9 +1231,11 @@ export function QuoteBuilder({
                   min={10}
                   max={50}
                   step={1}
-                  value={marginPts}
+                  value={r?.overridden ? sliderPts(r.serviceMargin) : marginPts}
                   onChange={(e) => {
                     setMarginPts(Math.round(+e.target.value));
+                    setPriceText("");
+                    setPriceOverrideSeeded(false);
                     dirty();
                   }}
                   style={{ width: "100%", accentColor: accent, cursor: "pointer", margin: "2px 0 0" }}
@@ -1256,21 +1278,24 @@ export function QuoteBuilder({
                 last
               />
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  marginTop: 13,
-                  paddingTop: 12,
-                  borderTop: "1px solid #eceef1",
+              <ServiceTotalField
+                total={total}
+                autoTotal={r?.autoTotal ?? 0}
+                cost={r?.cost ?? 0}
+                margin={r?.serviceMargin ?? 0}
+                partsSell={r?.partsSell ?? 0}
+                overridden={!!r?.overridden}
+                text={priceText}
+                onText={(t) => {
+                  setPriceText(t);
+                  setPriceOverrideSeeded(false);
+                  dirty();
                 }}
-              >
-                <span>Total</span>
-                <span style={{ fontFamily: "var(--font-mono)" }}>{money(total)}</span>
-              </div>
+                onReset={resetToAuto}
+                disabled={!r}
+                accent={accent}
+                style={{ marginTop: 13, paddingTop: 12, borderTop: "1px solid #eceef1" }}
+              />
 
               <button
                 type="button"

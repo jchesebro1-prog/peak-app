@@ -7,6 +7,7 @@ import { getRates } from "@/lib/inspection-engine";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { normalizeTravelOverride } from "@/lib/travel-plan";
+import { seedPriceOverride, seedPriceOverrideIsLegacy } from "@/lib/service-pricing";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -43,6 +44,7 @@ type InspectionDoc = {
   contact?: InContact;
   travel?: unknown;
   trip?: { mode?: string } | null;
+  priceOverride?: unknown;
 } | null;
 
 export default async function InspectionQuotePage({
@@ -166,6 +168,10 @@ export default async function InspectionQuotePage({
       level: levelMeta(insp && insp.level).key,
       notes: (insp && insp.scope) || "",
       travel: normalizeTravelOverride(insp && insp.travel) ?? (legacyDrive ? { mode: "drive" } : null),
+      // #217: reopen with the typed total; an old sent price off the $25 grid
+      // reopens typed in too, so re-saving never silently changes it (D286).
+      priceOverride: seedPriceOverride(editQuote.status, editQuote.value, insp && insp.priceOverride),
+      priceOverrideSeeded: seedPriceOverrideIsLegacy(editQuote.status, editQuote.value, insp && insp.priceOverride),
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
