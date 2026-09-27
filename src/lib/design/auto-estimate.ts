@@ -21,6 +21,7 @@ import { EQUIPMENT_ROW_BY_KEY, type EquipPlace } from "./equipment-vocab";
 import { priceCell, sellFromCost, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
 import { applyEquipment } from "./equipment-pricing";
 import { fabricAreaRateOf } from "./curtain-pricing";
+import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
 import type { AutoEstimate, AutoOverride } from "./grid-auto-model";
 import type { ScopeTargets } from "./scope-targets";
@@ -203,7 +204,7 @@ export function curtainSwapHits(
 ): AutoEquipHit[] {
   return parts.flatMap((p): AutoEquipHit[] => {
     const rate = fabricAreaRateOf(p);
-    return rate > 0 ? [{ kind: "part", ref: p.sku, desc: p.desc, unit: "sq ft", unitSell: sellFromCost(rate, margin) }] : [];
+    return rate > 0 ? [{ kind: "part", ref: p.sku, desc: p.desc, unit: FABRIC_RATE_UNIT, unitSell: sellFromCost(rate, margin) }] : [];
   });
 }
 

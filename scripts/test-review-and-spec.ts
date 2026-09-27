@@ -18264,7 +18264,7 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
     fabricHits9.length === 1 &&
       fabricHits9[0].kind === "part" &&
       fabricHits9[0].ref === "GEM9-VEL" &&
-      fabricHits9[0].unit === "sq ft" &&
+      fabricHits9[0].unit === "sq ft sewn (incl. making)" &&
       fabricHits9[0].unitSell === 5,
     "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
   );
@@ -21964,4 +21964,35 @@ import { sqftRateFromLinearYard as fab227FromLinYd, sqftRateFromSquareYard as fa
   ok(frf.includes('name="curtainAreaRate"') && frf.includes('name="boltWidthIn"') && frf.includes("$/sq ft sewn (includes making)"), "#227 catalog editor: it posts curtainAreaRate + boltWidthIn under the spec's label");
   const catPage227 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/page.tsx"), "utf8");
   ok(catPage227.includes('part?.category === "Fabric" && (') && catPage227.includes("<FabricRateField"), "#227 catalog editor: only Fabric parts show the $/sq ft field");
+}
+
+/* ====== #227 T3: labels — $X/sq ft sewn (incl. making) / No $/sq ft set ====== */
+import { fabricRateLabel as fab227Label, FABRIC_RATE_UNIT as fab227Unit, NO_FABRIC_RATE as fab227NoRate } from "@/lib/curtain-geom";
+import { priceCell as fab227PriceCell3, type PricingPart as Fab227Part3 } from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as fab227Rows3 } from "@/lib/design/equipment-vocab";
+import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
+{
+  ok(fab227Unit === "sq ft sewn (incl. making)" && fab227NoRate === "No $/sq ft set", "#227 labels: the unit and the no-rate text are the spec's words");
+  ok(fab227Label(3.64) === "$3.64/sq ft sewn (incl. making)", `#227 labels: a rate reads $X/sq ft sewn (incl. making) (got ${fab227Label(3.64)})`);
+  ok(fab227Label(0) === fab227NoRate && fab227Label(undefined) === fab227NoRate && fab227Label(null) === fab227NoRate && fab227Label(Number.NaN) === fab227NoRate, "#227 labels: no rate reads No $/sq ft set");
+
+  const hits = fab227Swap3([{ sku: "FAB227-S", desc: "velour", curtainAreaRate: 3.5 }], 0.3);
+  ok(hits.length === 1 && hits[0].unit === fab227Unit, "#227 labels: the swap search shows a fabric per sq ft sewn (incl. making)");
+
+  const drawDef = fab227Rows3.get("curtains:draw")!;
+  const ctxOf = (p: Fab227Part3) => ({ parts: new Map<string, Fab227Part3>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const bare = fab227PriceCell3({ kind: "part", sku: "FAB227-BARE" }, drawDef, ctxOf({ sku: "FAB227-BARE", desc: "Bare", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
+  ok(bare.status === "needs-part" && bare.reason === "FAB227-BARE: No $/sq ft set", "#227 labels: a rateless fabric on a curtain row is needs-a-part with No $/sq ft set");
+  const notFabric = fab227PriceCell3({ kind: "part", sku: "FAB227-HB" }, drawDef, ctxOf({ sku: "FAB227-HB", desc: "Headblock", unit: "ea", cost: 500, list: 700, category: "Rigging Hardware" }));
+  ok(notFabric.status === "needs-part" && notFabric.reason === "FAB227-HB is not a Fabric part", "#227 labels: a non-fabric part on a curtain row says so");
+
+  const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const modal = src("src/app/(app)/estimator/curtain-modal.tsx");
+  ok(modal.includes("fabricRateLabel(f.curtainAreaRate)") && !modal.includes('"/sq ft sewn"'), "#227 labels: the estimator curtain modal labels each fabric with fabricRateLabel");
+  ok(src("src/app/(app)/design/grid/[id]/curtain-drop.tsx").includes("fabricRateLabel(f.pricePerSqft)"), "#227 labels: the Grid curtain drop-in labels each fabric (No $/sq ft set when unrated)");
+  const emc227 = src("src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx");
+  ok(emc227.includes("FABRIC_RATE_UNIT") && !emc227.includes("+ making"), "#227 labels: the Equipment map cell reads per sq ft sewn (incl. making), not + making");
+  // PartFormModal is reused across parts without remounting, so the rate
+  // field's local state must be keyed per part or part A's rate saves onto B.
+  ok(/<FabricRateField[^>]*key=\{part\.sku\}/.test(src("src/app/(app)/catalog/page.tsx")), "#227 catalog editor: FabricRateField is keyed by part.sku so one part's rate never carries into the next");
 }

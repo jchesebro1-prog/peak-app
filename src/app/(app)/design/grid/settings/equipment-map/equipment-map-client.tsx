@@ -6,6 +6,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { EquipCellInput, EquipRowInput, EquipRowStatus } from "@/lib/design/equipment-map";
 import type { AssemblyOption, EquipCellVM, EquipRowVM } from "@/lib/design/equipment-map-view";
+import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
 import {
   clearEquipmentRowAction,
   saveEquipmentRowAction,
@@ -118,7 +119,7 @@ function CellSummary({ cell }: { cell: EquipCellVM }) {
       {cell.detail && <div style={{ fontSize: 11, color: "#737985", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cell.detail}</div>}
       {cell.kind !== "empty" && !cell.problem && (
         <div style={{ fontSize: 11, color: "#5b616e", marginTop: 2 }}>
-          {cell.perSqft ? `${money(cell.unitCost)} / sq ft + making` : `cost ${money(cell.unitCost)} · sell ${money(cell.unitSell)}`}
+          {cell.perSqft ? `${money(cell.unitCost)}/${FABRIC_RATE_UNIT}` : `cost ${money(cell.unitCost)} · sell ${money(cell.unitSell)}`}
         </div>
       )}
       {cell.confirmedBy && <div style={{ fontSize: 10.5, color: "#8a6d1f", marginTop: 2 }}>Confirmed by {cell.confirmedBy} · {day(cell.confirmedAt)}</div>}

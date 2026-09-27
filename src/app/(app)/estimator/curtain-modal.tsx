@@ -2,6 +2,7 @@
 
 import { computeCurtain, fmt } from "./pricing";
 import type { CurtainDraft, FabricOpt } from "./types";
+import { fabricRateLabel } from "@/lib/curtain-geom";
 import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./est-ui";
 
 /**
@@ -97,7 +98,7 @@ export default function CurtainModal({
         >
           {fabrics.map((f) => (
             <option key={f.sku} value={f.sku}>
-              {f.name + (f.curtainAreaRate ? "  ·  $" + f.curtainAreaRate.toFixed(2) + "/sq ft sewn" : "")}
+              {f.name + "  ·  " + fabricRateLabel(f.curtainAreaRate)}
             </option>
           ))}
         </select>

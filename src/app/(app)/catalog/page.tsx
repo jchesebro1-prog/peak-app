@@ -883,7 +883,12 @@ function PartFormModal({
             </div>
             {part?.category === "Fabric" && (
               <div style={{ marginTop: 13, marginBottom: 4 }}>
+                {/* key={part.sku}: PartFormModal is reused across parts without
+                    remounting (see SpecPanel below), so FabricRateField's local
+                    rate/bolt-width state would otherwise carry from one Fabric
+                    part into the next and save onto it. */}
                 <FabricRateField
+                  key={part.sku}
                   initialRate={part.curtainAreaRate ?? null}
                   initialBoltWidthIn={part.boltWidthIn ?? null}
                   fallbackRate={fabricAreaRateOf({ sku: part.sku, costPerSqft: part.costPerSqft })}

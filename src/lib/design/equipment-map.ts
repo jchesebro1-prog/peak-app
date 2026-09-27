@@ -25,6 +25,7 @@ import type { TierKey } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type EquipRowDef } from "./equipment-vocab";
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf } from "./curtain-pricing";
+import { NO_FABRIC_RATE } from "@/lib/curtain-geom";
 
 export const EQUIPMENT_MAP_BLOB = "grid_equipment_map";
 export const EQUIP_TIERS: readonly TierKey[] = ["good", "better", "best"];
@@ -218,8 +219,9 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     const p = ctx.parts.get(cell.sku);
     if (!p) return needs(`${cell.sku} is no longer in the catalog`);
     if (def.curtain) {
-      const rate = p.category === "Fabric" ? fabricAreaRateOf(p) : 0;
-      if (!(rate > 0)) return needs(`${p.sku} is not a fabric with an area rate`);
+      if (p.category !== "Fabric") return needs(`${p.sku} is not a Fabric part`);
+      const rate = fabricAreaRateOf(p);
+      if (!(rate > 0)) return needs(`${p.sku}: ${NO_FABRIC_RATE}`);
       return { status: "part", ref: p.sku, desc: p.desc, unit: def.unit, unitCost: 0, unitSell: 0, areaRate: rate };
     }
     const cost = Number(p.cost) || 0;

@@ -90,3 +90,9 @@ export function sqftRateFromLinearYard(perLinYd: number, boltWidthIn: number): n
 export function sqftRateFromSquareYard(perSqYd: number): number {
   return perSqYd > 0 ? round4(perSqYd / 9) : 0;
 }
+
+/** "$3.64/sq ft sewn (incl. making)", or "No $/sq ft set" for a missing/zero rate. */
+export function fabricRateLabel(rate: number | null | undefined): string {
+  const r = Number(rate);
+  return Number.isFinite(r) && r > 0 ? `$${r.toFixed(2)}/${FABRIC_RATE_UNIT}` : NO_FABRIC_RATE;
+}
