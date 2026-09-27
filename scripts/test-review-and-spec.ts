@@ -10528,6 +10528,7 @@ seeded()
   .then(() => daylite241AsyncChecks())
   .then(() => portal242RulesAsyncChecks())
   .then(() => portal242ImageLinksAsyncChecks())
+  .then(() => portal242ImagesTask4AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27489,4 +27490,113 @@ async function portal242ImageLinksAsyncChecks(): Promise<void> {
   const shown = await d242VisibleImages([sku]);
   ok((shown.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: unhidden — upload before datasheet-render, by source rank");
   ok(!(shown.get(sku) ?? []).some((d) => d.id === datasheet.id), "#242 images: a datasheet never appears in the image map");
+
+  // Review fix wave 2: gallery display is an image-only concept —
+  // setDocumentLinkDisplay must refuse a datasheet/spec-sheet link.
+  ok(!(await d242SetDisplay(datasheet.id, sku, { hidden: true })), "#242 images: setDocumentLinkDisplay refuses a non-image link");
+}
+
+/* ======================================================================
+   Portal catalog — Task 4: images in the staff UI (Datasheets column +
+   filter, part-editor gallery, upload many, add from URL). Pure checks
+   below; the one DB check (verifyUploadedBlob's fake-deps injection needs
+   no real DB, but is `async` like every other check that awaits — it is
+   registered in the chain as portal242ImagesTask4AsyncChecks()).
+   ====================================================================== */
+import {
+  buildImageIndex as d242BuildImageIndex,
+  imagesFor as d242ImagesFor,
+  type ImageRef as D242ImageRef,
+} from "@/lib/part-docs/views";
+{
+  // Step 1: a row's image slot counts hidden images too (staff see all),
+  // and the gallery carries hidden flags in gallery order.
+  const images: D242ImageRef[] = [
+    { id: "PD-imgvisible01", title: "Front", source: "upload", hidden: false, sort: 0, uploadedAt: 10 },
+    { id: "PD-imghidden001", title: "Backstage shot", source: "upload", hidden: true, sort: 1, uploadedAt: 20 },
+  ];
+  const idx = buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] });
+  const stat = { sku: "IMGSKU", quotes: 3, lastQuotedAt: 5, grid: 0, bidSpecs: 0 };
+  const row = documentRow(stat, { sku: "IMGSKU", desc: "Gallery part", category: "Lighting" }, idx, () => "", images);
+  ok(row.image.count === 2 && row.image.first?.id === "PD-imgvisible01", "#242 images view: a row's image count includes hidden images (staff see all) and `first` leads with gallery order");
+
+  const view = partDocsView(idx, "IMGSKU", () => "", images);
+  ok(view.images.map((i) => `${i.id}:${i.hidden}`).join(",") === "PD-imgvisible01:false,PD-imghidden001:true", "#242 images view: partDocsView's gallery carries hidden flags in gallery order");
+
+  const noImages = documentRow(stat, { sku: "NOIMGSKU", desc: "Bare part", category: "Lighting" }, idx, () => "");
+  ok(noImages.image.count === 0 && noImages.image.first === null, "#242 images view: documentRow defaults to an empty image slot when no images are passed");
+  ok(!documentRowMatches(row, parseDocumentsFilter({ show: "missing-image" })) && documentRowMatches(noImages, parseDocumentsFilter({ show: "missing-image" })), "#242 images view: the Missing image filter matches image.count === 0 only");
+
+  // buildImageIndex/imagesFor: the server's own path from loaded documents +
+  // links into that same ImageRef[] shape, no extra query.
+  const visDoc: PdDoc = { id: "PD-imgvisible01", kind: "image", title: "Front", fileName: "front.jpg", contentType: "image/jpeg", size: 1, blobKey: "part-docs/PD-imgvisible01/front.jpg", sourceUrl: null, source: "upload", uploadedAt: 10, uploadedBy: "t", history: [] };
+  const hidDoc: PdDoc = { id: "PD-imghidden001", kind: "image", title: "Backstage shot", fileName: "back.jpg", contentType: "image/jpeg", size: 1, blobKey: "part-docs/PD-imghidden001/back.jpg", sourceUrl: null, source: "upload", uploadedAt: 20, uploadedBy: "t", history: [] };
+  const imgIndex = d242BuildImageIndex(
+    [visDoc, hidDoc],
+    [
+      { id: "l1", partSku: "IMGSKU", documentId: visDoc.id, kind: "image", createdAt: 1, createdBy: "t", sort: 0, hidden: false },
+      { id: "l2", partSku: "IMGSKU", documentId: hidDoc.id, kind: "image", createdAt: 1, createdBy: "t", sort: 1, hidden: true },
+    ]
+  );
+  ok(d242ImagesFor(imgIndex, "IMGSKU").map((i) => i.id).join(",") === "PD-imgvisible01,PD-imghidden001", "#242 images view: buildImageIndex/imagesFor read the same live documents+links loadPartDocsState already loaded");
+  ok(d242ImagesFor(imgIndex, "NOBODY").length === 0, "#242 images view: an unlinked SKU gets an empty image list, not undefined");
+}
+
+/* --- #242 regression: a part linked only to an image reads "missing" for
+   the datasheet slot — coverage.ts:86 drops image links entirely, so an
+   image can never satisfy (or appear to satisfy) a coverage slot. --- */
+{
+  const imageOnlyDoc: PdDoc = {
+    id: "PD-onlyimage001", kind: "image", title: "Only image", fileName: "x.png", contentType: "image/png", size: 1,
+    blobKey: "part-docs/PD-onlyimage001/x.png", sourceUrl: null, source: "upload", uploadedAt: 1, uploadedBy: "t", history: [],
+  };
+  const idx = buildCoverageIndex({
+    documents: [imageOnlyDoc],
+    links: [{ id: "li1", partSku: "IMGONLYSKU", documentId: imageOnlyDoc.id, kind: "image", createdAt: 1, createdBy: "t" }],
+    accessoryLinks: [],
+    parts: [],
+  });
+  ok(slotCoverage(idx, "IMGONLYSKU", "datasheet").state === "missing", "#242 images: a part linked only to an image still reads 'missing' for datasheet coverage");
+}
+
+/* --- #242 regression: guessKind routes every image extension, WebP
+   included, to "image" (not just png/jpg tested in Task 3). --- */
+ok(guessKind("photo.webp") === "image" && guessKind("PHOTO.WEBP") === "image", "#242 images: guessKind routes .webp (any case) to image");
+
+async function portal242ImagesTask4AsyncChecks(): Promise<void> {
+  // verifyUploadedBlob refuses an over-cap image using the same fake-deps
+  // injection the Task-1 upload tests use, and deletes the blob — the
+  // image cap is MAX_PART_IMAGE_BYTES (10 MB), tighter than a datasheet's.
+  const removed: string[] = [];
+  const fakeImage = (bytes: Uint8Array, size: number) => ({
+    head: async () => ({ bytes, size }),
+    remove: async (p: string) => { removed.push(p); },
+  });
+  const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+  const ID = "PD-imagebig0001";
+  const big = await verifyUploadedBlob(
+    { documentId: ID, blobPathname: `part-docs/${ID}/big.png`, fileName: "big.png", kind: "image" },
+    fakeImage(pngBytes, 11 * 1024 * 1024)
+  );
+  ok(!big.ok && big.error === "That file is over 10 MB." && removed.includes(`part-docs/${ID}/big.png`), "#242 images upload: an 11 MB image is refused (10 MB cap, not the 25 MB doc cap) and its blob deleted");
+
+  const ok10mb = await verifyUploadedBlob(
+    { documentId: ID, blobPathname: `part-docs/${ID}/ok.jpg`, fileName: "photo.jpg", kind: "image" },
+    fakeImage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]), 9 * 1024 * 1024)
+  );
+  ok(ok10mb.ok && ok10mb.file.fileName === "photo.jpg" && ok10mb.file.contentType === "image/jpeg", "#242 images upload: a 9 MB JPEG under the cap is accepted, and displayFileName keeps the user's .jpg rather than renaming it to .jpeg");
+
+  // setDocumentLinkDisplay refuses a live but non-image link (review fix
+  // wave 2) — exercised here against a real datasheet link, distinct from
+  // the fixture-only pure checks above.
+  const sku = fixtureId(242, "sku-nonimg-display");
+  const ds = await d242CreateDoc({
+    kind: "datasheet", fileName: "ds.pdf", contentType: "application/pdf", size: 10,
+    blobKey: "part-docs/PD-t4-nonimg/ds.pdf", sourceUrl: null, source: "upload", by: "Test",
+  });
+  if (!ds) throw new Error("#242 images: fixture datasheet failed to create");
+  registerFixture("part_documents", ds.id);
+  await d242Attach(ds.id, [sku], "Test");
+  registerFixture("part_document_links", d242LinkId(sku, ds.id));
+  ok(!(await d242SetDisplay(ds.id, sku, { sort: 0 })), "#242 images upload: setDocumentLinkDisplay refuses a live datasheet link — gallery order/visibility is image-only");
 }

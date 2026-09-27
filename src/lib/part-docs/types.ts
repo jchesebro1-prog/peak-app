@@ -37,6 +37,15 @@ export function isPartDocKind(v: unknown): v is PartDocKind {
   return v === "datasheet" || v === "specsheet" || v === "image";
 }
 
+/** Narrower than isPartDocKind (#242 review fix): true only for the two
+ *  coverage-slot kinds. `fetchLinksAction` and `setNotNeededAction` are both
+ *  slot-only operations — an image kind slipping past a check built on the
+ *  wider isPartDocKind would let a client ask to "fetch" or "mark not
+ *  needed" an image, neither of which the image slot supports. */
+export function isDocSlotKind(v: unknown): v is DocSlotKind {
+  return v === "datasheet" || v === "specsheet";
+}
+
 export type PartDocumentSource = "upload" | "fetch" | "davinci" | "legacy" | "datasheet-render";
 
 /** A file this document used to hold. Replacing never deletes the blob (§2.4). */
@@ -121,6 +130,18 @@ export const MAX_PART_IMAGE_BYTES = 10 * 1024 * 1024;
 export function maxBytesFor(kind: PartDocKind): number {
   return kind === "image" ? MAX_PART_IMAGE_BYTES : MAX_PART_DOC_BYTES;
 }
+
+/** Gallery ordering rank for an image link (#242) — lower sorts first.
+ *  Shared by the store's customer-facing read (`visibleImagesForParts`) and
+ *  the staff view builder (`src/lib/part-docs/views.ts`'s `buildImageIndex`)
+ *  so both order a part's images identically. */
+export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
+  upload: 0,
+  fetch: 1,
+  davinci: 2,
+  "datasheet-render": 3,
+  legacy: 4,
+};
 
 /** Slots fetched per server-action call — each can take up to the fetcher's
  *  30 s timeout, so the page loops over a selection in batches this size. */

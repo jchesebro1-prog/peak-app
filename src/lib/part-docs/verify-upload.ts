@@ -19,10 +19,17 @@ export type VerifyDeps = {
 
 const liveDeps: VerifyDeps = { head: getBlobHead, remove: deleteBlob };
 
+/** jpg and jpeg are the same sniffed type (#242 review fix) — a file the
+ *  user named "photo.jpg" must stay "photo.jpg" when the bytes sniff as
+ *  "jpeg", not get renamed to "photo.jpeg" just because the literal
+ *  extension differs from the sniffed type's own spelling. */
+const EQUIVALENT_EXTENSION: Partial<Record<SniffedType, RegExp>> = { jpeg: /\.jpe?g$/i };
+
 /** Keep the user's name for display, capped, with an extension that matches the bytes. */
 export function displayFileName(raw: string, type: SniffedType): string {
   const name = String(raw ?? "").split(/[\\/]/).pop()!.trim().slice(0, 180) || "document";
-  return new RegExp(`\\.${type}$`, "i").test(name) ? name : `${name.replace(/\.(pdf|docx?|png|jpe?g|webp)$/i, "")}.${type}`;
+  const matchesType = (EQUIVALENT_EXTENSION[type] ?? new RegExp(`\\.${type}$`, "i")).test(name);
+  return matchesType ? name : `${name.replace(/\.(pdf|docx?|png|jpe?g|webp)$/i, "")}.${type}`;
 }
 
 export async function verifyUploadedBlob(

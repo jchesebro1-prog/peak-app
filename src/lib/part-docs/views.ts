@@ -6,7 +6,7 @@ import {
   type SlotCoverage,
 } from "./coverage";
 import type { QuotedPartStat } from "./quoted-parts";
-import type { DocSlotKind, PartDocKind } from "./types";
+import { IMAGE_SOURCE_RANK, type DocSlotKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
@@ -65,6 +65,68 @@ export function viewSatisfied(v: SlotView): boolean {
   return v.state === "own" || v.state === "not-needed" || v.state === "covered";
 }
 
+/**
+ * Images (#242) are a gallery, not a coverage slot — `buildCoverageIndex`
+ * drops them entirely (coverage.ts:86), so they need their own data path
+ * into these views rather than riding through `CoverageIndex`. `ImageRef` is
+ * the small, pure shape both `documentRow` and `partDocsView` take; the
+ * server builds one `Map<sku, ImageRef[]>` per request with `buildImageIndex`
+ * from the same `documents`/`links` arrays `loadPartDocsState` already loads
+ * (no extra query).
+ */
+export type ImageRef = { id: string; title: string; source: PartDocumentSource; hidden: boolean; sort: number | null; uploadedAt: number };
+
+export type ImageSlotView = { count: number; first: { id: string; title: string } | null };
+
+/** Gallery order (#242): source rank first (upload, fetch, davinci,
+ *  datasheet-render, legacy — IMAGE_SOURCE_RANK), then explicit `sort`
+ *  (missing sorts last), then upload time. The same order
+ *  `visibleImagesForParts` uses for the customer-facing read; staff (this
+ *  module) additionally see hidden images, unlike that customer read. */
+function sortImages(images: readonly ImageRef[]): ImageRef[] {
+  return [...images].sort((a, b) => {
+    const rank = IMAGE_SOURCE_RANK[a.source] - IMAGE_SOURCE_RANK[b.source];
+    if (rank) return rank;
+    const sortA = a.sort ?? Infinity;
+    const sortB = b.sort ?? Infinity;
+    if (sortA !== sortB) return sortA - sortB;
+    return a.uploadedAt - b.uploadedAt;
+  });
+}
+
+/** Every live image link, by SKU, in gallery order — hidden ones included
+ *  (staff see all; #242). Built from the same `documents`/`links` arrays
+ *  `loadPartDocsState` already loads, so this needs no extra query. */
+export function buildImageIndex(documents: readonly PartDocument[], links: readonly PartDocumentLink[]): Map<string, ImageRef[]> {
+  const docsById = new Map(documents.map((d) => [d.id, d] as const));
+  const bySku = new Map<string, ImageRef[]>();
+  const seen = new Set<string>();
+  for (const l of links) {
+    const doc = docsById.get(l.documentId);
+    if (!doc || doc.kind !== "image") continue;
+    const key = `${l.partSku}\u0000${doc.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const ref: ImageRef = { id: doc.id, title: doc.title, source: doc.source, hidden: !!l.hidden, sort: l.sort ?? null, uploadedAt: doc.uploadedAt };
+    const list = bySku.get(l.partSku);
+    if (list) list.push(ref);
+    else bySku.set(l.partSku, [ref]);
+  }
+  for (const [sku, list] of bySku) bySku.set(sku, sortImages(list));
+  return bySku;
+}
+
+export function imagesFor(index: ReadonlyMap<string, ImageRef[]>, sku: string): ImageRef[] {
+  return index.get(sku) ?? [];
+}
+
+/** `count` includes hidden images — staff see all (#242); `first` is the
+ *  gallery's lead image for a thumbnail. */
+export function imageSlotView(images: readonly ImageRef[]): ImageSlotView {
+  const sorted = sortImages(images);
+  return { count: sorted.length, first: sorted[0] ? { id: sorted[0].id, title: sorted[0].title } : null };
+}
+
 export type DocumentRow = {
   sku: string;
   mfr: string;
@@ -75,11 +137,12 @@ export type DocumentRow = {
   lastQuotedAt: number | null;
   datasheet: SlotView;
   specsheet: SlotView;
+  image: ImageSlotView;
 };
 
 export type RowPart = { sku: string; desc: string; category: string; mfr?: string; manufacturerModelNumber?: string; manufacturerPartNumber?: string };
 
-export function documentRow(stat: QuotedPartStat, part: RowPart, index: CoverageIndex, descOf: (sku: string) => string): DocumentRow {
+export function documentRow(stat: QuotedPartStat, part: RowPart, index: CoverageIndex, descOf: (sku: string) => string, images: readonly ImageRef[] = []): DocumentRow {
   return {
     sku: part.sku,
     mfr: part.mfr || "",
@@ -90,14 +153,16 @@ export function documentRow(stat: QuotedPartStat, part: RowPart, index: Coverage
     lastQuotedAt: stat.lastQuotedAt,
     datasheet: slotViewFor(index, part.sku, "datasheet", descOf),
     specsheet: slotViewFor(index, part.sku, "specsheet", descOf),
+    image: imageSlotView(images),
   };
 }
 
-export type DocumentsShow = "all" | "missing-datasheet" | "missing-specsheet" | "link" | "covered";
+export type DocumentsShow = "all" | "missing-datasheet" | "missing-specsheet" | "missing-image" | "link" | "covered";
 export const DOCUMENTS_SHOW: Array<{ value: DocumentsShow; label: string }> = [
   { value: "all", label: "All quoted parts" },
   { value: "missing-datasheet", label: "Missing datasheet" },
   { value: "missing-specsheet", label: "Missing spec sheet" },
+  { value: "missing-image", label: "Missing image" },
   { value: "link", label: "Link to fetch" },
   { value: "covered", label: "Covered by a fixture" },
 ];
@@ -120,6 +185,7 @@ export function documentRowMatches(r: DocumentRow, f: DocumentsFilter): boolean 
   if (f.cat && r.category !== f.cat) return false;
   if (f.show === "missing-datasheet" && viewSatisfied(r.datasheet)) return false;
   if (f.show === "missing-specsheet" && viewSatisfied(r.specsheet)) return false;
+  if (f.show === "missing-image" && r.image.count > 0) return false;
   if (f.show === "link" && r.datasheet.state !== "link-only" && r.specsheet.state !== "link-only") return false;
   if (f.show === "covered" && r.datasheet.state !== "covered" && r.specsheet.state !== "covered") return false;
   if (f.q) {
@@ -149,6 +215,11 @@ export type PartDocRow = {
   history: Array<{ index: number; fileName: string; replacedAt: number; replacedBy: string }>;
 };
 
+/** One image in the part editor's gallery (#242) — staff see hidden images
+ *  too, with their `sort`/`hidden` and a source label the client maps to
+ *  copy ("Upload" / "From URL" / "Datasheet thumbnail" / …). */
+export type PartDocsImage = { id: string; title: string; source: PartDocumentSource; hidden: boolean; sort: number | null };
+
 /** The part editor's Documents section (#207, spec §3). */
 export type PartDocsView = {
   sku: string;
@@ -159,9 +230,11 @@ export type PartDocsView = {
   coveredBy: Array<PartRef & { kinds: PartDocKind[] }>;
   /** Parts this one covers (its accessories). */
   accessories: PartRef[];
+  /** The image gallery, in display order (#242). */
+  images: PartDocsImage[];
 };
 
-export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: string) => string): PartDocsView {
+export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: string) => string, images: readonly ImageRef[] = []): PartDocsView {
   const linked = index.docsBySku.get(sku);
   const documents = [...(linked?.datasheet ?? []), ...(linked?.specsheet ?? [])]
     .sort((a, b) => b.uploadedAt - a.uploadedAt)
@@ -189,5 +262,6 @@ export function partDocsView(index: CoverageIndex, sku: string, descOf: (sku: st
     documents,
     coveredBy,
     accessories: (index.childrenOf.get(sku) ?? []).map((s) => ({ sku: s, desc: descOf(s) })),
+    images: sortImages(images).map(({ id, title, source, hidden, sort }) => ({ id, title, source, hidden, sort })),
   };
 }

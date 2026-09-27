@@ -1,6 +1,6 @@
 import { upload } from "@vercel/blob/client";
 import { contentTypeForFileName } from "@/lib/part-docs/files";
-import { MAX_PART_DOC_BYTES, newDocumentId, partDocBlobPath, type PartDocKind } from "@/lib/part-docs/types";
+import { maxBytesFor, newDocumentId, partDocBlobPath, type PartDocKind } from "@/lib/part-docs/types";
 import { attachUploadedDocumentAction, replaceDocumentFileAction } from "./actions";
 
 /**
@@ -14,9 +14,17 @@ type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 /** Quick refusals before any bytes move. The server re-checks the real bytes. */
 export function preflight(file: File, kind: PartDocKind): string | null {
-  if (file.size > MAX_PART_DOC_BYTES) return `${file.name} is over 25 MB.`;
-  const ok = kind === "datasheet" ? /\.pdf$/i.test(file.name) : /\.(pdf|docx?)$/i.test(file.name);
-  if (!ok) return kind === "datasheet" ? `${file.name} is not a PDF.` : `${file.name} is not a PDF or Word file.`;
+  const cap = maxBytesFor(kind);
+  if (file.size > cap) return `${file.name} is over ${Math.round(cap / (1024 * 1024))} MB.`;
+  const ok =
+    kind === "datasheet" ? /\.pdf$/i.test(file.name) :
+    kind === "image" ? /\.(png|jpe?g|webp)$/i.test(file.name) :
+    /\.(pdf|docx?)$/i.test(file.name);
+  if (!ok) {
+    return kind === "datasheet" ? `${file.name} is not a PDF.`
+      : kind === "image" ? `${file.name} is not a PNG, JPEG, or WebP image.`
+      : `${file.name} is not a PDF or Word file.`;
+  }
   return null;
 }
 

@@ -1,12 +1,167 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { dateYear } from "@/lib/format";
 import { collapseList } from "@/lib/part-docs/coverage";
-import { PART_DOC_KINDS, PART_DOC_KIND_LABEL } from "@/lib/part-docs/types";
-import type { PartDocsView } from "@/lib/part-docs/views";
+import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocumentSource } from "@/lib/part-docs/types";
+import type { PartDocsImage, PartDocsView } from "@/lib/part-docs/views";
 import AlsoCovers from "./documents/also-covers";
+import { addImageFromUrlAction, setImageDisplayAction } from "./documents/actions";
 import SlotCell, { docHref } from "./documents/slot-cell";
+import { uploadNewDocument } from "./documents/upload-client";
+
+/** Gallery source label (#242) — what the brief's spec calls "Upload · From
+ *  URL · Datasheet thumbnail"; davinci/legacy fall back to their own name
+ *  since an image rarely carries either today. */
+const IMAGE_SOURCE_LABEL: Record<PartDocumentSource, string> = {
+  upload: "Upload",
+  fetch: "From URL",
+  "datasheet-render": "Datasheet thumbnail",
+  davinci: "DaVinci",
+  legacy: "Legacy",
+};
+
+const smallLink: React.CSSProperties = { border: "none", background: "none", padding: 0, color: "var(--accent)", fontWeight: 600, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-ui)" };
+
+function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  const [url, setUrl] = useState("");
+  const [, startTransition] = useTransition();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const run = (label: string, fn: () => Promise<{ ok: boolean; error?: string }>) => {
+    setError(null);
+    setBusy(label);
+    startTransition(async () => {
+      const r = await fn();
+      setBusy(null);
+      if (!r.ok) setError(r.error || "That didn't work.");
+      else router.refresh();
+    });
+  };
+
+  const onFile = (file: File) => {
+    setError(null);
+    setBusy("Uploading…");
+    startTransition(async () => {
+      const r = await uploadNewDocument(file, "image", [sku]);
+      setBusy(null);
+      if (!r.ok) setError(r.error || "That didn't work.");
+      else router.refresh();
+    });
+  };
+
+  const addFromUrl = () => {
+    const u = url.trim();
+    if (!u) return;
+    run("Fetching…", async () => {
+      const r = await addImageFromUrlAction({ sku, url: u });
+      if (r.ok) setUrl("");
+      return r;
+    });
+  };
+
+  /** Reassign an explicit `sort` (0..n-1) to every image in `next`'s order —
+   *  simplest way to persist a ↑/↓ move regardless of whether any image had
+   *  an explicit sort before. */
+  const persistOrder = (next: PartDocsImage[]) => {
+    run("Saving…", async () => {
+      for (let i = 0; i < next.length; i++) {
+        const r = await setImageDisplayAction({ documentId: next[i].id, sku, sort: i });
+        if (!r.ok) return r;
+      }
+      return { ok: true };
+    });
+  };
+
+  const move = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= images.length) return;
+    const next = [...images];
+    [next[index], next[target]] = [next[target], next[index]];
+    persistOrder(next);
+  };
+
+  const toggleHidden = (image: PartDocsImage) => run("Saving…", () => setImageDisplayAction({ documentId: image.id, sku, hidden: !image.hidden }));
+
+  const dropProps = {
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOver(true);
+    },
+    onDragLeave: () => setOver(false),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOver(false);
+      const f = e.dataTransfer.files?.[0];
+      if (f) onFile(f);
+    },
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 600, color: "#5b616e", marginBottom: 4 }}>Images{images.length ? ` (${images.length})` : ""}</div>
+      {!!images.length && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
+          {images.map((img, i) => (
+            <div key={img.id} style={{ width: 120, opacity: img.hidden ? 0.55 : 1 }}>
+              <a href={docHref(img.id)} target="_blank" rel="noopener noreferrer">
+                <img src={docHref(img.id)} alt={img.title} style={{ width: 120, height: 90, objectFit: "cover", borderRadius: 7, border: "1px solid #e3e5ea", display: "block" }} />
+              </a>
+              <div style={{ fontSize: 10.5, color: "#8c919c", margin: "3px 0" }}>{IMAGE_SOURCE_LABEL[img.source] ?? img.source}</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <button type="button" style={smallLink} disabled={!!busy || i === 0} onClick={() => move(i, -1)} aria-label={`Move ${img.title} up`}>↑</button>
+                <button type="button" style={smallLink} disabled={!!busy || i === images.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${img.title} down`}>↓</button>
+                <button type="button" style={smallLink} disabled={!!busy} onClick={() => toggleHidden(img)}>
+                  {img.hidden ? "Show" : "Hide from customers"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div {...dropProps} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) onFile(f);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={!!busy}
+          style={{ border: "1px dashed #c9cdd5", borderRadius: 7, background: over ? "#f4f6fb" : "#fff", color: "#6b7079", fontSize: 11.5, padding: "5px 10px", cursor: "pointer" }}
+        >
+          Drop image or click
+        </button>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="Add image from URL…"
+            aria-label="Add image from URL"
+            style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7, border: "1px solid #dfe2e8", minWidth: 220 }}
+          />
+          <button type="button" className="pk-btn-outline" disabled={!!busy || !url.trim()} onClick={addFromUrl}>
+            Add
+          </button>
+        </span>
+        {busy && <span style={{ fontSize: 11.5, color: "#8c919c" }}>{busy}</span>}
+      </div>
+      {error && <div role="alert" style={{ marginTop: 4, fontSize: 11, color: "#b4543a" }}>{error}</div>}
+    </div>
+  );
+}
 
 /**
  * The part editor's Documents section (#207, spec §3): the two slots (same
@@ -37,6 +192,8 @@ export default function PartDocumentsSection({ view }: { view: PartDocsView }) {
           </div>
         ))}
       </div>
+
+      <ImagesGallery sku={view.sku} images={view.images} />
 
       {!!view.documents.length && (
         <div style={{ marginTop: 12 }}>

@@ -107,16 +107,22 @@ export function checkDocumentBytes(kind: PartDocKind, bytes: Uint8Array): { ok: 
   return { ok: true, type, contentType: CONTENT_TYPES[type] };
 }
 
+/** By file name only (no bytes to sniff) — used for a history entry's
+ *  content type, which the team route serves by name alone (#242: png/jpg/
+ *  jpeg/webp join the pre-existing doc/docx/pdf set). */
 export function contentTypeForFileName(fileName: string): string {
   const n = fileName.toLowerCase();
   if (n.endsWith(".docx")) return CONTENT_TYPES.docx;
   if (n.endsWith(".doc")) return CONTENT_TYPES.doc;
+  if (n.endsWith(".png")) return CONTENT_TYPES.png;
+  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return CONTENT_TYPES.jpeg;
+  if (n.endsWith(".webp")) return CONTENT_TYPES.webp;
   return CONTENT_TYPES.pdf;
 }
 
 /** Make a file name end in the extension its bytes actually have. */
 export function withExtension(fileName: string, type: SniffedType): string {
-  const base = fileName.replace(/\.(pdf|docx?|aspx|php|html?)$/i, "");
+  const base = fileName.replace(/\.(pdf|docx?|aspx|php|html?|png|jpe?g|webp)$/i, "");
   return `${base || "document"}.${type}`;
 }
 

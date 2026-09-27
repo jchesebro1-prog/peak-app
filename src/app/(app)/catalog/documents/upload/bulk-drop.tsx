@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocKind } from "@/lib/part-docs/types";
+import { ALL_PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocKind } from "@/lib/part-docs/types";
 import { matchFilesAction, searchPartsAction, type FileMatchRow, type PartHit } from "../actions";
 import { preflight, uploadNewDocument } from "../upload-client";
 
@@ -21,7 +21,7 @@ type Row = FileMatchRow & {
   message?: string;
 };
 
-const DOC_FILE = /\.(pdf|docx?)$/i;
+const DOC_FILE = /\.(pdf|docx?|png|jpe?g|webp)$/i;
 
 /** Every file under a dropped folder (Chrome/Safari/Firefox entries API). */
 async function filesFromEntry(entry: FileSystemEntry): Promise<File[]> {
@@ -145,10 +145,10 @@ export default function BulkDrop() {
         style={{ padding: 28, textAlign: "center", border: over ? "2px dashed var(--accent)" : "2px dashed #d7dbe2", marginBottom: 14 }}
       >
         <div style={{ fontSize: 14, fontWeight: 600 }}>Drop a folder or files here</div>
-        <div style={{ fontSize: 12, color: "#8c919c", margin: "6px 0 12px" }}>PDF, DOC, DOCX · up to 25 MB each</div>
+        <div style={{ fontSize: 12, color: "#8c919c", margin: "6px 0 12px" }}>PDF, DOC, DOCX, PNG, JPEG, WebP · up to 25 MB each (images up to 10 MB)</div>
         <label className="pk-btn-outline" style={{ cursor: "pointer", marginRight: 8 }}>
           Choose files
-          <input type="file" multiple accept=".pdf,.doc,.docx" style={{ display: "none" }} onChange={(e) => { const f = [...(e.target.files || [])]; e.target.value = ""; addFiles(f); }} />
+          <input type="file" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp" style={{ display: "none" }} onChange={(e) => { const f = [...(e.target.files || [])]; e.target.value = ""; addFiles(f); }} />
         </label>
         <label className="pk-btn-outline" style={{ cursor: "pointer" }}>
           Choose a folder
@@ -191,7 +191,7 @@ export default function BulkDrop() {
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.fileName}>{r.fileName}</td>
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4" }}>
                       <select aria-label={`Kind for ${r.fileName}`} value={r.kind} disabled={r.status === "done"} onChange={(e) => patch(r.key, { kind: e.target.value as PartDocKind })} style={{ fontSize: 12, padding: "4px 6px", borderRadius: 6, border: "1px solid #dfe2e8" }}>
-                        {PART_DOC_KINDS.map((k) => <option key={k} value={k}>{PART_DOC_KIND_LABEL[k]}</option>)}
+                        {ALL_PART_DOC_KINDS.map((k) => <option key={k} value={k}>{PART_DOC_KIND_LABEL[k]}</option>)}
                       </select>
                     </td>
                     <td style={{ padding: 8, borderTop: "1px solid #f0f1f4", fontSize: 12, color: CONF[r.confidence].color, fontWeight: 600 }}>{CONF[r.confidence].label}</td>

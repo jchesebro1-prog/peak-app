@@ -12,6 +12,7 @@ import {
   type DocBatchOpts,
 } from "@/db/doc-store";
 import {
+  IMAGE_SOURCE_RANK,
   isDocumentId,
   newDocumentId,
   type PartDocKind,
@@ -261,10 +262,14 @@ export async function detachDocument(documentId: string, partSku: string): Promi
 }
 
 /** Gallery display for one image link (#242) — `sort`/`hidden` on the
- *  part↔document link row, never on the shared document. True when a live
- *  link was patched. */
+ *  part↔document link row, never on the shared document. Refuses (returns
+ *  false) for a link that isn't live or whose own `kind` isn't "image" —
+ *  gallery order/visibility is an image-only concept (review fix wave 2).
+ *  True when a live image link was patched. */
 export async function setDocumentLinkDisplay(documentId: string, partSku: string, patch: { sort?: number; hidden?: boolean }): Promise<boolean> {
   const id = documentLinkId(partSku, documentId);
+  const link = await getDoc<PartDocumentLink>("part_document_links", id);
+  if (!link || link.kind !== "image") return false;
   const updated = await patchDoc<PartDocumentLink>("part_document_links", id, (d) => ({
     ...d,
     ...("sort" in patch ? { sort: patch.sort } : {}),
@@ -272,15 +277,6 @@ export async function setDocumentLinkDisplay(documentId: string, partSku: string
   }));
   return !!updated;
 }
-
-/** Source rank for gallery ordering (#242) — lower sorts first. */
-const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
-  upload: 0,
-  fetch: 1,
-  davinci: 2,
-  "datasheet-render": 3,
-  legacy: 4,
-};
 
 /**
  * Each part's non-hidden, live image links (#242), ordered by source rank

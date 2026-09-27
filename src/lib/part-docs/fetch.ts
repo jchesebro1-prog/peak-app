@@ -1,5 +1,5 @@
 import { guardedFetchBytes, type GuardedFetchErrorText } from "@/lib/venue-calendar-fetch";
-import { MAX_FETCH_TIMEOUT_MS, MAX_PART_DOC_BYTES } from "./types";
+import { MAX_FETCH_TIMEOUT_MS, MAX_PART_DOC_BYTES, MAX_PART_IMAGE_BYTES } from "./types";
 
 /**
  * Server-side download of a manufacturer document URL (#207, spec §6).
@@ -45,6 +45,36 @@ export async function fetchDocumentBytes(rawUrl: string, deps: FetchDeps = {}): 
     userAgent: "peak-app/1.0 (Peak Systems Group part documents)",
     deps: { fetchImpl: deps.fetchImpl, isUnsafeHost: deps.isUnsafeHost },
     errorText: PART_DOC_ERROR_TEXT,
+  });
+  if (!got.ok) return got;
+  return { ok: true, file: { bytes: got.bytes, contentDisposition: got.contentDisposition, finalUrl: got.finalUrl } };
+}
+
+/** This caller's own wording — the tighter 10 MB image cap gets its own
+ *  "over N MB" text rather than reusing PART_DOC_ERROR_TEXT's 25 MB one. */
+const PART_IMAGE_ERROR_TEXT: Required<GuardedFetchErrorText> = {
+  httpStatus: (status) => `The link returned HTTP ${status}.`,
+  tooLarge: `That file is over ${Math.round(MAX_PART_IMAGE_BYTES / (1024 * 1024))} MB.`,
+  timeout: "The link took too long to respond.",
+  network: "Could not reach that link.",
+};
+
+/** "Add image from URL" (#242) — the same guarded download as
+ *  fetchDocumentBytes, over the same guardedFetchBytes core, but with an
+ *  image accept header and the tighter MAX_PART_IMAGE_BYTES cap. The caller
+ *  still sniffs the real bytes (sniffImageType) — a server's Content-Type
+ *  header is never trusted either. */
+export async function fetchImageBytes(rawUrl: string, deps: FetchDeps = {}): Promise<{ ok: true; file: FetchedFile } | { ok: false; error: string }> {
+  if (!/^https?:\/\//i.test(String(rawUrl ?? "").trim())) return { ok: false, error: "Only http(s) links can be fetched." };
+
+  const got = await guardedFetchBytes(rawUrl, {
+    maxBytes: deps.maxBytes ?? MAX_PART_IMAGE_BYTES,
+    timeoutMs: deps.timeoutMs ?? MAX_FETCH_TIMEOUT_MS,
+    maxRedirects: MAX_REDIRECTS,
+    accept: "image/png, image/jpeg, image/webp, */*",
+    userAgent: "peak-app/1.0 (Peak Systems Group part documents)",
+    deps: { fetchImpl: deps.fetchImpl, isUnsafeHost: deps.isUnsafeHost },
+    errorText: PART_IMAGE_ERROR_TEXT,
   });
   if (!got.ok) return got;
   return { ok: true, file: { bytes: got.bytes, contentDisposition: got.contentDisposition, finalUrl: got.finalUrl } };

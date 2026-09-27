@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
-import { blobEnabled } from "@/lib/blob";
+import { blobEnabled, putBlob } from "@/lib/blob";
 import { searchDocs } from "@/db/doc-store";
 import { get as getPart, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import {
@@ -12,9 +12,12 @@ import {
   detachDocument,
   getDocument,
   replaceDocumentFile,
+  setDocumentLinkDisplay,
 } from "@/lib/stores/part-documents";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
+import { fetchImageBytes } from "@/lib/part-docs/fetch";
+import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
@@ -24,8 +27,11 @@ import {
   FETCH_BATCH_SIZE,
   PREFILL_ACTION_BUDGET_MS,
   PREFILL_CHUNK_WORST_CASE_MS,
+  isDocSlotKind,
   isDocumentId,
   isPartDocKind,
+  newDocumentId,
+  partDocBlobPath,
   type PartDocKind,
 } from "@/lib/part-docs/types";
 import { verifyUploadedBlob } from "@/lib/part-docs/verify-upload";
@@ -176,7 +182,7 @@ export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: 
   await requireUser();
   // Not-needed is a coverage-slot concept only (#242) — narrows kind to
   // DocSlotKind for setDocNotNeeded below; an image is never "not needed".
-  if (kind !== "datasheet" && kind !== "specsheet") return { ok: false, error: "Pick Datasheet or Spec sheet." };
+  if (!isDocSlotKind(kind)) return { ok: false, error: "Pick Datasheet or Spec sheet." };
   const changed = await setDocNotNeeded((skus || []).slice(0, MAX_SKUS_PER_CALL), kind, !!on);
   revalidate();
   return { ok: true, changed };
@@ -210,7 +216,7 @@ export async function fetchLinksAction(targets: FetchTarget[]): Promise<DocActio
   if (!blobEnabled()) {
     return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be fetched on this deployment." };
   }
-  const batch = (targets || []).filter((t) => t && typeof t.sku === "string" && isPartDocKind(t.kind)).slice(0, FETCH_BATCH_SIZE);
+  const batch = (targets || []).filter((t) => t && typeof t.sku === "string" && isDocSlotKind(t.kind)).slice(0, FETCH_BATCH_SIZE);
   if (!batch.length) return { ok: true, results: [] };
   const ctx = buildFetchContext(await loadPartDocsState(await listCatalog()));
   const results: FetchOutcome[] = [];
@@ -322,4 +328,67 @@ export async function prefillFromDavinciAction(): Promise<DocActionResult<{ summ
       `(${plan.stats.typesMatched} DaVinci types matched ${plan.stats.parts} ETC parts).` +
       (r.complete ? "" : " Not finished within this request's time limit — click Pre-fill from DaVinci again to continue where it stopped."),
   };
+}
+
+/** Reorder or hide/show one image in a part's gallery (#242). `setDocumentLinkDisplay`
+ *  itself refuses a non-image link, so a bad documentId/sku pair or a
+ *  datasheet/spec-sheet id passed here both come back as the same "not
+ *  linked" refusal. */
+export async function setImageDisplayAction(input: { documentId: string; sku: string; sort?: number; hidden?: boolean }): Promise<DocActionResult> {
+  await requireUser();
+  if (!isDocumentId(input.documentId)) return { ok: false, error: "Not a document id." };
+  const sku = String(input.sku || "").trim();
+  if (!sku) return { ok: false, error: "Missing part." };
+  const patch: { sort?: number; hidden?: boolean } = {};
+  if (typeof input.sort === "number") patch.sort = input.sort;
+  if (typeof input.hidden === "boolean") patch.hidden = input.hidden;
+  const ok = await setDocumentLinkDisplay(input.documentId, sku, patch);
+  if (!ok) return { ok: false, error: "That image isn't linked to this part." };
+  revalidate();
+  return { ok: true };
+}
+
+/** "Add image from URL" (#242) — download it through the same guarded fetch
+ *  (SSRF guard, redirect re-validation) `fetchSlot` uses for datasheets, but
+ *  with an image accept header and the tighter 10 MB image cap
+ *  (fetchImageBytes); check the real bytes with `sniffImageType` (a
+ *  server's Content-Type header is never trusted); store it and attach it
+ *  as a new image document, linked to `sku`. */
+export async function addImageFromUrlAction(input: { sku: string; url: string }): Promise<DocActionResult<{ documentId: string }>> {
+  const user = await requireUser();
+  const sku = String(input.sku || "").trim();
+  if (!sku) return { ok: false, error: "Missing part." };
+  if (!(await getPart(sku))) return { ok: false, error: "That part is no longer in the catalog." };
+  if (!blobEnabled()) {
+    return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be fetched on this deployment." };
+  }
+  const url = String(input.url || "").trim();
+  const got = await fetchImageBytes(url);
+  if (!got.ok) return { ok: false, error: got.error };
+  const imageType = sniffImageType(got.file.bytes);
+  if (!imageType) return { ok: false, error: "That link is not a PNG, JPEG, or WebP image." };
+
+  const documentId = newDocumentId();
+  const fileName = fileNameForFetched(got.file.contentDisposition, got.file.finalUrl, "image", imageType === "image/png" ? "png" : imageType === "image/jpeg" ? "jpeg" : "webp");
+  let stored: { pathname: string };
+  try {
+    stored = await putBlob(partDocBlobPath(documentId, fileName), Buffer.from(got.file.bytes), imageType);
+  } catch {
+    return { ok: false, error: "Could not store the file." };
+  }
+  const doc = await createDocument({
+    id: documentId,
+    kind: "image",
+    fileName,
+    contentType: imageType,
+    size: got.file.bytes.byteLength,
+    blobKey: stored.pathname,
+    sourceUrl: url,
+    source: "fetch",
+    by: user.name,
+  });
+  if (!doc) return { ok: false, error: "Could not record the document." };
+  await attachDocument(doc.id, [sku], user.name);
+  revalidate();
+  return { ok: true, documentId: doc.id };
 }

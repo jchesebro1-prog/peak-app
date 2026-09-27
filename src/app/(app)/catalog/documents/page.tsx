@@ -10,9 +10,11 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ensureFixturesConverted } from "@/lib/fixtures-migrate";
 import { quotedPartStats, rankQuotedParts } from "@/lib/part-docs/quoted-parts";
 import {
+  buildImageIndex,
   DOCUMENTS_SHOW,
   documentRow,
   documentRowMatches,
+  imagesFor,
   parseDocumentsFilter,
   progressLine,
   type DocumentRow,
@@ -60,7 +62,10 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
     return !!p && p.category !== "Labor";
   });
   const descOf = (sku: string) => bySku.get(sku)?.desc ?? "";
-  const all: DocumentRow[] = rankQuotedParts(stats.values()).map((s) => documentRow(s, bySku.get(s.sku)!, state.index, descOf));
+  // Images never route through CoverageIndex (coverage.ts drops them) — one
+  // extra Map built from the same documents/links this page already loaded.
+  const imageIndex = buildImageIndex(state.documents, state.links);
+  const all: DocumentRow[] = rankQuotedParts(stats.values()).map((s) => documentRow(s, bySku.get(s.sku)!, state.index, descOf, imagesFor(imageIndex, s.sku)));
 
   const filter = parseDocumentsFilter(sp);
   const filtered = all.filter((r) => documentRowMatches(r, filter));

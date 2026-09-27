@@ -7,6 +7,7 @@ import { FETCH_BATCH_SIZE, PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocKind
 import type { DocumentRow } from "@/lib/part-docs/views";
 import type { FetchOutcome, FetchTarget } from "@/lib/part-docs/fetch-links";
 import AlsoCovers from "./also-covers";
+import ImageCell from "./image-cell";
 import SlotCell from "./slot-cell";
 import {
   attachExistingDocumentAction,
@@ -195,6 +196,7 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
               <th style={TH}>Last quoted</th>
               <th style={TH}>Datasheet</th>
               <th style={TH}>Spec sheet</th>
+              <th style={TH}>Image</th>
             </tr>
           </thead>
           <tbody>
@@ -215,11 +217,14 @@ export default function DocumentsClient({ rows }: { rows: DocumentRow[] }) {
                     <SlotCell sku={r.sku} kind={k} view={r[k]} onUploaded={(sku, documentId, fileName) => setJustUploaded({ sku, documentId, fileName })} />
                   </td>
                 ))}
+                <td style={{ ...TD, minWidth: 140 }}>
+                  <ImageCell sku={r.sku} view={r.image} />
+                </td>
               </tr>
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={6} style={{ ...TD, textAlign: "center", color: "#8c919c", padding: 28 }}>Nothing matches these filters.</td>
+                <td colSpan={7} style={{ ...TD, textAlign: "center", color: "#8c919c", padding: 28 }}>Nothing matches these filters.</td>
               </tr>
             )}
           </tbody>
