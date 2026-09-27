@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { designNeedsPart } from "@/lib/design/scope-targets";
 import { requireUser } from "@/lib/session";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -224,7 +225,7 @@ export default async function ConsultingLetterPage({
             </>
           )}
           <div style={{ fontFamily: SANS, fontSize: 11.5, color: "#5b616e", marginTop: kind === "spec" ? 8 : 0, display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <span><b>{kind === "spec" ? "Engagement" : "Quote"}:</b> {kind === "spec" ? eng!.id : quoteId}</span>
+            <span><b>{kind === "spec" ? "Engagement" : "Quote"}:</b> {kind === "spec" ? eng!.id : quote ? displayQuoteNumber(quote) : quoteId}</span>
             <span><b>Customer:</b> {customer}</span>
             {venueCustomer !== customer && <span><b>Venue:</b> {venueCustomer}</span>}
             <span><b>Date:</b> {vars.date}</span>

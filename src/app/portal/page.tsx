@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getSettings } from "@/lib/settings";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getAll as allQuotes, portalCanAcceptQuote, portalListsQuote, type Quote } from "@/lib/stores/quotes";
 import { getAll as allLeads, OPEN_STAGES, type LeadStage } from "@/lib/stores/leads";
@@ -292,7 +293,7 @@ export default async function PortalPage({
             )}
           </div>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-            {q.id + " · " + fmtDate(q.updatedAt)}
+            {displayQuoteNumber(q) + " · " + fmtDate(q.updatedAt)}
           </div>
           <div style={{ fontSize: 11.5, marginTop: 3 }}>
             {pdfHref ? (

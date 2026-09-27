@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { getProject, signoffScopes, VENDORS, fmtDateY } from "@/lib/stores/projects";
 import { tasksForProject } from "@/lib/stores/tasks";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { getSettings } from "@/lib/settings";
 import { renderLetterPdf, type FieldSheetDoc } from "@/lib/pdf";
 
@@ -31,6 +32,8 @@ export async function GET(
     ? project.crew.map((member) => `${member.person} (${member.role || "crew"})`).join(", ")
     : "Unassigned";
 
+  // #223 — the linked quote by its estimate number (the project holds only its id).
+  const linkedQuoteNo = project.quoteId ? (await quoteNumbersFor([project.quoteId])).get(project.quoteId) ?? project.quoteId : null;
   const sections: FieldSheetDoc["pages"][number]["sections"] = [
     {
       heading: "Site & schedule",
@@ -56,7 +59,7 @@ export async function GET(
         { label: "Tasks", value: `${done} of ${projectTasks.length} complete` },
         { label: "Notes", value: `${liveNotes.length} recorded` },
         { label: "Customer acceptance", value: project.signoff ? `Signed by ${project.signoff.name || "customer"} · ${fmtDateY(project.signoff.signedAt)}` : "Pending" },
-        { label: "Linked design package", value: project.quoteId ? `Available from linked quote ${project.quoteId}` : "No linked quote" },
+        { label: "Linked design package", value: linkedQuoteNo ? `Available from linked quote ${linkedQuoteNo}` : "No linked quote" },
       ],
     },
     ...(liveNotes.length

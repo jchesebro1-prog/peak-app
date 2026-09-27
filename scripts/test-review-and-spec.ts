@@ -26030,3 +26030,33 @@ function e223Src(rel: string): string {
     "#223 pdfDocKey: the printed estimate number is part of the saved-PDF fingerprint"
   );
 }
+
+/* ======================================================================
+   #223 — display sweep B: builders, letters, PDFs, packages, repairs, portal.
+   Landmark guards, like sweep A: text shown to people prints the estimate
+   number; hrefs, hidden inputs, Blob paths and package keys keep the id.
+   ====================================================================== */
+{
+  for (const b of ["flame-tests", "repairs", "inspections", "rentals"]) {
+    const c = e223Src(`src/app/(app)/${b}/quote/controls.tsx`);
+    const p = e223Src(`src/app/(app)/${b}/quote/page.tsx`);
+    ok(c.includes("Saved {savedNumber}") && !c.includes("Saved {savedId}") && p.includes("savedNumber: displayQuoteNumber(editQuote)"), `#223 ${b} builder: the saved toast names the estimate number`);
+  }
+  ok(e223Src("src/app/(app)/design/engagements/quote/controls.tsx").includes("`Consulting proposal ${initial.number}`"), "#223 consulting builder header shows the number");
+  // The letter pages delegate to letter-view.tsx (#222 print route shares it), so that's where the lines live.
+  for (const l of ["flame-tests", "inspections"]) {
+    const s = e223Src(`src/app/(app)/${l}/letter/letter-view.tsx`);
+    ok(!s.includes('v: quote.id }') && !s.includes("Work Order {quote.id}") && s.includes('{ k: "Document", v: displayQuoteNumber(quote) }') && s.includes("Work Order {displayQuoteNumber(quote)}"), `#223 ${l} letter: Document + Work Order lines print the number`);
+  }
+  ok(e223Src("src/app/(app)/rentals/quote/letter/route.ts").includes("Rental-agreement-${displayQuoteNumber(quote)}.pdf"), "#223 rental agreement PDF is named by number");
+  const ren = e223Src("src/lib/renewal-outreach.ts");
+  ok(!ren.includes('renewal-" + quote.id + ".pdf') && ren.includes('"Rigging-inspection-renewal-" + displayQuoteNumber(quote) + ".pdf"'), "#223 renewal PDFs are named by number");
+  const pkg = e223Src("src/lib/client-package-server.ts");
+  ok(pkg.includes('{ label: "Quote", value: displayQuoteNumber(quote) }') && pkg.includes("client-packages/quote-${safeName(quote.id)}/"), "#223 client package prints the number; its Blob path keeps the id");
+  ok(e223Src("src/lib/stores/repair-jobs.ts").includes('"From quote " + displayQuoteNumber(q)'), "#223 a repair job's source label names the quote's number");
+  ok(e223Src("src/app/portal/page.tsx").includes('displayQuoteNumber(q) + " · "'), "#223 portal lists quotes by number");
+  // #222's saved-PDF download routes name the file by number; the file is still looked up by id.
+  const teamPdf = e223Src("src/app/api/quotes/[id]/pdf/route.ts");
+  const portalPdf = e223Src("src/app/portal/quotes/[id]/pdf/route.ts");
+  ok(teamPdf.includes("pdfFileName(displayQuoteNumber(q), rev)") && portalPdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && teamPdf.includes("getQuote(id)"), "#223 saved quote PDF downloads (team + portal) are named by number");
+}

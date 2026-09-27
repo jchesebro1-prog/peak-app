@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { list as listItems, type EquipmentCategory } from "@/lib/stores/equipment-items";
@@ -104,6 +105,7 @@ export default async function RentalQuotePage({
     saved,
     approved,
     savedId: "",
+    savedNumber: "",
     status: "draft",
     replaces: "",
   };
@@ -142,6 +144,7 @@ export default async function RentalQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      savedNumber: displayQuoteNumber(editQuote),
       status: editQuote.status,
       replaces: "",
     };

@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { get as getEquipmentItem } from "@/lib/stores/equipment-items";
 import { get as getEquipmentLocation } from "@/lib/stores/equipment-locations";
@@ -139,7 +140,7 @@ export async function GET(req: Request): Promise<Response> {
   };
 
   const pdf = renderLetterPdf(doc);
-  const filename = `Rental-agreement-${quote.id}.pdf`;
+  const filename = `Rental-agreement-${displayQuoteNumber(quote)}.pdf`;
 
   return new Response(new Uint8Array(pdf), {
     headers: {

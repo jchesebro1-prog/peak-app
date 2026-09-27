@@ -102,6 +102,8 @@ export type BuilderInitial = {
   saved: boolean;
   approved: boolean;
   savedId: string;
+  /** #223 — the saved quote's estimate number ("" before the first save). */
+  savedNumber: string;
   /** Quote status — drives the won-edit confirm (D206) and Change type (D205). "draft" when new. */
   status: string;
   /** #160 / D205 — the draft this new quote replaces; posted on the create save. */
@@ -380,6 +382,7 @@ export function QuoteBuilder({
   const editingId = initial.editingId;
   const won = initial.status === "won";
   const savedId = initial.savedId;
+  const savedNumber = initial.savedNumber || savedId;
   const isApproved = initial.approved;
   const source = initial.source;
   const letterHref = savedId ? "/repairs/letter?id=" + encodeURIComponent(savedId) : "";
@@ -1514,7 +1517,7 @@ export function QuoteBuilder({
 
               {savedFlag && savedId && (
                 <div style={{ marginTop: 10, textAlign: "center", fontSize: 11.5, color: "#1f7a52", fontWeight: 600 }}>
-                  Saved {savedId} ·{" "}
+                  Saved {savedNumber} ·{" "}
                   <Link href="/quotes" style={{ color: "#8c919c" }}>
                     Back to Quotes
                   </Link>
