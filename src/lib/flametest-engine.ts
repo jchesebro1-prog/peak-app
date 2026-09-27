@@ -13,6 +13,12 @@ import {
   type TravelPlan,
   type TripMode,
 } from "@/lib/travel-plan";
+import {
+  finishFlame,
+  normalizePriceOverride,
+  venueTesting,
+  type FlameFinish,
+} from "@/lib/service-pricing";
 
 /**
  * FlameTest — auto-pricing engine for flame-test quotes. Server port of
@@ -152,6 +158,8 @@ export type FlameTestVenueInput = {
   /** Fallback one-way estimates used when any venue lacks coords. */
   oneWayMiles?: number | string | null;
   oneWayMin?: number | string | null;
+  /** #217: a typed testing cost for this venue (blank/absent = computed). */
+  testingOverride?: number | string | null;
 };
 
 export type TripLeg = {
@@ -179,8 +187,12 @@ export type VenuePrice = {
   label: string;
   curtains: number;
   laborMin: number;
+  /** What this venue's testing prices at — the typed figure when set. */
   laborCost: number;
   charge: number;
+  /** curtains × curtainMinutes at laborRate, before any typed figure. */
+  computedCost: number;
+  testingOverride: number | null;
 };
 
 export type FlameTestComputeOpts = {
@@ -188,9 +200,11 @@ export type FlameTestComputeOpts = {
   venues?: FlameTestVenueInput[];
   /** Per-quote travel override (Auto · Drive · Fly, crew, nights, airfare). */
   travel?: TravelOverride | null;
+  /** #217: a typed quote total — replaces the rounded auto total exactly. */
+  priceOverride?: number | string | null;
 };
 
-export type FlameTestPricing = {
+export type FlameTestPricing = FlameFinish & {
   rates: FlameTestRates;
   perVenue: VenuePrice[];
   testingSubtotal: number;
@@ -202,34 +216,28 @@ export type FlameTestPricing = {
   trip: TripTravel & TripMode;
   /** The travel plan — travel.total is the figure the quote prices. */
   travel: TravelPlan;
-  /** travel.total + testingSubtotal, before the base-fee floor. */
-  rawCost: number;
-  baseFee: number;
-  /** True when the whole-job cost was floored at baseFee. */
-  baseApplied: boolean;
-  cost: number;
-  margin: number;
-  marginAmount: number;
-  total: number;
 };
 
 /* ---------- pure pricing ---------- */
 
-/** Per-venue curtain-testing labor: curtains x curtainMinutes at laborRate. */
+/** Per-venue curtain-testing labor: curtains x curtainMinutes at laborRate,
+ *  unless a typed testing cost replaces it (#217). */
 export function priceVenue(
   v: FlameTestVenueInput,
   rates: FlameTestRates
 ): VenuePrice {
   const curtains = Math.max(0, Math.round(Number(v.curtains) || 0));
   const laborMin = curtains * rates.curtainMinutes;
-  const laborCost = laborMin * (rates.laborRate / 60);
+  const t = venueTesting(laborMin * (rates.laborRate / 60), v.testingOverride);
   return {
     id: v.id ?? null,
     label: v.label || "Venue",
     curtains,
     laborMin,
-    laborCost,
-    charge: laborCost,
+    laborCost: t.laborCost,
+    charge: t.laborCost,
+    computedCost: t.computedCost,
+    testingOverride: t.testingOverride,
   };
 }
 
@@ -306,7 +314,8 @@ export function tripTravel(
  *
  *   rawCost = trip.total + testingSubtotal
  *   cost    = max(baseFee, rawCost)          — base fee floors the whole job
- *   total   = cost / (1 - margin)            — when 0 < margin < 1, else cost
+ *   total   = cost / (1 - margin)            — when 0 < margin < 1, else cost,
+ *             rounded to the nearest $25, or a typed priceOverride (#217)
  */
 export function compute(
   opts: FlameTestComputeOpts = {},
@@ -332,14 +341,16 @@ export function compute(
   });
   const trip = withMode(drive, plan);
   // Base $150 is a floor on the WHOLE job cost (mileage + travel + testing),
-  // not a per-venue charge. Margin is applied on top of the floored cost.
+  // not a per-venue charge. Margin is applied on top of the floored cost, then
+  // (#217) the total rounds to the nearest $25 unless a typed total replaces
+  // it — finishFlame() is the same code the builder preview runs.
   const rawCost = plan.total + testingSubtotal;
-  const baseFee = C.baseFee;
-  const baseApplied = rawCost < baseFee;
-  const cost = baseApplied ? baseFee : rawCost;
-  const margin = C.margin;
-  const total = margin > 0 && margin < 1 ? cost / (1 - margin) : cost;
-  const marginAmount = total - cost;
+  const fin = finishFlame({
+    rawCost,
+    baseFee: C.baseFee,
+    margin: C.margin,
+    priceOverride: normalizePriceOverride(opts.priceOverride),
+  });
 
   return {
     rates: C,
@@ -350,13 +361,7 @@ export function compute(
     venueCount: venues.length,
     trip,
     travel: plan,
-    rawCost,
-    baseFee,
-    baseApplied,
-    cost,
-    margin,
-    marginAmount,
-    total,
+    ...fin,
   };
 }
 

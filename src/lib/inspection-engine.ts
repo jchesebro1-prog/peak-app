@@ -15,6 +15,7 @@ import {
   type TravelPlan,
   type TripMode,
 } from "@/lib/travel-plan";
+import { finishInspection, normalizePriceOverride } from "@/lib/service-pricing";
 
 export { INSPECTION_RATE_DEFAULTS };
 export type { GeoAdapter, TripTravel, TripVenueInput };
@@ -34,7 +35,7 @@ export type { GeoAdapter, TripTravel, TripVenueInput };
  *      SHARED across venues visited on one trip (identical math to the
  *      repair engine — tripTravel is imported from it so the two can never
  *      drift).
- *   4. Total = (labor + travel) ÷ (1 − margin), floored at the minimum fee.
+ *   4. Total = (labor + travel) ÷ (1 − margin), floored at the minimum fee, then rounded to the nearest $25 (or a typed total, #217).
  *   5. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
  *      whose drive cost reaches the threshold prices as flights (default crew
  *      inspection_rates.flyCrew, nights from the inspection hours). Drive
@@ -90,6 +91,8 @@ export type InspectionEstimateOptions = {
   travel?: TravelOverride | null;
   /** Optional routing service (prototype's window.Geo). */
   geo?: GeoAdapter | null;
+  /** #217: a typed quote total — replaces the rounded auto total exactly. */
+  priceOverride?: number | string | null;
 };
 
 export type InspectionEstimate = {
@@ -111,8 +114,16 @@ export type InspectionEstimate = {
   minFee: number;
   minApplied: boolean;
   margin: number;
+  /** The total before rounding (min fee applied). */
+  totalRaw: number;
+  /** totalRaw rounded to the nearest $25. */
+  autoTotal: number;
   total: number;
+  priceOverride: number | null;
+  overridden: boolean;
   marginAmount: number;
+  /** 1 − cost ÷ total. */
+  effectiveMargin: number;
 };
 
 /** Pure compute with the rates passed in explicitly. */
@@ -145,11 +156,14 @@ export function computeEstimate(
   });
   const trip = withMode(drive, plan);
   const cost = laborCost + plan.total;
-
-  const margin = C.margin;
-  const sellRaw = margin > 0 && margin < 1 ? cost / (1 - margin) : cost;
-  const minApplied = sellRaw < C.minFee;
-  const total = minApplied ? C.minFee : sellRaw;
+  // #217: min-fee floor, the $25 rounding and a typed total — finishInspection()
+  // is the same code the builder preview runs.
+  const fin = finishInspection({
+    cost,
+    minFee: C.minFee,
+    margin: C.margin,
+    priceOverride: normalizePriceOverride(opts.priceOverride),
+  });
 
   return {
     rates: C,
@@ -163,13 +177,7 @@ export function computeEstimate(
     laborCost,
     trip,
     travel: plan,
-    cost,
-    sellRaw,
-    minFee: C.minFee,
-    minApplied,
-    margin,
-    total,
-    marginAmount: total - cost,
+    ...fin,
   };
 }
 

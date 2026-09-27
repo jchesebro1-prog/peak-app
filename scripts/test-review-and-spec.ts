@@ -10202,12 +10202,12 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   const flameNear: FTVenue = { id: "trv-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
   const flameFar: FTVenue = { id: "trv-far", label: "Far", curtains: 120, oneWayMiles: 500, oneWayMin: 480 };
   const fd = computeFlameQuote({ venues: [flameNear] }, flameRates);
-  ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.total, 575 / (1 - 0.3)),
-    "#208 flame: a $500 drive prices exactly as before (575 cost → 821.43)");
+  ok(fd.trip.total === 500 && fd.testingSubtotal === 75 && fd.rawCost === 575 && near(fd.totalRaw, 575 / (1 - 0.3)) && fd.total === 825,
+    "#208 flame: a $500 drive prices exactly as before (575 cost → 821.43, #217 rounds to 825)");
   ok(fd.trip.mode === "drive" && !("flight" in fd.trip) && fd.travel?.total === fd.trip.total && fd.rawCost === fd.trip.total + fd.testingSubtotal,
     "#208 flame: drive mode prices trip.total itself (bit-for-bit)");
   const ff = computeFlameQuote({ venues: [flameFar] }, flameRates);
-  ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.total, 2515 / (1 - 0.3)),
+  ok(ff.trip.total === 2200 && ff.trip.mode === "fly" && ff.travel?.total === 1765 && ff.rawCost === 2515 && near(ff.totalRaw, 2515 / (1 - 0.3)) && ff.total === 3600,
     "#208 flame: a $2,200 drive flies — 1,765 travel + 750 testing = 2,515 cost");
   ok(ff.trip.flight?.crew === 1 && ff.trip.flight?.nights === 2 && ff.trip.flight?.tripDays === 3,
     "#208 flame: 10 on-site hours (120 curtains × 5 min) → 2 nights for 1 person");
@@ -10221,10 +10221,10 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   // ---- repair (default crew 2) ----
   const repairRates = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
   const rd = trvRepairEstimate({ venues: [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }], laborHours: 4 }, repairRates);
-  ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.total, 607.5 / (1 - 0.3)) && rd.trip.mode === "drive",
+  ok(rd.trip.total === 307.5 && rd.serviceCost === 607.5 && near(rd.totalRaw, 607.5 / (1 - 0.3)) && rd.total === 875 && rd.trip.mode === "drive",
     "#208 repair: a $307.50 drive prices exactly as before (607.50 service cost)");
   const rf = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24 }, repairRates);
-  ok(rf.trip.mode === "fly" && rf.trip.flight?.crew === 2 && rf.travel?.total === 3305 && rf.serviceCost === 5105 && near(rf.total, 5105 / (1 - 0.3)),
+  ok(rf.trip.mode === "fly" && rf.trip.flight?.crew === 2 && rf.travel?.total === 3305 && rf.serviceCost === 5105 && near(rf.totalRaw, 5105 / (1 - 0.3)) && rf.total === 7300,
     "#208 repair: 24 crew-hours far away fly 2 people — 3,305 travel + 1,800 labor");
   const rf3 = trvRepairEstimate({ venues: [{ label: "Far", oneWayMiles: 500, oneWayMin: 480 }], laborHours: 24, crewSize: 3 }, repairRates);
   ok(rf3.trip.flight?.crew === 3 && rf3.travel?.total === 4290, "#208 repair: a crew of 3 on the quote flies 3 (never fewer than the priced crew)");
@@ -10236,10 +10236,10 @@ import { computeEstimate as trvInspectionEstimate } from "@/lib/inspection-engin
   // ---- inspection (1 person) ----
   const inspRates = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
   const idr = trvInspectionEstimate({ venues: [{ id: "trv-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }] }, inspRates);
-  ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.total, 832.5 / (1 - 0.3)) && idr.trip.mode === "drive",
+  ok(idr.trip.total === 307.5 && idr.cost === 832.5 && near(idr.totalRaw, 832.5 / (1 - 0.3)) && idr.total === 1200 && idr.trip.mode === "drive",
     "#208 inspection: a $307.50 drive prices exactly as before (832.50 cost)");
   const ifl = trvInspectionEstimate({ venues: [{ id: "trv-i2", label: "Far", lineSets: 40, oneWayMiles: 500, oneWayMin: 480 }] }, inspRates);
-  ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.total, 2665 / (1 - 0.3)),
+  ok(ifl.inspectHours === 12 && ifl.trip.mode === "fly" && ifl.travel?.total === 1765 && ifl.cost === 2665 && near(ifl.totalRaw, 2665 / (1 - 0.3)) && ifl.total === 3800,
     "#208 inspection: 12 inspection hours far away fly 1 person — 1,765 travel + 900 labor");
 }
 
@@ -20807,4 +20807,137 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
   const pg = rd215("src/app/(app)/inbox/page.tsx");
   ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
+}
+
+/* ====================================================================
+   #217 T1 — service quotes round to $25, take a typed total and (flame) a
+   typed per-venue testing cost. The pure finish module + the three engines.
+   ==================================================================== */
+import {
+  PRICE_STEP as PRICE_STEP217,
+  roundToStep as roundToStep217,
+  normalizePriceOverride as normalizePriceOverride217,
+  normalizeTestingOverride as normalizeTestingOverride217,
+  finishFlame as finishFlame217,
+  finishRepair as finishRepair217,
+  finishInspection as finishInspection217,
+  typedPriceWarning as typedPriceWarning217,
+  sliderPts as sliderPts217,
+  fmtPts as fmtPts217,
+  travelLineShare as travelLineShare217,
+  seedPriceOverride as seedPriceOverride217,
+} from "@/lib/service-pricing";
+{
+  const near217 = (a: number | undefined, b: number): boolean => a != null && Math.abs(a - b) < 1e-6;
+
+  // ---- pure rules ----
+  ok(PRICE_STEP217 === 25, "#217: the rounding step is $25");
+  ok(roundToStep217(821.43) === 825 && roundToStep217(812.49) === 800 && roundToStep217(812.5) === 825 && roundToStep217(837.5) === 850,
+    "#217 roundToStep: nearest $25, half rounds up");
+  ok(roundToStep217(0) === 0 && roundToStep217(25) === 25 && roundToStep217(Number.NaN) === 0 && roundToStep217(14, 10) === 10 && roundToStep217(15, 10) === 20,
+    "#217 roundToStep: exact multiples stay, NaN is 0, a custom step works");
+  ok(roundToStep217(862.4999999999999) === 875, "#217 roundToStep: float noise just under a half still rounds up");
+  ok(normalizePriceOverride217("1,234.40") === 1234 && normalizePriceOverride217("$900") === 900 && normalizePriceOverride217(950) === 950 && normalizePriceOverride217(10_000_000) === 10_000_000,
+    "#217 priceOverride: whole dollars, $ and commas tolerated, up to $10,000,000");
+  ok([0, -5, 10_000_001, "abc", "", null, undefined, true].every((v) => normalizePriceOverride217(v) === undefined),
+    "#217 priceOverride: zero, negative, over the cap, junk and blank are no override");
+  ok(normalizeTestingOverride217("0") === 0 && normalizeTestingOverride217(" 120 ") === 120 && normalizeTestingOverride217("") === undefined && normalizeTestingOverride217(-1) === undefined,
+    "#217 testingOverride: $0 is a real figure, blank is computed, negatives refused");
+  ok(typedPriceWarning217(500, 575, 1 - 575 / 500)?.kind === "below-cost" && typedPriceWarning217(600, 575, 1 - 575 / 600)?.kind === "low-margin" && typedPriceWarning217(800, 575, 1 - 575 / 800) === null,
+    "#217 warning: below cost first, then under a 10% margin, otherwise none");
+  ok(sliderPts217(0.05) === 10 && sliderPts217(0.62) === 50 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
+    "#217 slider: the back-solved margin moves the slider, clamped to 10–50");
+  ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the margin label shows the true value to one decimal");
+  const s1 = travelLineShare217({ flightTotal: 1765, total: 3600, cost: 2515, margin: 0.3 });
+  ok(s1.travel === 2526 && s1.rest === 1074 && s1.travel + s1.rest === 3600,
+    "#217 printed lines: the travel line is travel's share of the rounded total; the service part takes the rest");
+  const s2 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: 2515, margin: 0.3 });
+  ok(s2.travel === 702 && s2.travel + s2.rest === 1000, "#217 printed lines: a typed total below cost scales the travel line with it");
+  const s3 = travelLineShare217({ flightTotal: 1765, total: 3593, cost: null, margin: 0.3 });
+  ok(s3.travel === 2521 && s3.rest === 3593 - 2521, "#217 printed lines: a legacy quote with no stored cost keeps the D283 figure");
+  const s4 = travelLineShare217({ flightTotal: 1765, total: 1000, cost: null, margin: 0 });
+  ok(s4.travel === 1000 && s4.rest === 0, "#217 printed lines: the travel line never exceeds the total");
+  ok(seedPriceOverride217("sent", 821, undefined) === 821 && seedPriceOverride217("won", 821.4, null) === 821,
+    "#217 D286 parity: a pre-#217 sent quote priced off the $25 grid reopens with that price typed in");
+  ok(seedPriceOverride217("draft", 821, undefined) === null && seedPriceOverride217("sent", 825, undefined) === null && seedPriceOverride217("sent", 0, undefined) === null,
+    "#217: drafts, on-grid prices and zero values reopen on auto");
+  ok(seedPriceOverride217("draft", 825, 900) === 900 && seedPriceOverride217("sent", 821, "900") === 900,
+    "#217: a saved typed total always reopens as typed");
+
+  // ---- flame engine ----
+  const fRates217 = { mileageRate: 1, laborRate: 75, curtainMinutes: 5, baseFee: 150, margin: 0.3, travelRoundMin: 15 };
+  const fNear217: FTVenue = { id: "r217-near", label: "Near", curtains: 12, oneWayMiles: 100, oneWayMin: 120 };
+  const fa = computeFlameQuote({ venues: [fNear217] }, fRates217);
+  ok(near217(fa.totalRaw, 575 / 0.7) && fa.autoTotal === 825 && fa.total === 825 && !fa.overridden && fa.priceOverride === null,
+    "#217 flame: the auto total rounds 821.43 → 825");
+  ok(fa.marginAmount === 250 && near217(fa.effectiveMargin, 1 - 575 / 825) && fa.margin === 0.3,
+    "#217 flame: margin amount = total − cost, the effective margin back-solves, the rate margin is unchanged");
+  const fo = computeFlameQuote({ venues: [fNear217], priceOverride: 800 }, fRates217);
+  ok(fo.total === 800 && fo.overridden && fo.priceOverride === 800 && fo.autoTotal === 825 && near217(fo.effectiveMargin, 1 - 575 / 800) && fo.marginAmount === 225,
+    "#217 flame: a typed total is used exactly and the margin back-solves");
+  ok(computeFlameQuote({ venues: [fNear217], priceOverride: 812 }, fRates217).total === 812,
+    "#217 flame: a typed total off the $25 grid is not re-rounded");
+  const fBad = computeFlameQuote({ venues: [fNear217], priceOverride: "abc" }, fRates217);
+  ok(fBad.total === 825 && !fBad.overridden, "#217 flame: an invalid typed total prices at auto");
+  const ft = computeFlameQuote({ venues: [{ ...fNear217, testingOverride: 100 }] }, fRates217);
+  ok(ft.perVenue[0].laborCost === 100 && ft.perVenue[0].computedCost === 75 && ft.perVenue[0].testingOverride === 100 && ft.testingSubtotal === 100 && ft.rawCost === 600 && ft.total === 850,
+    "#217 flame: a typed testing cost replaces that venue's labor and the auto total re-rounds (857.14 → 850)");
+  const ftBlank = computeFlameQuote({ venues: [{ ...fNear217, testingOverride: "" }] }, fRates217);
+  ok(ftBlank.perVenue[0].laborCost === 75 && ftBlank.perVenue[0].testingOverride === null, "#217 flame: a blank testing cost is computed");
+  const fFloor = computeFlameQuote({ venues: [{ id: "r217-here", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }] }, fRates217);
+  ok(fFloor.baseApplied && fFloor.cost === 150 && fFloor.total === 225,
+    "#217 flame: the base fee floors the cost first, then the total rounds (214.29 → 225)");
+
+  // ---- repair engine ----
+  const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
+  const rNear217 = [{ label: "Near", oneWayMiles: 60, oneWayMin: 70 }];
+  const ra = trvRepairEstimate({ venues: rNear217, laborHours: 4 }, rRates217);
+  ok(near217(ra.totalRaw, 607.5 / 0.7) && ra.total === 875 && ra.serviceSell === 875 && near217(ra.serviceMargin, 1 - 607.5 / 875),
+    "#217 repair: the auto total rounds 867.86 → 875 and the service sell absorbs the difference");
+  const rp = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }] }, rRates217);
+  ok(rp.total === 1150 && near217(rp.partsSell, 200 / 0.7) && near217(rp.serviceSell, 1150 - 200 / 0.7) && near217(rp.serviceSell + rp.partsSell, rp.total),
+    "#217 repair: with parts the total rounds 1,153.57 → 1,150 and service + parts sell still sum to it");
+  const ro = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }], priceOverride: 1000 }, rRates217);
+  ok(ro.total === 1000 && ro.overridden && near217(ro.serviceMargin, 1 - 607.5 / (1000 - 200 / 0.7)) && near217(ro.marginAmount, 1000 - 807.5),
+    "#217 repair: a typed total back-solves the SERVICE margin; parts keep their markup");
+  const rc = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1 }, rRates217);
+  ok(rc.calloutApplied && rc.total === 350, "#217 repair: the minimum call-out floors the service sell before rounding");
+
+  // ---- inspection engine ----
+  const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
+  const iNear217 = [{ id: "r217-i1", label: "Near", lineSets: 20, oneWayMiles: 60, oneWayMin: 70 }];
+  const ia = trvInspectionEstimate({ venues: iNear217 }, iRates217);
+  ok(near217(ia.totalRaw, 832.5 / 0.7) && ia.total === 1200 && near217(ia.effectiveMargin, 1 - 832.5 / 1200),
+    "#217 inspection: the auto total rounds 1,189.29 → 1,200");
+  const io = trvInspectionEstimate({ venues: iNear217, priceOverride: 1100 }, iRates217);
+  ok(io.total === 1100 && io.overridden && io.autoTotal === 1200 && near217(io.effectiveMargin, 1 - 832.5 / 1100),
+    "#217 inspection: a typed total is used exactly");
+  const im = trvInspectionEstimate({ venues: [{ id: "r217-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }] }, iRates217);
+  ok(im.minApplied && im.total === 650, "#217 inspection: the minimum fee floors before rounding");
+
+  // ---- parity: each engine's finish IS the shared finish the builders will call ----
+  const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: 0.3, priceOverride: null });
+  ok(pf.total === fa.total && pf.cost === fa.cost && pf.effectiveMargin === fa.effectiveMargin, "#217 parity: the flame engine finishes exactly like finishFlame()");
+  const pr = finishRepair217({ serviceCost: rp.serviceCost, minCallout: 350, margin: 0.3, partsCost: rp.partsCost, partsMargin: 0.3, priceOverride: null });
+  ok(pr.total === rp.total && pr.serviceSell === rp.serviceSell && pr.serviceMargin === rp.serviceMargin, "#217 parity: the repair engine finishes exactly like finishRepair()");
+  const pi = finishInspection217({ cost: ia.cost, minFee: 650, margin: 0.3, priceOverride: null });
+  ok(pi.total === ia.total && pi.effectiveMargin === ia.effectiveMargin, "#217 parity: the inspection engine finishes exactly like finishInspection()");
+  for (const [f, fn] of [
+    ["src/lib/flametest-engine.ts", "finishFlame"],
+    ["src/lib/repair-engine.ts", "finishRepair"],
+    ["src/lib/inspection-engine.ts", "finishInspection"],
+  ] as const) {
+    const s = readFileSync(join(process.cwd(), f), "utf8");
+    const code = s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""); // doc comments still quote the formula
+    ok(code.includes(`${fn}(`) && /from "@\/lib\/service-pricing"/.test(code) && !/\/ \(1 - margin\)/.test(code),
+      `#217: ${f} finishes its price through ${fn}() with no margin math of its own`);
+  }
+  const sp217 = readFileSync(join(process.cwd(), "src/lib/service-pricing.ts"), "utf8");
+  ok(!/^\s*import\s/m.test(sp217), "#217: service-pricing.ts imports nothing — safe for the 'use client' builders");
+  const formula217 = (key: string, id: string): string =>
+    (PRICING_GROUPS.find((g) => g.key === key)!.items.find((it) => it.id === id) as { expr: string }).expr;
+  ok(formula217("flame", "flame.total").includes("rounded to the nearest $25") &&
+      formula217("repair", "repair.total").includes("rounded to the nearest $25") &&
+      formula217("inspection", "inspection.total").includes("rounded to the nearest $25"),
+    "#217: the Estimating Rules formulas say service totals round to the nearest $25");
 }

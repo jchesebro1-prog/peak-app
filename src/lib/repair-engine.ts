@@ -9,6 +9,7 @@ import {
   type TravelPlan,
   type TripMode,
 } from "@/lib/travel-plan";
+import { finishRepair, normalizePriceOverride } from "@/lib/service-pricing";
 
 export { REPAIR_RATE_DEFAULTS };
 
@@ -30,7 +31,7 @@ export { REPAIR_RATE_DEFAULTS };
  *      before parts).
  *   4. Parts — Σ(qty × cost), marked up to the parts margin:
  *      partsSell = partsCost ÷ (1 − partsMargin).
- *   5. Total = serviceSell + partsSell.
+ *   5. Total = serviceSell + partsSell, rounded to the nearest $25 (or a typed total, #217).
  *   6. Flights over drive (spec 2026-09-25, src/lib/travel-plan.ts) — a trip
  *      whose drive cost reaches the threshold prices as flights for at least
  *      the quote's crew (default repair_rates.flyCrew); travel-day labor bills
@@ -214,6 +215,8 @@ export type RepairEstimateOptions = {
   travel?: TravelOverride | null;
   /** Optional routing service (prototype's window.Geo). */
   geo?: GeoAdapter | null;
+  /** #217: a typed quote total — replaces the rounded auto total exactly. */
+  priceOverride?: number | string | null;
 };
 
 export type RepairEstimate = {
@@ -228,6 +231,9 @@ export type RepairEstimate = {
   travel: TravelPlan;
   serviceCost: number;
   serviceSellRaw: number;
+  /** The floored service sell before rounding (pre-#217 serviceSell). */
+  serviceSellAuto: number;
+  /** total − partsSell: the service line absorbs the $25 rounding / typed total. */
   serviceSell: number;
   minCallout: number;
   calloutApplied: boolean;
@@ -237,8 +243,18 @@ export type RepairEstimate = {
   margin: number;
   partsMargin: number;
   cost: number;
+  /** The total before rounding (floors applied). */
+  totalRaw: number;
+  /** totalRaw rounded to the nearest $25. */
+  autoTotal: number;
   total: number;
+  priceOverride: number | null;
+  overridden: boolean;
   marginAmount: number;
+  /** 1 − cost ÷ total over the whole job. */
+  effectiveMargin: number;
+  /** 1 − serviceCost ÷ serviceSell — the slider's margin, back-solved. */
+  serviceMargin: number;
 };
 
 /** Pure port of compute(opts) with the rates passed in explicitly. */
@@ -274,24 +290,23 @@ export function computeEstimate(
   const trip = withMode(drive, plan);
   const serviceCost = laborCost + plan.total;
 
-  const margin = C.margin;
-  const serviceSellRaw =
-    margin > 0 && margin < 1 ? serviceCost / (1 - margin) : serviceCost;
-  const calloutApplied = serviceSellRaw < C.minCallout;
-  const serviceSell = calloutApplied ? C.minCallout : serviceSellRaw;
-
   const parts: RepairEstimatePart[] = (opts.parts || []).map((p) => {
     const qty = Math.max(0, Number(p.qty) || 0);
     const cost = Math.max(0, Number(p.cost) || 0);
     return { name: p.name || "Part", qty, cost, extCost: qty * cost };
   });
   const partsCost = parts.reduce((a, p) => a + p.extCost, 0);
-  const pMargin = C.partsMargin;
-  const partsSell =
-    pMargin > 0 && pMargin < 1 ? partsCost / (1 - pMargin) : partsCost;
 
-  const total = serviceSell + partsSell;
-  const cost = serviceCost + partsCost;
+  // #217: the call-out floor, both margins, the $25 rounding and a typed total
+  // all come from finishRepair() — the same code the builder preview runs.
+  const fin = finishRepair({
+    serviceCost,
+    minCallout: C.minCallout,
+    margin: C.margin,
+    partsCost,
+    partsMargin: C.partsMargin,
+    priceOverride: normalizePriceOverride(opts.priceOverride),
+  });
 
   return {
     rates: C,
@@ -302,18 +317,25 @@ export function computeEstimate(
     trip,
     travel: plan,
     serviceCost,
-    serviceSellRaw,
-    serviceSell,
+    serviceSellRaw: fin.serviceSellRaw,
+    serviceSellAuto: fin.serviceSellAuto,
+    serviceSell: fin.serviceSell,
     minCallout: C.minCallout,
-    calloutApplied,
+    calloutApplied: fin.calloutApplied,
     parts,
     partsCost,
-    partsSell,
-    margin,
-    partsMargin: pMargin,
-    cost,
-    total,
-    marginAmount: total - cost,
+    partsSell: fin.partsSell,
+    margin: C.margin,
+    partsMargin: C.partsMargin,
+    cost: fin.cost,
+    totalRaw: fin.totalRaw,
+    autoTotal: fin.autoTotal,
+    total: fin.total,
+    priceOverride: fin.priceOverride,
+    overridden: fin.overridden,
+    marginAmount: fin.marginAmount,
+    effectiveMargin: fin.effectiveMargin,
+    serviceMargin: fin.serviceMargin,
   };
 }
 
