@@ -27739,3 +27739,59 @@ import { browsable as d242Browsable, browseReason as d242Reason, quotable as d24
   ok(d242Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#242 visibility: search-only reason");
   ok(d242NormVis("bogus") === "auto" && d242NormVis(undefined) === "auto" && d242NormVis("hide") === "hide", "#242 visibility: unknown values read as auto");
 }
+
+/* ======================================================================
+   Portal catalog — price rules, quote mode, accept/card guards, search
+   (#242, Task 6; spec §2.1/§2.3/§3.1/§4). Pure TypeScript modules.
+   ====================================================================== */
+import { unitPriceFor as d242Unit, fixtureUnitPrice as d242FixPrice } from "@/lib/portal-price-rules";
+import { quoteMode as d242Mode, canAcceptPortal as d242CanAccept, firmValidUntil as d242Valid, looksLikeCardNumber as d242Card } from "@/lib/portal-quote-mode";
+import { searchCatalog as d242Search, buildHaystack as d242Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
+{
+  const now = Date.UTC(2026, 8, 27);
+  const o = { margin: 0.3, staleCostMonths: 0, now };
+  ok(d242Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#242 price: cost ÷ (1 − margin)");
+  ok(d242Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d242Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#242 price: no cost → list");
+  const np = d242Unit({ cost: 0, list: 0 }, o);
+  ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#242 price: no cost and no list → price on request");
+  ok(d242Unit({ cost: 10, list: 20, note: "verify price" }, o).porReason === "verify-price", "#242 price: a note means verify price → POR");
+  const old = now - 400 * 86400000;
+  ok(!d242Unit({ cost: 10, list: 20, pricedAt: old }, o).por, "#242 price: stale-cost rule off by default");
+  ok(d242Unit({ cost: 10, list: 20, pricedAt: old }, { ...o, staleCostMonths: 12 }).porReason === "stale-cost", "#242 price: stale cost → POR when the setting is on");
+  ok(!d242Unit({ cost: 10, list: 20, pricedAt: null }, { ...o, staleCostMonths: 12 }).por, "#242 price: unknown priced date is not stale");
+  ok(d242Unit({ cost: 33.33, list: 0 }, o).unitPrice === 47.61, "#242 price: rounded to cents");
+
+  const comp = (sku: string, cost: number, qty = 1, extra = {}) => ({ sku, cost, list: 0, qty, quotable: true, required: true, ...extra });
+  const fx = d242FixPrice([comp("LE", 700), comp("LENS", 70, 2)], o);
+  ok(fx.unitPrice === 1200 && !fx.por && fx.cost === 840, "#242 fixture: sum of component tier prices × qty; cost carried");
+  ok(d242FixPrice([comp("LE", 700), comp("X", 0, 1, { list: 0 })], o).por, "#242 fixture: a POR component makes the fixture POR");
+  ok(d242FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false })], o).unavailable, "#242 fixture: a hidden required component makes it unavailable");
+  ok(!d242FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false, required: false })], o).unavailable, "#242 fixture: a hidden optional add-on doesn't block the fixture");
+
+  ok(d242Mode([{ por: false }, { por: false }]).mode === "firm", "#242 mode: all priced → firm");
+  const rv = d242Mode([{ por: false }, { por: true }, { por: true }]);
+  ok(rv.mode === "review" && rv.porCount === 2 && rv.reason === "2 lines are price on request", "#242 mode: any POR → review with reason");
+  ok(d242Mode([{ por: true }]).reason === "1 line is price on request", "#242 mode: singular reason");
+  ok(d242Valid(now, 30) === now + 30 * 86400000, "#242 validity: 30 days");
+  ok(d242CanAccept({ status: "sent", portalFirm: { validUntil: now + 1 } }, now).ok, "#242 accept: sent + in date → ok");
+  ok(d242CanAccept({ status: "sent", portalFirm: { validUntil: now - 1 } }, now).reason === "expired", "#242 accept: expired firm quote refused");
+  ok(d242CanAccept({ status: "sent" }, now).ok, "#242 accept: staff-sent (no portalFirm) never expires here");
+  ok(d242CanAccept({ status: "draft" }, now).reason === "not-sent" && d242CanAccept({ status: "sent", portalAcceptance: { at: 1 } }, now).reason === "accepted", "#242 accept: draft / already accepted refused");
+  ok(d242Card("PO 44812, card 4111 1111 1111 1111 please") && d242Card("4242424242424242"), "#242 card guard: Luhn-valid 13–19 digit runs caught, with spaces");
+  ok(!d242Card("PO 1234567890123") && !d242Card("call 608-555-0199"), "#242 card guard: PO numbers / phones that fail Luhn pass");
+
+  const e = (key: string, mfr: string, category: string, browsable = true, title = key): D242Entry => ({ key, kind: "part", title, sku: key, mfr, category, haystack: d242Hay([key, title, mfr, category]), browsable, rank: 0 });
+  const all = [e("A1", "ETC", "Fixtures"), e("A2", "ETC", "Cable"), e("B1", "Rose Brand", "Track", false), e("B2", "Rose Brand", "Fixtures", true, "Source Four Clamp")];
+  const r0 = d242Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(r0.total === 3 && !r0.entries.some((x) => x.key === "B1"), "#242 search: empty query lists browsable only");
+  ok(d242Search(all, { q: "b1", mfr: [], cat: [], page: 1, pageSize: 48 }).total === 1, "#242 search: a query finds search-only parts too");
+  const r1 = d242Search(all, { q: "", mfr: ["ETC"], cat: [], page: 1, pageSize: 48 });
+  ok(r1.total === 2 && r1.catFacets.find((f) => f.value === "Fixtures")?.count === 1 && !r1.catFacets.some((f) => f.value === "Track"), "#242 search: picking a manufacturer narrows category facets");
+  ok(r1.mfrFacets.find((f) => f.value === "Rose Brand")?.count === 1 && r1.mfrFacets.find((f) => f.value === "ETC")?.selected === true, "#242 search: manufacturer facet counts ignore its own selection (either order works)");
+  const r2 = d242Search(all, { q: "source clamp", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(r2.total === 1 && r2.entries[0].key === "B2", "#242 search: every token must match (AND)");
+  const many = Array.from({ length: 100 }, (_, i) => e("P" + i, "ETC", "Cable"));
+  const p3 = d242Search(many, { q: "", mfr: [], cat: [], page: 3, pageSize: 48 });
+  ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#242 search: 48 per page, last page partial");
+  ok(d242Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#242 search: page clamps to the last page");
+}
