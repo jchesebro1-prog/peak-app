@@ -123,7 +123,9 @@ export async function finalizeDocumentUpload(
     try {
       // Re-checked right before the delete: a racing finalize of the same
       // upload may have recorded this blob since the check above, and a
-      // recorded blob is never deleted.
+      // recorded blob is never deleted. This narrows the race window — it
+      // does not close it: a rival can still record the blob in the gap
+      // between this read and deps.remove() below. Best effort only.
       if (!(await documentsUnderUploadKey(customerId, uploadKey, blobPath)).length) await deps.remove(blobPath);
     } catch {
       /* best effort — the refusal stands either way */

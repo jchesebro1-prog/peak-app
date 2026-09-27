@@ -56,16 +56,29 @@ export async function updateDocumentAction(
   const norm = (v: unknown): string | null => String(v ?? "").trim() || null;
   const siteId = p.siteId !== undefined ? p.siteId : doc.siteId;
   const projectId = p.projectId !== undefined ? p.projectId : doc.projectId;
-  // Venue/project are re-validated only when this edit changes them — a
-  // title/category/notes edit on a file whose venue or project has since
-  // gone away must still save (it keeps its stored scope untouched).
-  const scopeChanged = norm(siteId) !== norm(doc.siteId) || norm(projectId) !== norm(doc.projectId);
+  // Venue and project are each re-validated only when THIS edit changes
+  // that one field. A title/category/notes edit — or a change to just the
+  // venue, or just the project — must still save even when the OTHER,
+  // untouched field points at a project (or venue) that has since been
+  // deleted; the untouched field passes through as stored, never re-checked.
+  const siteChanged = norm(siteId) !== norm(doc.siteId);
+  const projectChanged = norm(projectId) !== norm(doc.projectId);
   let scope: { siteId?: string | null; projectId?: string | null } = {};
-  if (scopeChanged) {
+  if (siteChanged && projectChanged) {
     const facts = await documentScopeFacts(doc.customerId, norm(projectId));
     const r = resolveDocumentScope({ siteId, projectId }, doc.customerId, facts);
     if (!r.ok) return r;
     scope = { siteId: r.siteId, projectId: r.projectId };
+  } else if (siteChanged) {
+    const facts = await documentScopeFacts(doc.customerId, null);
+    const r = resolveDocumentScope({ siteId, projectId: null }, doc.customerId, facts);
+    if (!r.ok) return r;
+    scope = { siteId: r.siteId };
+  } else if (projectChanged) {
+    const facts = await documentScopeFacts(doc.customerId, norm(projectId));
+    const r = resolveDocumentScope({ siteId: null, projectId }, doc.customerId, facts);
+    if (!r.ok) return r;
+    scope = { projectId: r.projectId };
   }
   const categories = await documentCategories();
   const next = await updateDocument(doc.id, {

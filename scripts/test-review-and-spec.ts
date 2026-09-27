@@ -25613,7 +25613,7 @@ const fwaRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   const em = fwaRd("src/app/(app)/companies/edit-modal.tsx");
   ok(/pickAddress = \(i: number, h: AddressHitVM\) => \{\s*setLoc\(i, \{[^}]*zip: h\.zip/.test(em) && em.includes("zip: l.zip || null,"),
     "#216 final: the company modal sends a picked hit's zip");
-  ok(/typeSpot = [^\n]*\n\s*setLoc\(i, \{ \.\.\.patch, zip: "", lat: null, lng: null \}\)/.test(em)
+  ok(/typeSpot = [^\n]*\n\s*setLoc\(i, \{ \.\.\.patch, zip: "", lat: null, lng: null, travelMiles: "", travelMin: "" \}\)/.test(em)
     && ["address", "city", "state"].every((f) => em.includes(`onChange={(e) => typeSpot(i, { ${f}: e.target.value })}`)),
     "#216 final: typing the street/city/state by hand drops the picked coordinates and zip");
 }
@@ -25724,11 +25724,16 @@ import { resolveDocumentCategories as fwaResolveCats, mergeDocumentCategories as
   const dr = fwaRd("src/app/api/documents/[id]/route.ts");
   ok(/catch \(e\) \{[\s\S]*if \(isBlobNotFound\(e\)\) return missing\(\);/.test(dr) && dr.includes('new Response("File missing", { status: 404'), "#218 final: a Blob not-found maps to 404 File missing");
   const du = fwaRd("src/lib/documents-upload.ts");
-  ok(!du.includes("async function recordedUnder") && !du.includes("listDocsByField") && /const refuse = [\s\S]{0,400}if \(!\(await documentsUnderUploadKey\(customerId, uploadKey, blobPath\)\)\.length\) await deps\.remove\(blobPath\);/.test(du),
+  ok(!du.includes("async function recordedUnder") && !du.includes("listDocsByField") && /const refuse = [\s\S]{0,600}if \(!\(await documentsUnderUploadKey\(customerId, uploadKey, blobPath\)\)\.length\) await deps\.remove\(blobPath\);/.test(du),
     "#218 final: refuse() re-checks the store before deleting a blob; the lookup lives in the documents store");
+  ok(du.includes("This narrows the race window — it") && du.includes("does not close it") && du.includes("Best effort only."),
+    "#218 final: the refuse() re-check comment is explicit that it narrows, not closes, the race");
   ok(!fwaRd("src/lib/stores/documents.ts").includes("documentByBlobPath"), "#218 final: the dead documentByBlobPath is gone");
   const da = fwaRd("src/app/(app)/documents/actions.ts");
-  ok(/const scopeChanged = [^\n]+\n\s*let scope[^\n]+\n\s*if \(scopeChanged\) \{/.test(da), "#218 final: a document edit re-validates venue/project only when it changes them");
+  ok(/const siteChanged = [^\n]+\n\s*const projectChanged = [^\n]+\n\s*let scope[^\n]+\n\s*if \(siteChanged && projectChanged\) \{/.test(da)
+    && /\} else if \(siteChanged\) \{\s*\n\s*const facts = await documentScopeFacts\(doc\.customerId, null\);/.test(da)
+    && /\} else if \(projectChanged\) \{\s*\n\s*const facts = await documentScopeFacts\(doc\.customerId, norm\(projectId\)\);/.test(da),
+    "#218 final: a document edit validates only the field it changes — an edit to just the venue or just the project leaves the other, untouched field unvalidated");
 }
 
 async function finalWaveAAsyncChecks(): Promise<void> {
@@ -25819,4 +25824,19 @@ async function finalWaveAAsyncChecks(): Promise<void> {
     }
   );
   ok(!lone.ok && removed.includes(path2), "#218 final: an unrecorded refused upload is still deleted");
+}
+
+/* --- #216 final — stale travel survives a venue move (review fix). Both
+   handlers that change a card's address must also clear its travel so any
+   travel showing at save time was routed/typed AFTER the last address
+   change; the server-side applyVenueMoveRule rule (checked above) still
+   drops it too, but the client must never resend a now-stale number. --- */
+{
+  const em216 = fwaRd("src/app/(app)/companies/edit-modal.tsx");
+  const typeSpotBody = em216.slice(em216.indexOf("const typeSpot ="), em216.indexOf("const makePrimaryLoc ="));
+  const pickAddressBody = em216.slice(em216.indexOf("const pickAddress ="), em216.indexOf("const runRoute ="));
+  ok(typeSpotBody.includes('travelMiles: "", travelMin: ""'),
+    "#216 final: typeSpot (hand-typed street/city/state edits) clears travelMiles/travelMin so stale travel never survives a moved card");
+  ok(pickAddressBody.includes('travelMiles: "", travelMin: ""'),
+    "#216 final: pickAddress (a picked address hit) clears travelMiles/travelMin so stale travel never survives a moved card");
 }

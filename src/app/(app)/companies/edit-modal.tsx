@@ -257,8 +257,11 @@ export default function EditCustomerModal({
 
   const setLoc = (i: number, patch: Partial<LocRow>) =>
     setLocations((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  // #216 final — a hand edit to the spot also drops any travel distance: if
+  // this card ends up moved at save time, whatever travel is showing was
+  // routed/typed BEFORE this edit, so it must not survive as stale.
   const typeSpot = (i: number, patch: Pick<Partial<LocRow>, "address" | "city" | "state">) =>
-    setLoc(i, { ...patch, zip: "", lat: null, lng: null });
+    setLoc(i, { ...patch, zip: "", lat: null, lng: null, travelMiles: "", travelMin: "" });
   const makePrimaryLoc = (i: number) =>
     setLocations((rows) => rows.map((r, idx) => ({ ...r, primary: idx === i })));
   const addLoc = () => setLocations((rows) => [...rows, newLoc(rows.length === 0, defaultKind)]);
@@ -336,8 +339,10 @@ export default function EditCustomerModal({
   // #216 — a picked hit carries its coordinates and zip; typing the street,
   // city or state by hand drops them (the server then keeps the stored spot
   // if the address ends up unchanged, else clears it for the geocoder).
+  // #216 final — a picked hit is itself a spot change too, so any travel
+  // showing predates it and must not survive stale.
   const pickAddress = (i: number, h: AddressHitVM) => {
-    setLoc(i, { address: addressFromHit(h), city: h.city, state: h.state, zip: h.zip || "", lat: h.lat, lng: h.lng });
+    setLoc(i, { address: addressFromHit(h), city: h.city, state: h.state, zip: h.zip || "", lat: h.lat, lng: h.lng, travelMiles: "", travelMin: "" });
     setSearch({ idx: null, hits: [], loading: false, msg: "" });
   };
 
