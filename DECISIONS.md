@@ -6566,3 +6566,343 @@ text without anyone clicking Import. What it does and doesn't do:
 The build log prints library created/kept/skipped, product specs written / same-as / unchanged / skipped, and every
 MFR # that was not found, ambiguous or already claimed by an earlier row — that list is Jeff's to-do for
 catalog parts that don't exist yet.
+
+## D359. Venue types are an editable list; behaviour reads each type's "works like" kind (#216, 2026-09-27)
+
+The five hardcoded `VENUE_KINDS` become a Settings list (`venueTypes`, `src/lib/venue-types.ts`), seeded with the five
+built-ins plus **Gym Stage** (works like proscenium). `sites.venueKind` stores the type key; every place that
+branches on the kind for behaviour (design defaults, estimating, Quick Design, import mapping) reads
+`worksLikeOf(types, key)` instead, and an unknown key works like proscenium. A harness guard fails any raw
+`venueKind === "<built-in>"` comparison in `src/`. Keys are immutable and minted from the label; the built-in keys
+and every key ever stored on a site (soft-deleted included) are reserved, so a new "Church" type can never take over
+the built-in `church` key. Removing a type still used by a live venue is refused ("archive it instead"); an archived
+type is hidden from pickers but a venue already on it keeps it. New venues default to the first non-archived type,
+with proscenium as the last resort.
+
+## D360. A venue's name is derived "Location — Type" and stored in `sites.name` (#216, 2026-09-27)
+
+The "Venue label" input is gone from every form. The name is `(locationName || company name) + " — " + type label`,
+numbered ` (2)`, ` (3)` against the company's other venues in one order everywhere: primary first, then created
+date, then id. It is written into `sites.name`, so the ~35 existing display sites needed no change. A new
+`sites.name_auto` column (migration `0028_sites_name_auto`, idempotent D141 form) marks derived names: renaming a
+type in Settings re-derives only auto-named venues of that type, and a re-derive never throws. Existing venues keep
+their stored name until someone edits them. Names already copied onto quotes, jobs and site visits are snapshots
+and don't change. A venue whose type was deleted from the list derives "… — Venue", never the raw type key; admin
+screens that list types still show the raw key so it can be fixed.
+
+## D361. The one-venue dialog saves one site; coordinates and zip come only from a picked address (#216, 2026-09-27)
+
+`saveVenueAction` creates or updates exactly one site through `saveVenue` — it never rewrites siblings, except that
+a new primary clears the old one and a company's first venue is always primary. Coordinates and zip are sent only
+when the user picked an address hit in the dialog; an untouched address sends none and the server keeps what it has.
+A moved address (street/city/state changed) clears lat/lng and travel and takes the zip from the pick, else null.
+The venue quick-add and the inbox quick-add ask for Location + Type and save through the same seam.
+
+## D362. The company modal applies the same move rule, but keeps hand-set travel when the address is unchanged (#216, 2026-09-27)
+
+The whole-company edit modal used to bypass the move rule (`upsert → writeRecord → saveSite`). It now runs every
+venue card through the same pure `venueMoveRule` before saving (`applyVenueMoveRule`). One deliberate refinement:
+the modal has editable mi/min fields and a Route button — a manual override — so when the address is unchanged,
+travel keeps whatever the form sent; on a move, travel is cleared unless the form sent a distance different from
+the stored one (a Route after the move). Hand-editing the street/city/state or picking a hit clears the card's
+travel fields on the client too, so a stale number is never re-sent.
+
+## D363. Service totals round to the nearest $25; a floored total rounds up (#217, 2026-09-27)
+
+Flame test, repair and inspection engines compute their total exactly as before, then `roundToStep(total, 25)`
+(half rounds up) in the pure `src/lib/service-pricing.ts`; margin is back-solved as `1 − cost/total`. When a floor
+applied (flame base fee, repair call-out, inspection minimum), the total rounds **up** to the next $25 instead, so a
+floored price never rounds back below the floor ($360 → $375, not $350). The rounded total is what saves, prints
+and renews. The builders call the same pure `finish*` functions as the engines, so a preview can't drift from the
+saved price. Not applied to the Estimator, Grid, Quick Design or rentals.
+
+## D364. A typed total is used exactly; the margin follows it (#217, 2026-09-27)
+
+Each service builder's Total is an input. A typed figure saves as `priceOverride` on the service subdoc and is the
+price, not re-rounded; the slider moves to the back-solved margin (clamped visually, the number shows the truth).
+Moving the slider or **Reset to auto** clears it. The server accepts 0 < override ≤ $10,000,000, parses it strictly
+(`0x10`, `1e3`, `-0.4` are refused), and skips the 5–50% margin clamp for it. A typed total below cost, below a 10%
+margin, or (repairs) below the parts' own sell price shows a warning, never a block. On repairs, a typed total — or
+an auto job whose service sell is $0 — reports the whole-job effective margin rather than the service-only ratio.
+
+## D365. Flame testing cost is editable per venue; printed lines always sum to the total (#217, 2026-09-27)
+
+Each flame venue's Testing cell takes a typed dollar figure (`venues[].testingOverride`), which replaces that venue's
+computed labor cost in the engine, the builder preview and the save; blank means computed, and the auto total
+re-rounds from the new cost. Wherever a letter prints component lines (the D283 travel line and the service line),
+the travel line is a share of the rounded/typed total (`travelLineShare`) and the difference is absorbed into the
+service line, so the printed lines always add up to the quoted total.
+
+## D366. Renewals re-price and round, never carry a typed figure, and name a real hand-set price (#217, 2026-09-27)
+
+Renewal re-pricing (D69) rounds to $25 and never passes last year's `priceOverride` or `testingOverride`. When last
+year's price was hand-set, the draft says so and drops the generic "reflects our current rates" line. A pre-#217
+sent price off the $25 grid reopens typed in (D286), so re-saving doesn't silently re-price it; the server — not the
+client — derives whether that saved override is just the seeded legacy figure (`deriveSeededMarker`), so a rounding
+artifact is never called "hand-set" the following year and the marker survives a second save.
+
+## D367. Documents live in private Blob, upload direct, are checked before they're recorded, and always download as a file (#218, 2026-09-27)
+
+`documents` is a new doc table (migration `0029_documents`, not offline-synced); every document belongs to a
+company and optionally one of its venues and projects (a project document defaults its company and venue from the
+project). The browser gets an upload grant for one pending record and path, uploads straight to Blob, then a
+finalize reads the blob head back, re-checks size (≤ 100 MB) and magic bytes (Windows/ELF/Mach-O executables, `#!`
+scripts), refuses blocked extensions on every dot-suffix (`x.pdf.exe`), and only then writes the record; a refused
+blob is deleted. Finalize is idempotent per upload key ("That file is already saved." counts as success on retry).
+Every download is `application/octet-stream`, `attachment`, `nosniff`, `private, no-store` — never inline; a missing
+blob answers 404 "File missing". Delete soft-deletes the record, then deletes the blob best-effort. Editing a
+document re-validates only the venue or project the edit actually changes.
+
+## D368. The portal shares documents both ways; its routes use the portal session only (#218, 2026-09-27)
+
+A portal person sees their company's Shared documents plus their own uploads, grouped by venue then category, and
+can upload ("Send us files"): an upload lands `source: customer`, `visibility: shared`, unseen, with no project.
+Portal people can't edit or delete anything in v1. Both portal routes (upload grant, download) take the company from
+`portalSession()` alone and answer the same 404 for every refusal (no session, another company's file, an internal
+file, a missing blob). The team's `?preview=` view never calls them — its downloads use the team route and its
+upload control is off — so neither route needs the team-preview path. Unseen customer uploads raise one bell item
+per company ("New documents from customers"); opening one or Mark seen clears it, and an item whose company was
+deleted drops off the bell.
+
+## D369. Document categories are an editable list; an over-long label is refused, not cut (#218, 2026-09-27)
+
+`documentCategories` is seeded Drawings, Show files, User data, Forms, Photos, Contracts, Other; admins rename, add,
+reorder and archive in Settings → Document categories (keys immutable). Labels are cleaned to 40 characters, but the
+merge validates with a cap of 41, so a 41-plus-character name is refused with a message rather than silently
+truncated. An upload's category must be an active key, else Other; an edit may keep an archived key. The save reads
+settings strictly, so a failed read can't merge onto the seed and lose the custom list.
+
+## D370. The go-live reset sweeps document files from the reset action, not from `clearDemoData` (#218, 2026-09-27)
+
+Clear demo data (go-live) removes demo document records like every other collection, and then deletes the
+`documents/` Blob prefix best-effort and logged. The sweep lives in a separate `clearDemoDocumentFiles()` called by
+`clearDemoDataAction` right after `clearDemoData()`, not inside `clearDemoData`: the review-regression harness calls
+`clearDemoData` directly, and a machine with a real `BLOB_READ_WRITE_TOKEN` would otherwise wipe production document
+files during a test run.
+
+## D371. Portal history is app-era only, and projects show a whitelisted view (#220, 2026-09-27)
+
+The portal's Quotes card lists every quote `portalListsQuote` allows (sent/won/lost plus the customer's own
+self-serve drafts; never a Daylite import), grouped **Open** and **History**, each opening its saved PDF (#222) in a
+new tab. A new **Your projects** card lists the company's app-era projects (never `source.system === "daylite"` or a
+`P-dl-*` id) as Active / History, through the pure `portalProjectView`: name, venue, type, stage, install dates or
+target, and a value only when it's known and the linked quote is won — never margin, procurement, crew, time logs,
+notes, tasks, owner, deliveries or mobilizations. Flame/repair/inspection job history is not on the portal.
+
+## D372. The saved PDF is printed by headless Chrome from signed print routes (#222, 2026-09-27)
+
+`/print/quote/[id]` renders the same `QuoteDocument` component the Estimator preview shows, and
+`/print/letter/[kind]/[id]` wraps the same flame/repair/inspection letter views, from saved data only. The routes sit
+outside the team middleware and need an HMAC-SHA256 token over `print:<kind>:<id>:<exp>` keyed by `AUTH_SECRET`,
+valid 120 s; anything else is 404. The preview toggles are saved on the quote (`pdfOptions`) so a PDF is
+reproducible. Engine: `puppeteer-core@25.11.0` + `@sparticuz/chromium@153.0.0`, pinned exact — the plan's 25.12.0
+expects Chrome 154 and no Chromium 154 build exists; a harness check keeps the two majors matched. Only Estimator
+(system) quotes and the three service letters have a saved PDF; consulting and rental quotes keep their own
+documents.
+
+## D373. Every save re-renders after the response; the newest save always wins (#222, 2026-09-27)
+
+A successful save (Estimator, flame/repair/inspection Save and Approve, portal self-serve) marks `pdf.pending` for
+that save and renders in `after()`. The generator waits 4 s so a burst of saves launches Chrome once, and settles
+only through a compare-and-set on `savedAt` under a row lock, so an older render can't overwrite a newer one and a
+late failure can't turn a ready PDF into a failed one. A failure keeps the last good file. A pending render older
+than 150 s reads as failed with Retry; Retry is offered only on failed or stale. A render problem never fails the
+save. Pages whose saves render set `maxDuration = 120`.
+
+## D374. A sent revision keeps the exact PDF that was current when it was sent (#222, 2026-09-27)
+
+Any write that changes printed content stamps `contentChangedAt`; sending copies the PDF onto the new revision
+(`quote-pdfs/<id>/rev-<n>.pdf`) only when the PDF is current for that content, else the revision waits for the
+re-render. Writers that change content without a builder save now schedule a render too (Grid promote/re-promote,
+Quick Design and Home promote, renewal re-prices, Estimator move-system and header edits, revision recall); the CSV
+import only marks the PDF out of date, since rendering per imported row is too heavy.
+
+## D375. The portal serves only the sent copy once a quote has been sent (#222, 2026-09-27)
+
+Once a quote has any sent revision, the portal PDF route serves only the latest sent revision's copy — never a later
+draft — and answers "being prepared" while that copy is owed. A quote that was never sent (the customer's own
+self-serve estimate) serves its current ready file. A row with nothing to open reads "Document being prepared" only
+while a copy can still arrive, else "PDF not available — contact your rep".
+
+## D376. `QUOTE_PDF_ORIGIN` pins where production prints from (#222, 2026-09-27)
+
+The headless browser prints from `QUOTE_PDF_ORIGIN` (scheme + host) when set, and must be set in the Production
+scope (DEPLOY.md §7). Without it, Vercel and local dev fall back to the request's own host headers; a production
+server off Vercel refuses to render ("Set QUOTE_PDF_ORIGIN…") because nothing there vouches for those headers.
+Preview leaves it unset so each preview prints from its own URL. A render on a preview deploy writes the one
+production database, so a real-PDF check on a preview is Jeff's call.
+
+## D377. Quotes created outside a builder get their PDF on their first builder save or send (#222, 2026-09-27)
+
+Lead convert, the inbox "+ New quote", an inspection's spawned quote and the venue-assessment paths create a quote
+without rendering. Rather than rendering at creation (when the quote is still a stub), such a quote shows no PDF
+until its first save in its builder, or a send, schedules one.
+
+## D378. Estimate numbers are a display identity; internal ids never change (#223, 2026-09-27)
+
+Quotes and leads gain `estNo` (and quotes `estSuffix`) from one shared Postgres sequence starting at 1001, printed
+with a prefix by type: EST (Estimator/system and unknown), FLM (flame test), RIG (inspection), REP (repair), RNT
+(rental), CON (consulting), OPP (an opportunity not yet quoted) — `FLM-1002`, `EST-1005-2`. Internal ids (`Q-2041`,
+`L-1050`) stay every key: URLs, foreign keys, Blob paths, Gmail labels, hidden inputs, support diagnostics. Only text
+people read changes; a record with no number yet displays its internal id. ⌘K and the quotes hub (new `?q=` search
+box) match the number and the old id, and the hub's panel shows "was Q-2041" in small type. Text already stored
+(activity notes, revision notes, job source labels) stays a snapshot.
+
+## D379. Renumbering is one SQL function: Daylite history first by company and name, then app-era by date (#223, 2026-09-27)
+
+Migration `0030_estimate_numbers` creates the sequence and `assign_estimate_numbers()` and calls it once. Daylite
+history carries no original dates, so per Jeff (2026-09-27) it is numbered **first**: Daylite quotes and `L-dl-`
+leads ordered by company, then name, then id (empty company last). Everything app-era follows in true creation-date
+order, ties by id. Soft-deleted records are numbered too, so a number is never reused. Every text sort key is
+`COLLATE "C"` so Neon and PGlite number identically, and `ANALYZE` runs before the backfill. The same function numbers
+every new record, so it also heals anything created unnumbered (by the old deployment during the build, a preview, a
+seed or the Daylite importer) on the next create; on a database without the function (a preview before production
+migrates) it returns 0 and writes nothing.
+
+## D380. An opportunity keeps one number; a replacement, renewal or duplicate gets a new one (#223, 2026-09-27)
+
+A quote made from a numbered lead takes the lead's number (`OPP-1005` → `EST-1005`); each further quote on it gets
+`-2`, `-3`, counting every quote ever given that number, soft-deleted included; a typed `-1` means the first. A quote
+that predates its lead gives the lead its number. The consulting builder finds the customer's open lead first, or
+creates the auto-lead with the proposal's number, so `CON-1010` and `OPP-1010` are one opportunity. "Change type",
+a renewal and a duplicate are new estimates with new numbers. In search the number wins and the prefix only ranks, so
+`FLM-1005` still finds `OPP-1005`.
+
+## D381. A stored number survives every write; a create inside a transaction is numbered by the next create (#223, 2026-09-27)
+
+`estNo`/`estSuffix` are written only by `assign_estimate_numbers()` (and the consulting auto-lead's one explicit
+carry). Both stores' `update()` strip them from patches, and the doc store itself preserves the stored values on
+every update, so a whole-document writer (sync push, Import hub, Daylite re-run, `upsertDoc`) can't drop or forge a
+number, and a copy never inherits one. `numberNewDoc` never runs the function's global lock inside a caller's open
+transaction: a record created inside `withTransaction` stays unnumbered (showing its id) until the next create
+numbers it.
+
+## D382. The Grid groups parts by 25 curated device types; confident matches apply themselves (#226, 2026-09-27)
+
+Raw vendor categories (hundreds, from 52 dealer sheets) no longer drive the Grid. A Settings list of 25 device types
+across the six scopes (`gridDeviceTypes`) and a raw-category → type map (`gridTypeMap`) replace them in the palette,
+Grid Settings symbols, Layers and legends. Whenever the map is read for a category with no entry, a high-confidence
+keyword suggestion is written as an `auto` entry; low-confidence or no suggestion stays unmapped for review at
+Catalog → Device types (admin). An admin assignment is never overwritten by auto. On a Vercel preview the auto
+entries are applied in memory only, never written (preview shares the production database). An unmapped part is
+**Unscoped** — the old `scopeFor()` fallback to Lighting is gone, which also fixes unknown parts flooding the
+Lighting chip.
+
+## D383. The palette hides unmapped parts until you search; Recent tracks hand placements only (#226, 2026-09-27)
+
+Tabs Favorites · Recent · All; All has scope chips, type chips, a manufacturer filter and search. Without a search,
+parts with no device type are hidden with an "N unmapped hidden" note (admins get a link to map them); a search finds
+everything, unmapped rows chipped "Unmapped". Favorites (≤ 300) and Recent (last 40) are per user. Auto-fill does not
+push Recent — only a hand placement does — so one Auto run can't flush a person's list. Icons are set per type; the
+old per-category icons stay as "Advanced" overrides, resolved category override → type icon → shipped default.
+
+## D384. Fabric prices by one flat $/sq ft of fabric plus a 10 % sewing adder in the estimators (#227, 2026-09-27)
+
+A fabric's `curtainAreaRate` is **fabric cost per sq ft** — it does not include sewing — and a drape costs
+`sewn area × rate × (1 + sewing %)`. The old per-foot making charge ($9.53/ft pleated, $4.75/ft flat) is deleted from
+every curtain path. Jeff (2026-09-27): "a 10% adder to the fabric pricing for sewing labor but that should be built
+into the estimators not on the fabric cost" — so the adder is one Estimating Rule, `curtains.sewingPct` (group
+"Curtain sewing", default 10, cap 100), applied once in the shared model (`sewnAreaRate` in
+`src/lib/design/curtain-pricing.ts`) and reached by the Estimator, Grid, Quick Design, the portal estimate and the
+Equipment map, with a parity check at 10 % and 25 %. A typed `vendorCostOverride` is the full cost — no adder on top.
+One helper, `fabricAreaRateOf` (`curtainAreaRate` → seed rate → `costPerSqft` → 0), supplies the rate everywhere.
+Against the old making model: 50 × 3 border $1,533.75 → $900.90; 20 × 19 main $2,360.70 → $2,282.28; flat muslin cyc
+$910 → $792. Fabrics with only a `costPerSqft` (RB-MARVEL, RB-COM-16, RB-SCRIM, RB-BOBNET, RB-POLY, and production
+rows without a rate) quote that vendor cost plus the adder, and the Equipment map's seeded SKU uses the seed rate
+rather than `costPerSqft` (Charisma $4.20 → $3.64). Saved Estimator curtain lines and portal drafts keep their old
+prices until re-priced.
+
+## D385. The rate is edited on the part and imported by exact header; each screen shows its own basis (#227, 2026-09-27)
+
+Fabric-category parts get a "$/sq ft fabric" field ("Fabric cost only — estimates add sewing labor (Estimating
+Rules, default 10 %)") with a converter ($/linear yard ÷ (3 × bolt width ÷ 12), or $/sq yd ÷ 9). The server refuses
+a rate on a non-Fabric part or above $500/sq ft; the CSV import has no per-row error channel, so it doesn't apply that
+bound. The Import hub and price-book import take "Fabric $/sq ft" and "Bolt width (in)" by exact header only, and a
+price-only import never resets them. The Grid curtain drop-in shows the tier **sell** per sewn sq ft with sewing
+included ("$X/sq ft sewn (incl. sewing)", the same basis as its live price) and defaults to the first fabric that has
+a rate, warning when the chosen fabric's rate is $0; the Estimator curtain modal and the Equipment map show fabric
+**cost** ("cost $X/sq ft fabric"). A fabric with no rate reads "No $/sq ft set" and prices at $0.
+
+## D386. Hardware is a third assembly kind, scoped by where it is mapped (#228, 2026-09-27)
+
+`FixtureKind` gains `hardware` beside fixture and system: a parts list with no scope or light engine, built in the
+Assembly Builder's new Hardware tab, and mapped on Equipment-map rows like any assembly (Batten Termination →
+"Chain Wrap"). It never stores a scope; its Grid layer is that of the first Equipment-map row it's mapped on, in
+vocabulary order, else Rigging — not the Lighting default. It is offered as a swap only on Rigging rows.
+
+## D387. "Not included" is a resolved Equipment-map cell (#229, 2026-09-27)
+
+A new cell kind `{ kind: "none" }` per row per tier (curtain rows included) counts as mapped: it never makes an
+estimate Incomplete or refuses a quote, prices $0, places nothing and emits no quote line. Auto cards and Quick
+Design show "Not included" with the quantity disabled. An Auto-placed allowance whose row has since become Not
+included says so ("row is now Not included — re-fill this scope").
+
+## D388. The Grid BOM groups by heading; accessories are unplaced lines priced like placed parts (#230, 2026-09-27)
+
+The editor BOM always shows seven headings — Rigging, Curtains, Lighting, Audio, Video, Controls, General — and every
+line (devices, wires, curtains, custom items, labor) lands under one. "+ Add accessory" on a heading searches that
+heading's parts (with "Search all categories") and adds an option-scoped, never-placed line priced at the tier price
+a placement of the same part would get, carried by option copies and revisions and included in the quote. Adding the
+same part under the same heading bumps its qty (capped); Fabric and Labor parts are refused; a part later deleted from
+the catalog shows as a flagged $0 "removed part" line. Custom items (#212) gain a BOM category, Controls included.
+
+## D389. Wire pull is off until Jeff sets runs (#231, 2026-09-27)
+
+Per system, `feet = (stage width + stage depth + house depth) × runs × tier multiplier`, rounded up, priced through
+five new "Wire pull" Equipment-map rows, unit ft, placed as a lot (the vocabulary is now 51 rows, 5 derived). Estimating Rules default **runs to
+0 = off**, so no estimate moves until Jeff sets it; tier multipliers default 1.0 / 1.15 / 1.3. House depth isn't
+captured by any design today, so it counts 0 and the line says "House depth isn't in the design — not counted"; a
+blank stage dimension counts 0 and says so.
+
+## D390. Labor is a % of each system's material × the tier multiplier (#232, 2026-09-27)
+
+`labor = system material × laborPct × tier multiplier` (defaults 1.0 / 1.15 / 1.3), replacing Quick Design's flat
+install % and the Grid's hours-per-device suggestion. Each system's labor % defaults to the **currently stored**
+install % (else 18%), not a fixed 18, so the Good tier doesn't move; the retired `system.installPct` is still read as
+that default, and Reset all on the labor rows follows it. Expected deltas: Quick Design Better +2.7% and Best +5.4%
+of materials; Grid quotes gain a priced `Labor — <heading>` line per BOM heading (18–23.4% of material), editable to a
+typed dollar amount.
+
+## D391. Equipment relabels come from one source; old labels and the moved key resolve on read (#233, 2026-09-27)
+
+Ten rows are relabelled in `equipment-vocab.ts` (Suspension Method, Batten Termination, Beginning Termination,
+Console Accessories, Emergency, Power Controls – Production/Architectural, Architectural Controls, DMX
+Distribution, and Distro system → Labor), and Quick Design now reads labels from the vocabulary by key instead of
+repeating them. Saved Quick Design qty overrides keyed by an old label are re-homed through a read-time alias map
+(one hop; a new label wins when both exist). `controls:outputStation` moves to `lighting:cablePackage` ("Cable
+Package"); an Equipment-map entry saved under the old key is read as the new one unless the blob already has its own
+`lighting:cablePackage`, and the next save writes the new key.
+
+## D392. Cable Package follows Lighting, so every Lighting design gains a line that needs mapping (#233, 2026-09-27)
+
+The moved Cable Package row is now gated on Lighting being on, not Controls + Data as Output station was. Knock-on:
+every design with Lighting — Quick Design and Grid Auto — gains a Cable Package line (quantity per D393), and until that
+row is mapped (a part, an allowance, or Not included) the design reads Incomplete and Add to Quotes refuses it, per
+D310/D322. An existing Output station mapping carries over through the alias in D391.
+
+## D393. Cable Package quantity = fixtures × per fixture × tier (#233, 2026-09-27)
+
+Jeff (2026-09-27): "The Cable package should be based on the number of fixtures selected and then a multiplier
+factor similar to how we are doing labor." The old stage-depth formula (2 × ⌊depth ÷ 7/4/3⌋) is gone:
+`qty = ⌈fixtures × per fixture × tier multiplier⌉` (`src/lib/design/cable-package.ts`), where fixtures = the
+quantity the design actually carries on the five lighting fixture rows (par, front, cyc, side, automated —
+`LIGHTING_FIXTURE_KEYS`), **after** the designer's typed quantities in Quick Design and on Grid Auto cards. Estimating
+Rules group "Cable package": `cable.lighting.perFixture` (default 1, cap 10) and Good/Better/Best multipliers (1 /
+1.15 / 1.3). The tier is the design's tier (Quick Design) or the Lighting card's Auto tier (Grid). No fixtures → no
+line; a typed Cable Package quantity still wins and drops the "N fixtures × f × m" note. The count is per cable, so
+it runs 4–5× the old figure (a large default design 20 → 91); the old seeded price hint for the row was removed, and
+the row is priced per unit in the Equipment map (#239).
+
+## D394. Inbox linking lives in the sidebar; the Link popup is gone (#214, 2026-09-27)
+
+Jeff (2026-09-27): "I would like inbox link function to pop into the sidebar and that is how you link and all of the
+information comes in. I like the button next to the name but then it just opens the sidebar." The per-message Link…
+button (and the summary's Edit links) now switches the reader's sidebar into **link mode** for that message: a
+"Linking from" header with Done, then the whole former popup — From/To/Cc people, the one search, the signature
+reader's pre-fill, quick-adds and Create task — as `link-panel.tsx`. `link-popup.tsx` is deleted; the modal chrome
+(backdrop, focus trap) goes with it, and the inbox's arrow-key thread switcher skips `[data-link-panel]` instead.
+Link mode is keyed by message, stays open after each link so several people can be linked in a row, and resets on a
+thread change. The pane widens from 300px to `clamp(300px, 100% − 320px, 380px)` only in link mode, so the
+conversation keeps at least 320px; the phone overlay keeps its height. Escape in an idle field exits link mode, but
+never closes a quick-add that has typed content, and leaving link mode with a half-typed contact, company or venue
+asks first.

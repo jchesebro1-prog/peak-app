@@ -8662,30 +8662,64 @@ estimator name. Not the companies, I still want the date though." Spec:
 
 ---
 
-## 216. Venues — edit after creation, derived names, editable venue types — OPEN
+## 216. Venues — edit after creation, derived names, editable venue types — DONE 2026-09-27 (D359–D362)
 
 **Reported:** 2026-09-26 (Jeff): "We need the ability to edit a venue after it is added. We also need to display
 the Venue's main name like Elementary or High School of what was typed in as well as the type of space. I also
 would like to edit what displays for the options when selecting the type of venue. There needs to be a Gym Stage
 option. Then that can eliminate the Venue Label, basically using the logic of the location name and venue type to
 be the name of the venue." Spec: `docs/superpowers/specs/2026-09-26-venues-and-service-rounding-design.md` (§216);
-plan: `docs/superpowers/plans/2026-09-26-venues.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
-`feat/punch-lane-b`.
+plan: `docs/superpowers/plans/2026-09-26-venues.md`.
+
+**Done.**
+- Venue types are an editable list in Settings → **Venue types** (admin): rename, add, reorder, archive, and a
+  "Works like" built-in kind per type that design and estimating defaults follow. **Gym Stage** is seeded (works
+  like proscenium). A type still used by a venue can be archived, not removed.
+- A venue's name is now derived — **"Location — Type"**, falling back to the company name, numbered ` (2)`, ` (3)`
+  within a company — and stored, so every screen shows it. The "Venue label" input is gone from every form; forms
+  ask for Location name and Venue type, with a "Will display as" preview. Renaming a type re-derives the names of
+  venues that use the derived name (`sites.name_auto`, migration `0028_sites_name_auto`).
+- **Edit one venue:** an Edit button on each venue row of the company page and on the venue page opens a one-venue
+  dialog (Location, Type, address search, Primary). "+ Add venue", the inbox Link popup's venue quick-add and the
+  quote intake ask for the same Location + Type.
+- A moved venue drops its old coordinates, zip and travel figures; coordinates and zip come only from an address
+  picked in the search. The company edit modal follows the same rule, keeping a hand-typed travel figure when the
+  address hasn't changed.
+
+**Still open.** Existing venues keep their current name until someone edits them — then they switch to the
+derived name. Names already copied onto quotes, jobs and site visits are snapshots and don't change. After the
+production deploy, confirm `drizzle.__drizzle_migrations` lists 0028 (with 0029 and 0030). See D359–D362.
 
 ---
 
-## 217. Service quotes — round to the nearest $25, typed total, editable testing cost — IN PROGRESS
+## 217. Service quotes — round to the nearest $25, typed total, editable testing cost — DONE 2026-09-27 (D363–D366)
 
 **Reported:** 2026-09-26 (Jeff): "Auto-estimates should round to the nearest 25 dollars. It should allow the
 estimator to change the figure and auto-adjust the margin. I also would like the venue testing cost to be editable
 in order to help with the rounding." Spec:
 `docs/superpowers/specs/2026-09-26-venues-and-service-rounding-design.md` (§217); plan:
-`docs/superpowers/plans/2026-09-26-service-rounding.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
-`feat/punch-lane-b`.
+`docs/superpowers/plans/2026-09-26-service-rounding.md`.
+
+**Done.**
+- Flame test, repair and inspection auto totals round to the nearest $25; when a base fee, call-out or minimum
+  applies, the total rounds **up** so it never lands below the floor. The margin shown is back-solved from the
+  rounded total.
+- Each builder's **Total** is now an input: a typed figure is the price exactly, the margin slider moves to match,
+  and moving the slider or **Reset to auto** goes back to the computed total. A typed total below cost, below a 10%
+  margin, or (repairs) below the parts' sell price warns but never blocks.
+- Flame tests: each venue's **Testing** cell takes a typed dollar figure, and the auto total re-rounds from it.
+- Letters and quote documents reconcile: the travel line is a share of the final total and the service line absorbs
+  the difference, so the printed lines always sum to the quoted price.
+- Renewals re-price at current rates and round to $25, never carry last year's typed figures, and the draft says
+  when last year's price was hand-set. A pre-#217 sent price that isn't on the $25 grid reopens as a typed figure,
+  so re-saving it doesn't silently change it.
+
+**Still open.** None — the Estimator, Grid, Quick Design and rentals were out of scope and don't round. See
+D363–D366.
 
 ---
 
-## 218. Documents — company / venue / project files, shared through the portal — OPEN
+## 218. Documents — company / venue / project files, shared through the portal — DONE 2026-09-27 (D367–D370)
 
 **Reported:** 2026-09-26 (Jeff): "I would like to add a documents portion of the app and have it mostly be linked
 to companies. I am hoping to [have] internal and external documents that upload to the company and link to the
@@ -8694,44 +8728,311 @@ company. Ultimately this is how we are going to build out the customer portal wh
 information to the customer but also allow them to share documents with us by uploading them. We will also be able
 to store drawings, show files, user data, and relevant forms this way." Spec:
 `docs/superpowers/specs/2026-09-26-documents-design.md`; plan: `docs/superpowers/plans/2026-09-26-documents.md`.
-Batch 2 — in progress on `feat/punch-inbox-tasks` / `feat/punch-lane-b`.
+
+**Done.**
+- A **Documents** card on the company page, the venue page, and a new Documents tab on projects: multi-file upload
+  (per-file category, Internal/Shared, progress, retry), filters by venue/category/visibility, edit, delete and
+  download. Every document belongs to a company and optionally one venue and one project.
+- Files go straight to private Vercel Blob (any type up to 100 MB; programs and scripts refused by extension and by
+  their first bytes) and always download as a file, never open in the browser (`documents` table, migration
+  `0029_documents`).
+- Categories are an editable list in Settings → Document categories, seeded Drawings, Show files, User data, Forms,
+  Photos, Contracts, Other.
+- **Portal, both ways:** a Documents section lists the company's Shared files and the customer's own uploads by venue
+  and category, and "Send us files" lets the customer upload (optional venue, category, note). Customer uploads show
+  "From customer" + "New" on the team card and raise a bell item, "New documents from customers", until seen.
+- Clear demo data (go-live) also deletes demo document files from Blob.
+
+**Still open.** Portal people can't edit or delete anything yet, not even their own uploads. Google Drive storage,
+versioning, previews, per-person sharing (F15) and attaching documents to quotes/emails stay out of scope. Upload
+rate limiting per portal grant and a few extra blocked extensions are logged as #234 and #237. Verify a real upload
+on production after deploy (Blob token in place). See D367–D370.
 
 ---
 
-## 220. Customer portal — all estimates and project history — OPEN
+## 220. Customer portal — all estimates and project history — DONE 2026-09-27 (D371)
 
 **Reported:** 2026-09-26 (Jeff): "Customers Portal should show all estimates, and projects in history. Selecting a
 quote should pop up to what mode it was created in." Spec:
 `docs/superpowers/specs/2026-09-26-quote-pdfs-portal-history-design.md` (§220); plan:
-`docs/superpowers/plans/2026-09-26-quote-pdfs-portal-history.md`. Batch 2 — in progress on
-`feat/punch-inbox-tasks` / `feat/punch-lane-b`.
+`docs/superpowers/plans/2026-09-26-quote-pdfs-portal-history.md`.
+
+**Done.**
+- The portal's quotes are grouped **Open** (sent, plus the customer's own self-serve drafts) and **History** (won,
+  lost), newest first; each row opens that quote's saved PDF (#222) in a new tab — the document exactly as it was
+  created in its own builder.
+- A new **Your projects** card shows Active and History projects: name, venue, type, stage, install dates or target,
+  and a value only when it's known and the quote is won. Nothing internal (margin, procurement, crew, time, notes,
+  tasks, owner) is ever shown.
+- App-era only: Daylite-imported quotes and projects stay internal. The team's portal preview shows the same.
+
+**Still open.** Flame/repair/inspection *job* history isn't on the portal; Daylite-era history stays internal by
+design. See D371.
 
 ---
 
-## 222. Saved estimates keep their PDF; the customer preview shows that PDF — OPEN
+## 222. Saved estimates keep their PDF; the customer preview shows that PDF — DONE 2026-09-27 (D372–D377)
 
 **Reported:** 2026-09-26 (Jeff): "I also want when you save the estimate and customer preview it saves the PDF
 version and that is what shows up in the customer preview." Spec:
 `docs/superpowers/specs/2026-09-26-quote-pdfs-portal-history-design.md` (§222); plan:
-`docs/superpowers/plans/2026-09-26-quote-pdfs-portal-history.md`. Batch 2 — in progress on
-`feat/punch-inbox-tasks` / `feat/punch-lane-b`.
+`docs/superpowers/plans/2026-09-26-quote-pdfs-portal-history.md`.
+
+**Done.**
+- Every Save of an Estimator quote or a flame-test / repair / inspection proposal renders a **real PDF** of the
+  customer document with headless Chrome (`puppeteer-core` + `@sparticuz/chromium`) right after the save, and keeps
+  it in Blob. A burst of saves renders once; the newest save always wins; a failed render keeps the last good file
+  and never fails the save.
+- The Estimator's **Customer preview →** now shows that saved PDF, with "Updating PDF…", "Unsaved changes — save
+  to update the PDF", or the failure reason with Retry. The preview's toggles are saved with the quote, and
+  **Download PDF** downloads the saved file. The service builders' letter buttons open their saved PDF the same way.
+- Sending a quote keeps the exact PDF that was current on that revision, and the portal serves only that sent copy
+  (a never-sent self-serve estimate serves its current file).
+- New env `QUOTE_PDF_ORIGIN` (DEPLOY.md §7) pins the address production prints from.
+
+**Still open (Jeff-gated).** Set `QUOTE_PDF_ORIGIN` in Vercel's **Production** scope before or with this deploy
+(leave it unset for Preview; set `VERCEL_AUTOMATION_BYPASS_SECRET` only if previews sit behind Deployment
+Protection). A preview deploy renders real PDFs but writes the one production database, so a render check on a
+preview is Jeff's call; otherwise check one save → PDF on production. Quotes created outside a builder (lead
+convert, inbox "+ New quote", inspection spawn, venue assessments) get their PDF on their first builder save or
+send. Consulting and rental quotes keep their own documents. See D372–D377.
 
 ---
 
-## 223. Estimate numbers — one shared counter, a prefix per type — OPEN
+## 223. Estimate numbers — one shared counter, a prefix per type — DONE 2026-09-27 (D378–D381)
 
 **Reported:** 2026-09-26 (Jeff): "I want the quote format to look less random. Let's just follow a simple estimate
 number growth so let's just renumber and start over but every opportunity, flame test, or really any estimate gets
 its own unique number." Spec: `docs/superpowers/specs/2026-09-26-estimate-numbers-design.md`; plan:
-`docs/superpowers/plans/2026-09-26-estimate-numbers.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
-`feat/punch-lane-b`.
+`docs/superpowers/plans/2026-09-26-estimate-numbers.md`.
+
+**Done.**
+- Every quote and opportunity gets an estimate number from **one shared counter starting at 1001**, printed with a
+  prefix by type: **EST** (Estimator), **FLM** (flame test), **RIG** (rigging inspection), **REP** (repair), **RNT**
+  (rental), **CON** (consulting), **OPP** (an opportunity not yet quoted).
+- An opportunity's number carries to its first quote (`OPP-1005` → `EST-1005`); more quotes on it get `-2`, `-3`.
+  A "Change type" replacement, a renewal and a duplicate are new estimates with new numbers.
+- **Everything is renumbered** (migration `0030_estimate_numbers`), soft-deleted records included so no number is
+  ever reused: Daylite history first, by company then name, then app-era records in true date order.
+- The number is what people see everywhere — quotes hub, ⌘K, Estimator and service builders, letters, saved PDFs,
+  portal, renewals, leads/opportunities, Home, reviews, queue, bell, company record, inbox, Grid, Specs, consulting.
+  ⌘K and the quotes hub's new search box find a quote by its number **or** its old id (`Q-2041` still works), and
+  the hub shows "was Q-2041". Internal ids, URLs and Gmail labels are unchanged.
+
+**Still open.** Activity and revision notes written before the renumber keep the old ids (snapshots). After the
+production deploy, offline field devices re-pull quotes and leads once (the backfill bumps every record's revision).
+Confirm 0030 in `drizzle.__drizzle_migrations`. See D378–D381.
 
 ---
 
-## 226. The Grid — curated device types replace raw vendor categories — IN PROGRESS
+## 226. The Grid — curated device types replace raw vendor categories — DONE 2026-09-27 (D382, D383)
 
 **Reported:** 2026-09-26 (Jeff, brainstorm): "Can we brainstorm how we solve the fact that there are too many
 categories in the grid? I need to resolve that as it is too many to be functional." Spec:
 `docs/superpowers/specs/2026-09-26-grid-device-types-design.md`; plan:
-`docs/superpowers/plans/2026-09-26-grid-device-types.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
-`feat/punch-lane-b`.
+`docs/superpowers/plans/2026-09-26-grid-device-types.md`.
+
+**Done.**
+- **25 curated device types** across Lighting, Rigging, Curtains, Audio, Video and General replace raw vendor
+  categories in the Grid. **Catalog → Device types** (admin) edits the list (rename, add, reorder, archive, merge)
+  and maps every raw category to a type, unmapped first, with part counts, suggestions and bulk assign. Confident
+  matches apply automatically (chipped "auto" for spot-checking); an admin choice is never overwritten.
+- The **palette** gains Favorites · Recent · All tabs, type chips per scope, a manufacturer filter and a star per
+  row; parts with no type are hidden until you search. Recent tracks hand placements only — Auto-fill doesn't push
+  it.
+- **Grid Settings → Symbols** sets icons per device type (the old per-category icons stay as Advanced overrides),
+  and **Layers** and plan legends group by device type with Unmapped last.
+- Fixed: a part with an unknown category used to fall into Lighting; it is now Unscoped.
+
+**Still open (Jeff-gated).** Review the auto-applied mappings and map what's left at Catalog → Device types on
+production (a preview deploy applies auto matches in memory only, never saves them). See D382, D383.
+
+---
+
+## 227. Fabric prices by a flat $/sq ft, plus a sewing adder in the estimators — DONE 2026-09-27 (D384, D385)
+
+**Reported:** 2026-09-26 (Jeff): "We need fabric to price via sqft." 2026-09-27: "Let's include a 10% adder to the
+fabric pricing for sewing labor but that should be built into the estimators not on the fabric cost." Spec:
+`docs/superpowers/specs/2026-09-26-fabric-sqft-pricing-design.md`; plan:
+`docs/superpowers/plans/2026-09-26-fabric-sqft-pricing.md`.
+
+**Done.**
+- A drape now costs **sewn area × the fabric's $/sq ft × (1 + sewing %)**; the per-foot making charge is gone from
+  the Estimator, Grid, Quick Design, the portal estimate and the Equipment map, all through one rate helper and one
+  shared model. The sewing adder is an Estimating Rule (Curtain sewing, default **10 %**), never stored on the fabric;
+  a typed vendor cost gets no adder.
+- Fabric parts get a **"$/sq ft fabric"** field in the catalog editor, with a converter from $/linear yard + bolt
+  width or $/sq yd. The Import hub and price-book import take "Fabric $/sq ft" and "Bolt width (in)" columns (exact
+  header only; a price-only import never clears them).
+- Against the old making model: 50 × 3 border $1,533.75 → $900.90, 20 × 19 main $2,360.70 → $2,282.28, flat muslin
+  cyc $910 → $792. See D384, D385.
+
+---
+
+## 228. Hardware assemblies — DONE 2026-09-27 (D386)
+
+**Reported:** 2026-09-26 (Jeff): "We need to add hardware as an assembly. So we can have the Chain Wrap be an
+Assembly termination method. This ultimately will be a catalog item that loads as batten terminations. But
+Assemblies for Hardware should exist." Spec: `docs/superpowers/specs/2026-09-26-grid-packages-labor-wire-design.md`
+(§228); plan: `docs/superpowers/plans/2026-09-26-grid-relabels-none-hardware.md`.
+
+**Done.** The Assembly Builder gains a third kind, **Hardware** (tab, New → Hardware, a parts list with no scope or
+light engine). Hardware assemblies map onto Equipment-map rows like any assembly — e.g. Batten Termination → "Chain
+Wrap" — land on the Rigging layer (or the layer of the row they're mapped on), and are offered as swaps on Rigging
+rows.
+
+**Still open (Jeff-gated).** Build the Chain Wrap (and other termination) hardware assemblies and map them. See
+D386.
+
+---
+
+## 229. "Not included" per row per tier — DONE 2026-09-27 (D387)
+
+**Reported:** 2026-09-26 (Jeff): "We also need the option on some of these that end up just not having a solution in
+certain categories. This would mostly pertain to the good tier." Spec:
+`docs/superpowers/specs/2026-09-26-grid-packages-labor-wire-design.md` (§229); plan:
+`docs/superpowers/plans/2026-09-26-grid-relabels-none-hardware.md`.
+
+**Done.** Any Equipment-map row can be set to **Not included** per tier (curtain rows too). It counts as mapped —
+never "Incomplete", never refuses a quote — prices $0, places nothing and adds no quote line; Auto cards and Quick
+Design show "Not included" for that item.
+
+**Still open.** None. See D387.
+
+---
+
+## 230. BOM grouped by category, "+ Add accessory" per category — DONE 2026-09-27 (D388)
+
+**Reported:** 2026-09-26 (Jeff): "In the BOM, we should add a line item in all of the categories that just allow for
+additional accessories from the catalog if needed for that category." Spec:
+`docs/superpowers/specs/2026-09-26-grid-packages-labor-wire-design.md` (§230); plan:
+`docs/superpowers/plans/2026-09-26-grid-bom-accessories.md`.
+
+**Done.** The Grid editor's BOM is grouped under Rigging, Curtains, Lighting, Audio, Video, Controls and General,
+each with its total. Each heading has **+ Add accessory**: a catalog search (that heading's parts, or "Search all
+categories") that adds an unplaced line priced exactly like a placed part at the design's tier, with editable qty,
+carried by option copies and revisions and included in the quote. Custom items can be filed under a heading too.
+
+**Still open.** The editor's BOM rows show list price while labor and the quote use tier sell (#236). See D388.
+
+---
+
+## 231. Wire pull per system, by venue size × tier — DONE 2026-09-27 (D389)
+
+**Reported:** 2026-09-26 (Jeff): "We also need to add the option for every package that defines wire pull based on an
+equation and then with a multiplier for each tier as the higher tiers do require extra costs." Spec:
+`docs/superpowers/specs/2026-09-26-grid-packages-labor-wire-design.md` (§231); plan:
+`docs/superpowers/plans/2026-09-26-grid-wire-labor.md`.
+
+**Done.** Each system (Rigging, Lighting, Audio, Video, Controls) gets a **Wire pull** line in Grid Auto and Quick
+Design: feet = (stage width + stage depth + house depth) × runs × tier multiplier, priced through a new "Wire pull"
+Equipment-map row per system. Estimating Rules gain runs per system and Good/Better/Best multipliers (1.0 / 1.15 /
+1.3).
+
+**Still open (Jeff-gated).** Runs default to **0 = off**, so nothing changes until they're set (#238), and each Wire
+pull row needs a per-foot part, allowance or Not included in the Equipment map. House depth isn't captured by any
+design yet, so it counts 0 and the line says so. See D389.
+
+---
+
+## 232. Labor per system, % of material × tier — DONE 2026-09-27 (D390)
+
+**Reported:** 2026-09-26 (Jeff): "Labor needs to be defined via a calculation with a cost multiplier per tier as the
+higher tiers do require extra labor for every system." Spec:
+`docs/superpowers/specs/2026-09-26-grid-packages-labor-wire-design.md` (§232); plan:
+`docs/superpowers/plans/2026-09-26-grid-wire-labor.md`.
+
+**Done.**
+- Labor per system = that system's material × labor % × the tier multiplier (1.0 / 1.15 / 1.3), editable per system
+  in Estimating Rules; each system's % starts at today's install %, so the Good tier doesn't move.
+- Quick Design's flat install % is replaced by the per-system calc ("Labor (per system)" with a breakdown): Better
+  rises by 2.7% and Best by 5.4% of materials.
+- Grid Auto cards show a labor row per system, and the Grid BOM and quote gain a priced **Labor — <heading>** line
+  per heading (a typed dollar figure overrides it), replacing the old hours-per-device suggestion.
+
+**Still open.** Jeff to confirm the default labor % and tier multipliers read right on a real design. See D390.
+
+---
+
+## 233. Equipment relabels; Cable Package moves to Lighting — DONE 2026-09-27 (D391–D393)
+
+**Reported:** 2026-09-26 (Jeff, relabel list in chat): Battery backup → Emergency; Processor → Power Controls –
+Production; Distro system → Labor; and the rigging/controls renames below. Spec:
+`docs/superpowers/specs/2026-09-26-grid-packages-labor-wire-design.md` (§233); plan:
+`docs/superpowers/plans/2026-09-26-grid-relabels-none-hardware.md`.
+
+**Done.**
+- Relabelled (keys unchanged): Aircraft cable → Suspension Method; Chain wrap → Batten Termination; Termination kit
+  → Beginning Termination; Console touch screen → Console Accessories; Battery backup → Emergency; Processor → Power
+  Controls – Production; Button → Power Controls – Architectural; Architectural touch screen → Architectural
+  Controls; Input station → DMX Distribution; Distro system → Labor.
+- Output station becomes **Cable Package** under Lighting. Quick Design reads every label from the one equipment
+  vocabulary; saved Quick Design quantities and an existing Output station mapping carry over.
+- 2026-09-27 (Jeff: "based on the number of fixtures selected and then a multiplier factor similar to how we are
+  doing labor"): Cable Package quantity = ⌈fixtures the design carries × per fixture (default 1) × tier (1 / 1.15 /
+  1.3)⌉, set in Estimating Rules → Cable package (D393).
+
+**Still open (Jeff-gated).** Because Cable Package now follows Lighting, **every Lighting design gains a Cable
+Package line**, and until that row is mapped (part, allowance or Not included) those designs read Incomplete and Add
+to Quotes refuses them (#239). An existing Output station mapping carries over automatically. See D391–D393.
+
+---
+
+## 234. Portal document uploads — a rate cap per grant — OPEN
+
+**Found:** 2026-09-27, #218 review. A portal person can upload any number of files (each ≤ 100 MB) with no per-grant
+or per-day limit. Add a cap per portal grant (count and total bytes per day), refused with a clear message.
+
+---
+
+## 235. Google Calendar `upsertManagedEvent` 409 fallback never runs — OPEN
+
+**Found:** 2026-09-26, #219 planning. `src/lib/google/calendar.ts` `upsertManagedEvent` checks `err.status === 409`,
+but the error it catches never has `status` set, so the "already exists → update" fallback is dead code. Set the
+status on the thrown error (or match on the response) and add a test.
+
+---
+
+## 236. Grid editor BOM rows price at list, not tier sell — OPEN
+
+**Found:** 2026-09-27, #232 review. The editor's BOM rows show list price, while the per-heading labor lines and the
+draft quote use tier sell, so the visible rows don't reconcile with the labor or the quote total. Price the editor's
+BOM rows at tier sell on the server.
+
+---
+
+## 237. Documents — add .lnk .hta .command .reg .cpl .msc to the blocked extensions — OPEN
+
+**Found:** 2026-09-27, #218 review. `BLOCKED_EXTENSIONS` in `src/lib/document-files.ts` misses Windows shortcuts
+(`.lnk`), HTML applications (`.hta`), macOS `.command` scripts, registry files (`.reg`), control-panel items (`.cpl`)
+and management-console files (`.msc`). Jeff to confirm, then add them (they download as files either way).
+
+---
+
+## 238. Set the wire-pull runs per system — OPEN (Jeff-gated)
+
+**From:** #231. Every system's wire-pull **runs** defaults to 0 (off), so no design has a wire-pull line yet. Set
+runs (and review the 1.0 / 1.15 / 1.3 tier multipliers) per system in Estimating Rules, and map each system's "Wire
+pull" row in Grid Settings → Equipment map.
+
+---
+
+## 239. Map Cable Package in the Equipment map — OPEN (Jeff-gated)
+
+**From:** #233 (D392, D393). Every Lighting design now carries a Cable Package line, one unit per cable
+(fixtures × per fixture × tier), so map it at a per-cable price; until `lighting:cablePackage` is mapped
+per tier (a part, an allowance or Not included) in Grid Settings → Equipment map, those designs read Incomplete and
+can't be added to Quotes. An existing Output station mapping carries over — check it on production.
+
+---
+
+## 240. Inbox — linking lives in the sidebar, not a popup — DONE 2026-09-27 (D394)
+
+**Reported:** 2026-09-27 (Jeff): "I would like inbox link function to pop into the sidebar and that is how you link
+and all of the information comes in. I like the button next to the name but then it just opens the sidebar."
+
+**Done.** The Link… button next to each sender name (and Edit links) opens the reader's sidebar in link mode for
+that message: who you're linking from, Done, then every #214 editor — From/To/Cc people, one search across
+companies/venues/people, the signature pre-fill, quick-adds and Create task. The popup is gone. The sidebar widens
+to 380px while linking (never squeezing the conversation below 320px), stays open for several links in a row, and
+won't drop a half-typed new contact without asking. See D394.

@@ -342,11 +342,39 @@ See `.env.example`.
     directories page instead of endless-scrolling; and the consulting
     proposal document drops its boilerplate header lines, gains a Dear
     line and bulleted assumptions, and prints a clean PDF with the quote's
-    own terms and a contact + estimator acceptance. Batch 2 — #216 (venues),
-    #217 (service-quote rounding), #218 (documents), #220 (portal history),
-    #222 (saved quote PDFs), #223 (estimate numbers), #226 (Grid device
-    types) — is in progress on `feat/punch-inbox-tasks` /
-    `feat/punch-lane-b`.
+    own terms and a contact + estimator acceptance.
+    ✅ **Batch 2** (Sep 27, #216–#218, #220, #222, #223, #226–#233,
+    D359–D394) — venue types become an editable list (Gym Stage seeded;
+    each type "works like" a built-in kind), venue names derive as
+    "Location — Type" (`sites.name_auto`, migration 0028) and one venue
+    edits in its own dialog; flame/repair/inspection totals round to $25
+    (floors round up), take a typed total that back-solves the margin, and
+    flame testing cost is editable per venue, with renewals re-pricing and
+    rounding; a `documents` collection (migration 0029) puts company/venue/
+    project files in private Blob with checked direct uploads,
+    attachment-only downloads and editable categories, shared both ways
+    through the portal ("Send us files", a bell for new customer uploads);
+    every Estimator and service-letter save renders a real headless-Chrome
+    PDF (`src/lib/quote-pdf/`, signed print routes, `QUOTE_PDF_ORIGIN`)
+    that the customer preview shows and the portal serves (sent copies
+    only), and the portal lists all app-era estimates (Open/History) plus
+    project history; every quote and lead carries an estimate number from
+    one counter at 1001 (EST/FLM/RIG/REP/RNT/CON/OPP, a lead's number
+    carries, `-2`/`-3` suffixes; migration 0030 renumbered everything,
+    Daylite history first) while internal ids stay unchanged and
+    searchable; the Grid groups parts by 25 curated device types
+    (Catalog → Device types, auto-applied confident matches, a palette with
+    Favorites/Recent/type chips/manufacturer filter); fabric prices by one
+    flat $/sq ft of fabric plus a sewing adder in the estimators (10 %,
+    Estimating Rules); and Grid packages gain Hardware
+    assemblies, a "Not included" Equipment-map cell, a BOM grouped by
+    heading with "+ Add accessory", wire pull (runs 0 = off) and labor as a
+    % of material × tier, plus the equipment relabels with Cable Package
+    moved to Lighting and sized by fixtures × per fixture × tier; Inbox
+    linking moved from the Link popup into the reader's sidebar (#240). Remaining is Jeff-gated: set `QUOTE_PDF_ORIGIN` in
+    production, map Cable Package (per cable)
+    and the Wire pull rows, set wire-pull runs, and review the device-type
+    mappings (PUNCHLIST #234–#240).
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
