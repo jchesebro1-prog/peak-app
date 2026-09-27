@@ -20506,3 +20506,127 @@ import { visibleRows as slVisibleRows, filterRows as slFilterRows, visibleGroupF
   ok(shortListComp224.startsWith('"use client"'), "#224: ShortList is a client component");
   ok(!/@\/lib\/stores\/|@\/db\//.test(shortListComp224), "#224: the client ShortList component imports no store/db module");
 }
+
+/* ====== #219 Daylite calendar import — Task 1: parser, classifier, keys, bodies, owners (pure) ======
+   Fixture: 11 rows copied from Dropbox "Calendar Events.tsv" (meeting-link
+   URLs and a phone number redacted) plus 2 synthetic bad rows. Physical
+   lines: header 1; Weekly Sales Meeting ×4 = 2–5; Jena 6; Christmas 7;
+   Lincoln 8; RCA 9; Oshkosh 10; Mike 11; Sauk 12; bad date 13; bad duration 14. */
+import {
+  parseCalendarTsv as dc219Parse,
+  splitTsv as dc219Split,
+  parseStart as dc219Start,
+  classify as dc219Classify,
+  eventKey as dc219Key,
+  googleEventId as dc219GId,
+  googleEventFor as dc219Body,
+  matchOwner as dc219Match,
+  todayYmdIn as dc219Today,
+  addMinutes as dc219Add,
+  type DayliteEvent as DC219Event,
+} from "@/lib/daylite/calendar-events";
+
+const DC219_FIXTURE =
+  [
+    "Duration (HH:MM)\t\tCategory\tStart Date\tStatus\tName\t\tDuration\tLinked\tOwner\tDetails\t",
+    '01:00\t\t\t"12/25/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/18/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/11/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/4/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '24:00\t\tPTO\t"9/25/26, 12:00 AM"\tConfirmed\t"Jena Off"\t\t"1 day"\t\t"Jena Tolksdorf"\t\t',
+    '48:00\t\t\t"12/24/26, 12:00 AM"\tConfirmed\t"Christmas Holiday"\t\t"2 days"\t\t"Jason Keagy"\t\t',
+    '00:30\t\t\t"9/16/26, 2:00 PM"\tConfirmed\t"Lincoln Academy Submittal Review"\t\t"30 minutes"\t"LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV, LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
+    '32:00\t\tInstall\t"2/11/26, 8:00 AM"\tConfirmed\t"RCA Wire Pulls (Mark, Paul, AJ, Nelson)"\t\t"1 day 8 hours"\t"RICHLAND CENTER HS (via Nexus Solutions) - Auditorium AV"\t"Andrew Herschleb"\t\t',
+    '01:30\t\t\t"2/11/26, 12:30 PM"\tConfirmed\t"Oshkosh North Aud & Black Box Projects - First AV Conversation including \\"Shelby\\""\t\t"1 hour 30 minutes"\t"BRAY ARCHITECTS - OSHKOSH NORTH HS - Auditorium & Black Box AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
+    '01:00\t\t"Service Call"\t"5/18/26, 8:00 AM"\tConfirmed\t"Mike to Cross Of Christ 8:00 am"\t\t"1 hour"\t\t"Mike Mundth"\t\t',
+    '01:00\t\t"Service Call"\t"9/16/26, 9:00 AM"\tConfirmed\t"Sauk Trail Elementary, Middleton HS "\t\t"1 hour"\t\t"Isaac Mittlesteadt"\t"Elementary - mute/unmute passcode   HS - Bluetooth issue, confirm replacement"\t',
+    '01:00\t\t\t"13/45/26, 9:00 AM"\tConfirmed\t"Broken date"\t\t"1 hour"\t\t"Jeff Chesebro"\t\t',
+    'soon\t\t\t"9/1/26, 9:00 AM"\tConfirmed\t"Broken duration"\t\t""\t\t"Jeff Chesebro"\t\t',
+  ].join("\n") + "\n";
+
+{
+  const j = (v: unknown) => JSON.stringify(v);
+
+  // splitTsv — tabs inside quotes, "" and \" escapes, physical line numbers.
+  const t1 = dc219Split('a\t"b\tc"\n"x ""y"" \\"z\\""\tw\n"p\nq"\tr\ns\tt\n');
+  ok(j(t1.map((r) => r.cells)) === j([["a", "b\tc"], ['x "y" "z"', "w"], ["p\nq", "r"], ["s", "t"]]), "#219 splitTsv: tabs in quotes, doubled and backslash-escaped quotes");
+  ok(j(t1.map((r) => r.line)) === j([1, 2, 3, 5]), "#219 splitTsv: a quoted newline advances the physical line number");
+  ok(dc219Split("﻿h1\th2\n\n").length === 1, "#219 splitTsv: BOM stripped, blank lines dropped");
+
+  // parseStart — U+202F and plain spaces, 12 AM/PM, bad dates.
+  ok(j(dc219Start("12/25/28, 9:00 AM")) === j({ y: 2028, m: 12, d: 25, hh: 9, mm: 0 }), "#219 parseStart: U+202F before AM");
+  ok(dc219Start("12/25/28, 12:00 PM")?.hh === 12 && dc219Start("1/2/25, 12:05 AM")?.hh === 0, "#219 parseStart: 12 PM is noon, 12 AM is midnight");
+  ok(j(dc219Start("3/1/2027, 7:15 pm")) === j({ y: 2027, m: 3, d: 1, hh: 19, mm: 15 }), "#219 parseStart: four-digit year and lowercase pm");
+  ok(dc219Start("2/30/26, 9:00 AM") === null && dc219Start("13/45/26, 9:00 AM") === null && dc219Start("") === null, "#219 parseStart: impossible dates are null");
+
+  // parseCalendarTsv over the fixture.
+  const p = dc219Parse(DC219_FIXTURE);
+  ok(p.rows.length === 11 && p.errors.length === 2, "#219 parse: 11 readable rows, 2 errors");
+  ok(j(p.errors.map((e) => e.line)) === "[13,14]" && /start date/.test(p.errors[0].reason) && /duration/.test(p.errors[1].reason), "#219 parse: bad rows reported with their line and reason");
+  const byName = (s: string) => p.rows.find((r) => r.name.startsWith(s))!;
+  const jena = byName("Jena Off");
+  ok(jena.allDay && jena.durationMin === 1440 && jena.category === "PTO" && jena.line === 6 && j(jena.start) === j({ y: 2026, m: 9, d: 25, hh: 0, mm: 0 }), "#219 parse: 24:00 at midnight is a one-day all-day event");
+  const xmas = byName("Christmas");
+  ok(xmas.allDay && xmas.durationMin === 2880, "#219 parse: 48:00 at midnight is a multi-day all-day event");
+  const lincoln = byName("Lincoln Academy");
+  ok(!lincoln.allDay && lincoln.durationMin === 30 && lincoln.start.hh === 14 && lincoln.linked.startsWith("LINCOLN  ACADEMY") && lincoln.category === "", "#219 parse: a timed 30-minute row with Linked kept verbatim and a blank Category");
+  const rca = byName("RCA Wire Pulls");
+  ok(!rca.allDay && rca.durationMin === 1920 && rca.category === "Install", "#219 parse: 32:00 from 8 AM stays a timed event (not midnight)");
+  ok(byName("Oshkosh").name.endsWith('including "Shelby"'), "#219 parse: Daylite's \\\" escape becomes a plain quote");
+  ok(byName("Mike to Cross").category === "Service Call" && byName("Mike to Cross").owner === "Mike Mundth", "#219 parse: a quoted Category is unquoted");
+  const sauk = byName("Sauk Trail");
+  ok(sauk.name === "Sauk Trail Elementary, Middleton HS" && sauk.details.includes("passcode   HS"), "#219 parse: cells trimmed, inner spacing in Details kept");
+  const missing = dc219Parse("Start Date\tName\n1/1/26, 9:00 AM\tX\n");
+  ok(missing.rows.length === 0 && missing.errors.length === 1 && /Owner/.test(missing.errors[0].reason), "#219 parse: a file without the required columns is refused by name");
+
+  // classify — the series threshold.
+  const c = dc219Classify(p.rows);
+  ok(c.series.length === 1 && j(c.series[0]) === j({ owner: "Jeff Chesebro", name: "Weekly Sales Meeting", count: 4 }) && c.oneOffs.length === 7, "#219 classify: 4 × same owner + name is a series; the other 7 are one-offs");
+  const ev = (over: Partial<DC219Event>): DC219Event => ({ line: 0, owner: "Pat Lee", name: "Payroll", category: "", start: { y: 2026, m: 1, d: 1, hh: 9, mm: 0 }, durationMin: 60, allDay: false, linked: "", details: "", status: "", ...over });
+  const three = [ev({}), ev({ name: "payroll" }), ev({ name: " PAYROLL " })];
+  ok(dc219Classify(three).series.length === 0 && dc219Classify(three).oneOffs.length === 3, "#219 classify: 3 occurrences is not a series");
+  const four = [...three, ev({ owner: "pat  lee" })];
+  ok(dc219Classify(four).series.length === 1 && dc219Classify(four).oneOffs.length === 0, "#219 classify: the 4th occurrence (case/space-insensitive owner + name) makes all four a series");
+
+  // eventKey — stable, normalized, 24 hex; the Google id is base32hex.
+  const weekly = p.rows.find((r) => r.name === "Weekly Sales Meeting" && r.start.d === 25)!;
+  ok(dc219Key(weekly) === "07afd50421a5cd9d115777d1", "#219 eventKey: golden value (sha256 of owner|name|start|durationMin, normalized) — never change it, the dedup blob depends on it");
+  ok(dc219Key({ ...weekly, name: "  weekly  SALES meeting " }) === dc219Key(weekly), "#219 eventKey: name case and spacing do not change the key");
+  ok(dc219Key({ ...weekly, durationMin: 90 }) !== dc219Key(weekly) && dc219Key({ ...weekly, owner: "Jason Keagy" }) !== dc219Key(weekly) && dc219Key({ ...weekly, start: { ...weekly.start, mm: 30 } }) !== dc219Key(weekly), "#219 eventKey: owner, start and duration each change the key");
+  ok(/^[a-v0-9]{5,1024}$/.test(dc219GId(dc219Key(weekly))) && dc219GId("abc").startsWith("dlc"), "#219 googleEventId: dlc + key is a valid Google event id");
+
+  // addMinutes — wall-clock arithmetic, no zone applied.
+  ok(j(dc219Add({ y: 2026, m: 3, d: 8, hh: 1, mm: 30 }, 60)) === j({ y: 2026, m: 3, d: 8, hh: 2, mm: 30 }), "#219 addMinutes: wall-clock math ignores the DST jump (Google applies the zone)");
+  ok(j(dc219Add({ y: 2025, m: 12, d: 31, hh: 23, mm: 30 }, 60)) === j({ y: 2026, m: 1, d: 1, hh: 0, mm: 30 }), "#219 addMinutes: crosses a year boundary");
+
+  // googleEventFor — summary, description, all-day vs timed.
+  const bJena = dc219Body(jena);
+  ok(j(bJena.start) === j({ date: "2026-09-25" }) && j(bJena.end) === j({ date: "2026-09-26" }) && bJena.summary === "[PTO] Jena Off" && bJena.description === "Imported from Daylite", "#219 body: one-day all-day, exclusive end date, [Category] prefix");
+  ok(j(dc219Body(xmas).end) === j({ date: "2026-12-26" }), "#219 body: a 2-day all-day event ends (exclusive) two days later");
+  const bLin = dc219Body(lincoln);
+  ok(j(bLin.start) === j({ dateTime: "2026-09-16T14:00:00", timeZone: "America/Chicago" }) && j(bLin.end) === j({ dateTime: "2026-09-16T14:30:00", timeZone: "America/Chicago" }), "#219 body: timed events are local wall-clock + America/Chicago, never UTC");
+  ok(bLin.summary === "Lincoln Academy Submittal Review" && bLin.description === lincoln.details + "\n\nLinked: " + lincoln.linked + "\n\nImported from Daylite", "#219 body: no category → no prefix; description = details, Linked, footer");
+  ok(bLin.id === "dlc" + dc219Key(lincoln), "#219 body: carries the deterministic Google id");
+  ok(dc219Body(rca).end && j(dc219Body(rca).end) === j({ dateTime: "2026-02-12T16:00:00", timeZone: "America/Chicago" }), "#219 body: a 32-hour timed event ends the next day at 16:00");
+
+  // matchOwner — exact, then first + last, never ambiguous.
+  const roster = [
+    { id: "u1", name: "Jeff Chesebro" },
+    { id: "u2", name: "Jason M. Keagy" },
+    { id: "u3", name: "Chris Mittlesteadt" },
+    { id: "u4", name: "Isaac Mittlesteadt" },
+  ];
+  const m1 = dc219Match("jeff  chesebro", roster);
+  ok(m1.ok && m1.user.id === "u1", "#219 matchOwner: exact full name, case/space-insensitive");
+  const m2 = dc219Match("Jason Keagy", roster);
+  ok(m2.ok && m2.user.id === "u2", "#219 matchOwner: first + last token when the roster has a middle initial");
+  const m3 = dc219Match("Isaac Mittlesteadt", roster);
+  ok(m3.ok && m3.user.id === "u4", "#219 matchOwner: a shared last name does not confuse two people");
+  const m4 = dc219Match("Mike Mundth", roster);
+  ok(!m4.ok && /No team member/.test(m4.reason), "#219 matchOwner: no user → reported, not guessed");
+  const m5 = dc219Match("Pat Lee", [{ id: "a", name: "Pat Lee" }, { id: "b", name: "pat lee" }]);
+  ok(!m5.ok && /More than one/.test(m5.reason), "#219 matchOwner: two matches is a refusal, never a pick");
+
+  // todayYmdIn — the business-zone date, not the server's.
+  ok(dc219Today(Date.UTC(2026, 8, 26, 3, 0)) === "2026-09-25", "#219 todayYmdIn: 03:00 UTC is still the previous day in Chicago");
+}
