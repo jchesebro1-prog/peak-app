@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
+import { useUrlSearchText } from "@/lib/use-url-search-text";
 import { ACCENT_INK, ACCENT_SOFT } from "@/app/(app)/companies/lib";
 import { VENDOR_STATUS_KEYS, VENDOR_STATUS_META, type VendorStatusKey } from "@/lib/vendor-status";
 import { claimManufacturerAction, createVendorAction } from "./actions";
@@ -57,29 +58,19 @@ export function VendorFilterBar({
   counts: Record<VendorStatusKey, number>;
   total: number;
 }) {
-  const router = useRouter();
-  const [text, setText] = useState(q);
-  const [prevQ, setPrevQ] = useState(q);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Derived-state reset during render (companies/controls.tsx idiom) — no effect.
-  if (prevQ !== q) {
-    setPrevQ(q);
-    setText(q);
-  }
-  const pushWith = (patch: { q?: string; status?: string }) => {
+  // #243: the draft never gets overwritten by its own slow navigation.
+  const { text, setSearch, go } = useUrlSearchText(q);
+  const hrefWith = (patch: { q?: string; status?: string }) => {
     const p = new URLSearchParams();
     const nq = patch.q !== undefined ? patch.q : text;
     const ns = patch.status !== undefined ? patch.status : status;
     if (nq.trim()) p.set("q", nq.trim());
     if (ns && ns !== "all") p.set("status", ns);
     const s = p.toString();
-    router.push("/vendors" + (s ? "?" + s : ""));
+    return "/vendors" + (s ? "?" + s : "");
   };
-  const onSearch = (v: string) => {
-    setText(v);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => pushWith({ q: v }), 300);
-  };
+  const pushWith = (patch: { status?: string }) => go(hrefWith(patch));
+  const onSearch = (v: string) => setSearch(v, hrefWith({ q: v }));
   const chips: Array<{ key: VendorStatusKey | "all"; label: string; n: number }> = [
     { key: "all", label: "All", n: total },
     ...VENDOR_STATUS_KEYS.map((k) => ({ key: k, label: VENDOR_STATUS_META[k].label, n: counts[k] })),

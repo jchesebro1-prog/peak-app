@@ -28197,3 +28197,36 @@ async function reviewLimitsFinal242AsyncChecks(): Promise<void> {
     await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
   }
 }
+
+/* ====== #243 URL-as-state search never overwritten by its own navigation ======
+   shouldAdoptUrlQ (src/lib/url-search-text.ts) is the re-sync decision
+   behind useUrlSearchText; the source checks pin the four filter bars to
+   the shared hook and the hook to replace-for-keystrokes / push-for-chips. */
+import { shouldAdoptUrlQ } from "@/lib/url-search-text";
+{
+  ok(!shouldAdoptUrlQ("acm", "acm", "acme co"), "#243: our own older navigation landing never overwrites what the user kept typing");
+  ok(!shouldAdoptUrlQ("acme", "acme", "acme "), "#243: the trimmed URL q never eats the draft's trailing space");
+  ok(!shouldAdoptUrlQ("acme", null, "acme "), "#243: a URL q equal to the trimmed draft is not adopted even before any push");
+  ok(shouldAdoptUrlQ("", "acme", "acme"), "#243: an outside clear (q removed) resets the draft");
+  ok(shouldAdoptUrlQ("riverside", "acme", "acme"), "#243: an outside change to a different q (Back, a link) is adopted");
+  ok(shouldAdoptUrlQ("acme", null, ""), "#243: with no push of its own, a new URL q is adopted");
+  ok(!shouldAdoptUrlQ("  ", null, ""), "#243: whitespace-only q equals an empty draft");
+
+  const hook243 = readFileSync("src/lib/use-url-search-text.ts", "utf8");
+  ok(/router\.replace\(href, \{ scroll: false \}\)/.test(hook243), "#243: search keystrokes navigate with router.replace and scroll: false");
+  ok(/router\.push\(href\)/.test(hook243), "#243: filter chips/selects keep router.push");
+  ok(/useTransition/.test(hook243) && /shouldAdoptUrlQ\(/.test(hook243), "#243: the hook runs navigations in a transition and re-syncs through shouldAdoptUrlQ");
+  ok(!/useEffect\([^)]*set[A-Z]/.test(hook243), "#243: no state is set from an effect");
+  const pure243 = readFileSync("src/lib/url-search-text.ts", "utf8");
+  ok(!/from "react"/.test(pure243), "#243: the pure re-sync module does not import React");
+  for (const f of [
+    "src/app/(app)/companies/controls.tsx",
+    "src/app/(app)/people/controls.tsx",
+    "src/app/(app)/vendors/controls.tsx",
+    "src/app/(app)/design/specs/library/controls.tsx",
+  ]) {
+    const src = readFileSync(f, "utf8");
+    ok(src.includes("useUrlSearchText(q)"), `#243: ${f} uses the shared useUrlSearchText hook`);
+    ok(!src.includes("setPrevQ"), `#243: ${f} no longer carries its own unconditional URL→draft reset`);
+  }
+}

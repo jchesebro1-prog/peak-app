@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
+import { useUrlSearchText } from "@/lib/use-url-search-text";
 import { ACCENT_INK, ACCENT_SOFT } from "./lib";
 
 /**
@@ -57,20 +56,10 @@ export function FilterBar({
   sort: string;
   originName: string | null;
 }) {
-  const router = useRouter();
-  const [text, setText] = useState(q);
-  const [prevQ, setPrevQ] = useState(q);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #243: the draft never gets overwritten by its own slow navigation.
+  const { text, setSearch, go, isPending } = useUrlSearchText(q);
 
-  // Reset the draft text when the URL's q changes (derived-state reset
-  // during render — avoids the set-state-in-effect cascade the repo lint
-  // flags; behavior-identical to the old effect).
-  if (prevQ !== q) {
-    setPrevQ(q);
-    setText(q);
-  }
-
-  const pushWith = (patch: { q?: string; type?: string; scope?: string; added?: string; sort?: string }) => {
+  const hrefWith = (patch: { q?: string; type?: string; scope?: string; added?: string; sort?: string }) => {
     const p = new URLSearchParams();
     const nq = patch.q !== undefined ? patch.q : text;
     const nt = patch.type !== undefined ? patch.type : type;
@@ -83,14 +72,10 @@ export function FilterBar({
     if (na === "7d") p.set("added", "7d");
     if (nso) p.set("sort", nso);
     const s = p.toString();
-    router.push("/companies" + (s ? "?" + s : ""));
+    return "/companies" + (s ? "?" + s : "");
   };
-
-  const onSearch = (v: string) => {
-    setText(v);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => pushWith({ q: v }), 300);
-  };
+  const pushWith = (patch: { type?: string; scope?: string; added?: string; sort?: string }) => go(hrefWith(patch));
+  const onSearch = (v: string) => setSearch(v, hrefWith({ q: v }));
 
   const ownerSelectValue = scope === "mine" ? meName : scope;
 
@@ -182,6 +167,7 @@ export function FilterBar({
 
       <div style={{ fontSize: 11.5, color: "#8c919c", marginTop: 8 }}>
         {originName ? `Drive times from ${originName}` : "Set a quote origin with coordinates in Settings → Locations to see drive times"}
+        {isPending && <span style={{ marginLeft: 8, color: "#aab0bb" }}>· Searching…</span>}
       </div>
     </div>
   );
