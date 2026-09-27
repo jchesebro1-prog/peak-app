@@ -6531,3 +6531,33 @@ The proposal now prints only the quote's own `consulting.terms` (the builder's T
 default `termsBlock` — Jeff's ask was that a default he didn't type was showing up uninvited. The `termsBlock`
 field itself is left in `src/lib/templates.ts`, noted in a code comment as unused here, rather than deleted;
 removing template fields outright is a separate cleanup this punch item didn't need to do.
+
+## D358. The North HS seed auto-loads once on the next production deploy (#205, 2026-09-26)
+
+`npm run build` now runs `node scripts/migrate.mjs && tsx scripts/seed-specs-once.ts && next build`. The seed
+step (`src/lib/specs/seed-once.ts`, `applySpecSeedOnce`) loads `docs/specs-seed/northhs-2026-07-30/spec-library.json`
+and Jeff's filled `product-specs-filled.xlsx` into the database, so production gets the library and the product
+text without anyone clicking Import. What it does and doesn't do:
+
+- **Library: create-only.** `importLibrary(file, by, { onlyNew: true })` skips any section, article, template or
+  curtain template whose id already exists — live **or soft-deleted** — and counts it as kept. A library edited in
+  production keeps its edits; a record someone deleted stays deleted. The Import library button is unchanged (it
+  still adds, updates and revives).
+- **Product specs: the Import product specs pipeline, unchanged.** `readSpecSheets` → `readProductSpecRows` →
+  `planProductSpecImport` (Replace existing **off**) → `applyProductSpecPlan`. It never creates a part, and text
+  that came from anywhere other than a product-spec import is protected by the pipeline's own rules.
+- **Once only.** The `spec_seed_applied` blob records `seed:northhs-2026-07-30 → { at, by }`, written only after
+  both phases finish. Every later deploy logs "already applied" and does nothing. `--force` re-runs it (still
+  create-only, so a re-run is safe).
+- **Same guards as migrations.** `VERCEL_ENV=preview` skips (preview shares the one production database); no
+  `DATABASE_URL` skips, so a local `npm run build` never touches a database. The script never reads `.env.local`.
+- **Never fails the build.** Any throw — and a four-minute timeout — logs
+  `[seed-specs] failed — will retry on the next deploy: …` and exits 0; the flag stays unset, so the next deploy
+  retries. Per-part write failures don't throw: they are listed under "errors" in the build log and the flag is
+  still set — a re-run with `--force` retries them.
+- **Local runs:** `npm run specs:seed` (`--local`: always the dev PGlite, `.data/pglite` or `PGLITE_PATH`; stop
+  `npm run dev` first — PGlite is one process at a time); `npm run specs:seed -- --force` to run it again.
+
+The build log prints library created/kept, product specs written / same-as / unchanged / skipped, and every
+MFR # that was not found, ambiguous or already claimed by an earlier row — that list is Jeff's to-do for
+catalog parts that don't exist yet.

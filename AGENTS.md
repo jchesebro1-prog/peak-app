@@ -30,8 +30,9 @@ verified UI/architecture specs live in `docs/specs/*.json`.
 
 ```bash
 npm run dev        # http://localhost:3000 — no DB setup needed (PGlite)
-npm run build      # applies prod migrations when DATABASE_URL is set, then builds
+npm run build      # applies prod migrations + the one-time spec seed when DATABASE_URL is set, then builds
 npm run db:seed    # idempotent fixtures (roster + settings)
+npm run specs:seed # one-time North HS spec seed into local PGlite (stop dev first; -- --force re-runs; prod runs it in build, D358)
 npm run db:generate     # new migration after editing src/db/schema.ts
 npm run db:reset-local  # wipe local PGlite + reseed
 ```
