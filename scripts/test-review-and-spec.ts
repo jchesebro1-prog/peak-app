@@ -2757,7 +2757,7 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
 }
 
 import { defaultAState, SYS_ORDER as g244SysOrder, VENUES as g244Venues } from "@/app/(app)/design/quick/engine";
-import { coverFromVenue, designPatchFromIntake, gridIntakeDefaults, intakeDesignName, manualScopeInputs, siteForLocId } from "@/lib/design/grid-intake";
+import { coverFromVenue, designPatchFromIntake, gridIntakeDefaults, intakeDesignName, manualScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib/design/curtain-pricing";
@@ -5001,6 +5001,29 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(g244Save.indexOf("validateIntakeCustomer(") < g244Save.indexOf("resolveIntakeCustomer(") && g244Save.indexOf("resolveIntakeCustomer(") < g244Save.indexOf("saveGridIntake(input.projectId") &&
     g244Save.indexOf("saveGridIntake(input.projectId") < g244Save.indexOf("generateBaseSheet("), "#244: the Grid intake checks the customer before any write, links it before the intake save, and the base sheet stays the last step of the first-save gate");
   ok(g244Ga.includes("contactName: project.contactName || \"\""), "#244: the Grid's draft quote carries the design's contact");
+  // Review fixes — rename / re-link are gated like delete; a stale or forged venue pick is refused before any write.
+  const g244Body = (name: string) => {
+    const at = g244Ga.indexOf(`export async function ${name}(`);
+    return at < 0 ? "" : g244Ga.slice(at, g244Ga.indexOf("\n}\n", at));
+  };
+  for (const [name, store] of [["renameGridDesignAction", "renameProject("], ["setGridCustomerAction", "setProjectCustomer("]] as const) {
+    const body = g244Body(name);
+    const gate = body.indexOf('if (!can("create", user.roles)) return { ok: false, error: "You can');
+    ok(gate > 0 && gate < body.indexOf(store) && gate < body.indexOf("updateDesign("), `#244 review: ${name} refuses without the create permission before any write`);
+  }
+  ok(g244Read("src/app/(app)/design/grid/[id]/editor.tsx").includes("canEdit={canCreate}"), "#244 review: the editor header only offers rename / re-link to people who can create designs");
+  ok(g244Read("src/app/(app)/design/grid/[id]/design-identity.tsx").includes("onFocus={(e) => e.currentTarget.select()}"), "#244 review: opening the title rename selects the old title, so typing replaces it");
+  const g244Sites = [{ id: "site-1", legacyLocId: "loc1" }, { id: "site-2", legacyLocId: null }];
+  ok(pickedVenueMissing({ locationMode: "pick", locationId: "loc-gone" }, g244Sites) && pickedVenueMissing({ locationMode: "pick", locationId: "loc1" }, []),
+    "#244 review: a picked venue the customer doesn't have (stale or forged, or any pick on a new customer) is missing");
+  ok(!pickedVenueMissing({ locationMode: "pick", locationId: "loc1" }, g244Sites) && !pickedVenueMissing({ locationMode: "pick", locationId: "site-2" }, g244Sites),
+    "#244 review: a venue still on the customer is not missing");
+  ok(!pickedVenueMissing({ locationMode: "skip", locationId: "loc-gone" }, g244Sites) && !pickedVenueMissing({ locationMode: "new", locationId: "" }, g244Sites) && !pickedVenueMissing({ locationMode: "pick", locationId: "  " }, g244Sites),
+    "#244 review: skip, new and a blank pick are never a missing venue");
+  const g244Stale = g244Save.indexOf("That venue is no longer on this customer — pick it again.");
+  ok(g244Stale > 0 && g244Save.indexOf("pickedVenueMissing(input.customer") < g244Stale && g244Stale < g244Save.indexOf("resolveIntakeCustomer(") && g244Stale < g244Save.indexOf("setProjectCustomer("),
+    "#244 review: the Grid intake refuses a missing venue pick before creating or linking anything");
+  ok(!g244Qa.includes("pickedVenueMissing") && !g244Read("src/lib/intake-customer.ts").includes("no longer on this customer"), "#244 review: the quote intake's venue handling is unchanged");
 }
 /* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
 {

@@ -41,7 +41,7 @@ import {
   setAutoEstimate,
 } from "@/lib/stores/grid-projects";
 import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-options";
-import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, siteForLocId } from "@/lib/design/grid-intake";
+import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
 import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
 import type { IntakeCustomerChoice } from "@/app/(app)/quotes/new/types";
 import { get as getCustomer } from "@/lib/stores/customers";
@@ -255,6 +255,10 @@ export async function saveGridIntakeAction(input: {
   if (!input.customer) return { ok: false, error: "Pick a customer, or add a new one." };
   const customerCheck = validateIntakeCustomer(input.customer);
   if (!customerCheck.ok) return { ok: false, error: customerCheck.error };
+  // #244 review — a picked venue must still be on the chosen customer (a
+  // stale form or a forged id), checked before any write.
+  const customerSites = customerCheck.creatingCustomer ? [] : await sitesForCompany(customerCheck.pickedCustomerId);
+  if (pickedVenueMissing(input.customer, customerSites)) return { ok: false, error: "That venue is no longer on this customer — pick it again." };
   const venueChosen =
     (input.customer.locationMode === "pick" && !!(input.customer.locationId || "").trim()) || input.customer.locationMode === "new";
   if (!input.venueName.trim() && !input.locationName.trim() && !venueChosen) return { ok: false, error: "Add a venue or location to continue." };
@@ -800,7 +804,8 @@ export async function setVenueAction(
 /** Rename the design from the editor header — the project and its linked
  *  design record(s) together, so the Designs dashboard shows the same name. */
 export async function renameGridDesignAction(projectId: string, name: string): Promise<Result> {
-  await requireUser();
+  const user = await requireUser();
+  if (!can("create", user.roles)) return { ok: false, error: "You can't rename designs." };
   const clean = String(name ?? "").trim();
   if (!clean) return { ok: false, error: "A design needs a name." };
   const p = await renameProject(projectId, clean);
@@ -814,7 +819,9 @@ export async function renameGridDesignAction(projectId: string, name: string): P
 /** Link (or change, or clear with "") the design's customer from the editor.
  *  A different customer drops the venue and contact picked off the old one. */
 export async function setGridCustomerAction(projectId: string, customerId: string): Promise<Result> {
-  await requireUser();
+  const user = await requireUser();
+  // Re-linking the customer changes the pricing tier — same gate as delete.
+  if (!can("create", user.roles)) return { ok: false, error: "You can't change a design's customer." };
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   const id = String(customerId ?? "").trim();

@@ -41,6 +41,7 @@ export default function DesignIdentity({
   customer,
   customerId,
   customerOptions,
+  canEdit,
   onError,
 }: {
   projectId: string;
@@ -48,6 +49,9 @@ export default function DesignIdentity({
   customer: string;
   customerId: string | null;
   customerOptions: CustomerComboboxOption[];
+  /** `create` permission — renaming and re-linking are refused without it
+   *  (server-checked); without it the title and customer are plain text. */
+  canEdit: boolean;
   onError: (message: string | null) => void;
 }) {
   const router = useRouter();
@@ -98,6 +102,7 @@ export default function DesignIdentity({
       {editingName ? (
         <input
           autoFocus
+          onFocus={(e) => e.currentTarget.select()}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => finishRename(true)}
@@ -114,7 +119,7 @@ export default function DesignIdentity({
           style={{ ...field, width: 240 }}
         />
       ) : (
-        <button type="button" onClick={beginRename} disabled={pending} title="Rename this design" style={quiet}>
+        <button type="button" onClick={beginRename} disabled={pending || !canEdit} title={canEdit ? "Rename this design" : undefined} style={canEdit ? quiet : { ...quiet, cursor: "default" }}>
           {name}
         </button>
       )}
@@ -134,6 +139,8 @@ export default function DesignIdentity({
             Cancel
           </button>
         </span>
+      ) : !canEdit ? (
+        customer ? <span style={{ color: "#8c919c", fontWeight: 500 }}>{customer}</span> : null
       ) : (
         <button
           type="button"

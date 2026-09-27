@@ -87,6 +87,18 @@ export function siteForLocId<T extends { id: string; legacyLocId: string | null 
   return sites.find((s) => (s.legacyLocId ?? s.id) === id) || null;
 }
 
+/** A venue picked at intake that the chosen customer no longer has (#244
+ *  review) — a stale form or a forged id. Only a "pick" with an id counts;
+ *  skip / new never do. `sites` are the chosen customer's (none for a new
+ *  customer, so any pick against one is missing). */
+export function pickedVenueMissing<T extends { id: string; legacyLocId: string | null }>(
+  choice: { locationMode: string; locationId: string },
+  sites: readonly T[]
+): boolean {
+  const id = (choice.locationId || "").trim();
+  return choice.locationMode === "pick" && !!id && !siteForLocId(sites, id);
+}
+
 /**
  * Cover-page fields from a customer venue (#244). A derived venue name
  * reads "Location — Type" (#216), so Venue/space is the part after the

@@ -1359,6 +1359,7 @@ export default function GridEditor({
           customer={project.customer}
           customerId={project.customerId}
           customerOptions={customerOptions}
+          canEdit={canCreate}
           onError={setErr}
         />
         {venues.length > 0 && (
