@@ -28877,6 +28877,9 @@ import {
   ACCEPT_CARD_COPY as d242AcceptCard,
   ACCEPT_EXPIRED_COPY as d242AcceptExpired,
   ACCEPT_METHOD_COPY as d242AcceptMethod,
+  ACCEPT_NOTES_LENGTH_COPY as d242AcceptNotesLen,
+  ACCEPT_PO_FILE_COPY as d242AcceptPoFile,
+  DECLINE_NO_ACCEPTANCE_COPY as d242DeclineNoAccept,
   PORTAL_NOT_FOUND_COPY as d242NotFound,
 } from "@/lib/portal-quotes";
 {
@@ -28964,13 +28967,62 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
     const expiredR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
     ok(!expiredR.ok && expiredR.error === d242AcceptExpired, "#242 accept: past validUntil refuses with the expired copy");
 
-    const okR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: "DOC-999" }, NOW);
-    ok(okR.ok, "#242 accept: a firm in-date quote accepts with purchaseMethod po + notes");
+    // Fix round 1: notes over 1000 chars are refused outright, never
+    // silently cut — writes nothing.
+    const longR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "x".repeat(1001), poDocumentId: null }, NOW);
+    ok(!longR.ok && longR.error === d242AcceptNotesLen, "#242 accept: notes over 1000 characters are refused, not truncated");
+    ok(!(await d242GetQuote(genA.quoteId))?.portalAcceptance, "#242 accept: the refused over-length note wrote nothing");
+
+    // Fix round 1: staff declining a quote that was never accepted must
+    // refuse outright and write nothing — no portalDecline appears out of
+    // nowhere on a quote the customer never touched.
+    const declineNeverR = await d242DeclinePortalAcceptance(genA.quoteId, "Staff", "Not applicable");
+    ok(!declineNeverR.ok && declineNeverR.error === d242DeclineNoAccept, "#242 decline: a never-accepted portal quote refuses to decline");
+    ok(!(await d242GetQuote(genA.quoteId))?.portalDecline, "#242 decline: the refused attempt wrote no portalDecline");
+
+    // Fix round 1: a non-portal quote can never be "declined" either (even
+    // one some other code path managed to stamp portalAcceptance onto).
+    const nonPortalId = fixtureId(242, "acc-non-portal");
+    await q222Create({ id: nonPortalId, name: "Test242 Non-portal Quote", customer: "Test242 Accept Co", customerId: CO, owner, source: "estimator", portalAcceptance: { at: NOW, by: "Pat Buyer", byEmail: "pat@example.com" } });
+    registerFixture("quotes", nonPortalId);
+    const declineNonPortalR = await d242DeclinePortalAcceptance(nonPortalId, "Staff", "Wrong quote type");
+    ok(!declineNonPortalR.ok && declineNonPortalR.error === d242DeclineNoAccept, "#242 decline: a non-portal-catalog quote refuses to decline, even carrying a portalAcceptance");
+
+    // Fix round 1: poDocumentId must resolve to a real, non-deleted,
+    // CUSTOMER-sourced document belonging to THIS session's company —
+    // never trusted as a bare string.
+    const otherCoDoc = await d218Create({
+      title: "PO", fileName: "po.pdf", mime: "application/pdf", size: 100,
+      blobPath: `documents/${CO_X}/UP-acc-other/po.pdf`, category: "other", visibility: "shared",
+      source: "customer", customerId: CO_X, siteId: null, projectId: null, notes: "", uploadedBy: "Rae Other",
+    });
+    registerFixture("documents", otherCoDoc.id);
+    const poOtherCoR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: otherCoDoc.id }, NOW);
+    ok(!poOtherCoR.ok && poOtherCoR.error === d242AcceptPoFile, "#242 accept: a PO file belonging to another company is refused");
+
+    const teamDoc = await d218Create({
+      title: "PO", fileName: "po-team.pdf", mime: "application/pdf", size: 100,
+      blobPath: `documents/${CO}/UP-acc-team/po-team.pdf`, category: "other", visibility: "internal",
+      source: "team", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Staff",
+    });
+    registerFixture("documents", teamDoc.id);
+    const poTeamR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: teamDoc.id }, NOW);
+    ok(!poTeamR.ok && poTeamR.error === d242AcceptPoFile, "#242 accept: a team-sourced document (not the customer's own upload) is refused as a PO file");
+    ok(!(await d242GetQuote(genA.quoteId))?.portalAcceptance, "#242 accept: neither refused PO attempt wrote an acceptance");
+
+    const ownDoc = await d218Create({
+      title: "Purchase order 44812", fileName: "po-44812.pdf", mime: "application/pdf", size: 100,
+      blobPath: `documents/${CO}/UP-acc-own/po-44812.pdf`, category: "other", visibility: "shared",
+      source: "customer", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Pat Buyer",
+    });
+    registerFixture("documents", ownDoc.id);
+    const okR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id }, NOW);
+    ok(okR.ok, "#242 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
     const q1 = await d242GetQuote(genA.quoteId);
     ok(
       !!q1?.portalAcceptance && q1.portalAcceptance.purchaseMethod === "po" && q1.portalAcceptance.notes === "PO 44812" &&
-        q1.portalAcceptance.poDocumentId === "DOC-999" && q1.status === "sent",
-      "#242 accept: portalAcceptance carries purchaseMethod/notes/poDocumentId; status stays sent (Approve, not Accept, moves it to won)"
+        q1.portalAcceptance.poDocumentId === ownDoc.id && q1.status === "sent",
+      "#242 accept: portalAcceptance carries purchaseMethod/notes/poDocumentId (the customer's own uploaded doc); status stays sent (Approve, not Accept, moves it to won)"
     );
 
     const againR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);

@@ -14,6 +14,7 @@ import { copySentRevisionPdf } from "@/lib/quote-pdf/generate";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
+import { getDocument } from "@/lib/stores/documents";
 import type { CartLine } from "@/lib/portal-cart-types";
 import { addLine, clearCart, getCart, type PortalCart } from "@/lib/stores/portal-carts";
 import {
@@ -188,6 +189,8 @@ export const ACCEPT_NOT_READY_COPY = "This quote isn't ready to accept yet.";
 export const ACCEPT_EXPIRED_COPY = "This quote's pricing has expired — refresh it to get current pricing.";
 export const ACCEPT_METHOD_COPY = "Pick how you'll purchase.";
 export const ACCEPT_CARD_COPY = "Don't enter card numbers — we'll call you to take payment.";
+export const ACCEPT_NOTES_LENGTH_COPY = "Keep purchasing notes under 1,000 characters.";
+export const ACCEPT_PO_FILE_COPY = "That purchase order file couldn't be attached — try uploading it again.";
 const ACCEPT_RATE_COPY = "You've tried to accept several times — try again later, or call us.";
 const ACCEPT_FAIL_COPY = "Couldn't accept this quote — try again.";
 export const ACCEPT_LIMIT = 10;
@@ -216,8 +219,25 @@ export async function acceptPortal(
   if (!(PURCHASE_METHODS as readonly string[]).includes(input.purchaseMethod)) {
     return { ok: false, error: ACCEPT_METHOD_COPY };
   }
-  const notes = String(input.notes || "").slice(0, 1000);
+  const notes = String(input.notes || "");
+  // Fix round 1 (reviewer): a note over the limit is refused, not silently
+  // cut — a truncated note could hide the very thing (e.g. a trailing card
+  // number) the customer typed.
+  if (notes.length > 1000) return { ok: false, error: ACCEPT_NOTES_LENGTH_COPY };
   if (looksLikeCardNumber(notes)) return { ok: false, error: ACCEPT_CARD_COPY };
+
+  // Fix round 1 (reviewer): a poDocumentId is never trusted as-is — it must
+  // resolve to a real, non-deleted, CUSTOMER-sourced document belonging to
+  // THIS session's company, or acceptance is refused outright (never silently
+  // dropped) so the customer knows to retry the upload.
+  let poDocumentId: string | null = null;
+  if (input.poDocumentId) {
+    const doc = await getDocument(input.poDocumentId);
+    if (!doc || doc.deleted || doc.customerId !== session.customerId || doc.source !== "customer") {
+      return { ok: false, error: ACCEPT_PO_FILE_COPY };
+    }
+    poDocumentId = doc.id;
+  }
 
   if (!rateLimit("portal-accept:" + session.grantId, ACCEPT_LIMIT, ACCEPT_WINDOW_MS).ok) {
     return { ok: false, error: ACCEPT_RATE_COPY };
@@ -230,7 +250,7 @@ export async function acceptPortal(
         byEmail: session.email,
         purchaseMethod: input.purchaseMethod as (typeof PURCHASE_METHODS)[number],
         notes,
-        poDocumentId: input.poDocumentId || null,
+        poDocumentId,
       },
       portalDecline: null,
     });
@@ -393,6 +413,7 @@ export async function copyToCart(
 }
 
 const DECLINE_NOTE_COPY = "Enter a note (1–500 characters).";
+export const DECLINE_NO_ACCEPTANCE_COPY = "This quote has no portal acceptance to decline.";
 const DECLINE_FAIL_COPY = "Couldn't decline this quote — try again.";
 
 /**
@@ -401,6 +422,12 @@ const DECLINE_FAIL_COPY = "Couldn't decline this quote — try again.";
  * stays `sent` (never a fifth status) so they can simply accept again. Takes
  * no session — the caller (estimator/actions.ts declinePortalAcceptanceAction)
  * is the team-side `requireUser()` gate.
+ *
+ * Fix round 1 (reviewer): refuses outright — writes nothing — unless the
+ * quote actually exists, is a portal-catalog quote, AND currently carries a
+ * `portalAcceptance` to decline. Without this, declining a never-accepted
+ * (or non-portal) quote would still stamp `portalDecline`, showing the
+ * customer a decline note for something they never submitted.
  */
 export async function declinePortalAcceptance(
   quoteId: string,
@@ -411,7 +438,9 @@ export async function declinePortalAcceptance(
   if (!trimmed || trimmed.length > 500) return { ok: false, error: DECLINE_NOTE_COPY };
   try {
     const q = await getQuote(quoteId);
-    if (!q) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+    if (!q || q.source !== "portal-catalog" || !q.portalAcceptance) {
+      return { ok: false, error: DECLINE_NO_ACCEPTANCE_COPY };
+    }
     await updateQuote(quoteId, { portalAcceptance: null, portalDecline: { at: Date.now(), by: by || "Staff", note: trimmed } });
     return { ok: true };
   } catch (e) {
