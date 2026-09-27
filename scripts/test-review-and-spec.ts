@@ -20352,4 +20352,39 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
   ok(card214.includes('mode?: "summary" | "edit";') && card214.includes('{mode === "edit" && open && ('), "#214 UI: WorkLinkCard's picker only renders in edit mode");
   const reader214 = read("src/app/(app)/inbox/thread-reader.tsx");
   ok(reader214.includes("Link…") && reader214.includes("onOpenLinks={() => onOpenLinks(m.id)}") && reader214.includes("<LinkPopup"), "#214 UI: each message header has Link… and the reader mounts the popup");
+
+  /* ---- #214 UI fix wave 1 ---- */
+  // 1. The dialog takes focus on mount and hands it back to the opener on
+  //    close — otherwise the inbox shell's own ArrowUp/ArrowDown handler
+  //    (which only skips a target inside `[role="dialog"]`) keeps switching
+  //    threads behind the popup and unmounting it.
+  ok(
+    popup214.includes('role="dialog"') &&
+      popup214.includes('aria-modal="true"') &&
+      popup214.includes("aria-labelledby={titleId}") &&
+      popup214.includes("tabIndex={-1}") &&
+      popup214.includes("dialogRef.current?.focus()") &&
+      popup214.includes("opener.focus()"),
+    "#214 UI fix 1: the dialog is a labelled, focusable role=dialog that takes focus on mount and restores it to the opener on close"
+  );
+  // 2. Escape doesn't fight a nested widget's own Escape handling: it backs
+  //    off once that widget already preventDefault()ed the key.
+  const popupEscIdx = popup214.indexOf('e.key !== "Escape"');
+  ok(
+    popupEscIdx !== -1 && popup214.slice(popupEscIdx, popupEscIdx + 60).includes("e.defaultPrevented"),
+    "#214 UI fix 2: the popup's Escape handler backs off when the key was already handled (e.defaultPrevented)"
+  );
+  const typeahead214 = read("src/components/search/typeahead.tsx");
+  const tEscIdx = typeahead214.indexOf('e.key === "Escape"');
+  ok(
+    tEscIdx !== -1 && typeahead214.slice(tEscIdx, tEscIdx + 400).includes("e.preventDefault()"),
+    "#214 UI fix 2: Typeahead preventDefault()s its own Escape so an outer dialog can tell it was already handled"
+  );
+  // 8. The old inline picker was gated to email threads; "Link…" follows.
+  ok(
+    reader214.includes("isEmail={vm.isEmail}") && reader214.includes("{isEmail && ("),
+    "#214 UI fix 8: the per-message Link… button is hidden on a non-email thread (!vm.isEmail)"
+  );
+  // 9. The ✕ close button has an accessible name.
+  ok(popup214.includes('aria-label="Close"'), "#214 UI fix 9: the popup's ✕ button has an accessible name");
 }

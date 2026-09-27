@@ -139,6 +139,7 @@ function ExpandedMessage({
   linkOptions,
   onLink,
   onOpenLinks,
+  isEmail,
 }: {
   m: MessageVM;
   collapsible: boolean;
@@ -147,6 +148,9 @@ function ExpandedMessage({
   onLink: (link: { type: string; id: string; label: string } | null) => void;
   /** #214 — open the Link popup on this message */
   onOpenLinks: () => void;
+  /** #214 fix wave 1 — the old picker was gated to email threads only;
+   *  "Link…" is hidden on a call/meeting thread for the same reason. */
+  isEmail: boolean;
 }) {
   return (
     <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
@@ -201,27 +205,29 @@ function ExpandedMessage({
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenLinks();
-            }}
-            title="Link the people, company and work on this message"
-            style={{
-              border: "1px solid #e4e7ec",
-              borderRadius: 6,
-              padding: "2px 8px",
-              color: "#3a3f4a",
-              fontSize: 10.5,
-              fontWeight: 600,
-              background: "#fff",
-              cursor: "pointer",
-              fontFamily: "var(--font-ui)",
-            }}
-          >
-            Link…
-          </button>
+          {isEmail && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenLinks();
+              }}
+              title="Link the people, company and work on this message"
+              style={{
+                border: "1px solid #e4e7ec",
+                borderRadius: 6,
+                padding: "2px 8px",
+                color: "#3a3f4a",
+                fontSize: 10.5,
+                fontWeight: 600,
+                background: "#fff",
+                cursor: "pointer",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              Link…
+            </button>
+          )}
           <select
             value={m.link ? `${m.link.type}|${m.link.label}` : ""}
             onClick={(e) => e.stopPropagation()}
@@ -309,12 +315,15 @@ function Conversation({
   linkOptions,
   onLink,
   onOpenLinks,
+  isEmail,
 }: {
   messages: MessageVM[];
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
   onLink: (messageId: string, link: { type: string; id: string; label: string } | null) => void;
   /** #214 — a message header's "Link…" */
   onOpenLinks: (messageId: string) => void;
+  /** #214 fix wave 1 — hide "Link…" on a non-email thread */
+  isEmail: boolean;
 }) {
   // id -> explicit user choice; anything absent falls back to "newest is open"
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -346,6 +355,7 @@ function Conversation({
         linkOptions={linkOptions}
         onLink={(link) => onLink(m.id, link)}
         onOpenLinks={() => onOpenLinks(m.id)}
+        isEmail={isEmail}
       />
     ) : (
       <CollapsedMessage key={m.id} m={m} onOpen={() => toggle(m.id, true)} />
@@ -398,6 +408,7 @@ function Conversation({
             linkOptions={linkOptions}
             onLink={(link) => onLink(newest.id, link)}
             onOpenLinks={() => onOpenLinks(newest.id)}
+            isEmail={isEmail}
           />
         ) : (
           <CollapsedMessage
@@ -780,6 +791,7 @@ export default function ThreadReader({
               void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
             }}
             onOpenLinks={(messageId) => setLinkFor({ messageId, fromHeader: true })}
+            isEmail={vm.isEmail}
           />
         </div>
 
