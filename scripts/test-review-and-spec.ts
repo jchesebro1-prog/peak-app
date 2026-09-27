@@ -10526,6 +10526,7 @@ seeded()
   .then(() => estimate223WritersAsyncChecks())
   .then(() => estimate223SweepDAsyncChecks())
   .then(() => daylite241AsyncChecks())
+  .then(() => reviewLimits242AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27596,4 +27597,148 @@ import { applyLimitCells as r242Apply } from "@/lib/review-limits";
       !/from "@\/(db|lib\/stores|lib\/settings|lib\/users)"/.test(card),
     "#242: the card is a client component over the pure rules + the server action — no store/db/settings import"
   );
+}
+
+/* --- #242 T3: the approval gate — auto-approval within the owner's limit ---
+ * decideApprovalGate is the one decision setStatus and the estimator
+ * pre-checks make; the async block exercises the real store. */
+import {
+  decideApprovalGate as r242Decide, checkApprovalGate as r242Check, create as r242Create, get as r242Get,
+  setStatus as r242SetStatus, approve as r242Approve, update as r242Update, isApprovalGateRefusal as r242IsRefusal,
+  type QuoteReview as R242Review, type Quote as R242Quote,
+} from "@/lib/stores/quotes";
+import { addUser as r242AddUser, getUserByEmail as r242UserByEmail } from "@/lib/users";
+import { getSettingsPatch as r242Patch, setSettings as r242SetSettings } from "@/lib/settings";
+import { loadReviewLimitContext as r242LoadCtx } from "@/lib/review-limits-server";
+import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures";
+{
+  const ctx = { roster: [{ id: "u1", name: "Nic Trapani", status: "active" }], limits: { u1: { system_plain: 25000 } } };
+  const base = { quoteType: "system", value: 20000, owner: "Nic Trapani", preparedBy: "", spec: null, flameTest: null, repair: null, inspection: null };
+  const rv = (o: Partial<R242Review> = {}): R242Review => ({
+    state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null, ...o,
+  });
+  const sent = r242Decide("sent", { ...base, review: rv() }, ctx, {}, 1000);
+  ok(
+    sent.ok && !!sent.stamp && sent.stamp.state === "approved" && sent.stamp.method === "auto_limit" && sent.stamp.decidedBy === "Nic Trapani" &&
+      sent.stamp.decidedAt === 1000 && JSON.stringify(sent.stamp.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+    "#242 gate: → sent within the owner's limit auto-approves and stamps method/decidedBy/decidedAt/snapshot"
+  );
+  const won = r242Decide("won", { ...base, review: rv({ state: "in_review" }) }, ctx, {}, 1000);
+  ok(won.ok && won.stamp?.method === "auto_limit", "#242 gate: → won auto-approves too (an in_review quote included)");
+  const overS = r242Decide("sent", { ...base, value: 30000, review: rv() }, ctx);
+  ok(!overS.ok && overS.error === "This quote needs an approval on record before it can be sent to the customer.", "#242 gate: over the limit → today's send refusal, verbatim");
+  const overW = r242Decide("won", { ...base, value: 30000, review: rv() }, ctx);
+  ok(!overW.ok && overW.error === "This quote needs an approval on record before it can be marked Won.", "#242 gate: over the limit → today's won refusal, verbatim");
+  ok(!r242Decide("sent", { ...base, review: rv({ state: "changes" }) }, ctx).ok, "#242 gate: 'changes requested' is never auto-approved past");
+  const inApp = r242Decide("sent", { ...base, value: 9_000_000, review: rv({ state: "approved", method: "in_app" }) }, ctx);
+  const att = r242Decide("won", { ...base, value: 9_000_000, review: rv({ state: "approved", method: "attested", note: "Teams" }) }, { limits: {}, roster: [] });
+  ok(inApp.ok && inApp.stamp === null && att.ok && att.stamp === null, "#242 gate: in-app and attested approvals pass unchanged, no restamp, whatever the limits");
+  const autoRev = rv({ state: "approved", method: "auto_limit", decidedBy: "Nic Trapani", auto: { kind: "system_plain", limit: 25000, value: 20000 } });
+  const holds = r242Decide("won", { ...base, review: autoRev }, ctx);
+  ok(holds.ok && holds.stamp === null, "#242 gate: a still-fitting auto approval passes without a restamp");
+  ok(!r242Decide("won", { ...base, value: 30000, review: autoRev }, ctx).ok, "#242 gate: stale auto approval (value raised) is refused");
+  ok(
+    !r242Decide("won", { ...base, spec: { sections: [{ kind: "labor", items: [{ sku: "L", qty: 1, price: 100, cost: 0 }] }] }, review: autoRev }, ctx).ok,
+    "#242 gate: stale auto approval (labor added, no with-labor limit) is refused"
+  );
+  ok(!r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 10000 } } }).ok, "#242 gate: stale auto approval (limit lowered) is refused");
+  ok(
+    r242Decide("won", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "engine-owned-flow" }).ok &&
+      r242Decide("sent", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "historical-import" }).ok,
+    "#242 gate: engine-owned and historical-import bypasses unchanged"
+  );
+  const bypassStamp = r242Decide("won", { ...base, review: rv() }, ctx, { bypassApprovalGate: "engine-owned-flow" });
+  ok(bypassStamp.ok && bypassStamp.stamp === null, "#242 gate: a bypassed transition never stamps an auto approval");
+  ok(r242Decide("draft", { ...base, value: 30000, review: rv() }, ctx).ok && r242Decide("lost", { ...base, review: rv() }, ctx).ok, "#242 gate: draft/lost stay open");
+  ok(r242Decide("sent", { ...base, review: rv() }, { limits: {}, roster: [] }).ok === false, "#242 gate: no limits configured → today's behaviour (needs review)");
+
+  const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const setStatusBody = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
+  ok(
+    setStatusBody.includes("decideApprovalGate(status, q, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
+    "#242: setStatus consults decideApprovalGate and writes the stamp inside the status patch"
+  );
+  const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(
+    (ea.match(/checkApprovalGate\(cur/g) || []).length === 2 && !ea.includes("requireApprovalToAdvance(cur"),
+    "#242: setStatusAction and sendToCustomerAction pre-check with checkApprovalGate (limits applied), not the bare review predicate"
+  );
+  const approveBody = qs.slice(qs.indexOf("export async function approve("), qs.indexOf("export async function resetToSeed("));
+  ok((approveBody.match(/review\.auto = null/g) || []).length === 3, "#242: approve, attestApproval and requestChanges each clear a previous auto snapshot");
+}
+
+async function reviewLimits242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const mk = async (slug: string, over: Partial<R242Quote> = {}) => {
+    const id = r242Fx(242, slug);
+    r242Reg("quotes", id);
+    return r242Create({ id, name: "#242 " + slug, customer: "Spec fixture", owner: owner.name, value: 20000, ...over });
+  };
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 } } });
+    const ctx = await r242LoadCtx();
+    ok(ctx.roster.some((u) => u.id === owner.id) && ctx.limits[owner.id]?.system_plain === 25000, "#242 store: loadReviewLimitContext reads the settings blob and the roster");
+
+    const a = await mk("within");
+    ok((await r242Check(a, "sent")).ok, "#242 store: checkApprovalGate passes a quote within the owner's limit");
+    const sentA = await r242SetStatus(a.id, "sent", "Someone Else");
+    const reA = await r242Get(a.id);
+    ok(
+      sentA?.status === "sent" && reA?.review.state === "approved" && reA.review.method === "auto_limit" && reA.review.decidedBy === owner.name &&
+        typeof reA.review.decidedAt === "number" && JSON.stringify(reA.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+      "#242 store: setStatus(sent) within the limit auto-approves in the same write — stamped to the OWNER, not the actor"
+    );
+
+    const b = await mk("over", { value: 30000 });
+    let refusedB = false;
+    try {
+      await r242SetStatus(b.id, "sent", "Test");
+    } catch (e) {
+      refusedB = r242IsRefusal(e) && (e as Error).message === "This quote needs an approval on record before it can be sent to the customer.";
+    }
+    const reB = await r242Get(b.id);
+    ok(refusedB && reB?.status === "draft" && reB.review.state === "none", "#242 store: over the limit is refused with today's message and nothing is stamped");
+    ok(!(await r242Check(b, "sent")).ok, "#242 store: checkApprovalGate refuses the over-limit quote");
+
+    const c = await mk("stale");
+    await r242SetStatus(c.id, "sent", "Test");
+    await r242Update(c.id, { value: 40000 });
+    let refusedC = false;
+    try {
+      await r242SetStatus(c.id, "won", "Test");
+    } catch (e) {
+      refusedC = r242IsRefusal(e);
+    }
+    ok(refusedC && (await r242Get(c.id))?.status === "sent", "#242 store: a stale auto approval (value raised) no longer lets the quote be marked Won");
+
+    const d = await mk("lowered");
+    await r242SetStatus(d.id, "sent", "Test");
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 10000 } } });
+    let refusedD = false;
+    try {
+      await r242SetStatus(d.id, "won", "Test");
+    } catch (e) {
+      refusedD = r242IsRefusal(e);
+    }
+    ok(refusedD, "#242 store: lowering the owner's limit un-approves an auto approval that no longer fits");
+
+    const e2 = await mk("inapp", { value: 90000 });
+    await r242Approve(e2.id, { by: "Jeff Chesebro" });
+    await r242SetStatus(e2.id, "sent", "Test");
+    const reE = await r242Get(e2.id);
+    ok(reE?.status === "sent" && reE.review.method === "in_app" && reE.review.auto == null, "#242 store: an in-app approval sends exactly as today — no auto stamp");
+
+    await r242Approve(c.id, { by: "Jeff Chesebro" });
+    const reC = await r242Get(c.id);
+    ok(reC?.review.method === "in_app" && reC.review.auto === null, "#242 store: approving over a stale auto approval clears its snapshot");
+
+    const f = await mk("bypass", { value: 90000 });
+    await r242SetStatus(f.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const reF = await r242Get(f.id);
+    ok(reF?.status === "sent" && reF.review.state === "none", "#242 store: the engine-owned bypass is unchanged and never stamps an approval");
+  } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
 }

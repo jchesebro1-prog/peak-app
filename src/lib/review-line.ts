@@ -23,10 +23,12 @@ import { firstName } from "@/lib/team";
  * wrong. Change the wording here and both surfaces move together.
  */
 export type ApprovedReviewLike = {
-  method?: "in_app" | "attested" | null;
+  method?: "in_app" | "attested" | "auto_limit" | null;
   decidedBy: string | null;
   reviewer: string | null;
   note: string;
+  /** #242: an `auto_limit` approval's snapshot (kind, limit, value). */
+  auto?: { kind: string; limit: number | "none"; value: number } | null;
 };
 
 /**

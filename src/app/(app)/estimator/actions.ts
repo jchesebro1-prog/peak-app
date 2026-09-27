@@ -11,7 +11,7 @@ import {
   get,
   getAll,
   requestChanges,
-  requireApprovalToAdvance,
+  checkApprovalGate,
   retireReplacedDraftSafely,
   setStatus,
   setQuoteStage,
@@ -734,7 +734,9 @@ export async function setStatusAction(
   // backstop — it should never actually fire given this pre-check.
   if (status === "won" || status === "sent") {
     const cur = await get(id);
-    const gate = requireApprovalToAdvance(cur?.review ?? null, status === "won" ? "won" : "send");
+    // #242: the same decision setStatus makes — an approval that still holds,
+    // or the quote owner's review limit.
+    const gate = await checkApprovalGate(cur, status);
     if (!gate.ok) {
       return {
         ok: false,
@@ -889,7 +891,7 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   await requireUser();
   if (!id) return { ok: false, review: null, status: null };
   const cur = await get(id);
-  const gate = requireApprovalToAdvance(cur?.review ?? null, "send");
+  const gate = await checkApprovalGate(cur, "sent");
   if (!gate.ok) {
     return {
       ok: false,
