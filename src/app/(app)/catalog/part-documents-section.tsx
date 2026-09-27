@@ -7,7 +7,7 @@ import { collapseList } from "@/lib/part-docs/coverage";
 import { PART_DOC_KINDS, PART_DOC_KIND_LABEL, type PartDocumentSource } from "@/lib/part-docs/types";
 import type { PartDocsImage, PartDocsView } from "@/lib/part-docs/views";
 import AlsoCovers from "./documents/also-covers";
-import { addImageFromUrlAction, setImageDisplayAction } from "./documents/actions";
+import { addImageFromUrlAction, setImageDisplayAction, setImageOrderAction } from "./documents/actions";
 import SlotCell, { docHref } from "./documents/slot-cell";
 import { uploadNewDocument } from "./documents/upload-client";
 
@@ -65,22 +65,28 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
     });
   };
 
-  /** Reassign an explicit `sort` (0..n-1) to every image in `next`'s order —
-   *  simplest way to persist a ↑/↓ move regardless of whether any image had
-   *  an explicit sort before. */
+  /** Persist a ↑/↓ move in ONE round trip (#242 review fix M3) — the full
+   *  reordered id list, not one setImageDisplayAction call per image. */
   const persistOrder = (next: PartDocsImage[]) => {
-    run("Saving…", async () => {
-      for (let i = 0; i < next.length; i++) {
-        const r = await setImageDisplayAction({ documentId: next[i].id, sku, sort: i });
-        if (!r.ok) return r;
-      }
-      return { ok: true };
-    });
+    run("Saving…", () => setImageOrderAction({ sku, documentIds: next.map((i) => i.id) }));
   };
+
+  // #242 review fix: a datasheet-render thumbnail always sorts after every
+  // real image (compareImages, types.ts) — `images` therefore arrives with
+  // every real image first, then a contiguous run of auto ones. ↑/↓ may
+  // move freely WITHIN either group, but never across that boundary: a real
+  // image can't be dragged in among the auto thumbnails (it would just sort
+  // back out again) and an auto thumbnail can't be promoted ahead of a real
+  // one.
+  const autoBoundary = images.findIndex((img) => img.source === "datasheet-render");
+  const groupOf = (i: number): "real" | "auto" => (autoBoundary === -1 || i < autoBoundary ? "real" : "auto");
+  const canMoveUp = (i: number) => i > 0 && groupOf(i - 1) === groupOf(i);
+  const canMoveDown = (i: number) => i < images.length - 1 && groupOf(i + 1) === groupOf(i);
 
   const move = (index: number, dir: -1 | 1) => {
     const target = index + dir;
     if (target < 0 || target >= images.length) return;
+    if (groupOf(index) !== groupOf(target)) return;
     const next = [...images];
     [next[index], next[target]] = [next[target], next[index]];
     persistOrder(next);
@@ -110,12 +116,12 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
           {images.map((img, i) => (
             <div key={img.id} style={{ width: 120, opacity: img.hidden ? 0.55 : 1 }}>
               <a href={docHref(img.id)} target="_blank" rel="noopener noreferrer">
-                <img src={docHref(img.id)} alt={img.title} style={{ width: 120, height: 90, objectFit: "cover", borderRadius: 7, border: "1px solid #e3e5ea", display: "block" }} />
+                <img src={docHref(img.id)} alt={img.title} loading="lazy" style={{ width: 120, height: 90, objectFit: "cover", borderRadius: 7, border: "1px solid #e3e5ea", display: "block" }} />
               </a>
               <div style={{ fontSize: 10.5, color: "#8c919c", margin: "3px 0" }}>{IMAGE_SOURCE_LABEL[img.source] ?? img.source}</div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <button type="button" style={smallLink} disabled={!!busy || i === 0} onClick={() => move(i, -1)} aria-label={`Move ${img.title} up`}>↑</button>
-                <button type="button" style={smallLink} disabled={!!busy || i === images.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${img.title} down`}>↓</button>
+                <button type="button" style={smallLink} disabled={!!busy || !canMoveUp(i)} onClick={() => move(i, -1)} aria-label={`Move ${img.title} up`}>↑</button>
+                <button type="button" style={smallLink} disabled={!!busy || !canMoveDown(i)} onClick={() => move(i, 1)} aria-label={`Move ${img.title} down`}>↓</button>
                 <button type="button" style={smallLink} disabled={!!busy} onClick={() => toggleHidden(img)}>
                   {img.hidden ? "Show" : "Hide from customers"}
                 </button>

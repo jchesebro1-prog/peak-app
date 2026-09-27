@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm, requireUser } from "@/lib/session";
-import { blobEnabled, putBlob } from "@/lib/blob";
+import { blobEnabled, deleteBlob, putBlob } from "@/lib/blob";
 import { searchDocs } from "@/db/doc-store";
 import { get as getPart, list as listCatalog, type CatalogPart } from "@/lib/stores/catalog";
 import {
@@ -13,6 +13,7 @@ import {
   getDocument,
   replaceDocumentFile,
   setDocumentLinkDisplay,
+  setImageOrder,
 } from "@/lib/stores/part-documents";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
@@ -330,20 +331,41 @@ export async function prefillFromDavinciAction(): Promise<DocActionResult<{ summ
   };
 }
 
-/** Reorder or hide/show one image in a part's gallery (#242). `setDocumentLinkDisplay`
- *  itself refuses a non-image link, so a bad documentId/sku pair or a
- *  datasheet/spec-sheet id passed here both come back as the same "not
- *  linked" refusal. */
+/** Hide/show (or set a single explicit `sort` on) one image in a part's
+ *  gallery (#242). `setDocumentLinkDisplay` itself refuses a non-image
+ *  link, so a bad documentId/sku pair or a datasheet/spec-sheet id passed
+ *  here both come back as the same "not linked" refusal. A full gallery
+ *  reorder goes through `setImageOrderAction` below (one round trip), not
+ *  N calls to this action. */
 export async function setImageDisplayAction(input: { documentId: string; sku: string; sort?: number; hidden?: boolean }): Promise<DocActionResult> {
   await requireUser();
   if (!isDocumentId(input.documentId)) return { ok: false, error: "Not a document id." };
   const sku = String(input.sku || "").trim();
   if (!sku) return { ok: false, error: "Missing part." };
   const patch: { sort?: number; hidden?: boolean } = {};
-  if (typeof input.sort === "number") patch.sort = input.sort;
+  if (input.sort !== undefined) {
+    if (!Number.isInteger(input.sort) || input.sort < 0) return { ok: false, error: "Invalid sort order." };
+    patch.sort = input.sort;
+  }
   if (typeof input.hidden === "boolean") patch.hidden = input.hidden;
   const ok = await setDocumentLinkDisplay(input.documentId, sku, patch);
   if (!ok) return { ok: false, error: "That image isn't linked to this part." };
+  revalidate();
+  return { ok: true };
+}
+
+/** Reassign a part's whole image-gallery order in one call (#242 review fix
+ *  M3) — the part editor's ↑/↓ send the full reordered id list here once,
+ *  instead of one setImageDisplayAction round trip per image. Refuses if
+ *  any id isn't currently a live image link of `sku` (setImageOrder). */
+export async function setImageOrderAction(input: { sku: string; documentIds: string[] }): Promise<DocActionResult> {
+  await requireUser();
+  const sku = String(input.sku || "").trim();
+  if (!sku) return { ok: false, error: "Missing part." };
+  const ids = (input.documentIds || []).filter(isDocumentId);
+  if (!ids.length) return { ok: false, error: "Nothing to reorder." };
+  const ok = await setImageOrder(sku, ids);
+  if (!ok) return { ok: false, error: "One of those images isn't linked to this part." };
   revalidate();
   return { ok: true };
 }
@@ -387,7 +409,18 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
     source: "fetch",
     by: user.name,
   });
-  if (!doc) return { ok: false, error: "Could not record the document." };
+  if (!doc) {
+    // #242 review fix M7: createDocument only fails on an id collision
+    // (vanishingly unlikely — newDocumentId is random), but when it does,
+    // the blob just stored under this fresh id is nobody's file — delete it
+    // rather than leave it orphaned.
+    try {
+      await deleteBlob(stored.pathname);
+    } catch {
+      /* best effort — the refusal stands either way */
+    }
+    return { ok: false, error: "Could not record the document." };
+  }
   await attachDocument(doc.id, [sku], user.name);
   revalidate();
   return { ok: true, documentId: doc.id };

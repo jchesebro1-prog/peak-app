@@ -1,6 +1,6 @@
 import { deleteBlob, getBlobHead } from "@/lib/blob";
 import type { StoredFile } from "@/lib/stores/part-documents";
-import { checkDocumentBytes, CONTENT_TYPES, SNIFF_BYTES, type SniffedType } from "./files";
+import { checkDocumentBytes, CONTENT_TYPES, EQUIVALENT_EXTENSION, SNIFF_BYTES, type SniffedType } from "./files";
 import { blobPathBelongsTo, maxBytesFor, type PartDocKind } from "./types";
 
 /**
@@ -18,12 +18,6 @@ export type VerifyDeps = {
 };
 
 const liveDeps: VerifyDeps = { head: getBlobHead, remove: deleteBlob };
-
-/** jpg and jpeg are the same sniffed type (#242 review fix) — a file the
- *  user named "photo.jpg" must stay "photo.jpg" when the bytes sniff as
- *  "jpeg", not get renamed to "photo.jpeg" just because the literal
- *  extension differs from the sniffed type's own spelling. */
-const EQUIVALENT_EXTENSION: Partial<Record<SniffedType, RegExp>> = { jpeg: /\.jpe?g$/i };
 
 /** Keep the user's name for display, capped, with an extension that matches the bytes. */
 export function displayFileName(raw: string, type: SniffedType): string {

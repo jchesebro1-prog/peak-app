@@ -12,7 +12,7 @@ import {
   type DocBatchOpts,
 } from "@/db/doc-store";
 import {
-  IMAGE_SOURCE_RANK,
+  compareImages,
   isDocumentId,
   newDocumentId,
   type PartDocKind,
@@ -279,10 +279,11 @@ export async function setDocumentLinkDisplay(documentId: string, partSku: string
 }
 
 /**
- * Each part's non-hidden, live image links (#242), ordered by source rank
- * (upload, fetch, davinci, datasheet-render, legacy), then by `sort`
- * (missing sorts last), then by upload time. A datasheet or spec-sheet
- * document never appears here — only `kind === "image"` links qualify.
+ * Each part's non-hidden, live image links (#242), in `compareImages` order
+ * (types.ts: a datasheet-render thumbnail after every real image, then
+ * explicit `sort`, then source rank, then upload time). A datasheet or
+ * spec-sheet document never appears here — only `kind === "image"` links
+ * qualify.
  */
 export async function visibleImagesForParts(skus: readonly string[]): Promise<Map<string, PartDocument[]>> {
   const links = (await documentLinksForParts(skus)).filter((l) => l.kind === "image" && !l.hidden);
@@ -300,15 +301,28 @@ export async function visibleImagesForParts(skus: readonly string[]): Promise<Ma
   }
   const out = new Map<string, PartDocument[]>();
   for (const [sku, entries] of bySku) {
-    entries.sort((a, b) => {
-      const rank = IMAGE_SOURCE_RANK[a.doc.source] - IMAGE_SOURCE_RANK[b.doc.source];
-      if (rank) return rank;
-      const sortA = a.link.sort ?? Infinity;
-      const sortB = b.link.sort ?? Infinity;
-      if (sortA !== sortB) return sortA - sortB;
-      return a.doc.uploadedAt - b.doc.uploadedAt;
-    });
+    entries.sort((a, b) => compareImages({ source: a.doc.source, sort: a.link.sort ?? null, uploadedAt: a.doc.uploadedAt }, { source: b.doc.source, sort: b.link.sort ?? null, uploadedAt: b.doc.uploadedAt }));
     out.set(sku, entries.map((e) => e.doc));
   }
   return out;
+}
+
+/**
+ * Reassign a sku's whole image-gallery order in one call (#242 review fix
+ * M3) — replaces N sequential setDocumentLinkDisplay writes from the client
+ * with one server round trip; each link still gets its own DB write
+ * (parallelized), but the caller only awaits once. Refuses (returns false,
+ * writing nothing) if any id in `documentIds` isn't currently a live image
+ * link of `sku` — a stale or foreign id never partially reorders the rest.
+ */
+export async function setImageOrder(sku: string, documentIds: readonly string[]): Promise<boolean> {
+  const ids = [...new Set(documentIds)];
+  if (!ids.length) return false;
+  const links = (await documentLinksForParts([sku])).filter((l) => l.kind === "image");
+  const linkIdByDoc = new Map(links.map((l) => [l.documentId, documentLinkId(sku, l.documentId)]));
+  if (ids.some((id) => !linkIdByDoc.has(id))) return false;
+  await Promise.all(
+    ids.map((id, i) => patchDoc<PartDocumentLink>("part_document_links", linkIdByDoc.get(id)!, (d) => ({ ...d, sort: i })))
+  );
+  return true;
 }

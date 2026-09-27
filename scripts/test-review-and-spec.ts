@@ -16292,12 +16292,30 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
   // explaining what used to be here — they check for an actual function
   // definition or call, not a mention in a comment.
   ok(!/cleanupOrphan\(/.test(docActionsSrc), "part docs actions: the vulnerable cleanupOrphan helper (and every call to it) is gone, not just unused");
-  ok(!/deleteBlob\(/.test(docActionsSrc), "part docs actions: this file never calls deleteBlob directly — the only blob delete anywhere in the upload path is verifyUploadedBlob's own gated refusal");
 
   const fnStart = docActionsSrc.indexOf("export async function attachUploadedDocumentAction");
   const fnEnd = docActionsSrc.indexOf("\nexport async function replaceDocumentFileAction");
   ok(fnStart >= 0 && fnEnd > fnStart, "part docs actions fixture: attachUploadedDocumentAction is still where the test expects it");
   const fnBody = docActionsSrc.slice(fnStart, fnEnd);
+
+  // Scoped to attachUploadedDocumentAction alone — the function the
+  // fix-wave-2 hole was actually in. #242 review fix M7 added a SEPARATE,
+  // safe deleteBlob call elsewhere in this file (addImageFromUrlAction,
+  // cleaning up a blob it just wrote itself, this same call, under a fresh
+  // server-minted documentId — never a client-supplied pathname or an
+  // existing document's real blobKey), so the assertion can no longer be
+  // "this file never calls deleteBlob" at all.
+  ok(!/deleteBlob\(/.test(fnBody), "part docs actions: attachUploadedDocumentAction never calls deleteBlob directly — the only blob delete in ITS upload path is verifyUploadedBlob's own gated refusal");
+
+  // #242 review fix M7: addImageFromUrlAction deletes the blob it just
+  // stored when createDocument then fails, rather than leaving it orphaned
+  // — the delete call is present and runs strictly after createDocument.
+  const addFromUrlStart = docActionsSrc.indexOf("export async function addImageFromUrlAction");
+  ok(addFromUrlStart >= 0, "part docs actions fixture: addImageFromUrlAction is present");
+  const addFromUrlBody = docActionsSrc.slice(addFromUrlStart);
+  const createCallAt = addFromUrlBody.indexOf("await createDocument(");
+  const m7DeleteAt = addFromUrlBody.indexOf("await deleteBlob(stored.pathname)");
+  ok(createCallAt >= 0 && m7DeleteAt >= 0 && m7DeleteAt > createCallAt, "part docs actions: addImageFromUrlAction's M7 deleteBlob runs only after createDocument, cleaning up the blob it just wrote itself when createDocument fails");
 
   const existsCheckAt = fnBody.indexOf("await getDocument(input.documentId)");
   const verifyCallAt = fnBody.indexOf("await verifyUploadedBlob(input)");
@@ -27453,6 +27471,7 @@ import {
   createDocument as d242CreateDoc,
   documentLinkId as d242LinkId,
   setDocumentLinkDisplay as d242SetDisplay,
+  setImageOrder as d242SetOrder,
   visibleImagesForParts as d242VisibleImages,
 } from "@/lib/stores/part-documents";
 async function portal242ImageLinksAsyncChecks(): Promise<void> {
@@ -27488,8 +27507,19 @@ async function portal242ImageLinksAsyncChecks(): Promise<void> {
 
   ok(await d242SetDisplay(render.id, sku, { hidden: false }), "#242 images: setDocumentLinkDisplay unhides the render link");
   const shown = await d242VisibleImages([sku]);
-  ok((shown.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: unhidden — upload before datasheet-render, by source rank");
+  // #242 review fix: a datasheet-render thumbnail always sorts LAST now
+  // (compareImages), not merely by IMAGE_SOURCE_RANK — same outcome here
+  // (upload before render) since neither carries an explicit `sort`, but
+  // for the group-boundary reason, not the old rank-first one.
+  ok((shown.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: unhidden — a real upload sorts before a datasheet-render thumbnail, which always sorts last");
   ok(!(shown.get(sku) ?? []).some((d) => d.id === datasheet.id), "#242 images: a datasheet never appears in the image map");
+
+  // #242 review fix (b): an explicit `sort` on a datasheet-render link never
+  // lets it outrank a real image — the auto-thumbnail group always sorts
+  // last, ahead of the `sort` comparison.
+  ok(await d242SetDisplay(render.id, sku, { sort: 0 }), "#242 images: setDocumentLinkDisplay sets an explicit sort on the render link");
+  const stillLast = await d242VisibleImages([sku]);
+  ok((stillLast.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: a datasheet-render thumbnail with sort 0 still sorts after a real image with no sort at all");
 
   // Review fix wave 2: gallery display is an image-only concept —
   // setDocumentLinkDisplay must refuse a datasheet/spec-sheet link.
@@ -27542,6 +27572,29 @@ import {
   ok(d242ImagesFor(imgIndex, "NOBODY").length === 0, "#242 images view: an unlinked SKU gets an empty image list, not undefined");
 }
 
+/* --- Fix round 1: compareImages ordering, proven at the pure view-builder
+   level (the async block below proves the same rule against the real
+   DB-backed visibleImagesForParts). --- */
+{
+  // (a) upload A (no sort) + fetch B (no sort) → [A, B] (source rank);
+  // after B:0, A:1 → [B, A].
+  const idxAB = buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] });
+  const A: D242ImageRef = { id: "IMGA00000001", title: "A", source: "upload", hidden: false, sort: null, uploadedAt: 1 };
+  const B: D242ImageRef = { id: "IMGB00000001", title: "B", source: "fetch", hidden: false, sort: null, uploadedAt: 2 };
+  const viewAB = partDocsView(idxAB, "ABSKU", () => "", [A, B]);
+  ok(viewAB.images.map((i) => i.id).join(",") === "IMGA00000001,IMGB00000001", "#242 images order: view builder — upload before fetch when neither has an explicit sort");
+
+  const viewReordered = partDocsView(idxAB, "ABSKU", () => "", [{ ...A, sort: 1 }, { ...B, sort: 0 }]);
+  ok(viewReordered.images.map((i) => i.id).join(",") === "IMGB00000001,IMGA00000001", "#242 images order: view builder — an explicit sort (B:0, A:1) overrides source rank, matching the DB-backed read");
+
+  // (b) a datasheet-render thumbnail with sort 0 still sorts after a real
+  // image with no sort at all — the auto-thumbnail group always sorts last.
+  const real: D242ImageRef = { id: "IMGREAL0001", title: "Real", source: "upload", hidden: false, sort: null, uploadedAt: 5 };
+  const auto: D242ImageRef = { id: "IMGAUTO0001", title: "Auto", source: "datasheet-render", hidden: false, sort: 0, uploadedAt: 1 };
+  const viewAuto = partDocsView(idxAB, "AUTOSKU", () => "", [auto, real]);
+  ok(viewAuto.images.map((i) => i.id).join(",") === "IMGREAL0001,IMGAUTO0001", "#242 images order: view builder — a datasheet-render thumbnail sorts after every real image even with an explicit sort of 0");
+}
+
 /* --- #242 regression: a part linked only to an image reads "missing" for
    the datasheet slot — coverage.ts:86 drops image links entirely, so an
    image can never satisfy (or appear to satisfy) a coverage slot. --- */
@@ -27586,17 +27639,43 @@ async function portal242ImagesTask4AsyncChecks(): Promise<void> {
   );
   ok(ok10mb.ok && ok10mb.file.fileName === "photo.jpg" && ok10mb.file.contentType === "image/jpeg", "#242 images upload: a 9 MB JPEG under the cap is accepted, and displayFileName keeps the user's .jpg rather than renaming it to .jpeg");
 
-  // setDocumentLinkDisplay refuses a live but non-image link (review fix
-  // wave 2) — exercised here against a real datasheet link, distinct from
-  // the fixture-only pure checks above.
-  const sku = fixtureId(242, "sku-nonimg-display");
-  const ds = await d242CreateDoc({
-    kind: "datasheet", fileName: "ds.pdf", contentType: "application/pdf", size: 10,
-    blobKey: "part-docs/PD-t4-nonimg/ds.pdf", sourceUrl: null, source: "upload", by: "Test",
-  });
-  if (!ds) throw new Error("#242 images: fixture datasheet failed to create");
-  registerFixture("part_documents", ds.id);
-  await d242Attach(ds.id, [sku], "Test");
-  registerFixture("part_document_links", d242LinkId(sku, ds.id));
-  ok(!(await d242SetDisplay(ds.id, sku, { sort: 0 })), "#242 images upload: setDocumentLinkDisplay refuses a live datasheet link — gallery order/visibility is image-only");
+  // (Fix round 1, M5: the "setDocumentLinkDisplay refuses a non-image link"
+  // assertion lives once, in portal242ImageLinksAsyncChecks — removed the
+  // duplicate that used to live here.)
+
+  // Fix round 1 (a): upload A + fetch B with no explicit sort → [A, B]
+  // (source-rank tiebreak); after writing sort B=0, A=1 → [B, A] — proven
+  // against the real DB-backed read (visibleImagesForParts), matching the
+  // pure view-builder assertion above.
+  const sku2 = fixtureId(242, "sku-img-order");
+  const imgA = await d242CreateDoc({ kind: "image", fileName: "a.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-t4-a/a.jpg", sourceUrl: null, source: "upload", by: "Test" });
+  const imgB = await d242CreateDoc({ kind: "image", fileName: "b.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-t4-b/b.jpg", sourceUrl: "https://x.example/b.jpg", source: "fetch", by: "Test" });
+  if (!imgA || !imgB) throw new Error("#242 images order: fixture documents failed to create");
+  registerFixture("part_documents", imgA.id);
+  registerFixture("part_documents", imgB.id);
+  await d242Attach(imgA.id, [sku2], "Test");
+  await d242Attach(imgB.id, [sku2], "Test");
+  registerFixture("part_document_links", d242LinkId(sku2, imgA.id));
+  registerFixture("part_document_links", d242LinkId(sku2, imgB.id));
+
+  const initialOrder = await d242VisibleImages([sku2]);
+  ok((initialOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: with no explicit sort, an upload sorts before a fetch (source rank)");
+
+  ok(await d242SetDisplay(imgB.id, sku2, { sort: 0 }), "#242 images order: setDocumentLinkDisplay sets B's sort to 0");
+  ok(await d242SetDisplay(imgA.id, sku2, { sort: 1 }), "#242 images order: setDocumentLinkDisplay sets A's sort to 1");
+  const reorderedByDisplay = await d242VisibleImages([sku2]);
+  ok((reorderedByDisplay.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgB.id},${imgA.id}`, "#242 images order: an explicit sort (B:0, A:1) overrides source rank — [B, A]");
+
+  // setImageOrder (#242 review fix M3, store): the part editor's ↑/↓ now
+  // reorder in ONE write via this, not N sequential setDocumentLinkDisplay
+  // calls. Refuses whole-hog if any id isn't a live image link of the sku.
+  ok(!(await d242SetOrder(sku2, [imgA.id, "PD-notlinked000"])), "#242 images order: setImageOrder refuses a documentId not linked to this part as an image");
+  ok(await d242SetOrder(sku2, [imgA.id, imgB.id]), "#242 images order: setImageOrder accepts a full reorder of the part's own image links");
+  const afterSetOrder = await d242VisibleImages([sku2]);
+  ok((afterSetOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: setImageOrder's order (A, B) is what visibleImagesForParts reads back");
+
+  // setImageDisplayAction-level validation lives in actions.ts (M2) and
+  // can't run from this harness (server actions need requireUser()'s
+  // request-scoped session) — the store-level equivalent is exercised via
+  // setDocumentLinkDisplay/setImageOrder above.
 }

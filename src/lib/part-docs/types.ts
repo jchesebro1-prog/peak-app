@@ -131,10 +131,8 @@ export function maxBytesFor(kind: PartDocKind): number {
   return kind === "image" ? MAX_PART_IMAGE_BYTES : MAX_PART_DOC_BYTES;
 }
 
-/** Gallery ordering rank for an image link (#242) — lower sorts first.
- *  Shared by the store's customer-facing read (`visibleImagesForParts`) and
- *  the staff view builder (`src/lib/part-docs/views.ts`'s `buildImageIndex`)
- *  so both order a part's images identically. */
+/** Gallery ordering rank for an image link (#242) — lower sorts first,
+ *  used only as `compareImages`'s tertiary tiebreak (below). */
 export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
   upload: 0,
   fetch: 1,
@@ -142,6 +140,32 @@ export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
   "datasheet-render": 3,
   legacy: 4,
 };
+
+/** The one shared, pure gallery-order comparator (#242 review fix — the
+ *  original rank-first rule silently made ↑/↓ a no-op across sources, since
+ *  a `sort` write could never outrank a lower-ranked source). Order:
+ *   1. an auto-generated datasheet-render thumbnail always sorts after
+ *      every real image, regardless of its own `sort`;
+ *   2. then explicit `sort` ascending (missing sorts last, +∞);
+ *   3. then IMAGE_SOURCE_RANK (upload, fetch, davinci, legacy);
+ *   4. then upload time.
+ *  Shared by the store's customer-facing read (`visibleImagesForParts`) and
+ *  the staff view builder (`src/lib/part-docs/views.ts`) so both order a
+ *  part's images identically — no duplicated ordering logic. */
+export function compareImages(
+  a: { source: PartDocumentSource; sort: number | null | undefined; uploadedAt: number },
+  b: { source: PartDocumentSource; sort: number | null | undefined; uploadedAt: number }
+): number {
+  const autoA = a.source === "datasheet-render" ? 1 : 0;
+  const autoB = b.source === "datasheet-render" ? 1 : 0;
+  if (autoA !== autoB) return autoA - autoB;
+  const sortA = a.sort ?? Infinity;
+  const sortB = b.sort ?? Infinity;
+  if (sortA !== sortB) return sortA - sortB;
+  const rank = IMAGE_SOURCE_RANK[a.source] - IMAGE_SOURCE_RANK[b.source];
+  if (rank) return rank;
+  return a.uploadedAt - b.uploadedAt;
+}
 
 /** Slots fetched per server-action call — each can take up to the fetcher's
  *  30 s timeout, so the page loops over a selection in batches this size. */

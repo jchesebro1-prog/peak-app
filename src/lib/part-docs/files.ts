@@ -120,8 +120,17 @@ export function contentTypeForFileName(fileName: string): string {
   return CONTENT_TYPES.pdf;
 }
 
+/** jpg and jpeg are the same sniffed type (#242 review fix) — a name
+ *  already ending in either spelling is left alone rather than renamed to
+ *  the sniffed type's own spelling (a file the user or a URL called
+ *  "photo.jpg" must stay "photo.jpg" when its bytes sniff as "jpeg").
+ *  Shared by `withExtension` below and `verify-upload.ts`'s
+ *  `displayFileName`, so uploaded and fetched files keep the same rule. */
+export const EQUIVALENT_EXTENSION: Partial<Record<SniffedType, RegExp>> = { jpeg: /\.jpe?g$/i };
+
 /** Make a file name end in the extension its bytes actually have. */
 export function withExtension(fileName: string, type: SniffedType): string {
+  if ((EQUIVALENT_EXTENSION[type] ?? new RegExp(`\\.${type}$`, "i")).test(fileName)) return fileName;
   const base = fileName.replace(/\.(pdf|docx?|aspx|php|html?|png|jpe?g|webp)$/i, "");
   return `${base || "document"}.${type}`;
 }
@@ -155,7 +164,10 @@ export function fileNameForFetched(contentDisposition: string | null, url: strin
   if (!name) {
     try {
       const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
-      if (/\.(pdf|docx?)$/i.test(last)) name = last;
+      // #242 review fix M1: an image URL's own basename (e.g.
+      // ".../hero-shot.jpg") is a real name — recognise it, not just the
+      // doc/pdf extensions this matched before images existed.
+      if (/\.(pdf|docx?|png|jpe?g|webp)$/i.test(last)) name = last;
     } catch {
       /* unparsable URL — fall through */
     }

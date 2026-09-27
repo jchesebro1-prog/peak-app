@@ -83,6 +83,7 @@ export default function ImageCell({
             <img
               src={docHref(view.first.id)}
               alt={view.first.title}
+              loading="lazy"
               style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, border: "1px solid #e3e5ea", display: "block" }}
             />
           </a>

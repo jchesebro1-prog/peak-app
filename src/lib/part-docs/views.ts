@@ -6,7 +6,7 @@ import {
   type SlotCoverage,
 } from "./coverage";
 import type { QuotedPartStat } from "./quoted-parts";
-import { IMAGE_SOURCE_RANK, type DocSlotKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
+import { compareImages, type DocSlotKind, type PartDocKind, type PartDocument, type PartDocumentLink, type PartDocumentSource } from "./types";
 
 /**
  * Serializable view models for the Datasheets page and the part editor
@@ -78,20 +78,14 @@ export type ImageRef = { id: string; title: string; source: PartDocumentSource; 
 
 export type ImageSlotView = { count: number; first: { id: string; title: string } | null };
 
-/** Gallery order (#242): source rank first (upload, fetch, davinci,
- *  datasheet-render, legacy — IMAGE_SOURCE_RANK), then explicit `sort`
- *  (missing sorts last), then upload time. The same order
- *  `visibleImagesForParts` uses for the customer-facing read; staff (this
- *  module) additionally see hidden images, unlike that customer read. */
+/** Gallery order (#242): `compareImages` (types.ts) — a datasheet-render
+ *  thumbnail always sorts after every real image, then explicit `sort`
+ *  ascending (missing sorts last), then source rank, then upload time. The
+ *  same comparator `visibleImagesForParts` uses for the customer-facing
+ *  read; staff (this module) additionally see hidden images, unlike that
+ *  customer read. */
 function sortImages(images: readonly ImageRef[]): ImageRef[] {
-  return [...images].sort((a, b) => {
-    const rank = IMAGE_SOURCE_RANK[a.source] - IMAGE_SOURCE_RANK[b.source];
-    if (rank) return rank;
-    const sortA = a.sort ?? Infinity;
-    const sortB = b.sort ?? Infinity;
-    if (sortA !== sortB) return sortA - sortB;
-    return a.uploadedAt - b.uploadedAt;
-  });
+  return [...images].sort(compareImages);
 }
 
 /** Every live image link, by SKU, in gallery order — hidden ones included
