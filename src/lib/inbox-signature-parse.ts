@@ -3,7 +3,7 @@
  * rules only (D89 — no AI): cut the quoted history, find the sign-off,
  * then pick name / title / company / phones / email / website off the
  * lines that follow. Pure (no imports) so test:specs covers it and the
- * Link popup's server loader can call it.
+ * link panel's server loader can call it.
  */
 
 export type SigPhoneLabel = "mobile" | "office" | "other";

@@ -84,7 +84,7 @@ export function pickContactHit(
   return { contactId: live[0].contactId, customerId: live[0].customerId };
 }
 
-/** #214 — the Link popup's people search: contacts with an address
+/** #214 — the link panel's people search: contacts with an address
  *  containing `fragment` (case-insensitive), as contactId → matching
  *  addresses. Soft-deleted contacts, and contacts whose home company is
  *  soft-deleted, are skipped — same rule as contactByEmail/contactsByEmails

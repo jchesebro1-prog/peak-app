@@ -16,7 +16,6 @@ import {
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
-import LinkPopup from "./link-popup";
 import TaskDialog from "./task-dialog";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
@@ -148,8 +147,9 @@ function ExpandedMessage({
   onCollapse: () => void;
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
   onLink: (link: { type: string; id: string; label: string } | null) => void;
-  /** #214 — open the Link popup on this message */
-  onOpenLinks: () => void;
+  /** #214 — put the sidebar into link mode for this message; the button
+   *  itself is passed so Done can hand focus back to it */
+  onOpenLinks: (opener: HTMLElement) => void;
   /** #215 — open the create-task dialog on this message */
   onTask: () => void;
   /** #214 fix wave 1 — the old picker was gated to email threads only;
@@ -214,7 +214,7 @@ function ExpandedMessage({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenLinks();
+                onOpenLinks(e.currentTarget);
               }}
               title="Link the people, company and work on this message"
               style={{
@@ -348,8 +348,8 @@ function Conversation({
   messages: MessageVM[];
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
   onLink: (messageId: string, link: { type: string; id: string; label: string } | null) => void;
-  /** #214 — a message header's "Link…" */
-  onOpenLinks: (messageId: string) => void;
+  /** #214 — a message header's "Link…" (opens the sidebar's link mode) */
+  onOpenLinks: (messageId: string, opener: HTMLElement) => void;
   /** #215 — a message header's "Task…" */
   onTask: (messageId: string) => void;
   /** #214 fix wave 1 — hide "Link…" on a non-email thread */
@@ -384,7 +384,7 @@ function Conversation({
         onCollapse={() => toggle(m.id, false)}
         linkOptions={linkOptions}
         onLink={(link) => onLink(m.id, link)}
-        onOpenLinks={() => onOpenLinks(m.id)}
+        onOpenLinks={(el) => onOpenLinks(m.id, el)}
         onTask={() => onTask(m.id)}
         isEmail={isEmail}
       />
@@ -438,7 +438,7 @@ function Conversation({
             onCollapse={() => toggle(newest.id, false)}
             linkOptions={linkOptions}
             onLink={(link) => onLink(newest.id, link)}
-            onOpenLinks={() => onOpenLinks(newest.id)}
+            onOpenLinks={(el) => onOpenLinks(newest.id, el)}
             onTask={() => onTask(newest.id)}
             isEmail={isEmail}
           />
@@ -472,9 +472,8 @@ export default function ThreadReader({
 }) {
   const router = useRouter();
   // #215 fix wave 1 — TaskDialog's fallback focus target when its own
-  // opener is no longer on the page (e.g. it was opened from the Link
-  // popup's footer, whose own restore-focus can leave that opener
-  // re-rendered away by the time the task dialog closes).
+  // opener is no longer on the page (e.g. it was opened from the link
+  // panel's "Create task", which unmounts as link mode closes).
   const readerRootRef = useRef<HTMLDivElement>(null);
 
   // email composer state (component is keyed by thread id — resets per thread)
@@ -500,8 +499,13 @@ export default function ThreadReader({
   }, [mode]);
   // D76 — schedule-site-visit modal
   const [visitOpen, setVisitOpen] = useState(false);
-  // #214 — the Link popup: which message, and whether a header opened it
+  // #214 sidebar — the sidebar's link mode: which message, and whether a
+  // header opened it (null = the summary). The opener gets focus back on Done.
   const [linkFor, setLinkFor] = useState<{ messageId: string; fromHeader: boolean } | null>(null);
+  const linkOpenerRef = useRef<HTMLElement | null>(null);
+  // #214 sidebar fix 2 — the mounted LinkPanel points this at its own
+  // "OK to leave?" check (typed-but-unsaved quick-add → confirm first).
+  const linkGuardRef = useRef<(() => boolean) | null>(null);
   // #215 — the create-task dialog; messageId = the message it was opened from
   const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
   const [sending, setSending] = useState(false);
@@ -633,9 +637,9 @@ export default function ThreadReader({
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
 
-  // #214 — the sidebar is a summary; "Edit links" opens the popup on the
+  // #214 — "Edit links" puts the sidebar into link mode on the
   // identity message, else the newest received one, else the newest.
-  const popupDefaultId =
+  const linkDefaultId =
     vm.identityMessageId ||
     [...vm.messages].reverse().find((m) => !m.out)?.id ||
     vm.messages[vm.messages.length - 1]?.id ||
@@ -644,7 +648,30 @@ export default function ThreadReader({
     <LinkSidebar
       vm={vm}
       variant={variant}
-      onEditLinks={() => popupDefaultId && setLinkFor({ messageId: popupDefaultId, fromHeader: false })}
+      linkFor={linkFor}
+      openerRef={linkOpenerRef}
+      linkGuardRef={linkGuardRef}
+      onEditLinks={() => {
+        if (!linkDefaultId) return;
+        // "Edit links" leaves the page as link mode replaces the summary —
+        // Done falls back to the new summary's Edit links.
+        linkOpenerRef.current = null;
+        setLinkFor({ messageId: linkDefaultId, fromHeader: false });
+      }}
+      onDoneLinking={() => setLinkFor(null)}
+      // #215 fix wave 1 — "Create task" only makes sense on an email
+      // thread ("Task…" itself is already isEmail-gated per message);
+      // Edit links opens on any channel, so this has to be gated here
+      // rather than relying on the panel never being asked for it. It
+      // leaves link mode and opens the task dialog for that message.
+      onCreateTask={
+        vm.isEmail
+          ? (mid) => {
+              setLinkFor(null);
+              openTask(mid);
+            }
+          : undefined
+      }
     />
   );
 
@@ -835,7 +862,23 @@ export default function ThreadReader({
             onLink={(messageId, link) => {
               void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
             }}
-            onOpenLinks={(messageId) => setLinkFor({ messageId, fromHeader: true })}
+            onOpenLinks={(messageId, el) => {
+              if (linkFor?.messageId === messageId) {
+                // #214 sidebar fix 3 — already in link mode on this message;
+                // re-clicking "Link…" refocuses the panel's search box
+                // rather than doing nothing.
+                readerRootRef.current
+                  ?.querySelector<HTMLInputElement>('input[aria-label="Search a company, venue or person…"]')
+                  ?.focus();
+                return;
+              }
+              // #214 sidebar fix 2 — switching link mode to a different
+              // message would unmount the open panel (and any typed-but-
+              // unsaved quick-add with it); ask first, same as Done.
+              if (linkFor && linkGuardRef.current && !linkGuardRef.current()) return;
+              linkOpenerRef.current = el;
+              setLinkFor({ messageId, fromHeader: true });
+            }}
             onTask={(messageId) => openTask(messageId)}
             isEmail={vm.isEmail}
           />
@@ -1263,28 +1306,6 @@ export default function ThreadReader({
         </div>
       </div>
       {variant === "pane" && sidebar}
-      {linkFor && (
-        <LinkPopup
-          key={linkFor.messageId}
-          vm={vm}
-          messageId={linkFor.messageId}
-          fromHeader={linkFor.fromHeader}
-          onClose={() => setLinkFor(null)}
-          // #215 fix wave 1 — "Create task" only makes sense on an email
-          // thread ("Task…" itself is already isEmail-gated per message);
-          // Edit links opens on any channel, so this has to be gated here
-          // rather than relying on the popup never being asked for it.
-          onCreateTask={
-            vm.isEmail
-              ? () => {
-                  const mid = linkFor.messageId;
-                  setLinkFor(null);
-                  openTask(mid);
-                }
-              : undefined
-          }
-        />
-      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /**
  * #214 — who is on one email: From / To / Cc parsed into participants.
- * Pure (no runtime imports) so test:specs covers it and the Link popup's
+ * Pure (no runtime imports) so test:specs covers it and the link panel's
  * server loader can use it without pulling anything else in.
  */
 

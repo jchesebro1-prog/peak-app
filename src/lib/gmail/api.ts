@@ -123,7 +123,7 @@ export async function getMessage(
   return gapi(mailboxKey, "/messages/" + id + "?format=full");
 }
 
-/** #214 — headers only (format=metadata): the Link popup's lazy Cc fetch
+/** #214 — headers only (format=metadata): the link panel's lazy Cc fetch
  *  for messages imported before Cc was stored. 5 quota units, no body. */
 export async function getMessageMetadata(
   mailboxKey: string,

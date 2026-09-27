@@ -33,7 +33,7 @@ export default function ThreadTasksCard({
   isEmail,
 }: {
   tasks: ReaderVM["threadTasks"];
-  /** #215 fix wave 1 — "Task…" (and the Link popup's "Create task") only
+  /** #215 fix wave 1 — "Task…" (and the link panel's "Create task") only
    *  ever show on an email thread; the empty-list hint shouldn't point at a
    *  control this thread doesn't have. */
   isEmail: boolean;

@@ -20,7 +20,7 @@ export default function WorkLinkCard({
 }: {
   vm: ReaderVM;
   /** #214 — "summary" (the sidebar): the chip, × and "+ New quote" only;
-   *  "edit" (the Link popup): the type + record picker too, open at once. */
+   *  "edit" (the link panel): the type + record picker too, open at once. */
   mode?: "summary" | "edit";
 }) {
   const router = useRouter();

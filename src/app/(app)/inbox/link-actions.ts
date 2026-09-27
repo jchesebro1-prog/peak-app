@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * #96 §2 — server actions for the link sidebar and the Link popup: link a thread to a
+ * #96 §2 — server actions for the link sidebar and the link panel: link a thread to a
  * customer, claim a domain manually, dismiss a suggestion, remember a
  * sender's address (contact + learned domain), and the three quick-add
  * flows (customer / contact / venue). Label sync to Gmail is Task 10 —
@@ -32,7 +32,7 @@ import { identityAddressFor, resolveAddressFor } from "@/lib/inbox-identity";
 type R = { ok: true } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
 
-/** Link sidebar / Link popup's Link / pick — links a thread to an existing customer,
+/** Link sidebar / link panel's Link / pick — links a thread to an existing customer,
  *  optionally remembering the sender's address and/or claiming their
  *  domain. */
 export async function linkThreadToCustomerAction(
@@ -120,7 +120,7 @@ export async function dismissSuggestionAction(threadId: string): Promise<R> {
   return { ok: true };
 }
 
-/** Link popup's "new customer" quick-add — creates the customer, links
+/** The link panel's "new customer" quick-add — creates the customer, links
  *  the thread (always, regardless of `remember`), and optionally remembers
  *  the sender's address on the new customer. */
 export async function quickAddCustomerAction(input: {
@@ -151,7 +151,7 @@ export async function quickAddCustomerAction(input: {
   return { ok: true, id: res.id };
 }
 
-/** Link popup's "new contact" quick-add (also the vendor Contacts tab). */
+/** The link panel's "new contact" quick-add (also the vendor Contacts tab). */
 export async function quickAddContactAction(input: {
   customerId: string;
   name: string;
@@ -183,7 +183,7 @@ export async function quickAddContactAction(input: {
   return res;
 }
 
-/** Link popup's "new venue" quick-add (#216) — saves ONE venue through
+/** The link panel's "new venue" quick-add (#216) — saves ONE venue through
  *  saveVenue (the same seam the venue dialog uses), so its name is the
  *  derived "Location — Type". Returns the new venue's doc location id; with
  *  `threadId` (the Venue card's "+ New venue", #124) it also links that
