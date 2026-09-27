@@ -227,9 +227,13 @@ export default function LinkPopup({
         setData(r.data);
         setDataRev(rev);
         if (r.data.ccPending) {
-          fetchMessageCcAction(vm.id, messageId).then((r2) => {
-            if (alive && r2.ok) setData(r2.data);
-          });
+          // #214 fix wave 2 — a rejected lazy backfill is not surfaced as
+          // an error; Cc simply stays un-backfilled for this load.
+          fetchMessageCcAction(vm.id, messageId)
+            .then((r2) => {
+              if (alive && r2.ok) setData(r2.data);
+            })
+            .catch(() => {});
         }
       })
       .catch(() => {
@@ -263,6 +267,40 @@ export default function LinkPopup({
       const opener = openerRef.current;
       if (opener instanceof HTMLElement) opener.focus();
     };
+  }, []);
+
+  // #214 fix wave 2 — trap Tab/Shift+Tab inside the dialog. Without this,
+  // Tabbing off either end of the popup lands focus on the page behind it,
+  // and the shell's own ArrowUp/ArrowDown handler (which only skips a
+  // target inside `[role="dialog"]`) starts switching threads again while
+  // the popup is still open — the same class of bug fix wave 1's mount
+  // focus fixed for the initial focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
@@ -369,6 +407,12 @@ export default function LinkPopup({
     start(async () => {
       setAddError(null);
       setNotice(null);
+      // #214 fix wave 2 — tracks whether quickAddContactAction actually
+      // created the contact. Once it has, the form is closed and can no
+      // longer show `addError`, and the reload must run even if the
+      // link step below throws (not just returns !ok) — otherwise the
+      // row still shows "Add" and a retry creates a duplicate contact.
+      let created = false;
       try {
         const res = await quickAddContactAction({ customerId: a.company!.id, ...a.values });
         if (!res.ok) {
@@ -381,14 +425,23 @@ export default function LinkPopup({
         // create a duplicate contact. The reload always runs so the new
         // person shows up — linked, or listed unlinked if only the link
         // step failed.
+        created = true;
         closeAdding();
         const link = await setThreadContactsAction(vm.id, res.id, true);
         if (!link.ok) setError(link.error || "Added the contact, but couldn't link them to this thread.");
         else if (link.note) setNotice(link.note);
-        setRev((v) => v + 1);
-        router.refresh();
       } catch {
-        setAddError("Something went wrong — try again.");
+        // #214 fix wave 2 — a throw after `closeAdding()` ran would
+        // otherwise land in `addError`, which nothing renders once the
+        // form is closed. Route it to the general `error` slot instead so
+        // it's actually visible.
+        if (created) setError("Added the contact, but couldn't link them to this thread — try again.");
+        else setAddError("Something went wrong — try again.");
+      } finally {
+        if (created) {
+          setRev((v) => v + 1);
+          router.refresh();
+        }
       }
     });
   };
@@ -726,7 +779,7 @@ export default function LinkPopup({
                             <button
                               type="button"
                               style={{ ...PRIMARY, marginTop: 8 }}
-                              disabled={pending}
+                              disabled={busy}
                               onClick={() =>
                                 run(async () => {
                                   const r = await fillContactBlanksAction(vm.id, messageId);
@@ -748,7 +801,7 @@ export default function LinkPopup({
                           <button
                             type="button"
                             style={{ ...PRIMARY, marginTop: 10 }}
-                            disabled={pending}
+                            disabled={busy}
                             onClick={() => startAdding(sender)}
                           >
                             Add as contact

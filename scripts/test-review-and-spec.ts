@@ -20387,4 +20387,36 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
   );
   // 9. The ✕ close button has an accessible name.
   ok(popup214.includes('aria-label="Close"'), "#214 UI fix 9: the popup's ✕ button has an accessible name");
+
+  /* ---- #214 UI fix wave 2 ---- */
+  // 1. submitAdding reloads in a `finally` once the contact exists, even if
+  //    setThreadContactsAction throws instead of returning !ok — otherwise
+  //    the row still shows "Add" and a retry duplicates the contact — and
+  //    that catch's message goes to the general `error` slot, since
+  //    `addError` renders nothing once `closeAdding()` has run.
+  const submitAddingIdx = popup214.indexOf("const submitAdding = () => {");
+  const submitAddingSrc = popup214.slice(submitAddingIdx, submitAddingIdx + 2400);
+  ok(
+    submitAddingIdx !== -1 &&
+      submitAddingSrc.includes("let created = false") &&
+      /}\s*catch\s*{[\s\S]*?if \(created\) setError\(/.test(submitAddingSrc) &&
+      /}\s*finally\s*{[\s\S]*?if \(created\) {[\s\S]*?setRev\(\(v\) => v \+ 1\);[\s\S]*?router\.refresh\(\);/.test(submitAddingSrc),
+    "#214 UI fix wave 2: submitAdding reloads in a finally once the contact exists (even if the link step throws) and routes that catch's message to the general error slot"
+  );
+  // 2. Typeahead's Escape only preventDefault()s/closes while the dropdown
+  //    is open — an idle box lets Escape bubble so a parent dialog's own
+  //    handler can close a quick-add form or the dialog itself.
+  ok(
+    tEscIdx !== -1 && typeahead214.slice(tEscIdx, tEscIdx + 40).includes("&& open"),
+    "#214 UI fix wave 2: Typeahead's Escape is gated on the dropdown being open, so an idle box lets Escape bubble to a parent dialog"
+  );
+  // 5. Tab/Shift+Tab is trapped inside the dialog so focus can't land on
+  //    the page behind it and re-enable the shell's arrow-key thread
+  //    switching while the popup is still open.
+  ok(
+    popup214.includes('if (e.key !== "Tab") return;') &&
+      popup214.includes("querySelectorAll<HTMLElement>") &&
+      popup214.includes("dialog.contains(active)"),
+    "#214 UI fix wave 2: a Tab/Shift+Tab handler traps focus inside the dialog"
+  );
 }

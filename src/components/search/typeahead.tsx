@@ -139,10 +139,11 @@ export function Typeahead<T>({
           } else if (e.key === "Enter" && open && matches[activeIdx]) {
             e.preventDefault();
             pick(matches[activeIdx]);
-          } else if (e.key === "Escape") {
-            // #214 fix wave 1 — preventDefault() so a dialog's own Escape
-            // handler (checking e.defaultPrevented) knows this keypress
-            // already closed the dropdown, not the dialog itself.
+          } else if (e.key === "Escape" && open) {
+            // #214 fix wave 2 — gated on `open` so an idle box lets Escape
+            // bubble to a parent dialog. e.preventDefault() tells that
+            // dialog's own handler (checking e.defaultPrevented) this
+            // keypress already closed the dropdown, not the dialog itself.
             e.preventDefault();
             setOpen(false);
           }
