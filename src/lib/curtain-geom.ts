@@ -49,7 +49,8 @@ export function curtainQty(d: CurtainSpec): number {
 
 /**
  * Customer-facing price for ONE curtain, from its fabric's SELL price/sq ft
- * only (#227 flat model: making is inside the rate). Equals the server's
+ * sewn (#227 flat model; the server folds the sewing adder into that sell
+ * rate, #227 late). Equals the server's
  * authoritative curtainCost().priceEach when `pricePerSqft` is passed at full
  * precision (it is — see the estimate page):
  *
@@ -69,8 +70,10 @@ export function curtainPriceEach(d: CurtainSpec, pricePerSqft: number): number {
 
 /* ---------- #227: fabric rate labels + converter (client-safe, no cost basis) ---------- */
 
-/** The unit a fabric's flat rate is quoted in — making is inside it. */
-export const FABRIC_RATE_UNIT = "sq ft sewn (incl. making)";
+/** The unit a fabric's catalog rate is quoted in — fabric cost only; estimates add sewing (#227 late). */
+export const FABRIC_RATE_UNIT = "sq ft fabric";
+/** The unit of a SELL rate per sq ft sewn that already carries the sewing adder (the Grid drop-in). */
+export const SEWN_SELL_UNIT = "sq ft sewn (incl. sewing)";
 /** What a fabric with no rate shows; it prices curtains at $0. */
 export const NO_FABRIC_RATE = "No $/sq ft set";
 
@@ -91,8 +94,14 @@ export function sqftRateFromSquareYard(perSqYd: number): number {
   return perSqYd > 0 ? round4(perSqYd / 9) : 0;
 }
 
-/** "$3.64/sq ft sewn (incl. making)", or "No $/sq ft set" for a missing/zero rate. */
+/** "$3.64/sq ft fabric", or "No $/sq ft set" for a missing/zero rate. */
 export function fabricRateLabel(rate: number | null | undefined): string {
   const r = Number(rate);
   return Number.isFinite(r) && r > 0 ? `$${r.toFixed(2)}/${FABRIC_RATE_UNIT}` : NO_FABRIC_RATE;
+}
+
+/** "$5.72/sq ft sewn (incl. sewing)" — a server-computed sell rate with the sewing adder in it; "No $/sq ft set" when 0. */
+export function sewnSellLabel(pricePerSqft: number | null | undefined): string {
+  const r = Number(pricePerSqft);
+  return Number.isFinite(r) && r > 0 ? `$${r.toFixed(2)}/${SEWN_SELL_UNIT}` : NO_FABRIC_RATE;
 }

@@ -20,6 +20,7 @@ import {
   wireRateId,
   type WireLaborRules,
 } from "@/lib/design/wire-labor";
+import { DEFAULT_SEWING_PCT, SEWING_PCT_ID, SEWING_PCT_MAX, sewingPctFrom } from "@/lib/design/curtain-pricing";
 
 /**
  * PricingRules — server port of app/pricing.js: the single master registry of
@@ -422,7 +423,7 @@ export const GROUPS: PricingGroup[] = [
       formula("rig.cw", "Rigging — counterweight, per line set", "headblock · footblock · arbor · T-bar track · lock rail = 1 each   ·   handline = 2 × G   ·   batten pipe = W   ·   loftblocks = floor(W ÷ 10)   ·   cable = loftblocks × (2G + W)"),
       formula("rig.motor", "Rigging — motorized", "electric hoists = tier mix × max( 2, floor(D ÷ 30) )"),
       formula("rig.dead", "Rigging — dead-hung", "sets = (5–7 by tier) × depth factor   ·   rigging points = sets × floor(W ÷ 10)"),
-      formula("curtain.cost", "Curtains — fabric cost", "cost = area × fabric $/ft²   ·   Draw area = (2W + 2) × PH   ·   Legs = 2 × (6 × PH)"),
+      formula("curtain.cost", "Curtains — cost", "cost = sewn area × fabric $/ft² × (1 + sewing %)   ·   Draw area = (2W + 2) × PH   ·   Legs = 2 × (6 × PH)"),
       formula("light.fix", "Lighting — fixtures per position", "count = round( electrics × width unit × tier factor )"),
     ],
   },
@@ -570,6 +571,15 @@ export const GROUPS: PricingGroup[] = [
         ...tierMultRates((t) => laborRateId(sys, t), LABOR_SYSTEM_LABEL[sys]),
       ]),
       formula("labor.amount", "System labor", "labor = system material × labor % × tier ×  (Good / Better / Best; none chosen → ×1.0)"),
+    ],
+  },
+  {
+    key: "curtains", label: "Curtain sewing", live: true,
+    sub: "Sewing labor on every curtain estimate (#227)",
+    note: "Live — a fabric's catalog $/sq ft is fabric cost only; every curtain estimate (Estimator, Quick Design, Grid, the portal) adds this sewing labor on top. A typed Rose Brand / vendor cost is the full cost and gets no adder.",
+    items: [
+      rate(SEWING_PCT_ID, "Sewing labor adder", DEFAULT_SEWING_PCT, "%", { min: 0, max: SEWING_PCT_MAX, step: 0.5, help: "cost = sewn area × fabric $/sq ft × (1 + this %)" }),
+      formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost ÷ (1 − margin)"),
     ],
   },
 ];
@@ -721,6 +731,12 @@ export async function frac(id: string, fb?: number): Promise<number> {
 export async function loadWireLaborRules(): Promise<WireLaborRules> {
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return wireLaborRulesFrom((id) => g[id]);
+}
+
+/** #227 late: the curtain sewing % (a percent number, 10 = 10 %) — one read of the general blob. */
+export async function loadCurtainSewingPct(): Promise<number> {
+  const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
+  return sewingPctFrom(g[SEWING_PCT_ID]);
 }
 
 /* ---------- export ---------- */

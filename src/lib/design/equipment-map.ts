@@ -15,16 +15,17 @@
  *  - assembly  → resolveFixture's included cost / sell;
  *  - allowance → the confirmed amount is a unit cost, sold like a list-less
  *                part;
- *  - fabric rows (curtains) → the mapped Fabric part's flat $/sq ft sewn
- *                (making included), read through fabricAreaRateOf — the one
- *                chain every curtain path uses, seed rates included (#227,
- *                reverses the #211 no-seed rule). The per-drape cost is
+ *  - fabric rows (curtains) → the mapped Fabric part's $/sq ft FABRIC
+ *                cost, read through fabricAreaRateOf — the one chain every
+ *                curtain path uses, seed rates included (#227, reverses the
+ *                #211 no-seed rule) — plus the sewing % it prices with
+ *                (#227 late). The per-drape cost (sewing included) is
  *                computed from the venue geometry in equipment-pricing.ts.
  */
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_KEY_ALIASES, EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type EquipRowDef } from "./equipment-vocab";
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
-import { fabricAreaRateOf } from "./curtain-pricing";
+import { fabricAreaRateOf, sewingPctFrom } from "./curtain-pricing";
 import { NO_FABRIC_RATE } from "@/lib/curtain-geom";
 
 export const EQUIPMENT_MAP_BLOB = "grid_equipment_map";
@@ -192,6 +193,9 @@ export type EquipPriceCtx = {
   fixtures: ReadonlyMap<string, FixtureRecord>;
   /** catalog_rates.defaultMargin — the list-less part / allowance sell rule. */
   margin: number;
+  /** #227 late: the curtain sewing % (Estimating Rules curtains.sewingPct).
+   *  loadEquipPriceCtx always sets it; absent reads as the 10 % default. */
+  sewingPct?: number;
 };
 /** "none" (#229): Not included — resolved at $0, never placed or quoted. */
 export type PricedStatus = "part" | "assembly" | "allowance" | "none";
@@ -205,8 +209,10 @@ export type PricedUnit = {
   unit: string;
   unitCost: number;
   unitSell: number;
-  /** Fabric rows only: $/sq ft of sewn fabric; the per-drape cost comes from the venue geometry. */
+  /** Fabric rows only: FABRIC cost per sq ft of sewn area; the per-drape cost comes from the venue geometry. */
   areaRate?: number;
+  /** Fabric rows only (#227 late): the sewing % the drape cost adds on top of `areaRate`. */
+  sewingPct?: number;
 };
 export type UnitPrice = PricedUnit | { status: "needs-part"; reason: string };
 export type EquipmentPriceTable = { margin: number; byTier: Record<TierKey, Record<string, UnitPrice>> };
@@ -238,7 +244,7 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
       if (p.category !== "Fabric") return needs(`${p.sku} is not a Fabric part`);
       const rate = fabricAreaRateOf(p);
       if (!(rate > 0)) return needs(`${p.sku}: ${NO_FABRIC_RATE}`);
-      return { status: "part", ref: p.sku, desc: p.desc, unit: def.unit, unitCost: 0, unitSell: 0, areaRate: rate };
+      return { status: "part", ref: p.sku, desc: p.desc, unit: def.unit, unitCost: 0, unitSell: 0, areaRate: rate, sewingPct: sewingPctFrom(ctx.sewingPct) };
     }
     const cost = Number(p.cost) || 0;
     const list = Number(p.list) || 0;

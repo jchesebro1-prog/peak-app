@@ -4,18 +4,55 @@
  * finished geometry the lineset weights use (spec 2026-07-24-curtain-pricing-
  * rebuild).
  *
- * #227 (2026-09-26, Jeff: "We need fabric to price via sqft"): ONE flat rate.
- * A fabric's `curtainAreaRate` is its cost per sq ft of SEWN fabric INCLUDING
- * making / sewing, so cost = sewn area × rate. The two-term model's separate
- * per-foot making charge (the Rose Brand 423939 calibration) is gone — the
- * rate carries it. A per-line vendor cost override still replaces the
- * computed cost when a real Rose Brand price arrives.
+ * #227 (2026-09-26, Jeff: "We need fabric to price via sqft"): ONE flat
+ * area rate — the two-term model's per-foot making charge (the Rose Brand
+ * 423939 calibration) is gone.
+ *
+ * #227 late (2026-09-27, Jeff: "a 10% adder to the fabric pricing for sewing
+ * labor … built into the estimators not on the fabric cost"): a fabric's
+ * `curtainAreaRate` is its FABRIC cost per sq ft only; every curtain estimate
+ * adds the sewing rule on top, here and nowhere else:
+ *
+ *   cost = sewn area × fabric rate × (1 + sewing % ÷ 100)
+ *
+ * The sewing % is one Estimating Rule (SEWING_PCT_ID, default 10). A per-line
+ * vendor cost override is the FULL cost — it replaces the computed cost, with
+ * no sewing on top.
  */
 
-export type CurtainRates = {
-  /** $/ft² of SEWN fabric (finished width × (1 + fullness) × height), making included. */
+/** #227 late — the Estimating Rules id of the sewing-labor adder (a percent number, 10 = 10 %). */
+export const SEWING_PCT_ID = "curtains.sewingPct";
+export const DEFAULT_SEWING_PCT = 10;
+export const SEWING_PCT_MAX = 100;
+
+/**
+ * The sewing % from a stored value: missing (undefined/null), non-number,
+ * negative or non-finite → 10; above 100 → 100; a stored 0 stays 0.
+ */
+export function sewingPctFrom(raw: unknown): number {
+  if (raw === null || raw === undefined) return DEFAULT_SEWING_PCT;
+  const v = typeof raw === "number" ? raw : Number.NaN;
+  return Number.isFinite(v) && v >= 0 ? Math.min(v, SEWING_PCT_MAX) : DEFAULT_SEWING_PCT;
+}
+
+/** The sewing rule every curtain estimate prices with — handed to client code as data. */
+export type CurtainSewing = { sewingPct: number };
+
+export type CurtainRates = CurtainSewing & {
+  /** FABRIC cost per ft² of sewn fabric area (finished width × (1 + fullness) × height) — no sewing in it. */
   fabricRate: number;
 };
+
+/**
+ * THE sewn area rate: fabric $/sq ft × (1 + sewing %). Every mirror (portal,
+ * Grid, the client preview's sell rate) multiplies sewn area by this, so they
+ * agree to the cent. A non-positive or non-finite fabric rate is 0.
+ */
+export function sewnAreaRate(fabricRate: number, sewingPct: number): number {
+  const r = Number(fabricRate);
+  if (!(Number.isFinite(r) && r > 0)) return 0;
+  return r * (1 + sewingPctFrom(sewingPct) / 100);
+}
 
 export type CurtainCostInput = {
   finishedWidthFt: number;
@@ -40,9 +77,8 @@ export const CURTAIN_MARGIN = 0.3;
 
 /**
  * Seed area rates by fabric SKU — the fallback when a catalog fabric has no
- * `curtainAreaRate` of its own. Calibrated FABRIC-ONLY (Rose-Brand-reconciled
- * × 1.10) before #227 folded making into the rate, so they under-price a sewn
- * drape until they are raised to include making (see DECISIONS).
+ * `curtainAreaRate` of its own. FABRIC-ONLY (Rose-Brand-reconciled × 1.10);
+ * the sewing adder is applied on top like any fabric rate (#227 late).
  */
 export const SEED_FABRIC_RATES: Record<string, number> = {
   "RB-CHAR-25": 3.64, // Charisma 25oz (anchor: RB 3.313 ×1.10)
@@ -77,11 +113,11 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Flat make-it cost (sewn area × rate), with optional vendor override. Pure. */
+/** Make-it cost (sewn area × fabric rate × (1 + sewing %)), with optional vendor override (the full cost). Pure. */
 export function curtainCost(input: CurtainCostInput, rates: CurtainRates): CurtainCost {
   const sewnWidthFt = input.finishedWidthFt * (1 + input.fullnessPct / 100);
   const sewnAreaSqft = sewnWidthFt * input.finishedHeightFt;
-  const makeCostEach = round2(sewnAreaSqft * (rates.fabricRate || 0));
+  const makeCostEach = round2(sewnAreaSqft * sewnAreaRate(rates.fabricRate, rates.sewingPct));
   const overridden = input.vendorCostOverride != null && input.vendorCostOverride > 0;
   const costEach = overridden ? round2(input.vendorCostOverride as number) : makeCostEach;
   return {

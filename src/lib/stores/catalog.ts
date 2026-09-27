@@ -86,8 +86,9 @@ export type CatalogPart = {
   ozBasis?: "lin-yd" | "sq-yd";
   /** Bolt width in inches — only meaningful when ozBasis is "lin-yd". */
   boltWidthIn?: number;
-  /** Curtain cost, $/ft² of SEWN fabric INCLUDING making/sewing (#227 — the
-   *  one flat rate; no separate making charge). Fabric rows only. Edited in
+  /** Curtain FABRIC cost, $/ft² of sewn fabric area (#227 — one flat rate;
+   *  #227 late — no sewing in it: every curtain estimate adds the sewing
+   *  rule, Estimating Rules curtains.sewingPct). Fabric rows only. Edited in
    *  the catalog part editor or imported as "Fabric $/sq ft"; read only
    *  through fabricAreaRateOf. Distinct from raw costPerSqft. */
   curtainAreaRate?: number;

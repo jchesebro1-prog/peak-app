@@ -17,6 +17,7 @@ import { isCustomerBuyable } from "@/lib/portal-catalog";
 import { curtainCost } from "@/lib/curtain-pricing";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
+import { loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { curtainQty, type CurtainSpec } from "@/lib/curtain-geom";
 
@@ -166,8 +167,9 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
       };
     });
 
-  // Fabric cost basis — server-side only. Map sku → catalog row; its rate comes from fabricAreaRateOf (#227).
-  const fabricRows = await byCategory("Fabric");
+  // Fabric cost basis — server-side only. Map sku → catalog row; its rate comes from fabricAreaRateOf (#227),
+  // plus the sewing adder (#227 late) — the same rule the preview page priced with.
+  const [fabricRows, sewingPct] = await Promise.all([byCategory("Fabric"), loadCurtainSewingPct()]);
   const fabricById = new Map(fabricRows.map((p) => [p.sku, p]));
 
   type Item = {
@@ -190,7 +192,7 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
     const fab = fabricById.get(spec.fabric);
     if (!fab) continue; // unknown fabric — drop the line
     const rate = fabricAreaRateOf(fab);
-    const { costEach, priceEach } = curtainCost(spec, rate, tier.margin);
+    const { costEach, priceEach } = curtainCost(spec, { fabricRate: rate, sewingPct }, tier.margin);
     if (priceEach <= 0) continue; // no dimensions — skip
     const qty = curtainQty(spec);
     const h = parseFloat(spec.height) || 0;

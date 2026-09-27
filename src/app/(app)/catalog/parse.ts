@@ -25,7 +25,7 @@ export type CatalogRow = {
   researchStatus: string;
   sourceDocumentName: string;
   sourceDocumentDate: string;
-  /** #227 — header-only: a fabric's $/sq ft sewn (making included); 0 when absent/blank. */
+  /** #227 — header-only: a fabric's $/sq ft, fabric cost only (estimates add sewing, #227 late); 0 when absent/blank. */
   curtainAreaRate: number;
   /** #227 — header-only: bolt width in inches; 0 when absent/blank. */
   boltWidthIn: number;

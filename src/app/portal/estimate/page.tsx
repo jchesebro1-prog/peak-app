@@ -9,6 +9,7 @@ import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import type { FabricSell } from "@/lib/curtain-geom";
 import { customerCatalog } from "@/lib/portal-catalog";
 import { resolveTier } from "@/lib/pricing-tiers";
+import { loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { PortalShell } from "../shell";
 import { EstimateBuilder } from "./estimate-builder";
 
@@ -73,10 +74,11 @@ export default async function PortalEstimatePage({
     );
   }
 
-  const [cust, fabricRows, equipment] = await Promise.all([
+  const [cust, fabricRows, equipment, sewingPct] = await Promise.all([
     getCustomer(session.customerId),
     byCategory("Fabric"),
     customerCatalog(tier.margin),
+    loadCurtainSewingPct(),
   ]);
 
   const venues = (cust?.locations || []).map((l) => ({
@@ -88,14 +90,15 @@ export default async function PortalEstimatePage({
   // Cost basis → customer sell price/sq ft. The cost rate NEVER leaves the
   // server; sell numbers ship at full precision so the preview equals the
   // stored quote. Only fabrics with a $/sq ft rate (fabricAreaRateOf, #227)
-  // are offered, so the customer never sees a $0/sq ft option.
+  // are offered, so the customer never sees a $0/sq ft option. The sell rate
+  // carries the sewing adder (#227 late), exactly as submit prices it.
   const fabrics: FabricSell[] = fabricRows
     .map((p) => ({ p, rate: fabricAreaRateOf(p) }))
     .filter((x) => x.rate > 0)
     .map(({ p, rate }) => ({
       sku: p.sku,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft(rate, tier.margin),
+      pricePerSqft: fabricSellPerSqft({ fabricRate: rate, sewingPct }, tier.margin),
     }));
 
   return (

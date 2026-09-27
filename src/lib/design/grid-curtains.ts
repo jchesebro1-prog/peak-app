@@ -16,7 +16,7 @@
  */
 
 import { curtainCost as curtainSell } from "@/lib/curtain-pricing";
-import { fabricAreaRateOf } from "./curtain-pricing";
+import { fabricAreaRateOf, type CurtainSewing } from "./curtain-pricing";
 import { curtainSpecOf, type GridCurtain } from "./grid-bom";
 
 /** The catalog slice a fabric row contributes. */
@@ -40,7 +40,8 @@ export type CurtainPrice = { costEach: number; priceEach: number };
  * Authoritative price for every curtain placement in a design, keyed by
  * PLACEMENT id (each drop is its own line - two drapes of one fabric are
  * different goods the moment their dimensions differ). The fabric's rate comes
- * from fabricAreaRateOf (#227), the chain the estimator and portal also use.
+ * from fabricAreaRateOf (#227), the chain the estimator and portal also use,
+ * and the sewing rule (#227 late, loadCurtainSewingPct) is added on top.
  *
  * A curtain whose fabric has left the catalog is NOT dropped: it prices at a
  * zero area rate, which surfaces it as a $0 line the human has to deal with,
@@ -49,6 +50,7 @@ export type CurtainPrice = { costEach: number; priceEach: number };
 export function priceGridCurtains(
   placements: Array<{ id: string; curtain?: GridCurtain | null }>,
   catalog: FabricRow[],
+  sewing: CurtainSewing,
   margin?: number
 ): Map<string, CurtainPrice> {
   const fabricById = new Map(catalog.filter(isFabricRow).map((p) => [p.id, p]));
@@ -56,7 +58,7 @@ export function priceGridCurtains(
   for (const pl of placements) {
     if (!pl.curtain) continue;
     const rate = fabricAreaRateOf(fabricById.get(pl.curtain.fabricSku));
-    out.set(pl.id, curtainSell(curtainSpecOf(pl.curtain), rate, margin));
+    out.set(pl.id, curtainSell(curtainSpecOf(pl.curtain), { fabricRate: rate, sewingPct: sewing.sewingPct }, margin));
   }
   return out;
 }

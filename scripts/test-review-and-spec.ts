@@ -2687,23 +2687,23 @@ ok(!isOpenEngagement({ status: "oversight_complete" }), "legacy oversight_comple
 /* --- curtain pricing: flat $/sq ft sewn, making included (#227) ---
  * Replaces the two-term Rose Brand 423939 reconciliation (spec 2026-07-24):
  * a fabric's rate now carries making, so cost = sewn area × rate, no width term. */
-const border = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64 });
+const border = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64, sewingPct: 0 });
 ok(border.costEach === 819, `#227 flat: a 50×3 border at 50% = sewn area 225 × 3.64 = 819, no width term (got ${border.costEach})`);
-const legs = curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 1 }, { fabricRate: 2.84 });
+const legs = curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 1 }, { fabricRate: 2.84, sewingPct: 0 });
 ok(Math.abs(legs.costEach - 441.8) < 0.01, `#227 flat: legs = sewn area 155.5625 × 2.84 ≈ 441.80 (got ${legs.costEach.toFixed(2)})`);
 
 // sewn geometry
 ok(border.sewnWidthFt === 75 && Math.abs(border.sewnAreaSqft - 225) < 1e-6, "sewnWidth = W×(1+fullness); sewnArea = sewnWidth×H");
 // qty multiplies the total, not the unit
-ok(Math.abs(curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 4 }, { fabricRate: 2.84 }).costTotal - legs.costEach * 4) < 1e-6, "costTotal = costEach × qty");
+ok(Math.abs(curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 4 }, { fabricRate: 2.84, sewingPct: 0 }).costTotal - legs.costEach * 4) < 1e-6, "costTotal = costEach × qty");
 
 // vendor override replaces the make cost and flags the line
-const ov = curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, { fabricRate: 3.64 });
+const ov = curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, { fabricRate: 3.64, sewingPct: 0 });
 ok(ov.costEach === 2080 && ov.overridden === true && ov.costTotal === 4160, "vendorCostOverride replaces make cost, flags overridden, ×qty");
-ok(curtainCost({ finishedWidthFt: 10, finishedHeightFt: 10, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64 }).overridden === false, "no override → overridden false");
+ok(curtainCost({ finishedWidthFt: 10, finishedHeightFt: 10, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64, sewingPct: 0 }).overridden === false, "no override → overridden false");
 
 // cyc flatness: 0% fullness → sewn area equals finished face, same one rate
-const cyc = curtainCost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9 });
+const cyc = curtainCost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9, sewingPct: 0 });
 ok(cyc.sewnAreaSqft === 800 && cyc.sewnWidthFt === 40, "cyc at 0% fullness: sewn area = finished face, no 1.5× applied");
 ok(cyc.costEach === 720, `#227 flat: flat goods price at the same one rate — 800 × 0.9 = 720, no cyc making charge (got ${cyc.costEach})`);
 
@@ -2723,7 +2723,7 @@ ok(Object.keys(SEED_FABRIC_RATES).length === 5, `SEED_FABRIC_RATES has exactly 5
 ok(SEED_FABRIC_RATES["RB-MV-MN"] > SEED_FABRIC_RATES["RB-CHAR-25"], "best-main Memorable prices above better-main Charisma (premium 25oz velour, not a cloned rate)");
 
 // seed-rate analog, end to end through curtainCost and the one helper (#227).
-const seedBorder = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: SEED_FABRIC_RATES["RB-CHAR-25"] });
+const seedBorder = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: SEED_FABRIC_RATES["RB-CHAR-25"], sewingPct: 0 });
 ok(seedBorder.costEach === 819, `#227 seed-rate border = sewnArea(225)×3.64 = 819 (got ${seedBorder.costEach})`);
 ok(fabricAreaRateOf({ sku: "RB-CHAR-25" }) === 3.64, "#227: fabricAreaRateOf reads the seed rate for a seeded SKU");
 
@@ -2740,6 +2740,7 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
   const cc = computeCurtainQuote(
     { name: "Main", hang: "", fabric: "RB-CHAR-25", qty: "2", height: "19", width: "20", fullness: "50", bottom: "" } as any,
     fabrics as any,
+    { sewingPct: 0 },
     0.3
   );
   // #227 flat: make cost = sewnArea(30×19=570) × 3.64 = 2074.8 (making is in the rate)
@@ -2749,6 +2750,7 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
   const ov = computeCurtainQuote(
     { name: "Main", hang: "", fabric: "RB-CHAR-25", qty: "2", height: "19", width: "20", fullness: "50", bottom: "", vendorCostOverride: "2080" } as any,
     fabrics as any,
+    { sewingPct: 0 },
     0.3
   );
   ok(ov.costEach === 2080, "a Rose Brand cost override replaces the make cost in the quote");
@@ -2773,13 +2775,14 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib
   const rule = drapeRuleQ("Draw", dims as any, "better")!;
   const budget = curtainCostQ(
     { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
-    { fabricRate: RATES_Q[rule.fabricSku] }
+    { fabricRate: RATES_Q[rule.fabricSku], sewingPct: 0 }
   ).costTotal;
   // Quote: same geometry typed into computeCurtain, one panel × qty summed.
   const fabrics = [{ sku: rule.fabricSku, name: "x", costPerSqft: 0, curtainAreaRate: RATES_Q[rule.fabricSku] }];
   const quotePanel = computeCurtainQuote(
     { name: "d", hang: "", fabric: rule.fabricSku, qty: String(rule.qty), height: String(rule.h), width: String(rule.w), fullness: String(rule.fullness), bottom: "" } as any,
     fabrics as any,
+    { sewingPct: 0 },
     0.3
   ).costEach;
   ok(Math.abs(budget - quotePanel * rule.qty) < 1, "budget and quote agree on the same drape's make cost");
@@ -2788,7 +2791,7 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib
 /* --- an unrated curtain fabric falls back to costPerSqft, never $0 (final-review finding 1) --- */
 {
   const marvelFab = [{ sku: "RB-MARVEL", name: "21 oz Marvel Velour", costPerSqft: 3.45 }];
-  const cc = computeCurtainQuote({ name: "x", hang: "", fabric: "RB-MARVEL", qty: "1", height: "20", width: "40", fullness: "50", bottom: "" } as any, marvelFab as any, 0.3);
+  const cc = computeCurtainQuote({ name: "x", hang: "", fabric: "RB-MARVEL", qty: "1", height: "20", width: "40", fullness: "50", bottom: "" } as any, marvelFab as any, { sewingPct: 0 }, 0.3);
   // fabricRate falls back to costPerSqft 3.45 through fabricAreaRateOf (#227): sewnArea 40×1.5×20=1200 → 1200×3.45=4140
   ok(Math.abs(cc.costEach - 4140) < 0.01, `unrated fabric prices via costPerSqft, not $0 (got ${cc.costEach})`);
 }
@@ -2801,16 +2804,16 @@ import { curtainPriceEach as portalPriceEach } from "@/lib/curtain-geom";
   const AREA_RATE = 3.64; // Charisma
   const margin = 0.30;
   // server flat cost: sewnW = 20×1.5=30, sewnA=30×19=570, cost=570×3.64=2074.8
-  const sv = portalCurtainCost(spec("RB-CHAR-25", "20", "19", "50"), AREA_RATE, margin);
+  const sv = portalCurtainCost(spec("RB-CHAR-25", "20", "19", "50"), { fabricRate: AREA_RATE, sewingPct: 0 }, margin);
   ok(Math.abs(sv.costEach - 2074.8) < 0.01, `portal server cost = flat $/sq ft cost (got ${sv.costEach})`);
   ok(Math.abs(sv.priceEach - 2074.8 / 0.7) < 0.02, "portal price = cost / (1 − 0.30)");
   // CENT-MATCH: client preview equals server priceEach exactly
-  const px = portalFabricSell(AREA_RATE, margin);
+  const px = portalFabricSell({ fabricRate: AREA_RATE, sewingPct: 0 }, margin);
   const clientPrice = portalPriceEach(spec("RB-CHAR-25", "20", "19", "50"), px);
   ok(Math.abs(clientPrice - sv.priceEach) < 0.01, `client preview == server price to the cent (client ${clientPrice}, server ${sv.priceEach})`);
   // flat cyc: the same one rate on both sides
-  const svFlat = portalCurtainCost(spec("RB-MUS", "40", "20", "0"), 0.9, margin);
-  const clientFlat = portalPriceEach(spec("RB-MUS", "40", "20", "0"), portalFabricSell(0.9, margin));
+  const svFlat = portalCurtainCost(spec("RB-MUS", "40", "20", "0"), { fabricRate: 0.9, sewingPct: 0 }, margin);
+  const clientFlat = portalPriceEach(spec("RB-MUS", "40", "20", "0"), portalFabricSell({ fabricRate: 0.9, sewingPct: 0 }, margin));
   ok(Math.abs(clientFlat - svFlat.priceEach) < 0.01 && svFlat.costEach === 720, "flat cyc: client == server, 800 sq ft × 0.9 = 720 (no cyc making charge)");
 }
 
@@ -10506,6 +10509,7 @@ seeded()
   .then(() => finalWaveAAsyncChecks())
   .then(() => finalWaveBAsyncChecks())
   .then(() => cable233LateAsyncChecks())
+  .then(() => sewing227LateAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -17815,8 +17819,8 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   const arbor = item("rigging", "rigging:arbor");
   ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#211 T5: an unmapped item is needs-a-part — never a fallback dollar");
   const d = item("curtains", "curtains:draw");
-  const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5 }).costTotal);
-  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#211 T5 / #227: a drape costs the shared flat $/sq ft model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
+  const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5, sewingPct: 10 }).costTotal);
+  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5, 10) && d.price === Math.round((expected / 0.7) * 100) / 100, `#211 T5 / #227: a drape costs the shared flat $/sq ft model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
   const sub = item("audio", "audio:subwoofer");
   ok(sub.status === "allowance" && sub.cost === 1200, "#211 T5: a confirmed allowance prices as its unit cost");
   // Fix wave 1 (M5): a curtain row mapped to a CONFIRMED ALLOWANCE (not a
@@ -18256,7 +18260,7 @@ import { reconcileQtyDraft as gemReconcile9 } from "@/lib/design/grid-auto-model
     fabricHits9.length === 1 &&
       fabricHits9[0].kind === "part" &&
       fabricHits9[0].ref === "GEM9-VEL" &&
-      fabricHits9[0].unit === "sq ft sewn (incl. making)" &&
+      fabricHits9[0].unit === "sq ft fabric" &&
       fabricHits9[0].unitSell === 5,
     "#211 T8 fix wave 1 (I2): a curtain row's swap candidates are Fabric parts with a positive area rate, shown as a per-sq-ft SELL through the catalog margin (3.5 ÷ 0.7 = 5), never the raw cost rate — a list-less, cost-less fabric is still findable"
   );
@@ -22255,9 +22259,9 @@ import { EQUIPMENT_ROW_BY_KEY as fab227Rows } from "@/lib/design/equipment-vocab
 import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
 {
   // The formula: sewn area × rate, pleated and flat alike.
-  const pleated = fab227Cost({ finishedWidthFt: 20, finishedHeightFt: 19, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64 });
+  const pleated = fab227Cost({ finishedWidthFt: 20, finishedHeightFt: 19, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64, sewingPct: 0 });
   ok(pleated.sewnAreaSqft === 570 && pleated.costEach === 2074.8, `#227: pleated cost = sewn area 570 × 3.64 = 2074.8, no width term (got ${pleated.costEach})`);
-  const flat = fab227Cost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9 });
+  const flat = fab227Cost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9, sewingPct: 0 });
   ok(flat.sewnAreaSqft === 800 && flat.costEach === 720, `#227: flat goods cost = 800 × 0.9 = 720 (got ${flat.costEach})`);
   ok(fab227Price(pleated.costEach, 0.3) === Math.round((2074.8 / 0.7) * 100) / 100, "#227: sell = cost ÷ (1 − margin), unchanged");
 
@@ -22278,17 +22282,18 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
   ];
   for (const c of cases) {
     const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate}`;
-    const shared = fab227Cost({ finishedWidthFt: c.w, finishedHeightFt: c.h, fullnessPct: c.full, qty: 1 }, { fabricRate: c.rate }).costEach;
+    const shared = fab227Cost({ finishedWidthFt: c.w, finishedHeightFt: c.h, fullnessPct: c.full, qty: 1 }, { fabricRate: c.rate, sewingPct: 10 }).costEach;
     const spec = { name: "d", hang: "", fabric: "FAB227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
-    const portal = fab227PortalCost(spec, c.rate, 0.3);
-    const est = fab227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "FAB227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], 0.3);
+    const portal = fab227PortalCost(spec, { fabricRate: c.rate, sewingPct: 10 }, 0.3);
+    const est = fab227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "FAB227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct: 10 }, 0.3);
     const grid = fab227Grid(
       [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "FAB227" } }],
       [{ id: "FAB227", sku: "FAB227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
+      { sewingPct: 10 },
       0.3
     ).get("pl1")!;
-    const drape = fab227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate);
-    const client = fab227PriceEach(spec, fab227Sell(c.rate, 0.3));
+    const drape = fab227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate, 10);
+    const client = fab227PriceEach(spec, fab227Sell({ fabricRate: c.rate, sewingPct: 10 }, 0.3));
     ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared, `#227 parity ${tag}: portal, estimator and Grid cost = shared model ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach})`);
     ok(drape === Math.round(shared), `#227 parity ${tag}: the Equipment map drape cost is the shared cost, dollar-rounded (got ${drape})`);
     ok(grid.priceEach === portal.priceEach && Math.abs(client - portal.priceEach) < 0.011, `#227 parity ${tag}: Grid + client preview sell = portal sell (client ${client}, server ${portal.priceEach})`);
@@ -22375,23 +22380,23 @@ import { sqftRateFromLinearYard as fab227FromLinYd, sqftRateFromSquareYard as fa
   // Catalog editor: client field, Fabric parts only, no store/cost import.
   const frf = readFileSync(join(process.cwd(), "src/app/(app)/catalog/fabric-rate-field.tsx"), "utf8");
   ok(frf.startsWith('"use client"') && !/from "@\/lib\/stores\/|from "@\/db|curtain-pricing"/.test(frf), "#227 catalog editor: the rate field is a client component importing no store or cost module");
-  ok(frf.includes('name="curtainAreaRate"') && frf.includes('name="boltWidthIn"') && frf.includes("$/sq ft sewn (includes making)"), "#227 catalog editor: it posts curtainAreaRate + boltWidthIn under the spec's label");
+  ok(frf.includes('name="curtainAreaRate"') && frf.includes('name="boltWidthIn"') && frf.includes("$/sq ft fabric"), "#227 catalog editor: it posts curtainAreaRate + boltWidthIn under the spec's label (#227 late: $/sq ft fabric)");
   const catPage227 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/page.tsx"), "utf8");
   ok(catPage227.includes('part?.category === "Fabric" && (') && catPage227.includes("<FabricRateField"), "#227 catalog editor: only Fabric parts show the $/sq ft field");
 }
 
-/* ====== #227 T3: labels — $X/sq ft sewn (incl. making) / No $/sq ft set ====== */
+/* ====== #227 T3: labels — $X/sq ft fabric (#227 late; was sewn incl. making) / No $/sq ft set ====== */
 import { fabricRateLabel as fab227Label, FABRIC_RATE_UNIT as fab227Unit, NO_FABRIC_RATE as fab227NoRate } from "@/lib/curtain-geom";
 import { priceCell as fab227PriceCell3, type PricingPart as Fab227Part3 } from "@/lib/design/equipment-map";
 import { EQUIPMENT_ROW_BY_KEY as fab227Rows3 } from "@/lib/design/equipment-vocab";
 import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
 {
-  ok(fab227Unit === "sq ft sewn (incl. making)" && fab227NoRate === "No $/sq ft set", "#227 labels: the unit and the no-rate text are the spec's words");
-  ok(fab227Label(3.64) === "$3.64/sq ft sewn (incl. making)", `#227 labels: a rate reads $X/sq ft sewn (incl. making) (got ${fab227Label(3.64)})`);
+  ok(fab227Unit === "sq ft fabric" && fab227NoRate === "No $/sq ft set", "#227 labels: the unit and the no-rate text are the spec's words (#227 late: sq ft fabric)");
+  ok(fab227Label(3.64) === "$3.64/sq ft fabric", `#227 labels: a rate reads $X/sq ft fabric (#227 late) (got ${fab227Label(3.64)})`);
   ok(fab227Label(0) === fab227NoRate && fab227Label(undefined) === fab227NoRate && fab227Label(null) === fab227NoRate && fab227Label(Number.NaN) === fab227NoRate, "#227 labels: no rate reads No $/sq ft set");
 
   const hits = fab227Swap3([{ sku: "FAB227-S", desc: "velour", curtainAreaRate: 3.5 }], 0.3);
-  ok(hits.length === 1 && hits[0].unit === fab227Unit, "#227 labels: the swap search shows a fabric per sq ft sewn (incl. making)");
+  ok(hits.length === 1 && hits[0].unit === fab227Unit, "#227 labels: the swap search shows a fabric per sq ft fabric (#227 late)");
 
   const drawDef = fab227Rows3.get("curtains:draw")!;
   const ctxOf = (p: Fab227Part3) => ({ parts: new Map<string, Fab227Part3>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
@@ -22403,9 +22408,9 @@ import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
   const src = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const modal = src("src/app/(app)/estimator/curtain-modal.tsx");
   ok(modal.includes("fabricRateLabel(f.curtainAreaRate)") && !modal.includes('"/sq ft sewn"'), "#227 labels: the estimator curtain modal labels each fabric with fabricRateLabel");
-  ok(src("src/app/(app)/design/grid/[id]/curtain-drop.tsx").includes("fabricRateLabel(f.pricePerSqft)"), "#227 labels: the Grid curtain drop-in labels each fabric (No $/sq ft set when unrated)");
+  ok(src("src/app/(app)/design/grid/[id]/curtain-drop.tsx").includes("sewnSellLabel(f.pricePerSqft)"), "#227 labels: the Grid curtain drop-in labels each fabric (No $/sq ft set when unrated; #227 late: its sewn sell rate, sewing included)");
   const emc227 = src("src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx");
-  ok(emc227.includes("FABRIC_RATE_UNIT") && !emc227.includes("+ making"), "#227 labels: the Equipment map cell reads per sq ft sewn (incl. making), not + making");
+  ok(emc227.includes("FABRIC_RATE_UNIT") && !emc227.includes("+ making"), "#227 labels: the Equipment map cell reads per sq ft fabric (#227 late), not + making");
   // PartFormModal is reused across parts without remounting, so the rate
   // field's local state must be keyed per part or part A's rate saves onto B.
   ok(/<FabricRateField[^>]*key=\{part\.sku\}/.test(src("src/app/(app)/catalog/page.tsx")), "#227 catalog editor: FabricRateField is keyed by part.sku so one part's rate never carries into the next");
@@ -25653,7 +25658,7 @@ import type { EquipmentMap as FwaMap } from "@/lib/design/equipment-map";
 {
   // #227 final — fabric labels say cost; the Grid drop-in defaults to a rated fabric.
   const emc = fwaRd("src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx");
-  ok(emc.includes("`cost ${money(cell.unitCost)}/${FABRIC_RATE_UNIT}`"), "#227 final: the Equipment-map fabric cell reads cost $X/sq ft sewn (incl. making)");
+  ok(emc.includes("`cost ${money(cell.unitCost)}/${FABRIC_RATE_UNIT}`"), "#227 final: the Equipment-map fabric cell reads cost $X/sq ft fabric (#227 late)");
   const cm = fwaRd("src/app/(app)/estimator/curtain-modal.tsx");
   ok(cm.includes('((f.curtainAreaRate ?? 0) > 0 ? "cost " : "") + fabricRateLabel(f.curtainAreaRate)'), "#227 final: the estimator curtain modal labels a fabric's rate as cost");
   const cd = fwaRd("src/app/(app)/design/grid/[id]/curtain-drop.tsx");
@@ -26108,4 +26113,128 @@ async function cable233LateAsyncChecks(): Promise<void> {
   await P.resetValue("cable.lighting.perFixture");
   await P.resetValue("cable.lighting.better");
   ok(JSON.stringify(await P.loadWireLaborRules()) === JSON.stringify(wl231.defaultWireLaborRules()), "#233 late: resetting restores the defaults");
+}
+
+/* ======================================================================
+   #227 late (Jeff 2026-09-27) — "a 10% adder to the fabric pricing for
+   sewing labor … built into the estimators, not on the fabric cost". The
+   catalog rate is fabric cost per sq ft again; every curtain estimate adds
+   the sewing rule (curtains.sewingPct, default 10, cap 100) through the one
+   shared model: cost = sewn area × fabric rate × (1 + sewing % ÷ 100).
+   ====================================================================== */
+import * as sew227 from "@/lib/design/curtain-pricing";
+import { curtainCost as sew227PortalCost, fabricSellPerSqft as sew227Sell } from "@/lib/curtain-pricing";
+import { curtainPriceEach as sew227PriceEach, fabricRateLabel as sew227Label, FABRIC_RATE_UNIT as sew227Unit, sewnSellLabel as sew227SellLabel } from "@/lib/curtain-geom";
+import { drapeUnitCost as sew227Drape, applyEquipment as sew227Apply } from "@/lib/design/equipment-pricing";
+import { computeCurtain as sew227Compute } from "@/app/(app)/estimator/pricing";
+import { priceGridCurtains as sew227Grid } from "@/lib/design/grid-curtains";
+import { priceCell as sew227PriceCell, buildEquipmentPriceTable as sew227Table, type PricingPart as Sew227Part } from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as sew227Rows } from "@/lib/design/equipment-vocab";
+import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
+{
+  const S = sew227;
+  ok(S.SEWING_PCT_ID === "curtains.sewingPct" && S.DEFAULT_SEWING_PCT === 10 && S.SEWING_PCT_MAX === 100, "#227 late: the rule is curtains.sewingPct, default 10 %, cap 100 %");
+  ok(S.sewingPctFrom(undefined) === 10 && S.sewingPctFrom(null) === 10 && S.sewingPctFrom("20") === 10 && S.sewingPctFrom(-5) === 10 && S.sewingPctFrom(Number.NaN) === 10,
+    "#227 late: a missing or junk sewing % is the 10 % default");
+  ok(S.sewingPctFrom(250) === 100 && S.sewingPctFrom(0) === 0 && S.sewingPctFrom(12.5) === 12.5, "#227 late: above 100 caps; a stored 0 stays 0; decimals kept");
+
+  // The report's example figures — same inputs as before the adder.
+  const at = (w: number, h: number, full: number, rate: number, sewingPct: number) =>
+    S.curtainCost({ finishedWidthFt: w, finishedHeightFt: h, fullnessPct: full, qty: 1 }, { fabricRate: rate, sewingPct });
+  ok(at(50, 3, 50, 3.64, 10).costEach === 900.9, `#227 late: a 50×3 border at 50% = 225 × 3.64 × 1.10 = 900.90 (was 819) (got ${at(50, 3, 50, 3.64, 10).costEach})`);
+  ok(at(20, 19, 50, 3.64, 10).costEach === 2282.28, `#227 late: a 20×19 main at 50% = 570 × 3.64 × 1.10 = 2282.28 (was 2074.80) (got ${at(20, 19, 50, 3.64, 10).costEach})`);
+  ok(at(40, 20, 0, 0.9, 10).costEach === 792, `#227 late: a flat 40×20 muslin cyc = 800 × 0.90 × 1.10 = 792 (was 720) (got ${at(40, 20, 0, 0.9, 10).costEach})`);
+  ok(at(50, 3, 50, 3.64, 0).costEach === 819 && at(50, 3, 50, 3.64, 20).costEach === 982.8, "#227 late: the rule drives the adder — 0 % is fabric only (819), 20 % → 982.80");
+  ok(S.sewnAreaRate(3.64, 10) === 3.64 * 1.1 && S.sewnAreaRate(0, 10) === 0 && S.sewnAreaRate(-1, 10) === 0, "#227 late: the sewn area rate is fabric rate × (1 + sewing %)");
+  const vo = S.curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, { fabricRate: 3.64, sewingPct: 10 });
+  ok(vo.costEach === 2080 && vo.costTotal === 4160 && vo.overridden, "#227 late: a typed vendor cost is the full cost — no sewing on top");
+  ok(S.curtainPrice(at(20, 19, 50, 3.64, 10).costEach, 0.3) === Math.round((2282.28 / 0.7) * 100) / 100, "#227 late: sell = cost ÷ (1 − margin), as before");
+
+  // Parity: every mirror carries the adder, at the default and a non-default rule.
+  for (const sewingPct of [10, 25]) {
+    for (const c of [{ w: 20, h: 19, full: 50, rate: 3.64 }, { w: 40, h: 20, full: 0, rate: 0.9 }, { w: 9.5, h: 10 + 11 / 12, full: 100, rate: 2.84 }]) {
+      const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate} +${sewingPct}%`;
+      const shared = at(c.w, c.h, c.full, c.rate, sewingPct).costEach;
+      const spec = { name: "d", hang: "", fabric: "SEW227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
+      const portal = sew227PortalCost(spec, { fabricRate: c.rate, sewingPct }, 0.3);
+      const est = sew227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], { sewingPct }, 0.3);
+      const grid = sew227Grid(
+        [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "SEW227" } }],
+        [{ id: "SEW227", sku: "SEW227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
+        { sewingPct },
+        0.3
+      ).get("pl1")!;
+      const drape = sew227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate, sewingPct);
+      const client = sew227PriceEach(spec, sew227Sell({ fabricRate: c.rate, sewingPct }, 0.3));
+      ok(shared > at(c.w, c.h, c.full, c.rate, 0).costEach, `#227 late ${tag}: the adder raises the cost`);
+      ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared && drape === Math.round(shared),
+        `#227 late parity ${tag}: portal, estimator, Grid and the Equipment-map drape all = shared ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach} / ${drape})`);
+      ok(grid.priceEach === portal.priceEach && Math.abs(client - portal.priceEach) < 0.011 && Math.abs(est.priceEach - portal.priceEach) <= 0.011,
+        `#227 late parity ${tag}: Grid, client preview and estimator sell = portal sell (${portal.priceEach})`);
+    }
+  }
+  const estOv = sew227Compute({ name: "d", hang: "", fabric: "SEW227", qty: "1", width: "20", height: "19", fullness: "50", bottom: "", vendorCostOverride: "2080" }, [{ sku: "SEW227", name: "x", costPerSqft: 0, curtainAreaRate: 3.64 }], { sewingPct: 10 }, 0.3);
+  ok(estOv.costEach === 2080, "#227 late: the estimator's Rose Brand cost override carries no sewing adder");
+
+  // Quick Design / Grid Equipment map: a fabric row carries the rule the server priced it with.
+  const drawDef = sew227Rows.get("curtains:draw")!;
+  const fab: Sew227Part = { sku: "SEW227-VEL", desc: "Velour", unit: "sq ft", cost: 0, list: 0, category: "Fabric", curtainAreaRate: 3.64 };
+  const ctx = { parts: new Map<string, Sew227Part>([[fab.sku, fab]]), fixtures: new Map(), margin: 0.3, sewingPct: 25 };
+  const cell = sew227PriceCell({ kind: "part", sku: fab.sku }, drawDef, ctx);
+  ok(cell.status === "part" && cell.areaRate === 3.64 && cell.sewingPct === 25, "#227 late: a mapped fabric keeps its fabric-only area rate and carries the sewing %");
+  const noRule = sew227PriceCell({ kind: "part", sku: fab.sku }, drawDef, { ...ctx, sewingPct: undefined });
+  ok(noRule.status === "part" && noRule.sewingPct === 10, "#227 late: a price context without the rule prices at the 10 % default, never 0");
+  const table = sew227Table({ "curtains:draw": { tiers: { good: { kind: "part", sku: fab.sku } }, sameAll: true, updatedBy: "t", updatedAt: 1 } }, ctx);
+  const geom = { w: 20, h: 19, fullness: 50, qty: 2 };
+  const sys = [{ key: "curtains" as const, name: "Curtains", on: true, m: 0.3, dot: "#000", rev: 0, cost: 0, items: [{ key: "curtains:draw", desc: "Draw", unit: "ea", qty: 1, cost: 0, price: 0, drape: geom }] }];
+  const priced = sew227Apply(sys, "better", table)[0].items[0];
+  const want = Math.round(S.curtainCost({ finishedWidthFt: 20, finishedHeightFt: 19, fullnessPct: 50, qty: 2 }, { fabricRate: 3.64, sewingPct: 25 }).costTotal);
+  ok(priced.cost === want && want === Math.round(570 * 3.64 * 1.25 * 2), `#227 late: Quick Design / Grid Auto drape cost carries the adder (${priced.cost})`);
+
+  // Estimating Rules.
+  const row = sew227Groups.flatMap((g) => g.items.map((it) => ({ g, it }))).find((x) => x.it.id === "curtains.sewingPct");
+  ok(!!row && row.g.live && row.it.kind === "rate" && row.it.def === 10 && row.it.max === 100 && row.it.store === "general" && row.it.unit === "%",
+    "#227 late: Estimating Rules carries a live Curtain sewing % (default 10, max 100)");
+
+  // Labels: the catalog rate is fabric cost.
+  ok(sew227Unit === "sq ft fabric" && sew227Label(3.64) === "$3.64/sq ft fabric" && sew227Label(0) === "No $/sq ft set", `#227 late: a fabric rate reads $X/sq ft fabric (${sew227Label(3.64)})`);
+  ok(sew227SellLabel(5.72) === "$5.72/sq ft sewn (incl. sewing)" && sew227SellLabel(0) === "No $/sq ft set", "#227 late: the Grid drop-in's sell rate says sewing is in it");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const frf = rd("src/app/(app)/catalog/fabric-rate-field.tsx");
+  ok(frf.includes("$/sq ft fabric") && frf.includes("Fabric cost only — estimates add sewing labor (Estimating Rules, default 10 %)") && frf.includes("sqftRateFromLinearYard") && frf.includes("sqftRateFromSquareYard"),
+    "#227 late: the part editor's field reads $/sq ft fabric with the sewing help, and keeps the $/lin-yd and $/sq yd converter");
+  const it227 = rd("src/app/(app)/import/types.ts");
+  ok(it227.includes('label: "Fabric $/sq ft (fabric cost only)"') && it227.includes("estimates add sewing labor"), "#227 late: the Import hub column help says fabric cost only");
+  ok(rd("src/app/(app)/design/grid/[id]/curtain-drop.tsx").includes("sewnSellLabel(f.pricePerSqft)"), "#227 late: the Grid drop-in labels each fabric's sewn sell rate");
+  const labelled = [
+    "src/app/(app)/catalog/fabric-rate-field.tsx", "src/app/(app)/catalog/parse.ts", "src/app/(app)/catalog/part-form.ts", "src/app/(app)/import/types.ts",
+    "src/app/(app)/import/registry.ts", "src/app/(app)/estimator/pricing.ts", "src/app/(app)/estimator/curtain-modal.tsx", "src/lib/curtain-geom.ts",
+    "src/lib/curtain-pricing.ts", "src/lib/design/curtain-pricing.ts", "src/lib/design/equipment-map.ts", "src/lib/design/equipment-pricing.ts",
+    "src/lib/stores/catalog.ts", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx",
+  ];
+  const stale = labelled.filter((f) => /incl\. making|includes making|making included|must include making|INCLUDING making|making \/ sewing included|add making before/i.test(rd(f)));
+  ok(stale.length === 0, `#227 late: no label or help says the fabric rate includes making (${stale.join(", ") || "none"})`);
+
+  // The rule reaches every pricing path as data from the server.
+  ok(rd("src/app/(app)/estimator/page.tsx").includes("loadCurtainSewingPct()") && rd("src/app/(app)/estimator/page.tsx").includes("curtainSewingPct={curtainSewingPct}") &&
+      rd("src/app/(app)/estimator/estimator-client.tsx").includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
+    "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
+  ok(rd("src/app/portal/actions.ts").includes("loadCurtainSewingPct()") && rd("src/app/portal/estimate/page.tsx").includes("loadCurtainSewingPct()"), "#227 late: the portal estimate (preview and submit) reads the rule");
+  ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
+    "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
+  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/estimate/estimate-builder.tsx"];
+  ok(clients.every((f) => !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db)/m.test(rd(f))), "#227 late: no client curtain file imports a VALUE from a store");
+}
+
+/* #227 late (b) — the sewing rule through Estimating Rules into its loader and the Equipment-map price context, against the scratch DB. Leaves the default behind. */
+async function sewing227LateAsyncChecks(): Promise<void> {
+  const P = await import("@/lib/stores/pricing");
+  const EMS = await import("@/lib/stores/equipment-map");
+  ok((await P.loadCurtainSewingPct()) === 10 && (await EMS.loadEquipPriceCtx()).ctx.sewingPct === 10, "#227 late: a fresh database adds 10 % sewing");
+  await P.setValue("curtains.sewingPct", 15);
+  ok((await P.loadCurtainSewingPct()) === 15 && (await EMS.loadEquipPriceCtx()).ctx.sewingPct === 15, "#227 late: an Estimating Rules edit reaches the loader and the price context");
+  await P.setValue("curtains.sewingPct", 500);
+  ok((await P.loadCurtainSewingPct()) === 100, "#227 late: Estimating Rules clamps the sewing % at 100");
+  await P.resetValue("curtains.sewingPct");
+  ok((await P.loadCurtainSewingPct()) === 10, "#227 late: resetting restores 10 %");
 }

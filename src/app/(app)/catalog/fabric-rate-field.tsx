@@ -4,8 +4,9 @@ import { useState, type CSSProperties } from "react";
 import { FABRIC_RATE_UNIT, NO_FABRIC_RATE, sqftRateFromLinearYard, sqftRateFromSquareYard } from "@/lib/curtain-geom";
 
 /**
- * #227 — a Fabric part's one curtain rate: cost per sq ft of SEWN fabric,
- * making / sewing included (no separate making charge anywhere). Lives inside
+ * #227 — a Fabric part's one curtain rate: FABRIC cost per sq ft of sewn
+ * fabric area. It carries no sewing: every curtain estimate adds the sewing
+ * labor rule on top (#227 late, Estimating Rules curtains.sewingPct). Lives inside
  * `<form action={upsertPart}>`: only the two named inputs (curtainAreaRate,
  * boltWidthIn) post with the form. The converter inputs carry no `name` and
  * its buttons are type="button", so nothing else reaches upsertPart.
@@ -66,7 +67,7 @@ export default function FabricRateField({
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div>
-          <div style={LBL}>$/sq ft sewn (includes making)</div>
+          <div style={LBL}>$/sq ft fabric</div>
           <input
             name="curtainAreaRate"
             value={rate}
@@ -89,8 +90,8 @@ export default function FabricRateField({
         </div>
       </div>
       <div style={HELP}>
-        Cost per sq ft of sewn fabric (finished width × (1 + fullness) × height), including making and sewing —
-        there is no separate making charge. Sell = cost ÷ (1 − margin).
+        Fabric cost only — estimates add sewing labor (Estimating Rules, default 10 %). Priced per sq ft of sewn
+        fabric area (finished width × (1 + fullness) × height); sell = cost ÷ (1 − margin).
       </div>
       {status && <div style={{ ...HELP, color: "#8a6d1f" }}>{status}</div>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginTop: 10, alignItems: "center" }}>
@@ -118,8 +119,8 @@ export default function FabricRateField({
         </button>
       </div>
       <div style={HELP}>
-        Converter: $/linear yard ÷ (3 × bolt width ÷ 12) — a 54″ bolt is 13.5 sq ft per yard; $/sq yard ÷ 9. A
-        converted fabric price is fabric only — add making before saving.
+        Converter: $/linear yard ÷ (3 × bolt width ÷ 12) — a 54″ bolt is 13.5 sq ft per yard; $/sq yard ÷ 9. Save
+        the converted fabric price as is — sewing is added in the estimate.
       </div>
     </div>
   );

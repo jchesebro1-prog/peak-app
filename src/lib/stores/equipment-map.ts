@@ -1,7 +1,7 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { getMany, type CatalogPart } from "@/lib/stores/catalog";
 import { listFixtures, type FixtureRecord } from "@/lib/stores/fixtures";
-import { getCatalogRates } from "@/lib/stores/pricing";
+import { getCatalogRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { fixtureSkus } from "@/lib/fixture-assemblies";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import {
@@ -68,10 +68,11 @@ export async function loadEquipPriceCtx(
     extraFixtureIds?: readonly string[];
   } = {}
 ): Promise<{ map: EquipmentMap; ctx: EquipPriceCtx; catalogParts: ReadonlyMap<string, CatalogPart> }> {
-  const [map, fixtureList, rates] = await Promise.all([
+  const [map, fixtureList, rates, sewingPct] = await Promise.all([
     getEquipmentMap(),
     opts.fixtures ? Promise.resolve(opts.fixtures) : listFixtures(),
     getCatalogRates(),
+    loadCurtainSewingPct(),
   ]);
   const fixtures = new Map(fixtureList.map((f) => [f.id, f]));
   let catalogParts: Map<string, CatalogPart>;
@@ -85,7 +86,7 @@ export async function loadEquipPriceCtx(
     }
     catalogParts = new Map((skus.size ? await getMany([...skus]) : []).map((p) => [p.sku, p]));
   }
-  return { map, ctx: { parts: catalogParts, fixtures, margin: rates.defaultMargin }, catalogParts };
+  return { map, ctx: { parts: catalogParts, fixtures, margin: rates.defaultMargin, sewingPct }, catalogParts };
 }
 
 export async function loadEquipmentPriceTable(opts?: Parameters<typeof loadEquipPriceCtx>[0]): Promise<EquipmentPriceTable> {

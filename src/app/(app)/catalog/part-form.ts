@@ -18,7 +18,7 @@ export type OptionalPartFields = {
   manufacturerPartNumber?: string;
   manufacturerModelNumber?: string;
   mapPrice?: number;
-  /** #227 — Fabric parts only: $/sq ft of sewn fabric, making included. */
+  /** #227 — Fabric parts only: fabric cost per sq ft of sewn area (estimates add sewing, #227 late). */
   curtainAreaRate?: number;
   /** #227 — Fabric parts only: bolt width in inches. */
   boltWidthIn?: number;

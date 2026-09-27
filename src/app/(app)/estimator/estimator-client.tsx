@@ -351,6 +351,7 @@ export default function EstimatorClient({
   initial,
   pipelines,
   fabrics,
+  curtainSewingPct,
   laborRates,
   fixtureRates,
   fixtureAssemblies,
@@ -1675,7 +1676,7 @@ export default function EstimatorClient({
   const addCurtain = (secId: string) => {
     const d = curtainDraft;
     const name = (d.name || "").trim();
-    const c = computeCurtain(d, fabrics, tierMargin ?? undefined);
+    const c = computeCurtain(d, fabrics, { sewingPct: curtainSewingPct }, tierMargin ?? undefined);
     if (!name || c.priceEach <= 0) return;
     let qty = parseInt(d.qty, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
@@ -3481,6 +3482,7 @@ export default function EstimatorClient({
               secName={curtainSec ? curtainSec.name : ""}
               draft={curtainDraft}
               fabrics={fabrics}
+              sewingPct={curtainSewingPct}
               margin={tierMargin ?? undefined}
               onSet={(field, val) => setCurtainDraft((d) => ({ ...d, [field]: val }))}
               onAdd={() => addCurtain(curtainFor)}

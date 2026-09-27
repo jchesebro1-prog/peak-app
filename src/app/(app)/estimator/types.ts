@@ -387,6 +387,8 @@ export type EstimatorProps = {
   companyName: string;
   logoDark: string | null;
   fabrics: FabricOpt[];
+  /** #227 late: the curtain sewing % (Estimating Rules curtains.sewingPct), read on the server. */
+  curtainSewingPct: number;
   /** Live labor/travel rates from catalog category 'Labor' (sku → cost). */
   laborRates: Record<string, number>;
   /** Live fixture add-on rates (Estimating Rules → fixture group). */

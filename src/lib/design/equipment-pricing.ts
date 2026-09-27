@@ -9,7 +9,7 @@
  * Design / Designs dashboard clients (already cost views) may import it. NO
  * Grid client file does — the #211 T5 spec guard walks them.
  */
-import { curtainCost } from "./curtain-pricing";
+import { curtainCost, sewingPctFrom } from "./curtain-pricing";
 import {
   applyOverrides,
   clamp,
@@ -35,12 +35,12 @@ import { needsPartCount } from "./scope-targets";
 import { defaultWireLaborRules, laborFrac, laborFracsFor, tierMult, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
 import { withCablePackage } from "./cable-package";
 
-/** One drape's make-it cost at a fabric's flat $/sq ft sewn (making included, #227) — the shared model (curtain-pricing.ts). */
-export function drapeUnitCost(drape: DrapeGeom, areaRate: number): number {
+/** One drape's make-it cost at a fabric's $/sq ft plus the sewing adder (#227, #227 late) — the shared model (curtain-pricing.ts). */
+export function drapeUnitCost(drape: DrapeGeom, areaRate: number, sewingPct: number): number {
   return Math.round(
     curtainCost(
       { finishedWidthFt: drape.w, finishedHeightFt: drape.h, fullnessPct: drape.fullness, qty: drape.qty },
-      { fabricRate: areaRate }
+      { fabricRate: areaRate, sewingPct }
     ).costTotal
   );
 }
@@ -55,7 +55,7 @@ function priceItem(it: BomItem, p: UnitPrice | undefined, margin: number): Price
   // allowance on a curtain row is already a per-drape unit cost.
   if (it.drape && p.status !== "allowance") {
     if (!(p.areaRate && p.areaRate > 0)) return { cost: 0, price: 0, status: "needs-part" };
-    const cost = drapeUnitCost(it.drape, p.areaRate);
+    const cost = drapeUnitCost(it.drape, p.areaRate, sewingPctFrom(p.sewingPct));
     return { cost, price: sellFromCost(cost, margin), status: p.status, ref: p.ref, refDesc: p.desc };
   }
   return { cost: p.unitCost, price: p.unitSell, status: p.status, ref: p.ref, refDesc: p.desc };

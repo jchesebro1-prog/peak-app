@@ -7,7 +7,7 @@ import { addBtnStyle, ConfigModal, FIELD, LBL, NUMFIELD, segBtn, Stat } from "./
 
 /**
  * Curtain configurator — name / fabric (catalog category 'Fabric', priced by
- * the make-it area rate × sewn area) / qty / W / H / fullness / optional
+ * sewn area × the fabric's $/sq ft × (1 + sewing %)) / qty / W / H / fullness / optional
  * Rose Brand cost override, with live fabric-area + cost + ext pricing in
  * the footer. Hang type and bottom finish no longer affect price (curtain
  * pricing rebuild) and have been dropped from this UI.
@@ -25,6 +25,7 @@ export default function CurtainModal({
   editing = false,
   draft,
   fabrics,
+  sewingPct,
   margin,
   onSet,
   onAdd,
@@ -34,13 +35,15 @@ export default function CurtainModal({
   editing?: boolean;
   draft: CurtainDraft;
   fabrics: FabricOpt[];
+  /** #227 late: the sewing-labor adder % every curtain estimate carries (from the server). */
+  sewingPct: number;
   /** Tier-seeded margin fraction (item 11, D87); undefined → legacy 38%. */
   margin?: number;
   onSet: (field: keyof CurtainDraft, val: string) => void;
   onAdd: () => void;
   onClose: () => void;
 }) {
-  const cc = computeCurtain(draft, fabrics, margin);
+  const cc = computeCurtain(draft, fabrics, { sewingPct }, margin);
   const qty = Math.max(1, parseInt(draft.qty, 10) || 0);
   const valid = (draft.name || "").trim().length > 0 && cc.priceEach > 0;
 

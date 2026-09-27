@@ -30,7 +30,7 @@ import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
 import { getSettings } from "@/lib/settings";
 import { loadDeviceTypeContext } from "@/lib/stores/device-types";
-import { loadWireLaborRules } from "@/lib/stores/pricing";
+import { loadCurtainSewingPct, loadWireLaborRules } from "@/lib/stores/pricing";
 import { gridLaborLines, sanitizeLaborOverrides, type GridLaborLine, type LaborOverrides, type WireLaborRules } from "@/lib/design/wire-labor";
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 
@@ -75,6 +75,8 @@ export type GridQuoteInputs = {
   location: boolean;
   /** #231/#232 rules (loadWireLaborRules). */
   wireLabor: WireLaborRules;
+  /** #227 late: the curtain sewing % (loadCurtainSewingPct). */
+  sewingPct: number;
   /** #232: the Grid library's grouping slice — the SAME PartLite rows the
    *  editor groups its BOM by (gridPartsFrom with the category map and device
    *  types), so a line's labor heading is the heading it prints under. */
@@ -96,7 +98,7 @@ export async function loadGridQuoteInputs(
   opts: { location?: boolean } = {}
 ): Promise<GridQuoteInputs> {
   const anyVirtual = projects.some((p) => (p.placements || []).some((pl) => parseVirtualPartId(pl.partId) !== null));
-  const [catalog, symbols, wireLabor] = await Promise.all([listCatalog(), listGridSymbols(), loadWireLaborRules()]);
+  const [catalog, symbols, wireLabor, sewingPct] = await Promise.all([listCatalog(), listGridSymbols(), loadWireLaborRules(), loadCurtainSewingPct()]);
   const [equip, groupParts] = await Promise.all([
     anyVirtual ? loadEquipPriceCtx({ catalog }) : Promise.resolve(null),
     loadGridGroupParts(symbols, catalog),
@@ -107,7 +109,7 @@ export async function loadGridQuoteInputs(
     if (!tiers.has(k)) tiers.set(k, resolveTier(customerId));
     return tiers.get(k)!;
   };
-  return { catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, groupParts };
+  return { catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, sewingPct, groupParts };
 }
 
 export async function buildGridQuote(
@@ -195,7 +197,9 @@ export async function buildGridQuote(
   const devTotals = bomTotals(placements, tierCatalog);
   const wires = routeLines(routes, tierCatalog, project.calibrations || [], riserLinks);
 
-  const curtainPrices = priceGridCurtains(placements, catalog, tier.margin);
+  // #227 late: curtains carry the sewing adder on top of the fabric rate.
+  const sewingPct = inputs ? inputs.sewingPct : await loadCurtainSewingPct();
+  const curtainPrices = priceGridCurtains(placements, catalog, { sewingPct }, tier.margin);
   const fabricNames = new Map(catalog.filter(isFabricRow).map((p) => [p.id, p.desc] as const));
   const curtains = curtainLines(placements, new Map([...curtainPrices].map(([id, v]) => [id, v.priceEach])), fabricNames);
   const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);

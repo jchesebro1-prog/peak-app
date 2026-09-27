@@ -8,7 +8,7 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { sitesForCompany } from "@/lib/identity/sites";
-import { loadWireLaborRules } from "@/lib/stores/pricing";
+import { loadCurtainSewingPct, loadWireLaborRules } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
@@ -81,13 +81,14 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor] = await Promise.all([
+  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
     getSettings(),
     listDesigns({ kind: "lineset" }),
     loadWireLaborRules(),
+    loadCurtainSewingPct(),
   ]);
   // Beta group resolution (Task 6, punch #39) — server-side only; the
   // editor receives each part's already-resolved `group` and never sees
@@ -163,7 +164,8 @@ export default async function GridEditorPage({
    * the editor's live price preview. These are SELL numbers only - the margin
    * and the cost basis stay on the server (lib/design/curtain-pricing is never
    * imported by the editor). The preview matches the quote to the cent because
-   * both run the same flat $/sq ft model (#227) at the same tier margin.
+   * both run the same flat $/sq ft model (#227) at the same tier margin, with
+   * the sewing adder (#227 late) folded into the sell rate.
    */
   const tier = await resolveTier(project.customerId);
   const fabrics: FabricSell[] = catalog
@@ -171,7 +173,7 @@ export default async function GridEditorPage({
     .map((p) => ({
       sku: p.id,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft(fabricAreaRateOf(p), tier.margin),
+      pricePerSqft: fabricSellPerSqft({ fabricRate: fabricAreaRateOf(p), sewingPct }, tier.margin),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   // #212: the active option's custom items, sell-priced at this customer's
@@ -194,6 +196,7 @@ export default async function GridEditorPage({
     tierFor: () => Promise.resolve(tier),
     location: false,
     wireLabor,
+    sewingPct,
     groupParts: parts,
   };
   // A pricing fault must not take the editor down with it — the quote

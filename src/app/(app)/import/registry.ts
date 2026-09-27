@@ -280,7 +280,7 @@ export function catalogPatch(
     // the file's own preserve-when-absent pattern for a numeric field: only
     // write the key when the row actually carried a value.
     ...(num(v.mapPrice) ? { mapPrice: num(v.mapPrice) } : {}),
-    // #227 — a fabric's flat $/sq ft (making included) and bolt width. Same
+    // #227 — a fabric's $/sq ft (fabric cost only; estimates add sewing) and bolt width. Same
     // preserve-when-absent rule as MAP: coerce() turns an absent column or a
     // blank cell into 0, so only a positive value is written and a price-only
     // sheet never resets them.

@@ -1,4 +1,4 @@
-import { curtainCost, curtainPrice, fabricAreaRateOf } from "@/lib/design/curtain-pricing";
+import { curtainCost, curtainPrice, fabricAreaRateOf, type CurtainSewing } from "@/lib/design/curtain-pricing";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -228,14 +228,19 @@ export type CurtainCalc = {
 };
 
 /**
- * CURTAIN PRICING — flat $/sq ft of sewn fabric, making included (#227),
- * shared with the budget side (src/lib/design/curtain-pricing.ts). The rate
- * comes from fabricAreaRateOf, the one chain every curtain path reads. A
- * per-line Rose Brand vendor cost overrides the computed make-it cost when set.
+ * CURTAIN PRICING — sewn area × the fabric's $/sq ft × (1 + sewing %) (#227,
+ * #227 late), the shared model on the budget side too
+ * (src/lib/design/curtain-pricing.ts). The fabric rate comes from
+ * fabricAreaRateOf, the one chain every curtain path reads; the sewing % is
+ * the Estimating Rule the server page reads and passes in as data. A per-line
+ * Rose Brand vendor cost is the full cost: it replaces the computed make-it
+ * cost, with no sewing on top.
  */
 export function computeCurtain(
   d: CurtainDraft,
   fabrics: FabricOpt[],
+  /** #227 late: the sewing rule (loadCurtainSewingPct, on the server). */
+  sewing: CurtainSewing,
   /** Margin-on-price fraction; the customer tier stamp seeds this (item 11,
    *  D87) — 0.30 is Peak's flat curtain margin, the no-tier default. */
   margin: number = 0.3
@@ -251,7 +256,7 @@ export function computeCurtain(
     d.vendorCostOverride != null && d.vendorCostOverride !== "" ? parseFloat(d.vendorCostOverride) : null;
   const cc = curtainCost(
     { finishedWidthFt: w, finishedHeightFt: h, fullnessPct: fullness, qty: 1, vendorCostOverride: override },
-    { fabricRate: fabricAreaRateOf(fab) }
+    { fabricRate: fabricAreaRateOf(fab), sewingPct: sewing.sewingPct }
   );
   return {
     fab,

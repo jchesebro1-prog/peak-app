@@ -19,7 +19,7 @@ import { getSettings, type Office } from "@/lib/settings";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
-import { getFixtureRates } from "@/lib/stores/pricing";
+import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
@@ -232,7 +232,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -244,6 +244,7 @@ export default async function EstimatorPage({
       catalogList(),
       loadPipelines(),
       listFixtures(),
+      loadCurtainSewingPct(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -253,7 +254,8 @@ export default async function EstimatorPage({
   const templateSets = await taskTemplateSetsFor("quote");
 
   // Only catalog fabrics with a $/sq ft rate feed the curtain configurator
-  // (#227: fabricAreaRateOf — the catalog rate, a seed, or cost per sq ft).
+  // (#227: fabricAreaRateOf — the catalog rate, a seed, or cost per sq ft —
+  // fabric cost only; the modal adds curtainSewingPct on top, #227 late).
   // Imported per-unit fabric rows with no rate would otherwise show up as
   // $0/sq ft options. curtainAreaRate carries the RESOLVED rate, so the
   // modal's label and computeCurtain read the same number.
@@ -350,6 +352,7 @@ export default async function EstimatorPage({
       companyName={settings.companyName || "Peak Systems Group"}
       logoDark={settings.logoDark || null}
       fabrics={fabrics}
+      curtainSewingPct={curtainSewingPct}
       laborRates={laborRates}
       fixtureRates={fixtureRates}
       fixtureAssemblies={fixtureAssembliesFrom(fixtures, catalogRows)}

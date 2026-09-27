@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { curtainPriceEach, fabricRateLabel, type FabricSell } from "@/lib/curtain-geom";
+import { curtainPriceEach, sewnSellLabel, type FabricSell } from "@/lib/curtain-geom";
 import { GRID_FULLNESS, curtainSpecOf, type GridCurtain, type GridCurtainType } from "@/lib/design/grid-bom";
 
 /**
@@ -133,7 +133,7 @@ export default function CurtainDrop({
           <select value={fabricSku} onChange={(e) => setFabricSku(e.target.value)} style={INPUT}>
             {fabrics.map((f) => (
               <option key={f.sku} value={f.sku}>
-                {f.name + "  ·  " + fabricRateLabel(f.pricePerSqft)}
+                {f.name + "  ·  " + sewnSellLabel(f.pricePerSqft)}
               </option>
             ))}
           </select>
