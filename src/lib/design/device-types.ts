@@ -176,12 +176,24 @@ const BLOCK = /\b(av control|av infrastructure|networked av|staging|stage access
 const RULES: readonly Rule[] = [
   H("rigging-control", /\b(rigging|motor|hoist) control(s|ler|lers)?\b/),
   H("hoists-motors", /\b(hoists?|motors?|motorized|winch(es)?)\b/),
+  // Bare "truss" wins over a later head noun like "clamps" for e.g. "Truss
+  // Clamps" (#226 fix wave 2) — left as is on purpose, not a bug: a truss
+  // clamp genuinely is truss/rigging hardware, unlike "Speaker Mounts"
+  // where the head noun says nothing about which device is mounted.
   H("truss-pipe", /\b(truss(es|ing)?|pipes?|battens?)\b/),
   // "tracks?" alone is deliberately NOT here — see the head-noun comment
   // above and the L("tracks-hardware", …) rule below.
   H("tracks-hardware", /\b(carriers?|travell?ers?)\b/),
   H("drapery", /\b(drapes?|drapery|curtains?|scrims?|velour|cyc fabric|masking)\b/),
-  H("rigging-hardware", /\b(shackles?|wire rope|slings?|loft ?blocks?|head ?blocks?|mule blocks?|floor blocks?|arbors?|rope locks?|shoes|strain reliefs?|hardware|mounts?|hooks?|turnbuckles?)\b/),
+  H("rigging-hardware", /\b(shackles?|wire rope|slings?|loft ?blocks?|head ?blocks?|mule blocks?|floor blocks?|arbors?|rope locks?|shoes|strain reliefs?|hooks?|turnbuckles?)\b/),
+  // The full phrase "rigging hardware" names the type exactly, so it stays
+  // high (regression guard, fix wave 1) even though the bare word
+  // "hardware" alone doesn't (#226 fix wave 2) — see the L("rigging-hardware",
+  // …) rule below.
+  H("rigging-hardware", /\brigging hardware\b/),
+  // "hardware" and "mounts?"/"brackets?" are deliberately NOT here (#226 fix
+  // wave 2) — see the mount/bracket head-noun comment above RULES and the
+  // L("rigging-hardware", …) rule below.
   H("assistive-listening", /\b(assistive|als|hearing loops?|induction loops?|listening)\b/),
   H("intercom", /\b(intercoms?|comms?|clear ?com|party ?line|beltpacks?)\b/),
   H("microphones", /\b(mics?|microphones?)\b/),
@@ -198,18 +210,30 @@ const RULES: readonly Rule[] = [
   H("control-networking", /\b(lighting controls?|lighting consoles?|dmx|sacn|gateways?|nodes?)\b/),
   H("lighting-accessories", /\b(lens(es)?|iris(es)?|gobos?|yokes?|lighting accessories|color frames?|top hats?|barn ?doors?|safety cables?)\b/),
   H("fixtures", /\b(fixtures?|luminaires?|leds?|spots?|spotlights?|wash(es)?|ellipsoidals?|fresnels?|pars?|cyc|moving lights?|followspots?|house ?lights?|work ?lights?)\b/),
-  H("parts-consumables", /\b(lamps?|parts|consumables?|filters?|gels?|batteries|fluids?)\b/),
+  // Bare "parts" is dropped from here (#226 fix wave 2) — see the
+  // L("parts-consumables", …) rule below.
+  H("parts-consumables", /\b(lamps?|consumables?|filters?|gels?|batteries|fluids?)\b/),
   H("cable-connectors", /\b(cables?|cabling|connectors?|adapters?|wire|wiring|cable assemblies|crossovers?|snakes?|multicores?)\b/),
-  H("racks-cases", /\b(racks?|cases?|carts?)\b/),
+  // Bare "cases?" is dropped from here (#226 fix wave 2) — see the
+  // L("racks-cases", …) rule below.
+  H("racks-cases", /\b(racks?|carts?)\b/),
   L("control-networking", /\b(controls?|controllers?|consoles?)\b/),
   L("fixtures", /\b(lighting|lights?|architectural)\b/),
   L("displays-projectors", /\bmonitors?\b/),
   L("microphones", /\bwireless\b/),
   L("power-distribution", /\bpower\b/),
-  L("rigging-hardware", /\brigging\b/),
+  // "hardware" joins "rigging" here (#226 fix wave 2): bare "Hardware" is as
+  // generic as bare "Mounts" — "Mounting Hardware", "Curtain Hardware" name
+  // no device — so it's low, never a confident auto-apply.
+  L("rigging-hardware", /\b(rigging|hardware)\b/),
   L("lighting-accessories", /\bclamps?\b/),
   // Bare "track(s)" — see the head-noun comment above the RULES declaration.
   L("tracks-hardware", /\btracks?\b/),
+  // Generic accessory-container head nouns (#226 fix wave 2, same class as
+  // "mounts?"/"brackets?" below): the modifier, not "cases"/"parts" itself,
+  // says what's inside, so a bare match is never a confident auto-apply.
+  L("racks-cases", /\bcases?\b/),
+  L("parts-consumables", /\bparts\b/),
 ];
 
 const words = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
@@ -226,6 +250,31 @@ const CABLE_HEAD_RE = /\b(cables?|cabling|connectors?|adapters?|snakes?|whips?|j
 const CURTAIN_WORD_RE = /\b(curtains?|drapes?|drapery|cyc|scrims?|velour|masking)\b/;
 
 /**
+ * A bare "mount(s)"/"bracket(s)" is a hookup accessory for some OTHER
+ * device, never a device type of its own (#226 fix wave 2) — the same class
+ * of mistake as the pre-fix "DMX Cable" → control-networking bug, but the
+ * old rule ("hardware|mounts?|hooks?" all lumped into rigging-hardware HIGH)
+ * made it worse by also being confidently wrong: "Speaker Mounts",
+ * "Projector Mounts", "TV Mounts" all auto-applied to Rigging. Here the
+ * modifier — not the head noun — says which device it mounts, and even a
+ * good modifier match stays LOW (a mount is still an accessory; it always
+ * needs a human to confirm). Only an explicit rigging word ("Rigging
+ * Mounts", "Beam Clamps & Mounts") keeps a mount in rigging-hardware, and
+ * still only at low confidence — never "high", per the mounts fix. Bare
+ * "Mounts"/"Mount"/"Rigid Mount"/"Brackets" carry no device information at
+ * all and get no suggestion.
+ */
+const MOUNT_HEAD_RE = /\b(mounts?|brackets?)\b/;
+const MOUNT_RIGGING_WORD_RE = /\b(rigging|beam)\b/;
+const MOUNT_MODIFIER_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bspeakers?\b/, "speakers"],
+  [/\b(projectors?|tvs?|displays?|monitors?)\b/, "displays-projectors"],
+  [/\bcameras?\b/, "cameras"],
+  [/\b(truss(es)?|pipes?)\b/, "truss-pipe"],
+  [/\b(fixtures?|lights?)\b/, "lighting-accessories"],
+];
+
+/**
  * The category string decides (its rule's confidence). Only when it matches
  * nothing do up to 20 sample part descriptions vote, and a vote is never
  * better than "low" — auto-apply acts on category evidence alone. Generic,
@@ -237,6 +286,11 @@ export function suggestDeviceType(category: string, sampleDescs: readonly string
   const text = words(key);
   if (CABLE_HEAD_RE.test(text)) return { typeKey: "cable-connectors", confidence: "high" };
   if (/\btracks?\b/.test(text) && CURTAIN_WORD_RE.test(text)) return { typeKey: "tracks-hardware", confidence: "high" };
+  if (MOUNT_HEAD_RE.test(text)) {
+    for (const [re, typeKey] of MOUNT_MODIFIER_RULES) if (re.test(text)) return { typeKey, confidence: "low" };
+    if (MOUNT_RIGGING_WORD_RE.test(text)) return { typeKey: "rigging-hardware", confidence: "low" };
+    return null;
+  }
   const hit = firstRule(text);
   if (hit) return { typeKey: hit.typeKey, confidence: hit.conf };
   const votes = new Map<string, number>();

@@ -20878,14 +20878,25 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     ["Loftblocks", "rigging-hardware", "high"], ["Headblocks", "rigging-hardware", "high"], ["Mule Block", "rigging-hardware", "high"],
     ["Arbor", "rigging-hardware", "high"], ["Standard Arbor", "rigging-hardware", "high"], ["Front Arbor", "rigging-hardware", "high"],
     ["Floor Block", "rigging-hardware", "high"], ["Manual Hoist", "hoists-motors", "high"], ["Motorized Hoist", "hoists-motors", "high"],
-    ["Rope Lock", "rigging-hardware", "high"], ["Hardware", "rigging-hardware", "high"], ["Shoes", "rigging-hardware", "high"],
-    ["Wire Mesh Strain Reliefs", "rigging-hardware", "high"], ["Mounts", "rigging-hardware", "high"], ["Curtains", "drapery", "high"],
+    ["Rope Lock", "rigging-hardware", "high"], ["Shoes", "rigging-hardware", "high"],
+    // fix wave 2 (#226): "Hardware" alone is as generic as bare "Mounts" —
+    // "Mounting Hardware", "Curtain Hardware" name no device — so it's low,
+    // same as the pre-existing bare "Rigging" row below, not the stale
+    // "high" this row used to assert.
+    ["Hardware", "rigging-hardware", "low"],
+    ["Wire Mesh Strain Reliefs", "rigging-hardware", "high"], ["Curtains", "drapery", "high"],
     ["Networking", "networking", "high"], ["Racks", "racks-cases", "high"], ["Rack Accessories", "racks-cases", "high"],
     ["Rack Options", "racks-cases", "high"], ["Connectors", "cable-connectors", "high"], ["Cable Assemblies", "cable-connectors", "high"],
     ["Lighting Controls", "control-networking", "high"], ["Video Controls", "switching-distribution", "high"], ["Speakers", "speakers", "high"],
     ["Audio Controls", "mixing-processing", "high"], ["Power Distribution", "power-distribution", "high"], ["Power Controls", "dimming-power", "high"],
-    ["Cable", "cable-connectors", "high"], ["Lamp", "parts-consumables", "high"], ["Cases", "racks-cases", "high"], ["Carts", "racks-cases", "high"],
-    ["Parts", "parts-consumables", "high"], ["Distro Boxes", "power-distribution", "high"], ["Cable Crossovers", "cable-connectors", "high"],
+    ["Cable", "cable-connectors", "high"], ["Lamp", "parts-consumables", "high"],
+    // fix wave 2 (#226): "Cases" and "Parts" are the same generic-container
+    // class as "Mounts"/"Hardware" — "Speaker Cases", "Rigging Parts" name
+    // no device by the container word alone — so both are low, not the
+    // stale "high" these two rows used to assert. "Carts" is unchanged: a
+    // cart is a specific enough object, not a modifier-dependent container.
+    ["Cases", "racks-cases", "low"], ["Carts", "racks-cases", "high"],
+    ["Parts", "parts-consumables", "low"], ["Distro Boxes", "power-distribution", "high"], ["Cable Crossovers", "cable-connectors", "high"],
     ["Wire", "cable-connectors", "high"], ["Control", "control-networking", "low"], ["Architectural", "fixtures", "low"],
     ["Uncategorized", null, null], ["Accessory", null, null], ["Atmospherics", null, null], ["Fabric", null, null], ["Labor", null, null],
     // dealer-sheet per-brand defaults
@@ -20918,6 +20929,26 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     // fix wave #226: ambiguous head nouns alone are never confidently wrong
     ["Console", "control-networking", "low"], ["Clamp", "lighting-accessories", "low"],
     ["Controls", "control-networking", "low"], ["Accessories", null, null],
+    // fix wave 2 (#226): a mount/bracket is a hookup accessory for some
+    // OTHER device, never a device of its own — the modifier says which
+    // device, and even a good modifier match stays low (never the "high"
+    // the old bare-"mounts?" rigging-hardware rule wrongly gave every one
+    // of these). Bare "Mounts"/"Mount"/"Rigid Mount"/"Brackets" carry no
+    // device information at all and get no suggestion.
+    ["Mounts", null, null], ["Mount", null, null], ["Rigid Mount", null, null], ["Brackets", null, null],
+    ["Speaker Mounts", "speakers", "low"], ["Projector Mounts", "displays-projectors", "low"],
+    ["TV Mounts", "displays-projectors", "low"], ["Display Mounts", "displays-projectors", "low"],
+    ["Monitor Mounts", "displays-projectors", "low"], ["Camera Mounts", "cameras", "low"],
+    ["Truss Mounts", "truss-pipe", "low"], ["Pipe Mounts", "truss-pipe", "low"],
+    ["Fixture Mounts", "lighting-accessories", "low"], ["Light Mounts", "lighting-accessories", "low"],
+    // only an explicit rigging word keeps a mount in rigging-hardware, and
+    // still only at low confidence, never high
+    ["Rigging Mounts", "rigging-hardware", "low"], ["Beam Clamps & Mounts", "rigging-hardware", "low"],
+    // regression guard: "Truss Clamps" is untouched by the mount/bracket
+    // fix (no "mount"/"bracket" word) and stays truss-pipe high — a truss
+    // clamp genuinely is truss/rigging hardware, domain-plausible even
+    // though "clamps" (not "truss") is the grammatical head noun.
+    ["Truss Clamps", "truss-pipe", "high"],
   ];
   for (const [cat, key, conf] of CASES) {
     const s = dt226Suggest(cat);
