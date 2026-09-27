@@ -10527,6 +10527,7 @@ seeded()
   .then(() => estimate223SweepDAsyncChecks())
   .then(() => daylite241AsyncChecks())
   .then(() => reviewLimits242AsyncChecks())
+  .then(() => reviewLimitChips242AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27738,6 +27739,65 @@ async function reviewLimits242AsyncChecks(): Promise<void> {
     await r242SetStatus(f.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
     const reF = await r242Get(f.id);
     ok(reF?.status === "sent" && reF.review.state === "none", "#242 store: the engine-owned bypass is unchanged and never stamps an approval");
+  } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
+}
+
+/* --- #242 T4: approval sentence, Reviews history, hub + builder chips --- */
+import { approvedReviewLine as r242Line, autoApprovalLine as r242AutoLine, staleAutoApprovalLine as r242StaleLine } from "@/lib/review-line";
+import { reviewLimitChipFor as r242ChipFor } from "@/lib/review-limits-server";
+{
+  const a = {
+    state: "approved", method: "auto_limit" as const, decidedBy: "Nic Trapani", reviewer: null, note: "",
+    auto: { kind: "system_plain", limit: 25000 as number | "none", value: 20000 },
+  };
+  ok(r242Line(a) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor", `#242: the approval banner reads the spec sentence (got "${r242Line(a)}")`);
+  ok(r242AutoLine({ ...a, auto: { kind: "rental", limit: "none", value: 1 } }) === "Auto-approved — Nic has no review limit for rentals", "#242: a No-limit auto approval says so");
+  ok(
+    r242Line({ method: "in_app", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Approved by Jeff — ready to send to the customer" &&
+      r242Line({ method: "attested", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Attested by Jeff — ready to send to the customer",
+    "#242: in-app and attested banner lines unchanged"
+  );
+  ok(
+    r242StaleLine("Over your $25,000 limit — needs review") === "Auto-approval no longer applies — over your $25,000 limit — needs review",
+    "#242: stale auto approval banner line"
+  );
+  const rl = readFileSync(join(process.cwd(), "src/lib/review-line.ts"), "utf8");
+  // Import statements only — the module's doc comment names @/lib/stores/quotes as the thing never to import.
+  ok(!/from "@\/(db|lib\/stores)/.test(rl), "#242: review-line.ts stays client-safe");
+  const chipSrc = readFileSync(join(process.cwd(), "src/components/review-limit-chip.tsx"), "utf8");
+  ok(
+    !chipSrc.includes("\"use client\"") && !/from "@\/(db|lib\/stores)/.test(chipSrc) && !/\buse(State|Effect|Transition)\b/.test(chipSrc),
+    "#242: ReviewLimitChip is a hook-free, store-free component usable from server pages and the Estimator client"
+  );
+  const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+  ok(
+    hub.includes("loadReviewLimitContext()") && hub.includes("reviewLimitChip(q, limitCtx, me)") && hub.includes("<ReviewLimitChip") &&
+      hub.includes('const canSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");'),
+    "#242: quotes hub rows carry the chip and Send opens for a quote within the owner's limit"
+  );
+  const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
+  ok(rvw.includes("autoApprovalLine(r)"), "#242: Reviews history names an auto approval with the limit sentence");
+  for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/page.tsx`), "utf8");
+    ok(src.includes("reviewLimitChipFor(") && src.includes("<ReviewLimitChip chip={reviewLimit}"), `#242: the ${p} builder shows the review-limit chip`);
+  }
+}
+
+async function reviewLimitChips242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const id = r242Fx(242, "chip");
+  r242Reg("quotes", id);
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { rental: 5000 } } });
+    const q = await r242Create({ id, name: "#242 chip", customer: "Spec fixture", owner: owner.name, value: 4000, quoteType: "rental" });
+    const mine = await r242ChipFor(q, owner.name);
+    ok(mine?.tone === "within" && mine.text === "Within your limit — approves automatically", "#242 store: reviewLimitChipFor evaluates a saved quote against the owner's live limit");
+    const theirs = await r242ChipFor({ ...q, value: 6000 }, "Jeff Chesebro");
+    ok(theirs?.tone === "over" && theirs.text === "Over Rae's $5,000 limit — needs review", "#242 store: another viewer sees the owner's name and dollar limit");
   } finally {
     await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
   }

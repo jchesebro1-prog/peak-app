@@ -22,6 +22,10 @@ import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, submitQuoteForReview, createQuoteClientPackageAction } from "./actions";
 import { DeleteQuoteButton } from "./delete-quote-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import { staleAutoApprovalLine } from "@/lib/review-line";
+import { reviewLimitChip, type ReviewLimitChipData } from "@/lib/review-limits";
+import { loadReviewLimitContext } from "@/lib/review-limits-server";
+import { ReviewLimitChip } from "@/components/review-limit-chip";
 import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
@@ -116,7 +120,7 @@ export default async function QuotesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, customers, users, reviewerRows, pipes] = await Promise.all([
+  const [user, sp, quotes, customers, users, reviewerRows, pipes, limitCtx] = await Promise.all([
     requireUser(),
     searchParams,
     getAll(),
@@ -124,6 +128,7 @@ export default async function QuotesPage({
     allUsers(),
     reviewers(),
     loadPipelines(),
+    loadReviewLimitContext(),
   ]);
   const me = user.name;
 
@@ -542,6 +547,7 @@ export default async function QuotesPage({
           const rMeta = REVIEW_CHIP[rState];
           const selected = q.id === selectedId;
           const owner = q.owner || "Unassigned";
+          const reviewLimit = reviewLimitChip(q, limitCtx, me);
           return (
             <div key={q.id}>
               <Link
@@ -658,6 +664,7 @@ export default async function QuotesPage({
                         ✓ Customer accepted
                       </span>
                     )}
+                    {reviewLimit && <ReviewLimitChip chip={reviewLimit} variant="pill" />}
                   </div>
                   <div
                     style={{
@@ -745,6 +752,7 @@ export default async function QuotesPage({
                   statusError={statusError}
                   packageError={packageError}
                   canCreate={can("create", user.roles)}
+                  reviewLimit={reviewLimit}
                 />
               )}
             </div>
@@ -791,6 +799,7 @@ function SelectedPanel({
   statusError,
   packageError,
   canCreate,
+  reviewLimit,
 }: {
   q: Quote;
   me: string;
@@ -806,17 +815,25 @@ function SelectedPanel({
   packageError: string | null;
   /** #205 — "Spec from this quote" opens a create form; only creators see it. */
   canCreate: boolean;
+  /** #242 — the owner's review-limit chip for this quote (null = none shown). */
+  reviewLimit: ReviewLimitChipData | null;
 }) {
-  const rev = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
+  const stored = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
+  // #242: a stale auto approval (edited over the owner's limit, labor added,
+  // limit lowered) is not an approval — read it as unsubmitted, like the gate.
+  const staleAuto = !!reviewLimit?.staleAuto;
+  const rev = staleAuto ? { ...stored, state: "none" as const } : stored;
   const rm = RB_META[rev.state] || RB_META.none;
   const isOwner = q.owner === me;
   const sentAlready = q.status === "sent" || q.status === "won" || q.status === "lost";
   const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && !sentAlready;
-  const canSend = isOwner && rev.state === "approved" && !sentAlready;
+  const canSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");
 
   let rbSub: string;
   if (rev.state === "none")
-    rbSub = "Submit for a reviewer’s approval before sending to the customer.";
+    rbSub = staleAuto && reviewLimit
+      ? staleAutoApprovalLine(reviewLimit.text)
+      : "Submit for a reviewer’s approval before sending to the customer.";
   else if (rev.state === "in_review")
     rbSub = rev.reviewer
       ? "With " + firstName(rev.reviewer) + " for approval"
@@ -902,6 +919,11 @@ function SelectedPanel({
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: rm.ink }}>{rm.title}</div>
           <div style={{ fontSize: 12, color: "#5b616e", marginTop: 1 }}>{rbSub}</div>
+          {reviewLimit && !staleAuto && (
+            <div style={{ marginTop: 6 }}>
+              <ReviewLimitChip chip={reviewLimit} variant="inline" />
+            </div>
+          )}
         </div>
         {canSubmit && (
           <form

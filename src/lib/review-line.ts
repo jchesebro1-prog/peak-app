@@ -1,4 +1,6 @@
 import { firstName } from "@/lib/team";
+import { reviewKindPhrase } from "@/lib/review-limits";
+import { money } from "@/lib/format";
 
 /**
  * The one place that phrases an APPROVED review for a human (punch #77).
@@ -35,6 +37,7 @@ export type ApprovedReviewLike = {
  * - `method === "attested"` — an off-platform review recorded by the estimator
  *   themself (punch #60): shows WHO recorded it and, when present, the
  *   mandatory note naming who actually reviewed it and how.
+ * - `method === "auto_limit"` — #242: autoApprovalLine (no "ready to send" suffix).
  * - anything else, including legacy docs decided before punch #60 where
  *   `method` is absent/null — renders as a plain in-app approval, exactly as it
  *   did before `method` existed. Legacy approvals are still valid approvals;
@@ -43,6 +46,7 @@ export type ApprovedReviewLike = {
  * Caller is expected to only invoke this for `review.state === "approved"`.
  */
 export function approvedReviewLine(review: ApprovedReviewLike): string {
+  if (review.method === "auto_limit") return autoApprovalLine(review);
   return review.method === "attested"
     ? "Attested by " +
         firstName(review.decidedBy || "") +
@@ -51,4 +55,22 @@ export function approvedReviewLine(review: ApprovedReviewLike): string {
     : "Approved by " +
         firstName(review.decidedBy || review.reviewer || "") +
         " — ready to send to the customer";
+}
+
+/** #242: "Auto-approved — within Nic's $25,000 limit for system estimates
+ *  without labor" (or "… Nic has no review limit for rentals"). */
+export function autoApprovalLine(review: ApprovedReviewLike): string {
+  const who = firstName(review.decidedBy || "");
+  const a = review.auto;
+  if (!a) return "Auto-approved — within " + who + "'s review limit";
+  const phrase = reviewKindPhrase(a.kind);
+  return a.limit === "none"
+    ? `Auto-approved — ${who} has no review limit for ${phrase}`
+    : `Auto-approved — within ${who}'s ${money(a.limit)} limit for ${phrase}`;
+}
+
+/** #242: the banner for an auto approval that no longer holds. */
+export function staleAutoApprovalLine(chipText: string): string {
+  const t = chipText || "needs review";
+  return "Auto-approval no longer applies — " + t.charAt(0).toLowerCase() + t.slice(1);
 }

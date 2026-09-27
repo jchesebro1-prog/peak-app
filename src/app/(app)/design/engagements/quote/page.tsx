@@ -1,6 +1,9 @@
 import { requireUser } from "@/lib/session";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import ActionError from "@/components/action-error";
+import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import { ReviewLimitChip } from "@/components/review-limit-chip";
+import type { ReviewLimitChipData } from "@/lib/review-limits";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import {
@@ -36,7 +39,7 @@ export default async function ConsultingQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, customerDocs, settings] = await Promise.all([
+  const [user, sp, customerDocs, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
@@ -67,10 +70,12 @@ export default async function ConsultingQuotePage({
   const assumptionsMenu = mergedConsultingAssumptions(settings.consultingAssumptions);
   const disciplineMenu = mergedConsultingDisciplines(settings.consultingDisciplines);
 
+  let reviewLimit: ReviewLimitChipData | null = null;
   let initial: BuilderInitial | null = null;
   if (editId) {
     const q = await getQuote(editId);
     if (q && q.quoteType === "consulting") {
+      reviewLimit = await reviewLimitChipFor(q, user.name);
       const pay = (q.consulting || null) as ConsultingQuotePayload | null;
       const contact =
         q.contact && typeof q.contact === "object"
@@ -120,6 +125,7 @@ export default async function ConsultingQuotePage({
   return (
     <>
       <ActionError message={error || undefined} />
+      <ReviewLimitChip chip={reviewLimit} />
       <ConsultingQuoteBuilder
         customers={customers}
         phaseMenu={phaseMenu}

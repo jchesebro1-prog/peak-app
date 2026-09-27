@@ -8,6 +8,8 @@ import { getSettings } from "@/lib/settings";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { pickContactName, readHandoff } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
+import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import { ReviewLimitChip } from "@/components/review-limit-chip";
 
 export const metadata = { title: "Rental quote — Quartzite-6" };
 
@@ -67,7 +69,7 @@ export default async function RentalQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, customerDocs, items, locations, settings] = await Promise.all([
+  const [user, sp, customerDocs, items, locations, settings] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
@@ -111,6 +113,9 @@ export default async function RentalQuotePage({
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
+  // #242: the owner's review-limit chip for a saved quote (a new quote has no owner/value yet).
+  const reviewLimit =
+    editQuote && editQuote.quoteType === "rental" ? await reviewLimitChipFor(editQuote, user.name) : null;
   if (editQuote && editQuote.quoteType === "rental") {
     const rd: RentalDoc = (editQuote.rental as RentalDoc) || {};
     const cid = editQuote.customerId || "";
@@ -166,6 +171,7 @@ export default async function RentalQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
+      <ReviewLimitChip chip={reviewLimit} />
       <QuoteBuilder
       customers={customers}
       items={items

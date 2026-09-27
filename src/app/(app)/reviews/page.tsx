@@ -9,6 +9,7 @@ import ReviewList, { type ReviewItem } from "./review-list";
 import { designBudgetLabel } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import { autoApprovalLine } from "@/lib/review-line";
 import type { ReviewKind } from "./actions";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
@@ -163,7 +164,11 @@ export default async function ReviewsPage({
     if (tab === "mine") {
       if (r.state === "approved")
         metaLine =
-          "Approved by " + firstName(r.decidedBy || r.reviewer || "") + " · " + timeAgo(r.decidedAt);
+          (r.method === "auto_limit"
+            ? autoApprovalLine(r)
+            : "Approved by " + firstName(r.decidedBy || r.reviewer || "")) +
+          " · " +
+          timeAgo(r.decidedAt);
       else if (r.state === "changes")
         metaLine =
           "Changes requested by " + firstName(r.decidedBy || "") + " · " + timeAgo(r.decidedAt);
