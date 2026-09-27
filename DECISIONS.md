@@ -6987,3 +6987,37 @@ limit check can't be fed a wrong value. Service, rental and consulting quotes ke
 teammate's save no longer makes them the owner — which also fixes the "Mine" filter, Home "my quotes", the letter
 signer and the spawned job's owner to the creator; Send, the Home stage move and the renewal send record the person
 who clicked (sent revision, "Install sold" task).
+
+## D398. A URL-driven search box never takes back its own navigation (#243, 2026-09-27)
+
+Companies, People, Vendors and the Specs library search share one hook, `useUrlSearchText`
+(`src/lib/use-url-search-text.ts`). The box re-syncs from the URL's `q` only when that `q` is not the value it last
+navigated to itself (`shouldAdoptUrlQ`, `src/lib/url-search-text.ts`) — so a slow server render landing mid-typing
+never rewinds the text, while Back or a clear link still does. Keystrokes use `router.replace` (no history entry per
+pause); filter chips and selects keep `push` and cancel any pending search. The URL still stores `q` trimmed.
+
+## D399. New Grid designs require a customer; the quote intake's pickers and save logic are shared (#244, 2026-09-27)
+
+The Grid intake uses the same customer / venue / contact controls (`src/components/customer-venue-contact-picker.tsx`)
+and the same create-or-link server logic (`src/lib/intake-customer.ts`) as `/quotes/new`, whose behaviour, messages
+and validation order are unchanged (its email-thread check still runs before any write). A customer is required, as
+on the quote intake. A picked venue is stored as the design's `siteId` (mapped through `docLocId`) and must belong to
+the chosen customer, checked before any write; any venue pick against a brand-new customer is refused. `GridProject`
+gains an optional `contactName`, which only the first draft quote picks up. Picking a venue fills only empty cover-page
+fields ("Location — Type" venue names split into campus and space); if the cover page is left blank, the server fills
+it from the venue. Renaming and re-linking a customer in the editor need `create` (same as delete — the customer sets
+the pricing tier); without it the header shows them as plain text. Changing the customer clears the venue and contact.
+
+## D400. The Grid intake's own defaults: Auditorium 50 × 30 × 20, 10' wings, 45' grid (#244, 2026-09-27)
+
+`gridIntakeDefaults()` (`src/lib/design/grid-intake.ts`) — venue `school` (Auditorium), size Large (a label only; the
+dimensions are explicit), the Auditorium preset's systems. Quick Design's shared `defaultAState` is untouched. The
+dimension sliders move in 1' steps (45 wasn't reachable in 2' steps from a 16' minimum) and each has a number box,
+clamped to the existing limits.
+
+## D401. A typed design title always wins (#244, 2026-09-27)
+
+A title typed at intake or in the editor header replaces the name, including one a design already had. A blank intake
+title keeps the existing rule: an untitled design is auto-named "Venue — Location". The rename updates the Grid
+project and its Designs-dashboard card together.
+

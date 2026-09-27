@@ -9079,3 +9079,44 @@ Spec: `docs/superpowers/specs/2026-09-27-quote-review-limits-design.md`; plan:
 
 **Still open (Jeff).** Fill in the limits — until then nothing changes. See D396, D397.
 
+
+---
+
+## 243. Companies search — typing lags and the text gets scrambled — DONE 2026-09-27 (D398)
+
+**Reported:** 2026-09-27 (Jeff): "The search in companies is buggy it is like delayed when you type and then the text
+gets all confused."
+
+**Done.** Each pause in typing reloaded the page for the search so far, and that reload is heavy (every company,
+quote, project and drive time). When a slow reload landed after you had kept typing, the box was reset to the older
+text — letters vanished and reappeared, and spaces were eaten. The box now keeps what you typed; only an outside
+change (Back, a clear link) resets it. Searching no longer adds a Back-button entry per pause, and Companies shows
+"Searching…" while results load. The same fix covers the People, Vendors and Specs library search boxes, which had
+the same code. See D398.
+
+**Still open.** The page itself is still a full server render per search; if it still feels slow on production with
+the real book, the next step is making the directory query lighter.
+
+---
+
+## 244. The Grid — new designs link a customer; one-page intake; Auditorium defaults; editable title — DONE 2026-09-27 (D399–D401)
+
+**Reported:** 2026-09-27 (Jeff): "New Grid Designs need to link to customers similar to how the estimator on intake
+handles all of that. Also default should be an Auditorium with a 50 width x 30 depth x 20 high with 10ft wings and a
+45ft grid height. Also there is no where to change the design title. I feel like the type and the venue should be on
+the same page that just when you select blank or auto it drops down the menu for the venue information but before the
+type should be the customer information."
+
+**Done.**
+- **One page, top to bottom:** design title → customer, venue and contact (the same pick / add new / skip controls as
+  the quote intake) → Start from Auto or Blank. Choosing one drops down the venue section (type, size, scopes,
+  dimensions, cover page). Auto then goes on to the Equipment step as before.
+- **Customer required;** picking one of the customer's venues links the design to it and fills any empty cover-page
+  fields. A new customer, venue or contact is created exactly the way the quote intake creates them.
+- **Defaults:** Auditorium, 50' wide × 30' deep × 20' high, 10' wings, 45' grid (Quick Design's own defaults are
+  unchanged). Sliders move in 1' steps and each has a box to type an exact number.
+- **Title:** typed at intake (blank keeps the "Venue — Location" auto-name), and editable later by clicking it in the
+  Grid editor's header. The customer can be linked or changed there too — needed for designs made before this.
+- The first draft quote from a design carries its contact.
+
+**Still open.** None. See D399–D401.
