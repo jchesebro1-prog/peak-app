@@ -1,6 +1,7 @@
 /**
  * Pure halves of catalog/actions.ts, so the harness can test them.
  */
+import { normalizeVisibility } from "@/lib/portal-visibility";
 
 function num(v: FormDataEntryValue | null): number {
   const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
@@ -22,6 +23,9 @@ export type OptionalPartFields = {
   curtainAreaRate?: number;
   /** #227 — Fabric parts only: bolt width in inches. */
   boltWidthIn?: number;
+  /** #242 Task 5 — an explicit Show/Hide portal-visibility override; Auto is
+   *  stored as absent (undefined clears through mergeUpsert). */
+  portalVisibility?: "show" | "hide" | undefined;
 };
 
 /**
@@ -39,6 +43,10 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   if (fd.has("mapPrice")) out.mapPrice = num(fd.get("mapPrice"));
   if (fd.has("curtainAreaRate")) out.curtainAreaRate = positive(fd.get("curtainAreaRate"));
   if (fd.has("boltWidthIn")) out.boltWidthIn = positive(fd.get("boltWidthIn"));
+  if (fd.has("portalVisibility")) {
+    const v = normalizeVisibility(fd.get("portalVisibility"));
+    out.portalVisibility = v === "auto" ? undefined : v;
+  }
   return out;
 }
 

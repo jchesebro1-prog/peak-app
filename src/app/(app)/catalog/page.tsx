@@ -23,11 +23,13 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { buildImageIndex, imagesFor, partDocsView, type PartDocsView } from "@/lib/part-docs/views";
+import { buildImageIndex, imagesFor, partDocsView, viewSatisfied, type PartDocsView } from "@/lib/part-docs/views";
 import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
+import { loadPortalRules } from "@/lib/freight-rule-load";
+import { browseReason, normalizeVisibility } from "@/lib/portal-visibility";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 // Part documents (#207): the part editor's slot cell calls fetchLinksAction
@@ -210,6 +212,24 @@ export default async function CatalogPage({
         const imageIndex = buildImageIndex(state.documents, state.links);
         return partDocsView(state.index, editingPart.sku, (s) => descBySku!.get(s) ?? "", imagesFor(imageIndex, editingPart.sku));
       })()
+    : null;
+
+  // Customer visibility (#242 Task 5) — the reason line under the part
+  // editor's Auto/Show/Hide selector. Until Task 7's part-doc index lands,
+  // `hasVisibleImage`/`hasDatasheet` read the already-loaded partDocs view
+  // (partDocs is null for a brand-new, unsaved part, so both read false) and
+  // `quoteCount` is a placeholder 0 — switch to `portalFactsForSku` in Task 7
+  // Step 5.
+  const visibilityReason = showForm
+    ? browseReason(
+        {
+          visibility: normalizeVisibility(editingPart?.portalVisibility),
+          hasVisibleImage: !!partDocs?.images.some((img) => !img.hidden),
+          hasDatasheet: !!partDocs && viewSatisfied(partDocs.slots.datasheet),
+          quoteCount: 0,
+        },
+        { minQuotes: (await loadPortalRules()).browseMinQuotes }
+      )
     : null;
 
   return (
@@ -587,6 +607,7 @@ export default async function CatalogPage({
           specTemplates={specTemplates}
           defaultArticleId={defaultArticleId}
           partDocs={partDocs}
+          visibilityReason={visibilityReason}
           error={partError}
         />
       )}
@@ -699,6 +720,7 @@ function PartFormModal({
   specTemplates,
   defaultArticleId,
   partDocs,
+  visibilityReason,
   error,
 }: {
   part: CatalogPart | null;
@@ -718,6 +740,10 @@ function PartFormModal({
   defaultArticleId: string | null;
   /** Part documents (#207) — null for a new, unsaved part. */
   partDocs: PartDocsView | null;
+  /** #242 Task 5 — the reason line under the visibility selector, computed
+   *  server-side from the current facts + the browse rule. Null when the
+   *  form isn't showing at all (never both showForm and null in practice). */
+  visibilityReason: string | null;
   /** #158 — a rejected `ports` field bounces here via ?partError=; empty string renders nothing. */
   error: string;
 }) {
@@ -987,6 +1013,28 @@ function PartFormModal({
                 <PartDocumentsSection key={part.sku} view={partDocs} />
               </div>
             )}
+
+            {/* Customer visibility (#242 Task 5) — Auto lets the browse
+                rule decide (image, datasheet, or recent quotes); Show/Hide
+                override it outright. The reason line beneath explains what
+                the portal currently does with THIS part, so an override is
+                never a mystery. */}
+            <div style={{ marginTop: 16, paddingTop: 13, borderTop: "1px solid #f0f1f4" }}>
+              {label("Customer visibility")}
+              <select
+                name="portalVisibility"
+                defaultValue={normalizeVisibility(part?.portalVisibility)}
+                className="ct-sel"
+                style={inputStyle}
+              >
+                <option value="auto">Auto</option>
+                <option value="show">Show</option>
+                <option value="hide">Hide</option>
+              </select>
+              {visibilityReason && (
+                <div style={{ fontSize: 11, color: "#aab0bb", marginTop: 4 }}>{visibilityReason}</div>
+              )}
+            </div>
 
             {/* Spec panel (Task 13) — the article, entry title, same-as
                 pointer, outline body and a live preview of how it prints.

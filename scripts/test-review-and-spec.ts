@@ -5571,6 +5571,16 @@ async function asyncChecks(): Promise<void> {
       "#81 create still applies its own defaults for absent columns"
     );
 
+    // #242 Task 5 — a price-book re-import must never clear a stored portal
+    // visibility override: catalogPatch's returned patch simply never
+    // carries the key, so mergeUpsert (which treats a key's mere presence,
+    // even undefined, as "overwrite this") leaves it alone either way.
+    const storedHidden = { ...stored, portalVisibility: "hide" as const };
+    ok(
+      !("portalVisibility" in catalogPatch(noCost.rows[0].values, storedHidden, "S4LED-S2")),
+      "#242 visibility: a price-book import patch never touches portalVisibility — a stored Show/Hide override survives re-import"
+    );
+
     /* ---- #204: a price-only Import-hub catalog import must not zero MAP ----
      * `v.mapPrice` is a "number"-kind field, so `coerce()` turns an absent
      * column OR a blank cell into the number 0 (never `undefined`) — the same
@@ -27704,4 +27714,28 @@ async function portal242ImagesTask4AsyncChecks(): Promise<void> {
   // can't run from this harness (server actions need requireUser()'s
   // request-scoped session) — the store-level equivalent is exercised via
   // setDocumentLinkDisplay/setImageOrder above.
+}
+
+/* ======================================================================
+   Portal catalog — customer visibility (#242, Task 5; spec §1.3). Pure:
+   quotable/browsable/browseReason/normalizeVisibility, the Auto/Show/Hide
+   rule the part editor's selector and (later) the portal catalog itself
+   both read. No DB check — the field is a plain optional CatalogPart column
+   written only through mergeUpsert (never wiped by an importer/enricher
+   patch — see the #242 assertion beside the #81 re-import checks above).
+   ====================================================================== */
+import { browsable as d242Browsable, browseReason as d242Reason, quotable as d242Quotable, normalizeVisibility as d242NormVis } from "@/lib/portal-visibility";
+{
+  const rule = { minQuotes: 3 };
+  const base = { visibility: "auto" as const, hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 };
+  ok(d242Quotable(base) && d242Quotable({ visibility: "show" }) && !d242Quotable({ visibility: "hide" }), "#242 visibility: everything but Hide is quotable");
+  ok(!d242Browsable(base, rule), "#242 visibility: auto with no image/datasheet/quotes is search-only");
+  ok(d242Browsable({ ...base, hasVisibleImage: true }, rule) && d242Browsable({ ...base, hasDatasheet: true }, rule), "#242 visibility: image or datasheet makes it browsable");
+  ok(!d242Browsable({ ...base, quoteCount: 2 }, rule) && d242Browsable({ ...base, quoteCount: 3 }, rule), "#242 visibility: 3+ recent quotes makes it browsable");
+  ok(d242Browsable({ ...base, visibility: "show" }, rule) && !d242Browsable({ ...base, visibility: "hide", hasVisibleImage: true }, rule), "#242 visibility: overrides win both ways");
+  ok(d242Reason({ ...base, hasVisibleImage: true }, rule) === "Browsable: has image", "#242 visibility: reason names the first matching fact");
+  ok(d242Reason({ ...base, quoteCount: 5 }, rule) === "Browsable: quoted 5 times recently", "#242 visibility: quote-count reason");
+  ok(d242Reason({ ...base, visibility: "hide" }, rule) === "Hidden from customers", "#242 visibility: hide reason");
+  ok(d242Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#242 visibility: search-only reason");
+  ok(d242NormVis("bogus") === "auto" && d242NormVis(undefined) === "auto" && d242NormVis("hide") === "hide", "#242 visibility: unknown values read as auto");
 }
