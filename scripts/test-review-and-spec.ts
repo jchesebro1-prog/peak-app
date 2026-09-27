@@ -10515,6 +10515,7 @@ seeded()
   .then(() => tasks215AsyncChecks())
   .then(() => calendarTasks215AsyncChecks())
   .then(() => inboxTask215AsyncChecks())
+  .then(() => wireLabor231AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -22203,4 +22204,81 @@ import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } fr
   ok(ff.includes('const isParts = draft.kind !== "fixture"') && ff.includes("isHardware"), "#228: the form edits hardware as one parts list");
   const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
   ok(emc.includes('a.kind === "hardware" ? "Hardware"') && emc.includes("Assembly (fixture, system or hardware)"), "#228: the map picker labels hardware assemblies");
+}
+
+/* --- #231/#232 T1: wire pull + system labor — rules and formulas (pure) --- */
+import * as wl231 from "@/lib/design/wire-labor";
+import { GROUPS as wl231Groups } from "@/lib/stores/pricing";
+{
+  const d = wl231.defaultWireLaborRules();
+  ok(wl231.WIRE_SYSTEMS.every((s) => d.wire[s].runs === 0 && d.wire[s].mult.good === 1 && d.wire[s].mult.better === 1.15 && d.wire[s].mult.best === 1.3),
+    "#231: every wire system defaults to 0 runs (off) and ×1.0 / ×1.15 / ×1.3");
+  ok(wl231.LABOR_SYSTEMS.every((s) => d.labor[s].pct === 18 && d.labor[s].mult.good === 1 && d.labor[s].mult.better === 1.15 && d.labor[s].mult.best === 1.3),
+    "#232: every labor system defaults to 18% and ×1.0 / ×1.15 / ×1.3");
+  const stored: Record<string, unknown> = { "wire.lighting.runs": 2, "wire.lighting.best": 1.5, "labor.audio.pct": 25, "labor.video.pct": -4, "wire.audio.runs": 999, "labor.pit.good": null };
+  const r = wl231.wireLaborRulesFrom((id) => stored[id]);
+  ok(r.wire.lighting.runs === 2 && r.wire.lighting.mult.best === 1.5 && r.labor.audio.pct === 25 && r.labor.video.pct === 18 && r.wire.audio.runs === wl231.RUNS_MAX && r.labor.pit.mult.good === 1,
+    "#231/#232: stored rates are read, junk falls back to the default, and values cap at the rule maximum");
+  const dims = wl231.wireDimsOf({ width: 40, depth: 30 });
+  const lightRule = { runs: 2, mult: d.wire.lighting.mult };
+  const f = wl231.wirePullFeet(dims, lightRule, "better");
+  ok(f.feet === 161 && f.missing.join() === "houseDepth", `#231: feet = (40 + 30 + 0) × 2 runs × 1.15 = 161, house depth missing (${f.feet})`);
+  ok(wl231.wirePullNote(f.missing) === "House depth not entered — counted as 0 ft", "#231: a missing dimension is noted on the line");
+  ok(wl231.wirePullFeet(dims, lightRule, null).feet === 140, "#231: no tier chosen → ×1.0");
+  ok(wl231.wirePullFeet(dims, { runs: 2.5, mult: d.wire.lighting.mult }, "best").feet === 228, "#231: footage rounds UP to a whole foot (227.5 → 228)");
+  ok(wl231.wirePullFeet(dims, { runs: 0, mult: d.wire.lighting.mult }, "best").feet === 0, "#231: 0 runs → no footage");
+  const none = wl231.wirePullFeet({}, { runs: 3, mult: d.wire.lighting.mult }, "good");
+  ok(none.feet === 0 && none.missing.length === 3, "#231: every dimension missing → 0 ft, all three noted");
+  ok(wl231.laborAmount(10000, d.labor.lighting, "better") === 2070 && wl231.laborAmount(10000, d.labor.lighting, null) === 1800 && wl231.laborAmount(10000, d.labor.lighting, "best") === 2340,
+    "#232: labor = material × 18% × 1.15 / ×1.0 (none) / ×1.3");
+  ok(wl231.laborAmount(0, d.labor.lighting, "best") === 0, "#232: no material → no labor");
+  const fr = wl231.laborFracsFor(d, "good");
+  ok(Object.keys(fr).length === 8 && Object.values(fr).every((v) => v === 0.18), "#232: at Good every Quick Design system's fraction is today's flat 18%");
+  const lines = wl231.gridLaborLines({ lighting: 10000, general: 500, audio: 0 }, (s) => (s === "lighting" ? "better" : null), d, {});
+  ok(lines.map((l) => `${l.sku}=${l.amount}`).join() === "labor:lighting=2070,labor:general=90", `#232: one Grid labor line per system with material, in system order (${lines.map((l) => l.sku).join()})`);
+  const ov = wl231.gridLaborLines({ lighting: 10000 }, () => "better", d, { lighting: 1500, audio: 0 });
+  ok(ov[0].amount === 1500 && ov[0].computed === 2070 && ov[0].overridden && ov[1]?.system === "audio" && ov[1].amount === 0 && ov[1].overridden,
+    "#232: a typed $ overrides; an override on a system with no material still shows, so it can be reset");
+  ok(wl231.laborLineDesc("lighting") === "Labor — Lighting" && wl231.isLaborSku("labor:general") && !wl231.isLaborSku("LIG-LBR"), "#232: labor lines read 'Labor — <System>' under a labor: sku");
+  ok(JSON.stringify(wl231.sanitizeLaborOverrides({ lighting: 1200.5, audio: -1, bogus: 5, video: "7", rigging: 2e7 })) === '{"lighting":1200.5}',
+    "#232: overrides keep known systems with a $0–$10M number");
+  ok(JSON.stringify(wl231.applyLaborOverride({ lighting: 5 }, "audio", 0)) === '{"lighting":5,"audio":0}' && JSON.stringify(wl231.applyLaborOverride({ lighting: 5 }, "lighting", null)) === "{}",
+    "#232: set or clear one system's override");
+  ok(wl231.laborSystemOf("rigging", "Lighting") === "rigging" && wl231.laborSystemOf(undefined, "Audio") === "audio" && wl231.laborSystemOf(null, "Unscoped") === "general" && wl231.laborSystemOf(null, "constructor") === "general",
+    "#232: an Auto tag's scope wins, then the part's Grid scope, else General");
+  const ids = new Set(wl231Groups.flatMap((g) => g.items.map((it) => it.id)));
+  ok(wl231.WIRE_SYSTEMS.every((s) => ["runs", "good", "better", "best"].every((x) => ids.has(`wire.${s}.${x}`))) && wl231.LABOR_SYSTEMS.every((s) => ["pct", "good", "better", "best"].every((x) => ids.has(`labor.${s}.${x}`))),
+    "#231/#232: Estimating Rules carries runs / labor % and Good/Better/Best × for every system");
+  const wlSrc = readFileSync(join(process.cwd(), "src/lib/design/wire-labor.ts"), "utf8");
+  ok([...wlSrc.matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].length === 0, "#231/#232: wire-labor.ts has type-only imports — safe for client components");
+
+  // Controller decision: an unset per-system labor % takes the CURRENT stored flat install %, so Good-tier totals never shift on deploy.
+  const legacy: Record<string, unknown> = { [wl231.LEGACY_INSTALL_PCT_ID]: 20, "labor.audio.pct": 25 };
+  const lg = wl231.wireLaborRulesFrom((id) => legacy[id]);
+  const lgFr = wl231.laborFracsFor(lg, "good");
+  ok(wl231.LABOR_SYSTEMS.every((s) => lg.labor[s].pct === (s === "audio" ? 25 : 20)) && lgFr.lighting === 0.2 && lgFr.audio === 0.25,
+    "#232: an unset system's labor % defaults to the stored install % (20 → every system 20%, Good fraction 0.20); a per-system value still wins");
+  const junk = (v: unknown) => wl231.wireLaborRulesFrom((id) => (id === wl231.LEGACY_INSTALL_PCT_ID ? v : undefined)).labor.lighting.pct;
+  ok(junk(-3) === 18 && junk("20") === 18 && junk(Number.NaN) === 18 && junk(null) === 18 && junk(999) === wl231.LABOR_PCT_MAX && junk(0) === 0,
+    "#232: a missing or junk stored install % leaves the 18% default; an over-max one caps; a stored 0 stays 0");
+}
+
+/* #231/#232 T1 (b) — the rules loader against the scratch DB. Leaves the defaults behind. */
+async function wireLabor231AsyncChecks(): Promise<void> {
+  const P = await import("@/lib/stores/pricing");
+  const fresh = await P.loadWireLaborRules();
+  ok(JSON.stringify(fresh) === JSON.stringify(wl231.defaultWireLaborRules()), "#231/#232: a fresh database reads the default rules");
+  await P.setValue("wire.lighting.runs", 3);
+  await P.setValue("labor.audio.pct", 22.5);
+  const set = await P.loadWireLaborRules();
+  ok(set.wire.lighting.runs === 3 && set.labor.audio.pct === 22.5 && set.wire.audio.runs === 0, "#231/#232: Estimating Rules edits reach the loader");
+  // The flat install % written straight into the blob (Task 3 retires its registry row; the stored value stays).
+  await setBlob219("pricing_rules", { [wl231.LEGACY_INSTALL_PCT_ID]: 21 });
+  const legacy = await P.loadWireLaborRules();
+  ok(legacy.labor.lighting.pct === 21 && legacy.labor.general.pct === 21 && legacy.labor.audio.pct === 22.5 && (await P.value("labor.lighting.pct")) === 21,
+    "#232: a stored install % of 21 seeds every unset system's labor % in the loader and on Estimating Rules");
+  await setBlob219("pricing_rules", { [wl231.LEGACY_INSTALL_PCT_ID]: null });
+  await P.setValue("wire.lighting.runs", 0);
+  await P.setValue("labor.audio.pct", 18);
+  ok(JSON.stringify(await P.loadWireLaborRules()) === JSON.stringify(wl231.defaultWireLaborRules()), "#231/#232: resetting restores the defaults (later suites see the defaults)");
 }

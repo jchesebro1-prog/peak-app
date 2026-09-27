@@ -1,6 +1,22 @@
 import { getBlob, setBlob } from "@/db/doc-store";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { FLY_CREW_DEFAULTS, FLY_RATE_DEFAULTS, type FlyRates } from "@/lib/travel-plan";
+import {
+  DEFAULT_LABOR_PCT,
+  DEFAULT_RUNS,
+  DEFAULT_TIER_MULTS,
+  LABOR_PCT_MAX,
+  LABOR_SYSTEMS,
+  LABOR_SYSTEM_LABEL,
+  MULT_MAX,
+  RUNS_MAX,
+  WIRE_SYSTEMS,
+  laborPctDefault,
+  laborRateId,
+  wireLaborRulesFrom,
+  wireRateId,
+  type WireLaborRules,
+} from "@/lib/design/wire-labor";
 
 /**
  * PricingRules — server port of app/pricing.js: the single master registry of
@@ -342,6 +358,14 @@ export function formula(
 
 /* ---------- the master registry (ported verbatim from pricing.js) ---------- */
 
+/** #231/#232: one system's Good / Better / Best multiplier rates. */
+function tierMultRates(idOf: (t: "good" | "better" | "best") => string, label: string): RateEntry[] {
+  const name = { good: "Good", better: "Better", best: "Best" } as const;
+  return (["good", "better", "best"] as const).map((t) =>
+    rate(idOf(t), `${label} — ${name[t]} ×`, DEFAULT_TIER_MULTS[t], "×", { min: 0, max: MULT_MAX, step: 0.05 })
+  );
+}
+
 export const GROUPS: PricingGroup[] = [
   {
     key: "system", label: "System design", live: true,
@@ -519,7 +543,34 @@ export const GROUPS: PricingGroup[] = [
       rate("grid.laborHoursPerDevice", "Install labor — hours per device", 0.5, "hr", { min: 0, max: 8, step: 0.05, help: "Hours of install labor The Grid suggests per placed device, before any per-part override. design/grid/[id]/page.tsx reads this via num(), not frac() — the stored value IS the hours figure." }),
     ],
   },
+  {
+    key: "wire", label: "Wire pull", live: true,
+    sub: "Per-system wire-pull footage by venue size × tier (#231)",
+    note: "Live — Quick Design and Grid Auto estimates read these. 0 runs (the default) adds no Wire pull line. The footage is a quantity: each system's “Wire pull” row in Grid Settings → Equipment map prices it.",
+    items: [
+      ...WIRE_SYSTEMS.flatMap((sys) => [
+        rate(wireRateId(sys, "runs"), `${LABOR_SYSTEM_LABEL[sys]} — runs`, DEFAULT_RUNS, "runs", { min: 0, max: RUNS_MAX, step: 1, help: "feet = (stage width + stage depth + house depth) × runs × tier ×. 0 = no wire pull for this system." }),
+        ...tierMultRates((t) => wireRateId(sys, t), LABOR_SYSTEM_LABEL[sys]),
+      ]),
+      formula("wire.feet", "Wire pull footage", "feet = ⌈(stage width + stage depth + house depth) × runs × tier ×⌉ — a missing dimension counts 0 and the line says so"),
+    ],
+  },
+  {
+    key: "labor", label: "System labor", live: true,
+    sub: "Per-system labor as a % of that system's material × tier (#232)",
+    note: "Live — replaces the flat install % and the Grid's hours-per-device suggestion. Material = the system's priced equipment and wire pull. The tier is the design's (Quick Design) or the scope's Auto choice (the Grid); none chosen → ×1.0. General = Grid lines with no system. A system with no labor % of its own uses the stored install %, else 18.",
+    items: [
+      ...LABOR_SYSTEMS.flatMap((sys) => [
+        rate(laborRateId(sys, "pct"), `${LABOR_SYSTEM_LABEL[sys]} — labor %`, DEFAULT_LABOR_PCT, "%", { min: 0, max: LABOR_PCT_MAX, step: 0.5, help: "labor = system material × this % × tier ×" }),
+        ...tierMultRates((t) => laborRateId(sys, t), LABOR_SYSTEM_LABEL[sys]),
+      ]),
+      formula("labor.amount", "System labor", "labor = system material × labor % × tier ×  (Good / Better / Best; none chosen → ×1.0)"),
+    ],
+  },
 ];
+
+/** #232: the per-system labor % ids — unset, they read the stored install % (laborPctDefault), not their registry def. */
+const LABOR_PCT_IDS: ReadonlySet<string> = new Set(LABOR_SYSTEMS.map((sys) => laborRateId(sys, "pct")));
 
 let BY_ID: Record<string, PricingEntry> = {};
 function reindex(): void {
@@ -568,7 +619,8 @@ export async function value(
   }
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   const gv = g[it.id];
-  return gv == null ? it.def : gv;
+  if (gv != null) return gv;
+  return LABOR_PCT_IDS.has(it.id) ? laborPctDefault((id) => g[id]) : it.def;
 }
 
 export async function setValue(
@@ -622,6 +674,12 @@ export async function num(id: string, fb: number): Promise<number> {
 /** num() as a fraction: frac('system.installPct', 0.18) → 0.18 when default. */
 export async function frac(id: string, fb?: number): Promise<number> {
   return (await num(id, fb != null ? fb * 100 : 0)) / 100;
+}
+
+/** #231/#232: the wire-pull and system-labor rules, in ONE read of the general blob. */
+export async function loadWireLaborRules(): Promise<WireLaborRules> {
+  const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
+  return wireLaborRulesFrom((id) => g[id]);
 }
 
 /* ---------- export ---------- */
