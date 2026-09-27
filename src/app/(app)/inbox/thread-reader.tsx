@@ -471,6 +471,11 @@ export default function ThreadReader({
   signature: string;
 }) {
   const router = useRouter();
+  // #215 fix wave 1 — TaskDialog's fallback focus target when its own
+  // opener is no longer on the page (e.g. it was opened from the Link
+  // popup's footer, whose own restore-focus can leave that opener
+  // re-rendered away by the time the task dialog closes).
+  const readerRootRef = useRef<HTMLDivElement>(null);
 
   // email composer state (component is keyed by thread id — resets per thread)
   const [mode, setMode] = useState<Mode | null>(null);
@@ -644,7 +649,11 @@ export default function ThreadReader({
   );
 
   return (
-    <div style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column" }}>
+    <div
+      ref={readerRootRef}
+      tabIndex={-1}
+      style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column", outline: "none" }}
+    >
       <div
         style={{
           flex: 1,
@@ -945,7 +954,12 @@ export default function ThreadReader({
               />
             )}
             {taskFor && (
-              <TaskDialog vm={vm} messageId={taskFor.messageId} onClose={() => setTaskFor(null)} />
+              <TaskDialog
+                vm={vm}
+                messageId={taskFor.messageId}
+                onClose={() => setTaskFor(null)}
+                containerRef={readerRootRef}
+              />
             )}
           </div>
 
@@ -1256,11 +1270,19 @@ export default function ThreadReader({
           messageId={linkFor.messageId}
           fromHeader={linkFor.fromHeader}
           onClose={() => setLinkFor(null)}
-          onCreateTask={() => {
-            const mid = linkFor.messageId;
-            setLinkFor(null);
-            openTask(mid);
-          }}
+          // #215 fix wave 1 — "Create task" only makes sense on an email
+          // thread ("Task…" itself is already isEmail-gated per message);
+          // Edit links opens on any channel, so this has to be gated here
+          // rather than relying on the popup never being asked for it.
+          onCreateTask={
+            vm.isEmail
+              ? () => {
+                  const mid = linkFor.messageId;
+                  setLinkFor(null);
+                  openTask(mid);
+                }
+              : undefined
+          }
         />
       )}
     </div>
