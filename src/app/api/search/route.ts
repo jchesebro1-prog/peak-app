@@ -61,7 +61,7 @@ export async function GET(req: Request) {
   // the doc), then apply the precise per-field filter below. Avoids
   // materializing whole tables — the catalog alone is ~10.7k rows.
   const CANDIDATES = 100;
-  const [quotes, designs, surveys, inspections, comms, companies, people, parts, recordings] =
+  const [quotes, designs, surveys, inspections, comms, companies, people, parts, recordings, partialQuotes] =
     await Promise.all([
       searchDocs("quotes", q, CANDIDATES),
       searchDocs("designs", q, CANDIDATES),
@@ -72,6 +72,7 @@ export async function GET(req: Request) {
       allContacts(),
       searchDocs("catalog_parts", q, CANDIDATES),
       searchDocs<RecordingRecord>("recordings", q, CANDIDATES),
+      quotesByPartialNumber(q, CANDIDATES),
     ]);
 
   const groups: Group[] = [];
@@ -88,7 +89,6 @@ export async function GET(req: Request) {
   // inside estNo too (bounded like every candidate set), then filtered by the
   // hub's own rule (quoteMatchesSearch) below.
   const parsedNo = parseEstimateNumber(q);
-  const partialQuotes = await quotesByPartialNumber(q, CANDIDATES);
   const [numberedQuotes, numberedLeads] = parsedNo
     ? await Promise.all([
         listDocsByField("quotes", "estNo", [String(parsedNo.estNo)]).then((rows) =>

@@ -230,9 +230,11 @@ export function quoteScope(q: ScopedQuote, scope: ReadonlyArray<string | null | 
  * customer at all. In order:
  * - no quote carries the number → none; all of them another company's →
  *   otherCompany;
- * - exactly one in scope → it;
  * - a typed full number (`EST-1010`: a prefix, no suffix) names the one
- *   unsuffixed quote under that prefix;
+ *   unsuffixed quote under that prefix exactly — even when it is the only
+ *   hit in scope, so it never falls through to a same-numbered suffixed
+ *   quote (`EST-1010-2`) instead;
+ * - exactly one in scope → it;
  * - with a scope, exactly one unsuffixed quote owned by that company → it
  *   (a bare `1010` on this company's opportunity means its first quote);
  * - otherwise ambiguous, listing the full numbers to choose from.
@@ -247,12 +249,15 @@ export function pickQuoteForNumber(
   const ownedByScope = (q: ScopedQuote) => quoteScope(q, scope) === "owned";
   const pool = named.filter((q) => quoteScope(q, scope) !== "other");
   if (!pool.length) return { otherCompany: true };
-  if (pool.length === 1) return { id: pool[0].id };
-  const unsuffixed = pool.filter((q) => effectiveSuffix(q) === 1);
+  // A full typed number (a prefix, no suffix) names exactly the one
+  // unsuffixed quote under that prefix — checked before the single-hit
+  // shortcut below, so EST-1010 never falls through to a lone EST-1010-2.
   if (parsed.prefix !== null && parsed.suffix === null) {
-    const exact = unsuffixed.filter((q) => prefixForQuoteType(q.quoteType) === parsed.prefix);
+    const exact = pool.filter((q) => effectiveSuffix(q) === 1 && prefixForQuoteType(q.quoteType) === parsed.prefix);
     if (exact.length === 1) return { id: exact[0].id };
   }
+  if (pool.length === 1) return { id: pool[0].id };
+  const unsuffixed = pool.filter((q) => effectiveSuffix(q) === 1);
   const ownUnsuffixed = unsuffixed.filter((q) => ownedByScope(q));
   if (ownUnsuffixed.length === 1) return { id: ownUnsuffixed[0].id };
   const ordered = [...pool].sort((a, b) => effectiveSuffix(a) - effectiveSuffix(b) || a.id.localeCompare(b.id));

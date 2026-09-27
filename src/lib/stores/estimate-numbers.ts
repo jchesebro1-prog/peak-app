@@ -7,7 +7,6 @@ import {
   parseEstimateNumber,
   partialEstimateDigits,
   pickQuoteForNumber,
-  quoteScope,
   type LeadNumberFields,
   type QuoteNumberFields,
 } from "@/lib/estimate-number";
@@ -121,11 +120,13 @@ type ScopeDoc = Doc & QuoteNumberFields & { customerId?: string | null; consulti
 
 /**
  * What a person typed into a "quote" field → one live quote (#223): an
- * internal id that exists (`Q-2041` keeps working), or an estimate number
- * (`CON-1010`, `1010`) picked by pickQuoteForNumber. `customerIds` scopes the
- * match to a company (an engagement's): another company's quote is refused
- * as "other-company", never reported as missing; empty = a global lookup.
- * The input is bounded to 120 characters.
+ * internal id that exists (`Q-2041` keeps working) or a FULL typed number
+ * (a prefix, e.g. `EST-1010`/`EST-1010-2`) resolves globally, unscoped — an
+ * install quote is often billed to a GC or architect, not the engagement's
+ * own customer. Only a BARE number (digits, optional suffix, no prefix)
+ * is scoped to `customerIds`: another company's quote is refused as
+ * "other-company", never reported as missing; empty scope = a global
+ * lookup either way. The input is bounded to 120 characters.
  */
 export async function resolveQuoteInput(
   input: string,
@@ -135,13 +136,13 @@ export async function resolveQuoteInput(
   if (!s) return { ok: false, reason: "none" };
   const scope = opts.customerIds ?? [];
   const byId = await getDoc<ScopeDoc>("quotes", s);
-  if (byId) {
-    return quoteScope(byId, scope) === "other" ? { ok: false, reason: "other-company" } : { ok: true, id: byId.id };
-  }
+  if (byId) return { ok: true, id: byId.id };
   const parsed = parseEstimateNumber(s);
   if (!parsed) return { ok: false, reason: "none" };
   const hits = await listDocsByField<ScopeDoc>("quotes", "estNo", [String(parsed.estNo)]);
-  const pick = pickQuoteForNumber(hits, parsed, scope);
+  // A full typed number (has a prefix, e.g. EST-1010 / EST-1010-2) resolves
+  // globally like an internal id — never scoped to the engagement's company.
+  const pick = pickQuoteForNumber(hits, parsed, parsed.prefix !== null ? [] : scope);
   if ("id" in pick) return { ok: true, id: pick.id };
   if ("ambiguous" in pick) return { ok: false, reason: "ambiguous", numbers: pick.ambiguous };
   if ("otherCompany" in pick) return { ok: false, reason: "other-company" };
@@ -164,11 +165,13 @@ export async function findQuoteIdByNumberOrId(
 /**
  * ⌘K candidates for a typed partial number — `flm100`, `FLM-100`, `100` —
  * found by those digits inside `doc->>'estNo'` (the doc text holds
- * `"estNo": 1005`, never "FLM-1005"), live rows only, at most `limit`. The
- * caller still filters and ranks with quoteSearchRank. Empty for words.
+ * `"estNo": 1005`, never "FLM-1005"), live rows only, at most `limit`,
+ * newest number first — so when a partial digit run matches more than
+ * `limit` quotes, the cap keeps the most recent ones. The caller still
+ * filters and ranks with quoteSearchRank. Empty for words.
  */
 export async function quotesByPartialNumber(term: string, limit: number): Promise<Doc[]> {
   const digits = partialEstimateDigits(term);
   if (!digits) return [];
-  return listDocsFiltered("quotes", { textFields: ["estNo"], text: digits, limit });
+  return listDocsFiltered("quotes", { textFields: ["estNo"], text: digits, limit, orderByNumericDesc: "estNo" });
 }

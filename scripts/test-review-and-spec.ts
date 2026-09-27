@@ -26187,11 +26187,37 @@ async function estimate223SweepDAsyncChecks(): Promise<void> {
   const global = await e223ResolveInput(n);
   ok(!global.ok && global.reason === "ambiguous" && global.numbers.includes(`EST-${n}-2`), "#223 resolveQuoteInput: no scope → ambiguous, with the full numbers");
   const byIdOther = await e223ResolveInput(qb.id, { customerIds: ["c223-nobody"] });
-  ok(!byIdOther.ok && byIdOther.reason === "other-company", "#223 resolveQuoteInput: an internal id of another company's quote is refused too");
+  ok(byIdOther.ok && byIdOther.id === qb.id, "#223 resolveQuoteInput: an internal id resolves globally, even scoped to a company that doesn't own it");
   const byId = await e223ResolveInput(qb.id);
   const missing = await e223ResolveInput("EST-999999999");
   ok(byId.ok && byId.id === qb.id && !missing.ok && missing.reason === "none", "#223 resolveQuoteInput: an internal id still works; an unknown number is 'none'");
   ok((await e223FindQuote(n)) === null, "#223 findQuoteIdByNumberOrId keeps refusing an ambiguous bare number");
+
+  // C2 — review fix: a FULL typed number (a prefix) resolves globally, even
+  // scoped to a company that doesn't own the exact match — an install quote
+  // is often billed to a GC/architect, not the engagement's own customer.
+  // A bare number stays scoped. Two quotes share one lead's number: the
+  // unsuffixed one billed to "the GC", the suffixed one billed to the
+  // engagement's own customer.
+  const lead2 = await e223Leads.create({ id: id("t7-lead2"), org: "#223 T7 Co 2" }, "spec");
+  e223Register("leads", lead2.id);
+  const qGc = await e223Quotes.create({ id: id("t7-gc"), name: "#223 t7 gc", owner: "spec", leadId: lead2.id, customerId: "c223-gc" });
+  e223Register("quotes", qGc.id);
+  const qEng = await e223Quotes.create({ id: id("t7-eng"), name: "#223 t7 eng", owner: "spec", leadId: lead2.id, customerId: "c223-eng" });
+  e223Register("quotes", qEng.id);
+  const n2 = String(lead2.estNo);
+  const fullOtherCompany = await e223ResolveInput(`EST-${n2}`, { customerIds: ["c223-eng"] });
+  ok(
+    fullOtherCompany.ok && fullOtherCompany.id === qGc.id,
+    "#223 resolveQuoteInput: a full typed number resolves globally — EST-<n> picks the GC's unsuffixed quote even scoped to the engagement's own customer"
+  );
+  const bareStaysScoped = await e223ResolveInput(n2, { customerIds: ["c223-eng"] });
+  ok(bareStaysScoped.ok && bareStaysScoped.id === qEng.id, "#223 resolveQuoteInput: a bare number (no prefix) still scopes to the engagement's customer");
+  const fullSuffixedOtherCompany = await e223ResolveInput(`EST-${n2}-2`, { customerIds: ["c223-gc"] });
+  ok(
+    fullSuffixedOtherCompany.ok && fullSuffixedOtherCompany.id === qEng.id,
+    "#223 resolveQuoteInput: a full suffixed number (EST-<n>-2) also resolves globally, scoped or not"
+  );
 
   // B — ⌘K candidates by prefix + partial digits.
   const partial = await e223ByPartial(`est${n.slice(0, -1)}`, 500);

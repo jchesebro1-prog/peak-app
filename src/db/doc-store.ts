@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
@@ -102,11 +102,19 @@ export async function searchDocs<T extends Doc = Doc>(
  *
  * Both are supersets of the caller's exact JS check, which re-runs on the
  * result. Field names are code constants, passed as bound parameters.
- * `limit` caps the rows (id order); omit it for no cap.
+ * `limit` caps the rows, in id order by default; `orderByNumericDesc` (a doc
+ * field holding a number, e.g. `estNo`) orders newest-first instead, so a
+ * capped result keeps the most recent matches rather than the oldest ids.
  */
 export async function listDocsFiltered<T extends Doc = Doc>(
   coll: CollectionName,
-  opts: { textFields?: readonly string[]; text?: string; nonEmpty?: readonly string[]; limit?: number }
+  opts: {
+    textFields?: readonly string[];
+    text?: string;
+    nonEmpty?: readonly string[];
+    limit?: number;
+    orderByNumericDesc?: string;
+  }
 ): Promise<T[]> {
   const db = await getDb();
   const t = table(coll);
@@ -127,7 +135,10 @@ export async function listDocsFiltered<T extends Doc = Doc>(
     );
     where.push(sql`(${anyNonEmpty})`);
   }
-  const q = db.select().from(t).where(and(...where)).orderBy(asc(t.id));
+  const order = opts.orderByNumericDesc
+    ? desc(sql`(${t.doc}->>${opts.orderByNumericDesc})::numeric`)
+    : asc(t.id);
+  const q = db.select().from(t).where(and(...where)).orderBy(order);
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
