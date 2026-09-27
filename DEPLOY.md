@@ -294,6 +294,12 @@ Every quote save renders the customer document to a PDF after the response
 
 - **Updates:** every `git push` to `main` redeploys automatically
   (migrations run during the build).
+- **Never use Vercel's Instant Rollback to a deploy older than migration
+  0030 (estimate numbers, #223).** Code from before it writes quote/lead
+  documents with no `estNo`, and the next document created after that
+  rollback re-numbers from the counter as if those records never had one —
+  it does not restore their old numbers. If a bad deploy needs undoing, roll
+  forward with a fix instead of rolling back past 0030.
 - **Custom domain** (optional, QUESTIONS.md #2): Vercel → Settings →
   Domains → add e.g. `app.peaksystemsgroup.com`, follow its DNS
   instructions, then add the matching

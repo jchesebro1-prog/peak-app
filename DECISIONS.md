@@ -6870,15 +6870,18 @@ Console Accessories, Emergency, Power Controls – Production/Architectural, Arc
 Distribution, and Distro system → Labor), and Quick Design now reads labels from the vocabulary by key instead of
 repeating them. Saved Quick Design qty overrides keyed by an old label are re-homed through a read-time alias map
 (one hop; a new label wins when both exist). `controls:outputStation` moves to `lighting:cablePackage` ("Cable
-Package"); an Equipment-map entry saved under the old key is read as the new one unless the blob already has its own
-`lighting:cablePackage`, and the next save writes the new key.
+Package") as a ROW, but deliberately carries **no** key or label alias for that one move: Cable Package is priced
+per cable (D393), not by the old row's math, so an old Output-station part mapping or typed qty must not carry over
+and misprice it. An Equipment-map entry saved under `controls:outputStation` is simply unknown now and dropped;
+Cable Package starts unmapped.
 
 ## D392. Cable Package follows Lighting, so every Lighting design gains a line that needs mapping (#233, 2026-09-27)
 
 The moved Cable Package row is now gated on Lighting being on, not Controls + Data as Output station was. Knock-on:
 every design with Lighting — Quick Design and Grid Auto — gains a Cable Package line (quantity per D393), and until that
 row is mapped (a part, an allowance, or Not included) the design reads Incomplete and Add to Quotes refuses it, per
-D310/D322. An existing Output station mapping carries over through the alias in D391.
+D310/D322. An existing Output station mapping does **not** carry over (D391) — Cable Package starts unmapped even on
+a design that had Output station mapped.
 
 ## D393. Cable Package quantity = fixtures × per fixture × tier (#233, 2026-09-27)
 

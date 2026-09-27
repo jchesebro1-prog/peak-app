@@ -8967,14 +8967,17 @@ Production; Distro system → Labor; and the rigging/controls renames below. Spe
   Controls – Production; Button → Power Controls – Architectural; Architectural touch screen → Architectural
   Controls; Input station → DMX Distribution; Distro system → Labor.
 - Output station becomes **Cable Package** under Lighting. Quick Design reads every label from the one equipment
-  vocabulary; saved Quick Design quantities and an existing Output station mapping carry over.
+  vocabulary; saved Quick Design quantities carry over through the relabels above, but **not** for Output station —
+  see below.
 - 2026-09-27 (Jeff: "based on the number of fixtures selected and then a multiplier factor similar to how we are
   doing labor"): Cable Package quantity = ⌈fixtures the design carries × per fixture (default 1) × tier (1 / 1.15 /
-  1.3)⌉, set in Estimating Rules → Cable package (D393).
+  1.3)⌉, set in Estimating Rules → Cable package (D393). Because it's now counted per cable, not by the old
+  Output-station math, an existing Output station Equipment-map mapping or typed quantity does **not** carry to
+  Cable Package (D391) — it would misprice it. Cable Package starts unmapped.
 
 **Still open (Jeff-gated).** Because Cable Package now follows Lighting, **every Lighting design gains a Cable
 Package line**, and until that row is mapped (part, allowance or Not included) those designs read Incomplete and Add
-to Quotes refuses them (#239). An existing Output station mapping carries over automatically. See D391–D393.
+to Quotes refuses them (#239). See D391–D393.
 
 ---
 
@@ -9019,10 +9022,11 @@ pull" row in Grid Settings → Equipment map.
 
 ## 239. Map Cable Package in the Equipment map — OPEN (Jeff-gated)
 
-**From:** #233 (D392, D393). Every Lighting design now carries a Cable Package line, one unit per cable
+**From:** #233 (D391–D393). Every Lighting design now carries a Cable Package line, one unit per cable
 (fixtures × per fixture × tier), so map it at a per-cable price; until `lighting:cablePackage` is mapped
 per tier (a part, an allowance or Not included) in Grid Settings → Equipment map, those designs read Incomplete and
-can't be added to Quotes. An existing Output station mapping carries over — check it on production.
+can't be added to Quotes. Cable Package starts **unmapped** — an existing Output station mapping does not carry
+over (D391), so there is nothing to check on production; it needs a fresh mapping.
 
 ---
 
