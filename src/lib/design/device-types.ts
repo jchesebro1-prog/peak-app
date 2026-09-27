@@ -337,7 +337,9 @@ export function sanitizeTypeMap(raw: unknown): TypeMap {
   if (!raw || typeof raw !== "object") return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     const key = normalizeRawCategory(k);
-    if (!key || key.length > 120 || !v || typeof v !== "object") continue;
+    // Same gate as every writer (mapKeyOf): Fabric/Labor name no device, so a
+    // stored entry for one is dropped on read (#226 final wave B).
+    if (!key || EXCLUDED.has(key) || key.length > 120 || !v || typeof v !== "object") continue;
     const e = v as Record<string, unknown>;
     const typeKey = e.typeKey === null ? null : typeof e.typeKey === "string" && KEY_RE.test(e.typeKey) ? e.typeKey : undefined;
     if (typeKey === undefined || (e.by !== "auto" && e.by !== "admin")) continue;

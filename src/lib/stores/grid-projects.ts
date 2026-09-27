@@ -1316,7 +1316,7 @@ export async function saveAccessory(
   projectId: string,
   optionId: string,
   raw: unknown
-): Promise<{ ok: true; item: GridAccessory } | { ok: false; error: string }> {
+): Promise<{ ok: true; item: GridAccessory; clamped?: true } | { ok: false; error: string }> {
   const project = await getProject(projectId);
   if (!project) return { ok: false, error: "Design not found." };
   if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
@@ -1326,7 +1326,7 @@ export async function saveAccessory(
     if (!symbol || symbol.category === "Fabric" || symbol.category === "Labor")
       return { ok: false, error: "That part isn't in the Grid library — pick it from the search." };
   }
-  let out: { ok: true; item: GridAccessory } | { ok: false; error: string } = { ok: false, error: "Design not found." };
+  let out: { ok: true; item: GridAccessory; clamped?: true } | { ok: false; error: string } = { ok: false, error: "Design not found." };
   await patchDoc<GridProject>("grid_projects", projectId, (p) => {
     const doc = ensureOptions(p);
     const opt = doc.options.find((o) => o.id === optionId);
@@ -1341,7 +1341,7 @@ export async function saveAccessory(
     }
     doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, accessories: s.items } : o));
     p.updatedAt = Date.now();
-    out = { ok: true, item: s.item };
+    out = { ok: true, item: s.item, ...(s.clamped ? { clamped: true as const } : {}) };
   });
   return out;
 }

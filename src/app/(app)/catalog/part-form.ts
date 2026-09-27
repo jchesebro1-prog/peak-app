@@ -42,6 +42,25 @@ export function optionalPartFields(fd: FormData): OptionalPartFields {
   return out;
 }
 
+/** A sane ceiling for a sewn fabric's $/sq ft (#227 final wave B) — the real
+ *  book runs a few dollars; anything past this is a typo (a bolt price, cents). */
+export const FABRIC_AREA_RATE_MAX = 500;
+
+/**
+ * Server-side gate for the fabric rate (#227 final wave B): only a Fabric part
+ * carries one, and never above FABRIC_AREA_RATE_MAX. `rate` is what
+ * optionalPartFields parsed (undefined = cleared or not submitted — always
+ * fine). null = fine, else the message the part modal shows.
+ */
+export function fabricRateProblem(category: string, rate: number | undefined): string | null {
+  if (rate === undefined) return null;
+  if (category.trim() !== "Fabric")
+    return "Only a Fabric part carries a fabric $/sq ft rate — clear the rate or set the category to Fabric.";
+  if (rate > FABRIC_AREA_RATE_MAX)
+    return `A fabric rate over $${FABRIC_AREA_RATE_MAX}/sq ft looks like a typo — enter the cost per sq ft of sewn fabric.`;
+  return null;
+}
+
 /**
  * `specSort` (order within an article) legitimately wants to be 0 — the
  * first item. `Number(v) || undefined` treats 0 as falsy and silently clears

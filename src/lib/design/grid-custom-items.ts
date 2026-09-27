@@ -84,7 +84,11 @@ export function sanitizeCustomItem(
   if (!Number.isInteger(qty) || qty < 1 || qty > CUSTOM_ITEM_QTY_MAX)
     return { ok: false, error: "Quantity must be a whole number from 1 to 100,000." };
   const unitCost = round2(Number(r.unitCost));
-  if (!(unitCost > 0) || unitCost > ALLOWANCE_MAX) return { ok: false, error: "A custom item needs a unit cost above $0." };
+  // Each refusal says what is actually wrong (#212 final wave B): junk isn't
+  // "zero", and a figure over the ceiling isn't "not above $0".
+  if (!Number.isFinite(unitCost)) return { ok: false, error: "Enter the unit cost as a number." };
+  if (unitCost > ALLOWANCE_MAX) return { ok: false, error: `A custom item's unit cost can't be more than $${ALLOWANCE_MAX.toLocaleString("en-US")}.` };
+  if (!(unitCost > 0)) return { ok: false, error: "A custom item needs a unit cost above $0." };
   const mfr = text(r.mfr, CUSTOM_ITEM_MAKER_MAX);
   const model = text(r.model, CUSTOM_ITEM_MAKER_MAX);
   return {

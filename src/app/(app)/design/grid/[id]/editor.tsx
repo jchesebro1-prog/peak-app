@@ -1927,8 +1927,10 @@ export default function GridEditor({
                         optionId={activeOptionId}
                         group={g.key}
                         parts={parts}
-                        onDone={(added) => {
+                        onDone={(added, note) => {
                           setAddingTo(null);
+                          // #230 final wave B: an over-cap bump was clamped — tell them.
+                          if (note) setErr(note);
                           if (added) router.refresh();
                         }}
                       />

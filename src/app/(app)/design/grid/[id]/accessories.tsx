@@ -61,6 +61,9 @@ const CHIP: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+/** A part that has left the library (#230 final wave B) — the line prices $0. */
+const REMOVED_CHIP: CSSProperties = { ...CHIP, color: "#a0442b", background: "#f9ece8" };
+
 const ELLIPSIS: CSSProperties = {
   color: "#3d424e",
   flex: 1,
@@ -110,7 +113,7 @@ export function AccessoryRow({
   projectId: string;
   optionId: string;
   accessoryId: string;
-  line: BomLine;
+  line: BomLine & { removed?: true };
   onChanged: () => void;
   onError: (message: string) => void;
 }) {
@@ -157,7 +160,13 @@ export function AccessoryRow({
       <span style={ELLIPSIS} title={`${line.partId} — ${line.desc}`}>
         {line.partId}
       </span>
-      <span style={CHIP}>Accessory</span>
+      {line.removed ? (
+        <span style={REMOVED_CHIP} title="This part is no longer in the catalog — it prices $0. Remove it or add its replacement.">
+          Removed part
+        </span>
+      ) : (
+        <span style={CHIP}>Accessory</span>
+      )}
       <ConfirmButton
         label="remove"
         confirmLabel="Remove?"
@@ -191,7 +200,8 @@ export function AccessoryPicker({
   optionId: string;
   group: BomGroupKey;
   parts: PartLite[];
-  onDone: (added: boolean) => void;
+  /** `note`: the add went through but says something (an over-cap bump was clamped). */
+  onDone: (added: boolean, note?: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [all, setAll] = useState(false);
@@ -215,7 +225,7 @@ export function AccessoryPicker({
         setError(r.error);
         return;
       }
-      onDone(true);
+      onDone(true, r.note);
     } catch {
       setError(GENERIC_ERROR);
     } finally {

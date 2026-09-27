@@ -130,6 +130,8 @@ export type GroupedBomLine = BomLine & {
   source: BomSource;
   /** Accessory lines only: the stored accessory id (edit / remove). */
   accessoryId?: string;
+  /** Accessory lines only: the part has left the library (#230 final wave B). */
+  removed?: true;
   /** Labor lines only (#232): the server-computed line (pct, mult, override). */
   labor?: GridLaborLine;
 };

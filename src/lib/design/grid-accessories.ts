@@ -39,7 +39,17 @@ export type GridAccessory = {
 /** What the editor posts: `id` = edit that line's qty; no `id` = add partId × qty under scope. */
 export type GridAccessoryInput = { id?: string | null; partId?: string; qty: number; scope?: string };
 
-export type AccessoryBomLine = BomLine & { accessoryId: string; group: BomGroupKey };
+export type AccessoryBomLine = BomLine & {
+  accessoryId: string;
+  group: BomGroupKey;
+  /** The part has left the library: the line prices $0 and the row says so (#230 final wave B). */
+  removed?: true;
+};
+
+/** What an over-cap add tells the person (#230 final wave B) — the qty was clamped, not silently eaten. */
+export function accessoryClampNote(qty: number): string {
+  return `That accessory line is capped at ${ACCESSORY_QTY_MAX.toLocaleString("en-US")} — it now holds ${qty.toLocaleString("en-US")}.`;
+}
 
 const ID_RE = /^ba-[0-9a-f]{12}$/;
 /** Ids that are never a Grid-library part: Auto's virtual parts, custom items, seed placeholders, #232 labor lines. */
@@ -92,13 +102,13 @@ export function accessoriesOf(raw: unknown): GridAccessory[] {
 }
 
 export type AccessorySave =
-  | { ok: true; items: GridAccessory[]; item: GridAccessory }
+  | { ok: true; items: GridAccessory[]; item: GridAccessory; clamped?: true }
   | { ok: false; reason: "no-such-accessory" | "invalid" | "too-many"; error: string };
 
 /**
  * Edit (existing `id`: qty only — part and heading are fixed) or add (no id).
- * Adding a part already under that heading bumps that line's qty (capped)
- * instead of a second row. Never mutates `items`.
+ * Adding a part already under that heading bumps that line's qty (capped,
+ * and `clamped` says so) instead of a second row. Never mutates `items`.
  */
 export function applyAccessorySave(items: readonly GridAccessory[], raw: unknown, makeId: () => string): AccessorySave {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -115,8 +125,9 @@ export function applyAccessorySave(items: readonly GridAccessory[], raw: unknown
   if (!s.ok) return { ok: false, reason: "invalid", error: s.error };
   const same = items.find((a) => a.partId === s.item.partId && a.scope === s.item.scope);
   if (same) {
-    const item = { ...same, qty: Math.min(ACCESSORY_QTY_MAX, same.qty + s.item.qty) };
-    return { ok: true, items: items.map((a) => (a.id === same.id ? item : a)), item };
+    const want = same.qty + s.item.qty;
+    const item = { ...same, qty: Math.min(ACCESSORY_QTY_MAX, want) };
+    return { ok: true, items: items.map((a) => (a.id === same.id ? item : a)), item, ...(want > ACCESSORY_QTY_MAX ? { clamped: true as const } : {}) };
   }
   if (items.length >= ACCESSORIES_MAX)
     return { ok: false, reason: "too-many", error: `An option holds at most ${ACCESSORIES_MAX} accessories.` };
@@ -153,6 +164,7 @@ export function accessoryBomLines(
       ext: a.qty * list,
       accessoryId: a.id,
       group: a.scope,
+      ...(part ? {} : { removed: true as const }),
     };
   });
 }

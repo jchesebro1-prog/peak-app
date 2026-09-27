@@ -11,7 +11,7 @@ import { GROUPS, TRADES, type CategoryMap } from "@/lib/catalog-taxonomy";
 import { runCatalogImport } from "./import";
 import { parsePortsField, serializePorts } from "@/lib/catalog-ports";
 import type { Port } from "@/lib/catalog-connect";
-import { validateSameAs, optionalPartFields, specSortValue } from "./part-form";
+import { validateSameAs, optionalPartFields, specSortValue, fabricRateProblem } from "./part-form";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { allArticles } from "@/lib/stores/spec-articles";
 import { allSections } from "@/lib/stores/spec-sections";
@@ -85,6 +85,13 @@ export async function upsertPart(formData: FormData): Promise<void> {
     ports = parsed.ports;
   }
 
+  // #227 final wave B: the fabric rate is refused server-side on a part that
+  // isn't Fabric, and above a sane ceiling — whatever the form sent.
+  const category = String(formData.get("category") || "").trim() || "Uncategorized";
+  const optional = optionalPartFields(formData);
+  const rateProblem = fabricRateProblem(category, optional.curtainAreaRate);
+  if (rateProblem) redirect(`/catalog?edit=${encodeURIComponent(sku)}&partError=${encodeURIComponent(rateProblem)}`);
+
   // Compared through serializePorts — the same stable key order the editor's
   // hidden field uses — so re-saving the modal without touching the ports is a
   // no-op and keeps the stamp. `undefined` in a mergeUpsert patch drops the key
@@ -96,12 +103,12 @@ export async function upsertPart(formData: FormData): Promise<void> {
   await mergeUpsert(sku, {
     ...(portsReplaced ? { davinci: undefined } : {}),
     desc,
-    category: String(formData.get("category") || "").trim() || "Uncategorized",
+    category,
     unit: String(formData.get("unit") || "").trim() || "ea",
     list: num(formData.get("list")),
     cost: num(formData.get("cost")),
     mfr: String(formData.get("mfr") || "").trim() || undefined,
-    ...optionalPartFields(formData),
+    ...optional,
     note: String(formData.get("note") || "").trim() || undefined,
     ...(ports ? { ports } : {}),
   });

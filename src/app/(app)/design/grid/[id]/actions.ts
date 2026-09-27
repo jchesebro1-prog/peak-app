@@ -43,7 +43,7 @@ import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-o
 import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import type { GridCustomItemInput } from "@/lib/design/grid-custom-items";
-import type { GridAccessoryInput } from "@/lib/design/grid-accessories";
+import { accessoryClampNote, type GridAccessoryInput } from "@/lib/design/grid-accessories";
 import { can } from "@/lib/team";
 import { designsForGridProject, removeDesign, updateDesign } from "@/lib/stores/designs";
 import { getSite } from "@/lib/identity/sites";
@@ -1066,13 +1066,14 @@ export async function saveAccessoryAction(
   projectId: string,
   optionId: string,
   input: GridAccessoryInput
-): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; id: string; note?: string } | { ok: false; error: string }> {
   await requireUser();
   const r = await saveAccessory(projectId, optionId, input);
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath("/design/designs");
-  return { ok: true, id: r.item.id };
+  // #230 final wave B: an add that would pass the cap is clamped — say so.
+  return { ok: true, id: r.item.id, ...(r.clamped ? { note: accessoryClampNote(r.item.qty) } : {}) };
 }
 
 export async function removeAccessoryAction(
