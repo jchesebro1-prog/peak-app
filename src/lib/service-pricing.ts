@@ -54,7 +54,9 @@ function ceilToStep(x: number, step: number = PRICE_STEP): number {
  */
 function wholeDollars(raw: unknown): number | undefined {
   if (typeof raw === "number") {
-    return Number.isFinite(raw) ? Math.round(raw) : undefined;
+    if (!Number.isFinite(raw) || raw < 0) return undefined;
+    const n = Math.round(raw);
+    return Object.is(n, -0) ? 0 : n;
   }
   if (typeof raw !== "string") return undefined;
   const s = raw.replace(/[$,\s]/g, "");
@@ -215,19 +217,19 @@ export function finishRepair(i: {
   const cost = i.serviceCost + i.partsCost;
   const fin = finishPrice(serviceSellAuto + partsSell, cost, i.priceOverride, calloutApplied);
   const serviceSell = fin.total - partsSell;
-  // #217 fix wave: the service-only ratio (1 − serviceCost ÷ serviceSell)
-  // blows up — or goes negative — right where serviceSell is thin or
-  // negative: a typed total that lands below what the parts alone are
-  // selling for, or an auto price whose floored service sell is $0 (a
-  // parts-only job with no call-out floor). In both cases report the
-  // whole-job effectiveMargin (already 1 − cost ÷ total) instead, so the
-  // slider/save-margin never shows a wild or negative number near zero.
+  // #217 fix wave 2: the service-only ratio (1 − serviceCost ÷ serviceSell)
+  // blows up — or goes negative — whenever the FINAL serviceSell (total minus
+  // parts, after rounding/typing) is zero or negative: a typed total that
+  // lands below what the parts alone are selling for, or an auto price whose
+  // rounded/floored service sell nets to $0 or less (a parts-only job with no
+  // call-out floor). Gate on serviceSell, not the pre-rounding serviceSellAuto
+  // — that guard missed the case where serviceSellAuto is positive but
+  // rounding/typing still drives the final serviceSell to $0 or below. In
+  // both cases report the whole-job effectiveMargin (already 1 − cost ÷
+  // total) instead, so the slider/save-margin never shows a wild, negative,
+  // or falsely-zero number near this cliff.
   const serviceMargin =
-    fin.overridden || serviceSellAuto <= 0
-      ? fin.effectiveMargin
-      : serviceSell > 0
-        ? 1 - i.serviceCost / serviceSell
-        : 0;
+    fin.overridden || serviceSell <= 0 ? fin.effectiveMargin : 1 - i.serviceCost / serviceSell;
   return {
     ...fin,
     serviceCost: i.serviceCost,

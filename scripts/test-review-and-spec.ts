@@ -20885,6 +20885,8 @@ import {
     "#217 fix wave: hex, exponent and a leading minus are not plain digits — rejected, not silently parsed by Number()");
   ok(normalizeTestingOverride217("0") === 0 && normalizeTestingOverride217(" 120 ") === 120 && normalizeTestingOverride217("") === undefined && normalizeTestingOverride217(-1) === undefined,
     "#217 testingOverride: $0 is a real figure, blank is computed, negatives refused");
+  ok(normalizeTestingOverride217(-0.4) === undefined && !Object.is(normalizeTestingOverride217(-0.4), -0) && !Object.is(normalizeTestingOverride217(-0), -0),
+    "#217 fix wave 2: a raw negative number like -0.4 is refused (not silently rounded to -0 and passed as >= 0), and -0 itself never comes back as -0");
   ok(finishPrice217(1000, 500, "$900").total === 900 && finishPrice217(1000, 500, 0).total === 1000 && finishPrice217(1000, 500, -5).total === 1000 && finishPrice217(1000, 500, 20_000_000).total === 1000,
     "#217 fix wave: finishPrice normalizes priceOverride itself — a typed string works there directly, and zero/negative/over-cap fall back to auto");
   ok(typedPriceWarning217(500, 575, 1 - 575 / 500)?.kind === "below-cost" && typedPriceWarning217(600, 575, 1 - 575 / 600)?.kind === "low-margin" && typedPriceWarning217(800, 575, 1 - 575 / 800) === null,
@@ -20970,6 +20972,15 @@ import {
   const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
   ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMargin, rAutoZero.effectiveMargin) && rAutoZero.serviceMargin > 0,
     "#217 fix wave repair margin: a parts-only auto job with no call-out floor (service sell $0) reports the effective margin instead of a flat 0");
+  const rCliff = finishRepair217({ serviceCost: 1, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
+  ok(!rCliff.overridden && rCliff.serviceSellAuto > 0 && rCliff.serviceSell < 0 && near217(rCliff.serviceSell, -3.5714285714287) &&
+      near217(rCliff.serviceMargin, rCliff.effectiveMargin) && rCliff.serviceMargin > 0.25,
+    "#217 fix wave 2: serviceMargin gates on the FINAL serviceSell (post-rounding, total − partsSell), not the pre-rounding " +
+      "serviceSellAuto — a positive serviceSellAuto (1.43) whose rounded serviceSell goes negative (-3.57) no longer cliffs " +
+      "the margin to 0; it reports the whole-job effectiveMargin instead");
+  ok(Math.abs(rCliff.serviceMargin - rAutoZero.serviceMargin) < 0.01,
+    "#217 fix wave 2: serviceCost 0 vs 1 (same rounded $1,425 total) give close margins — no discontinuity right where " +
+      "serviceSell crosses zero");
 
   // ---- inspection engine ----
   const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
