@@ -61,6 +61,12 @@ export default async function DayliteImportPage() {
           exports. Preview first — nothing is written until you confirm, and a re-run skips anything already
           imported.
         </div>
+        <Link
+          href="/import/daylite/calendar"
+          style={{ display: "inline-block", marginTop: 8, fontSize: 12.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+        >
+          Calendar events → each person’s Google Calendar
+        </Link>
       </div>
       <DayliteHistory stageLabels={stageLabels} />
     </div>

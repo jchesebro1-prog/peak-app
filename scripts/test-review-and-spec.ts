@@ -20804,3 +20804,18 @@ async function dayliteCalendarAsyncChecks219(): Promise<void> {
   const glue = read("src/lib/daylite/calendar-import.ts");
   ok(glue.includes('if (states[u.id] === "connected") mailboxByUserId[u.id] = personalKey(u.id);'), "#219 import: only a connected owner's OWN personal mailbox is ever targeted");
 }
+
+/* ====== #219 Daylite calendar import — Task 3: the screen (source checks) ====== */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const page = read("src/app/(app)/import/daylite/calendar/page.tsx");
+  ok(page.includes('await requirePerm("manage_users")') && page.includes("export const maxDuration = 60"), "#219 T3: the page is admin-gated and gets the 60 s server-action ceiling");
+  const client = read("src/app/(app)/import/daylite/calendar/calendar-client.tsx");
+  ok(client.startsWith('"use client"'), "#219 T3: the import screen is a client component");
+  const valueImports = [...client.matchAll(/^import (?!type )[^;]*?from "([^"]+)"/gm)].map((m) => m[1]);
+  ok(valueImports.length > 0 && valueImports.every((s) => s === "react" || s === "./actions"), "#219 T3: the client imports values only from react and its own actions — no store, db or server module");
+  ok(client.includes("skipKeys: skipRef.current") && client.includes('b.stoppedFor === "quota"') && client.includes("b.stoppedOwners"), "#219 T3: the loop re-posts with failed keys skipped, pauses on quota, drops stopped owners");
+  ok(client.includes("Only events from today on") && client.includes("Repeating series skipped"), "#219 T3: the from-today option and the skipped-series list are on the page");
+  const hist = read("src/app/(app)/import/daylite/page.tsx");
+  ok(hist.includes('href="/import/daylite/calendar"'), "#219 T3: /import/daylite links to the calendar import");
+}
