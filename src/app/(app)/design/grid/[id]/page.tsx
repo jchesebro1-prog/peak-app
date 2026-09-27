@@ -8,7 +8,7 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { sitesForCompany } from "@/lib/identity/sites";
-import { loadWireLaborRules, num } from "@/lib/stores/pricing";
+import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
@@ -31,7 +31,7 @@ import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import { customItemBomLines, customItemsOf } from "@/lib/design/grid-custom-items";
 import { getGridFavorites, getGridRecent, loadDeviceTypeContext } from "@/lib/stores/device-types";
 import type { PartLite } from "@/lib/design/grid-bom";
-import type { LaborPartLite } from "@/lib/design/grid-labor";
+import { buildGridQuote, type GridQuoteInputs } from "@/lib/design/grid-quote";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
@@ -79,15 +79,10 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, laborHoursPerDevice, settings, linesetDesigns, wireLabor] = await Promise.all([
+  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
-    // Install-hours-per-device knob (D114) — admin-tunable, now registered in
-    // pricing.ts GROUPS (key "grid") and editable from Design → Grid Settings
-    // as well as Estimating Rules. num() (not frac()) because this is a raw
-    // hours figure, not a percent rate.
-    num("grid.laborHoursPerDevice", 0.5),
     getSettings(),
     listDesigns({ kind: "lineset" }),
     loadWireLaborRules(),
@@ -123,7 +118,8 @@ export default async function GridEditorPage({
   // per virtual assembly/allowance the design actually places — and those rows
   // carry `cost` exactly like the Grid-library PartLite rows already do
   // (PartLite.cost is part of the existing payload), nothing more.
-  const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
+  const equipLoaded = await loadEquipPriceCtx({ catalog });
+  const { map: equipMap, ctx: equipCtx } = equipLoaded;
   const equipTable = buildEquipmentPriceTable(equipMap, equipCtx);
   const scopeTargets = project.scopeInputs
     ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable, {}, wireLabor))
@@ -183,19 +179,28 @@ export default async function GridEditorPage({
     customItemsOf(project.options?.find((o) => o.id === activeOptionId)?.customItems),
     tier.margin
   );
-  const laborParts: LaborPartLite[] = catalog
-    .filter((p) => (p.role || "").toLowerCase() === "labor")
-    .map((p) => ({
-      id: p.id,
-      sku: p.sku,
-      desc: p.desc,
-      category: p.category,
-      unit: p.unit,
-      list: p.list,
-      cost: p.cost,
-      role: p.role,
-      discipline: p.discipline,
-    }));
+  // #232: the active option's labor lines, computed by the quote builder
+  // itself over this request's reads — grouped by the same `parts` rows the
+  // editor groups its BOM by — so each heading's labor line is exactly what
+  // the draft quote will carry. Sell numbers only. A design that can't price
+  // yet (empty, a seed placeholder, a dead Auto part) shows no labor until
+  // it can.
+  const quoteInputs: GridQuoteInputs = {
+    catalog,
+    symbols: gridSymbols,
+    equip: equipLoaded,
+    tierFor: () => Promise.resolve(tier),
+    location: false,
+    wireLabor,
+    groupParts: parts,
+  };
+  // A pricing fault must not take the editor down with it — the quote
+  // action reports it where the person can act on it.
+  const built = await buildGridQuote(project, activeOptionId, quoteInputs).catch((e: unknown) => {
+    console.error("Grid editor: labor lines unavailable", e);
+    return null;
+  });
+  const laborLines = built?.ok ? built.build.labor : [];
 
   return (
     <CanMapProvider canMap={can("manage_users", user.roles)}>
@@ -231,13 +236,12 @@ export default async function GridEditorPage({
       fabrics={fabrics}
       scopeTargets={scopeTargets}
       auto={auto}
-      laborParts={laborParts}
-      laborHoursPerDevice={laborHoursPerDevice}
       venues={venues}
       symbolCtx={symbolContext(settings, deviceTypes.types)}
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
       customLines={customLines}
+      laborLines={laborLines}
       deviceTypes={deviceTypes.types}
       favorites={favorites}
       recent={recent}

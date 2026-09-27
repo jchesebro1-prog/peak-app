@@ -31,6 +31,7 @@ import {
   setPlacementCategory,
   setScopeInputs,
   setLinesetDesign,
+  setLaborOverride,
   setSheetCalibration,
   setVenue,
   saveAccessory,
@@ -879,7 +880,6 @@ export async function deleteProjectAction(
 export async function createDraftQuoteAction(
   projectId: string,
   optionId: string | null,
-  laborLines?: Array<{ partId: string; hours: number }>,
   opts?: { acceptIncomplete?: boolean }
 ): Promise<
   | { ok: true; quoteId: string; updated: boolean; fallbackLines: string[] }
@@ -908,7 +908,7 @@ export async function createDraftQuoteAction(
     }
   }
 
-  const built = await buildGridQuote(project, resolvedOptionId, laborLines);
+  const built = await buildGridQuote(project, resolvedOptionId);
   if (!built.ok) return built;
   const { build } = built;
 
@@ -1024,6 +1024,26 @@ export async function removeCustomItemAction(
 ): Promise<Result> {
   await requireUser();
   const r = await removeCustomItem(projectId, optionId, String(itemId ?? ""));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true };
+}
+
+/**
+ * #232: type (a number) or clear (null) one BOM heading's labor $ on an
+ * option. Same gate as the placement edits; the store validates the system
+ * and the amount. Revalidates the Designs dashboard too (its live budget
+ * reads this option's quote build).
+ */
+export async function setLaborOverrideAction(
+  projectId: string,
+  optionId: string,
+  system: string,
+  amount: number | null
+): Promise<Result> {
+  await requireUser();
+  const r = await setLaborOverride(projectId, optionId, String(system ?? ""), amount === null ? null : Number(amount));
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath("/design/designs");

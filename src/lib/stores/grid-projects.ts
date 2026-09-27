@@ -37,6 +37,8 @@ import {
   withoutAccessory,
   type GridAccessory,
 } from "@/lib/design/grid-accessories";
+import { applyLaborOverride, LABOR_OVERRIDE_MAX, sanitizeLaborOverrides } from "@/lib/design/wire-labor";
+import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
@@ -1109,6 +1111,9 @@ export async function addOption(
       // BOM accessories (#230) ride on the option the same way.
       const accessories = copyAccessories(accessoriesOf(src?.accessories), () => rid("ba-"));
       if (accessories.length) option.accessories = accessories;
+      // Labor overrides (#232) are option-scoped design state too.
+      const labor = sanitizeLaborOverrides(src?.laborOverrides);
+      if (Object.keys(labor).length) option.laborOverrides = labor;
     }
     doc.options = [...doc.options, option];
     if (input.copyFromOptionId) {
@@ -1262,6 +1267,41 @@ export async function removeCustomItem(
   return updated ? { ok: true } : { ok: false, error: "Design not found." };
 }
 
+/* ------------------------- labor overrides (#232) ------------------------- */
+
+/**
+ * Set (a number, $0–$10M; $0 leaves the line off the quote) or clear (null)
+ * one system's typed labor $ on an option. The system must be a Grid BOM
+ * heading (Rigging … General) — the only labor lines a Grid option has.
+ * Does not cut a revision (same as a custom item); quote / manual revisions
+ * capture it.
+ */
+export async function setLaborOverride(
+  projectId: string,
+  optionId: string,
+  system: string,
+  amount: number | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isBomGroupKey(system)) return { ok: false, error: "Unknown labor line." };
+  if (amount !== null && !(typeof amount === "number" && Number.isFinite(amount) && amount >= 0 && amount <= LABOR_OVERRIDE_MAX))
+    return { ok: false, error: "Enter a labor amount from $0 to $10,000,000." };
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) => {
+      if (o.id !== optionId) return o;
+      const next = applyLaborOverride(o.laborOverrides, system, amount);
+      const rest = { ...o };
+      delete rest.laborOverrides;
+      return Object.keys(next).length ? { ...rest, laborOverrides: next } : rest;
+    });
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, error: "Design not found." };
+}
+
 /* ---------------------------- BOM accessories (#230) ---------------------------- */
 
 /**
@@ -1359,6 +1399,8 @@ function snapshotOf(
             ...o,
             ...(o.customItems ? { customItems: o.customItems.map((c) => ({ ...c })) } : {}),
             ...(o.accessories ? { accessories: o.accessories.map((a) => ({ ...a })) } : {}),
+            // Labor overrides (#232) ride on the option — copied, not shared.
+            ...(o.laborOverrides ? { laborOverrides: { ...o.laborOverrides } } : {}),
           }))
         : undefined,
       quoteId: p.quoteId,

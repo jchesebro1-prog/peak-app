@@ -48,7 +48,8 @@ import { SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
-import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
+import type { GridLaborLine } from "@/lib/design/wire-labor";
+import { LaborLineRow } from "./labor-lines";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { GRID_SHEET_MAX_BYTES, GRID_SHEET_MAX_LABEL } from "@/lib/grid-sheet-file";
 import { optionSlice } from "@/lib/design/grid-options";
@@ -262,8 +263,6 @@ export default function GridEditor({
   fabrics,
   scopeTargets,
   auto,
-  laborParts,
-  laborHoursPerDevice,
   venues,
   canCreate,
   symbolCtx,
@@ -271,6 +270,7 @@ export default function GridEditor({
   linesetDesigns,
   wireTypes,
   customLines,
+  laborLines,
   deviceTypes,
   favorites,
   recent,
@@ -285,10 +285,6 @@ export default function GridEditor({
   scopeTargets: ScopeTargetsByTier | null;
   /** Auto designs (#211): the chosen cards (sell-only) + their targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
-  /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
-  laborParts: LaborPartLite[];
-  /** Install-hours-per-device knob from the pricing rules. */
-  laborHoursPerDevice: number;
   /** The customer's venues, for the picker (D113.6). */
   venues: Array<{ id: string; name: string }>;
   /** Gates delete — a Reviewer approves designs but has never made one. */
@@ -306,6 +302,8 @@ export default function GridEditor({
   wireTypes: WireType[];
   /** #212: the active option's custom items, priced server-side (sell only). */
   customLines: BomLine[];
+  /** #232: the active option's labor lines, computed server-side by buildGridQuote (sell only). */
+  laborLines: GridLaborLine[];
   /** #226: the curated device types (palette chips, Layers). */
   deviceTypes: DeviceType[];
   /** #226: this user's starred parts and last-placed parts (newest first). */
@@ -651,22 +649,10 @@ export default function GridEditor({
   );
   const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
 
-  // Labor suggestions (D114): the rule proposes; overrides let the human
-  // adjust hours or exclude a line before the quote mints.
-  const laborSuggestions = useMemo(
-    () => suggestLabor(placements, parts, laborParts, laborHoursPerDevice),
-    [placements, parts, laborParts, laborHoursPerDevice]
-  );
-  const [laborOverrides, setLaborOverrides] = useState<
-    Record<string, { hours?: number; included: boolean }>
-  >({});
-  const laborRows = laborSuggestions.map((s) => {
-    const o = laborOverrides[`${activeOptionId}:${s.partId}`];
-    const hours = o?.hours !== undefined && o.hours >= 0 ? o.hours : s.hours;
-    return { ...s, hours, included: o ? o.included : true, ext: hours * s.rate };
-  });
-  const includedLabor = laborRows.filter((l) => l.included && l.hours > 0);
-  const laborValue = includedLabor.reduce((a, l) => a + l.ext, 0);
+  // #232: one labor line per BOM heading, computed on the server exactly as
+  // the quote prices it (buildGridQuote); a typed $ override is saved on the
+  // option. Printed last under its heading and counted in that heading's total.
+  const laborValue = laborLines.reduce((a, l) => a + l.amount, 0);
 
   /** Create / update the option's draft quote. D322: the server refuses
    *  an Auto design with needs-a-part lines until the person confirms. */
@@ -674,12 +660,7 @@ export default function GridEditor({
     setErr(null);
     setTierFallbackLines([]);
     setBusy(true);
-    const r = await createDraftQuoteAction(
-      project.id,
-      activeOptionId,
-      includedLabor.map((l) => ({ partId: l.partId, hours: l.hours })),
-      { acceptIncomplete }
-    );
+    const r = await createDraftQuoteAction(project.id, activeOptionId, { acceptIncomplete });
     setBusy(false);
     if (!r.ok) {
       if (r.needsPart && !acceptIncomplete) setIncompleteQuote(r.error);
@@ -726,19 +707,34 @@ export default function GridEditor({
           accessories: accessoryLines,
           parts,
           placements,
+          labor: laborLines,
         })
       ),
-    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements]
+    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements, laborLines]
   );
   /** The heading whose accessory picker is open — per option, so switching options closes it. */
   const [addingTo, setAddingTo] = useState<{ optionId: string; group: BomGroupKey } | null>(null);
   const pickerOpenFor = addingTo && addingTo.optionId === activeOptionId ? addingTo.group : null;
   /** One BOM row under a heading. Device / wire / curtain rows are the
    *  pre-#230 rows unchanged; custom items render through their heading's
-   *  CustomItemsSection. */
+   *  CustomItemsSection; a labor line (#232) is its editable row. The switch
+   *  is exhaustive — a new BomSource fails tsc here until it has a row. */
   const renderBomLine = (l: GroupedBomLine) => {
-    if (l.source === "custom") return null;
-    if (l.source === "accessory") {
+    switch (l.source) {
+    case "custom":
+      return null;
+    case "labor":
+      return l.labor ? (
+        <LaborLineRow
+          key={`l-${l.labor.system}-${l.labor.amount}-${l.labor.overridden ? "o" : "c"}`}
+          projectId={project.id}
+          optionId={activeOptionId}
+          line={l.labor}
+          onChanged={() => router.refresh()}
+          onError={(m) => setErr(m)}
+        />
+      ) : null;
+    case "accessory":
       return l.accessoryId ? (
         <AccessoryRow
           key={`a-${l.accessoryId}-${l.qty}`}
@@ -750,8 +746,7 @@ export default function GridEditor({
           onError={(m) => setErr(m)}
         />
       ) : null;
-    }
-    if (l.source === "curtain") {
+    case "curtain":
       // Curtains (punch #49): one line each, never grouped - two drapes of
       // one fabric are different goods once their dimensions differ.
       return (
@@ -766,8 +761,7 @@ export default function GridEditor({
           <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
         </div>
       );
-    }
-    if (l.source === "wire") {
+    case "wire":
       return (
         <div key={`w-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
           <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
@@ -795,44 +789,49 @@ export default function GridEditor({
           <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
         </div>
       );
-    }
-    return (
-      <div key={`d-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-        <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty}×</strong>
-        <span
-          style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-          title={`${l.partId} — ${l.desc}`}
-        >
-          {partById.get(l.partId)?.virtual ? l.desc : l.partId}
-        </span>
-        {partById.get(l.partId)?.virtualDead ? (
-          // #211 D313: nothing real behind it — the quote refuses it by name.
+    case "device":
+      return (
+        <div key={`d-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+          <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty}×</strong>
           <span
-            title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
-            style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
+            style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={`${l.partId} — ${l.desc}`}
           >
-            Needs a part
+            {partById.get(l.partId)?.virtual ? l.desc : l.partId}
           </span>
-        ) : (
-          partById.get(l.partId)?.allowance && (
-            <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
-              Allowance
+          {partById.get(l.partId)?.virtualDead ? (
+            // #211 D313: nothing real behind it — the quote refuses it by name.
+            <span
+              title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
+              style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
+            >
+              Needs a part
             </span>
-          )
-        )}
-        {partById.get(l.partId)?.hasDatasheet && (
-          <a
-            href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
-          >
-            datasheet
-          </a>
-        )}
-        <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-      </div>
-    );
+          ) : (
+            partById.get(l.partId)?.allowance && (
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                Allowance
+              </span>
+            )
+          )}
+          {partById.get(l.partId)?.hasDatasheet && (
+            <a
+              href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+            >
+              datasheet
+            </a>
+          )}
+          <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+        </div>
+      );
+    default: {
+      const unhandled: never = l.source;
+      return unhandled;
+    }
+    }
   };
   const spaceRollups = useMemo(
     () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
@@ -905,7 +904,7 @@ export default function GridEditor({
 
   // Arrow-key nudge for the selected device (punch #47). Bound to the window
   // because the plan is a div with no focus of its own; every text field in
-  // this editor (calibration/space entry, palette search, labor hours) would
+  // this editor (calibration/space entry, palette search, labor amounts) would
   // otherwise lose its arrow keys, hence the editable-target bail-out. Inert
   // while any drawing mode owns the canvas.
   useEffect(() => {
@@ -1934,7 +1933,7 @@ export default function GridEditor({
                         }}
                       />
                     )}
-                    {g.lines.map((l) => renderBomLine(l))}
+                    {g.lines.filter((l) => l.source !== "labor").map((l) => renderBomLine(l))}
                     {groupCustom.length > 0 && (
                       <CustomItemsSection
                         key={`${activeOptionId}:${g.key}`}
@@ -1946,6 +1945,8 @@ export default function GridEditor({
                         onChanged={() => router.refresh()}
                       />
                     )}
+                    {/* #232: the heading's labor prints last — after its custom items. */}
+                    {g.lines.filter((l) => l.source === "labor").map((l) => renderBomLine(l))}
                   </div>
                 );
               })}
@@ -1953,53 +1954,6 @@ export default function GridEditor({
               {wires.unmeasured > 0 && (
                 <div style={{ fontSize: 10.5, color: "#a0442b" }}>
                   {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
-                </div>
-              )}
-              {laborRows.length > 0 && (
-                <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
-                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
-                    Labor (suggested)
-                  </div>
-                  {laborRows.map((l) => (
-                    <div key={l.partId} style={{ display: "flex", gap: 5, fontSize: 12, alignItems: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={l.included}
-                        onChange={(e) =>
-                          setLaborOverrides((prev) => ({
-                            ...prev,
-                            [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
-                          }))
-                        }
-                        style={{ margin: 0 }}
-                      />
-                      <span
-                        style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                        title={`${l.desc} @ ${moneyFmt(l.rate)}/hr`}
-                      >
-                        {l.partId}
-                      </span>
-                      <input
-                        value={String(l.hours)}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setLaborOverrides((prev) => ({
-                            ...prev,
-                            [`${activeOptionId}:${l.partId}`]: {
-                              included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
-                              hours: Number.isFinite(v) && v >= 0 ? v : 0,
-                            },
-                          }));
-                        }}
-                        inputMode="decimal"
-                        style={{ ...INPUT, width: 44, padding: "2px 5px", fontSize: 11.5, textAlign: "right" }}
-                      />
-                      <span style={{ fontSize: 10.5, color: "#8c919c" }}>hr</span>
-                      <span style={{ color: "#16181d", fontWeight: 600, opacity: l.included ? 1 : 0.4 }}>
-                        {moneyFmt(l.ext)}
-                      </span>
-                    </div>
-                  ))}
                 </div>
               )}
               {!bomEmpty && (

@@ -211,7 +211,7 @@ async function withLiveGridBudget(d: DesignRecord, project: GridProject | null, 
   const optionId = project.options?.[0]?.id;
   if (!optionId) return d;
   try {
-    const built = await buildGridQuote(project, optionId, undefined, inputs);
+    const built = await buildGridQuote(project, optionId, inputs);
     if (built.ok) return { ...d, budget: built.build.value };
   } catch {
     // A dashboard read must not fail because a partially edited Grid cannot

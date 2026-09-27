@@ -536,14 +536,6 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
-    key: "grid", label: "The Grid", live: true,
-    sub: "Install labor knob for the Grid's auto-priced BOM",
-    note: "Live — reprices every Grid design's suggested install labor immediately. General store (not percent-based): the raw value IS the hours figure, unlike the % rates above.",
-    items: [
-      rate("grid.laborHoursPerDevice", "Install labor — hours per device", 0.5, "hr", { min: 0, max: 8, step: 0.05, help: "Hours of install labor The Grid suggests per placed device, before any per-part override. design/grid/[id]/page.tsx reads this via num(), not frac() — the stored value IS the hours figure." }),
-    ],
-  },
-  {
     key: "wire", label: "Wire pull", live: true,
     sub: "Per-system wire-pull footage by venue size × tier (#231)",
     note: "Live — Quick Design and Grid Auto estimates read these. 0 runs (the default) adds no Wire pull line. The footage is a quantity: each system's “Wire pull” row in Grid Settings → Equipment map prices it.",

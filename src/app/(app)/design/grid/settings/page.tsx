@@ -7,7 +7,6 @@ import { list as listCatalog } from "@/lib/stores/catalog";
 import { symbolCategoryRows, symbolContext } from "@/lib/design/grid-icons";
 import { DEFAULT_CATEGORY_MAP } from "@/lib/catalog-taxonomy";
 import { resolveWireTypes } from "@/lib/catalog-connect";
-import { GROUPS, value as pricingValue, type RateEntry } from "@/lib/stores/pricing";
 import { buildPortRuleReport, type PortReportPart } from "@/lib/catalog-port-report";
 import { SymbolColorsCard } from "./symbol-colors-card";
 import { CategoryIconsCard } from "./category-icons-card";
@@ -16,7 +15,6 @@ import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { typeOfCategory } from "@/lib/design/device-types";
 import { DeviceTypeIconsCard } from "./device-type-icons-card";
 import { WireTypesCard } from "./wire-types-card";
-import { LaborHoursCard } from "./labor-hours-card";
 import { StandardNotesCard } from "./standard-notes-card";
 import { PortRulesCard, type PortRuleRowVM } from "./port-rules-card";
 import { GridSettingsTabs } from "./settings-tabs";
@@ -28,8 +26,8 @@ export const metadata = { title: "Grid settings — Quartzite-6" };
  * configuration screens The Grid needs but Settings never had room for:
  * stock-symbol colours and per-category icons (spec 2026-09-25, replacing
  * the D154 per-category shapes card), a review UI over the #159 port-rules
- * engine, the wire-type registry Grid wiring validation actually reads now,
- * and the install-hours-per-device knob. Admin-only (manage_users), same
+ * engine, and the wire-type registry Grid wiring validation actually reads
+ * now. Admin-only (manage_users), same
  * gate as every other data-administration screen (Estimating Rules,
  * Task Templates, Catalog admin cards).
  */
@@ -106,12 +104,6 @@ export default async function GridSettingsPage() {
   const used = [...usedSet];
   const wireTypes = resolveWireTypes(settings.wireTypes);
 
-  const laborRate = GROUPS.flatMap((g) => g.items).find(
-    (it): it is RateEntry => it.kind === "rate" && it.id === "grid.laborHoursPerDevice"
-  );
-  const laborValue = laborRate ? (await pricingValue(laborRate)) ?? laborRate.def : 0.5;
-  const laborDef = laborRate?.def ?? 0.5;
-
   // Port rules review (#159) — one pass over the full catalog (~37,400 parts
   // in prod) via listCatalog() above, called exactly once for this request;
   // buildPortRuleReport does its own single pass, never one scan per rule.
@@ -142,6 +134,7 @@ export default async function GridSettingsPage() {
     { label: "Assembly Builder", href: "/design/assemblies", desc: "Multi-part subassemblies placed as one Grid device." },
     { label: "Lineset Builder", href: "/design/lineset", desc: "Line-set layouts referenced from a Grid design." },
     { label: "Motor Library", href: "/design/motors", desc: "Motorized rigging catalog used by Grid rigging scope." },
+    { label: "Estimating Rules — Wire pull & System labor", href: "/estimating-rules", desc: "Per-system wire-pull runs and labor %, with Good/Better/Best multipliers." },
   ];
 
   return (
@@ -167,8 +160,8 @@ export default async function GridSettingsPage() {
             </span>
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>
-            Symbol colours, device-type icons, port rules, wire types, and install labor — the settings
-            specific to The Grid.
+            Symbol colours, device-type icons, port rules and wire types — the settings specific to
+            The Grid.
           </div>
         </div>
       </div>
@@ -204,8 +197,6 @@ export default async function GridSettingsPage() {
       />
 
       <WireTypesCard key={JSON.stringify(wireTypes)} wireTypes={wireTypes} />
-
-      <LaborHoursCard value={laborValue} def={laborDef} />
 
       <StandardNotesCard key={settings.gridStandardNotes ?? ""} value={settings.gridStandardNotes ?? ""} />
 

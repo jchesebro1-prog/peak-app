@@ -2656,41 +2656,6 @@ ok(rg.edges[1].fromName === "House" && rg.edges[1].toName === "Unassigned", "ris
 ok(rg.edges[0].lengthFt !== null && Math.abs((rg.edges[0].lengthFt || 0) - 40) < 1e-9,
   `riser: edge carries the measured length (${rg.edges[0].lengthFt})`);
 
-/* --- The Grid labor auto-suggest (D114) --- */
-import { suggestLabor } from "@/lib/design/grid-labor";
-
-const laborCat = [
-  { id: "LIG-LBR", sku: "LIG-LBR", desc: "Lighting — install labor", category: "Labor", unit: "hr", list: 68, cost: 45, role: "labor", discipline: "LIG" },
-  { id: "RIG-LBR", sku: "RIG-LBR", desc: "Rigging — install labor", category: "Labor", unit: "hr", list: 75, cost: 50, role: "labor", discipline: "RIG" },
-  { id: "AUD-LBR", sku: "AUD-LBR", desc: "Audio — install labor", category: "Labor", unit: "hr", list: 72, cost: 48, role: "labor", discipline: "AUD" },
-];
-const deviceCat = [
-  { id: "S4LED", sku: "S4LED", desc: "Source Four LED", category: "Lighting", unit: "ea", list: 1200, cost: 800 },
-  { id: "SPKR", sku: "SPKR", desc: "Loudspeaker", category: "Audio", unit: "ea", list: 900, cost: 600 },
-  { id: "HOIST", sku: "HOIST", desc: "Chain hoist", category: "Rigging Hardware", unit: "ea", list: 2000, cost: 1400 },
-  { id: "WIRE-X", sku: "WIRE-X", desc: "Cable", category: "Wire & Cable", unit: "ft", list: 2, cost: 1 },
-];
-const sug = suggestLabor(
-  [{ partId: "S4LED" }, { partId: "S4LED" }, { partId: "S4LED" }, { partId: "SPKR" }, { partId: "HOIST" }, { partId: "WIRE-X" }],
-  deviceCat as PartLite[],
-  laborCat as any[],
-  0.5
-);
-ok(sug.length === 3, `one suggestion per discipline present (${sug.length})`);
-const ligSug = sug.find((s) => s.partId === "LIG-LBR");
-ok(!!ligSug && ligSug.hours === 1.5, `3 lighting devices × 0.5h = 1.5h (${ligSug?.hours})`);
-const rigSug = sug.find((s) => s.partId === "RIG-LBR");
-ok(!!rigSug && rigSug.hours === 0.5, "the hoist maps to rigging labor");
-ok(sug.find((s) => s.partId === "AUD-LBR")?.hours === 0.5, "the speaker maps to audio labor");
-ok(!sug.some((s) => s.hours === 0), "no zero-hour suggestions");
-// Wire parts don't count as devices; hours round UP to the half hour.
-const sugOdd = suggestLabor([{ partId: "S4LED" }], deviceCat as PartLite[], laborCat as any[], 0.34);
-ok(sugOdd[0].hours === 0.5, `hours round up to the half hour (${sugOdd[0].hours})`);
-ok(suggestLabor([{ partId: "WIRE-X" }], deviceCat as PartLite[], laborCat as any[], 0.5).length === 0,
-  "wire-only placements suggest no labor");
-ok(suggestLabor([{ partId: "S4LED" }], deviceCat as PartLite[], [], 0.5).length === 0,
-  "no labor parts in the catalog → no suggestions (never invent rates)");
-
 /* --- repairs crew fan-out on Schedule (D115, overrides the D100 hold) --- */
 const crewJob = {
   id: "RJ-1", customer: "Lakeside", venue: "Sanctuary", stage: "scheduled",
@@ -10520,6 +10485,7 @@ seeded()
   .then(() => wireLabor231AsyncChecks())
   .then(() => gridAccessoriesAsyncChecks230())
   .then(() => laborPerSystem232AsyncChecks())
+  .then(() => gridLabor232AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -19033,8 +18999,10 @@ async function gridCustomItemsAsyncChecks(): Promise<void> {
   const unit = sellFromCost(1000, tier.margin);
   const built = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const line = built.ok ? built.build.spec.lines.find((l) => l.sku === `custom:${id}`) : undefined;
-  ok(built.ok && built.build.value === Math.round(2 * unit * 100) / 100,
-    `#212 quote: a custom-only option quotes at unit cost ÷ (1 − tier margin) × qty (${built.ok ? built.build.value : "refused"})`);
+  const customExt = Math.round(2 * unit * 100) / 100;
+  const customLabor = Math.round(customExt * 0.18 * 100) / 100;
+  ok(built.ok && Math.abs(built.build.value - (customExt + customLabor)) < 0.005,
+    `#212 quote + #232: a custom-only option quotes at unit cost ÷ (1 − tier margin) × qty, plus its General labor (${built.ok ? built.build.value : "refused"})`);
   ok(!!line && line.allowance === true && line.desc === "Custom motor controller — Acme — MC-9" && line.qty === 2 && line.price === unit,
     "#212 quote: the spec line carries the custom text, flagged allowance");
   ok(built.ok && built.build.fallbackLines.length === 0, "#212 quote: a custom line is never a tier-fallback line");
@@ -23176,8 +23144,12 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   const unit = isTierPriced(90, tier.margin) ? Math.round((90 / (1 - tier.margin)) * 100) / 100 : 150;
   const only = await buildGridQuote((await GP.getProject(gp.id))!, base);
   const onlyLine = only.ok ? only.build.spec.lines.find((l) => l.sku === PART) : undefined;
-  ok(only.ok && Math.abs(only.build.value - 2 * unit) < 0.005,
-    `#230 quote: an accessory-only option quotes at the part's tier price × qty (${only.ok ? only.build.value : only.error})`);
+  const onlyLabor = only.ok ? only.build.labor : [];
+  const r2_230 = (n: number) => Math.round(n * 100) / 100;
+  ok(only.ok && Math.abs(only.build.value - 2 * unit - onlyLabor.reduce((a, l) => a + l.amount, 0)) < 0.005,
+    `#230 quote: an accessory-only option quotes at the part's tier price × qty (+ #232 labor) (${only.ok ? only.build.value : only.error})`);
+  ok(onlyLabor.length === 1 && onlyLabor[0].system === "audio" && onlyLabor[0].material === r2_230(2 * unit) && onlyLabor[0].amount === r2_230(2 * unit * 0.18),
+    "#232 quote: an accessory counts as material in its heading's labor line (Audio, 18%)");
   ok(!!onlyLine && onlyLine.qty === 2 && onlyLine.price === unit && !onlyLine.allowance && onlyLine.desc === "TEST230 speaker bracket",
     "#230 quote: the accessory is a real catalog line on the spec, never an allowance");
 
@@ -23186,8 +23158,13 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   const same = both.ok ? both.build.spec.lines.filter((l) => l.sku === PART) : [];
   ok(same.length === 2 && same[0].price === unit && same[1].price === unit && same.map((l) => l.qty).sort().join() === "1,2",
     "#230 quote: an accessory prices exactly like a placed part of the same partId (two lines, one price)");
-  ok(both.ok && Math.abs(both.build.value - 3 * unit) < 0.005 && Math.abs(both.build.margin - (3 * unit - 3 * 90) / (3 * unit)) < 1e-6,
-    "#230 quote: the accessory counts in the value and its cost in the margin");
+  const bothLabor = both.ok ? both.build.labor : [];
+  const bothLaborSell = bothLabor.reduce((a, l) => a + l.amount, 0);
+  const bothLaborCost = bothLabor.reduce((a, l) => a + r2_230(l.amount * (1 - tier.margin)), 0);
+  ok(both.ok && Math.abs(bothLabor.reduce((a, l) => a + l.material, 0) - 3 * unit) < 0.02 &&
+    Math.abs(both.build.value - 3 * unit - bothLaborSell) < 0.005 &&
+    Math.abs(both.build.margin - (3 * unit + bothLaborSell - 3 * 90 - bothLaborCost) / (3 * unit + bothLaborSell)) < 1e-6,
+    "#230 quote: the accessory counts in the value and its cost in the margin (+ #232 labor at the tier margin)");
 
   const e = await GP.saveAccessory(gp.id, base, { id, qty: 4 });
   const afterEdit = await accOf(base);
@@ -23232,7 +23209,7 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   ok(ed.includes("accessoryBomLines(accessories, parts)") && ed.includes("accessoryValue") && ed.includes("accessoryLines.length === 0"),
     "#230 UI: accessories price from the same parts rows, count in the total, and an accessory-only option can quote");
   ok(ed.includes("groupOfCustomSystem(it.system) === g.key") && ed.includes("showAdd={false}"), "#230 UI: custom items print under their heading");
-  ok(ed.includes("Labor (suggested)"), "#230 UI: the D114 labor suggestion is untouched (#232 replaces it)");
+  ok(!ed.includes("Labor (suggested)"), "#230 UI + #232: the D114 labor suggestion is gone — labor prints inside each heading");
   const ci = read("src/app/(app)/design/grid/[id]/custom-items.tsx");
   ok(ci.includes("CUSTOM_SYSTEM_OF_GROUP") && ci.includes("showAdd") && ci.includes("system: draft.system"),
     "#230 UI: the custom-item form picks its BOM category and keeps it on edit");
@@ -23462,4 +23439,100 @@ async function laborPerSystem232AsyncChecks(): Promise<void> {
   ok((await raw())["labor.lighting.better"] === 1.15, "#232: per-row Reset of any other rate still writes its registry default");
   await setBlob219("pricing_rules", { [wl231.LEGACY_INSTALL_PCT_ID]: null, "labor.lighting.pct": null, "labor.lighting.better": null });
   ok(JSON.stringify(await P.loadWireLaborRules()) === JSON.stringify(wl231.defaultWireLaborRules()), "#232: resetting restores the defaults (later suites see the defaults)");
+}
+
+/* --- #232 T4: Grid labor lines replace the hours-per-device suggestion --- */
+import { gridSpecBomRows as lb232SpecRows } from "@/lib/design/grid-virtual-parts";
+import { bomGroups as lb232Groups, groupedBomLines as lb232Grouped } from "@/lib/design/grid-bom-groups";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const has = (f: string) => {
+    try {
+      rd(f);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  ok(!has("src/lib/design/grid-labor.ts") && !has("src/app/(app)/design/grid/settings/labor-hours-card.tsx"), "#232: the hours-per-device suggestion and its settings card are gone");
+  ok(!wl231Groups.some((g) => g.items.some((it) => it.id === "grid.laborHoursPerDevice")), "#232: grid.laborHoursPerDevice is retired from Estimating Rules");
+  const ed = rd("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(!ed.includes("suggestLabor") && !ed.includes("Labor (suggested)") && ed.includes("<LaborLineRow") && ed.includes("laborLines: GridLaborLine[]") &&
+    ed.includes('case "labor":') && /const\s+\w+:\s*never\s*=\s*l\.source/.test(ed) && ed.includes("labor: laborLines"),
+    "#232: the editor BOM prints each server-computed labor line inside its heading (exhaustive source switch)");
+  const ll = rd("src/app/(app)/design/grid/[id]/labor-lines.tsx");
+  const llImports = [...ll.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(ll.startsWith('"use client"') && llImports.every((m) => !m.startsWith("@/lib/stores/") && !m.startsWith("@/db") && !/\/(auto-estimate|equipment-pricing|equipment-map)$/.test(m)) && ll.includes("setLaborOverrideAction("),
+    "#232: the labor row is a client component with no store or pricing import");
+  const gq = rd("src/lib/design/grid-quote.ts");
+  ok(gq.includes("gridLaborLines(") && gq.includes("groupedBomLines(") && !gq.includes("laborLines?:") && gq.includes("inputs?: GridQuoteInputs"), "#232: buildGridQuote computes labor itself from the option's tier-priced material, grouped as the editor BOM groups it");
+  const pg = rd("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(pg.includes("buildGridQuote(project, activeOptionId, quoteInputs)") && pg.includes("laborLines={laborLines}") && !pg.includes("laborHoursPerDevice"), "#232: the editor page sends the same labor lines the quote will carry");
+  const acts = rd("src/app/(app)/design/grid/[id]/actions.ts");
+  const start = acts.indexOf("export async function setLaborOverrideAction");
+  const body = acts.slice(start, acts.indexOf("\n}\n", start));
+  ok(start > -1 && body.includes("await requireUser()") && body.includes("setLaborOverride(") && acts.includes("buildGridQuote(project, resolvedOptionId)"), "#232: the override action uses the placement-edit gate; the quote action no longer takes client labor");
+  ok(lb232SpecRows([{ sku: "labor:lighting", desc: "Labor — Lighting", qty: 1 }, { sku: "ETC-S4", desc: "Source Four", qty: 3 }], () => null).map((r) => r.sku).join() === "ETC-S4", "#232: the bid spec leaves labor lines out");
+  const mk = (system: "lighting" | "general", amount: number) => ({
+    system, sku: `labor:${system}`, desc: system === "lighting" ? "Labor — Lighting" : "Labor — General", material: 1000, pct: 18, mult: 1, tier: null, computed: amount, amount, overridden: false,
+  });
+  const g = lb232Groups(lb232Grouped({
+    devices: [{ partId: "LB232-DEV", desc: "Fixture", unit: "ea", qty: 2, list: 500, ext: 1000 }],
+    wires: [], curtains: [], custom: [], customItems: [], accessories: [],
+    parts: [{ id: "LB232-DEV", gridScope: "Lighting" }],
+    placements: [],
+    labor: [mk("lighting", 180), mk("general", 0)],
+  }));
+  const lig = g.find((x) => x.key === "lighting")!;
+  const gen = g.find((x) => x.key === "general")!;
+  ok(lig.lines.map((l) => l.source).join() === "device,labor" && lig.lines[1].partId === "labor:lighting" && lig.lines[1].labor?.amount === 180 && lig.value === 1180 &&
+    gen.lines.length === 1 && gen.lines[0].source === "labor" && gen.value === 0,
+    "#232: a labor line lands last in its own heading, and the heading total includes it");
+}
+
+/* #232 T4 (b) — labor lines through the store and buildGridQuote on the scratch DB. */
+async function gridLabor232AsyncChecks(): Promise<void> {
+  const GP = await import("@/lib/stores/grid-projects");
+  const { buildGridQuote } = await import("@/lib/design/grid-quote");
+  const { resolveTier } = await import("@/lib/pricing-tiers");
+  const { sellFromCost } = await import("@/lib/design/equipment-map");
+  const gp = await GP.createProject({ name: "LB232 test grid project", customer: "Test Customer LB232", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const base = (await GP.getProject(gp.id))!.options![0].id;
+  await GP.saveCustomItem(gp.id, base, { desc: "Lighting rack", system: "Lighting", qty: 1, unitCost: 7000 });
+  await GP.saveCustomItem(gp.id, base, { desc: "Misc hardware", qty: 2, unitCost: 100 });
+  const tier = await resolveTier(null);
+  const lightExt = Math.round(sellFromCost(7000, tier.margin) * 100) / 100;
+  const genExt = Math.round(2 * sellFromCost(100, tier.margin) * 100) / 100;
+  const b1 = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const lab = b1.ok ? b1.build.labor : [];
+  const ll = lab.find((l) => l.system === "lighting");
+  const gl = lab.find((l) => l.system === "general");
+  ok(!!ll && ll.amount === Math.round(lightExt * 0.18 * 100) / 100 && ll.mult === 1 && ll.tier === null && !!gl && gl.amount === Math.round(genExt * 0.18 * 100) / 100,
+    `#232 quote: a hand-built option gets one labor line per system at 18% × 1.0 (${ll?.amount} / ${gl?.amount})`);
+  const spec = b1.ok ? b1.build.spec.lines.filter((l) => l.sku.startsWith("labor:")) : [];
+  ok(spec.map((l) => `${l.sku}|${l.desc}|${l.qty}|${l.unit}`).join() === "labor:lighting|Labor — Lighting|1|lot,labor:general|Labor — General|1|lot",
+    "#232 quote: labor reaches the quote as priced lines, sku labor:<system>");
+  ok(b1.ok && Math.abs(b1.build.value - (lightExt + genExt + (ll?.amount ?? 0) + (gl?.amount ?? 0))) < 0.01, "#232 quote: the quote value includes labor");
+  ok(!(await GP.setLaborOverride(gp.id, base, "bogus", 5)).ok && !(await GP.setLaborOverride(gp.id, base, "pit", 5)).ok,
+    "#232 store: an unknown system — or one with no Grid BOM heading — is refused");
+  ok(!(await GP.setLaborOverride(gp.id, base, "lighting", -3)).ok, "#232 store: a negative amount is refused");
+  const set = await GP.setLaborOverride(gp.id, base, "lighting", 1500);
+  const b2 = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const ll2 = b2.ok ? b2.build.labor.find((l) => l.system === "lighting") : undefined;
+  ok(set.ok && !!ll2 && ll2.amount === 1500 && ll2.overridden && ll2.computed === ll?.amount, "#232 store: a typed $ overrides the computed labor");
+  await GP.setLaborOverride(gp.id, base, "general", 0);
+  const b3 = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  ok(b3.ok && !b3.build.spec.lines.some((l) => l.sku === "labor:general") && b3.build.labor.some((l) => l.system === "general" && l.amount === 0),
+    "#232 store: $0 drops that labor line from the quote but keeps it in the BOM to reset");
+  const alt = await GP.addOption(gp.id, { name: "Alt", copyFromOptionId: base, by: "Test Harness" });
+  const altOpt = alt.ok ? (await GP.getProject(gp.id))!.options!.find((o) => o.id === alt.option.id) : undefined;
+  // Key order is not stable through JSONB — compare the pairs.
+  const lbPairs = (o: object | undefined) => Object.entries(o ?? {}).map(([k, v]) => `${k}=${v}`).sort().join();
+  ok(lbPairs(altOpt?.laborOverrides) === "general=0,lighting=1500", `#232 store: copying an option copies its labor overrides (${lbPairs(altOpt?.laborOverrides)})`);
+  const rev = await GP.addRevision(gp.id, { by: "Test Harness", note: "labor overrides" });
+  await GP.setLaborOverride(gp.id, base, "lighting", null);
+  ok(JSON.stringify((await GP.getProject(gp.id))!.options!.find((o) => o.id === base)?.laborOverrides) === '{"general":0}', "#232 store: clearing one override leaves the others");
+  const restored = rev ? await GP.restoreRevision(gp.id, rev.rev, "Test Harness") : { ok: false as const };
+  ok(restored.ok && (await GP.getProject(gp.id))!.options!.find((o) => o.id === base)?.laborOverrides?.lighting === 1500, "#232 store: restoring a revision brings the overrides back");
 }

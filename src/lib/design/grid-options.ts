@@ -17,6 +17,7 @@
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { GridCustomItem } from "./grid-custom-items";
 import type { GridAccessory } from "./grid-accessories";
+import type { LaborOverrides } from "./wire-labor";
 
 export type GridOption = {
   id: string; // 'opt-' + 12 hex, or DEFAULT_OPTION_ID for a normalized legacy doc
@@ -32,6 +33,10 @@ export type GridOption = {
   /** BOM accessories (#230) — catalog parts added under a BOM heading,
    *  never placed. Absent on older options; always read through accessoriesOf(). */
   accessories?: GridAccessory[];
+  /** #232: typed labor $ per system — overrides that system's calculated
+   *  labor line; $0 leaves it off the quote. Absent on older options; always
+   *  read through sanitizeLaborOverrides(). */
+  laborOverrides?: LaborOverrides;
 };
 
 export const DEFAULT_OPTION_ID = "opt-base";

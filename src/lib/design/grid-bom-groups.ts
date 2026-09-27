@@ -15,16 +15,19 @@
  *    part's Grid scope (device type first, #226), Unscoped → General;
  *  - a curtain drop-in → Curtains;
  *  - a custom item (#212) → its `system` (absent → General);
- *  - an accessory → the heading it was added under (its stored `scope`).
+ *  - an accessory → the heading it was added under (its stored `scope`);
+ *  - a labor line (#232) → the heading of its system (the keys are the
+ *    same), printed last and counted in that heading's total.
  *
- * #232 seam: a per-system labor line is one more GroupedBomLine with
- * `source: "labor"` and `group` = its system key. bomGroups() partitions
- * whatever it is given, so labor needs a BomSource member and a render
- * case in the editor — nothing else here changes.
+ * #232: each heading's labor is computed by buildGridQuote over that
+ * heading's non-labor lines — the same partition this function makes, over
+ * tier-priced lines — so the editor and the quote agree on which lines
+ * count as a system's material.
  */
 import type { BomLine } from "./grid-bom";
 import { customItemPartId, type CustomItemSystem, type GridCustomItem } from "./grid-custom-items";
 import { isGridLayer, scopeOfPart, type GridLayer, type ScopedPartLite } from "./grid-scopes";
+import type { GridLaborLine } from "./wire-labor";
 
 export const BOM_GROUPS = [
   { key: "rigging", label: "Rigging" },
@@ -120,19 +123,26 @@ export function groupOfCustomSystem(system: string | null | undefined): BomGroup
   return isGridLayer(system) ? LAYER_GROUP[system] : "general";
 }
 
-export type BomSource = "device" | "accessory" | "wire" | "curtain" | "custom";
+export type BomSource = "device" | "accessory" | "wire" | "curtain" | "custom" | "labor";
 
 export type GroupedBomLine = BomLine & {
   group: BomGroupKey;
   source: BomSource;
   /** Accessory lines only: the stored accessory id (edit / remove). */
   accessoryId?: string;
+  /** Labor lines only (#232): the server-computed line (pct, mult, override). */
+  labor?: GridLaborLine;
 };
+
+/** A labor line's heading: its system when that is a BOM heading, else General. */
+export function groupOfLaborSystem(system: string): BomGroupKey {
+  return isBomGroupKey(system) ? system : "general";
+}
 
 export type BomGroup = { key: BomGroupKey; label: string; lines: GroupedBomLine[]; value: number };
 
 /** Tag every BOM line with its group and source. Within a group the order is
- *  devices, accessories, wires, curtains, custom items. */
+ *  devices, accessories, wires, curtains, custom items, labor. */
 export function groupedBomLines(input: {
   devices: readonly BomLine[];
   wires: readonly BomLine[];
@@ -142,6 +152,8 @@ export function groupedBomLines(input: {
   accessories: ReadonlyArray<BomLine & { accessoryId: string; group: BomGroupKey }>;
   parts: ReadonlyArray<GroupablePart & { id: string }>;
   placements: ReadonlyArray<AutoPlacementLite>;
+  /** #232: the option's labor lines (buildGridQuote's `labor`), when known. */
+  labor?: readonly GridLaborLine[];
 }): GroupedBomLine[] {
   const byId = new Map(input.parts.map((p) => [p.id, p]));
   const auto = autoSystemsByPart(input.placements);
@@ -152,6 +164,19 @@ export function groupedBomLines(input: {
     ...input.wires.map((l): GroupedBomLine => ({ ...l, source: "wire", group: groupOfPart(byId.get(l.partId)) })),
     ...input.curtains.map((l): GroupedBomLine => ({ ...l, source: "curtain", group: "curtains" })),
     ...input.custom.map((l): GroupedBomLine => ({ ...l, source: "custom", group: customGroup.get(l.partId) ?? "general" })),
+    ...(input.labor ?? []).map(
+      (l): GroupedBomLine => ({
+        partId: l.sku,
+        desc: l.desc,
+        unit: "lot",
+        qty: 1,
+        list: l.amount,
+        ext: l.amount,
+        source: "labor",
+        group: groupOfLaborSystem(l.system),
+        labor: l,
+      })
+    ),
   ];
 }
 

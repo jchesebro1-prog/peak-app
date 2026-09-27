@@ -25,6 +25,7 @@ import {
 import { DEFAULT_OPTION_ID, optionSlice } from "@/lib/design/grid-options";
 import { manualScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
+import { isLaborSku } from "@/lib/design/wire-labor";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getDb } from "@/db";
@@ -179,10 +180,13 @@ async function main() {
   const bGood = await buildGridQuote(qp, goodId);
   assert.ok(bBase.ok && bGood.ok, "buildGridQuote prices both options");
   if (bBase.ok && bGood.ok) {
-    assert.equal(bBase.build.lines.length, 1, "base option prices one grouped device line (2× symA)");
-    assert.equal(bBase.build.lines[0].qty, 2, "base option line qty is 2");
-    assert.equal(bGood.build.lines.length, 1, "good option prices its own single line");
-    assert.equal(bGood.build.lines[0].partId, symB.id, "good option line is symB, not symA");
+    const baseDev = bBase.build.lines.filter((l) => !isLaborSku(l.partId));
+    const goodDev = bGood.build.lines.filter((l) => !isLaborSku(l.partId));
+    assert.equal(baseDev.length, 1, "base option prices one grouped device line (2× symA)");
+    assert.equal(baseDev[0].qty, 2, "base option line qty is 2");
+    assert.equal(goodDev.length, 1, "good option prices its own single line");
+    assert.equal(goodDev[0].partId, symB.id, "good option line is symB, not symA");
+    assert.ok(bBase.build.labor.length > 0 && bBase.build.labor.every((l) => l.amount > 0), "#232: a priced option carries its calculated labor");
     assert.equal(bBase.build.spec.gridOptionId, qBase, "spec carries the option id");
     assert.ok(bBase.build.quoteName.endsWith(" · Design — The Grid design"), `quote name carries the option name when >1 option (got ${bBase.build.quoteName})`);
   }

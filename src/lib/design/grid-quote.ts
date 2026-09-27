@@ -2,8 +2,9 @@
  * Grid → quote pricing (Spec 1, Task 4). Lifted verbatim out of
  * createDraftQuoteAction so the same math prices ONE OPTION of a project
  * and can be exercised on a scratch database without a session. Every
- * comment about tier pricing, #63/#76 fallbacks, #49 curtains and D114
- * labor still applies — the logic is unchanged, only the input slice is.
+ * comment about tier pricing, #63/#76 fallbacks and #49 curtains still
+ * applies; labor is per system (#232) — one line per BOM heading, computed
+ * here from that heading's tier-priced material, never sent by the client.
  */
 
 import { getSite, docLocId } from "@/lib/identity/sites";
@@ -19,10 +20,19 @@ import type { GridProject } from "@/lib/stores/grid-projects";
 import { bomLines, bomTotals, curtainLines, routeLines, type BomLine } from "@/lib/design/grid-bom";
 import { isFabricRow, priceGridCurtains } from "@/lib/design/grid-curtains";
 import { isSeedPlaceholder } from "@/lib/design/grid-seed";
-import { ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options";
+import { defaultOptionId, ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options";
 import { riserLinksOf } from "@/lib/design/grid-riser-doc";
 import { customItemBomLines, customItemsCost, customItemsOf } from "@/lib/design/grid-custom-items";
 import { accessoriesCost, accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
+import { autoEstimateFor } from "@/lib/design/grid-auto-model";
+import { groupedBomLines, isBomGroupKey, type BomGroupKey, type GroupablePart } from "@/lib/design/grid-bom-groups";
+import { gridPartsFrom } from "@/lib/design/grid-parts";
+import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
+import { getSettings } from "@/lib/settings";
+import { loadDeviceTypeContext } from "@/lib/stores/device-types";
+import { loadWireLaborRules } from "@/lib/stores/pricing";
+import { gridLaborLines, sanitizeLaborOverrides, type GridLaborLine, type LaborOverrides, type WireLaborRules } from "@/lib/design/wire-labor";
+import type { TierKey } from "@/app/(app)/design/quick/engine";
 
 export type GridQuoteSpecLine = {
   sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true;
@@ -37,7 +47,14 @@ export type GridQuoteBuild = {
   tier: { tier: string; margin: number };
   locationId: string | null;
   quoteName: string;
+  /** #232: this option's labor lines (sell), one per BOM heading with
+   *  material or a typed override — the editor prints them under their
+   *  heading; lines with amount > 0 are on the quote. */
+  labor: GridLaborLine[];
 };
+
+/** The grouping slice of a Grid part, keyed by id (groupedBomLines' `parts`). */
+export type GridGroupPart = GroupablePart & { id: string };
 
 /**
  * What buildGridQuote reads, loaded ONCE for a batch of projects (fix wave 3,
@@ -53,28 +70,46 @@ export type GridQuoteInputs = {
   equip: Awaited<ReturnType<typeof loadEquipPriceCtx>> | null;
   tierFor: (customerId: string | null | undefined) => ReturnType<typeof resolveTier>;
   location: boolean;
+  /** #231/#232 rules (loadWireLaborRules). */
+  wireLabor: WireLaborRules;
+  /** #232: the Grid library's grouping slice — the SAME PartLite rows the
+   *  editor groups its BOM by (gridPartsFrom with the category map and device
+   *  types), so a line's labor heading is the heading it prints under. */
+  groupParts: ReadonlyArray<GridGroupPart>;
 };
+
+/**
+ * The editor's grouping rows (#232): gridPartsFrom over the library with the
+ * saved category map and the device-type context — exactly how the editor
+ * page builds `parts`. Virtual (asm:/allow:) rows are added per build.
+ */
+export async function loadGridGroupParts(symbols: GridSymbol[], catalog: CatalogPart[]): Promise<GridGroupPart[]> {
+  const [settings, deviceTypes] = await Promise.all([getSettings(), loadDeviceTypeContext(catalog)]);
+  return gridPartsFrom(symbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { deviceTypes });
+}
 
 export async function loadGridQuoteInputs(
   projects: ReadonlyArray<GridProject>,
   opts: { location?: boolean } = {}
 ): Promise<GridQuoteInputs> {
   const anyVirtual = projects.some((p) => (p.placements || []).some((pl) => parseVirtualPartId(pl.partId) !== null));
-  const [catalog, symbols] = await Promise.all([listCatalog(), listGridSymbols()]);
-  const equip = anyVirtual ? await loadEquipPriceCtx({ catalog }) : null;
+  const [catalog, symbols, wireLabor] = await Promise.all([listCatalog(), listGridSymbols(), loadWireLaborRules()]);
+  const [equip, groupParts] = await Promise.all([
+    anyVirtual ? loadEquipPriceCtx({ catalog }) : Promise.resolve(null),
+    loadGridGroupParts(symbols, catalog),
+  ]);
   const tiers = new Map<string, ReturnType<typeof resolveTier>>();
   const tierFor = (customerId: string | null | undefined) => {
     const k = customerId || "";
     if (!tiers.has(k)) tiers.set(k, resolveTier(customerId));
     return tiers.get(k)!;
   };
-  return { catalog, symbols, equip, tierFor, location: opts.location ?? true };
+  return { catalog, symbols, equip, tierFor, location: opts.location ?? true, wireLabor, groupParts };
 }
 
 export async function buildGridQuote(
   project: GridProject,
   optionId: string,
-  laborLines?: Array<{ partId: string; hours: number }>,
   /** Preloaded reads shared across a batch (loadGridQuoteInputs). */
   inputs?: GridQuoteInputs
 ): Promise<{ ok: true; build: GridQuoteBuild } | { ok: false; error: string }> {
@@ -164,15 +199,6 @@ export async function buildGridQuote(
   const curtainValue = curtains.reduce((a, l) => a + l.ext, 0);
   const curtainCostTotal = [...curtainPrices.values()].reduce((a, v) => a + v.costEach, 0);
 
-  const labor: Array<{ sku: string; desc: string; qty: number; unit: string; price: number; ext: number; cost: number }> = [];
-  for (const l of laborLines || []) {
-    const part = tierCatalog.find((p) => p.id === l.partId);
-    const hours = Number(l.hours);
-    if (!part || (part.role || "").toLowerCase() !== "labor") continue;
-    if (!(hours > 0) || hours > 10000) continue;
-    labor.push({ sku: part.sku, desc: part.desc, qty: hours, unit: part.unit || "hr", price: part.list, ext: hours * part.list, cost: hours * part.cost });
-  }
-
   // Custom items (#212) price exactly like an Equipment-map allowance: sell =
   // unit cost ÷ (1 − the customer's tier margin). Always priced, so they never
   // make a design "Incomplete" or refuse the quote.
@@ -185,6 +211,42 @@ export async function buildGridQuote(
   const acc = accessoryBomLines(accessories, tierCatalog);
   const accValue = acc.reduce((a, l) => a + l.ext, 0);
   const accCost = accessoriesCost(accessories, tierCatalog);
+
+  // #232: labor is one line per BOM heading — that heading's tier-priced
+  // material on this quote × labor % × the tier's multiplier, or the typed $
+  // the option carries. "Material" is every non-labor line the editor prints
+  // under the heading: placed devices (Auto lots, wire-pull lots included),
+  // accessories, measured wire runs + RiserLinks, curtains and custom items —
+  // partitioned by groupedBomLines over the same grouping rows the editor
+  // uses, so the two can never disagree about which line counts where. The
+  // tier is the option's Auto choice for that scope, else the option's own
+  // tier, else none (×1.0); General always takes the option's tier. Labor
+  // carries the customer's tier margin like every Grid line.
+  const wireLabor = inputs ? inputs.wireLabor : await loadWireLaborRules();
+  const groupParts = inputs ? inputs.groupParts : await loadGridGroupParts(symbols, catalog);
+  const grouped = groupedBomLines({
+    devices: devLines,
+    wires: wires.lines,
+    curtains,
+    custom,
+    customItems,
+    accessories: acc,
+    parts: [...groupParts, ...virtual],
+    placements,
+  });
+  const material: Partial<Record<BomGroupKey, number>> = {};
+  for (const l of grouped) if (l.ext > 0) material[l.group] = (material[l.group] ?? 0) + l.ext;
+  const est = autoEstimateFor(project.autoEstimate, optionId, defaultOptionId(project));
+  const laborTier = (sys: string): TierKey | null =>
+    (sys !== "general" ? est?.tierByScope[sys as keyof typeof est.tierByScope] : undefined) ?? option.tier ?? null;
+  // Only BOM headings take an override (setLaborOverride's rule), whatever an older doc holds.
+  const overrides: LaborOverrides = {};
+  for (const [k, v] of Object.entries(sanitizeLaborOverrides(option.laborOverrides))) if (isBomGroupKey(k)) overrides[k] = v;
+  const laborLines = gridLaborLines(material, laborTier, wireLabor, overrides);
+  const laborCostFrac = tier.margin >= 0 && tier.margin < 0.95 ? 1 - tier.margin : 0.7;
+  const labor = laborLines
+    .filter((l) => l.amount > 0)
+    .map((l) => ({ sku: l.sku, desc: l.desc, qty: 1, unit: "lot", price: l.amount, ext: l.amount, cost: Math.round(l.amount * laborCostFrac * 100) / 100 }));
 
   const lines: BomLine[] = [
     ...devLines,
@@ -219,5 +281,5 @@ export async function buildGridQuote(
   const manyOptions = ensureOptions(project).options.length > 1;
   const quoteName = `${project.name}${manyOptions ? ` · ${option.name}` : ""} — The Grid design`;
 
-  return { ok: true, build: { lines, value, margin, fallbackLines, spec, tier: { tier: tier.tier, margin: tier.margin }, locationId, quoteName } };
+  return { ok: true, build: { lines, value, margin, fallbackLines, spec, tier: { tier: tier.tier, margin: tier.margin }, locationId, quoteName, labor: laborLines } };
 }

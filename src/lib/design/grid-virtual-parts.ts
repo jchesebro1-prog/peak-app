@@ -17,6 +17,7 @@
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "./grid-bom";
 import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
+import { isLaborSku } from "./wire-labor";
 import { EQUIP_TIERS, cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
 import { GRID_SCOPE_OF_SYS, UNSCOPED, type GridLayer } from "./grid-scopes";
 import { resolveFixture, type FixtureCatalogPart, type FixtureResolvable } from "@/lib/fixture-assemblies";
@@ -151,6 +152,8 @@ export function gridSpecBomRows(
     const desc = String(l.desc || "").trim();
     const qty = Number(l.qty) || 0;
     if (l.allowance || sku.startsWith(ALLOWANCE_PART_PREFIX)) continue;
+    // #232: labor is a service line, not a product the spec can name.
+    if (isLaborSku(sku)) continue;
     const ref = sku ? parseVirtualPartId(sku) : null;
     if (ref?.kind === "assembly") {
       const f = fixtureOf(ref.id);
