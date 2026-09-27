@@ -10505,6 +10505,7 @@ seeded()
   .then(() => documentsPortalFixAsyncChecks())
   .then(() => finalWaveAAsyncChecks())
   .then(() => finalWaveBAsyncChecks())
+  .then(() => cable233LateAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18601,7 +18602,7 @@ import {
   const server = gemW3Price({ tier: "better", config: cfg }, table, {}, rates);
   ok(screen.budget !== calc.budget, `#211 wave 3 I1: the Scenery-track edit changes the screen total (${calc.budget} → ${screen.budget})`);
   ok(server.budget === screen.budget && server.needsPart === screen.needsPart, `#211 wave 3 I1: screen total == server total with a Scenery-track edit of 5 (${screen.budget} vs ${server.budget}; was ${calc.budget} on the server before wave 3)`);
-  ok(screen.budget === 13614 && calc.budget === 16479, `#211 wave 3 I1 + #232: the reviewer's figures at per-system Better labor (18% × 1.15) — 13614 on the screen, 16479 when the edit is dropped; were 13321 / 16125 at a flat 18% (${screen.budget} / ${calc.budget})`);
+  ok(screen.budget === 15016 && calc.budget === 17882, `#211 wave 3 I1 + #232 + #233 late: the reviewer's figures at per-system Better labor (18% × 1.15) with the Cable Package at ⌈79 fixtures × 1 × 1.15⌉ = 91 — 15016 on the screen, 17882 when the edit is dropped; were 13614 / 16479 with the stage-depth Cable Package (20), 13321 / 16125 at a flat 18% (${screen.budget} / ${calc.budget})`);
   ok(JSON.stringify(cfg.overrideUnits) === JSON.stringify({ "curtains:Scenery track": "ft" }) && JSON.stringify(gemW3Units) === JSON.stringify(cfg.overrideUnits), "#211 wave 3 I1: a save marks its overrides as feet");
   const { overrideUnits: _drop, ...oldCfg } = cfg;
   void _drop;
@@ -22451,8 +22452,8 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
   const light = C.systems.find((x) => x.key === "lighting")!;
   const ctrl = C.systems.find((x) => x.key === "controls")!;
   const cable = light.items.find((i) => i.key === "lighting:cablePackage");
-  ok(cable?.qty === 20 && cable.desc === "Cable Package" && cable.unit === "ea" && !ctrl.items.some((i) => i.key === "controls:outputStation"),
-    "#233: Cable Package keeps Output station's formula (2 × ⌊40/4⌋ = 20 at medium), now on the Lighting system");
+  ok(cable?.qty === 90 && cable.desc === "Cable Package" && cable.unit === "ea" && !ctrl.items.some((i) => i.key === "controls:outputStation"),
+    "#233: Cable Package is on the Lighting system — #233 late: ⌈78 fixtures × 1 × 1.15⌉ = 90 at medium Better (was Output station's 2 × ⌊40/4⌋ = 20)");
   const noLight = r233Compute({ ...s, sys: { ...s.sys, lighting: false } });
   ok(!noLight.systems.some((x) => x.key === "lighting" && x.items.some((i) => i.key === "lighting:cablePackage")),
     "#233: …and follows Lighting — with Lighting out of scope there is no Cable Package, whatever Controls/Data say");
@@ -25641,7 +25642,7 @@ import { deriveSeededMarker as fwaSeeded } from "@/lib/service-pricing";
     sys: { ...b.sys, lighting: true, controls: false }, ctrl: { console: false, architectural: false, data: false },
   });
   const cp = lightOnly.systems.find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:cablePackage");
-  ok(cp?.qty === 20, "#233 final: Lighting on with Controls off (no Data) now includes the Cable Package (2 × ⌊40/4⌋ = 20)");
+  ok(cp?.qty === 90, "#233 final: Lighting on with Controls off (no Data) now includes the Cable Package (#233 late: ⌈78 fixtures × 1 × 1.15⌉ = 90; was 2 × ⌊40/4⌋ = 20)");
   ok(/One hop only/.test(fwaRd("src/lib/design/equipment-vocab.ts")), "#233 final: EQUIPMENT_LABEL_ALIASES documents one-hop lookups");
 }
 
@@ -25994,4 +25995,117 @@ async function finalWaveBPdfChecks(): Promise<void> {
     },
   });
   ok((await store.read(kept))?.toString() === "%PDF-1.4 kept", "#222 final-B: a settle whose stored blobPath is the old path never deletes that file");
+}
+
+/* ======================================================================
+   #233 late (Jeff 2026-09-27) — the Cable Package quantity is the fixture
+   count × a per-fixture factor × the tier's multiplier, like labor:
+   qty = ⌈fixtures × perFixture × tier ×⌉. Estimating Rules ids
+   cable.lighting.perFixture (1, cap 10) and cable.lighting.good|better|best.
+   ====================================================================== */
+import * as cp233l from "@/lib/design/cable-package";
+import { LIGHTING_FIXTURE_KEYS as cp233lFixtureKeys, isLightingFixtureKey as cp233lIsFixture } from "@/lib/design/equipment-vocab";
+import { compute as cp233lCompute, defaultAState as cp233lDefault, tierDefsDefault as cp233lTierDefs, type AState as Cp233lAState } from "@/app/(app)/design/quick/engine";
+import { tierSystems as cp233lTierSystems } from "@/lib/design/equipment-pricing";
+import { autoEstimateCards as cp233lCards } from "@/lib/design/auto-estimate";
+import { manualScopeInputs as cp233lInputs } from "@/lib/design/grid-intake";
+import { GROUPS as cp233lGroups } from "@/lib/stores/pricing";
+{
+  const WL = wl231;
+  // The fixture set — named next to the vocabulary.
+  ok(cp233lFixtureKeys.join() === "lighting:par,lighting:front,lighting:cyc,lighting:side,lighting:automated",
+    "#233 late: the fixture set is Par, Front, Cyc, Side light and Automated");
+  ok(!cp233lIsFixture("lighting:cablePackage") && !cp233lIsFixture("lighting:wirePull") && !cp233lIsFixture("controls:console") && !cp233lIsFixture("controls:inputStation") && cp233lIsFixture("lighting:automated"),
+    "#233 late: the Cable Package itself, Wire pull, consoles and controls are not fixtures");
+  const items = [
+    { key: "lighting:par", qty: 10 }, { key: "lighting:front", qty: 13 }, { key: "lighting:automated", qty: 5 },
+    { key: "lighting:cablePackage", qty: 99 }, { key: "lighting:wirePull", qty: 400 }, { key: "controls:console", qty: 1 },
+  ];
+  ok(cp233l.lightingFixtureCount(items) === 28, `#233 late: the fixture count sums only fixture lines (got ${cp233l.lightingFixtureCount(items)})`);
+
+  // Rules: defaults, sanitizer bounds.
+  const d = WL.defaultWireLaborRules();
+  ok(d.cable.perFixture === 1 && d.cable.mult.good === 1 && d.cable.mult.better === 1.15 && d.cable.mult.best === 1.3,
+    "#233 late: defaults — 1 per fixture, ×1.0 / ×1.15 / ×1.3");
+  ok(WL.cableRateId("perFixture") === "cable.lighting.perFixture" && WL.cableRateId("best") === "cable.lighting.best", "#233 late: the rule ids are cable.lighting.perFixture / .good / .better / .best");
+  const stored: Record<string, unknown> = { "cable.lighting.perFixture": 1.5, "cable.lighting.best": 99 };
+  const r = WL.wireLaborRulesFrom((id) => stored[id]);
+  ok(r.cable.perFixture === 1.5 && r.cable.mult.best === WL.MULT_MAX && r.cable.mult.good === 1, "#233 late: a stored per-fixture (decimals allowed) is read; a multiplier caps at MULT_MAX");
+  const pf = (v: unknown) => WL.wireLaborRulesFrom((id) => (id === "cable.lighting.perFixture" ? v : undefined)).cable.perFixture;
+  ok(pf(-1) === 1 && pf("2") === 1 && pf(Number.NaN) === 1 && pf(null) === 1 && pf(50) === WL.CABLE_PER_FIXTURE_MAX && WL.CABLE_PER_FIXTURE_MAX === 10 && pf(0) === 0,
+    "#233 late: junk per-fixture → 1; above 10 caps at 10; a stored 0 stays 0");
+
+  // The quantity: tier multiplier, round up, none → ×1.0, 0 fixtures → nothing.
+  ok(cp233l.cablePackageQty(39, d.cable, "good") === 39 && cp233l.cablePackageQty(39, d.cable, "better") === 45 && cp233l.cablePackageQty(39, d.cable, "best") === 51,
+    "#233 late: 39 fixtures → 39 / ⌈44.85⌉ = 45 / ⌈50.7⌉ = 51 at Good / Better / Best");
+  ok(cp233l.cablePackageQty(39, d.cable, null) === 39, "#233 late: no tier → ×1.0");
+  ok(cp233l.cablePackageQty(10, { perFixture: 1.1, mult: d.cable.mult }, "good") === 11, "#233 late: float noise never buys an extra package (10 × 1.1 = 11, not 12)");
+  ok(cp233l.cablePackageQty(39, { perFixture: 1.5, mult: d.cable.mult }, "best") === 77, "#233 late: 39 × 1.5 × 1.3 = 76.05 rounds UP to 77");
+  ok(cp233l.cablePackageQty(0, d.cable, "best") === 0 && cp233l.cablePackageQty(12, { perFixture: 0, mult: d.cable.mult }, "best") === 0, "#233 late: 0 fixtures (or 0 per fixture) → 0");
+  ok(cp233l.cablePackageNote(24, d.cable, "better") === "24 fixtures × 1 × 1.15" && cp233l.cablePackageNote(1, { perFixture: 1.5, mult: d.cable.mult }, null) === "1 fixture × 1.5 × 1",
+    `#233 late: the line's note shows the math (${cp233l.cablePackageNote(24, d.cable, "better")})`);
+
+  // compute(): 40 × 24 medium, every fixture on → 10 + 13 + 6 + 5 + 5 = 39 fixtures.
+  const base = cp233lDefault(0);
+  const s: Cp233lAState = {
+    ...base, venue: "school", size: "medium", width: 40, depth: 24, grid: 24, wing: 12, ph: 20, tier: "better",
+    sys: { ...base.sys, rigging: false, curtains: false, lighting: true, controls: false, audio: false, video: false, acoustical: false, pit: false },
+    fixtures: { par: true, front: true, cyc: true, side: true, automated: true },
+  };
+  const C = cp233lCompute(s);
+  const light = C.systems.find((x) => x.key === "lighting")!;
+  const cable = light.items.find((i) => i.key === "lighting:cablePackage");
+  ok(cable?.qty === 45 && cable.note === "39 fixtures × 1 × 1.15" && cable.desc === "Cable Package",
+    `#233 late: compute() emits ⌈39 × 1 × 1.15⌉ = 45 at the design's Better tier, noted (${cable?.qty} · ${cable?.note})`);
+  ok(light.items[light.items.length - 1].key === "lighting:cablePackage", "#233 late: the Cable Package follows the fixture lines");
+  const deeper = cp233lCompute({ ...s, depth: 25 });
+  ok(deeper.systems.find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:cablePackage")?.qty === 45, "#233 late: stage depth no longer moves the quantity (same fixtures → same Cable Package)");
+  const none = cp233lCompute({ ...s, fixtures: { par: false, front: false, cyc: false, side: false, automated: false } });
+  ok(!none.systems.find((x) => x.key === "lighting")!.items.some((i) => i.key === "lighting:cablePackage"), "#233 late: no fixtures selected → no Cable Package line");
+
+  // The pipeline step applies the LIVE rules at each tier.
+  const rules = WL.wireLaborRulesFrom((id) => ({ "cable.lighting.perFixture": 2 } as Record<string, unknown>)[id]);
+  const stepped = cp233l.withCablePackage(C.systems, "best", rules);
+  const sc = stepped.find((x) => x.key === "lighting")!.items.filter((i) => i.key === "lighting:cablePackage");
+  ok(sc.length === 1 && sc[0].qty === 102 && sc[0].note === "39 fixtures × 2 × 1.3", `#233 late: the step replaces the line — 39 × 2 × 1.3 = 101.4 → 102 (${sc.map((i) => i.qty).join()})`);
+  ok(cp233l.withCablePackage(C.systems, "better", WL.defaultWireLaborRules()).every((x, i) => x === C.systems[i]), "#233 late: the step at the default rules and the design's tier changes nothing");
+  const off = cp233l.withCablePackage(C.systems.map((x) => (x.key === "lighting" ? { ...x, on: false } : x)), "best", rules);
+  ok(!off.find((x) => x.key === "lighting")!.items.some((i) => i.key === "lighting:cablePackage"), "#233 late: Lighting out of scope → no Cable Package");
+
+  // Quick Design (tierSystems) and Grid Auto (autoEstimateCards) both run it.
+  const allNone = { margin: 0.3, byTier: { good: {}, better: {}, best: {} } } as never;
+  const qd = (t: "good" | "better" | "best") => cp233lTierSystems(C, s, t, cp233lTierDefs(), allNone, {}, rules).find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:cablePackage")!;
+  ok(qd("good").qty === 78 && qd("better").qty === 90 && qd("best").qty === 102, `#233 late: Quick Design prices each tier's Cable Package at that tier (78 / 90 / 102 at 2 per fixture)`);
+  const inputs = { ...cp233lInputs(s), sys: s.sys };
+  const cards = cp233lCards(inputs, { tierByScope: { lighting: "best" as const }, overrides: {} }, allNone, {}, rules);
+  const cl = cards.find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:cablePackage")!;
+  ok(cl.qty === 102 && cl.eqQty === 102 && cl.note === "39 fixtures × 2 × 1.3" && cl.place === "lot", `#233 late: the Grid Auto Lighting card carries the Cable Package at the Lighting tier (${cl.qty})`);
+
+  // Estimating Rules wiring.
+  const g = cp233lGroups.find((x) => x.key === "cable");
+  const ids = (g?.items || []).map((it) => it.id);
+  ok(!!g && g.live && ["cable.lighting.perFixture", "cable.lighting.good", "cable.lighting.better", "cable.lighting.best"].every((id) => ids.includes(id)),
+    "#233 late: Estimating Rules has a live Cable package group with per fixture and Good / Better / Best ×");
+  const pfRow = g?.items.find((it) => it.id === "cable.lighting.perFixture");
+  ok(!!pfRow && pfRow.kind === "rate" && pfRow.def === 1 && pfRow.max === 10 && pfRow.step < 1 && pfRow.store === "general", "#233 late: per fixture defaults to 1, caps at 10 and takes decimals");
+  const gk = cp233lGroups.map((x) => x.key);
+  ok(gk.indexOf("cable") === gk.indexOf("wire") + 1 && gk.indexOf("labor") === gk.indexOf("cable") + 1, "#233 late: it sits between Wire pull and System labor");
+  const eng = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/engine.ts"), "utf8");
+  ok(!/2 \* fl\(D \/ 7\)/.test(eng), "#233 late: the stage-depth formula is gone");
+  const cpSrc = readFileSync(join(process.cwd(), "src/lib/design/cable-package.ts"), "utf8");
+  ok(!/from "@\/lib\/stores|from "@\/db/.test(cpSrc), "#233 late: cable-package.ts is client-safe (no store or db import)");
+}
+
+/* #233 late (b) — the Cable Package rules through Estimating Rules into the loader, against the scratch DB. Leaves the defaults behind. */
+async function cable233LateAsyncChecks(): Promise<void> {
+  const P = await import("@/lib/stores/pricing");
+  await P.setValue("cable.lighting.perFixture", 1.25);
+  await P.setValue("cable.lighting.better", 1.5);
+  const set = await P.loadWireLaborRules();
+  ok(set.cable.perFixture === 1.25 && set.cable.mult.better === 1.5, "#233 late: Estimating Rules edits reach the loader");
+  await P.setValue("cable.lighting.perFixture", 40);
+  ok((await P.loadWireLaborRules()).cable.perFixture === 10, "#233 late: Estimating Rules clamps per fixture at 10");
+  await P.resetValue("cable.lighting.perFixture");
+  await P.resetValue("cable.lighting.better");
+  ok(JSON.stringify(await P.loadWireLaborRules()) === JSON.stringify(wl231.defaultWireLaborRules()), "#233 late: resetting restores the defaults");
 }

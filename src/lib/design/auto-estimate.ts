@@ -21,6 +21,7 @@ import { EQUIPMENT_ROW_BY_KEY, type EquipPlace } from "./equipment-vocab";
 import { priceCell, sellFromCost, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
 import { applyEquipment } from "./equipment-pricing";
 import { defaultWireLaborRules, laborAmount, tierMult, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
+import { withCablePackage } from "./cable-package";
 import { fabricAreaRateOf } from "./curtain-pricing";
 import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
@@ -99,7 +100,7 @@ export function autoEstimateCards(
   est: AutoEstimate,
   table: EquipmentPriceTable,
   overridePrices: Record<string, UnitPrice>,
-  /** Wire-pull rules (#231) — the defaults (0 runs) add nothing. */
+  /** Wire-pull (#231), Cable Package (#233 late) and labor (#232) rules — the defaults add no wire pull. */
   rules: WireLaborRules = defaultWireLaborRules()
 ): AutoCard[] {
   const inputs = clampScopeInputs(rawInputs);
@@ -111,7 +112,8 @@ export function autoEstimateCards(
     const sys = C.systems.find((x) => x.key === scope);
     if (!sys) continue;
     const tier = est.tierByScope[scope] ?? "better";
-    const [sized] = withWirePull([sys], wireDimsOf(s), tier, rules);
+    // #233 late: the Cable Package at this card's tier, then the wire pull.
+    const [sized] = withWirePull(withCablePackage([sys], tier, rules), wireDimsOf(s), tier, rules);
     const [priced] = applyEquipment([sized], tier, table, overridePrices);
     const lines: AutoLine[] = [];
     for (const it of priced.items) {

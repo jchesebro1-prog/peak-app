@@ -2,6 +2,8 @@ import { getBlob, setBlob } from "@/db/doc-store";
 import { FIXTURE_RATE_DEFAULTS, type FixtureRates } from "@/lib/fixture-rates";
 import { FLY_CREW_DEFAULTS, FLY_RATE_DEFAULTS, type FlyRates } from "@/lib/travel-plan";
 import {
+  CABLE_PER_FIXTURE_MAX,
+  DEFAULT_CABLE_PER_FIXTURE,
   DEFAULT_LABOR_PCT,
   DEFAULT_RUNS,
   DEFAULT_TIER_MULTS,
@@ -11,6 +13,7 @@ import {
   MULT_MAX,
   RUNS_MAX,
   WIRE_SYSTEMS,
+  cableRateId,
   laborPctDefault,
   laborRateId,
   wireLaborRulesFrom,
@@ -548,6 +551,16 @@ export const GROUPS: PricingGroup[] = [
     ],
   },
   {
+    key: "cable", label: "Cable package", live: true,
+    sub: "Lighting Cable Package quantity by fixture count × tier (#233)",
+    note: "Live — Quick Design and Grid Auto estimates read these. Fixtures = the Par, Front, Cyc, Side light and Automated quantities the design selected; no fixtures adds no Cable Package line. The tier is the design's (Quick Design) or the Lighting scope's Auto choice (the Grid); none chosen → ×1.0. The quantity is priced by the “Cable Package” row in Grid Settings → Equipment map.",
+    items: [
+      rate(cableRateId("perFixture"), "Lighting — Cable Packages per fixture", DEFAULT_CABLE_PER_FIXTURE, "per fixture", { min: 0, max: CABLE_PER_FIXTURE_MAX, step: 0.05, help: "Cable Packages = ⌈fixtures × this × tier ×⌉. 0 = no Cable Package line." }),
+      ...tierMultRates(cableRateId, "Lighting Cable Package"),
+      formula("cable.qty", "Cable Package quantity", "qty = ⌈fixtures × per fixture × tier ×⌉  (fixtures = Par + Front + Cyc + Side light + Automated; Good / Better / Best; none chosen → ×1.0)"),
+    ],
+  },
+  {
     key: "labor", label: "System labor", live: true,
     sub: "Per-system labor as a % of that system's material × tier (#232)",
     note: "Live — replaces the flat install % and the Grid's hours-per-device suggestion. Material = the system's priced equipment and wire pull. The tier is the design's (Quick Design) or the scope's Auto choice (the Grid); none chosen → ×1.0. General = Grid lines with no system. A labor % with no value of its own defaults to the former install % (18 unless it was changed) — export CSV before changing.",
@@ -704,7 +717,7 @@ export async function frac(id: string, fb?: number): Promise<number> {
   return (await num(id, fb != null ? fb * 100 : 0)) / 100;
 }
 
-/** #231/#232: the wire-pull and system-labor rules, in ONE read of the general blob. */
+/** #231/#232/#233 late: the wire-pull, Cable Package and system-labor rules, in ONE read of the general blob. */
 export async function loadWireLaborRules(): Promise<WireLaborRules> {
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   return wireLaborRulesFrom((id) => g[id]);

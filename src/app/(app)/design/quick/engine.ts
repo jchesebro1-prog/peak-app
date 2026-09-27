@@ -13,6 +13,8 @@
 import { drapeRule } from "@/lib/design/goods";
 import { battenLenFt, venueDimsFromEstimator } from "@/lib/design/venue-dims";
 import { EQUIPMENT_LABEL_ALIASES, EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
+import { cablePackageItem } from "@/lib/design/cable-package";
+import { DEFAULT_CABLE_RULE } from "@/lib/design/wire-labor";
 
 /* ---------------------------------- types ---------------------------------- */
 
@@ -484,7 +486,7 @@ export function compute(s: AState): ComputeResult {
    */
   const pipeLenFt = venueOf(s).kind === "proscenium" ? battenLenFt(W) : W;
 
-  type Eq = { key: string; desc: string; unit: string; qty: number; drape?: DrapeGeom };
+  type Eq = { key: string; desc: string; unit: string; qty: number; drape?: DrapeGeom; note?: string };
   /** #233: an item's name and unit come from the vocabulary by key — ONE
    *  source for Quick Design, Auto cards, the Equipment map and the qty-
    *  override keys (D324). A key missing from the vocabulary is a bug the
@@ -593,12 +595,17 @@ export function compute(s: AState): ComputeResult {
     ctrlItems.push(eq("controls:inputStation", pick(1, 2, 4)));
     ctrlItems.push(eq("controls:distro", 1));
   }
-  // #233: Output station moved to Lighting as the Cable Package — its own
-  // formula, and it follows Lighting: any design with Lighting in scope gets
-  // it (Controls/Data no longer gate it). Pushed after the dimmer-rack count
-  // above, so the rack count is unchanged; a Lighting design without
-  // Controls + Data (Quick Design or a Grid Auto card) now gains this line.
-  if (s.sys.lighting) lightItems.push(eq("lighting:cablePackage", pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3))));
+  // #233: Output station moved to Lighting as the Cable Package, and it
+  // follows Lighting (Controls/Data don't gate it). #233 late (Jeff
+  // 2026-09-27): qty = ⌈fixtures × per fixture × tier ×⌉ — here at the
+  // default rule and the design's tier; the pricing pipeline re-derives it
+  // with the live Estimating Rules at each priced tier (withCablePackage).
+  // No fixtures → no line. Pushed after the dimmer-rack count above, so the
+  // rack count is unchanged.
+  if (s.sys.lighting) {
+    const cable = cablePackageItem(lightItems, DEFAULT_CABLE_RULE, s.tier);
+    if (cable) lightItems.push({ key: cable.key, desc: cable.desc, unit: cable.unit, qty: cable.qty, ...(cable.note ? { note: cable.note } : {}) });
+  }
 
   // Acoustical shell — multi (size-independent)
   const shell = s.shell || {};

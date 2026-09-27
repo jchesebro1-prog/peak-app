@@ -14,7 +14,12 @@
  * LIVE and scale footage / labor only; the reference price multipliers
  * (system.tier*Cost / *Price, D304) stay inert.
  *
- * The rules are Estimating Rules (pricing.ts groups "wire" and "labor", the
+ * Cable Package (#233 late, Jeff 2026-09-27), Lighting only:
+ *   qty = ⌈fixtures × per fixture × tier ×⌉
+ * The rule lives here with the others; the step that counts fixtures is
+ * cable-package.ts (it reads the fixture set from the vocabulary).
+ *
+ * The rules are Estimating Rules (pricing.ts groups "wire", "cable" and "labor", the
  * general store); loadWireLaborRules() reads them on the server and
  * wireLaborRulesFrom() here is the one sanitizer. An unset labor % takes the
  * stored flat install % (LEGACY_INSTALL_PCT_ID), else 18.
@@ -46,7 +51,9 @@ export type TierMults = Record<TierKey, number>;
 export type WireRule = { runs: number; mult: TierMults };
 /** `pct` is the percent number (18 = 18 %). */
 export type LaborRule = { pct: number; mult: TierMults };
-export type WireLaborRules = { wire: Record<WireSystem, WireRule>; labor: Record<LaborSystem, LaborRule> };
+/** #233 late: Cable Packages per lighting fixture, × the tier's multiplier. */
+export type CableRule = { perFixture: number; mult: TierMults };
+export type WireLaborRules = { wire: Record<WireSystem, WireRule>; labor: Record<LaborSystem, LaborRule>; cable: CableRule };
 
 export const DEFAULT_TIER_MULTS: Readonly<TierMults> = Object.freeze({ good: 1, better: 1.15, best: 1.3 });
 export const DEFAULT_RUNS = 0;
@@ -54,6 +61,10 @@ export const DEFAULT_LABOR_PCT = 18;
 export const RUNS_MAX = 20;
 export const LABOR_PCT_MAX = 60;
 export const MULT_MAX = 3;
+export const DEFAULT_CABLE_PER_FIXTURE = 1;
+export const CABLE_PER_FIXTURE_MAX = 10;
+/** #233 late: the Cable Package rule with nothing stored — what compute() emits before the live rules apply. */
+export const DEFAULT_CABLE_RULE: Readonly<CableRule> = Object.freeze({ perFixture: DEFAULT_CABLE_PER_FIXTURE, mult: DEFAULT_TIER_MULTS });
 /** Typo guard on one typed labor amount, not a policy. */
 export const LABOR_OVERRIDE_MAX = 10_000_000;
 
@@ -75,6 +86,11 @@ export function wireRateId(sys: WireSystem, field: "runs" | TierKey): string {
 /** Estimating Rules id of one labor knob: labor.<system>.pct | .good | .better | .best */
 export function laborRateId(sys: LaborSystem, field: "pct" | TierKey): string {
   return `labor.${sys}.${field}`;
+}
+
+/** #233 late — Estimating Rules id of one Cable Package knob: cable.lighting.perFixture | .good | .better | .best */
+export function cableRateId(field: "perFixture" | TierKey): string {
+  return `cable.lighting.${field}`;
 }
 
 /**
@@ -123,7 +139,11 @@ export function wireLaborRulesFrom(get: (id: string) => unknown): WireLaborRules
   for (const s of LABOR_SYSTEMS) {
     labor[s] = { pct: read(laborRateId(s, "pct"), pctDef, LABOR_PCT_MAX), mult: mults((t) => laborRateId(s, t)) };
   }
-  return { wire, labor };
+  const cable: CableRule = {
+    perFixture: read(cableRateId("perFixture"), DEFAULT_CABLE_PER_FIXTURE, CABLE_PER_FIXTURE_MAX),
+    mult: mults(cableRateId),
+  };
+  return { wire, labor, cable };
 }
 
 export function defaultWireLaborRules(): WireLaborRules {

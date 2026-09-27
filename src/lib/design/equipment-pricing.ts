@@ -33,6 +33,7 @@ import {
 import { sellFromCost, type EquipmentPriceTable, type UnitPrice } from "./equipment-map";
 import { needsPartCount } from "./scope-targets";
 import { defaultWireLaborRules, laborFrac, laborFracsFor, tierMult, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
+import { withCablePackage } from "./cable-package";
 
 /** One drape's make-it cost at a fabric's flat $/sq ft sewn (making included, #227) — the shared model (curtain-pricing.ts). */
 export function drapeUnitCost(drape: DrapeGeom, areaRate: number): number {
@@ -89,7 +90,7 @@ export function applyEquipment(
   });
 }
 
-/** The BOM's base rows for a tier: line-set scaling → wire pull (#231) → map pricing (no qty overrides). */
+/** The BOM's base rows for a tier: line-set scaling → Cable Package (#233 late) → wire pull (#231) → map pricing (no qty overrides). */
 export function tierSystemsBase(
   C: ComputeResult,
   s: AState,
@@ -97,10 +98,11 @@ export function tierSystemsBase(
   tierDefs: TierDefs,
   table: EquipmentPriceTable,
   overrides: Record<string, UnitPrice> = {},
-  /** Wire-pull rules (#231) — the defaults (0 runs) add nothing. */
+  /** Wire-pull (#231) and Cable Package (#233 late) rules — the defaults add no wire pull. */
   rules: WireLaborRules = defaultWireLaborRules()
 ): SystemBlock[] {
-  const sized = withWirePull(scaleSets(C.systems, C, tierKey, tierDefs), wireDimsOf(s), tierKey, rules);
+  const cabled = withCablePackage(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, rules);
+  const sized = withWirePull(cabled, wireDimsOf(s), tierKey, rules);
   return applyEquipment(sized, tierKey, table, overrides);
 }
 

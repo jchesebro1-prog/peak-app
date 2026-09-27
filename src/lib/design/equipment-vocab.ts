@@ -82,7 +82,8 @@ export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
   row("lighting", "cyc", "Cyc", "ea", "each", ["cyc"]),
   row("lighting", "side", "Side light", "ea", "each", ["wash", "side"]),
   row("lighting", "automated", "Automated", "ea", "each", ["moving", "automated"]),
-  // #233: was controls:outputStation ("Output station") — same equation, now a Fixtures item.
+  // #233: was controls:outputStation ("Output station"), now a Fixtures item.
+  // #233 late: qty = ⌈fixtures × per fixture × tier ×⌉ (cable-package.ts).
   row("lighting", "cablePackage", "Cable Package", "ea", "lot", ["cable", "jumper", "extension"]),
   // Controls (Quick Design only)
   row("controls", "console", "Console", "ea", "none", ["console"]),
@@ -118,6 +119,24 @@ export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
 ];
 
 export const EQUIPMENT_ROW_BY_KEY: ReadonlyMap<string, EquipRowDef> = new Map(EQUIPMENT_ROWS.map((r) => [r.key, r]));
+
+/**
+ * #233 late (Jeff 2026-09-27) — the lighting FIXTURE rows: the lines whose
+ * total quantity sizes the Cable Package (cable-package.ts). Not the Cable
+ * Package itself, Wire pull, or any Controls row (consoles, DMX, power).
+ * A new fixture row joins here explicitly.
+ */
+export const LIGHTING_FIXTURE_KEYS: readonly string[] = Object.freeze([
+  "lighting:par",
+  "lighting:front",
+  "lighting:cyc",
+  "lighting:side",
+  "lighting:automated",
+]);
+
+export function isLightingFixtureKey(key: unknown): boolean {
+  return typeof key === "string" && LIGHTING_FIXTURE_KEYS.includes(key);
+}
 
 export const EQUIP_SYSTEM_LABEL: Record<SysKey, string> = {
   rigging: "Rigging",
