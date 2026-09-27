@@ -17,6 +17,7 @@ import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import LinkPopup from "./link-popup";
+import TaskDialog from "./task-dialog";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
@@ -139,6 +140,7 @@ function ExpandedMessage({
   linkOptions,
   onLink,
   onOpenLinks,
+  onTask,
   isEmail,
 }: {
   m: MessageVM;
@@ -148,6 +150,8 @@ function ExpandedMessage({
   onLink: (link: { type: string; id: string; label: string } | null) => void;
   /** #214 — open the Link popup on this message */
   onOpenLinks: () => void;
+  /** #215 — open the create-task dialog on this message */
+  onTask: () => void;
   /** #214 fix wave 1 — the old picker was gated to email threads only;
    *  "Link…" is hidden on a call/meeting thread for the same reason. */
   isEmail: boolean;
@@ -226,6 +230,29 @@ function ExpandedMessage({
               }}
             >
               Link…
+            </button>
+          )}
+          {isEmail && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTask();
+              }}
+              title="Create a task from this message"
+              style={{
+                border: "1px solid #e4e7ec",
+                borderRadius: 6,
+                padding: "2px 7px",
+                color: "#68707b",
+                fontSize: 10.5,
+                fontWeight: 600,
+                background: "#fff",
+                cursor: "pointer",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              Task…
             </button>
           )}
           <select
@@ -315,6 +342,7 @@ function Conversation({
   linkOptions,
   onLink,
   onOpenLinks,
+  onTask,
   isEmail,
 }: {
   messages: MessageVM[];
@@ -322,6 +350,8 @@ function Conversation({
   onLink: (messageId: string, link: { type: string; id: string; label: string } | null) => void;
   /** #214 — a message header's "Link…" */
   onOpenLinks: (messageId: string) => void;
+  /** #215 — a message header's "Task…" */
+  onTask: (messageId: string) => void;
   /** #214 fix wave 1 — hide "Link…" on a non-email thread */
   isEmail: boolean;
 }) {
@@ -355,6 +385,7 @@ function Conversation({
         linkOptions={linkOptions}
         onLink={(link) => onLink(m.id, link)}
         onOpenLinks={() => onOpenLinks(m.id)}
+        onTask={() => onTask(m.id)}
         isEmail={isEmail}
       />
     ) : (
@@ -408,6 +439,7 @@ function Conversation({
             linkOptions={linkOptions}
             onLink={(link) => onLink(newest.id, link)}
             onOpenLinks={() => onOpenLinks(newest.id)}
+            onTask={() => onTask(newest.id)}
             isEmail={isEmail}
           />
         ) : (
@@ -465,6 +497,8 @@ export default function ThreadReader({
   const [visitOpen, setVisitOpen] = useState(false);
   // #214 — the Link popup: which message, and whether a header opened it
   const [linkFor, setLinkFor] = useState<{ messageId: string; fromHeader: boolean } | null>(null);
+  // #215 — the create-task dialog; messageId = the message it was opened from
+  const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
   const [sending, setSending] = useState(false);
 
   // call/meeting quick log
@@ -551,6 +585,8 @@ export default function ThreadReader({
     setShowCc(false);
     setAttachNote("");
   };
+
+  const openTask = (messageId: string | null) => setTaskFor({ messageId });
 
   const doSend = async () => {
     const b = cBody.trim();
@@ -791,6 +827,7 @@ export default function ThreadReader({
               void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
             }}
             onOpenLinks={(messageId) => setLinkFor({ messageId, fromHeader: true })}
+            onTask={(messageId) => openTask(messageId)}
             isEmail={vm.isEmail}
           />
         </div>
@@ -906,6 +943,9 @@ export default function ThreadReader({
                 visit={vm.visit}
                 onClose={() => setVisitOpen(false)}
               />
+            )}
+            {taskFor && (
+              <TaskDialog vm={vm} messageId={taskFor.messageId} onClose={() => setTaskFor(null)} />
             )}
           </div>
 
@@ -1216,6 +1256,11 @@ export default function ThreadReader({
           messageId={linkFor.messageId}
           fromHeader={linkFor.fromHeader}
           onClose={() => setLinkFor(null)}
+          onCreateTask={() => {
+            const mid = linkFor.messageId;
+            setLinkFor(null);
+            openTask(mid);
+          }}
         />
       )}
     </div>

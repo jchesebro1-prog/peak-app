@@ -10529,6 +10529,7 @@ seeded()
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   .then(() => tasks215AsyncChecks())
   .then(() => calendarTasks215AsyncChecks())
+  .then(() => inboxTask215AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -20071,7 +20072,7 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   );
   ok(fn214("searchLinkTargetsAction").includes("rankLinkTargets(") && fn214("searchLinkTargetsAction").includes("docLocId(s)"), "#214 actions: search ranks through the pure helper; venue ids are the CustomerLocation ids threads store");
   const page214 = read("src/app/(app)/inbox/page.tsx");
-  ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n    \};/.test(page214), "#214 page: the reader VM carries the linked people");
+  ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n/.test(page214), "#214 page: the reader VM carries the linked people");
 }
 
 /* ====== #214 Inbox Link popup — review fix wave 1 (Task 4 follow-up),
@@ -20664,4 +20665,146 @@ async function calendarTasks215AsyncChecks(): Promise<void> {
   ok((cal.match(/\$\{tasksQs\}/g) || []).length >= 7, "#215 every calendar nav link keeps the ?tasks=all choice");
   ok(cal.includes("placeTasks(") && cal.includes("<TaskChip") && cal.includes("renderTasks(k, 3)"), "#215 the calendar places tasks and renders chips in month cells and the task strip");
   ok(chip.includes("<ConfirmButton") && chip.includes("completeCalendarTaskAction(") && chip.includes("deleteCalendarTaskAction("), "#215 a chip completes via checkbox and deletes through the confirm button");
+}
+
+/* ============ #215 — tasks from email ============ */
+import {
+  threadTaskLinkCandidates as ttCandidates215,
+  buildThreadTaskInput as buildTTInput215,
+  dueAtFromDateInput as dueAt215,
+  defaultThreadTaskNotes as ttNotes215,
+  threadTaskRows as ttRows215,
+  type ThreadTaskRequest as ThreadTaskRequest215,
+} from "@/lib/inbox-task";
+
+{
+  const c = ttCandidates215({
+    threadId: "C-1", customerId: "rose-brand", siteId: "loc-1",
+    link: { type: "quote", id: "Q-2041", label: "Q-2041 · Main" },
+    primaryContactId: "ct-1", contactIds: ["ct-2", "ct-1", " "],
+  });
+  ok(c.map((x) => x.key).join(",") === "thread,contact:ct-1,contact:ct-2,customer,site,work", "#215 candidates: thread, primary + linked people (deduped), company, venue, work link");
+  ok(c.find((x) => x.key === "work")?.kind === "quote" && c.find((x) => x.key === "work")?.id === "Q-2041", "#215 the work candidate carries the link's type and id");
+  ok(
+    ttCandidates215({ threadId: "C-1", customerId: null, siteId: "loc-1", link: { type: "flame_job", id: "FT-3001" } }).map((x) => x.key).join(",") === "thread",
+    "#215 no company → no venue; a link type outside the work picker is not offered"
+  );
+
+  ok(dueAt215("") === null, "#215 an empty date means no due date");
+  ok(dueAt215("2026-10-05") === new Date(2026, 9, 5, 12).getTime(), "#215 a picked date saves as noon of that date");
+  ok(dueAt215("2026-02-30") === "invalid" && dueAt215("10/05/2026") === "invalid" && dueAt215("2026-13-01") === "invalid", "#215 an impossible or mis-formatted date is invalid");
+  ok(
+    ttNotes215("Re: rigging", "Pat Lee", "Sep 24, 2026, 3:10 PM") === 'From email: "Re: rigging" — Pat Lee, Sep 24, 2026, 3:10 PM' &&
+      ttNotes215("", "", "") === 'From email: "(no subject)" — unknown sender',
+    "#215 default notes name the subject, sender and date"
+  );
+
+  const roster = [{ id: "u1", name: "Jeff Chesebro" }, { id: "u2", name: "Sam Rivera" }];
+  const me = { id: "u1", name: "Jeff Chesebro" };
+  const base: ThreadTaskRequest215 = {
+    threadId: "C-1", title: "  Follow up   on bid ", notes: "n", assigneeUserId: "u2", dueDate: "2026-10-05",
+    linkKeys: ["contact:ct-2", "customer", "work", "contact:ct-forged"],
+  };
+  const build = (req: ThreadTaskRequest215, cands = c, workLabel = "Q-2041 · Main") => buildTTInput215({ req, candidates: cands, workLabel, roster, me });
+  const b1 = build(base);
+  ok(
+    b1.ok && b1.input.title === "Follow up on bid" && b1.input.section === "Email" && b1.input.assigneeUserId === "u2" &&
+      b1.input.assigneeName === "Sam Rivera" && b1.input.dueAt === new Date(2026, 9, 5, 12).getTime(),
+    "#215 build: title squashed, section Email, assignee from the roster, due at noon"
+  );
+  ok(
+    b1.ok && b1.input.threadId === "C-1" && b1.input.customerId === "rose-brand" && b1.input.quoteId === "Q-2041" &&
+      JSON.stringify(b1.input.contactIds) === '["ct-2"]' && b1.input.siteId === undefined,
+    "#215 build: only ticked candidates link, the thread always does, a forged key is ignored"
+  );
+  const surveyC = ttCandidates215({ threadId: "C-2", customerId: null, link: { type: "survey", id: "S-11", label: "S-11 · Main hall" } });
+  const b2 = build({ ...base, threadId: "C-2", linkKeys: ["work"], assigneeUserId: "" }, surveyC, "S-11 · Main hall");
+  ok(b2.ok && b2.input.notes === "n\nLinked survey: S-11 · Main hall" && b2.input.assigneeUserId === "u1", "#215 build: a survey becomes a notes reference line; blank assignee = me");
+  const inspC = ttCandidates215({ threadId: "C-3", customerId: null, link: { type: "inspection", id: "I-5", label: "Gym" } });
+  const b2b = build({ ...base, threadId: "C-3", notes: "", linkKeys: ["work"] }, inspC, "Gym");
+  ok(b2b.ok && b2b.input.notes === "Linked inspection: I-5 — Gym", "#215 build: an inspection reference line names the id when the label lacks it");
+  ok(!build({ ...base, title: "   " }).ok, "#215 build: a blank title is refused");
+  ok(!build({ ...base, assigneeUserId: "u9" }).ok, "#215 build: an assignee off the active team is refused");
+  ok(!build({ ...base, dueDate: "2026-13-01" }).ok, "#215 build: a bad due date is refused");
+  ok(!build({ ...base, title: "x".repeat(201) }).ok, "#215 build: a title over 200 characters is refused");
+  const b3 = build({ ...base, dueDate: "" });
+  ok(b3.ok && b3.input.dueAt === null, "#215 build: no date saves an undated task");
+
+  const NOW215 = new Date(2026, 8, 26, 12).getTime();
+  const mk = (o: Partial<TaskRecord> & { id: string }): TaskRecord => normalizeTask({ title: o.id, ...o });
+  const rows = ttRows215(
+    [
+      mk({ id: "a" }),
+      mk({ id: "b", dueAt: NOW215 - 2 * 86_400_000, assigneeName: "Sam Rivera" }),
+      mk({ id: "c", dueAt: NOW215 + 86_400_000 }),
+      mk({ id: "d", status: "done" }),
+    ],
+    NOW215,
+    (n) => (n === "Sam Rivera" ? "SR" : "?")
+  );
+  ok(rows.map((r) => r.id).join(",") === "b,c,a", "#215 thread tasks: open only, soonest due first, undated last");
+  ok(rows[0].overdue && rows[0].assigneeInitials === "SR" && !rows[1].overdue && rows[2].due === "" && rows[2].assigneeInitials === "", "#215 thread task rows carry overdue, initials and due label");
+  const it215 = readFileSync(join(process.cwd(), "src/lib/inbox-task.ts"), "utf8");
+  const itImports = [...it215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
+  ok(itImports.every((m) => !!m[1]), "#215 inbox-task.ts imports types only (the dialog imports it)");
+}
+
+async function inboxTask215AsyncChecks(): Promise<void> {
+  const { createTaskFromThread } = await import("../src/lib/inbox-task-write");
+  const { all: allCustomers215 } = await import("../src/lib/stores/customers");
+  const { createFixture } = await import("./test-fixtures");
+  const roster = await activeUsers();
+  const cust = (await allCustomers215()).find((x) => (x.locations || []).some((l) => !!l.id));
+  ok(!!cust && roster.length > 0, "#215 inbox setup: a customer with a venue and an active user exist");
+  if (!cust || !roster.length) return;
+  const loc = cust.locations.find((l) => !!l.id)!.id as string;
+  const now = Date.now();
+  const thread = {
+    id: "C-T215", mailbox: "personal", mailboxUser: "Test Harness", unread: false, customerId: cust.id, customer: cust.name,
+    contactName: "Pat Lee", contactEmail: "pat@example.com", subject: "Re: rigging bid", channel: "email", status: "waiting_us",
+    assignedTo: "", link: { type: "survey", id: "S-T215", label: "S-T215 · Main hall" }, messages: [], createdAt: now, updatedAt: now,
+    resolvedContactId: "ct-T215-a", linkedContactIds: ["ct-T215-a", "ct-T215-b"], siteId: loc,
+  };
+  await createFixture("comms", thread as never);
+  const me = { id: roster[0].id, name: roster[0].name };
+  const r = await createTaskFromThread(
+    { threadId: "C-T215", title: "Send revised bid", notes: "From email", assigneeUserId: "", dueDate: "2026-10-05", linkKeys: ["contact:ct-T215-b", "customer", "site", "work", "contact:ct-forged"] },
+    me
+  );
+  ok(r.ok, "#215 writer: a task is created from a thread");
+  if (!r.ok) return;
+  registerFixture("tasks", r.task.id);
+  const t = await getTask(r.task.id);
+  ok(
+    t?.threadId === "C-T215" && t.customerId === cust.id && t.siteId === loc && JSON.stringify(t.contactIds) === '["ct-T215-b"]',
+    "#215 writer: thread, company, venue and the ticked person are stored"
+  );
+  ok(
+    t?.section === "Email" && t.createdBy === me.name && t.assigneeUserId === me.id &&
+      t.notes === "From email\nLinked survey: S-T215 · Main hall" && t.dueAt === new Date(2026, 9, 5, 12).getTime(),
+    "#215 writer: section Email, created by and assigned to me, survey as a notes line, due at noon"
+  );
+  ok((await tasksForThread215("C-T215")).some((x) => x.id === r.task.id), "#215 writer: the thread's reader finds it");
+  await createFixture("comms", { ...thread, id: "C-T215-stale", siteId: "loc-not-this-customer" } as never);
+  const r2 = await createTaskFromThread({ threadId: "C-T215-stale", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: ["site"] }, me);
+  if (r2.ok) registerFixture("tasks", r2.task.id);
+  ok(r2.ok && r2.task.siteId === undefined, "#215 writer: a venue that isn't the company's is never linked");
+  const r3 = await createTaskFromThread({ threadId: "C-T215-missing", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
+  ok(!r3.ok, "#215 writer: a missing thread is refused");
+}
+
+{
+  const rd215 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const noStoreImport215 = (src: string) =>
+    !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/calendar-tasks-load"|lib\/inbox-task-write")/m.test(src);
+  const dlg = rd215("src/app/(app)/inbox/task-dialog.tsx");
+  const card = rd215("src/app/(app)/inbox/thread-tasks-card.tsx");
+  ok(dlg.startsWith('"use client"') && card.startsWith('"use client"') && noStoreImport215(dlg) && noStoreImport215(card), "#215 inbox task UI imports no store, db or writer");
+  const ta = rd215("src/app/(app)/inbox/task-actions.ts");
+  ok(ta.startsWith('"use server"') && (ta.match(/await requireUser\(\)/g) || []).length === 2 && ta.includes("createTaskFromThread("), "#215 both inbox task actions require a user; create delegates to the writer");
+  const reader = rd215("src/app/(app)/inbox/thread-reader.tsx");
+  ok(reader.includes("Task…") && reader.includes("<TaskDialog") && reader.includes("onCreateTask"), "#215 the reader has Task… per message, mounts the dialog, and wires the popup's Create task");
+  ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
+  const pg = rd215("src/app/(app)/inbox/page.tsx");
+  ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
 }
