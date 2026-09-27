@@ -24304,3 +24304,56 @@ async function pdfPoll222AsyncChecks(): Promise<void> {
     const hook222 = readFileSync(join(process.cwd(), "src/components/quote-pdf/use-quote-pdf.ts"), "utf8");
     ok(!hook222.includes("setInterval") && hook222.includes("startPdfPoll("), "#222 T5 review: the hook polls through startPdfPoll, never an async setInterval");
 }
+
+/* ======================================================================
+   #223 — estimate numbers: the pure module (src/lib/estimate-number.ts).
+   ====================================================================== */
+import {
+  ESTIMATE_PREFIX as e223Prefix,
+  prefixForQuoteType as e223PrefixFor,
+  formatQuoteNumber as e223FormatQuote,
+  formatLeadNumber as e223FormatLead,
+  displayQuoteNumber as e223DisplayQuote,
+  displayLeadNumber as e223DisplayLead,
+  parseEstimateNumber as e223Parse,
+  quoteNumberMatches as e223QuoteNoMatches,
+  leadNumberMatches as e223LeadNoMatches,
+  quoteMatchesSearch as e223QuoteSearch,
+  isEstimateNo as e223IsNo,
+  withoutEstimateFields as e223Strip,
+} from "@/lib/estimate-number";
+{
+  ok(
+    e223Prefix.system === "EST" && e223Prefix.flame_test === "FLM" && e223Prefix.inspection === "RIG" &&
+      e223Prefix.repair === "REP" && e223Prefix.rental === "RNT" && e223Prefix.consulting === "CON" &&
+      e223Prefix.opportunity === "OPP",
+    "#223 prefix map: EST/FLM/RIG/REP/RNT/CON/OPP"
+  );
+  ok(e223PrefixFor(undefined) === "EST" && e223PrefixFor(null) === "EST" && e223PrefixFor("") === "EST", "#223 an absent quoteType is a system quote → EST");
+  ok(e223PrefixFor("mystery") === "EST" && e223PrefixFor("opportunity") === "EST", "#223 an unknown quoteType (or the lead-only key) → EST");
+  ok(e223FormatQuote({ estNo: 1002, quoteType: "flame_test" }) === "FLM-1002", "#223 format: flame test");
+  ok(e223FormatQuote({ estNo: 1005, estSuffix: 2, quoteType: "system" }) === "EST-1005-2", "#223 format: suffix -2");
+  ok(e223FormatQuote({ estNo: 1005, estSuffix: 1, quoteType: "repair" }) === "REP-1005", "#223 format: a suffix below 2 is never printed");
+  ok(e223FormatQuote({ quoteType: "rental" }) === null && e223FormatQuote({ estNo: 0 }) === null && e223FormatQuote({ estNo: 12.5 }) === null, "#223 format: no valid estNo → null");
+  ok(e223FormatLead({ estNo: 1005 }) === "OPP-1005" && e223FormatLead({}) === null, "#223 format: lead → OPP");
+  ok(e223DisplayQuote({ id: "Q-2041" }) === "Q-2041" && e223DisplayQuote({ id: "Q-2041", estNo: 1001, quoteType: "inspection" }) === "RIG-1001", "#223 display: falls back to the internal id, never blank");
+  ok(e223DisplayLead({ id: "L-1050" }) === "L-1050" && e223DisplayLead({ id: "L-1050", estNo: 1003 }) === "OPP-1003", "#223 display: lead fallback");
+  const e223Same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(e223Same(e223Parse("flm-1002"), { estNo: 1002, suffix: null, prefix: "FLM" }), "#223 parse: flm-1002");
+  ok(e223Same(e223Parse("FLM1002"), { estNo: 1002, suffix: null, prefix: "FLM" }), "#223 parse: FLM1002");
+  ok(e223Same(e223Parse("1002"), { estNo: 1002, suffix: null, prefix: null }), "#223 parse: 1002");
+  ok(e223Same(e223Parse(" #1002 "), { estNo: 1002, suffix: null, prefix: null }), "#223 parse: #1002");
+  ok(e223Same(e223Parse("1005-2"), { estNo: 1005, suffix: 2, prefix: null }), "#223 parse: 1005-2");
+  ok(e223Same(e223Parse("est 1005 2"), { estNo: 1005, suffix: 2, prefix: "EST" }), "#223 parse: spaces as separators");
+  ok(e223Same(e223Parse("opp-1005"), { estNo: 1005, suffix: null, prefix: "OPP" }), "#223 parse: OPP");
+  ok(e223Parse("Q-2041") === null && e223Parse("XYZ-1002") === null && e223Parse("") === null && e223Parse(null) === null && e223Parse("lakefront") === null, "#223 parse: old ids, unknown prefixes and words are not numbers");
+  const e223Q = { id: "Q-2041", estNo: 1005, estSuffix: 2, quoteType: "flame_test", name: "Lakefront PAC", customer: "Lakefront" };
+  ok(e223QuoteNoMatches(e223Q, e223Parse("1005")!) && e223QuoteNoMatches(e223Q, e223Parse("flm-1005-2")!), "#223 match: bare number and exact number both hit");
+  ok(!e223QuoteNoMatches(e223Q, e223Parse("EST-1005")!) && !e223QuoteNoMatches(e223Q, e223Parse("1005-3")!), "#223 match: wrong prefix or wrong suffix misses");
+  ok(e223LeadNoMatches({ estNo: 1005 }, e223Parse("OPP-1005")!) && !e223LeadNoMatches({ estNo: 1005 }, e223Parse("FLM-1005")!), "#223 match: leads answer only to OPP or a bare number");
+  ok(e223QuoteSearch(e223Q, "FLM-1005-2") && e223QuoteSearch(e223Q, "q-2041") && e223QuoteSearch(e223Q, "lakefront") && e223QuoteSearch(e223Q, "flm-10"), "#223 search: number, old id, name and partial number all find the quote");
+  ok(!e223QuoteSearch(e223Q, "EST-1005") && e223QuoteSearch(e223Q, "  "), "#223 search: a wrong-prefix number misses; a blank term matches everything");
+  ok(e223IsNo(1001) && !e223IsNo(0) && !e223IsNo(-3) && !e223IsNo(1.5) && !e223IsNo("1001"), "#223 isEstimateNo: positive integers only");
+  const e223Patched = e223Strip({ name: "x", estNo: 5, estSuffix: 2 });
+  ok(e223Same(e223Patched, { name: "x" }), "#223 withoutEstimateFields drops estNo/estSuffix and keeps the rest");
+}
