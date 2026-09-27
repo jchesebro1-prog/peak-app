@@ -28100,3 +28100,29 @@ async function portal242CartAsyncChecks(): Promise<void> {
     "#242 cart: none of the above ever spawns a quote row — no estimate number is used until Generate"
   );
 }
+
+/* ======================================================================
+   Portal catalog — customer document route access rule (#242, Task 9;
+   spec §7). Pure only — the route itself (portal/catalog/doc/[id]) reads
+   the index's precomputed servableDocIds instead of calling this per
+   request; this is the rule stated standalone and tested directly.
+   ====================================================================== */
+import { canServePortalDoc as d242CanServeDoc, type PortalDocLinkFact as D242LinkFact } from "@/lib/portal-doc-access";
+{
+  const links = new Map<string, D242LinkFact[]>([
+    ["QUOTABLE", [{ documentId: "DOC-own", kind: "datasheet" }]],
+    ["QUOTABLE-HIDDEN-LINK", [{ documentId: "DOC-hidden", kind: "datasheet", hidden: true }]],
+    ["NOT-QUOTABLE", [{ documentId: "DOC-nq", kind: "datasheet" }]],
+    ["PARENT", [{ documentId: "DOC-parent-ds", kind: "datasheet" }, { documentId: "DOC-parent-img", kind: "image" }]],
+  ]);
+  const quotableSkus = new Set(["QUOTABLE", "QUOTABLE-HIDDEN-LINK", "ACCESSORY"]);
+  const coveringParentsOf = (sku: string): string[] => (sku === "ACCESSORY" ? ["PARENT"] : []);
+  const call = (docId: string) => d242CanServeDoc({ docId, linksBySku: links, quotableSkus, coveringParentsOf });
+
+  ok(call("DOC-own") === true, "#242 doc access: linked (not hidden) to a quotable SKU → true");
+  ok(call("DOC-hidden") === false, "#242 doc access: linked only via a hidden link → false");
+  ok(call("DOC-nq") === false, "#242 doc access: linked only to a non-quotable SKU → false");
+  ok(call("DOC-parent-ds") === true, "#242 doc access: a datasheet linked to a quotable fixture's covering parent → true");
+  ok(call("DOC-parent-img") === false, "#242 doc access: an image on a parent never serves via the accessory graph → false");
+  ok(call("DOC-does-not-exist") === false, "#242 doc access: an unlinked id is never servable");
+}

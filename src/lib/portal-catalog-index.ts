@@ -70,6 +70,14 @@ export type PortalIndex = {
   fixtures: Map<string, IndexedFixture>;
   entries: SearchEntry[];
   builtAt: number;
+  /** Every part-document id a portal customer may fetch (#242 Task 9,
+   *  spec §7): the union, over every quotable (non-hidden) part above, of
+   *  that part's own `imageIds` ∪ `datasheetIds` — both already exclude
+   *  hidden links, and `datasheetIds` already folds in covering parents
+   *  (never for images). Built once per index build, not per request —
+   *  see src/lib/portal-doc-access.ts for the same rule stated standalone
+   *  and pure. */
+  servableDocIds: Set<string>;
 };
 
 const TTL_MS = 5 * 60 * 1000;
@@ -254,7 +262,13 @@ async function buildIndex(): Promise<Built> {
     });
   }
 
-  return { at: now, ix: { parts, fixtures, entries, builtAt: now }, facts, rule };
+  const servableDocIds = new Set<string>();
+  for (const ip of parts.values()) {
+    for (const id of ip.imageIds) servableDocIds.add(id);
+    for (const id of ip.datasheetIds) servableDocIds.add(id);
+  }
+
+  return { at: now, ix: { parts, fixtures, entries, builtAt: now, servableDocIds }, facts, rule };
 }
 
 function headQty(q: number | undefined): number {
