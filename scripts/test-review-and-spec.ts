@@ -20740,11 +20740,13 @@ import {
       mk({ id: "c", dueAt: NOW215 + 86_400_000 }),
       mk({ id: "d", status: "done" }),
     ],
-    NOW215,
     (n) => (n === "Sam Rivera" ? "SR" : "?")
   );
   ok(rows.map((r) => r.id).join(",") === "b,c,a", "#215 thread tasks: open only, soonest due first, undated last");
-  ok(rows[0].overdue && rows[0].assigneeInitials === "SR" && !rows[1].overdue && rows[2].due === "" && rows[2].assigneeInitials === "", "#215 thread task rows carry overdue, initials and due label");
+  ok(
+    rows[0].dueAt === NOW215 - 2 * 86_400_000 && rows[0].assigneeInitials === "SR" && rows[2].dueAt === null && rows[2].assigneeInitials === "",
+    "#215 fix wave 1: thread task rows carry the raw dueAt and initials — no precomputed overdue/day label, since only the browser knows its own calendar day"
+  );
   const it215 = readFileSync(join(process.cwd(), "src/lib/inbox-task.ts"), "utf8");
   const itImports = [...it215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
   ok(itImports.every((m) => !!m[1]), "#215 inbox-task.ts imports types only (the dialog imports it)");
@@ -20760,14 +20762,19 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   if (!cust || !roster.length) return;
   const loc = cust.locations.find((l) => !!l.id)!.id as string;
   const now = Date.now();
+  const me = { id: roster[0].id, name: roster[0].name };
   const thread = {
-    id: "C-T215", mailbox: "personal", mailboxUser: "Test Harness", unread: false, customerId: cust.id, customer: cust.name,
+    // #215 fix wave 1 — visibleTo(t, me.name) requires mailbox === "personal"
+    // && mailboxUser === me.name; a fixture stamped with an arbitrary name
+    // was never actually visible to `me`; the "missing thread" test below
+    // used to pass for the wrong reason (createTaskFromThread only checked
+    // `!thread`), which is exactly the gap fix wave 1 closes.
+    id: "C-T215", mailbox: "personal", mailboxUser: me.name, unread: false, customerId: cust.id, customer: cust.name,
     contactName: "Pat Lee", contactEmail: "pat@example.com", subject: "Re: rigging bid", channel: "email", status: "waiting_us",
     assignedTo: "", link: { type: "survey", id: "S-T215", label: "S-T215 · Main hall" }, messages: [], createdAt: now, updatedAt: now,
     resolvedContactId: "ct-T215-a", linkedContactIds: ["ct-T215-a", "ct-T215-b"], siteId: loc,
   };
   await createFixture("comms", thread as never);
-  const me = { id: roster[0].id, name: roster[0].name };
   const r = await createTaskFromThread(
     { threadId: "C-T215", title: "Send revised bid", notes: "From email", assigneeUserId: "", dueDate: "2026-10-05", linkKeys: ["contact:ct-T215-b", "customer", "site", "work", "contact:ct-forged"] },
     me
@@ -20792,6 +20799,12 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   ok(r2.ok && r2.task.siteId === undefined, "#215 writer: a venue that isn't the company's is never linked");
   const r3 = await createTaskFromThread({ threadId: "C-T215-missing", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
   ok(!r3.ok, "#215 writer: a missing thread is refused");
+  await createFixture("comms", { ...thread, id: "C-T215-notmine", mailboxUser: "Somebody Else" } as never);
+  const r4 = await createTaskFromThread({ threadId: "C-T215-notmine", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
+  ok(
+    !r4.ok && r4.error === "That email thread no longer exists.",
+    "#215 fix wave 1: another person's personal thread (visibleTo false) is refused the same as a missing one, not just a missing thread"
+  );
 }
 
 {
@@ -20808,6 +20821,32 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
   const pg = rd215("src/app/(app)/inbox/page.tsx");
   ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
+
+  // #215 fix wave 1
+  ok(!dlg.includes("autoFocus"), "#215 fix wave 1: the task dialog doesn't use the uncontrolled autoFocus attribute");
+  ok(
+    dlg.includes("openerRef.current = document.activeElement") &&
+      dlg.includes("titleRef.current?.focus()") &&
+      dlg.includes("opener.isConnected") &&
+      dlg.includes("containerRef?.current"),
+    "#215 fix wave 1: the mount effect records the opener and focuses the Title field via a ref; close restores focus only to a still-connected opener, else the reader's container"
+  );
+  ok(
+    dlg.includes('t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT"') && dlg.includes("if (inField) return;"),
+    "#215 fix wave 1: Escape in a field doesn't discard the task dialog's typed text"
+  );
+  ok(
+    /onCreateTask=\{\s*vm\.isEmail/.test(reader),
+    "#215 fix wave 1: the Link popup's Create task is gated on vm.isEmail (Edit links itself isn't email-gated)"
+  );
+  ok(
+    card.includes("isEmail") && card.includes("No open tasks on this thread.") && card.includes("Use “Task…” on a message to add one."),
+    "#215 fix wave 1: the empty tasks-card hint only mentions Task… on an email thread"
+  );
+  ok(
+    dlg.includes("(vm.subject || \"\").slice(0, THREAD_TASK_TITLE_MAX)"),
+    "#215 fix wave 1: the pre-filled title (the subject) is capped to THREAD_TASK_TITLE_MAX"
+  );
 }
 
 /* ====== #225 Consulting proposal document fixes ======
