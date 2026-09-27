@@ -10502,6 +10502,7 @@ seeded()
   .then(() => quotePdfT4Fix222AsyncChecks())
   .then(() => quotePdfCoalesce222AsyncChecks())
   .then(() => pdfPoll222AsyncChecks())
+  .then(() => estimate223BackfillAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25536,4 +25537,151 @@ import {
   ok(e223IsNo(1001) && !e223IsNo(0) && !e223IsNo(-3) && !e223IsNo(1.5) && !e223IsNo("1001"), "#223 isEstimateNo: positive integers only");
   const e223Patched = e223Strip({ name: "x", estNo: 5, estSuffix: 2 });
   ok(e223Same(e223Patched, { name: "x" }), "#223 withoutEstimateFields drops estNo/estSuffix and keeps the rest");
+}
+
+/* ======================================================================
+   #223 — estimate numbers: the migration (sequence, assign_estimate_numbers(),
+   date-ordered backfill with lead→quote carry and suffixes, setval) and the
+   store wrapper's preview safety. Runs on the harness's fresh datadir, so
+   the real drizzle/0030_estimate_numbers.sql is what is under test.
+   ====================================================================== */
+import { assignEstimateNumbers as e223Assign } from "@/lib/stores/estimate-numbers";
+import { buildQuote as e223BuildQuote, type Quote as E223Quote } from "@/lib/stores/quotes";
+import { mkLead as e223MkLead, type LeadRecord as E223Lead } from "@/lib/stores/leads";
+import { getDocRows as e223GetRows, softDeleteDoc as e223SoftDelete } from "@/db/doc-store";
+import { getDb as e223GetDb, withTransaction as e223Tx } from "@/db";
+import { sql as e223Sql } from "drizzle-orm";
+import { readFileSync as e223ReadFile, readdirSync as e223ReadDir } from "node:fs";
+import { join as e223Join } from "node:path";
+import { isDeepStrictEqual as e223DeepEq } from "node:util";
+function e223Rows<T>(result: unknown): T[] {
+  if (result && typeof result === "object" && "rows" in result) return (result as { rows: T[] }).rows;
+  return Array.isArray(result) ? (result as T[]) : [];
+}
+
+async function estimate223BackfillAsyncChecks(): Promise<void> {
+  const db = await e223GetDb();
+  const reg = e223Rows<{ seq: string | null; fn: string | null }>(
+    await db.execute(e223Sql`select to_regclass('estimate_number_seq')::text as seq, to_regprocedure('assign_estimate_numbers()')::text as fn`)
+  );
+  ok(!!reg[0]?.seq && !!reg[0]?.fn, "#223 migration: estimate_number_seq and assign_estimate_numbers() exist on a fresh datadir");
+
+  // Number whatever earlier suites left unnumbered, so the fixtures below
+  // are the only unnumbered rows and get consecutive numbers.
+  await e223Assign();
+
+  const id = (slug: string) => fixtureId(223, slug);
+  const quote = (slug: string, t: number, extra: Partial<E223Quote> = {}): E223Quote => ({
+    ...e223BuildQuote(id(slug), { name: "#223 " + slug, owner: "spec" }, extra.quoteType || "system", null, t),
+    ...extra,
+  });
+  const lead = (slug: string, t: number, extra: Partial<E223Lead> = {}): E223Lead => ({
+    ...e223MkLead({ id: id(slug), org: "#223 " + slug, createdAt: t }),
+    ...extra,
+  });
+
+  // No createdAt at all — dated by its earliest history entry (5).
+  const hist = quote("hist", 1, { history: [{ at: 5, to: "draft" }], updatedAt: 90 });
+  delete (hist as Partial<E223Quote>).createdAt;
+  await createFixture("quotes", hist);
+  await createFixture("leads", lead("lead1", 10, { convertedQuoteId: id("q1") }));
+  await createFixture("quotes", quote("gone", 15));
+  await e223SoftDelete("quotes", id("gone"));
+  await createFixture("quotes", quote("q1", 20, { source: "lead" }));
+  await createFixture("quotes", quote("dl", 30, { source: "daylite" }));
+  await createFixture("quotes", quote("q2", 40, { leadId: id("lead1"), quoteType: "flame_test" }));
+  await createFixture("quotes", quote("q3", 55, { leadId: id("lead2") }));
+  await createFixture("leads", lead("lead2", 60));
+  await createFixture("quotes", quote("q4", 65, { quoteType: "consulting", consulting: { leadId: id("lead1") } }));
+  await createFixture("quotes", quote("tie-b", 70));
+  await createFixture("quotes", quote("tie-a", 70));
+
+  const assigned = await e223Assign();
+  ok(assigned === 11, `#223 backfill: numbers all eleven unnumbered fixtures in one pass (got ${assigned})`);
+
+  const read = async () => [
+    ...(await e223GetRows("quotes", ["hist", "gone", "q1", "dl", "q2", "q3", "q4", "tie-a", "tie-b"].map(id))),
+    ...(await e223GetRows("leads", ["lead1", "lead2"].map(id))),
+  ];
+  const rows = await read();
+  const field = (slug: string, k: "estNo" | "estSuffix") =>
+    (rows.find((r) => r.id === id(slug))?.doc as Record<string, unknown> | undefined)?.[k];
+  const no = (slug: string) => Number(field(slug, "estNo") ?? -1);
+  const b = no("hist");
+  ok(b >= 1001, "#223 backfill: numbers start at 1001 or later");
+  ok(
+    no("lead1") === b + 1 && no("gone") === b + 2 && no("dl") === b + 3 && no("q3") === b + 4 && no("tie-a") === b + 5 && no("tie-b") === b + 6,
+    "#223 backfill: leads and quotes interleave in date order (createdAt, else earliest history/activity; ties by id)"
+  );
+  ok(rows.find((r) => r.id === id("gone"))?.deleted === true && no("gone") > 0, "#223 backfill: a soft-deleted quote is numbered too, so no number is ever reused");
+  ok(no("dl") > 0, "#223 backfill: a Daylite-imported quote is numbered");
+  ok(no("q1") === no("lead1") && field("q1", "estSuffix") === undefined, "#223 backfill: the lead's converted quote carries the lead's number, no suffix");
+  ok(no("q2") === no("lead1") && field("q2", "estSuffix") === 2, "#223 backfill: a second quote on the lead (leadId) gets -2");
+  ok(no("q4") === no("lead1") && field("q4", "estSuffix") === 3, "#223 backfill: a consulting proposal linked by consulting.leadId gets -3");
+  ok(no("lead2") === no("q3") && field("q3", "estSuffix") === undefined, "#223 backfill: a lead newer than its quote takes the quote's number");
+  const histDoc = rows.find((r) => r.id === id("hist"))?.doc as Record<string, unknown> | undefined;
+  const histRest = { ...(histDoc || {}) };
+  delete histRest.estNo;
+  delete histRest.estSuffix;
+  ok(
+    e223DeepEq(histRest, JSON.parse(JSON.stringify({ ...hist, id: id("hist") }))),
+    "#223 backfill: writes only estNo/estSuffix (jsonb_set) — updatedAt and every other field are untouched, so list order and a concurrent save survive"
+  );
+
+  ok((await e223Assign()) === 0, "#223 backfill: a second pass assigns nothing");
+
+  const snapshot = JSON.stringify(rows.map((r) => [r.id, (r.doc as Record<string, unknown>).estNo, (r.doc as Record<string, unknown>).estSuffix]));
+  const file = e223ReadDir(e223Join(process.cwd(), "drizzle")).find((f) => /^\d{4}_estimate_numbers\.sql$/.test(f));
+  ok(!!file, "#223 migration: drizzle/NNNN_estimate_numbers.sql exists");
+  let rerunError: unknown = null;
+  if (file) {
+    const stmts = e223ReadFile(e223Join(process.cwd(), "drizzle", file), "utf8")
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      for (const s of stmts) await db.execute(e223Sql.raw(s));
+    } catch (e) {
+      rerunError = e;
+    }
+  }
+  ok(rerunError === null, `#223 migration: re-running every statement of the file is harmless (${String(rerunError)})`);
+  const after = await read();
+  ok(
+    JSON.stringify(after.map((r) => [r.id, (r.doc as Record<string, unknown>).estNo, (r.doc as Record<string, unknown>).estSuffix])) === snapshot,
+    "#223 migration: a re-run changes no number"
+  );
+
+  const top = e223Rows<{ top: string | number | bigint | null }>(
+    await db.execute(e223Sql`select max(v)::bigint as top from (
+      select (doc->>'estNo')::numeric as v from quotes where jsonb_typeof(doc->'estNo') = 'number'
+      union all
+      select (doc->>'estNo')::numeric from leads where jsonb_typeof(doc->'estNo') = 'number') s`)
+  );
+  const seq = e223Rows<{ last_value: string | number | bigint; is_called: boolean }>(
+    await db.execute(e223Sql`select last_value, is_called from estimate_number_seq`)
+  );
+  ok(
+    seq[0]?.is_called === true && Number(seq[0]?.last_value) === Number(top[0]?.top),
+    "#223 setval: the sequence sits at the highest number in use, so the next record continues it"
+  );
+
+  // A preview deploy reads the shared production DB before production has
+  // migrated: no function. The wrapper must answer 0, not throw (a throw
+  // inside a transaction would poison it).
+  const sentinel = new Error("e223-rollback");
+  const seen = { n: -1 };
+  try {
+    await e223Tx(async () => {
+      const tx = await e223GetDb();
+      await tx.execute(e223Sql`drop function assign_estimate_numbers()`);
+      seen.n = await e223Assign();
+      throw sentinel;
+    });
+  } catch (e) {
+    if (e !== sentinel) throw e;
+  }
+  ok(seen.n === 0, "#223 preview safety: with no assign_estimate_numbers() (an un-migrated DB) the wrapper returns 0 instead of throwing");
+  const back = e223Rows<{ fn: string | null }>(await db.execute(e223Sql`select to_regprocedure('assign_estimate_numbers()')::text as fn`));
+  ok(!!back[0]?.fn, "#223 …and rolling that transaction back restores the function");
 }

@@ -181,6 +181,9 @@ export interface LeadRecord {
   convertedQuoteId: string | null;
   convertedAt: number | null;
   activities: LeadActivity[];
+  /** Estimate number (#223) — shown as OPP-1005; its quotes carry it. Written
+   *  only by assign_estimate_numbers() (or create()'s explicit carry). */
+  estNo?: number;
   createdAt: number;
   updatedAt: number;
   lastActivityAt: number;

@@ -216,6 +216,15 @@ export type Quote = {
    *  pipeline status. Set/cleared only via setPoReceived; meaningless (null)
    *  on draft/sent/lost. Absent on pre-D119 docs — read with `?? null`. */
   poReceivedAt?: number | null;
+  /** Estimate number (#223) — the shared-counter value people see
+   *  (FLM-1002; src/lib/estimate-number.ts formats it). Written only by the
+   *  database's assign_estimate_numbers(); never changes once set. Absent
+   *  between insert and numbering, and on a DB that predates the migration. */
+  estNo?: number;
+  /** 2, 3, … for additional quotes on the same opportunity (#223); absent on the first. */
+  estSuffix?: number;
+  /** The lead (opportunity) this quote was made from (#223) — its estNo carries here. */
+  leadId?: string | null;
   review: QuoteReview;
   createdAt: number;
   updatedAt: number;
