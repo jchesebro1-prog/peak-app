@@ -24,10 +24,28 @@ import { tierMult, type CableRule, type WireLaborRules } from "./wire-labor";
 
 export const CABLE_PACKAGE_KEY = "lighting:cablePackage";
 
-/** The total quantity of the fixture lines among `items` (anything else is ignored). */
-export function lightingFixtureCount(items: ReadonlyArray<{ key: string; qty: number }>): number {
+/** A BomItem-shaped line, narrowed to what fixture counting needs. */
+export type FixtureLine = { key: string; qty: number; desc?: string };
+
+/**
+ * The total quantity of the fixture lines among `items` (anything else is
+ * ignored). `qtyOf` picks each line's EFFECTIVE quantity — the designer's
+ * typed override when there is one, else the equation's own qty (the
+ * default). Quick Design passes the tier's qtyOverrides (keyed by label);
+ * Grid Auto passes its per-row qty edits (keyed by row key) — #233 late
+ * review: fixture count must reflect what the design actually carries, not
+ * only what the equations first emitted.
+ */
+export function lightingFixtureCount(
+  items: ReadonlyArray<FixtureLine>,
+  qtyOf: (it: FixtureLine) => number = (it) => it.qty
+): number {
   let n = 0;
-  for (const it of items) if (isLightingFixtureKey(it.key) && Number.isFinite(it.qty) && it.qty > 0) n += it.qty;
+  for (const it of items) {
+    if (!isLightingFixtureKey(it.key)) continue;
+    const q = qtyOf(it);
+    if (Number.isFinite(q) && q > 0) n += q;
+  }
   return n;
 }
 
@@ -48,11 +66,12 @@ export function cablePackageNote(fixtures: number, rule: CableRule, tier: TierKe
 
 /** The Cable Package line for a Lighting system's items, or null when it has none. */
 export function cablePackageItem(
-  items: ReadonlyArray<{ key: string; qty: number }>,
+  items: ReadonlyArray<FixtureLine>,
   rule: CableRule,
-  tier: TierKey | null | undefined
+  tier: TierKey | null | undefined,
+  qtyOf: (it: FixtureLine) => number = (it) => it.qty
 ): BomItem | null {
-  const fixtures = lightingFixtureCount(items);
+  const fixtures = lightingFixtureCount(items, qtyOf);
   const qty = cablePackageQty(fixtures, rule, tier);
   if (!(qty > 0)) return null;
   const def = EQUIPMENT_ROW_BY_KEY.get(CABLE_PACKAGE_KEY);
@@ -72,13 +91,23 @@ export function cablePackageItem(
  * fixture lines with `rules.cable` at `tier`, replacing any it already had
  * (in place; appended when it had none). Runs before the wire-pull step and
  * map pricing. A system it doesn't change comes back as the same object.
+ *
+ * `qtyOf` (default: the equation's own qty) lets a caller count fixtures by
+ * their EFFECTIVE quantity — the designer's typed qty override, when there
+ * is one — rather than the raw equation output (#233 late review: Quick
+ * Design passes its qtyOverrides, Grid Auto its per-row qty edits).
  */
-export function withCablePackage(systems: SystemBlock[], tier: TierKey | null | undefined, rules: WireLaborRules): SystemBlock[] {
+export function withCablePackage(
+  systems: SystemBlock[],
+  tier: TierKey | null | undefined,
+  rules: WireLaborRules,
+  qtyOf: (it: FixtureLine) => number = (it) => it.qty
+): SystemBlock[] {
   return systems.map((sys) => {
     if (sys.key !== "lighting") return sys;
     const at = sys.items.findIndex((it) => it.key === CABLE_PACKAGE_KEY);
     const cur = at >= 0 ? sys.items[at] : undefined;
-    const next = sys.on ? cablePackageItem(sys.items, rules.cable, tier) : null;
+    const next = sys.on ? cablePackageItem(sys.items, rules.cable, tier, qtyOf) : null;
     if (!next) return cur ? { ...sys, items: sys.items.filter((it) => it.key !== CABLE_PACKAGE_KEY) } : sys;
     if (cur && cur.qty === next.qty && cur.note === next.note && sys.items.filter((it) => it.key === CABLE_PACKAGE_KEY).length === 1) return sys;
     const kept = sys.items.filter((it) => it.key !== CABLE_PACKAGE_KEY);

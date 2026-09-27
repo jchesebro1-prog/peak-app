@@ -60,7 +60,9 @@ export const LEGACY_HINTS: Record<string, LegacyHint> = {
   "lighting:cyc": { perTier: T(1200, 1750, 2600) },
   "lighting:side": { perTier: T(1250, 1800, 2700) },
   "lighting:automated": { perTier: T(2100, 3000, 4600) },
-  "lighting:cablePackage": { perTier: T(90, 125, 190) }, // was controls:outputStation (#233)
+  // #233 late review: no hint — the old Output-station price (T(90,125,190))
+  // was scaled to the ~20-unit stage-depth count; the unit is now per cable,
+  // so it no longer means anything. The row starts unmapped and unhinted.
   "controls:console": { perTier: T(4800, 7000, 10500) },
   "controls:consoleTouch": { perTier: T(1400, 2000, 3000) },
   "controls:batteryBackup": { perTier: T(20, 30, 45) },

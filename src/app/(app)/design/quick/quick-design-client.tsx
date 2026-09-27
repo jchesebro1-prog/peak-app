@@ -34,6 +34,7 @@ import {
 } from "./engine";
 import { fixtureOverridesFor, quickSaveConfig, systemLabor, tierDefsFor, tierSystems, tierSystemsBase, type QuickRates } from "@/lib/design/equipment-pricing";
 import { defaultWireLaborRules, laborFracsFor } from "@/lib/design/wire-labor";
+import { CABLE_PACKAGE_KEY } from "@/lib/design/cable-package";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
@@ -517,7 +518,10 @@ export default function QuickDesignClient({
         const upLabel = it.status === "needs-part" ? "Needs a part" : it.status === "none" ? "Not included" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
         // An allowance's refDesc is just the row's own name (no distinct
         // product) — the " · Allowance" suffix already says it once (#211 M3).
-        const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "") + (it.note ? ` · ${it.note}` : "");
+        // #233 late review: a typed Cable Package qty overrides the fixture
+        // math, so the "N fixtures × f × m" note is stale — drop it.
+        const showNote = it.note && !(it.key === CABLE_PACKAGE_KEY && hasOv);
+        const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "") + (showNote ? ` · ${it.note}` : "");
         return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext, none: it.status === "none" };
       });
       return { key: x.key, name: x.name, dot: x.dot, sub, rows, open: !!bomOpen[x.key] };

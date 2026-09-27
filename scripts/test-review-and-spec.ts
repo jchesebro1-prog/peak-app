@@ -17609,7 +17609,11 @@ import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintTe
   ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#211 T1: each row's label is the equation's own item name");
   ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#211 T1: the four fabric drapes are the curtain rows");
   ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#211 T1: Controls / Acoustical / Pit rows are never Auto-placed");
-  ok(keys.filter((k) => !gemRowByKey1.get(k)!.derived).every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#211 T1: every row carries its old built-in figure as a 'was' hint");
+  // lighting:cablePackage is the one deliberate exception (#233 late review):
+  // its old count-based price doesn't translate to the new per-cable unit.
+  ok(keys.filter((k) => !gemRowByKey1.get(k)!.derived && k !== "lighting:cablePackage").every((k) => gemHintText1(gemHints1[k]).startsWith("was ")),
+    "#211 T1: every row but Cable Package carries its old built-in figure as a 'was' hint");
+  ok(gemHintText1(gemHints1["lighting:cablePackage"]) === "", "#233 late review: Cable Package starts with no 'was' hint");
   ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#211 T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
   ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#211 T1: lighting hints are the old TIER_SKUS figures");
   ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#211 T1: one figure prints once, with its unit");
@@ -22518,7 +22522,8 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
   const cleared = r233Sanitize({ "controls:outputStation": { tiers: { good: cell } }, "lighting:cablePackage": null });
   ok(!("lighting:cablePackage" in cleared), "#233: clearing the new row is not undone by the old key");
   ok(r233KeyAliases?.get("controls:outputStation") === "lighting:cablePackage" && r233KeyAliases?.size === 1, "#233: exactly one key moved");
-  ok(r233Hints["lighting:cablePackage"] !== undefined && !("controls:outputStation" in r233Hints), "#233: the 'was' hint moved with the row");
+  ok(r233Hints["lighting:cablePackage"] === undefined && !("controls:outputStation" in r233Hints),
+    "#233 late review: the row has no 'was' hint — the old Output-station price was scaled to the pre-#233-late count and no longer applies; the row starts unmapped");
 }
 
 /* --- #229: "Not included" — a resolved Equipment-map cell: $0, never Incomplete, never placed, never quoted --- */
@@ -26100,6 +26105,33 @@ import { GROUPS as cp233lGroups } from "@/lib/stores/pricing";
   const cards = cp233lCards(inputs, { tierByScope: { lighting: "best" as const }, overrides: {} }, allNone, {}, rules);
   const cl = cards.find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:cablePackage")!;
   ok(cl.qty === 102 && cl.eqQty === 102 && cl.note === "39 fixtures × 2 × 1.3" && cl.place === "lot", `#233 late: the Grid Auto Lighting card carries the Cable Package at the Lighting tier (${cl.qty})`);
+
+  /* #233 late review (Jeff): the fixture count must follow the designer's
+     TYPED quantity — a Quick Design qty override or a Grid Auto qty edit —
+     not only the raw equation output. Base case: 39 fixtures (10 Par + 13
+     Front + 6 Cyc + 5 Side + 5 Automated). */
+  const sParOv: Cp233lAState = { ...s, qtyOverrides: { good: { lighting: { Par: 60 } } } };
+  const qdOv = cp233lTierSystems(C, sParOv, "good", cp233lTierDefs(), allNone, {}, rules)
+    .find((x) => x.key === "lighting")!
+    .items.find((i) => i.key === "lighting:cablePackage")!;
+  ok(qdOv.qty === 178,
+    `#233 late review: a typed Par override (10 → 60) changes the Cable Package's fixture count in Quick Design — 89 fixtures × 2 × 1 = 178 (got ${qdOv.qty})`);
+  ok(qdOv.note === "89 fixtures × 2 × 1", `#233 late review: the note shows the effective count, not the equation's (${qdOv.note})`);
+
+  const cardsParOv = cp233lCards(inputs, { tierByScope: { lighting: "best" as const }, overrides: { "lighting:par": { qty: 60 } } }, allNone, {}, rules);
+  const clParOv = cardsParOv.find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:cablePackage")!;
+  ok(clParOv.qty === 232,
+    `#233 late review: a typed Par qty edit (10 → 60) on the Grid Auto card changes the Cable Package's fixture count — 89 × 2 × 1.3 = 231.4 → 232 (got ${clParOv.qty})`);
+
+  // A typed Cable Package qty itself still wins (applyOverrides / the Auto
+  // card's own qty edit run after this step) — and the client drops the
+  // now-stale fixture-math note when that happens.
+  ok(r233Hints["lighting:cablePackage"] === undefined,
+    "#233 late review: the row has no legacy 'was' hint — the old Output-station price no longer applies to the per-cable unit");
+  const qdcSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
+  ok(qdcSrc.includes('import { CABLE_PACKAGE_KEY } from "@/lib/design/cable-package"') &&
+      qdcSrc.includes('it.key === CABLE_PACKAGE_KEY && hasOv'),
+    "#233 late review: Quick Design drops the fixture-math note once the Cable Package's own qty is typed over");
 
   // Estimating Rules wiring.
   const g = cp233lGroups.find((x) => x.key === "cable");

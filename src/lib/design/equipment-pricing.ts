@@ -101,7 +101,16 @@ export function tierSystemsBase(
   /** Wire-pull (#231) and Cable Package (#233 late) rules — the defaults add no wire pull. */
   rules: WireLaborRules = defaultWireLaborRules()
 ): SystemBlock[] {
-  const cabled = withCablePackage(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, rules);
+  // #233 late review: count fixtures by the designer's typed qty override
+  // (Quick Design's qtyOverrides, keyed by label per D324) when there is
+  // one, not the raw equation quantity — the Cable Package must reflect the
+  // fixtures the design actually carries.
+  const cabled = withCablePackage(
+    scaleSets(C.systems, C, tierKey, tierDefs),
+    tierKey,
+    rules,
+    (it) => s.qtyOverrides?.[tierKey]?.lighting?.[it.desc ?? ""] ?? it.qty
+  );
   const sized = withWirePull(cabled, wireDimsOf(s), tierKey, rules);
   return applyEquipment(sized, tierKey, table, overrides);
 }

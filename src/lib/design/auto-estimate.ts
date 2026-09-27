@@ -113,7 +113,14 @@ export function autoEstimateCards(
     if (!sys) continue;
     const tier = est.tierByScope[scope] ?? "better";
     // #233 late: the Cable Package at this card's tier, then the wire pull.
-    const [sized] = withWirePull(withCablePackage([sys], tier, rules), wireDimsOf(s), tier, rules);
+    // #233 late review: count fixtures by the designer's own qty edit (a
+    // typed override on the Auto card), not the raw equation quantity.
+    const [sized] = withWirePull(
+      withCablePackage([sys], tier, rules, (it) => est.overrides[it.key]?.qty ?? it.qty),
+      wireDimsOf(s),
+      tier,
+      rules
+    );
     const [priced] = applyEquipment([sized], tier, table, overridePrices);
     const lines: AutoLine[] = [];
     for (const it of priced.items) {
