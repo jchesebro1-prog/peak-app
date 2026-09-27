@@ -5,7 +5,7 @@ import { Fragment, useMemo, useState, useTransition, type CSSProperties } from "
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 import { CustomerCombobox } from "@/components/customer-combobox";
 import EntityQuickAdd, { INPUT, LABEL, emptyVenueQuickAdd, type QuickAddValues } from "@/components/entity-quick-add";
-import type { VenueType } from "@/lib/venue-types";
+import { venueTypeOptions, type VenueType } from "@/lib/venue-types";
 import { createQuoteIntakeAction } from "./actions";
 import { replaceConfirmMessage, sameBuilder, type IntakeInitial, type IntakeReplacing } from "./handoff";
 import { SERVICE_TYPES, type IntakeCustomer, type IntakeSubmit, type ServiceType } from "./types";
@@ -34,6 +34,8 @@ export default function QuoteIntakeForm({
   venueTypes: VenueType[];
 }) {
   const fromThread = !!threadId;
+  // #216 — a new venue starts on the first live venue type.
+  const defaultVenueKind = venueTypeOptions(venueTypes)[0]?.key;
   const [type, setType] = useState<ServiceType>(initial.type);
   // #110: the user-named category behind the trailing "Custom category" card.
   const [category, setCategory] = useState(initial.category);
@@ -49,7 +51,7 @@ export default function QuoteIntakeForm({
 
   const [locationMode, setLocationMode] = useState<"pick" | "new" | "skip">(initial.locationId ? "pick" : "skip");
   const [locationId, setLocationId] = useState(initial.locationId);
-  const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>(() => emptyVenueQuickAdd());
+  const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>(() => emptyVenueQuickAdd(defaultVenueKind));
 
   const [contactMode, setContactMode] = useState<"pick" | "new" | "skip">(initial.contactName ? "pick" : "skip");
   const [contactName, setContactName] = useState(initial.contactName);
@@ -338,7 +340,7 @@ export default function QuoteIntakeForm({
             venueTypes={venueTypes}
             onCancel={() => {
               setLocationMode("skip");
-              setNewLocation(emptyVenueQuickAdd());
+              setNewLocation(emptyVenueQuickAdd(defaultVenueKind));
             }}
           />
         </div>

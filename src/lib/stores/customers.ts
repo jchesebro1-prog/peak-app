@@ -87,8 +87,8 @@ export type CustomerLocation = {
   state?: string;
   /** #137 — venue zip (sites.zip) and the free-text category from the venues
    *  import (sites.kind). Both write-when-provided / preserve-when-undefined
-   *  (see writeRecord). */
-  zip?: string;
+   *  (see writeRecord). null = clear the stored zip (a moved venue, #216). */
+  zip?: string | null;
   kind?: string;
   lat?: number | string | null;
   lng?: number | string | null;
@@ -163,7 +163,8 @@ export type CustomerLocationInput = {
   address?: string;
   city?: string;
   state?: string;
-  zip?: string;
+  /** undefined/blank = preserve; null = clear (#216 moved venue). */
+  zip?: string | null;
   kind?: string;
   lat?: number | string | null;
   lng?: number | string | null;
@@ -233,7 +234,8 @@ export function normalizeRecord(c: CustomerRecordInput): CustomerDoc {
     // #137 — blank and absent both mean "preserve what's stored" (an import
     // cell can't clear a zip); a value writes. Keys stay in the literal so
     // the JSON key order matches composeLocation for the D83 change check.
-    zip: (l.zip || "").trim() || undefined,
+    // null is the explicit clear (#216: a moved venue drops its old zip).
+    zip: l.zip === null ? null : (l.zip || "").trim() || undefined,
     kind: (l.kind || "").trim() || undefined,
     lat: l.lat,
     lng: l.lng,

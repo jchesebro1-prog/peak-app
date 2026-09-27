@@ -16,7 +16,7 @@ import { LIFECYCLES } from "@/lib/identity/config";
 import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
 import { getSettings } from "@/lib/settings";
 import { getCompanySummary, type CompanySummary } from "@/lib/company-summary";
-import { saveVenue } from "@/lib/identity/venue-save";
+import { applyVenueMoveRule, saveVenue } from "@/lib/identity/venue-save";
 import { setNameAutoForLocIds } from "@/lib/identity/sites";
 import { deriveLocationLabels, venueTypesFrom, type SaveVenueInput, type SaveVenueResult } from "@/lib/venue-types";
 
@@ -78,12 +78,12 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
     name,
     types
   );
-  await upsert({
+  // #216 — the same move rule as the venue dialog (venueMoveRule): an
+  // untouched address keeps the stored coordinates/zip, a moved venue drops
+  // the old coordinates, zip and drive distance unless the form sent new ones.
+  const locations = await applyVenueMoveRule(
     id,
-    name,
-    type: input.type || "",
-    pricingTier: (input.pricingTier || "").trim() || null,
-    locations: rawLocs.map((l, i) => ({
+    rawLocs.map((l, i) => ({
       id: l.id,
       locationName: (l.locationName || "").trim(),
       label: labels[i] || "Venue",
@@ -99,7 +99,14 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
       venueKind: l.venueKind || "proscenium",
       travelMiles: l.travelMiles,
       travelMin: l.travelMin,
-    })),
+    }))
+  );
+  await upsert({
+    id,
+    name,
+    type: input.type || "",
+    pricingTier: (input.pricingTier || "").trim() || null,
+    locations,
     contacts: (input.contacts || [])
       .filter((c) => (c.name || "").trim())
       .map((c) => ({

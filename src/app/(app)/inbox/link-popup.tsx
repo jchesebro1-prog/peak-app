@@ -17,6 +17,7 @@
 import { useEffect, useId, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import EntityQuickAdd, { INPUT, emptyVenueQuickAdd, type QuickAddValues } from "@/components/entity-quick-add";
+import { venueTypeOptions } from "@/lib/venue-types";
 import { Typeahead } from "@/components/search/typeahead";
 import { passAllFilter, stableRank } from "@/lib/search/typeahead-rank";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
@@ -681,7 +682,8 @@ export default function LinkPopup({
                       style={newVenue ? ACCENT_BTN : BTN}
                       disabled={busy}
                       onClick={() => {
-                        setNewVenue(newVenue ? null : emptyVenueQuickAdd());
+                        // #216 — default to the first live venue type, not a hard-coded key.
+                        setNewVenue(newVenue ? null : emptyVenueQuickAdd(venueTypeOptions(vm.venueTypes)[0]?.key));
                         setVenueError(null);
                       }}
                     >

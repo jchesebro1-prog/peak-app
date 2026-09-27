@@ -129,7 +129,7 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
     locations.push({
       // A minted id so the new venue is findable after the save (it becomes
       // the site's legacyLocId → its docLocId).
-      id: "l" + Date.now(),
+      id: "l" + Date.now() + Math.random().toString(36).slice(2, 6),
       locationName: (input.newLocationName || "").trim(),
       label: "",
       deriveName: true,
@@ -141,7 +141,10 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
       state: (input.newLocationState || "").trim(),
       lat: null,
       lng: null,
-      venueKind: venueTypeOptions(types).some((t) => t.key === kind) ? kind : "proscenium",
+      // #216 — an unknown/archived type falls back to the first live one.
+      venueKind: venueTypeOptions(types).some((t) => t.key === kind)
+        ? kind
+        : (venueTypeOptions(types)[0]?.key ?? "proscenium"),
       travelMiles: null,
       travelMin: null,
     });

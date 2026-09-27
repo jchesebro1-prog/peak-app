@@ -36,6 +36,11 @@ type LocRow = {
   address: string;
   city: string;
   state: string;
+  /** #216 — the picked hit's postcode, or the stored one while the address
+   *  is untouched; "" once the address is typed by hand. */
+  zip: string;
+  /** Only ever a picked hit's coordinates or the stored ones (typing the
+   *  street/city/state by hand drops them — the server's move rule). */
   lat: number | null;
   lng: number | null;
   venueKind: string;
@@ -104,6 +109,7 @@ function newLoc(primary: boolean, venueKind = "proscenium"): LocRow {
     address: "",
     city: "",
     state: "",
+    zip: "",
     lat: null,
     lng: null,
     venueKind,
@@ -212,6 +218,7 @@ export default function EditCustomerModal({
       address: l.address || "",
       city: l.city || "",
       state: l.state || "",
+      zip: l.zip || "",
       lat: l.lat ?? null,
       lng: l.lng ?? null,
       venueKind: l.venueKind || "proscenium",
@@ -250,6 +257,8 @@ export default function EditCustomerModal({
 
   const setLoc = (i: number, patch: Partial<LocRow>) =>
     setLocations((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const typeSpot = (i: number, patch: Pick<Partial<LocRow>, "address" | "city" | "state">) =>
+    setLoc(i, { ...patch, zip: "", lat: null, lng: null });
   const makePrimaryLoc = (i: number) =>
     setLocations((rows) => rows.map((r, idx) => ({ ...r, primary: idx === i })));
   const addLoc = () => setLocations((rows) => [...rows, newLoc(rows.length === 0, defaultKind)]);
@@ -324,8 +333,11 @@ export default function EditCustomerModal({
     }, 400);
   };
 
+  // #216 — a picked hit carries its coordinates and zip; typing the street,
+  // city or state by hand drops them (the server then keeps the stored spot
+  // if the address ends up unchanged, else clears it for the geocoder).
   const pickAddress = (i: number, h: AddressHitVM) => {
-    setLoc(i, { address: addressFromHit(h), city: h.city, state: h.state, lat: h.lat, lng: h.lng });
+    setLoc(i, { address: addressFromHit(h), city: h.city, state: h.state, zip: h.zip || "", lat: h.lat, lng: h.lng });
     setSearch({ idx: null, hits: [], loading: false, msg: "" });
   };
 
@@ -374,6 +386,7 @@ export default function EditCustomerModal({
           address: l.address,
           city: l.city,
           state: l.state,
+          zip: l.zip || null,
           lat: l.lat,
           lng: l.lng,
           venueKind: l.venueKind,
@@ -781,7 +794,7 @@ export default function EditCustomerModal({
               <input
                 className="cu-m-in"
                 value={l.address}
-                onChange={(e) => setLoc(i, { address: e.target.value })}
+                onChange={(e) => typeSpot(i, { address: e.target.value })}
                 placeholder="Street address (for site-visit invites & maps)"
                 style={{ ...inStyle, fontSize: 12.5, padding: "8px 11px", borderRadius: 8, marginBottom: 8, width: "100%" }}
               />
@@ -789,14 +802,14 @@ export default function EditCustomerModal({
                 <input
                   className="cu-m-in"
                   value={l.city}
-                  onChange={(e) => setLoc(i, { city: e.target.value })}
+                  onChange={(e) => typeSpot(i, { city: e.target.value })}
                   placeholder="City"
                   style={{ ...inStyle, fontSize: 12.5, padding: "8px 11px", borderRadius: 8 }}
                 />
                 <input
                   className="cu-m-in"
                   value={l.state}
-                  onChange={(e) => setLoc(i, { state: e.target.value })}
+                  onChange={(e) => typeSpot(i, { state: e.target.value })}
                   placeholder="ST"
                   style={{ ...inStyle, fontSize: 12.5, padding: "8px 9px", borderRadius: 8, textAlign: "center" }}
                 />

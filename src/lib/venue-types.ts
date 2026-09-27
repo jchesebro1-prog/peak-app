@@ -286,3 +286,79 @@ export type VenueDialogInitial = {
   primary: boolean;
   currentName: string;
 };
+
+/** #216 — a venue's stored spot, in `sites` column form (coordinates are
+ *  numeric text; null = none). */
+export type VenueSpot = {
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: string | null;
+  lng: string | null;
+};
+
+/** What a save sent: the trimmed address fields, the picked hit's zip (null =
+ *  none), and complete coordinates only when the form had them (a picked hit,
+ *  or the stored ones echoed back while the address was untouched). */
+export type VenueSpotSent = {
+  address: string;
+  city: string;
+  state: string;
+  zip: string | null;
+  lat: string | null;
+  lng: string | null;
+};
+
+export type VenueMove = {
+  /** trimmed street + city + state equal the stored ones */
+  sameAddress: boolean;
+  /** an existing venue whose address or coordinates changed — its cached
+   *  drive distance priced the old spot */
+  moved: boolean;
+  zip: string | null;
+  lat: string | null;
+  lng: string | null;
+};
+
+/** Stored coordinate text compared by value ("40.10" ≡ "40.1"; null ≡ ""). */
+function sameCoordText(a: string | null, b: string | null): boolean {
+  const n = (v: string | null) => (v == null || v.trim() === "" ? null : Number(v));
+  return n(a) === n(b);
+}
+
+/**
+ * #216 — the ONE move rule every venue save applies (the venue dialog's
+ * saveVenue and the company modal's saveCustomerAction). Pure.
+ *
+ *  - Address unchanged (trimmed street/city/state equal the stored ones):
+ *    the stored zip is kept (a sent zip only fills a blank one) and, when no
+ *    complete coordinates were sent, the stored lat/lng are kept.
+ *  - Address changed: lat/lng come from the sent (picked) coordinates, else
+ *    null (the geocode runner re-locates it); the zip is the sent one, else
+ *    null — a moved venue never keeps the old zip, since the geocode
+ *    backfill matches on it and would put the venue back near its old spot.
+ *  - `moved` (existing venue, address or coordinates changed) tells the
+ *    caller to drop the cached drive distance.
+ *
+ * `stored` null = a new venue: everything comes from what was sent.
+ */
+export function venueMoveRule(stored: VenueSpot | null, sent: VenueSpotSent): VenueMove {
+  const t = (v: string | null) => (v ?? "").trim();
+  const sameAddress =
+    !!stored &&
+    t(stored.address) === sent.address.trim() &&
+    t(stored.city) === sent.city.trim() &&
+    t(stored.state) === sent.state.trim();
+  const zipIn = t(sent.zip) || null;
+  const zip = sameAddress ? stored?.zip || zipIn : zipIn;
+  let lat = sent.lat;
+  let lng = sent.lng;
+  if (lat == null || lng == null) {
+    lat = sameAddress ? (stored?.lat ?? null) : null;
+    lng = sameAddress ? (stored?.lng ?? null) : null;
+  }
+  const moved =
+    !!stored && (!sameAddress || !sameCoordText(lat, stored.lat) || !sameCoordText(lng, stored.lng));
+  return { sameAddress, moved, zip, lat, lng };
+}

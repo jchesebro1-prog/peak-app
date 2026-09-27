@@ -237,7 +237,7 @@ export function mergeLocation(
     hit.address = or(incoming.address, hit.address);
     hit.city = or(incoming.city, hit.city);
     hit.state = or(incoming.state, hit.state);
-    hit.zip = or(incoming.zip, hit.zip);
+    hit.zip = or(incoming.zip, hit.zip ?? undefined);
     hit.kind = or(incoming.kind, hit.kind);
     if (incoming.lat !== undefined && incoming.lat !== null && String(incoming.lat).trim() !== "") hit.lat = incoming.lat;
     if (incoming.lng !== undefined && incoming.lng !== null && String(incoming.lng).trim() !== "") hit.lng = incoming.lng;

@@ -11,6 +11,7 @@ import {
   venueTypeLabel,
   venueTypeOptions,
   venueTypesFrom,
+  venueMoveRule,
   type SaveVenueInput,
   type SaveVenueResult,
   type VenueDialogInitial,
@@ -41,11 +42,6 @@ export async function loadVenueTypes(): Promise<VenueType[]> {
 
 const cap = (v: unknown, n: number): string => (typeof v === "string" ? v.trim().slice(0, n) : "");
 const coord = (v: unknown): string | null => (typeof v === "number" && Number.isFinite(v) ? String(v) : null);
-/** Stored coordinate text compared by value ("40.10" ≡ "40.1"; null ≡ ""). */
-const sameCoord = (a: string | null, b: string | null): boolean => {
-  const n = (v: string | null) => (v == null || v.trim() === "" ? null : Number(v));
-  return n(a) === n(b);
-};
 
 export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult> {
   const companyId = cap(input?.companyId, 200);
@@ -75,24 +71,15 @@ export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult>
   const address = cap(input.address, 300);
   const city = cap(input.city, 120);
   const state = cap(input.state, 60);
-  const sameAddress =
-    !!existing &&
-    (existing.address ?? "").trim() === address &&
-    (existing.city ?? "").trim() === city &&
-    (existing.state ?? "").trim() === state;
-  // A moved venue never keeps the old zip — the geocode backfill matches on
-  // it (zip-only hits too) and would re-locate the venue near its old spot.
-  const zipIn = cap(input.zip, 20) || null;
-  const zip = sameAddress ? (existing?.zip || zipIn) : zipIn;
-  let lat = coord(input.lat);
-  let lng = coord(input.lng);
-  if (lat == null || lng == null) {
-    // No (complete) coordinates sent: keep the stored ones only when the
-    // venue hasn't moved.
-    lat = sameAddress ? (existing?.lat ?? null) : null;
-    lng = sameAddress ? (existing?.lng ?? null) : null;
-  }
-  const moved = !!existing && (!sameAddress || !sameCoord(lat, existing.lat) || !sameCoord(lng, existing.lng));
+  // One move rule for the dialog and the company modal (lib/venue-types).
+  const { zip, lat, lng, moved } = venueMoveRule(existing, {
+    address,
+    city,
+    state,
+    zip: cap(input.zip, 20) || null,
+    lat: coord(input.lat),
+    lng: coord(input.lng),
+  });
   // The first venue is always primary; a primary venue stays primary until
   // another one is made primary (the modal's "Make primary" radio).
   const primary = siblings.length === 0 || !!input.primary || !!existing?.isPrimary;
@@ -122,6 +109,83 @@ export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult>
     });
   });
   return { ok: true, siteId: id, locId: existing ? docLocId(existing) : id, name };
+}
+
+/** One venue card of a whole-company save (the company modal and quote
+ *  intake → saveCustomerAction). Structural so this module needs no app type. */
+export type CompanyVenueLoc = {
+  id?: string;
+  address: string;
+  city: string;
+  state: string;
+  zip?: string | null;
+  lat: number | null;
+  lng: number | null;
+  travelMiles: number | null;
+  travelMin: number | null;
+};
+
+/**
+ * #216 — the company modal's whole-company save applies the same move rule
+ * as saveVenue (venueMoveRule). The modal sends coordinates only from a
+ * picked hit or as the stored ones echoed back while the address is
+ * untouched, and the picked hit's zip.
+ *
+ *  - Address unchanged: stored zip kept; stored lat/lng kept unless a
+ *    picked hit sent new ones. Travel: what the form sent (its editable
+ *    mi/min fields and Route button are the manual override), else stored.
+ *  - Moved (address or coordinates changed): lat/lng/zip from the pick,
+ *    else null; the drive distance is cleared — unless the form sent a
+ *    distance that differs from the stored one (Route after the move), which
+ *    was measured from the new spot.
+ *
+ * Cards are matched to stored sites like writeRecord does (legacyLocId,
+ * then site id); an unmatched card is a new venue and keeps what it sent.
+ * A cleared zip is returned as null (the store's explicit "clear" — blank
+ * means preserve there).
+ */
+export async function applyVenueMoveRule<L extends CompanyVenueLoc>(
+  companyId: string | null | undefined,
+  locs: readonly L[]
+): Promise<L[]> {
+  const stored = await sitesForCompany(companyId);
+  const byKey = new Map<string, SiteRow>();
+  for (const s of stored) {
+    if (s.legacyLocId) byKey.set(s.legacyLocId, s);
+    byKey.set(s.id, s);
+  }
+  const numText = (v: unknown): string | null =>
+    typeof v === "number" && Number.isFinite(v) ? String(v) : null;
+  const num = (v: string | null): number | null =>
+    v == null || v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+  return locs.map((l) => {
+    const s = l.id ? byKey.get(l.id) : undefined;
+    if (!s) return l;
+    const r = venueMoveRule(s, {
+      address: (l.address || "").trim(),
+      city: (l.city || "").trim(),
+      state: (l.state || "").trim(),
+      zip: (l.zip || "").trim() || null,
+      lat: numText(l.lat),
+      lng: numText(l.lng),
+    });
+    const storedMiles = num(s.travelMiles);
+    const storedMin = num(s.travelMin);
+    const sentMiles = l.travelMiles === undefined ? storedMiles : l.travelMiles;
+    const sentMin = l.travelMin === undefined ? storedMin : l.travelMin;
+    const fresh = sentMiles !== storedMiles || sentMin !== storedMin;
+    const keepTravel = !r.moved || fresh;
+    return {
+      ...l,
+      // null only to clear a stored zip — undefined (preserve) otherwise, so
+      // a no-op save still compares equal (D83).
+      zip: r.zip ?? (s.zip ? null : undefined),
+      lat: num(r.lat),
+      lng: num(r.lng),
+      travelMiles: keepTravel ? sentMiles : null,
+      travelMin: keepTravel ? sentMin : null,
+    };
+  });
 }
 
 /** A stored site → the venue dialog's starting values. */

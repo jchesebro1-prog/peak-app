@@ -12,8 +12,9 @@ export type LocationInput = {
   city: string;
   state: string;
   /** #137 — carried through so a modal / quick-add save never drops an
-   *  imported zip or venue category (absent = preserve, see writeRecord). */
-  zip?: string;
+   *  imported zip or venue category (absent = preserve, see writeRecord).
+   *  null = clear it (#216: a moved venue, applyVenueMoveRule). */
+  zip?: string | null;
   kind?: string;
   lat: number | null;
   lng: number | null;

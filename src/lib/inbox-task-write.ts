@@ -17,9 +17,9 @@ export async function createTaskFromThread(
 ): Promise<{ ok: true; task: TaskRecord } | { ok: false; error: string }> {
   const thread = await getThread(String(req?.threadId || ""));
   // Fix wave 1 — the same rule link-actions.ts applies at every write site
-  // that touches a thread (setThreadSiteAction ~257, setIdentityMessageAction
-  // ~280, quickAddVenueAction ~204): missing, tombstoned, or another
-  // person's personal mailbox are all "not there" from this user's side.
+  // that touches a thread (setThreadSiteAction, setIdentityMessageAction,
+  // quickAddVenueAction): missing, tombstoned, or another person's personal
+  // mailbox are all "not there" from this user's side.
   if (!thread || thread.deleted || !visibleTo(thread, me.name))
     return { ok: false, error: "That email thread no longer exists." };
   const [customerId, roster] = await Promise.all([resolveCustomerId(thread), activeUsers()]);
