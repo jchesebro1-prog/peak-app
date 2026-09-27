@@ -29,6 +29,14 @@ const HEAD: React.CSSProperties = { display: "flex", alignItems: "center", justi
 const TYPE_GRID = "56px minmax(0, 1fr) 150px 90px 80px";
 const ROW_GRID = "26px minmax(0, 1fr) 70px 210px 210px";
 const scopeName = (s: GridLayer) => (s === "Unscoped" ? "General (Unscoped)" : s);
+/** Bulk-assign sentinel: distinct from "" (no choice yet) and from a real
+ *  type key, so the Assign button can stay disabled until the admin picks
+ *  ONE of "a type" or "Unmap" on purpose (#226 fix wave 3 — the old default
+ *  of "" meaning Unmap let a stray click silently unmap every selected row). */
+const UNMAP_CHOICE = "__unmap__";
+/** Rows rendered at once; narrowing the filter/tab brings the rest into view
+ *  (same cap style as the Grid palette's 60-row cap, editor.tsx). */
+const ROW_CAP = 200;
 
 export default function DeviceTypesClient({
   types,
@@ -52,13 +60,28 @@ export default function DeviceTypesClient({
   const [show, setShow] = useState<Show>(rows.some((r) => r.status === "unmapped") ? "unmapped" : "all");
   const [filter, setFilter] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [bulkType, setBulkType] = useState("");
+  const [bulkChoice, setBulkChoice] = useState("");
+
+  // #226 fix wave 3: a selection made under one tab/filter shouldn't survive
+  // into a different one — the categories a stale `picked` refers to may not
+  // even be on screen any more, and "Assign to N selected" would silently
+  // act on rows the admin can no longer see. Adjusted during render (the
+  // React-recommended way to reset state when an input changes) rather than
+  // in a useEffect, which would set state synchronously and force an extra
+  // render pass.
+  const scopeKey = `${show}|${filter}`;
+  const [pickedScope, setPickedScope] = useState(scopeKey);
+  if (scopeKey !== pickedScope) {
+    setPickedScope(scopeKey);
+    setPicked([]);
+  }
 
   const active = useMemo(() => types.filter((t) => !t.archived), [types]);
   const labelOf = (key: string | null | undefined) => (key ? types.find((t) => t.key === key)?.label ?? key : "");
   const dirty = JSON.stringify(drafts) !== JSON.stringify(initial);
   const needle = filter.trim().toLowerCase();
   const shown = rows.filter((r) => (show === "all" || r.status === show) && (!needle || r.category.toLowerCase().includes(needle)));
+  const visible = shown.slice(0, ROW_CAP);
   const tally: Record<Show, number> = {
     unmapped: rows.filter((r) => r.status === "unmapped").length,
     auto: rows.filter((r) => r.status === "auto").length,
@@ -66,7 +89,11 @@ export default function DeviceTypesClient({
   };
   const acceptable = rows.filter((r) => r.status === "unmapped" && !r.entry && r.suggestion && active.some((t) => t.key === r.suggestion!.typeKey)).length;
   const pickedSet = new Set(picked);
-  const allShownPicked = shown.length > 0 && shown.every((r) => pickedSet.has(r.category));
+  // A "too long to map" row can never be assigned (the server drops it —
+  // mapKeyOf), so it's excluded from "select all" and never counted as
+  // pickable; only rows currently rendered (within ROW_CAP) are selectable.
+  const pickable = visible.filter((r) => r.status !== "toolong");
+  const allShownPicked = pickable.length > 0 && pickable.every((r) => pickedSet.has(r.category));
 
   const run = (fn: () => Promise<Result>, after?: () => void) => {
     setMsg(null);
@@ -96,7 +123,7 @@ export default function DeviceTypesClient({
   };
   const togglePick = (category: string) => setPicked((p) => (p.includes(category) ? p.filter((c) => c !== category) : [...p, category]));
   const togglePickShown = () =>
-    setPicked((p) => (allShownPicked ? p.filter((c) => !shown.some((r) => r.category === c)) : [...new Set([...p, ...shown.map((r) => r.category)])]));
+    setPicked((p) => (allShownPicked ? p.filter((c) => !pickable.some((r) => r.category === c)) : [...new Set([...p, ...pickable.map((r) => r.category)])]));
   const typeOptions = active.map((t) => (
     <option key={t.key} value={t.key}>
       {t.label}
@@ -275,17 +302,31 @@ export default function DeviceTypesClient({
           ))}
           <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter categories" aria-label="Filter categories" style={{ ...INPUT, width: 220 }} />
           <span style={{ flex: 1 }} />
-          <select value={bulkType} onChange={(e) => setBulkType(e.target.value)} aria-label="Type for the selected categories" style={INPUT}>
-            <option value="">— Unmapped —</option>
+          <select value={bulkChoice} onChange={(e) => setBulkChoice(e.target.value)} aria-label="Type for the selected categories" style={INPUT}>
+            <option value="">Choose a type…</option>
             {typeOptions}
+            <option value={UNMAP_CHOICE}>Unmap</option>
           </select>
           <button
             type="button"
-            disabled={!picked.length || pending}
-            onClick={() => run(() => assignDeviceTypeAction(picked, bulkType || null), () => setPicked([]))}
-            style={picked.length && !pending ? PRIMARY : OFF}
+            disabled={!picked.length || !bulkChoice || pending}
+            onClick={() => {
+              if (bulkChoice === UNMAP_CHOICE) {
+                if (!window.confirm(`Unmap ${picked.length} selected ${picked.length === 1 ? "category" : "categories"}? They'll show as unmapped until someone picks a type.`)) return;
+                run(() => assignDeviceTypeAction(picked, null), () => {
+                  setPicked([]);
+                  setBulkChoice("");
+                });
+                return;
+              }
+              run(() => assignDeviceTypeAction(picked, bulkChoice), () => {
+                setPicked([]);
+                setBulkChoice("");
+              });
+            }}
+            style={picked.length && bulkChoice && !pending ? PRIMARY : OFF}
           >
-            Assign to {picked.length} selected
+            {bulkChoice === UNMAP_CHOICE ? `Unmap ${picked.length} selected` : `Assign to ${picked.length} selected`}
           </button>
         </div>
         <div style={{ padding: "6px 18px 14px" }}>
@@ -296,12 +337,19 @@ export default function DeviceTypesClient({
             <span>Suggested</span>
             <span>Device type</span>
           </div>
-          {shown.map((r) => (
+          {visible.map((r) => (
             <div key={r.key} style={{ display: "grid", gridTemplateColumns: ROW_GRID, gap: 8, alignItems: "center", padding: "5px 0", borderTop: "1px solid #f3f4f6" }}>
-              <input type="checkbox" aria-label={`Select ${r.category}`} checked={pickedSet.has(r.category)} onChange={() => togglePick(r.category)} />
+              <input
+                type="checkbox"
+                aria-label={`Select ${r.category}`}
+                checked={pickedSet.has(r.category)}
+                onChange={() => togglePick(r.category)}
+                disabled={r.status === "toolong"}
+              />
               <span title={r.category} style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {r.category}
                 {r.status === "auto" && <span style={{ ...TAG, color: "#1f5fa8", background: "#e8f0fb" }}>auto</span>}
+                {r.status === "toolong" && <span style={{ ...TAG, color: "#8a6d1f", background: "#fbf3dd" }}>too long to map</span>}
               </span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#5b616e", textAlign: "right" }}>{r.count.toLocaleString("en-US")}</span>
               <span style={{ fontSize: 12, color: "#5b616e", minWidth: 0 }}>
@@ -322,18 +370,27 @@ export default function DeviceTypesClient({
                   <span style={{ color: "#b7bcc6" }}>—</span>
                 )}
               </span>
-              <select
-                value={r.typeKey ?? ""}
-                disabled={pending}
-                onChange={(e) => run(() => assignDeviceTypeAction([r.category], e.target.value || null))}
-                aria-label={`Device type for ${r.category}`}
-                style={INPUT}
-              >
-                <option value="">— Unmapped —</option>
-                {typeOptions}
-              </select>
+              {r.status === "toolong" ? (
+                <span style={{ fontSize: 12, color: "#9aa0ab" }}>Too long to map — over 120 characters</span>
+              ) : (
+                <select
+                  value={r.typeKey ?? ""}
+                  disabled={pending}
+                  onChange={(e) => run(() => assignDeviceTypeAction([r.category], e.target.value || null))}
+                  aria-label={`Device type for ${r.category}`}
+                  style={INPUT}
+                >
+                  <option value="">— Unmapped —</option>
+                  {typeOptions}
+                </select>
+              )}
             </div>
           ))}
+          {shown.length > ROW_CAP && (
+            <div style={{ fontSize: 10.5, color: "#9aa0ab", padding: "6px 0" }}>
+              Showing {ROW_CAP} of {shown.length.toLocaleString("en-US")} — narrow the filter.
+            </div>
+          )}
           {shown.length === 0 && (
             <div style={{ padding: "18px 0", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               {show === "unmapped" && !needle ? "Every category has a device type." : "No category matches."}

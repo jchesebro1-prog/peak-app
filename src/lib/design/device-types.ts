@@ -312,6 +312,23 @@ export function suggestDeviceType(category: string, sampleDescs: readonly string
 
 /* ------------------------------ the map ------------------------------ */
 
+/**
+ * The map key `raw` normalizes to, or null when it can never be written to
+ * the type map: blank, an excluded head noun (fabric/labor), or longer than
+ * the 120-char key limit `sanitizeTypeMap` enforces on read. Every writer
+ * (autoTypeEntries, assignEntries, acceptSuggestionEntries) and
+ * typeReviewRows share this one gate — before this fix, autoTypeEntries had
+ * no length check, so a >120-char raw category was auto-mapped, silently
+ * dropped by sanitizeTypeMap on the very next read (because it's never
+ * `Object.hasOwn(map, key)`), and auto-mapped again: an endless re-write on
+ * every read, never actually idempotent (#226 fix wave 3).
+ */
+export function mapKeyOf(raw: string | null | undefined): string | null {
+  const key = normalizeRawCategory(raw);
+  if (!key || EXCLUDED.has(key) || key.length > 120) return null;
+  return key;
+}
+
 export function sanitizeTypeMap(raw: unknown): TypeMap {
   const out: TypeMap = {};
   if (!raw || typeof raw !== "object") return out;
@@ -370,13 +387,16 @@ export function keywordScopeOf(p: { category?: string; desc?: string; discipline
 }
 
 /** Auto-apply (spec, Jeff 2026-09-26): every distinct category with NO map
- *  entry whose category string earns a HIGH suggestion for an active type. */
+ *  entry whose category string earns a HIGH suggestion for an active type.
+ *  Gated by mapKeyOf, so Fabric/Labor and a >120-char category are skipped
+ *  outright rather than relying on suggestDeviceType to return null for them
+ *  (#226 fix wave 3 — the >120 case wasn't gated at all before). */
 export function autoTypeEntries(parts: ReadonlyArray<{ category: string }>, map: TypeMap, types: readonly DeviceType[], now: number): TypeMap {
   const active = new Set(types.filter((t) => !t.archived).map((t) => t.key));
   const out: TypeMap = {};
   const seen = new Set<string>();
   for (const p of parts) {
-    const key = normalizeRawCategory(p.category);
+    const key = mapKeyOf(p.category);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     if (Object.hasOwn(map, key)) continue;
@@ -393,14 +413,18 @@ export type TypeReviewRow = {
   suggestion: Suggestion | null;
   entry: TypeMapEntry | null;
   typeKey: string | null;
-  status: "unmapped" | "auto" | "admin";
+  status: "unmapped" | "auto" | "admin" | "toolong";
 };
 
-const STATUS_RANK: Record<TypeReviewRow["status"], number> = { unmapped: 0, auto: 1, admin: 2 };
+const STATUS_RANK: Record<TypeReviewRow["status"], number> = { unmapped: 0, auto: 1, admin: 2, toolong: 3 };
 
 /** Catalog → Device types rows: one per distinct raw category (first
  *  spelling wins), Fabric/Labor/blank left out; unmapped first, then auto,
- *  then admin; most parts first within each. */
+ *  then admin, then the read-only too-long rows; most parts first within
+ *  each. A category longer than the map's 120-char key limit can never be
+ *  written (mapKeyOf), so it gets its own "toolong" status instead of
+ *  showing as perpetually "unmapped" — a status that would invite an
+ *  assign/accept that silently does nothing (#226 fix wave 3). */
 export function typeReviewRows(parts: ReadonlyArray<{ category: string; desc?: string }>, map: TypeMap, types: readonly DeviceType[]): TypeReviewRow[] {
   const groups = new Map<string, { category: string; count: number; descs: string[] }>();
   for (const p of parts) {
@@ -416,6 +440,10 @@ export function typeReviewRows(parts: ReadonlyArray<{ category: string; desc?: s
   }
   const rows: TypeReviewRow[] = [];
   for (const [key, g] of groups) {
+    if (!mapKeyOf(key)) {
+      rows.push({ key, category: g.category, count: g.count, suggestion: null, entry: null, typeKey: null, status: "toolong" });
+      continue;
+    }
     const entry = Object.hasOwn(map, key) ? map[key] : null;
     const typeKey = typeOfCategory(key, map, types);
     const status: TypeReviewRow["status"] = !typeKey || !entry ? "unmapped" : entry.by;
@@ -426,13 +454,18 @@ export function typeReviewRows(parts: ReadonlyArray<{ category: string; desc?: s
 
 /** "Accept all suggestions": admin entries for every unmapped row that has
  *  no entry at all (an admin "unmapped" is a decision, not a gap) and any
- *  suggestion, low included, for an active type. */
+ *  suggestion, low included, for an active type. mapKeyOf is a second,
+ *  defensive gate — status "unmapped" already excludes "toolong" rows, but
+ *  every writer agrees on the same gate rather than trusting the caller's
+ *  status field alone (#226 fix wave 3). */
 export function acceptSuggestionEntries(rows: readonly TypeReviewRow[], types: readonly DeviceType[], now: number): TypeMap {
   const active = new Set(types.filter((t) => !t.archived).map((t) => t.key));
   const out: TypeMap = {};
   for (const r of rows) {
     if (r.status !== "unmapped" || r.entry || !r.suggestion || !active.has(r.suggestion.typeKey)) continue;
-    out[r.key] = { typeKey: r.suggestion.typeKey, by: "admin", at: now };
+    const key = mapKeyOf(r.key);
+    if (!key) continue;
+    out[key] = { typeKey: r.suggestion.typeKey, by: "admin", at: now };
   }
   return out;
 }
@@ -440,8 +473,8 @@ export function acceptSuggestionEntries(rows: readonly TypeReviewRow[], types: r
 export function assignEntries(categories: readonly string[], typeKey: string | null, now: number): TypeMap {
   const out: TypeMap = {};
   for (const c of categories) {
-    const key = normalizeRawCategory(String(c ?? ""));
-    if (!key || EXCLUDED.has(key) || key.length > 120) continue;
+    const key = mapKeyOf(String(c ?? ""));
+    if (!key) continue;
     out[key] = { typeKey, by: "admin", at: now };
   }
   return out;

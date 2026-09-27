@@ -20834,6 +20834,7 @@ import {
   cleanDeviceTypesInput as dt226Clean, typeLayerRows as dt226Layers, typeKeyOfPart as dt226KeyOf, typeLabel as dt226Label,
   deviceTypeIcons as dt226TypeIcons, withTypeIcons as dt226WithIcons, cleanIdList as dt226Ids, withRecent as dt226Recent,
   toggleInList as dt226Toggle, UNMAPPED_TYPE as DT226_UNMAPPED, ASSEMBLY_TYPE as DT226_ASM, type TypeMap as DT226Map,
+  mapKeyOf as dt226MapKey,
 } from "@/lib/design/device-types";
 import { gridPartsFrom as dt226Parts } from "@/lib/design/grid-parts";
 import { scopeOfPart as dt226ScopeOfPart } from "@/lib/design/grid-scopes";
@@ -20999,6 +21000,22 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     "#226 auto: only unmapped categories with a HIGH suggestion become auto entries (existing entries — even an admin 'unmapped' — untouched; low/none skipped)");
   ok(j(dt226Auto([{ category: "Truss" }], {}, types.map((t) => (t.key === "truss-pipe" ? { ...t, archived: true } : t)), 1)) === "{}", "#226 auto: never auto-maps to an archived type");
 
+  // #226 fix wave 3: mapKeyOf gates every map writer/reader against the
+  // 120-char key limit sanitizeTypeMap enforces on read, so a too-long
+  // category is never silently re-written on every read.
+  ok(
+    dt226MapKey("  Motorized  Hoist ") === "motorized hoist" &&
+      dt226MapKey("Fabric") === null &&
+      dt226MapKey("Labor") === null &&
+      dt226MapKey("") === null &&
+      dt226MapKey("x".repeat(121)) === null &&
+      dt226MapKey("x".repeat(120)) === "x".repeat(120),
+    "#226 mapKeyOf: normalizes; null for blank, excluded (fabric/labor) and >120 chars; exactly 120 is fine"
+  );
+  const longTruss = `Truss ${"x".repeat(130)}`; // > 120 chars; would be a HIGH truss-pipe match were the cap not enforced
+  ok(j(dt226Auto([{ category: longTruss }], {}, types, 1000)) === "{}", "#226 auto: a >120-char category is never auto-mapped, even on a HIGH match (mapKeyOf gate)");
+  ok(j(dt226Auto([{ category: "Fabric" }, { category: "Labor" }], {}, types, 1)) === "{}", "#226 auto: Fabric/Labor are gated out directly by mapKeyOf, not just by suggestDeviceType returning null");
+
   // review rows + accept
   const rows = dt226Rows([
     { category: "Truss", desc: "12in box truss" }, { category: "Truss", desc: "Corner block" },
@@ -21015,10 +21032,22 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
   ok(j(dt226Accept(rows, types, 77)) === j({ audio: { typeKey: "speakers", by: "admin", at: 77 }, rigging: { typeKey: "rigging-hardware", by: "admin", at: 77 } }),
     "#226 review: Accept all suggestions writes admin entries for unmapped rows with any suggestion — never over an admin 'unmapped' (Widgets)");
 
+  // #226 fix wave 3: a >120-char category is a read-only "toolong" review
+  // row, not a perpetually "unmapped" one, and accept refuses it even if it
+  // were somehow handed one marked "unmapped".
+  const longCat = `Widgets ${"z".repeat(130)}`;
+  const rowsWithLong = dt226Rows([{ category: longCat, desc: "x" }, { category: "Audio", desc: "QSC loudspeaker" }], map, types);
+  const longRow = rowsWithLong.find((r) => r.category.startsWith("Widgets "))!;
+  ok(longRow.status === "toolong" && longRow.suggestion === null && longRow.entry === null && longRow.typeKey === null,
+    "#226 review: a >120-char category is a read-only 'too long to map' row, never unmapped/auto/admin");
+  const fakeUnmappedLongRow = { ...longRow, status: "unmapped" as const, suggestion: { typeKey: "speakers", confidence: "low" as const } };
+  ok(j(dt226Accept([fakeUnmappedLongRow], types, 5)) === "{}", "#226 accept: mapKeyOf refuses a >120-char key even if a row is somehow marked unmapped");
+
   // assign / merge / type-list edits
   ok(j(dt226Assign([" Widgets ", "", "Labor", "Gizmos"], "speakers", 5)) === j({ widgets: { typeKey: "speakers", by: "admin", at: 5 }, gizmos: { typeKey: "speakers", by: "admin", at: 5 } }),
     "#226 assign: normalized keys, admin entries, blanks/Labor skipped");
   ok(j(dt226Assign(["Widgets"], null, 5)) === j({ widgets: { typeKey: null, by: "admin", at: 5 } }), "#226 assign: null = deliberately unmapped (auto never re-maps it)");
+  ok(j(dt226Assign(["x".repeat(130)], "speakers", 5)) === "{}", "#226 assign: a >120-char category is refused (mapKeyOf)");
   ok(j(dt226Merge({ a: { typeKey: "speakers", by: "auto", at: 1 }, b: { typeKey: "amplifiers", by: "admin", at: 1 }, c: { typeKey: "speakers", by: "admin", at: 1 } }, "speakers", "amplifiers", 9))
       === j({ a: { typeKey: "amplifiers", by: "admin", at: 9 }, c: { typeKey: "amplifiers", by: "admin", at: 9 } }),
     "#226 merge: every category of the merged type moves to the target as an admin entry");
@@ -21107,6 +21136,20 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
   ok(read("src/app/(app)/catalog/page.tsx").includes('href="/catalog/device-types"') && read("src/app/(app)/catalog/taxonomy-card.tsx").includes("Estimating groups &amp; trades"),
     "#226 screen: Catalog links to Device types; the group/trade card is now 'Estimating groups & trades'");
   ok(read("scripts/smoke-routes.ts").includes('"/catalog/device-types"'), "#226 screen: the route is in the smoke list");
+
+  // #226 fix wave 3: bulk assign starts with no choice and can't fire until
+  // one is made; an explicit Unmap option is confirmed before it acts; a
+  // too-long category is read-only; the table caps at 200 rendered rows.
+  ok(client.includes('<option value="">Choose a type…</option>') && client.includes('<option value={UNMAP_CHOICE}>Unmap</option>'),
+    "#226 screen: bulk assign starts unset (no default type or Unmap) and offers an explicit Unmap option");
+  ok(client.includes("disabled={!picked.length || !bulkChoice || pending}") && client.includes("window.confirm("),
+    "#226 screen: the Assign/Unmap button stays disabled until a choice is made, and Unmap is confirmed first");
+  ok(client.includes('Unmap ${picked.length} selected') && client.includes("scopeKey !== pickedScope") && client.includes("`${show}|${filter}`"),
+    "#226 screen: the button reads 'Unmap N selected' for the Unmap choice, and picked resets when the filter or tab changes");
+  ok(client.includes('status === "toolong"') && client.includes("too long to map"),
+    "#226 screen: a too-long category shows as read-only 'too long to map', never an assignable select");
+  ok(client.includes("const ROW_CAP = 200") && client.includes("Showing {ROW_CAP} of") && client.includes("narrow the filter."),
+    "#226 screen: the mapping table caps at 200 rendered rows with a 'Showing 200 of N — narrow the filter' notice");
 }
 
 async function deviceTypesAsyncChecks(): Promise<void> {
@@ -21114,14 +21157,21 @@ async function deviceTypesAsyncChecks(): Promise<void> {
   const { getBlob, setBlob, setBlobKeysIfAbsent } = await import("../src/db/doc-store");
   const { getDb: getDb226 } = await import("../src/db");
   const { blobs: blobs226 } = await import("../src/db/doc-tables");
-  const { inArray } = await import("drizzle-orm");
+  const { inArray, eq } = await import("drizzle-orm");
   const U = "TEST226-user";
   const ids = ["gridTypeMap", "gridDeviceTypes", `gridFavorites:${U}`, `gridRecent:${U}`];
   const db = await getDb226();
   const snapshot = await db.select().from(blobs226).where(inArray(blobs226.id, ids));
+  const typeMapRow = async () => (await db.select().from(blobs226).where(eq(blobs226.id, "gridTypeMap")))[0] as { updatedAt?: number } | undefined;
   try {
     await db.delete(blobs226).where(inArray(blobs226.id, ids));
-    const parts = [{ category: "Truss" }, { category: "Motorized Hoist" }, { category: "Control" }, { category: "Uncategorized" }, { category: "Widgets" }];
+    // #226 fix wave 3: LONG_CAT is a real (would-be-HIGH) truss match padded
+    // past the map's 120-char key limit — before the fix this got auto-mapped,
+    // silently dropped by sanitizeTypeMap on read, and auto-mapped again on
+    // every single call (never idempotent, even though the visible map never
+    // seemed to change).
+    const LONG_CAT = `Truss ${"x".repeat(130)}`;
+    const parts = [{ category: "Truss" }, { category: "Motorized Hoist" }, { category: "Control" }, { category: "Uncategorized" }, { category: "Widgets" }, { category: LONG_CAT }];
 
     await DT.assignDeviceType(["Motorized Hoist"], "speakers", 500);
     const first = await DT.loadDeviceTypeContext(parts, 1000);
@@ -21134,10 +21184,15 @@ async function deviceTypesAsyncChecks(): Promise<void> {
     ok(first.map["motorized hoist"]?.typeKey === "speakers" && first.map["motorized hoist"]?.by === "admin",
       "#226 store: an admin entry is never overwritten by auto (Motorized Hoist would auto-map to Hoists & Motors)");
     ok(!("control" in raw1) && !("uncategorized" in raw1) && !("widgets" in raw1), "#226 store: low-confidence and unsuggested categories stay unmapped for review");
+    ok(Object.keys(raw1).every((k) => k.length <= 120), "#226 store: a >120-char category (LONG_CAT) is never written to the map, even on a HIGH match");
+    const rowBeforeSecond = await typeMapRow();
     const second = await DT.loadDeviceTypeContext(parts, 2000);
+    const rowAfterSecond = await typeMapRow();
     const raw2 = await getBlob<Record<string, unknown>>("gridTypeMap", {});
-    ok(JSON.stringify(raw2) === JSON.stringify(raw1) && second.map.truss?.at === 1000,
-      "#226 store: a second read writes nothing (idempotent — the auto entry keeps its first timestamp)");
+    ok(JSON.stringify(raw2) === JSON.stringify(raw1) && second.map.truss?.at === 1000 && Object.keys(raw2).every((k) => k.length <= 120),
+      "#226 store: a second read writes nothing (idempotent — the auto entry keeps its first timestamp; LONG_CAT still absent)");
+    ok(rowBeforeSecond !== undefined && rowBeforeSecond.updatedAt === rowAfterSecond?.updatedAt,
+      "#226 store: a second loadDeviceTypeContext performs NO blob write at all — the row's updatedAt doesn't move, including with a >120-char fixture category");
 
     await setBlobKeysIfAbsent("gridTypeMap", { "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 3000 }, pipe: { typeKey: "truss-pipe", by: "auto", at: 3000 } });
     const raw3 = await getBlob<Record<string, { typeKey: string; by: string }>>("gridTypeMap", {});
