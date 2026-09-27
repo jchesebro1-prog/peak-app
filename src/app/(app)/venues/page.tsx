@@ -13,14 +13,25 @@ import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-
  * stays single-file since this task only touches this new page: the search
  * box and company filter are a plain GET <form> (text input + native
  * <datalist>) instead of the companies page's separate client controls.tsx
- * (no debounced client state). Result-count cap + label follow /catalog's
- * own PAGE=200 pattern (punch #92, D142).
+ * (no debounced client state). Result paging (#224) mirrors the companies
+ * directory's `?n=` "Show more" idiom — the old hard 200-row cap (punch
+ * #92, D142) is gone.
  */
 
 export const metadata = { title: "Venues — Quartzite-6" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
+
+/** Directory paging (#224) — replaces the old hard PAGE=200 cap with the
+ *  companies directory's "Show more" idiom: first PAGE rows, then a link
+ *  that raises `?n=` by PAGE, preserving the other filters. */
+const PAGE = 50;
+
+function parsePageSize(raw: string): number {
+  const v = parseInt(raw, 10);
+  return Number.isFinite(v) && v > 0 ? v : PAGE;
 }
 
 const CSS = `
@@ -117,30 +128,30 @@ export default async function VenuesPage({
   }
 
   // The directory can hold thousands of venues; render only a page of them
-  // so the DOM stays light (punch #92 — same cap-with-count-label default
-  // already established by /catalog's PAGE constant, D142). Filters +
-  // search narrow the set before the cap is applied.
-  const PAGE = 200;
+  // so the DOM stays light (punch #92's cap became #224's paging: a
+  // "Show more" link raises `?n=` by PAGE instead of a hard 200 cutoff).
+  // Filters + search narrow the set before paging is applied.
+  const n = parsePageSize(one(sp.n));
   const matchCount = filtered.length;
-  const truncated = matchCount > PAGE;
-  const visible = filtered.slice(0, PAGE);
+  const hasMore = matchCount > n;
+  const visible = filtered.slice(0, n);
   const resultLabel =
-    (truncated ? `Showing ${PAGE} of ${matchCount}` : `${matchCount} of ${rows.length}`) +
+    `Showing ${visible.length} of ${matchCount}` +
     ` venue${matchCount === 1 ? "" : "s"}` +
     (activeCompanyName ? " · " + activeCompanyName : "") +
     (ql ? ` · “${q.trim()}”` : "") +
-    (truncated ? " · refine with search or filters to narrow" : "") +
     (travel.originName
       ? ` · Drive from ${travel.originName}`
       : " · Set a quote origin with coordinates in Settings → Locations to see drive times");
 
-  const linkWith = (patch: { company?: string; sort?: string }) => {
+  const linkWith = (patch: { company?: string; sort?: string; n?: number }) => {
     const p = new URLSearchParams();
     if (q.trim()) p.set("q", q.trim());
     const nextCompany = patch.company !== undefined ? patch.company : company;
     if (nextCompany) p.set("company", nextCompany);
     const nextSort = patch.sort !== undefined ? patch.sort : sort;
     if (nextSort) p.set("sort", nextSort);
+    if (patch.n !== undefined) p.set("n", String(patch.n));
     const s = p.toString();
     return "/venues" + (s ? "?" + s : "");
   };
@@ -297,6 +308,17 @@ export default async function VenuesPage({
               {ql ? `No venues match “${q.trim()}”.` : "No venues match these filters."}
             </div>
           )}
+        </div>
+      )}
+      {hasMore && (
+        <div style={{ textAlign: "center", marginTop: 14 }}>
+          <Link
+            href={linkWith({ n: n + PAGE })}
+            className="pk-btn-outline"
+            style={{ display: "inline-block", fontSize: 12.5, fontWeight: 600, textDecoration: "none", padding: "9px 16px", borderRadius: 8 }}
+          >
+            Show more ({matchCount - visible.length} left)
+          </Link>
         </div>
       )}
     </div>

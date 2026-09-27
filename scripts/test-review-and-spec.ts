@@ -10525,6 +10525,7 @@ seeded()
   .then(() => specDocxAsyncChecks())
   .then(() => specBuilderActionsAsyncChecks())
   .then(() => specBuilderFinalFixAsyncChecks())
+  .then(() => dayliteCalendarAsyncChecks219())
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   .then(() => tasks215AsyncChecks())
@@ -20807,4 +20808,469 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
   const pg = rd215("src/app/(app)/inbox/page.tsx");
   ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
+}
+
+/* ====== #225 Consulting proposal document fixes ======
+   Source-level checks against the proposal generator (kind=proposal) at
+   design/engagements/letter/page.tsx: no duplicate header company/type
+   lines, a Dear line addressed to the contact, a print @page scoped to
+   this document (never the shared globals.css @page), bulleted
+   assumptions, only the quote's own terms (never the template's canned
+   termsBlock), no Anticipated phases block, and an acceptance block that
+   signs the contact + estimator rather than the two companies. */
+{
+  const read225 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const letter225 = read225("src/app/(app)/design/engagements/letter/page.tsx");
+
+  ok(
+    !letter225.includes("Consulting Proposal & Professional Services Agreement"),
+    "#225: the old always-on header type line ('Consulting Proposal & Professional Services Agreement') is gone"
+  );
+  ok(
+    /kind === "spec" && \([\s\S]{0,300}\{companyName\}/.test(letter225),
+    "#225: the header-band company-name line only renders for the spec document, not the proposal"
+  );
+
+  ok(
+    /Dear \{contact\?\.name \|\| "Sir or Madam"\}/.test(letter225),
+    "#225: the proposal has a Dear line addressed to the contact (fallback 'Sir or Madam', matching repairs/letter)"
+  );
+
+  ok(
+    /@media print[\s\S]{0,40}@page \{[\s\S]{0,60}margin: 0;/.test(letter225),
+    "#225: the proposal document carries its own print @page rule with margin 0 (kills the browser header/footer gutter)"
+  );
+  ok(
+    !/@page[\s\S]{0,80}margin: 0\.9in 1in/.test(letter225),
+    "#225: the proposal's page-scoped CSS doesn't just restate the global 0.9in/1in @page — it actually overrides it to 0"
+  );
+  const globalPageCss225 = read225("src/app/globals.css");
+  ok(
+    /@page \{\s*size: letter;\s*margin: 0\.9in 1in;\s*\}/.test(globalPageCss225),
+    "#225: the shared global @page in globals.css is untouched (still 0.9in 1in) — the override is scoped to this document only"
+  );
+  ok(
+    letter225.includes("padding: 0.9in 1in !important"),
+    "#225: print padding is restored inside the sheet (equivalent spacing) now that @page margin is 0"
+  );
+
+  ok(
+    /<ul style=\{\{[^}]*listStyle: "disc"[^}]*\}\}>\s*\{assumptions\.map/.test(letter225),
+    "#225: the assumptions <ul> sets listStyle: disc (Tailwind v4 resets list bullets)"
+  );
+
+  ok(
+    !/renderField\(t, "consulting_proposal", "termsBlock", vars\)/.test(letter225),
+    "#225: the proposal no longer prints the template's canned termsBlock boilerplate"
+  );
+  ok(
+    /\{pay\.terms && \(/.test(letter225) || /pay\.terms &&[\s\S]{0,80}Terms<\/div>/.test(letter225),
+    "#225: the Terms heading + block print only when the quote itself has terms"
+  );
+  const templates225 = read225("src/lib/templates.ts");
+  ok(
+    templates225.includes('id: "termsBlock"') && templates225.includes('label: "Standard terms"'),
+    "#225: the termsBlock template field itself stays defined in templates.ts (unused by the proposal, not deleted)"
+  );
+
+  ok(
+    !letter225.includes("Anticipated phases:"),
+    "#225: the Anticipated phases line is removed from the proposal document"
+  );
+
+  ok(
+    /\[contact\?\.name \|\| "Customer", quote\?\.owner \|\| "Jeff Chesebro"\]/.test(letter225),
+    "#225: the acceptance block signs the contact (fallback Customer) and the estimator quote.owner (fallback Jeff Chesebro), not the two companies"
+  );
+  ok(
+    !/\[customer \|\| "Customer", companyName\]/.test(letter225),
+    "#225: the old company-vs-company acceptance pair is gone"
+  );
+}
+
+/* ====== #224 Short lists on companies ======
+   Pure helpers behind ShortList (src/lib/short-list.ts, src/components/
+   short-list.tsx): visibleRows/filterRows/visibleGroupFlags, plus
+   source-level checks that the company record no longer hard-slices Site
+   visits, that the Companies + Venues directories page by `?n=`, and that
+   the client ShortList component stays store/db-free. */
+import { visibleRows as slVisibleRows, filterRows as slFilterRows, visibleGroupFlags } from "@/lib/short-list";
+{
+  ok(slVisibleRows(20, 5, false) === 5, "#224 short-list: collapsed shows `initial` rows");
+  ok(slVisibleRows(3, 5, false) === 3, "#224 short-list: collapsed never shows more than `total` rows");
+  ok(slVisibleRows(20, 5, true) === 20, "#224 short-list: expanded shows every row");
+  ok(slVisibleRows(0, 5, false) === 0 && slVisibleRows(0, 5, true) === 0, "#224 short-list: zero rows is zero either way");
+  ok(slVisibleRows(20, -3, false) === 0, "#224 short-list: a negative `initial` clamps to zero, not a negative slice length");
+  ok(slVisibleRows(-5, 5, true) === 0, "#224 short-list: a negative `total` clamps to zero");
+
+  const rows = ["Riverside Playhouse", "Main Street Theater", "riverside high school", "Downtown Arena"];
+  ok(
+    slFilterRows(rows, "riverside", (r) => r).length === 2,
+    "#224 short-list: filterRows matches case-insensitively across every row"
+  );
+  ok(
+    slFilterRows(rows, "  ", (r) => r).length === rows.length &&
+      slFilterRows(rows, "", (r) => r).length === rows.length,
+    "#224 short-list: an empty (or whitespace-only) query returns every row, trimmed first"
+  );
+  ok(
+    slFilterRows(rows, "RIVERSIDE", (r) => r).every((r) => r.toLowerCase().includes("riverside")),
+    "#224 short-list: the query itself is case-insensitive too"
+  );
+  ok(
+    slFilterRows(rows, "zzz-no-match", (r) => r).length === 0,
+    "#224 short-list: no matches yields an empty array, not the unfiltered list"
+  );
+  const orderCheck = slFilterRows([3, 1, 2, 4], "", () => "x");
+  ok(orderCheck[0] === 3 && orderCheck[3] === 4, "#224 short-list: filterRows preserves row order (a pass, not a re-sort)");
+
+  // visibleGroupFlags: Activity's date-group headers ride with their rows —
+  // a header shows only while at least one of its (post-filter) rows is
+  // still within the flattened visible count.
+  ok(
+    JSON.stringify(visibleGroupFlags([2, 3, 1], 4)) === JSON.stringify([true, true, false]),
+    "#224 short-list: a group past the visible cutoff (all its rows beyond visibleCount) is hidden"
+  );
+  ok(
+    JSON.stringify(visibleGroupFlags([2, 3, 1], 6)) === JSON.stringify([true, true, true]),
+    "#224 short-list: once visibleCount covers every row, every non-empty group shows"
+  );
+  ok(
+    JSON.stringify(visibleGroupFlags([0, 3], 2)) === JSON.stringify([false, true]),
+    "#224 short-list: an empty (fully filtered-out) group never shows its header even at index 0"
+  );
+  ok(
+    JSON.stringify(visibleGroupFlags([], 0)) === JSON.stringify([]),
+    "#224 short-list: no groups is an empty flag list, not an error"
+  );
+
+  const read224 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const companyPage224 = read224("src/app/(app)/companies/[id]/page.tsx");
+  ok(!companyPage224.includes("slice(0, 6)"), "#224: the company record's Site visits card no longer hard-slices to 6");
+  ok(companyPage224.includes("ShortList"), "#224: the company record renders cards through ShortList");
+
+  const directory224 = read224("src/app/(app)/companies/page.tsx");
+  ok(/sp\.n\b/.test(directory224) && directory224.includes('params.set("n"'), "#224: the Companies directory reads and writes the `?n=` page-size param");
+  ok(/showMoreHref|Show more/.test(directory224), "#224: the Companies directory has a Show-more control");
+
+  const venues224 = read224("src/app/(app)/venues/page.tsx");
+  ok(/sp\.n\b/.test(venues224) && venues224.includes('p.set("n"'), "#224: the Venues directory reads and writes the `?n=` page-size param");
+  ok(!/const PAGE = 200/.test(venues224), "#224: the old hard 200-row cap is gone from Venues");
+  ok(/Show more/.test(venues224), "#224: the Venues directory has a Show-more control");
+
+  const shortListComp224 = read224("src/components/short-list.tsx");
+  ok(shortListComp224.startsWith('"use client"'), "#224: ShortList is a client component");
+  ok(!/@\/lib\/stores\/|@\/db\//.test(shortListComp224), "#224: the client ShortList component imports no store/db module");
+}
+
+/* ====== #219 Daylite calendar import — Task 1: parser, classifier, keys, bodies, owners (pure) ======
+   Fixture: 11 rows copied from Dropbox "Calendar Events.tsv" (meeting-link
+   URLs and a phone number redacted) plus 2 synthetic bad rows. Physical
+   lines: header 1; Weekly Sales Meeting ×4 = 2–5; Jena 6; Christmas 7;
+   Lincoln 8; RCA 9; Oshkosh 10; Mike 11; Sauk 12; bad date 13; bad duration 14. */
+import {
+  parseCalendarTsv as dc219Parse,
+  splitTsv as dc219Split,
+  parseStart as dc219Start,
+  classify as dc219Classify,
+  eventKey as dc219Key,
+  googleEventId as dc219GId,
+  googleEventFor as dc219Body,
+  matchOwner as dc219Match,
+  todayYmdIn as dc219Today,
+  addMinutes as dc219Add,
+  type DayliteEvent as DC219Event,
+} from "@/lib/daylite/calendar-events";
+
+const DC219_FIXTURE =
+  [
+    "Duration (HH:MM)\t\tCategory\tStart Date\tStatus\tName\t\tDuration\tLinked\tOwner\tDetails\t",
+    '01:00\t\t\t"12/25/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/18/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/11/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/4/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '24:00\t\tPTO\t"9/25/26, 12:00\u202fAM"\tConfirmed\t"Jena Off"\t\t"1 day"\t\t"Jena Tolksdorf"\t\t',
+    '48:00\t\t\t"12/24/26, 12:00\u202fAM"\tConfirmed\t"Christmas Holiday"\t\t"2 days"\t\t"Jason Keagy"\t\t',
+    '00:30\t\t\t"9/16/26, 2:00\u202fPM"\tConfirmed\t"Lincoln Academy Submittal Review"\t\t"30 minutes"\t"LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV, LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
+    '32:00\t\tInstall\t"2/11/26, 8:00\u202fAM"\tConfirmed\t"RCA Wire Pulls (Mark, Paul, AJ, Nelson)"\t\t"1 day 8 hours"\t"RICHLAND CENTER HS (via Nexus Solutions) - Auditorium AV"\t"Andrew Herschleb"\t\t',
+    '01:30\t\t\t"2/11/26, 12:30\u202fPM"\tConfirmed\t"Oshkosh North Aud & Black Box Projects - First AV Conversation including \\"Shelby\\""\t\t"1 hour 30 minutes"\t"BRAY ARCHITECTS - OSHKOSH NORTH HS - Auditorium & Black Box AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
+    '01:00\t\t"Service Call"\t"5/18/26, 8:00\u202fAM"\tConfirmed\t"Mike to Cross Of Christ 8:00 am"\t\t"1 hour"\t\t"Mike Mundth"\t\t',
+    '01:00\t\t"Service Call"\t"9/16/26, 9:00\u202fAM"\tConfirmed\t"Sauk Trail Elementary, Middleton HS "\t\t"1 hour"\t\t"Isaac Mittlesteadt"\t"Elementary - mute/unmute passcode   HS - Bluetooth issue, confirm replacement"\t',
+    '01:00\t\t\t"13/45/26, 9:00\u202fAM"\tConfirmed\t"Broken date"\t\t"1 hour"\t\t"Jeff Chesebro"\t\t',
+    'soon\t\t\t"9/1/26, 9:00\u202fAM"\tConfirmed\t"Broken duration"\t\t""\t\t"Jeff Chesebro"\t\t',
+  ].join("\n") + "\n";
+
+{
+  const j = (v: unknown) => JSON.stringify(v);
+
+  // splitTsv — tabs inside quotes, "" and \" escapes, physical line numbers.
+  const t1 = dc219Split('a\t"b\tc"\n"x ""y"" \\"z\\""\tw\n"p\nq"\tr\ns\tt\n');
+  ok(j(t1.map((r) => r.cells)) === j([["a", "b\tc"], ['x "y" "z"', "w"], ["p\nq", "r"], ["s", "t"]]), "#219 splitTsv: tabs in quotes, doubled and backslash-escaped quotes");
+  ok(j(t1.map((r) => r.line)) === j([1, 2, 3, 5]), "#219 splitTsv: a quoted newline advances the physical line number");
+  ok(dc219Split("﻿h1\th2\n\n").length === 1, "#219 splitTsv: BOM stripped, blank lines dropped");
+
+  // parseStart — U+202F and plain spaces, 12 AM/PM, bad dates.
+  ok(j(dc219Start("12/25/28, 9:00\u202fAM")) === j({ y: 2028, m: 12, d: 25, hh: 9, mm: 0 }), "#219 parseStart: U+202F before AM");
+  ok(dc219Start("12/25/28, 9:00 AM") !== null, "#219 parseStart: a plain ASCII space before AM also still works");
+  ok(dc219Start("12/25/28, 12:00\u202fPM")?.hh === 12 && dc219Start("1/2/25, 12:05\u202fAM")?.hh === 0, "#219 parseStart: 12 PM is noon, 12 AM is midnight");
+  ok(j(dc219Start("3/1/2027, 7:15\u202fpm")) === j({ y: 2027, m: 3, d: 1, hh: 19, mm: 15 }), "#219 parseStart: four-digit year and lowercase pm");
+  ok(dc219Start("2/30/26, 9:00\u202fAM") === null && dc219Start("13/45/26, 9:00\u202fAM") === null && dc219Start("") === null, "#219 parseStart: impossible dates are null");
+  ok(DC219_FIXTURE.includes("\u202f"), "#219 fixture carries the real U+202F");
+
+  // parseCalendarTsv over the fixture.
+  const p = dc219Parse(DC219_FIXTURE);
+  ok(p.rows.length === 11 && p.errors.length === 2, "#219 parse: 11 readable rows, 2 errors");
+  ok(j(p.errors.map((e) => e.line)) === "[13,14]" && /start date/.test(p.errors[0].reason) && /duration/.test(p.errors[1].reason), "#219 parse: bad rows reported with their line and reason");
+  const byName = (s: string) => p.rows.find((r) => r.name.startsWith(s))!;
+  const jena = byName("Jena Off");
+  ok(jena.allDay && jena.durationMin === 1440 && jena.category === "PTO" && jena.line === 6 && j(jena.start) === j({ y: 2026, m: 9, d: 25, hh: 0, mm: 0 }), "#219 parse: 24:00 at midnight is a one-day all-day event");
+  const xmas = byName("Christmas");
+  ok(xmas.allDay && xmas.durationMin === 2880, "#219 parse: 48:00 at midnight is a multi-day all-day event");
+  const lincoln = byName("Lincoln Academy");
+  ok(!lincoln.allDay && lincoln.durationMin === 30 && lincoln.start.hh === 14 && lincoln.linked.startsWith("LINCOLN  ACADEMY") && lincoln.category === "", "#219 parse: a timed 30-minute row with Linked kept verbatim and a blank Category");
+  const rca = byName("RCA Wire Pulls");
+  ok(!rca.allDay && rca.durationMin === 1920 && rca.category === "Install", "#219 parse: 32:00 from 8 AM stays a timed event (not midnight)");
+  ok(byName("Oshkosh").name.endsWith('including "Shelby"'), "#219 parse: Daylite's \\\" escape becomes a plain quote");
+  ok(byName("Mike to Cross").category === "Service Call" && byName("Mike to Cross").owner === "Mike Mundth", "#219 parse: a quoted Category is unquoted");
+  const sauk = byName("Sauk Trail");
+  ok(sauk.name === "Sauk Trail Elementary, Middleton HS" && sauk.details.includes("passcode   HS"), "#219 parse: cells trimmed, inner spacing in Details kept");
+  const missing = dc219Parse("Start Date\tName\n1/1/26, 9:00 AM\tX\n");
+  ok(missing.rows.length === 0 && missing.errors.length === 1 && /Owner/.test(missing.errors[0].reason), "#219 parse: a file without the required columns is refused by name");
+
+  // classify — the series threshold.
+  const c = dc219Classify(p.rows);
+  ok(c.series.length === 1 && j(c.series[0]) === j({ owner: "Jeff Chesebro", name: "Weekly Sales Meeting", count: 4 }) && c.oneOffs.length === 7, "#219 classify: 4 × same owner + name is a series; the other 7 are one-offs");
+  const ev = (over: Partial<DC219Event>): DC219Event => ({ line: 0, owner: "Pat Lee", name: "Payroll", category: "", start: { y: 2026, m: 1, d: 1, hh: 9, mm: 0 }, durationMin: 60, allDay: false, linked: "", details: "", status: "", ...over });
+  const three = [ev({}), ev({ name: "payroll" }), ev({ name: " PAYROLL " })];
+  ok(dc219Classify(three).series.length === 0 && dc219Classify(three).oneOffs.length === 3, "#219 classify: 3 occurrences is not a series");
+  const four = [...three, ev({ owner: "pat  lee" })];
+  ok(dc219Classify(four).series.length === 1 && dc219Classify(four).oneOffs.length === 0, "#219 classify: the 4th occurrence (case/space-insensitive owner + name) makes all four a series");
+
+  // eventKey — stable, normalized, 24 hex; the Google id is base32hex.
+  const weekly = p.rows.find((r) => r.name === "Weekly Sales Meeting" && r.start.d === 25)!;
+  ok(dc219Key(weekly) === "07afd50421a5cd9d115777d1", "#219 eventKey: golden value (sha256 of owner|name|start|durationMin, normalized) — never change it, the dedup blob depends on it");
+  ok(dc219Key({ ...weekly, name: "  weekly  SALES meeting " }) === dc219Key(weekly), "#219 eventKey: name case and spacing do not change the key");
+  ok(dc219Key({ ...weekly, durationMin: 90 }) !== dc219Key(weekly) && dc219Key({ ...weekly, owner: "Jason Keagy" }) !== dc219Key(weekly) && dc219Key({ ...weekly, start: { ...weekly.start, mm: 30 } }) !== dc219Key(weekly), "#219 eventKey: owner, start and duration each change the key");
+  ok(/^[a-v0-9]{5,1024}$/.test(dc219GId(dc219Key(weekly))) && dc219GId("abc").startsWith("dlc"), "#219 googleEventId: dlc + key is a valid Google event id");
+
+  // addMinutes — wall-clock arithmetic, no zone applied.
+  ok(j(dc219Add({ y: 2026, m: 3, d: 8, hh: 1, mm: 30 }, 60)) === j({ y: 2026, m: 3, d: 8, hh: 2, mm: 30 }), "#219 addMinutes: wall-clock math ignores the DST jump (Google applies the zone)");
+  ok(j(dc219Add({ y: 2025, m: 12, d: 31, hh: 23, mm: 30 }, 60)) === j({ y: 2026, m: 1, d: 1, hh: 0, mm: 30 }), "#219 addMinutes: crosses a year boundary");
+
+  // googleEventFor — summary, description, all-day vs timed.
+  const bJena = dc219Body(jena);
+  ok(j(bJena.start) === j({ date: "2026-09-25" }) && j(bJena.end) === j({ date: "2026-09-26" }) && bJena.summary === "[PTO] Jena Off" && bJena.description === "Imported from Daylite", "#219 body: one-day all-day, exclusive end date, [Category] prefix");
+  ok(j(dc219Body(xmas).end) === j({ date: "2026-12-26" }), "#219 body: a 2-day all-day event ends (exclusive) two days later");
+  const bLin = dc219Body(lincoln);
+  ok(j(bLin.start) === j({ dateTime: "2026-09-16T14:00:00", timeZone: "America/Chicago" }) && j(bLin.end) === j({ dateTime: "2026-09-16T14:30:00", timeZone: "America/Chicago" }), "#219 body: timed events are local wall-clock + America/Chicago, never UTC");
+  ok(bLin.summary === "Lincoln Academy Submittal Review" && bLin.description === lincoln.details + "\n\nLinked: " + lincoln.linked + "\n\nImported from Daylite", "#219 body: no category → no prefix; description = details, Linked, footer");
+  ok(bLin.id === "dlc" + dc219Key(lincoln), "#219 body: carries the deterministic Google id");
+  ok(dc219Body(rca).end && j(dc219Body(rca).end) === j({ dateTime: "2026-02-12T16:00:00", timeZone: "America/Chicago" }), "#219 body: a 32-hour timed event ends the next day at 16:00");
+
+  // matchOwner — exact, then first + last, never ambiguous.
+  const roster = [
+    { id: "u1", name: "Jeff Chesebro" },
+    { id: "u2", name: "Jason M. Keagy" },
+    { id: "u3", name: "Chris Mittlesteadt" },
+    { id: "u4", name: "Isaac Mittlesteadt" },
+  ];
+  const m1 = dc219Match("jeff  chesebro", roster);
+  ok(m1.ok && m1.user.id === "u1", "#219 matchOwner: exact full name, case/space-insensitive");
+  const m2 = dc219Match("Jason Keagy", roster);
+  ok(m2.ok && m2.user.id === "u2", "#219 matchOwner: first + last token when the roster has a middle initial");
+  const m3 = dc219Match("Isaac Mittlesteadt", roster);
+  ok(m3.ok && m3.user.id === "u4", "#219 matchOwner: a shared last name does not confuse two people");
+  const m4 = dc219Match("Mike Mundth", roster);
+  ok(!m4.ok && /No team member/.test(m4.reason), "#219 matchOwner: no user → reported, not guessed");
+  const m5 = dc219Match("Pat Lee", [{ id: "a", name: "Pat Lee" }, { id: "b", name: "pat lee" }]);
+  ok(!m5.ok && /More than one/.test(m5.reason), "#219 matchOwner: two matches is a refusal, never a pick");
+
+  // todayYmdIn — the business-zone date, not the server's.
+  ok(dc219Today(Date.UTC(2026, 8, 26, 3, 0)) === "2026-09-25", "#219 todayYmdIn: 03:00 UTC is still the previous day in Chicago");
+}
+
+/* ====== #219 Daylite calendar import — Task 2: preview, pending selection, batch runner (fake insert), admin gate ======
+   runCalendarBatch never touches Google here: insert/record/now are fakes.
+   The DB half (previewCalendarImport / importCalendarBatch) runs on the
+   harness's scratch PGlite with the seeded roster and no mailbox
+   connections, so nothing can be written anywhere. */
+import {
+  DAYLITE_CALENDAR_BLOB as DC219_BLOB,
+  OWNER_STOP_AFTER as DC219_STOP_AFTER,
+  buildPreview as dc219Preview,
+  isAlreadyExists as dc219Is409,
+  isQuotaStop as dc219IsQuota,
+  runCalendarBatch as dc219Run,
+  sanitizeImported as dc219Sanitize,
+  selectPending as dc219Select,
+  type BatchDeps as DC219Deps,
+  type ImportedMap as DC219Map,
+  type PendingEvent as DC219Pending,
+} from "@/lib/daylite/calendar-batch";
+import { importCalendarBatch as dc219ImportBatch, previewCalendarImport as dc219PreviewDb } from "@/lib/daylite/calendar-import";
+import { setBlob as setBlob219 } from "@/db/doc-store";
+
+async function dayliteCalendarAsyncChecks219(): Promise<void> {
+  const j = (v: unknown) => JSON.stringify(v);
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const parsed = dc219Parse(DC219_FIXTURE);
+  const users = [
+    { id: "u1", name: "Jeff Chesebro" },
+    { id: "u5", name: "Jason Keagy" },
+    { id: "u6", name: "Isaac Mittlesteadt" },
+    { id: "u7", name: "Jena Tolksdorf" },
+  ];
+  const keyOf = (prefix: string) => dc219Key(parsed.rows.find((r) => r.name.startsWith(prefix))!);
+  const lincolnKey = keyOf("Lincoln Academy");
+
+  // --- buildPreview (pure)
+  const pv = dc219Preview(parsed, users, { u1: "not-connected", u5: "connected", u6: "no-calendar", u7: "gmail-off" }, { [lincolnKey]: { eventId: "x", owner: "Jason Keagy", at: 1 } }, { fromYmd: null });
+  const own = (name: string) => pv.owners.find((o) => o.owner === name)!;
+  ok(j(pv.owners.map((o) => o.owner)) === j(["Andrew Herschleb", "Isaac Mittlesteadt", "Jason Keagy", "Jeff Chesebro", "Jena Tolksdorf", "Mike Mundth"]), "#219 preview: one row per owner, sorted");
+  ok(own("Jason Keagy").oneOffs === 3 && own("Jason Keagy").alreadyImported === 1 && own("Jason Keagy").toImport === 2 && own("Jason Keagy").defaultInclude, "#219 preview: already-imported keys counted; connected owner included by default");
+  ok(own("Isaac Mittlesteadt").calendar === "no-calendar" && !own("Isaac Mittlesteadt").defaultInclude, "#219 preview: a mailbox without calendar scope is not included");
+  ok(own("Jeff Chesebro").oneOffs === 0 && own("Jeff Chesebro").seriesRows === 4 && j(own("Jeff Chesebro").series) === j([{ name: "Weekly Sales Meeting", count: 4 }]), "#219 preview: series listed with counts per owner");
+  ok(own("Mike Mundth").calendar === "no-user" && own("Mike Mundth").userId === null && /No team member/.test(own("Mike Mundth").matchNote), "#219 preview: an unmatched owner is reported");
+  ok(pv.totals.seriesCount === 1 && pv.totals.seriesRows === 4 && pv.totals.oneOffs === 7 && pv.totals.alreadyImported === 1 && pv.errors.length === 2, "#219 preview: totals and parse errors");
+  const pvToday = dc219Preview(parsed, users, {}, {}, { fromYmd: "2026-09-01" });
+  ok(pvToday.totals.oneOffs === 4 && pvToday.fromYmd === "2026-09-01", "#219 preview: 'from today on' drops earlier one-offs (Jena, Christmas, Lincoln, Sauk remain)");
+
+  // --- selectPending (pure) — only the owner's own connected mailbox.
+  const mailboxes = { u5: "personal:u5", u6: "personal:u6" };
+  const all = dc219Select(parsed, users, mailboxes, {}, { fromYmd: null, owners: ["Jason Keagy", "Isaac Mittlesteadt", "Jena Tolksdorf", "Mike Mundth"], skipKeys: [] });
+  ok(j(all.map((p) => p.body.summary)) === j(["Christmas Holiday", "Lincoln Academy Submittal Review", "Oshkosh North Aud & Black Box Projects - First AV Conversation including \"Shelby\"", "[Service Call] Sauk Trail Elementary, Middleton HS"]), "#219 pending: one-offs of included owners with a connected calendar, file order");
+  ok(all.every((p) => p.mailboxKey === (p.owner === "Jason Keagy" ? "personal:u5" : "personal:u6")), "#219 pending: each event targets its own owner's mailbox — never someone else's");
+  ok(dc219Select(parsed, users, mailboxes, {}, { fromYmd: null, owners: ["isaac  mittlesteadt"], skipKeys: [] }).length === 1, "#219 pending: the owners filter is case/space-insensitive");
+  ok(dc219Select(parsed, users, mailboxes, {}, { fromYmd: "2026-09-01", owners: ["Jason Keagy", "Isaac Mittlesteadt"], skipKeys: [] }).length === 3, "#219 pending: the date filter applies");
+  ok(dc219Select(parsed, users, mailboxes, {}, { fromYmd: null, owners: ["Jason Keagy"], skipKeys: [lincolnKey] }).length === 2, "#219 pending: skipKeys (failed this run) are left out");
+
+  // --- runCalendarBatch with fakes
+  const clock = { t: 0 };
+  const make = (insert: DC219Deps["insert"], store: DC219Map): DC219Deps => ({
+    insert,
+    record: async (patch) => {
+      Object.assign(store, patch);
+    },
+    now: () => clock.t,
+  });
+  const calls: { mailboxKey: string; id: string; start: unknown }[] = [];
+  const okInsert: DC219Deps["insert"] = async (mailboxKey, body) => {
+    calls.push({ mailboxKey, id: body.id, start: body.start });
+    clock.t += 100;
+    return { id: "g-" + calls.length };
+  };
+
+  const store1: DC219Map = {};
+  const r1 = await dc219Run(all, make(okInsert, store1));
+  ok(r1.stoppedFor === "done" && r1.written === 4 && r1.remaining === 0 && r1.pendingAtStart === 4 && Object.keys(store1).length === 4, "#219 batch: writes every pending event and records each key");
+  ok(store1[lincolnKey]?.eventId === "g-2" && store1[lincolnKey]?.owner === "Jason Keagy", "#219 batch: the record maps key → Google event id + owner");
+  ok(calls.every((c) => /^dlc[0-9a-f]{24}$/.test(c.id)) && j(calls[1].start) === j({ dateTime: "2026-09-16T14:00:00", timeZone: "America/Chicago" }), "#219 batch: bodies carry the deterministic id and wall-clock Chicago times");
+  const rerun = dc219Select(parsed, users, mailboxes, store1, { fromYmd: null, owners: ["Jason Keagy", "Isaac Mittlesteadt"], skipKeys: [] });
+  ok(rerun.length === 0, "#219 batch: a re-run over the recorded map selects nothing — importing twice never duplicates");
+
+  const store409: DC219Map = {};
+  const r409 = await dc219Run(all.slice(0, 1), make(async () => {
+    throw new Error('Calendar API /calendars/primary/events?sendUpdates=none → 409 {"error":{"code":409,"message":"The requested identifier already exists."}}');
+  }, store409));
+  ok(r409.alreadyThere === 1 && r409.failed === 0 && store409[all[0].key]?.eventId === all[0].body.id, "#219 batch: a 409 on our deterministic id is recorded as already in Google");
+
+  let n = 0;
+  const storeQ: DC219Map = {};
+  const rq = await dc219Run(all, make(async () => {
+    n++;
+    if (n === 2) throw new Error('Calendar API /calendars/primary/events?sendUpdates=none → 403 {"error":{"errors":[{"reason":"rateLimitExceeded"}]}}');
+    return { id: "g" + n };
+  }, storeQ));
+  ok(rq.stoppedFor === "quota" && rq.written === 1 && rq.remaining === 3 && rq.failed === 0 && rq.failedKeys.length === 0 && Object.keys(storeQ).length === 1 && rq.quotaMessage.includes("rateLimitExceeded"), "#219 batch: a rate-limit error stops the batch; the event stays pending, not failed");
+  ok(dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"reason":"quotaExceeded","message":"Calendar usage limits exceeded."}]}}')) && dc219IsQuota(new Error("→ 429 Too Many Requests")) && !dc219IsQuota(new Error("→ 500 backend")), "#219 isQuotaStop: quotaExceeded / usage limits / 429 stop; a 500 does not");
+  ok(dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}')), "#219 isQuotaStop: userRateLimitExceeded also stops for quota");
+  ok(!dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"domain":"usageLimits","reason":"accessNotConfigured","message":"Calendar API has not been used in this project."}]}}')) && !dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"domain":"usageLimits","reason":"dailyLimitExceededUnreg"}]}}')), "#219 isQuotaStop: accessNotConfigured / dailyLimitExceededUnreg (also domain usageLimits) are per-owner failures, not a quota pause");
+  ok(dc219Is409(new Error("Calendar API x → 409 {}")) && !dc219Is409(new Error("Calendar API x → 404 {}")), "#219 isAlreadyExists: matches only a 409");
+
+  clock.t = 0;
+  const slow: DC219Deps["insert"] = async () => {
+    clock.t += 5_000;
+    return { id: "s" };
+  };
+  const rb = await dc219Run(all, make(slow, {}), 20_000);
+  ok(rb.stoppedFor === "budget" && rb.written === 3 && rb.remaining === 1, "#219 batch: stops starting inserts when a worst-case insert no longer fits the budget");
+  clock.t = 0;
+  const rb1 = await dc219Run(all, make(slow, {}), 1_000);
+  ok(rb1.written === 1 && rb1.stoppedFor === "budget" && rb1.remaining === 3, "#219 batch: the first insert always runs (forward progress)");
+
+  const storeF: DC219Map = {};
+  const rf = await dc219Run(all, make(async (_k, body) => {
+    if (body.summary.startsWith("Lincoln")) throw new Error("Calendar API x → 500 backendError");
+    return { id: "ok" };
+  }, storeF));
+  ok(rf.written === 3 && rf.failed === 1 && j(rf.failedKeys) === j([lincolnKey]) && rf.byOwner["Jason Keagy"].failed === 1 && rf.byOwner["Jason Keagy"].lastError.includes("500") && !storeF[lincolnKey], "#219 batch: a non-quota error is counted per owner, not recorded, and its key returned for skipKeys");
+
+  const synth = (owner: string, i: number): DC219Pending => ({
+    key: i.toString(16).padStart(24, "0"),
+    owner,
+    mailboxKey: "personal:" + owner,
+    body: { id: "dlc" + i.toString(16).padStart(24, "0"), summary: owner + i, description: "", start: { date: "2026-01-01" }, end: { date: "2026-01-02" } },
+  });
+  const mixed = [...Array.from({ length: 7 }, (_, i) => synth("X", i)), synth("Y", 99)];
+  const rs = await dc219Run(mixed, make(async (mailboxKey) => {
+    if (mailboxKey === "personal:X") throw new Error("Mailbox not connected: personal:X");
+    return { id: "y" };
+  }, {}));
+  ok(rs.failed === DC219_STOP_AFTER && j(rs.stoppedOwners) === j(["X"]) && rs.written === 1 && rs.stoppedFor === "done" && rs.remaining === 0, "#219 batch: 5 consecutive failures stop that owner; other owners carry on");
+
+  let threw = false;
+  try {
+    await dc219Run(all.slice(0, 1), { insert: async () => ({ id: "z" }), record: async () => { throw new Error("db down"); }, now: () => 0 });
+  } catch {
+    threw = true;
+  }
+  ok(threw, "#219 batch: a failed blob write aborts the batch (a resume re-inserts → 409 → recorded)");
+
+  ok(j(Object.keys(dc219Sanitize({ a: { eventId: "e", owner: "o", at: 1 }, b: null, c: { owner: "x" }, d: "junk" }))) === j(["a"]), "#219 sanitizeImported: drops cleared (null) and malformed entries");
+
+  // --- DB half: the seeded roster, no mailbox connections.
+  await setBlob219(DC219_BLOB, { [lincolnKey]: { eventId: "dlc-test", owner: "Jason Keagy", at: 1 } });
+  const live = await dc219PreviewDb(DC219_FIXTURE, { fromToday: false });
+  const jason = live.owners.find((o) => o.owner === "Jason Keagy")!;
+  ok(jason.userName === "Jason Keagy" && jason.alreadyImported === 1 && ["gmail-off", "not-connected"].includes(jason.calendar) && !jason.defaultInclude, "#219 previewCalendarImport: matches the seeded roster, reads the blob, and reports no calendar");
+  ok(live.owners.find((o) => o.owner === "Mike Mundth")!.calendar === "no-user", "#219 previewCalendarImport: an owner outside the roster is no-user");
+  let inserted = 0;
+  const liveRun = await dc219ImportBatch(DC219_FIXTURE, { fromToday: false, owners: ["Jason Keagy", "Isaac Mittlesteadt"], skipKeys: [] }, {
+    insert: async () => {
+      inserted++;
+      return { id: "never" };
+    },
+    record: async () => {},
+    now: () => 0,
+  });
+  ok(liveRun.pendingAtStart === 0 && inserted === 0 && liveRun.stoppedFor === "done", "#219 importCalendarBatch: no connected calendar → nothing is written anywhere");
+  await setBlob219(DC219_BLOB, { [lincolnKey]: null });
+
+  // --- source checks: the zoned insert and the admin gate.
+  const cal = read("src/lib/google/calendar.ts");
+  ok(/export async function insertZonedEvent\(\s*mailboxKey: string,\s*body: ZonedEventBody\s*\)/.test(cal) && cal.includes('"/calendars/primary/events?sendUpdates=none"'), "#219 insertZonedEvent: primary calendar, no invite emails");
+  const act = read("src/app/(app)/import/daylite/calendar/actions.ts");
+  ok(act.startsWith('"use server"'), "#219 actions: a server-action module");
+  ok(
+    (act.match(/export async function \w+\([^)]*\)[^{]*\{\s*await requirePerm\("manage_users"\);/g) || []).length === 2 &&
+      (act.match(/^export async function/gm) || []).length === 2,
+    "#219 actions: both actions call requirePerm(\"manage_users\") first, outside any try"
+  );
+  const glue = read("src/lib/daylite/calendar-import.ts");
+  ok(glue.includes('if (states[u.id] === "connected") mailboxByUserId[u.id] = personalKey(u.id);'), "#219 import: only a connected owner's OWN personal mailbox is ever targeted");
+}
+
+/* ====== #219 Daylite calendar import — Task 3: the screen (source checks) ====== */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const page = read("src/app/(app)/import/daylite/calendar/page.tsx");
+  ok(page.includes('await requirePerm("manage_users")') && page.includes("export const maxDuration = 60"), "#219 T3: the page is admin-gated and gets the 60 s server-action ceiling");
+  const client = read("src/app/(app)/import/daylite/calendar/calendar-client.tsx");
+  ok(client.startsWith('"use client"'), "#219 T3: the import screen is a client component");
+  const valueImports = [...client.matchAll(/^import (?!type )[^;]*?from "([^"]+)"/gm)].map((m) => m[1]);
+  ok(valueImports.length > 0 && valueImports.every((s) => s === "react" || s === "./actions"), "#219 T3: the client imports values only from react and its own actions — no store, db or server module");
+  ok(client.includes("skipKeys: skipRef.current") && client.includes('b.stoppedFor === "quota"') && client.includes("b.stoppedOwners"), "#219 T3: the loop re-posts with failed keys skipped, pauses on quota, drops stopped owners");
+  ok(client.includes("Only events from today on") && client.includes("Repeating series skipped"), "#219 T3: the from-today option and the skipped-series list are on the page");
+  const hist = read("src/app/(app)/import/daylite/page.tsx");
+  ok(hist.includes('href="/import/daylite/calendar"'), "#219 T3: /import/daylite links to the calendar import");
 }
