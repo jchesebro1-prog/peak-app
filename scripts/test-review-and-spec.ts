@@ -20431,3 +20431,78 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     "#225: the old company-vs-company acceptance pair is gone"
   );
 }
+
+/* ====== #224 Short lists on companies ======
+   Pure helpers behind ShortList (src/lib/short-list.ts, src/components/
+   short-list.tsx): visibleRows/filterRows/visibleGroupFlags, plus
+   source-level checks that the company record no longer hard-slices Site
+   visits, that the Companies + Venues directories page by `?n=`, and that
+   the client ShortList component stays store/db-free. */
+import { visibleRows as slVisibleRows, filterRows as slFilterRows, visibleGroupFlags } from "@/lib/short-list";
+{
+  ok(slVisibleRows(20, 5, false) === 5, "#224 short-list: collapsed shows `initial` rows");
+  ok(slVisibleRows(3, 5, false) === 3, "#224 short-list: collapsed never shows more than `total` rows");
+  ok(slVisibleRows(20, 5, true) === 20, "#224 short-list: expanded shows every row");
+  ok(slVisibleRows(0, 5, false) === 0 && slVisibleRows(0, 5, true) === 0, "#224 short-list: zero rows is zero either way");
+  ok(slVisibleRows(20, -3, false) === 0, "#224 short-list: a negative `initial` clamps to zero, not a negative slice length");
+  ok(slVisibleRows(-5, 5, true) === 0, "#224 short-list: a negative `total` clamps to zero");
+
+  const rows = ["Riverside Playhouse", "Main Street Theater", "riverside high school", "Downtown Arena"];
+  ok(
+    slFilterRows(rows, "riverside", (r) => r).length === 2,
+    "#224 short-list: filterRows matches case-insensitively across every row"
+  );
+  ok(
+    slFilterRows(rows, "  ", (r) => r).length === rows.length &&
+      slFilterRows(rows, "", (r) => r).length === rows.length,
+    "#224 short-list: an empty (or whitespace-only) query returns every row, trimmed first"
+  );
+  ok(
+    slFilterRows(rows, "RIVERSIDE", (r) => r).every((r) => r.toLowerCase().includes("riverside")),
+    "#224 short-list: the query itself is case-insensitive too"
+  );
+  ok(
+    slFilterRows(rows, "zzz-no-match", (r) => r).length === 0,
+    "#224 short-list: no matches yields an empty array, not the unfiltered list"
+  );
+  const orderCheck = slFilterRows([3, 1, 2, 4], "", () => "x");
+  ok(orderCheck[0] === 3 && orderCheck[3] === 4, "#224 short-list: filterRows preserves row order (a pass, not a re-sort)");
+
+  // visibleGroupFlags: Activity's date-group headers ride with their rows —
+  // a header shows only while at least one of its (post-filter) rows is
+  // still within the flattened visible count.
+  ok(
+    JSON.stringify(visibleGroupFlags([2, 3, 1], 4)) === JSON.stringify([true, true, false]),
+    "#224 short-list: a group past the visible cutoff (all its rows beyond visibleCount) is hidden"
+  );
+  ok(
+    JSON.stringify(visibleGroupFlags([2, 3, 1], 6)) === JSON.stringify([true, true, true]),
+    "#224 short-list: once visibleCount covers every row, every non-empty group shows"
+  );
+  ok(
+    JSON.stringify(visibleGroupFlags([0, 3], 2)) === JSON.stringify([false, true]),
+    "#224 short-list: an empty (fully filtered-out) group never shows its header even at index 0"
+  );
+  ok(
+    JSON.stringify(visibleGroupFlags([], 0)) === JSON.stringify([]),
+    "#224 short-list: no groups is an empty flag list, not an error"
+  );
+
+  const read224 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const companyPage224 = read224("src/app/(app)/companies/[id]/page.tsx");
+  ok(!companyPage224.includes("slice(0, 6)"), "#224: the company record's Site visits card no longer hard-slices to 6");
+  ok(companyPage224.includes("ShortList"), "#224: the company record renders cards through ShortList");
+
+  const directory224 = read224("src/app/(app)/companies/page.tsx");
+  ok(/sp\.n\b/.test(directory224) && directory224.includes('params.set("n"'), "#224: the Companies directory reads and writes the `?n=` page-size param");
+  ok(/showMoreHref|Show more/.test(directory224), "#224: the Companies directory has a Show-more control");
+
+  const venues224 = read224("src/app/(app)/venues/page.tsx");
+  ok(/sp\.n\b/.test(venues224) && venues224.includes('p.set("n"'), "#224: the Venues directory reads and writes the `?n=` page-size param");
+  ok(!/const PAGE = 200/.test(venues224), "#224: the old hard 200-row cap is gone from Venues");
+  ok(/Show more/.test(venues224), "#224: the Venues directory has a Show-more control");
+
+  const shortListComp224 = read224("src/components/short-list.tsx");
+  ok(shortListComp224.startsWith('"use client"'), "#224: ShortList is a client component");
+  ok(!/@\/lib\/stores\/|@\/db\//.test(shortListComp224), "#224: the client ShortList component imports no store/db module");
+}
