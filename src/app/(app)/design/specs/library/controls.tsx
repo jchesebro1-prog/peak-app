@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
+import { useUrlSearchText } from "@/lib/use-url-search-text";
 import {
   adoptLegacyPointersAction,
   createLibrarySectionAction,
@@ -257,8 +258,9 @@ const TOGGLE_BASE: React.CSSProperties = {
 /**
  * Task 12 — the coverage table's filter row: search + article + state
  * selects and the on-a-BOM / datasheet toggles share one line (#121). URL-
- * as-state like the Companies FilterBar: every change pushes a fresh query
- * string to this same page so the table (a server component) re-filters.
+ * as-state like the Companies FilterBar: every change navigates to a fresh
+ * query string on this same page so the table (a server component)
+ * re-filters — search replaces, the filters push (#243).
  */
 export function CoverageControls({
   q,
@@ -275,19 +277,10 @@ export function CoverageControls({
   datasheet: boolean;
   articleOptions: Array<{ id: string; label: string }>;
 }) {
-  const router = useRouter();
-  const [text, setText] = useState(q);
-  const [prevQ, setPrevQ] = useState(q);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #243: the draft never gets overwritten by its own slow navigation.
+  const { text, setSearch, go } = useUrlSearchText(q);
 
-  // Reset the draft text when the URL's q changes from elsewhere (derived-
-  // state reset during render, matching the Companies FilterBar idiom).
-  if (prevQ !== q) {
-    setPrevQ(q);
-    setText(q);
-  }
-
-  const pushWith = (patch: { q?: string; article?: string; state?: string; bom?: boolean; datasheet?: boolean }) => {
+  const hrefWith = (patch: { q?: string; article?: string; state?: string; bom?: boolean; datasheet?: boolean }) => {
     const p = new URLSearchParams();
     const nq = patch.q !== undefined ? patch.q : text;
     const na = patch.article !== undefined ? patch.article : articleId;
@@ -300,14 +293,10 @@ export function CoverageControls({
     if (nb) p.set("bom", "1");
     if (nd) p.set("datasheet", "1");
     const s = p.toString();
-    router.push("/design/specs/library" + (s ? "?" + s : "") + "#coverage");
+    return "/design/specs/library" + (s ? "?" + s : "") + "#coverage";
   };
-
-  const onSearch = (v: string) => {
-    setText(v);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => pushWith({ q: v }), 300);
-  };
+  const pushWith = (patch: { article?: string; state?: string; bom?: boolean; datasheet?: boolean }) => go(hrefWith(patch));
+  const onSearch = (v: string) => setSearch(v, hrefWith({ q: v }));
 
   return (
     <SearchFilterBar value={text} onChange={onSearch} placeholder="Search SKU or description…" ariaLabel="Search coverage">

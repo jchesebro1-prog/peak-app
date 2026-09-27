@@ -161,7 +161,9 @@ async function persist(formData: FormData): Promise<string | null> {
     margin: 0,
     source: "consulting",
     quoteType: "consulting",
-    owner: user.name,
+    // #242 final: the owner is set when the quote is CREATED (below) and kept
+    // on every later save — the review limit follows the quote's owner, never
+    // whoever saved it last.
     contact,
     consulting,
   };
@@ -177,7 +179,7 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const q = editingId
     ? await updateQuote(editingId, payload)
-    : await createQuote({ ...payload, leadId: existingLead?.id ?? null });
+    : await createQuote({ ...payload, owner: user.name, leadId: existingLead?.id ?? null });
   const qid = (q && q.id) || editingId || null;
 
   if (!editingId && q) {

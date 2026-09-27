@@ -50,6 +50,8 @@ import type { Pipelines } from "@/lib/pipelines";
 import { PipelinesCard } from "./pipelines-card";
 import { DocumentCategoriesCard } from "./document-categories-card";
 import type { DocumentCategory } from "@/lib/document-categories";
+import { ReviewLimitsCard } from "./review-limits-card";
+import type { ReviewLimits } from "@/lib/review-limits";
 import Link from "next/link";
 import { SegmentedToggle } from "@/components/ui";
 import {
@@ -182,6 +184,7 @@ export default function SettingsClient({
   customerFieldDefs,
   venueTypes,
   documentCategories,
+  reviewLimits,
   pipelines,
   pipelineUsage,
   offices,
@@ -214,6 +217,8 @@ export default function SettingsClient({
   venueTypes: VenueType[];
   /** #218 — Settings → Admin → Document categories (resolved, archived included). */
   documentCategories: DocumentCategory[];
+  /** #242 — Settings → Admin → Review limits (resolved; archived people's rows kept). */
+  reviewLimits: ReviewLimits;
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id — the editor's
@@ -2170,6 +2175,13 @@ export default function SettingsClient({
 
       {section === "admin" && (
         <>
+          <div style={{ marginTop: 20 }}>
+            <ReviewLimitsCard
+              key={JSON.stringify(reviewLimits)}
+              people={users.filter((u) => u.status === "active").map((u) => ({ id: u.id, name: u.name }))}
+              limits={reviewLimits}
+            />
+          </div>
           <section className="pk-card" style={{ padding: "17px 18px", marginBottom: 20 }}>
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Admin</div>
             <div style={{ fontSize: 12.5, color: "#8c919c", marginTop: 4, marginBottom: 14 }}>

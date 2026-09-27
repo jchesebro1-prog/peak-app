@@ -30,6 +30,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import { displayQuoteNumber } from "@/lib/estimate-number";
+import { reviewLimitChipFor } from "@/lib/review-limits-server";
 import type {
   AiSource,
   CustomerLite,
@@ -371,6 +372,9 @@ export default async function EstimatorPage({
     travel["name|" + initial.custName] = lite(await travelForName(initial.custName));
   }
 
+  // #242: the owner's review-limit chip for the saved quote (none for a new one).
+  const reviewLimit = q ? await reviewLimitChipFor(q, user.name) : null;
+
   return (
     <EstimatorClient
       initial={initial}
@@ -389,6 +393,7 @@ export default async function EstimatorPage({
       reviewers={reviewerRows.map((u) => u.name)}
       me={user.name}
       canApprove={can("approve", user.roles)}
+      reviewLimit={reviewLimit}
       aiSource={aiSource}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}
       quoteTasks={quoteTasks}

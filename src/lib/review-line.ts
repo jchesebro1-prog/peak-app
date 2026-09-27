@@ -1,4 +1,6 @@
 import { firstName } from "@/lib/team";
+import { reviewKindPhrase } from "@/lib/review-limits";
+import { money } from "@/lib/format";
 
 /**
  * The one place that phrases an APPROVED review for a human (punch #77).
@@ -23,16 +25,20 @@ import { firstName } from "@/lib/team";
  * wrong. Change the wording here and both surfaces move together.
  */
 export type ApprovedReviewLike = {
-  method?: "in_app" | "attested" | null;
+  method?: "in_app" | "attested" | "auto_limit" | null;
   decidedBy: string | null;
   reviewer: string | null;
   note: string;
+  /** #242: an `auto_limit` approval's snapshot (kind, limit, value; who
+   *  moved the quote and to what — absent on older snapshots). */
+  auto?: { kind: string; limit: number | "none"; value: number; triggeredBy?: string; trigger?: "sent" | "won" } | null;
 };
 
 /**
  * - `method === "attested"` — an off-platform review recorded by the estimator
  *   themself (punch #60): shows WHO recorded it and, when present, the
  *   mandatory note naming who actually reviewed it and how.
+ * - `method === "auto_limit"` — #242: autoApprovalLine (no "ready to send" suffix).
  * - anything else, including legacy docs decided before punch #60 where
  *   `method` is absent/null — renders as a plain in-app approval, exactly as it
  *   did before `method` existed. Legacy approvals are still valid approvals;
@@ -41,6 +47,7 @@ export type ApprovedReviewLike = {
  * Caller is expected to only invoke this for `review.state === "approved"`.
  */
 export function approvedReviewLine(review: ApprovedReviewLike): string {
+  if (review.method === "auto_limit") return autoApprovalLine(review);
   return review.method === "attested"
     ? "Attested by " +
         firstName(review.decidedBy || "") +
@@ -49,4 +56,29 @@ export function approvedReviewLine(review: ApprovedReviewLike): string {
     : "Approved by " +
         firstName(review.decidedBy || review.reviewer || "") +
         " — ready to send to the customer";
+}
+
+/** #242: "Auto-approved — within Nic's $25,000 limit for system estimates
+ *  without labor" (or "… Nic has no review limit for rentals"). #242 final:
+ *  when someone other than the owner moved the quote, "… — sent by Jena" (or
+ *  "— marked Won by Jena"). Snapshots written before `triggeredBy` render
+ *  without the suffix. */
+export function autoApprovalLine(review: ApprovedReviewLike): string {
+  const who = firstName(review.decidedBy || "");
+  const a = review.auto;
+  if (!a) return "Auto-approved — within " + who + "'s review limit";
+  const phrase = reviewKindPhrase(a.kind);
+  const base =
+    a.limit === "none"
+      ? `Auto-approved — ${who} has no review limit for ${phrase}`
+      : `Auto-approved — within ${who}'s ${money(a.limit)} limit for ${phrase}`;
+  const by = (a.triggeredBy || "").trim();
+  if (!by || by.toLowerCase() === (review.decidedBy || "").trim().toLowerCase()) return base;
+  return `${base} — ${a.trigger === "won" ? "marked Won" : "sent"} by ${firstName(by)}`;
+}
+
+/** #242: the banner for an auto approval that no longer holds. */
+export function staleAutoApprovalLine(chipText: string): string {
+  const t = chipText || "needs review";
+  return "Auto-approval no longer applies — " + t.charAt(0).toLowerCase() + t.slice(1);
 }

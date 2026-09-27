@@ -8,6 +8,7 @@ import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { resolveDocumentCategories } from "@/lib/document-categories";
 import { venueTypesFrom } from "@/lib/venue-types";
+import { reviewLimitsFrom } from "@/lib/review-limits";
 import { allUsers } from "@/lib/users";
 import {
   callbackUrl,
@@ -196,6 +197,7 @@ export default async function SettingsPage() {
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
           documentCategories={resolveDocumentCategories(settings.documentCategories)}
           venueTypes={venueTypesFrom(settings.venueTypes)}
+          reviewLimits={reviewLimitsFrom(settings.reviewLimits)}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",

@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { SearchFilterBar } from "@/components/search/search-filter-bar";
+import { useUrlSearchText } from "@/lib/use-url-search-text";
 
 /**
  * Client bits for the People directory (identity core, D85): the search /
@@ -23,19 +22,10 @@ export function PeopleFilterBar({
   companyOptions: Array<{ id: string; name: string }>;
   statusOptions: Array<{ value: string; label: string }>;
 }) {
-  const router = useRouter();
-  const [text, setText] = useState(q);
-  const [prevQ, setPrevQ] = useState(q);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #243: the draft never gets overwritten by its own slow navigation.
+  const { text, setSearch, go } = useUrlSearchText(q);
 
-  // Reset the draft text when the URL's q changes (derived-state reset
-  // during render — avoids the set-state-in-effect cascade).
-  if (prevQ !== q) {
-    setPrevQ(q);
-    setText(q);
-  }
-
-  const pushWith = (patch: { q?: string; company?: string; status?: string }) => {
+  const hrefWith = (patch: { q?: string; company?: string; status?: string }) => {
     const p = new URLSearchParams();
     const nq = patch.q !== undefined ? patch.q : text;
     const nc = patch.company !== undefined ? patch.company : company;
@@ -45,14 +35,10 @@ export function PeopleFilterBar({
     // "active" is the default view (spec §5.4) — only non-defaults go in the URL.
     if (ns && ns !== "active") p.set("status", ns);
     const s = p.toString();
-    router.push("/people" + (s ? "?" + s : ""));
+    return "/people" + (s ? "?" + s : "");
   };
-
-  const onSearch = (v: string) => {
-    setText(v);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => pushWith({ q: v }), 300);
-  };
+  const pushWith = (patch: { company?: string; status?: string }) => go(hrefWith(patch));
+  const onSearch = (v: string) => setSearch(v, hrefWith({ q: v }));
 
   return (
     <div style={{ marginBottom: 14 }}>

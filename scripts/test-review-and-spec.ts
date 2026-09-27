@@ -2756,8 +2756,8 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
   ok(ov.costEach === 2080, "a Rose Brand cost override replaces the make cost in the quote");
 }
 
-import { defaultAState } from "@/app/(app)/design/quick/engine";
-import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
+import { defaultAState, SYS_ORDER as g244SysOrder, VENUES as g244Venues } from "@/app/(app)/design/quick/engine";
+import { coverFromVenue, designPatchFromIntake, gridIntakeDefaults, intakeDesignName, manualScopeInputs, pickedVenueMissing, siteForLocId } from "@/lib/design/grid-intake";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib/design/curtain-pricing";
@@ -4952,6 +4952,78 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(designPatchFromIntake({ projectName: "Already named", venueName: "X", locationName: "", a }).name === undefined, "grid-intake: a named design keeps its name");
   ok(designPatchFromIntake({ projectName: "Untitled system design", venueName: "", locationName: "Only campus", a }).name === "Only campus", "grid-intake: falls back to whichever cover field is filled");
   ok(TRACKABLE_SYS_KEYS.join(",") === "rigging,curtains,lighting,audio,video", "grid-scopes: TRACKABLE_SYS_KEYS is exported in the Scope panel's order");
+}
+
+/* --- #244: Grid intake — Auditorium defaults, title rule, customer venue → site + cover page (pure) --- */
+{
+  const d = gridIntakeDefaults();
+  ok(d.venue === "school" && d.width === 50 && d.depth === 30 && d.ph === 20 && d.wing === 10 && d.grid === 45 && d.size === "large",
+    "#244: a new Grid intake opens on an Auditorium, 50 wide × 30 deep × 20 high, 10' wings, 45' grid, size Large");
+  const aud = g244Venues.find((v) => v.key === "school")!;
+  ok(g244SysOrder.every((k) => d.sys[k] === aud.sys[k]) && d.sys !== aud.sys, "#244: its systems are the Auditorium preset's (a copy, not the preset object)");
+  ok(defaultAState(0).venue === "concenter" && defaultAState(0).grid === 50, "#244: Quick Design's own defaultAState is unchanged");
+  const a = gridIntakeDefaults();
+  ok(intakeDesignName({ title: "  North HS Rigging  ", projectName: "Untitled system design", venueName: "Auditorium", locationName: "North HS" }) === "North HS Rigging",
+    "#244: a typed title wins over the auto-name (trimmed)");
+  ok(intakeDesignName({ title: "Typed", projectName: "Already named", venueName: "", locationName: "" }) === "Typed", "#244: a typed title renames an already-named design too");
+  ok(intakeDesignName({ title: "   ", projectName: "Untitled system design", venueName: "Auditorium", locationName: "North HS" }) === "Auditorium — North HS",
+    "#244: a blank title keeps the 'Venue — Location' auto-name");
+  ok(intakeDesignName({ title: "", projectName: "Already named", venueName: "X", locationName: "Y" }) === undefined, "#244: a blank title never renames a named design");
+  const patch = designPatchFromIntake({
+    projectName: "Untitled system design", venueName: "Auditorium", locationName: "North HS", a, title: "My design",
+    customer: { customer: "North ISD", customerId: "north-isd", locationId: "l123" },
+  });
+  ok(patch.name === "My design" && patch.customer === "North ISD" && patch.customerId === "north-isd" && patch.locationId === "l123" && patch.grid === 45 && patch.venue === "school",
+    "#244: designPatchFromIntake carries the typed title and the customer link onto the design record");
+  const bare = designPatchFromIntake({ projectName: "Untitled system design", venueName: "V", locationName: "", a });
+  ok(!("customer" in bare) && !("customerId" in bare) && !("locationId" in bare) && bare.name === "V", "#244: without a customer the patch leaves the design's customer fields alone");
+  const sites = [
+    { id: "site-1", legacyLocId: "loc1", name: "A" },
+    { id: "site-2", legacyLocId: null, name: "B" },
+  ];
+  ok(siteForLocId(sites, "loc1")?.id === "site-1", "#244: a migrated venue's legacy location id maps to its site");
+  ok(siteForLocId(sites, "site-2")?.id === "site-2", "#244: a native venue's location id is its own site id");
+  ok(siteForLocId(sites, "site-1") === null && siteForLocId(sites, "") === null, "#244: a site id hidden behind a legacy id, or a blank id, maps to nothing");
+  const c1 = coverFromVenue({ label: "North High School — Auditorium", locationName: "North High School", address: "1 Main St", city: "Tulsa", state: "OK" }, "North ISD");
+  ok(c1.locationName === "North High School" && c1.venueName === "Auditorium" && c1.address === "1 Main St, Tulsa, OK",
+    "#244: a derived 'Location — Type' venue fills campus, space and a street + city/state address");
+  const c2 = coverFromVenue({ label: "North ISD — Gym Stage", locationName: "", city: "Tulsa", state: "OK" }, "North ISD");
+  ok(c2.locationName === "North ISD" && c2.venueName === "Gym Stage" && c2.address === "Tulsa, OK", "#244: a venue named after its company takes the customer's name as the campus");
+  const c3 = coverFromVenue({ label: "Main Gym", locationName: "East Campus" }, "North ISD");
+  ok(c3.locationName === "East Campus" && c3.venueName === "Main Gym" && c3.address === "", "#244: a hand-named venue keeps its whole name as the space");
+  // Wiring: the quote intake keeps its order (customer checks → thread pre-check → the one save).
+  const g244Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const g244Qa = g244Read("src/app/(app)/quotes/new/actions.ts");
+  const g244V = g244Qa.indexOf("validateIntakeCustomer(input)"), g244T = g244Qa.indexOf("threadQuoteLinkStatus(thread"), g244R = g244Qa.indexOf("resolveIntakeCustomer(input)");
+  ok(g244V > 0 && g244T > g244V && g244R > g244T, "#244: the quote intake still validates the customer, then pre-checks the thread, then saves");
+  const g244Ga = g244Read("src/app/(app)/design/grid/[id]/actions.ts");
+  const g244Save = g244Ga.slice(g244Ga.indexOf("export async function saveGridIntakeAction"), g244Ga.indexOf("export async function linkLinesetDesignAction"));
+  ok(g244Save.indexOf("validateIntakeCustomer(") < g244Save.indexOf("resolveIntakeCustomer(") && g244Save.indexOf("resolveIntakeCustomer(") < g244Save.indexOf("saveGridIntake(input.projectId") &&
+    g244Save.indexOf("saveGridIntake(input.projectId") < g244Save.indexOf("generateBaseSheet("), "#244: the Grid intake checks the customer before any write, links it before the intake save, and the base sheet stays the last step of the first-save gate");
+  ok(g244Ga.includes("contactName: project.contactName || \"\""), "#244: the Grid's draft quote carries the design's contact");
+  // Review fixes — rename / re-link are gated like delete; a stale or forged venue pick is refused before any write.
+  const g244Body = (name: string) => {
+    const at = g244Ga.indexOf(`export async function ${name}(`);
+    return at < 0 ? "" : g244Ga.slice(at, g244Ga.indexOf("\n}\n", at));
+  };
+  for (const [name, store] of [["renameGridDesignAction", "renameProject("], ["setGridCustomerAction", "setProjectCustomer("]] as const) {
+    const body = g244Body(name);
+    const gate = body.indexOf('if (!can("create", user.roles)) return { ok: false, error: "You can');
+    ok(gate > 0 && gate < body.indexOf(store) && gate < body.indexOf("updateDesign("), `#244 review: ${name} refuses without the create permission before any write`);
+  }
+  ok(g244Read("src/app/(app)/design/grid/[id]/editor.tsx").includes("canEdit={canCreate}"), "#244 review: the editor header only offers rename / re-link to people who can create designs");
+  ok(g244Read("src/app/(app)/design/grid/[id]/design-identity.tsx").includes("onFocus={(e) => e.currentTarget.select()}"), "#244 review: opening the title rename selects the old title, so typing replaces it");
+  const g244Sites = [{ id: "site-1", legacyLocId: "loc1" }, { id: "site-2", legacyLocId: null }];
+  ok(pickedVenueMissing({ locationMode: "pick", locationId: "loc-gone" }, g244Sites) && pickedVenueMissing({ locationMode: "pick", locationId: "loc1" }, []),
+    "#244 review: a picked venue the customer doesn't have (stale or forged, or any pick on a new customer) is missing");
+  ok(!pickedVenueMissing({ locationMode: "pick", locationId: "loc1" }, g244Sites) && !pickedVenueMissing({ locationMode: "pick", locationId: "site-2" }, g244Sites),
+    "#244 review: a venue still on the customer is not missing");
+  ok(!pickedVenueMissing({ locationMode: "skip", locationId: "loc-gone" }, g244Sites) && !pickedVenueMissing({ locationMode: "new", locationId: "" }, g244Sites) && !pickedVenueMissing({ locationMode: "pick", locationId: "  " }, g244Sites),
+    "#244 review: skip, new and a blank pick are never a missing venue");
+  const g244Stale = g244Save.indexOf("That venue is no longer on this customer — pick it again.");
+  ok(g244Stale > 0 && g244Save.indexOf("pickedVenueMissing(input.customer") < g244Stale && g244Stale < g244Save.indexOf("resolveIntakeCustomer(") && g244Stale < g244Save.indexOf("setProjectCustomer("),
+    "#244 review: the Grid intake refuses a missing venue pick before creating or linking anything");
+  ok(!g244Qa.includes("pickedVenueMissing") && !g244Read("src/lib/intake-customer.ts").includes("no longer on this customer"), "#244 review: the quote intake's venue handling is unchanged");
 }
 /* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
 {
@@ -10554,6 +10626,10 @@ seeded()
   .then(() => portal245GenerateAsyncChecks())
   .then(() => portal245AcceptAsyncChecks())
   .then(() => portal245ThumbnailsAsyncChecks())
+  .then(() => reviewLimits242AsyncChecks())
+  .then(() => reviewLimitChips242AsyncChecks())
+  .then(() => reviewLimitsFix242AsyncChecks())
+  .then(() => reviewLimitsFinal242AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18722,7 +18798,7 @@ import {
   const ds = read("src/lib/stores/designs.ts");
   const gq = read("src/lib/design/grid-quote.ts");
   ok(nav.includes("listDesignRecords()") && !nav.includes("getAllDesigns"), "#211 wave 3 I3: nav counts read design records only — no live Grid pricing on every page");
-  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 2, "#211 wave 3 I3: the Grid actions find linked designs with a filtered read");
+  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 4, "#211 wave 3 I3 (+ #244 rename/relink): the Grid actions find linked designs with a filtered read");
   ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId)"), "#211 wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
   // Minors.
   ok(ds.includes("fail CLOSED") || ds.includes("Fail CLOSED"), "#211 wave 3 minor: an Auto completeness failure marks the design incomplete");
@@ -23987,8 +24063,10 @@ async function venues216Task3FixesAsyncChecks(): Promise<void> {
   const eqa = v216Read("src/components/entity-quick-add.tsx");
   ok(eqa.includes("venue: { locationName: string; venueKind: string; city: string; state: string }") && eqa.includes("venueTypeOptions(") && !eqa.includes("Venue name (e.g."),
     "#216 T6: the shared venue quick-add asks Location + Type, never a label");
-  const qa = v216Read("src/app/(app)/quotes/new/actions.ts");
-  ok(qa.includes("deriveName: true") && qa.includes("newLocationKind") && !qa.includes("newLocationLabel"), "#216 T6: the quote intake's new venue gets a derived name and a picked type");
+  // #244 — the quote intake's customer/venue/contact save moved verbatim into lib/intake-customer.
+  const qa = v216Read("src/lib/intake-customer.ts");
+  ok(qa.includes("deriveName: true") && qa.includes("newLocationKind") && !qa.includes("newLocationLabel") && v216Read("src/app/(app)/quotes/new/actions.ts").includes("resolveIntakeCustomer(input)"),
+    "#216 T6: the quote intake's new venue gets a derived name and a picked type");
   ok(v216Read("src/app/(app)/quotes/new/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"), "#216 T6: the intake page passes the venue types");
   const la = v216Read("src/app/(app)/inbox/link-actions.ts");
   const s = la.indexOf("export async function quickAddVenueAction");
@@ -25808,9 +25886,11 @@ import { resolveDocumentCategories as fwaResolveCats, mergeDocumentCategories as
   // #216 final — quick-adds default to the first live venue type.
   const lp = fwaRd("src/app/(app)/inbox/link-panel.tsx");
   ok(lp.includes("emptyVenueQuickAdd(venueTypeOptions(vm.venueTypes)[0]?.key)") && !lp.includes("emptyVenueQuickAdd()"), "#216 final: the link panel's venue quick-add defaults to the first live venue type");
-  const qf = fwaRd("src/app/(app)/quotes/new/intake-form.tsx");
-  ok(qf.includes("const defaultVenueKind = venueTypeOptions(venueTypes)[0]?.key;") && !qf.includes("emptyVenueQuickAdd()"), "#216 final: the quote intake's venue quick-add defaults to the first live venue type");
-  const qa = fwaRd("src/app/(app)/quotes/new/actions.ts");
+  // #244 — the quote intake's picker moved into components/customer-venue-contact-picker.tsx.
+  const qf = fwaRd("src/components/customer-venue-contact-picker.tsx");
+  ok(qf.includes("return venueTypeOptions(venueTypes)[0]?.key;") && qf.includes("emptyVenueQuickAdd(defaultVenueKindOf(venueTypes))") && !qf.includes("emptyVenueQuickAdd()") &&
+    fwaRd("src/app/(app)/quotes/new/intake-form.tsx").includes("initialCustomerVenueContact("), "#216 final: the quote intake's venue quick-add defaults to the first live venue type");
+  const qa = fwaRd("src/lib/intake-customer.ts");
   ok(qa.includes('(venueTypeOptions(types)[0]?.key ?? "proscenium")') && qa.includes('id: "l" + Date.now() + Math.random().toString(36).slice(2, 6),'),
     "#216 final: the intake falls back to the first live type and mints a random-suffixed location id");
   ok(fwaRd("src/app/(app)/inbox/link-actions.ts").includes("/** The link panel's \"new venue\" quick-add") && !/~\d{3}/.test(fwaRd("src/lib/inbox-task-write.ts").slice(0, 2000)),
@@ -29278,4 +29358,865 @@ async function portal245ThumbnailsAsyncChecks(): Promise<void> {
   // never thrown past this call.
   const failing = await d245RenderThumb(datasheet.id, [sku], "Test", { ...fakeDeps, renderScreenshot: async () => { throw new Error("Chrome crashed"); } });
   ok(!failing.ok && failing.error === "Chrome crashed", "#245 thumbnails: a render failure is reported as { ok: false }, not thrown");
+}
+
+/* ======================================================================
+   #242 — quote review limits: pure rules (src/lib/review-limits.ts).
+   ====================================================================== */
+import {
+  REVIEW_KIND_KEYS as r242KindKeys, reviewKindColumn as r242Column, reviewKindPhrase as r242Phrase,
+  reviewKindOf as r242KindOf, hasLaborLine as r242HasLabor, hasTypedTotal as r242Typed,
+  sanitizeReviewLimits as r242Sanitize, reviewLimitsFrom as r242From, parseLimitInput as r242Parse,
+  formatLimitInput as r242Format, resolveOwnerId as r242Owner, evaluateReviewLimit as r242Eval,
+  canAutoApprove as r242CanAuto, approvalHolds as r242Holds, reviewLimitChip as r242Chip,
+  NO_REVIEW_LIMITS as r242None, type ReviewLimitContext as R242Ctx, type ReviewableQuote as R242Q,
+} from "@/lib/review-limits";
+{
+  ok(
+    r242KindKeys.join(",") ===
+      "system_plain,system_labor,flame_auto,flame_typed,repair_auto,repair_typed,inspection_auto,inspection_typed,rental,consulting",
+    "#242: ten review kinds, in the Settings column order"
+  );
+  ok(
+    r242Column("system_plain") === "System estimate — no labor" && r242Column("system_labor") === "System estimate — with labor" &&
+      r242Column("flame_typed") === "Flame test — typed total" && r242Column("rental") === "Rental",
+    "#242: column labels match the spec table"
+  );
+
+  const est = (items: Array<Record<string, unknown>>, kind = "materials") => ({
+    sections: [{ id: "s", name: "S", kind, mfr: "", freightPct: 0, items }],
+    mobs: [],
+  });
+  ok(!r242HasLabor(est([{ sku: "A", qty: 2, price: 100, cost: 50 }])), "#242: an Estimator spec with only material lines has no labor");
+  ok(r242HasLabor(est([{ sku: "LAB-RIG", qty: 10, price: 95, cost: 62 }], "labor")), "#242: an item in a kind:\"labor\" section is labor");
+  ok(r242HasLabor(est([{ sku: "LAB-x", qty: 1, price: 500, cost: 300, labor: true }])), "#242: a labor:true item inside a materials section is labor (pricing.ts sums it into lab)");
+  ok(!r242HasLabor(est([{ sku: "LAB-x", qty: 1, price: 500, cost: 300, labor: true, option: true }])), "#242: an optional labor line (excluded from totals) does not count");
+  ok(!r242HasLabor(est([{ sku: "LAB-x", qty: 0, price: 500, cost: 300 }], "labor")), "#242: a $0 labor line does not count");
+  ok(
+    !r242HasLabor(est([
+      { sku: "CUSTOM", qty: 1, price: 900, cost: 0, custom: true },
+      { sku: "ALLOW", qty: 1, price: 2000, cost: 0, allowance: true },
+      { sku: "DISC", qty: 1, price: -500, cost: 0 },
+    ])),
+    "#242: custom items, allowances and a discount line do not make a quote 'with labor'"
+  );
+  ok(r242HasLabor(est([{ sku: "LAB-x", qty: 3, price: 0, cost: 0, labor: true, extSellOverride: 750 }])), "#242: a labor line priced by an extended-sell override counts (lineExtSellOf)");
+  ok(
+    r242HasLabor({ kind: "grid", lines: [{ sku: "ETC-1", qty: 1, price: 10, ext: 10 }, { sku: "labor:lighting", qty: 1, price: 800, ext: 800 }] }),
+    "#242: a Grid quote's labor:<system> line (#232) is labor"
+  );
+  ok(
+    !r242HasLabor({ kind: "grid", lines: [{ sku: "ETC-1", qty: 1, price: 10, ext: 10 }, { sku: "allow:cable", qty: 1, price: 500, ext: 500, allowance: true }] }),
+    "#242: a Grid quote without a labor:<system> line is plain"
+  );
+  ok(
+    r242HasLabor({ venue: "Proscenium", size: "M", tier: "better", width: 40, depth: 30, grid: 20, systems: ["rigging"], fromDesign: "D-1" }),
+    "#242: a promoted Quick design counts as labor — its budget always prices installation"
+  );
+  ok(!r242HasLabor(null) && !r242HasLabor(undefined) && !r242HasLabor({}), "#242: no spec / an empty spec has no labor line");
+
+  ok(!r242Typed(null) && !r242Typed({}) && !r242Typed({ total: 1200 }), "#242: a service subdoc with no priceOverride is auto-priced");
+  ok(r242Typed({ priceOverride: 1500 }), "#242: a saved priceOverride is a typed total");
+  ok(!r242Typed({ priceOverride: 821, priceOverrideSeeded: true }), "#242: a D286/D366 seeded override (old off-grid sent price) is not a hand-typed total");
+  ok(!r242Typed({ priceOverride: 0 }) && !r242Typed({ priceOverride: "abc" }), "#242: a zero or junk priceOverride is not a typed total (normalizePriceOverride)");
+
+  ok(
+    r242KindOf({ quoteType: "flame_test", flameTest: { priceOverride: 900 } }) === "flame_typed" &&
+      r242KindOf({ quoteType: "flame_test", flameTest: { total: 900 } }) === "flame_auto",
+    "#242: flame test → flame_typed / flame_auto"
+  );
+  ok(
+    r242KindOf({ quoteType: "repair", repair: { priceOverride: 900 } }) === "repair_typed" && r242KindOf({ quoteType: "repair", repair: null }) === "repair_auto",
+    "#242: repair → repair_typed / repair_auto"
+  );
+  ok(
+    r242KindOf({ quoteType: "inspection", inspection: { priceOverride: 900 } }) === "inspection_typed" && r242KindOf({ quoteType: "inspection" }) === "inspection_auto",
+    "#242: inspection → inspection_typed / inspection_auto"
+  );
+  ok(r242KindOf({ quoteType: "flame_test", repair: { priceOverride: 900 } }) === "flame_auto", "#242: only the quote type's OWN subdoc is read for the typed total");
+  ok(r242KindOf({ quoteType: "rental" }) === "rental" && r242KindOf({ quoteType: "consulting" }) === "consulting", "#242: rental and consulting each have one kind");
+  ok(
+    r242KindOf({ quoteType: "system", spec: est([{ sku: "L", qty: 1, price: 1, cost: 0 }], "labor") }) === "system_labor" &&
+      r242KindOf({ quoteType: undefined, spec: null }) === "system_plain" &&
+      r242KindOf({ quoteType: "service", spec: est([{ sku: "L", qty: 1, price: 1, cost: 0, labor: true }]) }) === "system_labor",
+    "#242: system / missing / unknown types split on labor lines"
+  );
+
+  const s = r242Sanitize(
+    { u1: { system_plain: 25000.4, rental: "none", bogus: 5, flame_auto: -1, repair_auto: "12", consulting: 99_000_000 }, u9: { rental: 100 }, u2: {}, u3: "x" },
+    new Set(["u1", "u2", "u3"])
+  );
+  ok(
+    JSON.stringify(s) === JSON.stringify({ u1: { system_plain: 25000, rental: "none", consulting: 10_000_000 } }),
+    `#242: sanitizer rounds, keeps "none", caps at $10M, drops negative/string/unknown kinds, unknown users and empty rows (got ${JSON.stringify(s)})`
+  );
+  ok(
+    JSON.stringify(r242From({ u9: { rental: 5 } })) === JSON.stringify({ u9: { rental: 5 } }) && JSON.stringify(r242From(null)) === "{}" && JSON.stringify(r242From([1])) === "{}",
+    "#242: reviewLimitsFrom keeps every user id (no roster filter) and reads junk as no limits"
+  );
+
+  ok(
+    JSON.stringify(r242Parse("")) === JSON.stringify({ ok: true, limit: null }) && JSON.stringify(r242Parse("  ")) === JSON.stringify({ ok: true, limit: null }),
+    "#242: a blank cell is 'always needs review'"
+  );
+  ok(
+    (["No limit", "none", "UNLIMITED", "∞"] as const).every((t) => { const p = r242Parse(t); return p.ok && p.limit === "none"; }),
+    "#242: No limit / none / unlimited / ∞ parse as No limit"
+  );
+  const p1 = r242Parse("$25,000");
+  const p2 = r242Parse("1500.60");
+  const p3 = r242Parse("0");
+  ok(p1.ok && p1.limit === 25000 && p2.ok && p2.limit === 1501 && p3.ok && p3.limit === 0, "#242: dollar amounts parse to whole dollars ($25,000 → 25000; $0 allowed)");
+  ok(!r242Parse("-5").ok && !r242Parse("25k").ok && !r242Parse("1e5").ok && !r242Parse("20000000").ok, "#242: negatives, shorthand, exponents and anything over $10M are refused");
+  ok(
+    r242Format(null) === "" && r242Format(undefined) === "" && r242Format("none") === "No limit" && r242Format(25000) === "$25,000" &&
+      (() => { const p = r242Parse(r242Format(25000)); return p.ok && p.limit === 25000; })(),
+    "#242: formatLimitInput round-trips through parseLimitInput"
+  );
+
+  const roster = [
+    { id: "u1", name: "Nic Trapani", status: "active" },
+    { id: "u2", name: "Jena Tolksdorf", status: "active" },
+    { id: "u3", name: "Old Timer", status: "archived" },
+    { id: "u4", name: "Sam Twin", status: "active" },
+    { id: "u5", name: "Sam Twin", status: "active" },
+  ];
+  const ctx: R242Ctx = {
+    roster,
+    limits: { u1: { system_plain: 25000, system_labor: 10000, rental: "none" }, u3: { system_plain: 99999 }, u4: { system_plain: 99999 } },
+  };
+  ok(r242Owner("Nic Trapani", roster) === "u1" && r242Owner("  nic trapani ", roster) === "u1", "#242: owner name resolves to the roster id (trimmed, case-insensitive)");
+  ok(
+    r242Owner("Old Timer", roster) === null && r242Owner("Sam Twin", roster) === null && r242Owner("", roster) === null && r242Owner("Nobody", roster) === null,
+    "#242: archived, ambiguous, blank or unknown owners resolve to nobody"
+  );
+  const q = (over: Partial<R242Q> = {}): R242Q => ({ quoteType: "system", value: 25000, owner: "Nic Trapani", status: "draft", spec: null, review: null, ...over });
+  ok(r242Eval(q(), ctx).fits === true, "#242: a quote AT the owner's limit fits");
+  ok(r242Eval(q({ value: 24999 }), ctx).fits && !r242Eval(q({ value: 25001 }), ctx).fits, "#242: under fits, over does not");
+  ok(r242Eval(q({ quoteType: "rental", value: 9_000_000 }), ctx).fits, "#242: No limit fits any value");
+  ok(
+    !r242Eval(q({ quoteType: "consulting", value: 1 }), ctx).fits && r242Eval(q({ quoteType: "consulting", value: 1 }), ctx).limit === null,
+    "#242: a blank cell never fits — always needs review"
+  );
+  ok(
+    !r242Eval(q({ owner: "Old Timer", value: 1 }), ctx).fits && !r242Eval(q({ owner: "Sam Twin", value: 1 }), ctx).fits && !r242Eval(q({ owner: "Nobody", value: 1 }), ctx).fits,
+    "#242: an owner off the active roster (archived, ambiguous, unknown) never fits"
+  );
+  ok(
+    r242Eval(q({ owner: "", preparedBy: "Nic Trapani" }), ctx).fits && r242Eval(q({ owner: "", preparedBy: "Nic Trapani" }), ctx).ownerId === "u1",
+    "#242: a blank owner falls back to preparedBy"
+  );
+  const withLabor = q({ spec: est([{ sku: "L", qty: 1, price: 20000, cost: 0 }], "labor"), value: 20000 });
+  ok(!r242Eval(withLabor, ctx).fits && r242Eval(withLabor, ctx).kind === "system_labor", "#242: adding labor moves a quote to the with-labor limit ($10,000 here)");
+  ok(!r242Eval(q(), r242None).fits, "#242: with no limits configured (the default) nothing fits — nothing changes until limits are set");
+  ok(
+    r242CanAuto(q({ review: { state: "changes" } }), ctx) === null && r242CanAuto(q({ review: { state: "in_review" } }), ctx)?.kind === "system_plain",
+    "#242: a reviewer's 'changes requested' blocks auto-approval (as it blocks attestation); in_review does not"
+  );
+
+  ok(
+    r242Holds(q({ review: { state: "approved", method: "in_app" }, value: 9_999_999 }), ctx) &&
+      r242Holds(q({ review: { state: "approved", method: "attested" }, value: 9_999_999 }), r242None) &&
+      r242Holds(q({ review: { state: "approved", method: null } }), r242None),
+    "#242: in-app, attested and legacy approvals hold exactly as today, whatever the limits"
+  );
+  const auto = { state: "approved", method: "auto_limit", decidedBy: "Nic Trapani", auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  ok(r242Holds(q({ review: auto, value: 20000 }), ctx), "#242: an auto_limit approval holds while the quote still fits");
+  ok(!r242Holds(q({ review: auto, value: 30000 }), ctx), "#242: stale — value raised over the limit, the auto approval no longer holds");
+  ok(!r242Holds(q({ review: auto, value: 20000, spec: est([{ sku: "L", qty: 1, price: 1, cost: 0 }], "labor") }), ctx), "#242: stale — labor added (now the $10,000 with-labor limit), no longer holds");
+  // Review fix: a lowered limit governs NEW grants only — an unchanged quote keeps its auto approval.
+  ok(r242Holds(q({ review: auto, value: 20000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: limit lowered, quote unchanged against its snapshot — the auto approval still holds");
+  ok(r242Holds(q({ review: auto, value: 18000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: a value LOWERED under the snapshot is still unchanged — holds after a lowered limit");
+  ok(!r242Holds(q({ review: auto, value: 21000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: limit lowered AND the value raised past the snapshot — re-checked against the new limit, no longer holds");
+  ok(r242Holds(q({ review: auto, value: 21000 }), ctx), "#242: value raised past the snapshot but still within the current limit — re-checked, holds");
+  ok(r242Holds(q({ review: auto, value: 20000 }), { ...ctx, roster: [] }), "#242: owner removed from the roster, quote unchanged — still holds");
+  ok(!r242Holds(q({ review: auto, value: 21000 }), { ...ctx, roster: [] }), "#242: owner removed and the quote changed — re-checked, no longer holds");
+  ok(!r242Holds(q({ review: auto, value: 20000, owner: "Jena Tolksdorf" }), ctx), "#242: owner changed (not on the stamp) — re-checked against the new owner's limit");
+  ok(!r242Holds(q({ review: { ...auto, auto: null }, value: 1 }), r242None), "#242: an auto approval with no snapshot is re-checked (fails closed with no limits)");
+  ok(!r242Holds(q({ review: { state: "in_review" } }), ctx) && !r242Holds(q({ review: null }), ctx), "#242: no approval → does not hold");
+
+  const within = r242Chip(q({ value: 20000 }), ctx, "Nic Trapani");
+  ok(!!within && within.tone === "within" && within.text === "Within your limit — approves automatically" && !within.staleAuto, `#242 chip: owner within the limit (got ${JSON.stringify(within)})`);
+  const over = r242Chip(q({ value: 30000 }), ctx, "Nic Trapani");
+  ok(!!over && over.tone === "over" && over.text === "Over your $25,000 limit — needs review" && over.short === "Over $25,000 limit", `#242 chip: owner over the limit (got ${JSON.stringify(over)})`);
+  ok(r242Chip(q({ value: 30000 }), ctx, "Jena Tolksdorf")?.text === "Over Nic's $25,000 limit — needs review", "#242 chip: another viewer sees the owner's first name");
+  ok(
+    r242Chip(q({ quoteType: "consulting" }), ctx, "Nic Trapani") === null && r242Chip(q({ owner: "Nobody" }), ctx, "Nobody") === null,
+    "#242 chip: nothing when the owner has no limit for the kind (or is off the roster)"
+  );
+  ok(
+    r242Chip(q({ status: "won" }), ctx, "Nic Trapani") === null &&
+      r242Chip(q({ review: { state: "approved", method: "in_app" } }), ctx, "Nic Trapani") === null &&
+      r242Chip(q({ review: { state: "changes" } }), ctx, "Nic Trapani") === null,
+    "#242 chip: nothing on a won quote, an in-app approval, or a changes-requested quote"
+  );
+  const stale = r242Chip(q({ review: auto, value: 30000 }), ctx, "Nic Trapani");
+  ok(!!stale && stale.tone === "over" && stale.staleAuto === true, "#242 chip: a stale auto approval shows as over the limit, flagged staleAuto");
+  const staleBlank = r242Chip(q({ review: auto, value: 21000 }), { ...ctx, limits: {} }, "Nic Trapani");
+  ok(!!staleBlank && staleBlank.staleAuto && staleBlank.short === "Needs review", "#242 chip: a changed quote whose limit was cleared shows a stale auto approval 'needs review'");
+  ok(
+    r242Chip(q({ review: auto, value: 20000 }), { ...ctx, limits: {} }, "Nic Trapani") === null &&
+      r242Chip(q({ review: auto, value: 20000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }, "Nic Trapani") === null,
+    "#242 chip: an unchanged auto approval after the limit was cleared or lowered shows no chip — the banner describes the grant"
+  );
+
+  ok(r242Phrase("system_plain") === "system estimates without labor" && r242Phrase("nope") === "this kind of quote", "#242: kind phrases for the approval sentence");
+  const r242Src = readFileSync(join(process.cwd(), "src/lib/review-limits.ts"), "utf8");
+  ok(
+    !/from "@\/(db|lib\/stores)/.test(r242Src) && !r242Src.includes("\"use client\"") && !/from "@\/lib\/(settings|users|session)"/.test(r242Src),
+    "#242: review-limits.ts stays client-safe — no store, db, settings, users or session import"
+  );
+}
+
+/* --- #242 T2: Settings → Admin → Review limits (storage, action, card) --- */
+import { applyLimitCells as r242Apply } from "@/lib/review-limits";
+{
+  const stored = { u1: { system_plain: 25000 }, u9: { rental: "none" as const } };
+  const res = r242Apply(stored, { u1: { system_plain: "$30,000", rental: "No limit" }, u2: { consulting: "" } }, (id) => id);
+  ok(
+    res.ok && JSON.stringify(res.limits) === JSON.stringify({ u1: { system_plain: 30000, rental: "none" }, u9: { rental: "none" } }),
+    `#242 card: edited rows replace, hidden rows (archived people) are kept, an all-blank row is dropped (got ${JSON.stringify(res)})`
+  );
+  const cleared = r242Apply(stored, { u1: { system_plain: "" } }, (id) => id);
+  ok(cleared.ok && !("u1" in cleared.limits), "#242 card: clearing every cell of a row removes that person's limits (always needs review)");
+  const bad = r242Apply(stored, { u1: { flame_typed: "25k" } }, () => "Nic Trapani");
+  ok(!bad.ok && bad.error.startsWith("Nic Trapani · Flame test — typed total: "), `#242 card: a bad cell is refused naming the person and column (got ${JSON.stringify(bad)})`);
+
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
+  const at = act.indexOf("export async function saveReviewLimitsAction");
+  const body = act.slice(at, at + 1500);
+  ok(
+    at > 0 && body.includes('await requirePerm("manage_users")') && body.includes("sanitizeReviewLimits(") && body.includes("allUsers()") && body.includes("setSettings({ reviewLimits"),
+    "#242: saveReviewLimitsAction is manage_users-gated, sanitizes against the roster, and writes the settings blob"
+  );
+  const st = readFileSync(join(process.cwd(), "src/lib/settings.ts"), "utf8");
+  ok(st.includes('reviewLimits?: import("@/lib/review-limits").ReviewLimits;'), "#242: AppSettingsData declares reviewLimits");
+  const pg = readFileSync(join(process.cwd(), "src/app/(app)/settings/page.tsx"), "utf8");
+  const sc = readFileSync(join(process.cwd(), "src/app/(app)/settings/settings-client.tsx"), "utf8");
+  ok(
+    pg.includes("reviewLimits={reviewLimitsFrom(settings.reviewLimits)}") && sc.includes("<ReviewLimitsCard") && sc.includes("reviewLimits: ReviewLimits;"),
+    "#242: Settings → Admin renders the Review limits card from the stored blob"
+  );
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/settings/review-limits-card.tsx"), "utf8");
+  ok(
+    card.startsWith('"use client";') && card.includes("saveReviewLimitsAction(") && card.includes("applyLimitCells(") &&
+      !/from "@\/(db|lib\/stores|lib\/settings|lib\/users)"/.test(card),
+    "#242: the card is a client component over the pure rules + the server action — no store/db/settings import"
+  );
+}
+
+/* --- #242 T3: the approval gate — auto-approval within the owner's limit ---
+ * decideApprovalGate is the one decision setStatus and the estimator
+ * pre-checks make; the async block exercises the real store. */
+import {
+  decideApprovalGate as r242Decide, checkApprovalGate as r242Check, create as r242Create, get as r242Get,
+  setStatus as r242SetStatus, approve as r242Approve, update as r242Update, isApprovalGateRefusal as r242IsRefusal,
+  type QuoteReview as R242Review, type Quote as R242Quote,
+} from "@/lib/stores/quotes";
+import { addUser as r242AddUser, getUserByEmail as r242UserByEmail } from "@/lib/users";
+import { getSettingsPatch as r242Patch, setSettings as r242SetSettings } from "@/lib/settings";
+import { loadReviewLimitContext as r242LoadCtx } from "@/lib/review-limits-server";
+import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures";
+{
+  const ctx = { roster: [{ id: "u1", name: "Nic Trapani", status: "active" }], limits: { u1: { system_plain: 25000 } } };
+  const base = { quoteType: "system", value: 20000, owner: "Nic Trapani", preparedBy: "", spec: null, flameTest: null, repair: null, inspection: null };
+  const rv = (o: Partial<R242Review> = {}): R242Review => ({
+    state: "none", reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "", method: null, ...o,
+  });
+  const sent = r242Decide("sent", { ...base, review: rv() }, ctx, {}, 1000);
+  ok(
+    sent.ok && !!sent.stamp && sent.stamp.state === "approved" && sent.stamp.method === "auto_limit" && sent.stamp.decidedBy === "Nic Trapani" &&
+      sent.stamp.decidedAt === 1000 && JSON.stringify(sent.stamp.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+    "#242 gate: → sent within the owner's limit auto-approves and stamps method/decidedBy/decidedAt/snapshot"
+  );
+  const won = r242Decide("won", { ...base, review: rv({ state: "in_review" }) }, ctx, {}, 1000);
+  ok(won.ok && won.stamp?.method === "auto_limit", "#242 gate: → won auto-approves too (an in_review quote included)");
+  const overS = r242Decide("sent", { ...base, value: 30000, review: rv() }, ctx);
+  ok(!overS.ok && overS.error === "This quote needs an approval on record before it can be sent to the customer.", "#242 gate: over the limit → today's send refusal, verbatim");
+  const overW = r242Decide("won", { ...base, value: 30000, review: rv() }, ctx);
+  ok(!overW.ok && overW.error === "This quote needs an approval on record before it can be marked Won.", "#242 gate: over the limit → today's won refusal, verbatim");
+  ok(!r242Decide("sent", { ...base, review: rv({ state: "changes" }) }, ctx).ok, "#242 gate: 'changes requested' is never auto-approved past");
+  const inApp = r242Decide("sent", { ...base, value: 9_000_000, review: rv({ state: "approved", method: "in_app" }) }, ctx);
+  const att = r242Decide("won", { ...base, value: 9_000_000, review: rv({ state: "approved", method: "attested", note: "Teams" }) }, { limits: {}, roster: [] });
+  ok(inApp.ok && inApp.stamp === null && att.ok && att.stamp === null, "#242 gate: in-app and attested approvals pass unchanged, no restamp, whatever the limits");
+  const autoRev = rv({ state: "approved", method: "auto_limit", decidedBy: "Nic Trapani", auto: { kind: "system_plain", limit: 25000, value: 20000 } });
+  const holds = r242Decide("won", { ...base, review: autoRev }, ctx);
+  ok(holds.ok && holds.stamp === null, "#242 gate: a still-fitting auto approval passes without a restamp");
+  ok(!r242Decide("won", { ...base, value: 30000, review: autoRev }, ctx).ok, "#242 gate: stale auto approval (value raised) is refused");
+  ok(
+    !r242Decide("won", { ...base, spec: { sections: [{ kind: "labor", items: [{ sku: "L", qty: 1, price: 100, cost: 0 }] }] }, review: autoRev }, ctx).ok,
+    "#242 gate: stale auto approval (labor added, no with-labor limit) is refused"
+  );
+  const lowered = { ...ctx, limits: { u1: { system_plain: 10000 } } };
+  const keep = r242Decide("won", { ...base, review: autoRev }, lowered);
+  ok(keep.ok && keep.stamp === null, "#242 gate: limit lowered, quote unchanged — the auto approval still passes, snapshot kept (a lowered limit governs new grants only)");
+  ok(!r242Decide("won", { ...base, value: 21000, review: autoRev }, lowered).ok, "#242 gate: limit lowered and the quote changed — re-checked against the new limit, refused");
+  const raisedV = r242Decide("won", { ...base, value: 22000, review: autoRev }, ctx, {}, 2000);
+  ok(
+    raisedV.ok && raisedV.stamp?.method === "auto_limit" && raisedV.stamp.decidedAt === 2000 &&
+      JSON.stringify(raisedV.stamp.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 22000 }),
+    "#242 gate: a changed quote that still fits is re-stamped with the current value in the same write"
+  );
+  const raisedL = r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 40000 } } }, {}, 3000);
+  ok(
+    raisedL.ok && raisedL.stamp === null,
+    "#242 final: a RAISED limit on an unchanged quote does not re-stamp — the grant keeps its original decidedAt"
+  );
+  const ctx2 = { roster: [...ctx.roster, { id: "u2", name: "Jena Tolksdorf", status: "active" }], limits: { ...ctx.limits, u2: { system_plain: 50000 } } };
+  const moved = r242Decide("won", { ...base, owner: "Jena Tolksdorf", review: autoRev }, ctx2, {}, 4000);
+  ok(
+    moved.ok && moved.stamp?.decidedBy === "Jena Tolksdorf" && JSON.stringify(moved.stamp.auto) === JSON.stringify({ kind: "system_plain", limit: 50000, value: 20000 }),
+    "#242 gate: snapshot refresh — the owner changed and the new owner's limit fits, re-stamped to the new owner"
+  );
+  const loweredFits = r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 20000 } } }, {}, 5000);
+  ok(
+    loweredFits.ok && loweredFits.stamp === null,
+    "#242 final: a LOWERED limit the unchanged quote still fits does not re-stamp — the grant keeps its original decidedAt"
+  );
+  ok(
+    r242Decide("won", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "engine-owned-flow" }).ok &&
+      r242Decide("sent", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "historical-import" }).ok,
+    "#242 gate: engine-owned and historical-import bypasses unchanged"
+  );
+  const bypassStamp = r242Decide("won", { ...base, review: rv() }, ctx, { bypassApprovalGate: "engine-owned-flow" });
+  ok(bypassStamp.ok && bypassStamp.stamp === null, "#242 gate: a bypassed transition never stamps an auto approval");
+  ok(r242Decide("draft", { ...base, value: 30000, review: rv() }, ctx).ok && r242Decide("lost", { ...base, review: rv() }, ctx).ok, "#242 gate: draft/lost stay open");
+  ok(r242Decide("sent", { ...base, review: rv() }, { limits: {}, roster: [] }).ok === false, "#242 gate: no limits configured → today's behaviour (needs review)");
+
+  const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const setStatusBody = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
+  ok(
+    setStatusBody.includes("decideApprovalGate(status, q, ") && setStatusBody.includes("doc.review = autoStamp") && !setStatusBody.includes("resolveStatusGate(status, q.review"),
+    "#242: setStatus consults decideApprovalGate and writes the stamp inside the status patch"
+  );
+  const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(
+    (ea.match(/checkApprovalGate\(cur/g) || []).length === 2 && !ea.includes("requireApprovalToAdvance(cur"),
+    "#242: setStatusAction and sendToCustomerAction pre-check with checkApprovalGate (limits applied), not the bare review predicate"
+  );
+  const approveBody = qs.slice(qs.indexOf("export async function approve("), qs.indexOf("export async function resetToSeed("));
+  ok((approveBody.match(/review\.auto = null/g) || []).length === 3, "#242: approve, attestApproval and requestChanges each clear a previous auto snapshot");
+}
+
+async function reviewLimits242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const mk = async (slug: string, over: Partial<R242Quote> = {}) => {
+    const id = r242Fx(242, slug);
+    r242Reg("quotes", id);
+    return r242Create({ id, name: "#242 " + slug, customer: "Spec fixture", owner: owner.name, value: 20000, ...over });
+  };
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 } } });
+    const ctx = await r242LoadCtx();
+    ok(ctx.roster.some((u) => u.id === owner.id) && ctx.limits[owner.id]?.system_plain === 25000, "#242 store: loadReviewLimitContext reads the settings blob and the roster");
+
+    const a = await mk("within");
+    ok((await r242Check(a, "sent")).ok, "#242 store: checkApprovalGate passes a quote within the owner's limit");
+    // Stored snapshots come back in JSONB key order (shorter keys first), hence trigger before triggeredBy.
+    const sentA = await r242SetStatus(a.id, "sent", "Someone Else");
+    const reA = await r242Get(a.id);
+    ok(
+      sentA?.status === "sent" && reA?.review.state === "approved" && reA.review.method === "auto_limit" && reA.review.decidedBy === owner.name &&
+        typeof reA.review.decidedAt === "number" &&
+        JSON.stringify(reA.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000, trigger: "sent", triggeredBy: "Someone Else" }),
+      "#242 store: setStatus(sent) within the limit auto-approves in the same write — stamped to the OWNER, the actor recorded as triggeredBy (#242 final)"
+    );
+
+    const b = await mk("over", { value: 30000 });
+    let refusedB = false;
+    try {
+      await r242SetStatus(b.id, "sent", "Test");
+    } catch (e) {
+      refusedB = r242IsRefusal(e) && (e as Error).message === "This quote needs an approval on record before it can be sent to the customer.";
+    }
+    const reB = await r242Get(b.id);
+    ok(refusedB && reB?.status === "draft" && reB.review.state === "none", "#242 store: over the limit is refused with today's message and nothing is stamped");
+    ok(!(await r242Check(b, "sent")).ok, "#242 store: checkApprovalGate refuses the over-limit quote");
+
+    const c = await mk("stale");
+    await r242SetStatus(c.id, "sent", "Test");
+    await r242Update(c.id, { value: 40000 });
+    let refusedC = false;
+    try {
+      await r242SetStatus(c.id, "won", "Test");
+    } catch (e) {
+      refusedC = r242IsRefusal(e);
+    }
+    ok(refusedC && (await r242Get(c.id))?.status === "sent", "#242 store: a stale auto approval (value raised) no longer lets the quote be marked Won");
+
+    const d = await mk("lowered");
+    await r242SetStatus(d.id, "sent", "Test");
+    const d2 = await mk("lowered-changed");
+    await r242SetStatus(d2.id, "sent", "Test");
+    await r242Update(d2.id, { value: 21000 });
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 10000 } } });
+    const wonD = await r242SetStatus(d.id, "won", "Test");
+    const reD = await r242Get(d.id);
+    ok(
+      wonD?.status === "won" && reD?.review.method === "auto_limit" && reD.review.auto?.limit === 25000,
+      "#242 store: lowering the owner's limit leaves an UNCHANGED quote's auto approval standing — Won passes, the original grant kept"
+    );
+    let refusedD = false;
+    try {
+      await r242SetStatus(d2.id, "won", "Test");
+    } catch (e) {
+      refusedD = r242IsRefusal(e);
+    }
+    ok(refusedD && (await r242Get(d2.id))?.status === "sent", "#242 store: after a lowered limit, a CHANGED quote is re-checked against the new limit and refused");
+
+    const e2 = await mk("inapp", { value: 90000 });
+    await r242Approve(e2.id, { by: "Jeff Chesebro" });
+    await r242SetStatus(e2.id, "sent", "Test");
+    const reE = await r242Get(e2.id);
+    ok(reE?.status === "sent" && reE.review.method === "in_app" && reE.review.auto == null, "#242 store: an in-app approval sends exactly as today — no auto stamp");
+
+    await r242Approve(c.id, { by: "Jeff Chesebro" });
+    const reC = await r242Get(c.id);
+    ok(reC?.review.method === "in_app" && reC.review.auto === null, "#242 store: approving over a stale auto approval clears its snapshot");
+
+    const f = await mk("bypass", { value: 90000 });
+    await r242SetStatus(f.id, "sent", "Test", { bypassApprovalGate: "engine-owned-flow" });
+    const reF = await r242Get(f.id);
+    ok(reF?.status === "sent" && reF.review.state === "none", "#242 store: the engine-owned bypass is unchanged and never stamps an approval");
+  } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
+}
+
+/* --- #242 T4: approval sentence, Reviews history, hub + builder chips --- */
+import { approvedReviewLine as r242Line, autoApprovalLine as r242AutoLine, staleAutoApprovalLine as r242StaleLine } from "@/lib/review-line";
+import { reviewLimitChipFor as r242ChipFor } from "@/lib/review-limits-server";
+{
+  const a = {
+    state: "approved", method: "auto_limit" as const, decidedBy: "Nic Trapani", reviewer: null, note: "",
+    auto: { kind: "system_plain", limit: 25000 as number | "none", value: 20000 },
+  };
+  ok(r242Line(a) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor", `#242: the approval banner reads the spec sentence (got "${r242Line(a)}")`);
+  ok(r242AutoLine({ ...a, auto: { kind: "rental", limit: "none", value: 1 } }) === "Auto-approved — Nic has no review limit for rentals", "#242: a No-limit auto approval says so");
+  ok(
+    r242Line({ method: "in_app", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Approved by Jeff — ready to send to the customer" &&
+      r242Line({ method: "attested", decidedBy: "Jeff Chesebro", reviewer: null, note: "" }) === "Attested by Jeff — ready to send to the customer",
+    "#242: in-app and attested banner lines unchanged"
+  );
+  ok(
+    r242StaleLine("Over your $25,000 limit — needs review") === "Auto-approval no longer applies — over your $25,000 limit — needs review",
+    "#242: stale auto approval banner line"
+  );
+  const rl = readFileSync(join(process.cwd(), "src/lib/review-line.ts"), "utf8");
+  // Import statements only — the module's doc comment names @/lib/stores/quotes as the thing never to import.
+  ok(!/from "@\/(db|lib\/stores)/.test(rl), "#242: review-line.ts stays client-safe");
+  const chipSrc = readFileSync(join(process.cwd(), "src/components/review-limit-chip.tsx"), "utf8");
+  ok(
+    !chipSrc.includes("\"use client\"") && !/from "@\/(db|lib\/stores)/.test(chipSrc) && !/\buse(State|Effect|Transition)\b/.test(chipSrc),
+    "#242: ReviewLimitChip is a hook-free, store-free component usable from server pages and the Estimator client"
+  );
+  const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+  ok(
+    hub.includes("loadReviewLimitContext()") && hub.includes("reviewLimitChip(q, limitCtx, me)") && hub.includes("<ReviewLimitChip") &&
+      hub.includes('const canSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");'),
+    "#242: quotes hub rows carry the chip and Send opens for a quote within the owner's limit"
+  );
+  const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
+  ok(rvw.includes("autoApprovalLine(r)"), "#242: Reviews history names an auto approval with the limit sentence");
+  for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/page.tsx`), "utf8");
+    ok(src.includes("reviewLimitChipFor(") && src.includes("<ReviewLimitChip chip={reviewLimit}"), `#242: the ${p} builder shows the review-limit chip`);
+  }
+}
+
+async function reviewLimitChips242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const id = r242Fx(242, "chip");
+  r242Reg("quotes", id);
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { rental: 5000 } } });
+    const q = await r242Create({ id, name: "#242 chip", customer: "Spec fixture", owner: owner.name, value: 4000, quoteType: "rental" });
+    const mine = await r242ChipFor(q, owner.name);
+    ok(mine?.tone === "within" && mine.text === "Within your limit — approves automatically", "#242 store: reviewLimitChipFor evaluates a saved quote against the owner's live limit");
+    const theirs = await r242ChipFor({ ...q, value: 6000 }, "Jeff Chesebro");
+    ok(theirs?.tone === "over" && theirs.text === "Over Rae's $5,000 limit — needs review", "#242 store: another viewer sees the owner's name and dollar limit");
+  } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
+}
+
+/* --- #242 T3 review fixes: snapshot refresh, lowered limit = new grants only --- */
+import { attestApproval as r242Attest, requestChanges as r242RequestChanges } from "@/lib/stores/quotes";
+import { setStatus as r242SetUserStatus } from "@/lib/users";
+async function reviewLimitsFix242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const leaverEmail = "r242.leaver@example.test";
+  const leaver = (await r242UserByEmail(leaverEmail)) ?? (await r242AddUser({ name: "Lee Twofortytwo", email: leaverEmail }));
+  await r242SetUserStatus(leaver.id, "active");
+  const mk = async (slug: string, who: string, over: Partial<R242Quote> = {}) => {
+    const id = r242Fx(242, "fix-" + slug);
+    r242Reg("quotes", id);
+    return r242Create({ id, name: "#242 fix " + slug, customer: "Spec fixture", owner: who, value: 20000, ...over });
+  };
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 }, [leaver.id]: { system_plain: 25000 } } });
+
+    const w = await mk("won", owner.name);
+    const wonW = await r242SetStatus(w.id, "won", "Someone Else");
+    const reW = await r242Get(w.id);
+    ok(
+      wonW?.status === "won" && reW?.review.state === "approved" && reW.review.method === "auto_limit" && reW.review.decidedBy === owner.name &&
+        JSON.stringify(reW.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000, trigger: "won", triggeredBy: "Someone Else" }),
+      "#242 store: draft → Won within the owner's limit auto-approves in the same write"
+    );
+
+    const l = await mk("labor", owner.name);
+    await r242SetStatus(l.id, "sent", "Test");
+    await r242Update(l.id, { spec: { sections: [{ kind: "labor", items: [{ sku: "LAB-1", qty: 1, price: 500, cost: 0 }] }] } });
+    let refusedL = false;
+    try {
+      await r242SetStatus(l.id, "won", "Test");
+    } catch (e) {
+      refusedL = r242IsRefusal(e);
+    }
+    ok(refusedL && (await r242Get(l.id))?.status === "sent", "#242 store: labor added after the auto approval → re-evaluated (no with-labor limit) and Won is refused");
+
+    const u = await mk("leaver-unchanged", leaver.name);
+    await r242SetStatus(u.id, "sent", "Test");
+    const c = await mk("leaver-changed", leaver.name);
+    await r242SetStatus(c.id, "sent", "Test");
+    await r242Update(c.id, { value: 21000 });
+    await r242SetUserStatus(leaver.id, "removed");
+    const wonU = await r242SetStatus(u.id, "won", "Test");
+    ok(wonU?.status === "won", "#242 store: owner removed, quote unchanged — the auto approval still holds and Won passes");
+    let refusedC = false;
+    try {
+      await r242SetStatus(c.id, "won", "Test");
+    } catch (e) {
+      refusedC = r242IsRefusal(e);
+    }
+    ok(refusedC && (await r242Get(c.id))?.status === "sent", "#242 store: owner removed and the quote changed — re-checked, Won refused");
+    await r242SetUserStatus(leaver.id, "active");
+
+    const r = await mk("refresh", owner.name);
+    await r242SetStatus(r.id, "sent", "Test");
+    await r242Update(r.id, { value: 23000 });
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 30000 } } });
+    await r242SetStatus(r.id, "won", "Test");
+    const reR = await r242Get(r.id);
+    ok(
+      reR?.status === "won" && reR.review.method === "auto_limit" &&
+        JSON.stringify(reR.review.auto) === JSON.stringify({ kind: "system_plain", limit: 30000, value: 23000, trigger: "won", triggeredBy: "Test" }),
+      "#242 store: snapshot refresh — a changed quote that still fits is re-stamped with the current limit and value in the Won write"
+    );
+
+    const a = await mk("attest", owner.name);
+    await r242SetStatus(a.id, "sent", "Test");
+    await r242Attest(a.id, { by: owner.name, note: "Reviewed with Jeff on Teams" });
+    const reA = await r242Get(a.id);
+    ok(reA?.review.method === "attested" && reA.review.auto === null, "#242 store: attestApproval over an auto approval clears its snapshot");
+
+    const ch = await mk("changes", owner.name);
+    await r242SetStatus(ch.id, "sent", "Test");
+    await r242RequestChanges(ch.id, { by: "Jeff Chesebro", note: "Tighten scope" });
+    const reCh = await r242Get(ch.id);
+    ok(reCh?.review.state === "changes" && reCh.review.auto === null, "#242 store: requestChanges over an auto approval clears its snapshot");
+  } finally {
+    await r242SetUserStatus(leaver.id, "active");
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
+}
+
+/* --- #242 T5: the Estimator's chip, stale banner and Send-within-limit --- */
+{
+  const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(
+    ea.includes("async function syncOf(id: string, viewer: string)") && ea.includes("async function stageSyncOf(id: string, viewer: string)") &&
+      (ea.match(/reviewLimitChipFor\(/g) || []).length >= 3,
+    "#242 estimator: syncOf / stageSyncOf / the save result re-evaluate the chip on the server"
+  );
+  ok(!/return (syncOf|stageSyncOf)\(id\);/.test(ea), "#242 estimator: every sync names its viewer (the chip says 'your' only to the owner)");
+  ok((ea.match(/reviewLimit\?: ReviewLimitChipData \| null;/g) || []).length === 3 && ea.includes("reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,"), "#242 estimator: SaveResult, ReviewSync and StageSync carry reviewLimit");
+  const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
+  ok(pg.includes("reviewLimitChipFor(q, user.name)") && pg.includes("reviewLimit={reviewLimit}"), "#242 estimator: the page evaluates the saved quote's chip for the viewer");
+  const ty = readFileSync(join(process.cwd(), "src/app/(app)/estimator/types.ts"), "utf8");
+  ok(ty.includes("reviewLimit: ReviewLimitChipData | null;"), "#242 estimator: EstimatorProps.reviewLimit");
+  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(
+    !/from "@\/(lib\/stores|db|lib\/review-limits-server)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline"'),
+    "#242 estimator: the client renders the server-evaluated chip without importing a store or the server module"
+  );
+  ok(
+    ec.includes('const rbCanSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");') &&
+      ec.includes("if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);") &&
+      ec.includes("if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);") && ec.includes("staleAutoApprovalLine(reviewLimit.text)"),
+    "#242 estimator: Send opens within the limit, a stale auto approval reads as unsubmitted, every sync refreshes the chip"
+  );
+}
+
+/* --- #242 T4/T5 review fixes: stale hub badge, "as last saved", Reviews history --- */
+import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip";
+{
+  const within = { tone: "within" as const, text: "Within your limit — approves automatically", short: "Within limit", staleAuto: false };
+  const plain = symRender(symH(r242ChipView, { chip: within }));
+  const saved = symRender(symH(r242ChipView, { chip: within, savedOnly: true }));
+  ok(
+    !plain.includes("as last saved") && saved.includes("Within your limit — approves automatically") && saved.includes("· as last saved"),
+    "#242 fix: savedOnly appends a muted '· as last saved' after the fixed chip sentence"
+  );
+  for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/page.tsx`), "utf8");
+    ok(src.includes("<ReviewLimitChip chip={reviewLimit} savedOnly />"), `#242 fix: the ${p} builder chip says it reflects the last save`);
+  }
+  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline" savedOnly={pdfDirty} />'), "#242 fix: the Estimator chip says 'as last saved' while the form has unsaved changes");
+  const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+  const iChip = hub.indexOf("const reviewLimit = reviewLimitChip(q, limitCtx, me);");
+  const iState = hub.indexOf('const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";');
+  ok(iChip > 0 && iState > iChip, "#242 fix: a stale auto approval never shows the hub row's green Approved badge");
+  const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
+  ok(
+    rvw.includes("approvalHolds(q, limitCtx)") && rvw.includes("staleAutoApprovalLine(") && rvw.includes("loadReviewLimitContext()") &&
+      rvw.includes('state: x.staleLine ? "none" : r.state,'),
+    "#242 fix: Reviews history reads a stale auto approval as needing review (approvalHolds), never 'Auto-approved'"
+  );
+}
+
+/* --- #242 final: release-review fixes --- */
+import { isStaleAutoApproval as r242Stale, hasLaborLine as r242HasLaborF } from "@/lib/review-limits";
+import { reconcileEstimatorValue as r242Reconcile } from "@/app/(app)/estimator/pricing";
+import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from "@/lib/stores/quotes";
+{
+  // 9 — hasLaborLine matches totals(): any truthy `labor` flag is a labor line.
+  const sec = (it: Record<string, unknown>) => ({ sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [it] }] });
+  ok(r242HasLaborF(sec({ sku: "X", qty: 1, price: 100, cost: 0, labor: 1 })), "#242 final: hasLaborLine reads a truthy labor flag like totals() (!!it.labor)");
+  ok(!r242HasLaborF(sec({ sku: "X", qty: 1, price: 100, cost: 0, labor: 0 })), "#242 final: a falsy labor flag is not labor");
+
+  // 2 — the stale-auto rule submitQuoteForReview and the builders share.
+  const ctx = { roster: [{ id: "u1", name: "Nic Trapani", status: "active" }], limits: { u1: { system_plain: 25000 } } };
+  const autoR = { state: "approved", method: "auto_limit", decidedBy: "Nic Trapani", auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  const q = (over: Record<string, unknown>) => ({ quoteType: "system", value: 20000, owner: "Nic Trapani", status: "sent", spec: null, ...over });
+  ok(r242Stale(q({ review: autoR, value: 30000 }), ctx), "#242 final: an auto approval on a changed quote over the limit is stale");
+  ok(!r242Stale(q({ review: autoR }), ctx), "#242 final: an auto approval that still holds is not stale");
+  ok(
+    !r242Stale(q({ review: { state: "approved", method: "in_app" }, value: 9e6 }), ctx) && !r242Stale(q({ review: { state: "none" } }), ctx),
+    "#242 final: in-app approvals and unapproved quotes are never 'stale auto'"
+  );
+
+  // 7 — re-stamp only on a changed quote, never on a changed limit.
+  const base = { quoteType: "system", value: 20000, owner: "Nic Trapani", preparedBy: "", spec: null, flameTest: null, repair: null, inspection: null };
+  const rev = { state: "approved" as const, reviewer: null, submittedBy: "Nic Trapani", submittedAt: 1, decidedBy: "Nic Trapani", decidedAt: 1, note: "", method: "auto_limit" as const, auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  const lim = (n: number) => ({ ...ctx, limits: { u1: { system_plain: n } } });
+  const up = r242Decide("won", { ...base, review: rev }, lim(90000), {}, 9);
+  const down = r242Decide("won", { ...base, review: rev }, lim(20000), {}, 9);
+  ok(
+    up.ok && up.stamp === null && down.ok && down.stamp === null,
+    "#242 final: a raised or lowered limit on an unchanged quote keeps the original stamp (decidedAt untouched)"
+  );
+  const lowered = r242Decide("won", { ...base, value: 18000, review: rev }, lim(20000), {}, 9, "Jena Tolksdorf");
+  ok(
+    lowered.ok && lowered.stamp?.decidedAt === 9 && lowered.stamp.auto?.value === 18000 && lowered.stamp.auto.triggeredBy === "Jena Tolksdorf",
+    "#242 final: a changed VALUE that still fits re-stamps, recording the actor"
+  );
+
+  // 5 — triggeredBy on the snapshot; the banner names a clicker who isn't the owner.
+  const ev = { kind: "system_plain" as const, ownerName: "Nic Trapani", ownerId: "u1", limit: 25000, value: 20000, fits: true as const };
+  ok(
+    JSON.stringify(r242AutoRev(ev, 5, "Jena Tolksdorf", "sent").auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000, triggeredBy: "Jena Tolksdorf", trigger: "sent" }) &&
+      JSON.stringify(r242AutoRev(ev, 5).auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+    "#242 final: autoApprovedReview records triggeredBy + trigger, and omits them with no actor"
+  );
+  const line = (auto: Record<string, unknown>) => r242AutoLine({ method: "auto_limit", decidedBy: "Nic Trapani", reviewer: null, note: "", auto: { kind: "system_plain", limit: 25000, value: 20000, ...auto } });
+  ok(line({ triggeredBy: "Jena Tolksdorf", trigger: "sent" }) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor — sent by Jena", `#242 final: banner names a non-owner sender (got "${line({ triggeredBy: "Jena Tolksdorf", trigger: "sent" })}")`);
+  ok(line({ triggeredBy: "Jena Tolksdorf", trigger: "won" }).endsWith(" — marked Won by Jena"), "#242 final: banner names a non-owner who marked it Won");
+  ok(
+    line({ triggeredBy: "nic trapani", trigger: "sent" }) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor" &&
+      line({}) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor",
+    "#242 final: no suffix when the owner clicked, and old snapshots without triggeredBy still render"
+  );
+
+  // 3 — the server's own value.
+  const secs = [
+    { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 10, items: [{ id: 1, sku: "P", desc: "", qty: 2, unit: "ea", cost: 100, price: 150 }] },
+    { id: "b", name: "B", kind: "labor", mfr: "", freightPct: 0, items: [{ id: 2, sku: "L", desc: "", qty: 10, unit: "hr", cost: 50, price: 95 }] },
+  ];
+  // rev 300 + 950 = 1250, freight 10% of 200 cost = 20 → grand 1270
+  const kept = r242Reconcile(secs, { value: 1270.004, margin: 0.4 });
+  ok(!kept.adjusted && kept.value === 1270.004 && kept.margin === 0.4, `#242 final: a posted value within rounding is kept (got ${JSON.stringify(kept)})`);
+  const forged = r242Reconcile(secs, { value: 1, margin: 0.9 });
+  ok(forged.adjusted && forged.value === 1270 && Math.abs(forged.margin - (1250 - 700) / 1250) < 1e-9, `#242 final: a forged posted value is replaced by the recomputed one (got ${JSON.stringify(forged)})`);
+  const junk = r242Reconcile([null, { items: [{ qty: "9", price: 1e6, cost: 0 }] }, "x"], { value: 5, margin: 0 });
+  ok(junk.adjusted && junk.value === 0 && Number.isFinite(junk.margin), "#242 final: junk sections coerce to a finite recomputed value, never NaN");
+  ok(r242Reconcile(undefined, { value: 0, margin: 0 }).value === 0, "#242 final: no sections → 0");
+  const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  const saveBody = ea.slice(ea.indexOf("export async function saveQuoteAction("), ea.indexOf("export async function searchQuotesAction("));
+  ok(
+    saveBody.includes("reconcileEstimatorValue(payload.sections, { value: payload.value, margin: payload.margin })") &&
+      saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.margin,") && !/^\s+value: payload\.value,$/m.test(saveBody),
+    "#242 final: saveQuoteAction stores the server-recomputed value, never the posted one"
+  );
+  ok(/setStatus\(id, "sent", user\.name\)/.test(ea), "#242 final: sendToCustomerAction passes the actor to setStatus");
+  const home = readFileSync(join(process.cwd(), "src/app/(app)/home-actions.ts"), "utf8");
+  const inbox = readFileSync(join(process.cwd(), "src/app/(app)/inbox/actions.ts"), "utf8");
+  ok(home.includes("setQuoteStatus(id, status as QuoteStatus, user.name)") && inbox.includes('setQuoteStatus(quote.id, "sent", me)'), "#242 final: Home's stage move and the renewal send pass the actor");
+
+  // 4 — owner set on create only.
+  for (const p of ["flame-tests", "repairs", "inspections", "rentals", "design/engagements"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/quote/actions.ts`), "utf8");
+    const pl = src.slice(src.indexOf("const payload = {"), src.indexOf("updateQuote(editingId, payload)"));
+    ok(
+      pl.length > 0 && !pl.includes("owner: user.name") && /createQuote\(\{ \.\.\.payload, owner: user\.name/.test(src),
+      `#242 final: ${p} sets the quote owner on create only — a later save keeps the stored owner`
+    );
+  }
+
+  // 1 — a stale auto approval on a SENT quote reopens Submit / Attest.
+  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(
+    ec.includes('const staleSent = staleAuto && status === "sent";') &&
+      ec.includes('const rbCanSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);') &&
+      ec.includes('isOwner && rev.state !== "approved" && rev.state !== "changes" && (!sentAlready || staleSent);'),
+    "#242 final: the Estimator offers Submit for review and Attest on a sent quote whose auto approval went stale"
+  );
+  const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+  ok(
+    hub.includes('const staleSent = staleAuto && q.status === "sent";') &&
+      hub.includes('const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);'),
+    "#242 final: the quotes hub offers Submit for review on a sent quote whose auto approval went stale"
+  );
+  const qa = readFileSync(join(process.cwd(), "src/app/(app)/quotes/actions.ts"), "utf8");
+  const sub = qa.slice(qa.indexOf("export async function submitQuoteForReview("), qa.indexOf("export async function deleteQuoteAction("));
+  ok(
+    sub.includes("isStaleAutoApproval(q, await loadReviewLimitContext())") &&
+      sub.includes('if (q.status !== "draft" && !(staleAuto && q.status === "sent")) return;') &&
+      sub.includes('if (state !== "none" && state !== "changes" && !staleAuto) return;'),
+    "#242 final: submitQuoteForReview accepts a stale auto approval (draft or sent), like the Estimator's submitReviewAction"
+  );
+
+  // 6 — limits are read only when they can matter.
+  const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
+  ok(
+    ss.includes('const needsLimits = gated && (!hasApproval(q.review) || q.review?.method === "auto_limit");') &&
+      ss.includes("const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;") &&
+      ss.includes("decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null)"),
+    "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor"
+  );
+
+  // D396 note.
+  const dec = readFileSync(join(process.cwd(), "DECISIONS.md"), "utf8");
+  ok(dec.replace(/\s+/g, " ").includes('Unowned or imported quotes default their owner to "Jeff Chesebro"'), "#242 final: D396 records the Jeff Chesebro default owner");
+}
+
+async function reviewLimitsFinal242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const mk = async (slug: string, over: Partial<R242Quote> = {}) => {
+    const id = r242Fx(242, "final-" + slug);
+    r242Reg("quotes", id);
+    return r242Create({ id, name: "#242 final " + slug, customer: "Spec fixture", owner: owner.name, value: 20000, ...over });
+  };
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 } } });
+
+    // 1/2 — a sent quote whose auto approval went stale reaches Won through a real approval.
+    const s = await mk("stale-sent");
+    await r242SetStatus(s.id, "sent", owner.name);
+    await r242Update(s.id, { value: 40000 });
+    const staleQ = await r242Get(s.id);
+    ok(!!staleQ && staleQ.status === "sent" && r242Stale(staleQ, await r242LoadCtx()), "#242 final store: raising a sent quote past the limit leaves a stale auto approval");
+    let refused = false;
+    try {
+      await r242SetStatus(s.id, "won", owner.name);
+    } catch (e) {
+      refused = r242IsRefusal(e);
+    }
+    ok(refused, "#242 final store: the stale sent quote cannot be marked Won on its old auto approval");
+    await r242Submit(s.id, { by: owner.name, reviewer: null });
+    await r242Approve(s.id, { by: "Jeff Chesebro" });
+    const wonS = await r242SetStatus(s.id, "won", owner.name);
+    ok(wonS?.status === "won" && (await r242Get(s.id))?.review.method === "in_app", "#242 final store: resubmitted and approved, the stale sent quote reaches Won through a real approval");
+    const t = await mk("stale-attest");
+    await r242SetStatus(t.id, "sent", owner.name);
+    await r242Update(t.id, { value: 40000 });
+    await r242Attest(t.id, { by: owner.name, note: "Reviewed with Jeff by phone" });
+    ok((await r242SetStatus(t.id, "won", owner.name))?.status === "won", "#242 final store: an attested approval on a stale sent quote reaches Won too");
+
+    // 5 — the actor lands on the snapshot and the banner.
+    const j = await mk("jena");
+    await r242SetStatus(j.id, "sent", "Jena Tolksdorf");
+    const reJ = await r242Get(j.id);
+    ok(
+      reJ?.review.decidedBy === owner.name && reJ.review.auto?.triggeredBy === "Jena Tolksdorf" && reJ.review.auto.trigger === "sent" &&
+        r242Line(reJ.review).endsWith(" — sent by Jena"),
+      "#242 final store: an auto approval triggered by someone else records them and the banner says 'sent by Jena'"
+    );
+
+    // 7 — a limit change on an unchanged quote keeps the original grant.
+    const k = await mk("keep-stamp");
+    await r242SetStatus(k.id, "sent", owner.name);
+    const stamped = (await r242Get(k.id))?.review;
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 90000 } } });
+    await r242SetStatus(k.id, "won", "Someone Else");
+    const reK = (await r242Get(k.id))?.review;
+    ok(
+      !!stamped && reK?.decidedAt === stamped.decidedAt && reK.auto?.limit === 25000 && reK.auto.triggeredBy === owner.name,
+      "#242 final store: raising the limit on an unchanged quote keeps the original decidedAt and snapshot at Won"
+    );
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 } } });
+
+    // 3 — the gate evaluates the stored (server-derived) value.
+    const secs = [{ id: "a", name: "A", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "P", desc: "", qty: 1, unit: "ea", cost: 0, price: 30000 }] }];
+    const priced = r242Reconcile(secs, { value: 100, margin: 0 });
+    const f = await mk("forged", { value: priced.value, spec: { sections: secs, mobs: [] } });
+    let refusedF = false;
+    try {
+      await r242SetStatus(f.id, "sent", owner.name);
+    } catch (e) {
+      refusedF = r242IsRefusal(e);
+    }
+    ok(priced.adjusted && f.value === 30000 && refusedF, "#242 final store: a forged $100 value is stored as the recomputed $30,000 and the gate refuses it over the limit");
+
+    // 4 — a later update without an owner keeps the stored owner.
+    const o = await mk("owner-kept");
+    await r242Update(o.id, { name: "#242 final owner-kept (edited)", value: 21000 });
+    ok((await r242Get(o.id))?.owner === owner.name, "#242 final store: an update that carries no owner keeps the quote's owner");
+  } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
+}
+
+/* ====== #243 URL-as-state search never overwritten by its own navigation ======
+   shouldAdoptUrlQ (src/lib/url-search-text.ts) is the re-sync decision
+   behind useUrlSearchText; the source checks pin the four filter bars to
+   the shared hook and the hook to replace-for-keystrokes / push-for-chips. */
+import { shouldAdoptUrlQ } from "@/lib/url-search-text";
+{
+  ok(!shouldAdoptUrlQ("acm", "acm", "acme co"), "#243: our own older navigation landing never overwrites what the user kept typing");
+  ok(!shouldAdoptUrlQ("acme", "acme", "acme "), "#243: the trimmed URL q never eats the draft's trailing space");
+  ok(!shouldAdoptUrlQ("acme", null, "acme "), "#243: a URL q equal to the trimmed draft is not adopted even before any push");
+  ok(shouldAdoptUrlQ("", "acme", "acme"), "#243: an outside clear (q removed) resets the draft");
+  ok(shouldAdoptUrlQ("riverside", "acme", "acme"), "#243: an outside change to a different q (Back, a link) is adopted");
+  ok(shouldAdoptUrlQ("acme", null, ""), "#243: with no push of its own, a new URL q is adopted");
+  ok(!shouldAdoptUrlQ("  ", null, ""), "#243: whitespace-only q equals an empty draft");
+
+  const hook243 = readFileSync("src/lib/use-url-search-text.ts", "utf8");
+  ok(/router\.replace\(href, \{ scroll: false \}\)/.test(hook243), "#243: search keystrokes navigate with router.replace and scroll: false");
+  ok(/router\.push\(href\)/.test(hook243), "#243: filter chips/selects keep router.push");
+  ok(/useTransition/.test(hook243) && /shouldAdoptUrlQ\(/.test(hook243), "#243: the hook runs navigations in a transition and re-syncs through shouldAdoptUrlQ");
+  ok(!/useEffect\([^)]*set[A-Z]/.test(hook243), "#243: no state is set from an effect");
+  const pure243 = readFileSync("src/lib/url-search-text.ts", "utf8");
+  ok(!/from "react"/.test(pure243), "#243: the pure re-sync module does not import React");
+  for (const f of [
+    "src/app/(app)/companies/controls.tsx",
+    "src/app/(app)/people/controls.tsx",
+    "src/app/(app)/vendors/controls.tsx",
+    "src/app/(app)/design/specs/library/controls.tsx",
+  ]) {
+    const src = readFileSync(f, "utf8");
+    ok(src.includes("useUrlSearchText(q)"), `#243: ${f} uses the shared useUrlSearchText hook`);
+    ok(!src.includes("setPrevQ"), `#243: ${f} no longer carries its own unconditional URL→draft reset`);
+  }
 }

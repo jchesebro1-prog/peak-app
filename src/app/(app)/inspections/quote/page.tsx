@@ -15,6 +15,8 @@ import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./contr
 import { builderTiers } from "@/lib/pricing-tiers";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
+import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import { ReviewLimitChip } from "@/components/review-limit-chip";
 
 export const metadata = { title: "Inspection quote — Quartzite-6" };
 /** #222: Save/Approve render the proposal PDF in `after()`, inside this budget
@@ -134,6 +136,9 @@ export default async function InspectionQuotePage({
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
+  // #242: the owner's review-limit chip for a saved quote (a new quote has no owner/value yet).
+  const reviewLimit =
+    editQuote && editQuote.quoteType === "inspection" ? await reviewLimitChipFor(editQuote, user.name) : null;
   if (editQuote && editQuote.quoteType === "inspection") {
     const insp: InspectionDoc = (editQuote.inspection as InspectionDoc) || {};
     const cid = editQuote.customerId || "";
@@ -223,6 +228,7 @@ export default async function InspectionQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
+      <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
         customers={customers}
         offices={offices}

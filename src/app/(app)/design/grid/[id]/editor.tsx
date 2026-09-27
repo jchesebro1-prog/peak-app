@@ -78,6 +78,8 @@ import {
   createClientPackageAction,
 } from "./actions";
 import { ConfirmButton } from "@/components/confirm-button";
+import type { CustomerComboboxOption } from "@/components/customer-combobox";
+import DesignIdentity from "./design-identity";
 import CurtainDrop from "./curtain-drop";
 import LayersPanel from "./layers-panel";
 import SpacesPanel from "./spaces-panel";
@@ -236,6 +238,8 @@ export type ProjectLite = {
   id: string;
   name: string;
   customer: string;
+  /** #244 — the linked customer's id, for the header's customer control. */
+  customerId: string | null;
   siteId: string | null;
   siteName: string;
   quoteId: string | null;
@@ -264,6 +268,7 @@ export default function GridEditor({
   scopeTargets,
   auto,
   venues,
+  customerOptions,
   canCreate,
   quoteNumbers,
   symbolCtx,
@@ -290,6 +295,8 @@ export default function GridEditor({
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
   /** The customer's venues, for the picker (D113.6). */
   venues: Array<{ id: string; name: string }>;
+  /** #244 — every customer (id, name, type), for linking or changing the design's customer. */
+  customerOptions: CustomerComboboxOption[];
   /** Gates delete — a Reviewer approves designs but has never made one. */
   canCreate: boolean;
   /** Stock-symbol resolution context (spec 2026-09-25) — category icons,
@@ -1345,12 +1352,16 @@ export default function GridEditor({
         <Link href="/design/designs" style={{ ...BTN, textDecoration: "none" }}>
           ← The Grid
         </Link>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#16181d" }}>
-          Manual Layout <span style={{ color: "#8c919c", fontWeight: 500 }}>· {project.name}</span>
-          {project.customer ? (
-            <span style={{ color: "#8c919c", fontWeight: 500 }}> · {project.customer}</span>
-          ) : null}
-        </div>
+        {/* #244 — the title renames in place; the customer can be linked or changed. */}
+        <DesignIdentity
+          projectId={project.id}
+          name={project.name}
+          customer={project.customer}
+          customerId={project.customerId}
+          customerOptions={customerOptions}
+          canEdit={canCreate}
+          onError={setErr}
+        />
         {venues.length > 0 && (
           <select
             value={project.siteId || ""}

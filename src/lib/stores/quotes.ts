@@ -27,6 +27,16 @@ import {
   statusForQuoteStage,
   type QuotePipeline,
 } from "@/lib/pipelines";
+import {
+  approvalHolds,
+  autoSnapshotStale,
+  canAutoApprove,
+  NO_REVIEW_LIMITS,
+  type AutoApprovalEval,
+  type AutoApprovalSnapshot,
+  type ReviewLimitContext,
+} from "@/lib/review-limits";
+import { loadReviewLimitContext } from "@/lib/review-limits-server";
 
 export { normalizeQuotePipeline };
 
@@ -127,11 +137,15 @@ export type ReviewState = "none" | "in_review" | "approved" | "changes";
  *   supplying a mandatory note naming who reviewed it and how (e.g. a phone
  *   call or Teams review) — real reviews here often happen off-platform, and
  *   a hard `can("approve")` gate would block that legitimate workflow.
+ * - "auto_limit" — #242: the quote fit its OWNER's review limit (Settings →
+ *   Admin → Review limits) when it moved to sent/won, so the gate approved
+ *   it itself. It counts while the quote is unchanged against its snapshot,
+ *   or still fits the owner's current limit — approvalHolds().
  * Absent/null on legacy docs decided before this field existed (seed data,
  * pre-punch-60 approvals) — those are still valid approvals, just with an
  * unknown method.
  */
-export type ApprovalMethod = "in_app" | "attested";
+export type ApprovalMethod = "in_app" | "attested" | "auto_limit";
 
 export type QuoteReview = {
   state: ReviewState;
@@ -143,6 +157,10 @@ export type QuoteReview = {
   note: string;
   /** Set alongside decidedBy/decidedAt whenever state becomes "approved". */
   method?: ApprovalMethod | null;
+  /** #242: what an `auto_limit` approval was granted against — kind, the
+   *  owner's limit and the quote value at that moment. Null/absent on every
+   *  other approval (approve / attest / request changes clear it). */
+  auto?: AutoApprovalSnapshot | null;
 };
 
 export type QuoteHistoryEntry = {
@@ -933,6 +951,99 @@ export function resolveStatusGate(
   return requireApprovalToAdvance(review, status === "won" ? "won" : "send");
 }
 
+/** The quote fields the #242 approval decision reads. */
+export type GateQuote = Pick<
+  Quote,
+  "quoteType" | "value" | "owner" | "preparedBy" | "spec" | "flameTest" | "repair" | "inspection"
+> & { review?: QuoteReview | null };
+
+export type ApprovalGateDecision =
+  | { ok: true; stamp: QuoteReview | null }
+  | { ok: false; error: string };
+
+/** #242: the review record an auto-approval writes. Pure. submittedBy/At are
+ *  set too, so it lists under the owner's Reviews → "Submitted by me".
+ *  #242 final: the snapshot names who moved the quote (`triggeredBy`) and to
+ *  what (`trigger`), so the banner can say "— sent by Jena" when that was not
+ *  the owner. Both are left off when no actor is known. */
+export function autoApprovedReview(
+  ev: AutoApprovalEval,
+  now: number,
+  actor?: string | null,
+  trigger?: "sent" | "won"
+): QuoteReview {
+  const by = (actor || "").trim();
+  return {
+    state: "approved",
+    reviewer: null,
+    submittedBy: ev.ownerName || null,
+    submittedAt: now,
+    decidedBy: ev.ownerName || null,
+    decidedAt: now,
+    note: "",
+    method: "auto_limit",
+    auto: {
+      kind: ev.kind,
+      limit: ev.limit,
+      value: ev.value,
+      ...(by ? { triggeredBy: by } : {}),
+      ...(by && trigger ? { trigger } : {}),
+    },
+  };
+}
+
+/**
+ * #242 — the ONE approval decision every sent/won transition makes (setStatus,
+ * and the estimator's two typed pre-checks through checkApprovalGate). Pure:
+ * the caller loads the limits.
+ * - bypassed or ungated statuses → open (resolveStatusGate, unchanged);
+ * - an approval that still holds (in-app, attested, legacy, or an auto
+ *   approval the quote is unchanged against or still fits) → open; an auto
+ *   approval whose QUOTE changed against its snapshot (kind, owner or value)
+ *   and still fits is re-stamped in the same write — so the stamp refreshes
+ *   at the next gated transition, not before; otherwise nothing is
+ *   re-stamped. A limit raised or lowered in Settings on an unchanged quote
+ *   never re-stamps (#242 final) — the grant keeps its decidedAt; a lowered
+ *   limit governs new grants only;
+ * - else the owner's review limit: fits → open, with the auto-approval
+ *   record to write in the same patch; over / blank / owner off the roster /
+ *   changes requested → today's refusal sentence, verbatim.
+ */
+export function decideApprovalGate(
+  status: QuoteStatus,
+  q: GateQuote,
+  ctx: ReviewLimitContext,
+  opts: SetStatusOpts = {},
+  now: number = Date.now(),
+  /** #242 final: who is moving the quote (setStatus's `by`) — recorded on a
+   *  new auto snapshot as `triggeredBy`. */
+  actor: string | null = null
+): ApprovalGateDecision {
+  const open = resolveStatusGate(status, null, opts);
+  if (open.ok) return { ok: true, stamp: null };
+  const trigger = status === "won" ? "won" : "sent";
+  if (approvalHolds(q, ctx)) {
+    if (q.review?.method !== "auto_limit") return { ok: true, stamp: null };
+    const cur = canAutoApprove(q, ctx);
+    return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now, actor, trigger) : null };
+  }
+  const ev = canAutoApprove(q, ctx);
+  if (ev) return { ok: true, stamp: autoApprovedReview(ev, now, actor, trigger) };
+  return open;
+}
+
+/**
+ * #242 — the typed pre-check for a server action that wants the refusal as
+ * a value before calling setStatus (estimator setStatusAction /
+ * sendToCustomerAction). Same decision setStatus makes; writes nothing —
+ * setStatus stamps the approval in its own write.
+ */
+export async function checkApprovalGate(q: Quote | null, status: "sent" | "won"): Promise<ApprovalGateResult> {
+  if (!q) return requireApprovalToAdvance(null, status === "won" ? "won" : "send");
+  const d = decideApprovalGate(status, q, await loadReviewLimitContext());
+  return d.ok ? { ok: true } : d;
+}
+
 /**
  * The brand carried by the approval gate's own refusal (#174). A plain
  * string, compared by value — see `ApprovalGateRefused` for why not
@@ -1075,15 +1186,26 @@ export async function setStatus(
     await spawnFromQuote(q, q.status, { replayUnchanged: true });
     return q;
   }
-  const gate = resolveStatusGate(status, q.review, opts);
+  // #242: the owner's review limits are read only when this transition is
+  // gated at all (sent/won without a bypass) AND the answer can depend on
+  // them: no approval yet, or an auto_limit one. An in-app, attested or
+  // legacy approval passes on its own record, so it makes exactly the DB
+  // reads it made before #242 (#242 final).
+  const gated = !resolveStatusGate(status, null, opts).ok;
+  const needsLimits = gated && (!hasApproval(q.review) || q.review?.method === "auto_limit");
+  const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
+  const gate = decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null);
   // #174: a TYPED refusal. The gate is the only throw here whose message is
   // meant for the user; everything below this line that throws is a defect,
   // and callers tell the two apart with `statusFailureMessage`.
   if (!gate.ok) throw new ApprovalGateRefused(status === "won" ? "won" : "send", gate.error);
+  // #242: an auto-approval lands in the SAME write as the status change.
+  const autoStamp = gate.stamp;
   // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
   const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
   const result = await patchQuote(id, (doc) => {
     const t = Date.now();
+    if (autoStamp) doc.review = autoStamp;
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
     doc.status = status;
@@ -1295,6 +1417,7 @@ export async function approve(
     review.reviewer = review.reviewer || review.decidedBy;
     review.decidedAt = Date.now();
     review.note = opts.note || "";
+    review.auto = null;
     review.method = "in_app";
     q.review = review;
     q.updatedAt = Date.now();
@@ -1330,6 +1453,7 @@ export async function attestApproval(
     review.reviewer = review.reviewer || opts.by || null;
     review.decidedAt = Date.now();
     review.note = note;
+    review.auto = null;
     review.method = "attested";
     q.review = review;
     q.updatedAt = Date.now();
@@ -1346,6 +1470,7 @@ export async function requestChanges(
     review.decidedBy = opts.by || null;
     review.decidedAt = Date.now();
     review.note = opts.note || "";
+    review.auto = null;
     q.review = review;
     q.updatedAt = Date.now();
   });

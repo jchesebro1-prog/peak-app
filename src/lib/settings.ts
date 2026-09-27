@@ -99,6 +99,11 @@ export type AppSettingsData = {
    *  venueTypesFrom (lib/venue-types) — absent = the seed (5 built-ins +
    *  Gym Stage). sites.venue_kind stores a type key. */
   venueTypes?: import("@/lib/venue-types").VenueType[];
+  /** #242 — Settings → Admin → Review limits: per person (users.id) per
+   *  review kind, a whole-dollar self-approval ceiling or "none" (No limit);
+   *  a missing key = blank = always needs review. FULL REPLACEMENT on save,
+   *  read through reviewLimitsFrom (lib/review-limits); absent = {}. */
+  reviewLimits?: import("@/lib/review-limits").ReviewLimits;
   /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
    * over the source-sheet defaults in lib/venue-doctrine.ts. */
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;

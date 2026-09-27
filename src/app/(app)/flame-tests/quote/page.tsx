@@ -14,6 +14,8 @@ import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./contr
 import { builderTiers } from "@/lib/pricing-tiers";
 import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/new/handoff";
 import ActionError from "@/components/action-error";
+import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import { ReviewLimitChip } from "@/components/review-limit-chip";
 
 export const metadata = { title: "Flame test quote — Quartzite-6" };
 /** #222: Save/Approve render the proposal PDF in `after()`, inside this budget
@@ -52,7 +54,7 @@ export default async function FlameTestQuotePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
+  const [user, sp, customerDocs, rates, settings, travelRates] = await Promise.all([
     requireUser(),
     searchParams,
     allCustomers(),
@@ -127,6 +129,9 @@ export default async function FlameTestQuotePage({
   };
 
   const editQuote = editId ? await getQuote(editId) : null;
+  // #242: the owner's review-limit chip for a saved quote (a new quote has no owner/value yet).
+  const reviewLimit =
+    editQuote && editQuote.quoteType === "flame_test" ? await reviewLimitChipFor(editQuote, user.name) : null;
   if (editQuote && editQuote.quoteType === "flame_test") {
     const ft: FlameTestDoc = (editQuote.flameTest as FlameTestDoc) || {};
     const cid = editQuote.customerId || "";
@@ -227,6 +232,7 @@ export default async function FlameTestQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
+      <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
         customers={customers}
         offices={offices}

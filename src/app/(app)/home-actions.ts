@@ -36,11 +36,11 @@ export async function setQuoteStatusAction(
   id: string,
   status: string
 ): Promise<StageMoveResult> {
-  await requireUser();
+  const user = await requireUser();
   if (!(STAGES as readonly string[]).includes(status))
     return { ok: false, error: "That isn’t a stage a quote can move to." };
   try {
-    await setQuoteStatus(id, status as QuoteStatus);
+    await setQuoteStatus(id, status as QuoteStatus, user.name);
   } catch (e) {
     // Next signals redirect/notFound by throwing; nothing in the try does
     // either today, but a catch in the app directory must never eat one.

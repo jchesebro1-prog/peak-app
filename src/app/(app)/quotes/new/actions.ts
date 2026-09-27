@@ -4,16 +4,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
+import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { get as getThread, visibleTo } from "@/lib/stores/comms";
 import { linkThreadToNewQuote, threadQuoteLinkStatus } from "@/lib/gmail/linking";
 import { quoteEditPath, quoteServiceType, sameBuilder } from "./handoff";
-import { saveCustomerAction } from "@/app/(app)/companies/actions";
-import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
-import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { builderPath, isServiceType, type IntakeSubmit } from "./types";
-import { getSettings } from "@/lib/settings";
-import { venueTypeOptions, venueTypesFrom } from "@/lib/venue-types";
 
 /** I1/I4 review — where the "This thread is linked to X" banner's "open it"
  *  points. Small and self-contained on purpose: the fuller LINK_KIND_COLOR/
@@ -79,15 +75,11 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
     };
   }
 
-  const creatingCustomer = input.customerMode === "new";
-  const newCustomerName = (input.newCustomerName || "").trim();
-  if (creatingCustomer && !newCustomerName) {
-    return { ok: false, error: "Enter a name for the new customer." };
-  }
-  const pickedCustomerId = (input.customerId || "").trim();
-  if (!creatingCustomer && !pickedCustomerId) {
-    return { ok: false, error: "Pick a customer, or add a new one." };
-  }
+  // #244 — the customer checks now live in lib/intake-customer (shared with
+  // the Grid intake); same order, same messages, still before any write.
+  const check = validateIntakeCustomer(input);
+  if (!check.ok) return { ok: false, error: check.error };
+  const { creatingCustomer, pickedCustomerId } = check;
 
   // I4 follow-up review — checked here, BEFORE saveCustomerAction runs
   // below: a thread already linked to something else used to only get
@@ -115,92 +107,17 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
     }
   }
 
-  const existing = !creatingCustomer ? await getCustomer(pickedCustomerId) : null;
-  if (!creatingCustomer && !existing) {
-    return { ok: false, error: "That customer couldn't be found — refresh and try again." };
-  }
-
-  const locations: LocationInput[] = (existing?.locations || []).map(toLocationInput);
-  const contacts: ContactInput[] = (existing?.contacts || []).map(toContactInput);
-
-  if (input.locationMode === "new") {
-    const types = venueTypesFrom((await getSettings()).venueTypes);
-    const kind = (input.newLocationKind || "").trim();
-    locations.push({
-      // A minted id so the new venue is findable after the save (it becomes
-      // the site's legacyLocId → its docLocId).
-      id: "l" + Date.now() + Math.random().toString(36).slice(2, 6),
-      locationName: (input.newLocationName || "").trim(),
-      label: "",
-      deriveName: true,
-      // First location on the record → primary. Never demotes one that's
-      // already there.
-      primary: locations.length === 0,
-      address: "",
-      city: (input.newLocationCity || "").trim(),
-      state: (input.newLocationState || "").trim(),
-      lat: null,
-      lng: null,
-      // #216 — an unknown/archived type falls back to the first live one.
-      venueKind: venueTypeOptions(types).some((t) => t.key === kind)
-        ? kind
-        : (venueTypeOptions(types)[0]?.key ?? "proscenium"),
-      travelMiles: null,
-      travelMin: null,
-    });
-  }
-
-  if (input.contactMode === "new") {
-    const name = (input.newContactName || "").trim();
-    if (name) {
-      contacts.push({
-        name,
-        role: (input.newContactRole || "").trim(),
-        email: (input.newContactEmail || "").trim(),
-        phone: (input.newContactPhone || "").trim(),
-        primary: contacts.length === 0,
-      });
-    }
-  }
-
-  let customerId = existing?.id || "";
-  const needsSave = creatingCustomer || input.locationMode === "new" || input.contactMode === "new";
-  if (needsSave) {
-    const res = await saveCustomerAction({
-      id: existing?.id,
-      name: creatingCustomer ? newCustomerName : existing!.name,
-      type: creatingCustomer ? (input.newCustomerType || "") : existing!.type || "",
-      pricingTier: existing?.pricingTier ?? null,
-      locations,
-      contacts,
-    });
-    if (!res.ok) return { ok: false, error: "Couldn't save that customer — please try again." };
-    customerId = res.id;
-  }
-
-  if (!customerId) return { ok: false, error: "Pick or create a customer first." };
-
-  // #160: forward the venue/contact actually chosen — the builders used to
-  // drop them and fall back to primaries.
-  let venueId = input.locationMode === "pick" ? (input.locationId || "").trim() : "";
-  if (input.locationMode === "new") {
-    const before = new Set((existing?.locations || []).map((l) => l.id));
-    const after = await getCustomer(customerId);
-    venueId = (after?.locations || []).find((l) => l.id && !before.has(l.id))?.id || "";
-  }
-  const contact =
-    input.contactMode === "pick"
-      ? (input.contactName || "").trim()
-      : input.contactMode === "new"
-        ? (input.newContactName || "").trim()
-        : "";
+  // #244 — resolve/create the customer, append a new venue/contact, and read
+  // back what was chosen (lib/intake-customer, moved verbatim from here).
+  const resolved = await resolveIntakeCustomer(input);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  const { customerId, customerName, locationId: venueId, contactName: contact } = resolved;
 
   // #123 — opened from an Inbox thread ("+ New quote"): the builders only
   // mint a quote on their first save, so mint the draft here to have an id
   // to link, link the thread to it, and go back to the thread instead of the
   // builder. `thread` was already resolved + visibility-checked up top.
   if (threadId && thread) {
-    const customerName = existing?.name || newCustomerName;
     // I1 review — the venue/contact's full record, so the builder each
     // service type opens into shows the same venue/contact this thread had
     // instead of a blank slate (see linkThreadToNewQuote's doc comment for

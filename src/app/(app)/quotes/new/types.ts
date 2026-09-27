@@ -146,6 +146,11 @@ export type IntakeLocation = {
   city: string;
   state: string;
   primary: boolean;
+  /** #244 — the venue's location/campus name and street address; the Grid
+   *  intake pre-fills its cover page from them. Optional: the quote intake
+   *  never reads them. */
+  locationName?: string;
+  address?: string;
 };
 
 export type IntakeContact = {
@@ -163,6 +168,29 @@ export type IntakeCustomer = {
   locations: IntakeLocation[];
   contacts: IntakeContact[];
 };
+
+/** #244 — the customer / venue / contact half of an intake payload, shared by
+ *  the quote intake and the Grid intake (CustomerVenueContactPicker →
+ *  lib/intake-customer resolveIntakeCustomer). */
+export type IntakeCustomerChoice = Pick<
+  IntakeSubmit,
+  | "customerMode"
+  | "customerId"
+  | "newCustomerName"
+  | "newCustomerType"
+  | "locationMode"
+  | "locationId"
+  | "newLocationName"
+  | "newLocationKind"
+  | "newLocationCity"
+  | "newLocationState"
+  | "contactMode"
+  | "contactName"
+  | "newContactName"
+  | "newContactRole"
+  | "newContactEmail"
+  | "newContactPhone"
+>;
 
 /** The form's submit payload — a plain typed object (SaveCustomerInput's
  *  own convention), not FormData. */

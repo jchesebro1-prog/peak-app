@@ -219,7 +219,9 @@ async function persist(formData: FormData): Promise<string | null> {
     tierMargin: tier.margin,
     source: "repair",
     quoteType: "repair",
-    owner: user.name,
+    // #242 final: the owner is set when the quote is CREATED (below) and kept
+    // on every later save — the review limit follows the quote's owner, never
+    // whoever saved it last.
     contact,
     repair: {
       rates: r.rates,
@@ -259,7 +261,7 @@ async function persist(formData: FormData): Promise<string | null> {
 
   const q = editingId
     ? await updateQuote(editingId, payload)
-    : await createQuote(payload);
+    : await createQuote({ ...payload, owner: user.name });
   // D205: first save of a "Change type" replacement retires the old draft.
   // The new quote already exists, so a failed retire is logged, never thrown —
   // a throw would read as "nothing was written" and a re-save would duplicate.
