@@ -21,7 +21,7 @@ import { resolveFixture, type FixtureRecord } from "@/lib/fixture-assemblies";
 
 export type EquipCellVM = {
   tier: TierKey;
-  kind: "part" | "assembly" | "allowance" | "empty";
+  kind: "part" | "assembly" | "allowance" | "none" | "empty";
   title: string;
   detail: string;
   /** Unit cost (admin page only) — a fabric row's $/sq ft area rate. */
@@ -81,6 +81,7 @@ function cellVM(def: EquipRowDef, tier: TierKey, map: EquipmentMap, ctx: EquipPr
   const cell = cellFor(map[def.key], tier);
   const perSqft = !!def.curtain;
   if (!cell) return { tier, kind: "empty", title: "Needs a part", detail: "", unitCost: null, unitSell: null, perSqft, problem: null, input: null };
+  if (cell.kind === "none") return { tier, kind: "none", title: "Not included", detail: "", unitCost: null, unitSell: null, perSqft, problem: null, input: { kind: "none" } };
   const price = priceCell(cell, def, ctx);
   const priced = price.status === "needs-part" ? null : price;
   const problem = price.status === "needs-part" ? price.reason : null;

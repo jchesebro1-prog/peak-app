@@ -181,6 +181,7 @@ export function EquipmentCard({
       <div style={{ display: "grid", gap: 3, marginTop: 10 }}>
         {card.lines.map((l) => {
           const needs = l.status === "needs-part";
+          const none = l.status === "none";
           const edited = l.swapped || l.qty !== l.eqQty;
           return (
             <div key={l.rowKey} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 118px 92px 92px auto", gap: 8, alignItems: "center", fontSize: 12.5, padding: "6px 8px", borderRadius: 8, background: needs ? "#fdf4e7" : "transparent" }}>
@@ -201,6 +202,8 @@ export function EquipmentCard({
                         <span title="Only an admin can edit the Equipment map">{ASK_ADMIN_HINT}</span>
                       )}
                     </>
+                  ) : none ? (
+                    "Not included in this tier"
                   ) : (
                     `${l.refDesc ?? l.ref ?? ""}${l.swapped ? " · swapped for this design" : ""}`
                   )}
@@ -217,8 +220,8 @@ export function EquipmentCard({
                 />
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#aab0bb" }}>{l.unit}</span>
               </span>
-              <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}>{needs ? "—" : unitMoney(l.unitSell)}</span>
-              <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>{needs ? "—" : money(l.total)}</span>
+              <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", color: "#5b616e" }}>{needs || none ? "—" : unitMoney(l.unitSell)}</span>
+              <span style={{ fontFamily: "var(--font-mono)", textAlign: "right", fontWeight: 600 }}>{needs || none ? "—" : money(l.total)}</span>
               <span style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                 <button type="button" onClick={() => setSwapping(swapping === l.rowKey ? null : l.rowKey)} style={BTN}>Swap…</button>
                 {edited && <button type="button" onClick={() => reset(l)} title="Back to the equation and the map" style={BTN}>↺</button>}

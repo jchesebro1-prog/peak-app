@@ -46,6 +46,8 @@ type Priced = { cost: number; price: number; status: NonNullable<BomItem["status
 
 function priceItem(it: BomItem, p: UnitPrice | undefined, margin: number): Priced {
   if (!p || p.status === "needs-part") return { cost: 0, price: 0, status: "needs-part" };
+  // #229: Not included — $0 and no product (no ref), before any drape math.
+  if (p.status === "none") return { cost: 0, price: 0, status: "none" };
   // A drape costs per drape from the mapped fabric's area rate; a confirmed
   // allowance on a curtain row is already a per-drape unit cost.
   if (it.drape && p.status !== "allowance") {

@@ -22086,3 +22086,59 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
   ok(r233KeyAliases?.get("controls:outputStation") === "lighting:cablePackage" && r233KeyAliases?.size === 1, "#233: exactly one key moved");
   ok(r233Hints["lighting:cablePackage"] !== undefined && !("controls:outputStation" in r233Hints), "#233: the 'was' hint moved with the row");
 }
+
+/* --- #229: "Not included" — a resolved Equipment-map cell: $0, never Incomplete, never placed, never quoted --- */
+import {
+  sanitizeEquipCell as n229Cell, sanitizeEquipmentMap as n229Map, mergeEquipRow as n229Merge, rowStatus as n229Status,
+  priceCell as n229Price, buildEquipmentPriceTable as n229Table, type EquipmentMap as N229Map,
+} from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as n229ByKey } from "@/lib/design/equipment-vocab";
+import { equipmentMapView as n229View, mapSummary as n229Summary } from "@/lib/design/equipment-map-view";
+import { applyEquipment as n229Apply } from "@/lib/design/equipment-pricing";
+import { targetsFromSystems as n229Targets, needsPartCount as n229Needs } from "@/lib/design/scope-targets";
+import { autoEstimateCards as n229Cards, autoQuoteNeedsPart as n229AutoNeeds } from "@/lib/design/auto-estimate";
+import { partIdForLine as n229PartId } from "@/lib/design/grid-auto-layout";
+import { compute as n229Compute, defaultAState as n229Default } from "@/app/(app)/design/quick/engine";
+{
+  ok(JSON.stringify(n229Cell({ kind: "none", junk: 1 })) === '{"kind":"none"}', "#229: a Not included cell sanitizes to { kind: \"none\" }");
+  const m = n229Merge(undefined, { tiers: { good: { kind: "none" }, better: { kind: "part", sku: "P1" }, best: { kind: "part", sku: "P1" } } }, "Jeff", 5);
+  ok(m.ok && m.row.tiers.good?.kind === "none" && m.row.tiers.better?.kind === "part", "#229: the editor saves Not included for one tier");
+  const same = n229Merge(undefined, { tiers: { good: { kind: "none" } }, sameAll: true }, "Jeff", 5);
+  ok(same.ok && same.row.tiers.best?.kind === "none", "#229: …or for all tiers (Same for all tiers)");
+  const stored = n229Map({ "rigging:varSpeedHoist": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } });
+  ok(n229Status(stored["rigging:varSpeedHoist"]) === "mapped", "#229: a Not included row reads Mapped (resolved), never Needs a part");
+
+  const ctx = { parts: new Map([["P1", { sku: "P1", desc: "Hoist", unit: "ea", cost: 100, list: 150 }]]), fixtures: new Map(), margin: 0.3 };
+  const p = n229Price({ kind: "none" }, n229ByKey.get("rigging:varSpeedHoist")!, ctx);
+  ok(p.status === "none" && p.unitCost === 0 && p.unitSell === 0 && p.desc === "Not included", "#229: Not included prices $0 with status none");
+  ok(n229Price({ kind: "none" }, n229ByKey.get("curtains:border")!, ctx).status === "none", "#229: a curtain row can be Not included too");
+
+  const map: N229Map = { "lighting:par": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
+  const table = n229Table(map, ctx);
+  const base = n229Default(0);
+  const lightOnly = { rigging: false, curtains: false, lighting: true, controls: false, audio: false, video: false, acoustical: false, pit: false };
+  const [priced] = n229Apply(n229Compute({ ...base, sys: lightOnly }).systems.filter((x) => x.key === "lighting"), "good", table);
+  const par = priced.items.find((i) => i.key === "lighting:par")!;
+  ok(par.status === "none" && par.price === 0 && par.cost === 0 && !par.ref, "#229: the pipeline carries a Not included line at $0 with no product behind it");
+  const others = priced.items.filter((i) => i.qty > 0 && i.status === "needs-part").length;
+  ok(n229Targets([priced]).lighting!.needsPart === others && n229Needs([priced]) === others, "#229: Not included is never counted as needs-a-part (the Incomplete gate ignores it)");
+
+  const cards = n229Cards({ ...base, sys: lightOnly }, { tierByScope: { lighting: "good" }, overrides: {} }, table, {});
+  const line = cards[0].lines.find((l) => l.rowKey === "lighting:par")!;
+  ok(line.status === "none" && line.total === 0 && n229PartId(line, "good") === null && cards[0].lines.filter((l) => l.status === "needs-part").length === cards[0].needsPart,
+    "#229: an Auto card line is Not included — $0, not needs-a-part, never placed");
+  ok(n229AutoNeeds(cards, { tierByScope: { lighting: "good" } }) === cards[0].needsPart, "#229: Not included never refuses a Grid quote");
+
+  const view = n229View(map, ctx, {});
+  const row = view.find((r) => r.key === "lighting:par")!;
+  ok(row.status === "mapped" && row.cells.every((c) => c.kind === "none" && c.title === "Not included" && c.problem === null && c.input?.kind === "none"),
+    "#229: the Equipment map shows Not included and re-posts it");
+  ok(n229Summary(view).mapped === 1, "#229: the summary counts a Not included row as Mapped");
+
+  const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
+  ok(emc.includes('<option value="none">Not included</option>') && emc.includes('k === "none" ? { kind: "none" }'), "#229: the cell editor offers Not included");
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/equipment-card.tsx"), "utf8");
+  ok(card.includes('l.status === "none"') && card.includes("Not included in this tier"), "#229: Auto cards say Not included");
+  const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
+  ok(qd.includes('it.status === "none" ? "Not included"'), "#229: Quick Design's BOM says Not included");
+}

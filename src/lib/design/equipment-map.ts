@@ -35,6 +35,9 @@ export const ALLOWANCE_MAX = 10_000_000;
 export type EquipCell =
   | { kind: "part"; sku: string }
   | { kind: "assembly"; id: string }
+  /** #229: "Not included" — this tier has no solution for the item. Resolved:
+   *  never Incomplete, prices $0, places nothing, emits no quote line. */
+  | { kind: "none" }
   /** `note` is the internal "why"; `description` (#212) is the customer-facing
    *  line text for a product with no catalog row. Both trimmed, ≤ 200, absent when empty. */
   | { kind: "allowance"; amount: number; confirmedBy: string; confirmedAt: number; note?: string; description?: string };
@@ -54,6 +57,7 @@ export type EquipRowStatus = "mapped" | "allowance" | "needs-part";
 export type EquipCellInput =
   | { kind: "part"; sku: string }
   | { kind: "assembly"; id: string }
+  | { kind: "none" }
   | { kind: "allowance"; amount: number; note?: string; description?: string; confirmed: boolean }
   | null;
 export type EquipRowInput = { tiers: Partial<Record<TierKey, EquipCellInput>>; sameAll?: boolean };
@@ -75,6 +79,7 @@ export function sanitizeEquipCell(raw: unknown): EquipCell | null {
     const id = String(r.id ?? "").trim().slice(0, 120);
     return id ? { kind: "assembly", id } : null;
   }
+  if (r.kind === "none") return { kind: "none" };
   if (r.kind === "allowance") {
     const amount = round2(Number(r.amount));
     const confirmedBy = String(r.confirmedBy ?? "").trim().slice(0, 80);
@@ -121,7 +126,7 @@ export function cellFor(row: EquipRow | undefined, tier: TierKey): EquipCell | n
   return (row.sameAll ? row.tiers.good : row.tiers[tier]) ?? null;
 }
 
-/** Spec §3: Mapped (every tier part/assembly) · Allowance (any tier an allowance) · Needs a part (any tier empty). */
+/** Spec §3: Mapped (every tier a part, assembly or Not included, #229) · Allowance (any tier an allowance) · Needs a part (any tier empty). */
 export function rowStatus(row: EquipRow | undefined): EquipRowStatus {
   const cells = EQUIP_TIERS.map((t) => cellFor(row, t));
   if (cells.some((c) => !c)) return "needs-part";
@@ -167,7 +172,7 @@ export function mergeEquipRow(
       continue;
     }
     const cell = sanitizeEquipCell(c);
-    if (!cell) return { ok: false, error: "Pick a catalog part or an assembly for every filled tier." };
+    if (!cell) return { ok: false, error: "Pick a catalog part, an assembly or Not included for every filled tier." };
     tiers[t] = cell;
   }
   if (sameAll && tiers.good) {
@@ -188,7 +193,10 @@ export type EquipPriceCtx = {
   /** catalog_rates.defaultMargin — the list-less part / allowance sell rule. */
   margin: number;
 };
-export type PricedStatus = "part" | "assembly" | "allowance";
+/** "none" (#229): Not included — resolved at $0, never placed or quoted. */
+export type PricedStatus = "part" | "assembly" | "allowance" | "none";
+/** What a Not included line reads everywhere it shows (#229). */
+export const NOT_INCLUDED = "Not included";
 export type PricedUnit = {
   status: PricedStatus;
   /** SKU (part), fixture id (assembly) or row key (allowance). */
@@ -213,6 +221,8 @@ const needs = (reason: string): UnitPrice => ({ status: "needs-part", reason });
 
 export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPriceCtx): UnitPrice {
   if (!cell) return needs("Not mapped yet");
+  // #229: resolved, $0, no product — the ref is the row, never a SKU.
+  if (cell.kind === "none") return { status: "none", ref: def.key, desc: NOT_INCLUDED, unit: def.unit, unitCost: 0, unitSell: 0 };
   if (cell.kind === "allowance") {
     if (!(cell.amount > 0) || !cell.confirmedBy || !(cell.confirmedAt > 0)) return needs("Allowance not confirmed");
     // desc is bare (no "(allowance)" suffix here) — the one consumer that

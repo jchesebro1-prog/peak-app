@@ -68,6 +68,7 @@ export default function EquipmentMapClient({
         <div style={{ fontSize: 13, color: "#5b616e", lineHeight: 1.55 }}>
           Map every equation item to a catalog part or an assembly for each tier. Auto uses only <b>Mapped</b> and
           confirmed <b>Allowance</b> rows; <b>Needs a part</b> rows are left off Auto plans and listed on the Equipment step.
+          Set a tier to <b>Not included</b> when that tier has no solution for the item: it prices $0 and never blocks a quote.
           Nothing is mapped for you — each row shows the figure the old equations assumed, for reference only.
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
@@ -117,7 +118,7 @@ function CellSummary({ cell }: { cell: EquipCellVM }) {
       <div style={LABEL}>{tier}</div>
       <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cell.title}</div>
       {cell.detail && <div style={{ fontSize: 11, color: "#737985", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cell.detail}</div>}
-      {cell.kind !== "empty" && !cell.problem && (
+      {cell.kind !== "empty" && cell.kind !== "none" && !cell.problem && (
         <div style={{ fontSize: 11, color: "#5b616e", marginTop: 2 }}>
           {cell.perSqft ? `${money(cell.unitCost)}/${FABRIC_RATE_UNIT}` : `cost ${money(cell.unitCost)} · sell ${money(cell.unitSell)}`}
         </div>
@@ -221,7 +222,8 @@ function CellEditor({
       k === "part" ? { kind: "part", sku: "" }
         : k === "assembly" ? { kind: "assembly", id: "" }
           : k === "allowance" ? { kind: "allowance", amount: 0, note: "", description: "", confirmed: false }
-            : null
+            : k === "none" ? { kind: "none" }
+              : null
     );
   return (
     <div style={{ display: "grid", gap: 6 }}>
@@ -230,6 +232,7 @@ function CellEditor({
         <option value="part">{curtain ? "Catalog fabric" : "Catalog part"}</option>
         {!curtain && <option value="assembly">Assembly (fixture or system)</option>}
         <option value="allowance">Allowance</option>
+        <option value="none">Not included</option>
       </select>
       {value?.kind === "part" && <PartPicker rowKey={rowKey} sku={value.sku} onPick={(sku) => onChange({ kind: "part", sku })} />}
       {value?.kind === "assembly" && (

@@ -59,7 +59,7 @@ export type BomItem = {
   cost: number;
   price: number;
   /** Set by the Equipment map pricing step (#211): how this line priced. */
-  status?: "part" | "assembly" | "allowance" | "needs-part";
+  status?: "part" | "assembly" | "allowance" | "none" | "needs-part";
   /** What priced it: SKU, fixture id or row key — and its description. */
   ref?: string;
   refDesc?: string;

@@ -507,7 +507,7 @@ export default function QuickDesignClient({
         const up = it.price * (x.tierFixed ? 1 : selTd.priceMul);
         const ext = up * qty;
         sub += ext;
-        const upLabel = it.status === "needs-part" ? "Needs a part" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
+        const upLabel = it.status === "needs-part" ? "Needs a part" : it.status === "none" ? "Not included" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
         // An allowance's refDesc is just the row's own name (no distinct
         // product) — the " · Allowance" suffix already says it once (#211 M3).
         const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "");
