@@ -20529,19 +20529,19 @@ import {
 const DC219_FIXTURE =
   [
     "Duration (HH:MM)\t\tCategory\tStart Date\tStatus\tName\t\tDuration\tLinked\tOwner\tDetails\t",
-    '01:00\t\t\t"12/25/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
-    '01:00\t\t\t"12/18/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
-    '01:00\t\t\t"12/11/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
-    '01:00\t\t\t"12/4/28, 9:00 AM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
-    '24:00\t\tPTO\t"9/25/26, 12:00 AM"\tConfirmed\t"Jena Off"\t\t"1 day"\t\t"Jena Tolksdorf"\t\t',
-    '48:00\t\t\t"12/24/26, 12:00 AM"\tConfirmed\t"Christmas Holiday"\t\t"2 days"\t\t"Jason Keagy"\t\t',
-    '00:30\t\t\t"9/16/26, 2:00 PM"\tConfirmed\t"Lincoln Academy Submittal Review"\t\t"30 minutes"\t"LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV, LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
-    '32:00\t\tInstall\t"2/11/26, 8:00 AM"\tConfirmed\t"RCA Wire Pulls (Mark, Paul, AJ, Nelson)"\t\t"1 day 8 hours"\t"RICHLAND CENTER HS (via Nexus Solutions) - Auditorium AV"\t"Andrew Herschleb"\t\t',
-    '01:30\t\t\t"2/11/26, 12:30 PM"\tConfirmed\t"Oshkosh North Aud & Black Box Projects - First AV Conversation including \\"Shelby\\""\t\t"1 hour 30 minutes"\t"BRAY ARCHITECTS - OSHKOSH NORTH HS - Auditorium & Black Box AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
-    '01:00\t\t"Service Call"\t"5/18/26, 8:00 AM"\tConfirmed\t"Mike to Cross Of Christ 8:00 am"\t\t"1 hour"\t\t"Mike Mundth"\t\t',
-    '01:00\t\t"Service Call"\t"9/16/26, 9:00 AM"\tConfirmed\t"Sauk Trail Elementary, Middleton HS "\t\t"1 hour"\t\t"Isaac Mittlesteadt"\t"Elementary - mute/unmute passcode   HS - Bluetooth issue, confirm replacement"\t',
-    '01:00\t\t\t"13/45/26, 9:00 AM"\tConfirmed\t"Broken date"\t\t"1 hour"\t\t"Jeff Chesebro"\t\t',
-    'soon\t\t\t"9/1/26, 9:00 AM"\tConfirmed\t"Broken duration"\t\t""\t\t"Jeff Chesebro"\t\t',
+    '01:00\t\t\t"12/25/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/18/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/11/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '01:00\t\t\t"12/4/28, 9:00\u202fAM"\tConfirmed\t"Weekly Sales Meeting"\t\t"1 hour"\t\t"Jeff Chesebro"\thttps://meet.google.com/redacted\t',
+    '24:00\t\tPTO\t"9/25/26, 12:00\u202fAM"\tConfirmed\t"Jena Off"\t\t"1 day"\t\t"Jena Tolksdorf"\t\t',
+    '48:00\t\t\t"12/24/26, 12:00\u202fAM"\tConfirmed\t"Christmas Holiday"\t\t"2 days"\t\t"Jason Keagy"\t\t',
+    '00:30\t\t\t"9/16/26, 2:00\u202fPM"\tConfirmed\t"Lincoln Academy Submittal Review"\t\t"30 minutes"\t"LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV, LINCOLN  ACADEMY BELOIT (via MainStage) - Gymnatorium AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
+    '32:00\t\tInstall\t"2/11/26, 8:00\u202fAM"\tConfirmed\t"RCA Wire Pulls (Mark, Paul, AJ, Nelson)"\t\t"1 day 8 hours"\t"RICHLAND CENTER HS (via Nexus Solutions) - Auditorium AV"\t"Andrew Herschleb"\t\t',
+    '01:30\t\t\t"2/11/26, 12:30\u202fPM"\tConfirmed\t"Oshkosh North Aud & Black Box Projects - First AV Conversation including \\"Shelby\\""\t\t"1 hour 30 minutes"\t"BRAY ARCHITECTS - OSHKOSH NORTH HS - Auditorium & Black Box AV"\t"Jason Keagy"\thttps://teams.microsoft.com/meet/redacted\t',
+    '01:00\t\t"Service Call"\t"5/18/26, 8:00\u202fAM"\tConfirmed\t"Mike to Cross Of Christ 8:00 am"\t\t"1 hour"\t\t"Mike Mundth"\t\t',
+    '01:00\t\t"Service Call"\t"9/16/26, 9:00\u202fAM"\tConfirmed\t"Sauk Trail Elementary, Middleton HS "\t\t"1 hour"\t\t"Isaac Mittlesteadt"\t"Elementary - mute/unmute passcode   HS - Bluetooth issue, confirm replacement"\t',
+    '01:00\t\t\t"13/45/26, 9:00\u202fAM"\tConfirmed\t"Broken date"\t\t"1 hour"\t\t"Jeff Chesebro"\t\t',
+    'soon\t\t\t"9/1/26, 9:00\u202fAM"\tConfirmed\t"Broken duration"\t\t""\t\t"Jeff Chesebro"\t\t',
   ].join("\n") + "\n";
 
 {
@@ -20554,10 +20554,12 @@ const DC219_FIXTURE =
   ok(dc219Split("﻿h1\th2\n\n").length === 1, "#219 splitTsv: BOM stripped, blank lines dropped");
 
   // parseStart — U+202F and plain spaces, 12 AM/PM, bad dates.
-  ok(j(dc219Start("12/25/28, 9:00 AM")) === j({ y: 2028, m: 12, d: 25, hh: 9, mm: 0 }), "#219 parseStart: U+202F before AM");
-  ok(dc219Start("12/25/28, 12:00 PM")?.hh === 12 && dc219Start("1/2/25, 12:05 AM")?.hh === 0, "#219 parseStart: 12 PM is noon, 12 AM is midnight");
-  ok(j(dc219Start("3/1/2027, 7:15 pm")) === j({ y: 2027, m: 3, d: 1, hh: 19, mm: 15 }), "#219 parseStart: four-digit year and lowercase pm");
-  ok(dc219Start("2/30/26, 9:00 AM") === null && dc219Start("13/45/26, 9:00 AM") === null && dc219Start("") === null, "#219 parseStart: impossible dates are null");
+  ok(j(dc219Start("12/25/28, 9:00\u202fAM")) === j({ y: 2028, m: 12, d: 25, hh: 9, mm: 0 }), "#219 parseStart: U+202F before AM");
+  ok(dc219Start("12/25/28, 9:00 AM") !== null, "#219 parseStart: a plain ASCII space before AM also still works");
+  ok(dc219Start("12/25/28, 12:00\u202fPM")?.hh === 12 && dc219Start("1/2/25, 12:05\u202fAM")?.hh === 0, "#219 parseStart: 12 PM is noon, 12 AM is midnight");
+  ok(j(dc219Start("3/1/2027, 7:15\u202fpm")) === j({ y: 2027, m: 3, d: 1, hh: 19, mm: 15 }), "#219 parseStart: four-digit year and lowercase pm");
+  ok(dc219Start("2/30/26, 9:00\u202fAM") === null && dc219Start("13/45/26, 9:00\u202fAM") === null && dc219Start("") === null, "#219 parseStart: impossible dates are null");
+  ok(DC219_FIXTURE.includes("\u202f"), "#219 fixture carries the real U+202F");
 
   // parseCalendarTsv over the fixture.
   const p = dc219Parse(DC219_FIXTURE);
