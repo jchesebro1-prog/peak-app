@@ -3,7 +3,8 @@ import Link from "next/link";
 import { getSettings } from "@/lib/settings";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getAll as allQuotes, portalCanAcceptQuote, portalListsQuote, type Quote } from "@/lib/stores/quotes";
+import { getAll as allQuotes, portalListsQuote, type Quote } from "@/lib/stores/quotes";
+import { canAcceptPortal } from "@/lib/portal-quote-mode";
 import { getAll as allLeads, OPEN_STAGES, type LeadStage } from "@/lib/stores/leads";
 import {
   renewals as flameRenewals,
@@ -22,7 +23,9 @@ import { PortalShell } from "./shell";
 import { PortalSignedOut } from "./signed-out";
 import { portalNav } from "./nav";
 import { getCart } from "@/lib/stores/portal-carts";
-import { acceptPortalQuote } from "./actions";
+import { copyQuoteToCart } from "./actions";
+import { AcceptDialog } from "./accept-dialog";
+import { RefreshPricingButton } from "./refresh-pricing-button";
 import { documentsForCustomer } from "@/lib/stores/documents";
 import { activeDocumentCategories, resolveDocumentCategories } from "@/lib/document-categories";
 import { groupForPortal } from "@/lib/document-rules";
@@ -173,6 +176,13 @@ export default async function PortalPage({
   const denied = one(sp.denied) === "1";
   const sent = one(sp.sent) === "1";
   const accepted = one(sp.accepted) === "1";
+  // #242 Task 13: the Accept dialog's PO file failed to attach — the
+  // acceptance itself still went through (controller decision 5).
+  const fileWarn = one(sp.filewarn) === "1";
+  // #242 Task 13: Copy to new quote refused (expired grant, rate limit, or
+  // the quote wasn't found for this session) — a plain form, so it redirects
+  // with a query param rather than returning a value to display inline.
+  const copyErr = one(sp.copyerr) === "1";
   // #242: Generate lands here — ?generated=firm|review&q=<quote id>.
   const generatedRaw = one(sp.generated);
   const generated = generatedRaw === "firm" || generatedRaw === "review" ? generatedRaw : null;
@@ -270,15 +280,21 @@ export default async function PortalPage({
       .map((r) => [(r.locationId || r.venue) + "|" + levelMeta(r.level).key, r])
   );
 
+  const acceptCategories = activeDocumentCategories(docCategories).map((c) => ({ key: c.key, label: c.label }));
+
   const quoteRow = (q: (typeof published)[number]) => {
     const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
     const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
-    const canAccept = portalCanAcceptQuote(q, cid) && !preview;
+    const acceptGate = canAcceptPortal(q, Date.now());
+    const isExpired = q.status === "sent" && !q.portalAcceptance && acceptGate.reason === "expired";
+    const canAccept = acceptGate.ok && !preview;
     const firmUntil = firmValidUntil(q);
     const chip = isDraft
       ? q.source === "portal-catalog" && q.portalReview
         ? { label: "In review — Peak will confirm pricing", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
         : { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+      : isExpired
+      ? { label: "Pricing expired", ink: "#a33a2b", soft: "#fdf0ee", bd: "#f3d2cc" }
       : firmUntil != null
       ? { label: "Valid until " + fmtDate(firmUntil), ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" }
       : pendingAccept
@@ -289,69 +305,88 @@ export default async function PortalPage({
       ? `/portal/quotes/${encodeURIComponent(q.id)}/pdf` + (preview ? `?preview=${encodeURIComponent(cid)}` : "")
       : null;
     return (
-      <div
-        key={q.id}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0,1fr) 96px auto",
-          gap: 12,
-          alignItems: "center",
-          padding: "13px 20px",
-          borderBottom: "1px solid #f5f6f8",
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {pdfHref ? (
-              <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
-                {q.name}
-              </a>
-            ) : (
-              q.name
-            )}
+      <div key={q.id} style={{ borderBottom: "1px solid #f5f6f8" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0,1fr) 96px auto",
+            gap: 12,
+            alignItems: "center",
+            padding: "13px 20px 8px",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {pdfHref ? (
+                <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                  {q.name}
+                </a>
+              ) : (
+                q.name
+              )}
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
+              {displayQuoteNumber(q) + " · " + fmtDate(q.updatedAt)}
+            </div>
+            <div style={{ fontSize: 11.5, marginTop: 3 }}>
+              {pdfHref ? (
+                <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+                  Open PDF ↗
+                </a>
+              ) : pdfPreparing(q, cid) ? (
+                <span style={{ color: "#9aa0ab" }}>Document being prepared</span>
+              ) : (
+                <span style={{ color: "#9aa0ab" }}>PDF not available — contact your rep</span>
+              )}
+            </div>
           </div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-            {displayQuoteNumber(q) + " · " + fmtDate(q.updatedAt)}
-          </div>
-          <div style={{ fontSize: 11.5, marginTop: 3 }}>
-            {pdfHref ? (
-              <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
-                Open PDF ↗
-              </a>
-            ) : pdfPreparing(q, cid) ? (
-              <span style={{ color: "#9aa0ab" }}>Document being prepared</span>
-            ) : (
-              <span style={{ color: "#9aa0ab" }}>PDF not available — contact your rep</span>
-            )}
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{money(q.value)}</div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+              <Chip c={chip} />
+              {canAccept && (
+                <AcceptDialog quoteId={q.id} customerId={cid} categories={acceptCategories} disabled={preview} />
+              )}
+            </div>
+            {isExpired && !preview && <RefreshPricingButton quoteId={q.id} />}
           </div>
         </div>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{money(q.value)}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-          <Chip c={chip} />
-          {canAccept && (
-            <form action={acceptPortalQuote}>
-              <input type="hidden" name="quote" value={q.id} />
-              <button
-                type="submit"
-                title="Accepting lets our team know to move ahead — nothing is final until they confirm."
-                style={{
-                  fontFamily: "var(--font-ui)",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#fff",
-                  background: "#1f7a52",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Accept quote
-              </button>
-            </form>
-          )}
-        </div>
+        {(q.portalDecline || q.source === "portal-catalog") && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "0 20px 12px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#8c919c" }}>
+              {q.portalDecline ? "Peak: " + q.portalDecline.note : ""}
+            </div>
+            {q.source === "portal-catalog" && !preview && (
+              <form action={copyQuoteToCart.bind(null, q.id)}>
+                <button
+                  type="submit"
+                  style={{
+                    fontFamily: "var(--font-ui)",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: "var(--accent)",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Copy to new quote
+                </button>
+              </form>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -505,6 +540,22 @@ export default async function PortalPage({
             : `Thanks — Peak will confirm pricing on ${generatedNo || "your quote"} and let you know.`}
         </div>
       )}
+      {copyErr && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "14px 16px",
+            background: "#fdf0ee",
+            border: "1px solid #f3d2cc",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "#a33a2b",
+            fontWeight: 600,
+          }}
+        >
+          Couldn’t copy that quote — try again, or call us.
+        </div>
+      )}
       {accepted && (
         <div
           style={{
@@ -520,6 +571,11 @@ export default async function PortalPage({
         >
           Thanks — we’ve flagged your acceptance for the {companyName} team. They’ll confirm and
           get scheduling underway; nothing is final until they do.
+          {fileWarn && (
+            <div style={{ marginTop: 6, fontWeight: 500 }}>
+              Your file didn’t attach — you can email it to us, or try again from the quote.
+            </div>
+          )}
         </div>
       )}
 

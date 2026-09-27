@@ -402,7 +402,7 @@ export function isImportedHistoryQuote(q: Pick<Quote, "source">): boolean {
   return q.source === "daylite";
 }
 
-type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "portalAcceptance">;
+type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "portalAcceptance" | "portalReview">;
 
 /** Customer portal list rule: the grant's customer's published quotes plus
  *  their own self-serve drafts (the retired estimate builder's
@@ -415,9 +415,10 @@ export function portalListsQuote(q: PortalQuoteFields, customerId: string): bool
 }
 
 /** Customer portal Accept rule (button AND server action): a listed quote,
- *  sent, not already accepted. */
+ *  sent, not already accepted, and not awaiting Peak's re-review (#242 Task
+ *  13 — a refresh that turned up a price-on-request line, spec §4.5). */
 export function portalCanAcceptQuote(q: PortalQuoteFields, customerId: string): boolean {
-  return portalListsQuote(q, customerId) && q.status === "sent" && !q.portalAcceptance;
+  return portalListsQuote(q, customerId) && q.status === "sent" && !q.portalAcceptance && !q.portalReview;
 }
 
 export type ApprovalGateAction = "send" | "won";

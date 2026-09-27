@@ -215,6 +215,11 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
     cost: priced.cost,
     price: priced.unitPrice ?? 0,
     fixture: true,
+    // #242 Task 13: carried so Copy to new quote / a firm refresh can rebuild
+    // this line's cart entry (cartLinesFromSpec) — a fixture's SpecItem.sku is
+    // its light engine's, not the fixture record's own id.
+    fixtureId: fx.id,
+    ...(l.fixtureOptions ? { fixtureOptions: { ...l.fixtureOptions } } : {}),
     ...(engine?.mfr ? { manufacturer: engine.mfr } : {}),
     components: chosen
       .filter((c) => c.qty > 0 && !!fixtureComponentPart(ix, c.line.sku))
@@ -276,6 +281,10 @@ function priceCurtain(l: CartLine, qty: number): Priced {
     price: 0,
     curtain: true,
     por: true,
+    // #242 Task 13: the raw request, carried so Copy to new quote / a
+    // refresh can rebuild this line's cart entry (cartLinesFromSpec) — the
+    // formatted `desc` above is customer copy, not machine-readable.
+    curtainInputs: { ...c },
   };
   return { sell, item, section: "drape" };
 }
@@ -356,4 +365,31 @@ export function sellView(p: PricedCart): CustomerQuoteView {
     mode: p.mode,
     reason: p.reason,
   };
+}
+
+/**
+ * Rebuild cart lines from a portal-catalog quote's saved spec (#242 Task 13,
+ * spec §4.4/§4.5/§4.6) — the one mapping Copy to new quote and a pricing
+ * refresh both use. Reads exactly what priceCart wrote onto each SpecItem
+ * (fixtureId/fixtureOptions, curtainInputs) — an item missing what it needs
+ * (a pre-#242-Task-13 fixture/curtain line saved before these fields
+ * existed) is dropped rather than guessed at. Availability (hidden/deleted
+ * part, unknown fixture) is NOT checked here — callers re-price the result
+ * through `priceCart` and read `unavailable` off the priced lines, so there
+ * is exactly one place that decides what's still quotable.
+ */
+export function cartLinesFromSpec(sections: readonly SpecSection[]): Array<Omit<CartLine, "lineId">> {
+  const out: Array<Omit<CartLine, "lineId">> = [];
+  for (const s of sections) {
+    for (const it of s.items) {
+      if (it.fixture) {
+        if (it.fixtureId) out.push({ kind: "fixture", fixtureId: it.fixtureId, fixtureOptions: it.fixtureOptions, qty: it.qty });
+      } else if (it.curtain) {
+        if (it.curtainInputs) out.push({ kind: "curtain", curtainInputs: it.curtainInputs, qty: it.qty });
+      } else if (it.sku) {
+        out.push({ kind: "part", sku: it.sku, qty: it.qty });
+      }
+    }
+  }
+  return out;
 }

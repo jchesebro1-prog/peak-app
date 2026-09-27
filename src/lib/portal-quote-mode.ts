@@ -1,3 +1,5 @@
+import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
+
 /** Firm vs review, validity, accept eligibility, card guard (#242, spec §2.3/§4). Pure. */
 export type ModeLine = { por: boolean };
 export function quoteMode(lines: readonly ModeLine[]): { mode: "firm" | "review"; porCount: number; reason: string | null } {
@@ -9,11 +11,16 @@ export function firmValidUntil(generatedAt: number, validityDays: number): numbe
   return generatedAt + Math.max(1, Math.round(validityDays)) * 86400000;
 }
 export function canAcceptPortal(
-  q: { status: string; portalAcceptance?: unknown; portalFirm?: { validUntil: number } | null },
+  q: { status: string; portalAcceptance?: unknown; portalFirm?: { validUntil: number } | null; portalReview?: unknown },
   now: number
 ): { ok: boolean; reason?: "not-sent" | "accepted" | "expired" } {
   if (q.status !== "sent") return { ok: false, reason: "not-sent" };
   if (q.portalAcceptance) return { ok: false, reason: "accepted" };
+  // #242 Task 13 (spec §4.5): a refresh that flips into review must never
+  // stay acceptable — checked here (not only via the status change a
+  // sent→draft refresh makes) as the belt-and-suspenders rule for any path
+  // that keeps status "sent" while portalReview is set.
+  if (q.portalReview) return { ok: false, reason: "not-sent" };
   if (q.portalFirm && now > q.portalFirm.validUntil) return { ok: false, reason: "expired" };
   return { ok: true };
 }
@@ -47,3 +54,31 @@ export function looksLikeCardNumber(text: string): boolean {
 }
 export const PURCHASE_METHODS = ["po", "card", "check", "other"] as const;
 export const PURCHASE_METHOD_LABEL: Record<(typeof PURCHASE_METHODS)[number], string> = { po: "Purchase order", card: "Credit card", check: "Check", other: "Other" };
+
+/**
+ * Estimator save (#242 Task 13, controller decision 6): `por` is cleared on
+ * any item staff have now priced (`price > 0`) — a POR line staff left at 0
+ * stays flagged. Returns whether any `por` item remains, so the caller can
+ * clear the quote's `portalReview` stamp exactly when there is nothing left
+ * to review. Pure; sections/items not carrying `por` at all pass through
+ * unchanged (object-identical), so a non-portal quote's save is untouched.
+ */
+export function clearPricedPor(sections: readonly SpecSection[]): { sections: SpecSection[]; anyPor: boolean } {
+  let anyPor = false;
+  const next = sections.map((s) => {
+    let changed = false;
+    const items = s.items.map((it) => {
+      if (!it.por) return it;
+      if (it.price > 0) {
+        changed = true;
+        const { por, ...rest } = it;
+        void por;
+        return rest as SpecItem;
+      }
+      anyPor = true;
+      return it;
+    });
+    return changed ? { ...s, items } : s;
+  });
+  return { sections: next, anyPor };
+}

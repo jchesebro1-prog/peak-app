@@ -6,6 +6,7 @@ import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 import type { Pipelines } from "@/lib/pipelines";
 import type { FreightRule } from "@/lib/freight-rule";
+import type { CurtainRequest } from "@/lib/portal-cart-types";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -78,6 +79,18 @@ export type SpecItem = {
   noFreight?: boolean;
   /** #242: customer-requested line still waiting on a Peak price. */
   por?: boolean;
+  /** #242 Task 13 — the fixture record this line was configured from, and the
+   *  add-on quantities chosen (keyed `slot:sku`, as on a portal cart line).
+   *  Carried ONLY on a `fixture: true` item written by the portal
+   *  (portal-pricing.ts priceFixtureLine) so Copy to new quote / a pricing
+   *  refresh can rebuild the cart line that produced it; a hand-built
+   *  Estimator fixture line (fixture-bom.ts) never sets these. */
+  fixtureId?: string;
+  fixtureOptions?: Record<string, number>;
+  /** #242 Task 13 — the free-text curtain request this line was priced from
+   *  (portal-pricing.ts priceCurtain), carried the same way as `fixtureId`
+   *  above so the line can be rebuilt into a cart line. */
+  curtainInputs?: CurtainRequest;
 };
 
 /* ---------------- vendor quotes (#143, D162) ---------------- */
@@ -331,6 +344,31 @@ export type TravelLite = {
   officeName: string | null;
 };
 
+/**
+ * The staff Portal panel's data (#242 Task 13, spec §5) — present only for a
+ * loaded quote with `source === "portal-catalog"`; null otherwise (a fresh
+ * estimate, or any other quote type/source never renders the panel).
+ * `porItems` is a point-in-time read of the loaded spec's `por` lines (the
+ * next Save recomputes what remains — see `clearPricedPor`).
+ */
+export type PortalPanelData = {
+  quoteId: string;
+  portalFirm: { generatedAt: number; validUntil: number } | null;
+  portalReview: { requestedAt: number; reasons: string[] } | null;
+  portalAcceptance: {
+    at: number;
+    by: string;
+    byEmail: string;
+    purchaseMethod?: "po" | "card" | "check" | "other";
+    notes?: string;
+    poDocumentId?: string | null;
+  } | null;
+  portalDecline: { at: number; by: string; note: string } | null;
+  porItems: Array<{ desc: string; qty: number }>;
+  /** Where the Approve (→ won) status button redirects back to on refusal. */
+  back: string;
+};
+
 export type InitialQuote = {
   loadedId: string | null;
   quoteId: string;
@@ -373,6 +411,8 @@ export type InitialQuote = {
   pdfOptions: QuotePdfOptions;
   /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
   pdf: QuotePdfView | null;
+  /** #242 Task 13 — set only for a loaded `source === "portal-catalog"` quote. */
+  portal: PortalPanelData | null;
 };
 
 /**
@@ -433,4 +473,7 @@ export type EstimatorProps = {
   freightRule: FreightRule;
   /** Company-managed checked assumptions shared with consulting proposals. */
   assumptionLibrary: string[];
+  /** #242 Task 13 — a Portal panel Approve refusal's message (?statusError=
+   *  from the Quotes-hub status action), or null. */
+  portalStatusError: string | null;
 };

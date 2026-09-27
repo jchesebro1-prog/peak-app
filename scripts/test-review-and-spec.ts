@@ -9251,8 +9251,16 @@ import { exportObjectsFor } from "@/app/(app)/import/registry";
   ok(!QuoteStore.portalCanAcceptQuote({ ...base, portalAcceptance: { at: 1, by: "Pat", byEmail: "p@x" } }, "c-portal"), "#187 review 2: an already-accepted quote cannot be accepted twice");
   const portalPage = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8");
   const portalActions = readFileSync(join(process.cwd(), "src/app/portal/actions.ts"), "utf8");
-  ok(/\.filter\(\(q\) => portalListsQuote\(q, cid\)\)/.test(portalPage) && /portalCanAcceptQuote\(q, cid\)/.test(portalPage), "#187 review 2: the portal page lists and offers Accept through the shared rules");
-  ok(/if \(q && portalCanAcceptQuote\(q, session\.customerId\)\)/.test(portalActions), "#187 review 2: acceptPortalQuote refuses by the same rule (a Daylite quote id posted by hand is a no-op)");
+  // #242 Task 13 (spec §4.4/§4.5): the row's gate widened from
+  // portalCanAcceptQuote (tenant/Daylite/already-accepted only) to
+  // canAcceptPortal, which also refuses a firm quote past validUntil — the
+  // reviewer-found bug this task closes. The list filter (Daylite/tenant
+  // scoping) is unchanged.
+  ok(/\.filter\(\(q\) => portalListsQuote\(q, cid\)\)/.test(portalPage) && /canAcceptPortal\(q, Date\.now\(\)\)/.test(portalPage), "#187 review 2 (superseded by #242 Task 13): the portal page lists through portalListsQuote and gates Accept through canAcceptPortal (adds the validUntil check)");
+  // acceptPortalQuote no longer inlines the gate — every tenant/Daylite/
+  // already-accepted/expired/review check now lives once in acceptPortal
+  // (portal-quotes.ts), exercised end to end by portal242AcceptAsyncChecks.
+  ok(/acceptPortal\(session, input\)/.test(portalActions) && /from "@\/lib\/portal-quotes"/.test(portalActions), "#187 review 2 (superseded by #242 Task 13): acceptPortalQuote delegates every refusal rule to acceptPortal — a Daylite/other-customer/expired quote id posted by hand is still a no-op");
 }
 
 // Item 4 — row errors hold finalize until Jeff chooses.
@@ -10544,6 +10552,7 @@ seeded()
   .then(() => portal242CatalogBrowseAsyncChecks())
   .then(() => portal242SidebarAsyncChecks())
   .then(() => portal242GenerateAsyncChecks())
+  .then(() => portal242AcceptAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -28849,4 +28858,233 @@ async function portal242GenerateAsyncChecks(): Promise<void> {
 
 function eq242(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/* ======================================================================
+   Portal catalog — Task 13: Accept, expiry/refresh, copy to new quote,
+   staff decline (#242, spec §4.4–§4.6, §5). Pure checks first; DB checks
+   registered in the async chain as portal242AcceptAsyncChecks().
+   ====================================================================== */
+import { clearPricedPor as d242ClearPor } from "@/lib/portal-quote-mode";
+import { navData as d242NavData } from "@/lib/nav-counts";
+import { setRevisionPdfPath as d242SetRevPdf } from "@/lib/stores/quotes";
+import {
+  acceptPortal as d242AcceptPortal,
+  copyToCart as d242CopyToCart,
+  declinePortalAcceptance as d242DeclinePortalAcceptance,
+  refreshPortalQuote as d242RefreshPortalQuote,
+  ACCEPT_ALREADY_COPY as d242AcceptAlready,
+  ACCEPT_CARD_COPY as d242AcceptCard,
+  ACCEPT_EXPIRED_COPY as d242AcceptExpired,
+  ACCEPT_METHOD_COPY as d242AcceptMethod,
+  PORTAL_NOT_FOUND_COPY as d242NotFound,
+} from "@/lib/portal-quotes";
+{
+  const item = (over: Partial<SpecItem> = {}): SpecItem => ({ id: 1, sku: "S", desc: "D", qty: 1, unit: "ea", cost: 0, price: 0, ...over });
+  const sec = (items: SpecItem[]): D242Section => ({ id: "S", name: "S", kind: "materials", mfr: "", freightPct: 0, freightAuto: false, freightMiles: null, items });
+  const priced = item({ por: true, price: 120 });
+  const stillPor = item({ por: true, price: 0 });
+  const noPorAtAll = item({ price: 50 }); // never carried `por` at all
+  const r1 = d242ClearPor([sec([priced, stillPor, noPorAtAll])]);
+  ok(
+    !("por" in r1.sections[0].items[0]) && r1.sections[0].items[1].por === true && r1.sections[0].items[2] === noPorAtAll,
+    "#242 Task 13: clearPricedPor clears por once price > 0, leaves an unpriced POR line flagged, and never touches a line without por (same object)"
+  );
+  ok(r1.anyPor === true, "#242 Task 13: clearPricedPor reports a POR line remains");
+  const r2 = d242ClearPor([sec([priced])]);
+  ok(r2.anyPor === false, "#242 Task 13: clearPricedPor reports nothing remains once every por line is priced");
+  const untouchedSection = sec([noPorAtAll]);
+  const r3 = d242ClearPor([untouchedSection]);
+  ok(r3.sections[0] === untouchedSection, "#242 Task 13: a section with no por item at all comes back object-identical (non-portal quotes' saves untouched)");
+
+  const nowX = 1_700_000_000_000;
+  ok(
+    !d242CanAccept({ status: "sent", portalReview: { requestedAt: nowX, reasons: [] } }, nowX).ok,
+    "#242 Task 13: canAcceptPortal refuses while portalReview is set, even on a 'sent' quote (belt-and-suspenders alongside the status change)"
+  );
+}
+
+async function portal242AcceptAsyncChecks(): Promise<void> {
+  const P = fixtureId(242, "acc-part");
+  const P2 = fixtureId(242, "acc-fx-engine");
+  const P3 = fixtureId(242, "acc-existing");
+  const P4 = fixtureId(242, "acc-por-flip");
+  const OPT = fixtureId(242, "acc-fx-opt");
+  const FX = fixtureId(242, "acc-fx");
+  const CO = fixtureId(242, "acc-co");
+  const CO_X = fixtureId(242, "acc-co-other");
+  const G = fixtureId(242, "acc-grant");
+  const GX = fixtureId(242, "acc-grant-other");
+  for (const g of [G, GX]) registerFixture("portal_carts", g);
+  const NOW = new Date(2026, 9, 1, 9).getTime();
+  const DAY = 86400000;
+  const EXPIRED_NOW = NOW + 31 * DAY;
+  const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  const sessX = { grantId: GX, customerId: CO_X, name: "Rae Other", email: "rae@example.com" };
+
+  try {
+    const owner = (await activeUsers())[0]?.name || "";
+    await d242MergeUpsert(P, { desc: "Test242 Accept Part", category: "Test242 AcceptCat", unit: "ea", list: 120, cost: 70 });
+    await d242MergeUpsert(P2, { desc: "Test242 Accept Fixture Engine", category: "Test242 AcceptCat", unit: "ea", list: 90, cost: 50 });
+    await d242MergeUpsert(P3, { desc: "Test242 Accept Pre-existing", category: "Test242 AcceptCat", unit: "ea", list: 40, cost: 20 });
+    await d242MergeUpsert(P4, { desc: "Test242 Accept POR-flip Part", category: "Test242 AcceptCat", unit: "ea", list: 60, cost: 30 });
+    await d242MergeUpsert(OPT, { desc: "Test242 Accept Clamp", category: "Hardware", unit: "ea", list: 0, cost: 7.8 });
+    for (const s of [P, P2, P3, P4, OPT]) registerFixture("catalog_parts", s);
+    await createFixture("subassemblies", {
+      id: FX, kind: "fixture", label: "Test242 Accept Fixture", description: "", lightEngineSku: P2, lensSku: null,
+      lines: { data: [], power: [], mounting: [{ sku: OPT, qty: 0, label: "Clamp" }], accessories: [] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 450 };
+    await upsertCustomer({ id: CO, name: "Test242 Accept Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
+    await upsertCustomer({ id: CO_X, name: "Test242 Accept Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
+    d242Invalidate();
+
+    /* ---------------- Quote A: accept + decline ---------------- */
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }] });
+    const genA = await d242Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genA.ok) throw new Error("#242 Task 13 setup (A) failed — " + genA.error);
+    registerFixture("quotes", genA.quoteId);
+    ok(genA.mode === "firm", "#242 Task 13 setup: quote A (one priced part) generates firm");
+
+    const cardR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "Card on file 4111 1111 1111 1111", poDocumentId: null }, NOW);
+    ok(!cardR.ok && cardR.error === d242AcceptCard, "#242 accept: a 13–19 digit Luhn-valid run in the notes is refused with the card copy");
+    ok(!(await d242GetQuote(genA.quoteId))?.portalAcceptance, "#242 accept: the refused card attempt wrote nothing");
+
+    const methodR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "bitcoin", notes: "", poDocumentId: null }, NOW);
+    ok(!methodR.ok && methodR.error === d242AcceptMethod, "#242 accept: an unrecognized purchase method is refused — \"Pick how you'll purchase.\"");
+
+    const otherR = await d242AcceptPortal(sessX, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
+    ok(!otherR.ok && otherR.error === d242NotFound, "#242 accept: another customer's session can't accept this quote");
+
+    // Expired, and NOT YET accepted — canAcceptPortal's order (status →
+    // accepted → review → expired) means this is the one moment "expired"
+    // is reachable at all; testing it after a real accept would report
+    // "already accepted" instead (accepted wins — see canAcceptPortal).
+    const expiredR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
+    ok(!expiredR.ok && expiredR.error === d242AcceptExpired, "#242 accept: past validUntil refuses with the expired copy");
+
+    const okR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: "DOC-999" }, NOW);
+    ok(okR.ok, "#242 accept: a firm in-date quote accepts with purchaseMethod po + notes");
+    const q1 = await d242GetQuote(genA.quoteId);
+    ok(
+      !!q1?.portalAcceptance && q1.portalAcceptance.purchaseMethod === "po" && q1.portalAcceptance.notes === "PO 44812" &&
+        q1.portalAcceptance.poDocumentId === "DOC-999" && q1.status === "sent",
+      "#242 accept: portalAcceptance carries purchaseMethod/notes/poDocumentId; status stays sent (Approve, not Accept, moves it to won)"
+    );
+
+    const againR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
+    ok(!againR.ok && againR.error === d242AcceptAlready, "#242 accept: an already-accepted quote refuses — \"This quote was already accepted.\"");
+
+    const nav = await d242NavData(owner);
+    ok(
+      nav.bell.some((g) => g.key === "portal" && g.items.some((i) => i.id === genA.quoteId)),
+      "#242 accept: navData(owner)'s 'portal' bell group carries the accepted quote"
+    );
+
+    const declineR = await d242DeclinePortalAcceptance(genA.quoteId, "Staff", "Need a PO");
+    ok(declineR.ok, "#242 decline: a 1–500 char note declines");
+    const q2 = await d242GetQuote(genA.quoteId);
+    ok(
+      q2?.portalAcceptance === null && q2?.portalDecline?.note === "Need a PO" && q2?.status === "sent",
+      "#242 decline: portalAcceptance clears, portalDecline stamps {by, note}, status stays sent"
+    );
+    const badNoteR = await d242DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
+    ok(!badNoteR.ok, "#242 decline: an empty/whitespace-only note is refused");
+    const reAcceptR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null }, NOW);
+    ok(reAcceptR.ok, "#242 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
+    ok((await d242GetQuote(genA.quoteId))?.portalDecline === null, "#242 accept: a fresh acceptance clears the prior portalDecline");
+
+    /* ---------------- Quote B: expiry + firm refresh ---------------- */
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
+    const genB = await d242Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genB.ok) throw new Error("#242 Task 13 setup (B) failed — " + genB.error);
+    registerFixture("quotes", genB.quoteId);
+    const qB0 = await d242GetQuote(genB.quoteId);
+    const rev1 = (qB0?.revisions || []).find((r) => r.reason === "sent");
+    if (!rev1) throw new Error("#242 Task 13 setup (B): no sent revision after Generate");
+    ok(await d242SetRevPdf(genB.quoteId, rev1.rev, "quote-pdfs/test-rev1.pdf"), "#242 Task 13 setup (B): simulate the original send's PDF landing");
+    const qB0pdf = await d242GetQuote(genB.quoteId);
+    ok(!!qB0pdf && portalQuotePdfSource(qB0pdf, CO)?.rev === rev1.rev, "#242 refresh setup: the portal PDF source points at the original sent revision before any refresh");
+
+    const refreshEarlyR = await d242RefreshPortalQuote(sess, genB.quoteId, NOW);
+    ok(!refreshEarlyR.ok, "#242 refresh: refusing before validUntil has passed");
+    const refreshOtherR = await d242RefreshPortalQuote(sessX, genB.quoteId, EXPIRED_NOW);
+    ok(!refreshOtherR.ok && refreshOtherR.error === d242NotFound, "#242 refresh: another customer's session can't refresh this quote");
+
+    const refreshR = await d242RefreshPortalQuote(sess, genB.quoteId, EXPIRED_NOW);
+    ok(refreshR.ok && refreshR.mode === "firm", "#242 refresh: past validUntil, still every line priced → mode firm");
+    const qB1 = await d242GetQuote(genB.quoteId);
+    ok(!!qB1 && qB1.status === "sent" && !!qB1.portalFirm && qB1.portalFirm.validUntil === EXPIRED_NOW + 30 * DAY, "#242 refresh: stays sent; validUntil restarts 30 days from the refresh");
+    ok((qB1?.revisions?.length || 0) > (qB0?.revisions?.length || 0), "#242 refresh: a new revision was appended");
+    const rev2 = (qB1?.revisions || []).slice().reverse().find((r) => r.reason === "sent");
+    if (!rev2 || rev2.rev === rev1.rev) throw new Error("#242 Task 13: refresh cut no new sent revision");
+    ok(await d242SetRevPdf(genB.quoteId, rev2.rev, "quote-pdfs/test-rev2.pdf"), "#242 Task 13: simulate the refreshed price's PDF landing");
+    const afterRefreshPdf = portalQuotePdfSource((await d242GetQuote(genB.quoteId))!, CO);
+    ok(afterRefreshPdf?.rev === rev2.rev && afterRefreshPdf.path === "quote-pdfs/test-rev2.pdf", "#242 refresh: the portal PDF source now points at the NEWEST sent revision, not the original");
+
+    /* ---------------- Quote C: refresh flips to review ---------------- */
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P4, qty: 1 }] });
+    const genC = await d242Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genC.ok) throw new Error("#242 Task 13 setup (C) failed — " + genC.error);
+    registerFixture("quotes", genC.quoteId);
+    ok(genC.mode === "firm", "#242 Task 13 setup: quote C generates firm before its part is flagged");
+    await d242MergeUpsert(P4, { note: "Verify current price" });
+    d242Invalidate();
+    const refreshReviewR = await d242RefreshPortalQuote(sess, genC.quoteId, EXPIRED_NOW);
+    ok(refreshReviewR.ok && refreshReviewR.mode === "review", "#242 refresh: a line now price-on-request flips the refresh to review");
+    const qC1 = await d242GetQuote(genC.quoteId);
+    ok(
+      !!qC1 && qC1.status === "draft" && !!qC1.portalReview && qC1.portalFirm === null,
+      "#242 refresh: the quote recalls to draft, stamps portalReview, and clears portalFirm"
+    );
+    ok(!d242CanAccept(qC1!, EXPIRED_NOW).ok, "#242 refresh: the flipped quote can no longer be accepted (not-sent — it's back to draft)");
+
+    /* ---------------- Quote D: copy to new quote ---------------- */
+    const curtainInputs = { name: "Side Drape", fabricSku: "", fabricName: "Test242 Velour", qty: "1", width: "20", height: "16", fullness: "0" as const };
+    await d242SaveCart({
+      id: G, customerId: CO, locationId: "v1", updatedAt: NOW,
+      lines: [
+        { lineId: "a", kind: "part", sku: P, qty: 2 },
+        { lineId: "b", kind: "fixture", fixtureId: FX, qty: 1, fixtureOptions: { [`mounting:${OPT}`]: 1 } },
+        { lineId: "c", kind: "curtain", curtainInputs, qty: 1 },
+      ],
+    });
+    const genD = await d242Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genD.ok) throw new Error("#242 Task 13 setup (D) failed — " + genD.error);
+    registerFixture("quotes", genD.quoteId);
+    ok(genD.mode === "review", "#242 Task 13 setup: quote D's curtain line makes it a review generation (POR)");
+
+    // Hide P (the plain part line) AFTER generating — it must be skipped on
+    // copy without touching the fixture (a different light-engine SKU, P2)
+    // or the curtain (never SKU-backed).
+    await d242MergeUpsert(P, { portalVisibility: "hide" });
+    d242Invalidate();
+
+    // An existing, unrelated cart line survives the copy (never replaced).
+    await d242AddLine(G, CO, { kind: "part", sku: P3, qty: 1 });
+
+    const copyOtherR = await d242CopyToCart(sessX, genD.quoteId);
+    ok(!copyOtherR.ok && copyOtherR.error === d242NotFound, "#242 copy: another customer's session can't copy this quote");
+
+    const copyR = await d242CopyToCart(sess, genD.quoteId);
+    ok(copyR.ok && copyR.added === 2, "#242 copy: 2 of 3 lines copied — the hidden part is skipped, the fixture and the curtain are not");
+    const cartAfter = await d242GetCart(G, CO);
+    ok(cartAfter.lines.some((l) => l.kind === "part" && l.sku === P3), "#242 copy: the pre-existing P3 line is kept, not replaced");
+    ok(!cartAfter.lines.some((l) => l.kind === "part" && l.sku === P), "#242 copy: the now-hidden part is never added");
+    const copiedFixture = cartAfter.lines.find((l) => l.kind === "fixture");
+    ok(
+      !!copiedFixture && copiedFixture.fixtureId === FX && copiedFixture.fixtureOptions?.[`mounting:${OPT}`] === 1,
+      "#242 copy: the fixture line round-trips by fixture id + chosen options"
+    );
+    const copiedCurtain = cartAfter.lines.find((l) => l.kind === "curtain");
+    ok(
+      !!copiedCurtain && copiedCurtain.curtainInputs?.fabricName === "Test242 Velour" && copiedCurtain.curtainInputs?.width === "20",
+      "#242 copy: the curtain line round-trips by its free-text inputs"
+    );
+  } finally {
+    d242Invalidate();
+    await removeCustomer(CO);
+    await removeCustomer(CO_X);
+  }
 }

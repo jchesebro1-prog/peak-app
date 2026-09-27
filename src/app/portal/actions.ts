@@ -6,7 +6,11 @@ import { cookies } from "next/headers";
 import { portalSession, PORTAL_COOKIE } from "@/lib/portal";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { create as createLead } from "@/lib/stores/leads";
-import { get as getQuote, portalCanAcceptQuote, update as updateQuote } from "@/lib/stores/quotes";
+import {
+  acceptPortal,
+  copyToCart,
+  refreshPortalQuote as refreshPortalQuoteFor,
+} from "@/lib/portal-quotes";
 
 /**
  * Portal mutations (IDEAS #47). SECURITY: these run for ANONYMOUS visitors —
@@ -84,26 +88,50 @@ export async function submitPortalRequest(formData: FormData): Promise<void> {
 }
 
 /**
- * Non-binding quote acceptance (IDEAS #47 P3, Jeff's design call): the
- * button only FLAGS a follow-up for the team — a human confirms by marking
- * the quote Won, which runs the normal accepted-quote spawn machinery.
- * Tenant check: the quote must belong to the grant's customer and be in the
- * published "sent" state — and never imported Daylite history
- * (portalCanAcceptQuote, the same rule that renders the button).
+ * Quote acceptance (IDEAS #47 P3 / #242 Task 13, spec §4.4): the customer
+ * names how they'll purchase, an optional note (never a card number) and an
+ * optional PO file — a human still confirms by marking the quote Won, which
+ * runs the normal accepted-quote spawn machinery. Every tenant/eligibility
+ * check (this session's customer, sent, not already accepted, a firm quote
+ * still in date, not mid-review) lives in `acceptPortal` — the one seam the
+ * dialog and any other caller both go through.
  */
-export async function acceptPortalQuote(formData: FormData): Promise<void> {
-  const session = await portalSession();
-  if (!session) redirect("/portal?denied=1");
+export async function acceptPortalQuote(input: {
+  quoteId: string;
+  purchaseMethod: string;
+  notes: string;
+  poDocumentId: string | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await portalSession().catch(() => null);
+  const r = await acceptPortal(session, input);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
 
-  const id = String(formData.get("quote") || "");
-  const q = id ? await getQuote(id) : null;
-  if (q && portalCanAcceptQuote(q, session.customerId)) {
-    await updateQuote(id, {
-      portalAcceptance: { at: Date.now(), by: session.name, byEmail: session.email },
-    });
+/** Refresh pricing on an expired firm portal quote (#242 Task 13, spec §4.5). */
+export async function refreshPortalQuote(quoteId: string): Promise<{ ok: true; mode: "firm" | "review" } | { ok: false; error: string }> {
+  const session = await portalSession().catch(() => null);
+  const r = await refreshPortalQuoteFor(session, quoteId);
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+}
+
+/**
+ * Copy to new quote (#242 Task 13, spec §4.6) — appends the quote's lines to
+ * the grant's cart, then lands on the cart page to review/Generate. A plain
+ * `<form action>` (no client JS needed), so a refusal redirects with a query
+ * param instead of returning a value — matches `submitPortalRequest` above.
+ */
+export async function copyQuoteToCart(quoteId: string): Promise<void> {
+  const session = await portalSession().catch(() => null);
+  const r = await copyToCart(session, quoteId);
+  if (!r.ok) {
+    console.error("copyQuoteToCart refused", quoteId, r.error);
+    redirect("/portal?copyerr=1");
   }
-  revalidatePath("/", "layout");
-  redirect("/portal?accepted=1");
+  revalidatePath("/portal/catalog/quote");
+  revalidatePath("/portal/catalog");
+  redirect("/portal/catalog/quote");
 }
 
 export async function portalSignOut(): Promise<void> {

@@ -131,6 +131,7 @@ async function initialFrom(
       replaces: "",
       pdfOptions: { ...DEFAULT_PDF_OPTIONS },
       pdf: null,
+      portal: null,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -192,6 +193,23 @@ async function initialFrom(
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),
     pdf: pdfView(q.pdf, Date.now()),
+    // #242 Task 13: the staff Portal panel — present only for a portal-
+    // catalog quote. porItems is a point-in-time read of the loaded spec's
+    // `por` lines; the next Save recomputes what remains (clearPricedPor).
+    portal:
+      q.source === "portal-catalog"
+        ? {
+            quoteId: q.id,
+            portalFirm: q.portalFirm ?? null,
+            portalReview: q.portalReview ?? null,
+            portalAcceptance: q.portalAcceptance ?? null,
+            portalDecline: q.portalDecline ?? null,
+            porItems: (sections || []).flatMap((s) =>
+              s.items.filter((it) => it.por).map((it) => ({ desc: it.desc, qty: it.qty }))
+            ),
+            back: `/estimator?id=${encodeURIComponent(q.id)}`,
+          }
+        : null,
   };
 }
 
@@ -204,6 +222,10 @@ export default async function EstimatorPage({
   const sp = await searchParams;
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  // #242 Task 13: the Portal panel's Approve button reuses the Quotes-hub
+  // status action verbatim (setQuoteStatus) — a gate refusal redirects back
+  // here with ?statusError=; surfaced in the panel, cleared on the next load.
+  const portalStatusError = one(sp.statusError) || null;
   // Guided intake hand-off (quotes/new, #160): only applies to a fresh
   // builder — an explicit ?id= always wins.
   const handoff = rawId ? null : readHandoff(sp);
@@ -373,6 +395,7 @@ export default async function EstimatorPage({
       templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
       freightRule={freightRule}
+      portalStatusError={portalStatusError}
     />
   );
 }

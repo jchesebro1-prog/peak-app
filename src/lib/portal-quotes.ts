@@ -4,16 +4,26 @@
 // session in; nothing here takes a customer id, a venue's owner or a price
 // from the browser.
 import { totals } from "@/app/(app)/estimator/pricing";
+import type { SpecSection } from "@/app/(app)/estimator/types";
 import { loadPortalRules } from "@/lib/freight-rule-load";
 import type { PortalSession } from "@/lib/portal";
 import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
-import { priceCart, pricingContextFor } from "@/lib/portal-pricing";
-import { firmValidUntil } from "@/lib/portal-quote-mode";
+import { cartLinesFromSpec, priceCart, pricingContextFor } from "@/lib/portal-pricing";
+import { canAcceptPortal, firmValidUntil, looksLikeCardNumber, PURCHASE_METHODS } from "@/lib/portal-quote-mode";
+import { copySentRevisionPdf } from "@/lib/quote-pdf/generate";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { clearCart, getCart } from "@/lib/stores/portal-carts";
-import { create as createQuote, setStatus, update as updateQuote } from "@/lib/stores/quotes";
+import type { CartLine } from "@/lib/portal-cart-types";
+import { addLine, clearCart, getCart, type PortalCart } from "@/lib/stores/portal-carts";
+import {
+  addQuoteRevision,
+  create as createQuote,
+  get as getQuote,
+  portalListsQuote,
+  setStatus,
+  update as updateQuote,
+} from "@/lib/stores/quotes";
 
 /** Guard copy (verbatim, controller decision 8) — the cart page shows the same. */
 export const GENERATE_EMPTY_COPY = "Your quote is empty.";
@@ -163,5 +173,249 @@ export async function generatePortalQuote(
     return { ok: false, error: GENERATE_FAIL_COPY };
   } finally {
     inFlight.delete(grantId);
+  }
+}
+
+/* ======================================================================
+   Task 13 (spec §4.4–§4.6) — Accept, expiry/refresh, copy to new quote,
+   staff decline. Shared refusal copy first; every function below re-checks
+   portalListsQuote (never trusts an id belongs to this session's customer).
+   ====================================================================== */
+
+export const PORTAL_NOT_FOUND_COPY = "We couldn't find that quote.";
+export const ACCEPT_ALREADY_COPY = "This quote was already accepted.";
+export const ACCEPT_NOT_READY_COPY = "This quote isn't ready to accept yet.";
+export const ACCEPT_EXPIRED_COPY = "This quote's pricing has expired — refresh it to get current pricing.";
+export const ACCEPT_METHOD_COPY = "Pick how you'll purchase.";
+export const ACCEPT_CARD_COPY = "Don't enter card numbers — we'll call you to take payment.";
+const ACCEPT_RATE_COPY = "You've tried to accept several times — try again later, or call us.";
+const ACCEPT_FAIL_COPY = "Couldn't accept this quote — try again.";
+export const ACCEPT_LIMIT = 10;
+const ACCEPT_WINDOW_MS = 3_600_000;
+
+/** #242 Task 13 (spec §4.4). Every guard refuses BEFORE any write; the card
+ *  check runs even for a request that would otherwise be refused for
+ *  another reason first, so callers always see the reason a human reads
+ *  first (not-sent / accepted / expired take priority — a customer who
+ *  can't accept at all doesn't need the card warning). */
+export async function acceptPortal(
+  session: PortalSession | null,
+  input: { quoteId: string; purchaseMethod: string; notes: string; poDocumentId: string | null },
+  now: number = Date.now()
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  const q = await getQuote(input.quoteId);
+  if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+
+  const mode = canAcceptPortal(q, now);
+  if (!mode.ok) {
+    if (mode.reason === "accepted") return { ok: false, error: ACCEPT_ALREADY_COPY };
+    if (mode.reason === "expired") return { ok: false, error: ACCEPT_EXPIRED_COPY };
+    return { ok: false, error: ACCEPT_NOT_READY_COPY };
+  }
+  if (!(PURCHASE_METHODS as readonly string[]).includes(input.purchaseMethod)) {
+    return { ok: false, error: ACCEPT_METHOD_COPY };
+  }
+  const notes = String(input.notes || "").slice(0, 1000);
+  if (looksLikeCardNumber(notes)) return { ok: false, error: ACCEPT_CARD_COPY };
+
+  if (!rateLimit("portal-accept:" + session.grantId, ACCEPT_LIMIT, ACCEPT_WINDOW_MS).ok) {
+    return { ok: false, error: ACCEPT_RATE_COPY };
+  }
+  try {
+    await updateQuote(q.id, {
+      portalAcceptance: {
+        at: now,
+        by: session.name,
+        byEmail: session.email,
+        purchaseMethod: input.purchaseMethod as (typeof PURCHASE_METHODS)[number],
+        notes,
+        poDocumentId: input.poDocumentId || null,
+      },
+      portalDecline: null,
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error("acceptPortal failed", q.id, e);
+    return { ok: false, error: ACCEPT_FAIL_COPY };
+  }
+}
+
+const REFRESH_NOT_EXPIRED_COPY = "This quote hasn't expired yet.";
+const REFRESH_NOT_ELIGIBLE_COPY = "This quote can't be refreshed.";
+const REFRESH_RATE_COPY = "You've refreshed pricing several times this hour — try again later, or call us.";
+const REFRESH_FAIL_COPY = "Couldn't refresh this quote — try again.";
+export const REFRESH_LIMIT = 10;
+const REFRESH_WINDOW_MS = 3_600_000;
+
+/**
+ * Refresh pricing on an expired firm portal quote (#242 Task 13, spec §4.5).
+ * Rebuilds a transient cart from the quote's OWN spec (cartLinesFromSpec —
+ * the same mapping `copyToCart` uses) + its saved venue, re-prices every
+ * line at current cost/tier/freight, and writes the result back as a new
+ * revision.
+ *
+ * Firm (still every line priced): the quote stays `sent` — `setStatus`
+ * treats a same-status call as a no-op (it exists to replay a `won` spawn,
+ * not to cut a revision), so the "sent" revision here is cut by hand,
+ * exactly the shape `setStatus`'s own send path cuts (`reason: "sent"`),
+ * and `copySentRevisionPdf` is called directly rather than through
+ * `setStatus` — the #222 portal PDF route (`portalQuotePdfSource`) reads
+ * `latestSentRevision`, so this is what makes the refreshed price the one a
+ * customer's Open PDF (once it renders) actually shows.
+ *
+ * Review (some line is now price-on-request): `resolveStatusGate` allows
+ * `sent → draft` unconditionally (it only gates advancing TO `won`/`sent`),
+ * so this recalls the quote to `draft` via the real `setStatus` — history,
+ * pipeline stage and all — and stamps `portalReview`/clears `portalFirm`.
+ * `canAcceptPortal`/`portalCanAcceptQuote` also refuse to accept while
+ * `portalReview` is set, as a second gate independent of the status change.
+ */
+export async function refreshPortalQuote(
+  session: PortalSession | null,
+  quoteId: string,
+  now: number = Date.now()
+): Promise<{ ok: true; mode: "firm" | "review" } | { ok: false; error: string }> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  const q = await getQuote(quoteId);
+  if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+  if (q.source !== "portal-catalog") return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
+
+  const gate = canAcceptPortal(q, now);
+  if (gate.ok) return { ok: false, error: REFRESH_NOT_EXPIRED_COPY };
+  if (gate.reason !== "expired") return { ok: false, error: REFRESH_NOT_ELIGIBLE_COPY };
+
+  if (!rateLimit("portal-refresh:" + session.grantId, REFRESH_LIMIT, REFRESH_WINDOW_MS).ok) {
+    return { ok: false, error: REFRESH_RATE_COPY };
+  }
+  try {
+    const priorSections = ((q.spec as { sections?: SpecSection[] } | null)?.sections ?? []) as SpecSection[];
+    const rawLines = cartLinesFromSpec(priorSections).map((l, i) => ({ ...l, lineId: "refresh-" + i }));
+    const synthetic: PortalCart = { id: "", customerId: session.customerId, locationId: q.locationId ?? null, lines: rawLines, updatedAt: now };
+    const ctx = await pricingContextFor(session);
+    const p = await priceCart(synthetic, ctx);
+    const t = totals(p.sections, 0);
+
+    if (p.mode === "firm") {
+      const rules = await loadPortalRules();
+      await updateQuote(q.id, {
+        spec: { sections: p.sections, mobs: [] },
+        value: Math.round(t.grand),
+        margin: t.margin,
+        pricingTier: ctx.tier,
+        tierMargin: ctx.tierMargin,
+        portalFirm: { generatedAt: now, validUntil: firmValidUntil(now, rules.validityDays) },
+        portalReview: null,
+      });
+      await scheduleQuotePdf(q.id);
+      await addQuoteRevision(q.id, { by: "Customer portal", reason: "sent", note: "Portal price refresh" });
+      await copySentRevisionPdf(q.id).catch((e) => console.error("refreshPortalQuote: sent-revision copy failed", q.id, e));
+      return { ok: true, mode: "firm" };
+    }
+
+    await updateQuote(q.id, {
+      spec: { sections: p.sections, mobs: [] },
+      value: Math.round(t.grand),
+      margin: t.margin,
+      pricingTier: ctx.tier,
+      tierMargin: ctx.tierMargin,
+      portalFirm: null,
+      portalReview: { requestedAt: now, reasons: p.reason ? [p.reason] : [] },
+    });
+    await setStatus(q.id, "draft", "Customer portal");
+    return { ok: true, mode: "review" };
+  } catch (e) {
+    console.error("refreshPortalQuote failed", q.id, e);
+    return { ok: false, error: REFRESH_FAIL_COPY };
+  }
+}
+
+const COPY_FAIL_COPY = "Couldn't copy this quote — try again.";
+export const COPY_LIMIT = 20;
+const COPY_WINDOW_MS = 3_600_000;
+const COPY_RATE_COPY = "You've copied several quotes this hour — try again later, or call us.";
+
+/**
+ * Copy to new quote (#242 Task 13, spec §4.6): rebuilds this quote's lines
+ * (cartLinesFromSpec) and re-prices them (the same check `priceCart` uses
+ * for "No longer available" on the cart page) so a line whose part is now
+ * hidden/deleted is skipped — never added unpriceable. Appends to the
+ * grant's existing cart; nothing already there is touched or replaced.
+ * `addLine`'s own MAX_CART_LINES refusal simply stops that one line from
+ * being added (a same-SKU part line still merges past the cap).
+ */
+export async function copyToCart(
+  session: PortalSession | null,
+  quoteId: string
+): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  const q = await getQuote(quoteId);
+  if (!q || !portalListsQuote(q, session.customerId)) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+
+  if (!rateLimit("portal-copy:" + session.grantId, COPY_LIMIT, COPY_WINDOW_MS).ok) {
+    return { ok: false, error: COPY_RATE_COPY };
+  }
+  try {
+    const sections = ((q.spec as { sections?: SpecSection[] } | null)?.sections ?? []) as SpecSection[];
+    const rawLines = cartLinesFromSpec(sections).map((l, i) => ({ ...l, lineId: "copy-" + i }));
+    if (!rawLines.length) return { ok: true, added: 0 };
+    const ctx = await pricingContextFor(session);
+    const synthetic: PortalCart = { id: "", customerId: session.customerId, locationId: q.locationId ?? null, lines: rawLines, updatedAt: Date.now() };
+    const p = await priceCart(synthetic, ctx);
+    const available = new Set(p.lines.filter((l) => !l.unavailable).map((l) => l.lineId));
+
+    let added = 0;
+    for (const l of rawLines) {
+      if (!available.has(l.lineId)) continue;
+      const line: Omit<CartLine, "lineId"> = {
+        kind: l.kind,
+        sku: l.sku,
+        fixtureId: l.fixtureId,
+        fixtureOptions: l.fixtureOptions,
+        curtainInputs: l.curtainInputs,
+        qty: l.qty,
+      };
+      try {
+        await addLine(session.grantId, session.customerId, line);
+        added++;
+      } catch (e) {
+        // MAX_CART_LINES ("Your quote can hold up to 200 lines.") or a bad
+        // qty — neither stops the rest of the copy from being attempted (a
+        // part SKU further down may still merge into an existing line).
+        console.error("copyToCart: one line didn't add", q.id, l, e);
+      }
+    }
+    return { ok: true, added };
+  } catch (e) {
+    console.error("copyToCart failed", q.id, e);
+    return { ok: false, error: COPY_FAIL_COPY };
+  }
+}
+
+const DECLINE_NOTE_COPY = "Enter a note (1–500 characters).";
+const DECLINE_FAIL_COPY = "Couldn't decline this quote — try again.";
+
+/**
+ * Staff decline (#242 Task 13, spec §4.4): clears the customer's acceptance
+ * and stamps `portalDecline`, shown back to them in the portal; the quote
+ * stays `sent` (never a fifth status) so they can simply accept again. Takes
+ * no session — the caller (estimator/actions.ts declinePortalAcceptanceAction)
+ * is the team-side `requireUser()` gate.
+ */
+export async function declinePortalAcceptance(
+  quoteId: string,
+  by: string,
+  note: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = String(note || "").trim();
+  if (!trimmed || trimmed.length > 500) return { ok: false, error: DECLINE_NOTE_COPY };
+  try {
+    const q = await getQuote(quoteId);
+    if (!q) return { ok: false, error: PORTAL_NOT_FOUND_COPY };
+    await updateQuote(quoteId, { portalAcceptance: null, portalDecline: { at: Date.now(), by: by || "Staff", note: trimmed } });
+    return { ok: true };
+  } catch (e) {
+    console.error("declinePortalAcceptance failed", quoteId, e);
+    return { ok: false, error: DECLINE_FAIL_COPY };
   }
 }

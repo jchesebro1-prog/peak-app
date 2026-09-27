@@ -97,6 +97,7 @@ import VendorQuoteModal, {
 } from "./vendor-quote-modal";
 import PreviewDoc from "./preview-doc";
 import { DeleteQuoteButton } from "../quotes/delete-quote-button";
+import { PortalPanel } from "./portal-panel";
 
 /**
  * Estimator workspace — client port of Estimator.dc.html (build + preview
@@ -372,6 +373,7 @@ export default function EstimatorClient({
   templateSets,
   assumptionLibrary,
   freightRule,
+  portalStatusError,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
   /** #242: the freight default for THIS load — computed once from the props
@@ -3191,6 +3193,7 @@ export default function EstimatorClient({
                 position: "relative",
               }}
             >
+              {initial.portal && <PortalPanel data={initial.portal} statusError={portalStatusError} />}
               {sections.map((sec, i) => (
                 <SectionCard
                   key={sec.id}
