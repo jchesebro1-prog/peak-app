@@ -10526,6 +10526,7 @@ seeded()
   .then(() => estimate223WritersAsyncChecks())
   .then(() => estimate223SweepDAsyncChecks())
   .then(() => daylite241AsyncChecks())
+  .then(() => portal242RulesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27363,5 +27364,42 @@ async function daylite241AsyncChecks(): Promise<void> {
       src.includes("~* '\\mconsult(ing)?\\M'") &&
       (src.match(/NOT IN \('won', 'lost'\)/g) || []).length === 3,
     `#241 migration: its three patterns (each guarded to open quotes) classify every sample name exactly like dayliteQuoteType${disagree.length ? " — " + disagree.join("; ") : ""}`
+  );
+}
+
+/* ======================================================================
+   Portal catalog — freight by distance (#242, Task 1; spec
+   2026-09-27-portal-catalog-design.md §2.2). Pure rule below; the DB check
+   that the Estimating Rules rows resolve to defaults is registered in the
+   async chain as portal242RulesAsyncChecks().
+   ====================================================================== */
+import { DEFAULT_FREIGHT_RULE as d242Rule, freightPctForMiles as d242Freight } from "@/lib/freight-rule";
+{
+  const f = (m: number | null) => d242Freight(m, d242Rule);
+  ok(f(0).pct === 2 && !f(0).atCapUnknown, "#242 freight: 0 mi → 2%");
+  ok(f(199).pct === 2, "#242 freight: 199 mi → 2%");
+  ok(f(200).pct === 3, "#242 freight: 200 mi → 3% (step starts at 200)");
+  ok(f(399).pct === 3 && f(400).pct === 4, "#242 freight: 399 → 3%, 400 → 4%");
+  ok(f(1599).pct === 9 && f(1600).pct === 10, "#242 freight: 1,599 → 9%, 1,600 → 10% cap");
+  ok(f(5000).pct === 10, "#242 freight: far venue stays at the 10% cap");
+  ok(f(null).pct === 10 && f(null).atCapUnknown, "#242 freight: unknown distance → cap, flagged");
+  ok(d242Freight(-5, d242Rule).atCapUnknown && d242Freight(NaN, d242Rule).pct === 10, "#242 freight: negative/NaN miles → unknown → cap");
+  const custom = { basePct: 1, stepMiles: 100, stepPct: 0.5, capPct: 3 };
+  ok(d242Freight(250, custom).pct === 2 && d242Freight(10000, custom).pct === 3, "#242 freight: custom rule honoured incl. cap");
+  ok(d242Freight(100, { ...custom, stepMiles: 0 }).pct === 1, "#242 freight: a zero step never divides by zero — base only");
+}
+
+import { loadFreightRule as d242LoadFreight, loadPortalRules as d242LoadPortal } from "@/lib/freight-rule-load";
+async function portal242RulesAsyncChecks(): Promise<void> {
+  const rule = await d242LoadFreight();
+  ok(
+    rule.basePct === d242Rule.basePct && rule.stepMiles === d242Rule.stepMiles &&
+      rule.stepPct === d242Rule.stepPct && rule.capPct === d242Rule.capPct,
+    "#242 rules: loadFreightRule() resolves to DEFAULT_FREIGHT_RULE with no override"
+  );
+  const portal = await d242LoadPortal();
+  ok(
+    portal.validityDays === 30 && portal.browseMinQuotes === 3 && portal.browseWindowMonths === 24 && portal.staleCostMonths === 0,
+    "#242 rules: loadPortalRules() resolves to its documented defaults"
   );
 }

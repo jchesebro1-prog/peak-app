@@ -21,6 +21,7 @@ import {
   type WireLaborRules,
 } from "@/lib/design/wire-labor";
 import { DEFAULT_SEWING_PCT, SEWING_PCT_ID, SEWING_PCT_MAX, sewingPctFrom } from "@/lib/design/curtain-pricing";
+import { DEFAULT_FREIGHT_RULE, FREIGHT_RATE_IDS, PORTAL_RATE_IDS } from "@/lib/freight-rule";
 
 /**
  * PricingRules — server port of app/pricing.js: the single master registry of
@@ -580,6 +581,21 @@ export const GROUPS: PricingGroup[] = [
     items: [
       rate(SEWING_PCT_ID, "Sewing labor adder", DEFAULT_SEWING_PCT, "%", { min: 0, max: SEWING_PCT_MAX, step: 0.5, help: "cost = sewn area × fabric $/sq ft × (1 + this %)" }),
       formula("curtains.cost", "Curtain cost", "cost = sewn area × fabric $/sq ft × (1 + sewing %)   ·   sewn area = finished width × (1 + fullness) × height   ·   sell = cost ÷ (1 − margin)"),
+    ],
+  },
+  {
+    key: "portal", label: "Portal & freight", live: true,
+    sub: "Freight by distance and customer self-quote rules",
+    note: "Freight: base % under the first step, + step % for every full step of drive miles from the quoting office, never above the cap. Unknown distance charges the cap. The Estimator pre-fills new sections with it; the portal always applies it.",
+    items: [
+      rate(FREIGHT_RATE_IDS.base, "Freight — base", DEFAULT_FREIGHT_RULE.basePct, "%", { min: 0, max: 20, step: 0.5, help: "freight % for venues under the first step" }),
+      rate(FREIGHT_RATE_IDS.stepMiles, "Freight — step distance", DEFAULT_FREIGHT_RULE.stepMiles, "mi", { min: 1, max: 2000, step: 10, help: "each full step of drive miles adds the step %" }),
+      rate(FREIGHT_RATE_IDS.stepPct, "Freight — per step", DEFAULT_FREIGHT_RULE.stepPct, "%", { min: 0, max: 10, step: 0.5 }),
+      rate(FREIGHT_RATE_IDS.cap, "Freight — cap", DEFAULT_FREIGHT_RULE.capPct, "%", { min: 0, max: 30, step: 0.5, help: "also charged when the venue's distance is unknown" }),
+      rate(PORTAL_RATE_IDS.validityDays, "Portal firm quote valid for", 30, "days", { min: 1, max: 365, step: 1 }),
+      rate(PORTAL_RATE_IDS.browseMinQuotes, "Browsable when quoted at least", 3, "quotes", { min: 1, max: 100, step: 1 }),
+      rate(PORTAL_RATE_IDS.browseWindowMonths, "…within the last", 24, "months", { min: 1, max: 120, step: 1 }),
+      rate(PORTAL_RATE_IDS.staleCostMonths, "Price on request when cost older than", 0, "months (0 = off)", { min: 0, max: 120, step: 1 }),
     ],
   },
 ];
