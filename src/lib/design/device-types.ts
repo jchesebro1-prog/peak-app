@@ -157,12 +157,29 @@ const BLOCK = /\b(av control|av infrastructure|networked av|staging|stage access
  *  the single words they contain ("motor control" before "motor", "led
  *  video" before "led", "power controls" before "power", "safety cables"
  *  before "cables"). High rules are unambiguous on their own; low rules are
- *  single words that often but not always mean that type. */
+ *  single words that often but not always mean that type.
+ *
+ *  Head-noun precedence (fix wave #226): a compound category is read the
+ *  way a person reads it — by its head noun (its last significant word),
+ *  not by whichever word happens to sit earliest in this array. "DMX
+ *  Cable" and "Speaker Cable" are cables, not control-networking/speakers,
+ *  because "Cable" is what's being described; "DMX"/"Speaker" only say
+ *  which cable. `suggestDeviceType` enforces this in two ways below rather
+ *  than by reordering RULES (reordering only fixes the one pair you tested
+ *  and silently breaks another): (1) an absolute cable/connector/adapter/
+ *  snake/whip/jumper/extension check that wins regardless of anything else
+ *  in the string, and (2) demoting the bare, genuinely ambiguous head nouns
+ *  ("track" alone reads as either curtain-track hardware or lighting
+ *  track) to `L` here, with a small same-scope compound boost below
+ *  ("Curtain Track" → tracks-hardware high; "Lighting Track" or bare
+ *  "Track" alone → low, never confidently wrong). */
 const RULES: readonly Rule[] = [
   H("rigging-control", /\b(rigging|motor|hoist) control(s|ler|lers)?\b/),
   H("hoists-motors", /\b(hoists?|motors?|motorized|winch(es)?)\b/),
   H("truss-pipe", /\b(truss(es|ing)?|pipes?|battens?)\b/),
-  H("tracks-hardware", /\b(tracks?|carriers?|travell?ers?)\b/),
+  // "tracks?" alone is deliberately NOT here — see the head-noun comment
+  // above and the L("tracks-hardware", …) rule below.
+  H("tracks-hardware", /\b(carriers?|travell?ers?)\b/),
   H("drapery", /\b(drapes?|drapery|curtains?|scrims?|velour|cyc fabric|masking)\b/),
   H("rigging-hardware", /\b(shackles?|wire rope|slings?|loft ?blocks?|head ?blocks?|mule blocks?|floor blocks?|arbors?|rope locks?|shoes|strain reliefs?|hardware|mounts?|hooks?|turnbuckles?)\b/),
   H("assistive-listening", /\b(assistive|als|hearing loops?|induction loops?|listening)\b/),
@@ -191,10 +208,22 @@ const RULES: readonly Rule[] = [
   L("power-distribution", /\bpower\b/),
   L("rigging-hardware", /\brigging\b/),
   L("lighting-accessories", /\bclamps?\b/),
+  // Bare "track(s)" — see the head-noun comment above the RULES declaration.
+  L("tracks-hardware", /\btracks?\b/),
 ];
 
 const words = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
 const firstRule = (text: string) => RULES.find((r) => r.re.test(text)) ?? null;
+
+/** Head-noun precedence, absolute case (#226 fix wave): whatever else the
+ *  category says, a cable/connector/adapter/snake/whip/jumper/extension
+ *  word makes it Cable & Connectors — "DMX Cable" and "Speaker Cable" are
+ *  cables, not control-networking/speakers. */
+const CABLE_HEAD_RE = /\b(cables?|cabling|connectors?|adapters?|snakes?|whips?|jumpers?|extensions?)\b/;
+/** A Curtains-domain word that legitimizes a bare "track" as curtain-track
+ *  hardware ("Curtain Track" → tracks-hardware high). Without one, "track"
+ *  is read alone and stays low (see the L("tracks-hardware", …) rule). */
+const CURTAIN_WORD_RE = /\b(curtains?|drapes?|drapery|cyc|scrims?|velour|masking)\b/;
 
 /**
  * The category string decides (its rule's confidence). Only when it matches
@@ -205,7 +234,10 @@ const firstRule = (text: string) => RULES.find((r) => r.re.test(text)) ?? null;
 export function suggestDeviceType(category: string, sampleDescs: readonly string[] = []): Suggestion | null {
   const key = normalizeRawCategory(category);
   if (!key || EXCLUDED.has(key) || GENERIC.has(key) || BLOCK.test(words(key))) return null;
-  const hit = firstRule(words(key));
+  const text = words(key);
+  if (CABLE_HEAD_RE.test(text)) return { typeKey: "cable-connectors", confidence: "high" };
+  if (/\btracks?\b/.test(text) && CURTAIN_WORD_RE.test(text)) return { typeKey: "tracks-hardware", confidence: "high" };
+  const hit = firstRule(text);
   if (hit) return { typeKey: hit.typeKey, confidence: hit.conf };
   const votes = new Map<string, number>();
   for (const d of sampleDescs.slice(0, 20)) {
@@ -275,7 +307,9 @@ export function typeLabel(key: string, types: readonly DeviceType[]): string {
 export function keywordScopeOf(p: { category?: string; desc?: string; discipline?: string }): GridLayer {
   const text = `${p.category || ""} ${p.desc || ""} ${p.discipline || ""}`.toLowerCase();
   if (text.includes("curtain") || text.includes("fabric")) return "Curtains";
-  if (text.includes("rig") || text.includes("truss")) return "Rigging";
+  // #226 fix wave: word/prefix match, not a bare substring — "Rigid Mount"
+  // contains "rig" but isn't Rigging; "rig", "rigging" and "rigs" are.
+  if (/\brig(ging|s)?\b/.test(text) || text.includes("truss")) return "Rigging";
   if (text.includes("video") || text.includes("sdi") || text.includes("hdmi")) return "Video";
   if (text.includes("audio") || text.includes("speaker") || text.includes("microphone")) return "Audio";
   return UNSCOPED;

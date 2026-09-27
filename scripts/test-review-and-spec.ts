@@ -20873,7 +20873,7 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
   // the dealer-sheet BRAND_CATEGORY defaults in scripts/convert-dealer-sheets.py,
   // and common vendor-sheet section names)
   const CASES: Array<[string, string | null, "high" | "low" | null]> = [
-    ["Fixtures", "fixtures", "high"], ["Track", "tracks-hardware", "high"], ["Pipe", "truss-pipe", "high"],
+    ["Fixtures", "fixtures", "high"], ["Track", "tracks-hardware", "low"], ["Pipe", "truss-pipe", "high"],
     ["Loftblocks", "rigging-hardware", "high"], ["Headblocks", "rigging-hardware", "high"], ["Mule Block", "rigging-hardware", "high"],
     ["Arbor", "rigging-hardware", "high"], ["Standard Arbor", "rigging-hardware", "high"], ["Front Arbor", "rigging-hardware", "high"],
     ["Floor Block", "rigging-hardware", "high"], ["Manual Hoist", "hoists-motors", "high"], ["Motorized Hoist", "hoists-motors", "high"],
@@ -20902,12 +20902,30 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     ["Travelers", "tracks-hardware", "high"], ["Clear-Com", "intercom", "high"], ["Gobos", "lighting-accessories", "high"],
     ["Clamps", "lighting-accessories", "low"], ["Network Switches", "networking", "high"], ["Stage Monitors", "speakers", "high"],
     ["Monitors", "displays-projectors", "low"], ["  motorized   HOIST ", "hoists-motors", "high"],
+    // fix wave #226: head-noun precedence — a cable/connector/adapter word
+    // always wins, whatever else the category names
+    ["DMX Cable", "cable-connectors", "high"], ["5-Pin DMX Cable", "cable-connectors", "high"],
+    ["Speaker Cable", "cable-connectors", "high"], ["HDMI Cable", "cable-connectors", "high"],
+    ["XLR Adapters", "cable-connectors", "high"], ["Power Cable", "cable-connectors", "high"],
+    ["Cat6 Cable", "cable-connectors", "high"], ["Speakon Connectors", "cable-connectors", "high"],
+    // fix wave #226: a specific phrase still resolves correctly (regression
+    // guard — these already worked, this locks them in)
+    ["Lighting Console", "control-networking", "high"], ["Audio Console", "mixing-processing", "high"],
+    ["Mixing Console", "mixing-processing", "high"], ["Rigging Hardware", "rigging-hardware", "high"],
+    ["Curtain Track", "tracks-hardware", "high"], ["Motor Control", "rigging-control", "high"],
+    ["Hoist Controller", "rigging-control", "high"],
+    // fix wave #226: ambiguous head nouns alone are never confidently wrong
+    ["Console", "control-networking", "low"], ["Clamp", "lighting-accessories", "low"],
+    ["Controls", "control-networking", "low"], ["Accessories", null, null],
   ];
   for (const [cat, key, conf] of CASES) {
     const s = dt226Suggest(cat);
     ok(key === null ? s === null : s?.typeKey === key && s.confidence === conf,
       `#226 suggest: "${cat}" → ${key ?? "null"}${conf ? ` (${conf})` : ""} (got ${j(s)})`);
   }
+  const lightingTrack = dt226Suggest("Lighting Track");
+  ok(!(lightingTrack?.typeKey === "tracks-hardware" && lightingTrack.confidence === "high"),
+    `#226 suggest: "Lighting Track" is never confidently mis-typed as curtain-track hardware (low tracks-hardware or a lighting type is fine; got ${j(lightingTrack)})`);
   ok(j(dt226Suggest("Audio", ["QSC K12.2 powered loudspeaker", "QSC KS118 subwoofer", "Shure SM58 microphone"])) === j({ typeKey: "speakers", confidence: "low" }),
     "#226 suggest: sample descriptions vote a LOW-confidence type when the category says nothing");
   ok(dt226Suggest("Uncategorized", ["ETC Source Four ellipsoidal"]) === null && dt226Suggest("Fabric", ["velour"]) === null,
@@ -20931,6 +20949,12 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     "#226 scopeOfType: the type's scope; unmapped → Unscoped");
   ok(dt226Keyword({ category: "Widgets", desc: "Blue thing" }) === "Unscoped" && dt226Keyword({ category: "X", desc: "Velour curtain" }) === "Curtains" && dt226Keyword({ category: "Speakers", desc: "" }) === "Audio",
     "#226 scope fix: the keyword fallback ends in Unscoped, not Lighting");
+  ok(
+    dt226Keyword({ category: "Rigid Mount" }) === "Unscoped" &&
+      dt226Keyword({ category: "Rigging Hardware" }) === "Rigging" &&
+      dt226Keyword({ category: "Truss" }) === "Rigging",
+    "#226 fix wave: keywordScopeOf matches 'rig' as a word/prefix of rigging, not a bare substring — 'Rigid Mount' isn't Rigging"
+  );
   const gc226 = readFileSync(join(process.cwd(), "src/lib/stores/grid-catalog.ts"), "utf8");
   ok(gc226.includes("keywordScopeOf(") && !/return "Lighting";/.test(gc226), "#226 scope fix: grid-catalog's scopeFor delegates to keywordScopeOf (no Lighting fallback)");
 
