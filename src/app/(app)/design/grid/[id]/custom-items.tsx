@@ -10,6 +10,7 @@ import {
   customItemPartId,
   type GridCustomItem,
 } from "@/lib/design/grid-custom-items";
+import { BOM_GROUPS, CUSTOM_SYSTEM_OF_GROUP, groupOfCustomSystem } from "@/lib/design/grid-bom-groups";
 import { removeCustomItemAction, saveCustomItemAction } from "./actions";
 
 /**
@@ -68,8 +69,9 @@ function moneyFmt(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
 }
 
-type Draft = { id: string | null; desc: string; mfr: string; model: string; qty: string; unitCost: string };
-const EMPTY: Draft = { id: null, desc: "", mfr: "", model: "", qty: "1", unitCost: "" };
+/** `system` is the stored custom-item system of the chosen BOM heading ("" = General, #230). */
+type Draft = { id: string | null; desc: string; mfr: string; model: string; system: string; qty: string; unitCost: string };
+const EMPTY: Draft = { id: null, desc: "", mfr: "", model: "", system: "", qty: "1", unitCost: "" };
 
 export default function CustomItemsSection({
   projectId,
@@ -77,14 +79,17 @@ export default function CustomItemsSection({
   items,
   lines,
   onChanged,
+  showAdd = true,
 }: {
   projectId: string;
   optionId: string;
-  /** This option's items (for the edit form). */
+  /** The items to list here (#230: one BOM heading's), for the edit form. */
   items: GridCustomItem[];
   /** The same items priced server-side (sell only), keyed by partId custom:<id>. */
   lines: BomLine[];
   onChanged: () => void;
+  /** #230: false under a BOM heading — the one "+ Custom item" sits at the BOM's foot. */
+  showAdd?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +98,15 @@ export default function CustomItemsSection({
 
   const edit = (it: GridCustomItem) => {
     setError(null);
-    setDraft({ id: it.id, desc: it.desc, mfr: it.mfr ?? "", model: it.model ?? "", qty: String(it.qty), unitCost: String(it.unitCost) });
+    setDraft({
+      id: it.id,
+      desc: it.desc,
+      mfr: it.mfr ?? "",
+      model: it.model ?? "",
+      system: CUSTOM_SYSTEM_OF_GROUP[groupOfCustomSystem(it.system)] ?? "",
+      qty: String(it.qty),
+      unitCost: String(it.unitCost),
+    });
   };
   const field = (k: Exclude<keyof Draft, "id">) => (e: ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
@@ -109,6 +122,7 @@ export default function CustomItemsSection({
         desc: draft.desc,
         mfr: draft.mfr,
         model: draft.model,
+        system: draft.system,
         qty: Number(draft.qty),
         unitCost: Number(draft.unitCost),
       });
@@ -181,6 +195,21 @@ export default function CustomItemsSection({
             <input value={draft.mfr} onChange={field("mfr")} maxLength={CUSTOM_ITEM_MAKER_MAX} placeholder="Manufacturer" style={INPUT} />
             <input value={draft.model} onChange={field("model")} maxLength={CUSTOM_ITEM_MAKER_MAX} placeholder="Model" style={INPUT} />
           </div>
+          <select
+            value={draft.system}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDraft((d) => (d ? { ...d, system: v } : d));
+            }}
+            aria-label="BOM category"
+            style={INPUT}
+          >
+            {BOM_GROUPS.map((g) => (
+              <option key={g.key} value={CUSTOM_SYSTEM_OF_GROUP[g.key] ?? ""}>
+                {g.label}
+              </option>
+            ))}
+          </select>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={draft.qty} onChange={field("qty")} inputMode="numeric" placeholder="Qty" style={{ ...INPUT, width: 64, flex: "none" }} />
             <input value={draft.unitCost} onChange={field("unitCost")} inputMode="decimal" placeholder="Unit cost, $" style={INPUT} />
@@ -209,7 +238,7 @@ export default function CustomItemsSection({
             </button>
           </div>
         </div>
-      ) : (
+      ) : !showAdd ? null : (
         <button
           type="button"
           style={{ ...BTN, justifySelf: "start", fontSize: 11.5, padding: "3px 9px" }}

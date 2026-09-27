@@ -4,9 +4,9 @@
  * Pure and client-safe like grid-symbols/grid-bom: the editor, riser,
  * Grid Settings and the spec harness all import it. No doc-store, no DB.
  *
- * Icon:   entry.icon → entry.shape (legacy alias) → category icon
- *         → stored settings.gridCategoryShapes[category] (legacy alias)
- *         → "device".
+ * Icon:   entry.icon → entry.shape (legacy alias) → stored category
+ *         override → device type icon (#226) → category default → stored
+ *         settings.gridCategoryShapes[category] (legacy alias) → "device".
  * Colour: entry.color → group colour → trade colour → the Grid entry's
  *         own scope (Lighting/Rigging/Curtains/Audio/Video) → "Other".
  * Category names match trimmed + case-insensitive (CatalogPart.category
@@ -26,6 +26,7 @@ import {
 } from "../catalog-taxonomy";
 import { isGridShape, type GridShape } from "./grid-symbols";
 import { GENERATED_GRID_ICONS, type GridIconEl } from "./grid-icons.generated";
+import { deviceTypeIcons, UNMAPPED_LABEL, type DeviceType } from "./device-types";
 
 export type { GridIconEl } from "./grid-icons.generated";
 
@@ -272,6 +273,12 @@ export type SymbolContext = {
   /** RAW stored settings.gridCategoryShapes (never the old seed) — only an
    *  admin's explicit D154 choice is honoured as a fallback. */
   legacyCategoryShapes: Record<string, string> | null;
+  /** #226: ONLY the admin's stored per-category icons (the "Advanced"
+   *  overrides) — they beat the device-type icon; the shipped defaults in
+   *  `categoryIcons` do not. */
+  categoryIconOverrides?: Record<string, string>;
+  /** #226: active device type key → icon id (own icon, else the default). */
+  typeIcons?: Record<string, string>;
 };
 
 export function symbolContext(
@@ -283,13 +290,18 @@ export function symbolContext(
         gridCategoryShapes?: Record<string, string> | null;
       }
     | null
-    | undefined
+    | undefined,
+  types?: readonly DeviceType[] | null
 ): SymbolContext {
+  const typeIcons: Record<string, string> = {};
+  for (const [k, v] of Object.entries(deviceTypeIcons(types ?? []))) if (isGridIconId(v)) typeIcons[k] = v;
   return {
     categoryIcons: resolveCategoryIcons(settings?.gridCategoryIcons),
     colors: resolveSymbolColors(settings?.gridSymbolColors),
     categoryMap: resolveCategoryMap(settings?.catalogCategoryMap),
     legacyCategoryShapes: settings?.gridCategoryShapes ?? null,
+    categoryIconOverrides: cleanCategoryIcons(settings?.gridCategoryIcons) ?? {},
+    typeIcons,
   };
 }
 
@@ -305,6 +317,10 @@ export type SymbolEntry = {
    *  before grey, for Grid-owned categories the catalog map doesn't know
    *  ("Lighting", "Video", "Rigging"…). */
   gridScope?: string | null;
+  /** #226: the part's device type (null = unmapped; absent = the caller
+   *  resolved no types) and its label. */
+  deviceType?: string | null;
+  deviceTypeLabel?: string | null;
 };
 
 /** Grid-symbol → SymbolEntry fields (category, icon, colour, shape, Grid
@@ -387,8 +403,15 @@ export function symbolLook(entry: SymbolEntry | null | undefined, ctx: SymbolCon
   if (isGridIconId(e.icon)) iconId = e.icon;
   else if (isGridShape(e.shape)) iconId = LEGACY_SHAPE_ICON[e.shape];
   else {
+    // #226 order: stored raw-category override → device-type icon → shipped
+    // category default → stored legacy category shape → generic.
+    const override = lookup(ctx.categoryIconOverrides, e.category);
+    const typeIcon =
+      e.deviceType && ctx.typeIcons && Object.hasOwn(ctx.typeIcons, e.deviceType) ? ctx.typeIcons[e.deviceType] : undefined;
     const cat = lookup(ctx.categoryIcons, e.category);
-    if (isGridIconId(cat)) iconId = cat;
+    if (isGridIconId(override)) iconId = override;
+    else if (isGridIconId(typeIcon)) iconId = typeIcon;
+    else if (isGridIconId(cat)) iconId = cat;
     else if (isGridShape(legacyCat)) iconId = LEGACY_SHAPE_ICON[legacyCat];
     else iconId = GENERIC_ICON_ID;
   }
@@ -412,41 +435,67 @@ export function symbolLook(entry: SymbolEntry | null | undefined, ctx: SymbolCon
 export type LegendRow = { key: string; iconId: string; color: string; label: string };
 
 /** One row per distinct icon+colour actually drawn, first-seen order. An
- *  entry whose look differs from its category default is labelled
- *  "<category> — <desc>" (the #131 riser rule), otherwise just the category.
- *  A real plan repeats the same part dozens of times, so `symbolLook` is
- *  resolved once per DISTINCT entry (keyed by `id` when a caller has one,
- *  e.g. a PartLite — otherwise by its symbol-relevant fields) and reused for
- *  every repeat, rather than once per placement (final fix wave). */
+ *  entry whose look differs from its default is labelled "<label> — <desc>"
+ *  (the #131 riser rule). #226: an entry that carries `deviceType` (every
+ *  Grid surface now) is labelled by its device type; an unmapped one reads
+ *  "Unmapped · <raw category>" and those rows go last. Entries without the
+ *  field keep the old per-category label. A real plan repeats the same part
+ *  dozens of times, so `symbolLook` is resolved once per DISTINCT entry
+ *  (keyed by `id` when a caller has one, e.g. a PartLite — otherwise by its
+ *  symbol-relevant fields) and reused for every repeat (final fix wave). */
 export function legendRows(
   entries: Array<SymbolEntry & { id?: string | null; desc?: string | null }>,
   ctx: SymbolContext
 ): LegendRow[] {
   const rows: LegendRow[] = [];
-  const seenBadges = new Set<string>();
+  const unmapped: LegendRow[] = [];
+  /** dedupe key → the row it produced + that row's normalized category. */
+  const seenBadges = new Map<string, { row: LegendRow; category: string }>();
   const lookCache = new Map<string, SymbolLook>();
   for (const e of entries) {
     const identity =
-      e.id ?? `${e.category ?? ""}|${e.icon ?? ""}|${e.color ?? ""}|${e.shape ?? ""}|${e.group ?? ""}|${e.trade ?? ""}|${e.gridScope ?? ""}`;
+      e.id ??
+      `${e.category ?? ""}|${e.icon ?? ""}|${e.color ?? ""}|${e.shape ?? ""}|${e.group ?? ""}|${e.trade ?? ""}|${e.gridScope ?? ""}|${e.deviceType ?? ""}`;
     let look = lookCache.get(identity);
     if (!look) {
       look = symbolLook(e, ctx);
       lookCache.set(identity, look);
     }
-    const key = `${look.iconId}|${look.color}`;
-    if (seenBadges.has(key)) continue;
-    seenBadges.add(key);
-    const category = (e.category || "").trim() || "Uncategorized";
-    const base = symbolLook({ category: e.category, group: e.group, trade: e.trade, gridScope: e.gridScope }, ctx);
+    const category = (e.category || "").trim();
+    const typed = e.deviceType !== undefined;
+    const isUnmapped = typed && !e.deviceType;
+    // #226 fix wave: a typed entry dedupes within its device type (or the
+    // shared Unmapped bucket), so a type row and an unmapped category that
+    // happen to draw the same badge never merge into one label. Untyped
+    // callers keep the plain per-badge rule.
+    const bucket = !typed ? "" : e.deviceType ? `type:${e.deviceType}|` : "unmapped|";
+    const key = `${bucket}${look.iconId}|${look.color}`;
+    const seen = seenBadges.get(key);
+    if (seen) {
+      // Unmapped categories sharing one badge: the row can no longer name
+      // a single raw category, so it reads just "Unmapped".
+      if (isUnmapped && seen.category !== norm(category)) seen.row.label = UNMAPPED_LABEL;
+      continue;
+    }
+    const head = !typed
+      ? category || "Uncategorized"
+      : e.deviceType
+        ? e.deviceTypeLabel || e.deviceType
+        : category
+          ? `${UNMAPPED_LABEL} · ${category}`
+          : UNMAPPED_LABEL;
+    const base = symbolLook({ category: e.category, group: e.group, trade: e.trade, gridScope: e.gridScope, deviceType: e.deviceType }, ctx);
     const differs = base.iconId !== look.iconId || base.color !== look.color;
-    rows.push({ key, iconId: look.iconId, color: look.color, label: differs && e.desc ? `${category} — ${e.desc}` : category });
+    const row: LegendRow = { key, iconId: look.iconId, color: look.color, label: differs && e.desc ? `${head} — ${e.desc}` : head };
+    seenBadges.set(key, { row, category: norm(category) });
+    (isUnmapped ? unmapped : rows).push(row);
   }
-  return rows;
+  return [...rows, ...unmapped];
 }
 
 /* ------------------------ settings rows -------------------------- */
 
-export type SymbolCategoryRow = { category: string; gridScope: string | null };
+export type SymbolCategoryRow = { category: string; gridScope: string | null; deviceType?: string | null };
 
 /** The Category icons card's rows: every live category — the shipped icon
  *  defaults, the catalog taxonomy seed, live catalog categories, the Grid
@@ -478,6 +527,37 @@ export function symbolCategoryRows(input: {
   for (const g of input.grid) add(g.category);
   for (const c of Object.keys(input.stored || {})) add(c);
   return Array.from(rows.values()).sort((a, b) => a.category.localeCompare(b.category));
+}
+
+/** #226 fix wave: the Advanced overrides card's saved map — EVERY stored
+ *  override whose category matches a row (trimmed, case-insensitive; keyed
+ *  by the row's spelling). Never filtered against the row's baseline: the
+ *  baseline is now the editable device-type icon, so an override that
+ *  happens to equal it today is still the admin's pin, and dropping it here
+ *  made the card's whole-map save erase it. */
+export function storedCategoryOverrides(rows: readonly SymbolCategoryRow[], stored: Record<string, string> | null | undefined): Record<string, string> {
+  const byNorm = new Map(rows.map((r) => [norm(r.category), r.category]));
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(stored || {})) {
+    const category = byNorm.get(norm(k));
+    if (category && typeof v === "string" && v) out[category] = v;
+  }
+  return out;
+}
+
+/** One explicit edit on the Advanced overrides card: ↺ (`null`) or a pick
+ *  equal to the row's baseline removes that row's override; any other pick
+ *  sets it. Every other entry is carried over untouched. */
+export function withCategoryOverride(
+  map: Record<string, string>,
+  category: string,
+  iconId: string | null,
+  baseline: string
+): Record<string, string> {
+  const next = { ...map };
+  if (!iconId || iconId === baseline) delete next[category];
+  else next[category] = iconId;
+  return next;
 }
 
 /** The shipped default icon for a category (trimmed, case-insensitive), or

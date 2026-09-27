@@ -30,6 +30,14 @@ import {
   withoutCustomItem,
   type GridCustomItem,
 } from "@/lib/design/grid-custom-items";
+import {
+  accessoriesOf,
+  applyAccessorySave,
+  copyAccessories,
+  withoutAccessory,
+  type GridAccessory,
+} from "@/lib/design/grid-accessories";
+import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
 import {
@@ -1098,6 +1106,9 @@ export async function addOption(
       const src = doc.options.find((o) => o.id === input.copyFromOptionId);
       const items = copyCustomItems(customItemsOf(src?.customItems), () => rid("ci-"));
       if (items.length) option.customItems = items;
+      // BOM accessories (#230) ride on the option the same way.
+      const accessories = copyAccessories(accessoriesOf(src?.accessories), () => rid("ba-"));
+      if (accessories.length) option.accessories = accessories;
     }
     doc.options = [...doc.options, option];
     if (input.copyFromOptionId) {
@@ -1251,6 +1262,69 @@ export async function removeCustomItem(
   return updated ? { ok: true } : { ok: false, error: "Design not found." };
 }
 
+/* ---------------------------- BOM accessories (#230) ---------------------------- */
+
+/**
+ * Add (no `id`: partId + qty + scope) or edit the qty of (`id`) one BOM
+ * accessory on an option. An add must name a Grid-library part that is not
+ * Fabric or Labor (the palette's placeable rule) — the id a placement of it
+ * would carry, so it prices exactly like one. The raw input is re-sanitized
+ * here whatever the client sent. Re-adding a part under the same heading
+ * bumps that line. Does not cut a revision (same as a placement edit).
+ */
+export async function saveAccessory(
+  projectId: string,
+  optionId: string,
+  raw: unknown
+): Promise<{ ok: true; item: GridAccessory } | { ok: false; error: string }> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  if (!(typeof r.id === "string" && r.id)) {
+    const symbol = await getGridSymbol(String(r.partId ?? "").trim());
+    if (!symbol || symbol.category === "Fabric" || symbol.category === "Labor")
+      return { ok: false, error: "That part isn't in the Grid library — pick it from the search." };
+  }
+  let out: { ok: true; item: GridAccessory } | { ok: false; error: string } = { ok: false, error: "Design not found." };
+  await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    const opt = doc.options.find((o) => o.id === optionId);
+    if (!opt) {
+      out = { ok: false, error: "That option was removed — refresh the page." };
+      return;
+    }
+    const s = applyAccessorySave(accessoriesOf(opt.accessories), raw, () => rid("ba-"));
+    if (!s.ok) {
+      out = { ok: false, error: s.error };
+      return;
+    }
+    doc.options = doc.options.map((o) => (o.id === optionId ? { ...o, accessories: s.items } : o));
+    p.updatedAt = Date.now();
+    out = { ok: true, item: s.item };
+  });
+  return out;
+}
+
+/** Remove one accessory. Idempotent: an id already gone is not an error. */
+export async function removeAccessory(
+  projectId: string,
+  optionId: string,
+  accessoryId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  if (!hasOption(project, optionId)) return { ok: false, error: "That option was removed — refresh the page." };
+  const updated = await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    const doc = ensureOptions(p);
+    doc.options = doc.options.map((o) =>
+      o.id === optionId ? { ...o, accessories: withoutAccessory(accessoriesOf(o.accessories), accessoryId) } : o
+    );
+    p.updatedAt = Date.now();
+  });
+  return updated ? { ok: true } : { ok: false, error: "Design not found." };
+}
+
 /* ----------------------------- revisions ----------------------------- */
 
 /** Snapshot of the doc's mutable state as it stands. Pure. */
@@ -1279,9 +1353,13 @@ function snapshotOf(
     // normalized (a legacy single value lands as the first option's) and deep-copied.
     autoEstimate: JSON.parse(JSON.stringify(autoEstimatesOf(p.autoEstimate, p.options?.[0]?.id ?? DEFAULT_OPTION_ID))) as AutoEstimates,
     options: ensureOptions({
-      // Custom items (#212) ride on the option — copied, not shared.
+      // Custom items (#212) and BOM accessories (#230) ride on the option — copied, not shared.
       options: p.options
-        ? p.options.map((o) => ({ ...o, ...(o.customItems ? { customItems: o.customItems.map((c) => ({ ...c })) } : {}) }))
+        ? p.options.map((o) => ({
+            ...o,
+            ...(o.customItems ? { customItems: o.customItems.map((c) => ({ ...c })) } : {}),
+            ...(o.accessories ? { accessories: o.accessories.map((a) => ({ ...a })) } : {}),
+          }))
         : undefined,
       quoteId: p.quoteId,
       createdAt: p.createdAt,

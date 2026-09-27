@@ -617,3 +617,29 @@ export async function setBlob(
       },
     });
 }
+
+/**
+ * #226: merge `patch` into blob `id` WITHOUT replacing any key already
+ * there — the mirror image of setBlob's `||` (here the EXISTING row is the
+ * right-hand side, so it wins per top-level key), in one atomic statement.
+ * The Grid type map's auto-apply writes through this, so an admin entry can
+ * never be replaced by an auto one, even when the two writes race.
+ */
+export async function setBlobKeysIfAbsent(
+  id: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  if (!Object.keys(patch).length) return;
+  const db = await getDb();
+  const json = JSON.stringify(patch);
+  await db
+    .insert(blobs)
+    .values({ id, data: patch, updatedAt: Date.now() })
+    .onConflictDoUpdate({
+      target: blobs.id,
+      set: {
+        data: sql`${json}::jsonb || ${blobs.data}`,
+        updatedAt: Date.now(),
+      },
+    });
+}

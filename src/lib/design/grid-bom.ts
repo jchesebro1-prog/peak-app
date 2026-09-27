@@ -52,6 +52,13 @@ export type PartLite = {
    *  and every loft block would fall into Unscoped. Optional for the same
    *  reason as `group`: the other PartLite-shaped callers never resolve it. */
   trade?: string | null;
+  /** #226 device type key (lib/design/device-types), resolved server-side by
+   *  gridPartsFrom; null = unmapped. ABSENT (undefined) when the caller
+   *  resolved no device types — legendRows keeps its old per-category
+   *  labels for those callers. */
+  deviceType?: string | null;
+  /** #226 the type's display label, null when unmapped. */
+  deviceTypeLabel?: string | null;
   /** Grid-owned symbol metadata; pricing remains optional and separate. */
   manufacturer?: string;
   modelNumber?: string;

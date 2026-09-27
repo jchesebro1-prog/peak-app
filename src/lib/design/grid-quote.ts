@@ -22,6 +22,7 @@ import { isSeedPlaceholder } from "@/lib/design/grid-seed";
 import { ensureOptions, hasOption, optionSlice } from "@/lib/design/grid-options";
 import { riserLinksOf } from "@/lib/design/grid-riser-doc";
 import { customItemBomLines, customItemsCost, customItemsOf } from "@/lib/design/grid-custom-items";
+import { accessoriesCost, accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
 
 export type GridQuoteSpecLine = {
   sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true;
@@ -84,7 +85,9 @@ export async function buildGridQuote(
   const riserLinks = riserLinksOf(project.riser, optionId);
   // Per-design custom items (#212) — a design may be nothing but these.
   const customItems = customItemsOf(option.customItems);
-  if (!placements.length && !routes.length && !riserLinks.length && !customItems.length)
+  // BOM accessories (#230) — an option may be nothing but these, too.
+  const accessories = accessoriesOf(option.accessories);
+  if (!placements.length && !routes.length && !riserLinks.length && !customItems.length && !accessories.length)
     return { ok: false, error: "Place a device or route a wire first." };
 
   // Unresolved seed placeholders (D147) must not silently price at $0 (#64 idiom).
@@ -177,15 +180,22 @@ export async function buildGridQuote(
   const customValue = custom.reduce((a, l) => a + l.ext, 0);
   const customCost = customItemsCost(customItems);
 
+  // BOM accessories (#230) price from the SAME tier catalog rows as a placed
+  // part of that partId — tier sell, #76 list fallback and all.
+  const acc = accessoryBomLines(accessories, tierCatalog);
+  const accValue = acc.reduce((a, l) => a + l.ext, 0);
+  const accCost = accessoriesCost(accessories, tierCatalog);
+
   const lines: BomLine[] = [
     ...devLines,
+    ...acc,
     ...wires.lines,
     ...curtains,
     ...custom,
     ...labor.map((l) => ({ partId: l.sku, desc: l.desc, unit: l.unit, qty: l.qty, list: l.price, ext: l.ext })),
   ];
-  const value = devTotals.value + wires.value + curtainValue + customValue + labor.reduce((a, l) => a + l.ext, 0);
-  const cost = devTotals.cost + wires.cost + curtainCostTotal + customCost + labor.reduce((a, l) => a + l.cost, 0);
+  const value = devTotals.value + accValue + wires.value + curtainValue + customValue + labor.reduce((a, l) => a + l.ext, 0);
+  const cost = devTotals.cost + accCost + wires.cost + curtainCostTotal + customCost + labor.reduce((a, l) => a + l.cost, 0);
   const margin = value > 0 ? (value - cost) / value : 0;
   const fallbackLines = lines.filter(isFallbackLine).map((l) => l.desc);
 

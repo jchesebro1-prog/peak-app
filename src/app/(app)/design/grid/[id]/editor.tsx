@@ -34,17 +34,17 @@ import {
   type BomLine,
 } from "@/lib/design/grid-bom";
 import {
-  GRID_LAYERS,
   isLayerVisible,
   normalizeCategory,
   SCOPE_COLORS,
   scopeLayerKey,
   scopeOfPart,
+  typeLayerKey,
   type GridLayer,
 } from "@/lib/design/grid-scopes";
 import { markerColor } from "@/lib/design/grid-symbols";
 import { legendRows, symbolLook, type SymbolContext, type SymbolEntry, type SymbolLook } from "@/lib/design/grid-icons";
-import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
+import { SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
@@ -84,12 +84,16 @@ import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
 import ScopePanel from "./scope-panel";
 import AssembliesPanel from "./assemblies-panel";
-import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import OptionSwitcher from "./option-switcher";
 import PlanLegend from "./plan-legend";
 import SymbolLookPanel from "./symbol-look-panel";
 import CustomItemsSection from "./custom-items";
+import DevicePalette from "./device-palette";
+import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
+import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
+import { bomGroups, groupedBomLines, groupOfCustomSystem, type BomGroupKey, type GroupedBomLine } from "@/lib/design/grid-bom-groups";
+import { AccessoryPicker, AccessoryRow } from "./accessories";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -210,6 +214,18 @@ function snappedPlacement(
   );
 }
 
+/** #230: the "+ Add accessory" link on a BOM heading. */
+const ADD_LINK: React.CSSProperties = {
+  border: "none",
+  background: "none",
+  padding: 0,
+  fontSize: 10.5,
+  color: "var(--accent)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  whiteSpace: "nowrap",
+};
+
 function moneyFmt(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
 }
@@ -255,6 +271,9 @@ export default function GridEditor({
   linesetDesigns,
   wireTypes,
   customLines,
+  deviceTypes,
+  favorites,
+  recent,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -287,6 +306,11 @@ export default function GridEditor({
   wireTypes: WireType[];
   /** #212: the active option's custom items, priced server-side (sell only). */
   customLines: BomLine[];
+  /** #226: the curated device types (palette chips, Layers). */
+  deviceTypes: DeviceType[];
+  /** #226: this user's starred parts and last-placed parts (newest first). */
+  favorites: string[];
+  recent: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -359,13 +383,6 @@ export default function GridEditor({
     }
   }
 
-  const [search, setSearch] = useState("");
-  // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
-  // "" = All (today's exact behavior, every device part); one of Jeff's five
-  // scopes; or Unscoped for parts the catalog taxonomy can't place (never
-  // hidden, just bucketed). This is the "what can I arm" control ONLY -
-  // layer visibility below is a separate axis and the two never touch.
-  const [scopeFilter, setScopeFilter] = useState("");
   const [armedPartId, setArmedPartId] = useState<string | null>(null);
 
   /** Hidden LAYERS (punch #48) - namespaced keys, scopes and user categories
@@ -435,24 +452,6 @@ export default function GridEditor({
     (part: PartLite | null | undefined): SymbolLook => (part && lookById.get(part.id)) || symbolLook(part, symbolCtx),
     [lookById, symbolCtx]
   );
-  const filteredParts = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return parts
-      .filter((p) => !p.virtual)
-      .filter((p) => {
-        if (!scopeFilter) return true; // All - identical to pre-Task-6 behavior.
-        // Fabric/Labor rows aren't placeable devices. "All" already showed
-        // them before this task (verified: no prior exclusion existed), so
-        // that legacy behavior stays untouched above; every specific bucket
-        // (a named scope, or Unscoped) excludes them. Fabric reaches the plan
-        // through the curtain drop-in (#49), never as an armed device.
-        if (p.category === "Fabric" || p.category === "Labor") return false;
-        return scopeOfPart(p) === scopeFilter;
-      })
-      .filter((p) => (q ? (p.desc + " " + (p.modelNumber || p.sku) + " " + (p.manufacturer || "")).toLowerCase().includes(q) : true))
-      .sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
-  }, [parts, search, scopeFilter]);
-
   /* ------------------------- scopes + layers (#48) ------------------------- */
 
   /** The scope one placement belongs to. A curtain IS the Curtains scope by
@@ -463,11 +462,17 @@ export default function GridEditor({
       pl.curtain ? "Curtains" : scopeOfPart(partById.get(pl.partId)),
     [partById]
   );
+  /** #226: the device-type layer a placement belongs to — a curtain drop-in
+   *  is Drapery by construction, the way its scope is Curtains. */
+  const typeKeyOfPlacement = useCallback(
+    (pl: GridPlacement): string => (pl.curtain ? DRAPERY_TYPE_KEY : typeKeyOfPart(partById.get(pl.partId))),
+    [partById]
+  );
 
   const placementVisible = useCallback(
     (pl: GridPlacement) =>
-      isLayerVisible(scopeOfPlacement(pl), normalizeCategory(pl.category), hiddenSet),
-    [scopeOfPlacement, hiddenSet]
+      isLayerVisible(scopeOfPlacement(pl), normalizeCategory(pl.category), hiddenSet, typeKeyOfPlacement(pl)),
+    [scopeOfPlacement, hiddenSet, typeKeyOfPlacement]
   );
 
   /** Whole-project counts for the layer list - a scope you can't see on this
@@ -484,6 +489,23 @@ export default function GridEditor({
     }
     return m;
   }, [placements, routes, scopeOfPlacement, partById]);
+  /** #226: Layers groups each scope's items by device type (Unmapped last;
+   *  an unmapped item's raw/seeded category rides along as a sub-label, never
+   *  as a layer of its own). Same items as scopeCounts, so the numbers agree. */
+  const typeRows = useMemo(() => {
+    const items: Array<{ scope: GridLayer; typeKey: string; sub: string | null }> = [];
+    for (const pl of placements) {
+      const typeKey = typeKeyOfPlacement(pl);
+      const part = partById.get(pl.partId);
+      items.push({ scope: scopeOfPlacement(pl), typeKey, sub: typeKey === UNMAPPED_TYPE ? part?.category ?? pl.category ?? null : null });
+    }
+    for (const r of routes || []) {
+      const part = partById.get(r.partId);
+      const typeKey = typeKeyOfPart(part);
+      items.push({ scope: scopeOfPart(part), typeKey, sub: typeKey === UNMAPPED_TYPE ? part?.category ?? null : null });
+    }
+    return typeLayerRows(items, deviceTypes);
+  }, [placements, routes, partById, scopeOfPlacement, typeKeyOfPlacement, deviceTypes]);
 
   const categoryCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -550,7 +572,7 @@ export default function GridEditor({
       if (pl.curtain) continue;
       const part = partById.get(pl.partId);
       const key = part ? `id:${part.id}` : `cat:${pl.category ?? ""}`;
-      if (!distinct.has(key)) distinct.set(key, part ?? { category: pl.category });
+      if (!distinct.has(key)) distinct.set(key, part ?? { category: pl.category, deviceType: null });
     }
     return legendRows([...distinct.values()], symbolCtx);
   }, [visiblePlacements, partById, symbolCtx]);
@@ -584,9 +606,11 @@ export default function GridEditor({
    *  carry no user category - only a placed item can be labelled. */
   const visibleRoutes = useMemo(
     () =>
-      pageRoutes.filter(
-        (r) => !hiddenSet.has(scopeLayerKey(scopeOfPart(partById.get(r.partId))))
-      ),
+      pageRoutes.filter((r) => {
+        const part = partById.get(r.partId);
+        const s = scopeOfPart(part);
+        return !hiddenSet.has(scopeLayerKey(s)) && !hiddenSet.has(typeLayerKey(s, typeKeyOfPart(part)));
+      }),
     [pageRoutes, hiddenSet, partById]
   );
   const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
@@ -670,18 +694,146 @@ export default function GridEditor({
   // #212: per-design custom items — edited from the BOM, priced like allowances.
   const customItems = useMemo(() => customItemsOf(activeOption.customItems), [activeOption.customItems]);
   const customValue = customLines.reduce((a, l) => a + l.ext, 0);
-  const bomEmpty = lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0;
+  // #230: BOM accessories — option-scoped, priced from the SAME `parts` rows
+  // as a placed device of that partId (the quote re-prices both at tier).
+  const accessories = useMemo(() => accessoriesOf(activeOption.accessories), [activeOption.accessories]);
+  const accessoryLines = useMemo(() => accessoryBomLines(accessories, parts), [accessories, parts]);
+  const accessoryValue = accessoryLines.reduce((a, l) => a + l.ext, 0);
+  const bomEmpty =
+    lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0 && accessoryLines.length === 0;
+  // The one "+ Custom item" (at the BOM's foot); saved items print under their heading.
   const customSection = (
     <CustomItemsSection
-      key={activeOptionId}
+      key={`${activeOptionId}:add`}
       projectId={project.id}
       optionId={activeOptionId}
-      items={customItems}
+      items={[]}
       lines={customLines}
       onChanged={() => router.refresh()}
     />
   );
-  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue;
+  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue + accessoryValue;
+  /** #230: the BOM under its seven headings. */
+  const bomGroupList = useMemo(
+    () =>
+      bomGroups(
+        groupedBomLines({
+          devices: lines,
+          wires: wires.lines,
+          curtains,
+          custom: customLines,
+          customItems,
+          accessories: accessoryLines,
+          parts,
+          placements,
+        })
+      ),
+    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements]
+  );
+  /** The heading whose accessory picker is open — per option, so switching options closes it. */
+  const [addingTo, setAddingTo] = useState<{ optionId: string; group: BomGroupKey } | null>(null);
+  const pickerOpenFor = addingTo && addingTo.optionId === activeOptionId ? addingTo.group : null;
+  /** One BOM row under a heading. Device / wire / curtain rows are the
+   *  pre-#230 rows unchanged; custom items render through their heading's
+   *  CustomItemsSection. */
+  const renderBomLine = (l: GroupedBomLine) => {
+    if (l.source === "custom") return null;
+    if (l.source === "accessory") {
+      return l.accessoryId ? (
+        <AccessoryRow
+          key={`a-${l.accessoryId}-${l.qty}`}
+          projectId={project.id}
+          optionId={activeOptionId}
+          accessoryId={l.accessoryId}
+          line={l}
+          onChanged={() => router.refresh()}
+          onError={(m) => setErr(m)}
+        />
+      ) : null;
+    }
+    if (l.source === "curtain") {
+      // Curtains (punch #49): one line each, never grouped - two drapes of
+      // one fabric are different goods once their dimensions differ.
+      return (
+        <div key={`c-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+          <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>1×</strong>
+          <span
+            style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={l.desc}
+          >
+            {l.curtainName}
+          </span>
+          <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+        </div>
+      );
+    }
+    if (l.source === "wire") {
+      return (
+        <div key={`w-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+          <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
+          <span
+            style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={`${l.partId} — ${l.desc}`}
+          >
+            {l.partId}
+          </span>
+          {partById.get(l.partId)?.hasDatasheet && (
+            <a
+              href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+            >
+              datasheet
+            </a>
+          )}
+          {l.connectionType && (
+            <span style={{ color: "#9aa0ab", fontSize: 10.5, whiteSpace: "nowrap" }}>
+              {l.connectionType}
+            </span>
+          )}
+          <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+        </div>
+      );
+    }
+    return (
+      <div key={`d-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+        <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty}×</strong>
+        <span
+          style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          title={`${l.partId} — ${l.desc}`}
+        >
+          {partById.get(l.partId)?.virtual ? l.desc : l.partId}
+        </span>
+        {partById.get(l.partId)?.virtualDead ? (
+          // #211 D313: nothing real behind it — the quote refuses it by name.
+          <span
+            title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
+            style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
+          >
+            Needs a part
+          </span>
+        ) : (
+          partById.get(l.partId)?.allowance && (
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
+              Allowance
+            </span>
+          )
+        )}
+        {partById.get(l.partId)?.hasDatasheet && (
+          <a
+            href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+          >
+            datasheet
+          </a>
+        )}
+        <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+      </div>
+    );
+  };
   const spaceRollups = useMemo(
     () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
     [placements, parts, project.spaces, curtainPrices]
@@ -1161,6 +1313,29 @@ export default function GridEditor({
     else router.refresh();
   }
 
+  /** #226: arming from the palette clears every other armed tool — exactly
+   *  what the palette row's inline onClick did before the palette moved to
+   *  device-palette.tsx. */
+  const armPart = useCallback((partId: string | null) => {
+    setArmedPartId(partId);
+    setArmedCurtainType(null);
+    setSelected(null);
+    setSpaceDrawing(false);
+    setSpaceDraft([]);
+    setSelectedSpaceId(null);
+    setWireDrawing(false);
+    setWireDraft([]);
+    setSelectedRouteId(null);
+  }, []);
+  /** The palette's "that layer is hidden" warning — scope or type layer. */
+  const partLayerHidden = useCallback(
+    (p: PartLite) => {
+      const s = scopeOfPart(p);
+      return hiddenSet.has(scopeLayerKey(s)) || hiddenSet.has(typeLayerKey(s, typeKeyOfPart(p)));
+    },
+    [hiddenSet]
+  );
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {/* header */}
@@ -1365,110 +1540,18 @@ export default function GridEditor({
       <div style={{ display: "grid", gridTemplateColumns: "252px 1fr", gap: 12, alignItems: "start" }}>
         {/* sidebar */}
         <div style={{ display: "grid", gap: 12, position: "sticky", top: 12 }}>
-          {/* device palette */}
-          <div style={PANEL}>
-            <div style={PANEL_LABEL}>Devices</div>
-            {/* #121: search + scope filter on ONE row (SearchFilterBar; the
-                buttons wrap under the box inside this 252px column). */}
-            <SearchFilterBar value={search} onChange={setSearch} placeholder="Search names or Manufacturer #" ariaLabel="Search devices">
-              <div className="pk-searchbar-group">
-                {["", ...GRID_LAYERS].map((s) => {
-                  const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
-                  const on = scopeFilter === s;
-                  return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
-                })}
-              </div>
-            </SearchFilterBar>
-            {armedPart && hiddenSet.has(scopeLayerKey(scopeOfPart(armedPart))) && (
-              <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b", lineHeight: 1.4 }}>
-                The {scopeOfPart(armedPart)} layer is hidden, so what you place
-                won&apos;t show until you turn it back on.
-              </div>
-            )}
-            {armedPart ? (
-              <div style={{ marginTop: 8, fontSize: 11.5, color: "#2e7d55", fontWeight: 600 }}>
-                Painting: {armedPart.sku} — click the plan to place.{" "}
-                <button
-                  style={{ ...BTN, padding: "2px 7px", fontSize: 10.5, marginLeft: 2 }}
-                  onClick={() => setArmedPartId(null)}
-                >
-                  Done
-                </button>
-              </div>
-            ) : (
-              <div style={{ marginTop: 8, fontSize: 11, color: "#8c919c" }}>
-                Pick a part, then click the plan for each unit.
-              </div>
-            )}
-            <div style={{ marginTop: 8, maxHeight: 300, overflowY: "auto", display: "grid", gap: 3 }}>
-              {filteredParts.slice(0, 60).map((p) => {
-                const on = p.id === armedPartId;
-                return (
-                  <div key={p.id}>
-                    <button
-                      onClick={() => {
-                        setArmedPartId(on ? null : p.id);
-                        setArmedCurtainType(null);
-                        setSelected(null);
-                        setSpaceDrawing(false);
-                        setSpaceDraft([]);
-                        setSelectedSpaceId(null);
-                        setWireDrawing(false);
-                        setWireDraft([]);
-                        setSelectedRouteId(null);
-                      }}
-                      title={p.desc}
-                      style={{
-                        ...BTN,
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "5px 8px",
-                        fontWeight: 500,
-                        display: "grid",
-                        gap: 1,
-                        background: on ? "#16181d" : "#fff",
-                        color: on ? "#fff" : "#3d424e",
-                        borderColor: on ? "#16181d" : "#dfe2e8",
-                      }}
-                    >
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <SymbolIcon iconId={lookOf(p).iconId} color={lookOf(p).color} size={16} />
-                        <strong style={{ fontSize: 11.5 }}>{p.desc}</strong>
-                        <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
-                      </span>
-                      <span style={{ fontSize: 10.5, color: on ? "#c9cdd6" : "#8c919c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.manufacturer ? `${p.manufacturer} · ` : ""}{p.modelNumber || p.sku}{p.kind === "assembly" ? " · assembly" : ""}
-                      </span>
-                    </button>
-                    {/* Datasheet link (Task 5, punch #39) — a sibling of the
-                        arm/paint button, not nested inside it: a real <a>
-                        inside a <button> is invalid, and this still needs to
-                        open in its own tab without arming the part. */}
-                    {p.hasDatasheet && (
-                      <a
-                        href={`/api/part-datasheet/${encodeURIComponent(p.sku)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ display: "block", marginTop: 2, padding: "0 8px", fontSize: 10, color: "var(--accent)", textDecoration: "none" }}
-                      >
-                        Datasheet
-                      </a>
-                    )}
-                  </div>
-                );
-              })}
-              {filteredParts.length > 60 && (
-                <div style={{ fontSize: 10.5, color: "#9aa0ab", padding: "3px 2px" }}>
-                  {filteredParts.length - 60} more — narrow the search.
-                </div>
-              )}
-              {filteredParts.length === 0 && (
-                <div style={{ fontSize: 11.5, color: "#9aa0ab", padding: "3px 2px" }}>
-                  Nothing matches.
-                </div>
-              )}
-            </div>
-          </div>
+          {/* device palette (#226: tabs, device-type chips, manufacturer filter, stars) */}
+          <DevicePalette
+            parts={parts}
+            types={deviceTypes}
+            favorites={favorites}
+            recent={recent}
+            armedPartId={armedPartId}
+            onArm={armPart}
+            onDisarm={() => setArmedPartId(null)}
+            isHidden={partLayerHidden}
+            lookOf={lookOf}
+          />
 
           <AssembliesPanel parts={parts} onChanged={() => router.refresh()} />
 
@@ -1584,6 +1667,7 @@ export default function GridEditor({
           {/* layers (punch #48) - visibility of what's already placed */}
           <LayersPanel
             scopeCounts={scopeCounts}
+            typeRows={typeRows}
             categoryCounts={categoryCounts}
             hidden={hiddenSet}
             scopeColor={(s) => SCOPE_COLORS[s]}
@@ -1814,153 +1898,117 @@ export default function GridEditor({
           {/* BOM */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Bill of materials</div>
-            {bomEmpty ? (
-              <>
-                <div style={{ fontSize: 11.5, color: "#8c919c" }}>
-                  Paint devices onto the plan to build the BOM.
-                </div>
-                {customSection}
-              </>
-            ) : (
-              <div style={{ display: "grid", gap: 4 }}>
-                {lines.map((l) => (
-                  <div key={l.partId} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty}×</strong>
-                    <span
-                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      title={`${l.partId} — ${l.desc}`}
-                    >
-                      {partById.get(l.partId)?.virtual ? l.desc : l.partId}
-                    </span>
-                    {partById.get(l.partId)?.virtualDead ? (
-                      // #211 D313: nothing real behind it — the quote refuses it by name.
-                      <span
-                        title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
-                        style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
-                      >
-                        Needs a part
+            {bomEmpty && (
+              <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 4 }}>
+                Paint devices onto the plan to build the BOM.
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 4 }}>
+              {/* #230: one heading per category, in Jeff's order. Every
+                  heading shows, even empty, so an accessory can be added
+                  to a category nothing is placed in yet. */}
+              {bomGroupList.map((g) => {
+                const groupCustom = customItems.filter((it) => groupOfCustomSystem(it.system) === g.key);
+                return (
+                  <div key={g.key} style={{ display: "grid", gap: 4, borderTop: "1px dashed #e3e5ea", paddingTop: 5 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+                      <span style={{ flex: 1, fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
+                        {g.label}
                       </span>
-                    ) : (
-                      partById.get(l.partId)?.allowance && (
-                        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
-                          Allowance
-                        </span>
-                      )
-                    )}
-                    {partById.get(l.partId)?.hasDatasheet && (
-                      <a
-                        href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
-                      >
-                        datasheet
-                      </a>
-                    )}
-                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-                  </div>
-                ))}
-                {wires.lines.map((l) => (
-                  <div key={`w-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
-                    <span
-                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      title={`${l.partId} — ${l.desc}`}
-                    >
-                      {l.partId}
-                    </span>
-                    {partById.get(l.partId)?.hasDatasheet && (
-                      <a
-                        href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
-                      >
-                        datasheet
-                      </a>
-                    )}
-                    {l.connectionType && (
-                      <span style={{ color: "#9aa0ab", fontSize: 10.5, whiteSpace: "nowrap" }}>
-                        {l.connectionType}
-                      </span>
-                    )}
-                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-                  </div>
-                ))}
-                {wires.unmeasured > 0 && (
-                  <div style={{ fontSize: 10.5, color: "#a0442b" }}>
-                    {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
-                  </div>
-                )}
-                {/* Curtains (punch #49): one line each, never grouped - two
-                    drapes of one fabric are different goods once their
-                    dimensions differ. */}
-                {curtains.map((l) => (
-                  <div key={`c-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>1×</strong>
-                    <span
-                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      title={l.desc}
-                    >
-                      {l.curtainName}
-                    </span>
-                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-                  </div>
-                ))}
-                {customSection}
-                {laborRows.length > 0 && (
-                  <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
-                      Labor (suggested)
+                      {pickerOpenFor !== g.key && (
+                        <button type="button" style={ADD_LINK} onClick={() => setAddingTo({ optionId: activeOptionId, group: g.key })}>
+                          + Add accessory
+                        </button>
+                      )}
+                      {g.value > 0 && <span style={{ fontSize: 11, color: "#5b616e", fontWeight: 600 }}>{moneyFmt(g.value)}</span>}
                     </div>
-                    {laborRows.map((l) => (
-                      <div key={l.partId} style={{ display: "flex", gap: 5, fontSize: 12, alignItems: "center" }}>
-                        <input
-                          type="checkbox"
-                          checked={l.included}
-                          onChange={(e) =>
-                            setLaborOverrides((prev) => ({
-                              ...prev,
-                              [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
-                            }))
-                          }
-                          style={{ margin: 0 }}
-                        />
-                        <span
-                          style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title={`${l.desc} @ ${moneyFmt(l.rate)}/hr`}
-                        >
-                          {l.partId}
-                        </span>
-                        <input
-                          value={String(l.hours)}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            setLaborOverrides((prev) => ({
-                              ...prev,
-                              [`${activeOptionId}:${l.partId}`]: {
-                                included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
-                                hours: Number.isFinite(v) && v >= 0 ? v : 0,
-                              },
-                            }));
-                          }}
-                          inputMode="decimal"
-                          style={{ ...INPUT, width: 44, padding: "2px 5px", fontSize: 11.5, textAlign: "right" }}
-                        />
-                        <span style={{ fontSize: 10.5, color: "#8c919c" }}>hr</span>
-                        <span style={{ color: "#16181d", fontWeight: 600, opacity: l.included ? 1 : 0.4 }}>
-                          {moneyFmt(l.ext)}
-                        </span>
-                      </div>
-                    ))}
+                    {pickerOpenFor === g.key && (
+                      <AccessoryPicker
+                        projectId={project.id}
+                        optionId={activeOptionId}
+                        group={g.key}
+                        parts={parts}
+                        onDone={(added) => {
+                          setAddingTo(null);
+                          if (added) router.refresh();
+                        }}
+                      />
+                    )}
+                    {g.lines.map((l) => renderBomLine(l))}
+                    {groupCustom.length > 0 && (
+                      <CustomItemsSection
+                        key={`${activeOptionId}:${g.key}`}
+                        projectId={project.id}
+                        optionId={activeOptionId}
+                        items={groupCustom}
+                        lines={customLines}
+                        showAdd={false}
+                        onChanged={() => router.refresh()}
+                      />
+                    )}
                   </div>
-                )}
+                );
+              })}
+              {customSection}
+              {wires.unmeasured > 0 && (
+                <div style={{ fontSize: 10.5, color: "#a0442b" }}>
+                  {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
+                </div>
+              )}
+              {laborRows.length > 0 && (
+                <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
+                    Labor (suggested)
+                  </div>
+                  {laborRows.map((l) => (
+                    <div key={l.partId} style={{ display: "flex", gap: 5, fontSize: 12, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={l.included}
+                        onChange={(e) =>
+                          setLaborOverrides((prev) => ({
+                            ...prev,
+                            [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
+                          }))
+                        }
+                        style={{ margin: 0 }}
+                      />
+                      <span
+                        style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                        title={`${l.desc} @ ${moneyFmt(l.rate)}/hr`}
+                      >
+                        {l.partId}
+                      </span>
+                      <input
+                        value={String(l.hours)}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setLaborOverrides((prev) => ({
+                            ...prev,
+                            [`${activeOptionId}:${l.partId}`]: {
+                              included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
+                              hours: Number.isFinite(v) && v >= 0 ? v : 0,
+                            },
+                          }));
+                        }}
+                        inputMode="decimal"
+                        style={{ ...INPUT, width: 44, padding: "2px 5px", fontSize: 11.5, textAlign: "right" }}
+                      />
+                      <span style={{ fontSize: 10.5, color: "#8c919c" }}>hr</span>
+                      <span style={{ color: "#16181d", fontWeight: 600, opacity: l.included ? 1 : 0.4 }}>
+                        {moneyFmt(l.ext)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!bomEmpty && (
                 <div style={{ borderTop: "1px solid #edeff3", marginTop: 3, paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
                   <span style={{ color: "#8c919c" }}>Total</span>
                   <strong>{moneyFmt(grandValue)}</strong>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
             <button
               style={{
                 ...BTN,

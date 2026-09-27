@@ -145,6 +145,13 @@ export function categoryLayerKey(category: string): string {
   return `cat:${category}`;
 }
 
+/** #226: a device-type layer, namespaced by scope — "Unmapped" (and
+ *  Assemblies) can sit under several scopes, and hiding it under Audio must
+ *  not hide it under Lighting. */
+export function typeLayerKey(scope: GridLayer, typeKey: string): string {
+  return `type:${scope}:${typeKey}`;
+}
+
 /** Trimmed label, or null when a placement carries no user category. */
 export function normalizeCategory(raw: string | null | undefined): string | null {
   const t = (raw || "").trim();
@@ -152,17 +159,21 @@ export function normalizeCategory(raw: string | null | undefined): string | null
 }
 
 /**
- * Layer visibility for one item. The two axes AND together: hiding a scope
- * hides everything in it whatever its category, and hiding a category hides
- * that label across every scope. An item with no category is never affected by
- * a category toggle - categories are opt-in labels, not a partition.
+ * Layer visibility for one item. The axes AND together: hiding a scope
+ * hides everything in it whatever its type or category; hiding a device
+ * type (#226) hides that type within its scope; hiding a category hides
+ * that label across every scope. An item with no category is never
+ * affected by a category toggle - categories are opt-in labels, not a
+ * partition. `typeKey` is optional so pre-#226 callers are unchanged.
  */
 export function isLayerVisible(
   scope: GridLayer,
   category: string | null,
-  hidden: ReadonlySet<string>
+  hidden: ReadonlySet<string>,
+  typeKey?: string | null
 ): boolean {
   if (hidden.has(scopeLayerKey(scope))) return false;
+  if (typeKey && hidden.has(typeLayerKey(scope, typeKey))) return false;
   if (category && hidden.has(categoryLayerKey(category))) return false;
   return true;
 }

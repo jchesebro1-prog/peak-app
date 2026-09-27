@@ -74,6 +74,7 @@ const ROUTES = [
   "/catalog/documents", // #207 — the Datasheets to-do list
   "/catalog/documents?show=missing-datasheet",
   "/catalog/documents/upload", // #207 — bulk drop
+  "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
   "/estimating-rules",
   "/inspections",
   "/flame-tests",

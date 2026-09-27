@@ -15,6 +15,7 @@ import {
   generateBaseSheet,
   getProject,
   movePlacement,
+  removeAccessory,
   removeCustomItem,
   removeOption,
   removePlacement,
@@ -32,6 +33,7 @@ import {
   setLinesetDesign,
   setSheetCalibration,
   setVenue,
+  saveAccessory,
   saveCustomItem,
   saveGridIntake,
   setAutoEstimate,
@@ -40,6 +42,7 @@ import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-o
 import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import type { GridCustomItemInput } from "@/lib/design/grid-custom-items";
+import type { GridAccessoryInput } from "@/lib/design/grid-accessories";
 import { can } from "@/lib/team";
 import { designsForGridProject, removeDesign, updateDesign } from "@/lib/stores/designs";
 import { getSite } from "@/lib/identity/sites";
@@ -49,6 +52,7 @@ import { getSite } from "@/lib/identity/sites";
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart, getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
+import { pushGridRecent, toggleGridFavorite } from "@/lib/stores/device-types";
 import { autoNeedsPart, fillAutoScopes } from "@/lib/design/grid-auto-fill";
 import {
   AUTO_SCOPES,
@@ -363,8 +367,25 @@ export async function placeDeviceAction(
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   const p = await addPlacement(projectId, { ...input, by: user.name });
   if (!p) return { ok: false, error: "Design not found." };
+  // #226: Recent is the placer's own last-40 list — a convenience, so a
+  // failed write never fails the placement that already landed.
+  try {
+    await pushGridRecent(user.id, input.partId);
+  } catch {
+    /* best-effort */
+  }
   revalidatePath(editorPath(projectId));
   return { ok: true };
+}
+
+/** #226: star / unstar a part in the palette — the signed-in user's own
+ *  favorites (cap 300, refused past it). No revalidate: the palette keeps
+ *  the returned list; a reload reads the same blob. */
+export async function toggleGridFavoriteAction(
+  partId: string
+): Promise<{ ok: true; favorites: string[]; on: boolean } | { ok: false; error: string }> {
+  const user = await requireUser();
+  return toggleGridFavorite(user.id, String(partId || ""));
 }
 
 /** Reposition an already-placed device (punch #47). Wires attached to it
@@ -1003,6 +1024,40 @@ export async function removeCustomItemAction(
 ): Promise<Result> {
   await requireUser();
   const r = await removeCustomItem(projectId, optionId, String(itemId ?? ""));
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true };
+}
+
+/* ------------------------------ BOM accessories (#230) ------------------------------ */
+
+/**
+ * Add an accessory under a BOM heading, or change one's qty (#230). Same
+ * gate as the placement edits; the store re-validates the part against the
+ * Grid library and re-sanitizes everything. Revalidates the Designs
+ * dashboard too, since its live budget reads this option's quote build.
+ */
+export async function saveAccessoryAction(
+  projectId: string,
+  optionId: string,
+  input: GridAccessoryInput
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  await requireUser();
+  const r = await saveAccessory(projectId, optionId, input);
+  if (!r.ok) return r;
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true, id: r.item.id };
+}
+
+export async function removeAccessoryAction(
+  projectId: string,
+  optionId: string,
+  accessoryId: string
+): Promise<Result> {
+  await requireUser();
+  const r = await removeAccessory(projectId, optionId, String(accessoryId ?? ""));
   if (!r.ok) return r;
   revalidatePath(editorPath(projectId));
   revalidatePath("/design/designs");

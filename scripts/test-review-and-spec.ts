@@ -5374,7 +5374,7 @@ import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
     join(process.cwd(), "src/app/(app)/design/grid/settings/category-icons-card.tsx"),
     "utf8"
   );
-  ok(categoryIconsCardSrc.includes("resolveCategoryIcons(null)") && categoryIconsCardSrc.includes("symbolLook({ category, gridScope }, baseCtx)"),
+  ok(categoryIconsCardSrc.includes("resolveCategoryIcons(null)") && categoryIconsCardSrc.includes("symbolLook({ category, gridScope, deviceType }, baseCtx)"),
     "#206 final fix wave: the Category icons card's row baseline is symbolLook over a stored-override-free context, matching the plan");
   ok(categoryIconsCardSrc.includes("Object.hasOwn(overrides, r.category)"),
     "#206 final fix wave: the Category icons card reads a row's override with Object.hasOwn, not `in`/bracket access (a category named e.g. \"constructor\" would otherwise read Object.prototype)");
@@ -10512,10 +10512,13 @@ seeded()
   .then(() => dayliteCalendarAsyncChecks219())
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
+  .then(() => deviceTypesAsyncChecks())
+  .then(() => deviceTypeIconsAsyncChecks())
   .then(() => tasks215AsyncChecks())
   .then(() => calendarTasks215AsyncChecks())
   .then(() => inboxTask215AsyncChecks())
   .then(() => wireLabor231AsyncChecks())
+  .then(() => gridAccessoriesAsyncChecks230())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -17324,7 +17327,7 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     && gridPartsFrom([gpSym] as never, gpCat as never, {}, { hasDatasheet: (p) => p.sku === "W1" })[0].hasDatasheet === true,
     "#209 parts: a caller's hasDatasheet (the #207 part-documents check) replaces the legacy blob check");
   const gpPlanSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
-  ok(gpPlanSrc.includes("gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile })") && gpPlanSrc.includes("ownFiles(docIndex, p.sku, \"datasheet\")"),
+  ok(gpPlanSrc.includes("gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile, deviceTypes })") && gpPlanSrc.includes("ownFiles(docIndex, p.sku, \"datasheet\")"),
     "#209 parts: the plan editor flags datasheets from part documents (#207), not the legacy blob key");
 
   const gpProj: RiserProjectLite = {
@@ -17738,7 +17741,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 10 && (actionsSrc.match(/^export async function/gm) || []).length === 10, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -18025,10 +18029,9 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#211 T6: re-choosing one scope replaces only that scope's overrides");
   const refs = gemRefs6(est);
   ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#211 T6: overrideRefs names the SKUs and assemblies to load");
-  const ed6 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
-  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
+  ok(readFileSync(join(process.cwd(), "src/lib/design/grid-palette.ts"), "utf8").includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6 (moved by #226): the palette (grid-palette.ts) hides virtual parts; the quote, riser, set and schedule resolve them");
 }
 
 /* --- #211 T6 fix wave 1: lot-aware riser rows, lot units on the drawing set + schedule, dead virtual parts, bid-spec rows, store sanitizers, per-option estimates --- */
@@ -21540,6 +21543,442 @@ async function dayliteCalendarAsyncChecks219(): Promise<void> {
   ok(hist.includes('href="/import/daylite/calendar"'), "#219 T3: /import/daylite links to the calendar import");
 }
 
+/* ======================================================================
+   #226 Grid device types — Task 1: the pure model (seeds, suggestion
+   rules on realistic raw categories incl. the dealer-sheet per-brand
+   defaults, the map rules, review rows, list helpers, the scope fix).
+   ====================================================================== */
+import {
+  SEED_DEVICE_TYPES as dt226Seed, DEFAULT_TYPE_ICONS as dt226Icons, deviceTypesFrom as dt226From, slugOf as dt226Slug,
+  normalizeRawCategory as dt226Norm, suggestDeviceType as dt226Suggest, typeOfPart as dt226TypeOf, scopeOfType as dt226ScopeOf,
+  keywordScopeOf as dt226Keyword, autoTypeEntries as dt226Auto, sanitizeTypeMap as dt226Sanitize, typeReviewRows as dt226Rows,
+  acceptSuggestionEntries as dt226Accept, assignEntries as dt226Assign, mergeTypeEntries as dt226Merge,
+  cleanDeviceTypesInput as dt226Clean, typeLayerRows as dt226Layers, typeKeyOfPart as dt226KeyOf, typeLabel as dt226Label,
+  deviceTypeIcons as dt226TypeIcons, withTypeIcons as dt226WithIcons, cleanIdList as dt226Ids, withRecent as dt226Recent,
+  toggleInList as dt226Toggle, UNMAPPED_TYPE as DT226_UNMAPPED, ASSEMBLY_TYPE as DT226_ASM, type TypeMap as DT226Map,
+  mapKeyOf as dt226MapKey,
+} from "@/lib/design/device-types";
+import { gridPartsFrom as dt226Parts } from "@/lib/design/grid-parts";
+import { scopeOfPart as dt226ScopeOfPart } from "@/lib/design/grid-scopes";
+import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
+
+{
+  const j = (x: unknown) => JSON.stringify(x);
+  ok(dt226Seed.length === 25 && new Set(dt226Seed.map((t) => t.key)).size === 25, "#226 model: 25 seeded device types with unique keys");
+  ok(
+    dt226Seed.map((t) => t.key).join(",") ===
+      "fixtures,dimming-power,control-networking,lighting-accessories,hoists-motors,truss-pipe,rigging-hardware,rigging-control,drapery,tracks-hardware,speakers,microphones,mixing-processing,amplifiers,assistive-listening,intercom,displays-projectors,screens-lifts,cameras,switching-distribution,cable-connectors,racks-cases,power-distribution,networking,parts-consumables",
+    "#226 model: seed keys are slugs of the labels, in the spec's order"
+  );
+  ok(dt226Seed.filter((t) => t.scope === "Unscoped").map((t) => t.label).join("|") === "Cable & Connectors|Racks & Cases|Power Distribution|Networking|Parts & Consumables",
+    "#226 model: the General five are Unscoped");
+  ok(dt226Seed.every((t) => dt226IsIcon(dt226Icons[t.key])), "#226 model: every seeded type has a registered default icon");
+  ok(dt226Slug("Dimming & Power") === "dimming-power" && dt226Slug("  A/V  Racks!! ") === "a-v-racks", "#226 model: slugOf");
+  ok(dt226Norm("  Motorized   HOIST ") === "motorized hoist" && dt226Norm(null) === "" && dt226Norm("__proto__") === "",
+    "#226 model: normalizeRawCategory trims, lowercases, collapses whitespace (and refuses __proto__)");
+
+  // seed / sanitize / merge
+  ok(j(dt226From(undefined)) === j(dt226Seed) && dt226From(undefined) !== dt226From(undefined), "#226 model: absent → fresh seed copies");
+  const stored = dt226From([
+    { key: "fixtures", label: "Luminaires", scope: "Lighting", order: 5, icon: "wash" },
+    { key: "fixtures", label: "Dup", scope: "Lighting", order: 1 },
+    { key: "Bad Key", label: "x", scope: "Lighting", order: 1 },
+    { key: "fog", label: "Fog & Haze", scope: "Lighting", order: 900, archived: true },
+    { key: "x", label: "", scope: "Lighting", order: 2 },
+    { key: "y", label: "Y", scope: "Nope", order: 2 },
+  ]);
+  ok(stored[0].key === "fixtures" && stored[0].label === "Luminaires" && stored[0].icon === "wash", "#226 model: a stored type keeps its rename and icon");
+  ok(stored.filter((t) => t.key === "fixtures").length === 1 && !stored.some((t) => ["Bad Key", "x", "y"].includes(t.key)),
+    "#226 model: duplicate keys, bad keys, blank labels and unknown scopes are dropped");
+  ok(stored.length === 26 && stored.some((t) => t.key === "fog" && t.archived) && stored.some((t) => t.key === "parts-consumables"),
+    "#226 model: seeds missing from a stored list are merged back in; archived customs stay");
+
+  // suggestion rules — realistic raw categories (scripts/catalog-import-data.json,
+  // the dealer-sheet BRAND_CATEGORY defaults in scripts/convert-dealer-sheets.py,
+  // and common vendor-sheet section names)
+  const CASES: Array<[string, string | null, "high" | "low" | null]> = [
+    ["Fixtures", "fixtures", "high"], ["Track", "tracks-hardware", "low"], ["Pipe", "truss-pipe", "high"],
+    ["Loftblocks", "rigging-hardware", "high"], ["Headblocks", "rigging-hardware", "high"], ["Mule Block", "rigging-hardware", "high"],
+    ["Arbor", "rigging-hardware", "high"], ["Standard Arbor", "rigging-hardware", "high"], ["Front Arbor", "rigging-hardware", "high"],
+    ["Floor Block", "rigging-hardware", "high"], ["Manual Hoist", "hoists-motors", "high"], ["Motorized Hoist", "hoists-motors", "high"],
+    ["Rope Lock", "rigging-hardware", "high"], ["Shoes", "rigging-hardware", "high"],
+    // fix wave 2 (#226): "Hardware" alone is as generic as bare "Mounts" —
+    // "Mounting Hardware", "Curtain Hardware" name no device — so it's low,
+    // same as the pre-existing bare "Rigging" row below, not the stale
+    // "high" this row used to assert.
+    ["Hardware", "rigging-hardware", "low"],
+    ["Wire Mesh Strain Reliefs", "rigging-hardware", "high"], ["Curtains", "drapery", "high"],
+    ["Networking", "networking", "high"], ["Racks", "racks-cases", "high"], ["Rack Accessories", "racks-cases", "high"],
+    ["Rack Options", "racks-cases", "high"], ["Connectors", "cable-connectors", "high"], ["Cable Assemblies", "cable-connectors", "high"],
+    ["Lighting Controls", "control-networking", "high"], ["Video Controls", "switching-distribution", "high"], ["Speakers", "speakers", "high"],
+    ["Audio Controls", "mixing-processing", "high"], ["Power Distribution", "power-distribution", "high"], ["Power Controls", "dimming-power", "high"],
+    ["Cable", "cable-connectors", "high"], ["Lamp", "parts-consumables", "high"],
+    // fix wave 2 (#226): "Cases" and "Parts" are the same generic-container
+    // class as "Mounts"/"Hardware" — "Speaker Cases", "Rigging Parts" name
+    // no device by the container word alone — so both are low, not the
+    // stale "high" these two rows used to assert. "Carts" is unchanged: a
+    // cart is a specific enough object, not a modifier-dependent container.
+    ["Cases", "racks-cases", "low"], ["Carts", "racks-cases", "high"],
+    ["Parts", "parts-consumables", "low"], ["Distro Boxes", "power-distribution", "high"], ["Cable Crossovers", "cable-connectors", "high"],
+    ["Wire", "cable-connectors", "high"], ["Control", "control-networking", "low"], ["Architectural", "fixtures", "low"],
+    ["Uncategorized", null, null], ["Accessory", null, null], ["Atmospherics", null, null], ["Fabric", null, null], ["Labor", null, null],
+    // dealer-sheet per-brand defaults
+    ["Audio", null, null], ["AV Control", null, null], ["Networked AV", null, null], ["Video", null, null],
+    ["Displays", "displays-projectors", "high"], ["LED Video", "displays-projectors", "high"], ["Screens & Lifts", "screens-lifts", "high"],
+    ["AV Distribution", "switching-distribution", "high"], ["AV Infrastructure", null, null], ["Power", "power-distribution", "low"],
+    ["Assistive Listening", "assistive-listening", "high"], ["Comms", "intercom", "high"], ["Stage Accessories", null, null],
+    ["Rigging", "rigging-hardware", "low"], ["Staging", null, null], ["Lighting Control", "control-networking", "high"], ["Lighting", "fixtures", "low"],
+    // common section names
+    ["Moving Lights", "fixtures", "high"], ["Wireless Microphones", "microphones", "high"], ["Wireless", "microphones", "low"],
+    ["Wireless Access Points", "networking", "high"], ["Power Amplifiers", "amplifiers", "high"], ["Digital Mixing Consoles", "mixing-processing", "high"],
+    ["Lighting Consoles", "control-networking", "high"], ["PTZ Cameras", "cameras", "high"], ["Projection Screens", "screens-lifts", "high"],
+    ["HDBaseT Extenders", "switching-distribution", "high"], ["Dimmers", "dimming-power", "high"], ["Chain Hoists", "hoists-motors", "high"],
+    ["Motor Controllers", "rigging-control", "high"], ["Truss", "truss-pipe", "high"], ["Velour Curtains", "drapery", "high"],
+    ["Travelers", "tracks-hardware", "high"], ["Clear-Com", "intercom", "high"], ["Gobos", "lighting-accessories", "high"],
+    ["Clamps", "lighting-accessories", "low"], ["Network Switches", "networking", "high"], ["Stage Monitors", "speakers", "high"],
+    ["Monitors", "displays-projectors", "low"], ["  motorized   HOIST ", "hoists-motors", "high"],
+    // fix wave #226: head-noun precedence — a cable/connector/adapter word
+    // always wins, whatever else the category names
+    ["DMX Cable", "cable-connectors", "high"], ["5-Pin DMX Cable", "cable-connectors", "high"],
+    ["Speaker Cable", "cable-connectors", "high"], ["HDMI Cable", "cable-connectors", "high"],
+    ["XLR Adapters", "cable-connectors", "high"], ["Power Cable", "cable-connectors", "high"],
+    ["Cat6 Cable", "cable-connectors", "high"], ["Speakon Connectors", "cable-connectors", "high"],
+    // fix wave #226: a specific phrase still resolves correctly (regression
+    // guard — these already worked, this locks them in)
+    ["Lighting Console", "control-networking", "high"], ["Audio Console", "mixing-processing", "high"],
+    ["Mixing Console", "mixing-processing", "high"], ["Rigging Hardware", "rigging-hardware", "high"],
+    ["Curtain Track", "tracks-hardware", "high"], ["Motor Control", "rigging-control", "high"],
+    ["Hoist Controller", "rigging-control", "high"],
+    // fix wave #226: ambiguous head nouns alone are never confidently wrong
+    ["Console", "control-networking", "low"], ["Clamp", "lighting-accessories", "low"],
+    ["Controls", "control-networking", "low"], ["Accessories", null, null],
+    // fix wave 2 (#226): a mount/bracket is a hookup accessory for some
+    // OTHER device, never a device of its own — the modifier says which
+    // device, and even a good modifier match stays low (never the "high"
+    // the old bare-"mounts?" rigging-hardware rule wrongly gave every one
+    // of these). Bare "Mounts"/"Mount"/"Rigid Mount"/"Brackets" carry no
+    // device information at all and get no suggestion.
+    ["Mounts", null, null], ["Mount", null, null], ["Rigid Mount", null, null], ["Brackets", null, null],
+    ["Speaker Mounts", "speakers", "low"], ["Projector Mounts", "displays-projectors", "low"],
+    ["TV Mounts", "displays-projectors", "low"], ["Display Mounts", "displays-projectors", "low"],
+    ["Monitor Mounts", "displays-projectors", "low"], ["Camera Mounts", "cameras", "low"],
+    ["Truss Mounts", "truss-pipe", "low"], ["Pipe Mounts", "truss-pipe", "low"],
+    ["Fixture Mounts", "lighting-accessories", "low"], ["Light Mounts", "lighting-accessories", "low"],
+    // only an explicit rigging word keeps a mount in rigging-hardware, and
+    // still only at low confidence, never high
+    ["Rigging Mounts", "rigging-hardware", "low"], ["Beam Clamps & Mounts", "rigging-hardware", "low"],
+    // regression guard: "Truss Clamps" is untouched by the mount/bracket
+    // fix (no "mount"/"bracket" word) and stays truss-pipe high — a truss
+    // clamp genuinely is truss/rigging hardware, domain-plausible even
+    // though "clamps" (not "truss") is the grammatical head noun.
+    ["Truss Clamps", "truss-pipe", "high"],
+  ];
+  for (const [cat, key, conf] of CASES) {
+    const s = dt226Suggest(cat);
+    ok(key === null ? s === null : s?.typeKey === key && s.confidence === conf,
+      `#226 suggest: "${cat}" → ${key ?? "null"}${conf ? ` (${conf})` : ""} (got ${j(s)})`);
+  }
+  const lightingTrack = dt226Suggest("Lighting Track");
+  ok(!(lightingTrack?.typeKey === "tracks-hardware" && lightingTrack.confidence === "high"),
+    `#226 suggest: "Lighting Track" is never confidently mis-typed as curtain-track hardware (low tracks-hardware or a lighting type is fine; got ${j(lightingTrack)})`);
+  ok(j(dt226Suggest("Audio", ["QSC K12.2 powered loudspeaker", "QSC KS118 subwoofer", "Shure SM58 microphone"])) === j({ typeKey: "speakers", confidence: "low" }),
+    "#226 suggest: sample descriptions vote a LOW-confidence type when the category says nothing");
+  ok(dt226Suggest("Uncategorized", ["ETC Source Four ellipsoidal"]) === null && dt226Suggest("Fabric", ["velour"]) === null,
+    "#226 suggest: generic and excluded categories never get a suggestion, whatever the parts say");
+  ok(j(dt226Suggest("Fixtures", ["QSC loudspeaker"])) === j({ typeKey: "fixtures", confidence: "high" }), "#226 suggest: a category match beats the descriptions");
+
+  // typeOfPart / scopes
+  const types = dt226From(undefined);
+  const map: DT226Map = {
+    "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 1 },
+    widgets: { typeKey: null, by: "admin", at: 2 },
+    gone: { typeKey: "no-such-type", by: "admin", at: 3 },
+  };
+  ok(dt226TypeOf({ category: " Motorized  Hoist" }, map, types) === "hoists-motors", "#226 typeOfPart: matches the normalized category");
+  ok(dt226TypeOf({ category: "Widgets" }, map, types) === null && dt226TypeOf({ category: "Gone" }, map, types) === null && dt226TypeOf({ category: "Nothing" }, map, types) === null,
+    "#226 typeOfPart: an admin 'unmapped', an unknown type and no entry are all null");
+  ok(dt226TypeOf({ category: "Motorized Hoist" }, map, types.map((t) => (t.key === "hoists-motors" ? { ...t, archived: true } : t))) === null,
+    "#226 typeOfPart: an archived type maps nothing");
+  ok(dt226TypeOf({ category: "Fabric" }, { fabric: { typeKey: "drapery", by: "admin", at: 1 } }, types) === null, "#226 typeOfPart: Fabric/Labor never take a device type");
+  ok(dt226ScopeOf("hoists-motors", types) === "Rigging" && dt226ScopeOf("networking", types) === "Unscoped" && dt226ScopeOf(null, types) === "Unscoped" && dt226ScopeOf("nope", types) === "Unscoped",
+    "#226 scopeOfType: the type's scope; unmapped → Unscoped");
+  ok(dt226Keyword({ category: "Widgets", desc: "Blue thing" }) === "Unscoped" && dt226Keyword({ category: "X", desc: "Velour curtain" }) === "Curtains" && dt226Keyword({ category: "Speakers", desc: "" }) === "Audio",
+    "#226 scope fix: the keyword fallback ends in Unscoped, not Lighting");
+  ok(
+    dt226Keyword({ category: "Rigid Mount" }) === "Unscoped" &&
+      dt226Keyword({ category: "Rigging Hardware" }) === "Rigging" &&
+      dt226Keyword({ category: "Truss" }) === "Rigging",
+    "#226 fix wave: keywordScopeOf matches 'rig' as a word/prefix of rigging, not a bare substring — 'Rigid Mount' isn't Rigging"
+  );
+  const gc226 = readFileSync(join(process.cwd(), "src/lib/stores/grid-catalog.ts"), "utf8");
+  ok(gc226.includes("keywordScopeOf(") && !/return "Lighting";/.test(gc226), "#226 scope fix: grid-catalog's scopeFor delegates to keywordScopeOf (no Lighting fallback)");
+
+  // the map
+  ok(j(dt226Sanitize({ "  Motorized HOIST ": { typeKey: "hoists-motors", by: "auto", at: 5 }, a: { typeKey: "Bad Key", by: "admin", at: 1 }, b: { typeKey: "speakers", by: "robot", at: 1 }, c: null, d: { typeKey: null, by: "admin" } }))
+      === j({ "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 5 }, d: { typeKey: null, by: "admin", at: 0 } }),
+    "#226 map: sanitizeTypeMap normalizes keys, keeps admin 'unmapped', drops bad entries");
+  const auto = dt226Auto([{ category: "Truss" }, { category: "truss " }, { category: "Motorized Hoist" }, { category: "Control" }, { category: "Uncategorized" }, { category: "Widgets" }], map, types, 1000);
+  ok(j(auto) === j({ truss: { typeKey: "truss-pipe", by: "auto", at: 1000 } }),
+    "#226 auto: only unmapped categories with a HIGH suggestion become auto entries (existing entries — even an admin 'unmapped' — untouched; low/none skipped)");
+  ok(j(dt226Auto([{ category: "Truss" }], {}, types.map((t) => (t.key === "truss-pipe" ? { ...t, archived: true } : t)), 1)) === "{}", "#226 auto: never auto-maps to an archived type");
+
+  // #226 fix wave 3: mapKeyOf gates every map writer/reader against the
+  // 120-char key limit sanitizeTypeMap enforces on read, so a too-long
+  // category is never silently re-written on every read.
+  ok(
+    dt226MapKey("  Motorized  Hoist ") === "motorized hoist" &&
+      dt226MapKey("Fabric") === null &&
+      dt226MapKey("Labor") === null &&
+      dt226MapKey("") === null &&
+      dt226MapKey("x".repeat(121)) === null &&
+      dt226MapKey("x".repeat(120)) === "x".repeat(120),
+    "#226 mapKeyOf: normalizes; null for blank, excluded (fabric/labor) and >120 chars; exactly 120 is fine"
+  );
+  const longTruss = `Truss ${"x".repeat(130)}`; // > 120 chars; would be a HIGH truss-pipe match were the cap not enforced
+  ok(j(dt226Auto([{ category: longTruss }], {}, types, 1000)) === "{}", "#226 auto: a >120-char category is never auto-mapped, even on a HIGH match (mapKeyOf gate)");
+  ok(j(dt226Auto([{ category: "Fabric" }, { category: "Labor" }], {}, types, 1)) === "{}", "#226 auto: Fabric/Labor are gated out directly by mapKeyOf, not just by suggestDeviceType returning null");
+
+  // review rows + accept
+  const rows = dt226Rows([
+    { category: "Truss", desc: "12in box truss" }, { category: "Truss", desc: "Corner block" },
+    { category: "Motorized Hoist", desc: "CM Lodestar" },
+    { category: "Audio", desc: "QSC loudspeaker" },
+    { category: "Widgets", desc: "Loudspeaker stand" },
+    { category: "Rigging", desc: "Shackle" },
+    { category: "Fabric", desc: "Velour" }, { category: "", desc: "blank" },
+  ], { ...map, truss: { typeKey: "truss-pipe", by: "admin", at: 9 } }, types);
+  ok(rows.map((r) => r.category).join("|") === "Audio|Rigging|Widgets|Motorized Hoist|Truss", "#226 review: unmapped first, then auto, then admin; Fabric and blanks left out");
+  const audio = rows.find((r) => r.category === "Audio")!;
+  ok(audio.status === "unmapped" && j(audio.suggestion) === j({ typeKey: "speakers", confidence: "low" }) && audio.entry === null, "#226 review: an unmapped row carries its (description-voted) suggestion");
+  ok(rows.find((r) => r.category === "Truss")!.count === 2 && rows.find((r) => r.category === "Motorized Hoist")!.status === "auto", "#226 review: counts parts per category; auto entries flagged");
+  ok(j(dt226Accept(rows, types, 77)) === j({ audio: { typeKey: "speakers", by: "admin", at: 77 }, rigging: { typeKey: "rigging-hardware", by: "admin", at: 77 } }),
+    "#226 review: Accept all suggestions writes admin entries for unmapped rows with any suggestion — never over an admin 'unmapped' (Widgets)");
+
+  // #226 fix wave 3: a >120-char category is a read-only "toolong" review
+  // row, not a perpetually "unmapped" one, and accept refuses it even if it
+  // were somehow handed one marked "unmapped".
+  const longCat = `Widgets ${"z".repeat(130)}`;
+  const rowsWithLong = dt226Rows([{ category: longCat, desc: "x" }, { category: "Audio", desc: "QSC loudspeaker" }], map, types);
+  const longRow = rowsWithLong.find((r) => r.category.startsWith("Widgets "))!;
+  ok(longRow.status === "toolong" && longRow.suggestion === null && longRow.entry === null && longRow.typeKey === null,
+    "#226 review: a >120-char category is a read-only 'too long to map' row, never unmapped/auto/admin");
+  const fakeUnmappedLongRow = { ...longRow, status: "unmapped" as const, suggestion: { typeKey: "speakers", confidence: "low" as const } };
+  ok(j(dt226Accept([fakeUnmappedLongRow], types, 5)) === "{}", "#226 accept: mapKeyOf refuses a >120-char key even if a row is somehow marked unmapped");
+
+  // assign / merge / type-list edits
+  ok(j(dt226Assign([" Widgets ", "", "Labor", "Gizmos"], "speakers", 5)) === j({ widgets: { typeKey: "speakers", by: "admin", at: 5 }, gizmos: { typeKey: "speakers", by: "admin", at: 5 } }),
+    "#226 assign: normalized keys, admin entries, blanks/Labor skipped");
+  ok(j(dt226Assign(["Widgets"], null, 5)) === j({ widgets: { typeKey: null, by: "admin", at: 5 } }), "#226 assign: null = deliberately unmapped (auto never re-maps it)");
+  ok(j(dt226Assign(["x".repeat(130)], "speakers", 5)) === "{}", "#226 assign: a >120-char category is refused (mapKeyOf)");
+  ok(j(dt226Merge({ a: { typeKey: "speakers", by: "auto", at: 1 }, b: { typeKey: "amplifiers", by: "admin", at: 1 }, c: { typeKey: "speakers", by: "admin", at: 1 } }, "speakers", "amplifiers", 9))
+      === j({ a: { typeKey: "amplifiers", by: "admin", at: 9 }, c: { typeKey: "amplifiers", by: "admin", at: 9 } }),
+    "#226 merge: every category of the merged type moves to the target as an admin entry");
+  const edited = dt226Clean(
+    [
+      ...types.filter((t) => t.key !== "intercom").map((t) => (t.key === "speakers" ? { ...t, label: "Loudspeakers" } : t)),
+      { label: "Fog & Haze", scope: "Lighting" },
+      { label: "Speakers", scope: "Audio" },
+    ],
+    types.map((t) => (t.key === "fixtures" ? { ...t, icon: "wash" } : t))
+  );
+  ok(edited.ok && edited.types.find((t) => t.key === "speakers")!.label === "Loudspeakers" && edited.types.find((t) => t.key === "fog-haze")?.scope === "Lighting",
+    "#226 types: rename keeps the key; a new type gets a slug key");
+  ok(edited.ok && edited.types.some((t) => t.key === "speakers-2") && edited.types.find((t) => t.key === "intercom")?.archived === true && edited.types.find((t) => t.key === "fixtures")?.icon === "wash",
+    "#226 types: a colliding slug gets a suffix; a dropped type is archived, never deleted; icons survive a list save");
+  ok(edited.ok && edited.types.map((t) => t.order).slice(0, 3).join() === "10,20,30", "#226 types: order follows the submitted list");
+  ok(!dt226Clean([{ label: "A", scope: "Lighting" }, { label: "a", scope: "Audio" }], []).ok && !dt226Clean([{ label: " ", scope: "Lighting" }], []).ok && !dt226Clean([{ label: "A", scope: "Nope" }], []).ok,
+    "#226 types: duplicate names, blank names and unknown scopes are refused");
+
+  // icons, labels, layer rows
+  const tIcons = dt226TypeIcons(dt226WithIcons(types, { speakers: "horn", amplifiers: null }).map((t) => (t.key === "cameras" ? { ...t, archived: true } : t)));
+  ok(tIcons.speakers === "horn" && tIcons.amplifiers === "amplifier" && !("cameras" in tIcons), "#226 icons: a type's own icon wins over the default; archived types have none");
+  ok(dt226KeyOf({ id: "GASM-1", kind: "assembly" }) === DT226_ASM && dt226KeyOf({ id: "asm:fa-1" }) === DT226_ASM && dt226KeyOf({ id: "x", deviceType: "speakers" }) === "speakers"
+      && dt226KeyOf({ id: "y", deviceType: null }) === DT226_UNMAPPED && dt226KeyOf(undefined) === DT226_UNMAPPED,
+    "#226 typeKeyOfPart: assemblies, typed parts, unmapped");
+  ok(dt226Label(DT226_UNMAPPED, types) === "Unmapped" && dt226Label("speakers", types) === "Speakers", "#226 typeLabel");
+  const lr = dt226Layers([
+    { scope: "Audio", typeKey: "amplifiers" }, { scope: "Audio", typeKey: DT226_UNMAPPED, sub: "Speakers" },
+    { scope: "Audio", typeKey: "speakers" }, { scope: "Audio", typeKey: "speakers" }, { scope: "Audio", typeKey: DT226_UNMAPPED, sub: "Speakers" },
+  ], types);
+  ok(j(lr.get("Audio")) === j([{ key: "speakers", label: "Speakers", count: 2, subs: [] }, { key: "amplifiers", label: "Amplifiers", count: 1, subs: [] }, { key: DT226_UNMAPPED, label: "Unmapped", count: 2, subs: ["Speakers"] }]),
+    "#226 layers: rows in type order, Unmapped last with its seeded categories as sub-labels");
+
+  // favorites / recent list rules
+  ok(j(dt226Ids(["a", "a", "", 5, "b", "x".repeat(121)], 10)) === j(["a", "b"]) && j(dt226Ids(null, 3)) === "[]", "#226 lists: cleanIdList dedupes and drops junk");
+  ok(j(dt226Recent(["b", "a", "c"], "a", 3)) === j(["a", "b", "c"]) && j(dt226Recent(["a", "b", "c"], "d", 3)) === j(["d", "a", "b"]), "#226 recent: moves to the front, capped");
+  const t1 = dt226Toggle(["a"], "b", 3);
+  const t2 = dt226Toggle(["b", "a"], "a", 3);
+  const t3 = dt226Toggle(["a", "b", "c"], "d", 3);
+  ok(t1.ok && t1.on && j(t1.list) === j(["b", "a"]) && t2.ok && !t2.on && j(t2.list) === j(["b"]) && !t3.ok && /3 favorites/.test(t3.error),
+    "#226 favorites: toggle adds to the front, removes, and refuses past the cap");
+
+  // gridPartsFrom stamps the type and the type's scope
+  const dtCtx = { types, map: { fixtures: { typeKey: "fixtures", by: "auto", at: 1 } } as DT226Map };
+  const sym226 = (id: string, scope: string, category: string, kind?: "assembly") => ({
+    id, name: id, manufacturer: "ETC", modelNumber: id, scope, category, width: 40, height: 30, ports: [],
+    pricingPartId: kind ? null : id, kind: kind ?? "device", createdBy: "t", createdAt: 1, updatedAt: 1,
+  });
+  const cat226 = [
+    { id: "P-FIX", sku: "P-FIX", desc: "Source Four", category: "Fixtures", unit: "ea", list: 1, cost: 1 },
+    { id: "P-WID", sku: "P-WID", desc: "Blue widget", category: "Widgets", unit: "ea", list: 1, cost: 1 },
+  ];
+  const lib226 = dt226Parts([sym226("P-FIX", "Lighting", "Fixtures"), sym226("P-WID", "Lighting", "Widgets"), sym226("GASM-1", "Audio", "Assembly", "assembly")] as never, cat226 as never, {}, { deviceTypes: dtCtx });
+  const by226 = new Map(lib226.map((p) => [p.id, p]));
+  ok(by226.get("P-FIX")!.deviceType === "fixtures" && by226.get("P-FIX")!.deviceTypeLabel === "Fixtures" && dt226ScopeOfPart(by226.get("P-FIX")) === "Lighting",
+    "#226 parts: a mapped part carries its type and the type's scope");
+  ok(by226.get("P-WID")!.deviceType === null && dt226ScopeOfPart(by226.get("P-WID")) === "Unscoped",
+    "#226 scope fix: an unmapped part stored with the old Lighting fallback now resolves Unscoped");
+  ok(by226.get("GASM-1")!.deviceType === null && dt226ScopeOfPart(by226.get("GASM-1")) === "Audio", "#226 parts: an assembly keeps its own scope");
+  ok(dt226Parts([sym226("P-WID", "Lighting", "Widgets")] as never, cat226 as never, {})[0].deviceType === undefined, "#226 parts: without a device-type context nothing changes (back-compat callers)");
+}
+
+/* ======================================================================
+   #226 Grid device types — Task 2: the store (auto-apply on read, admin
+   entries never overwritten, idempotent re-read, preview guard, merge,
+   accept, favorites/recent caps) and the Catalog → Device types screen.
+   Blob fixtures are snapshotted and put back in the async function's
+   finally (blobs aren't CollectionName docs, so no fixture sweep).
+   ====================================================================== */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const page = read("src/app/(app)/catalog/device-types/page.tsx");
+  const client = read("src/app/(app)/catalog/device-types/device-types-client.tsx");
+  const acts = read("src/app/(app)/catalog/device-types/actions.ts");
+  const clientImports = [...client.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(page.includes('can("manage_users", user.roles)') && page.includes("loadDeviceTypeContext(") && page.includes("typeReviewRows("),
+    "#226 screen: Catalog → Device types is admin-gated and reads through the auto-applying context");
+  ok(client.startsWith('"use client"') && clientImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")),
+    "#226 screen: the client imports no store");
+  ok(["saveDeviceTypesAction", "assignDeviceTypeAction", "acceptAllSuggestionsAction", "mergeDeviceTypeAction"].every((n) => {
+    const i = acts.indexOf(`export async function ${n}`);
+    return i >= 0 && acts.slice(i, acts.indexOf("\n}\n", i)).includes('await requirePerm("manage_users")');
+  }), "#226 screen: every mapping action requires manage_users");
+  ok(client.includes("Accept all suggestions") && client.includes('r.status === "auto"') && client.includes("mergeDeviceTypeAction("),
+    "#226 screen: bulk accept, the auto chip and merge are on the screen");
+  ok(read("src/app/(app)/catalog/page.tsx").includes('href="/catalog/device-types"') && read("src/app/(app)/catalog/taxonomy-card.tsx").includes("Estimating groups &amp; trades"),
+    "#226 screen: Catalog links to Device types; the group/trade card is now 'Estimating groups & trades'");
+  ok(read("scripts/smoke-routes.ts").includes('"/catalog/device-types"'), "#226 screen: the route is in the smoke list");
+
+  // #226 fix wave 3: bulk assign starts with no choice and can't fire until
+  // one is made; an explicit Unmap option is confirmed before it acts; a
+  // too-long category is read-only; the table caps at 200 rendered rows.
+  ok(client.includes('<option value="">Choose a type…</option>') && client.includes('<option value={UNMAP_CHOICE}>Unmap</option>'),
+    "#226 screen: bulk assign starts unset (no default type or Unmap) and offers an explicit Unmap option");
+  ok(client.includes("disabled={!picked.length || !bulkChoice || pending}") && client.includes("window.confirm("),
+    "#226 screen: the Assign/Unmap button stays disabled until a choice is made, and Unmap is confirmed first");
+  ok(client.includes('Unmap ${picked.length} selected') && client.includes("scopeKey !== pickedScope") && client.includes("`${show}|${filter}`"),
+    "#226 screen: the button reads 'Unmap N selected' for the Unmap choice, and picked resets when the filter or tab changes");
+  ok(client.includes('status === "toolong"') && client.includes("too long to map"),
+    "#226 screen: a too-long category shows as read-only 'too long to map', never an assignable select");
+  ok(client.includes("const ROW_CAP = 200") && client.includes("Showing {ROW_CAP} of") && client.includes("narrow the filter."),
+    "#226 screen: the mapping table caps at 200 rendered rows with a 'Showing 200 of N — narrow the filter' notice");
+}
+
+async function deviceTypesAsyncChecks(): Promise<void> {
+  const DT = await import("../src/lib/stores/device-types");
+  const { getBlob, setBlob, setBlobKeysIfAbsent } = await import("../src/db/doc-store");
+  const { getDb: getDb226 } = await import("../src/db");
+  const { blobs: blobs226 } = await import("../src/db/doc-tables");
+  const { inArray, eq } = await import("drizzle-orm");
+  const U = "TEST226-user";
+  const ids = ["gridTypeMap", "gridDeviceTypes", `gridFavorites:${U}`, `gridRecent:${U}`];
+  const db = await getDb226();
+  const snapshot = await db.select().from(blobs226).where(inArray(blobs226.id, ids));
+  const typeMapRow = async () => (await db.select().from(blobs226).where(eq(blobs226.id, "gridTypeMap")))[0] as { updatedAt?: number } | undefined;
+  try {
+    await db.delete(blobs226).where(inArray(blobs226.id, ids));
+    // #226 fix wave 3: LONG_CAT is a real (would-be-HIGH) truss match padded
+    // past the map's 120-char key limit — before the fix this got auto-mapped,
+    // silently dropped by sanitizeTypeMap on read, and auto-mapped again on
+    // every single call (never idempotent, even though the visible map never
+    // seemed to change).
+    const LONG_CAT = `Truss ${"x".repeat(130)}`;
+    const parts = [{ category: "Truss" }, { category: "Motorized Hoist" }, { category: "Control" }, { category: "Uncategorized" }, { category: "Widgets" }, { category: LONG_CAT }];
+
+    await DT.assignDeviceType(["Motorized Hoist"], "speakers", 500);
+    const first = await DT.loadDeviceTypeContext(parts, 1000);
+    const raw1 = await getBlob<Record<string, unknown>>("gridTypeMap", {});
+    // Field by field: jsonb re-orders object keys, so never compare a stored
+    // entry to a literal with JSON.stringify.
+    const t1raw = raw1.truss as { typeKey?: string; by?: string; at?: number } | undefined;
+    ok(t1raw?.typeKey === "truss-pipe" && t1raw.by === "auto" && t1raw.at === 1000,
+      "#226 store: reading the map writes a HIGH-confidence auto entry for an unmapped category");
+    ok(first.map["motorized hoist"]?.typeKey === "speakers" && first.map["motorized hoist"]?.by === "admin",
+      "#226 store: an admin entry is never overwritten by auto (Motorized Hoist would auto-map to Hoists & Motors)");
+    ok(!("control" in raw1) && !("uncategorized" in raw1) && !("widgets" in raw1), "#226 store: low-confidence and unsuggested categories stay unmapped for review");
+    ok(Object.keys(raw1).every((k) => k.length <= 120), "#226 store: a >120-char category (LONG_CAT) is never written to the map, even on a HIGH match");
+    const rowBeforeSecond = await typeMapRow();
+    const second = await DT.loadDeviceTypeContext(parts, 2000);
+    const rowAfterSecond = await typeMapRow();
+    const raw2 = await getBlob<Record<string, unknown>>("gridTypeMap", {});
+    ok(JSON.stringify(raw2) === JSON.stringify(raw1) && second.map.truss?.at === 1000 && Object.keys(raw2).every((k) => k.length <= 120),
+      "#226 store: a second read writes nothing (idempotent — the auto entry keeps its first timestamp; LONG_CAT still absent)");
+    ok(rowBeforeSecond !== undefined && rowBeforeSecond.updatedAt === rowAfterSecond?.updatedAt,
+      "#226 store: a second loadDeviceTypeContext performs NO blob write at all — the row's updatedAt doesn't move, including with a >120-char fixture category");
+
+    await setBlobKeysIfAbsent("gridTypeMap", { "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 3000 }, pipe: { typeKey: "truss-pipe", by: "auto", at: 3000 } });
+    const raw3 = await getBlob<Record<string, { typeKey: string; by: string }>>("gridTypeMap", {});
+    ok(raw3["motorized hoist"].by === "admin" && raw3.pipe?.typeKey === "truss-pipe",
+      "#226 store: setBlobKeysIfAbsent fills missing keys and never replaces an existing one (the atomic guard auto-apply writes through)");
+
+    const prevEnv = process.env.VERCEL_ENV;
+    process.env.VERCEL_ENV = "preview";
+    try {
+      const pv = await DT.loadDeviceTypeContext([{ category: "Dimmers" }], 4000);
+      const rawPv = await getBlob<Record<string, unknown>>("gridTypeMap", {});
+      ok(pv.map.dimmers?.typeKey === "dimming-power" && !("dimmers" in rawPv),
+        "#226 store: a Vercel preview applies auto matches in memory but never writes them (previews share production's DB)");
+    } finally {
+      if (prevEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = prevEnv;
+    }
+
+    const cleared = await DT.assignDeviceType(["Truss"], null, 5000);
+    const afterClear = await DT.loadDeviceTypeContext(parts, 6000);
+    ok(cleared.ok && afterClear.map.truss?.typeKey === null && afterClear.map.truss?.by === "admin", "#226 store: an admin 'unmapped' sticks — auto never re-maps it");
+    ok(!(await DT.assignDeviceType(["Truss"], "no-such-type")).ok && !(await DT.assignDeviceType([], "speakers")).ok,
+      "#226 store: assign refuses an unknown type or an empty selection");
+
+    await DT.assignDeviceType(["Gizmos", "Widgets"], "amplifiers", 7000);
+    const merged = await DT.mergeDeviceType("amplifiers", "speakers", 8000);
+    const mm = await DT.getTypeMap();
+    const mt = await DT.getDeviceTypes();
+    ok(merged.ok && merged.moved === 2 && mm.gizmos?.typeKey === "speakers" && mm.widgets?.typeKey === "speakers" && mt.find((t) => t.key === "amplifiers")?.archived === true,
+      "#226 store: merge moves every category of a type to the target and archives the merged type");
+    ok(!(await DT.mergeDeviceType("speakers", "speakers")).ok && !(await DT.mergeDeviceType("speakers", "amplifiers")).ok,
+      "#226 store: merge refuses the same type or an archived target");
+
+    const acc = await DT.acceptAllSuggestions([{ category: "Control", desc: "ETC Ion" }, { category: "Architectural", desc: "x" }], 9000);
+    const ma = await DT.getTypeMap();
+    ok(acc === 2 && ma.control?.typeKey === "control-networking" && ma.control?.by === "admin" && ma.architectural?.typeKey === "fixtures",
+      "#226 store: Accept all suggestions applies the low-confidence ones as admin entries");
+
+    const saved = await DT.saveDeviceTypes([...mt.map((t) => (t.key === "cameras" ? { ...t, label: "PTZ & Cameras" } : t)), { label: "Fog & Haze", scope: "Lighting" }]);
+    const re = await DT.getDeviceTypes();
+    ok(saved.ok && re.find((t) => t.key === "cameras")?.label === "PTZ & Cameras" && re.some((t) => t.key === "fog-haze"), "#226 store: the type list round-trips (rename + add)");
+    ok(!(await DT.saveDeviceTypes([{ label: "", scope: "Lighting" }])).ok, "#226 store: an invalid list is refused whole");
+
+    const f1 = await DT.toggleGridFavorite(U, "P-1");
+    const f2 = await DT.toggleGridFavorite(U, "P-2");
+    ok(f1.ok && f2.ok && (await DT.getGridFavorites(U)).join() === "P-2,P-1", "#226 favorites: newest star first, per user");
+    const f3 = await DT.toggleGridFavorite(U, "P-1");
+    ok(f3.ok && !f3.on && (await DT.getGridFavorites(U)).join() === "P-2", "#226 favorites: starring again removes it");
+    ok((await DT.getGridFavorites("TEST226-other")).length === 0, "#226 favorites: another user's list is separate");
+    await setBlob(`gridFavorites:${U}`, { ids: Array.from({ length: 300 }, (_, i) => `F-${i}`) });
+    const full = await DT.toggleGridFavorite(U, "P-9");
+    ok(!full.ok && /300/.test(full.error), "#226 favorites: capped at 300 — a 301st star is refused with a message");
+
+    for (let i = 0; i < 45; i++) await DT.pushGridRecent(U, `R-${i}`);
+    await DT.pushGridRecent(U, "R-40");
+    const rec = await DT.getGridRecent(U);
+    ok(rec.length === 40 && rec[0] === "R-40" && rec[1] === "R-44" && rec.filter((x) => x === "R-40").length === 1 && !rec.includes("R-4"),
+      "#226 recent: last 40 distinct, most recent first");
+  } finally {
+    await db.delete(blobs226).where(inArray(blobs226.id, ids));
+    for (const row of snapshot) await db.insert(blobs226).values(row);
+  }
+}
+
 /* ====== Batch 1 final-review fixes — #221 redirect loop, #224 ?n= cap,
    #212 custom-item save/remove never sticks ====== */
 import { estimatorShouldRedirect as fr221Redirect, quoteBuilderHref as fr221Href } from "@/lib/quote-links";
@@ -22353,4 +22792,589 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
       (rd("src/lib/design/grid-auto-fill.ts").match(/loadWireLaborRules\(\)/g) || []).length === 3 && rd("src/lib/stores/design-pricing.ts").includes("loadWireLaborRules()") &&
       rd("src/app/(app)/design/quick/page.tsx").includes("loadWireLaborRules()") && rd("src/app/(app)/design/designs/page.tsx").includes("loadWireLaborRules()"),
     "#231: every server path that prices an estimate loads the wire rules");
+}
+
+/* ======================================================================
+   #226 Grid device types — Task 3: the palette (pure filter + wiring).
+   ====================================================================== */
+import { paletteView as pal226View, isMapped as pal226Mapped, PALETTE_ROW_CAP as PAL226_CAP } from "@/lib/design/grid-palette";
+import type { PartLite as PL226 } from "@/lib/design/grid-bom";
+
+{
+  const j = (x: unknown) => JSON.stringify(x);
+  const types = dt226From(undefined);
+  const P = (id: string, extra: Partial<PL226>): PL226 => ({ id, sku: id, desc: id, category: "X", unit: "ea", list: 0, cost: 0, ...extra });
+  const parts: PL226[] = [
+    P("spk-a", { desc: "Alpha speaker", manufacturer: "QSC", deviceType: "speakers", gridScope: "Audio" }),
+    P("spk-b", { desc: "Beta speaker", manufacturer: "Meyer", deviceType: "speakers", gridScope: "Audio" }),
+    P("amp-a", { desc: "Amp", manufacturer: "QSC", deviceType: "amplifiers", gridScope: "Audio" }),
+    P("wid", { desc: "Widget speaker bracket", manufacturer: "Acme", deviceType: null, gridScope: "Audio" }),
+    P("asm", { desc: "Rack assembly", kind: "assembly", deviceType: null, gridScope: "Audio" }),
+    P("fab", { desc: "Velour", category: "Fabric", deviceType: null }),
+    P("virt", { desc: "Virtual", virtual: true, deviceType: "speakers", gridScope: "Audio" }),
+    P("fix", { desc: "Source Four", manufacturer: "ETC", deviceType: "fixtures", gridScope: "Lighting" }),
+  ];
+  const view = (over: Partial<{ tab: "favorites" | "recent" | "all"; search: string; scope: "" | "Audio" | "Lighting"; typeKey: string; mfr: string }>) =>
+    pal226View(parts, { tab: "all", search: "", scope: "", typeKey: "", mfr: "", ...over }, types, ["fix", "gone", "spk-b"], ["amp-a"]);
+  const ids = (v: ReturnType<typeof view>) => v.rows.map((p) => p.id).join(",");
+
+  const all = view({});
+  ok(ids(all) === "spk-a,amp-a,spk-b,asm,fix" && all.hiddenUnmapped === 1, "#226 palette: without a search, unmapped parts are hidden (and counted); virtual and Fabric rows never show");
+  ok(all.scopeCounts[""] === 5 && all.scopeCounts.Audio === 4 && all.scopeCounts.Lighting === 1, "#226 palette: scope chip counts cover what the chip would show");
+  ok(view({ scope: "Audio" }).typeChips.map((c) => c.key).join(",") === "speakers,amplifiers,__assembly", "#226 palette: a scope shows its type chips in type order, assemblies after");
+  const spk = view({ scope: "Audio", typeKey: "speakers" });
+  ok(ids(spk) === "spk-a,spk-b" && j(spk.manufacturers) === j(["Meyer", "QSC"]), "#226 palette: a type chip narrows the rows and the manufacturer list");
+  ok(ids(view({ scope: "Audio", typeKey: "speakers", mfr: "QSC" })) === "spk-a", "#226 palette: the manufacturer filter narrows further");
+  const found = view({ search: "speaker" });
+  ok(ids(found) === "spk-a,spk-b,wid" && found.hiddenUnmapped === 0 && !pal226Mapped(found.rows[2]), "#226 palette: a search finds unmapped parts too");
+  ok(view({ scope: "Audio", search: "speaker" }).typeChips.map((c) => c.key).join(",") === "speakers,__unmapped", "#226 palette: while searching, an Unmapped chip appears last");
+  ok(ids(view({ tab: "favorites" })) === "fix,spk-b" && ids(view({ tab: "favorites", search: "beta" })) === "spk-b" && ids(view({ tab: "recent" })) === "amp-a",
+    "#226 palette: Favorites and Recent keep their stored order, skip parts no longer in the library, and honour the search");
+  ok(PAL226_CAP === 60, "#226 palette: the row cap stays 60");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pal = read("src/app/(app)/design/grid/[id]/device-palette.tsx");
+  const palImports = [...pal.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(pal.startsWith('"use client"') && palImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")) && pal.includes("paletteView(") && pal.includes("toggleGridFavoriteAction(") && pal.includes('href="/catalog/device-types"'),
+    "#226 palette: a client component on pure modules; stars through the action; admins get a link to Device types");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("<DevicePalette") && !ed.includes("filteredParts") && !ed.includes("scopeFilter"), "#226 palette: the editor delegates the palette");
+  const pg = read("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(pg.includes("loadDeviceTypeContext(catalog)") && pg.includes("getGridFavorites(user.id)") && pg.includes("getGridRecent(user.id)") && pg.includes("favorites={favorites}") && pg.includes("recent={recent}"),
+    "#226 palette: the page loads types, favorites and recent for the signed-in user");
+  const acts = read("src/app/(app)/design/grid/[id]/actions.ts");
+  const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
+  ok(body("placeDeviceAction").includes("pushGridRecent(user.id, input.partId)"), "#226 recent: placing a device updates the placer's Recent");
+  ok(body("toggleGridFavoriteAction").includes("await requireUser()") && body("toggleGridFavoriteAction").includes("toggleGridFavorite(user.id"), "#226 favorites: the star action is per signed-in user");
+}
+
+/* ======================================================================
+   #226 Grid device types — Task 4: icon order, legend labels, layers,
+   Grid Settings cards, every drawing surface resolving types.
+   ====================================================================== */
+import { symbolContext as dt4Ctx, symbolLook as dt4Look, legendRows as dt4Legend, DEFAULT_SYMBOL_COLORS as DT4_COLORS } from "@/lib/design/grid-icons";
+import { typeLayerKey as dt4LayerKey, isLayerVisible as dt4Visible } from "@/lib/design/grid-scopes";
+
+{
+  const ctx = dt4Ctx({ gridCategoryIcons: { Widgets: "wifi" } }, dt226WithIcons(dt226From(undefined), { speakers: "horn" }));
+  ok(dt4Look({ category: "Widgets", deviceType: "speakers" }, ctx).iconId === "wifi", "#226 icons: a raw-category override beats the device-type icon");
+  ok(dt4Look({ category: "Loudspeakers", deviceType: "speakers" }, ctx).iconId === "horn", "#226 icons: the device-type icon (admin-set) comes next");
+  ok(dt4Look({ category: "Track", deviceType: "amplifiers" }, ctx).iconId === "amplifier", "#226 icons: a type's default icon beats the shipped per-category default");
+  ok(dt4Look({ category: "Track" }, ctx).iconId === "track" && dt4Look({ category: "Nope", deviceType: null }, ctx).iconId === "device",
+    "#226 icons: no type → the existing category defaults, then the generic glyph");
+  ok(dt4Look({ category: "Loudspeakers", deviceType: "speakers", icon: "bell" }, ctx).iconId === "bell", "#226 icons: a per-entry icon still wins over everything");
+  ok(dt4Look({ category: "X", deviceType: "speakers", gridScope: "Audio" }, ctx).color === DT4_COLORS.AV, "#226 colours: the #206 rules are unchanged (scope → AV)");
+  ok(dt4Look({ category: "X", deviceType: "constructor" }, ctx).iconId === "device", "#226 icons: an inherited-prototype type key never resolves an icon");
+
+  const rows = dt4Legend([
+    { id: "a", category: "Loudspeakers", deviceType: "speakers", deviceTypeLabel: "Speakers", desc: "A" },
+    { id: "g", category: "Speakers", deviceType: null, desc: "Speakers" },
+    { id: "b", category: "Loudspeakers", deviceType: "speakers", deviceTypeLabel: "Speakers", desc: "B" },
+    { id: "c", category: "Rack", deviceType: "racks-cases", deviceTypeLabel: "Racks & Cases", desc: "C" },
+  ], ctx);
+  ok(rows.map((r) => r.label).join("|") === "Speakers|Racks & Cases|Unmapped · Speakers",
+    "#226 legend: rows are labelled by device type, Unmapped last with its raw/seeded category only as a sub-label");
+
+  ok(dt4LayerKey("Audio", "speakers") === "type:Audio:speakers" && !dt4Visible("Audio", null, new Set(["type:Audio:speakers"]), "speakers")
+      && dt4Visible("Audio", null, new Set(["type:Audio:amplifiers"]), "speakers") && dt4Visible("Audio", null, new Set(["type:Audio:speakers"])),
+    "#226 layers: a device-type layer (namespaced by scope) hides its placements only");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const lp = read("src/app/(app)/design/grid/[id]/layers-panel.tsx");
+  ok(lp.includes("typeLayerKey(s, t.key)") && lp.includes("typeRows"), "#226 layers: the Layers panel lists device types under each scope");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("typeLayerRows(") && ed.includes("typeKeyOfPlacement") && ed.includes("typeRows={typeRows}") && ed.includes("deviceType: null"),
+    "#226 layers: the editor groups placements by type and hides by type; partless legend entries are typed Unmapped");
+  for (const d of ["riser", "set", "schedule"]) {
+    const s = read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
+    ok(s.includes("loadDeviceTypeContext(catalog)") && s.includes("deviceTypes })"), `#226: the ${d} page resolves device types (scope fix + labels)`);
+  }
+  for (const d of ["riser", "set"]) {
+    const s = read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
+    ok(s.includes("symbolContext(settings, deviceTypes.types)") && s.includes("deviceType: null"), `#226: the ${d} legend is grouped by device type`);
+  }
+  ok(read("src/app/(app)/design/grid/[id]/page.tsx").includes("symbolContext(settings, deviceTypes.types)"), "#226: the plan editor resolves type icons");
+  const gs = read("src/app/(app)/design/grid/settings/page.tsx");
+  ok(gs.includes("<DeviceTypeIconsCard") && gs.indexOf("<DeviceTypeIconsCard") < gs.indexOf("<CategoryIconsCard") && gs.includes("used={used}") && gs.includes("symbolContext(settings, deviceTypes.types)"),
+    "#226 settings: icons are set per device type first; per-category icons follow");
+  const cic = read("src/app/(app)/design/grid/settings/category-icons-card.tsx");
+  ok(cic.includes("Advanced: per-category overrides") && cic.includes("useState(false)") && cic.includes("Show all"),
+    "#226 settings: per-category icons are demoted to a collapsed Advanced section (overridden or used categories, with Show all)");
+  for (const f of ["src/app/(app)/design/grid/settings/device-type-icons-card.tsx", "src/app/(app)/design/grid/[id]/layers-panel.tsx"]) {
+    const s = read(f);
+    const imps = [...s.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+    ok(s.startsWith('"use client"') && imps.every((x) => !x.startsWith("@/lib/stores/") && !x.startsWith("@/db")), `#226: ${f} imports no store`);
+  }
+}
+
+async function deviceTypeIconsAsyncChecks(): Promise<void> {
+  const DT = await import("../src/lib/stores/device-types");
+  const { getDb: getDb226b } = await import("../src/db");
+  const { blobs: blobs226b } = await import("../src/db/doc-tables");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb226b();
+  const snap = await db.select().from(blobs226b).where(eq(blobs226b.id, "gridDeviceTypes"));
+  try {
+    await db.delete(blobs226b).where(eq(blobs226b.id, "gridDeviceTypes"));
+    const t1 = await DT.setDeviceTypeIcons({ speakers: "horn", "no-such": "bell" });
+    const t2 = await DT.setDeviceTypeIcons({ speakers: null });
+    ok(t1.find((t) => t.key === "speakers")?.icon === "horn" && !t1.some((t) => t.key === "no-such") && t2.find((t) => t.key === "speakers")?.icon === undefined,
+      "#226 store: type icons set and clear per type; unknown keys are ignored");
+  } finally {
+    await db.delete(blobs226b).where(eq(blobs226b.id, "gridDeviceTypes"));
+    for (const row of snap) await db.insert(blobs226b).values(row);
+  }
+}
+
+/* ======================================================================
+   #226 T4 fix — per-category overrides survive an unrelated save; the
+   legend never merges a device type with an unmapped category.
+   ====================================================================== */
+import { storedCategoryOverrides as t4fStored, withCategoryOverride as t4fWith } from "@/lib/design/grid-icons";
+import { DRAPERY_TYPE_KEY as T4F_DRAPERY, DEFAULT_TYPE_ICONS as T4F_TYPE_ICONS } from "@/lib/design/device-types";
+
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const j = (v: unknown) => JSON.stringify(v);
+  const rows = [
+    { category: "Loudspeakers", gridScope: "Audio", deviceType: "speakers" },
+    { category: "Widgets", gridScope: null, deviceType: null },
+  ];
+  // An override that equals the speakers type icon (its baseline today).
+  const stored = { loudspeakers: T4F_TYPE_ICONS.speakers, Widgets: "wifi", "Gone Category": "bell" };
+  const saved = t4fStored(rows, stored);
+  ok(j(saved) === j({ Loudspeakers: T4F_TYPE_ICONS.speakers, Widgets: "wifi" }),
+    "#226 T4 fix: the Advanced card starts from every stored override that matches a row, even one equal to the type icon");
+  const afterUnrelated = t4fWith(saved, "Widgets", "bell", "device");
+  ok(afterUnrelated.Loudspeakers === T4F_TYPE_ICONS.speakers && afterUnrelated.Widgets === "bell",
+    "#226 T4 fix: an override equal to the type icon survives an unrelated save");
+  ok(!Object.hasOwn(t4fWith(saved, "Loudspeakers", null, T4F_TYPE_ICONS.speakers), "Loudspeakers") &&
+    !Object.hasOwn(t4fWith(saved, "Widgets", "device", "device"), "Widgets") &&
+    t4fWith({}, "Widgets", "horn", "device").Widgets === "horn",
+    "#226 T4 fix: only ↺ or an explicit pick equal to the baseline removes a row's override");
+  const cic = read("src/app/(app)/design/grid/settings/category-icons-card.tsx");
+  ok(cic.includes("storedCategoryOverrides(rows, stored)") && cic.includes("withCategoryOverride(o, category, iconId, baseline)") && !cic.includes("v !== baseIconFor"),
+    "#226 T4 fix: the card's saved map and row edits go through the pure helpers");
+
+  const ctx = dt4Ctx({ gridCategoryIcons: { "Zed A": "horn", "Zed B": "horn" } }, dt226From(undefined));
+  const same = (a: { iconId: string; color: string }, b: { iconId: string; color: string }) => a.iconId === b.iconId && a.color === b.color;
+  ok(same(dt4Look({ category: "Zed A", deviceType: "speakers" }, ctx), dt4Look({ category: "Zed B", deviceType: null }, ctx)),
+    "#226 T4 fix (fixture): the mapped and unmapped entries draw the same badge");
+  const mixed = dt4Legend([
+    { id: "m", category: "Zed A", deviceType: "speakers", deviceTypeLabel: "Speakers" },
+    { id: "u", category: "Zed B", deviceType: null },
+  ], ctx);
+  ok(mixed.map((r) => r.label).join("|") === "Speakers|Unmapped · Zed B" && new Set(mixed.map((r) => r.key)).size === 2,
+    "#226 T4 fix: a mapped type row and an unmapped category with the same badge never merge");
+  const merged = dt4Legend([
+    { id: "u1", category: "Zed A", deviceType: null },
+    { id: "u2", category: "Zed B", deviceType: null },
+    { id: "u3", category: " zed a", deviceType: null },
+  ], ctx);
+  ok(merged.map((r) => r.label).join("|") === "Unmapped", "#226 T4 fix: a merged unmapped row with differing categories reads \"Unmapped\"");
+  ok(dt4Legend([{ id: "u1", category: "Zed A", deviceType: null }, { id: "u3", category: "zed a ", deviceType: null }], ctx).map((r) => r.label).join("|") === "Unmapped · Zed A",
+    "#226 T4 fix: unmapped repeats of one category keep its sub-label");
+  ok(dt4Legend([{ id: "x", category: "Zed A" }, { id: "y", category: "Zed B" }], ctx).length === 1,
+    "#226 T4 fix: untyped callers still dedupe by badge alone");
+
+  ok(T4F_DRAPERY === "drapery" && Object.hasOwn(T4F_TYPE_ICONS, T4F_DRAPERY), "#226 T4 fix: DRAPERY_TYPE_KEY names a seeded type");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("pl.curtain ? DRAPERY_TYPE_KEY :") && !ed.includes('"drapery"'), "#226 T4 fix: the editor's curtain layer uses DRAPERY_TYPE_KEY");
+}
+
+/* ======================================================================
+   #230 Grid BOM by category + accessories — Task 1: the pure model
+   (grouping rule, accessory sanitize/list edits/pricing/search) and
+   source pins for the store, quote and actions.
+   ====================================================================== */
+import {
+  BOM_GROUPS as g230Groups, CUSTOM_SYSTEM_OF_GROUP as g230SysOf, autoSystemsByPart as g230Auto, bomGroups as g230BomGroups,
+  groupOfCustomSystem as g230CustomGroup, groupOfPart as g230GroupOf, groupedBomLines as g230Grouped, isBomGroupKey as g230IsKey,
+} from "@/lib/design/grid-bom-groups";
+import {
+  ACCESSORIES_MAX as a230Max, accessoriesCost as a230Cost, accessoriesOf as a230Of, accessoryBomLines as a230Lines,
+  accessoryCandidates as a230Cands, applyAccessorySave as a230Save, copyAccessories as a230Copy, sanitizeAccessory as a230Sanitize,
+  withoutAccessory as a230Without, type GridAccessory as A230,
+} from "@/lib/design/grid-accessories";
+import { sanitizeCustomItem as ci230Sanitize } from "@/lib/design/grid-custom-items";
+import type { PartLite as P230 } from "@/lib/design/grid-bom";
+
+{
+  // --- groups + the grouping rule
+  ok(g230Groups.map((g) => g.label).join("|") === "Rigging|Curtains|Lighting|Audio|Video|Controls|General", "#230 groups: seven headings in Jeff's order");
+  ok(g230IsKey("controls") && g230IsKey("general") && !g230IsKey("Controls") && !g230IsKey("acoustical"), "#230 groups: keys are the lower-case system keys");
+  ok(g230GroupOf({ gridScope: "Audio", deviceType: "speakers" }) === "audio" && g230GroupOf({ gridScope: "Unscoped", deviceType: "cable-connectors" }) === "general" && g230GroupOf(undefined) === "general",
+    "#230 groups: a part files by its (device-type) scope; Unscoped → General");
+  ok(g230GroupOf({ gridScope: "Lighting", deviceType: "control-networking" }) === "controls" && g230GroupOf({ gridScope: "Lighting", deviceType: "dimming-power" }) === "controls" && g230GroupOf({ gridScope: "Rigging", deviceType: "rigging-control" }) === "controls",
+    "#230 groups: control, dimming and rigging-control device types file under Controls");
+  ok(g230GroupOf({ gridScope: "Unscoped" }, new Set(["controls"])) === "controls" && g230GroupOf({ gridScope: "Audio" }, new Set(["video"])) === "video",
+    "#230 groups: an Auto-painted part files under the system it was painted for");
+  ok(g230GroupOf({ gridScope: "Audio" }, new Set(["audio", "video"])) === "audio" && g230GroupOf({ gridScope: "Audio" }, new Set(["acoustical"])) === "audio",
+    "#230 groups: ambiguous or non-BOM Auto systems fall back to the part's own scope");
+  const auto230 = g230Auto([
+    { partId: "A", auto: { scope: "controls" } }, { partId: "A" },
+    { partId: "B", autoOrigin: { scope: "lighting" } },
+    { partId: "F", curtain: {}, auto: { scope: "curtains" } },
+  ]);
+  ok([...(auto230.get("A") || [])].join() === "controls" && [...(auto230.get("B") || [])].join() === "lighting" && !auto230.has("F"),
+    "#230 groups: Auto systems per part come from auto tags and D320 origins; curtains are skipped");
+  ok(g230CustomGroup("Controls") === "controls" && g230CustomGroup("Rigging") === "rigging" && g230CustomGroup("Unscoped") === "general" && g230CustomGroup(undefined) === "general" && g230CustomGroup("Plumbing") === "general",
+    "#230 groups: a custom item's system maps to its group");
+  ok(Object.entries(g230SysOf).every(([k, s]) => g230CustomGroup(s ?? undefined) === k), "#230 groups: every group's custom-item system round-trips");
+  const ctl230 = ci230Sanitize({ desc: "Console desk", system: "Controls", qty: 1, unitCost: 10 }, "ci-0123456789ab");
+  ok(ctl230.ok && ctl230.item.system === "Controls", "#230 custom: a custom item can be filed under Controls");
+
+  // --- accessories: sanitize + list edits
+  const ID = "ba-0123456789ab";
+  const s230 = a230Sanitize({ partId: " ETC-S4 ", qty: 3, scope: "lighting" }, ID);
+  ok(s230.ok && s230.item.id === ID && s230.item.partId === "ETC-S4" && s230.item.qty === 3 && s230.item.scope === "lighting",
+    "#230 accessory: sanitize trims the part id and keeps qty + group");
+  ok(!a230Sanitize({ partId: "", qty: 1, scope: "lighting" }, ID).ok && !a230Sanitize({ partId: "asm:fa-1", qty: 1, scope: "lighting" }, ID).ok &&
+    !a230Sanitize({ partId: "allow:lighting:par:good", qty: 1, scope: "lighting" }, ID).ok && !a230Sanitize({ partId: "custom:ci-0123456789ab", qty: 1, scope: "lighting" }, ID).ok &&
+    !a230Sanitize({ partId: "grid-seed:x", qty: 1, scope: "lighting" }, ID).ok && !a230Sanitize({ partId: "x".repeat(201), qty: 1, scope: "lighting" }, ID).ok,
+    "#230 accessory: blank, virtual, custom, seed and over-long ids are never accessories");
+  ok(!a230Sanitize({ partId: "X", qty: 0, scope: "audio" }, ID).ok && !a230Sanitize({ partId: "X", qty: 1.5, scope: "audio" }, ID).ok && !a230Sanitize({ partId: "X", qty: 100001, scope: "audio" }, ID).ok,
+    "#230 accessory: qty is a whole number from 1 to 100,000");
+  ok(!a230Sanitize({ partId: "X", qty: 1, scope: "Lighting" }, ID).ok && !a230Sanitize({ partId: "X", qty: 1 }, ID).ok, "#230 accessory: the group key is required and exact");
+  const read230 = a230Of([
+    { id: ID, partId: "X", qty: 1, scope: "audio" }, { id: ID, partId: "Y", qty: 1, scope: "audio" },
+    { id: "bad", partId: "X", qty: 1, scope: "audio" }, { id: "ba-bbbbbbbbbbbb", partId: "", qty: 1, scope: "audio" }, 5,
+  ]);
+  ok(read230.length === 1 && read230[0].partId === "X" && a230Of(undefined).length === 0 && a230Of("junk").length === 0,
+    "#230 accessory: a stored list drops bad ids, invalid rows and duplicates");
+  let n230 = 0;
+  const mk230 = () => `ba-${String(++n230).padStart(12, "0")}`;
+  const add1 = a230Save([], { partId: "X", qty: 2, scope: "audio" }, mk230);
+  ok(add1.ok && add1.items.length === 1 && add1.item.id === "ba-000000000001" && add1.item.qty === 2, "#230 accessory: saving without an id adds a line");
+  const add2 = add1.ok ? a230Save(add1.items, { partId: "X", qty: 3, scope: "audio" }, mk230) : add1;
+  ok(add2.ok && add2.items.length === 1 && add2.item.qty === 5 && add2.item.id === "ba-000000000001", "#230 accessory: adding the same part to the same group bumps its qty");
+  const add3 = add2.ok ? a230Save(add2.items, { partId: "X", qty: 1, scope: "video" }, mk230) : add2;
+  ok(add3.ok && add3.items.length === 2 && add3.item.scope === "video", "#230 accessory: the same part under another group is its own line");
+  const ed230 = add3.ok ? a230Save(add3.items, { id: "ba-000000000001", qty: 9, partId: "IGNORED", scope: "rigging" }, mk230) : add3;
+  ok(ed230.ok && ed230.item.qty === 9 && ed230.item.partId === "X" && ed230.item.scope === "audio" && ed230.items.length === 2, "#230 accessory: an edit changes the qty only");
+  const gone230 = a230Save([], { id: "ba-000000000001", qty: 2 }, mk230);
+  ok(!gone230.ok && gone230.reason === "no-such-accessory", "#230 accessory: editing an accessory removed elsewhere is refused");
+  const badQty230 = add1.ok ? a230Save(add1.items, { id: "ba-000000000001", qty: 0 }, mk230) : add1;
+  ok(!badQty230.ok && badQty230.reason === "invalid", "#230 accessory: an edit to an invalid qty is refused");
+  const bad230 = a230Save([], { partId: "X", qty: 0, scope: "audio" }, mk230);
+  ok(!bad230.ok && bad230.reason === "invalid" && bad230.error.length > 0, "#230 accessory: an invalid add is refused with a message");
+  const full230: A230[] = Array.from({ length: a230Max }, (_, i) => ({ id: `ba-${String(i).padStart(12, "0")}`, partId: `P${i}`, qty: 1, scope: "general" }));
+  const over230 = a230Save(full230, { partId: "NEW", qty: 1, scope: "general" }, mk230);
+  ok(!over230.ok && over230.reason === "too-many", `#230 accessory: an option holds at most ${a230Max} accessories`);
+  const two230: A230[] = [
+    { id: "ba-aaaaaaaaaaaa", partId: "X", qty: 2, scope: "audio" },
+    { id: "ba-bbbbbbbbbbbb", partId: "GONE", qty: 1, scope: "general" },
+  ];
+  ok(a230Without(two230, "ba-aaaaaaaaaaaa").map((a) => a.id).join() === "ba-bbbbbbbbbbbb", "#230 accessory: remove drops exactly that line");
+  const copies230 = a230Copy(two230, mk230);
+  ok(copies230.length === 2 && copies230.every((c, i) => c.id !== two230[i].id && /^ba-[0-9a-f]{12}$/.test(c.id) && c.partId === two230[i].partId && c.qty === two230[i].qty && c.scope === two230[i].scope),
+    "#230 accessory: a copied option gets the same lines under fresh ids");
+
+  // --- pricing: the same part row a placement reads
+  const parts230: P230[] = [
+    { id: "X", sku: "X-SKU", desc: "Speaker bracket", category: "Speakers", unit: "ea", list: 120, cost: 70, gridScope: "Audio", deviceType: "speakers" },
+    { id: "CN", sku: "CN-SKU", desc: "Lighting console", category: "Consoles", unit: "ea", list: 900, cost: 600, gridScope: "Lighting", deviceType: "control-networking" },
+    { id: "FX", sku: "FX-SKU", desc: "LED fixture", category: "Fixtures", unit: "ea", list: 400, cost: 250, gridScope: "Lighting", deviceType: "fixtures" },
+    { id: "UN", sku: "UN-SKU", desc: "Unmapped audio widget", category: "Widgets", unit: "ea", list: 10, cost: 5, gridScope: "Audio", deviceType: null },
+    { id: "VIRT", sku: "VIRT", desc: "Virt assembly", category: "Assembly", unit: "ea", list: 10, cost: 5, gridScope: "Audio", deviceType: "speakers", virtual: true },
+    { id: "FAB", sku: "FAB", desc: "Velour fabric", category: "Fabric", unit: "sqft", list: 3, cost: 2, gridScope: "Curtains", deviceType: "drapery" },
+    { id: "W", sku: "W", desc: "DMX cable", category: "Cable", unit: "ft", list: 1, cost: 0.5, gridScope: "Unscoped", deviceType: "cable-connectors" },
+  ];
+  const lines230 = a230Lines(two230, parts230);
+  ok(lines230[0].partId === "X" && lines230[0].desc === "Speaker bracket" && lines230[0].unit === "ea" && lines230[0].qty === 2 && lines230[0].list === 120 && lines230[0].ext === 240 && lines230[0].accessoryId === "ba-aaaaaaaaaaaa" && lines230[0].group === "audio",
+    "#230 accessory: priced from the same part row a placement reads (ext = qty × list)");
+  ok(lines230[1].list === 0 && lines230[1].ext === 0 && lines230[1].desc.includes("removed part"), "#230 accessory: a part gone from the library prices $0, flagged, never dropped");
+  ok(a230Cost(two230, parts230) === 140, "#230 accessory: the cost basis is qty × part cost");
+
+  // --- search candidates
+  const ids230 = (rows: P230[]) => rows.map((p) => p.id).join();
+  ok(ids230(a230Cands(parts230, "audio", "", false)) === "X", "#230 search: a group lists its own device types' parts — not unmapped, virtual or other groups'");
+  ok(ids230(a230Cands(parts230, "controls", "", false)) === "CN" && ids230(a230Cands(parts230, "lighting", "", false)) === "FX",
+    "#230 search: Controls lists the control types; Lighting no longer does");
+  ok(ids230(a230Cands(parts230, "audio", "bracket", false)) === "X" && a230Cands(parts230, "audio", "console", false).length === 0, "#230 search: the query narrows within the group");
+  ok(a230Cands(parts230, "audio", "", true).length === 0 && ids230(a230Cands(parts230, "audio", "console", true)) === "CN" && ids230(a230Cands(parts230, "audio", "unmapped", true)) === "UN",
+    "#230 search: Search all reaches every placeable part, mapped or not, once there is a query");
+  ok(a230Cands(parts230, "curtains", "", false).length === 0 && a230Cands(parts230, "general", "virt", true).length === 0 && a230Cands(parts230, "general", "velour", true).length === 0,
+    "#230 search: Fabric/Labor rows and virtual parts are never offered");
+
+  // --- grouping every BOM source
+  const groups230 = g230BomGroups(g230Grouped({
+    devices: [
+      { partId: "X", desc: "Speaker bracket", unit: "ea", qty: 1, list: 120, ext: 120 },
+      { partId: "CN", desc: "Lighting console", unit: "ea", qty: 1, list: 900, ext: 900 },
+    ],
+    wires: [{ partId: "W", desc: "DMX cable", unit: "ft", qty: 50, list: 1, ext: 50 }],
+    curtains: [{ partId: "gp-1", desc: "Main", unit: "ea", qty: 1, list: 800, ext: 800, kind: "curtain" }],
+    custom: [{ partId: "custom:ci-0123456789ab", desc: "Stage lift", unit: "ea", qty: 1, list: 500, ext: 500, allowance: true, custom: true }],
+    customItems: [{ id: "ci-0123456789ab", desc: "Stage lift", qty: 1, unitCost: 350, system: "Rigging" }],
+    accessories: lines230,
+    parts: parts230,
+    placements: [{ partId: "X" }, { partId: "CN" }],
+  }));
+  const by230 = (k: string) => groups230.find((g) => g.key === k)!;
+  const tag230 = (k: string) => by230(k).lines.map((l) => `${l.source}:${l.partId}`).join();
+  ok(groups230.length === 7 && tag230("audio") === "device:X,accessory:X", "#230 grouping: a group lists its devices, then its accessories");
+  ok(tag230("controls") === "device:CN" && tag230("general") === "accessory:GONE,wire:W" && tag230("curtains") === "curtain:gp-1" && tag230("rigging") === "custom:custom:ci-0123456789ab",
+    "#230 grouping: devices, wires, curtains and custom items each land in their group");
+  ok(by230("audio").value === 360 && by230("video").lines.length === 0 && by230("video").value === 0, "#230 grouping: each group totals its lines; an empty group still appears");
+  ok(groups230.reduce((a, g) => a + g.value, 0) === 2610, "#230 grouping: the groups partition the BOM — nothing lost or double-counted");
+
+  // --- source pins: purity, quote, store, options, actions
+  const src230 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  for (const f of ["src/lib/design/grid-bom-groups.ts", "src/lib/design/grid-accessories.ts"]) {
+    const vi = [...src230(f).matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((mm) => mm[1]);
+    ok(vi.every((s) => s.startsWith("./")), `#230: ${f} value-imports only sibling pure modules (${vi.join(", ")})`);
+  }
+  const gq230 = src230("src/lib/design/grid-quote.ts");
+  ok(gq230.includes("accessoryBomLines(accessories, tierCatalog)") && gq230.includes("accessoriesCost(accessories, tierCatalog)") && gq230.includes("!accessories.length"),
+    "#230 quote: accessories price from the tier catalog placements use, and an accessory-only option can quote");
+  const st230 = src230("src/lib/stores/grid-projects.ts");
+  ok(st230.includes("copyAccessories(accessoriesOf(src?.accessories)") && st230.includes("accessories: o.accessories.map((a) => ({ ...a }))") && st230.includes("await getGridSymbol("),
+    "#230 store: option copy and revision snapshots carry accessories; an add is checked against the Grid library");
+  ok(src230("src/lib/design/grid-options.ts").includes("accessories?: GridAccessory[]"), "#230: accessories live on the Grid option");
+  const acts230 = src230("src/app/(app)/design/grid/[id]/actions.ts");
+  const body230 = (name: string) => acts230.slice(acts230.indexOf(`export async function ${name}`), acts230.indexOf("\n}\n", acts230.indexOf(`export async function ${name}`)));
+  ok(body230("saveAccessoryAction").includes("await requireUser()") && body230("saveAccessoryAction").includes("saveAccessory(") &&
+    body230("removeAccessoryAction").includes("await requireUser()") && body230("removeAccessoryAction").includes("removeAccessory("),
+    "#230: both accessory actions use the placement-edit gate and the server-side store");
+}
+
+/* #230 — accessories through the store, option copy, revisions and buildGridQuote on the scratch DB. */
+async function gridAccessoriesAsyncChecks230(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const GP = await import("../src/lib/stores/grid-projects");
+  const GC = await import("../src/lib/stores/grid-catalog");
+  const { buildGridQuote } = await import("../src/lib/design/grid-quote");
+  const { resolveTier } = await import("../src/lib/pricing-tiers");
+  const { isTierPriced } = await import("../src/lib/tier-pricing");
+
+  const PART = fixtureId(230, "bracket");
+  await upsertPart({ id: PART, sku: PART, desc: "TEST230 speaker bracket", category: "Speakers", unit: "ea", list: 150, cost: 90 });
+  registerFixture("catalog_parts", PART);
+  const part = await getPart(PART);
+  await GC.ensureGridSymbolsFor(part ? [part] : [], "Test Harness");
+  registerFixture("grid_catalog", PART);
+  ok(!!(await GC.getGridSymbol(PART)), "#230 store setup: the fixture part is in the Grid library");
+
+  const gp = await GP.createProject({ name: "TEST230 grid project", customer: "Test Customer 230", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const base = (await GP.getProject(gp.id))!.options![0].id;
+  const accOf = async (optionId: string) => (await GP.getProject(gp.id))!.options!.find((o) => o.id === optionId)?.accessories || [];
+
+  const unknown = await GP.saveAccessory(gp.id, base, { partId: "TEST230:nope", qty: 1, scope: "audio" });
+  ok(!unknown.ok && /Grid library/.test(unknown.error), "#230 store: a part that isn't in the Grid library is refused");
+  ok(!(await GP.saveAccessory(gp.id, "opt-nope", { partId: PART, qty: 1, scope: "audio" })).ok, "#230 store: an unknown option is refused");
+  const badScope = await GP.saveAccessory(gp.id, base, { partId: PART, qty: 1, scope: "Audio" });
+  ok(!badScope.ok && /category/.test(badScope.error), "#230 store: an invalid group is refused with the sanitizer's message");
+
+  const a = await GP.saveAccessory(gp.id, base, { partId: PART, qty: 2, scope: "audio" });
+  const id = a.ok ? a.item.id : "";
+  ok(a.ok && /^ba-[0-9a-f]{12}$/.test(id), "#230 store: a new accessory gets a ba- id");
+
+  const tier = await resolveTier(null);
+  const unit = isTierPriced(90, tier.margin) ? Math.round((90 / (1 - tier.margin)) * 100) / 100 : 150;
+  const only = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const onlyLine = only.ok ? only.build.spec.lines.find((l) => l.sku === PART) : undefined;
+  ok(only.ok && Math.abs(only.build.value - 2 * unit) < 0.005,
+    `#230 quote: an accessory-only option quotes at the part's tier price × qty (${only.ok ? only.build.value : only.error})`);
+  ok(!!onlyLine && onlyLine.qty === 2 && onlyLine.price === unit && !onlyLine.allowance && onlyLine.desc === "TEST230 speaker bracket",
+    "#230 quote: the accessory is a real catalog line on the spec, never an allowance");
+
+  await GP.addPlacement(gp.id, { sheetId: "TEST230:sheet", page: 1, x: 0.5, y: 0.5, partId: PART, optionId: base, by: "Test Harness" });
+  const both = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const same = both.ok ? both.build.spec.lines.filter((l) => l.sku === PART) : [];
+  ok(same.length === 2 && same[0].price === unit && same[1].price === unit && same.map((l) => l.qty).sort().join() === "1,2",
+    "#230 quote: an accessory prices exactly like a placed part of the same partId (two lines, one price)");
+  ok(both.ok && Math.abs(both.build.value - 3 * unit) < 0.005 && Math.abs(both.build.margin - (3 * unit - 3 * 90) / (3 * unit)) < 1e-6,
+    "#230 quote: the accessory counts in the value and its cost in the margin");
+
+  const e = await GP.saveAccessory(gp.id, base, { id, qty: 4 });
+  const afterEdit = await accOf(base);
+  ok(e.ok && afterEdit.length === 1 && afterEdit[0].id === id && afterEdit[0].qty === 4, "#230 store: editing changes the qty in place");
+  const bump = await GP.saveAccessory(gp.id, base, { partId: PART, qty: 1, scope: "audio" });
+  ok(bump.ok && bump.item.id === id && (await accOf(base))[0].qty === 5, "#230 store: re-adding the part under the same heading bumps the line");
+  await GP.saveAccessory(gp.id, base, { id, qty: 4 });
+
+  const alt = await GP.addOption(gp.id, { name: "Alt", copyFromOptionId: base, by: "Test Harness" });
+  const altAcc = alt.ok ? await accOf(alt.option.id) : [];
+  ok(altAcc.length === 1 && altAcc[0].id !== id && altAcc[0].partId === PART && altAcc[0].qty === 4 && altAcc[0].scope === "audio",
+    "#230 store: copying an option copies its accessories under fresh ids");
+
+  const rev = await GP.addRevision(gp.id, { by: "Test Harness", note: "with an accessory" });
+  ok((rev?.options?.find((o) => o.id === base)?.accessories || []).length === 1, "#230 store: a revision snapshot holds the option's accessories");
+
+  const r = await GP.removeAccessory(gp.id, base, id);
+  ok(r.ok && (await accOf(base)).length === 0, "#230 store: remove drops the accessory");
+  ok((await GP.removeAccessory(gp.id, base, id)).ok, "#230 store: removing an accessory already gone is not an error");
+
+  const restored = rev ? await GP.restoreRevision(gp.id, rev.rev, "Test Harness") : { ok: false as const };
+  const back = await accOf(base);
+  ok(restored.ok && back.length === 1 && back[0].id === id && back[0].qty === 4, "#230 store: restoring a revision brings its accessories back");
+}
+
+/* ======================================================================
+   #230 Grid BOM by category — Task 2: the grouped BOM UI (source pins).
+   ====================================================================== */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acc = read("src/app/(app)/design/grid/[id]/accessories.tsx");
+  const accFrom = [...acc.matchAll(/from\s+"([^"]+)"/g)].map((mm) => mm[1]);
+  ok(acc.startsWith('"use client"') && accFrom.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")),
+    "#230 UI: the accessory picker is a client component with no store import");
+  ok(acc.includes("accessoryCandidates(parts, group, search, all)") && acc.includes("Search all categories") &&
+    acc.includes("saveAccessoryAction(projectId, optionId, { partId: p.id, qty: n, scope: group })") &&
+    acc.includes("saveAccessoryAction(projectId, optionId, { id: accessoryId, qty: n })") && acc.includes("removeAccessoryAction(projectId, optionId, accessoryId)"),
+    "#230 UI: the picker searches the heading's types (Search all fallback); rows edit qty and remove through the actions");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("bomGroups(") && ed.includes("groupedBomLines(") && ed.includes("+ Add accessory") && ed.includes("<AccessoryPicker") && ed.includes("<AccessoryRow"),
+    "#230 UI: the editor BOM renders one heading per category, each with + Add accessory");
+  ok(ed.includes("accessoryBomLines(accessories, parts)") && ed.includes("accessoryValue") && ed.includes("accessoryLines.length === 0"),
+    "#230 UI: accessories price from the same parts rows, count in the total, and an accessory-only option can quote");
+  ok(ed.includes("groupOfCustomSystem(it.system) === g.key") && ed.includes("showAdd={false}"), "#230 UI: custom items print under their heading");
+  ok(ed.includes("Labor (suggested)"), "#230 UI: the D114 labor suggestion is untouched (#232 replaces it)");
+  const ci = read("src/app/(app)/design/grid/[id]/custom-items.tsx");
+  ok(ci.includes("CUSTOM_SYSTEM_OF_GROUP") && ci.includes("showAdd") && ci.includes("system: draft.system"),
+    "#230 UI: the custom-item form picks its BOM category and keeps it on edit");
+}
+
+/* ============ #222 / #220 — saved quote PDFs + portal history: pure pieces (Task 1) ============ */
+import { PRINT_TOKEN_TTL_MS, signPrintToken, verifyPrintToken } from "@/lib/quote-pdf/token";
+import {
+  PDF_PENDING_STALE_MS,
+  failedPdf,
+  latestSentRevision,
+  pdfFileName,
+  pdfKindForQuoteType,
+  pdfStoragePath,
+  pdfView,
+  pendingPdf,
+  portalPdfSource,
+  printPathFor,
+  revisionAwaitingPdf,
+  settlePdf,
+  teamPdfPath,
+  type QuotePdfState,
+} from "@/lib/quote-pdf/state";
+import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { originFrom } from "@/lib/quote-pdf/origin";
+import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectView } from "@/lib/portal-projects";
+{
+  const S = "test-secret-222";
+  const t0 = 1_800_000_000_000;
+  const tok = signPrintToken(S, "quote", "Q-2041", t0);
+  ok(verifyPrintToken(S, tok, "quote", "Q-2041", t0 + 1000), "#222 print token: a fresh token verifies for its kind + id");
+  ok(!verifyPrintToken(S, tok, "flame", "Q-2041", t0), "#222 print token: another kind is refused");
+  ok(!verifyPrintToken(S, tok, "quote", "Q-2042", t0), "#222 print token: another quote id is refused");
+  ok(!verifyPrintToken(S, tok, "quote", "Q-2041", t0 + PRINT_TOKEN_TTL_MS + 1), "#222 print token: expires after its TTL");
+  ok(PRINT_TOKEN_TTL_MS === 120_000, "#222 print token: TTL is 120 s");
+  const [exp, sig] = tok.split(".");
+  const flipped = sig.slice(0, -1) + (sig.endsWith("A") ? "B" : "A");
+  ok(!verifyPrintToken(S, `${exp}.${flipped}`, "quote", "Q-2041", t0), "#222 print token: a tampered signature is refused");
+  ok(!verifyPrintToken(S, `${Number(exp) + 60_000}.${sig}`, "quote", "Q-2041", t0), "#222 print token: a stretched expiry is refused");
+  ok(!verifyPrintToken("other-secret", tok, "quote", "Q-2041", t0), "#222 print token: another secret is refused");
+  ok(!verifyPrintToken(S, "", "quote", "Q-2041", t0) && !verifyPrintToken(S, "garbage", "quote", "Q-2041", t0), "#222 print token: missing or malformed tokens are refused");
+  ok(!verifyPrintToken("", tok, "quote", "Q-2041", t0), "#222 print token: no secret configured → nothing verifies");
+}
+{
+  ok(
+    pdfKindForQuoteType(undefined) === "quote" && pdfKindForQuoteType("system") === "quote" && pdfKindForQuoteType("flame_test") === "flame" &&
+      pdfKindForQuoteType("repair") === "repair" && pdfKindForQuoteType("inspection") === "inspection",
+    "#222 pdfKindForQuoteType: system → quote, the three service letters by type"
+  );
+  ok(pdfKindForQuoteType("consulting") === null && pdfKindForQuoteType("rental") === null, "#222 pdfKindForQuoteType: consulting and rental have no saved PDF");
+  ok(printPathFor("quote", "Q-1") === "/print/quote/Q-1" && printPathFor("repair", "Q 2") === "/print/letter/repair/Q%202", "#222 printPathFor: quote vs letter routes, id encoded");
+  ok(
+    pdfStoragePath("Q-2041", "123") === "quote-pdfs/Q-2041/123.pdf" && pdfStoragePath("TEST222:a/b", "rev-1") === "quote-pdfs/TEST222_a_b/rev-1.pdf",
+    "#222 pdfStoragePath: one folder per quote, unsafe characters replaced"
+  );
+  const ready: QuotePdfState = { status: "ready", at: 10, savedAt: 5, blobPath: "quote-pdfs/Q-1/5.pdf" };
+  const p = pendingPdf(ready, 20, 21);
+  ok(p.status === "pending" && p.savedAt === 20 && p.at === 21 && p.blobPath === ready.blobPath, "#222 pendingPdf: a new save goes pending but keeps the last good file");
+  ok(settlePdf(p, 19, { ok: true, blobPath: "x" }, 30) === undefined, "#222 settlePdf: an older save's render is superseded by the newer savedAt");
+  ok(settlePdf(null, 20, { ok: true, blobPath: "x" }, 30) === undefined, "#222 settlePdf: nothing to settle when the quote carries no pdf state");
+  const done = settlePdf(p, 20, { ok: true, blobPath: "quote-pdfs/Q-1/20.pdf" }, 30);
+  ok(done?.status === "ready" && done.blobPath === "quote-pdfs/Q-1/20.pdf" && done.at === 30 && done.savedAt === 20, "#222 settlePdf: the matching save becomes ready with its new file");
+  const bad = settlePdf(p, 20, { ok: false, error: "No Chrome" }, 30);
+  ok(bad?.status === "failed" && bad.error === "No Chrome" && bad.blobPath === ready.blobPath, "#222 settlePdf: a failure records the reason and keeps the last good file");
+  const f = failedPdf(ready, 40, "x".repeat(400), 41);
+  ok(f.status === "failed" && f.savedAt === 40 && f.error?.length === 300 && f.blobPath === ready.blobPath, "#222 failedPdf: reason capped at 300 chars, last good file kept");
+  const v = pdfView(p, 21 + PDF_PENDING_STALE_MS + 1);
+  ok(v?.status === "failed" && !!v.error && v.hasFile, "#222 pdfView: a pending render older than the stale window reads as failed");
+  ok(pdfView(p, 22)?.status === "pending" && pdfView(null, 0) === null, "#222 pdfView: a live pending render stays pending; no state → null");
+  ok(!("blobPath" in (pdfView(ready, 11) as object)), "#222 pdfView: the browser view never carries the storage path");
+  ok(
+    revisionAwaitingPdf({ rev: 2, at: 50, reason: "sent" }, 40) && !revisionAwaitingPdf({ rev: 2, at: 30, reason: "sent" }, 40) &&
+      !revisionAwaitingPdf({ rev: 2, at: 50, reason: "manual" }, 40) && !revisionAwaitingPdf({ rev: 2, at: 50, reason: "sent", pdfBlobPath: "x" }, 40),
+    "#222 revisionAwaitingPdf: only a sent revision cut at/after the PDF's save and not yet copied"
+  );
+  const revs = [
+    { rev: 1, at: 1, reason: "sent", pdfBlobPath: "r1" },
+    { rev: 2, at: 2, reason: "manual" },
+    { rev: 3, at: 3, reason: "sent" },
+  ];
+  ok(latestSentRevision(revs)?.rev === 3, "#222 latestSentRevision: the newest sent snapshot");
+  ok(portalPdfSource({ revisions: revs, pdf: ready })?.path === ready.blobPath, "#222 portalPdfSource: the latest sent revision has no copy → the current ready PDF");
+  ok(
+    portalPdfSource({ revisions: [revs[0], revs[1], { rev: 3, at: 3, reason: "sent", pdfBlobPath: "r3" }], pdf: ready })?.path === "r3",
+    "#222 portalPdfSource: the latest sent revision's copy wins over later edits"
+  );
+  ok(
+    portalPdfSource({ revisions: [], pdf: { ...ready, status: "failed" } }) === null && portalPdfSource({ revisions: [], pdf: null }) === null,
+    "#222 portalPdfSource: no ready file → nothing for the customer"
+  );
+  ok(
+    teamPdfPath({ revisions: revs, pdf: ready }, 1) === "r1" && teamPdfPath({ revisions: revs, pdf: ready }, 3) === null && teamPdfPath({ revisions: revs, pdf: ready }, null) === ready.blobPath,
+    "#222 teamPdfPath: ?rev=n reads that revision's copy, else the current file"
+  );
+  ok(pdfFileName("Q-2041", null) === "Q-2041.pdf" && pdfFileName("Q-2041", 3) === "Q-2041-rev3.pdf", "#222 pdfFileName: Q-id plus -rev<n>");
+}
+{
+  ok(JSON.stringify(normalizePdfOptions(undefined)) === JSON.stringify(DEFAULT_PDF_OPTIONS), "#222 normalizePdfOptions: absent → every toggle on, itemized");
+  const n = normalizePdfOptions({ detail: "sectioned", pdfPrices: false, pdfQty: "no", junk: 1 });
+  ok(n.detail === "sectioned" && n.pdfPrices === false && n.pdfQty === true && !("junk" in n), "#222 normalizePdfOptions: keeps real booleans, drops junk, defaults the rest");
+  ok(normalizePdfOptions({ detail: "weird" }).detail === "itemized", "#222 normalizePdfOptions: an unknown detail falls back to itemized");
+}
+{
+  ok(originFrom("localhost:3000", null) === "http://localhost:3000", "#222 originFrom: localhost defaults to http");
+  ok(originFrom("quartzite-six.vercel.app", "https") === "https://quartzite-six.vercel.app", "#222 originFrom: forwarded proto + host");
+  ok(originFrom("evil.com/x", "https") === null && originFrom("", "https") === null, "#222 originFrom: a host with a path, or no host, is refused");
+  ok(
+    originFrom("ignored:1", "http", "https://app.example.com/") === "https://app.example.com" && originFrom("x", "http", "not a url") === null,
+    "#222 originFrom: QUOTE_PDF_ORIGIN wins, and a malformed one refuses"
+  );
+}
+{
+  const dlSource = { system: "daylite", importedAt: 1 };
+  ok(
+    !isAppEraProject({ id: "P-3001", source: dlSource }) && !isAppEraProject({ id: "P-dl-abc123" }) && isAppEraProject({ id: "P-3002", source: null }),
+    "#220 isAppEraProject: Daylite-sourced and legacy P-dl-* projects stay internal"
+  );
+  const proj = {
+    id: "P-3003", name: "Main stage rigging", kind: "project" as const, projectType: "system", stage: "install",
+    stageMeta: { pipelineId: "install", tag: "onsite" as const, label: "Install", index: 3, count: 7 },
+    installStart: 100, installEnd: 200, targetDate: 300, value: 48000.4, valueUnknown: false, updatedAt: 9,
+    margin: 0.4, procurement: [{}], crew: [{}], timeLogs: [{}], notes: [{}], tasks: [{}], owner: "Jeff", deliveries: [{}], mobilizations: [{}],
+  };
+  const view = portalProjectView(proj, { venueName: "Hall A", quoteStatus: "won" });
+  ok(Object.keys(view).sort().join(",") === "done,end,id,name,stage,start,target,type,updatedAt,value,venue", "#220 portalProjectView: whitelists exactly the customer-safe fields");
+  ok(view.value === 48000 && view.venue === "Hall A" && view.type === "Installation" && view.stage === "Install" && !view.done, "#220 portalProjectView: value, venue, type label, stage label");
+  ok(
+    portalProjectView(proj, { venueName: "", quoteStatus: "sent" }).value === null && portalProjectView({ ...proj, valueUnknown: true }, { venueName: "", quoteStatus: "won" }).value === null,
+    "#220 portalProjectView: value only when known and the linked quote is won"
+  );
+  ok(
+    portalProjectView({ ...proj, kind: "order", projectType: null }, { venueName: "", quoteStatus: null }).type === "Order" &&
+      portalProjectView({ ...proj, projectType: "flame_test" }, { venueName: "", quoteStatus: null }).type === "Flame test",
+    "#220 portalProjectView: order and service type labels"
+  );
+  const doneView = portalProjectView({ ...proj, stageMeta: { ...proj.stageMeta, tag: "done" as const, label: "Complete" }, updatedAt: 20 }, { venueName: "", quoteStatus: null });
+  const g = groupPortalProjects([view, doneView]);
+  ok(g.active.length === 1 && g.active[0] === view && g.history.length === 1 && g.history[0].stage === "Complete", "#220 groupPortalProjects: Complete → History, everything else Active");
+  const gq = groupPortalQuotes([
+    { id: "a", status: "sent", updatedAt: 1 },
+    { id: "b", status: "won", updatedAt: 2 },
+    { id: "c", status: "draft", updatedAt: 3 },
+    { id: "d", status: "lost", updatedAt: 4 },
+  ]);
+  ok(gq.open.map((q) => q.id).join(",") === "c,a" && gq.history.map((q) => q.id).join(",") === "d,b", "#220 groupPortalQuotes: sent + own drafts Open, won + lost History, newest first");
 }

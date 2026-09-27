@@ -2,6 +2,7 @@ import { list as listPricingCatalog, type CatalogPart } from "@/lib/stores/catal
 import { insertDocIfAbsent, listDocs, patchDoc, softDeleteDoc, upsertDoc, insertWithPrefixedId } from "@/db/doc-store";
 import type { Port } from "@/lib/catalog-connect";
 import type { GridShape } from "@/lib/design/grid-symbols";
+import { keywordScopeOf } from "@/lib/design/device-types";
 
 /**
  * Grid's symbol library is intentionally separate from the pricing catalog.
@@ -41,13 +42,12 @@ export type GridSymbol = {
   updatedAt: number;
 };
 
+/** #226: the text heuristic lives in lib/design/device-types (pure) and now
+ *  ends in Unscoped, not Lighting — an unknown part must never flood the
+ *  Lighting chip (#48). Device types override this at read time
+ *  (gridPartsFrom), so this is only the seed-time fallback. */
 function scopeFor(p: CatalogPart): string {
-  const text = `${p.category} ${p.desc} ${p.discipline || ""}`.toLowerCase();
-  if (text.includes("curtain") || text.includes("fabric")) return "Curtains";
-  if (text.includes("rig") || text.includes("truss")) return "Rigging";
-  if (text.includes("video") || text.includes("sdi") || text.includes("hdmi")) return "Video";
-  if (text.includes("audio") || text.includes("speaker") || text.includes("microphone")) return "Audio";
-  return "Lighting";
+  return keywordScopeOf(p);
 }
 
 function dimensionsFor(p: CatalogPart): { width: number; height: number } {

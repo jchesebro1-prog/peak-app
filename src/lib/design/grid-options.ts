@@ -16,6 +16,7 @@
 
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { GridCustomItem } from "./grid-custom-items";
+import type { GridAccessory } from "./grid-accessories";
 
 export type GridOption = {
   id: string; // 'opt-' + 12 hex, or DEFAULT_OPTION_ID for a normalized legacy doc
@@ -28,6 +29,9 @@ export type GridOption = {
   /** Per-design custom items (#212) — priced as allowances, never placed.
    *  Absent on older options; always read through customItemsOf(). */
   customItems?: GridCustomItem[];
+  /** BOM accessories (#230) — catalog parts added under a BOM heading,
+   *  never placed. Absent on older options; always read through accessoriesOf(). */
+  accessories?: GridAccessory[];
 };
 
 export const DEFAULT_OPTION_ID = "opt-base";
