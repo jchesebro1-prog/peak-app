@@ -6950,7 +6950,9 @@ without / with labor, Flame test / Repair / Inspection auto-priced / typed total
 quote is "with labor" when it has any labor line (Estimator labor rows, Grid per-system labor, promoted Quick Design
 labor) — custom items, allowances and discounts don't change it (Jeff's pick); a service quote is "typed total" only
 when it carries a hand-typed #217 total, never an auto-seeded one. The limit used is the **quote owner's** (`owner`,
-else `preparedBy`, matched to an active roster name), whoever clicks Send.
+else `preparedBy`, matched to an active roster name), whoever clicks Send. Unowned or imported quotes default their
+owner to "Jeff Chesebro", so a No limit on Jeff's row applies to them; the limit follows the quote's owner, set when
+the quote is created (a later save by someone else keeps it).
 
 When a quote moves to sent or won without a live approval, `decideApprovalGate` (`src/lib/stores/quotes.ts`) checks
 that limit; within it, the review is stamped `approved`, `method: "auto_limit"`, `decidedBy` = the owner, with a

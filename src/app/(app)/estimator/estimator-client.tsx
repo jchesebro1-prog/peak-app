@@ -1899,7 +1899,11 @@ export default function EstimatorClient({
     reviewers.filter((n) => n !== me && n !== owner).map((n) => ({ value: n, label: n }))
   );
   const sentAlready = status === "sent" || status === "won" || status === "lost";
-  const rbCanSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && !sentAlready;
+  // #242 final: a SENT quote whose auto approval went stale can still be
+  // submitted for review or attested, so it can reach Won through a real
+  // approval (the gate refuses Won until it has one).
+  const staleSent = staleAuto && status === "sent";
+  const rbCanSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);
   const rbSubmitLabel = rev.state === "changes" ? "Resubmit for review" : "Submit for review";
   const rbCanDecide = canApprove && rev.state === "in_review" && !isOwner;
   const rbCanClaim = canApprove && rev.state === "in_review" && !rev.reviewer && !isOwner;
@@ -1914,7 +1918,7 @@ export default function EstimatorClient({
   // changes can't be attested past — resubmit for review instead. The server
   // enforces this too (canAttestApproval); hiding it here is only convenience.
   const rbCanAttest =
-    isOwner && rev.state !== "approved" && rev.state !== "changes" && !sentAlready;
+    isOwner && rev.state !== "approved" && rev.state !== "changes" && (!sentAlready || staleSent);
   const showReviewBar = !!loadedId;
 
   /* ---------------- Daylite stage bar (Task 6) ---------------- */

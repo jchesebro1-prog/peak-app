@@ -62,8 +62,16 @@ export const REVIEW_LIMIT_MAX = 10_000_000;
 export type ReviewLimit = number | "none";
 /** Settings `reviewLimits`: { [users.id]: { [kind]: limit } }. */
 export type ReviewLimits = Record<string, Partial<Record<ReviewKind, ReviewLimit>>>;
-/** Written on an `auto_limit` approval: what it was granted against. */
-export type AutoApprovalSnapshot = { kind: ReviewKind; limit: ReviewLimit; value: number };
+/** Written on an `auto_limit` approval: what it was granted against.
+ *  `triggeredBy` / `trigger` (#242 final) name who moved the quote to sent/won
+ *  when the grant was written — absent on snapshots written before them. */
+export type AutoApprovalSnapshot = {
+  kind: ReviewKind;
+  limit: ReviewLimit;
+  value: number;
+  triggeredBy?: string;
+  trigger?: "sent" | "won";
+};
 
 /* ---------------- structural inputs (QuoteReview / Quote satisfy them) ---------------- */
 
@@ -128,7 +136,7 @@ export function hasLaborLine(spec: unknown): boolean {
     return s.sections.some((sec) => {
       const so = (sec && typeof sec === "object" ? sec : {}) as { kind?: unknown; items?: unknown };
       const items = Array.isArray(so.items) ? (so.items as LineLike[]) : [];
-      return items.some((it) => !!it && !it.option && (so.kind === "labor" || it.labor === true) && estimatorExtSell(it) > 0);
+      return items.some((it) => !!it && !it.option && (so.kind === "labor" || !!it.labor) && estimatorExtSell(it) > 0);
     });
   }
   if (Array.isArray(s.lines)) {
@@ -256,19 +264,29 @@ export function approvalHolds(q: ReviewableQuote, ctx: ReviewLimitContext): bool
 }
 
 /** The auto-approval record should be rewritten when the current evaluation
- *  fits but no longer matches its snapshot (kind, limit, owner, or a value
- *  above the granted one). The rewrite happens at the next gated transition
- *  (decideApprovalGate), so until then the banner describes the last grant. */
+ *  fits but the QUOTE no longer matches its snapshot — its kind, owner or
+ *  value changed. A limit changed in Settings on an unchanged quote is not a
+ *  reason (#242 final): the grant keeps its original decidedAt and limit. The
+ *  rewrite happens at the next gated transition (decideApprovalGate), so until
+ *  then the banner describes the last grant. */
 export function autoSnapshotStale(q: ReviewableQuote, ev: AutoApprovalEval): boolean {
   const r = q.review;
   const a = r?.auto;
   if (!r || r.method !== "auto_limit" || !a) return true;
   return (
     a.kind !== ev.kind ||
-    a.limit !== ev.limit ||
-    ev.value > a.value ||
+    ev.value !== a.value ||
     (r.decidedBy || "").trim().toLowerCase() !== ev.ownerName.trim().toLowerCase()
   );
+}
+
+/** An auto_limit approval that no longer holds (approvalHolds) — the quote
+ *  reads as needing review everywhere, and its owner may submit it for review
+ *  or attest it again, even once it was sent (#242 final), so it can still
+ *  reach Won through a real approval. */
+export function isStaleAutoApproval(q: ReviewableQuote, ctx: ReviewLimitContext): boolean {
+  const r = q.review;
+  return !!r && r.state === "approved" && r.method === "auto_limit" && !approvalHolds(q, ctx);
 }
 
 /* ---------------- chip ---------------- */

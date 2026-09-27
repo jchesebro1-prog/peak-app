@@ -29,8 +29,9 @@ export type ApprovedReviewLike = {
   decidedBy: string | null;
   reviewer: string | null;
   note: string;
-  /** #242: an `auto_limit` approval's snapshot (kind, limit, value). */
-  auto?: { kind: string; limit: number | "none"; value: number } | null;
+  /** #242: an `auto_limit` approval's snapshot (kind, limit, value; who
+   *  moved the quote and to what — absent on older snapshots). */
+  auto?: { kind: string; limit: number | "none"; value: number; triggeredBy?: string; trigger?: "sent" | "won" } | null;
 };
 
 /**
@@ -58,15 +59,22 @@ export function approvedReviewLine(review: ApprovedReviewLike): string {
 }
 
 /** #242: "Auto-approved — within Nic's $25,000 limit for system estimates
- *  without labor" (or "… Nic has no review limit for rentals"). */
+ *  without labor" (or "… Nic has no review limit for rentals"). #242 final:
+ *  when someone other than the owner moved the quote, "… — sent by Jena" (or
+ *  "— marked Won by Jena"). Snapshots written before `triggeredBy` render
+ *  without the suffix. */
 export function autoApprovalLine(review: ApprovedReviewLike): string {
   const who = firstName(review.decidedBy || "");
   const a = review.auto;
   if (!a) return "Auto-approved — within " + who + "'s review limit";
   const phrase = reviewKindPhrase(a.kind);
-  return a.limit === "none"
-    ? `Auto-approved — ${who} has no review limit for ${phrase}`
-    : `Auto-approved — within ${who}'s ${money(a.limit)} limit for ${phrase}`;
+  const base =
+    a.limit === "none"
+      ? `Auto-approved — ${who} has no review limit for ${phrase}`
+      : `Auto-approved — within ${who}'s ${money(a.limit)} limit for ${phrase}`;
+  const by = (a.triggeredBy || "").trim();
+  if (!by || by.toLowerCase() === (review.decidedBy || "").trim().toLowerCase()) return base;
+  return `${base} — ${a.trigger === "won" ? "marked Won" : "sent"} by ${firstName(by)}`;
 }
 
 /** #242: the banner for an auto approval that no longer holds. */

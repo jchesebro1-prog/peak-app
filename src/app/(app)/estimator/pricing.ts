@@ -217,6 +217,44 @@ export function totals(sections: SpecSection[], taxRatePct: number): QuoteTotals
   };
 }
 
+/**
+ * #242 final — the value a saved Estimator quote carries is the server's own
+ * figure, never a client-posted one: the review-limit gate auto-approves on
+ * the stored value. Recomputes totals() (tax 0, as the builder does) over a
+ * numerically coerced copy of the posted sections; a posted value within a
+ * cent of it is kept as posted (rounding), anything else is replaced by the
+ * recomputed value and margin. Pure — the save action calls it.
+ */
+export function reconcileEstimatorValue(
+  sections: unknown,
+  posted: { value: unknown; margin: unknown }
+): { value: number; margin: number; adjusted: boolean } {
+  const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const safe: SpecSection[] = (Array.isArray(sections) ? sections : [])
+    .filter((sec): sec is SpecSection => !!sec && typeof sec === "object")
+    .map((sec) => ({
+      ...sec,
+      freightPct: n(sec.freightPct),
+      items: (Array.isArray(sec.items) ? sec.items : [])
+        .filter((it) => !!it && typeof it === "object")
+        .map((it) => ({
+          ...it,
+          qty: n(it.qty),
+          cost: n(it.cost),
+          price: n(it.price),
+          extSellOverride: typeof it.extSellOverride === "number" && Number.isFinite(it.extSellOverride) ? it.extSellOverride : undefined,
+        })),
+    }));
+  const t = totals(safe, 0);
+  const grand = n(t.grand);
+  const pv = posted.value;
+  if (typeof pv === "number" && Number.isFinite(pv) && Math.abs(pv - grand) <= 0.01) {
+    const pm = posted.margin;
+    return { value: pv, margin: typeof pm === "number" && Number.isFinite(pm) ? pm : n(t.margin), adjusted: false };
+  }
+  return { value: grand, margin: n(t.margin), adjusted: true };
+}
+
 /* ---------------- curtain configurator ---------------- */
 
 export type CurtainCalc = {

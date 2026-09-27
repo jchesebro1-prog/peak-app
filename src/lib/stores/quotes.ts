@@ -934,8 +934,17 @@ export type ApprovalGateDecision =
   | { ok: false; error: string };
 
 /** #242: the review record an auto-approval writes. Pure. submittedBy/At are
- *  set too, so it lists under the owner's Reviews → "Submitted by me". */
-export function autoApprovedReview(ev: AutoApprovalEval, now: number): QuoteReview {
+ *  set too, so it lists under the owner's Reviews → "Submitted by me".
+ *  #242 final: the snapshot names who moved the quote (`triggeredBy`) and to
+ *  what (`trigger`), so the banner can say "— sent by Jena" when that was not
+ *  the owner. Both are left off when no actor is known. */
+export function autoApprovedReview(
+  ev: AutoApprovalEval,
+  now: number,
+  actor?: string | null,
+  trigger?: "sent" | "won"
+): QuoteReview {
+  const by = (actor || "").trim();
   return {
     state: "approved",
     reviewer: null,
@@ -945,7 +954,13 @@ export function autoApprovedReview(ev: AutoApprovalEval, now: number): QuoteRevi
     decidedAt: now,
     note: "",
     method: "auto_limit",
-    auto: { kind: ev.kind, limit: ev.limit, value: ev.value },
+    auto: {
+      kind: ev.kind,
+      limit: ev.limit,
+      value: ev.value,
+      ...(by ? { triggeredBy: by } : {}),
+      ...(by && trigger ? { trigger } : {}),
+    },
   };
 }
 
@@ -956,10 +971,11 @@ export function autoApprovedReview(ev: AutoApprovalEval, now: number): QuoteRevi
  * - bypassed or ungated statuses → open (resolveStatusGate, unchanged);
  * - an approval that still holds (in-app, attested, legacy, or an auto
  *   approval the quote is unchanged against or still fits) → open; an auto
- *   approval whose snapshot no longer matches a fitting evaluation (kind,
- *   limit, owner, or a higher value) is re-stamped in the same write — so the
- *   stamp refreshes at the next gated transition, not before; otherwise
- *   nothing is re-stamped. An unchanged quote keeps its grant: a lowered
+ *   approval whose QUOTE changed against its snapshot (kind, owner or value)
+ *   and still fits is re-stamped in the same write — so the stamp refreshes
+ *   at the next gated transition, not before; otherwise nothing is
+ *   re-stamped. A limit raised or lowered in Settings on an unchanged quote
+ *   never re-stamps (#242 final) — the grant keeps its decidedAt; a lowered
  *   limit governs new grants only;
  * - else the owner's review limit: fits → open, with the auto-approval
  *   record to write in the same patch; over / blank / owner off the roster /
@@ -970,17 +986,21 @@ export function decideApprovalGate(
   q: GateQuote,
   ctx: ReviewLimitContext,
   opts: SetStatusOpts = {},
-  now: number = Date.now()
+  now: number = Date.now(),
+  /** #242 final: who is moving the quote (setStatus's `by`) — recorded on a
+   *  new auto snapshot as `triggeredBy`. */
+  actor: string | null = null
 ): ApprovalGateDecision {
   const open = resolveStatusGate(status, null, opts);
   if (open.ok) return { ok: true, stamp: null };
+  const trigger = status === "won" ? "won" : "sent";
   if (approvalHolds(q, ctx)) {
     if (q.review?.method !== "auto_limit") return { ok: true, stamp: null };
     const cur = canAutoApprove(q, ctx);
-    return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now) : null };
+    return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now, actor, trigger) : null };
   }
   const ev = canAutoApprove(q, ctx);
-  if (ev) return { ok: true, stamp: autoApprovedReview(ev, now) };
+  if (ev) return { ok: true, stamp: autoApprovedReview(ev, now, actor, trigger) };
   return open;
 }
 
@@ -1139,10 +1159,14 @@ export async function setStatus(
     return q;
   }
   // #242: the owner's review limits are read only when this transition is
-  // gated at all (sent/won without a bypass).
+  // gated at all (sent/won without a bypass) AND the answer can depend on
+  // them: no approval yet, or an auto_limit one. An in-app, attested or
+  // legacy approval passes on its own record, so it makes exactly the DB
+  // reads it made before #242 (#242 final).
   const gated = !resolveStatusGate(status, null, opts).ok;
-  const limits = gated ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
-  const gate = decideApprovalGate(status, q, limits, opts);
+  const needsLimits = gated && (!hasApproval(q.review) || q.review?.method === "auto_limit");
+  const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;
+  const gate = decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null);
   // #174: a TYPED refusal. The gate is the only throw here whose message is
   // meant for the user; everything below this line that throws is a defect,
   // and callers tell the two apart with `statusFailureMessage`.

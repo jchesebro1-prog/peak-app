@@ -830,7 +830,10 @@ function SelectedPanel({
   const rm = RB_META[rev.state] || RB_META.none;
   const isOwner = q.owner === me;
   const sentAlready = q.status === "sent" || q.status === "won" || q.status === "lost";
-  const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && !sentAlready;
+  // #242 final: a SENT quote whose auto approval went stale can still be
+  // submitted for review, so it can reach Won through a real approval.
+  const staleSent = staleAuto && q.status === "sent";
+  const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);
   const canSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");
 
   let rbSub: string;

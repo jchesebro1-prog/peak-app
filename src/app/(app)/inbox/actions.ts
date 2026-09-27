@@ -411,7 +411,7 @@ async function completeRenewalOutreach(
     // of disappearing. The returned sentence is deliberately unused: nothing
     // on this code path has a screen to show it on.
     try {
-      await setQuoteStatus(quote.id, "sent");
+      await setQuoteStatus(quote.id, "sent", me);
     } catch (e) {
       statusFailureMessage(
         e,

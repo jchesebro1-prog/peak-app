@@ -10529,6 +10529,7 @@ seeded()
   .then(() => reviewLimits242AsyncChecks())
   .then(() => reviewLimitChips242AsyncChecks())
   .then(() => reviewLimitsFix242AsyncChecks())
+  .then(() => reviewLimitsFinal242AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27668,8 +27669,8 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   );
   const raisedL = r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 40000 } } }, {}, 3000);
   ok(
-    raisedL.ok && JSON.stringify(raisedL.stamp?.auto) === JSON.stringify({ kind: "system_plain", limit: 40000, value: 20000 }),
-    "#242 gate: snapshot refresh — the owner's limit changed and still fits, so the record names the current limit"
+    raisedL.ok && raisedL.stamp === null,
+    "#242 final: a RAISED limit on an unchanged quote does not re-stamp — the grant keeps its original decidedAt"
   );
   const ctx2 = { roster: [...ctx.roster, { id: "u2", name: "Jena Tolksdorf", status: "active" }], limits: { ...ctx.limits, u2: { system_plain: 50000 } } };
   const moved = r242Decide("won", { ...base, owner: "Jena Tolksdorf", review: autoRev }, ctx2, {}, 4000);
@@ -27679,8 +27680,8 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
   );
   const loweredFits = r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 20000 } } }, {}, 5000);
   ok(
-    loweredFits.ok && loweredFits.stamp?.auto?.limit === 20000,
-    "#242 gate: snapshot refresh — a lowered limit the unchanged quote still fits re-stamps to the current limit"
+    loweredFits.ok && loweredFits.stamp === null,
+    "#242 final: a LOWERED limit the unchanged quote still fits does not re-stamp — the grant keeps its original decidedAt"
   );
   ok(
     r242Decide("won", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "engine-owned-flow" }).ok &&
@@ -27723,12 +27724,14 @@ async function reviewLimits242AsyncChecks(): Promise<void> {
 
     const a = await mk("within");
     ok((await r242Check(a, "sent")).ok, "#242 store: checkApprovalGate passes a quote within the owner's limit");
+    // Stored snapshots come back in JSONB key order (shorter keys first), hence trigger before triggeredBy.
     const sentA = await r242SetStatus(a.id, "sent", "Someone Else");
     const reA = await r242Get(a.id);
     ok(
       sentA?.status === "sent" && reA?.review.state === "approved" && reA.review.method === "auto_limit" && reA.review.decidedBy === owner.name &&
-        typeof reA.review.decidedAt === "number" && JSON.stringify(reA.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
-      "#242 store: setStatus(sent) within the limit auto-approves in the same write — stamped to the OWNER, not the actor"
+        typeof reA.review.decidedAt === "number" &&
+        JSON.stringify(reA.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000, trigger: "sent", triggeredBy: "Someone Else" }),
+      "#242 store: setStatus(sent) within the limit auto-approves in the same write — stamped to the OWNER, the actor recorded as triggeredBy (#242 final)"
     );
 
     const b = await mk("over", { value: 30000 });
@@ -27874,7 +27877,7 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
     const reW = await r242Get(w.id);
     ok(
       wonW?.status === "won" && reW?.review.state === "approved" && reW.review.method === "auto_limit" && reW.review.decidedBy === owner.name &&
-        JSON.stringify(reW.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+        JSON.stringify(reW.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000, trigger: "won", triggeredBy: "Someone Else" }),
       "#242 store: draft → Won within the owner's limit auto-approves in the same write"
     );
 
@@ -27914,7 +27917,7 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
     const reR = await r242Get(r.id);
     ok(
       reR?.status === "won" && reR.review.method === "auto_limit" &&
-        JSON.stringify(reR.review.auto) === JSON.stringify({ kind: "system_plain", limit: 30000, value: 23000 }),
+        JSON.stringify(reR.review.auto) === JSON.stringify({ kind: "system_plain", limit: 30000, value: 23000, trigger: "won", triggeredBy: "Test" }),
       "#242 store: snapshot refresh — a changed quote that still fits is re-stamped with the current limit and value in the Won write"
     );
 
@@ -27988,4 +27991,209 @@ import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip"
       rvw.includes('state: x.staleLine ? "none" : r.state,'),
     "#242 fix: Reviews history reads a stale auto approval as needing review (approvalHolds), never 'Auto-approved'"
   );
+}
+
+/* --- #242 final: release-review fixes --- */
+import { isStaleAutoApproval as r242Stale, hasLaborLine as r242HasLaborF } from "@/lib/review-limits";
+import { reconcileEstimatorValue as r242Reconcile } from "@/app/(app)/estimator/pricing";
+import { submitForReview as r242Submit, autoApprovedReview as r242AutoRev } from "@/lib/stores/quotes";
+{
+  // 9 — hasLaborLine matches totals(): any truthy `labor` flag is a labor line.
+  const sec = (it: Record<string, unknown>) => ({ sections: [{ id: "s", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [it] }] });
+  ok(r242HasLaborF(sec({ sku: "X", qty: 1, price: 100, cost: 0, labor: 1 })), "#242 final: hasLaborLine reads a truthy labor flag like totals() (!!it.labor)");
+  ok(!r242HasLaborF(sec({ sku: "X", qty: 1, price: 100, cost: 0, labor: 0 })), "#242 final: a falsy labor flag is not labor");
+
+  // 2 — the stale-auto rule submitQuoteForReview and the builders share.
+  const ctx = { roster: [{ id: "u1", name: "Nic Trapani", status: "active" }], limits: { u1: { system_plain: 25000 } } };
+  const autoR = { state: "approved", method: "auto_limit", decidedBy: "Nic Trapani", auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  const q = (over: Record<string, unknown>) => ({ quoteType: "system", value: 20000, owner: "Nic Trapani", status: "sent", spec: null, ...over });
+  ok(r242Stale(q({ review: autoR, value: 30000 }), ctx), "#242 final: an auto approval on a changed quote over the limit is stale");
+  ok(!r242Stale(q({ review: autoR }), ctx), "#242 final: an auto approval that still holds is not stale");
+  ok(
+    !r242Stale(q({ review: { state: "approved", method: "in_app" }, value: 9e6 }), ctx) && !r242Stale(q({ review: { state: "none" } }), ctx),
+    "#242 final: in-app approvals and unapproved quotes are never 'stale auto'"
+  );
+
+  // 7 — re-stamp only on a changed quote, never on a changed limit.
+  const base = { quoteType: "system", value: 20000, owner: "Nic Trapani", preparedBy: "", spec: null, flameTest: null, repair: null, inspection: null };
+  const rev = { state: "approved" as const, reviewer: null, submittedBy: "Nic Trapani", submittedAt: 1, decidedBy: "Nic Trapani", decidedAt: 1, note: "", method: "auto_limit" as const, auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  const lim = (n: number) => ({ ...ctx, limits: { u1: { system_plain: n } } });
+  const up = r242Decide("won", { ...base, review: rev }, lim(90000), {}, 9);
+  const down = r242Decide("won", { ...base, review: rev }, lim(20000), {}, 9);
+  ok(
+    up.ok && up.stamp === null && down.ok && down.stamp === null,
+    "#242 final: a raised or lowered limit on an unchanged quote keeps the original stamp (decidedAt untouched)"
+  );
+  const lowered = r242Decide("won", { ...base, value: 18000, review: rev }, lim(20000), {}, 9, "Jena Tolksdorf");
+  ok(
+    lowered.ok && lowered.stamp?.decidedAt === 9 && lowered.stamp.auto?.value === 18000 && lowered.stamp.auto.triggeredBy === "Jena Tolksdorf",
+    "#242 final: a changed VALUE that still fits re-stamps, recording the actor"
+  );
+
+  // 5 — triggeredBy on the snapshot; the banner names a clicker who isn't the owner.
+  const ev = { kind: "system_plain" as const, ownerName: "Nic Trapani", ownerId: "u1", limit: 25000, value: 20000, fits: true as const };
+  ok(
+    JSON.stringify(r242AutoRev(ev, 5, "Jena Tolksdorf", "sent").auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000, triggeredBy: "Jena Tolksdorf", trigger: "sent" }) &&
+      JSON.stringify(r242AutoRev(ev, 5).auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+    "#242 final: autoApprovedReview records triggeredBy + trigger, and omits them with no actor"
+  );
+  const line = (auto: Record<string, unknown>) => r242AutoLine({ method: "auto_limit", decidedBy: "Nic Trapani", reviewer: null, note: "", auto: { kind: "system_plain", limit: 25000, value: 20000, ...auto } });
+  ok(line({ triggeredBy: "Jena Tolksdorf", trigger: "sent" }) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor — sent by Jena", `#242 final: banner names a non-owner sender (got "${line({ triggeredBy: "Jena Tolksdorf", trigger: "sent" })}")`);
+  ok(line({ triggeredBy: "Jena Tolksdorf", trigger: "won" }).endsWith(" — marked Won by Jena"), "#242 final: banner names a non-owner who marked it Won");
+  ok(
+    line({ triggeredBy: "nic trapani", trigger: "sent" }) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor" &&
+      line({}) === "Auto-approved — within Nic's $25,000 limit for system estimates without labor",
+    "#242 final: no suffix when the owner clicked, and old snapshots without triggeredBy still render"
+  );
+
+  // 3 — the server's own value.
+  const secs = [
+    { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 10, items: [{ id: 1, sku: "P", desc: "", qty: 2, unit: "ea", cost: 100, price: 150 }] },
+    { id: "b", name: "B", kind: "labor", mfr: "", freightPct: 0, items: [{ id: 2, sku: "L", desc: "", qty: 10, unit: "hr", cost: 50, price: 95 }] },
+  ];
+  // rev 300 + 950 = 1250, freight 10% of 200 cost = 20 → grand 1270
+  const kept = r242Reconcile(secs, { value: 1270.004, margin: 0.4 });
+  ok(!kept.adjusted && kept.value === 1270.004 && kept.margin === 0.4, `#242 final: a posted value within rounding is kept (got ${JSON.stringify(kept)})`);
+  const forged = r242Reconcile(secs, { value: 1, margin: 0.9 });
+  ok(forged.adjusted && forged.value === 1270 && Math.abs(forged.margin - (1250 - 700) / 1250) < 1e-9, `#242 final: a forged posted value is replaced by the recomputed one (got ${JSON.stringify(forged)})`);
+  const junk = r242Reconcile([null, { items: [{ qty: "9", price: 1e6, cost: 0 }] }, "x"], { value: 5, margin: 0 });
+  ok(junk.adjusted && junk.value === 0 && Number.isFinite(junk.margin), "#242 final: junk sections coerce to a finite recomputed value, never NaN");
+  ok(r242Reconcile(undefined, { value: 0, margin: 0 }).value === 0, "#242 final: no sections → 0");
+  const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  const saveBody = ea.slice(ea.indexOf("export async function saveQuoteAction("), ea.indexOf("export async function searchQuotesAction("));
+  ok(
+    saveBody.includes("reconcileEstimatorValue(payload.sections, { value: payload.value, margin: payload.margin })") &&
+      saveBody.includes("value: priced.value,") && saveBody.includes("margin: priced.margin,") && !/^\s+value: payload\.value,$/m.test(saveBody),
+    "#242 final: saveQuoteAction stores the server-recomputed value, never the posted one"
+  );
+  ok(/setStatus\(id, "sent", user\.name\)/.test(ea), "#242 final: sendToCustomerAction passes the actor to setStatus");
+  const home = readFileSync(join(process.cwd(), "src/app/(app)/home-actions.ts"), "utf8");
+  const inbox = readFileSync(join(process.cwd(), "src/app/(app)/inbox/actions.ts"), "utf8");
+  ok(home.includes("setQuoteStatus(id, status as QuoteStatus, user.name)") && inbox.includes('setQuoteStatus(quote.id, "sent", me)'), "#242 final: Home's stage move and the renewal send pass the actor");
+
+  // 4 — owner set on create only.
+  for (const p of ["flame-tests", "repairs", "inspections", "rentals", "design/engagements"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/quote/actions.ts`), "utf8");
+    const pl = src.slice(src.indexOf("const payload = {"), src.indexOf("updateQuote(editingId, payload)"));
+    ok(
+      pl.length > 0 && !pl.includes("owner: user.name") && /createQuote\(\{ \.\.\.payload, owner: user\.name/.test(src),
+      `#242 final: ${p} sets the quote owner on create only — a later save keeps the stored owner`
+    );
+  }
+
+  // 1 — a stale auto approval on a SENT quote reopens Submit / Attest.
+  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(
+    ec.includes('const staleSent = staleAuto && status === "sent";') &&
+      ec.includes('const rbCanSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);') &&
+      ec.includes('isOwner && rev.state !== "approved" && rev.state !== "changes" && (!sentAlready || staleSent);'),
+    "#242 final: the Estimator offers Submit for review and Attest on a sent quote whose auto approval went stale"
+  );
+  const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+  ok(
+    hub.includes('const staleSent = staleAuto && q.status === "sent";') &&
+      hub.includes('const canSubmit = isOwner && (rev.state === "none" || rev.state === "changes") && (!sentAlready || staleSent);'),
+    "#242 final: the quotes hub offers Submit for review on a sent quote whose auto approval went stale"
+  );
+  const qa = readFileSync(join(process.cwd(), "src/app/(app)/quotes/actions.ts"), "utf8");
+  const sub = qa.slice(qa.indexOf("export async function submitQuoteForReview("), qa.indexOf("export async function deleteQuoteAction("));
+  ok(
+    sub.includes("isStaleAutoApproval(q, await loadReviewLimitContext())") &&
+      sub.includes('if (q.status !== "draft" && !(staleAuto && q.status === "sent")) return;') &&
+      sub.includes('if (state !== "none" && state !== "changes" && !staleAuto) return;'),
+    "#242 final: submitQuoteForReview accepts a stale auto approval (draft or sent), like the Estimator's submitReviewAction"
+  );
+
+  // 6 — limits are read only when they can matter.
+  const qs = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
+  ok(
+    ss.includes('const needsLimits = gated && (!hasApproval(q.review) || q.review?.method === "auto_limit");') &&
+      ss.includes("const limits = needsLimits ? await loadReviewLimitContext() : NO_REVIEW_LIMITS;") &&
+      ss.includes("decideApprovalGate(status, q, limits, opts, Date.now(), by ?? null)"),
+    "#242 final: setStatus loads review limits only for an unapproved or auto-approved quote, and passes the actor"
+  );
+
+  // D396 note.
+  const dec = readFileSync(join(process.cwd(), "DECISIONS.md"), "utf8");
+  ok(dec.replace(/\s+/g, " ").includes('Unowned or imported quotes default their owner to "Jeff Chesebro"'), "#242 final: D396 records the Jeff Chesebro default owner");
+}
+
+async function reviewLimitsFinal242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const mk = async (slug: string, over: Partial<R242Quote> = {}) => {
+    const id = r242Fx(242, "final-" + slug);
+    r242Reg("quotes", id);
+    return r242Create({ id, name: "#242 final " + slug, customer: "Spec fixture", owner: owner.name, value: 20000, ...over });
+  };
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 } } });
+
+    // 1/2 — a sent quote whose auto approval went stale reaches Won through a real approval.
+    const s = await mk("stale-sent");
+    await r242SetStatus(s.id, "sent", owner.name);
+    await r242Update(s.id, { value: 40000 });
+    const staleQ = await r242Get(s.id);
+    ok(!!staleQ && staleQ.status === "sent" && r242Stale(staleQ, await r242LoadCtx()), "#242 final store: raising a sent quote past the limit leaves a stale auto approval");
+    let refused = false;
+    try {
+      await r242SetStatus(s.id, "won", owner.name);
+    } catch (e) {
+      refused = r242IsRefusal(e);
+    }
+    ok(refused, "#242 final store: the stale sent quote cannot be marked Won on its old auto approval");
+    await r242Submit(s.id, { by: owner.name, reviewer: null });
+    await r242Approve(s.id, { by: "Jeff Chesebro" });
+    const wonS = await r242SetStatus(s.id, "won", owner.name);
+    ok(wonS?.status === "won" && (await r242Get(s.id))?.review.method === "in_app", "#242 final store: resubmitted and approved, the stale sent quote reaches Won through a real approval");
+    const t = await mk("stale-attest");
+    await r242SetStatus(t.id, "sent", owner.name);
+    await r242Update(t.id, { value: 40000 });
+    await r242Attest(t.id, { by: owner.name, note: "Reviewed with Jeff by phone" });
+    ok((await r242SetStatus(t.id, "won", owner.name))?.status === "won", "#242 final store: an attested approval on a stale sent quote reaches Won too");
+
+    // 5 — the actor lands on the snapshot and the banner.
+    const j = await mk("jena");
+    await r242SetStatus(j.id, "sent", "Jena Tolksdorf");
+    const reJ = await r242Get(j.id);
+    ok(
+      reJ?.review.decidedBy === owner.name && reJ.review.auto?.triggeredBy === "Jena Tolksdorf" && reJ.review.auto.trigger === "sent" &&
+        r242Line(reJ.review).endsWith(" — sent by Jena"),
+      "#242 final store: an auto approval triggered by someone else records them and the banner says 'sent by Jena'"
+    );
+
+    // 7 — a limit change on an unchanged quote keeps the original grant.
+    const k = await mk("keep-stamp");
+    await r242SetStatus(k.id, "sent", owner.name);
+    const stamped = (await r242Get(k.id))?.review;
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 90000 } } });
+    await r242SetStatus(k.id, "won", "Someone Else");
+    const reK = (await r242Get(k.id))?.review;
+    ok(
+      !!stamped && reK?.decidedAt === stamped.decidedAt && reK.auto?.limit === 25000 && reK.auto.triggeredBy === owner.name,
+      "#242 final store: raising the limit on an unchanged quote keeps the original decidedAt and snapshot at Won"
+    );
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 } } });
+
+    // 3 — the gate evaluates the stored (server-derived) value.
+    const secs = [{ id: "a", name: "A", kind: "materials", mfr: "", freightPct: 0, items: [{ id: 1, sku: "P", desc: "", qty: 1, unit: "ea", cost: 0, price: 30000 }] }];
+    const priced = r242Reconcile(secs, { value: 100, margin: 0 });
+    const f = await mk("forged", { value: priced.value, spec: { sections: secs, mobs: [] } });
+    let refusedF = false;
+    try {
+      await r242SetStatus(f.id, "sent", owner.name);
+    } catch (e) {
+      refusedF = r242IsRefusal(e);
+    }
+    ok(priced.adjusted && f.value === 30000 && refusedF, "#242 final store: a forged $100 value is stored as the recomputed $30,000 and the gate refuses it over the limit");
+
+    // 4 — a later update without an owner keeps the stored owner.
+    const o = await mk("owner-kept");
+    await r242Update(o.id, { name: "#242 final owner-kept (edited)", value: 21000 });
+    ok((await r242Get(o.id))?.owner === owner.name, "#242 final store: an update that carries no owner keeps the quote's owner");
+  } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
 }

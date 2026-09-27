@@ -39,7 +39,7 @@ import { list as catalogList, mergeUpsert } from "@/lib/stores/catalog";
 import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } from "./types";
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
-import { totals } from "./pricing";
+import { reconcileEstimatorValue, totals } from "./pricing";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
@@ -338,6 +338,13 @@ export async function saveQuoteAction(
   payload: SavePayload
 ): Promise<SaveResult> {
   const user = await requireUser();
+  // #242 final: the review-limit gate auto-approves on the STORED value, so it
+  // is the server's own totals() over the posted sections — a posted value
+  // that disagrees beyond rounding is replaced, never trusted.
+  const priced = reconcileEstimatorValue(payload.sections, { value: payload.value, margin: payload.margin });
+  if (priced.adjusted) {
+    console.warn("[estimator] saveQuoteAction: posted value", payload.value, "≠ recomputed", priced.value, "— stored the recomputed value");
+  }
   // `status` is deliberately NOT one of these fields — see the loadedId
   // branch below (security review, 2026-09-25): quotes.update() is an
   // unguarded field merge with no approval gate, no history stamp, and no
@@ -353,8 +360,8 @@ export async function saveQuoteAction(
     installTimeframe: payload.installTimeframe || "TBD",
     paymentTerms: payload.paymentTerms,
     category: (payload.category || "").trim(),
-    value: payload.value,
-    margin: payload.margin,
+    value: priced.value,
+    margin: priced.margin,
     source: "estimator",
     spec: { sections: payload.sections, mobs: payload.mobs },
     pdfOptions: normalizePdfOptions(payload.pdfOptions),
@@ -920,7 +927,7 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
   // try/catch is a backstop that should never actually fire given the
   // pre-check above, not a second source of truth.
   try {
-    await setStatus(id, "sent");
+    await setStatus(id, "sent", user.name);
   } catch (e) {
     return {
       ok: false,
