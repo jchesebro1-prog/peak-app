@@ -58,10 +58,12 @@ unknown users/kinds dropped). Saved through a server action gated by `requirePer
   the review `state: "approved"`, `method: "auto_limit"`, `decidedBy` = the owner, `decidedAt` = now, and a
   snapshot `{ kind, limit, value }`, then let the transition proceed. Otherwise the existing refusal message stands
   (review queue or attest).
-- **No stale auto-approval:** an `auto_limit` approval only counts while the quote still fits — `hasApproval` (or the
-  gate) re-checks kind + value against the owner's CURRENT limit; if the quote was edited over the limit, gained
-  labor, or the limit was lowered, it is not approved and needs review. In-app and attested approvals behave exactly
-  as today.
+- **No stale auto-approval:** an `auto_limit` approval holds while the quote is unchanged against its snapshot (same
+  kind, value at or under the snapshot, same owner) — even if the owner's limit is later lowered or the owner leaves
+  the roster: a lowered limit governs new grants only (amended 2026-09-27, matching the design Jeff approved: "if
+  it's edited over the limit, or labor is added"). Once the quote changed, it is re-checked against the owner's
+  CURRENT limit: still fits → the stamp is refreshed in the same locked write at the next gated transition; doesn't →
+  not approved, needs review. In-app and attested approvals behave exactly as today.
 - Approvers (Admin/Manager/Reviewer) are unchanged; engine-owned service flows and historical import keep their
   bypass.
 - The owner is the quote's `owner` (fall back to `preparedBy`); an owner not on the roster, or with no limit for the
@@ -78,6 +80,6 @@ unknown users/kinds dropped). Saved through a server action gated by `requirePer
 ## Testing
 Pure: `reviewKindOf` across every type and the labor / typed-total splits; limit sanitizer; eligibility (at, under,
 over, No limit, blank, unknown owner). Store/gate: send and won auto-approve within the limit and stamp the record;
-refuse over it with today's message; a stale auto approval (value raised, labor added, limit lowered) no longer
-passes; in-app/attested unchanged; engine-owned bypass unchanged. Settings action is `manage_users`-gated. Four gates
+refuse over it with today's message; a stale auto approval (value raised or labor added, and no longer within the
+current limit) no longer passes, while an unchanged quote keeps its grant after a lowered limit; in-app/attested unchanged; engine-owned bypass unchanged. Settings action is `manage_users`-gated. Four gates
 + `next build`.

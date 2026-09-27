@@ -9056,3 +9056,26 @@ rigging inspections and 4 consulting proposals — and each opens its own builde
 Daylite import preview names the builder too. See D395.
 
 **Still open.** Repairs are deliberately left as system quotes, by name or otherwise (Jeff's call pending).
+
+---
+
+## 242. Quote review limits — people approve their own quotes under limits Jeff sets — DONE 2026-09-27 (D396, D397)
+
+**Reported:** 2026-09-27 (Jeff): "We need to be able to set review tiers on quotes, so if someone creates a quote under
+certain points that are definable they can just approve their own quotes." / "the approved status could be auto."
+Spec: `docs/superpowers/specs/2026-09-27-quote-review-limits-design.md`; plan:
+`docs/superpowers/plans/2026-09-27-quote-review-limits.md`.
+
+**Done.**
+- **Settings → Admin → Review limits:** a limit per person per kind of quote — system estimate without / with labor;
+  flame test, repair and inspection auto-priced / typed total; rental; consulting. Blank = always needs review (the
+  default), a dollar amount, or No limit.
+- **Automatic:** when a quote is sent or marked won and its owner's limit covers it, it is approved on the spot and
+  logged ("Auto-approved — within Nic's $25,000 limit for system estimates without labor"); over the limit it goes to
+  review as before.
+- **Chips** on the quotes hub, Reviews, the Estimator and every service builder show whether a quote will approve
+  itself or needs review. Editing a quote over its limit (or adding labor) after it was approved sends it back to
+  review; lowering a limit only affects new approvals.
+
+**Still open (Jeff).** Fill in the limits — until then nothing changes. See D396, D397.
+

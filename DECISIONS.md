@@ -6937,3 +6937,42 @@ bumps `rev`, like 0030 — `updatedAt`, `estNo` and `estSuffix` are untouched; t
 consulting builder is an ordinary edit (no auto-lead — that is the create path only), but it rewrites `source` to
 `consulting`, sets the value to the scopes' total (0 until scopes are entered), and needs the quote's customer
 to be a company on file. The `/import/daylite` needs-a-company table names a quote row's inferred builder.
+
+## D396. Quote review limits: per-person self-approval, granted automatically (#242, 2026-09-27)
+
+Jeff (2026-09-27): "We need to be able to set review tiers on quotes, so if someone creates a quote under certain
+points that are definable they can just approve their own quotes" and "the approved status could be auto so if the
+quote is in the status that they could approve their own quote it just gets approved." Settings → Admin gains a
+**Review limits** table (`manage_users` only): one row per teammate, one column per review kind — System estimate
+without / with labor, Flame test / Repair / Inspection auto-priced / typed total, Rental, Consulting. A cell is blank
+(always needs review — everyone's default), a dollar amount (at or under), or No limit; stored as settings
+`reviewLimits`, sanitized on save and read (`src/lib/review-limits.ts`). The kind is `reviewKindOf(quote)`: a system
+quote is "with labor" when it has any labor line (Estimator labor rows, Grid per-system labor, promoted Quick Design
+labor) — custom items, allowances and discounts don't change it (Jeff's pick); a service quote is "typed total" only
+when it carries a hand-typed #217 total, never an auto-seeded one. The limit used is the **quote owner's** (`owner`,
+else `preparedBy`, matched to an active roster name), whoever clicks Send.
+
+When a quote moves to sent or won without a live approval, `decideApprovalGate` (`src/lib/stores/quotes.ts`) checks
+that limit; within it, the review is stamped `approved`, `method: "auto_limit"`, `decidedBy` = the owner, with a
+`{ kind, limit, value }` snapshot — in the same locked write as the status change, so no path can leave an
+approved-but-unsent or sent-but-unapproved quote. Over it, today's refusal stands (review queue or the #60 attest
+path). Every sent/won path already runs through `setStatus`, so each inherits it once; the engine-owned service
+flows and historical import keep their bypass, and in-app / attested approvals are unchanged. The banner reads
+"Auto-approved — within Nic's $25,000 limit for system estimates without labor"; chips on the quotes hub, the Reviews
+list, the Estimator and the five service/rental/consulting builders say "Within your limit — approves automatically"
+or "Over your $25,000 limit — needs review" (the owner's name when you are not the owner; "· as last saved" on the
+builders, which compute from the saved quote). Visible knock-on: a renewal sent from the dashboards (#36) that is
+within its owner's limit is now approved and marked sent automatically instead of waiting in draft.
+
+## D397. A lowered limit governs new grants only; a changed quote is re-checked (#242, 2026-09-27)
+
+An auto approval holds while the quote is unchanged against its snapshot — same kind, value at or under the
+snapshot's, same owner — even if the owner's limit is later lowered or the owner leaves the roster, so a customer
+accepting an unchanged quote can still be marked won. Once the quote changes (value raised past the snapshot, labor
+added, owner changed), it is re-checked against the owner's current limit: still within → the stamp is refreshed at
+the next gated transition; over → not approved (the hub, Estimator and Reviews read it as needing review, never the
+green Approved badge). Approve, attest, request changes and resubmit clear the snapshot. A resubmit after "changes
+requested" can auto-approve at send when within the limit — consistent with the #60 attest path, which resubmitting
+also reopens. The service builders' own "mark approved/won" step keeps its engine-owned bypass, so the chip there
+describes sending.
+
