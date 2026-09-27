@@ -88,6 +88,15 @@ export function venueTypeLabel(types: readonly VenueType[], key: string | null |
   return t ? t.label : k;
 }
 
+/** The type segment of a DERIVED venue name: the type's label, else "Venue".
+ *  Unlike venueTypeLabel, a key the list no longer has (a deleted custom
+ *  type) never leaks into a saved name (#216 final-B). */
+export function venueNameTypeLabel(types: readonly VenueType[], key: string | null | undefined): string {
+  const k = (key || "").trim();
+  const t = k ? types.find((x) => x.key === k) : undefined;
+  return t ? t.label : "Venue";
+}
+
 /** The built-in behaviour a type key stands for. Unknown → proscenium. */
 export function worksLikeOf(types: readonly VenueType[], key: string | null | undefined): BuiltInVenueKind {
   const t = key ? types.find((x) => x.key === key) : undefined;
@@ -211,7 +220,7 @@ export function deriveLocationLabels(
   return locs.map((l) => {
     if (!l.derive) return (l.label || "").trim();
     const name = deriveVenueName(
-      { locationName: l.locationName, companyName, typeLabel: venueTypeLabel(types, l.venueKind) },
+      { locationName: l.locationName, companyName, typeLabel: venueNameTypeLabel(types, l.venueKind) },
       [...fixed, ...assigned]
     );
     assigned.push(name);

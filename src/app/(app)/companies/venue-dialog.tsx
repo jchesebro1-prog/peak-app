@@ -8,7 +8,7 @@ import { addressFromHit } from "./lib";
 import type { AddressHitVM } from "./types";
 import {
   deriveVenueName,
-  venueTypeLabel,
+  venueNameTypeLabel,
   venueTypeOptions,
   type VenueDialogInitial,
   type VenueType,
@@ -76,7 +76,7 @@ export default function VenueDialog({
   // venue on a company is always primary.
   const lockPrimary = !!initial?.primary || siblingNames.length === 0;
   const preview = deriveVenueName(
-    { locationName, companyName, typeLabel: venueTypeLabel(venueTypes, venueKind) },
+    { locationName, companyName, typeLabel: venueNameTypeLabel(venueTypes, venueKind) },
     siblingNames
   );
   const dropdownOpen = searching || hits.length > 0 || !!searchMsg;

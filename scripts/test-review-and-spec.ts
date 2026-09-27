@@ -26238,3 +26238,20 @@ async function sewing227LateAsyncChecks(): Promise<void> {
   await P.resetValue("curtains.sewingPct");
   ok((await P.loadCurtainSewingPct()) === 10, "#227 late: resetting restores 10 %");
 }
+
+/* #216 final-B (2026-09-27) — a deleted venue type never leaks its raw key
+   into a DERIVED venue name: admin screens may show the key (venueTypeLabel),
+   but a saved name reads "Venue" for a type the list no longer has. */
+import { deriveLocationLabels as vn216Derive, venueNameTypeLabel as vn216NameLabel, venueTypesFrom as vn216Types } from "@/lib/venue-types";
+{
+  // The seed list with its one custom type, Gym Stage ("gymstage"), deleted in Settings.
+  const types = vn216Types(null).filter((t) => t.key !== "gymstage");
+  ok(vn216Types(null).some((t) => t.key === "gymstage") && !types.some((t) => t.key === "gymstage"), "#216 final-B: the fixture deletes the custom type gymstage from the list");
+  const names = vn216Derive([{ label: "", locationName: "Main", venueKind: "gymstage", derive: true }], "Acme", types);
+  ok(names[0] === "Main — Venue", `#216 final-B: a venue on a deleted type "gymstage" derives "Main — Venue", not "Main — gymstage" (got ${names[0]})`);
+  ok(vn216NameLabel(types, "gymstage") === "Venue" && vn216NameLabel(types, "") === "Venue" && vn216NameLabel(types, types[0].key) === types[0].label,
+    "#216 final-B: the name's type segment is the type's label, else Venue");
+  const rd216 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd216("src/lib/identity/venue-save.ts").includes("typeLabel: venueNameTypeLabel(types, venueKind)") && rd216("src/app/(app)/companies/venue-dialog.tsx").includes("typeLabel: venueNameTypeLabel(venueTypes, venueKind)"),
+    "#216 final-B: saveVenue and the venue dialog's preview derive the name with venueNameTypeLabel");
+}

@@ -8,7 +8,7 @@ import { getSettings } from "@/lib/settings";
 import {
   deriveVenueName,
   planVenueRenames,
-  venueTypeLabel,
+  venueNameTypeLabel,
   venueTypeOptions,
   venueTypesFrom,
   venueMoveRule,
@@ -65,7 +65,7 @@ export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult>
   const siblings = all.filter((s) => s.id !== existing?.id);
   const locationName = cap(input.locationName, 120);
   const name = deriveVenueName(
-    { locationName, companyName: company.name, typeLabel: venueTypeLabel(types, venueKind) },
+    { locationName, companyName: company.name, typeLabel: venueNameTypeLabel(types, venueKind) },
     siblings.map((s) => s.name)
   );
   const address = cap(input.address, 300);
