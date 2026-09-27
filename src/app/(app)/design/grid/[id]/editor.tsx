@@ -39,6 +39,7 @@ import {
   SCOPE_COLORS,
   scopeLayerKey,
   scopeOfPart,
+  typeLayerKey,
   type GridLayer,
 } from "@/lib/design/grid-scopes";
 import { markerColor } from "@/lib/design/grid-symbols";
@@ -88,7 +89,7 @@ import PlanLegend from "./plan-legend";
 import SymbolLookPanel from "./symbol-look-panel";
 import CustomItemsSection from "./custom-items";
 import DevicePalette from "./device-palette";
-import type { DeviceType } from "@/lib/design/device-types";
+import { typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
@@ -449,11 +450,17 @@ export default function GridEditor({
       pl.curtain ? "Curtains" : scopeOfPart(partById.get(pl.partId)),
     [partById]
   );
+  /** #226: the device-type layer a placement belongs to — a curtain drop-in
+   *  is Drapery by construction, the way its scope is Curtains. */
+  const typeKeyOfPlacement = useCallback(
+    (pl: GridPlacement): string => (pl.curtain ? "drapery" : typeKeyOfPart(partById.get(pl.partId))),
+    [partById]
+  );
 
   const placementVisible = useCallback(
     (pl: GridPlacement) =>
-      isLayerVisible(scopeOfPlacement(pl), normalizeCategory(pl.category), hiddenSet),
-    [scopeOfPlacement, hiddenSet]
+      isLayerVisible(scopeOfPlacement(pl), normalizeCategory(pl.category), hiddenSet, typeKeyOfPlacement(pl)),
+    [scopeOfPlacement, hiddenSet, typeKeyOfPlacement]
   );
 
   /** Whole-project counts for the layer list - a scope you can't see on this
@@ -470,6 +477,23 @@ export default function GridEditor({
     }
     return m;
   }, [placements, routes, scopeOfPlacement, partById]);
+  /** #226: Layers groups each scope's items by device type (Unmapped last;
+   *  an unmapped item's raw/seeded category rides along as a sub-label, never
+   *  as a layer of its own). Same items as scopeCounts, so the numbers agree. */
+  const typeRows = useMemo(() => {
+    const items: Array<{ scope: GridLayer; typeKey: string; sub: string | null }> = [];
+    for (const pl of placements) {
+      const typeKey = typeKeyOfPlacement(pl);
+      const part = partById.get(pl.partId);
+      items.push({ scope: scopeOfPlacement(pl), typeKey, sub: typeKey === UNMAPPED_TYPE ? part?.category ?? pl.category ?? null : null });
+    }
+    for (const r of routes || []) {
+      const part = partById.get(r.partId);
+      const typeKey = typeKeyOfPart(part);
+      items.push({ scope: scopeOfPart(part), typeKey, sub: typeKey === UNMAPPED_TYPE ? part?.category ?? null : null });
+    }
+    return typeLayerRows(items, deviceTypes);
+  }, [placements, routes, partById, scopeOfPlacement, typeKeyOfPlacement, deviceTypes]);
 
   const categoryCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -536,7 +560,7 @@ export default function GridEditor({
       if (pl.curtain) continue;
       const part = partById.get(pl.partId);
       const key = part ? `id:${part.id}` : `cat:${pl.category ?? ""}`;
-      if (!distinct.has(key)) distinct.set(key, part ?? { category: pl.category });
+      if (!distinct.has(key)) distinct.set(key, part ?? { category: pl.category, deviceType: null });
     }
     return legendRows([...distinct.values()], symbolCtx);
   }, [visiblePlacements, partById, symbolCtx]);
@@ -570,9 +594,11 @@ export default function GridEditor({
    *  carry no user category - only a placed item can be labelled. */
   const visibleRoutes = useMemo(
     () =>
-      pageRoutes.filter(
-        (r) => !hiddenSet.has(scopeLayerKey(scopeOfPart(partById.get(r.partId))))
-      ),
+      pageRoutes.filter((r) => {
+        const part = partById.get(r.partId);
+        const s = scopeOfPart(part);
+        return !hiddenSet.has(scopeLayerKey(s)) && !hiddenSet.has(typeLayerKey(s, typeKeyOfPart(part)));
+      }),
     [pageRoutes, hiddenSet, partById]
   );
   const wireParts = useMemo(() => parts.filter((p) => isPerLengthUnit(p.unit)), [parts]);
@@ -1161,9 +1187,12 @@ export default function GridEditor({
     setWireDraft([]);
     setSelectedRouteId(null);
   }, []);
-  /** The palette's "that layer is hidden" warning. */
+  /** The palette's "that layer is hidden" warning — scope or type layer. */
   const partLayerHidden = useCallback(
-    (p: PartLite) => hiddenSet.has(scopeLayerKey(scopeOfPart(p))),
+    (p: PartLite) => {
+      const s = scopeOfPart(p);
+      return hiddenSet.has(scopeLayerKey(s)) || hiddenSet.has(typeLayerKey(s, typeKeyOfPart(p)));
+    },
     [hiddenSet]
   );
 
@@ -1498,6 +1527,7 @@ export default function GridEditor({
           {/* layers (punch #48) - visibility of what's already placed */}
           <LayersPanel
             scopeCounts={scopeCounts}
+            typeRows={typeRows}
             categoryCounts={categoryCounts}
             hidden={hiddenSet}
             scopeColor={(s) => SCOPE_COLORS[s]}

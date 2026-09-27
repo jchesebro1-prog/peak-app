@@ -9,6 +9,7 @@ import { formatMeasure, type MeasureUnit } from "@/lib/annotations";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
+import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { symbolContext } from "@/lib/design/grid-icons";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
 import { buildSchedule, scheduleWiresFromView } from "@/lib/design/grid-schedule";
@@ -51,14 +52,16 @@ export default async function SchedulePage({
   const optionQuery = `?option=${encodeURIComponent(optionId)}`;
 
   const [catalog, gridSymbols, settings] = await Promise.all([listCatalog(), listGridSymbols(), getSettings()]);
+  // #226: device types — the scope fix (Unscoped, not the old Lighting fallback).
+  const deviceTypes = await loadDeviceTypeContext(catalog);
   const accent = settings.accent || "#b08d4a";
   const parts = [
-    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true }),
+    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
     ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
   ];
   const partById = new Map(parts.map((p) => [p.id, p]));
   const spaces = project.spaces || [];
-  const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings) });
+  const view = riserViewForOption({ project, optionId, parts, symCtx: symbolContext(settings, deviceTypes.types) });
   const { sections, wires, unitCount, wireFeet } = buildSchedule({
     placements: slice.placements,
     spaces,

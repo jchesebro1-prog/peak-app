@@ -5390,7 +5390,7 @@ import { isGridLayer as symIsGridLayer } from "@/lib/design/grid-scopes";
     join(process.cwd(), "src/app/(app)/design/grid/settings/category-icons-card.tsx"),
     "utf8"
   );
-  ok(categoryIconsCardSrc.includes("resolveCategoryIcons(null)") && categoryIconsCardSrc.includes("symbolLook({ category, gridScope }, baseCtx)"),
+  ok(categoryIconsCardSrc.includes("resolveCategoryIcons(null)") && categoryIconsCardSrc.includes("symbolLook({ category, gridScope, deviceType }, baseCtx)"),
     "#206 final fix wave: the Category icons card's row baseline is symbolLook over a stored-override-free context, matching the plan");
   ok(categoryIconsCardSrc.includes("Object.hasOwn(overrides, r.category)"),
     "#206 final fix wave: the Category icons card reads a row's override with Object.hasOwn, not `in`/bracket access (a category named e.g. \"constructor\" would otherwise read Object.prototype)");
@@ -10529,6 +10529,7 @@ seeded()
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   .then(() => deviceTypesAsyncChecks())
+  .then(() => deviceTypeIconsAsyncChecks())
   .then(() => tasks215AsyncChecks())
   .then(() => calendarTasks215AsyncChecks())
   .then(() => inboxTask215AsyncChecks())
@@ -17754,7 +17755,8 @@ const gemValueImports = (src: string): string[] =>
   const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/page.tsx"), "utf8");
   ok(pageSrc.includes('can("manage_users"') && pageSrc.includes("getMany(") && !pageSrc.includes("listCatalog"), "#211 T3: admin-gated, and the page reads only the SKUs it shows");
   const actionsSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/actions.ts"), "utf8");
-  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 9 && (actionsSrc.match(/^export async function/gm) || []).length === 9, "#211 T3: every settings action, the four new ones included, is admin-gated");
+  // #226 adds saveDeviceTypeIconsAction (the 10th).
+  ok((actionsSrc.match(/requirePerm\("manage_users"\)/g) || []).length === 10 && (actionsSrc.match(/^export async function/gm) || []).length === 10, "#211 T3: every settings action, the four new ones included, is admin-gated");
 }
 
 /* --- #211 T4: Scope targets are computed on the server; the old seeder is gone --- */
@@ -21873,4 +21875,82 @@ import type { PartLite as PL226 } from "@/lib/design/grid-bom";
   const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
   ok(body("placeDeviceAction").includes("pushGridRecent(user.id, input.partId)"), "#226 recent: placing a device updates the placer's Recent");
   ok(body("toggleGridFavoriteAction").includes("await requireUser()") && body("toggleGridFavoriteAction").includes("toggleGridFavorite(user.id"), "#226 favorites: the star action is per signed-in user");
+}
+
+/* ======================================================================
+   #226 Grid device types — Task 4: icon order, legend labels, layers,
+   Grid Settings cards, every drawing surface resolving types.
+   ====================================================================== */
+import { symbolContext as dt4Ctx, symbolLook as dt4Look, legendRows as dt4Legend, DEFAULT_SYMBOL_COLORS as DT4_COLORS } from "@/lib/design/grid-icons";
+import { typeLayerKey as dt4LayerKey, isLayerVisible as dt4Visible } from "@/lib/design/grid-scopes";
+
+{
+  const ctx = dt4Ctx({ gridCategoryIcons: { Widgets: "wifi" } }, dt226WithIcons(dt226From(undefined), { speakers: "horn" }));
+  ok(dt4Look({ category: "Widgets", deviceType: "speakers" }, ctx).iconId === "wifi", "#226 icons: a raw-category override beats the device-type icon");
+  ok(dt4Look({ category: "Loudspeakers", deviceType: "speakers" }, ctx).iconId === "horn", "#226 icons: the device-type icon (admin-set) comes next");
+  ok(dt4Look({ category: "Track", deviceType: "amplifiers" }, ctx).iconId === "amplifier", "#226 icons: a type's default icon beats the shipped per-category default");
+  ok(dt4Look({ category: "Track" }, ctx).iconId === "track" && dt4Look({ category: "Nope", deviceType: null }, ctx).iconId === "device",
+    "#226 icons: no type → the existing category defaults, then the generic glyph");
+  ok(dt4Look({ category: "Loudspeakers", deviceType: "speakers", icon: "bell" }, ctx).iconId === "bell", "#226 icons: a per-entry icon still wins over everything");
+  ok(dt4Look({ category: "X", deviceType: "speakers", gridScope: "Audio" }, ctx).color === DT4_COLORS.AV, "#226 colours: the #206 rules are unchanged (scope → AV)");
+  ok(dt4Look({ category: "X", deviceType: "constructor" }, ctx).iconId === "device", "#226 icons: an inherited-prototype type key never resolves an icon");
+
+  const rows = dt4Legend([
+    { id: "a", category: "Loudspeakers", deviceType: "speakers", deviceTypeLabel: "Speakers", desc: "A" },
+    { id: "g", category: "Speakers", deviceType: null, desc: "Speakers" },
+    { id: "b", category: "Loudspeakers", deviceType: "speakers", deviceTypeLabel: "Speakers", desc: "B" },
+    { id: "c", category: "Rack", deviceType: "racks-cases", deviceTypeLabel: "Racks & Cases", desc: "C" },
+  ], ctx);
+  ok(rows.map((r) => r.label).join("|") === "Speakers|Racks & Cases|Unmapped · Speakers",
+    "#226 legend: rows are labelled by device type, Unmapped last with its raw/seeded category only as a sub-label");
+
+  ok(dt4LayerKey("Audio", "speakers") === "type:Audio:speakers" && !dt4Visible("Audio", null, new Set(["type:Audio:speakers"]), "speakers")
+      && dt4Visible("Audio", null, new Set(["type:Audio:amplifiers"]), "speakers") && dt4Visible("Audio", null, new Set(["type:Audio:speakers"])),
+    "#226 layers: a device-type layer (namespaced by scope) hides its placements only");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const lp = read("src/app/(app)/design/grid/[id]/layers-panel.tsx");
+  ok(lp.includes("typeLayerKey(s, t.key)") && lp.includes("typeRows"), "#226 layers: the Layers panel lists device types under each scope");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("typeLayerRows(") && ed.includes("typeKeyOfPlacement") && ed.includes("typeRows={typeRows}") && ed.includes("deviceType: null"),
+    "#226 layers: the editor groups placements by type and hides by type; partless legend entries are typed Unmapped");
+  for (const d of ["riser", "set", "schedule"]) {
+    const s = read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
+    ok(s.includes("loadDeviceTypeContext(catalog)") && s.includes("deviceTypes })"), `#226: the ${d} page resolves device types (scope fix + labels)`);
+  }
+  for (const d of ["riser", "set"]) {
+    const s = read(`src/app/(app)/design/grid/[id]/${d}/page.tsx`);
+    ok(s.includes("symbolContext(settings, deviceTypes.types)") && s.includes("deviceType: null"), `#226: the ${d} legend is grouped by device type`);
+  }
+  ok(read("src/app/(app)/design/grid/[id]/page.tsx").includes("symbolContext(settings, deviceTypes.types)"), "#226: the plan editor resolves type icons");
+  const gs = read("src/app/(app)/design/grid/settings/page.tsx");
+  ok(gs.includes("<DeviceTypeIconsCard") && gs.indexOf("<DeviceTypeIconsCard") < gs.indexOf("<CategoryIconsCard") && gs.includes("used={used}") && gs.includes("symbolContext(settings, deviceTypes.types)"),
+    "#226 settings: icons are set per device type first; per-category icons follow");
+  const cic = read("src/app/(app)/design/grid/settings/category-icons-card.tsx");
+  ok(cic.includes("Advanced: per-category overrides") && cic.includes("useState(false)") && cic.includes("Show all"),
+    "#226 settings: per-category icons are demoted to a collapsed Advanced section (overridden or used categories, with Show all)");
+  for (const f of ["src/app/(app)/design/grid/settings/device-type-icons-card.tsx", "src/app/(app)/design/grid/[id]/layers-panel.tsx"]) {
+    const s = read(f);
+    const imps = [...s.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+    ok(s.startsWith('"use client"') && imps.every((x) => !x.startsWith("@/lib/stores/") && !x.startsWith("@/db")), `#226: ${f} imports no store`);
+  }
+}
+
+async function deviceTypeIconsAsyncChecks(): Promise<void> {
+  const DT = await import("../src/lib/stores/device-types");
+  const { getDb: getDb226b } = await import("../src/db");
+  const { blobs: blobs226b } = await import("../src/db/doc-tables");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb226b();
+  const snap = await db.select().from(blobs226b).where(eq(blobs226b.id, "gridDeviceTypes"));
+  try {
+    await db.delete(blobs226b).where(eq(blobs226b.id, "gridDeviceTypes"));
+    const t1 = await DT.setDeviceTypeIcons({ speakers: "horn", "no-such": "bell" });
+    const t2 = await DT.setDeviceTypeIcons({ speakers: null });
+    ok(t1.find((t) => t.key === "speakers")?.icon === "horn" && !t1.some((t) => t.key === "no-such") && t2.find((t) => t.key === "speakers")?.icon === undefined,
+      "#226 store: type icons set and clear per type; unknown keys are ignored");
+  } finally {
+    await db.delete(blobs226b).where(eq(blobs226b.id, "gridDeviceTypes"));
+    for (const row of snap) await db.insert(blobs226b).values(row);
+  }
 }

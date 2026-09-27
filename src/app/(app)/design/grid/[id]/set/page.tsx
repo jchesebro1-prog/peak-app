@@ -11,6 +11,7 @@ import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { placementQty } from "@/lib/design/grid-bom";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
+import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { legendRows, symbolContext, symbolLook, type SymbolEntry } from "@/lib/design/grid-icons";
 import { markerColor } from "@/lib/design/grid-symbols";
 import { DRAWING_SYSTEMS } from "@/lib/design/grid-scopes";
@@ -116,10 +117,12 @@ export default async function DrawingSetPage({
   const optionQuery = `?option=${encodeURIComponent(optionId)}`;
 
   const [sheets, catalog, gridSymbols, settings] = await Promise.all([listSheets(project.id), listCatalog(), listGridSymbols(), getSettings()]);
+  // #226: device types — the scope fix and type-grouped legend labels.
+  const deviceTypes = await loadDeviceTypeContext(catalog);
   const accent = settings.accent || "#b08d4a";
-  const symCtx = symbolContext(settings);
+  const symCtx = symbolContext(settings, deviceTypes.types);
   const parts = [
-    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true }),
+    ...gridPartsFrom(gridSymbols, catalog, resolveCategoryMap(settings.catalogCategoryMap), { catalogFallback: true, deviceTypes }),
     ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
   ];
   const partById = new Map(parts.map((p) => [p.id, p]));
@@ -152,7 +155,7 @@ export default async function DrawingSetPage({
   const legend = legendRows(
     slice.placements
       .filter((pl) => !pl.curtain)
-      .map((pl): SymbolEntry & { id?: string; desc?: string } => partById.get(pl.partId) || { category: pl.category || "", desc: pl.category || pl.partId }),
+      .map((pl): SymbolEntry & { id?: string; desc?: string } => partById.get(pl.partId) || { category: pl.category || "", desc: pl.category || pl.partId, deviceType: null }),
     symCtx
   );
 

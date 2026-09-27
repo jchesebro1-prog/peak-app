@@ -11,6 +11,10 @@ import { GROUPS, value as pricingValue, type RateEntry } from "@/lib/stores/pric
 import { buildPortRuleReport, type PortReportPart } from "@/lib/catalog-port-report";
 import { SymbolColorsCard } from "./symbol-colors-card";
 import { CategoryIconsCard } from "./category-icons-card";
+import { listProjects } from "@/lib/stores/grid-projects";
+import { loadDeviceTypeContext } from "@/lib/stores/device-types";
+import { typeOfCategory } from "@/lib/design/device-types";
+import { DeviceTypeIconsCard } from "./device-type-icons-card";
 import { WireTypesCard } from "./wire-types-card";
 import { LaborHoursCard } from "./labor-hours-card";
 import { StandardNotesCard } from "./standard-notes-card";
@@ -78,13 +82,28 @@ export default async function GridSettingsPage() {
   // cards' previews, and one row per live category: shipped defaults, the
   // taxonomy seed, live catalog categories, Grid library categories (with
   // their scope, so previews colour like the plan) and stored overrides.
-  const symCtx = symbolContext(settings);
+  // #226: device types drive the icons; the per-category card is now the
+  // Advanced override list (overridden or used-in-a-design categories).
+  const [deviceTypes, projects] = await Promise.all([loadDeviceTypeContext(catalog), listProjects()]);
+  const symCtx = symbolContext(settings, deviceTypes.types);
   const categoryRows = symbolCategoryRows({
     catalogCategories: Array.from(new Set(catalog.map((p) => p.category || ""))),
     grid: gridSymbols.map((s) => ({ category: s.category || "Other", scope: s.scope })),
     stored: settings.gridCategoryIcons ?? null,
     taxonomy: Object.keys(DEFAULT_CATEGORY_MAP),
-  });
+  }).map((r) => ({ ...r, deviceType: typeOfCategory(r.category, deviceTypes.map, deviceTypes.types) }));
+  const symById = new Map(gridSymbols.map((s) => [s.id, s]));
+  const partById = new Map(catalog.map((p) => [p.id, p]));
+  const usedSet = new Set<string>();
+  for (const pr of projects) {
+    for (const pl of pr.placements || []) {
+      const sym = symById.get(pl.partId);
+      const pricing = sym?.pricingPartId ? partById.get(sym.pricingPartId) : partById.get(pl.partId);
+      const c = pricing?.category || sym?.category || pl.category;
+      if (c) usedSet.add(c);
+    }
+  }
+  const used = [...usedSet];
   const wireTypes = resolveWireTypes(settings.wireTypes);
 
   const laborRate = GROUPS.flatMap((g) => g.items).find(
@@ -148,8 +167,8 @@ export default async function GridSettingsPage() {
             </span>
           </div>
           <div style={{ fontSize: 13.5, color: "#8c919c", marginTop: 4 }}>
-            Symbol colours and icons, port rules, wire types, and install labor — the settings specific
-            to The Grid.
+            Symbol colours, device-type icons, port rules, wire types, and install labor — the settings
+            specific to The Grid.
           </div>
         </div>
       </div>
@@ -158,11 +177,18 @@ export default async function GridSettingsPage() {
 
       <SymbolColorsCard key={JSON.stringify(symCtx.colors)} colors={symCtx.colors} />
 
+      <DeviceTypeIconsCard
+        key={JSON.stringify(deviceTypes.types.map((t) => [t.key, t.icon ?? null]))}
+        types={deviceTypes.types.filter((t) => !t.archived)}
+        ctx={symCtx}
+      />
+
       <CategoryIconsCard
         key={JSON.stringify(settings.gridCategoryIcons ?? null) + "::" + categoryRows.length}
         rows={categoryRows}
         stored={settings.gridCategoryIcons ?? null}
         ctx={symCtx}
+        used={used}
       />
 
       <PortRulesCard

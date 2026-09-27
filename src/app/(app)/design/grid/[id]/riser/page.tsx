@@ -9,6 +9,7 @@ import { isPerLengthUnit, type PartLite } from "@/lib/design/grid-bom";
 import { optionSlice, resolveOptionId } from "@/lib/design/grid-options";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { loadVirtualParts } from "@/lib/stores/equipment-map";
+import { loadDeviceTypeContext } from "@/lib/stores/device-types";
 import { riserViewForOption } from "@/lib/design/grid-riser-view";
 import { legendRows, symbolContext, type SymbolEntry } from "@/lib/design/grid-icons";
 import { SymbolIcon } from "@/components/design/symbol-shape";
@@ -54,13 +55,15 @@ export default async function RiserPage({
   const optionQuery = `?option=${encodeURIComponent(optionId)}`;
 
   const [sheets, catalog, gridSymbols, settings] = await Promise.all([listSheets(project.id), listCatalog(), listGridSymbols(), getSettings()]);
+  // #226: device types — the scope fix and type-grouped legend labels.
+  const deviceTypes = await loadDeviceTypeContext(catalog);
   const accent = settings.accent || "#b08d4a";
   const categoryMap = resolveCategoryMap(settings.catalogCategoryMap);
-  const symCtx = symbolContext(settings);
+  const symCtx = symbolContext(settings, deviceTypes.types);
   // `library` = what can be placed; `parts` also resolves pre-library placements.
-  const library = gridPartsFrom(gridSymbols, catalog, categoryMap);
+  const library = gridPartsFrom(gridSymbols, catalog, categoryMap, { deviceTypes });
   const parts = [
-    ...gridPartsFrom(gridSymbols, catalog, categoryMap, { catalogFallback: true }),
+    ...gridPartsFrom(gridSymbols, catalog, categoryMap, { catalogFallback: true, deviceTypes }),
     ...(await loadVirtualParts((project.placements || []).map((pl) => pl.partId), catalog)),
   ];
   const view = riserViewForOption({ project, optionId, parts, symCtx });
@@ -70,7 +73,7 @@ export default async function RiserPage({
   const legend = legendRows(
     slice.placements
       .filter((pl) => !pl.curtain)
-      .map((pl): SymbolEntry & { id?: string; desc?: string } => partById.get(pl.partId) || { category: pl.category || "", desc: pl.category || pl.partId }),
+      .map((pl): SymbolEntry & { id?: string; desc?: string } => partById.get(pl.partId) || { category: pl.category || "", desc: pl.category || pl.partId, deviceType: null }),
     symCtx
   );
 

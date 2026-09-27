@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
 import { setSettings } from "@/lib/settings";
-import { cleanCategoryIcons, cleanSymbolColors } from "@/lib/design/grid-icons";
+import { cleanCategoryIcons, cleanSymbolColors, isGridIconId } from "@/lib/design/grid-icons";
+import { setDeviceTypeIcons } from "@/lib/stores/device-types";
 import { cleanStandardNotes } from "@/lib/design/grid-drawing-set";
 import { cleanWireTypes, type WireType } from "@/lib/catalog-connect";
 import { PORT_RULES } from "@/lib/catalog-port-rules";
@@ -34,6 +35,20 @@ export async function saveCategoryIconsAction(map: Record<string, string>) {
   revalidatePath("/design/grid/settings");
   revalidatePath("/", "layout");
   return { ok: true as const };
+}
+
+/** #226: Device type icons — one glyph per device type. `null` = that
+ *  type's shipped default; an unknown icon id also falls back to null.
+ *  Unknown type keys are ignored by withTypeIcons. */
+export async function saveDeviceTypeIconsAction(icons: Record<string, string | null>) {
+  await requirePerm("manage_users");
+  const clean: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(icons || {})) {
+    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(k)) continue;
+    clean[k] = typeof v === "string" && isGridIconId(v) ? v : null;
+  }
+  await setDeviceTypeIcons(clean);
+  revalidatePath("/", "layout");
 }
 
 /** Symbol colours (stock symbols) — sparse per swatch over

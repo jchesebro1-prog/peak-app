@@ -235,7 +235,7 @@ export default async function GridEditorPage({
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
       venues={venues}
-      symbolCtx={symbolContext(settings)}
+      symbolCtx={symbolContext(settings, deviceTypes.types)}
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
       customLines={customLines}
