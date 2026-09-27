@@ -37,3 +37,17 @@ export function pdfBanner(s: {
   else if (!s.pdf && !s.dirty) notes.push({ tone: "warn", text: "No PDF yet for this quote.", action: "Create PDF" });
   return notes;
 }
+
+/**
+ * The embedded viewer's cache-buster (#222 T5 review): which FILE the iframe
+ * shows, so it reloads only when that file changes — never on each status or
+ * `at` refresh (a save's pending → ready would otherwise flash twice). A ready
+ * view names its file by `savedAt`; pending and failed keep serving the last
+ * good file, so they keep the previous key. Opened mid-render (no previous
+ * key), the key marks "the older file" so the finished one still reloads.
+ */
+export function pdfFileKey(prev: string | null, pdf: QuotePdfView | null): string | null {
+  if (!pdf || !pdf.hasFile) return prev;
+  if (pdf.status === "ready") return `f${pdf.savedAt}`;
+  return prev ?? `p${pdf.savedAt}`;
+}

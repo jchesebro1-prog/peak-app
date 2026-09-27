@@ -1,8 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
-import { pdfBanner, type PdfBannerTone } from "./pdf-banner";
+import { pdfBanner, pdfFileKey, type PdfBannerTone } from "./pdf-banner";
 import { useQuotePdf } from "./use-quote-pdf";
 
 function bannerStyle(tone: PdfBannerTone): CSSProperties {
@@ -70,7 +70,12 @@ export function QuotePdfViewer({
   const pending = pdf?.status === "pending";
   const notes = pdfBanner({ quoteId, pdf, dirty, timedOut, retrying });
   const base = quoteId ? `/api/quotes/${encodeURIComponent(quoteId)}/pdf` : null;
-  const src = base && pdf?.hasFile ? `${base}?v=${pdf.status}-${pdf.at}` : null;
+  // Reload the iframe only when the file itself changes (pdfFileKey) — the
+  // adjust-state-during-render pattern, so no effect and no extra frame.
+  const [shownKey, setShownKey] = useState<string | null>(() => pdfFileKey(null, pdf));
+  const fileKey = pdfFileKey(shownKey, pdf);
+  if (fileKey !== shownKey) setShownKey(fileKey);
+  const src = base && pdf?.hasFile && fileKey ? `${base}?v=${encodeURIComponent(fileKey)}` : null;
   return (
     <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
       <style>{IOS_CSS}</style>

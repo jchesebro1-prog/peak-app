@@ -60,11 +60,19 @@ export type GenerateInput = {
 
 /**
  * How long a scheduled render waits for a newer save before launching Chrome
- * (#222 Task 5). Budget: this + Chrome's navigation and print timeouts (30 s
- * each in production, render.ts) stays well inside the rendering pages'
- * 120 s maxDuration.
+ * (#222 Task 5). Budget (#222 T5 review): this + Chrome's worst case
+ * (RENDER_WORST_CASE_MS: launch, navigation, fonts, print) + the upload
+ * allowance stays inside the rendering pages' 120 s maxDuration.
  */
 export const PDF_COALESCE_MS = 4_000;
+
+/**
+ * Time left in the 120 s budget for storing the file, the settle write and a
+ * sent revision's copy (#222 T5 review). Not a cap — a quote PDF is well under
+ * a megabyte and Blob's put has no timeout of ours — but the budget assertion
+ * reserves it so a slower Chrome step can't silently eat the upload's share.
+ */
+export const PDF_UPLOAD_ALLOWANCE_MS = 20_000;
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 

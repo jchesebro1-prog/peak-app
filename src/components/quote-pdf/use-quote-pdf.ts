@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { quotePdfStatusAction, retryQuotePdfAction } from "@/app/(app)/quotes/pdf-actions";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
+import { startPdfPoll } from "./pdf-poll";
 
 /** Poll cadence and give-up point for a pending render (#222). */
 export const PDF_POLL_MS = 2000;
@@ -27,30 +28,18 @@ export function useQuotePdf(quoteId: string | null, pdf: QuotePdfView | null, on
 
   useEffect(() => {
     if (!quoteId || pendingAt == null) return;
-    const started = Date.now();
-    let live = true;
-    const timer = setInterval(async () => {
-      if (Date.now() - started > PDF_POLL_LIMIT_MS) {
-        clearInterval(timer);
-        if (live) setTimedOutKey(`${pendingAt}:${round}`);
-        return;
-      }
-      let next: QuotePdfView | null = null;
-      try {
-        next = await quotePdfStatusAction(quoteId);
-      } catch {
-        return;
-      }
-      if (!live || !next) return;
-      if (next.status !== "pending" || next.at !== pendingAt) {
-        clearInterval(timer);
-        onPdfRef.current(next);
-      }
-    }, PDF_POLL_MS);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
+    // A chained timeout (startPdfPoll): one status request in flight at a time.
+    return startPdfPoll({
+      pendingAt,
+      intervalMs: PDF_POLL_MS,
+      limitMs: PDF_POLL_LIMIT_MS,
+      fetch: () => quotePdfStatusAction(quoteId),
+      onSettled: (next) => onPdfRef.current(next),
+      onTimedOut: () => setTimedOutKey(`${pendingAt}:${round}`),
+      now: () => Date.now(),
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+    });
   }, [quoteId, pendingAt, round]);
 
   const retry = () => {

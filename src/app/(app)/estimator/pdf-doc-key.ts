@@ -6,7 +6,10 @@ import type { SpecSection, VendorQuote } from "./types";
  * live key to the key of the last successful save and says "Unsaved changes —
  * save to update the PDF." while they differ. Vendor quotes contribute only
  * their customer-visible fields: attachment, terms, notes and cost never print,
- * and the server rewrites attachments on save.
+ * and the server rewrites attachments on save. Only the vendor quotes a line
+ * references count, in id order: a Save hands back the server's list, pruned
+ * of records no line uses and reordered (saveQuoteAction), and that is the
+ * same document — not "Unsaved changes" (#222 T5 review).
  */
 export type PdfDocKeyInput = {
   projectName: string;
@@ -22,6 +25,12 @@ export type PdfDocKeyInput = {
   pdfOptions: QuotePdfOptions;
 };
 
+function printedVendorQuotes(sections: SpecSection[], vendorQuotes: VendorQuote[]): VendorQuote[] {
+  const used = new Set<string>();
+  (sections || []).forEach((sec) => (sec?.items || []).forEach((it) => it?.vendorQuoteId && used.add(it.vendorQuoteId)));
+  return (vendorQuotes || []).filter((v) => used.has(v.id)).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 export function pdfDocKey(i: PdfDocKeyInput): string {
   return JSON.stringify([
     i.projectName,
@@ -33,7 +42,7 @@ export function pdfDocKey(i: PdfDocKeyInput): string {
     i.assumptions,
     i.paymentTerms,
     i.sections,
-    i.vendorQuotes.map((v) => [v.id, v.vendor, v.quoteNumber, v.description, v.display, v.lines]),
+    printedVendorQuotes(i.sections, i.vendorQuotes).map((v) => [v.id, v.vendor, v.quoteNumber, v.description, v.display, v.lines]),
     i.pdfOptions,
   ]);
 }

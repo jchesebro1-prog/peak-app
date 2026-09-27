@@ -72,12 +72,25 @@ export function carriesBypass(requestUrl: string, printOrigin: string): boolean 
   }
 }
 
+/**
+ * Chrome's per-step caps in production (#222 T5 review). A render's worst case
+ * is their sum: launch, navigation, the fonts wait, print. The fonts wait is
+ * raced, not awaited bare — a font that never settles prints with its
+ * fallback instead of hanging the render past the function's maxDuration.
+ * generate.ts adds the coalescing wait and the upload allowance on top and the
+ * spec harness asserts the total stays inside the rendering pages' 120 s.
+ */
+export const RENDER_LAUNCH_TIMEOUT_MS = 20_000;
+export const RENDER_STEP_TIMEOUT_MS = 30_000;
+export const RENDER_FONTS_TIMEOUT_MS = 10_000;
+export const RENDER_WORST_CASE_MS = RENDER_LAUNCH_TIMEOUT_MS + 2 * RENDER_STEP_TIMEOUT_MS + RENDER_FONTS_TIMEOUT_MS;
+
 let queue: Promise<unknown> = Promise.resolve();
 
 export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number } = {}): Promise<Buffer> {
   // `next dev` compiles /print on first hit, which can take far longer than a
   // warm production render.
-  const timeout = opts.timeoutMs ?? (process.env.NODE_ENV === "development" ? 90_000 : 30_000);
+  const timeout = opts.timeoutMs ?? (process.env.NODE_ENV === "development" ? 90_000 : RENDER_STEP_TIMEOUT_MS);
   const run = () => renderOnce(url, timeout);
   const next = queue.then(run, run);
   queue = next.catch(() => undefined);
@@ -93,6 +106,7 @@ async function renderOnce(url: string, timeout: number): Promise<Buffer> {
     args: launch.args,
     headless: launch.headless,
     defaultViewport: { width: 1100, height: 1400 },
+    timeout: RENDER_LAUNCH_TIMEOUT_MS,
   });
   try {
     const page = await browser.newPage();
@@ -117,9 +131,9 @@ async function renderOnce(url: string, timeout: number): Promise<Buffer> {
     if (res ? !res.ok() : !url.startsWith("data:")) {
       throw new Error(`The print page answered ${res ? res.status() : "nothing"}.`);
     }
-    await page.evaluate(async () => {
-      await document.fonts.ready;
-    });
+    await page.evaluate(async (capMs: number) => {
+      await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, capMs))]);
+    }, Math.min(timeout, RENDER_FONTS_TIMEOUT_MS));
     const pdf = await page.pdf({ format: "letter", printBackground: true, preferCSSPageSize: true, timeout });
     return Buffer.from(pdf);
   } finally {

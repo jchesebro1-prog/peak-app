@@ -10525,6 +10525,7 @@ seeded()
   .then(() => quotePdfRoutes222AsyncChecks())
   .then(() => quotePdfT4Fix222AsyncChecks())
   .then(() => quotePdfCoalesce222AsyncChecks())
+  .then(() => pdfPoll222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -24121,7 +24122,7 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
 
   // Coalescing: the scheduled job waits for a burst of saves before launching Chrome.
   ok(/coalesceMs: PDF_COALESCE_MS/.test(s5("src/lib/quote-pdf/schedule.ts")), "#222 T5 schedule: the after() render coalesces");
-  ok(PDF_COALESCE_MS222 >= 2_000 && PDF_COALESCE_MS222 + 2 * 30_000 < 120_000, "#222 T5 schedule: the coalescing wait plus Chrome's timeouts stays inside the 120 s maxDuration");
+  ok(PDF_COALESCE_MS222 >= 2_000 && PDF_COALESCE_MS222 + RENDER_WORST_CASE_MS222 + PDF_UPLOAD_ALLOWANCE_MS222 < 120_000, "#222 T5 schedule: the coalescing wait plus Chrome's worst case (launch, navigation, fonts, print) and the upload allowance stays inside the 120 s maxDuration");
 
   // Task 4 re-review fixes.
   // (1) "Being prepared" only while a sent copy can still arrive.
@@ -24189,4 +24190,117 @@ async function quotePdfCoalesce222AsyncChecks(): Promise<void> {
       rmSync(root, { recursive: true, force: true });
     }
   });
+}
+
+/* ============ #220 Task 6 — portal quotes Open/History + projects ============ */
+{
+  const portal220 = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8");
+  ok(portal220.includes("resolvePortalViewer(") && !portal220.includes("getOptionalUser"), "#220 portal page: the team-preview rule is the shared resolvePortalViewer");
+  ok(portal220.includes("groupPortalQuotes(published)") && portal220.includes("portalQuotePdfSource(q, cid)") && portal220.includes("Document being prepared"), "#220 portal quotes: grouped Open/History, each row opens its PDF or says it's being prepared");
+  ok(portal220.includes("isAppEraProject(p)") && portal220.includes("portalProjectView(p,") && portal220.includes("Your projects"), "#220 portal projects: app-era only, through the whitelist view");
+  ok(!/\.(procurement|timeLogs|mobilizations|deliveries|crew|margin)\b/.test(portal220), "#220 portal page never reads internal project/quote fields");
+  ok(portal220.includes("portalQuotePdfPreparing(q, cid)") && portal220.includes("PDF not available — contact your rep"), "#220 portal quotes: \"being prepared\" only while a sent copy can still arrive; otherwise contact your rep");
+}
+
+/* ============ #222 Task 5 review fixes (folded into Task 6) ============ */
+import { pdfFileKey as pdfFileKey222 } from "@/components/quote-pdf/pdf-banner";
+import { startPdfPoll as startPdfPoll222 } from "@/components/quote-pdf/pdf-poll";
+import { RENDER_FONTS_TIMEOUT_MS as RENDER_FONTS_TIMEOUT_MS222, RENDER_WORST_CASE_MS as RENDER_WORST_CASE_MS222 } from "@/lib/quote-pdf/render";
+import { PDF_UPLOAD_ALLOWANCE_MS as PDF_UPLOAD_ALLOWANCE_MS222 } from "@/lib/quote-pdf/generate";
+{
+  // (1) The saved-PDF key covers only vendor quotes a line references, by id —
+  // the server's pruned/reordered list after a Save is the same document.
+  type Vq222 = { id: string; vendor: string; quoteNumber: string; description: string; display: "single"; lines: never[]; terms: string; notes: string; total: number; includesFreight: boolean };
+  const vq222 = (id: string, description = "d"): Vq222 => ({ id, vendor: "V", quoteNumber: id, description, display: "single", lines: [], terms: "", notes: "", total: 1, includesFreight: false });
+  const secs222 = [{ id: "s1", name: "S", kind: "materials", mfr: "", freightPct: 0, items: [
+    { id: 1, sku: "VQ", desc: "a", qty: 1, unit: "ea", cost: 1, price: 2, vendorQuoteId: "vqA" },
+    { id: 2, sku: "VQ", desc: "b", qty: 1, unit: "ea", cost: 1, price: 2, vendorQuoteId: "vqB" },
+  ] }] as unknown as Parameters<typeof pdfDocKey>[0]["sections"];
+  const k222 = (vendorQuotes: Vq222[]) => pdfDocKey({
+    projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "",
+    paymentTerms: "Unknown", sections: secs222, vendorQuotes, pdfOptions: DEFAULT_PDF_OPTIONS,
+  });
+  const editor222 = [vq222("vqB"), vq222("vqX"), vq222("vqA")];
+  ok(k222(editor222) === k222([vq222("vqA"), vq222("vqB")]), "#222 T5 review: the server's pruned + reordered vendor quotes give the same PDF key (no false \"Unsaved changes\" after Save)");
+  ok(k222(editor222) !== k222([vq222("vqA", "changed"), vq222("vqB")]), "#222 T5 review: editing a referenced vendor quote's printed field still marks the PDF stale");
+  ok(k222(editor222) === k222([vq222("vqA"), vq222("vqB"), vq222("vqX", "changed")]), "#222 T5 review: a vendor quote no line references never moves the key");
+
+
+  // (3) Fonts race a cap; the budget counts launch + navigation + fonts + print + upload.
+  const rs222r = readFileSync(join(process.cwd(), "src/lib/quote-pdf/render.ts"), "utf8");
+  ok(/Promise\.race\(\[document\.fonts\.ready/.test(rs222r) && /timeout: RENDER_LAUNCH_TIMEOUT_MS/.test(rs222r), "#222 T5 review: document.fonts.ready is raced against a cap and the launch has its own timeout");
+  ok(RENDER_FONTS_TIMEOUT_MS222 > 0 && RENDER_FONTS_TIMEOUT_MS222 < 30_000 && RENDER_WORST_CASE_MS222 >= 20_000 + 2 * 30_000 + RENDER_FONTS_TIMEOUT_MS222, "#222 T5 review: the worst case counts launch + navigation + fonts + print, and the fonts cap is short");
+
+  // (4) The iframe reloads only when the FILE changes.
+  const v222 = (status: "pending" | "ready" | "failed", savedAt: number, at: number, hasFile = true) => ({ status, at, savedAt, error: null, hasFile });
+  const kReady = pdfFileKey222(null, v222("ready", 100, 100));
+  const kPending = pdfFileKey222(kReady, v222("pending", 200, 201));
+  const kFailed = pdfFileKey222(kPending, v222("failed", 200, 260));
+  const kNew = pdfFileKey222(kFailed, v222("ready", 200, 300));
+  ok(kReady === kPending && kPending === kFailed && kNew !== kFailed, "#222 T5 review viewer: pending/failed keep the file key; the next ready file changes it");
+  ok(pdfFileKey222(kReady, v222("ready", 100, 999)) === kReady, "#222 T5 review viewer: a status refresh of the same file never reloads the iframe");
+  const kFirst = pdfFileKey222(null, v222("pending", 200, 201));
+  ok(kFirst !== null && pdfFileKey222(kFirst, v222("ready", 200, 300)) !== kFirst, "#222 T5 review viewer: opened mid-render, the finished file still reloads once");
+  const viewer222 = readFileSync(join(process.cwd(), "src/components/quote-pdf/quote-pdf-viewer.tsx"), "utf8");
+  ok(viewer222.includes("pdfFileKey(") && !viewer222.includes("${pdf.status}-${pdf.at}"), "#222 T5 review: the viewer's cache-buster is the file key, not status/at");
+}
+
+/** #222 T5 review (2): the status poll, driven by fake timers. */
+async function pdfPoll222AsyncChecks(): Promise<void> {
+  // (2) Polling is a chained setTimeout: one status request in flight at a time.
+  type Timer222 = { fn: () => void; ms: number; id: number };
+  const timers222: Timer222[] = [];
+  let tid222 = 0, clock222 = 0, inFlight222 = 0, maxInFlight222 = 0, calls222 = 0;
+  const release222: { fn: ((v: unknown) => void) | null } = { fn: null };
+  const settled222: unknown[] = [];
+  let timedOut222 = 0;
+  const cancel222 = startPdfPoll222({
+    pendingAt: 5, intervalMs: 2000, limitMs: 60_000,
+    now: () => clock222,
+    setTimer: (fn, ms) => { const t = { fn, ms, id: ++tid222 }; timers222.push(t); return t.id; },
+    clearTimer: (id) => { const i = timers222.findIndex((t) => t.id === id); if (i >= 0) timers222.splice(i, 1); },
+    fetch: () => { calls222++; inFlight222++; maxInFlight222 = Math.max(maxInFlight222, inFlight222); return new Promise((r) => { release222.fn = (v) => { inFlight222--; r(v as never); }; }); },
+    onSettled: (v) => settled222.push(v),
+    onTimedOut: () => { timedOut222++; },
+  });
+  const fire222 = () => { const t = timers222.shift(); clock222 += t ? t.ms : 0; t?.fn(); };
+  const flush222 = () => new Promise((r) => setTimeout(r, 0));
+    ok(timers222.length === 1 && timers222[0].ms === 2000 && calls222 === 0, "#222 T5 review poll: the first status check waits one interval");
+    fire222();
+    ok(calls222 === 1 && timers222.length === 0, "#222 T5 review poll: no next timer while a status request is in flight");
+    release222.fn?.({ status: "pending", at: 5, savedAt: 5, error: null, hasFile: false });
+    await flush222();
+    ok(timers222.length === 1 && maxInFlight222 === 1, "#222 T5 review poll: the next check is scheduled only after the last one answered");
+    fire222();
+    release222.fn?.({ status: "ready", at: 9, savedAt: 5, error: null, hasFile: true });
+    await flush222();
+    ok(settled222.length === 1 && timers222.length === 0 && calls222 === 2 && timedOut222 === 0, "#222 T5 review poll: a changed status is handed over and polling stops");
+    cancel222();
+    // Give-up and cancel.
+    const t2: Timer222[] = [];
+    let c2 = 0, n2 = 0, gaveUp2 = 0;
+    const cancel2 = startPdfPoll222({
+      pendingAt: 5, intervalMs: 2000, limitMs: 5000, now: () => c2,
+      setTimer: (fn, ms) => { t2.push({ fn, ms, id: t2.length + 1 }); return t2.length; },
+      clearTimer: () => { t2.length = 0; },
+      fetch: async () => { n2++; return { status: "pending" as const, at: 5, savedAt: 5, error: null, hasFile: false }; },
+      onSettled: () => undefined,
+      onTimedOut: () => { gaveUp2++; },
+    });
+    for (let i = 0; i < 5 && t2.length; i++) { const t = t2.shift()!; c2 += t.ms; t.fn(); await flush222(); }
+    ok(gaveUp2 === 1 && t2.length === 0 && n2 === 2, "#222 T5 review poll: past the limit it reports timedOut once and stops");
+    cancel2();
+    const t3: Timer222[] = [];
+    let n3 = 0;
+    const cancel3 = startPdfPoll222({
+      pendingAt: 5, intervalMs: 2000, limitMs: 60_000, now: () => 0,
+      setTimer: (fn, ms) => { t3.push({ fn, ms, id: 1 }); return 1; },
+      clearTimer: () => { t3.length = 0; },
+      fetch: async () => { n3++; return null; },
+      onSettled: () => undefined, onTimedOut: () => undefined,
+    });
+    cancel3();
+    ok(t3.length === 0 && n3 === 0, "#222 T5 review poll: cancel clears the pending timer");
+    const hook222 = readFileSync(join(process.cwd(), "src/components/quote-pdf/use-quote-pdf.ts"), "utf8");
+    ok(!hook222.includes("setInterval") && hook222.includes("startPdfPoll("), "#222 T5 review: the hook polls through startPdfPoll, never an async setInterval");
 }

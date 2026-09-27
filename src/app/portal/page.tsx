@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getSettings } from "@/lib/settings";
-import { portalSession, type PortalSession } from "@/lib/portal";
-import { getOptionalUser } from "@/lib/session";
 import { get as getCustomer } from "@/lib/stores/customers";
-import { getAll as allQuotes, portalCanAcceptQuote, portalListsQuote } from "@/lib/stores/quotes";
+import { getAll as allQuotes, portalCanAcceptQuote, portalListsQuote, type Quote } from "@/lib/stores/quotes";
 import { getAll as allLeads, OPEN_STAGES, type LeadStage } from "@/lib/stores/leads";
 import {
   renewals as flameRenewals,
@@ -21,6 +19,11 @@ import {
 } from "@/lib/stores/inspections";
 import { PortalShell } from "./shell";
 import { acceptPortalQuote } from "./actions";
+import { resolvePortalViewer } from "@/lib/portal-viewer";
+import { portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
+import { latestSentRevision, pdfView } from "@/lib/quote-pdf/state";
+import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectView } from "@/lib/portal-projects";
+import { getAllProjects } from "@/lib/stores/projects";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +57,17 @@ function fmtDate(ms: number | null | undefined): string {
     year: "numeric",
   });
 }
+
+const GROUP_HEAD: React.CSSProperties = {
+  padding: "9px 20px 5px",
+  fontSize: 10.5,
+  fontWeight: 700,
+  letterSpacing: ".06em",
+  textTransform: "uppercase",
+  color: "#9aa0ab",
+  background: "#fafbfc",
+  borderBottom: "1px solid #f0f1f4",
+};
 
 /** Customer-facing quote status (published pipeline states only). */
 const QUOTE_CHIP: Record<string, { label: string; ink: string; soft: string; bd: string }> = {
@@ -122,6 +136,18 @@ function Chip({ c }: { c: { label: string; ink: string; soft: string; bd: string
   );
 }
 
+/**
+ * #222: whether a row with no PDF to open says "Document being prepared" —
+ * only while a copy can still arrive: a sent revision awaiting its copy
+ * (portalQuotePdfPreparing, the same predicate the PDF route uses), or a
+ * never-sent estimate whose render is still in flight (not stale). Anything
+ * else reads "PDF not available — contact your rep".
+ */
+function pdfPreparing(q: Quote, cid: string): boolean {
+  if (portalQuotePdfPreparing(q, cid)) return true;
+  return !latestSentRevision(q.revisions) && pdfView(q.pdf, Date.now())?.status === "pending";
+}
+
 export default async function PortalPage({
   searchParams,
 }: {
@@ -134,31 +160,10 @@ export default async function PortalPage({
   const accepted = one(sp.accepted) === "1";
   const estimate = one(sp.estimate) === "1";
 
-  // Team-gated PREVIEW: a signed-in team member can view a customer's portal as
-  // that customer would see it (from the customer record's "Preview portal"
-  // button, ?preview=<customerId>). Takes precedence over any stale portal
-  // cookie so the team member always previews the requested customer. A real
-  // customer has no team session, so ?preview never grants them anyone's portal.
+  // Team-gated PREVIEW (?preview=<customerId>): resolvePortalViewer is the one
+  // rule, shared with the portal PDF route (#222) so a preview opens PDFs too.
   const previewCid = one(sp.preview);
-  let preview = false;
-  let session: PortalSession | null = null;
-  if (previewCid) {
-    const teamUser = await getOptionalUser();
-    if (teamUser) {
-      const pc = await getCustomer(previewCid);
-      if (pc) {
-        const primary = (pc.contacts || []).find((c) => c.primary) || (pc.contacts || [])[0];
-        session = {
-          grantId: "preview",
-          customerId: previewCid,
-          name: primary?.name || teamUser.name,
-          email: primary?.email || "",
-        };
-        preview = true;
-      }
-    }
-  }
-  if (!session) session = await portalSession();
+  const { session, preview } = await resolvePortalViewer(previewCid);
 
   /* -------- signed out / invalid link -------- */
   if (!session) {
@@ -196,12 +201,13 @@ export default async function PortalPage({
 
   /* -------- tenant-scoped data (customerId comes from the grant ONLY) -------- */
   const cid = session.customerId;
-  const [cust, quotes, leads, fRenewals, iRenewals] = await Promise.all([
+  const [cust, quotes, leads, fRenewals, iRenewals, projects] = await Promise.all([
     getCustomer(cid),
     allQuotes(),
     allLeads(),
     flameRenewals({}),
     inspectionRenewals({}),
+    getAllProjects(),
   ]);
   const custName = cust?.name || "your organization";
   const venues = cust?.locations || [];
@@ -213,6 +219,25 @@ export default async function PortalPage({
   const published = quotes
     .filter((q) => portalListsQuote(q, cid))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const quoteGroups = groupPortalQuotes(published);
+
+  // #220: project history, app-era only (never Daylite imports), through the
+  // portalProjectView whitelist — value only when known and the quote is won.
+  const quoteStatusById = new Map(quotes.map((q) => [q.id, q.status]));
+  const venueNameOf = (locationId: string | null) => {
+    const l = locationId ? venues.find((v) => v.id === locationId) : undefined;
+    return l ? l.label || l.locationName || "" : "";
+  };
+  const projectGroups = groupPortalProjects(
+    projects
+      .filter((p) => p.customerId === cid && isAppEraProject(p))
+      .map((p) =>
+        portalProjectView(p, {
+          venueName: venueNameOf(p.locationId),
+          quoteStatus: p.quoteId ? quoteStatusById.get(p.quoteId) ?? null : null,
+        })
+      )
+  );
 
   const requests = leads
     .filter(
@@ -230,6 +255,124 @@ export default async function PortalPage({
       .filter((r) => r.customerId === cid)
       .map((r) => [(r.locationId || r.venue) + "|" + levelMeta(r.level).key, r])
   );
+
+  const quoteRow = (q: (typeof published)[number]) => {
+    const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
+    const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
+    const canAccept = portalCanAcceptQuote(q, cid) && !preview;
+    const chip = isDraft
+      ? { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+      : pendingAccept
+      ? { label: "Accepted — awaiting confirmation", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+      : QUOTE_CHIP[q.status] || QUOTE_CHIP.sent;
+    // #222: the saved PDF (latest sent revision's copy, else the ready file).
+    const pdfHref = portalQuotePdfSource(q, cid)
+      ? `/portal/quotes/${encodeURIComponent(q.id)}/pdf` + (preview ? `?preview=${encodeURIComponent(cid)}` : "")
+      : null;
+    return (
+      <div
+        key={q.id}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0,1fr) 96px auto",
+          gap: 12,
+          alignItems: "center",
+          padding: "13px 20px",
+          borderBottom: "1px solid #f5f6f8",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {pdfHref ? (
+              <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                {q.name}
+              </a>
+            ) : (
+              q.name
+            )}
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
+            {q.id + " · " + fmtDate(q.updatedAt)}
+          </div>
+          <div style={{ fontSize: 11.5, marginTop: 3 }}>
+            {pdfHref ? (
+              <a href={pdfHref} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+                Open PDF ↗
+              </a>
+            ) : pdfPreparing(q, cid) ? (
+              <span style={{ color: "#9aa0ab" }}>Document being prepared</span>
+            ) : (
+              <span style={{ color: "#9aa0ab" }}>PDF not available — contact your rep</span>
+            )}
+          </div>
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>{money(q.value)}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+          <Chip c={chip} />
+          {canAccept && (
+            <form action={acceptPortalQuote}>
+              <input type="hidden" name="quote" value={q.id} />
+              <button
+                type="submit"
+                title="Accepting lets our team know to move ahead — nothing is final until they confirm."
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: "#1f7a52",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Accept quote
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const projectRow = (v: (typeof projectGroups.active)[number]) => {
+    const when =
+      v.start || v.end
+        ? [v.start ? fmtDate(v.start) : "", v.end ? fmtDate(v.end) : ""].filter(Boolean).join(" – ")
+        : v.target
+        ? "Target " + fmtDate(v.target)
+        : "";
+    return (
+      <div
+        key={v.id}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0,1fr) 96px auto",
+          gap: 12,
+          alignItems: "center",
+          padding: "13px 20px",
+          borderBottom: "1px solid #f5f6f8",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.name}</div>
+          <div style={{ fontSize: 11.5, color: "#9aa0ab", marginTop: 2 }}>{[v.venue, v.type, when].filter(Boolean).join(" · ")}</div>
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>
+          {v.value != null ? money(v.value) : ""}
+        </div>
+        <Chip
+          c={
+            v.done
+              ? { label: v.stage || "Complete", ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da" }
+              : { label: v.stage || "In progress", ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" }
+          }
+        />
+      </div>
+    );
+  };
 
   return (
     <PortalShell
@@ -404,86 +547,54 @@ export default async function PortalPage({
         )}
       </div>
 
-      {/* quotes */}
+      {/* quotes — #220: Open (sent, your own drafts) + History (won, lost); each opens its saved PDF (#222) */}
       <div style={CARD}>
         <div style={CARD_HEAD}>
           <div style={{ fontSize: 14.5, fontWeight: 600 }}>Your quotes &amp; estimates</div>
-          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
-            estimates you&#39;ve submitted and quotes from {companyName}
-          </div>
+          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>estimates you&#39;ve submitted and quotes from {companyName}</div>
         </div>
-        {published.map((q) => {
-          const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
-          const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
-          const canAccept = portalCanAcceptQuote(q, cid) && !preview;
-          const chip = isDraft
-            ? { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
-            : pendingAccept
-            ? { label: "Accepted — awaiting confirmation", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
-            : QUOTE_CHIP[q.status] || QUOTE_CHIP.sent;
-          return (
-            <div
-              key={q.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0,1fr) 96px auto",
-                gap: 12,
-                alignItems: "center",
-                padding: "13px 20px",
-                borderBottom: "1px solid #f5f6f8",
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {q.name}
-                </div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-                  {q.id + " · " + fmtDate(q.updatedAt)}
-                </div>
-              </div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, textAlign: "right" }}>
-                {money(q.value)}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                <Chip c={chip} />
-                {canAccept && (
-                  <form action={acceptPortalQuote}>
-                    <input type="hidden" name="quote" value={q.id} />
-                    <button
-                      type="submit"
-                      title="Accepting lets our team know to move ahead — nothing is final until they confirm."
-                      style={{
-                        fontFamily: "var(--font-ui)",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#fff",
-                        background: "#1f7a52",
-                        border: "none",
-                        borderRadius: 8,
-                        padding: "8px 12px",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Accept quote
-                    </button>
-                  </form>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {quoteGroups.open.length > 0 && (
+          <div>
+            <div style={GROUP_HEAD}>Open</div>
+            {quoteGroups.open.map(quoteRow)}
+          </div>
+        )}
+        {quoteGroups.history.length > 0 && (
+          <div>
+            <div style={GROUP_HEAD}>History</div>
+            {quoteGroups.history.map(quoteRow)}
+          </div>
+        )}
         {published.length === 0 && (
           <div style={{ padding: "22px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
             Nothing here yet — build an estimate or anything we send you will appear here.
+          </div>
+        )}
+      </div>
+
+      {/* projects — #220: app-era only, Active + History */}
+      <div style={CARD}>
+        <div style={CARD_HEAD}>
+          <div style={{ fontSize: 14.5, fontWeight: 600 }}>Your projects</div>
+          <div style={{ fontSize: 11.5, color: "#9aa0ab" }}>
+            {projectGroups.active.length ? projectGroups.active.length + " active" : "none active"}
+          </div>
+        </div>
+        {projectGroups.active.length > 0 && (
+          <div>
+            <div style={GROUP_HEAD}>Active</div>
+            {projectGroups.active.map(projectRow)}
+          </div>
+        )}
+        {projectGroups.history.length > 0 && (
+          <div>
+            <div style={GROUP_HEAD}>History</div>
+            {projectGroups.history.map(projectRow)}
+          </div>
+        )}
+        {projectGroups.active.length + projectGroups.history.length === 0 && (
+          <div style={{ padding: "22px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
+            No projects yet — work we take on for you will appear here.
           </div>
         )}
       </div>
