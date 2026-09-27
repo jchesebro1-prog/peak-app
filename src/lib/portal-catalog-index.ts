@@ -3,7 +3,7 @@ import { listFixtures } from "@/lib/stores/fixtures";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { coveringParents, ownFiles, slotCoverage, type CoverageIndex } from "@/lib/part-docs/coverage";
-import { buildImageIndex } from "@/lib/part-docs/views";
+import { buildImageIndex, type ImageRef } from "@/lib/part-docs/views";
 import { DOC_SLOT_KINDS } from "@/lib/part-docs/types";
 import { loadPortalRules } from "@/lib/freight-rule-load";
 import {
@@ -70,13 +70,17 @@ export type PortalIndex = {
   fixtures: Map<string, IndexedFixture>;
   entries: SearchEntry[];
   builtAt: number;
-  /** Every part-document id a portal customer may fetch (#242 Task 9,
-   *  spec §7): the union, over every quotable (non-hidden) part above, of
-   *  that part's own `imageIds` ∪ `datasheetIds` — both already exclude
-   *  hidden links, and `datasheetIds` already folds in covering parents
-   *  (never for images). Built once per index build, not per request —
-   *  see src/lib/portal-doc-access.ts for the same rule stated standalone
-   *  and pure. */
+  /** Every part-document id a portal customer may fetch (#242 Task 9, spec
+   *  §7). Built once per index build, not per request, by the pure
+   *  `servableDocIdsFrom` below: for every quotable (non-hidden) SKU, its
+   *  own visible images with a stored file, plus its own and covering-
+   *  parents' datasheet/spec-sheet documents with a stored file (never
+   *  through an image — only a datasheet or spec sheet "covers" a child
+   *  part, and an `ownDatasheet` accessory pair opts a child back out of
+   *  that coverage). "Hidden" excludes an image whose LINK is marked
+   *  hidden — `hidden` is a field only image links carry
+   *  (part-docs/types.ts `PartDocumentLink`), so there's no "hidden
+   *  datasheet link" case to filter here at all. */
   servableDocIds: Set<string>;
 };
 
@@ -157,6 +161,35 @@ function datasheetIdsFor(index: CoverageIndex, sku: string): string[] {
     for (const parent of coveringParents(index, sku, kind)) for (const d of ownFiles(index, parent, kind)) ids.add(d.id);
   }
   return [...ids];
+}
+
+/**
+ * The pure computation behind `PortalIndex.servableDocIds` (#242 Task 9 fix
+ * round 1, spec §7) — factored out of `buildIndex` so it's exercised
+ * directly against `buildCoverageIndex`/`buildImageIndex` fixtures, no DB.
+ * For every SKU in `liveSkus` (quotable — already filtered to non-hidden
+ * parts by the caller): its own visible (not-hidden-link) images that have
+ * a stored file, plus `datasheetIdsFor` — its own and covering-parents'
+ * datasheet/spec-sheet documents with a stored file. `ownFiles` (used by
+ * both `datasheetIdsFor` and here) already requires `blobKey`, so a
+ * link-only document (fetched URL, no bytes yet) never appears in either
+ * set; `coveringParents` already excludes an `ownDatasheet` accessory pair
+ * and never crosses an image (`buildCoverageIndex` drops image links
+ * entirely from `docsBySku`).
+ */
+export function servableDocIdsFrom(
+  index: CoverageIndex,
+  images: ReadonlyMap<string, ImageRef[]>,
+  liveSkus: Iterable<string>
+): Set<string> {
+  const ids = new Set<string>();
+  for (const sku of liveSkus) {
+    for (const r of images.get(sku) ?? []) {
+      if (!r.hidden && index.docsById.get(r.id)?.blobKey) ids.add(r.id);
+    }
+    for (const id of datasheetIdsFor(index, sku)) ids.add(id);
+  }
+  return ids;
 }
 
 async function buildIndex(): Promise<Built> {
@@ -262,11 +295,7 @@ async function buildIndex(): Promise<Built> {
     });
   }
 
-  const servableDocIds = new Set<string>();
-  for (const ip of parts.values()) {
-    for (const id of ip.imageIds) servableDocIds.add(id);
-    for (const id of ip.datasheetIds) servableDocIds.add(id);
-  }
+  const servableDocIds = servableDocIdsFrom(state.index, images, liveSkus);
 
   return { at: now, ix: { parts, fixtures, entries, builtAt: now, servableDocIds }, facts, rule };
 }

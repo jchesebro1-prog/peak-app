@@ -28102,27 +28102,57 @@ async function portal242CartAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Portal catalog — customer document route access rule (#242, Task 9;
-   spec §7). Pure only — the route itself (portal/catalog/doc/[id]) reads
-   the index's precomputed servableDocIds instead of calling this per
-   request; this is the rule stated standalone and tested directly.
+   Portal catalog — customer document route: the live servable-doc rule
+   (#242, Task 9 fix round 1; spec §7). Pure, built directly from
+   buildCoverageIndex/buildImageIndex fixtures (no DB) — the exact rule
+   buildIndex calls to produce PortalIndex.servableDocIds.
    ====================================================================== */
-import { canServePortalDoc as d242CanServeDoc, type PortalDocLinkFact as D242LinkFact } from "@/lib/portal-doc-access";
+import { servableDocIdsFrom as d242ServableDocIds } from "@/lib/portal-catalog-index";
+import { buildCoverageIndex as d242BuildCoverage } from "@/lib/part-docs/coverage";
+import { buildImageIndex as d242BuildImages } from "@/lib/part-docs/views";
+import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDocumentLink as D242DocLink } from "@/lib/part-docs/types";
 {
-  const links = new Map<string, D242LinkFact[]>([
-    ["QUOTABLE", [{ documentId: "DOC-own", kind: "datasheet" }]],
-    ["QUOTABLE-HIDDEN-LINK", [{ documentId: "DOC-hidden", kind: "datasheet", hidden: true }]],
-    ["NOT-QUOTABLE", [{ documentId: "DOC-nq", kind: "datasheet" }]],
-    ["PARENT", [{ documentId: "DOC-parent-ds", kind: "datasheet" }, { documentId: "DOC-parent-img", kind: "image" }]],
-  ]);
-  const quotableSkus = new Set(["QUOTABLE", "QUOTABLE-HIDDEN-LINK", "ACCESSORY"]);
-  const coveringParentsOf = (sku: string): string[] => (sku === "ACCESSORY" ? ["PARENT"] : []);
-  const call = (docId: string) => d242CanServeDoc({ docId, linksBySku: links, quotableSkus, coveringParentsOf });
+  const doc = (id: string, kind: D242Doc["kind"], blobKey: string | null): D242Doc => ({
+    id, kind, title: id, fileName: id, contentType: "application/octet-stream", size: 1, blobKey, sourceUrl: null,
+    source: "upload", uploadedAt: 1, uploadedBy: "Test", history: [],
+  });
+  const link = (partSku: string, documentId: string, kind: D242Doc["kind"], hidden?: boolean): D242DocLink => ({
+    id: `${partSku}:${documentId}`, partSku, documentId, kind, createdAt: 1, createdBy: "Test", ...(hidden !== undefined ? { hidden } : {}),
+  });
 
-  ok(call("DOC-own") === true, "#242 doc access: linked (not hidden) to a quotable SKU → true");
-  ok(call("DOC-hidden") === false, "#242 doc access: linked only via a hidden link → false");
-  ok(call("DOC-nq") === false, "#242 doc access: linked only to a non-quotable SKU → false");
-  ok(call("DOC-parent-ds") === true, "#242 doc access: a datasheet linked to a quotable fixture's covering parent → true");
-  ok(call("DOC-parent-img") === false, "#242 doc access: an image on a parent never serves via the accessory graph → false");
-  ok(call("DOC-does-not-exist") === false, "#242 doc access: an unlinked id is never servable");
+  const D_IMG_VISIBLE = doc("D-img-visible", "image", "blob/img-visible");
+  const D_IMG_HIDDEN = doc("D-img-hidden", "image", "blob/img-hidden");
+  const D_DS_NOBLOB = doc("D-ds-noblob", "datasheet", null);
+  const D_DS_PARENT = doc("D-ds-parent", "datasheet", "blob/ds-parent");
+  const D_IMG_PARENT = doc("D-img-parent", "image", "blob/img-parent");
+  const D_DS_PARENT2 = doc("D-ds-parent2", "datasheet", "blob/ds-parent2");
+  const D_IMG_HIDDENSKU = doc("D-img-hiddensku", "image", "blob/img-hiddensku");
+
+  const documents = [D_IMG_VISIBLE, D_IMG_HIDDEN, D_DS_NOBLOB, D_DS_PARENT, D_IMG_PARENT, D_DS_PARENT2, D_IMG_HIDDENSKU];
+  const links: D242DocLink[] = [
+    link("SKU-A", D_IMG_VISIBLE.id, "image"),
+    link("SKU-A", D_IMG_HIDDEN.id, "image", true),
+    link("SKU-B", D_DS_NOBLOB.id, "datasheet"),
+    link("PARENT", D_DS_PARENT.id, "datasheet"),
+    link("PARENT", D_IMG_PARENT.id, "image"),
+    link("PARENT2", D_DS_PARENT2.id, "datasheet"),
+    link("SKU-HIDDEN", D_IMG_HIDDENSKU.id, "image"),
+  ];
+  const accessoryLinks: D242AccLink[] = [
+    { id: "a1", parentSku: "PARENT", accessorySku: "SKU-ACC", source: "manual" },
+    { id: "a2", parentSku: "PARENT2", accessorySku: "SKU-ACC2", ownDatasheet: true, source: "manual" },
+  ];
+  const index = d242BuildCoverage({ documents, links, accessoryLinks, parts: [] });
+  const images = d242BuildImages(documents, links);
+  const liveSkus = ["SKU-A", "SKU-B", "SKU-ACC", "SKU-ACC2"]; // PARENT, PARENT2, SKU-HIDDEN are NOT live/quotable
+
+  const servable = d242ServableDocIds(index, images, liveSkus);
+
+  ok(servable.has(D_IMG_VISIBLE.id), "#242 doc access: a live part's own visible image with a stored file is servable");
+  ok(!servable.has(D_IMG_HIDDEN.id), "#242 doc access: a hidden image link is never servable");
+  ok(!servable.has(D_IMG_HIDDENSKU.id), "#242 doc access: a non-live (hidden) part's own image is never servable, even unhidden");
+  ok(!servable.has(D_IMG_PARENT.id), "#242 doc access: a covering parent's IMAGE is never servable via the accessory graph");
+  ok(servable.has(D_DS_PARENT.id), "#242 doc access: a covering parent's datasheet IS servable via a live (quotable) accessory");
+  ok(!servable.has(D_DS_PARENT2.id), "#242 doc access: an ownDatasheet accessory pair opts the child back out of parent coverage");
+  ok(!servable.has(D_DS_NOBLOB.id), "#242 doc access: a document with no stored file (blobKey null) is never servable");
 }
