@@ -145,7 +145,7 @@ export function normalizeFixtureRow(row: RawFixtureRow): FixtureRecord {
   const r = row as unknown as FixtureRecord;
   const lines = emptyBoxes();
   for (const box of FIXTURE_BOXES) if (Array.isArray(r.lines?.[box])) lines[box] = r.lines[box];
-  const kind = r.kind === "system" ? "system" : "fixture";
+  const kind: FixtureRecord["kind"] = r.kind === "system" ? "system" : r.kind === "hardware" ? "hardware" : "fixture";
   return {
     ...r,
     kind,
@@ -154,7 +154,7 @@ export function normalizeFixtureRow(row: RawFixtureRow): FixtureRecord {
     lightEngineSku: String(r.lightEngineSku || ""),
     lensSku: r.lensSku || null,
     lines,
-    ...(kind === "system" ? { parts: Array.isArray(r.parts) ? r.parts : [] } : {}),
+    ...(kind !== "fixture" ? { parts: Array.isArray(r.parts) ? r.parts : [] } : {}),
   };
 }
 

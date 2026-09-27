@@ -230,7 +230,7 @@ function CellEditor({
       <select value={kind} onChange={(e) => pick(e.target.value)} style={INPUT}>
         <option value="empty">Needs a part</option>
         <option value="part">{curtain ? "Catalog fabric" : "Catalog part"}</option>
-        {!curtain && <option value="assembly">Assembly (fixture or system)</option>}
+        {!curtain && <option value="assembly">Assembly (fixture, system or hardware)</option>}
         <option value="allowance">Allowance</option>
         <option value="none">Not included</option>
       </select>
@@ -240,7 +240,7 @@ function CellEditor({
           <option value="">Pick an assembly…</option>
           {assemblies.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.label} · {a.kind === "system" ? `System (${a.scope})` : "Fixture"} · sell {money(a.unitSell)}
+              {a.label} · {a.kind === "system" ? `System (${a.scope})` : a.kind === "hardware" ? "Hardware" : "Fixture"} · sell {money(a.unitSell)}
             </option>
           ))}
         </select>

@@ -1,7 +1,7 @@
 /**
  * Virtual parts (#211, D306) — pure. Auto places assemblies and confirmed
  * allowances as ORDINARY placements whose partId is a virtual id:
- *   asm:<fixtureId>          a fixture or System assembly (#210)
+ *   asm:<fixtureId>          a fixture, System or Hardware assembly (#210, #228)
  *   allow:<rowKey>:<tier>    a confirmed Equipment map allowance
  * The server resolves each id LIVE into a PartLite (desc, unit, list = sell,
  * cost, scope) appended to the page's parts, so the BOM, space rollups, riser,
@@ -16,8 +16,8 @@
  */
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "./grid-bom";
-import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
-import { cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
+import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
+import { EQUIP_TIERS, cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
 import { GRID_SCOPE_OF_SYS, UNSCOPED, type GridLayer } from "./grid-scopes";
 import { resolveFixture, type FixtureCatalogPart, type FixtureResolvable } from "@/lib/fixture-assemblies";
 
@@ -59,6 +59,25 @@ const SYSTEM_SCOPE_LAYER: Record<string, GridLayer> = {
   Video: "Video",
 };
 
+/**
+ * #228: a Hardware assembly has no scope of its own — it draws on the Grid
+ * layer of the Equipment map row it is mapped on (the first such row in
+ * vocabulary order, any tier; Controls / Acoustical / Pit → Unscoped). Not
+ * mapped anywhere (swapped in on an Auto card, which offers hardware on
+ * Rigging rows only) → Rigging.
+ */
+export function hardwareLayerFor(fixtureId: string, map: EquipmentMap): GridLayer {
+  for (const def of EQUIPMENT_ROWS) {
+    const row = map[def.key];
+    if (!row) continue;
+    for (const t of EQUIP_TIERS) {
+      const c = cellFor(row, t);
+      if (c?.kind === "assembly" && c.id === fixtureId) return GRID_SCOPE_OF_SYS[def.system] ?? UNSCOPED;
+    }
+  }
+  return "Rigging";
+}
+
 export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ctx: EquipPriceCtx): PartLite[] {
   const out: PartLite[] = [];
   const seen = new Set<string>();
@@ -81,7 +100,7 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
         unit: "ea",
         list: dead ? 0 : r.sell > 0 ? r.sell : sellFromCost(cost, ctx.margin),
         cost,
-        gridScope: f?.kind === "system" ? SYSTEM_SCOPE_LAYER[f.scope || ""] ?? UNSCOPED : "Lighting",
+        gridScope: f?.kind === "system" ? SYSTEM_SCOPE_LAYER[f.scope || ""] ?? UNSCOPED : f?.kind === "hardware" ? hardwareLayerFor(f.id, map) : "Lighting",
         kind: "device",
         virtual: true,
         ...(dead ? { virtualDead: true as const } : {}),

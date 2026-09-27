@@ -10,7 +10,7 @@ import { deleteFixtureAction, saveFixtureAction } from "./actions";
 import FixtureForm, { draftFromRecord, draftResolvable, draftToInput, emptyDraft, money, pricesNote, type Draft, type PartHit } from "./fixture-form";
 
 type Filter = "all" | FixtureKind;
-const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems" };
+const FILTER_LABEL: Record<Filter, string> = { all: "All", fixture: "Fixtures", system: "Systems", hardware: "Hardware" };
 const EDIT_BTN = { border: "1px solid #dfe2e8", borderRadius: 7, padding: "6px 9px", background: "#fff", color: "#3d424e", cursor: "pointer", fontSize: 11.5 } as const;
 
 /** #210 — the one Assemblies list (fixtures + systems) and its form. */
@@ -64,6 +64,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
     all: rows.length,
     fixture: rows.filter((r) => r.rec.kind === "fixture").length,
     system: rows.filter((r) => r.rec.kind === "system").length,
+    hardware: rows.filter((r) => r.rec.kind === "hardware").length,
   };
   const shown = rows.filter((r) => filter === "all" || r.rec.kind === filter);
   const live = draft ? resolveFixture(draftResolvable(draft), bySku, settings) : null;
@@ -114,7 +115,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div role="tablist" aria-label="Show" style={{ display: "inline-flex", background: "#f1f2f5", borderRadius: 9, padding: 3 }}>
-          {(["all", "fixture", "system"] as const).map((f) => (
+          {(["all", "fixture", "system", "hardware"] as const).map((f) => (
             <button
               key={f}
               type="button"
@@ -132,6 +133,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
             <span style={{ fontSize: 12.5, color: "#737985" }}>New assembly:</span>
             <button type="button" className="pk-btn-outline" onClick={() => start("fixture")}>Fixture</button>
             <button type="button" className="pk-btn-outline" onClick={() => start("system")}>System</button>
+            <button type="button" className="pk-btn-outline" onClick={() => start("hardware")}>Hardware</button>
             <button type="button" onClick={() => setChoosing(false)} style={{ border: 0, background: "transparent", color: "#8c919c", cursor: "pointer", fontSize: 12 }}>Cancel</button>
           </div>
         ) : (
@@ -161,7 +163,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
         </div>
         {listError && <div role="alert" style={{ margin: "0 0 10px", color: "#a0442b", fontSize: 12 }}>{listError}</div>}
         {shown.length === 0 ? (
-          <p style={{ color: "#8c919c", fontSize: 13 }}>No assemblies yet — build the first fixture or system from your catalog.</p>
+          <p style={{ color: "#8c919c", fontSize: 13 }}>No assemblies yet — build the first fixture, system or hardware assembly from your catalog.</p>
         ) : (
           <div style={{ display: "grid", gap: 0 }}>
             {shown.map(({ rec, live: l }) => {
@@ -179,7 +181,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
                     <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                       <span style={{ fontSize: 13.5, fontWeight: 700 }}>{rec.label}</span>
                       <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "#737985", background: "#f2f4f7", borderRadius: 999, padding: "2px 8px" }}>
-                        {rec.kind === "system" ? `System · ${rec.scope || "—"}` : "Fixture"}
+                        {rec.kind === "system" ? `System · ${rec.scope || "—"}` : rec.kind === "hardware" ? "Hardware" : "Fixture"}
                       </span>
                       {rec.needsReview && (
                         <span title="Converted from an assembly with no fixture-role part — its first part became the light engine. Check it and save." style={{ fontSize: 10.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dc", borderRadius: 999, padding: "2px 8px" }}>
@@ -189,7 +191,7 @@ export default function FixtureBuilder({ initial, parts: seed, priceListEffectiv
                     </div>
                     {rec.description && <div style={{ color: "#737985", fontSize: 12, marginTop: 4 }}>{rec.description}</div>}
                     <div style={{ color: "#9aa0ab", fontSize: 11.5, marginTop: 4 }}>
-                      {rec.kind === "system" ? `${l.parts.length} part${l.parts.length === 1 ? "" : "s"}` : head}
+                      {rec.kind !== "fixture" ? `${l.parts.length} part${l.parts.length === 1 ? "" : "s"}` : head}
                       {optional ? ` · ${optional} optional add-on${optional === 1 ? "" : "s"}` : ""}
                       {` · updated ${dateYear(rec.updatedAt)} by ${rec.updatedBy || "—"}`}
                     </div>

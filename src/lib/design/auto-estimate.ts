@@ -25,6 +25,7 @@ import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
 import type { AutoEstimate, AutoOverride } from "./grid-auto-model";
 import type { ScopeTargets } from "./scope-targets";
+import type { FixtureKind } from "@/lib/fixture-assemblies";
 
 /** Auto fills only the five Grid scopes (D307). */
 export const AUTO_SCOPES: readonly SysKey[] = TRACKABLE_SYS_KEYS;
@@ -219,17 +220,20 @@ export function partSwapHits(
 }
 
 /**
- * Which fixtures/systems are swap candidates for a scope (M1): a System
- * assembly only when its own scope matches the card's (`f.scope`, the
- * capitalized SysKey label — "Lighting", "Audio", …); a Fixture assembly only
- * on a Lighting row, the one scope where a bare light fixture is a sensible
- * swap for an equation line.
+ * Which fixtures/systems/hardware are swap candidates for a scope (M1, #228):
+ * a System assembly only when its own scope matches the card's (`f.scope`,
+ * the capitalized SysKey label — "Lighting", "Audio", …); a Fixture assembly
+ * only on a Lighting row, the one scope where a bare light fixture is a
+ * sensible swap for an equation line; a Hardware assembly only on a Rigging
+ * row (terminations, chain wraps).
  */
-export function assemblySwapCandidates<F extends { kind: "fixture" | "system"; scope?: string }>(
+export function assemblySwapCandidates<F extends { kind: FixtureKind; scope?: string }>(
   fixtures: ReadonlyArray<F>,
   scopeLabel: string
 ): F[] {
-  return fixtures.filter((f) => (f.kind === "fixture" ? scopeLabel === "Lighting" : f.scope === scopeLabel));
+  return fixtures.filter((f) =>
+    f.kind === "fixture" ? scopeLabel === "Lighting" : f.kind === "hardware" ? scopeLabel === "Rigging" : f.scope === scopeLabel
+  );
 }
 
 /** A SysKey ("lighting") → the capitalized SystemScope label ("Lighting") a System assembly's `scope` field stores. */

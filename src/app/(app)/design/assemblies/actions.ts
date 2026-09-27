@@ -62,7 +62,7 @@ export async function saveFixtureAction(input: FixtureInput): Promise<{ ok: true
   const id = input?.id ? String(input.id) : null;
   const existing = id ? await getFixture(id) : null;
   if (id && !existing) return { ok: false, error: "This assembly was deleted — reload the page." };
-  if (existing && existing.kind !== clean.value.kind) return { ok: false, error: "An assembly can't change between fixture and system." };
+  if (existing && existing.kind !== clean.value.kind) return { ok: false, error: "An assembly can't change between fixture, system and hardware." };
   const [parts, settings] = await Promise.all([
     getCatalogParts(fixtureSkus(clean.value)),
     getSettings(),

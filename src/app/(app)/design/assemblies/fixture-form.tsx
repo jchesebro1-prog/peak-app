@@ -294,9 +294,12 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
   const set = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
   const names = draft.legacy?.names || {};
   const isSystem = draft.kind === "system";
-  const noun = isSystem ? "system" : "fixture";
+  const isHardware = draft.kind === "hardware";
+  /** #228: a system and a hardware assembly are one parts list; only a fixture has a light engine and boxes. */
+  const isParts = draft.kind !== "fixture";
+  const noun = isSystem ? "system" : isHardware ? "hardware assembly" : "fixture";
   const engine = draft.lightEngineSku;
-  const chipFor = !isSystem && engine
+  const chipFor = !isParts && engine
     ? (sku: string) => (sku === engine ? null : <MemberCoverageChip parentSku={engine} accessorySku={sku} coverage={coverage[pairKey(engine, sku)]} />)
     : undefined;
   const optional = live.parts.filter((p) => !p.included).length;
@@ -308,15 +311,17 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
           <p style={{ margin: "5px 0 18px", color: "#737985", fontSize: 12.5 }}>
             {isSystem
               ? "A bundle of catalog parts under one scope — a mixer, DSP & amps; a video switcher; a distro system."
-              : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
+              : isHardware
+                ? "A bundle of catalog hardware — a chain wrap, a batten or beginning termination. It has no scope of its own: on the plan it follows the Equipment map row it is mapped on (Rigging by default)."
+                : "Pick the light engine (and lens), then what ships with it. A quantity of 0 makes a part a compatible optional add-on."}
           </p>
         </div>
         <button type="button" onClick={onCancel} style={{ border: 0, background: "transparent", color: "#737985", cursor: "pointer", fontSize: 12 }}>Cancel</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
-        <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
+        <label style={LABEL}>Label<input value={draft.label} onChange={(e) => set({ label: e.target.value })} placeholder={isSystem ? "e.g. Digital mixer, DSP & amplifiers" : isHardware ? "e.g. Chain wrap" : "e.g. ETC Source Four LED Series 3"} style={{ ...FIELD, marginTop: 5 }} /></label>
         <label style={LABEL}>Description<textarea value={draft.description} onChange={(e) => set({ description: e.target.value })} placeholder="Customer-facing description" rows={2} style={{ ...FIELD, marginTop: 5, resize: "vertical" }} /></label>
-        {isSystem ? (
+        {isHardware ? null : isSystem ? (
           <label style={LABEL}>Scope
             <select value={draft.scope} onChange={(e) => set({ scope: e.target.value as SystemScope | "" })} style={{ ...FIELD, marginTop: 5 }}>
               <option value="">— Pick a scope —</option>
@@ -351,7 +356,7 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
           </>
         )}
       </div>
-      {!isSystem && (draft.lightEngineSku || draft.lensSku) && (
+      {!isParts && (draft.lightEngineSku || draft.lensSku) && (
         <div style={{ marginTop: 16, border: "1px solid #eef0f3", borderRadius: 9, padding: 10 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>Light engine &amp; lens</div>
           {draft.lightEngineSku && (
@@ -376,8 +381,8 @@ export default function FixtureForm({ draft, onChange, bySku, onPickPart, live, 
           )}
         </div>
       )}
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: isSystem ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 14 }}>
-        {isSystem ? (
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: isParts ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+        {isParts ? (
           <LineBox title="Parts" lines={draft.parts} onLines={(next) => set({ parts: next })} bySku={bySku} onPickPart={onPickPart} names={names} />
         ) : (
           FIXTURE_BOXES.map((box) => (

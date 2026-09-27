@@ -218,7 +218,10 @@ export const FIXTURE_BOX_LABEL: Record<FixtureBox, string> = {
 export const SYSTEM_SCOPES = ["Lighting", "Controls", "Audio", "Video", "Rigging", "Curtains", "Acoustical", "Pit", "Other"] as const;
 export type SystemScope = (typeof SYSTEM_SCOPES)[number];
 
-export type FixtureKind = "fixture" | "system";
+/** #228: "hardware" is a parts-list assembly (like a system) with no scope of
+ *  its own — e.g. a Chain Wrap batten termination. On the plan it draws on
+ *  the Equipment map row it is mapped on (grid-virtual-parts hardwareLayerFor). */
+export type FixtureKind = "fixture" | "system" | "hardware";
 
 /** One part line. qty ≥ 0; 0 = a compatible optional add-on (off by default). */
 export type FixtureLine = { sku: string; label?: string; qty: number; costOverride?: number };
@@ -245,7 +248,7 @@ export type FixtureRecord = {
   circuit?: string;
   /** Fixture boxes (all four always present; empty for a system). */
   lines: Record<FixtureBox, FixtureLine[]>;
-  /** System only — its one parts list. */
+  /** System and hardware — the one parts list. */
   parts?: FixtureLine[];
   /** Build-time numbers for the "was $X" badge (price = included sell). */
   snapshot?: { cost: number; price: number; pricedAt: number | null };
@@ -324,7 +327,7 @@ function headToLine(sku: string, head?: HeadLine): FixtureLine {
 export function fixtureLineParts(
   r: Pick<FixtureResolvable, "kind" | "lightEngineSku" | "lensSku" | "lines" | "lightEngineLine" | "lensLine" | "parts">
 ): Array<{ slot: FixtureSlot; line: FixtureLine }> {
-  if (r.kind === "system") return (r.parts || []).map((line) => ({ slot: "parts" as const, line }));
+  if (r.kind !== "fixture") return (r.parts || []).map((line) => ({ slot: "parts" as const, line }));
   const out: Array<{ slot: FixtureSlot; line: FixtureLine }> = [];
   if (r.lightEngineSku) out.push({ slot: "lightEngine", line: headToLine(r.lightEngineSku, r.lightEngineLine) });
   if (r.lensSku) out.push({ slot: "lens", line: headToLine(r.lensSku, r.lensLine) });
@@ -495,21 +498,22 @@ const tooManyLines = `An assembly can have at most ${FIXTURE_MAX_LINES} lines.`;
 
 export function sanitizeFixtureInput(input: unknown): { ok: true; value: CleanFixture } | { ok: false; error: string } {
   const i = (input && typeof input === "object" ? input : {}) as FixtureInput;
-  const kind: FixtureKind = i.kind === "system" ? "system" : "fixture";
+  const kind: FixtureKind = i.kind === "system" ? "system" : i.kind === "hardware" ? "hardware" : "fixture";
   const label = text(i.label, 160);
   if (!label) return { ok: false, error: "Add a label." };
   const description = text(i.description, 2000);
   const lines: Record<FixtureBox, FixtureLine[]> = { data: [], power: [], mounting: [], accessories: [] };
   const cleanList = (raw: unknown) => (Array.isArray(raw) ? raw : []).map(cleanLine).filter((l): l is FixtureLine => !!l);
-  if (kind === "system") {
-    const scope = SYSTEM_SCOPES.find((s) => s === i.scope);
-    if (!scope) return { ok: false, error: "Pick a scope for the system." };
+  if (kind === "system" || kind === "hardware") {
+    // #228: hardware has the system's parts list but never a scope of its own.
+    const scope = kind === "system" ? SYSTEM_SCOPES.find((s) => s === i.scope) : undefined;
+    if (kind === "system" && !scope) return { ok: false, error: "Pick a scope for the system." };
     const parts = cleanList(i.parts);
-    if (!parts.length) return { ok: false, error: "Add at least one part to the system." };
+    if (!parts.length) return { ok: false, error: `Add at least one part to the ${kind === "system" ? "system" : "hardware assembly"}.` };
     if (parts.length > FIXTURE_MAX_LINES) return { ok: false, error: tooManyLines };
     const dup = duplicateSkuError(parts);
     if (dup) return { ok: false, error: dup };
-    return { ok: true, value: { kind, label, description, scope, lightEngineSku: "", lensSku: null, lines, parts } };
+    return { ok: true, value: { kind, label, description, ...(scope ? { scope } : {}), lightEngineSku: "", lensSku: null, lines, parts } };
   }
   const lightEngineSku = text(i.lightEngineSku, 160);
   if (!lightEngineSku) return { ok: false, error: "Pick a light engine from the catalog." };
@@ -559,7 +563,7 @@ const SLOT_ROLE: Record<FixtureSlot, AssemblyRole> = {
 /**
  * Fixture records → the Estimator/Quick Design shape (ResolvedFixtureAssembly),
  * so those consumers keep one code path: id → id, label → name, every priced
- * line → a component (qty → defaultQty, sell → list). Systems are left out —
+ * line → a component (qty → defaultQty, sell → list). Systems and hardware are left out —
  * the pickers list fixtures (spec §5).
  */
 export function fixtureAssembliesFrom(

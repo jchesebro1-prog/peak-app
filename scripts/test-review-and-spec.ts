@@ -22142,3 +22142,65 @@ import { compute as n229Compute, defaultAState as n229Default } from "@/app/(app
   const qd = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/quick-design-client.tsx"), "utf8");
   ok(qd.includes('it.status === "none" ? "Not included"'), "#229: Quick Design's BOM says Not included");
 }
+
+/* --- #228: Hardware assemblies — a third FixtureKind through the builder, the Equipment map and Auto --- */
+import {
+  sanitizeFixtureInput as h228Sanitize, fixtureLineParts as h228Lines, resolveFixture as h228Resolve, fixtureAssembliesFrom as h228From,
+  type FixtureRecord as H228Rec,
+} from "@/lib/fixture-assemblies";
+import { normalizeFixtureRow as h228Normalize } from "@/lib/fixtures-convert";
+import { assemblyOptions as h228Opts, equipmentMapView as h228View } from "@/lib/design/equipment-map-view";
+import { priceCell as h228Price, type EquipmentMap as H228Map } from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as h228ByKey } from "@/lib/design/equipment-vocab";
+import { assemblyPartId as h228AsmId, virtualPartsFor as h228Virtual } from "@/lib/design/grid-virtual-parts";
+import { assemblySwapCandidates as h228Cand, scopeLabelOf as h228ScopeLabel } from "@/lib/design/auto-estimate";
+{
+  const noParts = h228Sanitize({ kind: "hardware", label: "Chain Wrap", description: "", parts: [] });
+  ok(!noParts.ok && /part/i.test(noParts.error), "#228: hardware needs at least one part");
+  const hw = h228Sanitize({ kind: "hardware", label: " Chain Wrap ", description: "", scope: "Audio", lightEngineSku: "IGNORED", parts: [{ sku: "CH-3", qty: 1 }, { sku: "SHK-1", qty: 2 }] });
+  ok(hw.ok && hw.value.kind === "hardware" && hw.value.label === "Chain Wrap" && hw.value.lightEngineSku === "" && hw.value.lensSku === null && !("scope" in hw.value) && (hw.value.parts || []).length === 2,
+    "#228: a hardware assembly keeps one parts list — no light engine, no scope of its own");
+  const dup = h228Sanitize({ kind: "hardware", label: "X", description: "", parts: [{ sku: "A", qty: 1 }, { sku: "A", qty: 1 }] });
+  ok(!dup.ok && /two lines/.test(dup.error), "#228: hardware refuses a SKU on two lines, like a system");
+
+  const rec: H228Rec = {
+    id: "SA-HW1", kind: "hardware", label: "Chain Wrap", description: "", lightEngineSku: "", lensSku: null,
+    lines: { data: [], power: [], mounting: [], accessories: [] }, parts: [{ sku: "CH-3", qty: 1 }, { sku: "SHK-1", qty: 2 }],
+    createdAt: 1, createdBy: "t", updatedAt: 1, updatedBy: "t",
+  };
+  const catalog = new Map([
+    ["CH-3", { sku: "CH-3", desc: "Chain 3 ft", unit: "ea", cost: 10, list: 20 }],
+    ["SHK-1", { sku: "SHK-1", desc: "Shackle", unit: "ea", cost: 5, list: 8 }],
+  ]);
+  const r = h228Resolve(rec, catalog);
+  ok(h228Lines(rec).length === 2 && h228Lines(rec).every((x) => x.slot === "parts") && r.cost === 20 && r.sell === 36,
+    "#228: hardware prices its parts list (cost 10 + 2×5, sell 20 + 2×8)");
+  const norm = h228Normalize({ ...rec } as unknown as Record<string, unknown> & { id: string });
+  ok(norm.kind === "hardware" && (norm.parts || []).length === 2, "#228: a stored hardware row normalizes as hardware, keeping its parts");
+  ok(h228From([rec], catalog).length === 0, "#228: hardware never appears in the Estimator / Quick Design fixture pickers");
+
+  const ctx = { parts: catalog, fixtures: new Map([[rec.id, rec]]), margin: 0.3 };
+  const opt = h228Opts([rec], ctx)[0];
+  ok(opt?.kind === "hardware" && opt.unitSell === 36 && opt.unitCost === 20, "#228: the Equipment-map picker lists hardware assemblies with live totals");
+  const pc = h228Price({ kind: "assembly", id: rec.id }, h228ByKey.get("rigging:chainWrap")!, ctx);
+  ok(pc.status === "assembly" && pc.desc === "Chain Wrap" && pc.unitSell === 36, "#228: Batten Termination maps to the Chain Wrap hardware assembly");
+  const map: H228Map = { "rigging:chainWrap": { tiers: { good: { kind: "assembly", id: rec.id } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
+  ok(h228View(map, ctx, {}).find((row) => row.key === "rigging:chainWrap")!.cells[0].detail === "Hardware", "#228: the map cell names it Hardware");
+
+  const [vp] = h228Virtual([h228AsmId(rec.id)], map, ctx);
+  ok(vp?.gridScope === "Rigging" && !vp.virtualDead && vp.list === 36, "#228: a hardware virtual part draws on its mapped row's system (Rigging), not the Lighting default");
+  const onCurtains: H228Map = { "curtains:scenerytrack": { tiers: { good: { kind: "assembly", id: rec.id } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
+  ok(h228Virtual([h228AsmId(rec.id)], onCurtains, ctx)[0]?.gridScope === "Curtains", "#228: …mapped on a Curtains row it draws on Curtains");
+  ok(h228Virtual([h228AsmId(rec.id)], {}, ctx)[0]?.gridScope === "Rigging", "#228: an unmapped (swapped-in) hardware assembly defaults to Rigging");
+
+  const cands = [{ kind: "hardware" as const, id: "hw" }, { kind: "fixture" as const, id: "fx" }, { kind: "system" as const, scope: "Rigging", id: "sys" }];
+  ok(h228Cand(cands, h228ScopeLabel("rigging")).map((f) => f.id).join(",") === "hw,sys" && !h228Cand(cands, h228ScopeLabel("lighting")).some((f) => f.id === "hw"),
+    "#228: hardware is a swap candidate on Rigging rows only");
+
+  const fb = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/fixture-builder.tsx"), "utf8");
+  ok(fb.includes('hardware: "Hardware"') && fb.includes('start("hardware")'), "#228: the builder has a Hardware tab and a New assembly → Hardware button");
+  const ff = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/fixture-form.tsx"), "utf8");
+  ok(ff.includes('const isParts = draft.kind !== "fixture"') && ff.includes("isHardware"), "#228: the form edits hardware as one parts list");
+  const emc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx"), "utf8");
+  ok(emc.includes('a.kind === "hardware" ? "Hardware"') && emc.includes("Assembly (fixture, system or hardware)"), "#228: the map picker labels hardware assemblies");
+}
