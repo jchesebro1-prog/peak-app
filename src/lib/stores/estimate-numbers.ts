@@ -1,0 +1,177 @@
+import { sql } from "drizzle-orm";
+import { getDb, inTransaction } from "@/db";
+import { getDoc, getDocRows, listDocsByField, listDocsFiltered, type Doc } from "@/db/doc-store";
+import {
+  displayLeadNumber,
+  displayQuoteNumber,
+  parseEstimateNumber,
+  partialEstimateDigits,
+  pickQuoteForNumber,
+  type LeadNumberFields,
+  type QuoteNumberFields,
+} from "@/lib/estimate-number";
+
+/**
+ * Estimate-number allocation (#223) — the server seam over the database's
+ * `assign_estimate_numbers()` (drizzle/0030_estimate_numbers.sql), which is the
+ * only allocator: it numbers every quote and lead still without an `estNo`,
+ * oldest first, carrying a lead's number to its quotes (+ suffix).
+ *
+ * Every path that INSERTS a quote or lead calls this right after the insert
+ * (store create()s via numberNewDoc, leads.convert, the Daylite commit, the
+ * demo seed). Because it numbers every unnumbered row, it also heals
+ * stragglers: records the previous deployment created while production was
+ * migrating, or a preview deploy created against the shared, not-yet-migrated
+ * production DB.
+ *
+ * Server-only (imports the db). Formatting lives in @/lib/estimate-number.
+ */
+
+function rowsOf<T>(result: unknown): T[] {
+  if (result && typeof result === "object" && "rows" in result) return (result as { rows: T[] }).rows;
+  return Array.isArray(result) ? (result as T[]) : [];
+}
+
+// Set once the probe has found the function: a migration is never undone, so
+// every later call skips the round-trip. Never set while it is absent, so a
+// preview keeps probing until production migrates.
+let functionPresent = false;
+
+/**
+ * Number everything still unnumbered; returns how many records were numbered.
+ * Returns 0 — without raising — when the function does not exist yet: a
+ * preview deploy reads the shared production DB before production migrates
+ * (scripts/migrate.mjs skips previews), and a raised "function does not
+ * exist" would poison any transaction the caller is in. `to_regprocedure`
+ * answers NULL instead of raising.
+ */
+export async function assignEstimateNumbers(): Promise<number> {
+  const db = await getDb();
+  if (!functionPresent) {
+    const probe = rowsOf<{ ok: boolean }>(
+      await db.execute(sql`select to_regprocedure('assign_estimate_numbers()') is not null as ok`)
+    );
+    if (!probe[0]?.ok) return 0;
+    functionPresent = true;
+  }
+  const res = rowsOf<{ n: number | string | bigint | null }>(
+    await db.execute(sql`select assign_estimate_numbers() as n`)
+  );
+  return Number(res[0]?.n ?? 0);
+}
+
+/** Test seam: forget the cached probe (the spec harness drops the function
+ *  inside a rolled-back transaction to stand in for an un-migrated DB). */
+export function resetEstimateNumberProbe(): void {
+  functionPresent = false;
+}
+
+/**
+ * Number a just-inserted quote/lead and return it as stored (with estNo).
+ *
+ * Runs only OUTSIDE a transaction, i.e. after the insert has committed, as
+ * its own short statement: assign_estimate_numbers() takes a global advisory
+ * lock held until its transaction ends, so running it inside a caller's
+ * transaction would serialize every other create behind that whole
+ * transaction. A create inside one is left unnumbered — it shows its internal
+ * id until the next create numbers it (the function numbers every straggler).
+ *
+ * Never throws: the record is already written, and a create that reported
+ * failure after writing invites a duplicate re-save (D205). A failed pass is
+ * logged and healed the same way.
+ */
+export async function numberNewDoc<T extends Doc>(coll: "quotes" | "leads", doc: T): Promise<T> {
+  if (inTransaction()) return doc;
+  try {
+    await assignEstimateNumbers();
+    return (await getDoc<T>(coll, doc.id)) ?? doc;
+  } catch (e) {
+    console.error(`numberNewDoc: numbering ${coll}/${doc.id} failed — the next create will number it`, e);
+    return doc;
+  }
+}
+
+function cleanIds(ids: ReadonlyArray<string | null | undefined>): string[] {
+  return ids.filter((x): x is string => typeof x === "string" && x !== "");
+}
+
+/** id → display number for screens that hold only a quote id (a job's
+ *  quoteId, a Grid option's quoteId, a thread link). Soft-deleted quotes are
+ *  included (their number still identifies them); unknown ids are absent. */
+export async function quoteNumbersFor(ids: ReadonlyArray<string | null | undefined>): Promise<Map<string, string>> {
+  const rows = await getDocRows<Doc & QuoteNumberFields>("quotes", cleanIds(ids));
+  return new Map(rows.map((r) => [r.id, displayQuoteNumber(r.doc)]));
+}
+
+/** id → display number for leads (see quoteNumbersFor). */
+export async function leadNumbersFor(ids: ReadonlyArray<string | null | undefined>): Promise<Map<string, string>> {
+  const rows = await getDocRows<Doc & LeadNumberFields>("leads", cleanIds(ids));
+  return new Map(rows.map((r) => [r.id, displayLeadNumber(r.doc)]));
+}
+
+/** What a typed quote reference resolved to (see resolveQuoteInput). */
+export type QuoteInputResolution =
+  | { ok: true; id: string }
+  | { ok: false; reason: "none" }
+  | { ok: false; reason: "other-company" }
+  | { ok: false; reason: "ambiguous"; numbers: string[] };
+
+type ScopeDoc = Doc & QuoteNumberFields & { customerId?: string | null; consulting?: { venueCustomerId?: string | null } | null };
+
+/**
+ * What a person typed into a "quote" field → one live quote (#223): an
+ * internal id that exists (`Q-2041` keeps working) or a FULL typed number
+ * (a prefix, e.g. `EST-1010`/`EST-1010-2`) resolves globally, unscoped — an
+ * install quote is often billed to a GC or architect, not the engagement's
+ * own customer. Only a BARE number (digits, optional suffix, no prefix)
+ * is scoped to `customerIds`: another company's quote is refused as
+ * "other-company", never reported as missing; empty scope = a global
+ * lookup either way. The input is bounded to 120 characters.
+ */
+export async function resolveQuoteInput(
+  input: string,
+  opts: { customerIds?: ReadonlyArray<string | null | undefined> } = {}
+): Promise<QuoteInputResolution> {
+  const s = String(input || "").trim().slice(0, 120);
+  if (!s) return { ok: false, reason: "none" };
+  const scope = opts.customerIds ?? [];
+  const byId = await getDoc<ScopeDoc>("quotes", s);
+  if (byId) return { ok: true, id: byId.id };
+  const parsed = parseEstimateNumber(s);
+  if (!parsed) return { ok: false, reason: "none" };
+  const hits = await listDocsByField<ScopeDoc>("quotes", "estNo", [String(parsed.estNo)]);
+  // A full typed number (has a prefix, e.g. EST-1010 / EST-1010-2) resolves
+  // globally like an internal id — never scoped to the engagement's company.
+  const pick = pickQuoteForNumber(hits, parsed, parsed.prefix !== null ? [] : scope);
+  if ("id" in pick) return { ok: true, id: pick.id };
+  if ("ambiguous" in pick) return { ok: false, reason: "ambiguous", numbers: pick.ambiguous };
+  if ("otherCompany" in pick) return { ok: false, reason: "other-company" };
+  return { ok: false, reason: "none" };
+}
+
+/**
+ * What a person typed into a "quote" field → one live quote id, or null when
+ * nothing — or more than one quote, or only another company's — matches
+ * (resolveQuoteInput without the reason).
+ */
+export async function findQuoteIdByNumberOrId(
+  input: string,
+  opts: { customerIds?: ReadonlyArray<string | null | undefined> } = {}
+): Promise<string | null> {
+  const r = await resolveQuoteInput(input, opts);
+  return r.ok ? r.id : null;
+}
+
+/**
+ * ⌘K candidates for a typed partial number — `flm100`, `FLM-100`, `100` —
+ * found by those digits inside `doc->>'estNo'` (the doc text holds
+ * `"estNo": 1005`, never "FLM-1005"), live rows only, at most `limit`,
+ * newest number first — so when a partial digit run matches more than
+ * `limit` quotes, the cap keeps the most recent ones. The caller still
+ * filters and ranks with quoteSearchRank. Empty for words.
+ */
+export async function quotesByPartialNumber(term: string, limit: number): Promise<Doc[]> {
+  const digits = partialEstimateDigits(term);
+  if (!digits) return [];
+  return listDocsFiltered("quotes", { textFields: ["estNo"], text: digits, limit, orderByNumericDesc: "estNo" });
+}

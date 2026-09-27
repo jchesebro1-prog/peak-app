@@ -1,3 +1,4 @@
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfResponse } from "@/lib/quote-pdf/http";
 import { pdfFileName, teamPdfPath } from "@/lib/quote-pdf/state";
 import { requireUser } from "@/lib/session";
@@ -21,5 +22,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const revRaw = sp.get("rev");
   if (revRaw !== null && !/^\d{1,4}$/.test(revRaw)) return new Response("Not found", { status: 404 });
   const rev = revRaw === null ? null : Number(revRaw);
-  return pdfResponse(teamPdfPath(q, rev), pdfFileName(q.id, rev), sp.get("download") === "1");
+  return pdfResponse(teamPdfPath(q, rev), pdfFileName(displayQuoteNumber(q), rev), sp.get("download") === "1");
 }

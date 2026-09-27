@@ -80,7 +80,8 @@ export type IntakeInitial = {
   name: string;
 };
 
-export type IntakeReplacing = { id: string; type: ServiceType; lines: number; editPath: string };
+/** `id` keys the replace; `number` is what the intake shows (#223). */
+export type IntakeReplacing = { id: string; number: string; type: ServiceType; lines: number; editPath: string };
 
 /** Validate the intake's seed against the directory: an unknown customer →
  *  blank form; a venue/contact not on the customer → "skip" (no fallback —
@@ -155,8 +156,8 @@ export function canChangeType(status: string): boolean {
   return status === "draft";
 }
 
-export function replaceConfirmMessage(id: string, lines: number): string {
-  return `${id} and its ${lines} line${lines === 1 ? "" : "s"} will be replaced. Continue?`;
+export function replaceConfirmMessage(number: string, lines: number): string {
+  return `${number} and its ${lines} line${lines === 1 ? "" : "s"} will be replaced. Continue?`;
 }
 
 export type WonEditField = "customer" | "venue" | "contact";

@@ -194,14 +194,14 @@ export default function QuoteIntakeForm({
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
       <Link href={replacing ? replacing.editPath : "/quotes"} style={{ fontSize: 12.5, color: "#8c919c", textDecoration: "none" }}>
-        {replacing ? `← Back to ${replacing.id}` : "← Quotes"}
+        {replacing ? `← Back to ${replacing.number}` : "← Quotes"}
       </Link>
       <h1 style={{ fontSize: 21, fontWeight: 700, color: "#16181d", margin: "6px 0 3px" }}>
         {replacing ? "Change quote type" : "New quote"}
       </h1>
       <p style={{ fontSize: 13, color: "#8c919c", margin: "0 0 22px" }}>
         {replacing
-          ? `Pick the new type for ${replacing.id}. It is replaced when the new quote is first saved.`
+          ? `Pick the new type for ${replacing.number}. It is replaced when the new quote is first saved.`
           : fromThread
             ? "Pick who this is for. A draft quote is created, linked to the email thread, and you land back on the thread."
             : "Pick who this is for, then jump straight into the builder."}
@@ -491,7 +491,7 @@ export default function QuoteIntakeForm({
           }}
         >
           <span style={{ flex: 1, minWidth: 200 }}>
-            {replaceConfirmMessage(replacing.id, replacing.lines)}
+            {replaceConfirmMessage(replacing.number, replacing.lines)}
           </span>
           <button
             type="button"
@@ -546,7 +546,7 @@ export default function QuoteIntakeForm({
         {pending
           ? "Setting up…"
           : replacing && sameBuilder(type, replacing.type)
-            ? `Back to ${replacing.id} →`
+            ? `Back to ${replacing.number} →`
             : fromThread
               ? "Create quote & link thread"
               : "Continue to builder →"}

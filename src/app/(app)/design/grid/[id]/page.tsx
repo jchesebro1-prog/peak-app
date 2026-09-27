@@ -33,6 +33,7 @@ import { getGridFavorites, getGridRecent, loadDeviceTypeContext } from "@/lib/st
 import type { PartLite } from "@/lib/design/grid-bom";
 import { buildGridQuote, type GridQuoteInputs } from "@/lib/design/grid-quote";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import GridEditor from "./editor";
 import GridIntake from "./grid-intake";
 
@@ -207,10 +208,14 @@ export default async function GridEditorPage({
   });
   const laborLines = built?.ok ? built.build.labor : [];
 
+  // #223 — each option's draft quote by its estimate number.
+  const quoteNumbers = Object.fromEntries(await quoteNumbersFor((project.options || []).map((o) => o.quoteId)));
+
   return (
     <CanMapProvider canMap={can("manage_users", user.roles)}>
     <GridEditor
       canCreate={can("create", user.roles)}
+      quoteNumbers={quoteNumbers}
       activeOptionId={activeOptionId}
       project={{
         id: project.id,

@@ -11,6 +11,7 @@ import { listSheets, type GridProject } from "@/lib/stores/grid-projects";
 import { allSections } from "@/lib/stores/spec-sections";
 import { saveClientPackage, type ClientPackageRecord } from "@/lib/stores/client-packages";
 import type { Quote } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { createStoredZip, type ZipFile } from "@/lib/zip";
 import type { CoverageIndex } from "@/lib/part-docs/coverage";
 import { loadPartDocsState } from "@/lib/part-docs/load";
@@ -105,7 +106,7 @@ function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
     companyName: "Peak Systems Group",
     accent: "#b08d4a",
     tag: "Quote package",
-    meta: [{ label: "Package", value: packageName }, { label: "Quote", value: quote.id }],
+    meta: [{ label: "Package", value: packageName }, { label: "Quote", value: displayQuoteNumber(quote) }],
     re: quote.name,
     greeting: "",
     blocks: [],
@@ -114,7 +115,7 @@ function roughQuoteDrawing(quote: Quote, packageName: string): Buffer {
     taxNote: "",
     signer: { name: "Peak Systems Group", title: "Client package" },
     fieldSheet: {
-      job: quote.id,
+      job: displayQuoteNumber(quote),
       date: new Date().toLocaleDateString("en-US"),
       footer: "Quote equipment reference — verify against approved drawings.",
       pages: [{
@@ -266,7 +267,7 @@ export async function createQuoteClientPackage(quote: Quote, by: string): Promis
     if (item.catalogId && !packageDocs.bySku.get(item.sku)?.datasheetOk) gaps.push({ kind: "missing-datasheet", sku: item.sku, description: item.description, qty: item.qty, catalogId: item.catalogId });
   }
   const covered = items.filter((item) => item.datasheetCoveredBy.length).map((item) => coveredNote(item.sku, item.datasheetCoveredBy));
-  const packageName = `${safeName(quote.name || quote.id)}-${quote.id}`;
+  const packageName = `${safeName(quote.name || quote.id)}-${safeName(displayQuoteNumber(quote))}`;
   const files: ZipFile[] = [
     { name: "specification.docx", data: await buildSpecDocx(spec) },
     { name: "drawings/quote-equipment-summary.pdf", data: roughQuoteDrawing(quote, packageName) },

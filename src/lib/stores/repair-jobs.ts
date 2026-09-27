@@ -7,6 +7,7 @@ import {
   upsertDoc,
 } from "@/db/doc-store";
 import { withQuoteLock } from "@/db";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { get as getCustomerDoc } from "./customers";
 
 /**
@@ -410,6 +411,8 @@ export function warrantyStatus(job: RepairJobRecord | null | undefined): Warrant
 /** Minimal structural view of a quote doc (collection "quotes"). */
 export type RepairQuoteLike = {
   id: string;
+  estNo?: number | null;
+  estSuffix?: number | null;
   quoteType?: string;
   status?: string;
   customer?: string;
@@ -520,7 +523,7 @@ async function fromQuote(q: RepairQuoteLike): Promise<Omit<RepairJobRecord, "id"
     priority: (rp.priority || "standard") as RepairPriorityKey,
     title: rp.title || q.name || "Repair",
     scope: rp.scope || "",
-    source: rp.source || { kind: "quote", label: "From quote " + q.id },
+    source: rp.source || { kind: "quote", label: "From quote " + displayQuoteNumber(q) },
     items: rp.items || [],
     parts: rp.parts || [],
     laborHours: rp.laborHours || 0,

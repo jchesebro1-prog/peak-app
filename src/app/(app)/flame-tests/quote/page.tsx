@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { travelForCustomerVenues } from "@/lib/stores/customers";
@@ -119,6 +120,7 @@ export default async function FlameTestQuotePage({
     saved,
     approved,
     savedId: "",
+    savedNumber: "",
     status: "draft",
     replaces: "",
     nameLocked: false,
@@ -168,6 +170,7 @@ export default async function FlameTestQuotePage({
       approved: approved || wonAlready,
       // an existing quote always has a letter target
       savedId: editQuote.id,
+      savedNumber: displayQuoteNumber(editQuote),
       status: editQuote.status,
       replaces: "",
       nameLocked: false,
@@ -198,6 +201,7 @@ export default async function FlameTestQuotePage({
         saved: false,
         approved: false,
         savedId: "",
+        savedNumber: "",
         status: "draft",
         replaces: handoff.replaces,
         nameLocked: !!handoff.name,

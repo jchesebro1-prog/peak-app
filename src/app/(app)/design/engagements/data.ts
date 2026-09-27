@@ -5,6 +5,7 @@ import {
   type ConsultingEngagement,
 } from "@/lib/stores/engagements";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { all as allCustomers } from "@/lib/stores/customers";
 import { getAllDesigns } from "@/lib/stores/designs";
 import { allVisits, type SiteVisit } from "@/lib/stores/site-visits";
@@ -18,7 +19,8 @@ import { safeSweep } from "@/lib/safe-sweep";
  * everything already serializable for the client view.
  */
 
-export type QuoteLite = { id: string; value: number; status: string; name: string };
+/** `number` (#223) is the estimate number shown to people; `id` keys links. */
+export type QuoteLite = { id: string; number: string; value: number; status: string; name: string };
 
 /** Serializable slice of a linked design (D-### sandbox record) for the Overview tab. */
 export type DesignLite = { id: string; name: string; venue: string };
@@ -83,7 +85,7 @@ export async function loadConsultingData(): Promise<ConsultingData> {
   const quotesById: Record<string, QuoteLite> = {};
   for (const q of quotes) {
     if (!wanted.has(q.id)) continue;
-    quotesById[q.id] = { id: q.id, value: q.value || 0, status: q.status, name: q.name };
+    quotesById[q.id] = { id: q.id, number: displayQuoteNumber(q), value: q.value || 0, status: q.status, name: q.name };
   }
 
   const wantedDesigns = new Set<string>();

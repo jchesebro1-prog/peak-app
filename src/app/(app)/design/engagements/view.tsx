@@ -455,7 +455,7 @@ function EngagementDetail({
         <span>{eng.customer}</span>
         {q && (
           <Link href={`/design/engagements/quote?id=${encodeURIComponent(q.id)}`} style={{ color: "var(--accent)" }}>
-            Quote {q.id} · {money(q.value)} ({q.status})
+            Quote {q.number} · {money(q.value)} ({q.status})
           </Link>
         )}
         {eng.quoteId && (
@@ -519,7 +519,7 @@ function EngagementDetail({
 
 function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngagement }) {
   const router = useRouter();
-  const [installQuote, setInstallQuote] = useState(eng.installQuoteId || "");
+  const [installQuote, setInstallQuote] = useState((eng.installQuoteId && data.quotesById[eng.installQuoteId]?.number) || eng.installQuoteId || "");
   const [linkErr, setLinkErr] = useState<string | null>(null);
   const [proposal, setProposal] = useState("");
   const [proposalErr, setProposalErr] = useState<string | null>(null);
@@ -542,7 +542,7 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
               <div>
                 Source quote:{" "}
                 <Link href={`/design/engagements/quote?id=${encodeURIComponent(eng.quoteId)}`} style={{ color: "var(--accent)" }}>
-                  {eng.quoteId}
+                  {data.quotesById[eng.quoteId]?.number ?? eng.quoteId}
                 </Link>
               </div>
             ) : (
@@ -551,9 +551,9 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
                 <input
                   value={proposal}
                   onChange={(e) => setProposal(e.target.value)}
-                  placeholder="Q-…"
-                  aria-label="Consulting quote id"
-                  style={{ ...INPUT, width: 110, padding: "4px 8px", fontSize: 12 }}
+                  placeholder="CON-1010 or Q-…"
+                  aria-label="Consulting quote number"
+                  style={{ ...INPUT, width: 130, padding: "4px 8px", fontSize: 12 }}
                 />
                 <button
                   style={SMALL_BTN}
@@ -580,8 +580,8 @@ function OverviewTab({ data, eng }: { data: ConsultingData; eng: ConsultingEngag
               <input
                 value={installQuote}
                 onChange={(e) => setInstallQuote(e.target.value)}
-                placeholder="Q-…"
-                style={{ ...INPUT, width: 110, padding: "4px 8px", fontSize: 12 }}
+                placeholder="EST-1005 or Q-…"
+                style={{ ...INPUT, width: 130, padding: "4px 8px", fontSize: 12 }}
               />
               <button
                 style={SMALL_BTN}

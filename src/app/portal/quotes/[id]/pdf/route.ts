@@ -1,4 +1,5 @@
 import { resolvePortalViewer } from "@/lib/portal-viewer";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfResponse } from "@/lib/quote-pdf/http";
 import { portalQuotePdfPreparing, portalQuotePdfSource, portalQuotePdfUnavailable } from "@/lib/quote-pdf/portal-access";
 import { pdfFileName } from "@/lib/quote-pdf/state";
@@ -37,5 +38,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     });
   }
   if (!q || !src) return new Response("Not found", { status: 404 });
-  return pdfResponse(src.path, pdfFileName(q.id, src.rev), false);
+  return pdfResponse(src.path, pdfFileName(displayQuoteNumber(q), src.rev), false);
 }

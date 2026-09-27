@@ -5,6 +5,7 @@ import { loadAssembledSpec } from "@/lib/specs/load-spec";
 import { placeProduct } from "@/lib/specs/assemble-section";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { specCustomerOptions } from "../customer-options";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import Builder, { type SpecProductRow } from "./builder";
 
 /**
@@ -56,6 +57,10 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
     };
   });
 
+  // #223 — the source quote's estimate number for the header's Source line.
+  const srcQuoteId = doc.source.quoteId || (doc.source.kind === "quote" ? doc.source.id : undefined);
+  const sourceQuoteNumber = srcQuoteId ? (await quoteNumbersFor([srcQuoteId])).get(srcQuoteId) ?? null : null;
+
   return (
     <Builder
       doc={doc}
@@ -65,6 +70,7 @@ export default async function SpecBuilderPage({ params }: { params: Promise<{ id
       productRows={productRows}
       customerOptions={customerOptions}
       canEdit={canEdit}
+      sourceQuoteNumber={sourceQuoteNumber}
     />
   );
 }

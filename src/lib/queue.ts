@@ -7,6 +7,7 @@ import { renewals as flameRenewals } from "@/lib/stores/flame-jobs";
 import { renewals as inspectionRenewals } from "@/lib/stores/inspections";
 import { allVisits } from "@/lib/stores/site-visits";
 import type { QueueItem } from "@/lib/queue-types";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /* ------------------------------------------------------------------ *
  * My Queue (D93) — one person's open commitments, DERIVED.
@@ -117,7 +118,7 @@ export async function loadQueue(me: string): Promise<QueueItem[]> {
     items.push({
       key: `quote-review:${q.id}`,
       source: "quote-review",
-      title: r.reviewer ? `Review quote ${q.id}` : `Unclaimed review: quote ${q.id}`,
+      title: r.reviewer ? `Review quote ${displayQuoteNumber(q)}` : `Unclaimed review: quote ${displayQuoteNumber(q)}`,
       context: q.customer || q.name || "",
       due: due(r.submittedAt),
       href: "/reviews",

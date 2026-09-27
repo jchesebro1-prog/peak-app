@@ -6,6 +6,8 @@ import {
   softDeleteDoc,
   upsertDoc,
 } from "@/db/doc-store";
+import { displayQuoteNumber, isEstimateNo, withoutEstimateFields } from "@/lib/estimate-number";
+import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 
 /**
  * LeadStore — direct port of app/lead.js (rss_leads_v1).
@@ -181,6 +183,9 @@ export interface LeadRecord {
   convertedQuoteId: string | null;
   convertedAt: number | null;
   activities: LeadActivity[];
+  /** Estimate number (#223) — shown as OPP-1005; its quotes carry it. Written
+   *  only by assign_estimate_numbers() (or create()'s explicit carry). */
+  estNo?: number;
   createdAt: number;
   updatedAt: number;
   lastActivityAt: number;
@@ -483,6 +488,10 @@ export interface LeadCreateInput {
   value?: number;
   message?: string;
   customerId?: string | null;
+  /** #223 — an existing estimate number to carry instead of allocating one:
+   *  only for a lead made FOR a quote that already has one (the consulting
+   *  auto-lead). Everything else leaves it unset. */
+  estNo?: number | null;
 }
 
 /**
@@ -532,12 +541,17 @@ export async function create(
     });
   // mkLead defaults land syncState 'synced' / syncedAt t — the server write
   // is the cloud write (prototype: 'pending' until the SyncEngine pushed).
+  // #223: a carried number (consulting auto-lead) is stamped before insert;
+  // otherwise the database numbers the lead right after it. Over an existing
+  // id the stored number stays (upsertDoc never replaces one).
+  const carry = (rec: LeadRecord): LeadRecord =>
+    isEstimateNo(partial.estNo) ? { ...rec, estNo: partial.estNo } : rec;
   if (partial.id) {
-    const rec = build(partial.id);
+    const rec = carry(build(partial.id));
     await upsertDoc("leads", rec);
-    return rec;
+    return numberNewDoc("leads", rec);
   }
-  return insertWithPrefixedId<LeadRecord>("leads", "L", 1050, build);
+  return numberNewDoc("leads", await insertWithPrefixedId<LeadRecord>("leads", "L", 1050, (id) => carry(build(id))));
 }
 
 export async function update(
@@ -545,7 +559,8 @@ export async function update(
   patch: Partial<LeadRecord>
 ): Promise<LeadRecord | null> {
   return patchDoc<LeadRecord>("leads", id, (l) => {
-    Object.assign(l, patch || {});
+    // #223: an allocated number never changes — a patch cannot carry one.
+    Object.assign(l, withoutEstimateFields(patch || {}));
     dirty(l);
   });
 }
@@ -766,8 +781,8 @@ export async function convert(
   const pipes = await loadPipelines();
   const pl = quotePipelineFor(pipes, { pipelineId: pipes.defaultQuotePipelineId });
   const t = now();
-  const quote = await insertWithPrefixedId("quotes", "Q", 2041, (id) => ({
-    id,
+  const quote = await insertWithPrefixedId("quotes", "Q", 2041, (qid) => ({
+    id: qid,
     name: l.org + (l.interest ? " — " + l.interest : " — New project"),
     customer: l.org,
     customerId: customerId || null,
@@ -778,6 +793,8 @@ export async function convert(
     tierMargin: tier.margin,
     status: "draft",
     source: "lead",
+    // #223: the opportunity link — the quote carries this lead's number.
+    leadId: id,
     quoteType: "system",
     flameTest: null,
     contact: null,
@@ -798,6 +815,8 @@ export async function convert(
     pipelineId: pl.id,
     stage: firstStage(pl).id,
   }));
+  // #223: number it now, while the lead is the only candidate to carry from.
+  const numbered = await numberNewDoc("quotes", quote);
   const quoteId = quote.id;
 
   // 3) link + advance the lead
@@ -811,7 +830,7 @@ export async function convert(
     rec.nextActionAt = null;
     rec.nextActionNote = "";
     rec.activities = (rec.activities || []).concat([
-      act(now(), "system", me, "Converted to customer" + (quoteId ? " + quote " + quoteId : "")),
+      act(now(), "system", me, "Converted to customer" + (quoteId ? " + quote " + displayQuoteNumber(numbered) : "")),
     ]);
     touch(rec);
     dirty(rec);

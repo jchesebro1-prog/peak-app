@@ -18,6 +18,7 @@ import { InspectionMap } from "../controls";
 import { ScheduleButton } from "./controls";
 import type { MapPin } from "@/components/map/LeafletMap";
 import ActionError from "@/components/action-error";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 
 export const metadata = { title: "Inspection scheduler — Quartzite-6" };
 
@@ -92,6 +93,7 @@ export default async function InspectionSchedulingPage({
     activeUsers(),
     allCustomers(),
   ]);
+  const recQuoteNos = await quoteNumbersFor(records.map((r) => r.quoteId));
 
   const identity = new Map(roster.map((u) => [u.name, { color: u.color, initials: u.initials }]));
   const initialsOf = (n: string) => identity.get(n)?.initials || deriveInitials(n || "");
@@ -318,7 +320,7 @@ export default async function InspectionSchedulingPage({
                       {(r.venue || "Venue") +
                         (r.lineSets ? " · " + r.lineSets + " line sets" : "") +
                         (r.value ? " · " + money(r.value) : "") +
-                        (r.quoteId ? " · from " + r.quoteId : "")}
+                        (r.quoteId ? " · from " + (recQuoteNos.get(r.quoteId) ?? r.quoteId) : "")}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>

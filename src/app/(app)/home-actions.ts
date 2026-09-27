@@ -74,9 +74,10 @@ export async function removeQuoteAction(id: string) {
  */
 export async function promoteDesignAction(
   designId: string
-): Promise<{ ok: true; id: string } | { ok: false; error: string; needsPart?: number }> {
+): Promise<{ ok: true; id: string; number: string } | { ok: false; error: string; needsPart?: number }> {
   const res = await promoteFromDesigns(designId);
   if (!res.ok) return res;
   revalidatePath("/", "layout");
-  return { ok: true, id: res.quoteId };
+  // #223 — the estimate number for the toast; the link keeps the id.
+  return { ok: true, id: res.quoteId, number: res.quoteNumber ?? res.quoteId };
 }

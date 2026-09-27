@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
 import { allSpecDocuments } from "@/lib/stores/spec-documents";
 import { allSections } from "@/lib/stores/spec-sections";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { dateYear, timeAgo } from "@/lib/format";
 import type { SpecDocSource } from "@/lib/specs/spec-document";
 
@@ -28,8 +29,12 @@ const GRID = "90px minmax(0,1.5fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) 9
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function sourceLabel(s: SpecDocSource): string {
-  if (s.kind === "quote") return `Quote ${s.quoteId || s.id || ""}`.trim();
+function sourceLabel(s: SpecDocSource, quoteNos: Map<string, string>): string {
+  if (s.kind === "quote") {
+    // #223 — the quote by its estimate number (the id when unnumbered/unknown).
+    const qid = s.quoteId || s.id || "";
+    return `Quote ${quoteNos.get(qid) ?? qid}`.trim();
+  }
   if (s.kind === "grid") return `Grid: ${s.label || s.id || ""}`.trim();
   return "From scratch";
 }
@@ -42,6 +47,7 @@ function updatedLabel(ms: number): string {
 
 export default async function SpecsIndex() {
   const [user, docs, sections] = await Promise.all([requireUser(), allSpecDocuments(), allSections()]);
+  const specQuoteNos = await quoteNumbersFor(docs.map((d) => (d.source.kind === "quote" ? d.source.quoteId || d.source.id : d.source.quoteId)));
   const canCreate = can("create", user.roles);
   const sectionById = new Map(sections.map((s) => [s.id, s]));
   const rows = [...docs].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -105,7 +111,7 @@ export default async function SpecsIndex() {
                 )}
               </span>
               <span style={CELL}>{d.customer || <span style={MUTED}>—</span>}</span>
-              <span style={CELL}>{sourceLabel(d.source)}</span>
+              <span style={CELL}>{sourceLabel(d.source, specQuoteNos)}</span>
               <span style={{ ...CELL, color: "#6b7079" }} title={d.updatedBy ? `by ${d.updatedBy}` : undefined}>
                 {updatedLabel(d.updatedAt)}
               </span>

@@ -48,6 +48,8 @@ export type DrawerActivityVM = {
 
 export type DrawerDetailVM = {
   id: string;
+  /** #223 — OPP-1005 (falls back to the id). */
+  number: string;
   org: string;
   contact: string;
   contactRole: string;
@@ -78,6 +80,8 @@ export type DrawerDetailVM = {
   activities: DrawerActivityVM[];
   converted: boolean;
   quoteId: string;
+  /** #223 — the converted quote's estimate number ("" when none). */
+  quoteNumber: string;
 };
 
 export type SourceOptionVM = { value: string; label: string };

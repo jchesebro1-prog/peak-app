@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import QuoteIntakeForm from "./intake-form";
 import {
   intakeInitial,
@@ -72,7 +73,7 @@ export default async function NewQuotePage({
     const old = await getQuote(h.replaces);
     if (old && old.status === "draft") {
       const type = quoteServiceType(old);
-      replacing = { id: old.id, type, lines: quoteLineCount(old), editPath: quoteEditPath(old) };
+      replacing = { id: old.id, number: displayQuoteNumber(old), type, lines: quoteLineCount(old), editPath: quoteEditPath(old) };
       seed = {
         type,
         category: old.category || "",

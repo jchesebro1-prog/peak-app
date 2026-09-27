@@ -13,6 +13,7 @@ import {
 import { getDoc, upsertDoc, patchDoc } from "@/db/doc-store";
 import { withTransaction } from "@/db";
 import type { Quote } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { contactByEmail } from "@/lib/identity/lookup";
 import { contactsForCompany, emailsFor, saveContact, setEmails, softDeleteContact } from "@/lib/identity/contacts";
 import { claimDomain, customersForDomain } from "@/lib/gmail/domains";
@@ -2023,7 +2024,7 @@ async function main() {
     const r3qt = await getDoc<CommThread>("comms", "C-r3quote");
     assert.equal(r3qt?.link?.type, "quote", "#123 the thread links to a quote");
     assert.equal(r3qt?.link?.id, r3made.quoteId, "#123 …the minted one");
-    assert.equal(r3qt?.link?.label, `${r3made.quoteId} · Curtain quote for the PAC`, "#123 label matches the picker's format");
+    assert.equal(r3qt?.link?.label, `${r3q ? displayQuoteNumber(r3q) : r3made.quoteId} · Curtain quote for the PAC`, "#123 label matches the picker's format (#223: the estimate number)");
     assert.equal(r3qt?.customerId, "lakefront", "#123 an unlinked thread adopts the intake's customer");
     assert.equal(r3qt?.resolution, "linked", "#123 …and reads as linked");
 

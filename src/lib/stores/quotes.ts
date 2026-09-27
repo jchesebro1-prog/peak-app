@@ -7,6 +7,8 @@ import {
   upsertDoc,
 } from "@/db/doc-store";
 import { quotesSeed } from "@/db/seeds/quotes";
+import { withoutEstimateFields } from "@/lib/estimate-number";
+import { numberNewDoc } from "@/lib/stores/estimate-numbers";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
 import { getDb, withTransaction } from "@/db";
@@ -216,6 +218,15 @@ export type Quote = {
    *  pipeline status. Set/cleared only via setPoReceived; meaningless (null)
    *  on draft/sent/lost. Absent on pre-D119 docs — read with `?? null`. */
   poReceivedAt?: number | null;
+  /** Estimate number (#223) — the shared-counter value people see
+   *  (FLM-1002; src/lib/estimate-number.ts formats it). Written only by the
+   *  database's assign_estimate_numbers(); never changes once set. Absent
+   *  between insert and numbering, and on a DB that predates the migration. */
+  estNo?: number;
+  /** 2, 3, … for additional quotes on the same opportunity (#223); absent on the first. */
+  estSuffix?: number;
+  /** The lead (opportunity) this quote was made from (#223) — its estNo carries here. */
+  leadId?: string | null;
   review: QuoteReview;
   createdAt: number;
   updatedAt: number;
@@ -552,6 +563,8 @@ export function buildQuote(
     updatedAt: t,
     history: [{ at: t, to: "draft" }],
     ...(pl ? { pipelineId: pl.id, stage: firstStage(pl).id } : {}),
+    // #223: the opportunity this quote was made from — its number carries here.
+    ...(partial.leadId ? { leadId: partial.leadId } : {}),
   };
 }
 
@@ -565,16 +578,20 @@ export async function create(partial: Partial<Quote> = {}): Promise<Quote> {
   const pl = pipes ? quotePipelineFor(pipes, { pipelineId: partial.pipelineId || pipes.defaultQuotePipelineId }) : null;
   const build = (id: string): Quote => buildQuote(id, partial, quoteType, pl, t);
   // Explicit caller-supplied id (not a minted one) — no race to guard, keep
-  // the prior upsert semantics.
+  // the prior upsert semantics. #223: an id that already exists keeps its
+  // number — upsertDoc never replaces a stored estNo/estSuffix (doc-store).
+  // buildQuote never copies a number from `partial`, so a duplicate or a
+  // renewal is a new estimate; the database numbers it right after the write.
   if (partial.id) {
     const q = build(partial.id);
     await upsertDoc<Quote>("quotes", q);
-    return q;
+    return numberNewDoc("quotes", q);
   }
   // Minted id: nextPrefixedId's max-scan lets two concurrent creates compute
   // the same Q-####; insert-if-absent + retry (D73) instead of the second
-  // writer silently overwriting the first via upsertDoc.
-  return insertWithPrefixedId<Quote>("quotes", "Q", 2041, build);
+  // writer silently overwriting the first via upsertDoc. #223: numbered right
+  // after the insert (lead carry + suffix happen in the database).
+  return numberNewDoc("quotes", await insertWithPrefixedId<Quote>("quotes", "Q", 2041, build));
 }
 
 /** Shallow-merge updates into a quote; bumps updatedAt, rounds value. */
@@ -583,7 +600,8 @@ export async function update(
   patch: Partial<Quote>
 ): Promise<Quote | null> {
   return patchQuote(id, (q) => {
-    Object.assign(q, patch, { updatedAt: Date.now() });
+    // #223: an allocated number never changes — a patch cannot carry one.
+    Object.assign(q, withoutEstimateFields(patch), { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
 }

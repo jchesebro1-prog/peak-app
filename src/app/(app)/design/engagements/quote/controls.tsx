@@ -35,6 +35,8 @@ export type BuilderScope = { id: string; title: string; description: string; fee
 
 export type BuilderInitial = {
   id: string;
+  /** #223 — the estimate number shown in the header. */
+  number: string;
   name: string;
   customerId: string;
   venueCustomerId: string;
@@ -246,7 +248,7 @@ export function ConsultingQuoteBuilder({
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "26px 22px 60px", fontFamily: "var(--font-ui)" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 21, fontWeight: 700, color: "#16181d", margin: 0 }}>
-          {initial ? `Consulting proposal ${initial.id}` : "New consulting proposal"}
+          {initial ? `Consulting proposal ${initial.number}` : "New consulting proposal"}
         </h1>
         <span
           style={{

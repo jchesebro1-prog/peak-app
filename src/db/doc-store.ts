@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DOC_TABLES, blobs, type CollectionName } from "./doc-tables";
 
@@ -27,6 +27,29 @@ function table(coll: CollectionName) {
   const t = DOC_TABLES[coll];
   if (!t) throw new Error(`Unknown collection: ${coll}`);
   return t;
+}
+
+/**
+ * Estimate numbers (#223) are allocated by the database's
+ * assign_estimate_numbers() and never change. Every UPDATE of a quote or
+ * lead here — upsertDoc/upsertDocs replacing an existing row, patchDoc —
+ * therefore writes the incoming doc WITHOUT its estNo/estSuffix and keeps the
+ * ones stored in the row, in the same statement. So a whole doc read before
+ * the number was assigned (a stale save, a re-import, a store update() that
+ * raced the numbering) can never wipe it, and a doc carrying a different
+ * number can never rewrite it. A NEW row is inserted as given: create() paths
+ * build their docs field by field and never copy a number, except the one
+ * deliberate carry (leads.create's `estNo`, the consulting auto-lead).
+ */
+const ESTIMATE_NUMBERED: ReadonlySet<CollectionName> = new Set<CollectionName>(["quotes", "leads"]);
+
+function docOnUpdate(coll: CollectionName, incoming: SQL): SQL {
+  if (!ESTIMATE_NUMBERED.has(coll)) return incoming;
+  const cur = table(coll).doc;
+  return sql`((${incoming}) - 'estNo' - 'estSuffix') || jsonb_strip_nulls(jsonb_build_object(
+    'estNo', CASE WHEN jsonb_typeof(${cur}->'estNo') = 'number' THEN ${cur}->'estNo' END,
+    'estSuffix', CASE WHEN jsonb_typeof(${cur}->'estNo') = 'number' AND jsonb_typeof(${cur}->'estSuffix') = 'number'
+                      THEN ${cur}->'estSuffix' END))`;
 }
 
 export async function listDocs<T extends Doc = Doc>(
@@ -79,11 +102,19 @@ export async function searchDocs<T extends Doc = Doc>(
  *
  * Both are supersets of the caller's exact JS check, which re-runs on the
  * result. Field names are code constants, passed as bound parameters.
- * `limit` caps the rows (id order); omit it for no cap.
+ * `limit` caps the rows, in id order by default; `orderByNumericDesc` (a doc
+ * field holding a number, e.g. `estNo`) orders newest-first instead, so a
+ * capped result keeps the most recent matches rather than the oldest ids.
  */
 export async function listDocsFiltered<T extends Doc = Doc>(
   coll: CollectionName,
-  opts: { textFields?: readonly string[]; text?: string; nonEmpty?: readonly string[]; limit?: number }
+  opts: {
+    textFields?: readonly string[];
+    text?: string;
+    nonEmpty?: readonly string[];
+    limit?: number;
+    orderByNumericDesc?: string;
+  }
 ): Promise<T[]> {
   const db = await getDb();
   const t = table(coll);
@@ -104,7 +135,10 @@ export async function listDocsFiltered<T extends Doc = Doc>(
     );
     where.push(sql`(${anyNonEmpty})`);
   }
-  const q = db.select().from(t).where(and(...where)).orderBy(asc(t.id));
+  const order = opts.orderByNumericDesc
+    ? desc(sql`(${t.doc}->>${opts.orderByNumericDesc})::numeric`)
+    : asc(t.id);
+  const q = db.select().from(t).where(and(...where)).orderBy(order);
   const rows = opts.limit != null ? await q.limit(opts.limit) : await q;
   return rows.map((r) => ({ ...(r.doc as T), id: r.id }));
 }
@@ -228,7 +262,7 @@ export async function upsertDoc<T extends Doc>(
     .onConflictDoUpdate({
       target: t.id,
       set: {
-        doc: stored,
+        doc: docOnUpdate(coll, sql`excluded.doc`),
         rev: sql`${t.rev} + 1`,
         updatedAt: now,
         receivedAt: now,
@@ -375,7 +409,7 @@ export async function upsertDocs<T extends Doc>(
       .onConflictDoUpdate({
         target: t.id,
         set: {
-          doc: sql`excluded.doc`,
+          doc: docOnUpdate(coll, sql`excluded.doc`),
           rev: sql`${t.rev} + 1`,
           updatedAt: now,
           receivedAt: now,
@@ -430,6 +464,28 @@ export async function patchDoc<T extends Doc = Doc>(
   next.id = id;
   const db = await getDb();
   const t = table(coll);
+  if (ESTIMATE_NUMBERED.has(coll)) {
+    // #223: the stored number wins (docOnUpdate); hand the caller what was stored.
+    const rows = await db
+      .update(t)
+      .set({
+        doc: docOnUpdate(coll, sql`${JSON.stringify(next)}::jsonb`),
+        rev: sql`${t.rev} + 1`,
+        updatedAt: Date.now(),
+        receivedAt: Date.now(),
+      })
+      .where(eq(t.id, id))
+      .returning({ doc: t.doc });
+    const stored = rows[0]?.doc as Record<string, unknown> | undefined;
+    if (stored) {
+      const rec = next as Record<string, unknown>;
+      for (const k of ["estNo", "estSuffix"]) {
+        if (typeof stored[k] === "number") rec[k] = stored[k];
+        else delete rec[k];
+      }
+    }
+    return next;
+  }
   await db
     .update(t)
     .set({

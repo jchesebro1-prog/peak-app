@@ -45,6 +45,7 @@ import {
   type LetterDoc,
 } from "@/lib/pdf";
 import { renderField } from "@/lib/templates";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import {
   carryTravelOverride,
   flightOf,
@@ -1028,7 +1029,7 @@ export async function flameRenewalOutreach(
   const quote = pricing.quote;
   const pdf = renderLetterPdf(await flameLetterDoc(quote, settings));
   const attachment = pdfAttachment(
-    "Field-flame-inspection-renewal-" + quote.id + ".pdf",
+    "Field-flame-inspection-renewal-" + displayQuoteNumber(quote) + ".pdf",
     pdf
   );
 
@@ -1086,7 +1087,7 @@ export async function inspectionRenewalOutreach(
   const quote = pricing.quote;
   const pdf = renderLetterPdf(await inspectionLetterDoc(quote, settings));
   const attachment = pdfAttachment(
-    "Rigging-inspection-renewal-" + quote.id + ".pdf",
+    "Rigging-inspection-renewal-" + displayQuoteNumber(quote) + ".pdf",
     pdf
   );
 

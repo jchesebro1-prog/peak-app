@@ -3,6 +3,7 @@ import { money } from "@/lib/format";
 import { timeAgo as quoteTimeAgo, type Quote, type QuoteStatus } from "@/lib/stores/quotes";
 import { StatusPill, QUOTE_STATUS_TONE } from "@/components/ui";
 import { CardHeadTitle } from "./home-shared";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
  * My pipeline card — the filter strip + quote rows, port of Home.dc.html's
@@ -113,7 +114,7 @@ export default function HomePipeline({
 
       {filteredQuotes.map((q) => {
         const m = STATUS_META[q.status] || STATUS_META.draft;
-        const meta = `${q.id} · ${q.customer || "—"} · ${quoteTimeAgo(q.updatedAt)}${
+        const meta = `${displayQuoteNumber(q)} · ${q.customer || "—"} · ${quoteTimeAgo(q.updatedAt)}${
           q.requote ? " · needs requote" : ""
         }`;
         return (

@@ -14,6 +14,7 @@ import {
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
 import { moneyFull } from "./money";
 import type { AvatarVM, ChipVM, DrawerDetailVM } from "./types";
+import { displayLeadNumber, displayQuoteNumber, type QuoteNumberFields } from "@/lib/estimate-number";
 
 /**
  * Server-side view-model builders for the Leads screens — exact ports of the
@@ -96,7 +97,7 @@ const ACT_ICON: Record<string, string> = {
 };
 
 /** Full drawer view-model for an existing lead (Lead Detail.dc.html). */
-export function buildDrawerVM(l: LeadRecord): DrawerDetailVM {
+export function buildDrawerVM(l: LeadRecord, convertedQuote: (QuoteNumberFields & { id: string }) | null = null): DrawerDetailVM {
   const src = sourceMeta(l.source);
   const info = followUpInfo(l);
   const s = sla(l);
@@ -170,6 +171,7 @@ export function buildDrawerVM(l: LeadRecord): DrawerDetailVM {
 
   return {
     id: l.id,
+    number: displayLeadNumber(l),
     org: l.org,
     contact: l.contact,
     contactRole: l.contactRole || "",
@@ -195,5 +197,6 @@ export function buildDrawerVM(l: LeadRecord): DrawerDetailVM {
     activities,
     converted,
     quoteId: l.convertedQuoteId || "",
+    quoteNumber: convertedQuote ? displayQuoteNumber(convertedQuote) : l.convertedQuoteId || "",
   };
 }

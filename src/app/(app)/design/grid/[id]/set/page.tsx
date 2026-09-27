@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
 import { getProject, listSheets, type GridPlacement } from "@/lib/stores/grid-projects";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { list as listCatalog } from "@/lib/stores/catalog";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { getSettings } from "@/lib/settings";
@@ -159,11 +160,14 @@ export default async function DrawingSetPage({
     symCtx
   );
 
+  // #223 — printed as the estimate number; the option still keys by id.
+  const optionQuoteNo = option.quoteId ? (await quoteNumbersFor([option.quoteId])).get(option.quoteId) ?? option.quoteId : null;
+
   const tb = (d: DrawingSheetDef, i: number) =>
     titleBlockData({
       company: { name: settings.companyName, logoDark: settings.logoDark, offices: settings.offices },
       project: { id: project.id, name: project.name, customer: project.customer, siteName: project.siteName, intake: project.intake, createdBy: project.createdBy },
-      option: { name: option.name, quoteId: option.quoteId },
+      option: { name: option.name, quoteId: optionQuoteNo },
       optionCount: options.length,
       revisions: revRows,
       set,
@@ -207,7 +211,7 @@ export default async function DrawingSetPage({
           {project.customer && <div style={{ marginTop: 4 }}>{project.customer}</div>}
           {(project.siteName || project.intake?.venueName) && <div>{project.siteName || project.intake?.venueName}</div>}
           {project.intake?.address && <div>{project.intake.address}</div>}
-          <div className="pk-dw-mono" style={{ marginTop: 4 }}>{`${project.id}${option.quoteId ? ` · ${option.quoteId}` : ""}`}</div>
+          <div className="pk-dw-mono" style={{ marginTop: 4 }}>{`${project.id}${optionQuoteNo ? ` · ${optionQuoteNo}` : ""}`}</div>
         </div>
         <div className="pk-dw-block">
           <h2 className="pk-dw-h">General notes</h2>

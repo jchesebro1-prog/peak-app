@@ -8791,7 +8791,11 @@ async function dayliteChunkAsyncChecks(): Promise<void> {
     for (const c of colls)
       for (const d of await listDocs(c, { includeDeleted: true }))
         // A project note id is random ("nt-xxxxxx"); everything else must match.
-        out[`${c}/${d.id}`] = JSON.stringify(d).replace(/"nt-[a-z0-9]+"/g, '"nt-*"');
+        // #223: so is a quote's estimate number — the sequence never reuses a
+        // value, so the chunked re-run (after the hard delete) gets new ones.
+        out[`${c}/${d.id}`] = JSON.stringify(d)
+          .replace(/"nt-[a-z0-9]+"/g, '"nt-*"')
+          .replace(/"(estNo|estSuffix)":\d+/g, '"$1":*');
     return out;
   };
   const hardDelete = async (keys: string[]) => {
@@ -8811,6 +8815,12 @@ async function dayliteChunkAsyncChecks(): Promise<void> {
     const afterFull = await snapshot();
     const fullKeys = Object.keys(afterFull).filter((k) => !(k in base)).sort();
     ok(full.errors.length === 0 && full.total === 8 && fullKeys.length === 9, `daylite chunk: full commit writes 9 docs (8 work items + the sold job's new project) (${fullKeys.length}, total ${full.total}, errors ${full.errors.join("; ")})`);
+    const e223DlIds = fullKeys.filter((k) => k.startsWith("quotes/")).map((k) => k.slice("quotes/".length));
+    const e223DlRows = (await listDocs("quotes", { includeDeleted: true })).filter((d) => e223DlIds.includes(d.id));
+    ok(
+      e223DlIds.length > 0 && e223DlRows.length === e223DlIds.length && e223DlRows.every((d) => e223IsNo(d.estNo)),
+      "#223 daylite: commitHistory numbers the quotes it imported (one pass at the end of the chunk)"
+    );
     await hardDelete(fullKeys);
     ok(Object.keys(await snapshot()).length === Object.keys(base).length, "daylite chunk: the full run's docs are removed before the chunked run");
 
@@ -10510,6 +10520,11 @@ seeded()
   .then(() => finalWaveBAsyncChecks())
   .then(() => cable233LateAsyncChecks())
   .then(() => sewing227LateAsyncChecks())
+  .then(() => estimate223BackfillAsyncChecks())
+  .then(() => estimate223FixAsyncChecks())
+  .then(() => estimate223AllocationAsyncChecks())
+  .then(() => estimate223WritersAsyncChecks())
+  .then(() => estimate223SweepDAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -26254,4 +26269,697 @@ import { deriveLocationLabels as vn216Derive, venueNameTypeLabel as vn216NameLab
   const rd216 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   ok(rd216("src/lib/identity/venue-save.ts").includes("typeLabel: venueNameTypeLabel(types, venueKind)") && rd216("src/app/(app)/companies/venue-dialog.tsx").includes("typeLabel: venueNameTypeLabel(venueTypes, venueKind)"),
     "#216 final-B: saveVenue and the venue dialog's preview derive the name with venueNameTypeLabel");
+}
+
+/* ======================================================================
+   #223 — estimate numbers: the migration (sequence, assign_estimate_numbers(),
+   date-ordered backfill with lead→quote carry and suffixes, setval) and the
+   store wrapper's preview safety. Runs on the harness's fresh datadir, so
+   the real drizzle/0030_estimate_numbers.sql is what is under test.
+   ====================================================================== */
+import { assignEstimateNumbers as e223Assign, resetEstimateNumberProbe as e223ResetProbe } from "@/lib/stores/estimate-numbers";
+import { buildQuote as e223BuildQuote, type Quote as E223Quote } from "@/lib/stores/quotes";
+import { mkLead as e223MkLead, type LeadRecord as E223Lead } from "@/lib/stores/leads";
+import { getDocRows as e223GetRows, softDeleteDoc as e223SoftDelete } from "@/db/doc-store";
+import { getDb as e223GetDb, withTransaction as e223Tx } from "@/db";
+import { sql as e223Sql } from "drizzle-orm";
+import { readFileSync as e223ReadFile, readdirSync as e223ReadDir } from "node:fs";
+import { join as e223Join } from "node:path";
+import { isDeepStrictEqual as e223DeepEq } from "node:util";
+function e223Rows<T>(result: unknown): T[] {
+  if (result && typeof result === "object" && "rows" in result) return (result as { rows: T[] }).rows;
+  return Array.isArray(result) ? (result as T[]) : [];
+}
+
+async function estimate223BackfillAsyncChecks(): Promise<void> {
+  const db = await e223GetDb();
+  const reg = e223Rows<{ seq: string | null; fn: string | null }>(
+    await db.execute(e223Sql`select to_regclass('estimate_number_seq')::text as seq, to_regprocedure('assign_estimate_numbers()')::text as fn`)
+  );
+  ok(!!reg[0]?.seq && !!reg[0]?.fn, "#223 migration: estimate_number_seq and assign_estimate_numbers() exist on a fresh datadir");
+
+  // Number whatever earlier suites left unnumbered, so the fixtures below
+  // are the only unnumbered rows and get consecutive numbers.
+  await e223Assign();
+
+  const id = (slug: string) => fixtureId(223, slug);
+  const quote = (slug: string, t: number, extra: Partial<E223Quote> = {}): E223Quote => ({
+    ...e223BuildQuote(id(slug), { name: "#223 " + slug, owner: "spec" }, extra.quoteType || "system", null, t),
+    ...extra,
+  });
+  const lead = (slug: string, t: number, extra: Partial<E223Lead> = {}): E223Lead => ({
+    ...e223MkLead({ id: id(slug), org: "#223 " + slug, createdAt: t }),
+    ...extra,
+  });
+
+  // No createdAt at all — dated by its earliest history entry (5).
+  const hist = quote("hist", 1, { history: [{ at: 5, to: "draft" }], updatedAt: 90 });
+  delete (hist as Partial<E223Quote>).createdAt;
+  await createFixture("quotes", hist);
+  await createFixture("leads", lead("lead1", 10, { convertedQuoteId: id("q1") }));
+  await createFixture("quotes", quote("gone", 15));
+  await e223SoftDelete("quotes", id("gone"));
+  await createFixture("quotes", quote("q1", 20, { source: "lead" }));
+  await createFixture("quotes", quote("dl", 30, { source: "daylite" }));
+  await createFixture("quotes", quote("q2", 40, { leadId: id("lead1"), quoteType: "flame_test" }));
+  await createFixture("quotes", quote("q3", 55, { leadId: id("lead2") }));
+  await createFixture("leads", lead("lead2", 60));
+  await createFixture("quotes", quote("q4", 65, { quoteType: "consulting", consulting: { leadId: id("lead1") } }));
+  await createFixture("quotes", quote("tie-b", 70));
+  await createFixture("quotes", quote("tie-a", 70));
+
+  const assigned = await e223Assign();
+  ok(assigned === 11, `#223 backfill: numbers all eleven unnumbered fixtures in one pass (got ${assigned})`);
+
+  // Sorted: getDocRows has no ORDER BY, and the re-run's ANALYZE can change
+  // the plan (and so the row order) without changing any number.
+  const read = async () =>
+    [
+      ...(await e223GetRows("quotes", ["hist", "gone", "q1", "dl", "q2", "q3", "q4", "tie-a", "tie-b"].map(id))),
+      ...(await e223GetRows("leads", ["lead1", "lead2"].map(id))),
+    ].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  const rows = await read();
+  const field = (slug: string, k: "estNo" | "estSuffix") =>
+    (rows.find((r) => r.id === id(slug))?.doc as Record<string, unknown> | undefined)?.[k];
+  const no = (slug: string) => Number(field(slug, "estNo") ?? -1);
+  const b = no("dl");
+  ok(b >= 1001, "#223 backfill: numbers start at 1001 or later");
+  ok(
+    no("hist") === b + 1 && no("lead1") === b + 2 && no("gone") === b + 3 && no("q3") === b + 4 && no("tie-a") === b + 5 && no("tie-b") === b + 6,
+    "#223 backfill: Daylite history first, then leads and quotes interleave in date order (createdAt, else earliest history/activity; ties by id)"
+  );
+  ok(rows.find((r) => r.id === id("gone"))?.deleted === true && no("gone") > 0, "#223 backfill: a soft-deleted quote is numbered too, so no number is ever reused");
+  ok(no("dl") > 0, "#223 backfill: a Daylite-imported quote is numbered");
+  ok(no("q1") === no("lead1") && field("q1", "estSuffix") === undefined, "#223 backfill: the lead's converted quote carries the lead's number, no suffix");
+  ok(no("q2") === no("lead1") && field("q2", "estSuffix") === 2, "#223 backfill: a second quote on the lead (leadId) gets -2");
+  ok(no("q4") === no("lead1") && field("q4", "estSuffix") === 3, "#223 backfill: a consulting proposal linked by consulting.leadId gets -3");
+  ok(no("lead2") === no("q3") && field("q3", "estSuffix") === undefined, "#223 backfill: a lead newer than its quote takes the quote's number");
+  const histDoc = rows.find((r) => r.id === id("hist"))?.doc as Record<string, unknown> | undefined;
+  const histRest = { ...(histDoc || {}) };
+  delete histRest.estNo;
+  delete histRest.estSuffix;
+  ok(
+    e223DeepEq(histRest, JSON.parse(JSON.stringify({ ...hist, id: id("hist") }))),
+    "#223 backfill: writes only estNo/estSuffix (jsonb_set) — updatedAt and every other field are untouched, so list order and a concurrent save survive"
+  );
+
+  ok((await e223Assign()) === 0, "#223 backfill: a second pass assigns nothing");
+
+  const snapshot = JSON.stringify(rows.map((r) => [r.id, (r.doc as Record<string, unknown>).estNo, (r.doc as Record<string, unknown>).estSuffix]));
+  const file = e223ReadDir(e223Join(process.cwd(), "drizzle")).find((f) => /^\d{4}_estimate_numbers\.sql$/.test(f));
+  ok(!!file, "#223 migration: drizzle/NNNN_estimate_numbers.sql exists");
+  let rerunError: unknown = null;
+  if (file) {
+    const stmts = e223ReadFile(e223Join(process.cwd(), "drizzle", file), "utf8")
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      for (const s of stmts) await db.execute(e223Sql.raw(s));
+    } catch (e) {
+      rerunError = e;
+    }
+  }
+  ok(rerunError === null, `#223 migration: re-running every statement of the file is harmless (${String(rerunError)})`);
+  const after = await read();
+  ok(
+    JSON.stringify(after.map((r) => [r.id, (r.doc as Record<string, unknown>).estNo, (r.doc as Record<string, unknown>).estSuffix])) === snapshot,
+    "#223 migration: a re-run changes no number"
+  );
+
+  const top = e223Rows<{ top: string | number | bigint | null }>(
+    await db.execute(e223Sql`select max(v)::bigint as top from (
+      select (doc->>'estNo')::numeric as v from quotes where jsonb_typeof(doc->'estNo') = 'number'
+      union all
+      select (doc->>'estNo')::numeric from leads where jsonb_typeof(doc->'estNo') = 'number') s`)
+  );
+  const seq = e223Rows<{ last_value: string | number | bigint; is_called: boolean }>(
+    await db.execute(e223Sql`select last_value, is_called from estimate_number_seq`)
+  );
+  ok(
+    seq[0]?.is_called === true && Number(seq[0]?.last_value) === Number(top[0]?.top),
+    "#223 setval: the sequence sits at the highest number in use, so the next record continues it"
+  );
+
+  // A preview deploy reads the shared production DB before production has
+  // migrated: no function. The wrapper must answer 0, not throw (a throw
+  // inside a transaction would poison it).
+  const sentinel = new Error("e223-rollback");
+  const seen = { n: -1 };
+  try {
+    await e223Tx(async () => {
+      const tx = await e223GetDb();
+      await tx.execute(e223Sql`drop function assign_estimate_numbers()`);
+      e223ResetProbe();
+      seen.n = await e223Assign();
+      throw sentinel;
+    });
+  } catch (e) {
+    if (e !== sentinel) throw e;
+  }
+  ok(seen.n === 0, "#223 preview safety: with no assign_estimate_numbers() (an un-migrated DB) the wrapper returns 0 instead of throwing");
+  const back = e223Rows<{ fn: string | null }>(await db.execute(e223Sql`select to_regprocedure('assign_estimate_numbers()')::text as fn`));
+  ok(!!back[0]?.fn, "#223 …and rolling that transaction back restores the function");
+}
+
+/* ======================================================================
+   #223 T2 fix — Daylite history (no original dates) is numbered FIRST, by
+   company then name then id, with every text key under COLLATE "C"; a
+   soft-deleted sibling still holds its suffix; a lead newer than its
+   converted quote takes the quote's number; the function-exists probe is
+   cached after its first success.
+   ====================================================================== */
+import { upsertDoc as e223fUpsert } from "@/db/doc-store";
+import { registerFixture as e223fRegister } from "./test-fixtures";
+
+async function estimate223FixAsyncChecks(): Promise<void> {
+  const db = await e223GetDb();
+  await e223Assign();
+  const id = (slug: string) => fixtureId("223fix", slug);
+  const quote = (slug: string, t: number, extra: Partial<E223Quote> = {}): E223Quote => ({
+    ...e223BuildQuote(id(slug), { name: "#223 fix " + slug, owner: "spec" }, "system", null, t),
+    ...extra,
+  });
+  const lead = (slug: string, t: number, extra: Partial<E223Lead> = {}): E223Lead => ({
+    ...e223MkLead({ id: id(slug), org: "#223 fix " + slug, createdAt: t }),
+    ...extra,
+  });
+  const dlLeadId = "L-dl-e223fix";
+
+  // Pass 1: an app-era quote OLDER than every Daylite import, plus Daylite
+  // quotes and a Daylite lead whose import-time dates must not matter.
+  await createFixture("quotes", quote("old", 1));
+  await createFixture("quotes", quote("dl-beta", 50, { source: "daylite", customer: "Beta Co", name: "Anything" }));
+  await createFixture("quotes", quote("dl-alpha-z", 5, { source: "daylite", customer: "  alpha  ", name: "zeta" }));
+  await createFixture("quotes", quote("dl-alpha-e", 60, { source: "daylite", customer: "Alpha", name: "Echo" }));
+  await createFixture("quotes", quote("dl-empty", 2, { source: "daylite", customer: "", name: "aaa" }));
+  await createFixture("quotes", quote("dl-hyphen", 90, { source: "daylite", customer: "Al-Z Co", name: "x" }));
+  e223fRegister("leads", dlLeadId);
+  await e223fUpsert("leads", e223MkLead({ id: dlLeadId, org: "ALPHA", interest: "Foxtrot", createdAt: 70 }));
+
+  const n1 = await e223Assign();
+  ok(n1 === 7, `#223 fix: one pass numbers the six Daylite records and the app-era quote (got ${n1})`);
+  const rows1 = [
+    ...(await e223GetRows("quotes", ["old", "dl-beta", "dl-alpha-z", "dl-alpha-e", "dl-empty", "dl-hyphen"].map(id))),
+    ...(await e223GetRows("leads", [dlLeadId])),
+  ];
+  const no1 = (rowId: string) => Number((rows1.find((r) => r.id === rowId)?.doc as Record<string, unknown> | undefined)?.estNo ?? -1);
+  const order = [id("dl-hyphen"), id("dl-alpha-e"), dlLeadId, id("dl-alpha-z"), id("dl-beta"), id("dl-empty"), id("old")];
+  const base = no1(order[0]);
+  ok(
+    base >= 1001 && order.every((rowId, i) => no1(rowId) === base + i),
+    `#223 fix: Daylite history takes the lowest numbers — by company (lowercased, trimmed, byte order: "al-z co" < "alpha" < "beta co", empty last), then name ("echo" < "foxtrot" < "zeta") — got ${order.map(no1).join(",")}`
+  );
+  ok(no1(id("old")) > no1(id("dl-empty")), "#223 fix: an app-era quote older than every Daylite import is still numbered after them");
+  ok(no1(dlLeadId) > no1(id("dl-alpha-e")) && no1(dlLeadId) < no1(id("dl-alpha-z")), "#223 fix: a Daylite lead (L-dl-…) sorts by its org and interest among the Daylite quotes");
+
+  // Pass 2: a soft-deleted sibling holds its place in the suffix count.
+  await createFixture("leads", lead("sd-lead", 100));
+  await createFixture("quotes", quote("sd-1", 110, { leadId: id("sd-lead") }));
+  await e223Assign();
+  await e223SoftDelete("quotes", id("sd-1"));
+  await createFixture("quotes", quote("sd-2", 120, { leadId: id("sd-lead") }));
+  // …and a converted quote older than its lead.
+  await createFixture("quotes", quote("cq", 200));
+  await createFixture("leads", lead("cl", 210, { convertedQuoteId: id("cq") }));
+  const n2 = await e223Assign();
+  ok(n2 === 3, `#223 fix: the second pass numbers sd-2, the converted quote and its lead (got ${n2})`);
+
+  const rows2 = [
+    ...(await e223GetRows("quotes", ["sd-1", "sd-2", "cq"].map(id))),
+    ...(await e223GetRows("leads", ["sd-lead", "cl"].map(id))),
+  ];
+  const f2 = (slug: string, k: "estNo" | "estSuffix") =>
+    (rows2.find((r) => r.id === id(slug))?.doc as Record<string, unknown> | undefined)?.[k];
+  ok(
+    rows2.find((r) => r.id === id("sd-1"))?.deleted === true &&
+      f2("sd-1", "estNo") === f2("sd-lead", "estNo") && f2("sd-1", "estSuffix") === undefined &&
+      f2("sd-2", "estNo") === f2("sd-lead", "estNo") && f2("sd-2", "estSuffix") === 2,
+    "#223 fix: a soft-deleted sibling counts — the next quote on the lead is -2, never a reuse of the bare number"
+  );
+  ok(
+    typeof f2("cq", "estNo") === "number" && f2("cl", "estNo") === f2("cq", "estNo") && f2("cq", "estSuffix") === undefined,
+    "#223 fix: a lead newer than its converted quote (convertedQuoteId) takes the quote's number"
+  );
+
+  // Idempotent: nothing left to number, and re-running every statement of
+  // the migration file (ANALYZE included) changes no number.
+  ok((await e223Assign()) === 0, "#223 fix: a further pass assigns nothing");
+  const allIds = { quotes: ["old", "dl-beta", "dl-alpha-z", "dl-alpha-e", "dl-empty", "dl-hyphen", "sd-1", "sd-2", "cq"].map(id), leads: [dlLeadId, id("sd-lead"), id("cl")] };
+  const snap = async () =>
+    JSON.stringify(
+      [...(await e223GetRows("quotes", allIds.quotes)), ...(await e223GetRows("leads", allIds.leads))].map((r) => [
+        r.id,
+        (r.doc as Record<string, unknown>).estNo,
+        (r.doc as Record<string, unknown>).estSuffix,
+      ])
+    );
+  const before = await snap();
+  const file = e223ReadDir(e223Join(process.cwd(), "drizzle")).find((f) => /^\d{4}_estimate_numbers\.sql$/.test(f));
+  const sqlText = file ? e223ReadFile(e223Join(process.cwd(), "drizzle", file), "utf8") : "";
+  ok(/ANALYZE quotes;[\s\S]*ANALYZE leads;[\s\S]*SELECT assign_estimate_numbers\(\);/.test(sqlText), "#223 fix: the migration ANALYZEs quotes and leads before the backfill");
+  let rerunError: unknown = null;
+  try {
+    for (const stmt of sqlText.split("--> statement-breakpoint").map((x) => x.trim()).filter(Boolean)) await db.execute(e223Sql.raw(stmt));
+  } catch (e) {
+    rerunError = e;
+  }
+  ok(rerunError === null && (await snap()) === before, `#223 fix: re-running the migration is harmless and changes no number (${String(rerunError)})`);
+
+  // The probe is cached: once the function was found, a later call goes
+  // straight to it (here it is dropped inside a rolled-back transaction, so
+  // the cached call reaches the missing function and rejects).
+  const sentinel = new Error("e223fix-rollback");
+  const seen = { rejected: false };
+  try {
+    await e223Tx(async () => {
+      const tx = await e223GetDb();
+      await e223Assign();
+      await tx.execute(e223Sql`drop function assign_estimate_numbers()`);
+      try {
+        await e223Assign();
+      } catch {
+        seen.rejected = true;
+      }
+      throw sentinel;
+    });
+  } catch (e) {
+    if (e !== sentinel) throw e;
+  }
+  ok(seen.rejected, "#223 fix: after the first success the function-exists probe is skipped (cached)");
+  const back = e223Rows<{ fn: string | null }>(await db.execute(e223Sql`select to_regprocedure('assign_estimate_numbers()')::text as fn`));
+  ok(!!back[0]?.fn && (await e223Assign()) === 0, "#223 fix: …the rollback restores the function and the cached path works again");
+}
+
+/* ======================================================================
+   #223 — allocation on create: new leads, a lead's quotes (carry + suffix),
+   standalone quotes, renewals, the consulting auto-lead carry, update()
+   never renumbering, and the id→number lookups.
+   ====================================================================== */
+import * as e223Quotes from "@/lib/stores/quotes";
+import * as e223Leads from "@/lib/stores/leads";
+import { all as e223AllCustomers } from "@/lib/stores/customers";
+import { registerFixture as e223Register } from "./test-fixtures";
+import {
+  quoteNumbersFor as e223QuoteNos,
+  leadNumbersFor as e223LeadNos,
+  findQuoteIdByNumberOrId as e223FindQuote,
+} from "@/lib/stores/estimate-numbers";
+
+async function estimate223AllocationAsyncChecks(): Promise<void> {
+  const id = (slug: string) => fixtureId(223, slug);
+  const cust = (await e223AllCustomers())[0];
+  const lead = await e223Leads.create({ id: id("alloc-lead"), org: "#223 Alloc Co", customerId: cust?.id ?? null }, "spec");
+  e223Register("leads", lead.id);
+  ok(e223IsNo(lead.estNo), "#223 allocation: a new lead is numbered on create");
+
+  const conv = await e223Leads.convert(lead.id, {}, "spec");
+  if (conv?.quoteId) e223Register("quotes", conv.quoteId);
+  const first = conv?.quoteId ? await e223Quotes.get(conv.quoteId) : null;
+  ok(
+    !!first && first.estNo === lead.estNo && first.estSuffix === undefined && first.leadId === lead.id,
+    "#223 allocation: a lead's first quote carries its number with no suffix, and links back by leadId"
+  );
+  ok(
+    !!first && !!conv && conv.lead.activities.some((a) => a.note.includes(e223DisplayQuote(first))),
+    "#223 allocation: the lead's conversion activity names the quote by its number"
+  );
+
+  const second = await e223Quotes.create({ id: id("alloc-second"), name: "#223 second", owner: "spec", leadId: lead.id, quoteType: "flame_test" });
+  e223Register("quotes", second.id);
+  ok(
+    second.estNo === lead.estNo && second.estSuffix === 2 && e223FormatQuote(second) === `FLM-${lead.estNo}-2`,
+    "#223 allocation: a second quote on the same opportunity is -2, under its own type's prefix"
+  );
+
+  const solo = await e223Quotes.create({ id: id("alloc-solo"), name: "#223 solo", owner: "spec" });
+  e223Register("quotes", solo.id);
+  ok(e223IsNo(solo.estNo) && solo.estNo > (lead.estNo ?? 0) && solo.estSuffix === undefined, "#223 allocation: a standalone quote takes the next number");
+
+  const renewal = await e223Quotes.create({ id: id("alloc-renewal"), name: "#223 renewal", owner: "spec", quoteType: "flame_test", renewalOf: id("job") });
+  e223Register("quotes", renewal.id);
+  ok(renewal.estNo === (solo.estNo ?? 0) + 1, "#223 allocation: a renewal is a new estimate with the next number");
+
+  const kept = await e223Quotes.update(solo.id, { estNo: 1, estSuffix: 9, name: "#223 solo renamed" });
+  ok(kept?.estNo === solo.estNo && kept?.estSuffix === undefined && kept?.name === "#223 solo renamed", "#223 allocation: quotes.update() never changes an allocated number");
+  const keptLead = await e223Leads.update(lead.id, { estNo: 1 });
+  ok(keptLead?.estNo === lead.estNo, "#223 allocation: leads.update() never changes an allocated number");
+
+  const con = await e223Quotes.create({ id: id("alloc-con"), name: "#223 consulting", owner: "spec", quoteType: "consulting" });
+  e223Register("quotes", con.id);
+  const autoLead = await e223Leads.create({ id: id("alloc-autolead"), org: "#223 Auto", estNo: con.estNo ?? null }, "spec");
+  e223Register("leads", autoLead.id);
+  ok(autoLead.estNo === con.estNo && e223DisplayLead(autoLead) === `OPP-${con.estNo}`, "#223 allocation: the consulting auto-lead takes its proposal's number");
+
+  const again = await e223Quotes.create({ id: id("alloc-solo"), name: "#223 solo re-created", owner: "spec" });
+  ok(again.estNo === solo.estNo, "#223 allocation: create() over an existing id keeps that quote's number");
+
+  const qn = await e223QuoteNos([solo.id, second.id, "Q-NOPE-223", null]);
+  ok(qn.get(solo.id) === e223DisplayQuote(again) && qn.get(second.id) === `FLM-${lead.estNo}-2` && !qn.has("Q-NOPE-223"), "#223 lookup: quoteNumbersFor maps ids to display numbers and skips missing ids");
+  const ln = await e223LeadNos([lead.id]);
+  ok(ln.get(lead.id) === `OPP-${lead.estNo}`, "#223 lookup: leadNumbersFor");
+  ok(
+    (await e223FindQuote(solo.id)) === solo.id &&
+      (await e223FindQuote(`est-${solo.estNo}`)) === solo.id &&
+      (await e223FindQuote(`FLM-${lead.estNo}-2`)) === second.id &&
+      (await e223FindQuote(String(lead.estNo))) === null &&
+      (await e223FindQuote("nothing-223")) === null,
+    "#223 lookup: findQuoteIdByNumberOrId takes an id or one exact number; an ambiguous bare number (shared by a lead's quotes) resolves to nothing"
+  );
+}
+
+/* ======================================================================
+   #223 T3 review — no writer wipes or rewrites a stored number: a stale
+   whole-doc upsert, a stale patchDoc and a batch upsert all keep what the
+   database allocated; a duplicate/copy is a NEW estimate; a create inside
+   an outer transaction is not numbered there (the global advisory lock
+   would be held until that transaction commits) and the next create heals it.
+   ====================================================================== */
+import { patchDoc as e223tPatch, upsertDocs as e223tUpsertMany } from "@/db/doc-store";
+
+async function estimate223WritersAsyncChecks(): Promise<void> {
+  const id = (slug: string) => fixtureId(223, slug);
+  const lead = await e223Leads.create({ id: id("w-lead"), org: "#223 Writers" }, "spec");
+  e223Register("leads", lead.id);
+  const q1 = await e223Quotes.create({ id: id("w-q1"), name: "#223 w1", owner: "spec", leadId: lead.id });
+  e223Register("quotes", q1.id);
+  const q2 = await e223Quotes.create({ id: id("w-q2"), name: "#223 w2", owner: "spec", leadId: lead.id });
+  e223Register("quotes", q2.id);
+  ok(e223IsNo(q2.estNo) && q2.estNo === lead.estNo && q2.estSuffix === 2, "#223 writers: fixtures numbered (the -2 is what the stale writes below must keep)");
+
+  // A copy read BEFORE numbering, written back after it (a stale whole doc).
+  const stale = { ...q2 } as E223Quote;
+  delete stale.estNo;
+  delete stale.estSuffix;
+  await e223fUpsert("quotes", { ...stale, name: "#223 w2 stale" });
+  const afterStale = await e223Quotes.get(q2.id);
+  ok(
+    afterStale?.estNo === q2.estNo && afterStale?.estSuffix === 2 && afterStale?.name === "#223 w2 stale",
+    "#223 writers: a stale whole-doc upsert (no estNo) keeps the stored number and suffix, and still saves its other fields"
+  );
+  await e223fUpsert("quotes", { ...stale, estNo: 1, estSuffix: 7 });
+  const afterForged = await e223Quotes.get(q2.id);
+  ok(afterForged?.estNo === q2.estNo && afterForged?.estSuffix === 2, "#223 writers: a whole-doc upsert carrying a different estNo/estSuffix cannot change them");
+  await e223tUpsertMany("quotes", [{ ...stale, name: "#223 w2 batch" }]);
+  const afterBatch = await e223Quotes.get(q2.id);
+  ok(afterBatch?.estNo === q2.estNo && afterBatch?.estSuffix === 2 && afterBatch?.name === "#223 w2 batch", "#223 writers: a batch upsert keeps the stored number too");
+  await e223tUpsertMany("quotes", [{ ...stale, estNo: 1, estSuffix: 7 }]);
+  const afterBatchForged = await e223Quotes.get(q2.id);
+  ok(afterBatchForged?.estNo === q2.estNo && afterBatchForged?.estSuffix === 2, "#223 writers: …and a batch upsert cannot rewrite it");
+  await e223tPatch<E223Lead>("leads", lead.id, (l) => {
+    delete l.estNo;
+    l.interest = "#223 stale patch";
+    return l;
+  });
+  const afterPatch = await e223Leads.get(lead.id);
+  ok(afterPatch?.estNo === lead.estNo && afterPatch?.interest === "#223 stale patch", "#223 writers: a patchDoc whose doc lost estNo (read before numbering) keeps the stored number");
+  await e223tPatch<E223Lead>("leads", lead.id, (l) => ({ ...l, estNo: 1 }));
+  ok((await e223Leads.get(lead.id))?.estNo === lead.estNo, "#223 writers: a patchDoc cannot rewrite a lead's number");
+
+  // A duplicate/copy of a numbered quote is a new estimate — the spread
+  // estNo/estSuffix never travel (create() builds field by field).
+  const src = (await e223Quotes.get(q1.id))!;
+  const dup = await e223Quotes.create({ ...src, id: id("w-dup"), leadId: null, name: "#223 w1 copy" });
+  e223Register("quotes", dup.id);
+  ok(e223IsNo(dup.estNo) && dup.estNo > (q2.estNo ?? 0) && dup.estSuffix === undefined, "#223 writers: a duplicate of a numbered quote gets its own new number");
+  const minted = await e223Quotes.create({ ...src, id: undefined, leadId: null, name: "#223 w1 copy 2" });
+  e223Register("quotes", minted.id);
+  ok(e223IsNo(minted.estNo) && minted.estNo === (dup.estNo ?? 0) + 1, "#223 writers: …a minted-id copy too (the next number, never the source's)");
+
+  // Inside an outer transaction the create is not numbered (the lock would
+  // live as long as that transaction); the next create outside heals it.
+  e223Register("quotes", id("w-intx"));
+  const inTx: { q: E223Quote | null } = { q: null };
+  await e223Tx(async () => {
+    inTx.q = await e223Quotes.create({ id: id("w-intx"), name: "#223 in tx", owner: "spec" });
+  });
+  ok(!!inTx.q && inTx.q.estNo === undefined, "#223 writers: a create inside an outer transaction is left unnumbered (never holds the global numbering lock past its own statement)");
+  const healer = await e223Quotes.create({ id: id("w-healer"), name: "#223 healer", owner: "spec" });
+  e223Register("quotes", healer.id);
+  const healed = await e223Quotes.get(id("w-intx"));
+  ok(e223IsNo(healed?.estNo) && e223IsNo(healer.estNo) && (healed?.estNo ?? 0) < healer.estNo, "#223 writers: …and the next create outside a transaction numbers it (oldest first)");
+}
+
+/* ======================================================================
+   #223 — display sweep A: search + quotes hub + intake + Estimator. The
+   screens are server/client components the harness can't render, so these
+   are landmark guards: the old id-as-label text is gone and the number
+   helpers are wired in. Behaviour of the helpers is asserted in Task 1.
+   ====================================================================== */
+import { quoteDocumentDataFor as e223QuoteDocData } from "@/lib/quote-pdf/quote-document-data";
+import { pdfDocKey as e223PdfDocKey } from "@/app/(app)/estimator/pdf-doc-key";
+import { DEFAULT_PDF_OPTIONS as E223_DEFAULT_PDF_OPTIONS } from "@/lib/quote-pdf/pdf-options";
+function e223Src(rel: string): string {
+  return e223ReadFile(e223Join(process.cwd(), rel), "utf8");
+}
+{
+  const hub = e223Src("src/app/(app)/quotes/page.tsx");
+  ok(!hub.includes("{q.id} · {owner}") && hub.includes("{displayQuoteNumber(q)} · {owner}"), "#223 quotes hub: rows show the estimate number, not the internal id");
+  ok(hub.includes("quoteMatchesSearch(q, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
+  ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
+  ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
+  ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
+  const search = e223Src("src/app/api/search/route.ts");
+  ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
+  // Designs/surveys/inspections keep their own ids; only the Quotes → Designs span is checked.
+  const quoteGroups = search.slice(search.indexOf('"Quotes",'), search.indexOf('"Designs",'));
+  ok(quoteGroups.length > 0 && !quoteGroups.includes("sub: `${d.id} · ") && quoteGroups.includes("displayLeadNumber("), "#223 ⌘K: quote and opportunity sub-lines show numbers, not ids");
+  ok(search.includes("quoteSearchRank("), "#223 ⌘K: exact-number quote hits rank first");
+  const intake = e223Src("src/app/(app)/quotes/new/intake-form.tsx");
+  ok(!intake.includes("replacing.id") && intake.includes("replacing.number"), "#223 Change type intake names the quote by its number");
+  const est = e223Src("src/app/(app)/estimator/estimator-client.tsx");
+  ok(est.includes("setQuoteId(res.number ?? res.id)") && est.includes("({moveNotice.targetNumber})"), "#223 Estimator: header + move notice show numbers");
+  ok(e223Src("src/app/(app)/estimator/page.tsx").includes("quoteId: displayQuoteNumber(q)"), "#223 Estimator: the header label starts as the quote's number");
+  ok(e223Src("src/app/(app)/estimator/section-card.tsx").includes("{hit.number}"), "#223 Estimator: the move-to picker lists numbers");
+  ok(e223Src("src/app/(app)/estimator/actions.ts").includes("quoteSearchRank("), "#223 Estimator: the move-to picker finds by number and ranks exact hits first");
+
+  // The saved customer PDF (#222) prints the number; an unnumbered quote its id.
+  const docBase = { name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 };
+  const numbered = e223QuoteDocData({ ...docBase, id: "Q-2041", estNo: 1005, estSuffix: 2 } as never, null, { companyName: "", logoDark: null });
+  const unnumbered = e223QuoteDocData({ ...docBase, id: "Q-2042" } as never, null, { companyName: "", logoDark: null });
+  ok(numbered.quoteId === "EST-1005-2" && unnumbered.quoteId === "Q-2042", "#223 saved quote PDF: prints the estimate number, else the internal id");
+  // …and the PDF's fingerprint carries that number, so a renumbered document reads as out of date.
+  const keyBase = {
+    projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "",
+    paymentTerms: "Unknown", sections: [], vendorQuotes: [], pdfOptions: E223_DEFAULT_PDF_OPTIONS,
+  };
+  ok(
+    e223PdfDocKey({ ...keyBase, quoteNumber: "Q-2041" }) !== e223PdfDocKey({ ...keyBase, quoteNumber: "EST-1005" }) &&
+      e223PdfDocKey({ ...keyBase, quoteNumber: "EST-1005" }) === e223PdfDocKey({ ...keyBase, quoteNumber: "EST-1005" }),
+    "#223 pdfDocKey: the printed estimate number is part of the saved-PDF fingerprint"
+  );
+}
+
+/* ======================================================================
+   #223 — display sweep B: builders, letters, PDFs, packages, repairs, portal.
+   Landmark guards, like sweep A: text shown to people prints the estimate
+   number; hrefs, hidden inputs, Blob paths and package keys keep the id.
+   ====================================================================== */
+{
+  for (const b of ["flame-tests", "repairs", "inspections", "rentals"]) {
+    const c = e223Src(`src/app/(app)/${b}/quote/controls.tsx`);
+    const p = e223Src(`src/app/(app)/${b}/quote/page.tsx`);
+    ok(c.includes("Saved {savedNumber}") && !c.includes("Saved {savedId}") && p.includes("savedNumber: displayQuoteNumber(editQuote)"), `#223 ${b} builder: the saved toast names the estimate number`);
+  }
+  ok(e223Src("src/app/(app)/design/engagements/quote/controls.tsx").includes("`Consulting proposal ${initial.number}`"), "#223 consulting builder header shows the number");
+  // The letter pages delegate to letter-view.tsx (#222 print route shares it), so that's where the lines live.
+  for (const l of ["flame-tests", "inspections"]) {
+    const s = e223Src(`src/app/(app)/${l}/letter/letter-view.tsx`);
+    ok(!s.includes('v: quote.id }') && !s.includes("Work Order {quote.id}") && s.includes('{ k: "Document", v: displayQuoteNumber(quote) }') && s.includes("Work Order {displayQuoteNumber(quote)}"), `#223 ${l} letter: Document + Work Order lines print the number`);
+  }
+  ok(e223Src("src/app/(app)/rentals/quote/letter/route.ts").includes("Rental-agreement-${displayQuoteNumber(quote)}.pdf"), "#223 rental agreement PDF is named by number");
+  const ren = e223Src("src/lib/renewal-outreach.ts");
+  ok(!ren.includes('renewal-" + quote.id + ".pdf') && ren.includes('"Rigging-inspection-renewal-" + displayQuoteNumber(quote) + ".pdf"'), "#223 renewal PDFs are named by number");
+  const pkg = e223Src("src/lib/client-package-server.ts");
+  ok(pkg.includes('{ label: "Quote", value: displayQuoteNumber(quote) }') && pkg.includes("client-packages/quote-${safeName(quote.id)}/"), "#223 client package prints the number; its Blob path keeps the id");
+  ok(e223Src("src/lib/stores/repair-jobs.ts").includes('"From quote " + displayQuoteNumber(q)'), "#223 a repair job's source label names the quote's number");
+  ok(e223Src("src/app/portal/page.tsx").includes('displayQuoteNumber(q) + " · "'), "#223 portal lists quotes by number");
+  // #222's saved-PDF download routes name the file by number; the file is still looked up by id.
+  const teamPdf = e223Src("src/app/api/quotes/[id]/pdf/route.ts");
+  const portalPdf = e223Src("src/app/portal/quotes/[id]/pdf/route.ts");
+  ok(teamPdf.includes("pdfFileName(displayQuoteNumber(q), rev)") && portalPdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && teamPdf.includes("getQuote(id)"), "#223 saved quote PDF downloads (team + portal) are named by number");
+}
+
+/* ======================================================================
+   #223 — display sweep C: Grid, Designs/Home promote, Specs, engagements.
+   ====================================================================== */
+{
+  const ed = e223Src("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId"), "#223 Grid editor: 'Update draft quote' names the number");
+  ok(!e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("quoted as ${q.id}"), "#223 Grid revisions note the quote by number");
+  ok(
+    !e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("${existing.id} is already") &&
+      e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("${displayQuoteNumber(existing)} is already"),
+    "#223 Grid 'already sent — cut a revision' names the quote by number"
+  );
+  ok(e223Src("src/app/(app)/design/grid/[id]/set/page.tsx").includes("optionQuoteNo"), "#223 drawing set title block prints the number");
+  ok(e223Src("src/app/(app)/design/designs/design-client.tsx").includes("{promotedNo ?? promotedId}"), "#223 Designs: 'linked to quote' shows the number");
+  ok(e223Src("src/app/(app)/home-my-designs.tsx").includes("{promotedNo ?? promoted}"), "#223 Home: 'Added to Quotes as' shows the number");
+  ok(e223Src("src/app/(app)/design/specs/[id]/header-fields.tsx").includes("quoteNumber || s.quoteId"), "#223 Spec builder: source line names the quote's number");
+  ok(e223Src("src/app/(app)/design/engagements/view.tsx").includes("Quote {q.number}"), "#223 engagement overview names the proposal by number");
+  ok(e223Src("src/app/(app)/design/engagements/actions.ts").includes("resolveQuoteInput("), "#223 engagement quote fields accept an estimate number or an old id");
+}
+
+/* ======================================================================
+   #223 — display sweep D + the client-import guard.
+   ====================================================================== */
+import { relabelLinkedRecord as e223Relabel } from "@/lib/estimate-number";
+import { quoteFeedRows as e223FeedRows } from "@/lib/customer-feed-rows";
+{
+  ok(e223Relabel("Q-2041 · Lakefront", "Q-2041", "FLM-1002") === "FLM-1002 · Lakefront", "#223 relabel: a stored 'id · name' label shows the number");
+  ok(e223Relabel("FLM-1002 · Lakefront", "Q-2041", "FLM-1002") === "FLM-1002 · Lakefront", "#223 relabel: a label already carrying the number is left alone");
+  ok(e223Relabel("", "L-1050", "OPP-1003") === "OPP-1003" && e223Relabel(null, "L-1050", null) === "L-1050", "#223 relabel: blank label → number, else id");
+  ok(e223Relabel("Custom text", "Q-2041", "EST-1001") === "Custom text", "#223 relabel: a hand-written label is kept");
+  const fr = e223FeedRows({ id: "Q-2041", estNo: 1002, quoteType: "flame_test", name: "Riverside", history: [{ at: 1, to: "sent" }] });
+  ok(fr[0]?.title === "Quote FLM-1002 sent", "#223 company feed: quote rows name the estimate number");
+  const leadsPage = e223Src("src/app/(app)/leads/page.tsx");
+  ok(leadsPage.includes("idContact: displayLeadNumber(l)") && leadsPage.includes("buildDrawerVM(leadRec, convertedQuote)"), "#223 leads: table + drawer use numbers");
+  ok(e223Src("src/app/(app)/leads/lead-drawer.tsx").includes("Open quote {vm.quoteNumber}"), "#223 lead drawer: 'Open quote' names the number");
+  ok(e223Src("src/app/(app)/opportunities/page.tsx").includes("numberOf(r)"), "#223 opportunities board cards carry the number");
+  ok(e223Src("src/app/(app)/inbox/page.tsx").includes("relabelLinkedRecord("), "#223 inbox: work-link labels show live numbers");
+  ok(e223Src("src/app/(app)/reviews/review-list.tsx").includes("{it.displayId}"), "#223 reviews list names quotes by number");
+  // No client component may import the server-only allocator/lookup module.
+  const clientImporters: string[] = [];
+  for (const rel of e223ReadDir(e223Join(process.cwd(), "src"), { recursive: true }) as string[]) {
+    if (!/\.(tsx?|jsx?)$/.test(rel)) continue;
+    const src = e223ReadFile(e223Join(process.cwd(), "src", rel), "utf8");
+    if (/^\s*["']use client["']/.test(src) && src.includes("@/lib/stores/estimate-numbers")) clientImporters.push(rel);
+  }
+  ok(clientImporters.length === 0, `#223 no "use client" file imports @/lib/stores/estimate-numbers (${clientImporters.join(", ")})`);
+}
+
+/* ======================================================================
+   #223 T7 extras — ⌘K partial numbers with a prefix, an ambiguous bare
+   number in the engagement quote fields, a thread's lead number carried
+   to "+ New quote", and live numbers in the inbox's new-quote link label.
+   ====================================================================== */
+import {
+  partialEstimateDigits as e223PartialDigits,
+  pickQuoteForNumber as e223PickForNumber,
+  ambiguousQuoteNumberMessage as e223AmbiguousMsg,
+} from "@/lib/estimate-number";
+import { resolveQuoteInput as e223ResolveInput, quotesByPartialNumber as e223ByPartial } from "@/lib/stores/estimate-numbers";
+import { linkThreadToNewQuote as e223LinkNewQuote } from "@/lib/gmail/linking";
+{
+  ok(
+    e223PartialDigits("flm100") === "100" &&
+      e223PartialDigits("FLM-100") === "100" &&
+      e223PartialDigits("est 10") === "10" &&
+      e223PartialDigits("1005-2") === "1005" &&
+      e223PartialDigits("#1002") === "1002",
+    "#223 ⌘K: a known prefix + partial digits (flm100, FLM-100) reduce to the digits to search"
+  );
+  ok(
+    e223PartialDigits("xyz100") === null && e223PartialDigits("Q-2041") === null && e223PartialDigits("riverside") === null && e223PartialDigits("") === null,
+    "#223 ⌘K: unknown prefixes, old ids and words are not partial numbers"
+  );
+  const hits = [
+    { id: "Q-a", estNo: 1010, quoteType: "system", customerId: "c-a" },
+    { id: "Q-b", estNo: 1010, estSuffix: 2, quoteType: "system", customerId: "c-a" },
+  ];
+  const bare = e223Parse("1010")!;
+  const r1 = e223PickForNumber(hits, bare, ["c-a"]);
+  ok("id" in r1 && r1.id === "Q-a", "#223 quote input: a bare number shared by several quotes takes the unsuffixed one of the engagement's customer");
+  const r2 = e223PickForNumber(hits, bare, ["c-other"]);
+  ok("otherCompany" in r2, "#223 quote input: a number whose quotes all belong to another company is refused as such, never 'No quote … exists'");
+  const r2b = e223PickForNumber(hits, bare, []);
+  ok("ambiguous" in r2b && r2b.ambiguous.join(",") === "EST-1010,EST-1010-2", "#223 quote input: no customer scope → a shared bare number is ambiguous, listing the full numbers");
+  const r2c = e223PickForNumber([...hits, { id: "Q-c", estNo: 1010, estSuffix: 3, quoteType: "system", customerId: "c-z" }], e223Parse("1010-3")!, ["c-a"]);
+  ok("otherCompany" in r2c, "#223 quote input: an exact number belonging to another company is refused");
+  const r2d = e223PickForNumber([{ id: "Q-x", estNo: 1011, quoteType: "system", customerId: "c-z" }, { id: "Q-y", estNo: 1011, estSuffix: 2, quoteType: "system", customerId: "c-a" }], e223Parse("1011")!, ["c-a"]);
+  ok("id" in r2d && r2d.id === "Q-y", "#223 quote input: the customer scope narrows a shared number to the one quote in scope");
+  const r3 = e223PickForNumber(hits, e223Parse("EST-1010")!, []);
+  ok("id" in r3 && r3.id === "Q-a", "#223 quote input: a typed full number (prefix, no suffix) names the unsuffixed quote exactly");
+  const r4 = e223PickForNumber(hits, e223Parse("1010-2")!, []);
+  ok("id" in r4 && r4.id === "Q-b", "#223 quote input: a suffixed number names its quote");
+  ok("none" in e223PickForNumber([], bare, []), "#223 quote input: no hit → none");
+  const msg = e223AmbiguousMsg(["EST-1010", "EST-1010-2"]);
+  ok(msg === "That number matches more than one quote — use the full number (e.g. EST-1010-2).", "#223 quote input: the ambiguity copy asks for the full number");
+  const engActions = e223Src("src/app/(app)/design/engagements/actions.ts");
+  ok(
+    (engActions.match(/resolveQuoteInput\(/g) || []).length >= 2 &&
+      engActions.includes("ambiguousQuoteNumberMessage(") &&
+      (engActions.match(/That quote belongs to another company\./g) || []).length >= 1 &&
+      engActions.includes("String(quoteId).trim().slice(0, 120)") &&
+      engActions.includes('String(quoteId || "").trim().slice(0, 120)'),
+    "#223 engagement quote fields (install + consulting) resolve through resolveQuoteInput, scoped to the company, bounded, and report ambiguity / another company"
+  );
+  ok(e223Src("src/app/api/search/route.ts").includes("quotesByPartialNumber("), "#223 ⌘K: partial numbers reach the quote candidates");
+  ok(e223Src("src/lib/gmail/linking.ts").includes("leadId"), "#223 inbox + New quote passes the thread's lead");
+}
+
+async function estimate223SweepDAsyncChecks(): Promise<void> {
+  const id = (slug: string) => fixtureId(223, slug);
+  // C — resolveQuoteInput against real numbered quotes.
+  const lead = await e223Leads.create({ id: id("t7-lead"), org: "#223 T7 Co" }, "spec");
+  e223Register("leads", lead.id);
+  const qa = await e223Quotes.create({ id: id("t7-qa"), name: "#223 t7 a", owner: "spec", leadId: lead.id, customerId: "c223-t7" });
+  e223Register("quotes", qa.id);
+  const qb = await e223Quotes.create({ id: id("t7-qb"), name: "#223 t7 b", owner: "spec", leadId: lead.id, customerId: "c223-t7" });
+  e223Register("quotes", qb.id);
+  const n = String(lead.estNo);
+  const mine = await e223ResolveInput(n, { customerIds: ["c223-t7"] });
+  ok(mine.ok && mine.id === qa.id, "#223 resolveQuoteInput: a bare shared number takes the engagement customer's unsuffixed quote");
+  const theirs = await e223ResolveInput(n, { customerIds: ["c223-nobody"] });
+  ok(!theirs.ok && theirs.reason === "other-company", "#223 resolveQuoteInput: …another company's quotes are refused as another company's");
+  const global = await e223ResolveInput(n);
+  ok(!global.ok && global.reason === "ambiguous" && global.numbers.includes(`EST-${n}-2`), "#223 resolveQuoteInput: no scope → ambiguous, with the full numbers");
+  const byIdOther = await e223ResolveInput(qb.id, { customerIds: ["c223-nobody"] });
+  ok(byIdOther.ok && byIdOther.id === qb.id, "#223 resolveQuoteInput: an internal id resolves globally, even scoped to a company that doesn't own it");
+  const byId = await e223ResolveInput(qb.id);
+  const missing = await e223ResolveInput("EST-999999999");
+  ok(byId.ok && byId.id === qb.id && !missing.ok && missing.reason === "none", "#223 resolveQuoteInput: an internal id still works; an unknown number is 'none'");
+  ok((await e223FindQuote(n)) === null, "#223 findQuoteIdByNumberOrId keeps refusing an ambiguous bare number");
+
+  // C2 — review fix: a FULL typed number (a prefix) resolves globally, even
+  // scoped to a company that doesn't own the exact match — an install quote
+  // is often billed to a GC/architect, not the engagement's own customer.
+  // A bare number stays scoped. Two quotes share one lead's number: the
+  // unsuffixed one billed to "the GC", the suffixed one billed to the
+  // engagement's own customer.
+  const lead2 = await e223Leads.create({ id: id("t7-lead2"), org: "#223 T7 Co 2" }, "spec");
+  e223Register("leads", lead2.id);
+  const qGc = await e223Quotes.create({ id: id("t7-gc"), name: "#223 t7 gc", owner: "spec", leadId: lead2.id, customerId: "c223-gc" });
+  e223Register("quotes", qGc.id);
+  const qEng = await e223Quotes.create({ id: id("t7-eng"), name: "#223 t7 eng", owner: "spec", leadId: lead2.id, customerId: "c223-eng" });
+  e223Register("quotes", qEng.id);
+  const n2 = String(lead2.estNo);
+  const fullOtherCompany = await e223ResolveInput(`EST-${n2}`, { customerIds: ["c223-eng"] });
+  ok(
+    fullOtherCompany.ok && fullOtherCompany.id === qGc.id,
+    "#223 resolveQuoteInput: a full typed number resolves globally — EST-<n> picks the GC's unsuffixed quote even scoped to the engagement's own customer"
+  );
+  const bareStaysScoped = await e223ResolveInput(n2, { customerIds: ["c223-eng"] });
+  ok(bareStaysScoped.ok && bareStaysScoped.id === qEng.id, "#223 resolveQuoteInput: a bare number (no prefix) still scopes to the engagement's customer");
+  const fullSuffixedOtherCompany = await e223ResolveInput(`EST-${n2}-2`, { customerIds: ["c223-gc"] });
+  ok(
+    fullSuffixedOtherCompany.ok && fullSuffixedOtherCompany.id === qEng.id,
+    "#223 resolveQuoteInput: a full suffixed number (EST-<n>-2) also resolves globally, scoped or not"
+  );
+
+  // B — ⌘K candidates by prefix + partial digits.
+  const partial = await e223ByPartial(`est${n.slice(0, -1)}`, 500);
+  ok(partial.some((d) => d.id === qa.id) && partial.some((d) => d.id === qb.id), "#223 ⌘K: 'est' + a partial number finds quotes by their estNo digits");
+  ok((await e223ByPartial("riverside", 500)).length === 0, "#223 ⌘K: a word never triggers the number lookup");
+
+  // A — "+ New quote" on a thread linked to a lead carries the lead's number.
+  const thread = await createFixture("comms", {
+    id: id("t7-thread"), mailbox: "personal", mailboxUser: "Test Harness", unread: false, archived: false,
+    customerId: "c223-t7", customer: "#223 T7 Co", contactName: "", contactEmail: "t7@example.test",
+    subject: "#223 T7 thread", channel: "email", status: "waiting_us", assignedTo: "", messages: [],
+    link: { type: "lead", id: lead.id, label: `${lead.id} · #223 T7 Co` }, createdAt: Date.now(), updatedAt: Date.now(),
+  } as never);
+  const made = await e223LinkNewQuote(
+    (thread as { id: string }).id,
+    { customerId: "c223-t7", customer: "#223 T7 Co", locationId: null, contactName: "", quoteType: "flame_test", category: "", owner: "spec" },
+    { confirmReplace: true }
+  );
+  if (made.ok) e223Register("quotes", made.quoteId);
+  const mq = made.ok ? await e223Quotes.get(made.quoteId) : null;
+  ok(
+    !!mq && mq.leadId === lead.id && mq.estNo === lead.estNo && mq.estSuffix === 3 && e223FormatQuote(mq) === `FLM-${n}-3`,
+    "#223 inbox + New quote: a thread linked to a lead gives the new quote the lead's number (next suffix)"
+  );
+  const th = await e223GetRows<{ id: string; link?: { label?: string } }>("comms", [id("t7-thread")]);
+  ok(th[0]?.doc.link?.label === `FLM-${n}-3 · ${mq?.name}`, "#223 inbox + New quote: the thread's new link label names the quote by number");
 }

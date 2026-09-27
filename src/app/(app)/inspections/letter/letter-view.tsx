@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { locationById, nameFor } from "@/lib/stores/customers";
 import { levelMeta } from "@/lib/stores/inspections";
@@ -230,7 +231,7 @@ export async function InspectionLetterView({ id }: { id: string }) {
   const validThruMs = addDays(quote.createdAt, 30);
   const validThruLabel = longDate(validThruMs);
   const controlFields: Array<{ k: string; v: string }> = [
-    { k: "Document", v: quote.id },
+    { k: "Document", v: displayQuoteNumber(quote) },
     { k: "Issued", v: isoDate(quote.createdAt) },
     { k: "Valid through", v: isoDate(validThruMs) },
     { k: "Level", v: lm.label },
@@ -667,7 +668,7 @@ export async function InspectionLetterView({ id }: { id: string }) {
                   letterSpacing: ".02em",
                 }}
               >
-                Work Order {quote.id} · Valid through {validThruLabel} · This work order constitutes a
+                Work Order {displayQuoteNumber(quote)} · Valid through {validThruLabel} · This work order constitutes a
                 proposal valid for 30 days from issue.
               </div>
             </div>

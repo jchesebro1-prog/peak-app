@@ -54,6 +54,7 @@ import {
   setProjectValueAction,
 } from "./actions";
 import { TasksCard } from "@/components/tasks-card";
+import { displayQuoteNumber, type QuoteNumberFields } from "@/lib/estimate-number";
 import { DocumentsCard } from "@/components/documents/documents-card";
 import { ApplyTemplateControl } from "@/components/apply-template-control";
 import { SegmentedToggle } from "@/components/ui";
@@ -502,7 +503,7 @@ export function ProjectsView({
                   {q.name}
                 </div>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 3 }}>
-                  {q.id} · {custName({ customerId: q.customerId ?? null, customer: q.customer ?? "" })} · {money(q.value)}
+                  {displayQuoteNumber(q as QuoteNumberFields & { id: string })} · {custName({ customerId: q.customerId ?? null, customer: q.customer ?? "" })} · {money(q.value)}
                 </div>
               </div>
               <span

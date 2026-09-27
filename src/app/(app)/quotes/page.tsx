@@ -22,6 +22,7 @@ import { NewQuoteMenu, OwnerSelect, QuoteRevisions } from "./controls";
 import { setQuoteStatus, submitQuoteForReview, createQuoteClientPackageAction } from "./actions";
 import { DeleteQuoteButton } from "./delete-quote-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import { displayQuoteNumber, quoteMatchesSearch, quoteSearchRank } from "@/lib/estimate-number";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
 /** #222 fix wave 1: recalling a revision renders the quote's saved PDF in `after()`, inside this budget. */
@@ -153,6 +154,8 @@ export default async function QuotesPage({
   const typeParam = one(sp.type);
   const typeFilter = (TYPE_KEYS as readonly string[]).includes(typeParam) ? typeParam : "all";
   const selectedId = one(sp.id);
+  // #223 — search by estimate number (FLM-1002, 1002), old id, name, customer.
+  const searchTerm = one(sp.q).trim();
   // Punch #60: setQuoteStatus (quotes/actions.ts) redirects back here with
   // this param when the store's approval gate refuses a status change (e.g.
   // an unapproved quote pushed straight to Won from these plain buttons) —
@@ -168,6 +171,7 @@ export default async function QuotesPage({
     status?: string;
     type?: string;
     id?: string | null;
+    q?: string;
   }) => {
     const qs = new URLSearchParams();
     const w = over.who ?? (scope === "all" ? "all" : scope);
@@ -176,6 +180,8 @@ export default async function QuotesPage({
     if (w && w !== "all") qs.set("who", w);
     if (st && st !== "all") qs.set("status", st);
     if (ty && ty !== "all") qs.set("type", ty);
+    const term = over.q ?? searchTerm;
+    if (term) qs.set("q", term);
     if (over.id) qs.set("id", over.id);
     const s = qs.toString();
     return "/quotes" + (s ? "?" + s : "");
@@ -185,6 +191,16 @@ export default async function QuotesPage({
   let scoped = quotes;
   if (scope === "mine") scoped = quotes.filter((q) => q.owner === me);
   else if (scope !== "all") scoped = quotes.filter((q) => q.owner === scope);
+
+  /* ---- #223 search (before the type counts, so the rail counts matches).
+     Exact-number hits list first; within a tier getAll()'s order holds. ---- */
+  if (searchTerm) {
+    scoped = scoped
+      .filter((q) => quoteMatchesSearch(q, searchTerm))
+      .map((q, i) => ({ q, i, r: quoteSearchRank(q, searchTerm) ?? Number.MAX_SAFE_INTEGER }))
+      .sort((a, b) => a.r - b.r || a.i - b.i)
+      .map((x) => x.q);
+  }
 
   /* ---- quote-type filter (IDEAS #22 — one hub, filtered by type; a quote
      with no quoteType is a system quote) ---- */
@@ -244,8 +260,11 @@ export default async function QuotesPage({
     scope === "mine" ? "your" : scope === "all" ? "the team’s" : firstName(scope) + "’s";
   const standfirst =
     scoped.length + " quotes · " + money(openValue) + " open in " + scopeLabel + " pipeline";
-  const emptyMsg =
-    scope === "mine" ? "You have no quotes in this stage." : "No quotes in this stage.";
+  const emptyMsg = searchTerm
+    ? `No quotes match “${searchTerm}”.`
+    : scope === "mine"
+      ? "You have no quotes in this stage."
+      : "No quotes in this stage.";
 
   return (
     <div className="pk-content qt-pad">
@@ -353,6 +372,20 @@ export default async function QuotesPage({
             </Link>
           </div>
           <OwnerSelect value={ownerSelectValue} options={ownerOptions} />
+          <form method="get" action="/quotes" style={{ display: "flex" }}>
+            {scope !== "all" && <input type="hidden" name="who" value={scope} />}
+            {filter !== "all" && <input type="hidden" name="status" value={filter} />}
+            {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
+            <input
+              type="search"
+              name="q"
+              defaultValue={searchTerm}
+              placeholder="Search FLM-1002, Q-2041, name…"
+              aria-label="Search quotes by number, old id, name or customer"
+              className="pk-input"
+              style={{ fontSize: 12.5, padding: "6px 10px", minWidth: 0, width: 220, maxWidth: "100%" }}
+            />
+          </form>
         </div>
         <div
           className="qt-rowscroll"
@@ -634,7 +667,7 @@ export default async function QuotesPage({
                       marginTop: 3,
                     }}
                   >
-                    {q.id} · {owner}
+                    {displayQuoteNumber(q)} · {owner}
                   </div>
                 </div>
                 <div
@@ -828,6 +861,13 @@ function SelectedPanel({
           {packageError}
         </div>
       )}
+      {/* #223 — the estimate number, and the internal id it replaced */}
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 700, color: "#16181d", marginBottom: 8 }}>
+        {displayQuoteNumber(q)}
+        {displayQuoteNumber(q) !== q.id && (
+          <span style={{ fontWeight: 400, fontSize: 10.5, color: "#aab0bb", marginLeft: 8 }}>was {q.id}</span>
+        )}
+      </div>
       {/* review & approval banner (Estimator port) */}
       <div
         style={{
@@ -956,6 +996,7 @@ function SelectedPanel({
         {/* punch item 24 — snapshot / recall this quote's pricing */}
         <QuoteRevisions
           id={q.id}
+          number={displayQuoteNumber(q)}
           revisions={(q.revisions || []).map((r) => ({
             rev: r.rev,
             at: r.at,

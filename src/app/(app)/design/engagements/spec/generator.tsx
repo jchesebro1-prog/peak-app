@@ -62,7 +62,7 @@ export default function SpecGenerator({
 }: {
   engagement: { id: string; name: string; customer: string };
   sections: SectionLite[];
-  sourceQuotes: Array<{ id: string; name: string; customer: string; value: number }>;
+  sourceQuotes: Array<{ id: string; number: string; name: string; customer: string; value: number }>;
   saved: Array<{
     id: string;
     source: string;
@@ -212,7 +212,7 @@ export default function SpecGenerator({
             <div style={{ display: "grid", gap: 6 }}>
               {sourceQuotes.map((q) => (
                 <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, padding: "6px 0", borderTop: "1px solid #f4f5f7" }}>
-                  <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{q.id}</span>
+                  <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>{q.number}</span>
                   <span style={{ flex: 1, color: "#3d424e" }}>{q.name}</span>
                   <button style={BTN} disabled={busy} onClick={() => fromQuote(q.id)}>
                     Use this

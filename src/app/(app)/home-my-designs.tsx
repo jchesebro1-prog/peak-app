@@ -39,6 +39,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
   const [, startTransition] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [promoted, setPromoted] = useState<string | null>(null);
+  const [promotedNo, setPromotedNo] = useState<string | null>(null);
   /** A refused promote (#211 D319: the server re-price found a line that needs a part). */
   const [promoteError, setPromoteError] = useState<{ id: string; msg: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,8 +62,12 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
         return;
       }
       setPromoted(res.id);
+      setPromotedNo(res.number);
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setPromoted(null), 6000);
+      timer.current = setTimeout(() => {
+        setPromoted(null);
+        setPromotedNo(null);
+      }, 6000);
       router.refresh();
     });
   };
@@ -357,7 +362,7 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
           />
           <span style={{ fontSize: 13, lineHeight: 1.4 }}>
             Added to Quotes as{" "}
-            <b style={{ fontFamily: "var(--font-mono)" }}>{promoted}</b> — flagged for
+            <b style={{ fontFamily: "var(--font-mono)" }}>{promotedNo ?? promoted}</b> — flagged for
             requote
           </span>
           <Link
@@ -373,7 +378,10 @@ export default function HomeMyDesigns({ cards }: { cards: DesignCard[] }) {
             Requote now
           </Link>
           <button
-            onClick={() => setPromoted(null)}
+            onClick={() => {
+              setPromoted(null);
+              setPromotedNo(null);
+            }}
             style={{
               width: 24,
               height: 24,

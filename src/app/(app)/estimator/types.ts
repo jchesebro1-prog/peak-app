@@ -302,6 +302,8 @@ export type CatalogSearch = { hits: CatalogHit[]; total: number };
 /** One estimate hit for the "move system to existing estimate" picker. */
 export type QuoteLite = {
   id: string;
+  /** #223 — the estimate number shown in the picker. */
+  number: string;
   name: string;
   customer: string;
   status: QuoteStatus;

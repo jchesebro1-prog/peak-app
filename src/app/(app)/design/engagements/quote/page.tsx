@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import ActionError from "@/components/action-error";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -77,6 +78,7 @@ export default async function ConsultingQuotePage({
           : null;
       initial = {
         id: q.id,
+        number: displayQuoteNumber(q),
         name: q.name,
         customerId: q.customerId || "",
         venueCustomerId: pay?.venueCustomerId || q.customerId || "",

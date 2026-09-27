@@ -21,6 +21,7 @@ import { claimDomain, customersForDomain, customersForDomains } from "./domains"
 import { resolveSender, type Resolution } from "./resolve";
 import { quoteNameFromSubject } from "@/lib/inbox-links";
 import { resolveAddressFor } from "@/lib/inbox-identity";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 export async function resolveForThread(email: string): Promise<Resolution> {
   return resolveSender(email, {
@@ -391,6 +392,10 @@ export async function linkThreadToNewQuote(
     typeFields.consulting = { venueCustomerId: input.customerId, venueCustomer: input.customer };
   }
 
+  // #223 — a thread already linked to a lead (the confirmReplace path) gives
+  // the new quote that lead, so it carries the lead's number (-2, -3… when
+  // the opportunity already has quotes).
+  const leadId = t.link?.type === "lead" && (await getDoc("leads", t.link.id)) ? t.link.id : null;
   const q = await createQuote({
     name: (input.name || "").trim() || quoteNameFromSubject(t.subject),
     customer: input.customer,
@@ -401,10 +406,11 @@ export async function linkThreadToNewQuote(
     category: input.category,
     source: "inbox",
     owner: input.owner,
+    ...(leadId ? { leadId } : {}),
     ...typeFields,
   });
   if (!t.customerId) await linkThread(threadId, input.customerId, t.resolvedContactId ?? null);
-  await setLink(threadId, { type: "quote", id: q.id, label: `${q.id} · ${q.name}` });
+  await setLink(threadId, { type: "quote", id: q.id, label: `${displayQuoteNumber(q)} · ${q.name}` });
   return { ok: true, quoteId: q.id, name: q.name, reused: false };
 }
 

@@ -18,6 +18,7 @@ import { gridProjectsSeed } from "./seeds/grid-projects";
 import { equipmentLocationsSeed, equipmentItemsSeed } from "./seeds/equipment";
 import { vendorProfilesSeed } from "./seeds/vendors";
 import { defaultDashboardLayout } from "@/lib/dashboard-layout";
+import { assignEstimateNumbers } from "@/lib/stores/estimate-numbers";
 
 /**
  * Seed roster — the real Peak team (D126/D128): the prototype six plus
@@ -134,6 +135,8 @@ export async function seedDemoCollections(): Promise<number> {
       seeded++;
     }
   }
+  // #223: demo quotes/leads are written whole; number them like any new record.
+  if (seeded) await assignEstimateNumbers();
   return seeded;
 }
 

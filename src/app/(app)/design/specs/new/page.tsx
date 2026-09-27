@@ -6,6 +6,7 @@ import { getEngagement } from "@/lib/stores/engagements";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { getProject } from "@/lib/stores/grid-projects";
 import { bomFromQuote } from "@/lib/specs/quote-bom";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { specCustomerOptions } from "../customer-options";
 import NewSpecForm, { type NewSpecSource } from "./new-spec-form";
 
@@ -116,8 +117,8 @@ export default async function NewSpecPage({
       source = gridProjectId ? { kind: "grid", gridProjectId, quoteId: q.id } : { kind: "quote", quoteId: q.id };
       defaultCustomerId = defaultCustomerId || q.customerId || "";
       summary = fromLabel
-        ? `From ${fromLabel} (quote ${q.id}) — ${SECTION_PICK_NOTE}`
-        : `From quote ${q.id} — ${SECTION_PICK_NOTE}`;
+        ? `From ${fromLabel} (quote ${displayQuoteNumber(q)}) — ${SECTION_PICK_NOTE}`
+        : `From quote ${displayQuoteNumber(q)} — ${SECTION_PICK_NOTE}`;
     }
   }
   // A default the typeahead can't show would only fail the create

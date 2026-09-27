@@ -61,6 +61,7 @@ import {
   typeColor,
 } from "../lib";
 import type { SaveCustomerInput } from "../types";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
@@ -629,9 +630,9 @@ export default async function CustomerDetailPage({
                     >
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {qt.name || qt.id}
+                          {qt.name || displayQuoteNumber(qt)}
                         </div>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>{qt.id}</div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>{displayQuoteNumber(qt)}</div>
                       </div>
                       <span>
                         <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "3px 9px", borderRadius: 20 }}>

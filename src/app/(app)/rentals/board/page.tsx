@@ -11,6 +11,7 @@ import { list as listItems, type EquipmentItem } from "@/lib/stores/equipment-it
 import { list as listLocations } from "@/lib/stores/equipment-locations";
 import { shortDate } from "@/lib/format";
 import { toggleBookingStatus } from "./actions";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 
 export const metadata = { title: "Booking board — Quartzite-6" };
 
@@ -53,6 +54,7 @@ export default async function BookingBoardPage() {
     listItems(),
     listLocations(),
   ]);
+  const bookingQuoteNos = await quoteNumbersFor(bookings.map((b) => b.quoteId));
 
   const itemById = new Map<string, EquipmentItem>(items.map((i) => [i.id, i]));
   const locById = new Map(locations.map((l) => [l.id, l.name]));
@@ -197,7 +199,7 @@ export default async function BookingBoardPage() {
             href={`/rentals/quote?id=${encodeURIComponent(b.quoteId)}`}
             style={{ color: "#9aa0ab", textDecoration: "underline" }}
           >
-            {b.quoteId}
+            {bookingQuoteNos.get(b.quoteId) ?? b.quoteId}
           </Link>
         </div>
       </div>

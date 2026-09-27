@@ -7,6 +7,7 @@ import {
   priorityMeta,
 } from "@/lib/stores/repair-jobs";
 import { renderField } from "@/lib/templates";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import {
   SinglePageLetter,
   type LetterMetaRow,
@@ -34,6 +35,8 @@ export default async function ServiceCompletionLetterPage({
   ]);
   const id = oneParam(sp.job);
   const job = id ? await get(id) : null;
+  // #223 — the source quote by its estimate number (the job holds only its id).
+  const srcQuoteNo = job?.quoteId ? (await quoteNumbersFor([job.quoteId])).get(job.quoteId) : undefined;
   const companyName = settings.companyName || "Peak Systems Group";
   const accent = settings.accent || "#7b3f8a";
   if (!job) return <DocNotFound backHref="/repairs" label="repair" />;
@@ -71,7 +74,7 @@ export default async function ServiceCompletionLetterPage({
     { label: "Prepared For", value: venue },
     { label: "Attn", value: job.contact?.name || "—" },
     { label: "Location", value: location },
-    { label: "Reference", value: job.quoteId || job.source?.label || "—" },
+    { label: "Reference", value: srcQuoteNo || job.quoteId || job.source?.label || "—" },
     { label: "Priority", value: priorityMeta(job.priority).label },
     { label: "Warranty Through", value: warrantyThrough },
   ];

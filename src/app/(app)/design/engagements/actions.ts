@@ -39,6 +39,8 @@ import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { resolveQuoteInput, type QuoteInputResolution } from "@/lib/stores/estimate-numbers";
+import { ambiguousQuoteNumberMessage } from "@/lib/estimate-number";
 import { get as getCustomer, locationsForId, upsert as upsertCustomer } from "@/lib/stores/customers";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 
@@ -48,6 +50,15 @@ import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
  * Phase review CLAIM/APPROVE/CHANGES are NOT here — they run through the
  * approver-gated Reviews queue actions (reviews/actions.ts), same as quotes.
  */
+
+/** #223 — the plain-English refusal for a typed quote reference that did
+ *  not resolve to exactly one quote in scope. Never "No quote N exists"
+ *  when N exists. */
+function quoteInputError(r: Exclude<QuoteInputResolution, { ok: true }>, typed: string): string {
+  if (r.reason === "ambiguous") return ambiguousQuoteNumberMessage(r.numbers);
+  if (r.reason === "other-company") return "That quote belongs to another company.";
+  return `No quote ${typed} exists.`;
+}
 
 function uid(p?: string): string {
   return (p || "x") + Math.random().toString(36).slice(2, 8);
@@ -118,11 +129,18 @@ export async function linkInstallQuoteAction(
   quoteId: string | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireUser();
-  const clean = quoteId ? String(quoteId).trim() : null;
-  if (clean) {
+  const typed = quoteId ? String(quoteId).trim().slice(0, 120) : "";
+  let clean: string | null = null;
+  if (typed) {
+    // #223: accept an estimate number (EST-1005) as well as an internal id,
+    // scoped to the engagement's company when it has one.
+    const eng = await getEngagement(engId);
+    const r = await resolveQuoteInput(typed, { customerIds: eng?.companyId ? [eng.companyId] : [] });
+    if (!r.ok) return { ok: false, error: quoteInputError(r, typed) };
+    clean = r.id;
     // #35: validate the reference — the field used to accept any string.
     const q = await getQuote(clean);
-    if (!q) return { ok: false, error: `No quote ${clean} exists.` };
+    if (!q) return { ok: false, error: `No quote ${typed} exists.` };
     if (q.quoteType === "consulting")
       return {
         ok: false,
@@ -294,8 +312,15 @@ export async function attachProposalAction(
   quoteId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
-  const clean = String(quoteId || "").trim();
-  if (!clean) return { ok: false, error: "Enter the consulting quote id (Q-…)." };
+  const typed = String(quoteId || "").trim().slice(0, 120);
+  if (!typed) return { ok: false, error: "Enter the consulting quote number (CON-…) or id (Q-…)." };
+  // #223: resolve a typed estimate number to its quote id, scoped to the
+  // engagement's company when it has one; an unknown value passes through so
+  // attachQuoteToEngagement reports it as before.
+  const eng = await getEngagement(engId);
+  const resolved = await resolveQuoteInput(typed, { customerIds: eng?.companyId ? [eng.companyId] : [] });
+  if (!resolved.ok && resolved.reason !== "none") return { ok: false, error: quoteInputError(resolved, typed) };
+  const clean = resolved.ok ? resolved.id : typed;
   const r = await attachQuoteToEngagement(engId, clean, { name: user.name });
   if (!r.ok) return r;
   return done();

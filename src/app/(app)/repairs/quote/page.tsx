@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { travelForCustomerVenues } from "@/lib/stores/customers";
@@ -148,6 +149,7 @@ export default async function RepairQuotePage({
     saved,
     approved,
     savedId: "",
+    savedNumber: "",
     status: "draft",
     replaces: "",
   };
@@ -211,6 +213,7 @@ export default async function RepairQuotePage({
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
+      savedNumber: displayQuoteNumber(editQuote),
       status: editQuote.status,
       replaces: "",
     };
@@ -274,6 +277,7 @@ export default async function RepairQuotePage({
         saved: false,
         approved: false,
         savedId: "",
+        savedNumber: "",
         status: "draft",
         replaces: "",
       };

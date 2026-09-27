@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { create } from "@/lib/stores/leads";
+import { displayLeadNumber } from "@/lib/estimate-number";
 import { rateLimit, rateLimitRefund, clientIp } from "@/lib/rate-limit";
 
 /**
@@ -89,5 +90,5 @@ export async function POST(req: Request) {
       { status: 503 }
     );
   }
-  return NextResponse.json({ ok: true, id: lead.id }, { status: 201 });
+  return NextResponse.json({ ok: true, id: lead.id, number: displayLeadNumber(lead) }, { status: 201 });
 }
