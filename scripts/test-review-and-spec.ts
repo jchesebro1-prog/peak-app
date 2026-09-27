@@ -21412,6 +21412,7 @@ import { getDocRows as seed358GetDocRows } from "@/db/doc-store";
 
 async function specSeedOnceAsyncChecks(): Promise<void> {
   const KEY = fixtureId(358, "seed-once-flag");
+  const KEY_THROW = fixtureId(358, "seed-once-throw");
   const secA = fixtureId(358, "ss-a");
   const secB = fixtureId(358, "ss-b");
   const artA = fixtureId(358, "ar-a");
@@ -21487,13 +21488,45 @@ async function specSeedOnceAsyncChecks(): Promise<void> {
     ok((await seed358GetArticle(artB)) === null && artBRows.length === 1 && artBRows[0].deleted, "D358 seed: a soft-deleted article stays deleted — never revived by the seed");
     ok((await getPart(skuB))?.specBody === "Authored elsewhere", "D358 seed: the part authored elsewhere is still untouched after the forced re-run");
     ok(forced.status === "applied" && forced.products.unchanged === 1 && forced.products.written === 0, "D358 seed: the forced re-run finds the seeded part unchanged and writes nothing");
+    ok(forced.status === "applied" && forced.library.skipped === 0, "D358 seed: the result surfaces the library's skipped count");
+
+    // A throw (here: a products file that isn't there) leaves the flag unset,
+    // so the next deploy retries.
+    let threw = false;
+    try {
+      await seed358Apply({ ...opts, key: KEY_THROW, productsPath: join(dir, "missing.xlsx") });
+    } catch {
+      threw = true;
+    }
+    ok(threw && (await seed358Flag(KEY_THROW)) === null, "D358 seed: a run that throws (bad productsPath) leaves its flag unset");
+
+    // The Import library button's path — no onlyNew — still updates an
+    // existing record and reports kept: 0.
+    const plain = await importLibrary(
+      {
+        kind: SPEC_LIBRARY_KIND,
+        version: SPEC_LIBRARY_VERSION,
+        exportedAt: 0,
+        sections: [{ id: secA, number: "11 61 58", title: "Updated by a plain import" }],
+        articles: [],
+        templates: [],
+        curtainTemplates: [],
+      } as unknown as Parameters<typeof importLibrary>[0],
+      "Seed test"
+    );
+    ok(
+      plain.sections === 1 && plain.kept === 0 && (await getSection(secA))?.title === "Updated by a plain import",
+      "D358 seed: importLibrary without onlyNew still updates an existing section and reports kept: 0"
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
     const db = await getDb();
-    await db
-      .update(vaBlobsTable)
-      .set({ data: sql`${vaBlobsTable.data} - ${KEY}::text` })
-      .where(vaEq(vaBlobsTable.id, SEED358_BLOB));
+    for (const k of [KEY, KEY_THROW]) {
+      await db
+        .update(vaBlobsTable)
+        .set({ data: sql`${vaBlobsTable.data} - ${k}::text` })
+        .where(vaEq(vaBlobsTable.id, SEED358_BLOB));
+    }
     ok((await seed358Flag(KEY)) === null, "D358 seed: teardown removes the test flag from the spec_seed_applied blob");
   }
 }

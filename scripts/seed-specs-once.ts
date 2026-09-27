@@ -11,20 +11,28 @@
  *   - no DATABASE_URL    → skip (a local `npm run build` never touches a DB).
  *
  * Manual runs:
- *   npm run specs:seed                  → the dev PGlite (.data/pglite, or
- *                                         PGLITE_PATH). Stop `npm run dev`
- *                                         first — PGlite is one process at a
- *                                         time (AGENTS.md).
- *   npm run specs:seed -- --force       → run again even though the flag is set.
+ *   npm run specs:seed                  → LOCAL ONLY: the dev PGlite
+ *                                         (.data/pglite, or PGLITE_PATH). Stop
+ *                                         `npm run dev` first — PGlite is one
+ *                                         process at a time (AGENTS.md).
+ *   npm run specs:seed -- --force       → the same local PGlite, run again
+ *                                         even though the flag is set. It
+ *                                         never reaches production.
+ *
+ * Re-running on PRODUCTION: Specs → Library → Import product specs with the
+ * committed docs/specs-seed/northhs-2026-07-30/product-specs-filled.xlsx, or,
+ * with the production DATABASE_URL in the environment,
+ * `npx tsx scripts/seed-specs-once.ts --force`.
  *
  * `--local` always means PGlite: it drops any ambient DATABASE_URL for this
  * process. This script never reads .env.local.
  *
- * ALWAYS exits 0. A data problem must never block a deploy: on a throw it
- * logs "failed — will retry on the next deploy" and the flag stays unset.
+ * ALWAYS exits 0. A data problem must never block a deploy: on a throw —
+ * including one while loading the seed module itself (it is imported inside
+ * main() for exactly that reason) — it logs "failed — will retry on the next
+ * deploy" and the flag stays unset.
  */
 import path from "node:path";
-import { applySpecSeedOnce, NORTHHS_SEED_KEY } from "@/lib/specs/seed-once";
 
 const args = process.argv.slice(2);
 const local = args.includes("--local");
@@ -53,7 +61,12 @@ async function main(): Promise<void> {
     }
   }
   const target = local ? `local PGlite (${process.env.PGLITE_PATH || ".data/pglite"})` : "DATABASE_URL";
-  console.log(`[seed-specs] ${NORTHHS_SEED_KEY} → ${target}${force ? " (--force)" : ""}`);
+  console.log(`[seed-specs] seed:northhs-2026-07-30 → ${target}${force ? " (--force)" : ""}`);
+
+  // Imported here, after the guards: a failure while loading the module
+  // graph (database driver, exceljs, a broken import) lands in the catch
+  // below and exits 0 instead of failing the build.
+  const { applySpecSeedOnce } = await import("@/lib/specs/seed-once");
 
   const res = await applySpecSeedOnce({
     libraryPath: path.join(SEED_DIR, "spec-library.json"),
@@ -66,7 +79,10 @@ async function main(): Promise<void> {
     return;
   }
   const p = res.products;
-  console.log(`[seed-specs] library: ${res.library.created} created, ${res.library.kept} kept (already there)`);
+  console.log(
+    `[seed-specs] library: ${res.library.created} created, ${res.library.kept} kept (already there), ` +
+      `${res.library.skipped} skipped (no id / unknown curtain type)`
+  );
   console.log(
     `[seed-specs] product specs: ${p.written} written (${p.sameAs} same-as), ${p.unchanged} unchanged, ` +
       `${p.skippedExisting} skipped (text from elsewhere)`

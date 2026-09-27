@@ -6551,13 +6551,18 @@ text without anyone clicking Import. What it does and doesn't do:
   create-only, so a re-run is safe).
 - **Same guards as migrations.** `VERCEL_ENV=preview` skips (preview shares the one production database); no
   `DATABASE_URL` skips, so a local `npm run build` never touches a database. The script never reads `.env.local`.
-- **Never fails the build.** Any throw — and a four-minute timeout — logs
-  `[seed-specs] failed — will retry on the next deploy: …` and exits 0; the flag stays unset, so the next deploy
+- **Never fails the build.** Any throw — including one while loading the seed module, which the script imports
+  inside `main()` after the guards — and a four-minute timeout log
+  `[seed-specs] failed — will retry on the next deploy: …` and exit 0; the flag stays unset, so the next deploy
   retries. Per-part write failures don't throw: they are listed under "errors" in the build log and the flag is
-  still set — a re-run with `--force` retries them.
-- **Local runs:** `npm run specs:seed` (`--local`: always the dev PGlite, `.data/pglite` or `PGLITE_PATH`; stop
-  `npm run dev` first — PGlite is one process at a time); `npm run specs:seed -- --force` to run it again.
+  still set.
+- **Re-running on production** (e.g. to retry those per-part failures): Specs → Library → **Import product specs**
+  with the committed `docs/specs-seed/northhs-2026-07-30/product-specs-filled.xlsx`, or, with the production
+  `DATABASE_URL` in the environment, `npx tsx scripts/seed-specs-once.ts --force`.
+- **Local runs only:** `npm run specs:seed` (`--local`: always the dev PGlite, `.data/pglite` or `PGLITE_PATH`,
+  never production; stop `npm run dev` first — PGlite is one process at a time); `npm run specs:seed -- --force`
+  re-runs it against that same local PGlite.
 
-The build log prints library created/kept, product specs written / same-as / unchanged / skipped, and every
+The build log prints library created/kept/skipped, product specs written / same-as / unchanged / skipped, and every
 MFR # that was not found, ambiguous or already claimed by an earlier row — that list is Jeff's to-do for
 catalog parts that don't exist yet.

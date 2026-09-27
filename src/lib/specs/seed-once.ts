@@ -35,7 +35,8 @@ export type SeedOnceResult =
   | { status: "skipped"; reason: string }
   | {
       status: "applied";
-      library: { created: number; kept: number };
+      /** skipped = records the file itself can't place (no id, unknown curtain type). */
+      library: { created: number; kept: number; skipped: number };
       products: {
         written: number;
         sameAs: number;
@@ -112,7 +113,7 @@ export async function applySpecSeedOnce(opts: {
 
   return {
     status: "applied",
-    library: { created, kept: lib.kept },
+    library: { created, kept: lib.kept, skipped: lib.skipped },
     products: {
       written: applied.written,
       sameAs: applied.sameAs,
