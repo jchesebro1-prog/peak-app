@@ -1,6 +1,7 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
+import { compareVenueOrder } from "@/lib/venue-types";
 
 /**
  * Sites — venues owned by a company (D85, spec §4.4). "What is this job
@@ -8,10 +9,10 @@ import { sites, type NewSiteRow, type SiteRow } from "@/db/schema";
  * per-customer ids ('loc1', …) preserved here as legacyLocId.
  */
 
+/** Primary first, then creation order — the one venue order (#216) the
+ *  company modal numbers its cards in and the type-rename re-derive uses. */
 function primaryFirst(rows: SiteRow[]): SiteRow[] {
-  return rows.sort(
-    (a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.id.localeCompare(b.id)
-  );
+  return rows.sort(compareVenueOrder);
 }
 
 export async function sitesForCompany(

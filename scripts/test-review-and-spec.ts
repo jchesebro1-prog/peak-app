@@ -10490,6 +10490,7 @@ seeded()
   .then(() => venues216SaveFixesAsyncChecks())
   .then(() => venues216Task3FixesAsyncChecks())
   .then(() => venues216NameAutoAsyncChecks())
+  .then(() => venues216T7FixAsyncChecks())
   .then(() => specSeedOnceAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -23943,11 +23944,12 @@ async function venues216NameAutoAsyncChecks(): Promise<void> {
     let rows = await v216Sites7(CID);
     ok(rows.length === 2 && rows.every((s) => s.nameAuto === false), "#216 T7: existing venues start with nameAuto false");
     const a = await v216Save7({ ...blank, companyId: CID, venueKind: "gymstage" });
-    // createdAt orders the re-derive's numbering; keep a and b in distinct ms.
-    await new Promise((r) => setTimeout(r, 5));
     const b = await v216Save7({ ...blank, companyId: CID, venueKind: "gymstage" });
     const aId = a.ok ? a.siteId : "";
     const bId = b.ok ? b.siteId : "";
+    // createdAt orders the re-derive's numbering; pin it so a precedes b.
+    await (await getDb()).update(v216t7fSites).set({ createdAt: 1000 }).where(vaEq(v216t7fSites.id, aId));
+    await (await getDb()).update(v216t7fSites).set({ createdAt: 2000 }).where(vaEq(v216t7fSites.id, bId));
     rows = await v216Sites7(CID);
     ok(rows.find((s) => s.id === aId)?.nameAuto === true && rows.find((s) => s.id === bId)?.nameAuto === true, "#216 T7: a venue saved through the dialog is auto-named");
     await v216SetAuto(CID, ["m2"], true);
@@ -24111,5 +24113,83 @@ async function specSeedOnceAsyncChecks(): Promise<void> {
         .where(vaEq(vaBlobsTable.id, SEED358_BLOB));
     }
     ok((await seed358Flag(KEY)) === null, "D358 seed: teardown removes the test flag from the spec_seed_applied blob");
+  }
+}
+
+/* --- #216 T7 fix: one venue numbering order; the re-derive never throws --- */
+import { sites as v216t7fSites } from "@/db/schema";
+import { get as v216t7fGetCustomer } from "@/lib/stores/customers";
+import { getSettings as v216t7fGetSettings } from "@/lib/settings";
+{
+  const rd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const vt = rd("src/lib/venue-types.ts");
+  ok(/export function compareVenueOrder\(/.test(vt) && /\.sort\(compareVenueOrder\)/.test(vt.slice(vt.indexOf("export function planVenueRenames"))),
+    "#216 T7 fix: planVenueRenames numbers venues through the shared compareVenueOrder");
+  const st = rd("src/lib/identity/sites.ts");
+  ok(st.includes("rows.sort(compareVenueOrder)") && !st.includes("a.id.localeCompare(b.id)"),
+    "#216 T7 fix: sitesForCompany (the modal's card order) sorts with the same compareVenueOrder");
+  const sa = rd("src/app/(app)/settings/actions.ts");
+  const s0 = sa.indexOf("export async function saveVenueTypesAction");
+  const body = sa.slice(s0, sa.indexOf("\nexport ", s0 + 10));
+  ok(/try \{[\s\S]*withTransaction\(\(\) => rederiveVenueNamesForTypes\(res\.renamed, res\.types\)\)[\s\S]*\} catch/.test(body) && body.includes("return { ok: true, warning"),
+    "#216 T7 fix: the type-rename re-derive runs in one transaction and never throws out of the action");
+  ok(rd("src/app/(app)/settings/venue-types-card.tsx").includes("res.warning"), "#216 T7 fix: the Venue types card shows a re-derive warning");
+  const vs = rd("src/lib/identity/venue-save.ts");
+  const rb = vs.slice(vs.indexOf("export async function rederiveVenueNamesForTypes"));
+  ok(/\.where\(and\(eq\(sites\.id, p\.id\), eq\(sites\.nameAuto, true\), eq\(sites\.deleted, false\)\)\)/.test(rb),
+    "#216 T7 fix: the per-row rename only touches a still-auto-named, non-deleted venue");
+  const t7 = rd("scripts/test-review-and-spec.ts");
+  const t7s = t7.indexOf("async function venues216NameAutoAsyncChecks");
+  const t7b = t7.slice(t7s, t7.indexOf("\n}\n", t7s));
+  ok(!t7b.includes("setTimeout") && t7b.includes("createdAt: 1000"), "#216 T7 fix: the T7 test pins createdAt instead of sleeping");
+}
+async function venues216T7FixAsyncChecks(): Promise<void> {
+  const CID = fixtureId(216, "order-co");
+  const blank = { siteId: null, locationName: "", address: "", city: "", state: "", lat: null, lng: null, primary: false };
+  const db = await getDb();
+  try {
+    await upsertCustomer({
+      id: CID, name: "Roosevelt Middle School", type: "Education",
+      locations: [{ id: "m1", label: "Main Hall", primary: true, venueKind: "proscenium" }],
+      contacts: [],
+    });
+    const a = await v216Save7({ ...blank, companyId: CID, venueKind: "gymstage" });
+    const b = await v216Save7({ ...blank, companyId: CID, venueKind: "gymstage" });
+    const aName = a.ok ? a.name : "";
+    const bName = b.ok ? b.name : "";
+    ok(a.ok && b.ok && bName === `${aName} (2)`, `#216 T7 fix: two dialog-created venues number in creation order (${aName} / ${bName})`);
+    // Ids forced into the reverse of creation order: a (created first) sorts
+    // LAST by id. createdAt pinned so the order is deterministic.
+    const A = "st-t7fix-z";
+    const B = "st-t7fix-a";
+    await db.update(v216t7fSites).set({ id: A, createdAt: 1000 }).where(vaEq(v216t7fSites.id, a.ok ? a.siteId : ""));
+    await db.update(v216t7fSites).set({ id: B, createdAt: 2000 }).where(vaEq(v216t7fSites.id, b.ok ? b.siteId : ""));
+    const before = await v216Sites7(CID);
+    ok(before.map((s) => s.id).join("|") === `${before[0].id}|${A}|${B}` && before[0].isPrimary,
+      `#216 T7 fix: sitesForCompany orders primary first, then creation, never by id (${before.map((s) => s.id).join("|")})`);
+    // A no-op save shaped exactly like the company modal → saveCustomerAction:
+    // cards in the customer record's order, auto-named ones marked deriveName.
+    const doc = await v216t7fGetCustomer(CID);
+    const autoNamed = new Set(before.filter((s) => s.nameAuto).map((s) => s.legacyLocId ?? s.id));
+    const locs = doc?.locations ?? [];
+    const types = v216From((await v216t7fGetSettings()).venueTypes);
+    const labels = v216DeriveLabels(
+      locs.map((l) => ({ label: (l.label || "").trim(), locationName: (l.locationName || "").trim(), venueKind: l.venueKind || "proscenium", derive: autoNamed.has(l.id ?? "") })),
+      doc?.name ?? "",
+      types
+    );
+    await upsertCustomer({
+      id: CID, name: doc?.name ?? "", type: doc?.type ?? "",
+      locations: locs.map((l, i) => ({ ...l, label: labels[i] || "Venue" })),
+      contacts: [],
+    });
+    await v216SetAuto(CID, [...autoNamed], true);
+    const after = await v216Sites7(CID);
+    ok(after.find((s) => s.id === A)?.name === aName && after.find((s) => s.id === B)?.name === bName,
+      `#216 T7 fix: a no-op modal save keeps every venue's name — no "(2)" swap (${after.map((s) => s.name).join(" / ")})`);
+    ok((await v216Rederive(["gymstage"], types)) === 0, "#216 T7 fix: the type-rename re-derive agrees with the modal's numbering (nothing to change)");
+  } finally {
+    for (const s of await v216Sites7(CID)) await v216SoftDel7(s.id);
+    await removeCustomer(CID);
   }
 }

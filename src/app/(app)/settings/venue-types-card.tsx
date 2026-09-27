@@ -93,6 +93,7 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
       }
       setSaved(rows);
       setJustSaved(true);
+      if (res.warning) setError(res.warning);
       router.refresh();
     });
   };

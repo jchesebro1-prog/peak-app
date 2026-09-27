@@ -224,6 +224,17 @@ export type NamedSite = {
   createdAt: number;
 };
 
+/** THE one venue order (#216): primary first, then creation (createdAt
+ *  asc), then id. sitesForCompany — hence the company modal's cards and its
+ *  "Will display as" preview — and the type-rename re-derive both number
+ *  venues in this order, so a no-op save never swaps "X" / "X (2)". */
+export function compareVenueOrder(
+  a: { isPrimary: boolean; createdAt: number; id: string },
+  b: { isPrimary: boolean; createdAt: number; id: string }
+): number {
+  return Number(b.isPrimary) - Number(a.isPrimary) || a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+}
+
 /** Re-derive every auto-named venue of ONE company (after a type rename),
  *  primary first then creation order so numbering stays stable. Returns
  *  only the names that change. */
@@ -232,9 +243,7 @@ export function planVenueRenames(
   companyName: string,
   types: readonly VenueType[]
 ): Array<{ id: string; name: string }> {
-  const ordered = [...sites].sort(
-    (a, b) => Number(b.isPrimary) - Number(a.isPrimary) || a.createdAt - b.createdAt || a.id.localeCompare(b.id)
-  );
+  const ordered = [...sites].sort(compareVenueOrder);
   const next = deriveLocationLabels(
     ordered.map((s) => ({ label: s.name, locationName: s.locationName || "", venueKind: s.venueKind, derive: s.nameAuto })),
     companyName,

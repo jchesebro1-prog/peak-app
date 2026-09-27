@@ -176,8 +176,13 @@ export async function rederiveVenueNamesForTypes(
       types
     );
     for (const p of plan) {
-      await db.update(sites).set({ name: p.name, updatedAt: Date.now() }).where(eq(sites.id, p.id));
-      changed++;
+      // Still auto-named and live: a hand rename or delete since the read wins.
+      const hitRows = await db
+        .update(sites)
+        .set({ name: p.name, updatedAt: Date.now() })
+        .where(and(eq(sites.id, p.id), eq(sites.nameAuto, true), eq(sites.deleted, false)))
+        .returning({ id: sites.id });
+      changed += hitRows.length;
     }
   }
   return changed;

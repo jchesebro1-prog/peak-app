@@ -31,6 +31,7 @@ import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
+import { withTransaction } from "@/db";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -714,10 +715,11 @@ export async function saveCustomerFieldDefsAction(
 /* ---- Venue types (#216) ---- */
 
 /** Whole-list save of Settings → Venue types. Returns (never throws) so the
- *  card can show the message in production. */
+ *  card can show the message in production. The types are saved first; a
+ *  failed name re-derive rolls back as one unit and comes back as a warning. */
 export async function saveVenueTypesAction(
   input: VenueTypeInput[]
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   await requirePerm("manage_users");
   const current = venueTypesFrom((await getSettings()).venueTypes);
   // Keys still on any site (soft-deleted too) are never minted again.
@@ -734,9 +736,17 @@ export async function saveVenueTypesAction(
     }
   }
   await setSettings({ venueTypes: res.types });
-  if (res.renamed.length) await rederiveVenueNamesForTypes(res.renamed, res.types);
+  let warning: string | undefined;
+  if (res.renamed.length) {
+    try {
+      await withTransaction(() => rederiveVenueNamesForTypes(res.renamed, res.types));
+    } catch (e) {
+      console.error("[venue-types] re-deriving venue names failed", e);
+      warning = "Venue types saved, but venue names couldn't be updated to the new type names.";
+    }
+  }
   revalidatePath("/", "layout");
-  return { ok: true };
+  return { ok: true, warning };
 }
 
 /* ---- Recordings (Krisp recordings spec §1.3 / §5.1) ---- */
