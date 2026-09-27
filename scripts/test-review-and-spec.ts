@@ -20483,3 +20483,133 @@ async function tasks215AsyncChecks(): Promise<void> {
   await removeTask(t.id);
   ok(!(await tasksForThread215("C-T215-A")).some((x) => x.id === t.id), "#215 a deleted task leaves the thread's list");
 }
+
+/* ============ #215 — calendar task planner (pure) ============ */
+import {
+  placeTasks as placeTasks215,
+  groupPlacedByDay as groupPlacedByDay215,
+  localDayKey as localDayKey215,
+  dayKeyDiff as dayKeyDiff215,
+  taskHref as taskHref215,
+  initialsFor as initialsFor215,
+  calendarItemFromTask as calendarItemFromTask215,
+  calendarItemFromAssignment as calendarItemFromAssignment215,
+  selectCalendarTasks as selectCalendarTasks215,
+  type CalendarTaskItem as CalendarTaskItem215,
+} from "@/lib/calendar-tasks";
+import type { Assignment as Assignment215 } from "@/lib/stores/assignments";
+
+{
+  // Local noon — the day key is then the same in any timezone the harness runs in.
+  const at = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).getTime();
+  const it = (id: string, dueAt: number | null, extra: Partial<CalendarTaskItem215> = {}): CalendarTaskItem215 => ({
+    kind: "task", id, title: id, dueAt, done: false, assigneeName: "Jeff Chesebro", assigneeUserId: "u1",
+    assigneeInitials: "JC", href: "", ...extra,
+  });
+  const TODAY = "2026-09-26";
+  const oct = { today: TODAY, rangeStart: "2026-08-30", rangeEnd: "2026-10-10" };
+
+  ok(localDayKey215(at(2026, 9, 26)) === "2026-09-26", "#215 localDayKey is the local calendar day");
+  ok(
+    localDayKey215(new Date(2026, 0, 5, 0, 0, 1).getTime()) === "2026-01-05" && localDayKey215(new Date(2026, 0, 5, 23, 59).getTime()) === "2026-01-05",
+    "#215 localDayKey holds from just after midnight to just before the next"
+  );
+  ok(
+    dayKeyDiff215("2026-09-20", "2026-09-26") === 6 && dayKeyDiff215("2026-03-01", "2026-03-15") === 14 && dayKeyDiff215("2026-10-30", "2026-11-02") === 3,
+    "#215 dayKeyDiff counts whole days, across DST changes"
+  );
+  ok(Number.isNaN(dayKeyDiff215("2026-9-1", TODAY)), "#215 a malformed day key diffs to NaN");
+
+  const p = placeTasks215(
+    [
+      it("future", at(2026, 10, 2)),
+      it("undated", null),
+      it("overdue", at(2026, 9, 20)),
+      it("today", at(2026, 9, 26)),
+      it("done", at(2026, 9, 28), { done: true }),
+      it("doneOld", at(2026, 9, 1), { done: true }),
+    ],
+    oct
+  );
+  const by = (id: string) => p.find((x) => x.item.id === id);
+  ok(by("future")?.dayKey === "2026-10-02" && by("future")?.carried === false && by("future")?.overdueDays === 0, "#215 a future task sits on its due day");
+  ok(by("undated")?.dayKey === TODAY && by("undated")?.carried === true && by("undated")?.overdueDays === 0, "#215 an undated task floats on today, carried");
+  ok(by("overdue")?.dayKey === TODAY && by("overdue")?.carried === true && by("overdue")?.overdueDays === 6, "#215 an overdue task floats on today with its days overdue");
+  ok(by("today")?.dayKey === TODAY && by("today")?.carried === false && by("today")?.overdueDays === 0, "#215 a task due today sits on today and is not carried");
+  ok(!by("done") && !by("doneOld"), "#215 done tasks are never placed");
+  ok(p.every((x) => x.dayKey >= TODAY), "#215 nothing is ever placed on a past day");
+  const todays = p.filter((x) => x.dayKey === TODAY).map((x) => x.item.id).join(",");
+  ok(todays === "overdue,undated,today", `#215 today's order: overdue, undated carried, then due today (${todays})`);
+
+  const edges = placeTasks215([it("start", at(2026, 9, 26)), it("end", at(2026, 10, 10)), it("after", at(2026, 10, 11))], { today: TODAY, rangeStart: TODAY, rangeEnd: "2026-10-10" });
+  ok(edges.map((x) => x.item.id).join(",") === "start,end", "#215 range edges are inclusive; the day after is dropped");
+  const nextMonth = placeTasks215([it("undated", null), it("overdue", at(2026, 9, 1)), it("nov", at(2026, 11, 3))], { today: TODAY, rangeStart: "2026-11-01", rangeEnd: "2026-12-05" });
+  ok(nextMonth.map((x) => x.item.id).join(",") === "nov", "#215 with today outside the range, carried items are omitted");
+  const lastMonth = placeTasks215([it("aug", at(2026, 8, 15)), it("undated", null)], { today: TODAY, rangeStart: "2026-07-26", rangeEnd: "2026-09-05" });
+  ok(lastMonth.length === 0, "#215 a past range shows nothing — an overdue task is never drawn on its old due day");
+  ok(placeTasks215([it("zero", 0)], oct)[0]?.carried === true, "#215 a zero dueAt reads as undated");
+  const grouped = groupPlacedByDay215(p);
+  ok(grouped.get(TODAY)?.length === 3 && grouped.get("2026-10-02")?.length === 1, "#215 groupPlacedByDay buckets placements by day key");
+
+  ok(
+    initialsFor215("Jeff Chesebro", [{ id: "u1", name: "Jeff Chesebro", initials: "JC" }]) === "JC" &&
+      initialsFor215("sam de rivera", []) === "SD" && initialsFor215("", []) === "",
+    "#215 initials: roster first, else the first letters of the first two words"
+  );
+  ok(taskHref215({ threadId: "C-1", projectId: "P-1" }) === "/inbox?thread=C-1", "#215 a thread-linked task links to its thread first");
+  ok(
+    taskHref215({ projectId: "P-3001" }) === "/projects/P-3001" && taskHref215({ quoteId: "Q-2041" }) === "/quotes?id=Q-2041" &&
+      taskHref215({ engagementId: "E-1" }) === "/design/engagements/E-1?tab=schedule" && taskHref215({ designId: "D-1" }) === "/design/designs?id=D-1" &&
+      taskHref215({ leadId: "L-1" }) === "/leads?lead=L-1" && taskHref215({ customerId: "rose-brand" }) === "/companies/rose-brand" && taskHref215({}) === "",
+    "#215 taskHref falls through project, quote, engagement, design, lead, customer, then none"
+  );
+
+  const roster215 = [{ id: "u1", name: "Jeff Chesebro", initials: "JC" }, { id: "u2", name: "Sam Rivera", initials: "SR" }];
+  const mkT = (o: Partial<TaskRecord> & { id: string }): TaskRecord => normalizeTask({ title: o.id, ...o });
+  const tasks215 = [
+    mkT({ id: "T-mine", assigneeUserId: "u1", assigneeName: "Jeff Chesebro", dueAt: at(2026, 10, 1) }),
+    mkT({ id: "T-theirs", assigneeUserId: "u2", assigneeName: "Sam Rivera" }),
+    mkT({ id: "T-nobody", assigneeUserId: null, assigneeName: "" }),
+    mkT({ id: "T-done", assigneeUserId: "u1", assigneeName: "Jeff Chesebro", status: "done" }),
+    mkT({ id: "T-nameonly", assigneeUserId: null, assigneeName: "Jeff Chesebro" }),
+  ];
+  const asg = (o: Partial<Assignment215> & { id: string }): Assignment215 => ({
+    title: o.id, assignee: "", createdBy: "Sam Rivera", createdAt: 1, dueDate: 0, link: null,
+    done: false, doneAt: null, doneVia: null, source: "", ...o,
+  });
+  const asg215 = [
+    asg({ id: "as-mine", assignee: "Jeff Chesebro" }),
+    asg({ id: "as-theirs", assignee: "Sam Rivera", dueDate: at(2026, 9, 20) }),
+    asg({ id: "as-done", assignee: "Jeff Chesebro", done: true }),
+    asg({ id: "as-blank", assignee: "" }),
+  ];
+  const me215 = { id: "u1", name: "Jeff Chesebro" };
+  const mine215 = selectCalendarTasks215(tasks215, asg215, { me: me215, everyone: false, roster: roster215 });
+  ok(
+    mine215.map((x) => `${x.kind}:${x.id}`).join(",") === "task:T-mine,assignment:as-mine",
+    "#215 mine: tasks by user id, assignments by name; done, unassigned and name-only tasks excluded"
+  );
+  const all215 = selectCalendarTasks215(tasks215, asg215, { me: me215, everyone: true, roster: roster215 });
+  ok(
+    all215.map((x) => `${x.kind}:${x.id}`).join(",") === "task:T-mine,task:T-theirs,assignment:as-mine,assignment:as-theirs",
+    "#215 everyone: every assigned open task and assignment"
+  );
+  const asgItem = all215.find((x) => x.id === "as-theirs")!;
+  ok(
+    asgItem.dueAt === at(2026, 9, 20) && asgItem.assigneeUserId === "u2" && asgItem.assigneeInitials === "SR" && asgItem.href === "/queue?who=Sam%20Rivera",
+    "#215 an assignment normalizes its due date, roster id, initials and a /queue?who= link"
+  );
+  ok(all215.find((x) => x.id === "as-mine")!.dueAt === null, "#215 an assignment's dueDate 0 reads as no date");
+  const taskItem = all215.find((x) => x.id === "T-mine")!;
+  ok(
+    taskItem.kind === "task" && taskItem.assigneeInitials === "JC" && taskItem.done === false && taskItem.dueAt === at(2026, 10, 1) && taskItem.href === "",
+    "#215 a task normalizes to the calendar item shape"
+  );
+  ok(
+    calendarItemFromTask215(mkT({ id: "T-d", status: "done" }), []).done === true && calendarItemFromAssignment215(asg({ id: "as-d", done: true }), []).done === true,
+    "#215 done maps through both normalizers"
+  );
+  const ct215 = readFileSync(join(process.cwd(), "src/lib/calendar-tasks.ts"), "utf8");
+  const ctImports215 = [...ct215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
+  ok(ctImports215.length > 0 && ctImports215.every((m) => !!m[1]), "#215 calendar-tasks.ts imports types only");
+}
