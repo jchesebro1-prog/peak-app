@@ -7021,3 +7021,164 @@ A title typed at intake or in the editor header replaces the name, including one
 title keeps the existing rule: an untitled design is auto-named "Venue — Location". The rename updates the Grid
 project and its Designs-dashboard card together.
 
+## D402. Freight-by-distance is a new standard rule, defaulted into new Estimator sections too (#245, 2026-09-27)
+
+`src/lib/freight-rule.ts` (pure): 2% under 200 drive-miles from the shop, +1% per additional 200 miles, capped at
+10%; unknown distance goes straight to the cap. The portal applies it on every quote, no override. The Estimator
+adopts the same rule as the **default** `freightPct` for a **new section** once the quote has a venue, replacing the
+old hard-coded 2% — pre-filled, not locked, so staff can still type over it. A section whose freight staff never
+touched re-computes when the venue changes; one they touched (`freightAuto` cleared) does not. An unlocated venue
+gets the cap plus a small staff-only "Freight at max — venue not located" flag. Saved quotes are never rewritten by
+a later rule change. Miles come from `travelForId(customerId, locationId)` (`src/lib/stores/customers.ts:920`) — the
+same manual/cached-route/haversine chain the Estimator's own travel chip already shows — so `source: "none"` is what
+"unknown" means here too.
+
+## D403. Freight prices on the Estimator's cost base; the customer only ever sees amount + miles (#245, 2026-09-27)
+
+Portal quotes are stored and totalled through the Estimator's own `{sections}` shape and `totals()`
+(`src/app/(app)/estimator/pricing.ts:184`), where freight is `freightPct` × the section's **cost** base
+(`systemFreightBase`) — pricing it on sell in the portal would make the same quote disagree with itself the moment
+staff opened it in the Estimator. So the rule still sets `freightPct` and lets the existing Estimator math price it,
+but the customer-facing line reads **"Freight & delivery — 412 mi"** — an amount and a mile count, never a percentage
+(a % of cost reads wrong against a sell subtotal) and never the word "unknown" (an unlocated venue's cap is priced
+silently). This trades a small, accepted margin-exposure risk — a customer could in principle infer the cost base
+from the dollar amount on a well-known SKU — for a number that always reconciles with the Estimator. Supersedes
+spec §2.2's "applied to sell" and §3.4's "(miles, %)".
+
+## D404. Firm vs review: only curtains and price-on-request lines fall to review; firm sends bypass the approval gate by name (#245, 2026-09-27)
+
+`quoteMode(lines)` (`src/lib/portal-quote-mode.ts`) is **review** iff any line is POR — every curtain line always is,
+in this build — otherwise **firm**. A firm generation calls `setStatus(id, "sent", …)` with a new, explicit
+`bypassApprovalGate: "portal-firm"` (`src/lib/stores/quotes.ts:880`) so a customer's own firm quote doesn't sit in
+someone's #242 review-limit queue for a price they never got to negotiate. **Approve** (sent/won staff action on an
+accepted portal order) stays on the ordinary gated path — the bypass only ever applies to the portal's own send, not
+to anything staff do afterward.
+
+## D405. Review and new-quote notices are derived bell groups — no lead record is created (#245, 2026-09-27)
+
+The staff bell is computed straight from quotes already on hand (`src/lib/nav-counts.ts`, `portalBellGroups` in
+`src/lib/portal-bell.ts` — no writer, nothing stored). A review generation adds a **"Portal quotes to review"**
+group (mine-or-unassigned); a firm generation adds a **"New portal quotes"** group (sent within the last 72h,
+mine-or-unassigned). Nothing lands in the Leads SLA queue for either case, and the existing "Portal acceptances to
+confirm" group is untouched. Supersedes spec §4.2's "bell notice", §4.3's "Leads SLA queue" and §4.4's "to-do".
+
+## D406. Carts are their own collection — no estimate number is burned until Generate (#245, 2026-09-27)
+
+A new doc collection **`portal_carts`** (migration 0032), one row per portal grant (`id` = grant id), holds
+`{ lines, venueId?, updatedAt }` with **no stored prices** — everything is re-priced server-side on every read. Every
+quote insert allocates an estimate number on write (#223), so treating the cart as a draft quote would burn a number
+per abandoned browse session and need a "hide carts" exception on every staff surface that lists quotes. Generate is
+the only step that inserts a quote row (and so the only step that allocates a number), then empties the cart. A
+cart untouched for 90 days just shows empty-with-notice on the next visit; row cleanup itself is a follow-up (§7).
+
+## D407. Customer visibility is Auto/Show/Hide over a computed browsable rule; search always covers the full quotable catalog (#245, 2026-09-27)
+
+`CatalogPart.portalVisibility?: "auto" | "show" | "hide"` (missing = auto), written only through the existing
+`mergeUpsert` write path so a price-book import never clears it. **Quotable** = not hidden. **Browsable** (what shows
+with no search term) = `Show`, or (`Auto` and the part has a visible image, or a datasheet/spec sheet of its own or
+covered through the accessory graph, or has appeared on 3+ distinct non-deleted quotes in the last 24 months). Search
+always covers every quotable part regardless of the browsable rule — browsable only governs the bare landing grid and
+facet listings with nothing typed. The old hard-coded `CUSTOMER_CATEGORIES` list and `buyable()` are gone;
+`src/lib/portal-visibility.ts` is the one rule.
+
+## D408. Labor-category parts price inside fixtures but never appear to customers on their own (#245, 2026-09-27)
+
+The seed data has Labor-category parts sitting in the ordinary catalog index, unspecified-manufacturer and priced
+per unit — which made them customer-searchable by accident (flagged in Task 10). They're excluded from customer
+search and browse outright unless individually set to `Show`, but they still price and count toward the freight base
+exactly like any other fixture component when a fixture line includes one (including as an optional add-on) — the
+customer just sees the fixture's total, with the labor row itself shown by name inside "Included" the way any other
+component is.
+
+## D409. Fixture sidebar is included-parts + add-on toggles, not option-group pickers; the curtain request panel narrows its inputs (#245, 2026-09-27)
+
+`FixtureRecord` boxes are flat part lists — `qty > 0` is included, `qty 0` is an optional add-on — there are no
+either/or choice groups in the real fixture model (`src/lib/fixture-assemblies.ts:227`). The portal sidebar shows the
+light engine, lens and every included part as fixed, and each optional add-on as its own toggle with its qty; only
+`kind: "fixture"` records are offered at all. This supersedes spec §3.2's "one picker per option box." Separately, the
+curtain request panel reuses the Estimator's curtain configurator inputs but drops **hang** and **bottom** (Pipe and
+Chain defaults apply) and adds a **"Not sure — recommend one"** fabric choice (stored as an empty `fabricSku`, which
+already prints as "Fabric to confirm") — one option beyond what the Estimator itself offers, since a customer
+shouldn't have to know fabric weights to ask for a price.
+
+## D410. Images are a third part-document kind; gallery order is datasheet-render-last, then staff order, then source, then upload time (#245, 2026-09-27)
+
+`PartDocKind` gains `"image"` (PNG/JPEG/WebP, 10 MB cap, never SVG — script risk on a customer-facing route);
+`PartDocumentSource` gains `"datasheet-render"`; `PartDocumentLink` gains `sort?` and `hidden?` (kept linked, never
+shown, without deleting the row — how a bad auto-thumbnail gets suppressed). Accessory coverage (#207) still applies
+to datasheets/spec sheets only — an accessory never borrows its fixture's photo. The gallery order actually shipped
+is **an auto-rendered datasheet thumbnail sorts last, then staff drag order (`sort`), then source rank (upload >
+fetch > datasheet-render), then upload time** — the reverse of spec §1.1's rank-first draft, decided in Task 4's
+review so a staff-ordered gallery isn't silently reshuffled by source. The spec is amended to match (§1.1, this
+commit). Separately, the Catalog → Datasheets "Missing image" filter counts a part with only **hidden** images as
+still missing one — a hidden image was rejected as a storefront photo, so it shouldn't satisfy the filter that's
+telling staff to go find one.
+
+## D411. No DaVinci image import in this build (#245, 2026-09-27)
+
+The DaVinci export's 2,122 images are 1,427 icon and 626 riser line-art SVGs (plus template previews/title blocks) —
+checked directly in `data/davinci/source/*/library.json`'s `images[].imageMetadata.imageType`. There are no product
+photos to import, they'd make poor storefront tiles even if there were, and SVG is excluded from customer-served
+images by design (above). Sources in this build are upload, URL fetch and the datasheet page-1 thumbnail only.
+Logged as a follow-up in case a DaVinci product-photo export turns up later. Supersedes pick 7 and spec §1.1's
+source 3.
+
+## D412. The customer document route is allow-listed per request; images and docs get different cache lifetimes and one framing exception (#245, 2026-09-27)
+
+`src/app/portal/catalog/doc/[id]/route.ts` (distinct from #218's own-upload route) serves a document only when the
+session is a live portal grant (or a team preview) **and** the document is linked, not hidden, to a part that's
+quotable for that customer — directly or, for datasheets/spec sheets, through the accessory graph. Anything else is
+a plain 404 with no hint it exists; the team route stays team-only and a `pk_portal` cookie never opens it. Images
+cache `private, max-age=86400`; documents (PDFs viewed inline) cache `private, max-age=300`, both keyed by the
+document id as ETag with an exact If-None-Match match. This one route also gets a `SAMEORIGIN` framing exception (the
+in-page PDF/image viewer needs to embed it), granted nowhere else.
+
+## D413. Unit price = cost ÷ (1 − tier margin), list as fallback; three POR reasons, one of them off by default (#245, 2026-09-27)
+
+`src/lib/portal-pricing.ts` (server-only; cost, margin and tier name never reach the browser). No cost → `list`.
+**Price on request** when: there's no cost and no list (or both ≤ 0); the part carries a non-empty "verify price"
+note; or — only when the setting is turned on, default **off** — the cost is older than the configured staleness
+window. A fixture line is POR the moment any required component is; a fixture is only offered at all when every
+required component is quotable. Curtains are always POR in this build (D409 covers the request-only panel).
+
+## D414. Card numbers are guarded by whole digit groups + Luhn; a PO file must be the customer's own upload (#245, 2026-09-27)
+
+The purchasing-notes field is scanned by grouping runs of digits split on spaces/dashes, then Luhn-checking
+contiguous spans of **whole groups** totalling 13–19 digits — a sliding window over raw digits caught long unbroken
+non-card strings (tracking numbers) as false positives; whole-group scanning still catches a card typed right after
+a PO number with normal spacing. A caught span refuses with "Don't enter card numbers — we'll call you to take
+payment," the same copy as the helper text. Separately, the optional PO file must be uploaded fresh through the
+#218 portal document flow at accept time — decline was found to accept *any* linked document, including one the
+customer never touched; it's now checked as the customer's own upload.
+
+## D415. Firm quotes hold their price 30 days; refresh is a real revision; a review-flip is a real sent → draft recall (#245, 2026-09-27)
+
+Past `validUntil`, Accept is disabled and **Refresh pricing** re-prices every line at current cost/tier and the
+venue's current freight as a **new revision** (so #222's already-saved PDFs stay truthful) and restarts the window.
+If a refresh turns up a POR line, it takes the review path instead — and that's a genuine `sent → draft` status
+recall through `setStatus` (the gate only blocks transitions *to* `sent`/`won`, so this one is unconditionally
+allowed), not a same-status relabel — with its own pipeline-stage and history entries, matching a staff recall in
+every other way. `canAcceptPortal` refuses acceptance outright while a quote is flagged `portalReview`, belt-and-
+suspenders against any future writer that might otherwise leave a sent-but-under-review quote acceptable.
+
+## D416. Opening a portal quote in the Estimator can't accidentally reclassify it (#245, 2026-09-27)
+
+Staff price a review quote's POR lines in the ordinary Estimator screen, which used to stamp `source: "estimator"`
+unconditionally on every save — the very first Save on a portal-catalog quote would have silently and permanently
+dropped its Portal panel, its bell/portal-listing rules and every other portal-only branch. `saveQuoteAction` now
+reads the existing doc's `source` before building its patch and keeps `source: "portal-catalog"` only when it
+already was one; every other save is unchanged. The same save also runs `clearPricedPor` (`portal-quote-mode.ts`) on
+a loaded portal-catalog quote: any line that now has a real price loses its `por` flag, and once none remain
+`portalReview` is cleared too — a non-portal quote's save is provably untouched (the pure check asserts the section
+object is returned unchanged when nothing needed clearing).
+
+## D417. `/portal/estimate` is retired; per-action rate limits; facets and tile Add get their own small rules (#245, 2026-09-27)
+
+`/portal/estimate` and `estimate-builder.tsx` are deleted; the route redirects to `/portal/catalog` and
+`submitPortalEstimate` is removed. Per-grant rate limits, the Displays-API pattern: browse 240/min, search 120/min,
+add-to-cart 120/min, fixture pricing 240/min, ask-a-question 5/hour, generate 10/hour, accept 10/hour, refresh
+10/hour, copy-to-new-quote 20/hour, document route 300/min. The facet rail's own filter box (for narrowing a long
+Manufacturer or Category list) only appears once a facet has more than 8 values — with 8 or fewer, scrolling the
+plain list is faster than typing. A tile's quick **Add** always adds qty 1 directly, no sidebar detour; opening the
+image or title still opens the sidebar.
+

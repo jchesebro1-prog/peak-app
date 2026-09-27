@@ -29,8 +29,10 @@ items stay manual. **S13:** YES — full-page calendar module under Home.
 in-app notification; the calendar entry is enough (F12 dropped). **S16:** no
 log@ habit — forward-parsing dropped for good (C9 closed: no). **S17:** BOTH
 — keep the popover form AND add drag-and-drop + time-off lanes. **S18:**
-service-line defaults confirmed as-is (F1–F5 closed). **S19:** portal parked
-until the backend is fully working — revisit before customer-facing deploy.
+service-line defaults confirmed as-is (F1–F5 closed). **S19:** answered +
+built (#245, 2026-09-27) — a `/portal/catalog` module: customers browse,
+configure and quote catalog/fixtures/curtains themselves, firm or
+Peak-review by line, with images/datasheets in a part sidebar.
 
 ### 1. Fifteen minutes of clicks — ships everything built today (no decisions)
 - **S1.** Push to GitHub via GitHub Desktop (nine local commits → Vercel auto-deploys).
@@ -78,9 +80,15 @@ until the backend is fully working — revisit before customer-facing deploy.
 - **S18.** Service-line defaults — confirm or tweak: L1 annual / L2 five-year
   inspections w/ 60-day lead, soft quote gate, current repairs-intake fields,
   service contracts parked. (= **F1–F5**)
-- **S19. Customer portal** (parked as unsolved, your call that AI wasn't the
+- ~~**S19. Customer portal** (parked as unsolved, your call that AI wasn't the
   answer): worth a 15-minute conversation — what is the customer actually
-  looking for when they open it?
+  looking for when they open it?~~ **ANSWERED + BUILT (#245, D402–D417,
+  2026-09-27):** a `/portal/catalog` module, similar in spirit to the
+  Estimator but with no margin/freight choices — search + facets, a part
+  sidebar with images/datasheets, a fixture configurator, a no-price
+  curtain request, cart → Generate. Catalog and fixture lines are firm;
+  curtains (and anything price-on-request) go to Peak review. Self-serve
+  service quotes are a separate follow-up spec.
 
 Not on the list on purpose: AI/API (deferred until rules hit their ceiling —
 your standing rule) and Monday-style UI (tabled 7/19).

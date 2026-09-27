@@ -3,6 +3,8 @@
 Date: 2026-09-27 · Branch `feat/portal-catalog` (off `origin/main` 90a9f830) · Punch **#245**
 (proposed — recompute the next free punch/D numbers from `origin/main` right before writing docs).
 
+**As-built:** §8 and DECISIONS D402–D417 record where the shipped build deviates from this spec.
+
 Jeff (2026-09-27):
 
 > Can we brainstorm how we get it so the customer can quote their own catalog items and generate
@@ -67,8 +69,7 @@ photo covers a product family exactly as one datasheet does. Upload validation (
 PNG, JPEG, WebP; images are capped at 10 MB (datasheets keep 25 MB). Accessory **coverage** (the
 #207 rule) applies to datasheets/spec sheets only — an accessory never borrows its fixture's photo.
 
-**Sources, in priority order** — the portal shows a part's visible images sorted by source rank then
-`sort`:
+**Sources, in priority order:**
 
 1. `upload` — part editor Documents section + Upload many (filename matching, as #207).
 2. `fetch` — "Add image from URL" through the shared `guardedFetchBytes` SSRF guard.
@@ -82,6 +83,12 @@ PNG, JPEG, WebP; images are capped at 10 MB (datasheets keep 25 MB). Accessory *
 
 Both batch jobs are resumable and time-budgeted (the #207 fetch pattern: 45 s budget, cursor,
 per-item result kept until a later success).
+
+**Gallery order (as built, D410):** a part's visible images sort **any `datasheet-render` image
+last, then by staff drag order (`sort`), then by source rank (`upload` > `fetch` >
+`datasheet-render`), then by upload time** — so an auto-rendered thumbnail never outranks a
+staff-ordered gallery. This supersedes this section's original "sorted by source rank then
+`sort`."
 
 ### 1.2 Customers can open documents
 

@@ -9120,3 +9120,66 @@ type should be the customer information."
 - The first draft quote from a design carries its contact.
 
 **Still open.** None. See D399–D401.
+
+---
+
+## 245. Customer portal catalog — customers browse, configure and quote the catalog themselves — DONE 2026-09-27 (D402–D417)
+
+**Reported:** 2026-09-27 (Jeff): "Can we brainstorm how we get it so the customer can quote their own catalog items
+and generate their own quotes? I am thinking that it is similar to the estimator however they don't get choices on
+margin or freight and it is only the selector for curtains, fixtures, and catalog. I was also thinking that the
+catalog should start having datasheet and images linked to it that can be displayed as a side bar. … I like how full
+compass or sweetwater does their stuff where you explore a website but I also don't want to build out the entire
+website for it." Closes MASTER-QUESTIONS **S19**. Spec:
+`docs/superpowers/specs/2026-09-27-portal-catalog-design.md`; plan:
+`docs/superpowers/plans/2026-09-27-portal-catalog.md`.
+
+**Done.**
+- **`/portal/catalog`** (`src/app/portal/catalog/`) replaces "Estimate" in the portal nav — search (SKU,
+  description, manufacturer, mfr part #) plus Manufacturer/Category facets, either order, counts over the current
+  result set; 48/page, numbered paging; a "Parts you've quoted before" shelf with nothing typed. `/portal/estimate`
+  redirects here.
+- **Part sidebar:** image gallery, price or "Price on request", inline document viewer (`/portal/catalog/doc/[id]`),
+  spec text, "Goes with" accessories, qty + Add. A fixture record configures as included parts + toggleable optional
+  add-ons (D409); a header button opens a no-price **Request curtain pricing** panel (D409).
+- **Catalog media:** images are a third `part_documents` kind alongside datasheets/spec sheets (upload, URL fetch,
+  or an admin-run datasheet-page-1 thumbnail render) with a per-part Auto/Show/Hide visibility selector and a
+  computed browsable rule (D407, D410); `/catalog/documents` gained an Image column, an image-from-URL action, and
+  the **DaVinci image import** / **Datasheet thumbnails** admin batches.
+- **Pricing:** cost ÷ (1 − tier margin) with a list fallback and three price-on-request reasons (D413); a new
+  freight-by-distance rule, also defaulted into new Estimator sections (D402, D403); curtains and any POR line make
+  the whole quote a review quote, everything else sends firm through a named approval-gate bypass (D404).
+- **Cart → quote:** `portal_carts` (`src/lib/stores/portal-carts.ts`), one per grant, no prices stored and no
+  estimate number until **Generate** (D406); the cart page (`/portal/catalog/quote`) shows subtotal, freight (amount
+  + miles, D403), the Firm/Needs-review badge, and the standing "subject to Peak review and approval" line. A firm
+  generation is sent, valid 30 days, PDF attached, and lands a **"New portal quotes"** bell group for the owner; a
+  review generation is a numbered draft with a **"Portal quotes to review"** bell group instead of a lead (D405).
+- **Accept / staff side:** the customer's Accept dialog (purchase method, notes with a card-number guard, optional PO
+  file, D414) and expiry → **Refresh pricing** as a new revision (D415); the Estimator's new Portal panel shows the
+  review banner, acceptance detail, and staff **Approve** / **Decline with note**; a portal-catalog quote keeps its
+  source and clears priced POR flags across an ordinary Estimator save (D416). Quotes hub and company records show a
+  **Portal** badge / activity line.
+
+**Still open (Jeff).**
+- Run **Datasheet thumbnails** on production — the headless-Chrome render is only exercised against faked Chrome +
+  Blob calls locally; verify on a preview/prod deploy with `QUOTE_PDF_ORIGIN` set.
+- Upload hero images for your top-selling parts — the portal will otherwise fall back to a datasheet icon or
+  placeholder tile for most of the catalog on day one.
+- Review Hide/Show on any odd parts — the Auto rule is a good default, not a guarantee.
+- Check the Labor category's part list (D408) — those parts price inside fixtures but are excluded from customer
+  search/browse; confirm nothing that should be customer-facing got swept in.
+- Try the whole flow once with a real customer grant — browse, configure a fixture, request curtain pricing, cart,
+  Generate, Accept — before pointing an actual customer at it.
+
+**Follow-ups (not built).** Self-serve service quotes (flame test / repair / inspection — a separate spec, reuses
+this build's firm/review split and Accept/Approve flow); a priced curtain configurator (replaces the request-only
+panel); a department-tree layer over the facets; Quick Design adopting the freight rule; public sign-up (create a
+customer + grant on the spot); abandoned-cart row cleanup (90-day-stale carts already show empty, the rows
+themselves aren't pruned); a DaVinci product-photo import, if a real photo export ever exists (D411); and two stale
+DECISIONS entries worth a cleanup pass — D60 (grant length, says 6 months against 90-day code) and D63 (says #48
+"stays parked" — this punch item supersedes it).
+
+**Review minors worth a later pass:** the fixture picker's Included list still shows Labor-category component SKUs
+by name (cosmetic); the datasheet-thumbnail render's tie-break when one SKU somehow has two own datasheets is an
+arbitrary but stable array-order pick, not a documented rule; the empty-browse-set copy still says "build an
+estimate" in one spot. See D402–D417.

@@ -375,6 +375,30 @@ See `.env.example`.
     production, map Cable Package (per cable)
     and the Wire pull rows, set wire-pull runs, and review the device-type
     mappings (PUNCHLIST #234–#240).
+19. ✅ **Portal Catalog** (#245, D402–D417) — closes MASTER-QUESTIONS S19.
+    `/portal/catalog` replaces "Estimate" in the portal nav: search +
+    Manufacturer/Category facets, a "quoted before" shelf, a part sidebar
+    (image gallery, price or Price on request, inline documents via
+    `/portal/catalog/doc/[id]`, spec text, Goes-with accessories, Ask a
+    question) that becomes a fixture configurator (included parts + toggle
+    add-ons) or a no-price curtain request panel. Images join datasheets/
+    spec sheets as a third `part_documents` kind (upload, URL fetch, admin
+    datasheet-thumbnail render), with a per-part Auto/Show/Hide visibility
+    rule and a computed browsable rule gating the bare landing grid.
+    Server-only pricing (`src/lib/portal-pricing.ts`) and a new
+    freight-by-distance rule (also the Estimator's own new-section
+    default) feed a `portal_carts` collection — one cart per grant, no
+    prices stored, no estimate number until **Generate** — which sends
+    firm quotes (30-day validity, a named approval-gate bypass) or lands
+    review quotes (any curtain or price-on-request line) as derived
+    "Portal quotes to review" / "New portal quotes" bell groups, no lead
+    record. Accept carries purchase method/notes (card-number guarded) +
+    an optional PO file; expiry gives way to Refresh pricing as a new
+    revision; staff Approve/Decline sits in a new Estimator Portal panel.
+    Remaining is Jeff-gated: run the datasheet-thumbnail render on
+    production, upload hero images, review Hide/Show and the Labor
+    category list, and try the flow with a real customer grant. Decisions
+    D402–D417; punch item #245.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
