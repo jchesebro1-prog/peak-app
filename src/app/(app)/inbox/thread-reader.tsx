@@ -503,6 +503,9 @@ export default function ThreadReader({
   // header opened it (null = the summary). The opener gets focus back on Done.
   const [linkFor, setLinkFor] = useState<{ messageId: string; fromHeader: boolean } | null>(null);
   const linkOpenerRef = useRef<HTMLElement | null>(null);
+  // #214 sidebar fix 2 — the mounted LinkPanel points this at its own
+  // "OK to leave?" check (typed-but-unsaved quick-add → confirm first).
+  const linkGuardRef = useRef<(() => boolean) | null>(null);
   // #215 — the create-task dialog; messageId = the message it was opened from
   const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
   const [sending, setSending] = useState(false);
@@ -647,6 +650,7 @@ export default function ThreadReader({
       variant={variant}
       linkFor={linkFor}
       openerRef={linkOpenerRef}
+      linkGuardRef={linkGuardRef}
       onEditLinks={() => {
         if (!linkDefaultId) return;
         // "Edit links" leaves the page as link mode replaces the summary —
@@ -859,6 +863,19 @@ export default function ThreadReader({
               void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
             }}
             onOpenLinks={(messageId, el) => {
+              if (linkFor?.messageId === messageId) {
+                // #214 sidebar fix 3 — already in link mode on this message;
+                // re-clicking "Link…" refocuses the panel's search box
+                // rather than doing nothing.
+                readerRootRef.current
+                  ?.querySelector<HTMLInputElement>('input[aria-label="Search a company, venue or person…"]')
+                  ?.focus();
+                return;
+              }
+              // #214 sidebar fix 2 — switching link mode to a different
+              // message would unmount the open panel (and any typed-but-
+              // unsaved quick-add with it); ask first, same as Done.
+              if (linkFor && linkGuardRef.current && !linkGuardRef.current()) return;
               linkOpenerRef.current = el;
               setLinkFor({ messageId, fromHeader: true });
             }}

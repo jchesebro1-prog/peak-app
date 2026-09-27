@@ -48,9 +48,12 @@ export default function TaskDialog({
   messageId: string | null;
   onClose: () => void;
   /** #215 fix wave 1 — where to send focus on close when the opener is no
-   *  longer in the document (e.g. the link panel's "Create task", whose own
-   *  opener may have re-rendered away by the time this dialog closes) — the
-   *  reader's own root, so focus never falls all the way out to the page. */
+   *  longer in the document (e.g. the link panel's "Create task" button,
+   *  which unmounts as link mode closes right under it) — the reader's own
+   *  root, so focus never falls all the way out to the page. #214 sidebar:
+   *  the link sidebar restores its own focus on Done/Escape, but that's a
+   *  separate concern from this dialog's opener — this fallback is still
+   *  this dialog's own job. */
   containerRef?: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -73,17 +76,20 @@ export default function TaskDialog({
   const [due, setDue] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Same mount-focus / restore-on-close pattern as the link panel (#214 fix
-  // wave 1): without it the inbox shell's ArrowUp/ArrowDown handler (which
-  // only skips a target inside `[role="dialog"]`) would keep switching
-  // threads out from under this dialog, and focus would land on the page
-  // behind it once the dialog closes. #215 fix wave 1 — the dialog never
-  // actually took focus (no auto-focus replacement, no dialogRef.focus()
-  // call), so this effect now moves focus onto the Title field itself via a
-  // ref rather than the previous uncontrolled JSX attribute; on close,
-  // focus only goes back to the opener when it's still on the page (e.g. opened
-  // from the link panel's "Create task", which unmounts as link mode
-  // closes) — otherwise it falls back to the reader itself.
+  // Mount-focus / restore-on-close — this dialog's own copy of the pattern
+  // (#214 sidebar: the link sidebar's link mode does the same for itself on
+  // Done/Escape, but has no say over this dialog's opener). Without moving
+  // focus here, the inbox shell's ArrowUp/ArrowDown handler (which skips a
+  // target inside `[role="dialog"], [role="menu"], [data-link-panel]`) would
+  // keep switching threads out from under this still-modal dialog, and focus
+  // would land on the page behind it once the dialog closes. #215 fix wave 1
+  // — the dialog never actually took focus (no auto-focus replacement, no
+  // dialogRef.focus() call), so this effect now moves focus onto the Title
+  // field itself via a ref rather than the previous uncontrolled JSX
+  // attribute; on close, focus only goes back to the opener when it's still
+  // on the page (e.g. opened from the link panel's "Create task" button,
+  // which unmounts as link mode closes) — otherwise it falls back to the
+  // reader itself.
   useEffect(() => {
     const fallback = containerRef?.current ?? null;
     openerRef.current = document.activeElement;

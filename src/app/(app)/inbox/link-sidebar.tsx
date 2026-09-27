@@ -42,6 +42,7 @@ export default function LinkSidebar({
   variant,
   linkFor,
   openerRef,
+  linkGuardRef,
   onEditLinks,
   onDoneLinking,
   onCreateTask,
@@ -55,6 +56,10 @@ export default function LinkSidebar({
   linkFor: { messageId: string; fromHeader: boolean } | null;
   /** the element that entered link mode; Done hands focus back to it */
   openerRef: RefObject<HTMLElement | null>;
+  /** #214 sidebar fix 2 — the mounted LinkPanel keeps this pointed at its own
+   *  "OK to leave?" check; the reader calls it before switching link mode to
+   *  a different message. */
+  linkGuardRef?: RefObject<(() => boolean) | null>;
   /** #214 — link mode on the identity message */
   onEditLinks: () => void;
   /** back to the summary */
@@ -138,7 +143,12 @@ export default function LinkSidebar({
   const asideStyle: React.CSSProperties =
     variant === "pane"
       ? {
-          width: linkFor ? 380 : 300,
+          // #214 sidebar fix 1 — in link mode, shrink below 380px on a
+          // narrow pane so the conversation column (readerRootRef, this
+          // aside's flex-row containing block) keeps >=320px; percentages
+          // on a flex item resolve against the flex container's content
+          // box, i.e. the reader row, which is what "100%" means here.
+          width: linkFor ? "clamp(300px, calc(100% - 320px), 380px)" : 300,
           maxWidth: "100%",
           transition: "width .18s ease",
           flexShrink: 0,
@@ -176,6 +186,7 @@ export default function LinkSidebar({
           messageId={linkFor.messageId}
           fromHeader={linkFor.fromHeader}
           onDone={doneLinking}
+          guardRef={linkGuardRef}
           onCreateTask={onCreateTask ? () => onCreateTask(linkFor.messageId) : undefined}
         />
       ) : (

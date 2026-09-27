@@ -26053,14 +26053,14 @@ import { existsSync as sb214Exists, readdirSync as sb214Readdir } from "node:fs"
     panel.includes("scrollIntoView(") && /querySelector<HTMLInputElement>\([^)]*Search a company, venue or person/.test(panel) && panel.includes(".focus()"),
     "#214 sidebar: entering link mode scrolls the panel into view and focuses its search box"
   );
-  // Sidebar hosts the panel, keyed by message; 300 → 380 in link mode.
+  // Sidebar hosts the panel, keyed by message; 300 → clamp(…380px) in link mode.
   ok(
     side.includes('import LinkPanel from "./link-panel";') &&
       /<LinkPanel\s+key=\{linkFor\.messageId\}/.test(side) &&
-      /width: linkFor \? 380 : 300/.test(side) &&
+      /width: linkFor \? "clamp\(300px, calc\(100% - 320px\), 380px\)" : 300/.test(side) &&
       side.includes('transition: "width') &&
       side.includes('maxWidth: "100%"'),
-    "#214 sidebar: the sidebar swaps in LinkPanel keyed by message, widening 300 → 380px in pane link mode"
+    "#214 sidebar: the sidebar swaps in LinkPanel keyed by message, widening 300 → a clamped ≤380px in pane link mode"
   );
   ok(
     side.includes("opener.isConnected") && side.includes("editLinksRef.current?.focus()"),
@@ -26089,4 +26089,47 @@ import { existsSync as sb214Exists, readdirSync as sb214Readdir } from "node:fs"
     return /Link popup/i.test(s) || /\bLinkPopup\b/.test(s) || s.includes("link-popup.tsx");
   });
   ok(stale.length === 0, `#214 sidebar: no src file still names the Link popup (${stale.join(", ")})`);
+
+  /* ---- #214 sidebar review fixes 1–3 (Sep 27) ------------------------- */
+
+  // Fix 1 — link mode's width clamps instead of a bare 380, so the
+  // conversation column (the reader row this aside is a flex item of) keeps
+  // at least 320px on a narrow pane; summary mode is untouched at 300.
+  ok(
+    /width: linkFor \? "clamp\(300px, calc\(100% - 320px\), 380px\)" : 300/.test(side),
+    "#214 sidebar fix 1: link mode's pane width clamps 300–380px against the reader row so the conversation keeps >=320px on a narrow pane"
+  );
+
+  // Fix 2 — a typed-but-unsaved quick-add (contact/company/venue) survives a
+  // stray Escape (task-dialog.tsx's rule); an empty one still closes. Done
+  // confirms before discarding a non-empty one.
+  ok(
+    /function openQuickAddWithContent\(/.test(panel) &&
+      panel.includes("if (openQuickAddWithContent(adding, newCompany, newVenue)) return;") &&
+      panel.includes("window.confirm(`Discard the unsaved new ${kind}?`)"),
+    "#214 sidebar fix 2: a typed-but-unsaved quick-add form survives Escape, and Done confirms before discarding one"
+  );
+  // The same discard guard reaches the reader through the sidebar, so a
+  // header "Link…" on a different message while one is open confirms too —
+  // switching would otherwise unmount the panel (and the typed form) with it.
+  ok(
+    panel.includes("guardRef?: RefObject<(() => boolean) | null>") &&
+      side.includes("linkGuardRef") &&
+      side.includes("guardRef={linkGuardRef}") &&
+      reader.includes("linkGuardRef") &&
+      /if \(linkFor && linkGuardRef\.current && !linkGuardRef\.current\(\)\) return;/.test(reader),
+    "#214 sidebar fix 2: the mounted panel's discard guard reaches the reader through the sidebar, gating a header Link… on another message"
+  );
+
+  // Fix 3 — re-clicking Link… on the message already in link mode refocuses
+  // the panel's search box instead of being a no-op.
+  {
+    const reOpen = reader.indexOf("if (linkFor?.messageId === messageId)");
+    ok(
+      reOpen !== -1 &&
+        reader.slice(reOpen, reOpen + 500).includes("Search a company, venue or person") &&
+        reader.slice(reOpen, reOpen + 500).includes(".focus()"),
+      "#214 sidebar fix 3: re-clicking Link… on the message already in link mode refocuses the panel's search box"
+    );
+  }
 }

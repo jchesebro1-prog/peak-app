@@ -18,7 +18,7 @@
  * mode stays open so several people can be linked in a row. No store
  * imports — a store pulls postgres into the client bundle (next build only).
  */
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import EntityQuickAdd, { INPUT, emptyVenueQuickAdd, type QuickAddValues } from "@/components/entity-quick-add";
 import { venueTypeOptions } from "@/lib/venue-types";
@@ -168,11 +168,29 @@ type Adding = {
   company: { id: string; name: string } | null;
 };
 
+/** #214 sidebar fix 2 — which quick-add form (if any) has been typed into,
+ *  so Escape / Done / a header "Link…" on another message all know whether
+ *  leaving would silently drop it. A module-level function (not a value from
+ *  render scope) so the Escape effect below doesn't need it as a dep. */
+function openQuickAddWithContent(
+  adding: Adding | null,
+  newCompany: QuickAddValues["customer"] | null,
+  newVenue: QuickAddValues["venue"] | null
+): "contact" | "company" | "venue" | null {
+  if (adding && (adding.values.name.trim() || adding.values.role.trim() || adding.values.phone.trim()))
+    return "contact";
+  if (newCompany && newCompany.name.trim()) return "company";
+  if (newVenue && (newVenue.locationName.trim() || newVenue.city.trim() || newVenue.state.trim()))
+    return "venue";
+  return null;
+}
+
 export default function LinkPanel({
   vm,
   messageId,
   fromHeader,
   onDone,
+  guardRef,
   onCreateTask,
 }: {
   vm: ReaderVM;
@@ -181,6 +199,10 @@ export default function LinkPanel({
   fromHeader: boolean;
   /** back to the sidebar summary (Done, or Escape inside the panel) */
   onDone: () => void;
+  /** #214 sidebar fix 2 — the reader calls this before switching link mode to
+   *  a different message; it returns false (and keeps this message's panel
+   *  up) when the person cancels a "discard the unsaved …?" confirm. */
+  guardRef?: RefObject<(() => boolean) | null>;
   /** #215 wires this; "Create task" shows only when it is set */
   onCreateTask?: () => void;
 }) {
@@ -294,7 +316,12 @@ export default function LinkPanel({
         // First Escape closes the open quick-add form (a Typeahead's own
         // Escape already preventDefault()s above, so this only runs for a
         // plain form field or a target outside any input). A second
-        // Escape, with nothing left open, returns to the summary.
+        // Escape, with nothing left open, returns to the summary. #214
+        // sidebar fix 2 — but not while there's typed content in it: same
+        // "a stray Escape while typing doesn't throw away what's typed" rule
+        // as task-dialog.tsx. An empty form still closes here; a non-empty
+        // one only closes from Done's own discard confirm.
+        if (openQuickAddWithContent(adding, newCompany, newVenue)) return;
         setAdding(null);
         setNewCompany(null);
         setNewVenue(null);
@@ -307,6 +334,24 @@ export default function LinkPanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onDone, adding, newCompany, newVenue]);
+
+  // #214 sidebar fix 2 — keeps guardRef pointed at a closure over the latest
+  // adding/newCompany/newVenue so the reader can ask, before it swaps this
+  // panel for a different message's, whether that would discard something
+  // typed — and if so, run the same confirm Done uses. Cleared on unmount
+  // (own key change or Done/Escape closing the panel) so a stale guard is
+  // never consulted once this instance's data is gone.
+  useEffect(() => {
+    if (!guardRef) return;
+    const guard = () => {
+      const kind = openQuickAddWithContent(adding, newCompany, newVenue);
+      return !kind || window.confirm(`Discard the unsaved new ${kind}?`);
+    };
+    guardRef.current = guard;
+    return () => {
+      if (guardRef.current === guard) guardRef.current = null;
+    };
+  });
 
   const run = (
     fn: () => Promise<ActionResult>,
@@ -453,7 +498,18 @@ export default function LinkPanel({
             Linking from: {fromLabel}
           </div>
         </div>
-        <button type="button" style={{ ...PRIMARY, flexShrink: 0 }} onClick={onDone}>
+        <button
+          type="button"
+          style={{ ...PRIMARY, flexShrink: 0 }}
+          onClick={() => {
+            // #214 sidebar fix 2 — Done never silently drops a typed-but-
+            // unsaved quick-add; same confirm the reader runs before
+            // switching link mode to a different message.
+            const kind = openQuickAddWithContent(adding, newCompany, newVenue);
+            if (kind && !window.confirm(`Discard the unsaved new ${kind}?`)) return;
+            onDone();
+          }}
+        >
           Done
         </button>
       </div>
