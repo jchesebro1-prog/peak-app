@@ -44,6 +44,9 @@ export const UNMAPPED_TYPE = "__unmapped";
 export const ASSEMBLY_TYPE = "__assembly";
 export const ALLOWANCE_TYPE = "__allowance";
 export const UNMAPPED_LABEL = "Unmapped";
+/** The seeded type a curtain drop-in (`GridPlacement.curtain`) belongs to
+ *  by construction — its Layers row, the way its scope is Curtains. */
+export const DRAPERY_TYPE_KEY = "drapery";
 
 const SEED: ReadonlyArray<[string, GridLayer]> = [
   ["Fixtures", "Lighting"], ["Dimming & Power", "Lighting"], ["Control & Networking", "Lighting"], ["Lighting Accessories", "Lighting"],

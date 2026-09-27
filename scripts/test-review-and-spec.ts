@@ -21954,3 +21954,59 @@ async function deviceTypeIconsAsyncChecks(): Promise<void> {
     for (const row of snap) await db.insert(blobs226b).values(row);
   }
 }
+
+/* ======================================================================
+   #226 T4 fix — per-category overrides survive an unrelated save; the
+   legend never merges a device type with an unmapped category.
+   ====================================================================== */
+import { storedCategoryOverrides as t4fStored, withCategoryOverride as t4fWith } from "@/lib/design/grid-icons";
+import { DRAPERY_TYPE_KEY as T4F_DRAPERY, DEFAULT_TYPE_ICONS as T4F_TYPE_ICONS } from "@/lib/design/device-types";
+
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const j = (v: unknown) => JSON.stringify(v);
+  const rows = [
+    { category: "Loudspeakers", gridScope: "Audio", deviceType: "speakers" },
+    { category: "Widgets", gridScope: null, deviceType: null },
+  ];
+  // An override that equals the speakers type icon (its baseline today).
+  const stored = { loudspeakers: T4F_TYPE_ICONS.speakers, Widgets: "wifi", "Gone Category": "bell" };
+  const saved = t4fStored(rows, stored);
+  ok(j(saved) === j({ Loudspeakers: T4F_TYPE_ICONS.speakers, Widgets: "wifi" }),
+    "#226 T4 fix: the Advanced card starts from every stored override that matches a row, even one equal to the type icon");
+  const afterUnrelated = t4fWith(saved, "Widgets", "bell", "device");
+  ok(afterUnrelated.Loudspeakers === T4F_TYPE_ICONS.speakers && afterUnrelated.Widgets === "bell",
+    "#226 T4 fix: an override equal to the type icon survives an unrelated save");
+  ok(!Object.hasOwn(t4fWith(saved, "Loudspeakers", null, T4F_TYPE_ICONS.speakers), "Loudspeakers") &&
+    !Object.hasOwn(t4fWith(saved, "Widgets", "device", "device"), "Widgets") &&
+    t4fWith({}, "Widgets", "horn", "device").Widgets === "horn",
+    "#226 T4 fix: only ↺ or an explicit pick equal to the baseline removes a row's override");
+  const cic = read("src/app/(app)/design/grid/settings/category-icons-card.tsx");
+  ok(cic.includes("storedCategoryOverrides(rows, stored)") && cic.includes("withCategoryOverride(o, category, iconId, baseline)") && !cic.includes("v !== baseIconFor"),
+    "#226 T4 fix: the card's saved map and row edits go through the pure helpers");
+
+  const ctx = dt4Ctx({ gridCategoryIcons: { "Zed A": "horn", "Zed B": "horn" } }, dt226From(undefined));
+  const same = (a: { iconId: string; color: string }, b: { iconId: string; color: string }) => a.iconId === b.iconId && a.color === b.color;
+  ok(same(dt4Look({ category: "Zed A", deviceType: "speakers" }, ctx), dt4Look({ category: "Zed B", deviceType: null }, ctx)),
+    "#226 T4 fix (fixture): the mapped and unmapped entries draw the same badge");
+  const mixed = dt4Legend([
+    { id: "m", category: "Zed A", deviceType: "speakers", deviceTypeLabel: "Speakers" },
+    { id: "u", category: "Zed B", deviceType: null },
+  ], ctx);
+  ok(mixed.map((r) => r.label).join("|") === "Speakers|Unmapped · Zed B" && new Set(mixed.map((r) => r.key)).size === 2,
+    "#226 T4 fix: a mapped type row and an unmapped category with the same badge never merge");
+  const merged = dt4Legend([
+    { id: "u1", category: "Zed A", deviceType: null },
+    { id: "u2", category: "Zed B", deviceType: null },
+    { id: "u3", category: " zed a", deviceType: null },
+  ], ctx);
+  ok(merged.map((r) => r.label).join("|") === "Unmapped", "#226 T4 fix: a merged unmapped row with differing categories reads \"Unmapped\"");
+  ok(dt4Legend([{ id: "u1", category: "Zed A", deviceType: null }, { id: "u3", category: "zed a ", deviceType: null }], ctx).map((r) => r.label).join("|") === "Unmapped · Zed A",
+    "#226 T4 fix: unmapped repeats of one category keep its sub-label");
+  ok(dt4Legend([{ id: "x", category: "Zed A" }, { id: "y", category: "Zed B" }], ctx).length === 1,
+    "#226 T4 fix: untyped callers still dedupe by badge alone");
+
+  ok(T4F_DRAPERY === "drapery" && Object.hasOwn(T4F_TYPE_ICONS, T4F_DRAPERY), "#226 T4 fix: DRAPERY_TYPE_KEY names a seeded type");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("pl.curtain ? DRAPERY_TYPE_KEY :") && !ed.includes('"drapery"'), "#226 T4 fix: the editor's curtain layer uses DRAPERY_TYPE_KEY");
+}

@@ -449,7 +449,8 @@ export function legendRows(
 ): LegendRow[] {
   const rows: LegendRow[] = [];
   const unmapped: LegendRow[] = [];
-  const seenBadges = new Set<string>();
+  /** dedupe key → the row it produced + that row's normalized category. */
+  const seenBadges = new Map<string, { row: LegendRow; category: string }>();
   const lookCache = new Map<string, SymbolLook>();
   for (const e of entries) {
     const identity =
@@ -460,12 +461,22 @@ export function legendRows(
       look = symbolLook(e, ctx);
       lookCache.set(identity, look);
     }
-    const key = `${look.iconId}|${look.color}`;
-    if (seenBadges.has(key)) continue;
-    seenBadges.add(key);
     const category = (e.category || "").trim();
     const typed = e.deviceType !== undefined;
     const isUnmapped = typed && !e.deviceType;
+    // #226 fix wave: a typed entry dedupes within its device type (or the
+    // shared Unmapped bucket), so a type row and an unmapped category that
+    // happen to draw the same badge never merge into one label. Untyped
+    // callers keep the plain per-badge rule.
+    const bucket = !typed ? "" : e.deviceType ? `type:${e.deviceType}|` : "unmapped|";
+    const key = `${bucket}${look.iconId}|${look.color}`;
+    const seen = seenBadges.get(key);
+    if (seen) {
+      // Unmapped categories sharing one badge: the row can no longer name
+      // a single raw category, so it reads just "Unmapped".
+      if (isUnmapped && seen.category !== norm(category)) seen.row.label = UNMAPPED_LABEL;
+      continue;
+    }
     const head = !typed
       ? category || "Uncategorized"
       : e.deviceType
@@ -475,7 +486,9 @@ export function legendRows(
           : UNMAPPED_LABEL;
     const base = symbolLook({ category: e.category, group: e.group, trade: e.trade, gridScope: e.gridScope, deviceType: e.deviceType }, ctx);
     const differs = base.iconId !== look.iconId || base.color !== look.color;
-    (isUnmapped ? unmapped : rows).push({ key, iconId: look.iconId, color: look.color, label: differs && e.desc ? `${head} — ${e.desc}` : head });
+    const row: LegendRow = { key, iconId: look.iconId, color: look.color, label: differs && e.desc ? `${head} — ${e.desc}` : head };
+    seenBadges.set(key, { row, category: norm(category) });
+    (isUnmapped ? unmapped : rows).push(row);
   }
   return [...rows, ...unmapped];
 }
@@ -514,6 +527,37 @@ export function symbolCategoryRows(input: {
   for (const g of input.grid) add(g.category);
   for (const c of Object.keys(input.stored || {})) add(c);
   return Array.from(rows.values()).sort((a, b) => a.category.localeCompare(b.category));
+}
+
+/** #226 fix wave: the Advanced overrides card's saved map — EVERY stored
+ *  override whose category matches a row (trimmed, case-insensitive; keyed
+ *  by the row's spelling). Never filtered against the row's baseline: the
+ *  baseline is now the editable device-type icon, so an override that
+ *  happens to equal it today is still the admin's pin, and dropping it here
+ *  made the card's whole-map save erase it. */
+export function storedCategoryOverrides(rows: readonly SymbolCategoryRow[], stored: Record<string, string> | null | undefined): Record<string, string> {
+  const byNorm = new Map(rows.map((r) => [norm(r.category), r.category]));
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(stored || {})) {
+    const category = byNorm.get(norm(k));
+    if (category && typeof v === "string" && v) out[category] = v;
+  }
+  return out;
+}
+
+/** One explicit edit on the Advanced overrides card: ↺ (`null`) or a pick
+ *  equal to the row's baseline removes that row's override; any other pick
+ *  sets it. Every other entry is carried over untouched. */
+export function withCategoryOverride(
+  map: Record<string, string>,
+  category: string,
+  iconId: string | null,
+  baseline: string
+): Record<string, string> {
+  const next = { ...map };
+  if (!iconId || iconId === baseline) delete next[category];
+  else next[category] = iconId;
+  return next;
 }
 
 /** The shipped default icon for a category (trimmed, case-insensitive), or

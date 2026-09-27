@@ -89,7 +89,7 @@ import PlanLegend from "./plan-legend";
 import SymbolLookPanel from "./symbol-look-panel";
 import CustomItemsSection from "./custom-items";
 import DevicePalette from "./device-palette";
-import { typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
+import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
@@ -453,7 +453,7 @@ export default function GridEditor({
   /** #226: the device-type layer a placement belongs to — a curtain drop-in
    *  is Drapery by construction, the way its scope is Curtains. */
   const typeKeyOfPlacement = useCallback(
-    (pl: GridPlacement): string => (pl.curtain ? "drapery" : typeKeyOfPart(partById.get(pl.partId))),
+    (pl: GridPlacement): string => (pl.curtain ? DRAPERY_TYPE_KEY : typeKeyOfPart(partById.get(pl.partId))),
     [partById]
   );
 

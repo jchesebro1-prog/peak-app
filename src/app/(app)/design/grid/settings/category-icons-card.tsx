@@ -2,7 +2,14 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resolveCategoryIcons, symbolLook, type SymbolCategoryRow, type SymbolContext } from "@/lib/design/grid-icons";
+import {
+  resolveCategoryIcons,
+  storedCategoryOverrides,
+  symbolLook,
+  withCategoryOverride,
+  type SymbolCategoryRow,
+  type SymbolContext,
+} from "@/lib/design/grid-icons";
 import { SymbolIcon } from "@/components/design/symbol-shape";
 import { IconPicker } from "@/components/design/icon-picker";
 import { saveCategoryIconsAction } from "./actions";
@@ -14,9 +21,11 @@ import { saveCategoryIconsAction } from "./actions";
  * icon, so every override an admin already configured keeps working.
  * Collapsed by default, and it lists only categories that have an override
  * or are used in a Grid design ("Show all" lists every live category).
- * Sparse save: only rows that differ from their baseline are posted
- * (settings.gridCategoryIcons merges per category). "Reset to defaults"
- * clears the key; ↺ on a row returns just that row.
+ * Save posts the whole map (settings.gridCategoryIcons is replaced), so the
+ * starting map holds EVERY stored override — even one that equals today's
+ * device-type icon (#226 fix wave: filtering those out erased them on the
+ * next unrelated save). Only an explicit pick equal to the baseline, or ↺,
+ * removes a row. "Reset to defaults" clears the key.
  *
  * A row's baseline — what ↺ returns to and what an untouched row previews —
  * is computed with the SAME resolver the plan uses (`symbolLook` over
@@ -48,14 +57,7 @@ export function CategoryIconsCard({
   const rowByCategory = useMemo(() => new Map(rows.map((r) => [r.category, r])), [rows]);
   const usedSet = useMemo(() => new Set(used.map(norm)), [used]);
 
-  const saved = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(stored || {})) {
-      const row = rows.find((r) => norm(r.category) === norm(k));
-      if (row && v !== baseIconFor(row.category, row.gridScope, row.deviceType ?? null)) out[row.category] = v;
-    }
-    return out;
-  }, [rows, stored, baseIconFor]);
+  const saved = useMemo(() => storedCategoryOverrides(rows, stored), [rows, stored]);
   const [overrides, setOverrides] = useState<Record<string, string>>(saved);
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -72,13 +74,9 @@ export function CategoryIconsCard({
   const setRow = (category: string, iconId: string | null) => {
     setJustSaved(false);
     setError(null);
-    setOverrides((o) => {
-      const next = { ...o };
-      const row = rowByCategory.get(category);
-      if (!iconId || iconId === baseIconFor(category, row?.gridScope ?? null, row?.deviceType ?? null)) delete next[category];
-      else next[category] = iconId;
-      return next;
-    });
+    const row = rowByCategory.get(category);
+    const baseline = baseIconFor(category, row?.gridScope ?? null, row?.deviceType ?? null);
+    setOverrides((o) => withCategoryOverride(o, category, iconId, baseline));
   };
 
   const save = (map: Record<string, string>) => {
