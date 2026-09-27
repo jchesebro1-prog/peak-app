@@ -22266,3 +22266,145 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   ok(ci.includes("CUSTOM_SYSTEM_OF_GROUP") && ci.includes("showAdd") && ci.includes("system: draft.system"),
     "#230 UI: the custom-item form picks its BOM category and keeps it on edit");
 }
+
+/* ============ #222 / #220 — saved quote PDFs + portal history: pure pieces (Task 1) ============ */
+import { PRINT_TOKEN_TTL_MS, signPrintToken, verifyPrintToken } from "@/lib/quote-pdf/token";
+import {
+  PDF_PENDING_STALE_MS,
+  failedPdf,
+  latestSentRevision,
+  pdfFileName,
+  pdfKindForQuoteType,
+  pdfStoragePath,
+  pdfView,
+  pendingPdf,
+  portalPdfSource,
+  printPathFor,
+  revisionAwaitingPdf,
+  settlePdf,
+  teamPdfPath,
+  type QuotePdfState,
+} from "@/lib/quote-pdf/state";
+import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { originFrom } from "@/lib/quote-pdf/origin";
+import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectView } from "@/lib/portal-projects";
+{
+  const S = "test-secret-222";
+  const t0 = 1_800_000_000_000;
+  const tok = signPrintToken(S, "quote", "Q-2041", t0);
+  ok(verifyPrintToken(S, tok, "quote", "Q-2041", t0 + 1000), "#222 print token: a fresh token verifies for its kind + id");
+  ok(!verifyPrintToken(S, tok, "flame", "Q-2041", t0), "#222 print token: another kind is refused");
+  ok(!verifyPrintToken(S, tok, "quote", "Q-2042", t0), "#222 print token: another quote id is refused");
+  ok(!verifyPrintToken(S, tok, "quote", "Q-2041", t0 + PRINT_TOKEN_TTL_MS + 1), "#222 print token: expires after its TTL");
+  ok(PRINT_TOKEN_TTL_MS === 120_000, "#222 print token: TTL is 120 s");
+  const [exp, sig] = tok.split(".");
+  const flipped = sig.slice(0, -1) + (sig.endsWith("A") ? "B" : "A");
+  ok(!verifyPrintToken(S, `${exp}.${flipped}`, "quote", "Q-2041", t0), "#222 print token: a tampered signature is refused");
+  ok(!verifyPrintToken(S, `${Number(exp) + 60_000}.${sig}`, "quote", "Q-2041", t0), "#222 print token: a stretched expiry is refused");
+  ok(!verifyPrintToken("other-secret", tok, "quote", "Q-2041", t0), "#222 print token: another secret is refused");
+  ok(!verifyPrintToken(S, "", "quote", "Q-2041", t0) && !verifyPrintToken(S, "garbage", "quote", "Q-2041", t0), "#222 print token: missing or malformed tokens are refused");
+  ok(!verifyPrintToken("", tok, "quote", "Q-2041", t0), "#222 print token: no secret configured → nothing verifies");
+}
+{
+  ok(
+    pdfKindForQuoteType(undefined) === "quote" && pdfKindForQuoteType("system") === "quote" && pdfKindForQuoteType("flame_test") === "flame" &&
+      pdfKindForQuoteType("repair") === "repair" && pdfKindForQuoteType("inspection") === "inspection",
+    "#222 pdfKindForQuoteType: system → quote, the three service letters by type"
+  );
+  ok(pdfKindForQuoteType("consulting") === null && pdfKindForQuoteType("rental") === null, "#222 pdfKindForQuoteType: consulting and rental have no saved PDF");
+  ok(printPathFor("quote", "Q-1") === "/print/quote/Q-1" && printPathFor("repair", "Q 2") === "/print/letter/repair/Q%202", "#222 printPathFor: quote vs letter routes, id encoded");
+  ok(
+    pdfStoragePath("Q-2041", "123") === "quote-pdfs/Q-2041/123.pdf" && pdfStoragePath("TEST222:a/b", "rev-1") === "quote-pdfs/TEST222_a_b/rev-1.pdf",
+    "#222 pdfStoragePath: one folder per quote, unsafe characters replaced"
+  );
+  const ready: QuotePdfState = { status: "ready", at: 10, savedAt: 5, blobPath: "quote-pdfs/Q-1/5.pdf" };
+  const p = pendingPdf(ready, 20, 21);
+  ok(p.status === "pending" && p.savedAt === 20 && p.at === 21 && p.blobPath === ready.blobPath, "#222 pendingPdf: a new save goes pending but keeps the last good file");
+  ok(settlePdf(p, 19, { ok: true, blobPath: "x" }, 30) === undefined, "#222 settlePdf: an older save's render is superseded by the newer savedAt");
+  ok(settlePdf(null, 20, { ok: true, blobPath: "x" }, 30) === undefined, "#222 settlePdf: nothing to settle when the quote carries no pdf state");
+  const done = settlePdf(p, 20, { ok: true, blobPath: "quote-pdfs/Q-1/20.pdf" }, 30);
+  ok(done?.status === "ready" && done.blobPath === "quote-pdfs/Q-1/20.pdf" && done.at === 30 && done.savedAt === 20, "#222 settlePdf: the matching save becomes ready with its new file");
+  const bad = settlePdf(p, 20, { ok: false, error: "No Chrome" }, 30);
+  ok(bad?.status === "failed" && bad.error === "No Chrome" && bad.blobPath === ready.blobPath, "#222 settlePdf: a failure records the reason and keeps the last good file");
+  const f = failedPdf(ready, 40, "x".repeat(400), 41);
+  ok(f.status === "failed" && f.savedAt === 40 && f.error?.length === 300 && f.blobPath === ready.blobPath, "#222 failedPdf: reason capped at 300 chars, last good file kept");
+  const v = pdfView(p, 21 + PDF_PENDING_STALE_MS + 1);
+  ok(v?.status === "failed" && !!v.error && v.hasFile, "#222 pdfView: a pending render older than the stale window reads as failed");
+  ok(pdfView(p, 22)?.status === "pending" && pdfView(null, 0) === null, "#222 pdfView: a live pending render stays pending; no state → null");
+  ok(!("blobPath" in (pdfView(ready, 11) as object)), "#222 pdfView: the browser view never carries the storage path");
+  ok(
+    revisionAwaitingPdf({ rev: 2, at: 50, reason: "sent" }, 40) && !revisionAwaitingPdf({ rev: 2, at: 30, reason: "sent" }, 40) &&
+      !revisionAwaitingPdf({ rev: 2, at: 50, reason: "manual" }, 40) && !revisionAwaitingPdf({ rev: 2, at: 50, reason: "sent", pdfBlobPath: "x" }, 40),
+    "#222 revisionAwaitingPdf: only a sent revision cut at/after the PDF's save and not yet copied"
+  );
+  const revs = [
+    { rev: 1, at: 1, reason: "sent", pdfBlobPath: "r1" },
+    { rev: 2, at: 2, reason: "manual" },
+    { rev: 3, at: 3, reason: "sent" },
+  ];
+  ok(latestSentRevision(revs)?.rev === 3, "#222 latestSentRevision: the newest sent snapshot");
+  ok(portalPdfSource({ revisions: revs, pdf: ready })?.path === ready.blobPath, "#222 portalPdfSource: the latest sent revision has no copy → the current ready PDF");
+  ok(
+    portalPdfSource({ revisions: [revs[0], revs[1], { rev: 3, at: 3, reason: "sent", pdfBlobPath: "r3" }], pdf: ready })?.path === "r3",
+    "#222 portalPdfSource: the latest sent revision's copy wins over later edits"
+  );
+  ok(
+    portalPdfSource({ revisions: [], pdf: { ...ready, status: "failed" } }) === null && portalPdfSource({ revisions: [], pdf: null }) === null,
+    "#222 portalPdfSource: no ready file → nothing for the customer"
+  );
+  ok(
+    teamPdfPath({ revisions: revs, pdf: ready }, 1) === "r1" && teamPdfPath({ revisions: revs, pdf: ready }, 3) === null && teamPdfPath({ revisions: revs, pdf: ready }, null) === ready.blobPath,
+    "#222 teamPdfPath: ?rev=n reads that revision's copy, else the current file"
+  );
+  ok(pdfFileName("Q-2041", null) === "Q-2041.pdf" && pdfFileName("Q-2041", 3) === "Q-2041-rev3.pdf", "#222 pdfFileName: Q-id plus -rev<n>");
+}
+{
+  ok(JSON.stringify(normalizePdfOptions(undefined)) === JSON.stringify(DEFAULT_PDF_OPTIONS), "#222 normalizePdfOptions: absent → every toggle on, itemized");
+  const n = normalizePdfOptions({ detail: "sectioned", pdfPrices: false, pdfQty: "no", junk: 1 });
+  ok(n.detail === "sectioned" && n.pdfPrices === false && n.pdfQty === true && !("junk" in n), "#222 normalizePdfOptions: keeps real booleans, drops junk, defaults the rest");
+  ok(normalizePdfOptions({ detail: "weird" }).detail === "itemized", "#222 normalizePdfOptions: an unknown detail falls back to itemized");
+}
+{
+  ok(originFrom("localhost:3000", null) === "http://localhost:3000", "#222 originFrom: localhost defaults to http");
+  ok(originFrom("quartzite-six.vercel.app", "https") === "https://quartzite-six.vercel.app", "#222 originFrom: forwarded proto + host");
+  ok(originFrom("evil.com/x", "https") === null && originFrom("", "https") === null, "#222 originFrom: a host with a path, or no host, is refused");
+  ok(
+    originFrom("ignored:1", "http", "https://app.example.com/") === "https://app.example.com" && originFrom("x", "http", "not a url") === null,
+    "#222 originFrom: QUOTE_PDF_ORIGIN wins, and a malformed one refuses"
+  );
+}
+{
+  const dlSource = { system: "daylite", importedAt: 1 };
+  ok(
+    !isAppEraProject({ id: "P-3001", source: dlSource }) && !isAppEraProject({ id: "P-dl-abc123" }) && isAppEraProject({ id: "P-3002", source: null }),
+    "#220 isAppEraProject: Daylite-sourced and legacy P-dl-* projects stay internal"
+  );
+  const proj = {
+    id: "P-3003", name: "Main stage rigging", kind: "project" as const, projectType: "system", stage: "install",
+    stageMeta: { pipelineId: "install", tag: "onsite" as const, label: "Install", index: 3, count: 7 },
+    installStart: 100, installEnd: 200, targetDate: 300, value: 48000.4, valueUnknown: false, updatedAt: 9,
+    margin: 0.4, procurement: [{}], crew: [{}], timeLogs: [{}], notes: [{}], tasks: [{}], owner: "Jeff", deliveries: [{}], mobilizations: [{}],
+  };
+  const view = portalProjectView(proj, { venueName: "Hall A", quoteStatus: "won" });
+  ok(Object.keys(view).sort().join(",") === "done,end,id,name,stage,start,target,type,updatedAt,value,venue", "#220 portalProjectView: whitelists exactly the customer-safe fields");
+  ok(view.value === 48000 && view.venue === "Hall A" && view.type === "Installation" && view.stage === "Install" && !view.done, "#220 portalProjectView: value, venue, type label, stage label");
+  ok(
+    portalProjectView(proj, { venueName: "", quoteStatus: "sent" }).value === null && portalProjectView({ ...proj, valueUnknown: true }, { venueName: "", quoteStatus: "won" }).value === null,
+    "#220 portalProjectView: value only when known and the linked quote is won"
+  );
+  ok(
+    portalProjectView({ ...proj, kind: "order", projectType: null }, { venueName: "", quoteStatus: null }).type === "Order" &&
+      portalProjectView({ ...proj, projectType: "flame_test" }, { venueName: "", quoteStatus: null }).type === "Flame test",
+    "#220 portalProjectView: order and service type labels"
+  );
+  const doneView = portalProjectView({ ...proj, stageMeta: { ...proj.stageMeta, tag: "done" as const, label: "Complete" }, updatedAt: 20 }, { venueName: "", quoteStatus: null });
+  const g = groupPortalProjects([view, doneView]);
+  ok(g.active.length === 1 && g.active[0] === view && g.history.length === 1 && g.history[0].stage === "Complete", "#220 groupPortalProjects: Complete → History, everything else Active");
+  const gq = groupPortalQuotes([
+    { id: "a", status: "sent", updatedAt: 1 },
+    { id: "b", status: "won", updatedAt: 2 },
+    { id: "c", status: "draft", updatedAt: 3 },
+    { id: "d", status: "lost", updatedAt: 4 },
+  ]);
+  ok(gq.open.map((q) => q.id).join(",") === "c,a" && gq.history.map((q) => q.id).join(",") === "d,b", "#220 groupPortalQuotes: sent + own drafts Open, won + lost History, newest first");
+}
