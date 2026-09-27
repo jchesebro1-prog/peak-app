@@ -28708,10 +28708,12 @@ async function portal242GenerateAsyncChecks(): Promise<void> {
   const CO = fixtureId(242, "gen-co");
   const CO2 = fixtureId(242, "gen-co-noowner");
   const CO_X = fixtureId(242, "gen-co-other");
+  const COCF = fixtureId(242, "gen-co-clearfail");
   const G = fixtureId(242, "gen-grant");
   const G2 = fixtureId(242, "gen-grant-2");
   const GR = fixtureId(242, "gen-grant-rate");
-  for (const g of [G, G2, GR]) registerFixture("portal_carts", g);
+  const GCF = fixtureId(242, "gen-grant-clearfail");
+  for (const g of [G, G2, GR, GCF]) registerFixture("portal_carts", g);
   const NOW = new Date(2026, 8, 27, 12).getTime();
   const DAY = 86400000;
   const made: string[] = [];
@@ -28733,6 +28735,7 @@ async function portal242GenerateAsyncChecks(): Promise<void> {
     await upsertCustomer({ id: CO, name: "Test242 Gen Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
     await upsertCustomer({ id: CO2, name: "Test242 Gen Co Two", type: "Education", locations: [{ ...venue, id: "w1" }], contacts: [] });
     await upsertCustomer({ id: CO_X, name: "Test242 Gen Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
+    await upsertCustomer({ id: COCF, name: "Test242 Gen Co ClearFail", type: "Education", owner, locations: [{ ...venue, id: "z1" }], contacts: [] });
     d242Invalidate();
     const cust = await d242GetCustomer(CO);
     const hall = cust?.locations.find((l) => l.id === "v1");
@@ -28793,6 +28796,22 @@ async function portal242GenerateAsyncChecks(): Promise<void> {
     }
     ok((await d242GetCart(G, CO)).lines.length === 0, "#242 generate review: the cart is empty afterwards");
 
+    // Fix round 1 — clearCart failing AFTER the quote already exists (and,
+    // for a firm generation, was already sent) must never turn into a
+    // reported failure: a retry off a false "try again" would re-read the
+    // still-full cart and mint a SECOND real quote for the same order.
+    await d242SaveCart({ id: GCF, customerId: COCF, locationId: "z1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    const beforeCF = (await d242GetAllQuotes()).filter((q) => q.customerId === COCF).length;
+    const rcf = await d242Generate(
+      { grantId: GCF, customerId: COCF, name: "Pat Buyer", email: "pat@example.com" },
+      { now: NOW, schedulePdf: false, deps: { clearCart: async () => { throw new Error("boom — clearCart down"); } } }
+    );
+    if (rcf.ok) registerFixture("quotes", rcf.quoteId);
+    const afterCF = (await d242GetAllQuotes()).filter((q) => q.customerId === COCF);
+    ok(rcf.ok === true && typeof (rcf as { quoteId?: string }).quoteId === "string" && afterCF.length === beforeCF + 1,
+      "#242 fix round 1: clearCart failing after the quote exists still reports ok:true and mints exactly one quote");
+    ok((await d242GetCart(GCF, COCF)).lines.length === 1, "#242 fix round 1: the cart is left full (not silently cleared) when clearCart itself is the thing that failed");
+
     // Owner fallback: a company with no owner → unassigned.
     await d242SaveCart({ id: G2, customerId: CO2, locationId: "w1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
     const r2 = await run({ ...sess, grantId: G2, customerId: CO2 });
@@ -28824,6 +28843,7 @@ async function portal242GenerateAsyncChecks(): Promise<void> {
     await removeCustomer(CO);
     await removeCustomer(CO2);
     await removeCustomer(CO_X);
+    await removeCustomer(COCF);
   }
 }
 

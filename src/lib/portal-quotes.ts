@@ -29,6 +29,11 @@ const GENERATE_WINDOW_MS = 3_600_000;
 
 export type GenerateResult = { ok: true; quoteId: string; mode: "firm" | "review" } | { ok: false; error: string };
 
+/** Test seam (fix round 1): lets a DB check force the post-creation cart
+ *  clear to fail, without touching any other dependency. Defaults to the
+ *  real store. */
+export type GeneratePortalQuoteDeps = { clearCart?: typeof clearCart };
+
 /** Grants with a Generate in flight in this process — a double click never
  *  makes two quotes from one cart. */
 const inFlight = new Set<string>();
@@ -72,8 +77,9 @@ function writable(session: PortalSession | null): session is PortalSession {
  */
 export async function generatePortalQuote(
   session: PortalSession | null,
-  opts: { now?: number; schedulePdf?: boolean } = {}
+  opts: { now?: number; schedulePdf?: boolean; deps?: GeneratePortalQuoteDeps } = {}
 ): Promise<GenerateResult> {
+  const clearCartImpl = opts.deps?.clearCart ?? clearCart;
   if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
   const { grantId, customerId } = session;
 
@@ -138,7 +144,17 @@ export async function generatePortalQuote(
         }).catch((err) => console.error("generatePortalQuote: review fallback failed", created.id, err));
       }
     }
-    await clearCart(grantId);
+    // Once the quote exists, Generate must report success no matter what —
+    // a customer who got their number back must never be told to retry (a
+    // retry would re-read the still-full cart and mint a SECOND real quote).
+    // clearCart is therefore its own try/catch, off the outer one: its
+    // failure is logged, never refunds the rate-limit token (a quote WAS
+    // made), and never turns this into a reported failure.
+    try {
+      await clearCartImpl(grantId);
+    } catch (e) {
+      console.error("generatePortalQuote: clearing the cart failed (quote already made)", created.id, e);
+    }
     return { ok: true, quoteId: created.id, mode };
   } catch (e) {
     console.error("generatePortalQuote failed", e);
