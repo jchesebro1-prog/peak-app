@@ -27,6 +27,7 @@ import {
   sortHistoryDesc,
   type VenueHistoryRow,
 } from "./venue-match";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 export type VenueDirRow = {
   site: SiteRow;
@@ -125,7 +126,7 @@ export async function loadVenueHistory(site: SiteRow): Promise<VenueHistoryRow[]
 
   for (const q of quotes.filter((r) => docMatchesVenue(r, companyId, locId))) {
     rows.push({
-      id: q.id, kind: "quote", title: q.name || q.id, subtitle: "Quote",
+      id: q.id, kind: "quote", title: q.name || displayQuoteNumber(q), subtitle: "Quote",
       ts: q.updatedAt, status: q.status, open: isOpenStage("quote", q.status),
       href: quoteDeepLink(q.quoteType ?? "", q.id), // quoteType is optional; "" → Estimator
     });

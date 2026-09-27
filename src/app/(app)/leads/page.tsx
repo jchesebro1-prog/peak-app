@@ -23,6 +23,8 @@ import {
 } from "@/lib/stores/leads";
 import { ACCENT_INK, avatarFor, buildDrawerVM, fuChip, srcChip, stageChip, type Ident } from "./lib";
 import { OwnerSelect } from "@/components/owner-select";
+import { displayLeadNumber } from "@/lib/estimate-number";
+import { get as getQuote } from "@/lib/stores/quotes";
 import { SEG_KEYS, type SegKey } from "./segs";
 import { shortMoneyDash, shortMoneyZero } from "./money";
 import BoardView from "@/components/board/board-view";
@@ -304,6 +306,8 @@ export default async function LeadsPage({
   /* ---------- drawer ---------- */
   const leadRec =
     leadParam && leadParam !== "new" ? allLeads.find((l) => l.id === leadParam) || null : null;
+  // #223 — the converted quote, so the drawer can name it by its number.
+  const convertedQuote = leadRec?.convertedQuoteId ? await getQuote(leadRec.convertedQuoteId) : null;
   const drawerMode: "new" | "detail" | null = leadParam
     ? leadParam === "new" || !leadRec
       ? "new"
@@ -394,7 +398,7 @@ export default async function LeadsPage({
         id: l.id,
         col: l.stage,
         title: l.org,
-        sub: l.interest || "New enquiry",
+        sub: `${displayLeadNumber(l)} · ${l.interest || "New enquiry"}`,
         value: l.value || 0,
         valueLabel: shortMoneyZero(l.value),
         chips: showFu ? [{ label: fu.full, ink: fu.ink, soft: fu.soft, bd: fu.bd }] : [],
@@ -440,7 +444,7 @@ export default async function LeadsPage({
     return {
       id: l.id,
       org: l.org,
-      sub,
+      sub: `${displayLeadNumber(l)} · ${sub}`,
       valueLabel: shortMoneyZero(l.value),
       owner: avatarFor(roster, l.owner),
       ownerTitle: l.owner || "Unassigned",
@@ -484,7 +488,7 @@ export default async function LeadsPage({
       id: l.id,
       href: hrefFor("table", seg, l.id, who),
       org: l.org,
-      idContact: l.id + (l.contact ? " · " + l.contact : ""),
+      idContact: displayLeadNumber(l) + (l.contact ? " · " + l.contact : ""),
       scope: l.interest || "—",
       src: srcChip(l),
       stage: stageChip(l),
@@ -824,7 +828,7 @@ export default async function LeadsPage({
         <LeadDrawer
           key={leadParam}
           mode={drawerMode}
-          vm={drawerMode === "detail" && leadRec ? buildDrawerVM(leadRec) : null}
+          vm={drawerMode === "detail" && leadRec ? buildDrawerVM(leadRec, convertedQuote) : null}
           closeHref={closeHref}
           meName={me.name}
           rosterNames={roster.map((r) => r.name)}

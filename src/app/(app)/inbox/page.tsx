@@ -80,6 +80,8 @@ import type {
 } from "./types";
 import InboxShell from "./inbox-shell";
 import HomeTabs from "../home-tabs";
+import { relabelLinkedRecord, displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
+import { leadNumbersFor, quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 
 export const metadata = { title: "Inbox — Quartzite-6" };
 
@@ -655,10 +657,10 @@ export default async function InboxPage({
               (q.customerId && q.customerId === resolvedCid) ||
               nameToId.get((q.customer || "").toLowerCase()) === resolvedCid
           )
-          .map((q) => ({ value: q.id, label: `${q.id} · ${q.name || "Quote"}` })),
+          .map((q) => ({ value: q.id, label: `${displayQuoteNumber(q)} · ${q.name || "Quote"}` })),
         lead: leads
           .filter((l) => l.customerId === resolvedCid && l.stage !== "won" && l.stage !== "lost")
-          .map((l) => ({ value: l.id, label: `${l.id} · ${l.org || l.contact || "Lead"}` })),
+          .map((l) => ({ value: l.id, label: `${displayLeadNumber(l)} · ${l.org || l.contact || "Lead"}` })),
         survey: surveys
           .filter((s) => s.customerId === resolvedCid)
           .map((s) => ({
@@ -816,6 +818,20 @@ export default async function InboxPage({
         .filter((r): r is NonNullable<typeof r> => !!r)
         .map((r) => [r.id, contactDisplayName(r)] as const)
     );
+    // #223 — stored link labels were written as "<internal id> · name"; show
+    // each linked quote/lead by its current estimate number instead.
+    const linkedRefs: Array<{ type: string; id: string }> = [];
+    for (const k of [sel.link, ...(sel.messages || []).map((m) => m.link)]) if (k) linkedRefs.push({ type: k.type, id: k.id });
+    const [linkQuoteNos, linkLeadNos] = await Promise.all([
+      quoteNumbersFor(linkedRefs.filter((k) => k.type === "quote").map((k) => k.id)),
+      leadNumbersFor(linkedRefs.filter((k) => k.type === "lead").map((k) => k.id)),
+    ]);
+    const linkLabel = (k: { type: string; id: string; label?: string | null }) =>
+      relabelLinkedRecord(
+        k.label,
+        k.id,
+        k.type === "quote" ? linkQuoteNos.get(k.id) : k.type === "lead" ? linkLeadNos.get(k.id) : null
+      );
     const workKindLabel = sel.link ? sel.link.type.charAt(0).toUpperCase() + sel.link.type.slice(1) : "";
     const taskLinks: ReaderVM["taskLinks"] = taskCandidates.flatMap((c): ReaderVM["taskLinks"] => {
       switch (c.kind) {
@@ -835,7 +851,7 @@ export default async function InboxPage({
               key: c.key,
               kind: c.kind,
               label:
-                `${workKindLabel} · ${sel.link?.label || c.id}` +
+                `${workKindLabel} · ${sel.link ? linkLabel(sel.link) : c.id}` +
                 (c.kind === "survey" || c.kind === "inspection" ? " (noted in the task)" : ""),
             },
           ];
@@ -863,7 +879,7 @@ export default async function InboxPage({
         ? {
             type: m.link.type,
             kindLabel: m.link.type.charAt(0).toUpperCase() + m.link.type.slice(1),
-            label: m.link.label || m.link.id,
+            label: linkLabel(m.link),
             color: LINK_KIND_COLOR[m.link.type] || "#5b616e",
             href: linkHref(m.link),
           }
@@ -899,7 +915,7 @@ export default async function InboxPage({
             type: sel.link.type,
             kindLabel:
               sel.link.type.charAt(0).toUpperCase() + sel.link.type.slice(1),
-            label: sel.link.label || sel.link.id,
+            label: linkLabel(sel.link),
             color: LINK_KIND_COLOR[sel.link.type] || "#5b616e",
             href: linkHref(sel.link),
           }

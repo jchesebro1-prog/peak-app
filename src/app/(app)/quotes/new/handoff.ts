@@ -156,8 +156,8 @@ export function canChangeType(status: string): boolean {
   return status === "draft";
 }
 
-export function replaceConfirmMessage(id: string, lines: number): string {
-  return `${id} and its ${lines} line${lines === 1 ? "" : "s"} will be replaced. Continue?`;
+export function replaceConfirmMessage(number: string, lines: number): string {
+  return `${number} and its ${lines} line${lines === 1 ? "" : "s"} will be replaced. Continue?`;
 }
 
 export type WonEditField = "customer" | "venue" | "contact";

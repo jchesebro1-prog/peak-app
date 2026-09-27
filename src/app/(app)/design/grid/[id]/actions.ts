@@ -917,7 +917,7 @@ export async function createDraftQuoteAction(
   const existing = option.quoteId ? await getQuote(option.quoteId) : null;
   if (existing) {
     if (existing.status !== "draft")
-      return { ok: false, error: `${existing.id} is already ${existing.status} — cut a revision from the quote screen instead.` };
+      return { ok: false, error: `${displayQuoteNumber(existing)} is already ${existing.status} — cut a revision from the quote screen instead.` };
     await updateQuote(existing.id, {
       name: build.quoteName,
       value: build.value,

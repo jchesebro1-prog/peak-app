@@ -23,6 +23,7 @@ import BoardView from "@/components/board/board-view";
 import type { BoardCardVM, BoardColumnVM, ChipVM } from "@/components/board/types";
 import { moveOpportunityAction } from "./actions";
 import { KwInput } from "./controls";
+import { displayLeadNumber, displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
  * Opportunities (#18) — Daylite's merged pipeline as a READ-TIME UNION over
@@ -166,6 +167,10 @@ export default async function OpportunitiesPage({
   const standfirst = `${tot.count} opportunities • $${Math.round(tot.value).toLocaleString("en-US")} open pipeline`;
 
   /* ---- board VMs (pre-sorted updatedAt-desc) ---- */
+  // #223 — every card carries its estimate number (OPP-1005 / FLM-1002).
+  const leadNo = new Map(leads.map((l) => [l.id, displayLeadNumber(l)]));
+  const quoteNo = new Map(quotes.map((q) => [q.id, displayQuoteNumber(q)]));
+  const numberOf = (r: OppRow): string => (r.kind === "lead" ? leadNo.get(r.id) : quoteNo.get(r.id)) ?? r.id;
   const cardOf = (r: OppRow): BoardCardVM => {
     const chips: ChipVM[] = [r.kind === "lead" ? L_CHIP : Q_CHIP];
     if (r.col === "closed") chips.push(r.srcStage === "won" ? WON_CHIP : LOST_CHIP);
@@ -173,7 +178,7 @@ export default async function OpportunitiesPage({
       id: r.id,
       col: r.col,
       title: r.title,
-      sub: r.sub,
+      sub: r.sub ? `${numberOf(r)} · ${r.sub}` : numberOf(r),
       value: r.value,
       valueLabel: shortMoneyZero(r.value),
       chips,

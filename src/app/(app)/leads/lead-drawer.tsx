@@ -788,7 +788,7 @@ export default function LeadDrawer({
                     >
                       {vm.srcShort}
                     </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#aab0bb" }}>{vm.id}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "#aab0bb" }}>{vm.number}</span>
                   </div>
                   <button onClick={close} style={closeBtnStyle}>
                     ×
@@ -1180,7 +1180,7 @@ export default function LeadDrawer({
                           textDecoration: "none",
                         }}
                       >
-                        Open quote {vm.quoteId} →
+                        Open quote {vm.quoteNumber} →
                       </Link>
                     ) : (
                       <>

@@ -1,11 +1,13 @@
 import { sql } from "drizzle-orm";
 import { getDb, inTransaction } from "@/db";
-import { getDoc, getDocRows, listDocsByField, type Doc } from "@/db/doc-store";
+import { getDoc, getDocRows, listDocsByField, listDocsFiltered, type Doc } from "@/db/doc-store";
 import {
   displayLeadNumber,
   displayQuoteNumber,
   parseEstimateNumber,
-  quoteNumberMatches,
+  partialEstimateDigits,
+  pickQuoteForNumber,
+  quoteScope,
   type LeadNumberFields,
   type QuoteNumberFields,
 } from "@/lib/estimate-number";
@@ -108,20 +110,65 @@ export async function leadNumbersFor(ids: ReadonlyArray<string | null | undefine
   return new Map(rows.map((r) => [r.id, displayLeadNumber(r.doc)]));
 }
 
+/** What a typed quote reference resolved to (see resolveQuoteInput). */
+export type QuoteInputResolution =
+  | { ok: true; id: string }
+  | { ok: false; reason: "none" }
+  | { ok: false; reason: "other-company" }
+  | { ok: false; reason: "ambiguous"; numbers: string[] };
+
+type ScopeDoc = Doc & QuoteNumberFields & { customerId?: string | null; consulting?: { venueCustomerId?: string | null } | null };
+
 /**
- * What a person typed into a "quote" field → one live quote id: an internal
- * id that exists (`Q-2041` keeps working), or an estimate number that names
- * exactly one live quote (`CON-1010`, `1010` when unambiguous). Null when
- * nothing — or more than one quote — matches.
+ * What a person typed into a "quote" field → one live quote (#223): an
+ * internal id that exists (`Q-2041` keeps working), or an estimate number
+ * (`CON-1010`, `1010`) picked by pickQuoteForNumber. `customerIds` scopes the
+ * match to a company (an engagement's): another company's quote is refused
+ * as "other-company", never reported as missing; empty = a global lookup.
+ * The input is bounded to 120 characters.
  */
-export async function findQuoteIdByNumberOrId(input: string): Promise<string | null> {
-  const s = String(input || "").trim();
-  if (!s) return null;
-  if (await getDoc("quotes", s)) return s;
+export async function resolveQuoteInput(
+  input: string,
+  opts: { customerIds?: ReadonlyArray<string | null | undefined> } = {}
+): Promise<QuoteInputResolution> {
+  const s = String(input || "").trim().slice(0, 120);
+  if (!s) return { ok: false, reason: "none" };
+  const scope = opts.customerIds ?? [];
+  const byId = await getDoc<ScopeDoc>("quotes", s);
+  if (byId) {
+    return quoteScope(byId, scope) === "other" ? { ok: false, reason: "other-company" } : { ok: true, id: byId.id };
+  }
   const parsed = parseEstimateNumber(s);
-  if (!parsed) return null;
-  const hits = (await listDocsByField<Doc & QuoteNumberFields>("quotes", "estNo", [String(parsed.estNo)])).filter((q) =>
-    quoteNumberMatches(q, parsed)
-  );
-  return hits.length === 1 ? hits[0].id : null;
+  if (!parsed) return { ok: false, reason: "none" };
+  const hits = await listDocsByField<ScopeDoc>("quotes", "estNo", [String(parsed.estNo)]);
+  const pick = pickQuoteForNumber(hits, parsed, scope);
+  if ("id" in pick) return { ok: true, id: pick.id };
+  if ("ambiguous" in pick) return { ok: false, reason: "ambiguous", numbers: pick.ambiguous };
+  if ("otherCompany" in pick) return { ok: false, reason: "other-company" };
+  return { ok: false, reason: "none" };
+}
+
+/**
+ * What a person typed into a "quote" field → one live quote id, or null when
+ * nothing — or more than one quote, or only another company's — matches
+ * (resolveQuoteInput without the reason).
+ */
+export async function findQuoteIdByNumberOrId(
+  input: string,
+  opts: { customerIds?: ReadonlyArray<string | null | undefined> } = {}
+): Promise<string | null> {
+  const r = await resolveQuoteInput(input, opts);
+  return r.ok ? r.id : null;
+}
+
+/**
+ * ⌘K candidates for a typed partial number — `flm100`, `FLM-100`, `100` —
+ * found by those digits inside `doc->>'estNo'` (the doc text holds
+ * `"estNo": 1005`, never "FLM-1005"), live rows only, at most `limit`. The
+ * caller still filters and ranks with quoteSearchRank. Empty for words.
+ */
+export async function quotesByPartialNumber(term: string, limit: number): Promise<Doc[]> {
+  const digits = partialEstimateDigits(term);
+  if (!digits) return [];
+  return listDocsFiltered("quotes", { textFields: ["estNo"], text: digits, limit });
 }

@@ -109,7 +109,7 @@ export default function IntakeForm() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [hp, setHp] = useState(""); // honeypot — stays empty for humans
-  const [sent, setSent] = useState<{ id: string; org: string; first: string } | null>(null);
+  const [sent, setSent] = useState<{ id: string; number: string; org: string; first: string } | null>(null);
 
   const set = (patch: Partial<F>) => {
     setF((v) => ({ ...v, ...patch }));
@@ -154,9 +154,10 @@ export default function IntakeForm() {
         }),
       });
       if (res.ok) {
-        const data: { id?: string } = await res.json().catch(() => ({}));
+        const data: { id?: string; number?: string } = await res.json().catch(() => ({}));
         setSent({
           id: data.id || "L-—",
+          number: data.number || data.id || "OPP-—",
           org: f.org.trim(),
           first: f.contact.trim().split(/\s+/)[0] || "there",
         });
@@ -239,7 +240,7 @@ export default function IntakeForm() {
           }}
         >
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: ACCENT_INK }}>
-            {sent.id}
+            {sent.number}
           </span>
           <span style={{ fontSize: 12.5, color: "#8c919c" }}>reference number</span>
         </div>

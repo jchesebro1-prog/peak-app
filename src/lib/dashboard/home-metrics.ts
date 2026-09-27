@@ -4,6 +4,7 @@ import { firstName } from "@/lib/team";
 import type { DesignRecord } from "@/lib/stores/designs";
 import type { Quote, QuoteStatus } from "@/lib/stores/quotes";
 import { quoteBuilderHref } from "@/lib/quote-links";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 const DAY = 86_400_000;
 
@@ -83,7 +84,7 @@ export function homeAlerts(
         urgent: d >= 7,
         sortVal: 1000000 + (q.value || 0) + d * 1000,
         title: shortTitle(q.name) + (d >= 7 ? " — overdue follow-up" : " — awaiting response"),
-        detail: `${q.id} · ${money(q.value)} · sent ${d <= 0 ? "today" : `${d}d ago`}`,
+        detail: `${displayQuoteNumber(q)} · ${money(q.value)} · sent ${d <= 0 ? "today" : `${d}d ago`}`,
         tag: d <= 0 ? "new" : `${d}d`,
       });
     } else if (q.status === "draft" && (q.value || 0) > 0 && d >= 3) {
@@ -92,7 +93,7 @@ export function homeAlerts(
         urgent: false,
         sortVal: q.value || 0,
         title: shortTitle(q.name) + " — draft not sent",
-        detail: `${q.id} · ${money(q.value)} · edited ${d}d ago`,
+        detail: `${displayQuoteNumber(q)} · ${money(q.value)} · edited ${d}d ago`,
         tag: "Draft",
       });
     }

@@ -11,6 +11,7 @@ import {
   quoteNumberMatches,
   type QuoteNumberFields,
 } from "@/lib/estimate-number";
+import { quotesByPartialNumber } from "@/lib/stores/estimate-numbers";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
@@ -83,7 +84,11 @@ export async function GET(req: Request) {
   // `"estNo": 1002`, never "FLM-1002", so a typed number is also looked up
   // by value (indexed on doc->>'estNo'). Leads are listed here only when a
   // typed number names them (OPP-1002, or any prefix on the same number).
+  // A prefix + partial number (`flm100`, `FLM-100`) is found by its digits
+  // inside estNo too (bounded like every candidate set), then filtered by the
+  // hub's own rule (quoteMatchesSearch) below.
   const parsedNo = parseEstimateNumber(q);
+  const partialQuotes = await quotesByPartialNumber(q, CANDIDATES);
   const [numberedQuotes, numberedLeads] = parsedNo
     ? await Promise.all([
         listDocsByField("quotes", "estNo", [String(parsedNo.estNo)]).then((rows) =>
@@ -95,7 +100,7 @@ export async function GET(req: Request) {
       ])
     : [[], []];
   const seenQuote = new Set<string>();
-  const quoteHits = [...numberedQuotes, ...quotes.filter((d) => quoteMatchesSearch(asNumbered(d), q))]
+  const quoteHits = [...numberedQuotes, ...[...partialQuotes, ...quotes].filter((d) => quoteMatchesSearch(asNumbered(d), q))]
     .filter((d) => {
       if (seenQuote.has(d.id)) return false;
       seenQuote.add(d.id);

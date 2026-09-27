@@ -10,6 +10,7 @@ import { designBudgetLabel } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import type { ReviewKind } from "./actions";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 export const metadata = { title: "Reviews — Quartzite-6" };
 
@@ -46,6 +47,8 @@ const CSS = `
 type RawItem = {
   kind: ReviewKind;
   id: string;
+  /** #223 — what the list shows (a quote's number; a design's id). */
+  displayId: string;
   name: string;
   owner: string;
   value: number;
@@ -90,6 +93,7 @@ export default async function ReviewsPage({
     ...quotes.map((q) => ({
       kind: "Quote" as const,
       id: q.id,
+      displayId: displayQuoteNumber(q),
       name: q.name,
       owner: q.owner,
       value: q.value || 0,
@@ -100,6 +104,7 @@ export default async function ReviewsPage({
     ...designs.map((d) => ({
       kind: "Design" as const,
       id: d.id,
+      displayId: d.id,
       name: d.name,
       owner: d.owner,
       value: d.budget || 0,
@@ -119,6 +124,7 @@ export default async function ReviewsPage({
         .map((ph) => ({
           kind: "Engagement" as const,
           id: e.id + ":" + ph.id,
+          displayId: e.id + ":" + ph.id,
           name: e.name + " — " + ph.name,
           owner: e.people.find((p) => p.role === "Engagement Lead")?.person || "",
           value: 0,
@@ -178,6 +184,7 @@ export default async function ReviewsPage({
     return {
       kind: x.kind,
       id: x.id,
+      displayId: x.displayId,
       name: x.name,
       owner: x.owner,
       ownerFirst: firstName(x.owner),

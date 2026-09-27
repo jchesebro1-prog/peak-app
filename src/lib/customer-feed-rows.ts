@@ -3,7 +3,8 @@
  * types, ZERO store imports (every store module value-imports doc-store,
  * which must never reach this spec-tested / potentially-client-safe layer).
  * The ONE allowed import is VISIT_STAGE_META from @/lib/lead-thread — that
- * module is dependency-free by construction (plan 03).
+ * module is dependency-free by construction (plan 03) — and `@/lib/estimate-number`
+ * (#223), which is pure by construction.
  *
  * Vocab mirrors (drift-guarded by exact-literal specs, see the #21 section
  * of the harness): QUOTE_VERB mirrors quotes.STAGE_LABEL's stage set;
@@ -13,6 +14,7 @@
  * loader loaded once are passed IN here.
  */
 import { VISIT_STAGE_META } from "@/lib/lead-thread";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import { stageLabelFor, type Pipelines } from "@/lib/pipelines";
 // Type-only — erased at build time, so the zero-store-import / client-bundle
 // rule still holds at runtime (no store code is ever pulled in here).
@@ -88,25 +90,29 @@ const QUOTE_VERB: Record<QuoteStatus, string> = {
 
 export function quoteFeedRows(q: {
   id: string;
+  estNo?: number | null;
+  estSuffix?: number | null;
+  quoteType?: string | null;
   name: string;
   history: Array<{ at: number; to: string }>;
   /** setPoReceived writes NO history entry — this annex field is the record. */
   poReceivedAt?: number | null;
   portalAcceptance?: { at: number; by: string } | null;
 }): FeedRow[] {
+  const label = displayQuoteNumber(q);
   const href = "/quotes?id=" + encodeURIComponent(q.id);
   const rows = (q.history || []).map((h, i) =>
-    row("quote", `quote:${q.id}:${i}`, h.at, `Quote ${q.id} ${QUOTE_VERB[h.to as QuoteStatus] ?? h.to}`, q.name, href, "")
+    row("quote", `quote:${q.id}:${i}`, h.at, `Quote ${label} ${QUOTE_VERB[h.to as QuoteStatus] ?? h.to}`, q.name, href, "")
   );
   if (q.poReceivedAt != null)
-    rows.push(row("quote", `quote:${q.id}:po`, q.poReceivedAt, `Quote ${q.id} PO received`, q.name, href, ""));
+    rows.push(row("quote", `quote:${q.id}:po`, q.poReceivedAt, `Quote ${label} PO received`, q.name, href, ""));
   if (q.portalAcceptance)
     rows.push(
       row(
         "quote",
         `quote:${q.id}:portal`,
         q.portalAcceptance.at,
-        `Quote ${q.id} accepted in portal`,
+        `Quote ${label} accepted in portal`,
         q.name,
         href,
         q.portalAcceptance.by

@@ -14,6 +14,7 @@ import {
 export type ReviewItem = {
   kind: ReviewKind;
   id: string;
+  displayId: string;
   name: string;
   owner: string;
   ownerFirst: string;
@@ -182,7 +183,7 @@ export default function ReviewList({
                   <span
                     style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}
                   >
-                    {it.id}
+                    {it.displayId}
                   </span>
                 </div>
                 <div

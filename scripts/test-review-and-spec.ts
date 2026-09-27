@@ -10516,6 +10516,7 @@ seeded()
   .then(() => estimate223FixAsyncChecks())
   .then(() => estimate223AllocationAsyncChecks())
   .then(() => estimate223WritersAsyncChecks())
+  .then(() => estimate223SweepDAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -26068,10 +26069,153 @@ function e223Src(rel: string): string {
   const ed = e223Src("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(ed.includes("quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId"), "#223 Grid editor: 'Update draft quote' names the number");
   ok(!e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("quoted as ${q.id}"), "#223 Grid revisions note the quote by number");
+  ok(
+    !e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("${existing.id} is already") &&
+      e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("${displayQuoteNumber(existing)} is already"),
+    "#223 Grid 'already sent — cut a revision' names the quote by number"
+  );
   ok(e223Src("src/app/(app)/design/grid/[id]/set/page.tsx").includes("optionQuoteNo"), "#223 drawing set title block prints the number");
   ok(e223Src("src/app/(app)/design/designs/design-client.tsx").includes("{promotedNo ?? promotedId}"), "#223 Designs: 'linked to quote' shows the number");
   ok(e223Src("src/app/(app)/home-my-designs.tsx").includes("{promotedNo ?? promoted}"), "#223 Home: 'Added to Quotes as' shows the number");
   ok(e223Src("src/app/(app)/design/specs/[id]/header-fields.tsx").includes("quoteNumber || s.quoteId"), "#223 Spec builder: source line names the quote's number");
   ok(e223Src("src/app/(app)/design/engagements/view.tsx").includes("Quote {q.number}"), "#223 engagement overview names the proposal by number");
-  ok(e223Src("src/app/(app)/design/engagements/actions.ts").includes("findQuoteIdByNumberOrId("), "#223 engagement quote fields accept an estimate number or an old id");
+  ok(e223Src("src/app/(app)/design/engagements/actions.ts").includes("resolveQuoteInput("), "#223 engagement quote fields accept an estimate number or an old id");
+}
+
+/* ======================================================================
+   #223 — display sweep D + the client-import guard.
+   ====================================================================== */
+import { relabelLinkedRecord as e223Relabel } from "@/lib/estimate-number";
+import { quoteFeedRows as e223FeedRows } from "@/lib/customer-feed-rows";
+{
+  ok(e223Relabel("Q-2041 · Lakefront", "Q-2041", "FLM-1002") === "FLM-1002 · Lakefront", "#223 relabel: a stored 'id · name' label shows the number");
+  ok(e223Relabel("FLM-1002 · Lakefront", "Q-2041", "FLM-1002") === "FLM-1002 · Lakefront", "#223 relabel: a label already carrying the number is left alone");
+  ok(e223Relabel("", "L-1050", "OPP-1003") === "OPP-1003" && e223Relabel(null, "L-1050", null) === "L-1050", "#223 relabel: blank label → number, else id");
+  ok(e223Relabel("Custom text", "Q-2041", "EST-1001") === "Custom text", "#223 relabel: a hand-written label is kept");
+  const fr = e223FeedRows({ id: "Q-2041", estNo: 1002, quoteType: "flame_test", name: "Riverside", history: [{ at: 1, to: "sent" }] });
+  ok(fr[0]?.title === "Quote FLM-1002 sent", "#223 company feed: quote rows name the estimate number");
+  const leadsPage = e223Src("src/app/(app)/leads/page.tsx");
+  ok(leadsPage.includes("idContact: displayLeadNumber(l)") && leadsPage.includes("buildDrawerVM(leadRec, convertedQuote)"), "#223 leads: table + drawer use numbers");
+  ok(e223Src("src/app/(app)/leads/lead-drawer.tsx").includes("Open quote {vm.quoteNumber}"), "#223 lead drawer: 'Open quote' names the number");
+  ok(e223Src("src/app/(app)/opportunities/page.tsx").includes("numberOf(r)"), "#223 opportunities board cards carry the number");
+  ok(e223Src("src/app/(app)/inbox/page.tsx").includes("relabelLinkedRecord("), "#223 inbox: work-link labels show live numbers");
+  ok(e223Src("src/app/(app)/reviews/review-list.tsx").includes("{it.displayId}"), "#223 reviews list names quotes by number");
+  // No client component may import the server-only allocator/lookup module.
+  const clientImporters: string[] = [];
+  for (const rel of e223ReadDir(e223Join(process.cwd(), "src"), { recursive: true }) as string[]) {
+    if (!/\.(tsx?|jsx?)$/.test(rel)) continue;
+    const src = e223ReadFile(e223Join(process.cwd(), "src", rel), "utf8");
+    if (/^\s*["']use client["']/.test(src) && src.includes("@/lib/stores/estimate-numbers")) clientImporters.push(rel);
+  }
+  ok(clientImporters.length === 0, `#223 no "use client" file imports @/lib/stores/estimate-numbers (${clientImporters.join(", ")})`);
+}
+
+/* ======================================================================
+   #223 T7 extras — ⌘K partial numbers with a prefix, an ambiguous bare
+   number in the engagement quote fields, a thread's lead number carried
+   to "+ New quote", and live numbers in the inbox's new-quote link label.
+   ====================================================================== */
+import {
+  partialEstimateDigits as e223PartialDigits,
+  pickQuoteForNumber as e223PickForNumber,
+  ambiguousQuoteNumberMessage as e223AmbiguousMsg,
+} from "@/lib/estimate-number";
+import { resolveQuoteInput as e223ResolveInput, quotesByPartialNumber as e223ByPartial } from "@/lib/stores/estimate-numbers";
+import { linkThreadToNewQuote as e223LinkNewQuote } from "@/lib/gmail/linking";
+{
+  ok(
+    e223PartialDigits("flm100") === "100" &&
+      e223PartialDigits("FLM-100") === "100" &&
+      e223PartialDigits("est 10") === "10" &&
+      e223PartialDigits("1005-2") === "1005" &&
+      e223PartialDigits("#1002") === "1002",
+    "#223 ⌘K: a known prefix + partial digits (flm100, FLM-100) reduce to the digits to search"
+  );
+  ok(
+    e223PartialDigits("xyz100") === null && e223PartialDigits("Q-2041") === null && e223PartialDigits("riverside") === null && e223PartialDigits("") === null,
+    "#223 ⌘K: unknown prefixes, old ids and words are not partial numbers"
+  );
+  const hits = [
+    { id: "Q-a", estNo: 1010, quoteType: "system", customerId: "c-a" },
+    { id: "Q-b", estNo: 1010, estSuffix: 2, quoteType: "system", customerId: "c-a" },
+  ];
+  const bare = e223Parse("1010")!;
+  const r1 = e223PickForNumber(hits, bare, ["c-a"]);
+  ok("id" in r1 && r1.id === "Q-a", "#223 quote input: a bare number shared by several quotes takes the unsuffixed one of the engagement's customer");
+  const r2 = e223PickForNumber(hits, bare, ["c-other"]);
+  ok("otherCompany" in r2, "#223 quote input: a number whose quotes all belong to another company is refused as such, never 'No quote … exists'");
+  const r2b = e223PickForNumber(hits, bare, []);
+  ok("ambiguous" in r2b && r2b.ambiguous.join(",") === "EST-1010,EST-1010-2", "#223 quote input: no customer scope → a shared bare number is ambiguous, listing the full numbers");
+  const r2c = e223PickForNumber([...hits, { id: "Q-c", estNo: 1010, estSuffix: 3, quoteType: "system", customerId: "c-z" }], e223Parse("1010-3")!, ["c-a"]);
+  ok("otherCompany" in r2c, "#223 quote input: an exact number belonging to another company is refused");
+  const r2d = e223PickForNumber([{ id: "Q-x", estNo: 1011, quoteType: "system", customerId: "c-z" }, { id: "Q-y", estNo: 1011, estSuffix: 2, quoteType: "system", customerId: "c-a" }], e223Parse("1011")!, ["c-a"]);
+  ok("id" in r2d && r2d.id === "Q-y", "#223 quote input: the customer scope narrows a shared number to the one quote in scope");
+  const r3 = e223PickForNumber(hits, e223Parse("EST-1010")!, []);
+  ok("id" in r3 && r3.id === "Q-a", "#223 quote input: a typed full number (prefix, no suffix) names the unsuffixed quote exactly");
+  const r4 = e223PickForNumber(hits, e223Parse("1010-2")!, []);
+  ok("id" in r4 && r4.id === "Q-b", "#223 quote input: a suffixed number names its quote");
+  ok("none" in e223PickForNumber([], bare, []), "#223 quote input: no hit → none");
+  const msg = e223AmbiguousMsg(["EST-1010", "EST-1010-2"]);
+  ok(msg === "That number matches more than one quote — use the full number (e.g. EST-1010-2).", "#223 quote input: the ambiguity copy asks for the full number");
+  const engActions = e223Src("src/app/(app)/design/engagements/actions.ts");
+  ok(
+    (engActions.match(/resolveQuoteInput\(/g) || []).length >= 2 &&
+      engActions.includes("ambiguousQuoteNumberMessage(") &&
+      (engActions.match(/That quote belongs to another company\./g) || []).length >= 1 &&
+      engActions.includes("String(quoteId).trim().slice(0, 120)") &&
+      engActions.includes('String(quoteId || "").trim().slice(0, 120)'),
+    "#223 engagement quote fields (install + consulting) resolve through resolveQuoteInput, scoped to the company, bounded, and report ambiguity / another company"
+  );
+  ok(e223Src("src/app/api/search/route.ts").includes("quotesByPartialNumber("), "#223 ⌘K: partial numbers reach the quote candidates");
+  ok(e223Src("src/lib/gmail/linking.ts").includes("leadId"), "#223 inbox + New quote passes the thread's lead");
+}
+
+async function estimate223SweepDAsyncChecks(): Promise<void> {
+  const id = (slug: string) => fixtureId(223, slug);
+  // C — resolveQuoteInput against real numbered quotes.
+  const lead = await e223Leads.create({ id: id("t7-lead"), org: "#223 T7 Co" }, "spec");
+  e223Register("leads", lead.id);
+  const qa = await e223Quotes.create({ id: id("t7-qa"), name: "#223 t7 a", owner: "spec", leadId: lead.id, customerId: "c223-t7" });
+  e223Register("quotes", qa.id);
+  const qb = await e223Quotes.create({ id: id("t7-qb"), name: "#223 t7 b", owner: "spec", leadId: lead.id, customerId: "c223-t7" });
+  e223Register("quotes", qb.id);
+  const n = String(lead.estNo);
+  const mine = await e223ResolveInput(n, { customerIds: ["c223-t7"] });
+  ok(mine.ok && mine.id === qa.id, "#223 resolveQuoteInput: a bare shared number takes the engagement customer's unsuffixed quote");
+  const theirs = await e223ResolveInput(n, { customerIds: ["c223-nobody"] });
+  ok(!theirs.ok && theirs.reason === "other-company", "#223 resolveQuoteInput: …another company's quotes are refused as another company's");
+  const global = await e223ResolveInput(n);
+  ok(!global.ok && global.reason === "ambiguous" && global.numbers.includes(`EST-${n}-2`), "#223 resolveQuoteInput: no scope → ambiguous, with the full numbers");
+  const byIdOther = await e223ResolveInput(qb.id, { customerIds: ["c223-nobody"] });
+  ok(!byIdOther.ok && byIdOther.reason === "other-company", "#223 resolveQuoteInput: an internal id of another company's quote is refused too");
+  const byId = await e223ResolveInput(qb.id);
+  const missing = await e223ResolveInput("EST-999999999");
+  ok(byId.ok && byId.id === qb.id && !missing.ok && missing.reason === "none", "#223 resolveQuoteInput: an internal id still works; an unknown number is 'none'");
+  ok((await e223FindQuote(n)) === null, "#223 findQuoteIdByNumberOrId keeps refusing an ambiguous bare number");
+
+  // B — ⌘K candidates by prefix + partial digits.
+  const partial = await e223ByPartial(`est${n.slice(0, -1)}`, 500);
+  ok(partial.some((d) => d.id === qa.id) && partial.some((d) => d.id === qb.id), "#223 ⌘K: 'est' + a partial number finds quotes by their estNo digits");
+  ok((await e223ByPartial("riverside", 500)).length === 0, "#223 ⌘K: a word never triggers the number lookup");
+
+  // A — "+ New quote" on a thread linked to a lead carries the lead's number.
+  const thread = await createFixture("comms", {
+    id: id("t7-thread"), mailbox: "personal", mailboxUser: "Test Harness", unread: false, archived: false,
+    customerId: "c223-t7", customer: "#223 T7 Co", contactName: "", contactEmail: "t7@example.test",
+    subject: "#223 T7 thread", channel: "email", status: "waiting_us", assignedTo: "", messages: [],
+    link: { type: "lead", id: lead.id, label: `${lead.id} · #223 T7 Co` }, createdAt: Date.now(), updatedAt: Date.now(),
+  } as never);
+  const made = await e223LinkNewQuote(
+    (thread as { id: string }).id,
+    { customerId: "c223-t7", customer: "#223 T7 Co", locationId: null, contactName: "", quoteType: "flame_test", category: "", owner: "spec" },
+    { confirmReplace: true }
+  );
+  if (made.ok) e223Register("quotes", made.quoteId);
+  const mq = made.ok ? await e223Quotes.get(made.quoteId) : null;
+  ok(
+    !!mq && mq.leadId === lead.id && mq.estNo === lead.estNo && mq.estSuffix === 3 && e223FormatQuote(mq) === `FLM-${n}-3`,
+    "#223 inbox + New quote: a thread linked to a lead gives the new quote the lead's number (next suffix)"
+  );
+  const th = await e223GetRows<{ id: string; link?: { label?: string } }>("comms", [id("t7-thread")]);
+  ok(th[0]?.doc.link?.label === `FLM-${n}-3 · ${mq?.name}`, "#223 inbox + New quote: the thread's new link label names the quote by number");
 }

@@ -10,6 +10,7 @@ import HomeGreeting from "./home-greeting";
 import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
 import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
 export const maxDuration = 120;
@@ -96,7 +97,7 @@ export default async function HomePage({
   const sheetQ = sheetId ? s.myQuotes.find((q) => q.id === sheetId) : undefined;
   const sheetQuote: SheetQuote | null = sheetQ
     ? {
-        id: sheetQ.id, name: sheetQ.name, meta: `${sheetQ.id} · ${sheetQ.customer || "—"}`, value: money(sheetQ.value),
+        id: sheetQ.id, name: sheetQ.name, meta: `${displayQuoteNumber(sheetQ)} · ${sheetQ.customer || "—"}`, value: money(sheetQ.value),
         marginLabel: sheetQ.margin ? `${Math.round(sheetQ.margin * 100)}% margin` : "", status: sheetQ.status,
         quoteType: sheetQ.quoteType,
       }

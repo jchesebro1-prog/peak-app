@@ -166,3 +166,101 @@ export function withoutEstimateFields<T extends object>(patch: T): Omit<T, "estN
   delete out.estSuffix;
   return out as Omit<T, "estNo" | "estSuffix">;
 }
+
+/**
+ * A record link's stored label, shown with the record's CURRENT number
+ * (#223). Links written before estimate numbers stored `"<internal id> · name"`;
+ * new ones store `"<number> · name"`. Hand-written labels are kept.
+ */
+export function relabelLinkedRecord(
+  stored: string | null | undefined,
+  id: string,
+  number: string | null | undefined
+): string {
+  const label = stored || id;
+  if (!number || number === id) return label;
+  if (label.startsWith(number)) return label;
+  if (label.startsWith(id)) return number + label.slice(id.length);
+  return label;
+}
+
+/**
+ * The digits to look up when a search term reads as a (possibly partial)
+ * estimate number — `flm100`, `FLM-100`, `est 10`, `1005-2`, `#1002` → the
+ * counter digits (`100`, `10`, `1005`, `1002`). The doc JSON holds
+ * `"estNo": 1005`, never "FLM-1005", so ⌘K finds candidates by these digits
+ * inside `estNo` and then applies quoteMatchesSearch. Null for words, old ids
+ * (`Q-2041`) and unknown prefixes.
+ */
+export function partialEstimateDigits(term: string | null | undefined): string | null {
+  const s = String(term ?? "").trim().toUpperCase().replace(/^#\s*/, "");
+  const m = /^(?:([A-Z]{3})[\s\-_#.]*)?(\d{1,9})(?:[\s\-_/]+\d{0,3})?$/.exec(s);
+  if (!m) return null;
+  if (m[1] !== undefined && !KNOWN_PREFIXES.has(m[1])) return null;
+  return m[2];
+}
+
+/** What a typed quote reference resolved to among the quotes sharing its number. */
+export type QuoteNumberPick = { id: string } | { ambiguous: string[] } | { otherCompany: true } | { none: true };
+
+export type ScopedQuote = QuoteNumberFields & {
+  id: string;
+  customerId?: string | null;
+  consulting?: { venueCustomerId?: string | null } | null;
+};
+
+/**
+ * A quote against a company scope (#223): "owned" when its billed or venue
+ * customer is in `scope`; "other" when it has a customer and none is in
+ * `scope`; "open" when the scope is empty or the quote has no customer.
+ */
+export function quoteScope(q: ScopedQuote, scope: ReadonlyArray<string | null | undefined>): "owned" | "other" | "open" {
+  const scopeIds = scope.filter((s): s is string => !!s);
+  if (!scopeIds.length) return "open";
+  const owners = [q.customerId, q.consulting?.venueCustomerId].filter((s): s is string => !!s);
+  if (!owners.length) return "open";
+  return owners.some((o) => scopeIds.includes(o)) ? "owned" : "other";
+}
+
+/**
+ * Pick the one quote a typed number names (#223 — engagement quote fields).
+ * `hits` are the live quotes sharing its counter value; `scope` is the
+ * engagement's company (empty = no scope, a global lookup). A quote is in
+ * scope when its billed or venue customer is in `scope`, or it has no
+ * customer at all. In order:
+ * - no quote carries the number → none; all of them another company's →
+ *   otherCompany;
+ * - exactly one in scope → it;
+ * - a typed full number (`EST-1010`: a prefix, no suffix) names the one
+ *   unsuffixed quote under that prefix;
+ * - with a scope, exactly one unsuffixed quote owned by that company → it
+ *   (a bare `1010` on this company's opportunity means its first quote);
+ * - otherwise ambiguous, listing the full numbers to choose from.
+ */
+export function pickQuoteForNumber(
+  hits: ReadonlyArray<ScopedQuote>,
+  parsed: ParsedEstimateNumber,
+  scope: ReadonlyArray<string | null | undefined>
+): QuoteNumberPick {
+  const named = hits.filter((q) => quoteNumberMatches(q, parsed));
+  if (!named.length) return { none: true };
+  const ownedByScope = (q: ScopedQuote) => quoteScope(q, scope) === "owned";
+  const pool = named.filter((q) => quoteScope(q, scope) !== "other");
+  if (!pool.length) return { otherCompany: true };
+  if (pool.length === 1) return { id: pool[0].id };
+  const unsuffixed = pool.filter((q) => effectiveSuffix(q) === 1);
+  if (parsed.prefix !== null && parsed.suffix === null) {
+    const exact = unsuffixed.filter((q) => prefixForQuoteType(q.quoteType) === parsed.prefix);
+    if (exact.length === 1) return { id: exact[0].id };
+  }
+  const ownUnsuffixed = unsuffixed.filter((q) => ownedByScope(q));
+  if (ownUnsuffixed.length === 1) return { id: ownUnsuffixed[0].id };
+  const ordered = [...pool].sort((a, b) => effectiveSuffix(a) - effectiveSuffix(b) || a.id.localeCompare(b.id));
+  return { ambiguous: ordered.map((q) => displayQuoteNumber(q)) };
+}
+
+/** The refusal for a number several quotes share (#223). */
+export function ambiguousQuoteNumberMessage(numbers: ReadonlyArray<string>): string {
+  const example = numbers[numbers.length - 1] || "EST-1010-2";
+  return `That number matches more than one quote — use the full number (e.g. ${example}).`;
+}

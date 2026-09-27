@@ -121,7 +121,15 @@ export function inTransaction(): boolean {
   return transactionStore.getStore() !== undefined;
 }
 
-/** Run a unit of document/identity writes atomically. Nested calls join the outer transaction. */
+/**
+ * Run a unit of document/identity writes atomically. Nested calls join the outer transaction.
+ *
+ * #223: `Quotes.create` / `Leads.create` called inside a transaction return an
+ * UNNUMBERED record (no `estNo`) — estimate-numbers.ts keeps its global
+ * numbering lock out of outer transactions. The record displays its internal
+ * id until the next create outside a transaction numbers it (the allocator
+ * heals every unnumbered row, oldest first).
+ */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   const active = transactionStore.getStore();
   if (active) return fn();

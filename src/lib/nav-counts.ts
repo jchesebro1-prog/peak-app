@@ -19,6 +19,7 @@ import { unseenCustomerDocuments } from "@/lib/stores/documents";
 import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { customerUploadBell } from "@/lib/document-rules";
 import { shortDate } from "@/lib/format";
+import { displayLeadNumber } from "@/lib/estimate-number";
 import type {
   NavCounts,
   BellGroup,
@@ -261,7 +262,7 @@ export async function navData(me: string): Promise<{
       const info = followUpInfo(l);
       return {
         id: l.id,
-        title: l.org || l.contact || l.id,
+        title: l.org || l.contact || displayLeadNumber(l),
         sub: `${info?.label || ""}${l.owner ? "" : " · unassigned"}`,
         href: "/leads",
         letter: "L",
