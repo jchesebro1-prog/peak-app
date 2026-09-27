@@ -6,10 +6,14 @@ import { coveringParents, ownFiles, slotCoverage, type CoverageIndex } from "@/l
 import { buildImageIndex, type ImageRef } from "@/lib/part-docs/views";
 import { DOC_SLOT_KINDS } from "@/lib/part-docs/types";
 import { loadPortalRules } from "@/lib/freight-rule-load";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import {
   browsable,
   browseReason,
+  INTERNAL_HIDDEN_REASON,
+  isInternalCategory,
   normalizeVisibility,
+  portalHidden,
   type BrowseRule,
   type PortalVisibility,
   type VisibilityFacts,
@@ -82,6 +86,13 @@ export type PortalIndex = {
    *  (part-docs/types.ts `PartDocumentLink`), so there's no "hidden
    *  datasheet link" case to filter here at all. */
   servableDocIds: Set<string>;
+  /** Kind + title of every datasheet/spec-sheet id any `IndexedPart.datasheetIds`
+   *  names (#242 Task 11 — the part sidebar's Documents list). */
+  docMeta: Map<string, { kind: "datasheet" | "specsheet"; title: string }>;
+  /** Curtain fabrics a customer may name on a curtain request (#242 Task 11,
+   *  spec §3.3): quotable "Fabric" parts with an area rate. Names only —
+   *  the rate never leaves the server. */
+  fabrics: Array<{ sku: string; name: string }>;
 };
 
 const TTL_MS = 5 * 60 * 1000;
@@ -200,11 +211,15 @@ async function buildIndex(): Promise<Built> {
   const images = buildImageIndex(state.documents, state.links);
   const counts = countRecentQuotesBySku(quotes, now - rules.browseWindowMonths * MONTH_MS);
 
-  const live: CatalogPart[] = all.filter((p) => p && p.sku && normalizeVisibility(p.portalVisibility) !== "hide");
+  // Withheld: an explicit Hide, and internal labor/travel rows left on
+  // "auto" (#242 Task 11) — neither quotable, browsable nor searchable.
+  const live: CatalogPart[] = all.filter((p) => p && p.sku && !portalHidden(p.portalVisibility, p.category));
   const liveSkus = new Set(live.map((p) => p.sku));
 
   const parts = new Map<string, IndexedPart>();
   const facts = new Map<string, VisibilityFacts>();
+  const docMeta: PortalIndex["docMeta"] = new Map();
+  const fabrics: PortalIndex["fabrics"] = [];
   const entries: SearchEntry[] = [];
   for (const p of live) {
     const visibility = normalizeVisibility(p.portalVisibility);
@@ -224,6 +239,7 @@ async function buildIndex(): Promise<Built> {
       hasVisibleImage: imageIds.length > 0,
       hasDatasheet,
       quoteCount: counts.get(p.sku) ?? 0,
+      ...(isInternalCategory(p.category) ? { internal: true } : {}),
     };
     facts.set(p.sku, f);
     const ip: IndexedPart = {
@@ -246,6 +262,12 @@ async function buildIndex(): Promise<Built> {
       quoteCount: f.quoteCount,
     };
     parts.set(p.sku, ip);
+    for (const id of ip.datasheetIds) {
+      if (docMeta.has(id)) continue;
+      const d = state.index.docsById.get(id);
+      if (d && (d.kind === "datasheet" || d.kind === "specsheet")) docMeta.set(id, { kind: d.kind, title: (d.title || d.fileName || "").trim() });
+    }
+    if ((p.category || "").trim() === "Fabric" && fabricAreaRateOf(p) > 0) fabrics.push({ sku: p.sku, name: (p.desc || p.sku).trim() });
     entries.push({
       key: ip.sku,
       kind: "part",
@@ -297,7 +319,9 @@ async function buildIndex(): Promise<Built> {
 
   const servableDocIds = servableDocIdsFrom(state.index, images, liveSkus);
 
-  return { at: now, ix: { parts, fixtures, entries, builtAt: now, servableDocIds }, facts, rule };
+  fabrics.sort((a, b) => a.name.localeCompare(b.name));
+
+  return { at: now, ix: { parts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics }, facts, rule };
 }
 
 function headQty(q: number | undefined): number {
@@ -312,14 +336,20 @@ function headQty(q: number | undefined): number {
 export async function portalFactsForSku(sku: string): Promise<VisibilityFacts & { reason: string }> {
   let b = await built();
   let f = b.facts.get(sku);
+  let part: CatalogPart | null = null;
   if (!f) {
-    const part = sku ? await getPart(sku) : null;
-    if (part && normalizeVisibility(part.portalVisibility) !== "hide") {
+    part = sku ? await getPart(sku) : null;
+    if (part && !portalHidden(part.portalVisibility, part.category)) {
       b = await built({ fresh: true });
       f = b.facts.get(sku);
     }
   }
   if (!f) {
+    // An internal labor/travel row on "auto" is withheld by category, not by
+    // a human's Hide — say so, so the editor's Auto reads right (#242 Task 11).
+    if (part && normalizeVisibility(part.portalVisibility) === "auto" && isInternalCategory(part.category)) {
+      return { visibility: "auto", hasVisibleImage: false, hasDatasheet: false, quoteCount: 0, internal: true, reason: INTERNAL_HIDDEN_REASON };
+    }
     const hidden: VisibilityFacts = { visibility: "hide", hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 };
     return { ...hidden, reason: "Hidden from customers" };
   }

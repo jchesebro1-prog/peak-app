@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import type { Facet } from "@/lib/portal-search";
+import type { PartDetail } from "@/lib/portal-part-view";
+import { CurtainRequestButton } from "./curtain-request";
+import { PANEL_CSS } from "./panel-css";
+import { docSrc, money, useAddToQuote } from "./panel-ui";
+import { PartSidebar } from "./part-sidebar";
 import {
   catalogHref,
   pagerItems,
@@ -17,8 +22,10 @@ import {
  * Portal catalog browser (#242 Task 10, spec §3.1). Everything is URL state:
  * the search box replaces `?q=` after 250 ms of quiet, facet checkboxes and
  * the pager push new URLs, and the server page renders each result set. Tiles
- * are sell-only `TileVM`s. Add / Configure open the part sidebar (`?part=`,
- * Task 11); a team preview shows Add disabled.
+ * are sell-only `TileVM`s. A part tile's Add puts one on the quote (spec
+ * §3.1 quick Add); its image/name and a fixture's Configure open the part
+ * sidebar (`?part=`, Task 11, rendered server-side). A team preview shows
+ * every add disabled.
  */
 
 type Result = {
@@ -71,7 +78,8 @@ const CSS = `
   .pc-price small { font-family: var(--font-ui); font-size: 11px; font-weight: 500; color: #8c919c; }
   .pc-por { font-size: 11.5px; font-weight: 600; color: #8c919c; }
   .pc-btn { display: inline-flex; align-items: center; justify-content: center; font: 600 12px var(--font-ui); border-radius: 8px; padding: 7px 12px; text-decoration: none; white-space: nowrap; flex-shrink: 0; }
-  .pc-btn-add { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
+  .pc-btn-add { color: #fff; background: var(--accent); border: 1px solid var(--accent); cursor: pointer; font-family: var(--font-ui); }
+  .pc-btn-add:disabled { opacity: .7; cursor: default; }
   .pc-btn-add:hover { filter: brightness(.94); }
   .pc-btn-cfg { color: var(--accent); background: #fff; border: 1px solid var(--accent); }
   .pc-btn-off { opacity: .45; cursor: not-allowed; }
@@ -84,6 +92,9 @@ const CSS = `
   a.pc-page:hover { background: #fff; border-color: #d6d9e0; }
   .pc-page-cur { background: var(--accent); color: #fff; }
   .pc-page-off { color: #c3c7ce; }
+  .pc-toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 12px; background: #16181d; color: #fff; border-radius: 10px; padding: 11px 16px; font-size: 13px; font-weight: 600; box-shadow: 0 10px 30px rgba(22, 24, 29, .25); max-width: calc(100vw - 32px); }
+  .pc-toast a { color: #fff; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+  .pc-toast button { border: none; background: none; color: #9aa0ab; font-size: 17px; cursor: pointer; padding: 0 0 0 4px; line-height: 1; }
   .pc-empty { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: 34px 24px; text-align: center; }
   @media (max-width: 767px) {
     .pc-body { grid-template-columns: 1fr; gap: 14px; }
@@ -96,14 +107,7 @@ const CSS = `
   }
 `;
 
-const money = (n: number) =>
-  "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
 const facetLabel = (v: string) => (v === "—" ? "Unspecified" : v);
-
-function docSrc(id: string, previewCid: string): string {
-  return `/portal/catalog/doc/${encodeURIComponent(id)}` + (previewCid ? `?preview=${encodeURIComponent(previewCid)}` : "");
-}
 
 function SearchIcon() {
   return (
@@ -136,8 +140,28 @@ function PlaceholderArt() {
   );
 }
 
-function Tile({ t, params, previewCid }: { t: TileVM; params: CatalogParams; previewCid: string }) {
+type Toast = { kind: "added"; count: number } | { kind: "error"; text: string };
+
+function Tile({
+  t,
+  params,
+  previewCid,
+  onToast,
+}: {
+  t: TileVM;
+  params: CatalogParams;
+  previewCid: string;
+  onToast: (toast: Toast) => void;
+}) {
   const [broken, setBroken] = useState(false);
+  const [done, setDone] = useState(false);
+  const add = useAddToQuote(
+    (count) => {
+      setDone(true);
+      onToast({ kind: "added", count });
+    },
+    (text) => onToast({ kind: "error", text })
+  );
   const href = catalogHref(params, { part: t.key }, previewCid);
   const showImage = !!t.imageId && !broken;
   return (
@@ -176,9 +200,15 @@ function Tile({ t, params, previewCid }: { t: TileVM; params: CatalogParams; pre
               Add
             </span>
           ) : (
-            <Link href={href} scroll={false} className="pc-btn pc-btn-add" aria-label={`Add ${t.title}`}>
-              Add
-            </Link>
+            <button
+              type="button"
+              className="pc-btn pc-btn-add"
+              aria-label={`Add ${t.title} to your quote`}
+              disabled={add.pending}
+              onClick={() => add.run({ kind: "part", sku: t.sku, qty: 1 })}
+            >
+              {add.pending ? "Adding…" : done ? "Added ✓" : "Add"}
+            </button>
           )}
         </div>
       </div>
@@ -241,14 +271,28 @@ export function CatalogClient({
   result,
   shelf,
   companyName,
+  detail,
+  viewer,
+  fabrics,
 }: {
   params: CatalogParams;
   previewCid: string;
   result: Result;
   shelf: TileVM[];
   companyName: string;
+  /** The open sidebar's item (`?part=`), rendered server-side; null when
+   *  the key isn't one this customer can see. */
+  detail: PartDetail | null;
+  viewer: { name: string; email: string };
+  fabrics: Array<{ sku: string; name: string }>;
 }) {
   const router = useRouter();
+  const [toast, setToast] = useState<Toast | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
   const [pending, startTransition] = useTransition();
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -303,13 +347,16 @@ export function CatalogClient({
 
   return (
     <div>
-      <style>{CSS}</style>
+      <style>{CSS + PANEL_CSS}</style>
 
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.015em" }}>Catalog</div>
-        <div style={{ fontSize: 13, color: "#5b616e", marginTop: 4, lineHeight: 1.6 }}>
-          Search everything {companyName} carries — prices shown are yours. All quotes are subject to Peak review and approval.
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: "1 1 320px" }}>
+          <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.015em" }}>Catalog</div>
+          <div style={{ fontSize: 13, color: "#5b616e", marginTop: 4, lineHeight: 1.6 }}>
+            Search everything {companyName} carries — prices shown are yours. All quotes are subject to Peak review and approval.
+          </div>
         </div>
+        <CurtainRequestButton fabrics={fabrics} previewCid={previewCid} />
       </div>
 
       <div className="pc-top">
@@ -388,7 +435,7 @@ export function CatalogClient({
               </div>
               <div className="pc-shelf">
                 {shelf.map((t) => (
-                  <Tile key={"shelf-" + t.key} t={t} params={params} previewCid={previewCid} />
+                  <Tile key={"shelf-" + t.key} t={t} params={params} previewCid={previewCid} onToast={setToast} />
                 ))}
               </div>
             </div>
@@ -429,7 +476,7 @@ export function CatalogClient({
           ) : (
             <div className="pc-grid" style={{ opacity: pending ? 0.55 : 1 }}>
               {result.entries.map((t) => (
-                <Tile key={t.key} t={t} params={params} previewCid={previewCid} />
+                <Tile key={t.key} t={t} params={params} previewCid={previewCid} onToast={setToast} />
               ))}
             </div>
           )}
@@ -469,6 +516,23 @@ export function CatalogClient({
           )}
         </section>
       </div>
+      {params.part && <PartSidebar key={params.part} detail={detail} params={params} previewCid={previewCid} viewer={viewer} />}
+
+      {toast && (
+        <div className="pc-toast" role="status">
+          {toast.kind === "added" ? (
+            <span>
+              Added to your quote —{" "}
+              <Link href="/portal/catalog/quote">Quote ({toast.count})</Link>
+            </span>
+          ) : (
+            <span>{toast.text}</span>
+          )}
+          <button type="button" aria-label="Dismiss" onClick={() => setToast(null)}>
+            ×
+          </button>
+        </div>
+      )}
     </div>
   );
 }

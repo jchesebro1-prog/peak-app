@@ -23,6 +23,24 @@ export const PORTAL_SEARCH_RATE_COPY = "Too many searches at once — wait a mom
 const SEARCH_LIMIT = 120;
 const SEARCH_WINDOW_MS = 60_000;
 
+/** The page path's own limit (#242 Task 11): every /portal/catalog render
+ *  (browse, a search, an open sidebar) counts once per grant — or per
+ *  previewed customer for a team preview. */
+export const PORTAL_BROWSE_RATE_COPY = "Too many requests — try again in a minute.";
+const BROWSE_LIMIT = 240;
+const BROWSE_WINDOW_MS = 60_000;
+
+/** The rate-limit key for a viewer (a team preview is keyed by the
+ *  previewed customer, since every preview shares grantId "preview"). */
+export function portalBrowseKey(session: Pick<PortalSession, "grantId" | "customerId">, preview: boolean): string {
+  return preview ? "portal-browse:preview:" + session.customerId : "portal-browse:" + session.grantId;
+}
+
+/** Records one catalog page render; false once the viewer passes 240 a minute. */
+export function portalBrowseAllowed(session: Pick<PortalSession, "grantId" | "customerId">, preview: boolean): boolean {
+  return rateLimit(portalBrowseKey(session, preview), BROWSE_LIMIT, BROWSE_WINDOW_MS).ok;
+}
+
 export type CatalogResult = {
   entries: TileVM[];
   total: number;

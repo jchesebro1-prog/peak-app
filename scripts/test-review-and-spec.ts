@@ -10542,6 +10542,7 @@ seeded()
   .then(() => portal242IndexAsyncChecks())
   .then(() => portal242CartAsyncChecks())
   .then(() => portal242CatalogBrowseAsyncChecks())
+  .then(() => portal242SidebarAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25060,7 +25061,10 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   const acts = s222("src/app/(app)/quotes/pdf-actions.ts");
   ok((acts.match(/await requireUser\(\);/g) || []).length === 2 && acts.indexOf("requireUser()") < acts.indexOf("getQuote("), "#222 PDF status/retry actions: signed-in team only");
   ok(/QUOTE_PDF_ORIGIN/.test(s222("DEPLOY.md")) && /QUOTE_PDF_ORIGIN/.test(s222(".env.example")), "#222 QUOTE_PDF_ORIGIN is documented for production");
-  ok(!/\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 1, "#222 next.config: the framing exception is the PDF route's alone");
+  // #242 Task 11 adds the one other same-origin framing exception: the
+  // portal part sidebar's inline datasheet viewer (/portal/catalog/doc/:id).
+  ok(!/\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 2 && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && /"\/portal\/catalog\/doc\/:id",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg),
+    "#222 next.config: the framing exceptions are the PDF route's and (#242) the portal doc viewer's alone");
 }
 
 async function quotePdfRoutes222AsyncChecks(): Promise<void> {
@@ -28325,5 +28329,269 @@ async function portal242CatalogBrowseAsyncChecks(): Promise<void> {
     d242Invalidate();
     await removeCustomer(CO_A);
     await removeCustomer(CO_B);
+  }
+}
+
+/* ======================================================================
+   Portal catalog — part sidebar, fixture configurator, curtain request,
+   add to quote, ask a question (#242, Task 11; spec §3.2/§3.3/§8.3) plus
+   the controller's labor exclusion and page rate limit. Pure: the labor
+   rule, cart/curtain guards, the question lead builder, the sell-only
+   sidebar view models and fixture option cleaning. DB: the session-taking
+   action bodies (hidden/labor refused, qty errors surfaced, curtain line
+   added with the SERVER's fabric name, the lead's fields). Registered in the
+   async chain as portal242SidebarAsyncChecks().
+   ====================================================================== */
+import {
+  INTERNAL_HIDDEN_REASON as d242InternalReason,
+  isInternalCategory as d242IsInternal,
+  portalHidden as d242PortalHidden,
+} from "@/lib/portal-visibility";
+import {
+  cartAddProblem as d242CartProblem,
+  cleanCurtainRequest as d242CleanCurtain,
+  NOT_QUOTABLE_COPY as d242NotQuotable,
+  PORTAL_MAX_QTY as d242PortalMaxQty,
+  QTY_COPY as d242QtyCopy,
+} from "@/lib/portal-cart-rules";
+import { buildPartQuestionLead as d242BuildQLead, partQuestionProblem as d242QProblem } from "@/lib/portal-leads";
+import {
+  cleanFixtureOptions as d242CleanOpts,
+  fixtureOptionKey as d242OptKey,
+  PART_UNAVAILABLE_COPY as d242Unavailable,
+  toFixtureDetailVM as d242FixtureVM,
+  toPartDetailVM as d242PartVM,
+} from "@/lib/portal-part-view";
+import { PORTAL_BROWSE_RATE_COPY as d242BrowseRateCopy, portalBrowseAllowed as d242BrowseAllowed, portalBrowseKey as d242BrowseKey } from "@/lib/portal-catalog-browse";
+import { partDetailActionFor as d242DetailAction, partDetailFor as d242Detail, priceFixtureOptionsFor as d242PriceOpts } from "@/lib/portal-part-detail";
+import { addToCartFor as d242AddFor, ASK_RATE_COPY as d242AskRate, askAboutPartFor as d242AskFor } from "@/lib/portal-cart-actions";
+import { addToCart as d242AddAction, askAboutPart as d242AskAction } from "@/app/portal/catalog/actions";
+import { priceFixture as d242PriceFixture } from "@/lib/portal-pricing";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  // Labor exclusion (controller decision 1).
+  ok(d242IsInternal("Labor") && d242IsInternal("  labor ") && d242IsInternal("LABOR") && !d242IsInternal("Labor & Travel") && !d242IsInternal("Lighting") && !d242IsInternal(null),
+    "#242 labor: the Labor category is internal (case-insensitive, trimmed); other categories aren't");
+  ok(d242PortalHidden("auto", "Labor") && d242PortalHidden(undefined, " labor") && d242PortalHidden("hide", "Cable") && !d242PortalHidden("show", "Labor") && !d242PortalHidden("auto", "Cable"),
+    "#242 labor: auto + Labor is withheld like Hide; Show still overrides");
+  const lab = { visibility: "auto" as const, hasVisibleImage: true, hasDatasheet: true, quoteCount: 99, internal: true };
+  ok(!d242Quotable(lab) && !d242Browsable(lab, { minQuotes: 3 }) && d242Reason(lab, { minQuotes: 3 }) === "Hidden from customers — labor/travel rate" && d242InternalReason === "Hidden from customers — labor/travel rate",
+    "#242 labor: an auto labor row is neither quotable nor browsable, whatever its facts, and says why");
+  ok(d242Quotable({ ...lab, visibility: "show" }) && d242Browsable({ ...lab, visibility: "show" }, { minQuotes: 3 }) && d242Reason({ ...lab, visibility: "show" }, { minQuotes: 3 }) === "Shown by override",
+    "#242 labor: Show on a labor row wins");
+
+  // Page rate limit (controller decision 2).
+  ok(d242BrowseKey({ grantId: "G1", customerId: "C1" }, false) === "portal-browse:G1" && d242BrowseKey({ grantId: "preview", customerId: "C1" }, true) === "portal-browse:preview:C1",
+    "#242 browse limit: keyed per grant, or per previewed customer");
+  const rs = { grantId: "t242-browse-" + Date.now(), customerId: "C" };
+  let under = true;
+  for (let i = 0; i < 240; i++) if (!d242BrowseAllowed(rs, false)) under = false;
+  ok(under && !d242BrowseAllowed(rs, false) && d242BrowseAllowed(rs, true), "#242 browse limit: 240 renders a minute, the 241st refused; a preview counts separately");
+  ok(d242BrowseRateCopy === "Too many requests — try again in a minute.", "#242 browse limit: the over-limit copy");
+
+  // Cart guards.
+  ok(d242CartProblem(false, 1) === "This part isn't available to quote." && d242NotQuotable === "This part isn't available to quote.", "#242 cart rules: an item not in the index is refused");
+  ok([0, -1, 1.5, Number.NaN, 10001].every((q) => d242CartProblem(true, q) === "Enter a quantity from 1 to 10,000.") && d242QtyCopy === "Enter a quantity from 1 to 10,000.",
+    "#242 cart rules: qty must be a whole number 1..10,000");
+  ok(d242CartProblem(true, 1) === null && d242CartProblem(true, 10000) === null && d242PortalMaxQty === d242MaxQty, "#242 cart rules: 1 and 10,000 are fine; the ceiling matches the cart store's");
+
+  const fabrics = [{ sku: "FAB-1", name: "IFR Velour — Black" }];
+  const good = d242CleanCurtain({ name: "  Main Drape ", fabricSku: "FAB-1", fabricName: "HACKED", qty: "2", width: "40", height: "18.5", fullness: "50" }, fabrics);
+  ok(good.ok && good.curtain.fabricName === "IFR Velour — Black" && good.curtain.name === "Main Drape" && good.qty === 2 && good.curtain.qty === "2" && good.curtain.width === "40" && good.curtain.height === "18.5" && good.curtain.fullness === "50",
+    "#242 curtain: a valid request is cleaned; the fabric NAME comes from the server's list, never the client");
+  const pick = d242CleanCurtain({ name: "Border", fabricSku: "", qty: "1", width: "10", height: "3", fullness: "0" }, fabrics);
+  ok(pick.ok && pick.curtain.fabricSku === "" && pick.curtain.fabricName === "", "#242 curtain: no fabric = Peak to recommend");
+  const bad = (over: Record<string, unknown>) => d242CleanCurtain({ name: "X", fabricSku: "FAB-1", qty: "1", width: "10", height: "10", fullness: "50", ...over }, fabrics);
+  ok(!bad({ fabricSku: "NOPE" }).ok && !bad({ name: "  " }).ok && !bad({ qty: "0" }).ok && !bad({ qty: "1.5" }).ok && !bad({ width: "abc" }).ok && !bad({ height: "0" }).ok && !bad({ width: "999" }).ok && !bad({ fullness: "60" }).ok && !d242CleanCurtain(null, fabrics).ok,
+    "#242 curtain: unknown fabric, blank name, bad qty/size and an off-list fullness are refused");
+  const qtyErr = bad({ qty: "0" });
+  ok(!qtyErr.ok && qtyErr.error === "Enter a quantity from 1 to 10,000.", "#242 curtain: the qty refusal uses the cart's copy");
+
+  // Ask a question — pure lead + guards.
+  const lead = d242BuildQLead({ customerId: "CO-9", name: "Pat Buyer", email: "pat@example.com" }, "Lakefront HS", { sku: "SKU-7", title: "Widget Pro" }, "  Is this in stock?  ", "  555-0100 ");
+  ok(lead.source === "existing" && lead.owner === "" && lead.customerId === "CO-9" && lead.org === "Lakefront HS" && lead.contact === "Pat Buyer" && lead.email === "pat@example.com" && lead.phone === "555-0100",
+    "#242 ask: the lead is an unassigned existing-customer lead on the session's customer");
+  ok(typeof lead.message === "string" && lead.message.startsWith("[Portal question — SKU-7]") && lead.message.endsWith("Is this in stock?") && lead.message.includes("Widget Pro"),
+    "#242 ask: the message is headed [Portal question — <SKU>] and carries the question");
+  ok((d242BuildQLead({ customerId: "C", name: "", email: "" }, "", { sku: "S", title: "S" }, "q", "x".repeat(60)).phone ?? "").length === 40, "#242 ask: phone capped at 40");
+  ok(d242QProblem("", "") !== null && d242QProblem("   ", "") !== null && d242QProblem("x".repeat(2001), "") !== null && d242QProblem("x".repeat(2000), "") === null && d242QProblem("hi", "1".repeat(41)) !== null && d242QProblem("hi", undefined) === null && d242QProblem("hi", 5) !== null,
+    "#242 ask: message 1–2,000 chars; phone ≤ 40 chars and optional");
+
+  // Sidebar view models — sell only (controller decision 4).
+  const leakyPart = { sku: "SKU-1", desc: "Widget", mfr: "ETC", mpn: "W-1", unit: "ft", cost: 42, list: 99, note: "vendor note", pricedAt: 123, margin: 0.3, tier: "silver", imageIds: ["IMG-1"], datasheetIds: ["DS-1"], specText: "Part 2 text", accessories: [], quoteCount: 5 };
+  const pv = d242PartVM(leakyPart, { unitPrice: 12.5, por: false }, [{ id: "DS-1", kind: "datasheet", title: "Widget datasheet" }], []);
+  ok(eq(Object.keys(pv).sort(), ["docs", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
+    "#242 sidebar: the part detail is exactly the sell-only whitelist");
+  const pj = JSON.stringify(pv);
+  ok(!pj.includes("\"cost\"") && !pj.includes("\"list\"") && !pj.includes("margin") && !pj.includes("tier") && !pj.includes("silver") && !pj.includes("note") && !pj.includes("pricedAt") && !pj.includes("42"),
+    "#242 sidebar: no cost, list, margin, tier, note or priced-at stamp rides along");
+  ok(d242PartVM(leakyPart, { unitPrice: 9, por: true }, [], []).unitPrice === null && d242PartVM(leakyPart, null, [], []).por === true, "#242 sidebar: a POR (or unpriced) part shows no number");
+
+  const fxDef = {
+    id: "fx1", label: "Kit", description: "d", lightEngineSku: "ENG", lensSku: "LENS",
+    lines: [
+      { slot: "lightEngine", sku: "ENG", label: "Engine", qty: 1, required: true },
+      { slot: "lens", sku: "LENS", label: "Lens", qty: 1, required: true },
+      { slot: "power", sku: "PWR", label: "Power cable", qty: 2, required: true },
+      { slot: "accessories", sku: "CLAMP", label: "Clamp", qty: 0, required: false },
+      { slot: "data", sku: "DMX", label: "DMX cable", qty: 0, required: false },
+    ],
+  };
+  ok(d242OptKey({ slot: "accessories", sku: "CLAMP" }) === "accessories:CLAMP", "#242 fixture options: keyed slot:sku, as on a cart line");
+  ok(eq(d242CleanOpts(fxDef, { "accessories:CLAMP": 2, "data:DMX": 0, "power:PWR": 5, "lens:LENS": 1, "accessories:OTHER": 1, "x": 3 }), { "accessories:CLAMP": 2 }),
+    "#242 fixture options: only this fixture's add-ons survive — never a required line or a foreign key; qty 0 = off");
+  ok(eq(d242CleanOpts(fxDef, { "accessories:CLAMP": -1, "data:DMX": 1.5 }), {}) && eq(d242CleanOpts(fxDef, { "accessories:CLAMP": "2" }), {}) && eq(d242CleanOpts(fxDef, { "data:DMX": 10001 }), {}) && eq(d242CleanOpts(fxDef, null), {}) && eq(d242CleanOpts(fxDef, [1]), {}),
+    "#242 fixture options: negative, fractional, string, oversize and non-object input is dropped");
+  const fvm = d242FixtureVM(fxDef, "ETC", { unitPrice: 300, por: false }, (sku) => (sku === "CLAMP" ? { unitPrice: 20, por: false } : { unitPrice: 5, por: true }), { images: ["IMG"], docs: [] });
+  ok(eq(fvm.fixed.map((f) => f.sku), ["ENG", "LENS", "PWR"]) && fvm.fixed[2].qty === 2 && eq(fvm.addOns.map((a) => a.key), ["accessories:CLAMP", "data:DMX"]) && fvm.addOns[0].unitPrice === 20 && fvm.addOns[1].unitPrice === null && fvm.addOns[1].por,
+    "#242 fixture sidebar: engine, lens and included lines are fixed; qty-0 lines are add-ons with their own sell");
+  ok(!fvm.unavailable && fvm.unitPrice === 300 && fvm.key === "fixture:fx1" && fvm.mfr === "ETC", "#242 fixture sidebar: priced from the no-add-on fixture price");
+  const fu = d242FixtureVM(fxDef, "", null, () => null, { images: [], docs: [] });
+  ok(fu.unavailable && fu.unitPrice === null && !fu.por, "#242 fixture sidebar: an unpriceable fixture reads unavailable");
+  ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
+    "#242 fixture sidebar: exactly the sell-only whitelist");
+  ok(d242Unavailable === "This item isn't available.", "#242 sidebar: the unavailable copy");
+}
+
+async function portal242SidebarAsyncChecks(): Promise<void> {
+  const P = fixtureId(242, "sb-widget");
+  const ACC = fixtureId(242, "sb-acc");
+  const PH = fixtureId(242, "sb-hidden");
+  const LAB = fixtureId(242, "sb-labor");
+  const LABS = fixtureId(242, "sb-labor-shown");
+  const ADD = fixtureId(242, "sb-addon");
+  const FAB = fixtureId(242, "sb-fabric");
+  const FX = fixtureId(242, "sb-kit");
+  const CO = fixtureId(242, "sb-co");
+  const GRANT = fixtureId(242, "sb-grant");
+  const GRANT_ASK = fixtureId(242, "sb-grant-ask");
+  registerFixture("portal_carts", GRANT);
+  registerFixture("portal_carts", GRANT_ASK);
+  const { listDocs } = await import("@/db/doc-store");
+  try {
+    await d242MergeUpsert(P, { desc: "Test242 Sidebar Widget", category: "Test242 SbCat", unit: "ea", list: 30, cost: 10, mfr: "Test242 SbMfr", manufacturerPartNumber: "SBW-1" });
+    await d242MergeUpsert(ACC, { desc: "Test242 Sidebar Clamp", category: "Test242 SbCat", unit: "ea", list: 8, cost: 4 });
+    await d242MergeUpsert(PH, { desc: "Test242 Sidebar Hidden", category: "Test242 SbCat", unit: "ea", list: 30, cost: 10, portalVisibility: "hide" });
+    await d242MergeUpsert(LAB, { desc: "Test242 Travel day", category: " Labor ", unit: "hr", list: 90, cost: 60 });
+    await d242MergeUpsert(LABS, { desc: "Test242 Shown labor", category: "Labor", unit: "hr", list: 90, cost: 60, portalVisibility: "show" });
+    await d242MergeUpsert(ADD, { desc: "Test242 Sidebar Add-on", category: "Test242 SbCat", unit: "ea", list: 20, cost: 6 });
+    await d242MergeUpsert(FAB, { desc: "Test242 Velour", category: "Fabric", unit: "yd", list: 0, cost: 0, curtainAreaRate: 3 });
+    for (const s of [P, ACC, PH, LAB, LABS, ADD, FAB]) registerFixture("catalog_parts", s);
+    await createFixture("part_accessory_links", { id: fixtureId(242, "sb-acc-link"), parentSku: P, accessorySku: ACC, source: "manual" });
+    await createFixture("part_accessory_links", { id: fixtureId(242, "sb-acc-link-h"), parentSku: P, accessorySku: PH, source: "manual" });
+    await createFixture("subassemblies", {
+      id: FX, kind: "fixture", label: "Test242 Sidebar Kit", description: "Kit description", lightEngineSku: P, lensSku: null,
+      lines: { data: [], power: [], mounting: [], accessories: [{ sku: ADD, qty: 0, label: "" }, { sku: PH, qty: 0, label: "" }] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    await upsertCustomer({ id: CO, name: "Test242 Sidebar Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
+    d242Invalidate();
+    const ix = await d242Index({ fresh: true });
+
+    // Labor exclusion in the index.
+    ok(!ix.parts.has(LAB) && !ix.entries.some((e) => e.key === LAB), "#242 labor: an auto Labor row is absent from the portal index and search");
+    ok(ix.parts.has(LABS), "#242 labor: a Labor row set to Show stays quotable");
+    const fLab = await d242Facts(LAB);
+    ok(fLab.reason === "Hidden from customers — labor/travel rate" && fLab.visibility === "auto", "#242 labor: the part editor's reason line names the labor/travel rule (Auto kept)");
+    ok((await d242Facts(LABS)).reason === "Shown by override", "#242 labor: a shown labor row reads Shown by override");
+    ok(ix.fabrics.some((f) => f.sku === FAB && f.name === "Test242 Velour") && ix.fabrics.every((f) => Object.keys(f).sort().join() === "name,sku"),
+      "#242 curtain: the fabric list is quotable Fabric parts with a rate — sku + name only");
+
+    const ctx = await d242Ctx({ customerId: CO, name: "" });
+    const sess = { grantId: GRANT, customerId: CO, name: "Pat Test", email: "pat@example.com" };
+
+    // Part detail.
+    const d = await d242Detail(ctx, P);
+    ok(!!d && d.kind === "part" && d.unitPrice === (await d242PriceSku(P, ctx))?.unitPrice && d.mpn === "SBW-1" && d.mfr === "Test242 SbMfr",
+      "#242 sidebar: a part's detail is priced at the viewer's tier");
+    ok(!!d && d.kind === "part" && d.goesWith.map((t) => t.key).join() === ACC, "#242 sidebar: Goes with = quotable accessories only (a hidden accessory is left out)");
+    const dj = JSON.stringify(d);
+    ok(!dj.includes("\"cost\"") && !dj.includes("\"list\"") && !dj.includes("margin") && !dj.includes("silver") && !dj.includes("pricedAt") && !dj.includes("\"note\""),
+      "#242 sidebar: the detail JSON carries no cost, list, margin, tier or priced-at stamp");
+    ok((await d242Detail(ctx, PH)) === null && (await d242Detail(ctx, LAB)) === null && (await d242Detail(ctx, "no-such-sku-242")) === null && (await d242Detail(ctx, "fixture:nope")) === null,
+      "#242 sidebar: hidden, labor and unknown keys read as not available");
+    const nd = await d242DetailAction(null, P);
+    ok(!nd.ok && nd.error === "Your access link has expired — open the link we sent you again.", "#242 sidebar action: no session → the expired-link copy");
+    const hd = await d242DetailAction(sess, PH);
+    ok(!hd.ok && hd.error === "This item isn't available.", "#242 sidebar action: a hidden SKU → This item isn't available.");
+
+    // Fixture detail + live price.
+    const fd = await d242Detail(ctx, "fixture:" + FX);
+    const addKey = "accessories:" + ADD;
+    ok(!!fd && fd.kind === "fixture" && fd.fixed.map((f) => f.sku).join() === P && fd.addOns.map((a) => a.key).join() === addKey && fd.description === "Kit description",
+      "#242 fixture sidebar: the light engine is fixed; the quotable qty-0 line is the one add-on (a hidden one isn't offered)");
+    const base = (await d242PriceFixture(FX, {}, ctx))?.unitPrice ?? NaN;
+    const addUnit = (await d242PriceSku(ADD, ctx))?.unitPrice ?? NaN;
+    const po = await d242PriceOpts(sess, false, FX, { [addKey]: 2, ["accessories:" + PH]: 3, "lens:x": 1 });
+    ok(po.ok && !po.unavailable && po.unitPrice === Math.round((base + 2 * addUnit) * 100) / 100,
+      "#242 fixture price: the live price = included parts + chosen add-ons, same path as the cart; foreign keys ignored");
+    const pv = await d242PriceOpts({ grantId: "preview", customerId: CO, name: "", email: "" }, true, FX, {});
+    ok(pv.ok && pv.unitPrice === base, "#242 fixture price: works for a team preview viewer");
+    const pn = await d242PriceOpts(null, false, FX, {});
+    ok(!pn.ok && pn.error === "Your access link has expired — open the link we sent you again.", "#242 fixture price: no viewer → refused");
+
+    // addToCart (session-taking body).
+    const noSess = await d242AddAction({ kind: "part", sku: P, qty: 1 });
+    ok(!noSess.ok && noSess.error === "Your access link has expired — open the link we sent you again.", "#242 add: the real action with no portal session is refused");
+    const hid = await d242AddFor(sess, { kind: "part", sku: PH, qty: 1 });
+    ok(!hid.ok && hid.error === "This part isn't available to quote.", "#242 add: a hidden SKU is refused");
+    const labAdd = await d242AddFor(sess, { kind: "part", sku: LAB, qty: 1 });
+    ok(!labAdd.ok && labAdd.error === "This part isn't available to quote.", "#242 add: a labor/travel rate is refused");
+    const q0 = await d242AddFor(sess, { kind: "part", sku: P, qty: 0 });
+    const q15 = await d242AddFor(sess, { kind: "part", sku: P, qty: 1.5 });
+    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && !q15.ok && q15.error === "Enter a quantity from 1 to 10,000.", "#242 add: qty errors come back as { ok:false, error }");
+    const a1 = await d242AddFor(sess, { kind: "part", sku: P, qty: 2 });
+    ok(a1.ok && a1.count === 1, "#242 add: a part adds and returns the line count");
+    const a1b = await d242AddFor(sess, { kind: "part", sku: P, qty: 1, unitPrice: 0.01 });
+    ok(a1b.ok && a1b.count === 1, "#242 add: the same part merges into its line (a client price is ignored)");
+    const a2 = await d242AddFor(sess, { kind: "fixture", fixtureId: FX, options: { [addKey]: 2, ["accessories:" + PH]: 1 }, qty: 1 });
+    ok(a2.ok && a2.count === 2, "#242 add: a configured fixture adds as its own line");
+    const a3 = await d242AddFor(sess, { kind: "curtain", curtain: { name: "Main Drape", fabricSku: FAB, fabricName: "Client says free", qty: "3", width: "40", height: "20", fullness: "100" } });
+    ok(a3.ok && a3.count === 3, "#242 add: a curtain request adds a line");
+    const badFab = await d242AddFor(sess, { kind: "curtain", curtain: { name: "X", fabricSku: PH, qty: "1", width: "1", height: "1", fullness: "0" } });
+    ok(!badFab.ok, "#242 add: a curtain naming a fabric off the list is refused");
+    const pvAdd = await d242AddFor({ grantId: "preview", customerId: CO, name: "", email: "" }, { kind: "part", sku: P, qty: 1 });
+    ok(!pvAdd.ok, "#242 add: a preview session never writes");
+    const cart = await d242GetCart(GRANT, CO);
+    const pl = cart.lines.find((l) => l.kind === "part");
+    const fl = cart.lines.find((l) => l.kind === "fixture");
+    const cl = cart.lines.find((l) => l.kind === "curtain");
+    ok(pl?.sku === P && pl.qty === 3 && !("unitPrice" in pl), "#242 add: the part line holds the merged qty, never a price");
+    ok(fl?.fixtureId === FX && JSON.stringify(fl.fixtureOptions) === JSON.stringify({ [addKey]: 2 }), "#242 add: the fixture line stores only its own cleaned add-on keys");
+    ok(cl?.qty === 3 && cl.curtainInputs?.fabricName === "Test242 Velour" && cl.curtainInputs?.fabricSku === FAB && cl.curtainInputs?.width === "40" && cl.curtainInputs?.fullness === "100",
+      "#242 add: the curtain line stores the inputs with the server's fabric name; line qty = curtain qty");
+
+    // askAboutPart (session-taking body).
+    const askNone = await d242AskAction({ sku: P, message: "hi" });
+    ok(!askNone.ok && askNone.error === "Your access link has expired — open the link we sent you again.", "#242 ask: the real action with no portal session is refused");
+    const askEmpty = await d242AskFor(sess, { sku: P, message: "   " });
+    ok(!askEmpty.ok, "#242 ask: an empty question is refused");
+    const askHidden = await d242AskFor(sess, { sku: PH, message: "Is this in stock?" });
+    ok(!askHidden.ok && askHidden.error === "This item isn't available.", "#242 ask: a hidden SKU is refused without confirming it exists");
+    const leadsBefore = new Set((await listDocs<{ id: string }>("leads")).map((l) => l.id));
+    const asked = await d242AskFor(sess, { sku: P, message: "Is this in stock?", phone: " 555-0100 " });
+    const mine = (await listDocs<{ id: string; customerId?: string | null; source?: string; owner?: string; message?: string; email?: string; contact?: string; phone?: string; org?: string; stage?: string }>("leads"))
+      .filter((l) => !leadsBefore.has(l.id));
+    for (const l of mine) registerFixture("leads", l.id);
+    const L = mine[0];
+    ok(asked.ok && mine.length === 1, "#242 ask: one lead is created");
+    ok(!!L && L.customerId === CO && L.source === "existing" && L.owner === "" && L.stage === "new" && L.org === "Test242 Sidebar Co" && L.contact === "Pat Test" && L.email === "pat@example.com" && L.phone === "555-0100",
+      "#242 ask: the lead is unassigned (SLA queue), source existing, on the SESSION's customer with the grant's name/email");
+    ok(!!L && typeof L.message === "string" && L.message.startsWith(`[Portal question — ${P}]`) && L.message.includes("Is this in stock?"), "#242 ask: the lead message starts [Portal question — <SKU>]");
+    const askFx = await d242AskFor(sess, { sku: "fixture:" + FX, message: "Colour temp?" });
+    const fxLead = (await listDocs<{ id: string; message?: string }>("leads")).filter((l) => !leadsBefore.has(l.id) && !mine.some((m) => m.id === l.id));
+    for (const l of fxLead) registerFixture("leads", l.id);
+    ok(askFx.ok && fxLead.length === 1 && (fxLead[0].message ?? "").startsWith(`[Portal question — ${P}] Test242 Sidebar Kit`), "#242 ask: a fixture question is headed by its light engine's SKU and the fixture name");
+
+    const sessAsk = { ...sess, grantId: GRANT_ASK };
+    const before2 = new Set((await listDocs<{ id: string }>("leads")).map((l) => l.id));
+    let fiveOk = true;
+    for (let i = 0; i < 5; i++) if (!(await d242AskFor(sessAsk, { sku: P, message: "q" + i })).ok) fiveOk = false;
+    const sixth = await d242AskFor(sessAsk, { sku: P, message: "q6" });
+    for (const l of (await listDocs<{ id: string }>("leads")).filter((x) => !before2.has(x.id))) registerFixture("leads", l.id);
+    ok(fiveOk && !sixth.ok && sixth.error === d242AskRate, "#242 ask: 5 questions an hour per grant, the 6th refused");
+  } finally {
+    d242Invalidate();
+    await removeCustomer(CO);
   }
 }

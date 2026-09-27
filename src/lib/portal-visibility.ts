@@ -19,6 +19,9 @@ export type VisibilityFacts = {
   hasVisibleImage: boolean;
   hasDatasheet: boolean;
   quoteCount: number;
+  /** An internal catalog row (a labor/travel rate, see
+   *  `isInternalCategory`) — hidden under "auto"; "show" still overrides. */
+  internal?: boolean;
 };
 
 export type BrowseRule = { minQuotes: number };
@@ -29,10 +32,31 @@ export function normalizeVisibility(v: unknown): PortalVisibility {
   return v === "show" || v === "hide" ? v : "auto";
 }
 
-/** Everything but an explicit Hide can be quoted (staff-side; not gated by
- *  the browse rule at all). */
-export function quotable(f: Pick<VisibilityFacts, "visibility">): boolean {
-  return f.visibility !== "hide";
+/** Catalog categories that are internal rates, not products (#242 Task 11
+ *  controller decision): the "Labor" rows carry labor and travel rates. */
+const INTERNAL_CATEGORIES = new Set(["labor"]);
+
+/** The reason line for an internal row left on "auto". */
+export const INTERNAL_HIDDEN_REASON = "Hidden from customers — labor/travel rate";
+
+/** Whether a catalog category is an internal rate (case-insensitive, trimmed). */
+export function isInternalCategory(category: unknown): boolean {
+  return typeof category === "string" && INTERNAL_CATEGORIES.has(category.trim().toLowerCase());
+}
+
+/** Whether a catalog row is withheld from customers entirely: an explicit
+ *  Hide, or an internal (labor/travel) row left on "auto". "show" always
+ *  wins, so an internal row a human chose to show stays quotable. */
+export function portalHidden(visibility: unknown, category: unknown): boolean {
+  const v = normalizeVisibility(visibility);
+  return v === "hide" || (v === "auto" && isInternalCategory(category));
+}
+
+/** Everything but an explicit Hide (or an internal row on "auto") can be
+ *  quoted (staff-side; not gated by the browse rule at all). */
+export function quotable(f: Pick<VisibilityFacts, "visibility" | "internal">): boolean {
+  if (f.visibility === "hide") return false;
+  return !(f.visibility === "auto" && f.internal);
 }
 
 /** Whether the portal catalog would list this part on its own (browse or
@@ -42,6 +66,7 @@ export function quotable(f: Pick<VisibilityFacts, "visibility">): boolean {
 export function browsable(f: VisibilityFacts, rule: BrowseRule): boolean {
   if (f.visibility === "show") return true;
   if (f.visibility === "hide") return false;
+  if (f.internal) return false;
   return f.hasVisibleImage || f.hasDatasheet || f.quoteCount >= rule.minQuotes;
 }
 
@@ -52,6 +77,7 @@ export function browsable(f: VisibilityFacts, rule: BrowseRule): boolean {
 export function browseReason(f: VisibilityFacts, rule: BrowseRule): string {
   if (f.visibility === "hide") return "Hidden from customers";
   if (f.visibility === "show") return "Shown by override";
+  if (f.internal) return INTERNAL_HIDDEN_REASON;
   if (f.hasVisibleImage) return "Browsable: has image";
   if (f.hasDatasheet) return "Browsable: has datasheet";
   if (f.quoteCount >= rule.minQuotes) return `Browsable: quoted ${f.quoteCount} times recently`;

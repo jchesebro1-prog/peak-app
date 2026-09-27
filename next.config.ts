@@ -77,6 +77,12 @@ const nextConfig: NextConfig = {
         source: "/api/quotes/:id/pdf",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
+      // #242: the portal part sidebar opens a datasheet inline in a
+      // same-origin viewer (the route itself gates who may read which doc).
+      {
+        source: "/portal/catalog/doc/:id",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
     ];
   },
   // The Field Survey module was renamed Venue Assessments (route moved from

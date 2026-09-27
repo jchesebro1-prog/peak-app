@@ -5,7 +5,9 @@ import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { getCart } from "@/lib/stores/portal-carts";
 import { pricingContextFor } from "@/lib/portal-pricing";
-import { browseCatalog, quotedBeforeShelf } from "@/lib/portal-catalog-browse";
+import { browseCatalog, portalBrowseAllowed, PORTAL_BROWSE_RATE_COPY, quotedBeforeShelf } from "@/lib/portal-catalog-browse";
+import { portalIndex } from "@/lib/portal-catalog-index";
+import { partDetailFor } from "@/lib/portal-part-detail";
 import { CATALOG_PAGE_SIZE, parseCatalogParams } from "@/lib/portal-catalog-view";
 import { PortalShell } from "../shell";
 import { PortalSignedOut } from "../signed-out";
@@ -25,6 +27,10 @@ export const dynamic = "force-dynamic";
  * SECURITY: the customer comes from `resolvePortalViewer` only (their grant,
  * or a signed-in team member's `?preview=`). Tiles are sell-only `TileVM`s —
  * the catalog index (which carries cost) never leaves the server.
+ *
+ * #242 Task 11: an open `?part=` sidebar is rendered here from the resolved
+ * viewer (so a team preview shows it fully, adds disabled); every render
+ * counts against a 240-a-minute limit per grant (or previewed customer).
  */
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -54,14 +60,25 @@ export default async function PortalCatalogPage({
   }
 
   const cid = session.customerId;
+  if (!portalBrowseAllowed(session, preview)) {
+    return (
+      <PortalShell companyName={companyName} logoLight={settings.logoLight || null} wide>
+        <div style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 12, padding: "34px 24px", textAlign: "center" }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{PORTAL_BROWSE_RATE_COPY}</div>
+        </div>
+      </PortalShell>
+    );
+  }
   const params = parseCatalogParams(sp);
   const ctx = await pricingContextFor(session);
   const browsing = !params.q && !params.mfr.length && !params.cat.length;
-  const [cust, result, shelf, cart] = await Promise.all([
+  const [cust, result, shelf, cart, detail, ix] = await Promise.all([
     getCustomer(cid),
     browseCatalog({ ...params, pageSize: CATALOG_PAGE_SIZE }, ctx),
     browsing && params.page === 1 ? quotedBeforeShelf(ctx) : Promise.resolve([]),
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
+    params.part ? partDetailFor(ctx, params.part) : Promise.resolve(null),
+    portalIndex(),
   ]);
   const custName = cust?.name || "your organization";
 
@@ -105,6 +122,9 @@ export default async function PortalCatalogPage({
         result={result}
         shelf={shelf}
         companyName={companyName}
+        detail={detail}
+        viewer={{ name: session.name, email: session.email }}
+        fabrics={ix.fabrics}
       />
     </PortalShell>
   );

@@ -152,6 +152,10 @@ const ROUTES = [
   "/portal/catalog",
   "/portal/catalog?preview=lakefront",
   "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
+  // #242 Task 11: the part sidebar renders server-side from ?part= — a real
+  // SKU, and an unknown key ("This item isn't available.").
+  "/portal/catalog?preview=lakefront&q=velour&part=RB-EN-22",
+  "/portal/catalog?preview=lakefront&part=no-such-part",
   "/portal/estimate",
   "/portal/estimate?preview=lakefront",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET

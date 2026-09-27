@@ -1,0 +1,121 @@
+// SERVER ONLY — the bodies of the portal catalog's mutating actions (#242
+// Task 11). The "use server" wrappers in src/app/portal/catalog/actions.ts
+// read the grant cookie and pass the session in; nothing here takes a
+// customer id, a price or a fabric name from the browser.
+import type { PortalSession } from "@/lib/portal";
+import { portalIndex } from "@/lib/portal-catalog-index";
+import { PORTAL_EXPIRED_COPY } from "@/lib/portal-catalog-browse";
+import { cartAddProblem, cleanCurtainRequest, NOT_QUOTABLE_COPY, QTY_COPY } from "@/lib/portal-cart-rules";
+import { buildPartQuestionLead, partQuestionProblem } from "@/lib/portal-leads";
+import { cleanFixtureOptions, FIXTURE_UNAVAILABLE_COPY, PART_UNAVAILABLE_COPY } from "@/lib/portal-part-view";
+import { priceFixture, pricingContextFor } from "@/lib/portal-pricing";
+import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
+import { get as getCustomer } from "@/lib/stores/customers";
+import { create as createLead } from "@/lib/stores/leads";
+import { addLine } from "@/lib/stores/portal-carts";
+
+export type AddToCartInput =
+  | { kind: "part"; sku: string; qty: number }
+  | { kind: "fixture"; fixtureId: string; options: Record<string, number>; qty: number }
+  | { kind: "curtain"; curtain: unknown };
+
+export type AddToCartResult = { ok: true; count: number } | { ok: false; error: string };
+export type AskResult = { ok: true } | { ok: false; error: string };
+
+export const CART_RATE_COPY = "Too many changes at once — wait a moment and try again.";
+export const ASK_RATE_COPY = "You've sent several questions this hour — we'll get back to you soon, or call us.";
+const ADD_FAIL_COPY = "Couldn't add that — try again.";
+const ASK_FAIL_COPY = "Couldn't send your question — try again.";
+/** The two messages `addLine` throws — safe to show; anything else isn't. */
+const STORE_COPY = new Set([QTY_COPY, "Your quote can hold up to 200 lines."]);
+
+/** A preview session (a team member looking as the customer) never writes. */
+function writable(session: PortalSession | null): session is PortalSession {
+  return !!session && session.grantId !== "preview" && !!session.grantId && !!session.customerId;
+}
+
+/** The `addToCart` action's body. Every add re-checks the item against the
+ *  portal index (hidden/labor/unknown → refused) and never reads a price. */
+export async function addToCartFor(session: PortalSession | null, input: unknown): Promise<AddToCartResult> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  if (!rateLimit("portal-cart:" + session.grantId, 120, 60_000).ok) return { ok: false, error: CART_RATE_COPY };
+  const r = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const ix = await portalIndex();
+
+  let line: Parameters<typeof addLine>[2];
+  if (r.kind === "part") {
+    const sku = typeof r.sku === "string" ? r.sku : "";
+    const problem = cartAddProblem(!!sku && ix.parts.has(sku), r.qty as number);
+    if (problem) return { ok: false, error: problem };
+    line = { kind: "part", sku, qty: r.qty as number };
+  } else if (r.kind === "fixture") {
+    const fx = typeof r.fixtureId === "string" ? ix.fixtures.get(r.fixtureId) : undefined;
+    const problem = cartAddProblem(!!fx, r.qty as number);
+    if (problem) return { ok: false, error: problem === NOT_QUOTABLE_COPY ? PART_UNAVAILABLE_COPY : problem };
+    const options = cleanFixtureOptions(fx!, r.options);
+    if (!(await priceFixture(fx!.id, options, await pricingContextFor(session)))) return { ok: false, error: FIXTURE_UNAVAILABLE_COPY };
+    line = { kind: "fixture", fixtureId: fx!.id, fixtureOptions: options, qty: r.qty as number };
+  } else if (r.kind === "curtain") {
+    const c = cleanCurtainRequest(r.curtain, ix.fabrics);
+    if (!c.ok) return c;
+    line = { kind: "curtain", curtainInputs: c.curtain, qty: c.qty };
+  } else {
+    return { ok: false, error: ADD_FAIL_COPY };
+  }
+
+  try {
+    const cart = await addLine(session.grantId, session.customerId, line);
+    return { ok: true, count: cart.lines.length };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (STORE_COPY.has(msg)) return { ok: false, error: msg };
+    console.error("addToCart failed", e);
+    return { ok: false, error: ADD_FAIL_COPY };
+  }
+}
+
+const ASK_LIMIT = 5;
+const ASK_WINDOW_MS = 3_600_000;
+
+/**
+ * The `askAboutPart` action's body — a lead in the Leads SLA queue (source
+ * "existing", no owner) linked to the SESSION's customer, its message headed
+ * `[Portal question — <SKU>]`. `sku` may be a part SKU or `fixture:<id>`
+ * (headed by the fixture's light-engine SKU). 5 questions an hour per grant;
+ * an invalid question or a failed write doesn't spend one.
+ */
+export async function askAboutPartFor(session: PortalSession | null, input: unknown): Promise<AskResult> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  const r = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const problem = partQuestionProblem(r.message, r.phone);
+  if (problem) return { ok: false, error: problem };
+
+  const key = typeof r.sku === "string" ? r.sku : "";
+  const ix = await portalIndex();
+  let part: { sku: string; title: string } | null = null;
+  if (key.startsWith("fixture:")) {
+    const fx = ix.fixtures.get(key.slice("fixture:".length));
+    if (fx) part = { sku: fx.lightEngineSku, title: fx.label };
+  } else {
+    const p = key ? ix.parts.get(key) : undefined;
+    if (p) part = { sku: p.sku, title: p.desc || p.sku };
+  }
+  if (!part) return { ok: false, error: PART_UNAVAILABLE_COPY };
+
+  const cust = await getCustomer(session.customerId);
+  if (!cust) return { ok: false, error: PORTAL_EXPIRED_COPY };
+
+  const rlKey = "portal-ask:" + session.grantId;
+  if (!rateLimit(rlKey, ASK_LIMIT, ASK_WINDOW_MS).ok) return { ok: false, error: ASK_RATE_COPY };
+  try {
+    await createLead(
+      buildPartQuestionLead(session, cust.name, part, r.message as string, typeof r.phone === "string" ? r.phone : ""),
+      session.name
+    );
+  } catch (e) {
+    rateLimitRefund(rlKey);
+    console.error("askAboutPart: lead mint failed", e);
+    return { ok: false, error: ASK_FAIL_COPY };
+  }
+  return { ok: true };
+}
