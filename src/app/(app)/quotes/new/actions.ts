@@ -12,6 +12,8 @@ import { saveCustomerAction } from "@/app/(app)/companies/actions";
 import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
 import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
 import { builderPath, isServiceType, type IntakeSubmit } from "./types";
+import { getSettings } from "@/lib/settings";
+import { venueTypeOptions, venueTypesFrom } from "@/lib/venue-types";
 
 /** I1/I4 review — where the "This thread is linked to X" banner's "open it"
  *  points. Small and self-contained on purpose: the fuller LINK_KIND_COLOR/
@@ -122,8 +124,15 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
   const contacts: ContactInput[] = (existing?.contacts || []).map(toContactInput);
 
   if (input.locationMode === "new") {
+    const types = venueTypesFrom((await getSettings()).venueTypes);
+    const kind = (input.newLocationKind || "").trim();
     locations.push({
-      label: (input.newLocationLabel || "").trim() || "Venue",
+      // A minted id so the new venue is findable after the save (it becomes
+      // the site's legacyLocId → its docLocId).
+      id: "l" + Date.now(),
+      locationName: (input.newLocationName || "").trim(),
+      label: "",
+      deriveName: true,
       // First location on the record → primary. Never demotes one that's
       // already there.
       primary: locations.length === 0,
@@ -132,7 +141,7 @@ export async function createQuoteIntakeAction(input: IntakeSubmit): Promise<Inta
       state: (input.newLocationState || "").trim(),
       lat: null,
       lng: null,
-      venueKind: "proscenium",
+      venueKind: venueTypeOptions(types).some((t) => t.key === kind) ? kind : "proscenium",
       travelMiles: null,
       travelMin: null,
     });

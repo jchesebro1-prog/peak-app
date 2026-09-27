@@ -209,6 +209,10 @@ export default function VenueDialog({
     busyRef.current = true;
     setBusy(true);
     setError("");
+    // A successful save stays busy: router.push isn't awaited, so resetting
+    // here would re-enable Save during navigation and a second click in add
+    // mode would create a duplicate venue. The dialog unmounts on arrival.
+    let done = false;
     try {
       const res = await saveVenueAction({
         companyId,
@@ -227,13 +231,16 @@ export default function VenueDialog({
         setError(res.error);
         return;
       }
+      done = true;
       router.push(closeHref, { scroll: false });
       router.refresh();
     } catch {
       setError("Couldn't save the venue — check your connection and try again.");
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (!done) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   };
 

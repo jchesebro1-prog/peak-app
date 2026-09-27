@@ -22,10 +22,11 @@ import { ACCENT_INK, ACCENT_SOFT, cityState, mono } from "../../companies/lib";
  * Venue detail (D101) — mirrors the `getX(id) → notFound() → getCompany(fk)`
  * shape and `.pk-card`/typography idiom of the companies/people detail pages
  * (src/app/(app)/companies/[id]/page.tsx, src/app/(app)/people/[id]/page.tsx).
- * Read-only: header (owning company, address, travel, primary flag), open
- * work pulled to the top, the full reverse-chronological history from
+ * Header (owning company, address, travel, primary flag) with an Edit
+ * button that opens the one-venue dialog via ?edit=1 (#216); open work
+ * pulled to the top; the full reverse-chronological history from
  * loadVenueHistory (already sorted newest-first, matched through docLocId so
- * migrated venues aren't silently empty — see venue-match.ts), and the owning
+ * migrated venues aren't silently empty — see venue-match.ts); and the owning
  * company's contacts.
  */
 

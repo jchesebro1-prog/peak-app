@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Fragment, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 import { CustomerCombobox } from "@/components/customer-combobox";
-import EntityQuickAdd, { INPUT, LABEL, type QuickAddValues } from "@/components/entity-quick-add";
+import EntityQuickAdd, { INPUT, LABEL, emptyVenueQuickAdd, type QuickAddValues } from "@/components/entity-quick-add";
+import type { VenueType } from "@/lib/venue-types";
 import { createQuoteIntakeAction } from "./actions";
 import { replaceConfirmMessage, sameBuilder, type IntakeInitial, type IntakeReplacing } from "./handoff";
 import { SERVICE_TYPES, type IntakeCustomer, type IntakeSubmit, type ServiceType } from "./types";
@@ -22,6 +23,7 @@ export default function QuoteIntakeForm({
   initial,
   replacing,
   threadId,
+  venueTypes,
 }: {
   customers: IntakeCustomer[];
   initial: IntakeInitial;
@@ -29,6 +31,7 @@ export default function QuoteIntakeForm({
   /** #123 — set when opened from the Inbox's "+ New quote"; the intake
    *  mints the draft quote, links the thread and returns to the Inbox. */
   threadId?: string;
+  venueTypes: VenueType[];
 }) {
   const fromThread = !!threadId;
   const [type, setType] = useState<ServiceType>(initial.type);
@@ -46,11 +49,7 @@ export default function QuoteIntakeForm({
 
   const [locationMode, setLocationMode] = useState<"pick" | "new" | "skip">(initial.locationId ? "pick" : "skip");
   const [locationId, setLocationId] = useState(initial.locationId);
-  const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>({
-    label: "",
-    city: "",
-    state: "",
-  });
+  const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>(() => emptyVenueQuickAdd());
 
   const [contactMode, setContactMode] = useState<"pick" | "new" | "skip">(initial.contactName ? "pick" : "skip");
   const [contactName, setContactName] = useState(initial.contactName);
@@ -167,7 +166,8 @@ export default function QuoteIntakeForm({
       newCustomerType: newCustomer.type,
       locationMode,
       locationId,
-      newLocationLabel: newLocation.label,
+      newLocationName: newLocation.locationName,
+      newLocationKind: newLocation.venueKind,
       newLocationCity: newLocation.city,
       newLocationState: newLocation.state,
       contactMode,
@@ -335,9 +335,10 @@ export default function QuoteIntakeForm({
             kind="venue"
             value={newLocation}
             onChange={setNewLocation}
+            venueTypes={venueTypes}
             onCancel={() => {
               setLocationMode("skip");
-              setNewLocation({ label: "", city: "", state: "" });
+              setNewLocation(emptyVenueQuickAdd());
             }}
           />
         </div>

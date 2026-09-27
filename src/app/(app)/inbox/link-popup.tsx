@@ -16,7 +16,7 @@
  */
 import { useEffect, useId, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import EntityQuickAdd, { INPUT, type QuickAddValues } from "@/components/entity-quick-add";
+import EntityQuickAdd, { INPUT, emptyVenueQuickAdd, type QuickAddValues } from "@/components/entity-quick-add";
 import { Typeahead } from "@/components/search/typeahead";
 import { passAllFilter, stableRank } from "@/lib/search/typeahead-rank";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
@@ -681,7 +681,7 @@ export default function LinkPopup({
                       style={newVenue ? ACCENT_BTN : BTN}
                       disabled={busy}
                       onClick={() => {
-                        setNewVenue(newVenue ? null : { label: "", city: "", state: "" });
+                        setNewVenue(newVenue ? null : emptyVenueQuickAdd());
                         setVenueError(null);
                       }}
                     >
@@ -724,6 +724,7 @@ export default function LinkPopup({
                       kind="venue"
                       value={newVenue}
                       onChange={setNewVenue}
+                      venueTypes={vm.venueTypes}
                       submitting={pending}
                       error={venueError}
                       onCancel={() => {

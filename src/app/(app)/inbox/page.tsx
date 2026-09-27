@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { activeUsers, getUser } from "@/lib/users";
 import { deriveInitials, fallbackColor, firstName } from "@/lib/team";
@@ -921,6 +922,7 @@ export default async function InboxPage({
       customerCard,
       siteId,
       siteOptions,
+      venueTypes: venueTypesFrom(settings.venueTypes),
       identityMessageId: sel.identityMessageId ?? null,
       identity,
       customerOptions: customers

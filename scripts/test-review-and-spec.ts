@@ -23881,3 +23881,33 @@ async function venues216Task3FixesAsyncChecks(): Promise<void> {
   const sa0 = acts.indexOf("export async function searchAddressAction");
   ok(sa0 >= 0 && acts.slice(sa0, acts.indexOf("\n}\n", sa0)).includes("zip: h.zip"), "#216 T5: address search hits carry the postcode");
 }
+/* --- #216 T6: quick-adds ask Location + Type; inbox saves one venue --- */
+{
+  const v216Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const eqa = v216Read("src/components/entity-quick-add.tsx");
+  ok(eqa.includes("venue: { locationName: string; venueKind: string; city: string; state: string }") && eqa.includes("venueTypeOptions(") && !eqa.includes("Venue name (e.g."),
+    "#216 T6: the shared venue quick-add asks Location + Type, never a label");
+  const qa = v216Read("src/app/(app)/quotes/new/actions.ts");
+  ok(qa.includes("deriveName: true") && qa.includes("newLocationKind") && !qa.includes("newLocationLabel"), "#216 T6: the quote intake's new venue gets a derived name and a picked type");
+  ok(v216Read("src/app/(app)/quotes/new/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"), "#216 T6: the intake page passes the venue types");
+  const la = v216Read("src/app/(app)/inbox/link-actions.ts");
+  const s = la.indexOf("export async function quickAddVenueAction");
+  const body = la.slice(s, la.indexOf("\nexport ", s + 10));
+  ok(s > 0 && body.includes("saveVenue(") && !body.includes("saveCustomerAction(") && body.includes("venueKind: input.venueKind"),
+    "#216 T6: the inbox venue quick-add saves one venue through saveVenue");
+  ok(v216Read("src/app/(app)/inbox/page.tsx").includes("venueTypes: venueTypesFrom(settings.venueTypes)"), "#216 T6: the reader VM carries the venue types");
+  const v216SrcRoot = join(process.cwd(), "src");
+  const stale = (v216Readdir(v216SrcRoot, { recursive: true, encoding: "utf8" }) as string[])
+    .filter((f) => /\.(ts|tsx)$/.test(f))
+    .filter((f) => readFileSync(join(v216SrcRoot, f), "utf8").includes('label: "", city: "", state: ""'));
+  ok(stale.length === 0, `#216 T6: no venue quick-add still resets a label field (found: ${stale.join(", ")})`);
+}
+/* --- #216 T5 review: a successful venue save stays busy through navigation --- */
+{
+  const dlg = readFileSync(join(process.cwd(), "src/app/(app)/companies/venue-dialog.tsx"), "utf8");
+  const saveFn = dlg.slice(dlg.indexOf("const save ="), dlg.indexOf("return (", dlg.indexOf("const save =")));
+  const fin = saveFn.slice(saveFn.lastIndexOf("finally"));
+  ok(/done = true;\s*router\.push\(/.test(saveFn) && /if \(!done\)\s*\{[\s\S]*busyRef\.current = false;[\s\S]*setBusy\(false\)/.test(fin) && !/finally\s*\{\s*busyRef\.current = false/.test(saveFn),
+    "#216 T5: busy is not reset after a successful save (no double-submit during navigation)");
+  ok(!readFileSync(join(process.cwd(), "src/app/(app)/venues/[id]/page.tsx"), "utf8").includes(" * Read-only:"), "#216 T5: the venue page header no longer claims read-only");
+}

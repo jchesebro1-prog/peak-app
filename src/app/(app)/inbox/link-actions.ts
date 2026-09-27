@@ -14,8 +14,7 @@ import { get as getThread, resolveCustomerId, visibleTo } from "@/lib/stores/com
 import type { CommThread } from "@/lib/stores/comms";
 import { get as getCustomer, contactsForId } from "@/lib/stores/customers";
 import { saveCustomerAction } from "@/app/(app)/companies/actions";
-import { toContactInput, toLocationInput } from "@/app/(app)/companies/lib";
-import type { ContactInput, LocationInput } from "@/app/(app)/companies/types";
+import { saveVenue } from "@/lib/identity/venue-save";
 import { savePersonAction } from "@/app/(app)/people/actions";
 import type { SavePersonInput } from "@/app/(app)/people/types";
 import { claimDomain, releaseDomain } from "@/lib/gmail/domains";
@@ -184,15 +183,16 @@ export async function quickAddContactAction(input: {
   return res;
 }
 
-/** Link sidebar's "new venue" quick-add — appends a location to the
- *  customer through the SAME path the Companies screen and guided quote
- *  intake use (saveCustomerAction), never the legacy name-keyed
- *  setLocations blob. Returns the new site's directory id; with `threadId`
- *  (the Venue card's "+ New venue", #124) it also links that venue to the
- *  thread, adopting the customer first if the thread had none stored. */
+/** Link sidebar's "new venue" quick-add (#216) — saves ONE venue through
+ *  saveVenue (the same seam the venue dialog uses), so its name is the
+ *  derived "Location — Type". Returns the new venue's doc location id; with
+ *  `threadId` (the Venue card's "+ New venue", #124) it also links that
+ *  venue to the thread, adopting the customer first if the thread had none
+ *  stored. */
 export async function quickAddVenueAction(input: {
   customerId: string;
-  label: string;
+  locationName: string;
+  venueKind: string;
   city: string;
   state: string;
   threadId?: string;
@@ -204,37 +204,20 @@ export async function quickAddVenueAction(input: {
   if (input.threadId && (!thread || !visibleTo(thread, me.name)))
     return { ok: false, error: "Thread not found." };
 
-  const beforeIds = new Set((existing.locations || []).map((l) => l.id).filter(Boolean));
-  const locations: LocationInput[] = (existing.locations || []).map(toLocationInput);
-  locations.push({
-    label: (input.label || "").trim() || "Venue",
-    // First location on the record → primary. Never demotes one that's
-    // already there.
-    primary: locations.length === 0,
+  const res = await saveVenue({
+    companyId: existing.id,
+    siteId: null,
+    locationName: input.locationName || "",
+    venueKind: input.venueKind,
     address: "",
-    city: (input.city || "").trim(),
-    state: (input.state || "").trim(),
+    city: input.city || "",
+    state: input.state || "",
     lat: null,
     lng: null,
-    venueKind: "proscenium",
-    travelMiles: null,
-    travelMin: null,
+    primary: false,
   });
-  const contacts: ContactInput[] = (existing.contacts || []).map(toContactInput);
-
-  const res = await saveCustomerAction({
-    id: existing.id,
-    name: existing.name,
-    type: existing.type || "",
-    pricingTier: existing.pricingTier ?? null,
-    locations,
-    contacts,
-  });
-  if (!res.ok) return { ok: false, error: "Couldn't save that venue." };
-
-  const after = await getCustomer(existing.id);
-  const added = (after?.locations || []).find((l) => !!l.id && !beforeIds.has(l.id));
-  const siteId = added?.id || null;
+  if (!res.ok) return { ok: false, error: res.error };
+  const siteId = res.locId;
   // I review — a thread already linked to a DIFFERENT customer never gets
   // this venue stamped on it; the venue card only ever offers venues on the
   // thread's own linked customer, so a mismatch here means the thread

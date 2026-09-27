@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { getSettings } from "@/lib/settings";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
 import QuoteIntakeForm from "./intake-form";
@@ -12,6 +13,7 @@ import {
   type IntakeReplacing,
 } from "./handoff";
 import type { IntakeCustomer } from "./types";
+import { venueTypesFrom } from "@/lib/venue-types";
 
 export const metadata = { title: "New quote — Quartzite-6" };
 
@@ -34,7 +36,7 @@ export default async function NewQuotePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const [, sp, customerDocs] = await Promise.all([requireUser(), searchParams, allCustomers()]);
+  const [, sp, customerDocs, settings] = await Promise.all([requireUser(), searchParams, allCustomers(), getSettings()]);
   const h = readHandoff(sp);
 
   const customers: IntakeCustomer[] = customerDocs
@@ -88,6 +90,7 @@ export default async function NewQuotePage({
       initial={intakeInitial(seed, customers)}
       replacing={replacing}
       threadId={h.threadId}
+      venueTypes={venueTypesFrom(settings.venueTypes)}
     />
   );
 }

@@ -7,6 +7,7 @@ import type { LinkWorkType } from "@/lib/inbox-links";
 import type { ParsedSignature, SigPhone } from "@/lib/inbox-signature-parse";
 import type { ParticipantRole } from "@/lib/inbox-participants";
 import type { ThreadTaskLinkKind, ThreadTaskRow } from "@/lib/inbox-task";
+import type { VenueType } from "@/lib/venue-types";
 
 export type Opt = { value: string; label: string };
 
@@ -236,6 +237,8 @@ export type ReaderVM = {
   siteId: string | null;
   /** #124 — the linked customer's venues, for the sidebar's Venue select. */
   siteOptions: Opt[];
+  /** #216 — Settings → Venue types, for the venue quick-add's type picker. */
+  venueTypes: VenueType[];
   /** #125 — identity source: which message's addresses drive resolution and
    *  quick-add; null = the thread contact (today's behaviour). */
   identityMessageId: string | null;

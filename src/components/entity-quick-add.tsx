@@ -2,14 +2,20 @@
 
 import type { CSSProperties, ReactElement } from "react";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
+import { SEED_VENUE_TYPES, venueTypeOptions, type VenueType } from "@/lib/venue-types";
 
 export type QuickAddKind = "customer" | "contact" | "venue";
 
 export type QuickAddValues = {
   customer: { name: string; type: string };
   contact: { name: string; role: string; email: string; phone: string };
-  venue: { label: string; city: string; state: string };
+  venue: { locationName: string; venueKind: string; city: string; state: string };
 };
+
+/** #216 — a blank venue quick-add (the name is derived server-side). */
+export function emptyVenueQuickAdd(venueKind = "proscenium"): QuickAddValues["venue"] {
+  return { locationName: "", venueKind, city: "", state: "" };
+}
 
 export const LABEL: CSSProperties = {
   display: "block",
@@ -54,6 +60,8 @@ type Props<K extends QuickAddKind> = {
   onSubmit?: () => void;
   submitting?: boolean;
   error?: string | null;
+  /** #216 — the venue-type list (Settings → Venue types); kind="venue" only. */
+  venueTypes?: readonly VenueType[];
 };
 
 function EntityQuickAddImpl({
@@ -64,6 +72,7 @@ function EntityQuickAddImpl({
   onSubmit,
   submitting,
   error,
+  venueTypes,
 }: {
   kind: QuickAddKind;
   value: QuickAddValues[QuickAddKind];
@@ -72,6 +81,7 @@ function EntityQuickAddImpl({
   onSubmit?: () => void;
   submitting?: boolean;
   error?: string | null;
+  venueTypes?: readonly VenueType[];
 }) {
   let fields: React.ReactNode;
 
@@ -100,14 +110,29 @@ function EntityQuickAddImpl({
     );
   } else if (kind === "venue") {
     const v = value as QuickAddValues["venue"];
+    const options = venueTypeOptions(venueTypes ?? SEED_VENUE_TYPES, v.venueKind);
     fields = (
       <div style={{ display: "grid", gap: 8 }}>
-        <input
-          value={v.label}
-          onChange={(e) => onChange({ ...v, label: e.target.value })}
-          placeholder="Venue name (e.g. Main auditorium)"
-          style={INPUT}
-        />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <input
+            value={v.locationName}
+            onChange={(e) => onChange({ ...v, locationName: e.target.value })}
+            placeholder="Location (blank = company name)"
+            style={INPUT}
+          />
+          <select
+            aria-label="Venue type"
+            value={v.venueKind}
+            onChange={(e) => onChange({ ...v, venueKind: e.target.value })}
+            style={INPUT}
+          >
+            {options.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <input
             value={v.city}

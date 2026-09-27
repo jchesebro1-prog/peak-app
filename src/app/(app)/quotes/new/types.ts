@@ -180,7 +180,10 @@ export type IntakeSubmit = {
   newCustomerType: string;
   locationMode: "pick" | "new" | "skip";
   locationId: string;
-  newLocationLabel: string;
+  /** #216 — the new venue's location (blank = the company name) and type key;
+   *  its name is derived server-side. */
+  newLocationName: string;
+  newLocationKind: string;
   newLocationCity: string;
   newLocationState: string;
   contactMode: "pick" | "new" | "skip";
