@@ -17,6 +17,7 @@ import { isCustomerBuyable } from "@/lib/portal-catalog";
 import { curtainCost } from "@/lib/curtain-pricing";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { curtainQty, type CurtainSpec } from "@/lib/curtain-geom";
 
 /**
@@ -288,6 +289,8 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
         " via the customer portal self-serve estimator. Prices are budgetary — review and confirm before sending.",
     };
     await updateQuote(created.id, patch as unknown as Parameters<typeof updateQuote>[1]);
+    // #222: the customer can open their own estimate's PDF from the portal.
+    await scheduleQuotePdf(created.id);
   } catch (error) {
     console.error("submitPortalEstimate: quote mint/update failed", error);
     redirect("/portal/estimate?err=submit");

@@ -13,6 +13,8 @@ import { PortalShell } from "../shell";
 import { EstimateBuilder } from "./estimate-builder";
 
 export const dynamic = "force-dynamic";
+/** #222: submitting renders the estimate's PDF in `after()`, inside this budget. */
+export const maxDuration = 60;
 
 /**
  * Portal SELF-SERVE ESTIMATE (IDEAS #48, drapery slice) — a signed-in customer

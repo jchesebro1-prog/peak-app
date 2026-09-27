@@ -10522,6 +10522,7 @@ seeded()
   .then(() => quotePdfOptions222AsyncChecks())
   .then(() => quotePdfEngine222AsyncChecks())
   .then(() => quotePdfFix222AsyncChecks())
+  .then(() => quotePdfRoutes222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23777,5 +23778,72 @@ async function quotePdfFix222AsyncChecks(): Promise<void> {
     rmSync(root, { recursive: true, force: true });
   } catch {
     /* temp dir */
+  }
+}
+
+/* ============ #222 Task 4 — saves schedule the PDF; download routes ============ */
+import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
+{
+  const s222 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const est = s222("src/app/(app)/estimator/actions.ts");
+  const upd = est.slice(est.indexOf("if (loadedId) {"), est.indexOf("} else {"));
+  ok(upd.includes("scheduleQuotePdf(loadedId)") && upd.indexOf("scheduleQuotePdf(loadedId)") < upd.indexOf("setStatus(loadedId"), "#222 saveQuoteAction (update): the PDF goes pending before any status change in the same save");
+  const crt = est.slice(est.indexOf("created = await create("), est.indexOf("retireReplacedDraftSafely(payload.replaces"));
+  ok(crt.includes("scheduleQuotePdf(created.id)") && crt.indexOf("scheduleQuotePdf(created.id)") < crt.indexOf("setStatus(created.id"), "#222 saveQuoteAction (create): the PDF goes pending before any status change");
+  for (const k of ["flame-tests", "repairs", "inspections"]) {
+    ok(/  if \(q\) await scheduleQuotePdf\(q\.id\);\n  return \(q && q\.id\) \|\| editingId \|\| null;/.test(s222(`src/app/(app)/${k}/quote/actions.ts`)), `#222 ${k}: every save schedules the proposal-letter PDF`);
+    ok(/export const maxDuration = 60;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 60 s`);
+  }
+  ok(/scheduleQuotePdf\(created\.id\)/.test(s222("src/app/portal/actions.ts")) && /export const maxDuration = 60;/.test(s222("src/app/portal/estimate/page.tsx")), "#222 a portal self-serve estimate gets its PDF too");
+  const cfg = s222("next.config.ts");
+  ok(/source: "\/api\/quotes\/:id\/pdf"[\s\S]{0,200}SAMEORIGIN/.test(cfg) && cfg.indexOf("SAMEORIGIN") > cfg.indexOf('value: "DENY"'), "#222 next.config: only the team PDF route may be framed, by the app itself — after the global DENY");
+  const team = s222("src/app/api/quotes/[id]/pdf/route.ts");
+  ok(team.indexOf("requireUser()") > -1 && team.indexOf("requireUser()") < team.indexOf("getQuote("), "#222 team PDF route: signed-in team only, checked first");
+  const portal = s222("src/app/portal/quotes/[id]/pdf/route.ts");
+  ok(portal.includes("resolvePortalViewer(") && portal.includes("portalQuotePdfSource(") && !/searchParams\.get\("(path|blobPath)"\)/.test(portal + team), "#222 PDF routes: files by quote id under the portal rule — never a client-supplied path");
+  const http = s222("src/lib/quote-pdf/http.ts");
+  ok(/application\/pdf/.test(http) && /nosniff/.test(http) && /private, no-store/.test(http) && /isQuotePdfPath\(/.test(http), "#222 pdfResponse: PDF type, nosniff, private no-store, path-guarded");
+  // Review requirements on top of the brief.
+  const sched = s222("src/lib/quote-pdf/schedule.ts");
+  ok(/canHavePdf\(q\.quoteType\)/.test(sched) && /updateQuotePdf\(quoteId, \(cur\) => pendingPdf\(/.test(sched) && !/\bupdate\(/.test(sched), "#222 scheduleQuotePdf: pending only through updateQuotePdf, never for a type with no PDF");
+  ok(/export const maxDuration = 60;/.test(s222("src/app/(app)/estimator/page.tsx")), "#222 the Estimator page gives its after() render 60 s");
+  const acts = s222("src/app/(app)/quotes/pdf-actions.ts");
+  ok((acts.match(/await requireUser\(\);/g) || []).length === 2 && acts.indexOf("requireUser()") < acts.indexOf("getQuote("), "#222 PDF status/retry actions: signed-in team only");
+  ok(/QUOTE_PDF_ORIGIN/.test(s222("DEPLOY.md")) && /QUOTE_PDF_ORIGIN/.test(s222(".env.example")), "#222 QUOTE_PDF_ORIGIN is documented for production");
+  ok(!/\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 1, "#222 next.config: the framing exception is the PDF route's alone");
+}
+
+async function quotePdfRoutes222AsyncChecks(): Promise<void> {
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.VERCEL;
+  const prevDir = process.env.QUOTE_PDF_DIR;
+  const root = mkdtempSync(join(tmpdir(), "q222-http-"));
+  process.env.QUOTE_PDF_DIR = root;
+  try {
+    const bad = await pdfResponse222("../etc/passwd", "x.pdf", false);
+    ok(bad.status === 404, "#222 pdfResponse: a path that isn't a quote PDF is a 404, before any I/O");
+    const none = await pdfResponse222(null, "x.pdf", false);
+    const missing = await pdfResponse222("quote-pdfs/Q-9/1.pdf", "Q-9.pdf", false);
+    ok(none.status === 404 && missing.status === 404, "#222 pdfResponse: no file is a plain 404");
+    const store = pdfStorage();
+    if ("unavailable" in store) throw new Error(store.unavailable);
+    const p = await store.put("quote-pdfs/Q-222/5.pdf", Buffer.from("%PDF-1.7 test"));
+    const res = await pdfResponse222(p, "Q-222.pdf", false);
+    ok(
+      res.status === 200 &&
+        res.headers.get("content-type") === "application/pdf" &&
+        res.headers.get("content-disposition") === 'inline; filename="Q-222.pdf"' &&
+        res.headers.get("x-content-type-options") === "nosniff" &&
+        res.headers.get("cache-control") === "private, no-store" &&
+        (await res.text()) === "%PDF-1.7 test",
+      "#222 pdfResponse: streams the file inline with the PDF headers"
+    );
+    const dl = await pdfResponse222(p, "Q-222-rev2.pdf", true);
+    ok(dl.headers.get("content-disposition") === 'attachment; filename="Q-222-rev2.pdf"', "#222 pdfResponse: ?download=1 is an attachment");
+    await dl.body?.cancel();
+  } finally {
+    if (prevDir === undefined) delete process.env.QUOTE_PDF_DIR;
+    else process.env.QUOTE_PDF_DIR = prevDir;
+    rmSync(root, { recursive: true, force: true });
   }
 }

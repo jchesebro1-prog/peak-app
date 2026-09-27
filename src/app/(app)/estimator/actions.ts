@@ -41,6 +41,8 @@ import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { totals } from "./pricing";
 import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 
 export async function saveEstimatorCustomPartAction(input: {
@@ -165,6 +167,8 @@ export type SaveResult = {
    *  was refreshed because someone else moved it elsewhere, but this save
    *  never asked to change status itself, so it's not an error. */
   notice?: string;
+  /** #222 — the saved PDF's state after this save (pending when a render was scheduled). */
+  pdf?: QuotePdfView | null;
 };
 
 export type ReviewSync = {
@@ -341,6 +345,7 @@ export async function saveQuoteAction(
   let q: Quote | null = null;
   let statusError: string | undefined;
   let statusNotice: string | undefined;
+  let pdfState: QuotePdfView | null = null;
   /* #143: keep only the vendor quotes something still references. Deleting a
      system, or moving one to another estimate, would otherwise strand its
      record — and its attachment — on this document forever.
@@ -368,6 +373,9 @@ export async function saveQuoteAction(
   if (loadedId) {
     storedVendorQuotes = await storeVendorQuotes(loadedId, storedVendorQuotes);
     q = await update(loadedId, { ...patch, vendorQuotes: storedVendorQuotes } as QuotePatch);
+    // #222: pending BEFORE any status change below, so a send in this same
+    // save waits for this save's render instead of copying the previous file.
+    if (q) pdfState = await scheduleQuotePdf(loadedId);
     // Security review (2026-09-25), D84/punch #60: a changed status can only
     // reach the DB through the gated setStatus() path — the approval gate,
     // status history and spawnFromQuote all live there, and `update()`
@@ -446,6 +454,8 @@ export async function saveQuoteAction(
       vendorQuotes: storedVendorQuotes,
       pdfOptions: normalizePdfOptions(payload.pdfOptions),
     } as QuotePatch);
+    // #222: same ordering as the update branch.
+    if (q) pdfState = await scheduleQuotePdf(created.id);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand
       // new quote can never already carry an approval record, so this can
@@ -483,6 +493,7 @@ export async function saveQuoteAction(
     pipelineId: q?.pipelineId ?? null,
     stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
+    pdf: pdfState,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
   };

@@ -53,6 +53,12 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // #222: the Estimator's customer preview embeds the saved PDF. Later
+      // entries win for the same key, so this relaxes DENY for this route only.
+      {
+        source: "/api/quotes/:id/pdf",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
     ];
   },
   // The Field Survey module was renamed Venue Assessments (route moved from

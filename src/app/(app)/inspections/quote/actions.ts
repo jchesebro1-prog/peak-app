@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
@@ -207,6 +208,8 @@ async function persist(formData: FormData): Promise<string | null> {
   if (!editingId && q) {
     await retireReplacedDraftSafely(replaces, q.id, "inspections quote");
   }
+  // #222: every save re-prints the proposal letter to the saved PDF.
+  if (q) await scheduleQuotePdf(q.id);
   return (q && q.id) || editingId || null;
 }
 
