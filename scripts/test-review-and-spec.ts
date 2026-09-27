@@ -10527,6 +10527,7 @@ seeded()
   .then(() => specBuilderFinalFixAsyncChecks())
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
+  .then(() => tasks215AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -20419,4 +20420,66 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
       popup214.includes("dialog.contains(active)"),
     "#214 UI fix wave 2: a Tab/Shift+Tab handler traps focus inside the dialog"
   );
+}
+
+/* ============ #215 — task links (store) ============ */
+import {
+  taskLinksOf as taskLinksOf215,
+  tasksForThread as tasksForThread215,
+  tasksForCustomer as tasksForCustomer215,
+  tasksForContact as tasksForContact215,
+  TASK_CONTACT_IDS_MAX as TASK_CONTACT_IDS_MAX215,
+} from "@/lib/stores/tasks";
+
+{
+  const bare215 = normalizeTask({ id: "T-6101", title: "x" } as never);
+  ok(
+    !("threadId" in bare215) && !("contactIds" in bare215) && !("customerId" in bare215) && !("siteId" in bare215) && !("leadId" in bare215),
+    "#215 a pre-existing task reads with no link keys at all"
+  );
+  const linked215 = normalizeTask({
+    id: "T-6102", title: "x", threadId: " C-1040 ", customerId: "rose-brand", siteId: "loc-1", leadId: "L-2001",
+    contactIds: ["ct-1", " ct-2 ", "ct-1", "", 7],
+  } as never);
+  ok(
+    linked215.threadId === "C-1040" && linked215.customerId === "rose-brand" && linked215.siteId === "loc-1" && linked215.leadId === "L-2001",
+    "#215 normalizeTask keeps the four single link ids, trimmed"
+  );
+  ok(JSON.stringify(linked215.contactIds) === '["ct-1","ct-2"]', "#215 contactIds are trimmed and deduped; blanks and non-strings dropped");
+  ok(
+    Object.keys(taskLinksOf215({ threadId: "  ", customerId: null, siteId: undefined, contactIds: [] } as never)).length === 0,
+    "#215 blank / null link ids are omitted, not stored as empty"
+  );
+  const many215 = taskLinksOf215({ contactIds: Array.from({ length: 40 }, (_, i) => "ct-" + i) } as never);
+  ok(TASK_CONTACT_IDS_MAX215 === 25 && many215.contactIds?.length === 25, "#215 contactIds cap at 25");
+  ok(taskLinksOf215({ threadId: "x".repeat(121) } as never).threadId === undefined, "#215 an over-long link id is dropped");
+  ok(
+    typeof tasksForThread215 === "function" && typeof tasksForCustomer215 === "function" && typeof tasksForContact215 === "function",
+    "#215 thread / customer / contact readers are exported"
+  );
+}
+
+async function tasks215AsyncChecks(): Promise<void> {
+  const me = { id: "harness", name: "Test Harness" };
+  const t = await createTask(
+    {
+      title: "#215 harness task", section: "Email", threadId: "C-T215-A", customerId: "CUST-T215",
+      siteId: "LOC-T215", leadId: "L-T215", contactIds: ["ct-T215-a", "ct-T215-b"],
+    },
+    me
+  );
+  registerFixture("tasks", t.id);
+  const back = await getTask(t.id);
+  ok(
+    back?.threadId === "C-T215-A" && back.customerId === "CUST-T215" && back.siteId === "LOC-T215" &&
+      back.leadId === "L-T215" && JSON.stringify(back.contactIds) === '["ct-T215-a","ct-T215-b"]',
+    "#215 createTask round-trips every link field"
+  );
+  ok((await tasksForThread215("C-T215-A")).some((x) => x.id === t.id), "#215 tasksForThread finds the task");
+  ok((await tasksForCustomer215("CUST-T215")).some((x) => x.id === t.id), "#215 tasksForCustomer finds the task");
+  ok((await tasksForContact215("ct-T215-b")).some((x) => x.id === t.id), "#215 tasksForContact finds it by any linked person");
+  ok(!(await tasksForContact215("ct-T215-zzz")).some((x) => x.id === t.id), "#215 tasksForContact ignores people not on the task");
+  ok((await tasksForThread215("")).length === 0, "#215 an empty thread id matches nothing");
+  await removeTask(t.id);
+  ok(!(await tasksForThread215("C-T215-A")).some((x) => x.id === t.id), "#215 a deleted task leaves the thread's list");
 }
