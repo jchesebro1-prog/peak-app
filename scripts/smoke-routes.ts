@@ -146,6 +146,14 @@ const ROUTES = [
   "/design-studio",
   "/consulting/quote",
   "/flame-tests/today",
+  // #242 portal catalog: signed out (the team session is not a portal grant)
+  // renders the signed-out card; a team preview renders the full browse page
+  // (search + facets + tiles); the retired /portal/estimate redirects here.
+  "/portal/catalog",
+  "/portal/catalog?preview=lakefront",
+  "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
+  "/portal/estimate",
+  "/portal/estimate?preview=lakefront",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",

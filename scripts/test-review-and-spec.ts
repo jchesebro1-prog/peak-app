@@ -10541,6 +10541,7 @@ seeded()
   .then(() => portal242ImagesTask4AsyncChecks())
   .then(() => portal242IndexAsyncChecks())
   .then(() => portal242CartAsyncChecks())
+  .then(() => portal242CatalogBrowseAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25040,7 +25041,10 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
     ok(/  if \(q\) await scheduleQuotePdf\(q\.id\);\n  return \(q && q\.id\) \|\| editingId \|\| null;/.test(s222(`src/app/(app)/${k}/quote/actions.ts`)), `#222 ${k}: every save schedules the proposal-letter PDF`);
     ok(/export const maxDuration = 120;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 120 s`);
   }
-  ok(/scheduleQuotePdf\(created\.id\)/.test(s222("src/app/portal/actions.ts")) && /export const maxDuration = 120;/.test(s222("src/app/portal/estimate/page.tsx")), "#222 a portal self-serve estimate gets its PDF too");
+  // #242 Task 10: /portal/estimate is retired to a redirect (it hosts no
+  // submit any more), so the maxDuration half of this check moved off it;
+  // submitPortalEstimate itself goes in Task 12.
+  ok(/scheduleQuotePdf\(created\.id\)/.test(s222("src/app/portal/actions.ts")) && /redirect\(/.test(s222("src/app/portal/estimate/page.tsx")), "#222 a portal self-serve estimate gets its PDF too (#242: the estimate page now only redirects)");
   const cfg = s222("next.config.ts");
   ok(/source: "\/api\/quotes\/:id\/pdf"[\s\S]{0,200}SAMEORIGIN/.test(cfg) && cfg.indexOf("SAMEORIGIN") > cfg.indexOf('value: "DENY"'), "#222 next.config: only the team PDF route may be framed, by the app itself — after the global DENY");
   const team = s222("src/app/api/quotes/[id]/pdf/route.ts");
@@ -25175,7 +25179,7 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
     "src/app/(app)/flame-tests/quote/page.tsx",
     "src/app/(app)/repairs/quote/page.tsx",
     "src/app/(app)/inspections/quote/page.tsx",
-    "src/app/portal/estimate/page.tsx",
+    // "src/app/portal/estimate/page.tsx" — retired to a redirect (#242 Task 10); schedules nothing.
     "src/app/(app)/design/grid/[id]/page.tsx",
     "src/app/(app)/design/designs/page.tsx",
     "src/app/(app)/design/quick/page.tsx",
@@ -26325,7 +26329,9 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(rd("src/app/(app)/estimator/page.tsx").includes("loadCurtainSewingPct()") && rd("src/app/(app)/estimator/page.tsx").includes("curtainSewingPct={curtainSewingPct}") &&
       rd("src/app/(app)/estimator/estimator-client.tsx").includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
     "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
-  ok(rd("src/app/portal/actions.ts").includes("loadCurtainSewingPct()") && rd("src/app/portal/estimate/page.tsx").includes("loadCurtainSewingPct()"), "#227 late: the portal estimate (preview and submit) reads the rule");
+  // #242 Task 10: the portal estimate PAGE is retired to a redirect (no preview
+  // pricing left there); the submit path keeps reading the rule until Task 12.
+  ok(rd("src/app/portal/actions.ts").includes("loadCurtainSewingPct()") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft"), "#227 late: the portal estimate submit reads the rule (#242: the preview page is retired)");
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
     "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
   const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/estimate/estimate-builder.tsx"];
@@ -28155,4 +28161,169 @@ import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDoc
   ok(servable.has(D_DS_PARENT.id), "#242 doc access: a covering parent's datasheet IS servable via a live (quotable) accessory");
   ok(!servable.has(D_DS_PARENT2.id), "#242 doc access: an ownDatasheet accessory pair opts the child back out of parent coverage");
   ok(!servable.has(D_DS_NOBLOB.id), "#242 doc access: a document with no stored file (blobKey null) is never servable");
+}
+
+/* ======================================================================
+   Portal catalog — the /portal/catalog browse page (#242, Task 10; spec
+   §3.1). Pure: the URL/pager/shelf/tile helpers in portal-catalog-view.ts
+   and the shell nav items. DB: the searchPortalCatalog action refuses
+   without a portal session, prices tiles for the SESSION's customer only,
+   stays sell-only, rate-limits per grant; the quoted-before shelf reads only
+   the company's own listed quotes. Registered in the async chain as
+   portal242CatalogBrowseAsyncChecks().
+   ====================================================================== */
+import {
+  CATALOG_PAGE_SIZE as d242PageSize,
+  catalogHref as d242CatHref,
+  cleanSearchQuery as d242CleanQ,
+  pagerItems as d242Pager,
+  parseCatalogParams as d242ParseCat,
+  quotedBeforeSkus as d242ShelfSkus,
+  toggleValue as d242Toggle,
+  toTileVM as d242Tile,
+} from "@/lib/portal-catalog-view";
+import { portalNav as d242Nav } from "@/app/portal/nav";
+import { searchPortalCatalog as d242SearchAction } from "@/app/portal/catalog/actions";
+import {
+  PORTAL_EXPIRED_COPY as d242ExpiredCopy,
+  PORTAL_SEARCH_RATE_COPY as d242RateCopy,
+  quotedBeforeShelf as d242Shelf,
+  searchPortalCatalogFor as d242SearchFor,
+} from "@/lib/portal-catalog-browse";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok(d242PageSize === 48, "#242 browse: 48 tiles per page");
+  ok(eq(d242Pager(1, 1), [1]) && eq(d242Pager(3, 7), [1, 2, 3, 4, 5, 6, 7]), "#242 pager: 7 or fewer pages lists every page");
+  ok(eq(d242Pager(1, 20), [1, 2, 3, 4, 5, "gap", 20]), "#242 pager: near the start shows 1–5 … last");
+  ok(eq(d242Pager(10, 20), [1, "gap", 9, 10, 11, "gap", 20]), "#242 pager: mid-range shows first … p−1 p p+1 … last");
+  ok(eq(d242Pager(20, 20), [1, "gap", 16, 17, 18, 19, 20]), "#242 pager: near the end shows first … last five");
+  ok(eq(d242Pager(4, 20), [1, 2, 3, 4, 5, "gap", 20]) && eq(d242Pager(5, 20), [1, "gap", 4, 5, 6, "gap", 20]), "#242 pager: pages 1–4 show 1–5; page 5 steps into the mid-range window");
+  ok(eq(d242Pager(99, 20), [1, "gap", 16, 17, 18, 19, 20]) && eq(d242Pager(Number.NaN, 0), [1]), "#242 pager: out-of-range and junk input clamp");
+
+  const pc = d242ParseCat({ q: "  led par ", mfr: ["ETC", "Chauvet", "ETC", ""], cat: "Lighting", page: "3", part: "SKU-1" });
+  ok(pc.q === "led par" && eq(pc.mfr, ["ETC", "Chauvet"]) && eq(pc.cat, ["Lighting"]) && pc.page === 3 && pc.part === "SKU-1",
+    "#242 browse: ?q=&mfr=&cat=&page=&part= parse — mfr/cat repeat, de-duplicated, blanks dropped");
+  ok(d242ParseCat({ page: "abc" }).page === 1 && d242ParseCat({ page: "-4" }).page === 1 && d242ParseCat({}).q === "", "#242 browse: a junk page reads as 1");
+  const href = d242CatHref(pc, { page: 1 }, "cust-9");
+  ok(href === "/portal/catalog?q=led+par&mfr=ETC&mfr=Chauvet&cat=Lighting&part=SKU-1&preview=cust-9", "#242 browse: catalogHref keeps every param, drops page 1, carries preview");
+  const back = d242ParseCat(Object.fromEntries([...new URL("http://x" + href).searchParams.keys()].map((k) => [k, new URL("http://x" + href).searchParams.getAll(k)])));
+  ok(back.q === pc.q && eq(back.mfr, pc.mfr) && eq(back.cat, pc.cat) && back.part === pc.part, "#242 browse: catalogHref round-trips through parseCatalogParams");
+  ok(d242CatHref({ q: "", mfr: [], cat: [], page: 1, part: "" }) === "/portal/catalog", "#242 browse: empty params → bare /portal/catalog");
+  ok(eq(d242Toggle(["a", "b"], "a"), ["b"]) && eq(d242Toggle(["a"], "b"), ["a", "b"]), "#242 browse: toggleValue adds or removes a facet value");
+
+  const cq = d242CleanQ({ q: 7, mfr: "ETC", cat: [1, "Cable", "Cable"], page: "2", pageSize: 500 });
+  ok(cq.q === "" && eq(cq.mfr, ["ETC"]) && eq(cq.cat, ["Cable"]) && cq.page === 2 && cq.pageSize === 48, "#242 search action: an untrusted query is cleaned and pageSize clamps to 48");
+  ok(d242CleanQ(null).pageSize === 48 && d242CleanQ({ pageSize: 0 }).pageSize === 48 && d242CleanQ({ pageSize: 12 }).pageSize === 12, "#242 search action: missing/zero pageSize → 48; a smaller one is kept");
+
+  const mkQ = (createdAt: number, skus: unknown[]) => ({ createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
+  const quotable = (s: string) => s !== "HID";
+  const shelf = d242ShelfSkus([mkQ(1000, ["OLD", "B"]), mkQ(3000, ["A", "HID", "A", "B"]), mkQ(2000, ["C"])], quotable);
+  ok(eq(shelf, ["A", "B", "C", "OLD"]), "#242 shelf: newest quote first, distinct, quotable only");
+  const many = d242ShelfSkus([mkQ(1, Array.from({ length: 30 }, (_, i) => "S" + i))], () => true);
+  ok(many.length === 12 && many[0] === "S0" && many[11] === "S11", "#242 shelf: capped at 12");
+  const odd = d242ShelfSkus([
+    { createdAt: 5, spec: null }, { createdAt: 4, spec: { sections: "x" } }, { createdAt: 3, spec: { sections: [null, { items: 7 }, { items: [null, { sku: 9 }, { sku: "" }, { sku: "OK" }] }] } },
+    { createdAt: 9, deleted: true, spec: { sections: [{ items: [{ sku: "DEL" }] }] } },
+  ], () => true);
+  ok(eq(odd, ["OK"]), "#242 shelf: malformed spec shapes and deleted quotes contribute nothing");
+
+  const leaky = { imageIds: ["IMG-1", "IMG-2"], datasheetIds: ["DS-1"], unit: "ft", cost: 42, list: 99, note: "x", margin: 0.3 };
+  const t = d242Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
+  ok(eq(Object.keys(t).sort(), ["category", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
+    "#242 tile: TileVM is exactly the sell-only whitelist");
+  ok(t.imageId === "IMG-1" && t.hasDatasheet && t.unit === "ft" && t.unitPrice === 12.5 && !t.por && !JSON.stringify(t).includes("42"),
+    "#242 tile: hero image = first image id; no cost rides along from an IndexedPart");
+  const tp = d242Tile({ key: "fixture:fx", kind: "fixture", title: "Kit", sku: "ENG", mfr: "", category: "Fixture assemblies" }, null, null);
+  ok(tp.unitPrice === null && tp.por && tp.imageId === null && !tp.hasDatasheet && tp.unit === "ea", "#242 tile: no price → Price on request; no media → placeholder");
+  ok(d242Tile({ key: "k", kind: "part", title: "", sku: "S", mfr: "", category: "" }, null, { unitPrice: 5, por: true }).unitPrice === null,
+    "#242 tile: a POR price never shows a number");
+
+  const nav = d242Nav("catalog", { cartCount: 3 });
+  ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Quote"]) && nav[1].active === true && !nav[0].active && nav[2].badge === 3 && nav[2].href === "/portal/catalog/quote",
+    "#242 nav: Home · Catalog · Quote (N), Catalog active");
+  const pvNav = d242Nav("home", { previewCid: "c 1" });
+  ok(pvNav[0].href === "/portal?preview=c%201" && pvNav[1].href === "/portal/catalog?preview=c%201" && pvNav[2].disabled === true && pvNav[2].badge === undefined,
+    "#242 nav: a team preview carries ?preview=, shows no cart count and disables Quote");
+}
+
+async function portal242CatalogBrowseAsyncChecks(): Promise<void> {
+  ok(d242ExpiredCopy === "Your access link has expired — open the link we sent you again.", "#242 search action: expired-link copy is verbatim");
+  const none = await d242SearchAction({ q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(!none.ok && none.error === "Your access link has expired — open the link we sent you again.",
+    "#242 search action: no portal session → { ok: false } with the expired-link copy");
+  const nullSess = await d242SearchFor(null, { q: "a" });
+  ok(!nullSess.ok && nullSess.error === d242ExpiredCopy, "#242 search action: the action body refuses a null session");
+
+  const P1 = fixtureId(242, "browse-widget");
+  const PH = fixtureId(242, "browse-hidden");
+  const PB = fixtureId(242, "browse-other-co");
+  const PV = fixtureId(242, "browse-verify");
+  const FX = fixtureId(242, "browse-kit");
+  const CO_A = fixtureId(242, "browse-co-a");
+  const CO_B = fixtureId(242, "browse-co-b");
+  try {
+    await d242MergeUpsert(P1, { desc: "Test242 Browse Widget", category: "Test242 BrowseCat", unit: "ft", list: 30, cost: 10, mfr: "Test242 BrowseMfr" });
+    await d242MergeUpsert(PH, { desc: "Test242 Browse Hidden", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10, portalVisibility: "hide" });
+    await d242MergeUpsert(PB, { desc: "Test242 Browse OtherCo", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10 });
+    await d242MergeUpsert(PV, { desc: "Test242 Browse Verify", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10, note: "verify with vendor" });
+    for (const s of [P1, PH, PB, PV]) registerFixture("catalog_parts", s);
+    await createFixture("subassemblies", {
+      id: FX, kind: "fixture", label: "Test242 Browse Kit", description: "", lightEngineSku: P1, lensSku: null,
+      lines: { data: [], power: [], mounting: [], accessories: [] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    await upsertCustomer({ id: CO_A, name: "Test242 Browse Co A", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
+    await upsertCustomer({ id: CO_B, name: "Test242 Browse Co B", type: "Education", locations: [], contacts: [] });
+    const now = Date.now();
+    const q = (id: string, customerId: string, status: string, source: string, createdAt: number, skus: string[]) =>
+      createFixture("quotes", {
+        id, name: id, customerId, customer: customerId, locationId: null, status, source, value: 0, margin: 0, owner: "Test",
+        createdAt, updatedAt: createdAt, spec: { sections: [{ id: "S1", items: skus.map((sku, i) => ({ id: i + 1, sku, qty: 1 })) }] },
+      });
+    await q(fixtureId(242, "browse-q-a"), CO_A, "sent", "estimator", now - 1000, [PV, PH, P1]);
+    await q(fixtureId(242, "browse-q-a-draft"), CO_A, "draft", "estimator", now, [PB]); // internal draft: not listed
+    await q(fixtureId(242, "browse-q-b"), CO_B, "sent", "estimator", now, [PB]); // another company's quote
+    d242Invalidate();
+    await d242Index({ fresh: true });
+
+    const sessA = { grantId: fixtureId(242, "browse-grant-a"), customerId: CO_A, name: "", email: "" };
+    const sessB = { grantId: fixtureId(242, "browse-grant-b"), customerId: CO_B, name: "", email: "" };
+    const rA = await d242SearchFor(sessA, { q: "Test242 Browse", mfr: [], cat: [], page: 1, pageSize: 500 });
+    ok(rA.ok && rA.result.entries.length <= 48 && rA.result.page === 1, "#242 search action: a session gets ok:true, at most 48 tiles even when asked for 500");
+    if (rA.ok) {
+      const byKey = new Map(rA.result.entries.map((e) => [e.key, e]));
+      const ctxA = await d242Ctx({ customerId: CO_A, name: "" });
+      const w = byKey.get(P1);
+      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d242PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round((10 / (1 - 0.22)) * 100) / 100,
+        "#242 search action: a part tile is priced at the session customer's tier");
+      ok(!byKey.has(PH), "#242 search action: a Hide part never appears");
+      ok(byKey.get(PV)?.por === true && byKey.get(PV)?.unitPrice === null, "#242 search action: a verify-price part reads Price on request");
+      const kit = byKey.get("fixture:" + FX);
+      ok(!!kit && kit.kind === "fixture" && kit.sku === P1 && kit.unitPrice === w?.unitPrice, "#242 search action: a fixture tile prices its included parts (default options)");
+      const json = JSON.stringify(rA.result);
+      ok(!json.includes("\"cost\"") && !json.includes("haystack") && !json.includes("margin") && !json.includes("silver") && !json.includes("\"list\""),
+        "#242 search action: results carry no cost, list, margin, tier name or search internals");
+      ok(rA.result.mfrFacets.some((f) => f.value === "Test242 BrowseMfr") && rA.result.catFacets.some((f) => f.value === "Test242 BrowseCat"), "#242 search action: facets come back with the page");
+    }
+    const rB = await d242SearchFor(sessB, { q: "Test242 Browse Widget", pageSize: 48 });
+    const ctxB = await d242Ctx({ customerId: CO_B, name: "" });
+    ok(rB.ok && rB.result.entries.find((e) => e.key === P1)?.unitPrice === (await d242PriceSku(P1, ctxB))?.unitPrice,
+      "#242 search action: another session's tiles are priced for THAT session's customer");
+
+    const shelfA = (await d242Shelf(await d242Ctx({ customerId: CO_A, name: "" }))).map((t) => t.key);
+    ok(JSON.stringify(shelfA) === JSON.stringify([PV, P1]),
+      "#242 shelf: only the company's own listed quotes, quotable SKUs, line order — never another company's quote or an internal draft");
+    const shelfB = (await d242Shelf(ctxB)).map((t) => t.key);
+    ok(JSON.stringify(shelfB) === JSON.stringify([PB]), "#242 shelf: company B sees only its own quoted part");
+
+    const sessR = { grantId: fixtureId(242, "browse-grant-rate"), customerId: CO_A, name: "", email: "" };
+    let allOk = true;
+    for (let i = 0; i < 120; i++) if (!(await d242SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 })).ok) allOk = false;
+    const over = await d242SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 });
+    ok(allOk && !over.ok && over.error === d242RateCopy, "#242 search action: 120 searches a minute per grant, the 121st is refused");
+  } finally {
+    d242Invalidate();
+    await removeCustomer(CO_A);
+    await removeCustomer(CO_B);
+  }
 }

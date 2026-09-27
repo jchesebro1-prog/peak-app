@@ -165,7 +165,7 @@ function withQty(label: string, qty: number): string {
   return qty === 1 ? label : `${label} ×${qty}`;
 }
 
-function priceFixture(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts): Priced {
+function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpts): Priced {
   const fx: IndexedFixture | undefined = l.fixtureId ? ix.fixtures.get(l.fixtureId) : undefined;
   if (!fx) return { sell: unavailableLine(l, qty, null), item: null, section: "fixt" };
   const opts = l.fixtureOptions ?? {};
@@ -228,6 +228,23 @@ function priceFixture(l: CartLine, qty: number, ix: PortalIndex, o: PriceRuleOpt
   return { sell, item, section: "fixt" };
 }
 
+/** Unit sell for one fixture assembly with the given add-on quantities
+ *  (keyed `slot:sku`, as on a cart line; `{}` = included parts only — the
+ *  catalog tile's price). The same code path `priceCart` prices a fixture
+ *  line with. null = the fixture isn't offered (unknown, or a required
+ *  component is no longer quotable). */
+export async function priceFixture(
+  fixtureId: string,
+  options: Record<string, number>,
+  ctx: PortalPricingContext
+): Promise<{ unitPrice: number | null; por: boolean } | null> {
+  const ix = await portalIndex();
+  const line: CartLine = { lineId: "", kind: "fixture", fixtureId, fixtureOptions: options, qty: 1 };
+  const p = priceFixtureLine(line, 1, ix, ruleOpts(ctx));
+  if (p.sell.unavailable) return null;
+  return { unitPrice: p.sell.unitPrice, por: p.sell.por };
+}
+
 function priceCurtain(l: CartLine, qty: number): Priced {
   const c = l.curtainInputs;
   if (!c) return { sell: unavailableLine(l, qty, null), item: null, section: "drape" };
@@ -275,7 +292,7 @@ export async function priceCart(cart: PortalCart, ctx: PortalPricingContext): Pr
   let nextId = 1;
   for (const l of cart.lines ?? []) {
     const qty = lineQty(l.qty);
-    const p = l.kind === "fixture" ? priceFixture(l, qty, ix, o) : l.kind === "curtain" ? priceCurtain(l, qty) : pricePart(l, qty, ix, o);
+    const p = l.kind === "fixture" ? priceFixtureLine(l, qty, ix, o) : l.kind === "curtain" ? priceCurtain(l, qty) : pricePart(l, qty, ix, o);
     lines.push(p.sell);
     if (p.item) buckets[p.section].push({ id: nextId++, ...p.item });
   }

@@ -19,6 +19,9 @@ import {
   fmtShort as fmtShortIso,
 } from "@/lib/stores/inspections";
 import { PortalShell } from "./shell";
+import { PortalSignedOut } from "./signed-out";
+import { portalNav } from "./nav";
+import { getCart } from "@/lib/stores/portal-carts";
 import { acceptPortalQuote } from "./actions";
 import { documentsForCustomer } from "@/lib/stores/documents";
 import { activeDocumentCategories, resolveDocumentCategories } from "@/lib/document-categories";
@@ -174,45 +177,22 @@ export default async function PortalPage({
   if (!session) {
     return (
       <PortalShell companyName={companyName} logoLight={settings.logoLight || null}>
-        <div
-          style={{
-            maxWidth: 460,
-            margin: "48px auto 0",
-            background: "#fff",
-            border: "1px solid #e4e7ec",
-            borderRadius: 14,
-            padding: "30px 28px",
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: 17, fontWeight: 600 }}>
-            {denied ? "That access link didn’t work" : "Sign in with your access link"}
-          </div>
-          <div style={{ fontSize: 13, color: "#5b616e", lineHeight: 1.65, marginTop: 10 }}>
-            {denied
-              ? "The link may have expired or been replaced. Ask your " +
-                companyName +
-                " contact to send you a fresh one — it only takes them a moment."
-              : "This portal uses personal access links instead of passwords. Open the link " +
-                companyName +
-                " sent you and you’ll land right here, signed in. Don’t have one? Ask your " +
-                companyName +
-                " contact."}
-          </div>
-        </div>
+        <PortalSignedOut companyName={companyName} denied={denied} />
       </PortalShell>
     );
   }
 
   /* -------- tenant-scoped data (customerId comes from the grant ONLY) -------- */
   const cid = session.customerId;
-  const [cust, quotes, leads, fRenewals, iRenewals, projects] = await Promise.all([
+  const [cust, quotes, leads, fRenewals, iRenewals, projects, cart] = await Promise.all([
     getCustomer(cid),
     allQuotes(),
     allLeads(),
     flameRenewals({}),
     inspectionRenewals({}),
     getAllProjects(),
+    // #242: the nav's Quote (N) — never read in a team preview.
+    preview ? Promise.resolve(null) : getCart(session.grantId, cid),
   ]);
   const custName = cust?.name || "your organization";
   const venues = cust?.locations || [];
@@ -398,6 +378,7 @@ export default async function PortalPage({
       companyName={companyName}
       logoLight={settings.logoLight || null}
       person={{ name: session.name, customer: custName }}
+      nav={portalNav("home", preview ? { previewCid: cid } : { cartCount: cart?.lines.length ?? 0 })}
     >
       {preview && (
         <div
@@ -449,17 +430,17 @@ export default async function PortalPage({
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", flexShrink: 0 }}>
           {preview ? (
             <>
-              <span title="Disabled in preview" style={{ ...CTA_SECONDARY, opacity: 0.45, cursor: "not-allowed" }}>
-                Build your own estimate
-              </span>
+              <Link href={`/portal/catalog?preview=${encodeURIComponent(cid)}`} style={CTA_SECONDARY}>
+                Shop the catalog
+              </Link>
               <span title="Disabled in preview" style={{ ...CTA_PRIMARY, opacity: 0.45, cursor: "not-allowed" }}>
                 + Request a quote
               </span>
             </>
           ) : (
             <>
-              <Link href="/portal/estimate" style={CTA_SECONDARY}>
-                Build your own estimate
+              <Link href="/portal/catalog" style={CTA_SECONDARY}>
+                Shop the catalog
               </Link>
               <Link href="/portal/request" style={CTA_PRIMARY}>
                 + Request a quote
