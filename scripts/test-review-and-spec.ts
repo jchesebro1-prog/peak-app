@@ -27365,3 +27365,198 @@ async function daylite241AsyncChecks(): Promise<void> {
     `#241 migration: its three patterns (each guarded to open quotes) classify every sample name exactly like dayliteQuoteType${disagree.length ? " — " + disagree.join("; ") : ""}`
   );
 }
+
+/* ======================================================================
+   #242 — quote review limits: pure rules (src/lib/review-limits.ts).
+   ====================================================================== */
+import {
+  REVIEW_KIND_KEYS as r242KindKeys, reviewKindColumn as r242Column, reviewKindPhrase as r242Phrase,
+  reviewKindOf as r242KindOf, hasLaborLine as r242HasLabor, hasTypedTotal as r242Typed,
+  sanitizeReviewLimits as r242Sanitize, reviewLimitsFrom as r242From, parseLimitInput as r242Parse,
+  formatLimitInput as r242Format, resolveOwnerId as r242Owner, evaluateReviewLimit as r242Eval,
+  canAutoApprove as r242CanAuto, approvalHolds as r242Holds, reviewLimitChip as r242Chip,
+  NO_REVIEW_LIMITS as r242None, type ReviewLimitContext as R242Ctx, type ReviewableQuote as R242Q,
+} from "@/lib/review-limits";
+{
+  ok(
+    r242KindKeys.join(",") ===
+      "system_plain,system_labor,flame_auto,flame_typed,repair_auto,repair_typed,inspection_auto,inspection_typed,rental,consulting",
+    "#242: ten review kinds, in the Settings column order"
+  );
+  ok(
+    r242Column("system_plain") === "System estimate — no labor" && r242Column("system_labor") === "System estimate — with labor" &&
+      r242Column("flame_typed") === "Flame test — typed total" && r242Column("rental") === "Rental",
+    "#242: column labels match the spec table"
+  );
+
+  const est = (items: Array<Record<string, unknown>>, kind = "materials") => ({
+    sections: [{ id: "s", name: "S", kind, mfr: "", freightPct: 0, items }],
+    mobs: [],
+  });
+  ok(!r242HasLabor(est([{ sku: "A", qty: 2, price: 100, cost: 50 }])), "#242: an Estimator spec with only material lines has no labor");
+  ok(r242HasLabor(est([{ sku: "LAB-RIG", qty: 10, price: 95, cost: 62 }], "labor")), "#242: an item in a kind:\"labor\" section is labor");
+  ok(r242HasLabor(est([{ sku: "LAB-x", qty: 1, price: 500, cost: 300, labor: true }])), "#242: a labor:true item inside a materials section is labor (pricing.ts sums it into lab)");
+  ok(!r242HasLabor(est([{ sku: "LAB-x", qty: 1, price: 500, cost: 300, labor: true, option: true }])), "#242: an optional labor line (excluded from totals) does not count");
+  ok(!r242HasLabor(est([{ sku: "LAB-x", qty: 0, price: 500, cost: 300 }], "labor")), "#242: a $0 labor line does not count");
+  ok(
+    !r242HasLabor(est([
+      { sku: "CUSTOM", qty: 1, price: 900, cost: 0, custom: true },
+      { sku: "ALLOW", qty: 1, price: 2000, cost: 0, allowance: true },
+      { sku: "DISC", qty: 1, price: -500, cost: 0 },
+    ])),
+    "#242: custom items, allowances and a discount line do not make a quote 'with labor'"
+  );
+  ok(r242HasLabor(est([{ sku: "LAB-x", qty: 3, price: 0, cost: 0, labor: true, extSellOverride: 750 }])), "#242: a labor line priced by an extended-sell override counts (lineExtSellOf)");
+  ok(
+    r242HasLabor({ kind: "grid", lines: [{ sku: "ETC-1", qty: 1, price: 10, ext: 10 }, { sku: "labor:lighting", qty: 1, price: 800, ext: 800 }] }),
+    "#242: a Grid quote's labor:<system> line (#232) is labor"
+  );
+  ok(
+    !r242HasLabor({ kind: "grid", lines: [{ sku: "ETC-1", qty: 1, price: 10, ext: 10 }, { sku: "allow:cable", qty: 1, price: 500, ext: 500, allowance: true }] }),
+    "#242: a Grid quote without a labor:<system> line is plain"
+  );
+  ok(
+    r242HasLabor({ venue: "Proscenium", size: "M", tier: "better", width: 40, depth: 30, grid: 20, systems: ["rigging"], fromDesign: "D-1" }),
+    "#242: a promoted Quick design counts as labor — its budget always prices installation"
+  );
+  ok(!r242HasLabor(null) && !r242HasLabor(undefined) && !r242HasLabor({}), "#242: no spec / an empty spec has no labor line");
+
+  ok(!r242Typed(null) && !r242Typed({}) && !r242Typed({ total: 1200 }), "#242: a service subdoc with no priceOverride is auto-priced");
+  ok(r242Typed({ priceOverride: 1500 }), "#242: a saved priceOverride is a typed total");
+  ok(!r242Typed({ priceOverride: 821, priceOverrideSeeded: true }), "#242: a D286/D366 seeded override (old off-grid sent price) is not a hand-typed total");
+  ok(!r242Typed({ priceOverride: 0 }) && !r242Typed({ priceOverride: "abc" }), "#242: a zero or junk priceOverride is not a typed total (normalizePriceOverride)");
+
+  ok(
+    r242KindOf({ quoteType: "flame_test", flameTest: { priceOverride: 900 } }) === "flame_typed" &&
+      r242KindOf({ quoteType: "flame_test", flameTest: { total: 900 } }) === "flame_auto",
+    "#242: flame test → flame_typed / flame_auto"
+  );
+  ok(
+    r242KindOf({ quoteType: "repair", repair: { priceOverride: 900 } }) === "repair_typed" && r242KindOf({ quoteType: "repair", repair: null }) === "repair_auto",
+    "#242: repair → repair_typed / repair_auto"
+  );
+  ok(
+    r242KindOf({ quoteType: "inspection", inspection: { priceOverride: 900 } }) === "inspection_typed" && r242KindOf({ quoteType: "inspection" }) === "inspection_auto",
+    "#242: inspection → inspection_typed / inspection_auto"
+  );
+  ok(r242KindOf({ quoteType: "flame_test", repair: { priceOverride: 900 } }) === "flame_auto", "#242: only the quote type's OWN subdoc is read for the typed total");
+  ok(r242KindOf({ quoteType: "rental" }) === "rental" && r242KindOf({ quoteType: "consulting" }) === "consulting", "#242: rental and consulting each have one kind");
+  ok(
+    r242KindOf({ quoteType: "system", spec: est([{ sku: "L", qty: 1, price: 1, cost: 0 }], "labor") }) === "system_labor" &&
+      r242KindOf({ quoteType: undefined, spec: null }) === "system_plain" &&
+      r242KindOf({ quoteType: "service", spec: est([{ sku: "L", qty: 1, price: 1, cost: 0, labor: true }]) }) === "system_labor",
+    "#242: system / missing / unknown types split on labor lines"
+  );
+
+  const s = r242Sanitize(
+    { u1: { system_plain: 25000.4, rental: "none", bogus: 5, flame_auto: -1, repair_auto: "12", consulting: 99_000_000 }, u9: { rental: 100 }, u2: {}, u3: "x" },
+    new Set(["u1", "u2", "u3"])
+  );
+  ok(
+    JSON.stringify(s) === JSON.stringify({ u1: { system_plain: 25000, rental: "none", consulting: 10_000_000 } }),
+    `#242: sanitizer rounds, keeps "none", caps at $10M, drops negative/string/unknown kinds, unknown users and empty rows (got ${JSON.stringify(s)})`
+  );
+  ok(
+    JSON.stringify(r242From({ u9: { rental: 5 } })) === JSON.stringify({ u9: { rental: 5 } }) && JSON.stringify(r242From(null)) === "{}" && JSON.stringify(r242From([1])) === "{}",
+    "#242: reviewLimitsFrom keeps every user id (no roster filter) and reads junk as no limits"
+  );
+
+  ok(
+    JSON.stringify(r242Parse("")) === JSON.stringify({ ok: true, limit: null }) && JSON.stringify(r242Parse("  ")) === JSON.stringify({ ok: true, limit: null }),
+    "#242: a blank cell is 'always needs review'"
+  );
+  ok(
+    (["No limit", "none", "UNLIMITED", "∞"] as const).every((t) => { const p = r242Parse(t); return p.ok && p.limit === "none"; }),
+    "#242: No limit / none / unlimited / ∞ parse as No limit"
+  );
+  const p1 = r242Parse("$25,000");
+  const p2 = r242Parse("1500.60");
+  const p3 = r242Parse("0");
+  ok(p1.ok && p1.limit === 25000 && p2.ok && p2.limit === 1501 && p3.ok && p3.limit === 0, "#242: dollar amounts parse to whole dollars ($25,000 → 25000; $0 allowed)");
+  ok(!r242Parse("-5").ok && !r242Parse("25k").ok && !r242Parse("1e5").ok && !r242Parse("20000000").ok, "#242: negatives, shorthand, exponents and anything over $10M are refused");
+  ok(
+    r242Format(null) === "" && r242Format(undefined) === "" && r242Format("none") === "No limit" && r242Format(25000) === "$25,000" &&
+      (() => { const p = r242Parse(r242Format(25000)); return p.ok && p.limit === 25000; })(),
+    "#242: formatLimitInput round-trips through parseLimitInput"
+  );
+
+  const roster = [
+    { id: "u1", name: "Nic Trapani", status: "active" },
+    { id: "u2", name: "Jena Tolksdorf", status: "active" },
+    { id: "u3", name: "Old Timer", status: "archived" },
+    { id: "u4", name: "Sam Twin", status: "active" },
+    { id: "u5", name: "Sam Twin", status: "active" },
+  ];
+  const ctx: R242Ctx = {
+    roster,
+    limits: { u1: { system_plain: 25000, system_labor: 10000, rental: "none" }, u3: { system_plain: 99999 }, u4: { system_plain: 99999 } },
+  };
+  ok(r242Owner("Nic Trapani", roster) === "u1" && r242Owner("  nic trapani ", roster) === "u1", "#242: owner name resolves to the roster id (trimmed, case-insensitive)");
+  ok(
+    r242Owner("Old Timer", roster) === null && r242Owner("Sam Twin", roster) === null && r242Owner("", roster) === null && r242Owner("Nobody", roster) === null,
+    "#242: archived, ambiguous, blank or unknown owners resolve to nobody"
+  );
+  const q = (over: Partial<R242Q> = {}): R242Q => ({ quoteType: "system", value: 25000, owner: "Nic Trapani", status: "draft", spec: null, review: null, ...over });
+  ok(r242Eval(q(), ctx).fits === true, "#242: a quote AT the owner's limit fits");
+  ok(r242Eval(q({ value: 24999 }), ctx).fits && !r242Eval(q({ value: 25001 }), ctx).fits, "#242: under fits, over does not");
+  ok(r242Eval(q({ quoteType: "rental", value: 9_000_000 }), ctx).fits, "#242: No limit fits any value");
+  ok(
+    !r242Eval(q({ quoteType: "consulting", value: 1 }), ctx).fits && r242Eval(q({ quoteType: "consulting", value: 1 }), ctx).limit === null,
+    "#242: a blank cell never fits — always needs review"
+  );
+  ok(
+    !r242Eval(q({ owner: "Old Timer", value: 1 }), ctx).fits && !r242Eval(q({ owner: "Sam Twin", value: 1 }), ctx).fits && !r242Eval(q({ owner: "Nobody", value: 1 }), ctx).fits,
+    "#242: an owner off the active roster (archived, ambiguous, unknown) never fits"
+  );
+  ok(
+    r242Eval(q({ owner: "", preparedBy: "Nic Trapani" }), ctx).fits && r242Eval(q({ owner: "", preparedBy: "Nic Trapani" }), ctx).ownerId === "u1",
+    "#242: a blank owner falls back to preparedBy"
+  );
+  const withLabor = q({ spec: est([{ sku: "L", qty: 1, price: 20000, cost: 0 }], "labor"), value: 20000 });
+  ok(!r242Eval(withLabor, ctx).fits && r242Eval(withLabor, ctx).kind === "system_labor", "#242: adding labor moves a quote to the with-labor limit ($10,000 here)");
+  ok(!r242Eval(q(), r242None).fits, "#242: with no limits configured (the default) nothing fits — nothing changes until limits are set");
+  ok(
+    r242CanAuto(q({ review: { state: "changes" } }), ctx) === null && r242CanAuto(q({ review: { state: "in_review" } }), ctx)?.kind === "system_plain",
+    "#242: a reviewer's 'changes requested' blocks auto-approval (as it blocks attestation); in_review does not"
+  );
+
+  ok(
+    r242Holds(q({ review: { state: "approved", method: "in_app" }, value: 9_999_999 }), ctx) &&
+      r242Holds(q({ review: { state: "approved", method: "attested" }, value: 9_999_999 }), r242None) &&
+      r242Holds(q({ review: { state: "approved", method: null } }), r242None),
+    "#242: in-app, attested and legacy approvals hold exactly as today, whatever the limits"
+  );
+  const auto = { state: "approved", method: "auto_limit", auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  ok(r242Holds(q({ review: auto, value: 20000 }), ctx), "#242: an auto_limit approval holds while the quote still fits");
+  ok(!r242Holds(q({ review: auto, value: 30000 }), ctx), "#242: stale — value raised over the limit, the auto approval no longer holds");
+  ok(!r242Holds(q({ review: auto, value: 20000, spec: est([{ sku: "L", qty: 1, price: 1, cost: 0 }], "labor") }), ctx), "#242: stale — labor added (now the $10,000 with-labor limit), no longer holds");
+  ok(!r242Holds(q({ review: auto, value: 20000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: stale — limit lowered, no longer holds");
+  ok(!r242Holds(q({ review: { state: "in_review" } }), ctx) && !r242Holds(q({ review: null }), ctx), "#242: no approval → does not hold");
+
+  const within = r242Chip(q({ value: 20000 }), ctx, "Nic Trapani");
+  ok(!!within && within.tone === "within" && within.text === "Within your limit — approves automatically" && !within.staleAuto, `#242 chip: owner within the limit (got ${JSON.stringify(within)})`);
+  const over = r242Chip(q({ value: 30000 }), ctx, "Nic Trapani");
+  ok(!!over && over.tone === "over" && over.text === "Over your $25,000 limit — needs review" && over.short === "Over $25,000 limit", `#242 chip: owner over the limit (got ${JSON.stringify(over)})`);
+  ok(r242Chip(q({ value: 30000 }), ctx, "Jena Tolksdorf")?.text === "Over Nic's $25,000 limit — needs review", "#242 chip: another viewer sees the owner's first name");
+  ok(
+    r242Chip(q({ quoteType: "consulting" }), ctx, "Nic Trapani") === null && r242Chip(q({ owner: "Nobody" }), ctx, "Nobody") === null,
+    "#242 chip: nothing when the owner has no limit for the kind (or is off the roster)"
+  );
+  ok(
+    r242Chip(q({ status: "won" }), ctx, "Nic Trapani") === null &&
+      r242Chip(q({ review: { state: "approved", method: "in_app" } }), ctx, "Nic Trapani") === null &&
+      r242Chip(q({ review: { state: "changes" } }), ctx, "Nic Trapani") === null,
+    "#242 chip: nothing on a won quote, an in-app approval, or a changes-requested quote"
+  );
+  const stale = r242Chip(q({ review: auto, value: 30000 }), ctx, "Nic Trapani");
+  ok(!!stale && stale.tone === "over" && stale.staleAuto === true, "#242 chip: a stale auto approval shows as over the limit, flagged staleAuto");
+  const staleBlank = r242Chip(q({ review: auto, value: 20000 }), { ...ctx, limits: {} }, "Nic Trapani");
+  ok(!!staleBlank && staleBlank.staleAuto && staleBlank.short === "Needs review", "#242 chip: a stale auto approval whose limit was cleared still shows 'needs review'");
+
+  ok(r242Phrase("system_plain") === "system estimates without labor" && r242Phrase("nope") === "this kind of quote", "#242: kind phrases for the approval sentence");
+  const r242Src = readFileSync(join(process.cwd(), "src/lib/review-limits.ts"), "utf8");
+  ok(
+    !/from "@\/(db|lib\/stores)/.test(r242Src) && !r242Src.includes("\"use client\"") && !/from "@\/lib\/(settings|users|session)"/.test(r242Src),
+    "#242: review-limits.ts stays client-safe — no store, db, settings, users or session import"
+  );
+}
