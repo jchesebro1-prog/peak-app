@@ -10525,6 +10525,7 @@ seeded()
   .then(() => specDocxAsyncChecks())
   .then(() => specBuilderActionsAsyncChecks())
   .then(() => specBuilderFinalFixAsyncChecks())
+  .then(() => dayliteCalendarAsyncChecks219())
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
@@ -20631,4 +20632,173 @@ const DC219_FIXTURE =
 
   // todayYmdIn — the business-zone date, not the server's.
   ok(dc219Today(Date.UTC(2026, 8, 26, 3, 0)) === "2026-09-25", "#219 todayYmdIn: 03:00 UTC is still the previous day in Chicago");
+}
+
+/* ====== #219 Daylite calendar import — Task 2: preview, pending selection, batch runner (fake insert), admin gate ======
+   runCalendarBatch never touches Google here: insert/record/now are fakes.
+   The DB half (previewCalendarImport / importCalendarBatch) runs on the
+   harness's scratch PGlite with the seeded roster and no mailbox
+   connections, so nothing can be written anywhere. */
+import {
+  DAYLITE_CALENDAR_BLOB as DC219_BLOB,
+  OWNER_STOP_AFTER as DC219_STOP_AFTER,
+  buildPreview as dc219Preview,
+  isAlreadyExists as dc219Is409,
+  isQuotaStop as dc219IsQuota,
+  runCalendarBatch as dc219Run,
+  sanitizeImported as dc219Sanitize,
+  selectPending as dc219Select,
+  type BatchDeps as DC219Deps,
+  type ImportedMap as DC219Map,
+  type PendingEvent as DC219Pending,
+} from "@/lib/daylite/calendar-batch";
+import { importCalendarBatch as dc219ImportBatch, previewCalendarImport as dc219PreviewDb } from "@/lib/daylite/calendar-import";
+import { setBlob as setBlob219 } from "@/db/doc-store";
+
+async function dayliteCalendarAsyncChecks219(): Promise<void> {
+  const j = (v: unknown) => JSON.stringify(v);
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const parsed = dc219Parse(DC219_FIXTURE);
+  const users = [
+    { id: "u1", name: "Jeff Chesebro" },
+    { id: "u5", name: "Jason Keagy" },
+    { id: "u6", name: "Isaac Mittlesteadt" },
+    { id: "u7", name: "Jena Tolksdorf" },
+  ];
+  const keyOf = (prefix: string) => dc219Key(parsed.rows.find((r) => r.name.startsWith(prefix))!);
+  const lincolnKey = keyOf("Lincoln Academy");
+
+  // --- buildPreview (pure)
+  const pv = dc219Preview(parsed, users, { u1: "not-connected", u5: "connected", u6: "no-calendar", u7: "gmail-off" }, { [lincolnKey]: { eventId: "x", owner: "Jason Keagy", at: 1 } }, { fromYmd: null });
+  const own = (name: string) => pv.owners.find((o) => o.owner === name)!;
+  ok(j(pv.owners.map((o) => o.owner)) === j(["Andrew Herschleb", "Isaac Mittlesteadt", "Jason Keagy", "Jeff Chesebro", "Jena Tolksdorf", "Mike Mundth"]), "#219 preview: one row per owner, sorted");
+  ok(own("Jason Keagy").oneOffs === 3 && own("Jason Keagy").alreadyImported === 1 && own("Jason Keagy").toImport === 2 && own("Jason Keagy").defaultInclude, "#219 preview: already-imported keys counted; connected owner included by default");
+  ok(own("Isaac Mittlesteadt").calendar === "no-calendar" && !own("Isaac Mittlesteadt").defaultInclude, "#219 preview: a mailbox without calendar scope is not included");
+  ok(own("Jeff Chesebro").oneOffs === 0 && own("Jeff Chesebro").seriesRows === 4 && j(own("Jeff Chesebro").series) === j([{ name: "Weekly Sales Meeting", count: 4 }]), "#219 preview: series listed with counts per owner");
+  ok(own("Mike Mundth").calendar === "no-user" && own("Mike Mundth").userId === null && /No team member/.test(own("Mike Mundth").matchNote), "#219 preview: an unmatched owner is reported");
+  ok(pv.totals.seriesCount === 1 && pv.totals.seriesRows === 4 && pv.totals.oneOffs === 7 && pv.totals.alreadyImported === 1 && pv.errors.length === 2, "#219 preview: totals and parse errors");
+  const pvToday = dc219Preview(parsed, users, {}, {}, { fromYmd: "2026-09-01" });
+  ok(pvToday.totals.oneOffs === 4 && pvToday.fromYmd === "2026-09-01", "#219 preview: 'from today on' drops earlier one-offs (Jena, Christmas, Lincoln, Sauk remain)");
+
+  // --- selectPending (pure) — only the owner's own connected mailbox.
+  const mailboxes = { u5: "personal:u5", u6: "personal:u6" };
+  const all = dc219Select(parsed, users, mailboxes, {}, { fromYmd: null, owners: ["Jason Keagy", "Isaac Mittlesteadt", "Jena Tolksdorf", "Mike Mundth"], skipKeys: [] });
+  ok(j(all.map((p) => p.body.summary)) === j(["Christmas Holiday", "Lincoln Academy Submittal Review", "Oshkosh North Aud & Black Box Projects - First AV Conversation including \"Shelby\"", "[Service Call] Sauk Trail Elementary, Middleton HS"]), "#219 pending: one-offs of included owners with a connected calendar, file order");
+  ok(all.every((p) => p.mailboxKey === (p.owner === "Jason Keagy" ? "personal:u5" : "personal:u6")), "#219 pending: each event targets its own owner's mailbox — never someone else's");
+  ok(dc219Select(parsed, users, mailboxes, {}, { fromYmd: null, owners: ["isaac  mittlesteadt"], skipKeys: [] }).length === 1, "#219 pending: the owners filter is case/space-insensitive");
+  ok(dc219Select(parsed, users, mailboxes, {}, { fromYmd: "2026-09-01", owners: ["Jason Keagy", "Isaac Mittlesteadt"], skipKeys: [] }).length === 3, "#219 pending: the date filter applies");
+  ok(dc219Select(parsed, users, mailboxes, {}, { fromYmd: null, owners: ["Jason Keagy"], skipKeys: [lincolnKey] }).length === 2, "#219 pending: skipKeys (failed this run) are left out");
+
+  // --- runCalendarBatch with fakes
+  const clock = { t: 0 };
+  const make = (insert: DC219Deps["insert"], store: DC219Map): DC219Deps => ({
+    insert,
+    record: async (patch) => {
+      Object.assign(store, patch);
+    },
+    now: () => clock.t,
+  });
+  const calls: { mailboxKey: string; id: string; start: unknown }[] = [];
+  const okInsert: DC219Deps["insert"] = async (mailboxKey, body) => {
+    calls.push({ mailboxKey, id: body.id, start: body.start });
+    clock.t += 100;
+    return { id: "g-" + calls.length };
+  };
+
+  const store1: DC219Map = {};
+  const r1 = await dc219Run(all, make(okInsert, store1));
+  ok(r1.stoppedFor === "done" && r1.written === 4 && r1.remaining === 0 && r1.pendingAtStart === 4 && Object.keys(store1).length === 4, "#219 batch: writes every pending event and records each key");
+  ok(store1[lincolnKey]?.eventId === "g-2" && store1[lincolnKey]?.owner === "Jason Keagy", "#219 batch: the record maps key → Google event id + owner");
+  ok(calls.every((c) => /^dlc[0-9a-f]{24}$/.test(c.id)) && j(calls[1].start) === j({ dateTime: "2026-09-16T14:00:00", timeZone: "America/Chicago" }), "#219 batch: bodies carry the deterministic id and wall-clock Chicago times");
+  const rerun = dc219Select(parsed, users, mailboxes, store1, { fromYmd: null, owners: ["Jason Keagy", "Isaac Mittlesteadt"], skipKeys: [] });
+  ok(rerun.length === 0, "#219 batch: a re-run over the recorded map selects nothing — importing twice never duplicates");
+
+  const store409: DC219Map = {};
+  const r409 = await dc219Run(all.slice(0, 1), make(async () => {
+    throw new Error('Calendar API /calendars/primary/events?sendUpdates=none → 409 {"error":{"code":409,"message":"The requested identifier already exists."}}');
+  }, store409));
+  ok(r409.alreadyThere === 1 && r409.failed === 0 && store409[all[0].key]?.eventId === all[0].body.id, "#219 batch: a 409 on our deterministic id is recorded as already in Google");
+
+  let n = 0;
+  const storeQ: DC219Map = {};
+  const rq = await dc219Run(all, make(async () => {
+    n++;
+    if (n === 2) throw new Error('Calendar API /calendars/primary/events?sendUpdates=none → 403 {"error":{"errors":[{"reason":"rateLimitExceeded"}]}}');
+    return { id: "g" + n };
+  }, storeQ));
+  ok(rq.stoppedFor === "quota" && rq.written === 1 && rq.remaining === 3 && rq.failed === 0 && rq.failedKeys.length === 0 && Object.keys(storeQ).length === 1 && rq.quotaMessage.includes("rateLimitExceeded"), "#219 batch: a rate-limit error stops the batch; the event stays pending, not failed");
+  ok(dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"reason":"quotaExceeded","message":"Calendar usage limits exceeded."}]}}')) && dc219IsQuota(new Error("→ 429 Too Many Requests")) && !dc219IsQuota(new Error("→ 500 backend")), "#219 isQuotaStop: quotaExceeded / usage limits / 429 stop; a 500 does not");
+  ok(dc219Is409(new Error("Calendar API x → 409 {}")) && !dc219Is409(new Error("Calendar API x → 404 {}")), "#219 isAlreadyExists: matches only a 409");
+
+  clock.t = 0;
+  const slow: DC219Deps["insert"] = async () => {
+    clock.t += 5_000;
+    return { id: "s" };
+  };
+  const rb = await dc219Run(all, make(slow, {}), 20_000);
+  ok(rb.stoppedFor === "budget" && rb.written === 3 && rb.remaining === 1, "#219 batch: stops starting inserts when a worst-case insert no longer fits the budget");
+  clock.t = 0;
+  const rb1 = await dc219Run(all, make(slow, {}), 1_000);
+  ok(rb1.written === 1 && rb1.stoppedFor === "budget" && rb1.remaining === 3, "#219 batch: the first insert always runs (forward progress)");
+
+  const storeF: DC219Map = {};
+  const rf = await dc219Run(all, make(async (_k, body) => {
+    if (body.summary.startsWith("Lincoln")) throw new Error("Calendar API x → 500 backendError");
+    return { id: "ok" };
+  }, storeF));
+  ok(rf.written === 3 && rf.failed === 1 && j(rf.failedKeys) === j([lincolnKey]) && rf.byOwner["Jason Keagy"].failed === 1 && rf.byOwner["Jason Keagy"].lastError.includes("500") && !storeF[lincolnKey], "#219 batch: a non-quota error is counted per owner, not recorded, and its key returned for skipKeys");
+
+  const synth = (owner: string, i: number): DC219Pending => ({
+    key: i.toString(16).padStart(24, "0"),
+    owner,
+    mailboxKey: "personal:" + owner,
+    body: { id: "dlc" + i.toString(16).padStart(24, "0"), summary: owner + i, description: "", start: { date: "2026-01-01" }, end: { date: "2026-01-02" } },
+  });
+  const mixed = [...Array.from({ length: 7 }, (_, i) => synth("X", i)), synth("Y", 99)];
+  const rs = await dc219Run(mixed, make(async (mailboxKey) => {
+    if (mailboxKey === "personal:X") throw new Error("Mailbox not connected: personal:X");
+    return { id: "y" };
+  }, {}));
+  ok(rs.failed === DC219_STOP_AFTER && j(rs.stoppedOwners) === j(["X"]) && rs.written === 1 && rs.stoppedFor === "done" && rs.remaining === 0, "#219 batch: 5 consecutive failures stop that owner; other owners carry on");
+
+  let threw = false;
+  try {
+    await dc219Run(all.slice(0, 1), { insert: async () => ({ id: "z" }), record: async () => { throw new Error("db down"); }, now: () => 0 });
+  } catch {
+    threw = true;
+  }
+  ok(threw, "#219 batch: a failed blob write aborts the batch (a resume re-inserts → 409 → recorded)");
+
+  ok(j(Object.keys(dc219Sanitize({ a: { eventId: "e", owner: "o", at: 1 }, b: null, c: { owner: "x" }, d: "junk" }))) === j(["a"]), "#219 sanitizeImported: drops cleared (null) and malformed entries");
+
+  // --- DB half: the seeded roster, no mailbox connections.
+  await setBlob219(DC219_BLOB, { [lincolnKey]: { eventId: "dlc-test", owner: "Jason Keagy", at: 1 } });
+  const live = await dc219PreviewDb(DC219_FIXTURE, { fromToday: false });
+  const jason = live.owners.find((o) => o.owner === "Jason Keagy")!;
+  ok(jason.userName === "Jason Keagy" && jason.alreadyImported === 1 && ["gmail-off", "not-connected"].includes(jason.calendar) && !jason.defaultInclude, "#219 previewCalendarImport: matches the seeded roster, reads the blob, and reports no calendar");
+  ok(live.owners.find((o) => o.owner === "Mike Mundth")!.calendar === "no-user", "#219 previewCalendarImport: an owner outside the roster is no-user");
+  let inserted = 0;
+  const liveRun = await dc219ImportBatch(DC219_FIXTURE, { fromToday: false, owners: ["Jason Keagy", "Isaac Mittlesteadt"], skipKeys: [] }, {
+    insert: async () => {
+      inserted++;
+      return { id: "never" };
+    },
+    record: async () => {},
+    now: () => 0,
+  });
+  ok(liveRun.pendingAtStart === 0 && inserted === 0 && liveRun.stoppedFor === "done", "#219 importCalendarBatch: no connected calendar → nothing is written anywhere");
+  await setBlob219(DC219_BLOB, { [lincolnKey]: null });
+
+  // --- source checks: the zoned insert and the admin gate.
+  const cal = read("src/lib/google/calendar.ts");
+  ok(/export async function insertZonedEvent\(\s*mailboxKey: string,\s*body: ZonedEventBody\s*\)/.test(cal) && cal.includes('"/calendars/primary/events?sendUpdates=none"'), "#219 insertZonedEvent: primary calendar, no invite emails");
+  const act = read("src/app/(app)/import/daylite/calendar/actions.ts");
+  ok(act.startsWith('"use server"'), "#219 actions: a server-action module");
+  ok(
+    (act.match(/export async function \w+\([^)]*\)[^{]*\{\s*await requirePerm\("manage_users"\);/g) || []).length === 2 &&
+      (act.match(/^export async function/gm) || []).length === 2,
+    "#219 actions: both actions call requirePerm(\"manage_users\") first, outside any try"
+  );
+  const glue = read("src/lib/daylite/calendar-import.ts");
+  ok(glue.includes('if (states[u.id] === "connected") mailboxByUserId[u.id] = personalKey(u.id);'), "#219 import: only a connected owner's OWN personal mailbox is ever targeted");
 }
