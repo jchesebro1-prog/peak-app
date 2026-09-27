@@ -64,6 +64,7 @@ Source: `3580_North HS Auditorium_Spec 26 09 61_Theatrical Power Production Arch
 
 - "3.02 Installation" was body text, not a Heading 2, in the source — read as an article title.
 - "3.03 Contractor Services" was body text, not a Heading 2, in the source — read as an article title.
+- 2.8 ENTERTAINMENT LUMINAIRES MOVING: the source ran the "Automated Profile Fixture" heading into the General clause's last sentence — split back into General + a product heading.
 - 2.2 repeats the title ENTERTAINMENT POWER CONTROLS (it holds the discrete-fed Mini Panel) — merged into 2.1 so the section has one Power Controls article.
 - Part 2 article "ENTERTAINMENT LUMINARIE ACCESSORIES" renamed "ENTERTAINMENT LUMINAIRE ACCESSORIES".
 - Section title shortened from "Theatrical Power, Production and Architectural Controls, and Fixtures" to "Theatrical Lighting Controls and Fixtures" — rename it in the section editor if you prefer the long form.

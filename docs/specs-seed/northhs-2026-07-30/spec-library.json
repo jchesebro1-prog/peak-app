@@ -799,7 +799,7 @@
         "Chauvet Lighting Inc.",
         "Vari-Lite"
       ],
-      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance",
+      "general": "General:\n  Acceptable Manufacturers:\n    {{manufacturers}}\n  Refer to Part 1, Quality Assurance for recommended and approved dealers for this portion of the spec.\n  Basis-of-Design Product: The design for each lighting product is based on the product named. Subject to compliance with requirements, provide either the named product or a comparable product by one of the other manufacturers specified. Alternative manufacturers must submit a full pre-approval package fifteen days prior to bid date. Package shall consist of items listed in Part 1, Quality Assurance\n  Permission to bid does not imply acceptance of the manufacturer.",
       "categoryKeys": [],
       "updatedAt": 1790000000000,
       "updatedBy": "seed:northhs-2026-07-30"
