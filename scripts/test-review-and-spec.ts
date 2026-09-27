@@ -20353,3 +20353,81 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
   const reader214 = read("src/app/(app)/inbox/thread-reader.tsx");
   ok(reader214.includes("Link…") && reader214.includes("onOpenLinks={() => onOpenLinks(m.id)}") && reader214.includes("<LinkPopup"), "#214 UI: each message header has Link… and the reader mounts the popup");
 }
+
+/* ====== #225 Consulting proposal document fixes ======
+   Source-level checks against the proposal generator (kind=proposal) at
+   design/engagements/letter/page.tsx: no duplicate header company/type
+   lines, a Dear line addressed to the contact, a print @page scoped to
+   this document (never the shared globals.css @page), bulleted
+   assumptions, only the quote's own terms (never the template's canned
+   termsBlock), no Anticipated phases block, and an acceptance block that
+   signs the contact + estimator rather than the two companies. */
+{
+  const read225 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const letter225 = read225("src/app/(app)/design/engagements/letter/page.tsx");
+
+  ok(
+    !letter225.includes("Consulting Proposal & Professional Services Agreement"),
+    "#225: the old always-on header type line ('Consulting Proposal & Professional Services Agreement') is gone"
+  );
+  ok(
+    /kind === "spec" && \([\s\S]{0,300}\{companyName\}/.test(letter225),
+    "#225: the header-band company-name line only renders for the spec document, not the proposal"
+  );
+
+  ok(
+    /Dear \{contact\?\.name \|\| "Sir or Madam"\}/.test(letter225),
+    "#225: the proposal has a Dear line addressed to the contact (fallback 'Sir or Madam', matching repairs/letter)"
+  );
+
+  ok(
+    /@media print[\s\S]{0,40}@page \{[\s\S]{0,60}margin: 0;/.test(letter225),
+    "#225: the proposal document carries its own print @page rule with margin 0 (kills the browser header/footer gutter)"
+  );
+  ok(
+    !/@page[\s\S]{0,80}margin: 0\.9in 1in/.test(letter225),
+    "#225: the proposal's page-scoped CSS doesn't just restate the global 0.9in/1in @page — it actually overrides it to 0"
+  );
+  const globalPageCss225 = read225("src/app/globals.css");
+  ok(
+    /@page \{\s*size: letter;\s*margin: 0\.9in 1in;\s*\}/.test(globalPageCss225),
+    "#225: the shared global @page in globals.css is untouched (still 0.9in 1in) — the override is scoped to this document only"
+  );
+  ok(
+    letter225.includes("padding: 0.9in 1in !important"),
+    "#225: print padding is restored inside the sheet (equivalent spacing) now that @page margin is 0"
+  );
+
+  ok(
+    /<ul style=\{\{[^}]*listStyle: "disc"[^}]*\}\}>\s*\{assumptions\.map/.test(letter225),
+    "#225: the assumptions <ul> sets listStyle: disc (Tailwind v4 resets list bullets)"
+  );
+
+  ok(
+    !/renderField\(t, "consulting_proposal", "termsBlock", vars\)/.test(letter225),
+    "#225: the proposal no longer prints the template's canned termsBlock boilerplate"
+  );
+  ok(
+    /\{pay\.terms && \(/.test(letter225) || /pay\.terms &&[\s\S]{0,80}Terms<\/div>/.test(letter225),
+    "#225: the Terms heading + block print only when the quote itself has terms"
+  );
+  const templates225 = read225("src/lib/templates.ts");
+  ok(
+    templates225.includes('id: "termsBlock"') && templates225.includes('label: "Standard terms"'),
+    "#225: the termsBlock template field itself stays defined in templates.ts (unused by the proposal, not deleted)"
+  );
+
+  ok(
+    !letter225.includes("Anticipated phases:"),
+    "#225: the Anticipated phases line is removed from the proposal document"
+  );
+
+  ok(
+    /\[contact\?\.name \|\| "Customer", quote\?\.owner \|\| "Jeff Chesebro"\]/.test(letter225),
+    "#225: the acceptance block signs the contact (fallback Customer) and the estimator quote.owner (fallback Jeff Chesebro), not the two companies"
+  );
+  ok(
+    !/\[customer \|\| "Customer", companyName\]/.test(letter225),
+    "#225: the old company-vs-company acceptance pair is gone"
+  );
+}
