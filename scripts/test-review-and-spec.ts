@@ -10528,6 +10528,7 @@ seeded()
   .then(() => dayliteCalendarAsyncChecks219())
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
+  .then(() => deviceTypesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -21047,4 +21048,125 @@ import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
     "#226 scope fix: an unmapped part stored with the old Lighting fallback now resolves Unscoped");
   ok(by226.get("GASM-1")!.deviceType === null && dt226ScopeOfPart(by226.get("GASM-1")) === "Audio", "#226 parts: an assembly keeps its own scope");
   ok(dt226Parts([sym226("P-WID", "Lighting", "Widgets")] as never, cat226 as never, {})[0].deviceType === undefined, "#226 parts: without a device-type context nothing changes (back-compat callers)");
+}
+
+/* ======================================================================
+   #226 Grid device types — Task 2: the store (auto-apply on read, admin
+   entries never overwritten, idempotent re-read, preview guard, merge,
+   accept, favorites/recent caps) and the Catalog → Device types screen.
+   Blob fixtures are snapshotted and put back in the async function's
+   finally (blobs aren't CollectionName docs, so no fixture sweep).
+   ====================================================================== */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const page = read("src/app/(app)/catalog/device-types/page.tsx");
+  const client = read("src/app/(app)/catalog/device-types/device-types-client.tsx");
+  const acts = read("src/app/(app)/catalog/device-types/actions.ts");
+  const clientImports = [...client.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(page.includes('can("manage_users", user.roles)') && page.includes("loadDeviceTypeContext(") && page.includes("typeReviewRows("),
+    "#226 screen: Catalog → Device types is admin-gated and reads through the auto-applying context");
+  ok(client.startsWith('"use client"') && clientImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")),
+    "#226 screen: the client imports no store");
+  ok(["saveDeviceTypesAction", "assignDeviceTypeAction", "acceptAllSuggestionsAction", "mergeDeviceTypeAction"].every((n) => {
+    const i = acts.indexOf(`export async function ${n}`);
+    return i >= 0 && acts.slice(i, acts.indexOf("\n}\n", i)).includes('await requirePerm("manage_users")');
+  }), "#226 screen: every mapping action requires manage_users");
+  ok(client.includes("Accept all suggestions") && client.includes('r.status === "auto"') && client.includes("mergeDeviceTypeAction("),
+    "#226 screen: bulk accept, the auto chip and merge are on the screen");
+  ok(read("src/app/(app)/catalog/page.tsx").includes('href="/catalog/device-types"') && read("src/app/(app)/catalog/taxonomy-card.tsx").includes("Estimating groups &amp; trades"),
+    "#226 screen: Catalog links to Device types; the group/trade card is now 'Estimating groups & trades'");
+  ok(read("scripts/smoke-routes.ts").includes('"/catalog/device-types"'), "#226 screen: the route is in the smoke list");
+}
+
+async function deviceTypesAsyncChecks(): Promise<void> {
+  const DT = await import("../src/lib/stores/device-types");
+  const { getBlob, setBlob, setBlobKeysIfAbsent } = await import("../src/db/doc-store");
+  const { getDb: getDb226 } = await import("../src/db");
+  const { blobs: blobs226 } = await import("../src/db/doc-tables");
+  const { inArray } = await import("drizzle-orm");
+  const U = "TEST226-user";
+  const ids = ["gridTypeMap", "gridDeviceTypes", `gridFavorites:${U}`, `gridRecent:${U}`];
+  const db = await getDb226();
+  const snapshot = await db.select().from(blobs226).where(inArray(blobs226.id, ids));
+  try {
+    await db.delete(blobs226).where(inArray(blobs226.id, ids));
+    const parts = [{ category: "Truss" }, { category: "Motorized Hoist" }, { category: "Control" }, { category: "Uncategorized" }, { category: "Widgets" }];
+
+    await DT.assignDeviceType(["Motorized Hoist"], "speakers", 500);
+    const first = await DT.loadDeviceTypeContext(parts, 1000);
+    const raw1 = await getBlob<Record<string, unknown>>("gridTypeMap", {});
+    // Field by field: jsonb re-orders object keys, so never compare a stored
+    // entry to a literal with JSON.stringify.
+    const t1raw = raw1.truss as { typeKey?: string; by?: string; at?: number } | undefined;
+    ok(t1raw?.typeKey === "truss-pipe" && t1raw.by === "auto" && t1raw.at === 1000,
+      "#226 store: reading the map writes a HIGH-confidence auto entry for an unmapped category");
+    ok(first.map["motorized hoist"]?.typeKey === "speakers" && first.map["motorized hoist"]?.by === "admin",
+      "#226 store: an admin entry is never overwritten by auto (Motorized Hoist would auto-map to Hoists & Motors)");
+    ok(!("control" in raw1) && !("uncategorized" in raw1) && !("widgets" in raw1), "#226 store: low-confidence and unsuggested categories stay unmapped for review");
+    const second = await DT.loadDeviceTypeContext(parts, 2000);
+    const raw2 = await getBlob<Record<string, unknown>>("gridTypeMap", {});
+    ok(JSON.stringify(raw2) === JSON.stringify(raw1) && second.map.truss?.at === 1000,
+      "#226 store: a second read writes nothing (idempotent — the auto entry keeps its first timestamp)");
+
+    await setBlobKeysIfAbsent("gridTypeMap", { "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 3000 }, pipe: { typeKey: "truss-pipe", by: "auto", at: 3000 } });
+    const raw3 = await getBlob<Record<string, { typeKey: string; by: string }>>("gridTypeMap", {});
+    ok(raw3["motorized hoist"].by === "admin" && raw3.pipe?.typeKey === "truss-pipe",
+      "#226 store: setBlobKeysIfAbsent fills missing keys and never replaces an existing one (the atomic guard auto-apply writes through)");
+
+    const prevEnv = process.env.VERCEL_ENV;
+    process.env.VERCEL_ENV = "preview";
+    try {
+      const pv = await DT.loadDeviceTypeContext([{ category: "Dimmers" }], 4000);
+      const rawPv = await getBlob<Record<string, unknown>>("gridTypeMap", {});
+      ok(pv.map.dimmers?.typeKey === "dimming-power" && !("dimmers" in rawPv),
+        "#226 store: a Vercel preview applies auto matches in memory but never writes them (previews share production's DB)");
+    } finally {
+      if (prevEnv === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = prevEnv;
+    }
+
+    const cleared = await DT.assignDeviceType(["Truss"], null, 5000);
+    const afterClear = await DT.loadDeviceTypeContext(parts, 6000);
+    ok(cleared.ok && afterClear.map.truss?.typeKey === null && afterClear.map.truss?.by === "admin", "#226 store: an admin 'unmapped' sticks — auto never re-maps it");
+    ok(!(await DT.assignDeviceType(["Truss"], "no-such-type")).ok && !(await DT.assignDeviceType([], "speakers")).ok,
+      "#226 store: assign refuses an unknown type or an empty selection");
+
+    await DT.assignDeviceType(["Gizmos", "Widgets"], "amplifiers", 7000);
+    const merged = await DT.mergeDeviceType("amplifiers", "speakers", 8000);
+    const mm = await DT.getTypeMap();
+    const mt = await DT.getDeviceTypes();
+    ok(merged.ok && merged.moved === 2 && mm.gizmos?.typeKey === "speakers" && mm.widgets?.typeKey === "speakers" && mt.find((t) => t.key === "amplifiers")?.archived === true,
+      "#226 store: merge moves every category of a type to the target and archives the merged type");
+    ok(!(await DT.mergeDeviceType("speakers", "speakers")).ok && !(await DT.mergeDeviceType("speakers", "amplifiers")).ok,
+      "#226 store: merge refuses the same type or an archived target");
+
+    const acc = await DT.acceptAllSuggestions([{ category: "Control", desc: "ETC Ion" }, { category: "Architectural", desc: "x" }], 9000);
+    const ma = await DT.getTypeMap();
+    ok(acc === 2 && ma.control?.typeKey === "control-networking" && ma.control?.by === "admin" && ma.architectural?.typeKey === "fixtures",
+      "#226 store: Accept all suggestions applies the low-confidence ones as admin entries");
+
+    const saved = await DT.saveDeviceTypes([...mt.map((t) => (t.key === "cameras" ? { ...t, label: "PTZ & Cameras" } : t)), { label: "Fog & Haze", scope: "Lighting" }]);
+    const re = await DT.getDeviceTypes();
+    ok(saved.ok && re.find((t) => t.key === "cameras")?.label === "PTZ & Cameras" && re.some((t) => t.key === "fog-haze"), "#226 store: the type list round-trips (rename + add)");
+    ok(!(await DT.saveDeviceTypes([{ label: "", scope: "Lighting" }])).ok, "#226 store: an invalid list is refused whole");
+
+    const f1 = await DT.toggleGridFavorite(U, "P-1");
+    const f2 = await DT.toggleGridFavorite(U, "P-2");
+    ok(f1.ok && f2.ok && (await DT.getGridFavorites(U)).join() === "P-2,P-1", "#226 favorites: newest star first, per user");
+    const f3 = await DT.toggleGridFavorite(U, "P-1");
+    ok(f3.ok && !f3.on && (await DT.getGridFavorites(U)).join() === "P-2", "#226 favorites: starring again removes it");
+    ok((await DT.getGridFavorites("TEST226-other")).length === 0, "#226 favorites: another user's list is separate");
+    await setBlob(`gridFavorites:${U}`, { ids: Array.from({ length: 300 }, (_, i) => `F-${i}`) });
+    const full = await DT.toggleGridFavorite(U, "P-9");
+    ok(!full.ok && /300/.test(full.error), "#226 favorites: capped at 300 — a 301st star is refused with a message");
+
+    for (let i = 0; i < 45; i++) await DT.pushGridRecent(U, `R-${i}`);
+    await DT.pushGridRecent(U, "R-40");
+    const rec = await DT.getGridRecent(U);
+    ok(rec.length === 40 && rec[0] === "R-40" && rec[1] === "R-44" && rec.filter((x) => x === "R-40").length === 1 && !rec.includes("R-4"),
+      "#226 recent: last 40 distinct, most recent first");
+  } finally {
+    await db.delete(blobs226).where(inArray(blobs226.id, ids));
+    for (const row of snapshot) await db.insert(blobs226).values(row);
+  }
 }

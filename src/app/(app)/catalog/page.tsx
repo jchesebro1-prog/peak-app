@@ -243,6 +243,24 @@ export default async function CatalogPage({
           >
             Datasheets
           </Link>
+          {/* #226 — the Grid's device types (admin). */}
+          {isAdmin && (
+            <Link
+              href="/catalog/device-types"
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#16181d",
+                background: "#fff",
+                border: "1px solid #e4e7ec",
+                borderRadius: 9,
+                padding: "10px 15px",
+                textDecoration: "none",
+              }}
+            >
+              Device types
+            </Link>
+          )}
           <Link
             href="/catalog?new=1"
             style={{

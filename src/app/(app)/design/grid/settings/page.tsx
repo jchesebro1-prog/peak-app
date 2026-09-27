@@ -118,7 +118,7 @@ export default async function GridSettingsPage() {
   const matchedTotal = report.rows.reduce((sum, r) => sum + r.hits.length, 0);
 
   const RELATED = [
-    { label: "Catalog — Categories & trades", href: "/catalog", desc: "Category → group/trade mapping the Grid editor reads." },
+    { label: "Catalog — Device types", href: "/catalog/device-types", desc: "The ~25 device types the Grid palette, layers and legends group parts by." },
     { label: "Catalog — part ports editor", href: "/catalog", desc: "Per-part port editing, one SKU at a time." },
     { label: "Assembly Builder", href: "/design/assemblies", desc: "Multi-part subassemblies placed as one Grid device." },
     { label: "Lineset Builder", href: "/design/lineset", desc: "Line-set layouts referenced from a Grid design." },

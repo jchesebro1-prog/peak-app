@@ -6,7 +6,8 @@ import { GROUPS, TRADES, type CategoryMap, type CatalogGroup, type Trade } from 
 import { saveCategoryMapAction } from "./actions";
 
 /**
- * Admin "Categories & trades" mapping editor (punch #39, Task 2). Lists every
+ * Admin "Estimating groups & trades" mapping editor (was "Categories &
+ * trades"; #226 moved the Grid onto Device types) (punch #39, Task 2). Lists every
  * distinct part category and lets an admin assign it a beta Group and/or
  * Trade — the mapping catalog parts resolve through (see
  * lib/catalog-taxonomy.ts) without rewriting the parts themselves.
@@ -133,7 +134,7 @@ export function TaxonomyCard({
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <span style={{ fontSize: 14.5, fontWeight: 600 }}>Categories &amp; trades</span>
+            <span style={{ fontSize: 14.5, fontWeight: 600 }}>Estimating groups &amp; trades</span>
             <span
               style={{
                 fontFamily: "var(--font-mono)",
@@ -151,7 +152,7 @@ export function TaxonomyCard({
             </span>
           </div>
           <div style={{ fontSize: 12, color: "#8c919c", marginTop: 4, lineHeight: 1.45 }}>
-            Map each imported category to a beta Group and Trade so parts roll up correctly.
+            Map each imported category to a Group and Trade so estimates roll up correctly. The Grid groups parts by Device types instead.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
