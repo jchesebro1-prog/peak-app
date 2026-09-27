@@ -12,6 +12,7 @@ import { createAssignment } from "@/lib/stores/assignments";
 import { withTransaction } from "@/db";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
+import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import {
   carriesPipeline,
   firstStage,
@@ -224,6 +225,9 @@ export type Quote = {
   stage?: string | null;
   /** Append-only priced snapshots (punch item 24). Absent on pre-D84 quotes. */
   revisions?: QuoteRevision[];
+  /** Customer-preview "Show on PDF" choices (#222) — saved with the quote so the
+   *  stored PDF is reproducible. Read through normalizePdfOptions. */
+  pdfOptions?: QuotePdfOptions | null;
 };
 
 /**

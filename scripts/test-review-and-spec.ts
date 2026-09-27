@@ -10289,9 +10289,9 @@ import { renderField as trvRenderField } from "@/lib/templates";
       !!getTemplateDef("inspection_proposal")?.fields.some((fl) => fl.id === "priceLineFly"),
     "#208: the fly price line is an editable template field on both proposals");
   const trvLetters: Array<[string, RegExp]> = [
-    ["src/app/(app)/flame-tests/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
-    ["src/app/(app)/inspections/letter/page.tsx", /desc: TRAVEL_FLY_LINE/],
-    ["src/app/(app)/repairs/letter/page.tsx", /flyTravelSentence\(/],
+    ["src/app/(app)/flame-tests/letter/letter-view.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/inspections/letter/letter-view.tsx", /desc: TRAVEL_FLY_LINE/],
+    ["src/app/(app)/repairs/letter/letter-view.tsx", /flyTravelSentence\(/],
     ["src/lib/renewal-outreach.ts", /flyTravelSentence\(/],
   ];
   for (const [f, line] of trvLetters) {
@@ -10519,6 +10519,7 @@ seeded()
   .then(() => inboxTask215AsyncChecks())
   .then(() => wireLabor231AsyncChecks())
   .then(() => gridAccessoriesAsyncChecks230())
+  .then(() => quotePdfOptions222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -21067,9 +21068,9 @@ import {
   ok(!para2.includes("hand-set"), "#217 renewal: no hand-set sentence when last year's price was auto");
 
   for (const f of [
-    "src/app/(app)/flame-tests/letter/page.tsx",
-    "src/app/(app)/inspections/letter/page.tsx",
-    "src/app/(app)/repairs/letter/page.tsx",
+    "src/app/(app)/flame-tests/letter/letter-view.tsx",
+    "src/app/(app)/inspections/letter/letter-view.tsx",
+    "src/app/(app)/repairs/letter/letter-view.tsx",
     "src/lib/renewal-outreach.ts",
   ]) {
     const s = src217(f);
@@ -23377,4 +23378,57 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
     { id: "d", status: "lost", updatedAt: 4 },
   ]);
   ok(gq.open.map((q) => q.id).join(",") === "c,a" && gq.history.map((q) => q.id).join(",") === "d,b", "#220 groupPortalQuotes: sent + own drafts Open, won + lost History, newest first");
+}
+
+/* ============ #222 Task 2 — one customer document, signed print routes, saved pdfOptions ============ */
+import { quoteDocumentDataFor } from "@/lib/quote-pdf/quote-document-data";
+import { create as q222Create, get as q222Get, update as q222Update } from "@/lib/stores/quotes";
+import { fixtureId as fixtureId222, registerFixture as registerFixture222 } from "./test-fixtures";
+{
+  const src222 = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const qd = src222("src/app/(app)/estimator/quote-document.tsx");
+  ok(!/^\s*["']use client["']/.test(qd) && !/\buse(State|Effect|Memo|Ref|Transition)\(/.test(qd) && !/onClick=/.test(qd), "#222 QuoteDocument: no client directive, no hooks, no handlers — the print route renders it on the server");
+  const pd = src222("src/app/(app)/estimator/preview-doc.tsx");
+  ok(!pd.includes('className="est-doc"') && !pd.includes("customerLines("), "#222 PreviewDoc carries no copy of the customer document (it lives in QuoteDocument)");
+  ok(/\|print\/\|/.test(src222("src/middleware.ts")), "#222 middleware: /print/ is exempt from the team login (it checks its own token)");
+  for (const p of ["src/app/print/quote/[id]/page.tsx", "src/app/print/letter/[kind]/[id]/page.tsx"]) {
+    const s = src222(p);
+    ok(s.indexOf("verifyPrintToken(") > -1 && s.indexOf("verifyPrintToken(") < s.indexOf("getQuote("), `#222 ${p}: the token is checked before any quote is read`);
+  }
+  for (const k of ["flame-tests", "repairs", "inspections"]) {
+    const view = src222(`src/app/(app)/${k}/letter/letter-view.tsx`);
+    const page = src222(`src/app/(app)/${k}/letter/page.tsx`);
+    ok(!view.includes("requireUser") && page.includes("requireUser()") && /LetterView id=\{id\}/.test(page), `#222 ${k} letter: the page keeps the team login; the shared view has none`);
+  }
+}
+{
+  const q = {
+    id: "Q-9", name: "Stage package", customer: "Old Name", customerId: "co-1", locationId: "st-2", contactName: "Pat Lee",
+    quoteNote: "Hi", assumptions: "A", owner: "Jeff Chesebro", updatedAt: 1234, createdAt: 1000, revisions: [{}, {}],
+    spec: { sections: [] }, vendorQuotes: [], paymentTerms: "Net 30", pdfOptions: { detail: "sectioned", pdfPrices: false },
+  };
+  const cust = {
+    name: "Civic Center",
+    locations: [{ id: "st-1", label: "Hall", city: "X", primary: true }, { id: "st-2", label: "Theater", city: "Denver", primary: false }],
+    contacts: [{ name: "Pat Lee", role: "TD", email: "", primary: false }],
+  };
+  const d = quoteDocumentDataFor(q as never, cust as never, { companyName: "Peak", logoDark: null });
+  ok(d.custName === "Civic Center" && d.venueLabel === "Theater — Denver" && d.hasAttn && d.attnLine === "Pat Lee · TD", "#222 quoteDocumentDataFor: customer, venue and attn exactly as the Estimator preview shows them");
+  ok(d.revNum === 2 && d.revDateMs === 1234 && d.detail === "sectioned" && d.pdfPrices === false && d.pdfQty === true && d.paymentTerms === "Net 30", "#222 quoteDocumentDataFor: revision, date, saved pdfOptions, terms");
+  ok(d.t.grand === 0 && d.sections.length === 0 && d.ownerName === "Jeff Chesebro" && d.companyName === "Peak", "#222 quoteDocumentDataFor: totals from saved sections, owner, company");
+  const bare = quoteDocumentDataFor({ id: "Q-10", name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 } as never, null, { companyName: "", logoDark: null });
+  ok(
+    bare.custName === "Walk-in" && bare.venueLabel === "" && !bare.hasAttn && bare.revNum === 1 && bare.paymentTerms === "Unknown" &&
+      bare.companyName === "Peak Systems Group" && bare.ownerName === "Peak Systems Group",
+    "#222 quoteDocumentDataFor: an unlinked quote falls back without inventing data"
+  );
+}
+
+async function quotePdfOptions222AsyncChecks(): Promise<void> {
+  const id = fixtureId222("222", "opts");
+  registerFixture222("quotes", id);
+  await q222Create({ id, name: "#222 opts", customer: "Spec fixture", owner: "spec" });
+  await q222Update(id, { pdfOptions: { ...DEFAULT_PDF_OPTIONS, detail: "sectioned", pdfTerms: false } });
+  const back = normalizePdfOptions((await q222Get(id))?.pdfOptions);
+  ok(back.detail === "sectioned" && back.pdfTerms === false && back.pdfQty === true, "#222 pdfOptions: saved on the quote and read back");
 }

@@ -7,8 +7,10 @@ import { authConfig } from "./auth.config";
  * server-side (see src/lib/session.ts) — middleware is the UX gate, not the
  * only gate. /portal has its OWN cookie auth (magic-link grants, IDEAS #47)
  * enforced inside every portal page/action via portalSession() — it is
- * exempted here so customers never see the team login. /api/gmail/sync is the
- * cron endpoint (D74) — no session exists on a cron call, so it is exempted
+ * exempted here so customers never see the team login. /print/* is the
+ * headless-Chrome print route for saved quote PDFs (#222); it checks its own
+ * 120 s signed token and 404s without one. /api/gmail/sync is the cron
+ * endpoint (D74) — no session exists on a cron call, so it is exempted
  * here and guards itself with a CRON_SECRET bearer check instead.
  * /api/native/auth/* (start, exchange) run before a session exists in the
  * WebView — see docs/superpowers/specs/2026-09-21-native-auth-handoff-design.md.
@@ -22,6 +24,6 @@ export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
+    "/((?!api/auth|api/native/auth|api/leads/intake|api/gmail/sync|api/recordings/upload|login|lead-intake|portal|print/|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|icons|images).*)",
   ],
 };

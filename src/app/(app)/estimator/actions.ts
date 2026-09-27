@@ -40,6 +40,7 @@ import type { CatalogSearch, PaymentTerms, SpecMob, SpecSection, VendorQuote } f
 import { blobEnabled, dataUrlToBytes, putBlob, safeName } from "@/lib/blob";
 import { VENDOR_QUOTE_BLOB_PREFIX, ownsVendorQuoteBlobPath } from "@/lib/vendor-quote-file";
 import { totals } from "./pricing";
+import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { activeUsers } from "@/lib/users";
 
 export async function saveEstimatorCustomPartAction(input: {
@@ -135,6 +136,8 @@ export type SavePayload = {
   /** Always sent in full (#143) — the stored list is replaced, so removing a
    *  vendor quote in the builder actually removes it from the doc. */
   vendorQuotes: VendorQuote[];
+  /** #222 — the preview's Show-on-PDF choices; the saved PDF prints with them. */
+  pdfOptions: QuotePdfOptions;
   /** #160 / D205 — sent on the create save only: the draft this quote replaces. */
   replaces?: string;
 };
@@ -333,6 +336,7 @@ export async function saveQuoteAction(
     margin: payload.margin,
     source: "estimator",
     spec: { sections: payload.sections, mobs: payload.mobs },
+    pdfOptions: normalizePdfOptions(payload.pdfOptions),
   };
   let q: Quote | null = null;
   let statusError: string | undefined;
@@ -440,6 +444,7 @@ export async function saveQuoteAction(
       paymentTerms: payload.paymentTerms,
       category: (payload.category || "").trim(),
       vendorQuotes: storedVendorQuotes,
+      pdfOptions: normalizePdfOptions(payload.pdfOptions),
     } as QuotePatch);
     if (payload.status !== "draft") {
       // Punch #60: setStatus's approval gate now applies here too. A brand

@@ -21,6 +21,7 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
 import { blobEnabled } from "@/lib/blob";
+import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
@@ -124,6 +125,7 @@ async function initialFrom(
       sections: null,
       vendorQuotes: [],
       replaces: "",
+      pdfOptions: { ...DEFAULT_PDF_OPTIONS },
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -182,6 +184,7 @@ async function initialFrom(
     sections,
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
+    pdfOptions: normalizePdfOptions(q.pdfOptions),
   };
 }
 

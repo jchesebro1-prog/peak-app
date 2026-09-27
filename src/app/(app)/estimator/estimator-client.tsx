@@ -78,6 +78,7 @@ import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { fixtureBomLine } from "./fixture-bom";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
 import { ACCENT_INK, ACCENT_SOFT } from "./est-ui";
+import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { saveEstimatorCustomPartAction } from "./actions";
 import SectionCard, { type InputKind } from "./section-card";
 import { parseMoney, type ImportedMaterial } from "./material-csv";
@@ -480,13 +481,18 @@ export default function EstimatorClient({
   const categorySaved = useRef(initial.category);
   const [revNum, setRevNum] = useState(initial.revNum);
   const [revDateMs, setRevDateMs] = useState(initial.revDateMs);
-  const [pdfQty, setPdfQty] = useState(true);
-  const [pdfNotes, setPdfNotes] = useState(true);
-  const [pdfCover, setPdfCover] = useState(true);
-  const [pdfTerms, setPdfTerms] = useState(true);
-  const [pdfOptions, setPdfOptions] = useState(true);
-  const [pdfPrices, setPdfPrices] = useState(true);
-  const [detail, setDetail] = useState<"itemized" | "sectioned">("itemized");
+  const [pdfQty, setPdfQty] = useState(initial.pdfOptions.pdfQty);
+  const [pdfNotes, setPdfNotes] = useState(initial.pdfOptions.pdfNotes);
+  const [pdfCover, setPdfCover] = useState(initial.pdfOptions.pdfCover);
+  const [pdfTerms, setPdfTerms] = useState(initial.pdfOptions.pdfTerms);
+  const [pdfOptions, setPdfOptions] = useState(initial.pdfOptions.pdfOptions);
+  const [pdfPrices, setPdfPrices] = useState(initial.pdfOptions.pdfPrices);
+  const [detail, setDetail] = useState<"itemized" | "sectioned">(initial.pdfOptions.detail);
+  /** #222 — the Show-on-PDF choices, saved with the quote (Quote.pdfOptions). */
+  const pdfOpts = useMemo<QuotePdfOptions>(
+    () => ({ detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions }),
+    [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions]
+  );
   const [activeId, setActiveId] = useState<string | null>(
     () => (initial.sections ?? freshSections())[0]?.id ?? null
   );
@@ -789,6 +795,7 @@ export default function EstimatorClient({
           sections,
           mobs,
           vendorQuotes,
+          pdfOptions: pdfOpts,
         });
         // #181: adopt the id whenever the server hands one back, even when
         // `ok` is false — the create branch mints the quote FIRST and only
