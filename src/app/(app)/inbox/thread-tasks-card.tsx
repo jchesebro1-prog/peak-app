@@ -7,20 +7,24 @@
  *  localDayKey/dayKeyDiff helpers the calendar uses. dueAt is stored as noon
  *  UTC (the project's "picked date" convention); comparing it to the
  *  server's own clock instant used to call a task due today "overdue" hours
- *  early in every US timezone. */
-import { useState, useTransition } from "react";
+ *  early in every US timezone. The label is computed only after mount (same
+ *  `mounted` gate as calendar-client) so SSR never disagrees about "today". */
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ReaderVM } from "./types";
 import { completeThreadTaskAction } from "./task-actions";
 import { dayKeyDiff, localDayKey } from "@/lib/calendar-tasks";
 import { CARD, H, MUTED } from "./sidebar-styles";
 
-function dueInfo(dueAt: number | null): { label: string; overdue: boolean } {
+const emptySubscribe = () => () => {};
+
+function dueInfo(dueAt: number | null, mounted: boolean): { label: string; overdue: boolean } {
   if (dueAt == null) return { label: "no date", overdue: false };
+  const dateLabel = new Date(dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (!mounted) return { label: `due ${dateLabel}`, overdue: false };
   const today = localDayKey(Date.now());
   const dueKey = localDayKey(dueAt);
   const overdue = dayKeyDiff(dueKey, today) > 0;
-  const dateLabel = new Date(dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return { label: overdue ? `overdue · ${dateLabel}` : `due ${dateLabel}`, overdue };
 }
 
@@ -35,6 +39,11 @@ export default function ThreadTasksCard({
   isEmail: boolean;
 }) {
   const router = useRouter();
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
   const [pending, start] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +73,7 @@ export default function ThreadTasksCard({
         </div>
       ) : (
         tasks.map((t) => {
-          const { label, overdue } = dueInfo(t.dueAt);
+          const { label, overdue } = dueInfo(t.dueAt, mounted);
           return (
             <label
               key={t.id}
