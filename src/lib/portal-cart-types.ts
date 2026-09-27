@@ -1,5 +1,5 @@
 /**
- * Portal cart shapes (#242). Pure types — the `portal_carts` store (Task 8)
+ * Portal cart shapes (#245). Pure types — the `portal_carts` store (Task 8)
  * persists these and the server pricer (src/lib/portal-pricing.ts) reads
  * them. A cart never carries a price: every figure is computed on the server
  * from the catalog index each time the cart is priced.

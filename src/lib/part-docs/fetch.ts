@@ -59,7 +59,7 @@ const PART_IMAGE_ERROR_TEXT: Required<GuardedFetchErrorText> = {
   network: "Could not reach that link.",
 };
 
-/** "Add image from URL" (#242) — the same guarded download as
+/** "Add image from URL" (#245) — the same guarded download as
  *  fetchDocumentBytes, over the same guardedFetchBytes core, but with an
  *  image accept header and the tighter MAX_PART_IMAGE_BYTES cap. The caller
  *  still sniffs the real bytes (sniffImageType) — a server's Content-Type

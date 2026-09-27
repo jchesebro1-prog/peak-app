@@ -197,7 +197,7 @@ export async function attachExistingDocumentAction(documentId: string, skus: str
 /** Mark (or unmark) parts as needing no document of one kind. */
 export async function setNotNeededAction(skus: string[], kind: PartDocKind, on: boolean): Promise<DocActionResult<{ changed: number }>> {
   await requireUser();
-  // Not-needed is a coverage-slot concept only (#242) — narrows kind to
+  // Not-needed is a coverage-slot concept only (#245) — narrows kind to
   // DocSlotKind for setDocNotNeeded below; an image is never "not needed".
   if (!isDocSlotKind(kind)) return { ok: false, error: "Pick Datasheet or Spec sheet." };
   const changed = await setDocNotNeeded((skus || []).slice(0, MAX_SKUS_PER_CALL), kind, !!on);
@@ -348,7 +348,7 @@ export async function prefillFromDavinciAction(): Promise<DocActionResult<{ summ
 }
 
 /** Hide/show (or set a single explicit `sort` on) one image in a part's
- *  gallery (#242). `setDocumentLinkDisplay` itself refuses a non-image
+ *  gallery (#245). `setDocumentLinkDisplay` itself refuses a non-image
  *  link, so a bad documentId/sku pair or a datasheet/spec-sheet id passed
  *  here both come back as the same "not linked" refusal. A full gallery
  *  reorder goes through `setImageOrderAction` below (one round trip), not
@@ -370,7 +370,7 @@ export async function setImageDisplayAction(input: { documentId: string; sku: st
   return { ok: true };
 }
 
-/** Reassign a part's whole image-gallery order in one call (#242 review fix
+/** Reassign a part's whole image-gallery order in one call (#245 review fix
  *  M3) — the part editor's ↑/↓ send the full reordered id list here once,
  *  instead of one setImageDisplayAction round trip per image. Refuses if
  *  any id isn't currently a live image link of `sku` (setImageOrder). */
@@ -391,7 +391,7 @@ export async function setImageOrderAction(input: { sku: string; documentIds: str
   return { ok: true };
 }
 
-/** "Add image from URL" (#242) — download it through the same guarded fetch
+/** "Add image from URL" (#245) — download it through the same guarded fetch
  *  (SSRF guard, redirect re-validation) `fetchSlot` uses for datasheets, but
  *  with an image accept header and the tighter 10 MB image cap
  *  (fetchImageBytes); check the real bytes with `sniffImageType` (a
@@ -431,7 +431,7 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
     by: user.name,
   });
   if (!doc) {
-    // #242 review fix M7: createDocument only fails on an id collision
+    // #245 review fix M7: createDocument only fails on an id collision
     // (vanishingly unlikely — newDocumentId is random), but when it does,
     // the blob just stored under this fresh id is nobody's file — delete it
     // rather than leave it orphaned.
@@ -448,7 +448,7 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
 }
 
 /**
- * Admin: "Datasheet thumbnails" (#242, spec §5/§1.1). Every quoted part
+ * Admin: "Datasheet thumbnails" (#245, spec §5/§1.1). Every quoted part
  * (the same scope as this page's rows, Labor excluded) that has its own
  * blob-backed datasheet and no image yet gets one rendered from that
  * datasheet's page 1 — one PDF renders once and attaches to every SKU that

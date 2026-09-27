@@ -88,7 +88,7 @@ export async function submitPortalRequest(formData: FormData): Promise<void> {
 }
 
 /**
- * Quote acceptance (IDEAS #47 P3 / #242 Task 13, spec §4.4): the customer
+ * Quote acceptance (IDEAS #47 P3 / #245 Task 13, spec §4.4): the customer
  * names how they'll purchase, an optional note (never a card number) and an
  * optional PO file — a human still confirms by marking the quote Won, which
  * runs the normal accepted-quote spawn machinery. Every tenant/eligibility
@@ -108,7 +108,7 @@ export async function acceptPortalQuote(input: {
   return r;
 }
 
-/** Refresh pricing on an expired firm portal quote (#242 Task 13, spec §4.5). */
+/** Refresh pricing on an expired firm portal quote (#245 Task 13, spec §4.5). */
 export async function refreshPortalQuote(quoteId: string): Promise<{ ok: true; mode: "firm" | "review" } | { ok: false; error: string }> {
   const session = await portalSession().catch(() => null);
   const r = await refreshPortalQuoteFor(session, quoteId);
@@ -117,7 +117,7 @@ export async function refreshPortalQuote(quoteId: string): Promise<{ ok: true; m
 }
 
 /**
- * Copy to new quote (#242 Task 13, spec §4.6) — appends the quote's lines to
+ * Copy to new quote (#245 Task 13, spec §4.6) — appends the quote's lines to
  * the grant's cart, then lands on the cart page to review/Generate. A plain
  * `<form action>` (no client JS needed), so a refusal redirects with a query
  * param instead of returning a value — matches `submitPortalRequest` above.

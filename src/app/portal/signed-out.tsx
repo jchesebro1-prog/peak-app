@@ -1,6 +1,6 @@
 /**
  * The portal's signed-out / bad-link card (IDEAS #47), shared by `/portal`
- * and `/portal/catalog` (#242). Server component, no data.
+ * and `/portal/catalog` (#245). Server component, no data.
  */
 export function PortalSignedOut({ companyName, denied = false }: { companyName: string; denied?: boolean }) {
   return (

@@ -7,7 +7,7 @@ import type { CurtainRequest as CurtainInputs } from "@/lib/portal-cart-types";
 import { AddedNote, PreviewHint, useAddToQuote } from "./panel-ui";
 
 /**
- * "Request curtain pricing" (#242 Task 11, spec §3.3) — the Estimator curtain
+ * "Request curtain pricing" (#245 Task 11, spec §3.3) — the Estimator curtain
  * configurator's inputs (name, fabric, qty, width, height, fullness), with
  * NO price anywhere: the fabric list is names only, `curtainAreas` gives a
  * fabric-area hint, and the line lands on the quote as price on request.

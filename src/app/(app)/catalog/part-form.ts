@@ -23,7 +23,7 @@ export type OptionalPartFields = {
   curtainAreaRate?: number;
   /** #227 — Fabric parts only: bolt width in inches. */
   boltWidthIn?: number;
-  /** #242 Task 5 — an explicit Show/Hide portal-visibility override; Auto is
+  /** #245 Task 5 — an explicit Show/Hide portal-visibility override; Auto is
    *  stored as absent (undefined clears through mergeUpsert). */
   portalVisibility?: "show" | "hide" | undefined;
 };

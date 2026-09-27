@@ -9,7 +9,7 @@ import { PANEL_CSS } from "../panel-css";
 import { money, QtyStepper } from "../panel-ui";
 
 /**
- * The portal cart (#242 Task 12, spec §3.4). Everything shown is the server's
+ * The portal cart (#245 Task 12, spec §3.4). Everything shown is the server's
  * sell-only view (`CustomerQuoteView`); every edit is a server action followed
  * by a refresh, so the numbers on screen are always the server's. Freight
  * reads as an amount + the venue's miles — never a %.

@@ -11,7 +11,7 @@ import { addImageFromUrlAction, setImageDisplayAction, setImageOrderAction } fro
 import SlotCell, { docHref } from "./documents/slot-cell";
 import { uploadNewDocument } from "./documents/upload-client";
 
-/** Gallery source label (#242) — what the brief's spec calls "Upload · From
+/** Gallery source label (#245) — what the brief's spec calls "Upload · From
  *  URL · Datasheet thumbnail"; davinci/legacy fall back to their own name
  *  since an image rarely carries either today. */
 const IMAGE_SOURCE_LABEL: Record<PartDocumentSource, string> = {
@@ -65,13 +65,13 @@ function ImagesGallery({ sku, images }: { sku: string; images: PartDocsImage[] }
     });
   };
 
-  /** Persist a ↑/↓ move in ONE round trip (#242 review fix M3) — the full
+  /** Persist a ↑/↓ move in ONE round trip (#245 review fix M3) — the full
    *  reordered id list, not one setImageDisplayAction call per image. */
   const persistOrder = (next: PartDocsImage[]) => {
     run("Saving…", () => setImageOrderAction({ sku, documentIds: next.map((i) => i.id) }));
   };
 
-  // #242 review fix: a datasheet-render thumbnail always sorts after every
+  // #245 review fix: a datasheet-render thumbnail always sorts after every
   // real image (compareImages, types.ts) — `images` therefore arrives with
   // every real image first, then a contiguous run of auto ones. ↑/↓ may
   // move freely WITHIN either group, but never across that boundary: a real

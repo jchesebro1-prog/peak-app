@@ -17,7 +17,7 @@ import { CatalogClient } from "./catalog-client";
 export const dynamic = "force-dynamic";
 
 /**
- * Portal CATALOG (#242 Task 10, spec §3.1) — search, Manufacturer and
+ * Portal CATALOG (#245 Task 10, spec §3.1) — search, Manufacturer and
  * Category facets (counted over the current results, so either narrows the
  * other), 48 tiles per page with numbered paging, and a "Parts you've quoted
  * before" shelf when nothing is searched. All URL state
@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
  * or a signed-in team member's `?preview=`). Tiles are sell-only `TileVM`s —
  * the catalog index (which carries cost) never leaves the server.
  *
- * #242 Task 11: an open `?part=` sidebar is rendered here from the resolved
+ * #245 Task 11: an open `?part=` sidebar is rendered here from the resolved
  * viewer (so a team preview shows it fully, adds disabled); every render
  * counts against a 240-a-minute limit per grant (or previewed customer).
  */

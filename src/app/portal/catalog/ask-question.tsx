@@ -6,7 +6,7 @@ import { askAboutPart } from "./actions";
 import { PreviewHint } from "./panel-ui";
 
 /**
- * "Ask a question about this part" (#242 Task 11, spec §3.2 item 7). Name and
+ * "Ask a question about this part" (#245 Task 11, spec §3.2 item 7). Name and
  * email come from the grant (shown, not editable — the server uses the
  * session's, never these); the question lands in the Leads SLA queue.
  */

@@ -1,4 +1,4 @@
-// SERVER ONLY — Generate: a portal cart becomes a real quote (#242 Task 12,
+// SERVER ONLY — Generate: a portal cart becomes a real quote (#245 Task 12,
 // spec §4.2/§4.3/§8). The "use server" wrapper in
 // src/app/portal/catalog/actions.ts reads the grant cookie and passes the
 // session in; nothing here takes a customer id, a venue's owner or a price
@@ -196,7 +196,7 @@ const ACCEPT_FAIL_COPY = "Couldn't accept this quote — try again.";
 export const ACCEPT_LIMIT = 10;
 const ACCEPT_WINDOW_MS = 3_600_000;
 
-/** #242 Task 13 (spec §4.4). Every guard refuses BEFORE any write; the card
+/** #245 Task 13 (spec §4.4). Every guard refuses BEFORE any write; the card
  *  check runs even for a request that would otherwise be refused for
  *  another reason first, so callers always see the reason a human reads
  *  first (not-sent / accepted / expired take priority — a customer who
@@ -269,7 +269,7 @@ export const REFRESH_LIMIT = 10;
 const REFRESH_WINDOW_MS = 3_600_000;
 
 /**
- * Refresh pricing on an expired firm portal quote (#242 Task 13, spec §4.5).
+ * Refresh pricing on an expired firm portal quote (#245 Task 13, spec §4.5).
  * Rebuilds a transient cart from the quote's OWN spec (cartLinesFromSpec —
  * the same mapping `copyToCart` uses) + its saved venue, re-prices every
  * line at current cost/tier/freight, and writes the result back as a new
@@ -356,7 +356,7 @@ const COPY_WINDOW_MS = 3_600_000;
 const COPY_RATE_COPY = "You've copied several quotes this hour — try again later, or call us.";
 
 /**
- * Copy to new quote (#242 Task 13, spec §4.6): rebuilds this quote's lines
+ * Copy to new quote (#245 Task 13, spec §4.6): rebuilds this quote's lines
  * (cartLinesFromSpec) and re-prices them (the same check `priceCart` uses
  * for "No longer available" on the cart page) so a line whose part is now
  * hidden/deleted is skipped — never added unpriceable. Appends to the
@@ -417,7 +417,7 @@ export const DECLINE_NO_ACCEPTANCE_COPY = "This quote has no portal acceptance t
 const DECLINE_FAIL_COPY = "Couldn't decline this quote — try again.";
 
 /**
- * Staff decline (#242 Task 13, spec §4.4): clears the customer's acceptance
+ * Staff decline (#245 Task 13, spec §4.4): clears the customer's acceptance
  * and stamps `portalDecline`, shown back to them in the portal; the quote
  * stays `sent` (never a fifth status) so they can simply accept again. Takes
  * no session — the caller (estimator/actions.ts declinePortalAcceptanceAction)

@@ -256,7 +256,7 @@ export async function navData(me: string): Promise<{
       color: "#1f7a52",
     }))
   );
-  // #242 (spec §8.2) — two derived groups over the same quotes already
+  // #245 (spec §8.2) — two derived groups over the same quotes already
   // fetched above; no extra table scan, no writer, no Leads-queue record.
   const { review: portalReviewItems, generated: portalNewItems } = portalBellGroups(
     quotes,

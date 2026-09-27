@@ -18,7 +18,7 @@ export const CONTENT_TYPES: Record<SniffedType, string> = {
 };
 
 /** What each slot accepts: a datasheet is a PDF; a spec sheet is PDF or Word
- *  (§2.2); an image is PNG, JPEG, or WebP (#242) — never SVG. */
+ *  (§2.2); an image is PNG, JPEG, or WebP (#245) — never SVG. */
 export const ALLOWED_TYPES: Record<PartDocKind, readonly SniffedType[]> = {
   datasheet: ["pdf"],
   specsheet: ["pdf", "doc", "docx"],
@@ -81,7 +81,7 @@ export const SNIFF_BYTES = 64 * 1024;
 
 /**
  * What the bytes really are, for the three image kinds part documents
- * accept (#242): PNG (the 8-byte PNG signature), JPEG (the JFIF/EXIF SOI
+ * accept (#245): PNG (the 8-byte PNG signature), JPEG (the JFIF/EXIF SOI
  * marker `FF D8 FF`), or WebP (a RIFF container whose form type is `WEBP`
  * at offset 8). An SVG (text, not one of these signatures) or any other
  * file never sniffs as an image here — SVG is never an accepted image type.
@@ -108,7 +108,7 @@ export function checkDocumentBytes(kind: PartDocKind, bytes: Uint8Array): { ok: 
 }
 
 /** By file name only (no bytes to sniff) — used for a history entry's
- *  content type, which the team route serves by name alone (#242: png/jpg/
+ *  content type, which the team route serves by name alone (#245: png/jpg/
  *  jpeg/webp join the pre-existing doc/docx/pdf set). */
 export function contentTypeForFileName(fileName: string): string {
   const n = fileName.toLowerCase();
@@ -120,7 +120,7 @@ export function contentTypeForFileName(fileName: string): string {
   return CONTENT_TYPES.pdf;
 }
 
-/** jpg and jpeg are the same sniffed type (#242 review fix) — a name
+/** jpg and jpeg are the same sniffed type (#245 review fix) — a name
  *  already ending in either spelling is left alone rather than renamed to
  *  the sniffed type's own spelling (a file the user or a URL called
  *  "photo.jpg" must stay "photo.jpg" when its bytes sniff as "jpeg").
@@ -164,7 +164,7 @@ export function fileNameForFetched(contentDisposition: string | null, url: strin
   if (!name) {
     try {
       const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
-      // #242 review fix M1: an image URL's own basename (e.g.
+      // #245 review fix M1: an image URL's own basename (e.g.
       // ".../hero-shot.jpg") is a real name — recognise it, not just the
       // doc/pdf extensions this matched before images existed.
       if (/\.(pdf|docx?|png|jpe?g|webp)$/i.test(last)) name = last;

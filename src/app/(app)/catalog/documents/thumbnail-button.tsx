@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { renderThumbnailsAction } from "./actions";
 
 /**
- * Admin-only (#242, spec §5): render page 1 of each quoted part's own
+ * Admin-only (#245, spec §5): render page 1 of each quoted part's own
  * datasheet PDF to a PNG thumbnail, for every part with a stored datasheet
  * and no image yet. Loops the action — like the Datasheets fetch loop
  * (documents-client.tsx) — until nothing is left within this run's reach,

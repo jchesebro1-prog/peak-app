@@ -19,7 +19,7 @@ import {
 } from "@/lib/portal-catalog-view";
 
 /**
- * Portal catalog browser (#242 Task 10, spec §3.1). Everything is URL state:
+ * Portal catalog browser (#245 Task 10, spec §3.1). Everything is URL state:
  * the search box replaces `?q=` after 250 ms of quiet, facet checkboxes and
  * the pager push new URLs, and the server page renders each result set. Tiles
  * are sell-only `TileVM`s. A part tile's Add puts one on the quote (spec

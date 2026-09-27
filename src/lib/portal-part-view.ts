@@ -2,7 +2,7 @@ import type { IndexedFixture } from "@/lib/portal-catalog-index";
 import type { TileVM } from "@/lib/portal-catalog-view";
 
 /**
- * Portal part sidebar — pure, client-safe shapes + helpers (#242 Task 11,
+ * Portal part sidebar — pure, client-safe shapes + helpers (#245 Task 11,
  * spec §3.2 / §8.3). No server imports (type-only above), so the sidebar
  * components use it directly.
  *

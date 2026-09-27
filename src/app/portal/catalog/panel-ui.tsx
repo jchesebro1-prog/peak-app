@@ -7,7 +7,7 @@ import { PREVIEW_ADD_HINT } from "@/lib/portal-part-view";
 import { addToCart } from "./actions";
 
 /**
- * Shared pieces of the catalog's part sidebar and curtain panel (#242 Task
+ * Shared pieces of the catalog's part sidebar and curtain panel (#245 Task
  * 11): money format, the doc URL, the qty stepper, the add-to-quote hook
  * and the "Added — Quote (N)" note. Styles live in PANEL_CSS (panel-css.ts).
  */

@@ -1,5 +1,5 @@
 /**
- * Customer visibility of a catalog part (#242 Task 5, spec §1.3). Pure — no
+ * Customer visibility of a catalog part (#245 Task 5, spec §1.3). Pure — no
  * store access — so it's exercised directly by the harness.
  *
  * A part is always `quotable` unless a human explicitly hid it: staff can
@@ -32,7 +32,7 @@ export function normalizeVisibility(v: unknown): PortalVisibility {
   return v === "show" || v === "hide" ? v : "auto";
 }
 
-/** Catalog categories that are internal rates, not products (#242 Task 11
+/** Catalog categories that are internal rates, not products (#245 Task 11
  *  controller decision): the "Labor" rows carry labor and travel rates. */
 const INTERNAL_CATEGORIES = new Set(["labor"]);
 

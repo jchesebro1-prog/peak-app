@@ -108,7 +108,7 @@ import { PortalPanel } from "./portal-panel";
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 const TAX_RATE_PCT = 0;
 
-/** #242: freightPct comes from the caller — this runs at module scope (used by
+/** #245: freightPct comes from the caller — this runs at module scope (used by
  *  a lazy useState initializer before props are in scope), so it can't read
  *  the freight rule itself. */
 const freshSections = (freightPct: number): SpecSection[] => [
@@ -376,7 +376,7 @@ export default function EstimatorClient({
   portalStatusError,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
-  /** #242: the freight default for THIS load — computed once from the props
+  /** #245: the freight default for THIS load — computed once from the props
    *  the server already seeded (no venue picked yet ⇒ base %; a picked venue
    *  reads its precomputed travel entry, seeded by page.tsx the same way
    *  travelSeen below is). Only used to seed the two initializers below and
@@ -713,7 +713,7 @@ export default function EstimatorClient({
     });
   };
 
-  /** #242 — the freight % a NEW/untouched system should carry right now:
+  /** #245 — the freight % a NEW/untouched system should carry right now:
    *  base until a venue is picked, then the distance rule. Paired 1:1 with
    *  what's actually been applied to `sections` (see reapplyAutoFreight
    *  below) so the "venue not located" hint below the slider never flashes
@@ -1225,7 +1225,7 @@ export default function EstimatorClient({
     let v = parseFloat(val);
     if (isNaN(v) || v < 0) v = 0;
     if (v > 15) v = 15;
-    // #242: a hand-set freight % opts this section out of the distance-rule
+    // #245: a hand-set freight % opts this section out of the distance-rule
     // auto-updates a later venue change would otherwise re-apply.
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, freightPct: v, freightAuto: false } : s)));
   };

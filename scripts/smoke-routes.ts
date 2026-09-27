@@ -146,19 +146,19 @@ const ROUTES = [
   "/design-studio",
   "/consulting/quote",
   "/flame-tests/today",
-  // #242 portal catalog: signed out (the team session is not a portal grant)
+  // #245 portal catalog: signed out (the team session is not a portal grant)
   // renders the signed-out card; a team preview renders the full browse page
   // (search + facets + tiles); the retired /portal/estimate redirects here.
   "/portal/catalog",
   "/portal/catalog?preview=lakefront",
   "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
-  // #242 Task 11: the part sidebar renders server-side from ?part= — a real
+  // #245 Task 11: the part sidebar renders server-side from ?part= — a real
   // SKU, and an unknown key ("This item isn't available.").
   "/portal/catalog?preview=lakefront&q=velour&part=RB-EN-22",
   "/portal/catalog?preview=lakefront&part=no-such-part",
   "/portal/estimate",
   "/portal/estimate?preview=lakefront",
-  // #242 Task 12: the cart page — signed out, and a team preview (read-only);
+  // #245 Task 12: the cart page — signed out, and a team preview (read-only);
   // /portal with a Generate banner flag (the quote id isn't this customer's,
   // so the banner names no number).
   "/portal/catalog/quote",

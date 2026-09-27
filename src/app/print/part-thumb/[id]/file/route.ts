@@ -3,7 +3,7 @@ import { verifyPrintToken } from "@/lib/quote-pdf/token";
 import { getDocument } from "@/lib/stores/part-documents";
 
 /**
- * Signed sibling of /print/part-thumb/[id] (#242) — streams the datasheet's
+ * Signed sibling of /print/part-thumb/[id] (#245) — streams the datasheet's
  * own PDF bytes to the client renderer. Same token, same kind, checked
  * before any read; no team session (this is what headless Chrome fetches).
  */

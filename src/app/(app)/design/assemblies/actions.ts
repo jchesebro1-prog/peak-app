@@ -13,7 +13,7 @@ import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import type { PartHit } from "./fixture-form";
 
 const revalidateConsumers = () => {
-  // #242: fixtures and the accessory graph feed the portal catalog index —
+  // #245: fixtures and the accessory graph feed the portal catalog index —
   // drop this process's cached copy (other instances converge within its TTL).
   invalidatePortalIndex();
   // Grid checked (fix wave 1, I1/M4): no Grid route reads live fixtures

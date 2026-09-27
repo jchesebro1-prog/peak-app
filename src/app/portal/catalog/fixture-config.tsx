@@ -6,7 +6,7 @@ import { priceFixtureOptions } from "./actions";
 import { AddedNote, clampQty, money, PreviewHint, QtyStepper, useAddToQuote } from "./panel-ui";
 
 /**
- * The fixture configurator (#242 Task 11, spec §8.3): the light engine, lens
+ * The fixture configurator (#245 Task 11, spec §8.3): the light engine, lens
  * and included parts are fixed; each optional add-on is a toggle with its
  * own qty (qty > 0 = on). The total is re-priced ON THE SERVER on every
  * change (debounced) through the same path the cart uses — the browser

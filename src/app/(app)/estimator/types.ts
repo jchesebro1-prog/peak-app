@@ -77,9 +77,9 @@ export type SpecItem = {
   /** Section freight is not charged on this line (#143, D162) — the vendor's
    *  own price already includes it. */
   noFreight?: boolean;
-  /** #242: customer-requested line still waiting on a Peak price. */
+  /** #245: customer-requested line still waiting on a Peak price. */
   por?: boolean;
-  /** #242 Task 13 — the fixture record this line was configured from, and the
+  /** #245 Task 13 — the fixture record this line was configured from, and the
    *  add-on quantities chosen (keyed `slot:sku`, as on a portal cart line).
    *  Carried ONLY on a `fixture: true` item written by the portal
    *  (portal-pricing.ts priceFixtureLine) so Copy to new quote / a pricing
@@ -87,7 +87,7 @@ export type SpecItem = {
    *  Estimator fixture line (fixture-bom.ts) never sets these. */
   fixtureId?: string;
   fixtureOptions?: Record<string, number>;
-  /** #242 Task 13 — the free-text curtain request this line was priced from
+  /** #245 Task 13 — the free-text curtain request this line was priced from
    *  (portal-pricing.ts priceCurtain), carried the same way as `fixtureId`
    *  above so the line can be rebuilt into a cart line. */
   curtainInputs?: CurtainRequest;
@@ -167,9 +167,9 @@ export type SpecSection = {
   kind: string;
   mfr: string;
   freightPct: number;
-  /** #242: freight was set by the distance rule and staff haven't touched it. */
+  /** #245: freight was set by the distance rule and staff haven't touched it. */
   freightAuto?: boolean;
-  /** #242: one-way drive miles the freight rule priced from (null = venue not located). */
+  /** #245: one-way drive miles the freight rule priced from (null = venue not located). */
   freightMiles?: number | null;
   items: SpecItem[];
 };
@@ -345,7 +345,7 @@ export type TravelLite = {
 };
 
 /**
- * The staff Portal panel's data (#242 Task 13, spec §5) — present only for a
+ * The staff Portal panel's data (#245 Task 13, spec §5) — present only for a
  * loaded quote with `source === "portal-catalog"`; null otherwise (a fresh
  * estimate, or any other quote type/source never renders the panel).
  * `porItems` is a point-in-time read of the loaded spec's `por` lines (the
@@ -411,7 +411,7 @@ export type InitialQuote = {
   pdfOptions: QuotePdfOptions;
   /** The saved PDF's state (#222) — null for a new or never-rendered estimate. */
   pdf: QuotePdfView | null;
-  /** #242 Task 13 — set only for a loaded `source === "portal-catalog"` quote. */
+  /** #245 Task 13 — set only for a loaded `source === "portal-catalog"` quote. */
   portal: PortalPanelData | null;
 };
 
@@ -468,12 +468,12 @@ export type EstimatorProps = {
   /** Reusable task-template sets applicable to quotes (D149, #118), for the
    *  "Apply template" control next to the Tasks card. */
   templateSets: { id: string; name: string }[];
-  /** #242: the freight-by-distance rule (Estimating Rules), loaded server-side
+  /** #245: the freight-by-distance rule (Estimating Rules), loaded server-side
    *  via loadFreightRule() — plain numbers, client-safe. */
   freightRule: FreightRule;
   /** Company-managed checked assumptions shared with consulting proposals. */
   assumptionLibrary: string[];
-  /** #242 Task 13 — a Portal panel Approve refusal's message (?statusError=
+  /** #245 Task 13 — a Portal panel Approve refusal's message (?statusError=
    *  from the Quotes-hub status action), or null. */
   portalStatusError: string | null;
 };

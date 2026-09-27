@@ -12,21 +12,21 @@
 export type PartDocKind = "datasheet" | "specsheet" | "image";
 
 /** The two coverage slots — a datasheet/spec-sheet document can satisfy a
- *  part's requirement; an image never can (#242). Existing screens iterate
+ *  part's requirement; an image never can (#245). Existing screens iterate
  *  this (not ALL_PART_DOC_KINDS) so they keep showing exactly these two
  *  columns without change. */
 export const DOC_SLOT_KINDS = ["datasheet", "specsheet"] as const;
 
 /** The narrow two-value type every coverage-slot function is keyed by —
  *  distinct from the wider `PartDocKind` so a `Record`/switch keyed by it
- *  stays exhaustive with only "datasheet" and "specsheet" (#242). */
+ *  stays exhaustive with only "datasheet" and "specsheet" (#245). */
 export type DocSlotKind = (typeof DOC_SLOT_KINDS)[number];
 
 /** Every part-document kind, coverage slots plus the gallery-only `image`
- *  kind (#242). */
+ *  kind (#245). */
 export const ALL_PART_DOC_KINDS = ["datasheet", "specsheet", "image"] as const;
 
-/** Alias of DOC_SLOT_KINDS — kept so every pre-#242 call site keeps today's
+/** Alias of DOC_SLOT_KINDS — kept so every pre-#245 call site keeps today's
  *  two slots unchanged. Typed to the narrow DocSlotKind (not the wider
  *  PartDocKind) so iterating it never introduces "image" into a two-key
  *  Record or a DocumentRow index. */
@@ -37,7 +37,7 @@ export function isPartDocKind(v: unknown): v is PartDocKind {
   return v === "datasheet" || v === "specsheet" || v === "image";
 }
 
-/** Narrower than isPartDocKind (#242 review fix): true only for the two
+/** Narrower than isPartDocKind (#245 review fix): true only for the two
  *  coverage-slot kinds. `fetchLinksAction` and `setNotNeededAction` are both
  *  slot-only operations — an image kind slipping past a check built on the
  *  wider isPartDocKind would let a client ask to "fetch" or "mark not
@@ -87,9 +87,9 @@ export type PartDocumentLink = {
   kind: PartDocKind;
   createdAt: number;
   createdBy: string;
-  /** Gallery order for an image link (#242) — missing sorts last. */
+  /** Gallery order for an image link (#245) — missing sorts last. */
   sort?: number;
-  /** Hide an image from the gallery without detaching it (#242). */
+  /** Hide an image from the gallery without detaching it (#245). */
   hidden?: boolean;
 };
 
@@ -123,15 +123,15 @@ export type DocNotNeeded = { datasheet?: true; specsheet?: true };
 /** Upload and fetch ceiling (§6). */
 export const MAX_PART_DOC_BYTES = 25 * 1024 * 1024;
 
-/** Image cap (#242) — tighter than the datasheet/spec-sheet ceiling. */
+/** Image cap (#245) — tighter than the datasheet/spec-sheet ceiling. */
 export const MAX_PART_IMAGE_BYTES = 10 * 1024 * 1024;
 
-/** The byte ceiling for a slot's kind (#242). */
+/** The byte ceiling for a slot's kind (#245). */
 export function maxBytesFor(kind: PartDocKind): number {
   return kind === "image" ? MAX_PART_IMAGE_BYTES : MAX_PART_DOC_BYTES;
 }
 
-/** Gallery ordering rank for an image link (#242) — lower sorts first,
+/** Gallery ordering rank for an image link (#245) — lower sorts first,
  *  used only as `compareImages`'s tertiary tiebreak (below). */
 export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
   upload: 0,
@@ -141,7 +141,7 @@ export const IMAGE_SOURCE_RANK: Record<PartDocumentSource, number> = {
   legacy: 4,
 };
 
-/** The one shared, pure gallery-order comparator (#242 review fix — the
+/** The one shared, pure gallery-order comparator (#245 review fix — the
  *  original rank-first rule silently made ↑/↓ a no-op across sources, since
  *  a `sort` write could never outrank a lower-ranked source). Order:
  *   1. an auto-generated datasheet-render thumbnail always sorts after

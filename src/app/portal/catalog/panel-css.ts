@@ -1,6 +1,6 @@
 /**
  * Styles for the catalog's part sidebar, fixture configurator, ask-a-question
- * form and curtain panel (#242 Task 11) — local `ps-*` classes in the same
+ * form and curtain panel (#245 Task 11) — local `ps-*` classes in the same
  * palette as the browse page's `pc-*` (catalog-client.tsx). Accent only via
  * `var(--accent)`.
  */

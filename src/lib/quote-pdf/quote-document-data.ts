@@ -18,7 +18,7 @@ import { displayQuoteNumber } from "@/lib/estimate-number";
 /** The Estimator's TAX_RATE_PCT (estimator-client.tsx) — no tax line today. */
 const TAX_RATE_PCT = 0;
 
-/** #242 — the standing lines a portal-catalog quote prints (global
+/** #245 — the standing lines a portal-catalog quote prints (global
  *  constraints, verbatim). Kept here (not in the server-only
  *  src/lib/portal-quotes.ts) so the document data stays pure. */
 export const PORTAL_DOC_REVIEW_LINE = "All quotes are subject to Peak review and approval.";
@@ -30,7 +30,7 @@ function longDate(ms: number): string {
 }
 
 /**
- * #242 — what a portal-catalog quote adds to the document: the review + tax
+ * #245 — what a portal-catalog quote adds to the document: the review + tax
  * lines, "Valid until <date>" for a firm generation, and the freight row with
  * the venue's one-way miles when known ("Freight & delivery — 412 mi"). Never
  * the freight % (it is a % of cost — spec §8.1). Every other quote: nothing.

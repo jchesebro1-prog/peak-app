@@ -7,7 +7,7 @@ import { PURCHASE_METHOD_LABEL } from "@/lib/portal-quote-mode";
 import type { PortalPanelData } from "./types";
 
 /**
- * Staff Portal panel (#242 Task 13, spec §5) — rendered at the top of the
+ * Staff Portal panel (#245 Task 13, spec §5) — rendered at the top of the
  * Estimator for a loaded `source === "portal-catalog"` quote. A review
  * banner listing every price-on-request line, the customer's acceptance
  * (purchase method / notes / PO file) with Approve (→ the normal gated Won

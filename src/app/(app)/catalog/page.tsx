@@ -215,7 +215,7 @@ export default async function CatalogPage({
       })()
     : null;
 
-  // Customer visibility (#242) — the reason line under the part editor's
+  // Customer visibility (#245) — the reason line under the part editor's
   // Auto/Show/Hide selector, read from the portal's cached catalog index
   // (image, datasheet and recent-quote facts). A brand-new, unsaved part has
   // none of those yet, so it reads the rule against empty facts.
@@ -736,7 +736,7 @@ function PartFormModal({
   defaultArticleId: string | null;
   /** Part documents (#207) — null for a new, unsaved part. */
   partDocs: PartDocsView | null;
-  /** #242 Task 5 — the reason line under the visibility selector, computed
+  /** #245 Task 5 — the reason line under the visibility selector, computed
    *  server-side from the current facts + the browse rule. Null when the
    *  form isn't showing at all (never both showForm and null in practice). */
   visibilityReason: string | null;
@@ -1010,7 +1010,7 @@ function PartFormModal({
               </div>
             )}
 
-            {/* Customer visibility (#242 Task 5) — Auto lets the browse
+            {/* Customer visibility (#245 Task 5) — Auto lets the browse
                 rule decide (image, datasheet, or recent quotes); Show/Hide
                 override it outright. The reason line beneath explains what
                 the portal currently does with THIS part, so an override is

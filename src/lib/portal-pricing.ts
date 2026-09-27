@@ -15,7 +15,7 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { travelForId } from "@/lib/stores/customers";
 
 /**
- * Server-canonical portal pricing (#242, spec §2 + §8). The browser never
+ * Server-canonical portal pricing (#245, spec §2 + §8). The browser never
  * computes or submits a price: every cart view, generate, accept and refresh
  * re-prices here. `PricedCart.sections` is the staff-side Estimator spec
  * (it carries cost) and is NEVER sent to the client — pages send
@@ -215,7 +215,7 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
     cost: priced.cost,
     price: priced.unitPrice ?? 0,
     fixture: true,
-    // #242 Task 13: carried so Copy to new quote / a firm refresh can rebuild
+    // #245 Task 13: carried so Copy to new quote / a firm refresh can rebuild
     // this line's cart entry (cartLinesFromSpec) — a fixture's SpecItem.sku is
     // its light engine's, not the fixture record's own id.
     fixtureId: fx.id,
@@ -269,7 +269,7 @@ function priceCurtain(l: CartLine, qty: number): Priced {
     por: true,
     porReason: "curtain",
     unavailable: false,
-    // The cart's curtain summary (#242 Task 12): "30'W × 18'H, 50% fullness — IFR Velour".
+    // The cart's curtain summary (#245 Task 12): "30'W × 18'H, 50% fullness — IFR Velour".
     detail: `${size} — ${fabric}`,
   };
   const item: Omit<SpecItem, "id"> = {
@@ -281,7 +281,7 @@ function priceCurtain(l: CartLine, qty: number): Priced {
     price: 0,
     curtain: true,
     por: true,
-    // #242 Task 13: the raw request, carried so Copy to new quote / a
+    // #245 Task 13: the raw request, carried so Copy to new quote / a
     // refresh can rebuild this line's cart entry (cartLinesFromSpec) — the
     // formatted `desc` above is customer copy, not machine-readable.
     curtainInputs: { ...c },
@@ -368,11 +368,11 @@ export function sellView(p: PricedCart): CustomerQuoteView {
 }
 
 /**
- * Rebuild cart lines from a portal-catalog quote's saved spec (#242 Task 13,
+ * Rebuild cart lines from a portal-catalog quote's saved spec (#245 Task 13,
  * spec §4.4/§4.5/§4.6) — the one mapping Copy to new quote and a pricing
  * refresh both use. Reads exactly what priceCart wrote onto each SpecItem
  * (fixtureId/fixtureOptions, curtainInputs) — an item missing what it needs
- * (a pre-#242-Task-13 fixture/curtain line saved before these fields
+ * (a pre-#245-Task-13 fixture/curtain line saved before these fields
  * existed) is dropped rather than guessed at. Availability (hidden/deleted
  * part, unknown fixture) is NOT checked here — callers re-price the result
  * through `priceCart` and read `unavailable` off the priced lines, so there

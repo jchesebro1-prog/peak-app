@@ -7,7 +7,7 @@ import { docHref } from "./slot-cell";
 import { uploadNewDocument } from "./upload-client";
 
 /**
- * The Datasheets page's Image column (#242) — a thumbnail of the gallery's
+ * The Datasheets page's Image column (#245) — a thumbnail of the gallery's
  * lead image, the image count, and a drop zone that uploads straight into
  * the gallery (kind "image"). Ordering, hide/show and "from URL" live in the
  * part editor's fuller Images gallery (part-documents-section.tsx); this

@@ -2,7 +2,7 @@ import type { PortalSession } from "@/lib/portal";
 import type { LeadCreateInput } from "@/lib/stores/leads";
 
 /**
- * "Ask a question about this part" (#242 Task 11, spec §3.2 item 7) — the
+ * "Ask a question about this part" (#245 Task 11, spec §3.2 item 7) — the
  * pure lead builder + input guards. The action only wires these to
  * `create()` in src/lib/stores/leads.ts, mirroring `submitPortalRequest`:
  * source "existing", no owner (→ the Leads SLA queue), pre-linked to the

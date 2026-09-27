@@ -1,5 +1,5 @@
 /**
- * Freight by distance (#242, spec 2026-09-27-portal-catalog-design.md §2.2).
+ * Freight by distance (#245, spec 2026-09-27-portal-catalog-design.md §2.2).
  * base % under the first step, + stepPct for every full stepMiles, capped.
  * Unknown distance charges the cap (err high) and says so. Pure.
  */

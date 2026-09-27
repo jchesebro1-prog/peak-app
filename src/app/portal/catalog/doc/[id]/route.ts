@@ -6,19 +6,19 @@ import { getDocument } from "@/lib/stores/part-documents";
 import { getBlobStream } from "@/lib/blob";
 import { contentDisposition } from "@/lib/part-docs/files";
 
-/** A fresh Response per call (#242 Task 9 fix round 1, CRITICAL 1) — a
+/** A fresh Response per call (#245 Task 9 fix round 1, CRITICAL 1) — a
  *  Response body can be read only once, so a single module-level instance
  *  reused across every deny path would fail every 404 after the first on a
  *  warm serverless instance. */
 const notFound = () => new Response("Not found", { status: 404 });
 
-/** Never serve SVG (#242 spec §7) — images are PNG/JPEG/WebP by
+/** Never serve SVG (#245 spec §7) — images are PNG/JPEG/WebP by
  *  construction (src/lib/part-docs/files.ts ALLOWED_TYPES); anything else
  *  on an image-kind document 404s rather than streaming an unknown type. */
 const ALLOWED_IMAGE_CONTENT_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 /**
- * Portal customer document route (#242 Task 9, spec §7): a part document
+ * Portal customer document route (#245 Task 9, spec §7): a part document
  * (image, datasheet, or spec sheet) is served ONLY when it's linked (not
  * hidden) to a part the customer can quote, or — datasheets/spec sheets
  * only, never images — covers such a part through the accessory graph.
@@ -57,13 +57,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
   // The blobKey changes on every replace (putBlob's addRandomSuffix), so a
   // hash of it — not just doc.id — moves the ETag when the file does
-  // (controller decision, #242 Task 9 fix round 1).
+  // (controller decision, #245 Task 9 fix round 1).
   const fileTag = createHash("sha1").update(doc.blobKey).digest("hex").slice(0, 16);
   const etag = `"${doc.id}-${fileTag}"`;
   // Datasheets/spec sheets churn far less than a gallery image gets
   // reordered/replaced, but customers still shouldn't wait a full day to
   // see a just-fixed spec sheet — images get the long TTL, documents a
-  // short one (controller decision, #242 Task 9 fix round 1).
+  // short one (controller decision, #245 Task 9 fix round 1).
   const cacheControl = doc.kind === "image" ? "private, max-age=86400" : "private, max-age=300";
 
   if (req.headers.get("if-none-match") === etag) {

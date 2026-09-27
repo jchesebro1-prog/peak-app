@@ -1,4 +1,4 @@
-// SERVER ONLY — the datasheet page-1 thumbnail render (#242, spec §5/§1.1).
+// SERVER ONLY — the datasheet page-1 thumbnail render (#245, spec §5/§1.1).
 // Headless Chrome loads a signed /print/part-thumb/[id] route (a client
 // component that opens the datasheet PDF with pdf.js and paints page 1 to a
 // canvas), screenshots the canvas, stores the PNG and links it as a new
@@ -31,7 +31,7 @@ export type RenderThumbnailDeps = {
   putFile?: (pathname: string, bytes: Buffer, contentType: string) => Promise<{ pathname: string }>;
 };
 
-/** Headless-Chrome element screenshot (#242) — sibling to
+/** Headless-Chrome element screenshot (#245) — sibling to
  *  render.ts's renderPrintRouteToPdf, but for one <canvas id="thumb"> instead
  *  of a whole page.pdf(): the client renderer flags `body[data-ready="1"]`
  *  once pdf.js has painted page 1, and that's the only thing waited on. */

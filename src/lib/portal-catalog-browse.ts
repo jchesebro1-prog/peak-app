@@ -10,7 +10,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { getAll as getAllQuotes, portalListsQuote } from "@/lib/stores/quotes";
 
 /**
- * Portal catalog browse (#242 Task 10, spec §3.1). The page renders first
+ * Portal catalog browse (#245 Task 10, spec §3.1). The page renders first
  * paint through `browseCatalog`; the `searchPortalCatalog` server action
  * (src/app/portal/catalog/actions.ts) goes through `searchPortalCatalogFor`,
  * which is the action's whole body minus reading the cookie — so the
@@ -23,7 +23,7 @@ export const PORTAL_SEARCH_RATE_COPY = "Too many searches at once — wait a mom
 const SEARCH_LIMIT = 120;
 const SEARCH_WINDOW_MS = 60_000;
 
-/** The page path's own limit (#242 Task 11): every /portal/catalog render
+/** The page path's own limit (#245 Task 11): every /portal/catalog render
  *  (browse, a search, an open sidebar) counts once per grant — or per
  *  previewed customer for a team preview. */
 export const PORTAL_BROWSE_RATE_COPY = "Too many requests — try again in a minute.";

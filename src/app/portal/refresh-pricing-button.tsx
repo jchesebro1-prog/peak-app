@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { refreshPortalQuote } from "./actions";
 
-/** Past `validUntil`, the Accept button is replaced by this (#242 Task 13,
+/** Past `validUntil`, the Accept button is replaced by this (#245 Task 13,
  *  spec §4.5) — re-prices every line at current cost/tier/freight. */
 export function RefreshPricingButton({ quoteId }: { quoteId: string }) {
   const router = useRouter();

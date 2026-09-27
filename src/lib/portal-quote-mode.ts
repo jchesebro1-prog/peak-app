@@ -1,6 +1,6 @@
 import type { SpecItem, SpecSection } from "@/app/(app)/estimator/types";
 
-/** Firm vs review, validity, accept eligibility, card guard (#242, spec §2.3/§4). Pure. */
+/** Firm vs review, validity, accept eligibility, card guard (#245, spec §2.3/§4). Pure. */
 export type ModeLine = { por: boolean };
 export function quoteMode(lines: readonly ModeLine[]): { mode: "firm" | "review"; porCount: number; reason: string | null } {
   const porCount = lines.filter((l) => l.por).length;
@@ -16,7 +16,7 @@ export function canAcceptPortal(
 ): { ok: boolean; reason?: "not-sent" | "accepted" | "expired" } {
   if (q.status !== "sent") return { ok: false, reason: "not-sent" };
   if (q.portalAcceptance) return { ok: false, reason: "accepted" };
-  // #242 Task 13 (spec §4.5): a refresh that flips into review must never
+  // #245 Task 13 (spec §4.5): a refresh that flips into review must never
   // stay acceptable — checked here (not only via the status change a
   // sent→draft refresh makes) as the belt-and-suspenders rule for any path
   // that keeps status "sent" while portalReview is set.
@@ -56,7 +56,7 @@ export const PURCHASE_METHODS = ["po", "card", "check", "other"] as const;
 export const PURCHASE_METHOD_LABEL: Record<(typeof PURCHASE_METHODS)[number], string> = { po: "Purchase order", card: "Credit card", check: "Check", other: "Other" };
 
 /**
- * Estimator save (#242 Task 13, controller decision 6): `por` is cleared on
+ * Estimator save (#245 Task 13, controller decision 6): `por` is cleared on
  * any item staff have now priced (`price > 0`) — a POR line staff left at 0
  * stays flagged. Returns whether any `por` item remains, so the caller can
  * clear the quote's `portalReview` stamp exactly when there is nothing left

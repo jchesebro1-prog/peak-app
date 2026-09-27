@@ -1,4 +1,4 @@
-// #242 (spec §8.2) — the staff bell derives portal review/approval notices
+// #245 (spec §8.2) — the staff bell derives portal review/approval notices
 // from records already on every request; there is no writer, no Leads-queue
 // record and no to-do row for these two groups. Pure: `now` and `me` are
 // parameters so the harness can test every boundary without a clock or a DB.

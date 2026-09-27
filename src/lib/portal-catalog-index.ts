@@ -21,7 +21,7 @@ import {
 import { buildHaystack, type SearchEntry } from "@/lib/portal-search";
 
 /**
- * The portal's catalog index (#242, spec §1/§3/§8) — SERVER ONLY.
+ * The portal's catalog index (#245, spec §1/§3/§8) — SERVER ONLY.
  *
  * `IndexedPart` carries `cost`, because server pricing (portal-pricing.ts)
  * needs it. This module must never be imported into a client component; pages
@@ -74,7 +74,7 @@ export type PortalIndex = {
   fixtures: Map<string, IndexedFixture>;
   entries: SearchEntry[];
   builtAt: number;
-  /** Every part-document id a portal customer may fetch (#242 Task 9, spec
+  /** Every part-document id a portal customer may fetch (#245 Task 9, spec
    *  §7). Built once per index build, not per request, by the pure
    *  `servableDocIdsFrom` below: for every quotable (non-hidden) SKU, its
    *  own visible images with a stored file, plus its own and covering-
@@ -87,15 +87,15 @@ export type PortalIndex = {
    *  datasheet link" case to filter here at all. */
   servableDocIds: Set<string>;
   /** Kind + title of every datasheet/spec-sheet id any `IndexedPart.datasheetIds`
-   *  names (#242 Task 11 — the part sidebar's Documents list). */
+   *  names (#245 Task 11 — the part sidebar's Documents list). */
   docMeta: Map<string, { kind: "datasheet" | "specsheet"; title: string; pdf: boolean }>;
-  /** Internal labor/travel rows left on "auto" (#242 Task 11 fix round 1) —
+  /** Internal labor/travel rows left on "auto" (#245 Task 11 fix round 1) —
    *  NOT quotable, searchable, browsable or doc-servable on their own, but a
    *  fixture may carry one as a component (e.g. shop fabrication), so fixture
    *  resolution and fixture pricing — and nothing else — read this map via
    *  `fixtureComponentPart`. An explicit Hide is never here. */
   componentParts: Map<string, IndexedPart>;
-  /** Curtain fabrics a customer may name on a curtain request (#242 Task 11,
+  /** Curtain fabrics a customer may name on a curtain request (#245 Task 11,
    *  spec §3.3): quotable "Fabric" parts with an area rate. Names only —
    *  the rate never leaves the server. */
   fabrics: Array<{ sku: string; name: string }>;
@@ -146,7 +146,7 @@ export async function portalIndex(opts?: { fresh?: boolean }): Promise<PortalInd
 }
 
 /**
- * Distinct quotes per SKU created at or after `since` (#242 browse rule).
+ * Distinct quotes per SKU created at or after `since` (#245 browse rule).
  * Skips deleted quotes and Daylite history imports; walks
  * `spec.sections[].items[].sku`, guarding every level; a SKU counts once per
  * quote however many lines carry it. Pure.
@@ -187,7 +187,7 @@ function datasheetIdsFor(index: CoverageIndex, sku: string): string[] {
 }
 
 /**
- * The pure computation behind `PortalIndex.servableDocIds` (#242 Task 9 fix
+ * The pure computation behind `PortalIndex.servableDocIds` (#245 Task 9 fix
  * round 1, spec §7) — factored out of `buildIndex` so it's exercised
  * directly against `buildCoverageIndex`/`buildImageIndex` fixtures, no DB.
  * For every SKU in `liveSkus` (quotable — already filtered to non-hidden
@@ -224,7 +224,7 @@ async function buildIndex(): Promise<Built> {
   const counts = countRecentQuotesBySku(quotes, now - rules.browseWindowMonths * MONTH_MS);
 
   // Withheld: an explicit Hide, and internal labor/travel rows left on
-  // "auto" (#242 Task 11) — neither quotable, browsable nor searchable.
+  // "auto" (#245 Task 11) — neither quotable, browsable nor searchable.
   const live: CatalogPart[] = all.filter((p) => p && p.sku && !portalHidden(p.portalVisibility, p.category));
   const liveSkus = new Set(live.map((p) => p.sku));
 
@@ -377,7 +377,7 @@ export async function portalFactsForSku(sku: string): Promise<VisibilityFacts & 
   }
   if (!f) {
     // An internal labor/travel row on "auto" is withheld by category, not by
-    // a human's Hide — say so, so the editor's Auto reads right (#242 Task 11).
+    // a human's Hide — say so, so the editor's Auto reads right (#245 Task 11).
     if (part && normalizeVisibility(part.portalVisibility) === "auto" && isInternalCategory(part.category)) {
       return { visibility: "auto", hasVisibleImage: false, hasDatasheet: false, quoteCount: 0, internal: true, reason: INTERNAL_HIDDEN_REASON };
     }

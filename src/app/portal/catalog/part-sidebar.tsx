@@ -10,7 +10,7 @@ import { FixtureConfig } from "./fixture-config";
 import { AddedNote, docSrc, money, PreviewHint, QtyStepper, useAddToQuote } from "./panel-ui";
 
 /**
- * The catalog's right-hand part sidebar (#242 Task 11, spec §3.2) — a
+ * The catalog's right-hand part sidebar (#245 Task 11, spec §3.2) — a
  * full-screen sheet under 768 px. Opened by `?part=<sku|fixture:id>`; the
  * page renders `detail` server-side (sell-only), so a link or a refresh
  * reopens it. Esc, the × and the scrim clear `?part=`.

@@ -69,7 +69,7 @@ export function matchFileName(fileName: string, index: FilenameIndex): FilenameM
   return { keys: [], skus: [], confidence: "none" };
 }
 
-/** Image when the extension is PNG/JPEG/WebP (#242); else spec sheet when
+/** Image when the extension is PNG/JPEG/WebP (#245); else spec sheet when
  *  the name says spec/guide/specification or the file is Word; otherwise
  *  Datasheet (spec §3). */
 export function guessKind(fileName: string): PartDocKind {

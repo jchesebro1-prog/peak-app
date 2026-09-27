@@ -261,7 +261,7 @@ export async function detachDocument(documentId: string, partSku: string): Promi
   return true;
 }
 
-/** Gallery display for one image link (#242) — `sort`/`hidden` on the
+/** Gallery display for one image link (#245) — `sort`/`hidden` on the
  *  part↔document link row, never on the shared document. Refuses (returns
  *  false) for a link that isn't live or whose own `kind` isn't "image" —
  *  gallery order/visibility is an image-only concept (review fix wave 2).
@@ -279,7 +279,7 @@ export async function setDocumentLinkDisplay(documentId: string, partSku: string
 }
 
 /**
- * Each part's non-hidden, live image links (#242), in `compareImages` order
+ * Each part's non-hidden, live image links (#245), in `compareImages` order
  * (types.ts: a datasheet-render thumbnail after every real image, then
  * explicit `sort`, then source rank, then upload time). A datasheet or
  * spec-sheet document never appears here — only `kind === "image"` links
@@ -308,7 +308,7 @@ export async function visibleImagesForParts(skus: readonly string[]): Promise<Ma
 }
 
 /**
- * Reassign a sku's whole image-gallery order in one call (#242 review fix
+ * Reassign a sku's whole image-gallery order in one call (#245 review fix
  * M3) — replaces N sequential setDocumentLinkDisplay writes from the client
  * with one server round trip; each link still gets its own DB write
  * (parallelized), but the caller only awaits once.

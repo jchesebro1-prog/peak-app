@@ -2,7 +2,7 @@ import { getDoc, softDeleteDoc, upsertDoc } from "@/db/doc-store";
 import type { CartLine, CurtainRequest, PortalCart } from "@/lib/portal-cart-types";
 
 /**
- * Portal carts (#242, Task 8) — one `portal_carts` document per portal
+ * Portal carts (#245, Task 8) — one `portal_carts` document per portal
  * grant (`id` = the grant id), holding what a customer has put together in
  * Design a Space before they Generate a quote. This is NOT a quote row: no
  * estimate number is ever allocated here, and nothing here is priced —

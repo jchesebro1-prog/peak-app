@@ -15,7 +15,7 @@
 - Worktree: `/Users/sm/Downloads/peak-app/.claude/worktrees/portal-catalog`, branch `feat/portal-catalog`. Run `npm ci` once if `node_modules` is absent (never symlink it — Turbopack panics). Copy `.env.local` and `next-env.d.ts` from the main checkout if absent. Node: `export PATH="$HOME/.local/node/bin:$PATH"`.
 - **Never open `.data/pglite`.** Tests use `npm run test:specs` (scratch `PGLITE_PATH`). Never run two DB processes at once; never leave a `tsx` running.
 - **Never `git stash`** (shared across worktrees). Commit instead.
-- Punch number **#242**; decisions start at **D396** — re-check both against `origin/main` right before writing docs (Task 14).
+- Punch number **#245**; decisions start at **D396** — re-check both against `origin/main` right before writing docs (Task 14).
 - Customers never receive cost, margin or tier name — any portal-bound type is sell-only.
 - Every portal action/route takes `customerId` from `portalSession()` (actions) or `resolvePortalViewer()` (pages/routes) only.
 - Prices are server-canonical: a client-sent price is never read.
@@ -26,10 +26,10 @@
 - Freight defaults: base **2**%, step **200** mi, +**1**% per step, cap **10**%; unknown distance → cap.
 - Firm validity default **30** days; browsable threshold **3** quotes in **24** months; stale-cost months default **0** (= off).
 - Image content types: **image/png, image/jpeg, image/webp** only; image cap **10 MB**; never SVG.
-- Test harness: one file `scripts/test-review-and-spec.ts`, helper `ok(cond, msg)`. Pure checks = a `{ … }` block appended at file end with hoisted imports aliased `d242…`; DB checks = `async function portal242XxxAsyncChecks()` added as a `.then(() => portal242XxxAsyncChecks())` line directly above the comment `  // Before the report and before the \`.catch\`, so a thrown suite is torn`. Messages prefixed `#242`. Use `fixtureId(242, "slug")` + `registerFixture(coll, id)` for any DB row a test creates.
+- Test harness: one file `scripts/test-review-and-spec.ts`, helper `ok(cond, msg)`. Pure checks = a `{ … }` block appended at file end with hoisted imports aliased `d245…`; DB checks = `async function portal245XxxAsyncChecks()` added as a `.then(() => portal245XxxAsyncChecks())` line directly above the comment `  // Before the report and before the \`.catch\`, so a thrown suite is torn`. Messages prefixed `#245`. Use `fixtureId(245, "slug")` + `registerFixture(coll, id)` for any DB row a test creates.
 - Migrations: next is **0032**; hand-harden generated SQL to be idempotent (copy `drizzle/0029_documents.sql`: `IF NOT EXISTS`, `CREATE OR REPLACE TRIGGER … bump_doc_seq()`).
 - Gates per task (report real numbers): `npx tsc --noEmit`, `npm run test:specs` (report PASS/FAIL counts), `npx eslint <touched files>`. Tasks touching pages/components also run `npx next build` (a client component importing a store only breaks the build).
-- Commit after each task: `git commit -m "<type>(portal): … (#242)"` ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Commit after each task: `git commit -m "<type>(portal): … (#245)"` ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## File Structure
 
@@ -70,20 +70,20 @@
 - [ ] **Step 1: Write the failing test** — append to the end of `scripts/test-review-and-spec.ts`:
 
 ```ts
-import { DEFAULT_FREIGHT_RULE as d242Rule, freightPctForMiles as d242Freight } from "@/lib/freight-rule";
+import { DEFAULT_FREIGHT_RULE as d245Rule, freightPctForMiles as d245Freight } from "@/lib/freight-rule";
 {
-  const f = (m: number | null) => d242Freight(m, d242Rule);
-  ok(f(0).pct === 2 && !f(0).atCapUnknown, "#242 freight: 0 mi → 2%");
-  ok(f(199).pct === 2, "#242 freight: 199 mi → 2%");
-  ok(f(200).pct === 3, "#242 freight: 200 mi → 3% (step starts at 200)");
-  ok(f(399).pct === 3 && f(400).pct === 4, "#242 freight: 399 → 3%, 400 → 4%");
-  ok(f(1599).pct === 9 && f(1600).pct === 10, "#242 freight: 1,599 → 9%, 1,600 → 10% cap");
-  ok(f(5000).pct === 10, "#242 freight: far venue stays at the 10% cap");
-  ok(f(null).pct === 10 && f(null).atCapUnknown, "#242 freight: unknown distance → cap, flagged");
-  ok(d242Freight(-5, d242Rule).atCapUnknown && d242Freight(NaN, d242Rule).pct === 10, "#242 freight: negative/NaN miles → unknown → cap");
+  const f = (m: number | null) => d245Freight(m, d245Rule);
+  ok(f(0).pct === 2 && !f(0).atCapUnknown, "#245 freight: 0 mi → 2%");
+  ok(f(199).pct === 2, "#245 freight: 199 mi → 2%");
+  ok(f(200).pct === 3, "#245 freight: 200 mi → 3% (step starts at 200)");
+  ok(f(399).pct === 3 && f(400).pct === 4, "#245 freight: 399 → 3%, 400 → 4%");
+  ok(f(1599).pct === 9 && f(1600).pct === 10, "#245 freight: 1,599 → 9%, 1,600 → 10% cap");
+  ok(f(5000).pct === 10, "#245 freight: far venue stays at the 10% cap");
+  ok(f(null).pct === 10 && f(null).atCapUnknown, "#245 freight: unknown distance → cap, flagged");
+  ok(d245Freight(-5, d245Rule).atCapUnknown && d245Freight(NaN, d245Rule).pct === 10, "#245 freight: negative/NaN miles → unknown → cap");
   const custom = { basePct: 1, stepMiles: 100, stepPct: 0.5, capPct: 3 };
-  ok(d242Freight(250, custom).pct === 2 && d242Freight(10000, custom).pct === 3, "#242 freight: custom rule honoured incl. cap");
-  ok(d242Freight(100, { ...custom, stepMiles: 0 }).pct === 1, "#242 freight: a zero step never divides by zero — base only");
+  ok(d245Freight(250, custom).pct === 2 && d245Freight(10000, custom).pct === 3, "#245 freight: custom rule honoured incl. cap");
+  ok(d245Freight(100, { ...custom, stepMiles: 0 }).pct === 1, "#245 freight: a zero step never divides by zero — base only");
 }
 ```
 
@@ -93,7 +93,7 @@ import { DEFAULT_FREIGHT_RULE as d242Rule, freightPctForMiles as d242Freight } f
 
 ```ts
 /**
- * Freight by distance (#242, spec 2026-09-27-portal-catalog-design.md §2.2).
+ * Freight by distance (#245, spec 2026-09-27-portal-catalog-design.md §2.2).
  * base % under the first step, + stepPct for every full stepMiles, capped.
  * Unknown distance charges the cap (err high) and says so. Pure.
  */
@@ -180,9 +180,9 @@ export async function loadPortalRules() {
 
 If `server-only` is not a dependency (check `package.json`), omit that import line — match how other server-only libs in `src/lib/` mark themselves (e.g. `src/lib/curtain-pricing.ts`).
 
-- [ ] **Step 6: Add a DB check** that the rows resolve to defaults: an async function `portal242RulesAsyncChecks` asserting `(await loadFreightRule())` deep-equals `DEFAULT_FREIGHT_RULE` and `(await loadPortalRules()).validityDays === 30`; register it in the chain.
+- [ ] **Step 6: Add a DB check** that the rows resolve to defaults: an async function `portal245RulesAsyncChecks` asserting `(await loadFreightRule())` deep-equals `DEFAULT_FREIGHT_RULE` and `(await loadPortalRules()).validityDays === 30`; register it in the chain.
 
-- [ ] **Step 7: Run gates, then commit** — `feat(portal): freight-by-distance rule + Portal & freight Estimating Rules (#242)`.
+- [ ] **Step 7: Run gates, then commit** — `feat(portal): freight-by-distance rule + Portal & freight Estimating Rules (#245)`.
 
 ---
 
@@ -200,20 +200,20 @@ If `server-only` is not a dependency (check `package.json`), omit that import li
 - [ ] **Step 1: Failing test**
 
 ```ts
-import { sectionFreightDefault as d242SecFr, applyAutoFreight as d242ApplyFr } from "@/app/(app)/estimator/freight-default";
+import { sectionFreightDefault as d245SecFr, applyAutoFreight as d245ApplyFr } from "@/app/(app)/estimator/freight-default";
 {
   const rule = { basePct: 2, stepMiles: 200, stepPct: 1, capPct: 10 };
-  ok(d242SecFr({ hasVenue: false, miles: null, rule }).pct === 2 && !d242SecFr({ hasVenue: false, miles: null, rule }).unknown, "#242 estimator: no venue yet → base %, not flagged");
-  ok(d242SecFr({ hasVenue: true, miles: 450, rule }).pct === 4, "#242 estimator: venue at 450 mi → 4%");
-  const u = d242SecFr({ hasVenue: true, miles: null, rule });
-  ok(u.pct === 10 && u.unknown, "#242 estimator: venue not located → cap + flag");
+  ok(d245SecFr({ hasVenue: false, miles: null, rule }).pct === 2 && !d245SecFr({ hasVenue: false, miles: null, rule }).unknown, "#245 estimator: no venue yet → base %, not flagged");
+  ok(d245SecFr({ hasVenue: true, miles: 450, rule }).pct === 4, "#245 estimator: venue at 450 mi → 4%");
+  const u = d245SecFr({ hasVenue: true, miles: null, rule });
+  ok(u.pct === 10 && u.unknown, "#245 estimator: venue not located → cap + flag");
   const secs = [
     { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 2, freightAuto: true, items: [] },
     { id: "b", name: "B", kind: "materials", mfr: "", freightPct: 7, freightAuto: false, items: [] },
     { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [] },
   ];
-  const out = d242ApplyFr(secs as never, { pct: 4 });
-  ok(out[0].freightPct === 4 && out[1].freightPct === 7 && out[2].freightPct === 5, "#242 estimator: venue change re-applies only to untouched (auto) sections; saved quotes without the flag never change");
+  const out = d245ApplyFr(secs as never, { pct: 4 });
+  ok(out[0].freightPct === 4 && out[1].freightPct === 7 && out[2].freightPct === 5, "#245 estimator: venue change re-applies only to untouched (auto) sections; saved quotes without the flag never change");
 }
 ```
 
@@ -225,7 +225,7 @@ import { sectionFreightDefault as d242SecFr, applyAutoFreight as d242ApplyFr } f
 import { freightPctForMiles, type FreightRule } from "@/lib/freight-rule";
 import type { SpecSection } from "./types";
 
-/** New-section freight (#242): base until a venue is picked; then the distance rule. */
+/** New-section freight (#245): base until a venue is picked; then the distance rule. */
 export function sectionFreightDefault(input: { hasVenue: boolean; miles: number | null | undefined; rule: FreightRule }): { pct: number; unknown: boolean } {
   if (!input.hasVenue) return { pct: input.rule.basePct, unknown: false };
   const r = freightPctForMiles(input.miles, input.rule);
@@ -239,7 +239,7 @@ export function applyAutoFreight(sections: SpecSection[], d: { pct: number }): S
 ```
 
 - [ ] **Step 4: Wire the client.**
-  - `types.ts` `SpecSection`: add `/** #242: freight was set by the distance rule and staff haven't touched it. */ freightAuto?: boolean;`
+  - `types.ts` `SpecSection`: add `/** #245: freight was set by the distance rule and staff haven't touched it. */ freightAuto?: boolean;`
   - `page.tsx`: `const freightRule = await loadFreightRule();` pass `freightRule` prop to the client (it is plain numbers — client-safe).
   - Client: compute `const fd = sectionFreightDefault({ hasVenue: !!locationId, miles: travelEstNow()?.miles ?? null, rule: freightRule })` — `travelEstNow()` (~671) already returns the cached `TravelLite` for the current selection; when the selection's travel is not yet fetched treat as "still loading" and don't apply (see effect below).
   - `freshSections()` and `addSystem()`: replace `freightPct: 2` with `freightPct: fd.pct, freightAuto: true`.
@@ -247,7 +247,7 @@ export function applyAutoFreight(sections: SpecSection[], d: { pct: number }): S
   - Add an effect keyed on `[customerId, locationId, travel-loaded-for-selection]`: once the selection's travel entry exists in `travelSeen` (value may be `null` = unknown), `setSections((ss) => applyAutoFreight(ss, fd))`. Ensure the effect runs once per selection change, not per render.
   - `section-card.tsx`: accept `freightUnknown?: boolean`; when `sec.freightAuto && freightUnknown`, render under the slider `<span className="pk-hint">Freight at max — venue not located</span>` (use an existing hint/warn class used nearby in the file).
   - Saved quotes load with whatever `freightAuto` they stored; old quotes have none → never rewritten.
-- [ ] **Step 5: Gates incl. `npx next build`; commit** — `feat(estimator): new sections default freight from the distance rule (#242)`.
+- [ ] **Step 5: Gates incl. `npx next build`; commit** — `feat(estimator): new sections default freight from the distance rule (#245)`.
 
 ---
 
@@ -255,7 +255,7 @@ export function applyAutoFreight(sections: SpecSection[], d: { pct: number }): S
 
 **Files:**
 - Modify: `src/lib/part-docs/types.ts`, `src/lib/part-docs/files.ts`, `src/lib/part-docs/verify-upload.ts`, `src/app/api/part-documents/upload/route.ts`, `src/lib/stores/part-documents.ts`, `src/lib/part-docs/coverage.ts` (exclude images), `src/lib/part-docs/filename-match.ts` (`guessKind`)
-- Test: append pure block + `portal242ImageLinksAsyncChecks`
+- Test: append pure block + `portal245ImageLinksAsyncChecks`
 
 **Interfaces:**
 - Produces:
@@ -270,23 +270,23 @@ export function applyAutoFreight(sections: SpecSection[], d: { pct: number }): S
 - [ ] **Step 1: Failing tests**
 
 ```ts
-import { sniffImageType as d242Sniff } from "@/lib/part-docs/files";
-import { isPartDocKind as d242IsKind, maxBytesFor as d242Max, PART_DOC_KINDS as d242Kinds } from "@/lib/part-docs/types";
+import { sniffImageType as d245Sniff } from "@/lib/part-docs/files";
+import { isPartDocKind as d245IsKind, maxBytesFor as d245Max, PART_DOC_KINDS as d245Kinds } from "@/lib/part-docs/types";
 {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
   const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
   const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
   const svg = new TextEncoder().encode("<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
   const pdf = new TextEncoder().encode("%PDF-1.7");
-  ok(d242Sniff(png) === "image/png" && d242Sniff(jpg) === "image/jpeg" && d242Sniff(webp) === "image/webp", "#242 images: PNG/JPEG/WebP magic bytes recognised");
-  ok(d242Sniff(svg) === null && d242Sniff(pdf) === null, "#242 images: SVG and PDF are never images");
-  ok(d242IsKind("image") && !d242IsKind("photo"), "#242 images: image is a part-document kind");
-  ok(d242Max("image") === 10 * 1024 * 1024 && d242Max("datasheet") === 25 * 1024 * 1024, "#242 images: 10 MB image cap, datasheets keep 25 MB");
-  ok(!(d242Kinds as readonly string[]).includes("image"), "#242 images: coverage slots stay datasheet + spec sheet");
+  ok(d245Sniff(png) === "image/png" && d245Sniff(jpg) === "image/jpeg" && d245Sniff(webp) === "image/webp", "#245 images: PNG/JPEG/WebP magic bytes recognised");
+  ok(d245Sniff(svg) === null && d245Sniff(pdf) === null, "#245 images: SVG and PDF are never images");
+  ok(d245IsKind("image") && !d245IsKind("photo"), "#245 images: image is a part-document kind");
+  ok(d245Max("image") === 10 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 10 MB image cap, datasheets keep 25 MB");
+  ok(!(d245Kinds as readonly string[]).includes("image"), "#245 images: coverage slots stay datasheet + spec sheet");
 }
 ```
 
-DB check `portal242ImageLinksAsyncChecks`: create two image docs (`source: "upload"` and `"datasheet-render"`) + one datasheet via `createDocument`, `attachDocument` all to `fixtureId(242,"sku-img")`, set `setDocumentLinkDisplay(renderDoc, sku, { hidden: true })`, assert `visibleImagesForParts([sku])` returns only the upload image; unhide → returns `[upload, render]` in that order; assert a datasheet never appears in the image map. Register fixtures for `part_documents`/`part_document_links` (use the collection names in `DOC_TABLES`).
+DB check `portal245ImageLinksAsyncChecks`: create two image docs (`source: "upload"` and `"datasheet-render"`) + one datasheet via `createDocument`, `attachDocument` all to `fixtureId(245,"sku-img")`, set `setDocumentLinkDisplay(renderDoc, sku, { hidden: true })`, assert `visibleImagesForParts([sku])` returns only the upload image; unhide → returns `[upload, render]` in that order; assert a datasheet never appears in the image map. Register fixtures for `part_documents`/`part_document_links` (use the collection names in `DOC_TABLES`).
 
 - [ ] **Step 2: Run → fails.**
 
@@ -309,7 +309,7 @@ export function sniffImageType(b: Uint8Array): "image/png" | "image/jpeg" | "ima
   - `coverage.ts`: `buildCoverageIndex` ignores documents/links whose `kind === "image"` (images never cover or satisfy a slot). Add a guard at index build.
   - `filename-match.ts` `guessKind`: `/\.(png|jpe?g|webp)$/i` → `"image"`.
   - `stores/part-documents.ts`: `setDocumentLinkDisplay` via `patchDoc` on the link id `documentLinkId(partSku, documentId)`; `visibleImagesForParts` via `documentLinksForParts(skus)` filtered to `kind === "image" && !hidden && !deleted`, then `getDocuments(ids)`, sorted as specified.
-- [ ] **Step 4: Gates; commit** — `feat(part-docs): images are a third document kind — PNG/JPEG/WebP, 10 MB, gallery order + hide (#242)`.
+- [ ] **Step 4: Gates; commit** — `feat(part-docs): images are a third document kind — PNG/JPEG/WebP, 10 MB, gallery order + hide (#245)`.
 
 ---
 
@@ -332,7 +332,7 @@ export function sniffImageType(b: Uint8Array): "image/png" | "image/jpeg" | "ima
   - `addImageFromUrlAction`: `requireUser()`; reuse `guardedFetchBytes` (see `src/lib/part-docs/fetch-links.ts` for the call shape), check `sniffImageType`, size ≤ `MAX_PART_IMAGE_BYTES`, upload to Blob at `partDocBlobPath(id, fileName)` the way `fetchSlot` stores a fetched file, `createDocument({ kind: "image", source: "fetch", sourceUrl: url, … })`, `attachDocument(id, [sku], by)`.
   - Upload many: accept `.png,.jpg,.jpeg,.webp` in the file input `accept`; `guessKind` already routes them to `image`.
   - Team route `/api/part-documents/[id]` already serves any kind; confirm it sets the right content type for images (it uses the stored `contentType`).
-- [ ] **Step 4: Gates incl. `next build`; commit** — `feat(catalog): image slots — Datasheets column + missing filter, part-editor gallery, upload many, add from URL (#242)`.
+- [ ] **Step 4: Gates incl. `next build`; commit** — `feat(catalog): image slots — Datasheets column + missing filter, part-editor gallery, upload many, add from URL (#245)`.
 
 ---
 
@@ -359,20 +359,20 @@ export function browseReason(f: VisibilityFacts, rule: BrowseRule): string;
 - [ ] **Step 1: Failing test**
 
 ```ts
-import { browsable as d242Browsable, browseReason as d242Reason, quotable as d242Quotable, normalizeVisibility as d242NormVis } from "@/lib/portal-visibility";
+import { browsable as d245Browsable, browseReason as d245Reason, quotable as d245Quotable, normalizeVisibility as d245NormVis } from "@/lib/portal-visibility";
 {
   const rule = { minQuotes: 3 };
   const base = { visibility: "auto" as const, hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 };
-  ok(d242Quotable(base) && d242Quotable({ visibility: "show" }) && !d242Quotable({ visibility: "hide" }), "#242 visibility: everything but Hide is quotable");
-  ok(!d242Browsable(base, rule), "#242 visibility: auto with no image/datasheet/quotes is search-only");
-  ok(d242Browsable({ ...base, hasVisibleImage: true }, rule) && d242Browsable({ ...base, hasDatasheet: true }, rule), "#242 visibility: image or datasheet makes it browsable");
-  ok(!d242Browsable({ ...base, quoteCount: 2 }, rule) && d242Browsable({ ...base, quoteCount: 3 }, rule), "#242 visibility: 3+ recent quotes makes it browsable");
-  ok(d242Browsable({ ...base, visibility: "show" }, rule) && !d242Browsable({ ...base, visibility: "hide", hasVisibleImage: true }, rule), "#242 visibility: overrides win both ways");
-  ok(d242Reason({ ...base, hasVisibleImage: true }, rule) === "Browsable: has image", "#242 visibility: reason names the first matching fact");
-  ok(d242Reason({ ...base, quoteCount: 5 }, rule) === "Browsable: quoted 5 times recently", "#242 visibility: quote-count reason");
-  ok(d242Reason({ ...base, visibility: "hide" }, rule) === "Hidden from customers", "#242 visibility: hide reason");
-  ok(d242Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#242 visibility: search-only reason");
-  ok(d242NormVis("bogus") === "auto" && d242NormVis(undefined) === "auto" && d242NormVis("hide") === "hide", "#242 visibility: unknown values read as auto");
+  ok(d245Quotable(base) && d245Quotable({ visibility: "show" }) && !d245Quotable({ visibility: "hide" }), "#245 visibility: everything but Hide is quotable");
+  ok(!d245Browsable(base, rule), "#245 visibility: auto with no image/datasheet/quotes is search-only");
+  ok(d245Browsable({ ...base, hasVisibleImage: true }, rule) && d245Browsable({ ...base, hasDatasheet: true }, rule), "#245 visibility: image or datasheet makes it browsable");
+  ok(!d245Browsable({ ...base, quoteCount: 2 }, rule) && d245Browsable({ ...base, quoteCount: 3 }, rule), "#245 visibility: 3+ recent quotes makes it browsable");
+  ok(d245Browsable({ ...base, visibility: "show" }, rule) && !d245Browsable({ ...base, visibility: "hide", hasVisibleImage: true }, rule), "#245 visibility: overrides win both ways");
+  ok(d245Reason({ ...base, hasVisibleImage: true }, rule) === "Browsable: has image", "#245 visibility: reason names the first matching fact");
+  ok(d245Reason({ ...base, quoteCount: 5 }, rule) === "Browsable: quoted 5 times recently", "#245 visibility: quote-count reason");
+  ok(d245Reason({ ...base, visibility: "hide" }, rule) === "Hidden from customers", "#245 visibility: hide reason");
+  ok(d245Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#245 visibility: search-only reason");
+  ok(d245NormVis("bogus") === "auto" && d245NormVis(undefined) === "auto" && d245NormVis("hide") === "hide", "#245 visibility: unknown values read as auto");
 }
 ```
 
@@ -380,7 +380,7 @@ import { browsable as d242Browsable, browseReason as d242Reason, quotable as d24
 - [ ] **Step 3: Implement**
 
 ```ts
-/** Customer visibility of a catalog part (#242, spec §1.3). Pure. */
+/** Customer visibility of a catalog part (#245, spec §1.3). Pure. */
 export type PortalVisibility = "auto" | "show" | "hide";
 export type VisibilityFacts = { visibility: PortalVisibility; hasVisibleImage: boolean; hasDatasheet: boolean; quoteCount: number };
 export type BrowseRule = { minQuotes: number };
@@ -407,7 +407,7 @@ export function browseReason(f: VisibilityFacts, rule: BrowseRule): string {
 ```
 
 - [ ] **Step 4: Editor.** `part-form.ts` `OptionalPartFields` gains `portalVisibility?: "show" | "hide" | undefined` — `if (fd.has("portalVisibility")) { const v = normalizeVisibility(fd.get("portalVisibility")); out.portalVisibility = v === "auto" ? undefined : v; }` (auto is stored as absent; an explicit undefined clears through `mergeUpsert`). In `PartFormModal`, a labeled `<select name="portalVisibility">` (Auto · Show · Hide) under the Documents section, and beneath it the reason line. The page computes the reason server-side for the edited SKU using the Task 7 index helper `portalFactsForSku(sku)` — until Task 7 lands, compute with `hasVisibleImage`/`hasDatasheet` from the already-loaded `partDocs` view and `quoteCount: 0`, then switch to `portalFactsForSku` in Task 7 Step 5.
-- [ ] **Step 5: Gates incl. `next build`; commit** — `feat(catalog): customer visibility Auto/Show/Hide with a browse reason (#242)`.
+- [ ] **Step 5: Gates incl. `next build`; commit** — `feat(catalog): customer visibility Auto/Show/Hide with a browse reason (#245)`.
 
 ---
 
@@ -449,56 +449,56 @@ export function searchCatalog(all: readonly SearchEntry[], query: SearchQuery): 
 - [ ] **Step 1: Failing tests**
 
 ```ts
-import { unitPriceFor as d242Unit, fixtureUnitPrice as d242FixPrice } from "@/lib/portal-price-rules";
-import { quoteMode as d242Mode, canAcceptPortal as d242CanAccept, firmValidUntil as d242Valid, looksLikeCardNumber as d242Card } from "@/lib/portal-quote-mode";
-import { searchCatalog as d242Search, buildHaystack as d242Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
+import { unitPriceFor as d245Unit, fixtureUnitPrice as d245FixPrice } from "@/lib/portal-price-rules";
+import { quoteMode as d245Mode, canAcceptPortal as d245CanAccept, firmValidUntil as d245Valid, looksLikeCardNumber as d245Card } from "@/lib/portal-quote-mode";
+import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
 {
   const now = Date.UTC(2026, 8, 27);
   const o = { margin: 0.3, staleCostMonths: 0, now };
-  ok(d242Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#242 price: cost ÷ (1 − margin)");
-  ok(d242Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d242Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#242 price: no cost → list");
-  const np = d242Unit({ cost: 0, list: 0 }, o);
-  ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#242 price: no cost and no list → price on request");
-  ok(d242Unit({ cost: 10, list: 20, note: "verify price" }, o).porReason === "verify-price", "#242 price: a note means verify price → POR");
+  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost ÷ (1 − margin)");
+  ok(d245Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d245Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#245 price: no cost → list");
+  const np = d245Unit({ cost: 0, list: 0 }, o);
+  ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#245 price: no cost and no list → price on request");
+  ok(d245Unit({ cost: 10, list: 20, note: "verify price" }, o).porReason === "verify-price", "#245 price: a note means verify price → POR");
   const old = now - 400 * 86400000;
-  ok(!d242Unit({ cost: 10, list: 20, pricedAt: old }, o).por, "#242 price: stale-cost rule off by default");
-  ok(d242Unit({ cost: 10, list: 20, pricedAt: old }, { ...o, staleCostMonths: 12 }).porReason === "stale-cost", "#242 price: stale cost → POR when the setting is on");
-  ok(!d242Unit({ cost: 10, list: 20, pricedAt: null }, { ...o, staleCostMonths: 12 }).por, "#242 price: unknown priced date is not stale");
-  ok(d242Unit({ cost: 33.33, list: 0 }, o).unitPrice === 47.61, "#242 price: rounded to cents");
+  ok(!d245Unit({ cost: 10, list: 20, pricedAt: old }, o).por, "#245 price: stale-cost rule off by default");
+  ok(d245Unit({ cost: 10, list: 20, pricedAt: old }, { ...o, staleCostMonths: 12 }).porReason === "stale-cost", "#245 price: stale cost → POR when the setting is on");
+  ok(!d245Unit({ cost: 10, list: 20, pricedAt: null }, { ...o, staleCostMonths: 12 }).por, "#245 price: unknown priced date is not stale");
+  ok(d245Unit({ cost: 33.33, list: 0 }, o).unitPrice === 47.61, "#245 price: rounded to cents");
 
   const comp = (sku: string, cost: number, qty = 1, extra = {}) => ({ sku, cost, list: 0, qty, quotable: true, required: true, ...extra });
-  const fx = d242FixPrice([comp("LE", 700), comp("LENS", 70, 2)], o);
-  ok(fx.unitPrice === 1200 && !fx.por && fx.cost === 840, "#242 fixture: sum of component tier prices × qty; cost carried");
-  ok(d242FixPrice([comp("LE", 700), comp("X", 0, 1, { list: 0 })], o).por, "#242 fixture: a POR component makes the fixture POR");
-  ok(d242FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false })], o).unavailable, "#242 fixture: a hidden required component makes it unavailable");
-  ok(!d242FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false, required: false })], o).unavailable, "#242 fixture: a hidden optional add-on doesn't block the fixture");
+  const fx = d245FixPrice([comp("LE", 700), comp("LENS", 70, 2)], o);
+  ok(fx.unitPrice === 1200 && !fx.por && fx.cost === 840, "#245 fixture: sum of component tier prices × qty; cost carried");
+  ok(d245FixPrice([comp("LE", 700), comp("X", 0, 1, { list: 0 })], o).por, "#245 fixture: a POR component makes the fixture POR");
+  ok(d245FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false })], o).unavailable, "#245 fixture: a hidden required component makes it unavailable");
+  ok(!d245FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false, required: false })], o).unavailable, "#245 fixture: a hidden optional add-on doesn't block the fixture");
 
-  ok(d242Mode([{ por: false }, { por: false }]).mode === "firm", "#242 mode: all priced → firm");
-  const rv = d242Mode([{ por: false }, { por: true }, { por: true }]);
-  ok(rv.mode === "review" && rv.porCount === 2 && rv.reason === "2 lines are price on request", "#242 mode: any POR → review with reason");
-  ok(d242Mode([{ por: true }]).reason === "1 line is price on request", "#242 mode: singular reason");
-  ok(d242Valid(now, 30) === now + 30 * 86400000, "#242 validity: 30 days");
-  ok(d242CanAccept({ status: "sent", portalFirm: { validUntil: now + 1 } }, now).ok, "#242 accept: sent + in date → ok");
-  ok(d242CanAccept({ status: "sent", portalFirm: { validUntil: now - 1 } }, now).reason === "expired", "#242 accept: expired firm quote refused");
-  ok(d242CanAccept({ status: "sent" }, now).ok, "#242 accept: staff-sent (no portalFirm) never expires here");
-  ok(d242CanAccept({ status: "draft" }, now).reason === "not-sent" && d242CanAccept({ status: "sent", portalAcceptance: { at: 1 } }, now).reason === "accepted", "#242 accept: draft / already accepted refused");
-  ok(d242Card("PO 44812, card 4111 1111 1111 1111 please") && d242Card("4242424242424242"), "#242 card guard: Luhn-valid 13–19 digit runs caught, with spaces");
-  ok(!d242Card("PO 1234567890123") && !d242Card("call 608-555-0199"), "#242 card guard: PO numbers / phones that fail Luhn pass");
+  ok(d245Mode([{ por: false }, { por: false }]).mode === "firm", "#245 mode: all priced → firm");
+  const rv = d245Mode([{ por: false }, { por: true }, { por: true }]);
+  ok(rv.mode === "review" && rv.porCount === 2 && rv.reason === "2 lines are price on request", "#245 mode: any POR → review with reason");
+  ok(d245Mode([{ por: true }]).reason === "1 line is price on request", "#245 mode: singular reason");
+  ok(d245Valid(now, 30) === now + 30 * 86400000, "#245 validity: 30 days");
+  ok(d245CanAccept({ status: "sent", portalFirm: { validUntil: now + 1 } }, now).ok, "#245 accept: sent + in date → ok");
+  ok(d245CanAccept({ status: "sent", portalFirm: { validUntil: now - 1 } }, now).reason === "expired", "#245 accept: expired firm quote refused");
+  ok(d245CanAccept({ status: "sent" }, now).ok, "#245 accept: staff-sent (no portalFirm) never expires here");
+  ok(d245CanAccept({ status: "draft" }, now).reason === "not-sent" && d245CanAccept({ status: "sent", portalAcceptance: { at: 1 } }, now).reason === "accepted", "#245 accept: draft / already accepted refused");
+  ok(d245Card("PO 44812, card 4111 1111 1111 1111 please") && d245Card("4242424242424242"), "#245 card guard: Luhn-valid 13–19 digit runs caught, with spaces");
+  ok(!d245Card("PO 1234567890123") && !d245Card("call 608-555-0199"), "#245 card guard: PO numbers / phones that fail Luhn pass");
 
-  const e = (key: string, mfr: string, category: string, browsable = true, title = key): D242Entry => ({ key, kind: "part", title, sku: key, mfr, category, haystack: d242Hay([key, title, mfr, category]), browsable, rank: 0 });
+  const e = (key: string, mfr: string, category: string, browsable = true, title = key): D242Entry => ({ key, kind: "part", title, sku: key, mfr, category, haystack: d245Hay([key, title, mfr, category]), browsable, rank: 0 });
   const all = [e("A1", "ETC", "Fixtures"), e("A2", "ETC", "Cable"), e("B1", "Rose Brand", "Track", false), e("B2", "Rose Brand", "Fixtures", true, "Source Four Clamp")];
-  const r0 = d242Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(r0.total === 3 && !r0.entries.some((x) => x.key === "B1"), "#242 search: empty query lists browsable only");
-  ok(d242Search(all, { q: "b1", mfr: [], cat: [], page: 1, pageSize: 48 }).total === 1, "#242 search: a query finds search-only parts too");
-  const r1 = d242Search(all, { q: "", mfr: ["ETC"], cat: [], page: 1, pageSize: 48 });
-  ok(r1.total === 2 && r1.catFacets.find((f) => f.value === "Fixtures")?.count === 1 && !r1.catFacets.some((f) => f.value === "Track"), "#242 search: picking a manufacturer narrows category facets");
-  ok(r1.mfrFacets.find((f) => f.value === "Rose Brand")?.count === 1 && r1.mfrFacets.find((f) => f.value === "ETC")?.selected === true, "#242 search: manufacturer facet counts ignore its own selection (either order works)");
-  const r2 = d242Search(all, { q: "source clamp", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(r2.total === 1 && r2.entries[0].key === "B2", "#242 search: every token must match (AND)");
+  const r0 = d245Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(r0.total === 3 && !r0.entries.some((x) => x.key === "B1"), "#245 search: empty query lists browsable only");
+  ok(d245Search(all, { q: "b1", mfr: [], cat: [], page: 1, pageSize: 48 }).total === 1, "#245 search: a query finds search-only parts too");
+  const r1 = d245Search(all, { q: "", mfr: ["ETC"], cat: [], page: 1, pageSize: 48 });
+  ok(r1.total === 2 && r1.catFacets.find((f) => f.value === "Fixtures")?.count === 1 && !r1.catFacets.some((f) => f.value === "Track"), "#245 search: picking a manufacturer narrows category facets");
+  ok(r1.mfrFacets.find((f) => f.value === "Rose Brand")?.count === 1 && r1.mfrFacets.find((f) => f.value === "ETC")?.selected === true, "#245 search: manufacturer facet counts ignore its own selection (either order works)");
+  const r2 = d245Search(all, { q: "source clamp", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(r2.total === 1 && r2.entries[0].key === "B2", "#245 search: every token must match (AND)");
   const many = Array.from({ length: 100 }, (_, i) => e("P" + i, "ETC", "Cable"));
-  const p3 = d242Search(many, { q: "", mfr: [], cat: [], page: 3, pageSize: 48 });
-  ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#242 search: 48 per page, last page partial");
-  ok(d242Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#242 search: page clamps to the last page");
+  const p3 = d245Search(many, { q: "", mfr: [], cat: [], page: 3, pageSize: 48 });
+  ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#245 search: 48 per page, last page partial");
+  ok(d245Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#245 search: page clamps to the last page");
 }
 ```
 
@@ -506,7 +506,7 @@ import { searchCatalog as d242Search, buildHaystack as d242Hay, type SearchEntry
 - [ ] **Step 3: Implement `portal-price-rules.ts`**
 
 ```ts
-/** Portal unit pricing rules (#242, spec §2.1). Pure; sell-only outputs. */
+/** Portal unit pricing rules (#245, spec §2.1). Pure; sell-only outputs. */
 export type PriceInput = { cost: number | null | undefined; list: number | null | undefined; note?: string | null; pricedAt?: number | null };
 export type PriceRuleOpts = { margin: number; staleCostMonths: number; now: number };
 export type UnitPrice = { unitPrice: number | null; por: boolean; porReason?: "no-price" | "verify-price" | "stale-cost" };
@@ -545,7 +545,7 @@ export function fixtureUnitPrice(components: FixtureComponentInput[], o: PriceRu
 - [ ] **Step 4: Implement `portal-quote-mode.ts`**
 
 ```ts
-/** Firm vs review, validity, accept eligibility, card guard (#242, spec §2.3/§4). Pure. */
+/** Firm vs review, validity, accept eligibility, card guard (#245, spec §2.3/§4). Pure. */
 export type ModeLine = { por: boolean };
 export function quoteMode(lines: readonly ModeLine[]): { mode: "firm" | "review"; porCount: number; reason: string | null } {
   const porCount = lines.filter((l) => l.por).length;
@@ -590,7 +590,7 @@ Verify in the test that `"PO 1234567890123"` fails Luhn (it does: compute once; 
 - [ ] **Step 5: Implement `portal-search.ts`**
 
 ```ts
-/** Portal catalog search + two-way facets + paging (#242, spec §3.1). Pure. */
+/** Portal catalog search + two-way facets + paging (#245, spec §3.1). Pure. */
 export type SearchEntry = { key: string; kind: "part" | "fixture"; title: string; sku: string; mfr: string; category: string; haystack: string; browsable: boolean; rank: number };
 export type SearchQuery = { q: string; mfr: string[]; cat: string[]; page: number; pageSize: number };
 export type Facet = { value: string; count: number; selected: boolean };
@@ -624,7 +624,7 @@ export function searchCatalog(all: readonly SearchEntry[], query: SearchQuery): 
 }
 ```
 
-- [ ] **Step 6: Gates; commit** — `feat(portal): pure price rules, quote mode, accept/card guards, catalog search (#242)`.
+- [ ] **Step 6: Gates; commit** — `feat(portal): pure price rules, quote mode, accept/card guards, catalog search (#245)`.
 
 ---
 
@@ -633,7 +633,7 @@ export function searchCatalog(all: readonly SearchEntry[], query: SearchQuery): 
 **Files:**
 - Create: `src/lib/portal-catalog-index.ts`, `src/lib/portal-pricing.ts`
 - Modify: `src/app/(app)/catalog/page.tsx` (switch the Task 5 reason to `portalFactsForSku`)
-- Test: `portal242IndexAsyncChecks`
+- Test: `portal245IndexAsyncChecks`
 
 **Interfaces:**
 - Consumes: Tasks 1, 3, 5, 6; `list()` (catalog), `loadPartDocsState(parts)` (`part-docs/load.ts`) → `.index` (`CoverageIndex` with `childrenOf`, `parentsOf`), `slotCoverage`/`slotSatisfied`, `visibleImagesForParts`, `listFixtures()`, `resolveFixture`, quotes `getAll()`, `resolveTier(companyId, contactName)`, `travelForId(customerId, locId)`.
@@ -668,16 +668,16 @@ export async function priceSku(sku: string, ctx: PortalPricingContext): Promise<
 - [ ] **Step 1: Failing tests** — pure `countRecentQuotesBySku`:
 
 ```ts
-import { countRecentQuotesBySku as d242Counts } from "@/lib/portal-catalog-index";
+import { countRecentQuotesBySku as d245Counts } from "@/lib/portal-catalog-index";
 {
   const mk = (createdAt: number, skus: string[], source = "estimator") => ({ source, createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
   const since = 1000;
-  const m = d242Counts([mk(2000, ["A", "A", "B"]), mk(3000, ["A"]), mk(500, ["A"]), mk(4000, ["A"], "daylite"), { source: "x", createdAt: 5000, spec: null }], since);
-  ok(m.get("A") === 2 && m.get("B") === 1, "#242 index: counts distinct quotes per SKU inside the window, excluding Daylite history and old quotes");
+  const m = d245Counts([mk(2000, ["A", "A", "B"]), mk(3000, ["A"]), mk(500, ["A"]), mk(4000, ["A"], "daylite"), { source: "x", createdAt: 5000, spec: null }], since);
+  ok(m.get("A") === 2 && m.get("B") === 1, "#245 index: counts distinct quotes per SKU inside the window, excluding Daylite history and old quotes");
 }
 ```
 
-DB `portal242IndexAsyncChecks`: create catalog fixtures via `mergeUpsert` (`fixtureId(242,"p-img")` with an attached image, `fixtureId(242,"p-hide")` with `portalVisibility: "hide"`, `fixtureId(242,"p-plain")`), call `invalidatePortalIndex(); const ix = await portalIndex({ fresh: true })`, assert: `p-hide` absent from `ix.entries`; `p-img` entry `browsable === true`; `p-plain` present with `browsable === false`. Assert `priceSku(p-hide)` → `null`. Build a cart `{ id: "TEST242:cart", customerId: <a test company>, locationId: null, lines: [{ lineId: "1", kind: "part", sku: p-img, qty: 2 }, { lineId: "2", kind: "curtain", qty: 1, curtainInputs: {...} }] }`; `priceCart` → `mode === "review"`, curtain line `por`, part line `extPrice === 2 × unitPrice`, `freight.unknown === true` (no venue) and `freight.pct === 10`; `sellView()` result JSON contains no `"cost"` key (assert `!JSON.stringify(sellView(p)).includes("\"cost\"")`).
+DB `portal245IndexAsyncChecks`: create catalog fixtures via `mergeUpsert` (`fixtureId(245,"p-img")` with an attached image, `fixtureId(245,"p-hide")` with `portalVisibility: "hide"`, `fixtureId(245,"p-plain")`), call `invalidatePortalIndex(); const ix = await portalIndex({ fresh: true })`, assert: `p-hide` absent from `ix.entries`; `p-img` entry `browsable === true`; `p-plain` present with `browsable === false`. Assert `priceSku(p-hide)` → `null`. Build a cart `{ id: "TEST245:cart", customerId: <a test company>, locationId: null, lines: [{ lineId: "1", kind: "part", sku: p-img, qty: 2 }, { lineId: "2", kind: "curtain", qty: 1, curtainInputs: {...} }] }`; `priceCart` → `mode === "review"`, curtain line `por`, part line `extPrice === 2 × unitPrice`, `freight.unknown === true` (no venue) and `freight.pct === 10`; `sellView()` result JSON contains no `"cost"` key (assert `!JSON.stringify(sellView(p)).includes("\"cost\"")`).
 
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement `portal-catalog-index.ts`.**
@@ -694,13 +694,13 @@ DB `portal242IndexAsyncChecks`: create catalog fixtures via `mergeUpsert` (`fixt
     - `part`: missing from index (hidden/deleted) → `unavailable: true`, excluded from totals/sections, title "No longer available"; else `unitPriceFor` → SellLine + staff `SpecItem { id, sku, desc, qty, unit, cost, price: unitPrice ?? 0, manufacturer: mfr, manufacturerPartNumber: mpn, por?: true }`.
     - `fixture`: fixture from index (+ `fixtureOptions: Record<string, number>` of optional-line qty overrides keyed `slot:sku`) → components (required lines at stored qty, optional lines at the chosen qty, default 0) → `fixtureUnitPrice`; staff item `{ …, fixture: true, components: [...] , cost: fx.cost, price: fx.unitPrice ?? 0 }`; `detail` = "Included: … · Add-ons: …".
     - `curtain`: always `por: true, porReason: "curtain"`; staff item `{ sku: "CRT-REQ", desc: "<name> — <fabric name>, <W>'W × <H>'H, <fullness>% fullness (customer request — price on request)", qty, unit: "ea", cost: 0, price: 0, curtain: true, por: true }`.
-    - Add `por?: boolean` to `SpecItem` in `src/app/(app)/estimator/types.ts` (comment: `/** #242: customer-requested line still waiting on a Peak price. */`).
+    - Add `por?: boolean` to `SpecItem` in `src/app/(app)/estimator/types.ts` (comment: `/** #245: customer-requested line still waiting on a Peak price. */`).
     - Sections: `SEC-EQUIP` "Equipment & supplies", `SEC-FIXT` "Fixtures", `SEC-DRAPE` "Drapery & soft goods" — only non-empty ones; each `kind: "materials", mfr: "", freightPct: freight.pct, freightAuto: false, items`.
     - Totals: `const t = totals(sections, 0)` (Estimator's `totals`); `subtotal = t.mat` (verify `mat` is sell of materials by reading `totals()` — if `rev` is the sell subtotal use `rev`); `freight.amount = t.fr`; `total = t.grand`; `mode` via `quoteMode(lines.filter(l => !l.unavailable))`.
   - `sellView` strips `sections`.
   - `priceSku`: index lookup (null when absent) → `unitPriceFor`.
 - [ ] **Step 5:** Catalog editor reason line → `await portalFactsForSku(sku)` (Task 5 Step 4 follow-through).
-- [ ] **Step 6: Gates incl. `next build`; commit** — `feat(portal): cached catalog index + server-canonical portal pricing (#242)`.
+- [ ] **Step 6: Gates incl. `next build`; commit** — `feat(portal): cached catalog index + server-canonical portal pricing (#245)`.
 
 ---
 
@@ -709,7 +709,7 @@ DB `portal242IndexAsyncChecks`: create catalog fixtures via `mergeUpsert` (`fixt
 **Files:**
 - Modify: `src/db/doc-tables.ts` (`export const portalCarts = docTable("portal_carts")` + `DOC_TABLES.portal_carts`)
 - Create: `drizzle/0032_portal_carts.sql` (+ journal/snapshot from `npm run db:generate`, then hand-harden), `src/lib/stores/portal-carts.ts`
-- Test: `portal242CartAsyncChecks`
+- Test: `portal245CartAsyncChecks`
 
 **Interfaces:**
 - Produces:
@@ -729,10 +729,10 @@ export async function clearCart(grantId: string): Promise<void>;
 export const MAX_CART_LINES = 200; export const MAX_LINE_QTY = 10000;
 ```
 
-- [ ] **Step 1: Failing DB test** — `getCart("TEST242:g1", co)` → empty with `lines.length === 0`; `addLine` part ×2 then same SKU ×3 → one line qty 5; add a curtain line → 2 lines; `updateLine(qty 0)` removes; a cart saved for customer A read with customer B → empty (never another customer's cart); qty clamped to `MAX_LINE_QTY`; no quote row created (`(await getAllQuotes()).some(q => q.customerId === co && q.source === "portal-catalog")` false). Register `portal_carts` fixtures.
+- [ ] **Step 1: Failing DB test** — `getCart("TEST245:g1", co)` → empty with `lines.length === 0`; `addLine` part ×2 then same SKU ×3 → one line qty 5; add a curtain line → 2 lines; `updateLine(qty 0)` removes; a cart saved for customer A read with customer B → empty (never another customer's cart); qty clamped to `MAX_LINE_QTY`; no quote row created (`(await getAllQuotes()).some(q => q.customerId === co && q.source === "portal-catalog")` false). Register `portal_carts` fixtures.
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement** — doc table; `npm run db:generate` (stop: this opens no DB); rename the generated SQL to `0032_portal_carts.sql`, rewrite to `CREATE TABLE IF NOT EXISTS "portal_carts" (…same columns as 0029…)`, two `CREATE INDEX IF NOT EXISTS`, and `CREATE OR REPLACE TRIGGER portal_carts_seq_bump BEFORE UPDATE ON "portal_carts" FOR EACH ROW EXECUTE FUNCTION bump_doc_seq();` — copy 0029's text and substitute the name. Store via `getDoc`/`upsertDoc`; `lineId` = `crypto.randomUUID().slice(0, 8)`; `updatedAt = Date.now()`.
-- [ ] **Step 4: Gates; commit** — `feat(portal): portal_carts collection — one cart per grant, no quote row until Generate (#242)`.
+- [ ] **Step 4: Gates; commit** — `feat(portal): portal_carts collection — one cart per grant, no quote row until Generate (#245)`.
 
 ---
 
@@ -748,7 +748,7 @@ export const MAX_CART_LINES = 200; export const MAX_LINE_QTY = 10000;
 - [ ] **Step 1: Failing test** — doc linked (not hidden) to a quotable SKU → true; linked only to a hidden-link → false; linked only to a non-quotable SKU → false; a datasheet linked to a quotable fixture parent of a quotable accessory → true; an **image** on a parent never serves via the accessory → false.
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement** the pure fn, then the route: `resolvePortalViewer(searchParams.get("preview") || "")` → no session → 404; `portalIndex()` gives quotable SKUs and doc ids per SKU (add `docLinks: Map<string, …>` to the index if needed rather than re-querying); `getDocument(id)`; deny → `new Response("Not found", { status: 404 })`; allow → same body as `/api/part-documents/[id]` (`getBlobStream(blobKey)`; no blobKey → 302 to `sourceUrl`), headers `Content-Type: doc.contentType`, `Content-Disposition` inline, `Cache-Control: private, max-age=86400`, `ETag: "<id>"`, and `X-Content-Type-Options: nosniff`. Rate-limit per grant with `rateLimit("portal-doc:" + session.grantId, 300, 60_000)` → 429.
-- [ ] **Step 4: Gates; commit** — `feat(portal): customer document route — only docs linked to parts they can see (#242)`.
+- [ ] **Step 4: Gates; commit** — `feat(portal): customer document route — only docs linked to parts they can see (#245)`.
 
 ---
 
@@ -769,7 +769,7 @@ export const MAX_CART_LINES = 200; export const MAX_LINE_QTY = 10000;
   - `catalog-client.tsx` ("use client"): search box (debounced 250 ms, updates the URL with `router.replace`), left rail with Manufacturer and Category facet lists (each with a filter input, checkboxes, counts, selected first), chips for active facets, a tile grid (image `<img src="/portal/catalog/doc/<imageId>" loading="lazy">` → datasheet icon → neutral placeholder), price or **Price on request**, a quick **Add** (parts; disabled in preview) and **Configure** (fixtures) — both open the sidebar (`?part=`); numbered pager (Prev · 1 2 3 … · Next). Under 768 px the rail collapses behind a "Filters" button. Styles: existing `pk-*` classes and CSS variables only; accent via `var(--accent)`.
   - `searchPortalCatalog` ("use server"): `portalSession()` → none → `{ ok:false, error: "Your access link has expired — open the link we sent you again." }`; `rateLimit("portal-search:" + grantId, 120, 60_000)`; clamp `pageSize` to 48; returns TileVMs (sell only).
   - Shell nav: add a `nav?: Array<{ href: string; label: string; active?: boolean; badge?: number }>` prop to `PortalShell`, render as links under the top bar; `/portal` passes Home active, `/portal/catalog` passes Catalog active; the Quote item shows the cart line count (`getCart(...)`, skip in preview).
-- [ ] **Step 3: Gates incl. `next build` and `npm run test:smoke` (stop any dev server first; `lsof -i :3000`); commit** — `feat(portal): /portal/catalog — search, manufacturer/category facets, tiles, paging, quoted-before shelf (#242)`.
+- [ ] **Step 3: Gates incl. `next build` and `npm run test:smoke` (stop any dev server first; `lsof -i :3000`); commit** — `feat(portal): /portal/catalog — search, manufacturer/category facets, tiles, paging, quoted-before shelf (#245)`.
 
 ---
 
@@ -792,7 +792,7 @@ export const MAX_CART_LINES = 200; export const MAX_LINE_QTY = 10000;
   - Fixture configurator: fixed parts list (light engine, lens, included lines with qty), add-ons as toggles with a qty input (qty > 0 = on), live price via `priceFixtureOptions` (debounced), unavailable → "This fixture can't be quoted online right now — ask us about it." and Add disabled.
   - Curtain request (header button on `/portal/catalog` → modal): inputs name, fabric (select over `byCategory("Fabric")` filtered by `fabricAreaRateOf(p) > 0` — names only, no rates), qty, width (ft), height (ft), fullness (Flat/50%/75%/100%); reuse `curtainAreas` from `src/lib/curtain-geom.ts` only to show "≈ N sq ft of fabric" (no price). Copy: "We'll price this for you — curtain quotes are confirmed by Peak." Submit → `addToCart({ kind: "curtain", … })`.
   - All add actions: `invalidate` nothing; `revalidatePath("/portal/catalog")`; return the new line count for the header chip.
-- [ ] **Step 3: Gates incl. `next build`; commit** — `feat(portal): part sidebar, fixture configurator, curtain pricing request, ask a question, add to quote (#242)`.
+- [ ] **Step 3: Gates incl. `next build`; commit** — `feat(portal): part sidebar, fixture configurator, curtain pricing request, ask a question, add to quote (#245)`.
 
 ---
 
@@ -818,20 +818,20 @@ export async function generatePortalQuote(session: PortalSession, opts?: { now?:
 export async function sendPortalFirm(quoteId: string, validityDays: number, now: number): Promise<void>; // shared by generate + refresh
 ```
 
-- [ ] **Step 1: Failing DB checks** (`portal242GenerateAsyncChecks`, company fixture with an owner and a venue whose `travelMiles` = 450):
+- [ ] **Step 1: Failing DB checks** (`portal245GenerateAsyncChecks`, company fixture with an owner and a venue whose `travelMiles` = 450):
   - firm cart (one priced part) → `generatePortalQuote(sessionStub, { schedulePdf: false })` → quote `status === "sent"`, `source === "portal-catalog"`, `estNo` is a number, `portalFirm.validUntil === generatedAt + 30d`, `owner` = company owner, `spec.sections[0].freightPct === 4`, `value === totals(...).grand`, cart now empty.
   - review cart (part + curtain) → `status === "draft"`, `portalReview.reasons[0] === "1 line is price on request"`, `estNo` set, `portalListsQuote(q, co)` true.
   - cart with no venue → `{ ok: false, error: "Pick the venue this is for." }`; empty cart → `{ ok:false, error: "Your quote is empty." }`.
   - `portalListsQuote` true for a `portal-catalog` draft of this customer, false for another customer's.
 - [ ] **Step 2: Run → fails.**
 - [ ] **Step 3: Implement.**
-  - `quotes.ts`: add the fields; `resolveStatusGate`/the bypass check (~897-901) accepts `"portal-firm"`; comment: `// #242: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.` `portalListsQuote`: `q.status !== "draft" || q.source === "portal-self-serve" || q.source === "portal-catalog"`.
+  - `quotes.ts`: add the fields; `resolveStatusGate`/the bypass check (~897-901) accepts `"portal-firm"`; comment: `// #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.` `portalListsQuote`: `q.status !== "draft" || q.source === "portal-self-serve" || q.source === "portal-catalog"`.
   - `generatePortalQuote`: load cart (`getCart(session.grantId, session.customerId)`); guards (empty, no venue, all lines unavailable); `ctx = pricingContextFor(session)`; `p = priceCart(cart, ctx)`; `cust = getCustomer(customerId)`; `createQuote({ name: "Portal quote — " + <venue label>, customer: cust.name, customerId, locationId: cart.locationId, contactName: session.name, value: p.total, margin: ctx.margin, pricingTier: ctx.tier, tierMargin: ctx.tierMargin, source: "portal-catalog", spec: { sections: p.sections, mobs: [] } })`; `updateQuote(id, { owner: cust.owner || "", quoteNote: "All quotes are subject to Peak review and approval. Plus applicable sales tax.", portalReview: mode === "review" ? { requestedAt: now, reasons: [p.reason] } : null })`; `scheduleQuotePdf(id)` when `schedulePdf !== false`; firm → `sendPortalFirm(id, rules.validityDays, now)`; `clearCart(grantId)`.
   - `sendPortalFirm`: `updateQuote(id, { portalFirm: { generatedAt: now, validUntil: firmValidUntil(now, validityDays) } })` then `setStatus(id, "sent", "Customer portal", { bypassApprovalGate: "portal-firm" })`. Follow the estimator's save-then-send order exactly (read `src/app/(app)/estimator/actions.ts` save+send path) so the #222 sent-revision PDF copy behaves the same.
   - Quote documents: make the quote PDF/preview print the review line, "Plus applicable sales tax." and, when `portalFirm`, "Valid until <date>" — find where `quoteNote` renders in `src/lib/quote-pdf/quote-document-data.ts` and add `validUntil` there; freight renders via the existing "Freight & delivery" line; add miles to that label only for `source === "portal-catalog"` (store `freightMiles` on the section: add optional `freightMiles?: number | null` to `SpecSection` and set it in `priceCart`).
   - Cart page (`/portal/catalog/quote`): server loads `priceCart` → `sellView`; client shows venue select (customer venues; `setVenue` action), lines (qty steppers → `updateLine`, remove, fixture add-ons summary, curtain inputs summary, POR marker, "No longer available" rows), Subtotal · **Freight & delivery — 412 mi** (or "Freight & delivery — distance unknown") · Total (or "Total (excludes items pending price)"), badge **Firm quote** / **Needs Peak review** + reason, the standing line, **Generate quote** (disabled with reason when empty/no venue/preview) → `generatePortalQuoteAction` → redirect `/portal?generated=<firm|review>` with a banner: firm → "Your quote EST-#### is ready — open the PDF or accept it below."; review → "Thanks — Peak will confirm pricing on EST-#### and let you know."
   - Retire: delete `submitPortalEstimate`, `estimate-builder.tsx`, `src/lib/portal-catalog.ts`; `/portal/estimate/page.tsx` stays as the redirect (Task 10). Grep for leftovers: `grep -rn "portal-catalog\"\|customerCatalog\|CUSTOMER_CATEGORIES\|submitPortalEstimate\|estimate-builder" src scripts` → only intended hits.
-- [ ] **Step 4: Gates incl. `next build`; commit** — `feat(portal): cart page + Generate — firm quotes send numbered with a 30-day validity, others go to Peak review; old estimate retired (#242)`.
+- [ ] **Step 4: Gates incl. `next build`; commit** — `feat(portal): cart page + Generate — firm quotes send numbered with a 30-day validity, others go to Peak review; old estimate retired (#245)`.
 
 ---
 
@@ -848,7 +848,7 @@ export async function sendPortalFirm(quoteId: string, validityDays: number, now:
   - `refreshPortalQuote(session, quoteId, now?): Promise<{ ok: true; mode: "firm" | "review" } | { ok: false; error: string }>`
   - `copyToCart(session, quoteId): Promise<{ ok: true; added: number } | { ok: false; error: string }>`
   - `declinePortalAcceptance(quoteId: string, by: string, note: string): Promise<{ ok: true } | { ok: false; error: string }>`
-- [ ] **Step 1: Failing DB checks** (`portal242AcceptAsyncChecks`):
+- [ ] **Step 1: Failing DB checks** (`portal245AcceptAsyncChecks`):
   - accept a firm in-date quote with `purchaseMethod: "po", notes: "PO 44812"` → `portalAcceptance.purchaseMethod === "po"`; status still `sent`; the bell item appears for the owner (`navData(owner)` has the "portal" group containing the quote).
   - accept with notes containing `4111 1111 1111 1111` → `{ ok:false, error: "Don't enter card numbers — we'll call you to take payment." }` and nothing written.
   - accept with an unknown `purchaseMethod` → refused `"Pick how you'll purchase."`.
@@ -865,7 +865,7 @@ export async function sendPortalFirm(quoteId: string, validityDays: number, now:
   - `refreshPortalQuote`: must be this customer's `portal-catalog` quote, `sent`, `portalFirm`, expired, not accepted; rebuild a transient cart from its spec items (same mapping as `copyToCart`) + its `locationId`; `priceCart`; firm → `updateQuote(id, { spec, value })`, `addQuoteRevision(id, { by: "Customer portal", reason: "manual", note: "Portal price refresh" })`, `scheduleQuotePdf(id)`, `sendPortalFirm(id, …)` (if `setStatus(sent→sent)` is a no-op in the store, instead cut the revision with `reason: "sent"` and call `copySentRevisionPdf(id)` — verify by reading `setStatus` and choose the path the #222 portal PDF route (`portalQuotePdfSource`) will actually serve; the DB test asserts the portal PDF source points at the newest revision); review → `setStatus(id, "draft", …)` if the store permits sent→draft, else leave `sent` but set `portalReview` and clear `portalFirm` — decide from the store's transition rules and log the choice in DECISIONS (Task 14).
   - Staff `PortalPanel` in the Estimator (top of the page for `source === "portal-catalog"`): review banner listing POR items ("Price on request: <desc> ×qty") with the reasons; acceptance block — purchase method label, notes, PO file link (`/api/documents/<id>` — use whatever the staff document download route is; grep `DocumentRecord` download route), accepted by/when; buttons **Approve (mark Won)** → the existing Quotes-hub status action (`src/app/(app)/quotes/actions.ts` status setter with `won`; surface `ApprovalGateRefused` messages as-is) and **Decline with note** (prompt-free: an inline textarea + button → `declinePortalAcceptanceAction`). Also show "Firm portal quote — valid until <date>" when `portalFirm`.
   - Estimator save: after items are saved, `por` cleared on items with `price > 0`; when none left, `portalReview: null`.
-- [ ] **Step 4: Gates incl. `next build`; commit** — `feat(portal): accept with purchase method/notes/PO file, expiry + refresh, copy to new quote; staff approve/decline panel (#242)`.
+- [ ] **Step 4: Gates incl. `next build`; commit** — `feat(portal): accept with purchase method/notes/PO file, expiry + refresh, copy to new quote; staff approve/decline panel (#245)`.
 
 ---
 
@@ -885,9 +885,9 @@ export async function sendPortalFirm(quoteId: string, validityDays: number, now:
   - Bell: `notif-prefs.ts` `CATEGORIES` gains `{ key: "portalReview", label: "Portal quotes to review", desc: "Customer quotes with items waiting on a Peak price." }` and `{ key: "portalNew", label: "New portal quotes", desc: "Firm quotes customers generated in the last 3 days." }`; `nav-counts.ts` pushes both via `portalBellGroups`, `href: quoteBuilderHref(q)`. Update the existing "portal" group's sub-line to "… — approve or decline in the quote".
   - Company record: "Portal activity: N portal quotes · M awaiting approval · K in review" (counts over the company's `portal-catalog` quotes), linking to `/quotes?customer=<id>` if that filter exists, else plain text.
   - Datasheet thumbnails: `/print/part-thumb/[id]?t=<token>` (under `print/`, already outside team auth) verifies `verifyPrintToken(AUTH_SECRET, t, "part-thumb", id, now)`; a client component loads `pdfjs-dist` (worker `/pdf.worker.min.mjs`, as `src/components/design/pdf-canvas.tsx` does), fetches the PDF bytes from a signed sibling route `/print/part-thumb/[id]/file?t=` (streams `getBlobStream(blobKey)` after the same token check), renders page 1 at 800 px width to a `<canvas id="thumb">`, then sets `document.body.dataset.ready = "1"`. `renderDatasheetThumbnail`: `chromeLaunch()` (unavailable → `{ ok:false, error: "Headless Chrome isn't available here." }`), `page.goto(printOriginFor(...) + path)`, `waitForSelector('body[data-ready="1"]', { timeout: 30_000 })`, `(await page.$("#thumb")).screenshot({ type: "png" })`, upload to Blob at `partDocBlobPath(newId, "<datasheet-title>-thumb.png")` (private), `createDocument({ kind: "image", source: "datasheet-render", sourceRef: datasheetId, contentType: "image/png", … })`, `attachDocument(newId, skus, by)`. `renderThumbnailsAction`: `requirePerm("manage_users")`, loads `portalIndex`/parts-docs state, `thumbnailCandidates`, groups by datasheet, renders under a 45 s budget (`createFetchBudget(45_000)`), returns `{ done, remaining }`; the button (admin-only, on `/catalog/documents`) loops until `remaining === 0`, like the fetch-links client loop. Calls `invalidatePortalIndex()` when done.
-  - Docs: re-check next free punch/D numbers on `origin/main` (`git fetch && git show origin/main:DECISIONS.md | grep -oE "^#+ *D[0-9]+" | tail -1`). DECISIONS entries (one each): freight rule + Estimator default; freight on the Estimator's cost base, customers see amount + miles; firm/review split and the `portal-firm` gate bypass; review/approval notices as derived bell groups; fixture configurator = included + add-on toggles; `portal_carts` separate from quotes (estimate numbers); no DaVinci image import (icons/riser art); images PNG/JPEG/WebP only; visibility rule + quote-count window; refresh path choice from Task 13; `/portal/estimate` retired. PUNCHLIST #242 entry (what shipped + Jeff-gated follow-ups: run datasheet thumbnails on production, upload hero images for top parts, review Hide/Show on odd parts, set `QUOTE_PDF_ORIGIN` if not yet). Follow-ups logged: self-serve service quotes (next spec), priced curtain configurator, department tree, Quick Design freight, public sign-up, abandoned-cart cleanup, D60/D63 staleness. AGENTS.md phase-status item **19. ✅ Portal Catalog (#242, D396…)**. MASTER-QUESTIONS S19 → answered by #242.
+  - Docs: re-check next free punch/D numbers on `origin/main` (`git fetch && git show origin/main:DECISIONS.md | grep -oE "^#+ *D[0-9]+" | tail -1`). DECISIONS entries (one each): freight rule + Estimator default; freight on the Estimator's cost base, customers see amount + miles; firm/review split and the `portal-firm` gate bypass; review/approval notices as derived bell groups; fixture configurator = included + add-on toggles; `portal_carts` separate from quotes (estimate numbers); no DaVinci image import (icons/riser art); images PNG/JPEG/WebP only; visibility rule + quote-count window; refresh path choice from Task 13; `/portal/estimate` retired. PUNCHLIST #245 entry (what shipped + Jeff-gated follow-ups: run datasheet thumbnails on production, upload hero images for top parts, review Hide/Show on odd parts, set `QUOTE_PDF_ORIGIN` if not yet). Follow-ups logged: self-serve service quotes (next spec), priced curtain configurator, department tree, Quick Design freight, public sign-up, abandoned-cart cleanup, D60/D63 staleness. AGENTS.md phase-status item **19. ✅ Portal Catalog (#245, D396…)**. MASTER-QUESTIONS S19 → answered by #245.
 - [ ] **Step 3: Full gates** — `npx tsc --noEmit`; `npm run test:specs` (PASS count = baseline + new, 0 FAIL); `npm run test:smoke` (dev server stopped first); `npx eslint` on every touched file vs. the baseline count; `npx next build`. Clean temp PGlite dirs afterwards (`df -h /private/var/folders` first).
-- [ ] **Step 4: Commit** — `feat(portal): Portal badge, review/new-quote bell groups, company portal activity, datasheet thumbnails; docs (#242)`.
+- [ ] **Step 4: Commit** — `feat(portal): Portal badge, review/new-quote bell groups, company portal activity, datasheet thumbnails; docs (#245)`.
 
 ---
 

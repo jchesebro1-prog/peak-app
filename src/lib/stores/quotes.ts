@@ -213,19 +213,19 @@ export type Quote = {
     at: number;
     by: string;
     byEmail: string;
-    /** #242 (spec §4.4) — additive; pre-#242 acceptances carry none of these. */
+    /** #245 (spec §4.4) — additive; pre-#245 acceptances carry none of these. */
     purchaseMethod?: "po" | "card" | "check" | "other";
     notes?: string;
     poDocumentId?: string | null;
   } | null;
-  /** #242 (spec §4.2) — a FIRM portal-catalog generation: every line priced by
+  /** #245 (spec §4.2) — a FIRM portal-catalog generation: every line priced by
    *  rule (portal-pricing.ts), sent at once, good until `validUntil`. Absent /
    *  null on every other quote, including a review quote staff later send. */
   portalFirm?: { generatedAt: number; validUntil: number } | null;
-  /** #242 (spec §4.3) — a portal-catalog generation waiting on Peak: some line
+  /** #245 (spec §4.3) — a portal-catalog generation waiting on Peak: some line
    *  is price on request. Cleared when staff send it. */
   portalReview?: { requestedAt: number; reasons: string[] } | null;
-  /** #242 (spec §4.4) — staff declined the customer's portal acceptance. */
+  /** #245 (spec §4.4) — staff declined the customer's portal acceptance. */
   portalDecline?: { at: number; by: string; note: string } | null;
   /** Renewal provenance (IDEAS #36): the completed flame job / inspection
    *  record this quote renews — the ✉ one-click outreach reuses an existing
@@ -300,7 +300,7 @@ export const QUOTE_CONTENT_FIELDS = [
   "inspection",
   "vendorQuotes",
   "pdfOptions",
-  // #242: a firm portal quote prints "Valid until <date>".
+  // #245: a firm portal quote prints "Valid until <date>".
   "portalFirm",
 ] as const;
 
@@ -406,7 +406,7 @@ type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "porta
 
 /** Customer portal list rule: the grant's customer's published quotes plus
  *  their own self-serve drafts (the retired estimate builder's
- *  "portal-self-serve", and #242's "portal-catalog" review quotes) — never an
+ *  "portal-self-serve", and #245's "portal-catalog" review quotes) — never an
  *  internal draft, never imported Daylite history. */
 export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
   if (!customerId || q.customerId !== customerId) return false;
@@ -415,7 +415,7 @@ export function portalListsQuote(q: PortalQuoteFields, customerId: string): bool
 }
 
 /** Customer portal Accept rule (button AND server action): a listed quote,
- *  sent, not already accepted, and not awaiting Peak's re-review (#242 Task
+ *  sent, not already accepted, and not awaiting Peak's re-review (#245 Task
  *  13 — a refresh that turned up a price-on-request line, spec §4.5). */
 export function portalCanAcceptQuote(q: PortalQuoteFields, customerId: string): boolean {
   return portalListsQuote(q, customerId) && q.status === "sent" && !q.portalAcceptance && !q.portalReview;
@@ -902,7 +902,7 @@ export async function restoreQuoteRevision(
  * and opens `sent` only — a portal quote reaches `won` through the real gate.
  */
 export type SetStatusOpts = {
-  // #242: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
+  // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
   bypassApprovalGate?: "engine-owned-flow" | "historical-import" | "portal-firm";
 };
 
@@ -926,7 +926,7 @@ export function resolveStatusGate(
     opts.bypassApprovalGate === "historical-import"
   )
     return { ok: true };
-  // #242: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
+  // #245: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
   // It opens the SEND only — Approve (→ won) stays on the normal gate.
   if (opts.bypassApprovalGate === "portal-firm" && status === "sent") return { ok: true };
   if (status !== "won" && status !== "sent") return { ok: true };

@@ -181,7 +181,7 @@ export type CatalogPart = {
   specUpdatedAt?: number;
   specUpdatedBy?: string;
 
-  /** Customer portal visibility (#242 Task 5, spec §1.3) — Auto (the rule
+  /** Customer portal visibility (#245 Task 5, spec §1.3) — Auto (the rule
    *  decides, see src/lib/portal-visibility.ts), Show (always browsable), or
    *  Hide (never quotable or browsable in the portal). Absent means "auto";
    *  the part editor stores auto by omitting the key rather than writing the

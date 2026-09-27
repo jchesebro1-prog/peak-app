@@ -145,7 +145,7 @@ export default async function CustomerDetailPage({
   const custQuotes = quotes.filter((qt) =>
     qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name
   );
-  /* #242 (spec §5) — "Portal activity" line under PortalAccessCard. */
+  /* #245 (spec §5) — "Portal activity" line under PortalAccessCard. */
   const portalQuotes = custQuotes.filter((qt) => qt.source === "portal-catalog");
   const portalAwaitingApproval = portalQuotes.filter(
     (qt) => qt.status === "sent" && !!qt.portalAcceptance
@@ -766,7 +766,7 @@ export default async function CustomerDetailPage({
               grants={portalGrants}
             />
 
-            {/* #242 — Portal activity: counts over this company's portal-catalog
+            {/* #245 — Portal activity: counts over this company's portal-catalog
                 quotes. Hidden when there are none; no /quotes?customer= filter
                 exists yet, so this is plain text, not a link. */}
             {portalQuotes.length > 0 && (

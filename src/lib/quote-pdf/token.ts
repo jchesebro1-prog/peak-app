@@ -12,7 +12,7 @@ export const PRINT_TOKEN_TTL_MS = 120_000;
 
 /** Every print route this token can gate — the four quote/letter kinds
  *  (`PdfKind`, unwidened: other code still switches on it exhaustively) plus
- *  #242's datasheet-thumbnail render, which prints no quote. */
+ *  #245's datasheet-thumbnail render, which prints no quote. */
 export type PrintTokenKind = PdfKind | "part-thumb";
 
 function mac(secret: string, kind: PrintTokenKind, id: string, exp: number): string {

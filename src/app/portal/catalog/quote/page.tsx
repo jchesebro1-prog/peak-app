@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 /**
- * Portal CART — `/portal/catalog/quote` (#242 Task 12, spec §3.4). The
+ * Portal CART — `/portal/catalog/quote` (#245 Task 12, spec §3.4). The
  * customer picks the venue (it drives freight), edits quantities, sees the
  * server-priced subtotal · freight · total and whether Generate makes a firm
  * quote or one Peak reviews first, then generates it.

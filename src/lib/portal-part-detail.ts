@@ -19,7 +19,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { unitPriceFor } from "@/lib/portal-price-rules";
 
 /**
- * The part sidebar's data (#242 Task 11, spec §3.2). `partDetailFor` takes a
+ * The part sidebar's data (#245 Task 11, spec §3.2). `partDetailFor` takes a
  * pricing context the CALLER resolved — the page from `resolvePortalViewer`
  * (so a team preview works), the action from `portalSession()` — never a
  * customer id from the browser.

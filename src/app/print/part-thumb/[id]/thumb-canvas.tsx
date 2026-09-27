@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Client renderer for the datasheet page-1 thumbnail print route (#242).
+ * Client renderer for the datasheet page-1 thumbnail print route (#245).
  * Loads pdf.js exactly as src/components/design/pdf-canvas.tsx does (worker
  * at /pdf.worker.min.mjs; disableFontFace so an embedded/headless browser's
  * render promise can never hang forever waiting on document.fonts), fetches

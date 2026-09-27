@@ -21,7 +21,7 @@ import type { SearchQuery } from "@/lib/portal-search";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
 
 /**
- * Portal catalog actions (#242 Tasks 10–11, spec §3). SECURITY: these run
+ * Portal catalog actions (#245 Tasks 10–11, spec §3). SECURITY: these run
  * for anonymous visitors — the customer comes from `portalSession()` (the
  * grant cookie) only, never from the client; every result is sell-only.
  * Each export is a thin cookie-reading wrapper: the session-taking bodies
@@ -81,7 +81,7 @@ export async function askAboutPart(input: { sku: string; message: string; phone?
   return askAboutPartFor(session, input);
 }
 
-/* ---------------- the cart page — /portal/catalog/quote (#242 Task 12) ---------------- */
+/* ---------------- the cart page — /portal/catalog/quote (#245 Task 12) ---------------- */
 
 function cartChanged(r: { ok: boolean }) {
   if (r.ok) {

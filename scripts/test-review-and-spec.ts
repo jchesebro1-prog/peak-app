@@ -5571,14 +5571,14 @@ async function asyncChecks(): Promise<void> {
       "#81 create still applies its own defaults for absent columns"
     );
 
-    // #242 Task 5 — a price-book re-import must never clear a stored portal
+    // #245 Task 5 — a price-book re-import must never clear a stored portal
     // visibility override: catalogPatch's returned patch simply never
     // carries the key, so mergeUpsert (which treats a key's mere presence,
     // even undefined, as "overwrite this") leaves it alone either way.
     const storedHidden = { ...stored, portalVisibility: "hide" as const };
     ok(
       !("portalVisibility" in catalogPatch(noCost.rows[0].values, storedHidden, "S4LED-S2")),
-      "#242 visibility: a price-book import patch never touches portalVisibility — a stored Show/Hide override survives re-import"
+      "#245 visibility: a price-book import patch never touches portalVisibility — a stored Show/Hide override survives re-import"
     );
 
     /* ---- #204: a price-only Import-hub catalog import must not zero MAP ----
@@ -9251,16 +9251,16 @@ import { exportObjectsFor } from "@/app/(app)/import/registry";
   ok(!QuoteStore.portalCanAcceptQuote({ ...base, portalAcceptance: { at: 1, by: "Pat", byEmail: "p@x" } }, "c-portal"), "#187 review 2: an already-accepted quote cannot be accepted twice");
   const portalPage = readFileSync(join(process.cwd(), "src/app/portal/page.tsx"), "utf8");
   const portalActions = readFileSync(join(process.cwd(), "src/app/portal/actions.ts"), "utf8");
-  // #242 Task 13 (spec §4.4/§4.5): the row's gate widened from
+  // #245 Task 13 (spec §4.4/§4.5): the row's gate widened from
   // portalCanAcceptQuote (tenant/Daylite/already-accepted only) to
   // canAcceptPortal, which also refuses a firm quote past validUntil — the
   // reviewer-found bug this task closes. The list filter (Daylite/tenant
   // scoping) is unchanged.
-  ok(/\.filter\(\(q\) => portalListsQuote\(q, cid\)\)/.test(portalPage) && /canAcceptPortal\(q, Date\.now\(\)\)/.test(portalPage), "#187 review 2 (superseded by #242 Task 13): the portal page lists through portalListsQuote and gates Accept through canAcceptPortal (adds the validUntil check)");
+  ok(/\.filter\(\(q\) => portalListsQuote\(q, cid\)\)/.test(portalPage) && /canAcceptPortal\(q, Date\.now\(\)\)/.test(portalPage), "#187 review 2 (superseded by #245 Task 13): the portal page lists through portalListsQuote and gates Accept through canAcceptPortal (adds the validUntil check)");
   // acceptPortalQuote no longer inlines the gate — every tenant/Daylite/
   // already-accepted/expired/review check now lives once in acceptPortal
-  // (portal-quotes.ts), exercised end to end by portal242AcceptAsyncChecks.
-  ok(/acceptPortal\(session, input\)/.test(portalActions) && /from "@\/lib\/portal-quotes"/.test(portalActions), "#187 review 2 (superseded by #242 Task 13): acceptPortalQuote delegates every refusal rule to acceptPortal — a Daylite/other-customer/expired quote id posted by hand is still a no-op");
+  // (portal-quotes.ts), exercised end to end by portal245AcceptAsyncChecks.
+  ok(/acceptPortal\(session, input\)/.test(portalActions) && /from "@\/lib\/portal-quotes"/.test(portalActions), "#187 review 2 (superseded by #245 Task 13): acceptPortalQuote delegates every refusal rule to acceptPortal — a Daylite/other-customer/expired quote id posted by hand is still a no-op");
 }
 
 // Item 4 — row errors hold finalize until Jeff chooses.
@@ -10544,16 +10544,16 @@ seeded()
   .then(() => estimate223WritersAsyncChecks())
   .then(() => estimate223SweepDAsyncChecks())
   .then(() => daylite241AsyncChecks())
-  .then(() => portal242RulesAsyncChecks())
-  .then(() => portal242ImageLinksAsyncChecks())
-  .then(() => portal242ImagesTask4AsyncChecks())
-  .then(() => portal242IndexAsyncChecks())
-  .then(() => portal242CartAsyncChecks())
-  .then(() => portal242CatalogBrowseAsyncChecks())
-  .then(() => portal242SidebarAsyncChecks())
-  .then(() => portal242GenerateAsyncChecks())
-  .then(() => portal242AcceptAsyncChecks())
-  .then(() => portal242ThumbnailsAsyncChecks())
+  .then(() => portal245RulesAsyncChecks())
+  .then(() => portal245ImageLinksAsyncChecks())
+  .then(() => portal245ImagesTask4AsyncChecks())
+  .then(() => portal245IndexAsyncChecks())
+  .then(() => portal245CartAsyncChecks())
+  .then(() => portal245CatalogBrowseAsyncChecks())
+  .then(() => portal245SidebarAsyncChecks())
+  .then(() => portal245GenerateAsyncChecks())
+  .then(() => portal245AcceptAsyncChecks())
+  .then(() => portal245ThumbnailsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -16320,7 +16320,7 @@ async function partDocsUploadAsyncChecks(): Promise<void> {
 
   // Fix round 2: restore FILE-WIDE deleteBlob coverage. Round 1 had
   // rescoped this to attachUploadedDocumentAction's own body alone (to
-  // accommodate #242 review fix M7's legitimate deleteBlob call in
+  // accommodate #245 review fix M7's legitimate deleteBlob call in
   // addImageFromUrlAction) — but that let a THIRD, unreviewed deleteBlob
   // call land anywhere else in the file undetected. The real invariant is
   // narrower and file-wide: exactly one deleteBlob( call exists at all,
@@ -22401,7 +22401,7 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
     "src/lib/design/curtain-pricing.ts", "src/lib/curtain-pricing.ts", "src/lib/curtain-geom.ts",
     "src/lib/design/equipment-pricing.ts", "src/lib/design/equipment-map.ts", "src/lib/design/grid-curtains.ts",
     "src/lib/design/auto-estimate.ts", "src/app/(app)/estimator/pricing.ts", "src/app/(app)/estimator/page.tsx",
-    // #242 Task 12: the portal estimate builder is deleted (the catalog cart replaced it).
+    // #245 Task 12: the portal estimate builder is deleted (the catalog cart replaced it).
     "src/app/portal/actions.ts", "src/app/portal/estimate/page.tsx",
     "src/app/(app)/design/grid/[id]/page.tsx", "src/app/(app)/design/grid/[id]/editor.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx",
   ];
@@ -25054,16 +25054,16 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
     ok(/  if \(q\) await scheduleQuotePdf\(q\.id\);\n  return \(q && q\.id\) \|\| editingId \|\| null;/.test(s222(`src/app/(app)/${k}/quote/actions.ts`)), `#222 ${k}: every save schedules the proposal-letter PDF`);
     ok(/export const maxDuration = 120;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 120 s`);
   }
-  // #242 Tasks 10/12: /portal/estimate only redirects and submitPortalEstimate
+  // #245 Tasks 10/12: /portal/estimate only redirects and submitPortalEstimate
   // is gone; a portal quote is now made by the catalog cart's Generate, which
   // schedules its PDF — before the firm send, as every save does — from a page
   // that gives the after() render 120 s.
   const pq222 = s222("src/lib/portal-quotes.ts");
   const firm222 = pq222.slice(pq222.indexOf("export async function sendPortalFirm"), pq222.indexOf("function writable"));
-  ok(/redirect\(/.test(s222("src/app/portal/estimate/page.tsx")) && !/submitPortalEstimate/.test(s222("src/app/portal/actions.ts")), "#222 the retired portal estimate page only redirects; its submit is gone (#242)");
+  ok(/redirect\(/.test(s222("src/app/portal/estimate/page.tsx")) && !/submitPortalEstimate/.test(s222("src/app/portal/actions.ts")), "#222 the retired portal estimate page only redirects; its submit is gone (#245)");
   ok(firm222.includes("scheduleQuotePdf(quoteId)") && firm222.indexOf("scheduleQuotePdf(quoteId)") < firm222.indexOf("setStatus(quoteId") && /scheduleQuotePdf\(created\.id\)/.test(pq222),
-    "#222 a portal catalog quote gets its PDF too — pending before the firm send (#242)");
-  ok(/export const maxDuration = 120;/.test(s222("src/app/portal/catalog/quote/page.tsx")), "#222 the portal cart page (Generate) gives its after() render 120 s (#242)");
+    "#222 a portal catalog quote gets its PDF too — pending before the firm send (#245)");
+  ok(/export const maxDuration = 120;/.test(s222("src/app/portal/catalog/quote/page.tsx")), "#222 the portal cart page (Generate) gives its after() render 120 s (#245)");
   const cfg = s222("next.config.ts");
   ok(/source: "\/api\/quotes\/:id\/pdf"[\s\S]{0,200}SAMEORIGIN/.test(cfg) && cfg.indexOf("SAMEORIGIN") > cfg.indexOf('value: "DENY"'), "#222 next.config: only the team PDF route may be framed, by the app itself — after the global DENY");
   const team = s222("src/app/api/quotes/[id]/pdf/route.ts");
@@ -25079,10 +25079,10 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   const acts = s222("src/app/(app)/quotes/pdf-actions.ts");
   ok((acts.match(/await requireUser\(\);/g) || []).length === 2 && acts.indexOf("requireUser()") < acts.indexOf("getQuote("), "#222 PDF status/retry actions: signed-in team only");
   ok(/QUOTE_PDF_ORIGIN/.test(s222("DEPLOY.md")) && /QUOTE_PDF_ORIGIN/.test(s222(".env.example")), "#222 QUOTE_PDF_ORIGIN is documented for production");
-  // #242 Task 11 adds the one other same-origin framing exception: the
+  // #245 Task 11 adds the one other same-origin framing exception: the
   // portal part sidebar's inline datasheet viewer (/portal/catalog/doc/:id).
   ok(!/\/:path\*"[^}]*SAMEORIGIN/.test(cfg) && (cfg.match(/SAMEORIGIN/g) || []).length === 2 && /"\/api\/quotes\/:id\/pdf",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg) && /"\/portal\/catalog\/doc\/:id",\s*headers: \[\{ key: "X-Frame-Options", value: "SAMEORIGIN" \}\]/.test(cfg),
-    "#222 next.config: the framing exceptions are the PDF route's and (#242) the portal doc viewer's alone");
+    "#222 next.config: the framing exceptions are the PDF route's and (#245) the portal doc viewer's alone");
 }
 
 async function quotePdfRoutes222AsyncChecks(): Promise<void> {
@@ -25201,7 +25201,7 @@ async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
     "src/app/(app)/flame-tests/quote/page.tsx",
     "src/app/(app)/repairs/quote/page.tsx",
     "src/app/(app)/inspections/quote/page.tsx",
-    // "src/app/portal/estimate/page.tsx" — retired to a redirect (#242 Task 10); schedules nothing.
+    // "src/app/portal/estimate/page.tsx" — retired to a redirect (#245 Task 10); schedules nothing.
     "src/app/(app)/design/grid/[id]/page.tsx",
     "src/app/(app)/design/designs/page.tsx",
     "src/app/(app)/design/quick/page.tsx",
@@ -26351,14 +26351,14 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(rd("src/app/(app)/estimator/page.tsx").includes("loadCurtainSewingPct()") && rd("src/app/(app)/estimator/page.tsx").includes("curtainSewingPct={curtainSewingPct}") &&
       rd("src/app/(app)/estimator/estimator-client.tsx").includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
     "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
-  // #242 Tasks 10/12: the portal estimate page and its submit are retired —
+  // #245 Tasks 10/12: the portal estimate page and its submit are retired —
   // portal curtains are price on request (Peak prices them in the Estimator,
   // which reads the rule above), so no portal path prices fabric any more.
   ok(!rd("src/app/portal/actions.ts").includes("curtainCost(") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft") && !rd("src/lib/portal-pricing.ts").includes("curtainCost("),
-    "#227 late: no portal path prices a curtain outside the rule (#242: portal curtains are price on request)");
+    "#227 late: no portal path prices a curtain outside the rule (#245: portal curtains are price on request)");
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
     "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
-  // #242 Task 12: the portal estimate builder is deleted; the portal cart (which shows curtain requests) takes its place here.
+  // #245 Task 12: the portal estimate builder is deleted; the portal cart (which shows curtain requests) takes its place here.
   const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx"];
   ok(clients.every((f) => !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db)/m.test(rd(f))), "#227 late: no client curtain file imports a VALUE from a store");
 }
@@ -27439,142 +27439,142 @@ async function daylite241AsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Portal catalog — freight by distance (#242, Task 1; spec
+   Portal catalog — freight by distance (#245, Task 1; spec
    2026-09-27-portal-catalog-design.md §2.2). Pure rule below; the DB check
    that the Estimating Rules rows resolve to defaults is registered in the
-   async chain as portal242RulesAsyncChecks().
+   async chain as portal245RulesAsyncChecks().
    ====================================================================== */
-import { DEFAULT_FREIGHT_RULE as d242Rule, freightPctForMiles as d242Freight } from "@/lib/freight-rule";
+import { DEFAULT_FREIGHT_RULE as d245Rule, freightPctForMiles as d245Freight } from "@/lib/freight-rule";
 {
-  const f = (m: number | null) => d242Freight(m, d242Rule);
-  ok(f(0).pct === 2 && !f(0).atCapUnknown, "#242 freight: 0 mi → 2%");
-  ok(f(199).pct === 2, "#242 freight: 199 mi → 2%");
-  ok(f(200).pct === 3, "#242 freight: 200 mi → 3% (step starts at 200)");
-  ok(f(399).pct === 3 && f(400).pct === 4, "#242 freight: 399 → 3%, 400 → 4%");
-  ok(f(1599).pct === 9 && f(1600).pct === 10, "#242 freight: 1,599 → 9%, 1,600 → 10% cap");
-  ok(f(5000).pct === 10, "#242 freight: far venue stays at the 10% cap");
-  ok(f(null).pct === 10 && f(null).atCapUnknown, "#242 freight: unknown distance → cap, flagged");
-  ok(d242Freight(-5, d242Rule).atCapUnknown && d242Freight(NaN, d242Rule).pct === 10, "#242 freight: negative/NaN miles → unknown → cap");
+  const f = (m: number | null) => d245Freight(m, d245Rule);
+  ok(f(0).pct === 2 && !f(0).atCapUnknown, "#245 freight: 0 mi → 2%");
+  ok(f(199).pct === 2, "#245 freight: 199 mi → 2%");
+  ok(f(200).pct === 3, "#245 freight: 200 mi → 3% (step starts at 200)");
+  ok(f(399).pct === 3 && f(400).pct === 4, "#245 freight: 399 → 3%, 400 → 4%");
+  ok(f(1599).pct === 9 && f(1600).pct === 10, "#245 freight: 1,599 → 9%, 1,600 → 10% cap");
+  ok(f(5000).pct === 10, "#245 freight: far venue stays at the 10% cap");
+  ok(f(null).pct === 10 && f(null).atCapUnknown, "#245 freight: unknown distance → cap, flagged");
+  ok(d245Freight(-5, d245Rule).atCapUnknown && d245Freight(NaN, d245Rule).pct === 10, "#245 freight: negative/NaN miles → unknown → cap");
   const custom = { basePct: 1, stepMiles: 100, stepPct: 0.5, capPct: 3 };
-  ok(d242Freight(250, custom).pct === 2 && d242Freight(10000, custom).pct === 3, "#242 freight: custom rule honoured incl. cap");
-  ok(d242Freight(100, { ...custom, stepMiles: 0 }).pct === 1, "#242 freight: a zero step never divides by zero — base only");
+  ok(d245Freight(250, custom).pct === 2 && d245Freight(10000, custom).pct === 3, "#245 freight: custom rule honoured incl. cap");
+  ok(d245Freight(100, { ...custom, stepMiles: 0 }).pct === 1, "#245 freight: a zero step never divides by zero — base only");
 }
 
-import { loadFreightRule as d242LoadFreight, loadPortalRules as d242LoadPortal } from "@/lib/freight-rule-load";
-async function portal242RulesAsyncChecks(): Promise<void> {
-  const rule = await d242LoadFreight();
+import { loadFreightRule as d245LoadFreight, loadPortalRules as d245LoadPortal } from "@/lib/freight-rule-load";
+async function portal245RulesAsyncChecks(): Promise<void> {
+  const rule = await d245LoadFreight();
   ok(
-    rule.basePct === d242Rule.basePct && rule.stepMiles === d242Rule.stepMiles &&
-      rule.stepPct === d242Rule.stepPct && rule.capPct === d242Rule.capPct,
-    "#242 rules: loadFreightRule() resolves to DEFAULT_FREIGHT_RULE with no override"
+    rule.basePct === d245Rule.basePct && rule.stepMiles === d245Rule.stepMiles &&
+      rule.stepPct === d245Rule.stepPct && rule.capPct === d245Rule.capPct,
+    "#245 rules: loadFreightRule() resolves to DEFAULT_FREIGHT_RULE with no override"
   );
-  const portal = await d242LoadPortal();
+  const portal = await d245LoadPortal();
   ok(
     portal.validityDays === 30 && portal.browseMinQuotes === 3 && portal.browseWindowMonths === 24 && portal.staleCostMonths === 0,
-    "#242 rules: loadPortalRules() resolves to its documented defaults"
+    "#245 rules: loadPortalRules() resolves to its documented defaults"
   );
 }
 
 /* ======================================================================
    Portal catalog — Estimator adopts the freight rule for new sections
-   (#242, Task 2). Pure: sectionFreightDefault (new-section default) and
+   (#245, Task 2). Pure: sectionFreightDefault (new-section default) and
    applyAutoFreight (re-apply on venue change, touched sections untouched).
    ====================================================================== */
-import { sectionFreightDefault as d242SecFr, applyAutoFreight as d242ApplyFr } from "@/app/(app)/estimator/freight-default";
+import { sectionFreightDefault as d245SecFr, applyAutoFreight as d245ApplyFr } from "@/app/(app)/estimator/freight-default";
 {
   const rule = { basePct: 2, stepMiles: 200, stepPct: 1, capPct: 10 };
-  ok(d242SecFr({ hasVenue: false, miles: null, rule }).pct === 2 && !d242SecFr({ hasVenue: false, miles: null, rule }).unknown, "#242 estimator: no venue yet → base %, not flagged");
-  ok(d242SecFr({ hasVenue: true, miles: 450, rule }).pct === 4, "#242 estimator: venue at 450 mi → 4%");
-  const u = d242SecFr({ hasVenue: true, miles: null, rule });
-  ok(u.pct === 10 && u.unknown, "#242 estimator: venue not located → cap + flag");
+  ok(d245SecFr({ hasVenue: false, miles: null, rule }).pct === 2 && !d245SecFr({ hasVenue: false, miles: null, rule }).unknown, "#245 estimator: no venue yet → base %, not flagged");
+  ok(d245SecFr({ hasVenue: true, miles: 450, rule }).pct === 4, "#245 estimator: venue at 450 mi → 4%");
+  const u = d245SecFr({ hasVenue: true, miles: null, rule });
+  ok(u.pct === 10 && u.unknown, "#245 estimator: venue not located → cap + flag");
   const secs = [
     { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 2, freightAuto: true, items: [] },
     { id: "b", name: "B", kind: "materials", mfr: "", freightPct: 7, freightAuto: false, items: [] },
     { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [] },
   ];
-  const out = d242ApplyFr(secs as never, { pct: 4 });
-  ok(out[0].freightPct === 4 && out[1].freightPct === 7 && out[2].freightPct === 5, "#242 estimator: venue change re-applies only to untouched (auto) sections; saved quotes without the flag never change");
+  const out = d245ApplyFr(secs as never, { pct: 4 });
+  ok(out[0].freightPct === 4 && out[1].freightPct === 7 && out[2].freightPct === 5, "#245 estimator: venue change re-applies only to untouched (auto) sections; saved quotes without the flag never change");
 }
 
 /* ======================================================================
-   Portal catalog — images as a third part-document kind (#242, Task 3;
+   Portal catalog — images as a third part-document kind (#245, Task 3;
    spec 2026-09-27-portal-catalog-design.md). Pure checks below; the DB
    check that image links round-trip through visibleImagesForParts is
-   registered in the async chain as portal242ImageLinksAsyncChecks().
+   registered in the async chain as portal245ImageLinksAsyncChecks().
    ====================================================================== */
-import { sniffImageType as d242Sniff } from "@/lib/part-docs/files";
-import { isPartDocKind as d242IsKind, maxBytesFor as d242Max, PART_DOC_KINDS as d242Kinds } from "@/lib/part-docs/types";
+import { sniffImageType as d245Sniff } from "@/lib/part-docs/files";
+import { isPartDocKind as d245IsKind, maxBytesFor as d245Max, PART_DOC_KINDS as d245Kinds } from "@/lib/part-docs/types";
 {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
   const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
   const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
   const svg = new TextEncoder().encode("<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
   const pdf = new TextEncoder().encode("%PDF-1.7");
-  ok(d242Sniff(png) === "image/png" && d242Sniff(jpg) === "image/jpeg" && d242Sniff(webp) === "image/webp", "#242 images: PNG/JPEG/WebP magic bytes recognised");
-  ok(d242Sniff(svg) === null && d242Sniff(pdf) === null, "#242 images: SVG and PDF are never images");
-  ok(d242IsKind("image") && !d242IsKind("photo"), "#242 images: image is a part-document kind");
-  ok(d242Max("image") === 10 * 1024 * 1024 && d242Max("datasheet") === 25 * 1024 * 1024, "#242 images: 10 MB image cap, datasheets keep 25 MB");
-  ok(!(d242Kinds as readonly string[]).includes("image"), "#242 images: coverage slots stay datasheet + spec sheet");
+  ok(d245Sniff(png) === "image/png" && d245Sniff(jpg) === "image/jpeg" && d245Sniff(webp) === "image/webp", "#245 images: PNG/JPEG/WebP magic bytes recognised");
+  ok(d245Sniff(svg) === null && d245Sniff(pdf) === null, "#245 images: SVG and PDF are never images");
+  ok(d245IsKind("image") && !d245IsKind("photo"), "#245 images: image is a part-document kind");
+  ok(d245Max("image") === 10 * 1024 * 1024 && d245Max("datasheet") === 25 * 1024 * 1024, "#245 images: 10 MB image cap, datasheets keep 25 MB");
+  ok(!(d245Kinds as readonly string[]).includes("image"), "#245 images: coverage slots stay datasheet + spec sheet");
 }
 
 import {
-  attachDocument as d242Attach,
-  createDocument as d242CreateDoc,
-  documentLinkId as d242LinkId,
-  setDocumentLinkDisplay as d242SetDisplay,
-  setImageOrder as d242SetOrder,
-  visibleImagesForParts as d242VisibleImages,
+  attachDocument as d245Attach,
+  createDocument as d245CreateDoc,
+  documentLinkId as d245LinkId,
+  setDocumentLinkDisplay as d245SetDisplay,
+  setImageOrder as d245SetOrder,
+  visibleImagesForParts as d245VisibleImages,
 } from "@/lib/stores/part-documents";
-async function portal242ImageLinksAsyncChecks(): Promise<void> {
-  const sku = fixtureId(242, "sku-img");
+async function portal245ImageLinksAsyncChecks(): Promise<void> {
+  const sku = fixtureId(245, "sku-img");
 
-  const upload = await d242CreateDoc({
+  const upload = await d245CreateDoc({
     kind: "image", fileName: "upload.jpg", contentType: "image/jpeg", size: 1000,
     blobKey: "part-docs/PD-fixture-up/upload.jpg", sourceUrl: null, source: "upload", by: "Test",
   });
-  const render = await d242CreateDoc({
+  const render = await d245CreateDoc({
     kind: "image", fileName: "render.png", contentType: "image/png", size: 1000,
     blobKey: "part-docs/PD-fixture-rn/render.png", sourceUrl: null, source: "datasheet-render", by: "Test",
   });
-  const datasheet = await d242CreateDoc({
+  const datasheet = await d245CreateDoc({
     kind: "datasheet", fileName: "ds.pdf", contentType: "application/pdf", size: 1000,
     blobKey: "part-docs/PD-fixture-ds/ds.pdf", sourceUrl: null, source: "upload", by: "Test",
   });
-  if (!upload || !render || !datasheet) throw new Error("#242 images: fixture documents failed to create");
+  if (!upload || !render || !datasheet) throw new Error("#245 images: fixture documents failed to create");
   registerFixture("part_documents", upload.id);
   registerFixture("part_documents", render.id);
   registerFixture("part_documents", datasheet.id);
 
-  await d242Attach(upload.id, [sku], "Test");
-  await d242Attach(render.id, [sku], "Test");
-  await d242Attach(datasheet.id, [sku], "Test");
-  registerFixture("part_document_links", d242LinkId(sku, upload.id));
-  registerFixture("part_document_links", d242LinkId(sku, render.id));
-  registerFixture("part_document_links", d242LinkId(sku, datasheet.id));
+  await d245Attach(upload.id, [sku], "Test");
+  await d245Attach(render.id, [sku], "Test");
+  await d245Attach(datasheet.id, [sku], "Test");
+  registerFixture("part_document_links", d245LinkId(sku, upload.id));
+  registerFixture("part_document_links", d245LinkId(sku, render.id));
+  registerFixture("part_document_links", d245LinkId(sku, datasheet.id));
 
-  ok(await d242SetDisplay(render.id, sku, { hidden: true }), "#242 images: setDocumentLinkDisplay hides the render link");
-  const hidden = await d242VisibleImages([sku]);
-  ok((hidden.get(sku) ?? []).map((d) => d.id).join(",") === upload.id, "#242 images: a hidden image never appears in visibleImagesForParts");
+  ok(await d245SetDisplay(render.id, sku, { hidden: true }), "#245 images: setDocumentLinkDisplay hides the render link");
+  const hidden = await d245VisibleImages([sku]);
+  ok((hidden.get(sku) ?? []).map((d) => d.id).join(",") === upload.id, "#245 images: a hidden image never appears in visibleImagesForParts");
 
-  ok(await d242SetDisplay(render.id, sku, { hidden: false }), "#242 images: setDocumentLinkDisplay unhides the render link");
-  const shown = await d242VisibleImages([sku]);
-  // #242 review fix: a datasheet-render thumbnail always sorts LAST now
+  ok(await d245SetDisplay(render.id, sku, { hidden: false }), "#245 images: setDocumentLinkDisplay unhides the render link");
+  const shown = await d245VisibleImages([sku]);
+  // #245 review fix: a datasheet-render thumbnail always sorts LAST now
   // (compareImages), not merely by IMAGE_SOURCE_RANK — same outcome here
   // (upload before render) since neither carries an explicit `sort`, but
   // for the group-boundary reason, not the old rank-first one.
-  ok((shown.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: unhidden — a real upload sorts before a datasheet-render thumbnail, which always sorts last");
-  ok(!(shown.get(sku) ?? []).some((d) => d.id === datasheet.id), "#242 images: a datasheet never appears in the image map");
+  ok((shown.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#245 images: unhidden — a real upload sorts before a datasheet-render thumbnail, which always sorts last");
+  ok(!(shown.get(sku) ?? []).some((d) => d.id === datasheet.id), "#245 images: a datasheet never appears in the image map");
 
-  // #242 review fix (b): an explicit `sort` on a datasheet-render link never
+  // #245 review fix (b): an explicit `sort` on a datasheet-render link never
   // lets it outrank a real image — the auto-thumbnail group always sorts
   // last, ahead of the `sort` comparison.
-  ok(await d242SetDisplay(render.id, sku, { sort: 0 }), "#242 images: setDocumentLinkDisplay sets an explicit sort on the render link");
-  const stillLast = await d242VisibleImages([sku]);
-  ok((stillLast.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#242 images: a datasheet-render thumbnail with sort 0 still sorts after a real image with no sort at all");
+  ok(await d245SetDisplay(render.id, sku, { sort: 0 }), "#245 images: setDocumentLinkDisplay sets an explicit sort on the render link");
+  const stillLast = await d245VisibleImages([sku]);
+  ok((stillLast.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${render.id}`, "#245 images: a datasheet-render thumbnail with sort 0 still sorts after a real image with no sort at all");
 
   // Review fix wave 2: gallery display is an image-only concept —
   // setDocumentLinkDisplay must refuse a datasheet/spec-sheet link.
-  ok(!(await d242SetDisplay(datasheet.id, sku, { hidden: true })), "#242 images: setDocumentLinkDisplay refuses a non-image link");
+  ok(!(await d245SetDisplay(datasheet.id, sku, { hidden: true })), "#245 images: setDocumentLinkDisplay refuses a non-image link");
 }
 
 /* ======================================================================
@@ -27582,11 +27582,11 @@ async function portal242ImageLinksAsyncChecks(): Promise<void> {
    filter, part-editor gallery, upload many, add from URL). Pure checks
    below; the one DB check (verifyUploadedBlob's fake-deps injection needs
    no real DB, but is `async` like every other check that awaits — it is
-   registered in the chain as portal242ImagesTask4AsyncChecks()).
+   registered in the chain as portal245ImagesTask4AsyncChecks()).
    ====================================================================== */
 import {
-  buildImageIndex as d242BuildImageIndex,
-  imagesFor as d242ImagesFor,
+  buildImageIndex as d245BuildImageIndex,
+  imagesFor as d245ImagesFor,
   type ImageRef as D242ImageRef,
 } from "@/lib/part-docs/views";
 {
@@ -27599,28 +27599,28 @@ import {
   const idx = buildCoverageIndex({ documents: [], links: [], accessoryLinks: [], parts: [] });
   const stat = { sku: "IMGSKU", quotes: 3, lastQuotedAt: 5, grid: 0, bidSpecs: 0 };
   const row = documentRow(stat, { sku: "IMGSKU", desc: "Gallery part", category: "Lighting" }, idx, () => "", images);
-  ok(row.image.count === 2 && row.image.first?.id === "PD-imgvisible01", "#242 images view: a row's image count includes hidden images (staff see all) and `first` leads with gallery order");
+  ok(row.image.count === 2 && row.image.first?.id === "PD-imgvisible01", "#245 images view: a row's image count includes hidden images (staff see all) and `first` leads with gallery order");
 
   const view = partDocsView(idx, "IMGSKU", () => "", images);
-  ok(view.images.map((i) => `${i.id}:${i.hidden}`).join(",") === "PD-imgvisible01:false,PD-imghidden001:true", "#242 images view: partDocsView's gallery carries hidden flags in gallery order");
+  ok(view.images.map((i) => `${i.id}:${i.hidden}`).join(",") === "PD-imgvisible01:false,PD-imghidden001:true", "#245 images view: partDocsView's gallery carries hidden flags in gallery order");
 
   const noImages = documentRow(stat, { sku: "NOIMGSKU", desc: "Bare part", category: "Lighting" }, idx, () => "");
-  ok(noImages.image.count === 0 && noImages.image.first === null, "#242 images view: documentRow defaults to an empty image slot when no images are passed");
-  ok(!documentRowMatches(row, parseDocumentsFilter({ show: "missing-image" })) && documentRowMatches(noImages, parseDocumentsFilter({ show: "missing-image" })), "#242 images view: the Missing image filter matches image.count === 0 only");
+  ok(noImages.image.count === 0 && noImages.image.first === null, "#245 images view: documentRow defaults to an empty image slot when no images are passed");
+  ok(!documentRowMatches(row, parseDocumentsFilter({ show: "missing-image" })) && documentRowMatches(noImages, parseDocumentsFilter({ show: "missing-image" })), "#245 images view: the Missing image filter matches image.count === 0 only");
 
   // buildImageIndex/imagesFor: the server's own path from loaded documents +
   // links into that same ImageRef[] shape, no extra query.
   const visDoc: PdDoc = { id: "PD-imgvisible01", kind: "image", title: "Front", fileName: "front.jpg", contentType: "image/jpeg", size: 1, blobKey: "part-docs/PD-imgvisible01/front.jpg", sourceUrl: null, source: "upload", uploadedAt: 10, uploadedBy: "t", history: [] };
   const hidDoc: PdDoc = { id: "PD-imghidden001", kind: "image", title: "Backstage shot", fileName: "back.jpg", contentType: "image/jpeg", size: 1, blobKey: "part-docs/PD-imghidden001/back.jpg", sourceUrl: null, source: "upload", uploadedAt: 20, uploadedBy: "t", history: [] };
-  const imgIndex = d242BuildImageIndex(
+  const imgIndex = d245BuildImageIndex(
     [visDoc, hidDoc],
     [
       { id: "l1", partSku: "IMGSKU", documentId: visDoc.id, kind: "image", createdAt: 1, createdBy: "t", sort: 0, hidden: false },
       { id: "l2", partSku: "IMGSKU", documentId: hidDoc.id, kind: "image", createdAt: 1, createdBy: "t", sort: 1, hidden: true },
     ]
   );
-  ok(d242ImagesFor(imgIndex, "IMGSKU").map((i) => i.id).join(",") === "PD-imgvisible01,PD-imghidden001", "#242 images view: buildImageIndex/imagesFor read the same live documents+links loadPartDocsState already loaded");
-  ok(d242ImagesFor(imgIndex, "NOBODY").length === 0, "#242 images view: an unlinked SKU gets an empty image list, not undefined");
+  ok(d245ImagesFor(imgIndex, "IMGSKU").map((i) => i.id).join(",") === "PD-imgvisible01,PD-imghidden001", "#245 images view: buildImageIndex/imagesFor read the same live documents+links loadPartDocsState already loaded");
+  ok(d245ImagesFor(imgIndex, "NOBODY").length === 0, "#245 images view: an unlinked SKU gets an empty image list, not undefined");
 }
 
 /* --- Fix round 1: compareImages ordering, proven at the pure view-builder
@@ -27633,20 +27633,20 @@ import {
   const A: D242ImageRef = { id: "IMGA00000001", title: "A", source: "upload", hidden: false, sort: null, uploadedAt: 1 };
   const B: D242ImageRef = { id: "IMGB00000001", title: "B", source: "fetch", hidden: false, sort: null, uploadedAt: 2 };
   const viewAB = partDocsView(idxAB, "ABSKU", () => "", [A, B]);
-  ok(viewAB.images.map((i) => i.id).join(",") === "IMGA00000001,IMGB00000001", "#242 images order: view builder — upload before fetch when neither has an explicit sort");
+  ok(viewAB.images.map((i) => i.id).join(",") === "IMGA00000001,IMGB00000001", "#245 images order: view builder — upload before fetch when neither has an explicit sort");
 
   const viewReordered = partDocsView(idxAB, "ABSKU", () => "", [{ ...A, sort: 1 }, { ...B, sort: 0 }]);
-  ok(viewReordered.images.map((i) => i.id).join(",") === "IMGB00000001,IMGA00000001", "#242 images order: view builder — an explicit sort (B:0, A:1) overrides source rank, matching the DB-backed read");
+  ok(viewReordered.images.map((i) => i.id).join(",") === "IMGB00000001,IMGA00000001", "#245 images order: view builder — an explicit sort (B:0, A:1) overrides source rank, matching the DB-backed read");
 
   // (b) a datasheet-render thumbnail with sort 0 still sorts after a real
   // image with no sort at all — the auto-thumbnail group always sorts last.
   const real: D242ImageRef = { id: "IMGREAL0001", title: "Real", source: "upload", hidden: false, sort: null, uploadedAt: 5 };
   const auto: D242ImageRef = { id: "IMGAUTO0001", title: "Auto", source: "datasheet-render", hidden: false, sort: 0, uploadedAt: 1 };
   const viewAuto = partDocsView(idxAB, "AUTOSKU", () => "", [auto, real]);
-  ok(viewAuto.images.map((i) => i.id).join(",") === "IMGREAL0001,IMGAUTO0001", "#242 images order: view builder — a datasheet-render thumbnail sorts after every real image even with an explicit sort of 0");
+  ok(viewAuto.images.map((i) => i.id).join(",") === "IMGREAL0001,IMGAUTO0001", "#245 images order: view builder — a datasheet-render thumbnail sorts after every real image even with an explicit sort of 0");
 }
 
-/* --- #242 regression: a part linked only to an image reads "missing" for
+/* --- #245 regression: a part linked only to an image reads "missing" for
    the datasheet slot — coverage.ts:86 drops image links entirely, so an
    image can never satisfy (or appear to satisfy) a coverage slot. --- */
 {
@@ -27660,14 +27660,14 @@ import {
     accessoryLinks: [],
     parts: [],
   });
-  ok(slotCoverage(idx, "IMGONLYSKU", "datasheet").state === "missing", "#242 images: a part linked only to an image still reads 'missing' for datasheet coverage");
+  ok(slotCoverage(idx, "IMGONLYSKU", "datasheet").state === "missing", "#245 images: a part linked only to an image still reads 'missing' for datasheet coverage");
 }
 
-/* --- #242 regression: guessKind routes every image extension, WebP
+/* --- #245 regression: guessKind routes every image extension, WebP
    included, to "image" (not just png/jpg tested in Task 3). --- */
-ok(guessKind("photo.webp") === "image" && guessKind("PHOTO.WEBP") === "image", "#242 images: guessKind routes .webp (any case) to image");
+ok(guessKind("photo.webp") === "image" && guessKind("PHOTO.WEBP") === "image", "#245 images: guessKind routes .webp (any case) to image");
 
-async function portal242ImagesTask4AsyncChecks(): Promise<void> {
+async function portal245ImagesTask4AsyncChecks(): Promise<void> {
   // verifyUploadedBlob refuses an over-cap image using the same fake-deps
   // injection the Task-1 upload tests use, and deletes the blob — the
   // image cap is MAX_PART_IMAGE_BYTES (10 MB), tighter than a datasheet's.
@@ -27682,66 +27682,66 @@ async function portal242ImagesTask4AsyncChecks(): Promise<void> {
     { documentId: ID, blobPathname: `part-docs/${ID}/big.png`, fileName: "big.png", kind: "image" },
     fakeImage(pngBytes, 11 * 1024 * 1024)
   );
-  ok(!big.ok && big.error === "That file is over 10 MB." && removed.includes(`part-docs/${ID}/big.png`), "#242 images upload: an 11 MB image is refused (10 MB cap, not the 25 MB doc cap) and its blob deleted");
+  ok(!big.ok && big.error === "That file is over 10 MB." && removed.includes(`part-docs/${ID}/big.png`), "#245 images upload: an 11 MB image is refused (10 MB cap, not the 25 MB doc cap) and its blob deleted");
 
   const ok10mb = await verifyUploadedBlob(
     { documentId: ID, blobPathname: `part-docs/${ID}/ok.jpg`, fileName: "photo.jpg", kind: "image" },
     fakeImage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]), 9 * 1024 * 1024)
   );
-  ok(ok10mb.ok && ok10mb.file.fileName === "photo.jpg" && ok10mb.file.contentType === "image/jpeg", "#242 images upload: a 9 MB JPEG under the cap is accepted, and displayFileName keeps the user's .jpg rather than renaming it to .jpeg");
+  ok(ok10mb.ok && ok10mb.file.fileName === "photo.jpg" && ok10mb.file.contentType === "image/jpeg", "#245 images upload: a 9 MB JPEG under the cap is accepted, and displayFileName keeps the user's .jpg rather than renaming it to .jpeg");
 
   // (Fix round 1, M5: the "setDocumentLinkDisplay refuses a non-image link"
-  // assertion lives once, in portal242ImageLinksAsyncChecks — removed the
+  // assertion lives once, in portal245ImageLinksAsyncChecks — removed the
   // duplicate that used to live here.)
 
   // Fix round 1 (a): upload A + fetch B with no explicit sort → [A, B]
   // (source-rank tiebreak); after writing sort B=0, A=1 → [B, A] — proven
   // against the real DB-backed read (visibleImagesForParts), matching the
   // pure view-builder assertion above.
-  const sku2 = fixtureId(242, "sku-img-order");
-  const imgA = await d242CreateDoc({ kind: "image", fileName: "a.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-t4-a/a.jpg", sourceUrl: null, source: "upload", by: "Test" });
-  const imgB = await d242CreateDoc({ kind: "image", fileName: "b.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-t4-b/b.jpg", sourceUrl: "https://x.example/b.jpg", source: "fetch", by: "Test" });
-  if (!imgA || !imgB) throw new Error("#242 images order: fixture documents failed to create");
+  const sku2 = fixtureId(245, "sku-img-order");
+  const imgA = await d245CreateDoc({ kind: "image", fileName: "a.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-t4-a/a.jpg", sourceUrl: null, source: "upload", by: "Test" });
+  const imgB = await d245CreateDoc({ kind: "image", fileName: "b.jpg", contentType: "image/jpeg", size: 10, blobKey: "part-docs/PD-t4-b/b.jpg", sourceUrl: "https://x.example/b.jpg", source: "fetch", by: "Test" });
+  if (!imgA || !imgB) throw new Error("#245 images order: fixture documents failed to create");
   registerFixture("part_documents", imgA.id);
   registerFixture("part_documents", imgB.id);
-  await d242Attach(imgA.id, [sku2], "Test");
-  await d242Attach(imgB.id, [sku2], "Test");
-  registerFixture("part_document_links", d242LinkId(sku2, imgA.id));
-  registerFixture("part_document_links", d242LinkId(sku2, imgB.id));
+  await d245Attach(imgA.id, [sku2], "Test");
+  await d245Attach(imgB.id, [sku2], "Test");
+  registerFixture("part_document_links", d245LinkId(sku2, imgA.id));
+  registerFixture("part_document_links", d245LinkId(sku2, imgB.id));
 
-  const initialOrder = await d242VisibleImages([sku2]);
-  ok((initialOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: with no explicit sort, an upload sorts before a fetch (source rank)");
+  const initialOrder = await d245VisibleImages([sku2]);
+  ok((initialOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#245 images order: with no explicit sort, an upload sorts before a fetch (source rank)");
 
-  ok(await d242SetDisplay(imgB.id, sku2, { sort: 0 }), "#242 images order: setDocumentLinkDisplay sets B's sort to 0");
-  ok(await d242SetDisplay(imgA.id, sku2, { sort: 1 }), "#242 images order: setDocumentLinkDisplay sets A's sort to 1");
-  const reorderedByDisplay = await d242VisibleImages([sku2]);
-  ok((reorderedByDisplay.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgB.id},${imgA.id}`, "#242 images order: an explicit sort (B:0, A:1) overrides source rank — [B, A]");
+  ok(await d245SetDisplay(imgB.id, sku2, { sort: 0 }), "#245 images order: setDocumentLinkDisplay sets B's sort to 0");
+  ok(await d245SetDisplay(imgA.id, sku2, { sort: 1 }), "#245 images order: setDocumentLinkDisplay sets A's sort to 1");
+  const reorderedByDisplay = await d245VisibleImages([sku2]);
+  ok((reorderedByDisplay.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgB.id},${imgA.id}`, "#245 images order: an explicit sort (B:0, A:1) overrides source rank — [B, A]");
 
-  // setImageOrder (#242 review fix M3, store): the part editor's ↑/↓ now
+  // setImageOrder (#245 review fix M3, store): the part editor's ↑/↓ now
   // reorder in ONE write via this, not N sequential setDocumentLinkDisplay
   // calls. Refuses whole-hog if any id isn't a live image link of the sku.
-  ok(!(await d242SetOrder(sku2, [imgA.id, "PD-notlinked000"])), "#242 images order: setImageOrder refuses a documentId not linked to this part as an image");
-  ok(await d242SetOrder(sku2, [imgA.id, imgB.id]), "#242 images order: setImageOrder accepts a full reorder of the part's own image links");
-  const afterSetOrder = await d242VisibleImages([sku2]);
-  ok((afterSetOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: setImageOrder's order (A, B) is what visibleImagesForParts reads back");
+  ok(!(await d245SetOrder(sku2, [imgA.id, "PD-notlinked000"])), "#245 images order: setImageOrder refuses a documentId not linked to this part as an image");
+  ok(await d245SetOrder(sku2, [imgA.id, imgB.id]), "#245 images order: setImageOrder accepts a full reorder of the part's own image links");
+  const afterSetOrder = await d245VisibleImages([sku2]);
+  ok((afterSetOrder.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#245 images order: setImageOrder's order (A, B) is what visibleImagesForParts reads back");
 
   // Fix round 2: setImageOrder now requires EXACT-SET coverage — a
   // datasheet linked to this same sku (never an image link) is refused,
   // and so is a merely partial list of the part's own image links; both
   // leave real state ambiguous rather than silently reordering a subset.
-  const dsSameSku = await d242CreateDoc({
+  const dsSameSku = await d245CreateDoc({
     kind: "datasheet", fileName: "ds2.pdf", contentType: "application/pdf", size: 10,
     blobKey: "part-docs/PD-t4-ds2/ds2.pdf", sourceUrl: null, source: "upload", by: "Test",
   });
-  if (!dsSameSku) throw new Error("#242 images order: fixture datasheet failed to create");
+  if (!dsSameSku) throw new Error("#245 images order: fixture datasheet failed to create");
   registerFixture("part_documents", dsSameSku.id);
-  await d242Attach(dsSameSku.id, [sku2], "Test");
-  registerFixture("part_document_links", d242LinkId(sku2, dsSameSku.id));
+  await d245Attach(dsSameSku.id, [sku2], "Test");
+  registerFixture("part_document_links", d245LinkId(sku2, dsSameSku.id));
 
-  ok(!(await d242SetOrder(sku2, [imgA.id, imgB.id, dsSameSku.id])), "#242 images order: setImageOrder refuses a datasheet linked to the same sku (not an image link)");
-  ok(!(await d242SetOrder(sku2, [imgA.id])), "#242 images order: setImageOrder refuses a partial list (missing imgB)");
-  const afterRefusals = await d242VisibleImages([sku2]);
-  ok((afterRefusals.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#242 images order: both refused calls wrote nothing — the order from before them stands");
+  ok(!(await d245SetOrder(sku2, [imgA.id, imgB.id, dsSameSku.id])), "#245 images order: setImageOrder refuses a datasheet linked to the same sku (not an image link)");
+  ok(!(await d245SetOrder(sku2, [imgA.id])), "#245 images order: setImageOrder refuses a partial list (missing imgB)");
+  const afterRefusals = await d245VisibleImages([sku2]);
+  ok((afterRefusals.get(sku2) ?? []).map((d) => d.id).join(",") === `${imgA.id},${imgB.id}`, "#245 images order: both refused calls wrote nothing — the order from before them stands");
 
   // setImageDisplayAction-level validation lives in actions.ts (M2) and
   // can't run from this harness (server actions need requireUser()'s
@@ -27750,311 +27750,311 @@ async function portal242ImagesTask4AsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   Portal catalog — customer visibility (#242, Task 5; spec §1.3). Pure:
+   Portal catalog — customer visibility (#245, Task 5; spec §1.3). Pure:
    quotable/browsable/browseReason/normalizeVisibility, the Auto/Show/Hide
    rule the part editor's selector and (later) the portal catalog itself
    both read. No DB check — the field is a plain optional CatalogPart column
    written only through mergeUpsert (never wiped by an importer/enricher
-   patch — see the #242 assertion beside the #81 re-import checks above).
+   patch — see the #245 assertion beside the #81 re-import checks above).
    ====================================================================== */
-import { browsable as d242Browsable, browseReason as d242Reason, quotable as d242Quotable, normalizeVisibility as d242NormVis } from "@/lib/portal-visibility";
+import { browsable as d245Browsable, browseReason as d245Reason, quotable as d245Quotable, normalizeVisibility as d245NormVis } from "@/lib/portal-visibility";
 {
   const rule = { minQuotes: 3 };
   const base = { visibility: "auto" as const, hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 };
-  ok(d242Quotable(base) && d242Quotable({ visibility: "show" }) && !d242Quotable({ visibility: "hide" }), "#242 visibility: everything but Hide is quotable");
-  ok(!d242Browsable(base, rule), "#242 visibility: auto with no image/datasheet/quotes is search-only");
-  ok(d242Browsable({ ...base, hasVisibleImage: true }, rule) && d242Browsable({ ...base, hasDatasheet: true }, rule), "#242 visibility: image or datasheet makes it browsable");
-  ok(!d242Browsable({ ...base, quoteCount: 2 }, rule) && d242Browsable({ ...base, quoteCount: 3 }, rule), "#242 visibility: 3+ recent quotes makes it browsable");
-  ok(d242Browsable({ ...base, visibility: "show" }, rule) && !d242Browsable({ ...base, visibility: "hide", hasVisibleImage: true }, rule), "#242 visibility: overrides win both ways");
-  ok(d242Reason({ ...base, hasVisibleImage: true }, rule) === "Browsable: has image", "#242 visibility: reason names the first matching fact");
-  ok(d242Reason({ ...base, quoteCount: 5 }, rule) === "Browsable: quoted 5 times recently", "#242 visibility: quote-count reason");
-  ok(d242Reason({ ...base, visibility: "hide" }, rule) === "Hidden from customers", "#242 visibility: hide reason");
-  ok(d242Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#242 visibility: search-only reason");
-  ok(d242NormVis("bogus") === "auto" && d242NormVis(undefined) === "auto" && d242NormVis("hide") === "hide", "#242 visibility: unknown values read as auto");
+  ok(d245Quotable(base) && d245Quotable({ visibility: "show" }) && !d245Quotable({ visibility: "hide" }), "#245 visibility: everything but Hide is quotable");
+  ok(!d245Browsable(base, rule), "#245 visibility: auto with no image/datasheet/quotes is search-only");
+  ok(d245Browsable({ ...base, hasVisibleImage: true }, rule) && d245Browsable({ ...base, hasDatasheet: true }, rule), "#245 visibility: image or datasheet makes it browsable");
+  ok(!d245Browsable({ ...base, quoteCount: 2 }, rule) && d245Browsable({ ...base, quoteCount: 3 }, rule), "#245 visibility: 3+ recent quotes makes it browsable");
+  ok(d245Browsable({ ...base, visibility: "show" }, rule) && !d245Browsable({ ...base, visibility: "hide", hasVisibleImage: true }, rule), "#245 visibility: overrides win both ways");
+  ok(d245Reason({ ...base, hasVisibleImage: true }, rule) === "Browsable: has image", "#245 visibility: reason names the first matching fact");
+  ok(d245Reason({ ...base, quoteCount: 5 }, rule) === "Browsable: quoted 5 times recently", "#245 visibility: quote-count reason");
+  ok(d245Reason({ ...base, visibility: "hide" }, rule) === "Hidden from customers", "#245 visibility: hide reason");
+  ok(d245Reason(base, rule) === "Search only — no image, datasheet, or recent quotes", "#245 visibility: search-only reason");
+  ok(d245NormVis("bogus") === "auto" && d245NormVis(undefined) === "auto" && d245NormVis("hide") === "hide", "#245 visibility: unknown values read as auto");
 }
 
 /* ======================================================================
    Portal catalog — price rules, quote mode, accept/card guards, search
-   (#242, Task 6; spec §2.1/§2.3/§3.1/§4). Pure TypeScript modules.
+   (#245, Task 6; spec §2.1/§2.3/§3.1/§4). Pure TypeScript modules.
    ====================================================================== */
-import { unitPriceFor as d242Unit, fixtureUnitPrice as d242FixPrice } from "@/lib/portal-price-rules";
-import { quoteMode as d242Mode, canAcceptPortal as d242CanAccept, firmValidUntil as d242Valid, looksLikeCardNumber as d242Card } from "@/lib/portal-quote-mode";
-import { searchCatalog as d242Search, buildHaystack as d242Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
+import { unitPriceFor as d245Unit, fixtureUnitPrice as d245FixPrice } from "@/lib/portal-price-rules";
+import { quoteMode as d245Mode, canAcceptPortal as d245CanAccept, firmValidUntil as d245Valid, looksLikeCardNumber as d245Card } from "@/lib/portal-quote-mode";
+import { searchCatalog as d245Search, buildHaystack as d245Hay, type SearchEntry as D242Entry } from "@/lib/portal-search";
 {
   const now = Date.UTC(2026, 8, 27);
   const o = { margin: 0.3, staleCostMonths: 0, now };
-  ok(d242Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#242 price: cost ÷ (1 − margin)");
-  ok(d242Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d242Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#242 price: no cost → list");
-  const np = d242Unit({ cost: 0, list: 0 }, o);
-  ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#242 price: no cost and no list → price on request");
-  ok(d242Unit({ cost: 10, list: 20, note: "verify price" }, o).porReason === "verify-price", "#242 price: a note means verify price → POR");
+  ok(d245Unit({ cost: 70, list: 200 }, o).unitPrice === 100, "#245 price: cost ÷ (1 − margin)");
+  ok(d245Unit({ cost: 0, list: 80 }, o).unitPrice === 80 && d245Unit({ cost: null, list: 80 }, o).unitPrice === 80, "#245 price: no cost → list");
+  const np = d245Unit({ cost: 0, list: 0 }, o);
+  ok(np.por && np.porReason === "no-price" && np.unitPrice === null, "#245 price: no cost and no list → price on request");
+  ok(d245Unit({ cost: 10, list: 20, note: "verify price" }, o).porReason === "verify-price", "#245 price: a note means verify price → POR");
   const old = now - 400 * 86400000;
-  ok(!d242Unit({ cost: 10, list: 20, pricedAt: old }, o).por, "#242 price: stale-cost rule off by default");
-  ok(d242Unit({ cost: 10, list: 20, pricedAt: old }, { ...o, staleCostMonths: 12 }).porReason === "stale-cost", "#242 price: stale cost → POR when the setting is on");
-  ok(!d242Unit({ cost: 10, list: 20, pricedAt: null }, { ...o, staleCostMonths: 12 }).por, "#242 price: unknown priced date is not stale");
-  ok(d242Unit({ cost: 33.33, list: 0 }, o).unitPrice === 47.61, "#242 price: rounded to cents");
+  ok(!d245Unit({ cost: 10, list: 20, pricedAt: old }, o).por, "#245 price: stale-cost rule off by default");
+  ok(d245Unit({ cost: 10, list: 20, pricedAt: old }, { ...o, staleCostMonths: 12 }).porReason === "stale-cost", "#245 price: stale cost → POR when the setting is on");
+  ok(!d245Unit({ cost: 10, list: 20, pricedAt: null }, { ...o, staleCostMonths: 12 }).por, "#245 price: unknown priced date is not stale");
+  ok(d245Unit({ cost: 33.33, list: 0 }, o).unitPrice === 47.61, "#245 price: rounded to cents");
 
   const comp = (sku: string, cost: number, qty = 1, extra = {}) => ({ sku, cost, list: 0, qty, quotable: true, required: true, ...extra });
-  const fx = d242FixPrice([comp("LE", 700), comp("LENS", 70, 2)], o);
-  ok(fx.unitPrice === 1200 && !fx.por && fx.cost === 840, "#242 fixture: sum of component tier prices × qty; cost carried");
-  ok(d242FixPrice([comp("LE", 700), comp("X", 0, 1, { list: 0 })], o).por, "#242 fixture: a POR component makes the fixture POR");
-  ok(d242FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false })], o).unavailable, "#242 fixture: a hidden required component makes it unavailable");
-  ok(!d242FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false, required: false })], o).unavailable, "#242 fixture: a hidden optional add-on doesn't block the fixture");
+  const fx = d245FixPrice([comp("LE", 700), comp("LENS", 70, 2)], o);
+  ok(fx.unitPrice === 1200 && !fx.por && fx.cost === 840, "#245 fixture: sum of component tier prices × qty; cost carried");
+  ok(d245FixPrice([comp("LE", 700), comp("X", 0, 1, { list: 0 })], o).por, "#245 fixture: a POR component makes the fixture POR");
+  ok(d245FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false })], o).unavailable, "#245 fixture: a hidden required component makes it unavailable");
+  ok(!d245FixPrice([comp("LE", 700), comp("H", 5, 1, { quotable: false, required: false })], o).unavailable, "#245 fixture: a hidden optional add-on doesn't block the fixture");
 
-  ok(d242Mode([{ por: false }, { por: false }]).mode === "firm", "#242 mode: all priced → firm");
-  const rv = d242Mode([{ por: false }, { por: true }, { por: true }]);
-  ok(rv.mode === "review" && rv.porCount === 2 && rv.reason === "2 lines are price on request", "#242 mode: any POR → review with reason");
-  ok(d242Mode([{ por: true }]).reason === "1 line is price on request", "#242 mode: singular reason");
-  ok(d242Valid(now, 30) === now + 30 * 86400000, "#242 validity: 30 days");
-  ok(d242CanAccept({ status: "sent", portalFirm: { validUntil: now + 1 } }, now).ok, "#242 accept: sent + in date → ok");
-  ok(d242CanAccept({ status: "sent", portalFirm: { validUntil: now - 1 } }, now).reason === "expired", "#242 accept: expired firm quote refused");
-  ok(d242CanAccept({ status: "sent" }, now).ok, "#242 accept: staff-sent (no portalFirm) never expires here");
-  ok(d242CanAccept({ status: "draft" }, now).reason === "not-sent" && d242CanAccept({ status: "sent", portalAcceptance: { at: 1 } }, now).reason === "accepted", "#242 accept: draft / already accepted refused");
-  ok(d242Card("PO 44812, card 4111 1111 1111 1111 please") && d242Card("4242424242424242"), "#242 card guard: Luhn-valid 13–19 digit runs caught, with spaces");
-  ok(!d242Card("PO 1234567890123") && !d242Card("call 608-555-0199"), "#242 card guard: PO numbers / phones that fail Luhn pass");
+  ok(d245Mode([{ por: false }, { por: false }]).mode === "firm", "#245 mode: all priced → firm");
+  const rv = d245Mode([{ por: false }, { por: true }, { por: true }]);
+  ok(rv.mode === "review" && rv.porCount === 2 && rv.reason === "2 lines are price on request", "#245 mode: any POR → review with reason");
+  ok(d245Mode([{ por: true }]).reason === "1 line is price on request", "#245 mode: singular reason");
+  ok(d245Valid(now, 30) === now + 30 * 86400000, "#245 validity: 30 days");
+  ok(d245CanAccept({ status: "sent", portalFirm: { validUntil: now + 1 } }, now).ok, "#245 accept: sent + in date → ok");
+  ok(d245CanAccept({ status: "sent", portalFirm: { validUntil: now - 1 } }, now).reason === "expired", "#245 accept: expired firm quote refused");
+  ok(d245CanAccept({ status: "sent" }, now).ok, "#245 accept: staff-sent (no portalFirm) never expires here");
+  ok(d245CanAccept({ status: "draft" }, now).reason === "not-sent" && d245CanAccept({ status: "sent", portalAcceptance: { at: 1 } }, now).reason === "accepted", "#245 accept: draft / already accepted refused");
+  ok(d245Card("PO 44812, card 4111 1111 1111 1111 please") && d245Card("4242424242424242"), "#245 card guard: Luhn-valid 13–19 digit runs caught, with spaces");
+  ok(!d245Card("PO 1234567890123") && !d245Card("call 608-555-0199"), "#245 card guard: PO numbers / phones that fail Luhn pass");
 
-  const e = (key: string, mfr: string, category: string, browsable = true, title = key): D242Entry => ({ key, kind: "part", title, sku: key, mfr, category, haystack: d242Hay([key, title, mfr, category]), browsable, rank: 0 });
+  const e = (key: string, mfr: string, category: string, browsable = true, title = key): D242Entry => ({ key, kind: "part", title, sku: key, mfr, category, haystack: d245Hay([key, title, mfr, category]), browsable, rank: 0 });
   const all = [e("A1", "ETC", "Fixtures"), e("A2", "ETC", "Cable"), e("B1", "Rose Brand", "Track", false), e("B2", "Rose Brand", "Fixtures", true, "Source Four Clamp")];
-  const r0 = d242Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(r0.total === 3 && !r0.entries.some((x) => x.key === "B1"), "#242 search: empty query lists browsable only");
-  ok(d242Search(all, { q: "b1", mfr: [], cat: [], page: 1, pageSize: 48 }).total === 1, "#242 search: a query finds search-only parts too");
-  const r1 = d242Search(all, { q: "", mfr: ["ETC"], cat: [], page: 1, pageSize: 48 });
-  ok(r1.total === 2 && r1.catFacets.find((f) => f.value === "Fixtures")?.count === 1 && !r1.catFacets.some((f) => f.value === "Track"), "#242 search: picking a manufacturer narrows category facets");
-  ok(r1.mfrFacets.find((f) => f.value === "Rose Brand")?.count === 1 && r1.mfrFacets.find((f) => f.value === "ETC")?.selected === true, "#242 search: manufacturer facet counts ignore its own selection (either order works)");
-  const r2 = d242Search(all, { q: "source clamp", mfr: [], cat: [], page: 1, pageSize: 48 });
-  ok(r2.total === 1 && r2.entries[0].key === "B2", "#242 search: every token must match (AND)");
+  const r0 = d245Search(all, { q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(r0.total === 3 && !r0.entries.some((x) => x.key === "B1"), "#245 search: empty query lists browsable only");
+  ok(d245Search(all, { q: "b1", mfr: [], cat: [], page: 1, pageSize: 48 }).total === 1, "#245 search: a query finds search-only parts too");
+  const r1 = d245Search(all, { q: "", mfr: ["ETC"], cat: [], page: 1, pageSize: 48 });
+  ok(r1.total === 2 && r1.catFacets.find((f) => f.value === "Fixtures")?.count === 1 && !r1.catFacets.some((f) => f.value === "Track"), "#245 search: picking a manufacturer narrows category facets");
+  ok(r1.mfrFacets.find((f) => f.value === "Rose Brand")?.count === 1 && r1.mfrFacets.find((f) => f.value === "ETC")?.selected === true, "#245 search: manufacturer facet counts ignore its own selection (either order works)");
+  const r2 = d245Search(all, { q: "source clamp", mfr: [], cat: [], page: 1, pageSize: 48 });
+  ok(r2.total === 1 && r2.entries[0].key === "B2", "#245 search: every token must match (AND)");
   const many = Array.from({ length: 100 }, (_, i) => e("P" + i, "ETC", "Cable"));
-  const p3 = d242Search(many, { q: "", mfr: [], cat: [], page: 3, pageSize: 48 });
-  ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#242 search: 48 per page, last page partial");
-  ok(d242Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#242 search: page clamps to the last page");
+  const p3 = d245Search(many, { q: "", mfr: [], cat: [], page: 3, pageSize: 48 });
+  ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#245 search: 48 per page, last page partial");
+  ok(d245Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#245 search: page clamps to the last page");
 }
 
 /* Fix round 1: fixture cost accumulation for POR components; group-based card detection */
 {
-  ok(d242FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { margin: 0.3, staleCostMonths: 0, now: 0 }).cost === 800, "#242 fixture: a POR component's known cost still counts toward the fixture's internal cost");
-  ok(d242Card("PO 12345 4111 1111 1111 1111"), "#242 card guard: a card typed after a PO number is still caught");
-  ok(d242Card("PO-12345-4111-1111-1111-1111"), "#242 card guard: dash-separated run with a leading PO group");
-  ok(!d242Card("tracking 94111111111111111222"), "#242 card guard: a long unbroken digit string is not scanned window by window");
-  ok(!d242Card("qty 2 x 1000 units, call 608 555 0199"), "#242 card guard: short groups (qty, phone) don't add up to a card");
+  ok(d245FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { margin: 0.3, staleCostMonths: 0, now: 0 }).cost === 800, "#245 fixture: a POR component's known cost still counts toward the fixture's internal cost");
+  ok(d245Card("PO 12345 4111 1111 1111 1111"), "#245 card guard: a card typed after a PO number is still caught");
+  ok(d245Card("PO-12345-4111-1111-1111-1111"), "#245 card guard: dash-separated run with a leading PO group");
+  ok(!d245Card("tracking 94111111111111111222"), "#245 card guard: a long unbroken digit string is not scanned window by window");
+  ok(!d245Card("qty 2 x 1000 units, call 608 555 0199"), "#245 card guard: short groups (qty, phone) don't add up to a card");
 }
 
 /* ======================================================================
-   Portal catalog — cached catalog index + server-canonical pricing (#242,
+   Portal catalog — cached catalog index + server-canonical pricing (#245,
    Task 7; spec §2/§8). Pure quote counting, then a DB pass over real
    catalog rows, an image link, a Hide override and a cart.
    ====================================================================== */
 import {
-  countRecentQuotesBySku as d242Counts,
-  invalidatePortalIndex as d242Invalidate,
-  portalIndex as d242Index,
-  portalFactsForSku as d242Facts,
+  countRecentQuotesBySku as d245Counts,
+  invalidatePortalIndex as d245Invalidate,
+  portalIndex as d245Index,
+  portalFactsForSku as d245Facts,
 } from "@/lib/portal-catalog-index";
 import {
-  priceCart as d242PriceCart,
-  priceSku as d242PriceSku,
-  sellView as d242SellView,
-  pricingContextFor as d242Ctx,
-  freightFor as d242FreightFor,
+  priceCart as d245PriceCart,
+  priceSku as d245PriceSku,
+  sellView as d245SellView,
+  pricingContextFor as d245Ctx,
+  freightFor as d245FreightFor,
 } from "@/lib/portal-pricing";
-import { mergeUpsert as d242MergeUpsert } from "@/lib/stores/catalog";
+import { mergeUpsert as d245MergeUpsert } from "@/lib/stores/catalog";
 import type { PortalCart as D242Cart } from "@/lib/portal-cart-types";
 {
   const mk = (createdAt: number, skus: string[], source = "estimator") => ({ source, createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
   const since = 1000;
-  const m = d242Counts([mk(2000, ["A", "A", "B"]), mk(3000, ["A"]), mk(500, ["A"]), mk(4000, ["A"], "daylite"), { source: "x", createdAt: 5000, spec: null }], since);
-  ok(m.get("A") === 2 && m.get("B") === 1, "#242 index: counts distinct quotes per SKU inside the window, excluding Daylite history and old quotes");
-  const odd = d242Counts([
+  const m = d245Counts([mk(2000, ["A", "A", "B"]), mk(3000, ["A"]), mk(500, ["A"]), mk(4000, ["A"], "daylite"), { source: "x", createdAt: 5000, spec: null }], since);
+  ok(m.get("A") === 2 && m.get("B") === 1, "#245 index: counts distinct quotes per SKU inside the window, excluding Daylite history and old quotes");
+  const odd = d245Counts([
     { source: "estimator", createdAt: 2000, deleted: true, spec: { sections: [{ items: [{ sku: "D" }] }] } },
     { source: "estimator", createdAt: 2000, spec: { sections: "nope" } },
     { source: "estimator", createdAt: 2000, spec: { sections: [{ items: null }, { items: [null, { sku: 7 }, { sku: "" }, { sku: "E" }] }] } },
   ], since);
-  ok(!odd.has("D") && odd.get("E") === 1 && odd.size === 1, "#242 index: deleted quotes and malformed spec shapes are skipped safely");
+  ok(!odd.has("D") && odd.get("E") === 1 && odd.size === 1, "#245 index: deleted quotes and malformed spec shapes are skipped safely");
 }
 
-async function portal242IndexAsyncChecks(): Promise<void> {
-  const IMG = fixtureId(242, "p-img");
-  const HIDE = fixtureId(242, "p-hide");
-  const PLAIN = fixtureId(242, "p-plain");
-  const CO = fixtureId(242, "co-index");
+async function portal245IndexAsyncChecks(): Promise<void> {
+  const IMG = fixtureId(245, "p-img");
+  const HIDE = fixtureId(245, "p-hide");
+  const PLAIN = fixtureId(245, "p-plain");
+  const CO = fixtureId(245, "co-index");
   try {
-    await d242MergeUpsert(IMG, { desc: "Test242 Imaged Fixture", category: "Lighting", unit: "ea", list: 500, cost: 70, mfr: "Test242 Mfr" });
-    await d242MergeUpsert(HIDE, { desc: "Test242 Hidden Part", category: "Lighting", unit: "ea", list: 50, cost: 10, portalVisibility: "hide" });
-    await d242MergeUpsert(PLAIN, { desc: "Test242 Plain Part", category: "Cable", unit: "ea", list: 20, cost: 5 });
+    await d245MergeUpsert(IMG, { desc: "Test242 Imaged Fixture", category: "Lighting", unit: "ea", list: 500, cost: 70, mfr: "Test242 Mfr" });
+    await d245MergeUpsert(HIDE, { desc: "Test242 Hidden Part", category: "Lighting", unit: "ea", list: 50, cost: 10, portalVisibility: "hide" });
+    await d245MergeUpsert(PLAIN, { desc: "Test242 Plain Part", category: "Cable", unit: "ea", list: 20, cost: 5 });
     for (const s of [IMG, HIDE, PLAIN]) registerFixture("catalog_parts", s);
-    const img = await d242CreateDoc({ kind: "image", fileName: "p.png", contentType: "image/png", size: 10, blobKey: "part-docs/PD-t7-img/p.png", sourceUrl: null, source: "upload", by: "Test" });
-    if (!img) throw new Error("#242 index: fixture image failed to create");
+    const img = await d245CreateDoc({ kind: "image", fileName: "p.png", contentType: "image/png", size: 10, blobKey: "part-docs/PD-t7-img/p.png", sourceUrl: null, source: "upload", by: "Test" });
+    if (!img) throw new Error("#245 index: fixture image failed to create");
     registerFixture("part_documents", img.id);
-    await d242Attach(img.id, [IMG], "Test");
-    registerFixture("part_document_links", d242LinkId(IMG, img.id));
+    await d245Attach(img.id, [IMG], "Test");
+    registerFixture("part_document_links", d245LinkId(IMG, img.id));
     await upsertCustomer({ id: CO, name: "Test242 Portal Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
 
-    d242Invalidate();
-    const ix = await d242Index({ fresh: true });
+    d245Invalidate();
+    const ix = await d245Index({ fresh: true });
     const entry = (k: string) => ix.entries.find((e) => e.key === k);
-    ok(!ix.parts.has(HIDE) && !entry(HIDE), "#242 index: a Hide part is absent from the index and its search entries");
-    ok(entry(IMG)?.browsable === true && ix.parts.get(IMG)?.imageIds.includes(img.id) === true, "#242 index: a part with a visible image is browsable and carries the image id");
-    ok(!!entry(PLAIN) && entry(PLAIN)!.browsable === false, "#242 index: a plain part is searchable but not browsable");
-    ok(entry(IMG)!.haystack.includes("imaged") && entry(IMG)!.title === "Test242 Imaged Fixture", "#242 index: entry title + haystack come from the part");
-    ok((await d242Index()) === ix, "#242 index: a second read inside the TTL is the cached index");
-    d242Invalidate();
-    ok((await d242Index()) !== ix, "#242 index: invalidatePortalIndex forces a rebuild");
+    ok(!ix.parts.has(HIDE) && !entry(HIDE), "#245 index: a Hide part is absent from the index and its search entries");
+    ok(entry(IMG)?.browsable === true && ix.parts.get(IMG)?.imageIds.includes(img.id) === true, "#245 index: a part with a visible image is browsable and carries the image id");
+    ok(!!entry(PLAIN) && entry(PLAIN)!.browsable === false, "#245 index: a plain part is searchable but not browsable");
+    ok(entry(IMG)!.haystack.includes("imaged") && entry(IMG)!.title === "Test242 Imaged Fixture", "#245 index: entry title + haystack come from the part");
+    ok((await d245Index()) === ix, "#245 index: a second read inside the TTL is the cached index");
+    d245Invalidate();
+    ok((await d245Index()) !== ix, "#245 index: invalidatePortalIndex forces a rebuild");
 
     // Spec §1.3: an own spec sheet (no datasheet) counts as a datasheet.
-    const SPEC = fixtureId(242, "p-spec");
-    await d242MergeUpsert(SPEC, { desc: "Test242 Spec-sheet Part", category: "Rigging", unit: "ea", list: 30, cost: 12 });
+    const SPEC = fixtureId(245, "p-spec");
+    await d245MergeUpsert(SPEC, { desc: "Test242 Spec-sheet Part", category: "Rigging", unit: "ea", list: 30, cost: 12 });
     registerFixture("catalog_parts", SPEC);
-    const ss = await d242CreateDoc({ kind: "specsheet", fileName: "s.pdf", contentType: "application/pdf", size: 10, blobKey: "part-docs/PD-t7-ss/s.pdf", sourceUrl: null, source: "upload", by: "Test" });
-    if (!ss) throw new Error("#242 index: fixture spec sheet failed to create");
+    const ss = await d245CreateDoc({ kind: "specsheet", fileName: "s.pdf", contentType: "application/pdf", size: 10, blobKey: "part-docs/PD-t7-ss/s.pdf", sourceUrl: null, source: "upload", by: "Test" });
+    if (!ss) throw new Error("#245 index: fixture spec sheet failed to create");
     registerFixture("part_documents", ss.id);
-    await d242Attach(ss.id, [SPEC], "Test");
-    registerFixture("part_document_links", d242LinkId(SPEC, ss.id));
-    d242Invalidate();
-    const ixS = await d242Index({ fresh: true });
-    const fSpec = await d242Facts(SPEC);
+    await d245Attach(ss.id, [SPEC], "Test");
+    registerFixture("part_document_links", d245LinkId(SPEC, ss.id));
+    d245Invalidate();
+    const ixS = await d245Index({ fresh: true });
+    const fSpec = await d245Facts(SPEC);
     ok(ixS.entries.find((e) => e.key === SPEC)?.browsable === true && fSpec.hasDatasheet && fSpec.reason === "Browsable: has datasheet" && ixS.parts.get(SPEC)?.datasheetIds.includes(ss.id) === true,
-      "#242 index: a part whose only document is an own spec sheet is browsable (has datasheet)");
+      "#245 index: a part whose only document is an own spec sheet is browsable (has datasheet)");
 
-    const fImg = await d242Facts(IMG);
-    ok(fImg.hasVisibleImage && fImg.reason === "Browsable: has image", "#242 facts: portalFactsForSku reads the index for a listed part");
-    ok((await d242Facts(HIDE)).reason === "Hidden from customers", "#242 facts: a hidden part reads Hidden from customers");
+    const fImg = await d245Facts(IMG);
+    ok(fImg.hasVisibleImage && fImg.reason === "Browsable: has image", "#245 facts: portalFactsForSku reads the index for a listed part");
+    ok((await d245Facts(HIDE)).reason === "Hidden from customers", "#245 facts: a hidden part reads Hidden from customers");
 
-    const ctx = await d242Ctx({ customerId: CO, name: "" });
-    ok(ctx.tier === "silver" && Math.abs(ctx.margin - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#242 pricing: context resolves the company tier + margin");
-    ok((await d242PriceSku(HIDE, ctx)) === null, "#242 pricing: a Hide part is not quotable (priceSku → null)");
-    const ps = await d242PriceSku(IMG, ctx);
-    ok(!!ps && ps.unitPrice === Math.round((70 / (1 - 0.22)) * 100) / 100 && !ps.por, "#242 pricing: priceSku = cost ÷ (1 − tier margin)");
-    const fr = await d242FreightFor(CO, null);
-    ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#242 freight: no venue → unknown distance at the cap");
+    const ctx = await d245Ctx({ customerId: CO, name: "" });
+    ok(ctx.tier === "silver" && Math.abs(ctx.margin - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#245 pricing: context resolves the company tier + margin");
+    ok((await d245PriceSku(HIDE, ctx)) === null, "#245 pricing: a Hide part is not quotable (priceSku → null)");
+    const ps = await d245PriceSku(IMG, ctx);
+    ok(!!ps && ps.unitPrice === Math.round((70 / (1 - 0.22)) * 100) / 100 && !ps.por, "#245 pricing: priceSku = cost ÷ (1 − tier margin)");
+    const fr = await d245FreightFor(CO, null);
+    ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#245 freight: no venue → unknown distance at the cap");
 
     const cart: D242Cart = {
-      id: "TEST242:cart", customerId: CO, locationId: null, updatedAt: Date.now(),
+      id: "TEST245:cart", customerId: CO, locationId: null, updatedAt: Date.now(),
       lines: [
         { lineId: "1", kind: "part", sku: IMG, qty: 2 },
         { lineId: "2", kind: "curtain", qty: 1, curtainInputs: { name: "Main drape", fabricSku: "FAB-1", fabricName: "IFR Velour", qty: "1", width: "40", height: "20", fullness: "50" } },
         { lineId: "3", kind: "part", sku: HIDE, qty: 1 },
       ],
     };
-    const p = await d242PriceCart(cart, ctx);
+    const p = await d245PriceCart(cart, ctx);
     const partLine = p.lines.find((l) => l.lineId === "1")!;
     const curtain = p.lines.find((l) => l.lineId === "2")!;
     const gone = p.lines.find((l) => l.lineId === "3")!;
-    ok(p.mode === "review" && curtain.por && curtain.porReason === "curtain" && curtain.unitPrice === null, "#242 cart: a curtain line is price on request → review");
-    ok(partLine.extPrice === Math.round(2 * partLine.unitPrice! * 100) / 100 && !partLine.por, "#242 cart: part extPrice = qty × server unit price");
-    ok(gone.unavailable && gone.title === "No longer available" && gone.extPrice === null, "#242 cart: a hidden part reads No longer available");
-    ok(p.freight.unknown && p.freight.pct === 10 && p.freight.miles === null, "#242 cart: no venue → freight at the cap, unknown");
+    ok(p.mode === "review" && curtain.por && curtain.porReason === "curtain" && curtain.unitPrice === null, "#245 cart: a curtain line is price on request → review");
+    ok(partLine.extPrice === Math.round(2 * partLine.unitPrice! * 100) / 100 && !partLine.por, "#245 cart: part extPrice = qty × server unit price");
+    ok(gone.unavailable && gone.title === "No longer available" && gone.extPrice === null, "#245 cart: a hidden part reads No longer available");
+    ok(p.freight.unknown && p.freight.pct === 10 && p.freight.miles === null, "#245 cart: no venue → freight at the cap, unknown");
     ok(p.subtotal === partLine.extPrice && p.freight.amount === Math.round(140 * 0.1 * 100) / 100 && p.total === Math.round((p.subtotal + p.freight.amount) * 100) / 100,
-      "#242 cart: subtotal is materials sell, freight is the section % of cost (Estimator math), total adds them");
+      "#245 cart: subtotal is materials sell, freight is the section % of cost (Estimator math), total adds them");
     ok(!p.sections.some((s) => s.items.some((i) => i.sku === HIDE)) && p.sections.every((s) => s.freightPct === 10 && s.freightMiles === null),
-      "#242 cart: staff sections skip unavailable lines and carry the freight % + miles");
+      "#245 cart: staff sections skip unavailable lines and carry the freight % + miles");
     const drape = p.sections.find((s) => s.id === "SEC-DRAPE");
-    ok(!!drape && drape.items[0].sku === "CRT-REQ" && drape.items[0].por === true && drape.items[0].desc.includes("50% fullness"), "#242 cart: the curtain request lands as a POR drapery line for staff");
+    ok(!!drape && drape.items[0].sku === "CRT-REQ" && drape.items[0].por === true && drape.items[0].desc.includes("50% fullness"), "#245 cart: the curtain request lands as a POR drapery line for staff");
     // Fixture assembly: light engine (IMG) + a required PLAIN ×2 + an optional HIDE add-on
     // (not quotable, so never offered) + an optional PLAIN-priced add-on the cart turns on.
-    const FX = fixtureId(242, "fx");
-    const OPT = fixtureId(242, "p-opt");
-    await d242MergeUpsert(OPT, { desc: "Test242 Optional Clamp", category: "Hardware", unit: "ea", list: 0, cost: 7.8 });
+    const FX = fixtureId(245, "fx");
+    const OPT = fixtureId(245, "p-opt");
+    await d245MergeUpsert(OPT, { desc: "Test242 Optional Clamp", category: "Hardware", unit: "ea", list: 0, cost: 7.8 });
     registerFixture("catalog_parts", OPT);
     await createFixture("subassemblies", {
       id: FX, kind: "fixture", label: "Test242 Fixture Kit", description: "Kit", lightEngineSku: IMG, lensSku: null,
       lines: { data: [], power: [{ sku: PLAIN, qty: 2 }], mounting: [{ sku: OPT, qty: 0, label: "Clamp" }], accessories: [{ sku: HIDE, qty: 0 }] },
       createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
     });
-    const FXH = fixtureId(242, "fx-hidden-req");
+    const FXH = fixtureId(245, "fx-hidden-req");
     await createFixture("subassemblies", {
       id: FXH, kind: "fixture", label: "Test242 Blocked Kit", description: "", lightEngineSku: IMG, lensSku: null,
       lines: { data: [], power: [{ sku: HIDE, qty: 1 }], mounting: [], accessories: [] },
       createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
     });
-    d242Invalidate();
-    const ix2 = await d242Index({ fresh: true });
-    ok(!ix2.fixtures.has(FXH) && !ix2.entries.some((e) => e.key === "fixture:" + FXH), "#242 index: a fixture with a hidden required component is not offered");
+    d245Invalidate();
+    const ix2 = await d245Index({ fresh: true });
+    ok(!ix2.fixtures.has(FXH) && !ix2.entries.some((e) => e.key === "fixture:" + FXH), "#245 index: a fixture with a hidden required component is not offered");
     const ifx = ix2.fixtures.get(FX);
     ok(!!ifx && ifx.lines.length === 3 && ifx.lines[0].slot === "lightEngine" && ifx.lines[0].required && ifx.lines.find((x) => x.sku === OPT)?.required === false,
-      "#242 index: a fixture lists its light engine (required) + box lines, qty 0 = optional");
-    ok(!!ifx && !ifx.lines.some((x) => x.sku === HIDE), "#242 index: a Hide part is never offered as a fixture add-on");
-    ok(ix2.entries.find((e) => e.key === "fixture:" + FX)?.browsable === true, "#242 index: a fixture is a browsable search entry");
-    const fxCart: D242Cart = { id: "TEST242:cart2", customerId: CO, locationId: null, updatedAt: Date.now(),
+      "#245 index: a fixture lists its light engine (required) + box lines, qty 0 = optional");
+    ok(!!ifx && !ifx.lines.some((x) => x.sku === HIDE), "#245 index: a Hide part is never offered as a fixture add-on");
+    ok(ix2.entries.find((e) => e.key === "fixture:" + FX)?.browsable === true, "#245 index: a fixture is a browsable search entry");
+    const fxCart: D242Cart = { id: "TEST245:cart2", customerId: CO, locationId: null, updatedAt: Date.now(),
       lines: [{ lineId: "f", kind: "fixture", fixtureId: FX, qty: 3, fixtureOptions: { [`mounting:${OPT}`]: 1 } }] };
-    const pf = await d242PriceCart(fxCart, ctx);
+    const pf = await d245PriceCart(fxCart, ctx);
     const fl = pf.lines[0];
     const tp = (c: number) => Math.round((c / (1 - 0.22)) * 100) / 100;
     const unit = Math.round((tp(70) + 2 * tp(5) + tp(7.8)) * 100) / 100;
     ok(fl.kind === "fixture" && !fl.por && fl.unitPrice === unit && fl.extPrice === Math.round(unit * 3 * 100) / 100 && pf.mode === "firm",
-      "#242 cart: fixture unit = Σ chosen components' tier prices × qty; all priced → firm");
-    ok(fl.detail === "Included: Test242 Imaged Fixture, Test242 Plain Part ×2 · Add-ons: Clamp", "#242 cart: fixture detail names included parts and chosen add-ons");
+      "#245 cart: fixture unit = Σ chosen components' tier prices × qty; all priced → firm");
+    ok(fl.detail === "Included: Test242 Imaged Fixture, Test242 Plain Part ×2 · Add-ons: Clamp", "#245 cart: fixture detail names included parts and chosen add-ons");
     const fitem = pf.sections.find((x) => x.id === "SEC-FIXT")?.items[0];
     ok(!!fitem && fitem.fixture === true && fitem.cost === 70 + 10 + 7.8 && fitem.components?.length === 3 && !fitem.components.some((c) => c.sku === HIDE),
-      "#242 cart: staff fixture item carries per-unit cost + chosen components only");
-    ok(!JSON.stringify(d242SellView(pf)).includes("\"cost\""), "#242 cart: a fixture's sell view carries no cost");
+      "#245 cart: staff fixture item carries per-unit cost + chosen components only");
+    ok(!JSON.stringify(d245SellView(pf)).includes("\"cost\""), "#245 cart: a fixture's sell view carries no cost");
 
-    const sv = JSON.stringify(d242SellView(p));
-    ok(!sv.includes("\"cost\"") && !sv.includes("\"sections\"") && !sv.includes("margin") && !sv.includes("silver"), "#242 cart: sellView carries no cost, sections, margin or tier name");
+    const sv = JSON.stringify(d245SellView(p));
+    ok(!sv.includes("\"cost\"") && !sv.includes("\"sections\"") && !sv.includes("margin") && !sv.includes("silver"), "#245 cart: sellView carries no cost, sections, margin or tier name");
     ok(!sv.includes("\"pct\"") && !sv.includes("\"unknown\"") && JSON.stringify(JSON.parse(sv).freight) === JSON.stringify({ amount: p.freight.amount, miles: null }),
-      "#242 cart: sellView freight is amount + miles only — no pct or unknown (cost could be backed out)");
+      "#245 cart: sellView freight is amount + miles only — no pct or unknown (cost could be backed out)");
   } finally {
-    d242Invalidate();
+    d245Invalidate();
     await removeCustomer(CO);
   }
 }
 
 /* ======================================================================
-   Portal catalog — the portal_carts collection + store (#242, Task 8; spec
+   Portal catalog — the portal_carts collection + store (#245, Task 8; spec
    2026-09-27-portal-catalog-design.md). One cart per portal grant — NOT a
    quote row, so no estimate number is ever used here — priced only by
    src/lib/portal-pricing.ts (Task 7) when read. Registered in the async
-   chain as portal242CartAsyncChecks().
+   chain as portal245CartAsyncChecks().
    ====================================================================== */
 import {
-  addLine as d242AddLine,
-  clearCart as d242ClearCart,
-  getCart as d242GetCart,
-  MAX_CART_LINES as d242MaxLines,
-  MAX_LINE_QTY as d242MaxQty,
-  removeLine as d242RemoveLine,
-  saveCart as d242SaveCart,
-  setVenue as d242SetVenue,
-  updateLine as d242UpdateLine,
+  addLine as d245AddLine,
+  clearCart as d245ClearCart,
+  getCart as d245GetCart,
+  MAX_CART_LINES as d245MaxLines,
+  MAX_LINE_QTY as d245MaxQty,
+  removeLine as d245RemoveLine,
+  saveCart as d245SaveCart,
+  setVenue as d245SetVenue,
+  updateLine as d245UpdateLine,
 } from "@/lib/stores/portal-carts";
-import { getAll as d242GetAllQuotes } from "@/lib/stores/quotes";
+import { getAll as d245GetAllQuotes } from "@/lib/stores/quotes";
 
-async function portal242CartAsyncChecks(): Promise<void> {
-  const GRANT = fixtureId(242, "g1");
-  const CO_A = fixtureId(242, "cart-co-a");
-  const CO_B = fixtureId(242, "cart-co-b");
+async function portal245CartAsyncChecks(): Promise<void> {
+  const GRANT = fixtureId(245, "g1");
+  const CO_A = fixtureId(245, "cart-co-a");
+  const CO_B = fixtureId(245, "cart-co-b");
   registerFixture("portal_carts", GRANT);
 
-  const empty = await d242GetCart(GRANT, CO_A);
+  const empty = await d245GetCart(GRANT, CO_A);
   ok(
     empty.id === GRANT && empty.customerId === CO_A && empty.lines.length === 0 && empty.locationId === null,
-    "#242 cart: an absent grant reads as an empty cart — no quote row exists for it"
+    "#245 cart: an absent grant reads as an empty cart — no quote row exists for it"
   );
 
-  await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 2 });
-  await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 3 });
-  let cart = await d242GetCart(GRANT, CO_A);
-  ok(cart.lines.length === 1 && cart.lines[0].qty === 5, "#242 cart: same-SKU part ×2 then ×3 merges into one line, qty 5");
+  await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 2 });
+  await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 3 });
+  let cart = await d245GetCart(GRANT, CO_A);
+  ok(cart.lines.length === 1 && cart.lines[0].qty === 5, "#245 cart: same-SKU part ×2 then ×3 merges into one line, qty 5");
 
   const curtainInput = {
     name: "Main drape", fabricSku: "FAB-1", fabricName: "IFR Velour", qty: "1", width: "40", height: "20", fullness: "50" as const,
   };
-  cart = await d242AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
-  ok(cart.lines.length === 2, "#242 cart: adding a curtain line makes two lines total (never merges with the part line)");
-  cart = await d242AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
-  ok(cart.lines.length === 3, "#242 cart: two curtain lines never merge with each other either — always new");
+  cart = await d245AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
+  ok(cart.lines.length === 2, "#245 cart: adding a curtain line makes two lines total (never merges with the part line)");
+  cart = await d245AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
+  ok(cart.lines.length === 3, "#245 cart: two curtain lines never merge with each other either — always new");
 
   const partLineId = cart.lines.find((l) => l.kind === "part")!.lineId;
-  cart = await d242UpdateLine(GRANT, CO_A, partLineId, { qty: 0 });
-  ok(cart.lines.length === 2 && !cart.lines.some((l) => l.lineId === partLineId), "#242 cart: updateLine qty 0 removes the line");
+  cart = await d245UpdateLine(GRANT, CO_A, partLineId, { qty: 0 });
+  ok(cart.lines.length === 2 && !cart.lines.some((l) => l.lineId === partLineId), "#245 cart: updateLine qty 0 removes the line");
 
   // qty clamps to MAX_LINE_QTY on add, and again on a later updateLine; a
   // negative updateLine qty removes rather than clamping to 1.
-  cart = await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BIG", qty: d242MaxQty + 500 });
+  cart = await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BIG", qty: d245MaxQty + 500 });
   const bigLineId = cart.lines.find((l) => l.sku === "SKU-BIG")!.lineId;
-  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d242MaxQty, "#242 cart: qty above MAX_LINE_QTY clamps to it on add");
-  cart = await d242UpdateLine(GRANT, CO_A, bigLineId, { qty: d242MaxQty + 1000 });
-  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d242MaxQty, "#242 cart: qty above MAX_LINE_QTY clamps to it on updateLine too");
-  cart = await d242UpdateLine(GRANT, CO_A, bigLineId, { qty: -3 });
-  ok(!cart.lines.some((l) => l.lineId === bigLineId), "#242 cart: updateLine qty <= 0 removes the line (negative, not just zero)");
+  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d245MaxQty, "#245 cart: qty above MAX_LINE_QTY clamps to it on add");
+  cart = await d245UpdateLine(GRANT, CO_A, bigLineId, { qty: d245MaxQty + 1000 });
+  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d245MaxQty, "#245 cart: qty above MAX_LINE_QTY clamps to it on updateLine too");
+  cart = await d245UpdateLine(GRANT, CO_A, bigLineId, { qty: -3 });
+  ok(!cart.lines.some((l) => l.lineId === bigLineId), "#245 cart: updateLine qty <= 0 removes the line (negative, not just zero)");
 
   // addLine validation (Task 7 review follow-up): a non-integer or < 1 qty
   // refuses outright rather than silently coercing.
@@ -28062,16 +28062,16 @@ async function portal242CartAsyncChecks(): Promise<void> {
   for (const badQty of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
     let threw = "";
     try {
-      await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BAD", qty: badQty });
+      await d245AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BAD", qty: badQty });
     } catch (e) {
       threw = String((e as Error).message);
     }
-    ok(threw === wantsRefusal, `#242 cart: addLine refuses qty ${badQty} with the exact message`);
+    ok(threw === wantsRefusal, `#245 cart: addLine refuses qty ${badQty} with the exact message`);
   }
 
   // fixtureOptions: only finite integers 0..MAX_LINE_QTY survive; anything
   // else (negative, fractional, over the cap, NaN) is dropped, not clamped.
-  cart = await d242AddLine(GRANT, CO_A, {
+  cart = await d245AddLine(GRANT, CO_A, {
     kind: "fixture",
     fixtureId: "fx-1",
     qty: 1,
@@ -28080,67 +28080,67 @@ async function portal242CartAsyncChecks(): Promise<void> {
       "mounting:zero": 0,
       "mounting:neg": -1,
       "mounting:frac": 1.5,
-      "mounting:huge": d242MaxQty + 1,
+      "mounting:huge": d245MaxQty + 1,
       "mounting:nan": Number.NaN,
     },
   });
   const fxLine = cart.lines.find((l) => l.kind === "fixture")!;
   ok(
     JSON.stringify(fxLine.fixtureOptions) === JSON.stringify({ "mounting:ok": 2, "mounting:zero": 0 }),
-    "#242 cart: fixtureOptions keeps only finite integers in 0..MAX_LINE_QTY, drops the rest"
+    "#245 cart: fixtureOptions keeps only finite integers in 0..MAX_LINE_QTY, drops the rest"
   );
 
   // MAX_CART_LINES: fill to the cap, prove a same-SKU merge still works right
   // at the cap (it's not a new line), then prove a genuinely new line refuses.
-  await d242ClearCart(GRANT);
-  for (let i = 0; i < d242MaxLines; i++) {
-    await d242AddLine(GRANT, CO_A, { kind: "part", sku: `FILL-${i}`, qty: 1 });
+  await d245ClearCart(GRANT);
+  for (let i = 0; i < d245MaxLines; i++) {
+    await d245AddLine(GRANT, CO_A, { kind: "part", sku: `FILL-${i}`, qty: 1 });
   }
-  cart = await d242GetCart(GRANT, CO_A);
-  ok(cart.lines.length === d242MaxLines, `#242 cart: filled to MAX_CART_LINES (${d242MaxLines})`);
-  cart = await d242AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-0", qty: 1 });
+  cart = await d245GetCart(GRANT, CO_A);
+  ok(cart.lines.length === d245MaxLines, `#245 cart: filled to MAX_CART_LINES (${d245MaxLines})`);
+  cart = await d245AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-0", qty: 1 });
   ok(
-    cart.lines.length === d242MaxLines && cart.lines.find((l) => l.sku === "FILL-0")!.qty === 2,
-    "#242 cart: a same-SKU merge is allowed even when the cart is already at the line cap"
+    cart.lines.length === d245MaxLines && cart.lines.find((l) => l.sku === "FILL-0")!.qty === 2,
+    "#245 cart: a same-SKU merge is allowed even when the cart is already at the line cap"
   );
   let capThrew = "";
   try {
-    await d242AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-NEW", qty: 1 });
+    await d245AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-NEW", qty: 1 });
   } catch (e) {
     capThrew = String((e as Error).message);
   }
-  ok(capThrew === "Your quote can hold up to 200 lines.", "#242 cart: a genuinely new line beyond the cap is refused with the exact message");
+  ok(capThrew === "Your quote can hold up to 200 lines.", "#245 cart: a genuinely new line beyond the cap is refused with the exact message");
 
   // Cross-customer isolation: a cart saved for CO_A reads empty as CO_B, and
   // that read never mutates the real cart. A write made as the mismatched
   // customer overwrites the row under the caller's own id (never CO_A's).
-  const asB = await d242GetCart(GRANT, CO_B);
-  ok(asB.lines.length === 0 && asB.customerId === CO_B, "#242 cart: another customer's grant reads as empty, never the real cart");
-  const stillA = await d242GetCart(GRANT, CO_A);
-  ok(stillA.lines.length === d242MaxLines, "#242 cart: reading the cart as the wrong customer never mutated it");
-  await d242SetVenue(GRANT, CO_B, "loc-1");
-  const nowB = await d242GetCart(GRANT, CO_B);
-  ok(nowB.locationId === "loc-1" && nowB.customerId === CO_B, "#242 cart: a save made under the mismatched customer overwrites the row under the caller's own id");
+  const asB = await d245GetCart(GRANT, CO_B);
+  ok(asB.lines.length === 0 && asB.customerId === CO_B, "#245 cart: another customer's grant reads as empty, never the real cart");
+  const stillA = await d245GetCart(GRANT, CO_A);
+  ok(stillA.lines.length === d245MaxLines, "#245 cart: reading the cart as the wrong customer never mutated it");
+  await d245SetVenue(GRANT, CO_B, "loc-1");
+  const nowB = await d245GetCart(GRANT, CO_B);
+  ok(nowB.locationId === "loc-1" && nowB.customerId === CO_B, "#245 cart: a save made under the mismatched customer overwrites the row under the caller's own id");
 
-  await d242SaveCart({ id: GRANT, customerId: CO_A, locationId: null, lines: [{ lineId: "z1", kind: "part", sku: "SKU-Z", qty: 1 }], updatedAt: Date.now() });
-  cart = await d242RemoveLine(GRANT, CO_A, "z1");
-  ok(cart.lines.length === 0, "#242 cart: removeLine drops the named line");
+  await d245SaveCart({ id: GRANT, customerId: CO_A, locationId: null, lines: [{ lineId: "z1", kind: "part", sku: "SKU-Z", qty: 1 }], updatedAt: Date.now() });
+  cart = await d245RemoveLine(GRANT, CO_A, "z1");
+  ok(cart.lines.length === 0, "#245 cart: removeLine drops the named line");
 
   ok(
-    !(await d242GetAllQuotes()).some((q) => q.customerId === CO_A && q.source === "portal-catalog"),
-    "#242 cart: none of the above ever spawns a quote row — no estimate number is used until Generate"
+    !(await d245GetAllQuotes()).some((q) => q.customerId === CO_A && q.source === "portal-catalog"),
+    "#245 cart: none of the above ever spawns a quote row — no estimate number is used until Generate"
   );
 }
 
 /* ======================================================================
    Portal catalog — customer document route: the live servable-doc rule
-   (#242, Task 9 fix round 1; spec §7). Pure, built directly from
+   (#245, Task 9 fix round 1; spec §7). Pure, built directly from
    buildCoverageIndex/buildImageIndex fixtures (no DB) — the exact rule
    buildIndex calls to produce PortalIndex.servableDocIds.
    ====================================================================== */
-import { servableDocIdsFrom as d242ServableDocIds } from "@/lib/portal-catalog-index";
-import { buildCoverageIndex as d242BuildCoverage } from "@/lib/part-docs/coverage";
-import { buildImageIndex as d242BuildImages } from "@/lib/part-docs/views";
+import { servableDocIdsFrom as d245ServableDocIds } from "@/lib/portal-catalog-index";
+import { buildCoverageIndex as d245BuildCoverage } from "@/lib/part-docs/coverage";
+import { buildImageIndex as d245BuildImages } from "@/lib/part-docs/views";
 import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDocumentLink as D242DocLink } from "@/lib/part-docs/types";
 {
   const doc = (id: string, kind: D242Doc["kind"], blobKey: string | null): D242Doc => ({
@@ -28173,124 +28173,124 @@ import type { PartAccessoryLink as D242AccLink, PartDocument as D242Doc, PartDoc
     { id: "a1", parentSku: "PARENT", accessorySku: "SKU-ACC", source: "manual" },
     { id: "a2", parentSku: "PARENT2", accessorySku: "SKU-ACC2", ownDatasheet: true, source: "manual" },
   ];
-  const index = d242BuildCoverage({ documents, links, accessoryLinks, parts: [] });
-  const images = d242BuildImages(documents, links);
+  const index = d245BuildCoverage({ documents, links, accessoryLinks, parts: [] });
+  const images = d245BuildImages(documents, links);
   const liveSkus = ["SKU-A", "SKU-B", "SKU-ACC", "SKU-ACC2"]; // PARENT, PARENT2, SKU-HIDDEN are NOT live/quotable
 
-  const servable = d242ServableDocIds(index, images, liveSkus);
+  const servable = d245ServableDocIds(index, images, liveSkus);
 
-  ok(servable.has(D_IMG_VISIBLE.id), "#242 doc access: a live part's own visible image with a stored file is servable");
-  ok(!servable.has(D_IMG_HIDDEN.id), "#242 doc access: a hidden image link is never servable");
-  ok(!servable.has(D_IMG_HIDDENSKU.id), "#242 doc access: a non-live (hidden) part's own image is never servable, even unhidden");
-  ok(!servable.has(D_IMG_PARENT.id), "#242 doc access: a covering parent's IMAGE is never servable via the accessory graph");
-  ok(servable.has(D_DS_PARENT.id), "#242 doc access: a covering parent's datasheet IS servable via a live (quotable) accessory");
-  ok(!servable.has(D_DS_PARENT2.id), "#242 doc access: an ownDatasheet accessory pair opts the child back out of parent coverage");
-  ok(!servable.has(D_DS_NOBLOB.id), "#242 doc access: a document with no stored file (blobKey null) is never servable");
+  ok(servable.has(D_IMG_VISIBLE.id), "#245 doc access: a live part's own visible image with a stored file is servable");
+  ok(!servable.has(D_IMG_HIDDEN.id), "#245 doc access: a hidden image link is never servable");
+  ok(!servable.has(D_IMG_HIDDENSKU.id), "#245 doc access: a non-live (hidden) part's own image is never servable, even unhidden");
+  ok(!servable.has(D_IMG_PARENT.id), "#245 doc access: a covering parent's IMAGE is never servable via the accessory graph");
+  ok(servable.has(D_DS_PARENT.id), "#245 doc access: a covering parent's datasheet IS servable via a live (quotable) accessory");
+  ok(!servable.has(D_DS_PARENT2.id), "#245 doc access: an ownDatasheet accessory pair opts the child back out of parent coverage");
+  ok(!servable.has(D_DS_NOBLOB.id), "#245 doc access: a document with no stored file (blobKey null) is never servable");
 }
 
 /* ======================================================================
-   Portal catalog — the /portal/catalog browse page (#242, Task 10; spec
+   Portal catalog — the /portal/catalog browse page (#245, Task 10; spec
    §3.1). Pure: the URL/pager/shelf/tile helpers in portal-catalog-view.ts
    and the shell nav items. DB: the searchPortalCatalog action refuses
    without a portal session, prices tiles for the SESSION's customer only,
    stays sell-only, rate-limits per grant; the quoted-before shelf reads only
    the company's own listed quotes. Registered in the async chain as
-   portal242CatalogBrowseAsyncChecks().
+   portal245CatalogBrowseAsyncChecks().
    ====================================================================== */
 import {
-  CATALOG_PAGE_SIZE as d242PageSize,
-  catalogHref as d242CatHref,
-  cleanSearchQuery as d242CleanQ,
-  pagerItems as d242Pager,
-  parseCatalogParams as d242ParseCat,
-  quotedBeforeSkus as d242ShelfSkus,
-  toggleValue as d242Toggle,
-  toTileVM as d242Tile,
+  CATALOG_PAGE_SIZE as d245PageSize,
+  catalogHref as d245CatHref,
+  cleanSearchQuery as d245CleanQ,
+  pagerItems as d245Pager,
+  parseCatalogParams as d245ParseCat,
+  quotedBeforeSkus as d245ShelfSkus,
+  toggleValue as d245Toggle,
+  toTileVM as d245Tile,
 } from "@/lib/portal-catalog-view";
-import { portalNav as d242Nav } from "@/app/portal/nav";
-import { searchPortalCatalog as d242SearchAction } from "@/app/portal/catalog/actions";
+import { portalNav as d245Nav } from "@/app/portal/nav";
+import { searchPortalCatalog as d245SearchAction } from "@/app/portal/catalog/actions";
 import {
-  PORTAL_EXPIRED_COPY as d242ExpiredCopy,
-  PORTAL_SEARCH_RATE_COPY as d242RateCopy,
-  quotedBeforeShelf as d242Shelf,
-  searchPortalCatalogFor as d242SearchFor,
+  PORTAL_EXPIRED_COPY as d245ExpiredCopy,
+  PORTAL_SEARCH_RATE_COPY as d245RateCopy,
+  quotedBeforeShelf as d245Shelf,
+  searchPortalCatalogFor as d245SearchFor,
 } from "@/lib/portal-catalog-browse";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  ok(d242PageSize === 48, "#242 browse: 48 tiles per page");
-  ok(eq(d242Pager(1, 1), [1]) && eq(d242Pager(3, 7), [1, 2, 3, 4, 5, 6, 7]), "#242 pager: 7 or fewer pages lists every page");
-  ok(eq(d242Pager(1, 20), [1, 2, 3, 4, 5, "gap", 20]), "#242 pager: near the start shows 1–5 … last");
-  ok(eq(d242Pager(10, 20), [1, "gap", 9, 10, 11, "gap", 20]), "#242 pager: mid-range shows first … p−1 p p+1 … last");
-  ok(eq(d242Pager(20, 20), [1, "gap", 16, 17, 18, 19, 20]), "#242 pager: near the end shows first … last five");
-  ok(eq(d242Pager(4, 20), [1, 2, 3, 4, 5, "gap", 20]) && eq(d242Pager(5, 20), [1, "gap", 4, 5, 6, "gap", 20]), "#242 pager: pages 1–4 show 1–5; page 5 steps into the mid-range window");
-  ok(eq(d242Pager(99, 20), [1, "gap", 16, 17, 18, 19, 20]) && eq(d242Pager(Number.NaN, 0), [1]), "#242 pager: out-of-range and junk input clamp");
+  ok(d245PageSize === 48, "#245 browse: 48 tiles per page");
+  ok(eq(d245Pager(1, 1), [1]) && eq(d245Pager(3, 7), [1, 2, 3, 4, 5, 6, 7]), "#245 pager: 7 or fewer pages lists every page");
+  ok(eq(d245Pager(1, 20), [1, 2, 3, 4, 5, "gap", 20]), "#245 pager: near the start shows 1–5 … last");
+  ok(eq(d245Pager(10, 20), [1, "gap", 9, 10, 11, "gap", 20]), "#245 pager: mid-range shows first … p−1 p p+1 … last");
+  ok(eq(d245Pager(20, 20), [1, "gap", 16, 17, 18, 19, 20]), "#245 pager: near the end shows first … last five");
+  ok(eq(d245Pager(4, 20), [1, 2, 3, 4, 5, "gap", 20]) && eq(d245Pager(5, 20), [1, "gap", 4, 5, 6, "gap", 20]), "#245 pager: pages 1–4 show 1–5; page 5 steps into the mid-range window");
+  ok(eq(d245Pager(99, 20), [1, "gap", 16, 17, 18, 19, 20]) && eq(d245Pager(Number.NaN, 0), [1]), "#245 pager: out-of-range and junk input clamp");
 
-  const pc = d242ParseCat({ q: "  led par ", mfr: ["ETC", "Chauvet", "ETC", ""], cat: "Lighting", page: "3", part: "SKU-1" });
+  const pc = d245ParseCat({ q: "  led par ", mfr: ["ETC", "Chauvet", "ETC", ""], cat: "Lighting", page: "3", part: "SKU-1" });
   ok(pc.q === "led par" && eq(pc.mfr, ["ETC", "Chauvet"]) && eq(pc.cat, ["Lighting"]) && pc.page === 3 && pc.part === "SKU-1",
-    "#242 browse: ?q=&mfr=&cat=&page=&part= parse — mfr/cat repeat, de-duplicated, blanks dropped");
-  ok(d242ParseCat({ page: "abc" }).page === 1 && d242ParseCat({ page: "-4" }).page === 1 && d242ParseCat({}).q === "", "#242 browse: a junk page reads as 1");
-  const href = d242CatHref(pc, { page: 1 }, "cust-9");
-  ok(href === "/portal/catalog?q=led+par&mfr=ETC&mfr=Chauvet&cat=Lighting&part=SKU-1&preview=cust-9", "#242 browse: catalogHref keeps every param, drops page 1, carries preview");
-  const back = d242ParseCat(Object.fromEntries([...new URL("http://x" + href).searchParams.keys()].map((k) => [k, new URL("http://x" + href).searchParams.getAll(k)])));
-  ok(back.q === pc.q && eq(back.mfr, pc.mfr) && eq(back.cat, pc.cat) && back.part === pc.part, "#242 browse: catalogHref round-trips through parseCatalogParams");
-  ok(d242CatHref({ q: "", mfr: [], cat: [], page: 1, part: "" }) === "/portal/catalog", "#242 browse: empty params → bare /portal/catalog");
-  ok(eq(d242Toggle(["a", "b"], "a"), ["b"]) && eq(d242Toggle(["a"], "b"), ["a", "b"]), "#242 browse: toggleValue adds or removes a facet value");
+    "#245 browse: ?q=&mfr=&cat=&page=&part= parse — mfr/cat repeat, de-duplicated, blanks dropped");
+  ok(d245ParseCat({ page: "abc" }).page === 1 && d245ParseCat({ page: "-4" }).page === 1 && d245ParseCat({}).q === "", "#245 browse: a junk page reads as 1");
+  const href = d245CatHref(pc, { page: 1 }, "cust-9");
+  ok(href === "/portal/catalog?q=led+par&mfr=ETC&mfr=Chauvet&cat=Lighting&part=SKU-1&preview=cust-9", "#245 browse: catalogHref keeps every param, drops page 1, carries preview");
+  const back = d245ParseCat(Object.fromEntries([...new URL("http://x" + href).searchParams.keys()].map((k) => [k, new URL("http://x" + href).searchParams.getAll(k)])));
+  ok(back.q === pc.q && eq(back.mfr, pc.mfr) && eq(back.cat, pc.cat) && back.part === pc.part, "#245 browse: catalogHref round-trips through parseCatalogParams");
+  ok(d245CatHref({ q: "", mfr: [], cat: [], page: 1, part: "" }) === "/portal/catalog", "#245 browse: empty params → bare /portal/catalog");
+  ok(eq(d245Toggle(["a", "b"], "a"), ["b"]) && eq(d245Toggle(["a"], "b"), ["a", "b"]), "#245 browse: toggleValue adds or removes a facet value");
 
-  const cq = d242CleanQ({ q: 7, mfr: "ETC", cat: [1, "Cable", "Cable"], page: "2", pageSize: 500 });
-  ok(cq.q === "" && eq(cq.mfr, ["ETC"]) && eq(cq.cat, ["Cable"]) && cq.page === 2 && cq.pageSize === 48, "#242 search action: an untrusted query is cleaned and pageSize clamps to 48");
-  ok(d242CleanQ(null).pageSize === 48 && d242CleanQ({ pageSize: 0 }).pageSize === 48 && d242CleanQ({ pageSize: 12 }).pageSize === 12, "#242 search action: missing/zero pageSize → 48; a smaller one is kept");
+  const cq = d245CleanQ({ q: 7, mfr: "ETC", cat: [1, "Cable", "Cable"], page: "2", pageSize: 500 });
+  ok(cq.q === "" && eq(cq.mfr, ["ETC"]) && eq(cq.cat, ["Cable"]) && cq.page === 2 && cq.pageSize === 48, "#245 search action: an untrusted query is cleaned and pageSize clamps to 48");
+  ok(d245CleanQ(null).pageSize === 48 && d245CleanQ({ pageSize: 0 }).pageSize === 48 && d245CleanQ({ pageSize: 12 }).pageSize === 12, "#245 search action: missing/zero pageSize → 48; a smaller one is kept");
 
   const mkQ = (createdAt: number, skus: unknown[]) => ({ createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
   const quotable = (s: string) => s !== "HID";
-  const shelf = d242ShelfSkus([mkQ(1000, ["OLD", "B"]), mkQ(3000, ["A", "HID", "A", "B"]), mkQ(2000, ["C"])], quotable);
-  ok(eq(shelf, ["A", "B", "C", "OLD"]), "#242 shelf: newest quote first, distinct, quotable only");
-  const many = d242ShelfSkus([mkQ(1, Array.from({ length: 30 }, (_, i) => "S" + i))], () => true);
-  ok(many.length === 12 && many[0] === "S0" && many[11] === "S11", "#242 shelf: capped at 12");
-  const odd = d242ShelfSkus([
+  const shelf = d245ShelfSkus([mkQ(1000, ["OLD", "B"]), mkQ(3000, ["A", "HID", "A", "B"]), mkQ(2000, ["C"])], quotable);
+  ok(eq(shelf, ["A", "B", "C", "OLD"]), "#245 shelf: newest quote first, distinct, quotable only");
+  const many = d245ShelfSkus([mkQ(1, Array.from({ length: 30 }, (_, i) => "S" + i))], () => true);
+  ok(many.length === 12 && many[0] === "S0" && many[11] === "S11", "#245 shelf: capped at 12");
+  const odd = d245ShelfSkus([
     { createdAt: 5, spec: null }, { createdAt: 4, spec: { sections: "x" } }, { createdAt: 3, spec: { sections: [null, { items: 7 }, { items: [null, { sku: 9 }, { sku: "" }, { sku: "OK" }] }] } },
     { createdAt: 9, deleted: true, spec: { sections: [{ items: [{ sku: "DEL" }] }] } },
   ], () => true);
-  ok(eq(odd, ["OK"]), "#242 shelf: malformed spec shapes and deleted quotes contribute nothing");
+  ok(eq(odd, ["OK"]), "#245 shelf: malformed spec shapes and deleted quotes contribute nothing");
 
   const leaky = { imageIds: ["IMG-1", "IMG-2"], datasheetIds: ["DS-1"], unit: "ft", cost: 42, list: 99, note: "x", margin: 0.3 };
-  const t = d242Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
+  const t = d245Tile({ key: "SKU-1", kind: "part", title: "Widget", sku: "SKU-1", mfr: "ETC", category: "Lighting" }, leaky, { unitPrice: 12.5, por: false });
   ok(eq(Object.keys(t).sort(), ["category", "hasDatasheet", "imageId", "key", "kind", "mfr", "por", "sku", "title", "unit", "unitPrice"]),
-    "#242 tile: TileVM is exactly the sell-only whitelist");
+    "#245 tile: TileVM is exactly the sell-only whitelist");
   ok(t.imageId === "IMG-1" && t.hasDatasheet && t.unit === "ft" && t.unitPrice === 12.5 && !t.por && !JSON.stringify(t).includes("42"),
-    "#242 tile: hero image = first image id; no cost rides along from an IndexedPart");
-  const tp = d242Tile({ key: "fixture:fx", kind: "fixture", title: "Kit", sku: "ENG", mfr: "", category: "Fixture assemblies" }, null, null);
-  ok(tp.unitPrice === null && tp.por && tp.imageId === null && !tp.hasDatasheet && tp.unit === "ea", "#242 tile: no price → Price on request; no media → placeholder");
-  ok(d242Tile({ key: "k", kind: "part", title: "", sku: "S", mfr: "", category: "" }, null, { unitPrice: 5, por: true }).unitPrice === null,
-    "#242 tile: a POR price never shows a number");
+    "#245 tile: hero image = first image id; no cost rides along from an IndexedPart");
+  const tp = d245Tile({ key: "fixture:fx", kind: "fixture", title: "Kit", sku: "ENG", mfr: "", category: "Fixture assemblies" }, null, null);
+  ok(tp.unitPrice === null && tp.por && tp.imageId === null && !tp.hasDatasheet && tp.unit === "ea", "#245 tile: no price → Price on request; no media → placeholder");
+  ok(d245Tile({ key: "k", kind: "part", title: "", sku: "S", mfr: "", category: "" }, null, { unitPrice: 5, por: true }).unitPrice === null,
+    "#245 tile: a POR price never shows a number");
 
-  const nav = d242Nav("catalog", { cartCount: 3 });
+  const nav = d245Nav("catalog", { cartCount: 3 });
   ok(eq(nav.map((n) => n.label), ["Home", "Catalog", "Quote"]) && nav[1].active === true && !nav[0].active && nav[2].badge === 3 && nav[2].href === "/portal/catalog/quote",
-    "#242 nav: Home · Catalog · Quote (N), Catalog active");
-  const pvNav = d242Nav("home", { previewCid: "c 1" });
+    "#245 nav: Home · Catalog · Quote (N), Catalog active");
+  const pvNav = d245Nav("home", { previewCid: "c 1" });
   ok(pvNav[0].href === "/portal?preview=c%201" && pvNav[1].href === "/portal/catalog?preview=c%201" && pvNav[2].disabled === true && pvNav[2].badge === undefined,
-    "#242 nav: a team preview carries ?preview=, shows no cart count and disables Quote");
+    "#245 nav: a team preview carries ?preview=, shows no cart count and disables Quote");
 }
 
-async function portal242CatalogBrowseAsyncChecks(): Promise<void> {
-  ok(d242ExpiredCopy === "Your access link has expired — open the link we sent you again.", "#242 search action: expired-link copy is verbatim");
-  const none = await d242SearchAction({ q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
+async function portal245CatalogBrowseAsyncChecks(): Promise<void> {
+  ok(d245ExpiredCopy === "Your access link has expired — open the link we sent you again.", "#245 search action: expired-link copy is verbatim");
+  const none = await d245SearchAction({ q: "", mfr: [], cat: [], page: 1, pageSize: 48 });
   ok(!none.ok && none.error === "Your access link has expired — open the link we sent you again.",
-    "#242 search action: no portal session → { ok: false } with the expired-link copy");
-  const nullSess = await d242SearchFor(null, { q: "a" });
-  ok(!nullSess.ok && nullSess.error === d242ExpiredCopy, "#242 search action: the action body refuses a null session");
+    "#245 search action: no portal session → { ok: false } with the expired-link copy");
+  const nullSess = await d245SearchFor(null, { q: "a" });
+  ok(!nullSess.ok && nullSess.error === d245ExpiredCopy, "#245 search action: the action body refuses a null session");
 
-  const P1 = fixtureId(242, "browse-widget");
-  const PH = fixtureId(242, "browse-hidden");
-  const PB = fixtureId(242, "browse-other-co");
-  const PV = fixtureId(242, "browse-verify");
-  const FX = fixtureId(242, "browse-kit");
-  const CO_A = fixtureId(242, "browse-co-a");
-  const CO_B = fixtureId(242, "browse-co-b");
+  const P1 = fixtureId(245, "browse-widget");
+  const PH = fixtureId(245, "browse-hidden");
+  const PB = fixtureId(245, "browse-other-co");
+  const PV = fixtureId(245, "browse-verify");
+  const FX = fixtureId(245, "browse-kit");
+  const CO_A = fixtureId(245, "browse-co-a");
+  const CO_B = fixtureId(245, "browse-co-b");
   try {
-    await d242MergeUpsert(P1, { desc: "Test242 Browse Widget", category: "Test242 BrowseCat", unit: "ft", list: 30, cost: 10, mfr: "Test242 BrowseMfr" });
-    await d242MergeUpsert(PH, { desc: "Test242 Browse Hidden", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10, portalVisibility: "hide" });
-    await d242MergeUpsert(PB, { desc: "Test242 Browse OtherCo", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10 });
-    await d242MergeUpsert(PV, { desc: "Test242 Browse Verify", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10, note: "verify with vendor" });
+    await d245MergeUpsert(P1, { desc: "Test242 Browse Widget", category: "Test242 BrowseCat", unit: "ft", list: 30, cost: 10, mfr: "Test242 BrowseMfr" });
+    await d245MergeUpsert(PH, { desc: "Test242 Browse Hidden", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10, portalVisibility: "hide" });
+    await d245MergeUpsert(PB, { desc: "Test242 Browse OtherCo", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10 });
+    await d245MergeUpsert(PV, { desc: "Test242 Browse Verify", category: "Test242 BrowseCat", unit: "ea", list: 30, cost: 10, note: "verify with vendor" });
     for (const s of [P1, PH, PB, PV]) registerFixture("catalog_parts", s);
     await createFixture("subassemblies", {
       id: FX, kind: "fixture", label: "Test242 Browse Kit", description: "", lightEngineSku: P1, lensSku: null,
@@ -28305,49 +28305,49 @@ async function portal242CatalogBrowseAsyncChecks(): Promise<void> {
         id, name: id, customerId, customer: customerId, locationId: null, status, source, value: 0, margin: 0, owner: "Test",
         createdAt, updatedAt: createdAt, spec: { sections: [{ id: "S1", items: skus.map((sku, i) => ({ id: i + 1, sku, qty: 1 })) }] },
       });
-    await q(fixtureId(242, "browse-q-a"), CO_A, "sent", "estimator", now - 1000, [PV, PH, P1]);
-    await q(fixtureId(242, "browse-q-a-draft"), CO_A, "draft", "estimator", now, [PB]); // internal draft: not listed
-    await q(fixtureId(242, "browse-q-b"), CO_B, "sent", "estimator", now, [PB]); // another company's quote
-    d242Invalidate();
-    await d242Index({ fresh: true });
+    await q(fixtureId(245, "browse-q-a"), CO_A, "sent", "estimator", now - 1000, [PV, PH, P1]);
+    await q(fixtureId(245, "browse-q-a-draft"), CO_A, "draft", "estimator", now, [PB]); // internal draft: not listed
+    await q(fixtureId(245, "browse-q-b"), CO_B, "sent", "estimator", now, [PB]); // another company's quote
+    d245Invalidate();
+    await d245Index({ fresh: true });
 
-    const sessA = { grantId: fixtureId(242, "browse-grant-a"), customerId: CO_A, name: "", email: "" };
-    const sessB = { grantId: fixtureId(242, "browse-grant-b"), customerId: CO_B, name: "", email: "" };
-    const rA = await d242SearchFor(sessA, { q: "Test242 Browse", mfr: [], cat: [], page: 1, pageSize: 500 });
-    ok(rA.ok && rA.result.entries.length <= 48 && rA.result.page === 1, "#242 search action: a session gets ok:true, at most 48 tiles even when asked for 500");
+    const sessA = { grantId: fixtureId(245, "browse-grant-a"), customerId: CO_A, name: "", email: "" };
+    const sessB = { grantId: fixtureId(245, "browse-grant-b"), customerId: CO_B, name: "", email: "" };
+    const rA = await d245SearchFor(sessA, { q: "Test242 Browse", mfr: [], cat: [], page: 1, pageSize: 500 });
+    ok(rA.ok && rA.result.entries.length <= 48 && rA.result.page === 1, "#245 search action: a session gets ok:true, at most 48 tiles even when asked for 500");
     if (rA.ok) {
       const byKey = new Map(rA.result.entries.map((e) => [e.key, e]));
-      const ctxA = await d242Ctx({ customerId: CO_A, name: "" });
+      const ctxA = await d245Ctx({ customerId: CO_A, name: "" });
       const w = byKey.get(P1);
-      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d242PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round((10 / (1 - 0.22)) * 100) / 100,
-        "#242 search action: a part tile is priced at the session customer's tier");
-      ok(!byKey.has(PH), "#242 search action: a Hide part never appears");
-      ok(byKey.get(PV)?.por === true && byKey.get(PV)?.unitPrice === null, "#242 search action: a verify-price part reads Price on request");
+      ok(!!w && w.kind === "part" && w.unit === "ft" && w.unitPrice === (await d245PriceSku(P1, ctxA))?.unitPrice && w.unitPrice === Math.round((10 / (1 - 0.22)) * 100) / 100,
+        "#245 search action: a part tile is priced at the session customer's tier");
+      ok(!byKey.has(PH), "#245 search action: a Hide part never appears");
+      ok(byKey.get(PV)?.por === true && byKey.get(PV)?.unitPrice === null, "#245 search action: a verify-price part reads Price on request");
       const kit = byKey.get("fixture:" + FX);
-      ok(!!kit && kit.kind === "fixture" && kit.sku === P1 && kit.unitPrice === w?.unitPrice, "#242 search action: a fixture tile prices its included parts (default options)");
+      ok(!!kit && kit.kind === "fixture" && kit.sku === P1 && kit.unitPrice === w?.unitPrice, "#245 search action: a fixture tile prices its included parts (default options)");
       const json = JSON.stringify(rA.result);
       ok(!json.includes("\"cost\"") && !json.includes("haystack") && !json.includes("margin") && !json.includes("silver") && !json.includes("\"list\""),
-        "#242 search action: results carry no cost, list, margin, tier name or search internals");
-      ok(rA.result.mfrFacets.some((f) => f.value === "Test242 BrowseMfr") && rA.result.catFacets.some((f) => f.value === "Test242 BrowseCat"), "#242 search action: facets come back with the page");
+        "#245 search action: results carry no cost, list, margin, tier name or search internals");
+      ok(rA.result.mfrFacets.some((f) => f.value === "Test242 BrowseMfr") && rA.result.catFacets.some((f) => f.value === "Test242 BrowseCat"), "#245 search action: facets come back with the page");
     }
-    const rB = await d242SearchFor(sessB, { q: "Test242 Browse Widget", pageSize: 48 });
-    const ctxB = await d242Ctx({ customerId: CO_B, name: "" });
-    ok(rB.ok && rB.result.entries.find((e) => e.key === P1)?.unitPrice === (await d242PriceSku(P1, ctxB))?.unitPrice,
-      "#242 search action: another session's tiles are priced for THAT session's customer");
+    const rB = await d245SearchFor(sessB, { q: "Test242 Browse Widget", pageSize: 48 });
+    const ctxB = await d245Ctx({ customerId: CO_B, name: "" });
+    ok(rB.ok && rB.result.entries.find((e) => e.key === P1)?.unitPrice === (await d245PriceSku(P1, ctxB))?.unitPrice,
+      "#245 search action: another session's tiles are priced for THAT session's customer");
 
-    const shelfA = (await d242Shelf(await d242Ctx({ customerId: CO_A, name: "" }))).map((t) => t.key);
+    const shelfA = (await d245Shelf(await d245Ctx({ customerId: CO_A, name: "" }))).map((t) => t.key);
     ok(JSON.stringify(shelfA) === JSON.stringify([PV, P1]),
-      "#242 shelf: only the company's own listed quotes, quotable SKUs, line order — never another company's quote or an internal draft");
-    const shelfB = (await d242Shelf(ctxB)).map((t) => t.key);
-    ok(JSON.stringify(shelfB) === JSON.stringify([PB]), "#242 shelf: company B sees only its own quoted part");
+      "#245 shelf: only the company's own listed quotes, quotable SKUs, line order — never another company's quote or an internal draft");
+    const shelfB = (await d245Shelf(ctxB)).map((t) => t.key);
+    ok(JSON.stringify(shelfB) === JSON.stringify([PB]), "#245 shelf: company B sees only its own quoted part");
 
-    const sessR = { grantId: fixtureId(242, "browse-grant-rate"), customerId: CO_A, name: "", email: "" };
+    const sessR = { grantId: fixtureId(245, "browse-grant-rate"), customerId: CO_A, name: "", email: "" };
     let allOk = true;
-    for (let i = 0; i < 120; i++) if (!(await d242SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 })).ok) allOk = false;
-    const over = await d242SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 });
-    ok(allOk && !over.ok && over.error === d242RateCopy, "#242 search action: 120 searches a minute per grant, the 121st is refused");
+    for (let i = 0; i < 120; i++) if (!(await d245SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 })).ok) allOk = false;
+    const over = await d245SearchFor(sessR, { q: "zzz-test242-none", pageSize: 1 });
+    ok(allOk && !over.ok && over.error === d245RateCopy, "#245 search action: 120 searches a minute per grant, the 121st is refused");
   } finally {
-    d242Invalidate();
+    d245Invalidate();
     await removeCustomer(CO_A);
     await removeCustomer(CO_B);
   }
@@ -28355,101 +28355,101 @@ async function portal242CatalogBrowseAsyncChecks(): Promise<void> {
 
 /* ======================================================================
    Portal catalog — part sidebar, fixture configurator, curtain request,
-   add to quote, ask a question (#242, Task 11; spec §3.2/§3.3/§8.3) plus
+   add to quote, ask a question (#245, Task 11; spec §3.2/§3.3/§8.3) plus
    the controller's labor exclusion and page rate limit. Pure: the labor
    rule, cart/curtain guards, the question lead builder, the sell-only
    sidebar view models and fixture option cleaning. DB: the session-taking
    action bodies (hidden/labor refused, qty errors surfaced, curtain line
    added with the SERVER's fabric name, the lead's fields). Registered in the
-   async chain as portal242SidebarAsyncChecks().
+   async chain as portal245SidebarAsyncChecks().
    ====================================================================== */
 import {
-  INTERNAL_HIDDEN_REASON as d242InternalReason,
-  isInternalCategory as d242IsInternal,
-  portalHidden as d242PortalHidden,
+  INTERNAL_HIDDEN_REASON as d245InternalReason,
+  isInternalCategory as d245IsInternal,
+  portalHidden as d245PortalHidden,
 } from "@/lib/portal-visibility";
 import {
-  cartAddProblem as d242CartProblem,
-  cleanCurtainRequest as d242CleanCurtain,
-  NOT_QUOTABLE_COPY as d242NotQuotable,
-  PORTAL_MAX_QTY as d242PortalMaxQty,
-  QTY_COPY as d242QtyCopy,
+  cartAddProblem as d245CartProblem,
+  cleanCurtainRequest as d245CleanCurtain,
+  NOT_QUOTABLE_COPY as d245NotQuotable,
+  PORTAL_MAX_QTY as d245PortalMaxQty,
+  QTY_COPY as d245QtyCopy,
 } from "@/lib/portal-cart-rules";
-import { buildPartQuestionLead as d242BuildQLead, partQuestionProblem as d242QProblem } from "@/lib/portal-leads";
+import { buildPartQuestionLead as d245BuildQLead, partQuestionProblem as d245QProblem } from "@/lib/portal-leads";
 import {
-  cleanFixtureOptions as d242CleanOpts,
-  fixtureOptionKey as d242OptKey,
-  PART_UNAVAILABLE_COPY as d242Unavailable,
-  toFixtureDetailVM as d242FixtureVM,
-  toPartDetailVM as d242PartVM,
+  cleanFixtureOptions as d245CleanOpts,
+  fixtureOptionKey as d245OptKey,
+  PART_UNAVAILABLE_COPY as d245Unavailable,
+  toFixtureDetailVM as d245FixtureVM,
+  toPartDetailVM as d245PartVM,
 } from "@/lib/portal-part-view";
-import { PORTAL_BROWSE_RATE_COPY as d242BrowseRateCopy, portalBrowseAllowed as d242BrowseAllowed, portalBrowseKey as d242BrowseKey } from "@/lib/portal-catalog-browse";
-import { partDetailActionFor as d242DetailAction, partDetailFor as d242Detail, priceFixtureOptionsFor as d242PriceOpts } from "@/lib/portal-part-detail";
-import { addToCartFor as d242AddFor, ASK_RATE_COPY as d242AskRate, askAboutPartFor as d242AskFor } from "@/lib/portal-cart-actions";
-import { addToCart as d242AddAction, askAboutPart as d242AskAction } from "@/app/portal/catalog/actions";
-import { priceFixture as d242PriceFixture } from "@/lib/portal-pricing";
+import { PORTAL_BROWSE_RATE_COPY as d245BrowseRateCopy, portalBrowseAllowed as d245BrowseAllowed, portalBrowseKey as d245BrowseKey } from "@/lib/portal-catalog-browse";
+import { partDetailActionFor as d245DetailAction, partDetailFor as d245Detail, priceFixtureOptionsFor as d245PriceOpts } from "@/lib/portal-part-detail";
+import { addToCartFor as d245AddFor, ASK_RATE_COPY as d245AskRate, askAboutPartFor as d245AskFor } from "@/lib/portal-cart-actions";
+import { addToCart as d245AddAction, askAboutPart as d245AskAction } from "@/app/portal/catalog/actions";
+import { priceFixture as d245PriceFixture } from "@/lib/portal-pricing";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   // Labor exclusion (controller decision 1).
-  ok(d242IsInternal("Labor") && d242IsInternal("  labor ") && d242IsInternal("LABOR") && !d242IsInternal("Labor & Travel") && !d242IsInternal("Lighting") && !d242IsInternal(null),
-    "#242 labor: the Labor category is internal (case-insensitive, trimmed); other categories aren't");
-  ok(d242PortalHidden("auto", "Labor") && d242PortalHidden(undefined, " labor") && d242PortalHidden("hide", "Cable") && !d242PortalHidden("show", "Labor") && !d242PortalHidden("auto", "Cable"),
-    "#242 labor: auto + Labor is withheld like Hide; Show still overrides");
+  ok(d245IsInternal("Labor") && d245IsInternal("  labor ") && d245IsInternal("LABOR") && !d245IsInternal("Labor & Travel") && !d245IsInternal("Lighting") && !d245IsInternal(null),
+    "#245 labor: the Labor category is internal (case-insensitive, trimmed); other categories aren't");
+  ok(d245PortalHidden("auto", "Labor") && d245PortalHidden(undefined, " labor") && d245PortalHidden("hide", "Cable") && !d245PortalHidden("show", "Labor") && !d245PortalHidden("auto", "Cable"),
+    "#245 labor: auto + Labor is withheld like Hide; Show still overrides");
   const lab = { visibility: "auto" as const, hasVisibleImage: true, hasDatasheet: true, quoteCount: 99, internal: true };
-  ok(!d242Quotable(lab) && !d242Browsable(lab, { minQuotes: 3 }) && d242Reason(lab, { minQuotes: 3 }) === "Hidden from customers — labor/travel rate" && d242InternalReason === "Hidden from customers — labor/travel rate",
-    "#242 labor: an auto labor row is neither quotable nor browsable, whatever its facts, and says why");
-  ok(d242Quotable({ ...lab, visibility: "show" }) && d242Browsable({ ...lab, visibility: "show" }, { minQuotes: 3 }) && d242Reason({ ...lab, visibility: "show" }, { minQuotes: 3 }) === "Shown by override",
-    "#242 labor: Show on a labor row wins");
+  ok(!d245Quotable(lab) && !d245Browsable(lab, { minQuotes: 3 }) && d245Reason(lab, { minQuotes: 3 }) === "Hidden from customers — labor/travel rate" && d245InternalReason === "Hidden from customers — labor/travel rate",
+    "#245 labor: an auto labor row is neither quotable nor browsable, whatever its facts, and says why");
+  ok(d245Quotable({ ...lab, visibility: "show" }) && d245Browsable({ ...lab, visibility: "show" }, { minQuotes: 3 }) && d245Reason({ ...lab, visibility: "show" }, { minQuotes: 3 }) === "Shown by override",
+    "#245 labor: Show on a labor row wins");
 
   // Page rate limit (controller decision 2).
-  ok(d242BrowseKey({ grantId: "G1", customerId: "C1" }, false) === "portal-browse:G1" && d242BrowseKey({ grantId: "preview", customerId: "C1" }, true) === "portal-browse:preview:C1",
-    "#242 browse limit: keyed per grant, or per previewed customer");
+  ok(d245BrowseKey({ grantId: "G1", customerId: "C1" }, false) === "portal-browse:G1" && d245BrowseKey({ grantId: "preview", customerId: "C1" }, true) === "portal-browse:preview:C1",
+    "#245 browse limit: keyed per grant, or per previewed customer");
   const rs = { grantId: "t242-browse-" + Date.now(), customerId: "C" };
   let under = true;
-  for (let i = 0; i < 240; i++) if (!d242BrowseAllowed(rs, false)) under = false;
-  ok(under && !d242BrowseAllowed(rs, false) && d242BrowseAllowed(rs, true), "#242 browse limit: 240 renders a minute, the 241st refused; a preview counts separately");
-  ok(d242BrowseRateCopy === "Too many requests — try again in a minute.", "#242 browse limit: the over-limit copy");
+  for (let i = 0; i < 240; i++) if (!d245BrowseAllowed(rs, false)) under = false;
+  ok(under && !d245BrowseAllowed(rs, false) && d245BrowseAllowed(rs, true), "#245 browse limit: 240 renders a minute, the 241st refused; a preview counts separately");
+  ok(d245BrowseRateCopy === "Too many requests — try again in a minute.", "#245 browse limit: the over-limit copy");
 
   // Cart guards.
-  ok(d242CartProblem(false, 1) === "This part isn't available to quote." && d242NotQuotable === "This part isn't available to quote.", "#242 cart rules: an item not in the index is refused");
-  ok([0, -1, 1.5, Number.NaN, 10001].every((q) => d242CartProblem(true, q) === "Enter a quantity from 1 to 10,000.") && d242QtyCopy === "Enter a quantity from 1 to 10,000.",
-    "#242 cart rules: qty must be a whole number 1..10,000");
-  ok(d242CartProblem(true, 1) === null && d242CartProblem(true, 10000) === null && d242PortalMaxQty === d242MaxQty, "#242 cart rules: 1 and 10,000 are fine; the ceiling matches the cart store's");
+  ok(d245CartProblem(false, 1) === "This part isn't available to quote." && d245NotQuotable === "This part isn't available to quote.", "#245 cart rules: an item not in the index is refused");
+  ok([0, -1, 1.5, Number.NaN, 10001].every((q) => d245CartProblem(true, q) === "Enter a quantity from 1 to 10,000.") && d245QtyCopy === "Enter a quantity from 1 to 10,000.",
+    "#245 cart rules: qty must be a whole number 1..10,000");
+  ok(d245CartProblem(true, 1) === null && d245CartProblem(true, 10000) === null && d245PortalMaxQty === d245MaxQty, "#245 cart rules: 1 and 10,000 are fine; the ceiling matches the cart store's");
 
   const fabrics = [{ sku: "FAB-1", name: "IFR Velour — Black" }];
-  const good = d242CleanCurtain({ name: "  Main Drape ", fabricSku: "FAB-1", fabricName: "HACKED", qty: "2", width: "40", height: "18.5", fullness: "50" }, fabrics);
+  const good = d245CleanCurtain({ name: "  Main Drape ", fabricSku: "FAB-1", fabricName: "HACKED", qty: "2", width: "40", height: "18.5", fullness: "50" }, fabrics);
   ok(good.ok && good.curtain.fabricName === "IFR Velour — Black" && good.curtain.name === "Main Drape" && good.qty === 2 && good.curtain.qty === "2" && good.curtain.width === "40" && good.curtain.height === "18.5" && good.curtain.fullness === "50",
-    "#242 curtain: a valid request is cleaned; the fabric NAME comes from the server's list, never the client");
-  const pick = d242CleanCurtain({ name: "Border", fabricSku: "", qty: "1", width: "10", height: "3", fullness: "0" }, fabrics);
-  ok(pick.ok && pick.curtain.fabricSku === "" && pick.curtain.fabricName === "", "#242 curtain: no fabric = Peak to recommend");
-  const bad = (over: Record<string, unknown>) => d242CleanCurtain({ name: "X", fabricSku: "FAB-1", qty: "1", width: "10", height: "10", fullness: "50", ...over }, fabrics);
-  ok(!bad({ fabricSku: "NOPE" }).ok && !bad({ name: "  " }).ok && !bad({ qty: "0" }).ok && !bad({ qty: "1.5" }).ok && !bad({ width: "abc" }).ok && !bad({ height: "0" }).ok && !bad({ width: "999" }).ok && !bad({ fullness: "60" }).ok && !d242CleanCurtain(null, fabrics).ok,
-    "#242 curtain: unknown fabric, blank name, bad qty/size and an off-list fullness are refused");
+    "#245 curtain: a valid request is cleaned; the fabric NAME comes from the server's list, never the client");
+  const pick = d245CleanCurtain({ name: "Border", fabricSku: "", qty: "1", width: "10", height: "3", fullness: "0" }, fabrics);
+  ok(pick.ok && pick.curtain.fabricSku === "" && pick.curtain.fabricName === "", "#245 curtain: no fabric = Peak to recommend");
+  const bad = (over: Record<string, unknown>) => d245CleanCurtain({ name: "X", fabricSku: "FAB-1", qty: "1", width: "10", height: "10", fullness: "50", ...over }, fabrics);
+  ok(!bad({ fabricSku: "NOPE" }).ok && !bad({ name: "  " }).ok && !bad({ qty: "0" }).ok && !bad({ qty: "1.5" }).ok && !bad({ width: "abc" }).ok && !bad({ height: "0" }).ok && !bad({ width: "999" }).ok && !bad({ fullness: "60" }).ok && !d245CleanCurtain(null, fabrics).ok,
+    "#245 curtain: unknown fabric, blank name, bad qty/size and an off-list fullness are refused");
   const qtyErr = bad({ qty: "0" });
-  ok(!qtyErr.ok && qtyErr.error === "Enter a quantity from 1 to 10,000.", "#242 curtain: the qty refusal uses the cart's copy");
+  ok(!qtyErr.ok && qtyErr.error === "Enter a quantity from 1 to 10,000.", "#245 curtain: the qty refusal uses the cart's copy");
 
   // Ask a question — pure lead + guards.
-  const lead = d242BuildQLead({ customerId: "CO-9", name: "Pat Buyer", email: "pat@example.com" }, "Lakefront HS", { sku: "SKU-7", title: "Widget Pro" }, "  Is this in stock?  ", "  555-0100 ");
+  const lead = d245BuildQLead({ customerId: "CO-9", name: "Pat Buyer", email: "pat@example.com" }, "Lakefront HS", { sku: "SKU-7", title: "Widget Pro" }, "  Is this in stock?  ", "  555-0100 ");
   ok(lead.source === "existing" && lead.owner === "" && lead.customerId === "CO-9" && lead.org === "Lakefront HS" && lead.contact === "Pat Buyer" && lead.email === "pat@example.com" && lead.phone === "555-0100",
-    "#242 ask: the lead is an unassigned existing-customer lead on the session's customer");
+    "#245 ask: the lead is an unassigned existing-customer lead on the session's customer");
   ok(typeof lead.message === "string" && lead.message.startsWith("[Portal question — SKU-7]") && lead.message.endsWith("Is this in stock?") && lead.message.includes("Widget Pro"),
-    "#242 ask: the message is headed [Portal question — <SKU>] and carries the question");
-  ok((d242BuildQLead({ customerId: "C", name: "", email: "" }, "", { sku: "S", title: "S" }, "q", "x".repeat(60)).phone ?? "").length === 40, "#242 ask: phone capped at 40");
-  ok(d242QProblem("", "") !== null && d242QProblem("   ", "") !== null && d242QProblem("x".repeat(2001), "") !== null && d242QProblem("x".repeat(2000), "") === null && d242QProblem("hi", "1".repeat(41)) !== null && d242QProblem("hi", undefined) === null && d242QProblem("hi", 5) !== null,
-    "#242 ask: message 1–2,000 chars; phone ≤ 40 chars and optional");
+    "#245 ask: the message is headed [Portal question — <SKU>] and carries the question");
+  ok((d245BuildQLead({ customerId: "C", name: "", email: "" }, "", { sku: "S", title: "S" }, "q", "x".repeat(60)).phone ?? "").length === 40, "#245 ask: phone capped at 40");
+  ok(d245QProblem("", "") !== null && d245QProblem("   ", "") !== null && d245QProblem("x".repeat(2001), "") !== null && d245QProblem("x".repeat(2000), "") === null && d245QProblem("hi", "1".repeat(41)) !== null && d245QProblem("hi", undefined) === null && d245QProblem("hi", 5) !== null,
+    "#245 ask: message 1–2,000 chars; phone ≤ 40 chars and optional");
 
   // Sidebar view models — sell only (controller decision 4).
   const leakyPart = { sku: "SKU-1", desc: "Widget", mfr: "ETC", mpn: "W-1", unit: "ft", cost: 42, list: 99, note: "vendor note", pricedAt: 123, margin: 0.3, tier: "silver", imageIds: ["IMG-1"], datasheetIds: ["DS-1"], specText: "Part 2 text", accessories: [], quoteCount: 5 };
-  const pv = d242PartVM(leakyPart, { unitPrice: 12.5, por: false }, [{ id: "DS-1", kind: "datasheet", title: "Widget datasheet", pdf: true }], []);
-  const docVms = d242PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
+  const pv = d245PartVM(leakyPart, { unitPrice: 12.5, por: false }, [{ id: "DS-1", kind: "datasheet", title: "Widget datasheet", pdf: true }], []);
+  const docVms = d245PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
   ok(eq(docVms, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false }, { id: "D2", kind: "datasheet", title: "DS", pdf: true }]),
-    "#242 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
+    "#245 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
   ok(eq(Object.keys(pv).sort(), ["docs", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
-    "#242 sidebar: the part detail is exactly the sell-only whitelist");
+    "#245 sidebar: the part detail is exactly the sell-only whitelist");
   const pj = JSON.stringify(pv);
   ok(!pj.includes("\"cost\"") && !pj.includes("\"list\"") && !pj.includes("margin") && !pj.includes("tier") && !pj.includes("silver") && !pj.includes("note") && !pj.includes("pricedAt") && !pj.includes("42"),
-    "#242 sidebar: no cost, list, margin, tier, note or priced-at stamp rides along");
-  ok(d242PartVM(leakyPart, { unitPrice: 9, por: true }, [], []).unitPrice === null && d242PartVM(leakyPart, null, [], []).por === true, "#242 sidebar: a POR (or unpriced) part shows no number");
+    "#245 sidebar: no cost, list, margin, tier, note or priced-at stamp rides along");
+  ok(d245PartVM(leakyPart, { unitPrice: 9, por: true }, [], []).unitPrice === null && d245PartVM(leakyPart, null, [], []).por === true, "#245 sidebar: a POR (or unpriced) part shows no number");
 
   const fxDef = {
     id: "fx1", label: "Kit", description: "d", lightEngineSku: "ENG", lensSku: "LENS",
@@ -28461,50 +28461,50 @@ import { priceFixture as d242PriceFixture } from "@/lib/portal-pricing";
       { slot: "data", sku: "DMX", label: "DMX cable", qty: 0, required: false },
     ],
   };
-  ok(d242OptKey({ slot: "accessories", sku: "CLAMP" }) === "accessories:CLAMP", "#242 fixture options: keyed slot:sku, as on a cart line");
-  ok(eq(d242CleanOpts(fxDef, { "accessories:CLAMP": 2, "data:DMX": 0, "power:PWR": 5, "lens:LENS": 1, "accessories:OTHER": 1, "x": 3 }), { "accessories:CLAMP": 2 }),
-    "#242 fixture options: only this fixture's add-ons survive — never a required line or a foreign key; qty 0 = off");
-  ok(eq(d242CleanOpts(fxDef, { "accessories:CLAMP": -1, "data:DMX": 1.5 }), {}) && eq(d242CleanOpts(fxDef, { "accessories:CLAMP": "2" }), {}) && eq(d242CleanOpts(fxDef, { "data:DMX": 10001 }), {}) && eq(d242CleanOpts(fxDef, null), {}) && eq(d242CleanOpts(fxDef, [1]), {}),
-    "#242 fixture options: negative, fractional, string, oversize and non-object input is dropped");
-  const fvm = d242FixtureVM(fxDef, "ETC", { unitPrice: 300, por: false }, (sku) => (sku === "CLAMP" ? { unitPrice: 20, por: false } : { unitPrice: 5, por: true }), { images: ["IMG"], docs: [] });
+  ok(d245OptKey({ slot: "accessories", sku: "CLAMP" }) === "accessories:CLAMP", "#245 fixture options: keyed slot:sku, as on a cart line");
+  ok(eq(d245CleanOpts(fxDef, { "accessories:CLAMP": 2, "data:DMX": 0, "power:PWR": 5, "lens:LENS": 1, "accessories:OTHER": 1, "x": 3 }), { "accessories:CLAMP": 2 }),
+    "#245 fixture options: only this fixture's add-ons survive — never a required line or a foreign key; qty 0 = off");
+  ok(eq(d245CleanOpts(fxDef, { "accessories:CLAMP": -1, "data:DMX": 1.5 }), {}) && eq(d245CleanOpts(fxDef, { "accessories:CLAMP": "2" }), {}) && eq(d245CleanOpts(fxDef, { "data:DMX": 10001 }), {}) && eq(d245CleanOpts(fxDef, null), {}) && eq(d245CleanOpts(fxDef, [1]), {}),
+    "#245 fixture options: negative, fractional, string, oversize and non-object input is dropped");
+  const fvm = d245FixtureVM(fxDef, "ETC", { unitPrice: 300, por: false }, (sku) => (sku === "CLAMP" ? { unitPrice: 20, por: false } : { unitPrice: 5, por: true }), { images: ["IMG"], docs: [] });
   ok(eq(fvm.fixed.map((f) => f.sku), ["ENG", "LENS", "PWR"]) && fvm.fixed[2].qty === 2 && eq(fvm.addOns.map((a) => a.key), ["accessories:CLAMP", "data:DMX"]) && fvm.addOns[0].unitPrice === 20 && fvm.addOns[1].unitPrice === null && fvm.addOns[1].por,
-    "#242 fixture sidebar: engine, lens and included lines are fixed; qty-0 lines are add-ons with their own sell");
-  ok(!fvm.unavailable && fvm.unitPrice === 300 && fvm.key === "fixture:fx1" && fvm.mfr === "ETC", "#242 fixture sidebar: priced from the no-add-on fixture price");
-  const fu = d242FixtureVM(fxDef, "", null, () => null, { images: [], docs: [] });
-  ok(fu.unavailable && fu.unitPrice === null && !fu.por, "#242 fixture sidebar: an unpriceable fixture reads unavailable");
+    "#245 fixture sidebar: engine, lens and included lines are fixed; qty-0 lines are add-ons with their own sell");
+  ok(!fvm.unavailable && fvm.unitPrice === 300 && fvm.key === "fixture:fx1" && fvm.mfr === "ETC", "#245 fixture sidebar: priced from the no-add-on fixture price");
+  const fu = d245FixtureVM(fxDef, "", null, () => null, { images: [], docs: [] });
+  ok(fu.unavailable && fu.unitPrice === null && !fu.por, "#245 fixture sidebar: an unpriceable fixture reads unavailable");
   ok(eq(Object.keys(fvm).sort(), ["addOns", "description", "docs", "fixed", "id", "images", "key", "kind", "mfr", "por", "title", "unavailable", "unitPrice"]),
-    "#242 fixture sidebar: exactly the sell-only whitelist");
-  ok(d242Unavailable === "This item isn't available.", "#242 sidebar: the unavailable copy");
+    "#245 fixture sidebar: exactly the sell-only whitelist");
+  ok(d245Unavailable === "This item isn't available.", "#245 sidebar: the unavailable copy");
 }
 
-async function portal242SidebarAsyncChecks(): Promise<void> {
-  const P = fixtureId(242, "sb-widget");
-  const ACC = fixtureId(242, "sb-acc");
-  const PH = fixtureId(242, "sb-hidden");
-  const LAB = fixtureId(242, "sb-labor");
-  const LABS = fixtureId(242, "sb-labor-shown");
-  const ADD = fixtureId(242, "sb-addon");
-  const FAB = fixtureId(242, "sb-fabric");
-  const FX = fixtureId(242, "sb-kit");
-  const FXL = fixtureId(242, "sb-kit-labor");
-  const FXH = fixtureId(242, "sb-kit-hidden");
-  const CO = fixtureId(242, "sb-co");
-  const GRANT = fixtureId(242, "sb-grant");
-  const GRANT_ASK = fixtureId(242, "sb-grant-ask");
+async function portal245SidebarAsyncChecks(): Promise<void> {
+  const P = fixtureId(245, "sb-widget");
+  const ACC = fixtureId(245, "sb-acc");
+  const PH = fixtureId(245, "sb-hidden");
+  const LAB = fixtureId(245, "sb-labor");
+  const LABS = fixtureId(245, "sb-labor-shown");
+  const ADD = fixtureId(245, "sb-addon");
+  const FAB = fixtureId(245, "sb-fabric");
+  const FX = fixtureId(245, "sb-kit");
+  const FXL = fixtureId(245, "sb-kit-labor");
+  const FXH = fixtureId(245, "sb-kit-hidden");
+  const CO = fixtureId(245, "sb-co");
+  const GRANT = fixtureId(245, "sb-grant");
+  const GRANT_ASK = fixtureId(245, "sb-grant-ask");
   registerFixture("portal_carts", GRANT);
   registerFixture("portal_carts", GRANT_ASK);
   const { listDocs } = await import("@/db/doc-store");
   try {
-    await d242MergeUpsert(P, { desc: "Test242 Sidebar Widget", category: "Test242 SbCat", unit: "ea", list: 30, cost: 10, mfr: "Test242 SbMfr", manufacturerPartNumber: "SBW-1" });
-    await d242MergeUpsert(ACC, { desc: "Test242 Sidebar Clamp", category: "Test242 SbCat", unit: "ea", list: 8, cost: 4 });
-    await d242MergeUpsert(PH, { desc: "Test242 Sidebar Hidden", category: "Test242 SbCat", unit: "ea", list: 30, cost: 10, portalVisibility: "hide" });
-    await d242MergeUpsert(LAB, { desc: "Test242 Travel day", category: " Labor ", unit: "hr", list: 90, cost: 60 });
-    await d242MergeUpsert(LABS, { desc: "Test242 Shown labor", category: "Labor", unit: "hr", list: 90, cost: 60, portalVisibility: "show" });
-    await d242MergeUpsert(ADD, { desc: "Test242 Sidebar Add-on", category: "Test242 SbCat", unit: "ea", list: 20, cost: 6 });
-    await d242MergeUpsert(FAB, { desc: "Test242 Velour", category: "Fabric", unit: "yd", list: 0, cost: 0, curtainAreaRate: 3 });
+    await d245MergeUpsert(P, { desc: "Test242 Sidebar Widget", category: "Test242 SbCat", unit: "ea", list: 30, cost: 10, mfr: "Test242 SbMfr", manufacturerPartNumber: "SBW-1" });
+    await d245MergeUpsert(ACC, { desc: "Test242 Sidebar Clamp", category: "Test242 SbCat", unit: "ea", list: 8, cost: 4 });
+    await d245MergeUpsert(PH, { desc: "Test242 Sidebar Hidden", category: "Test242 SbCat", unit: "ea", list: 30, cost: 10, portalVisibility: "hide" });
+    await d245MergeUpsert(LAB, { desc: "Test242 Travel day", category: " Labor ", unit: "hr", list: 90, cost: 60 });
+    await d245MergeUpsert(LABS, { desc: "Test242 Shown labor", category: "Labor", unit: "hr", list: 90, cost: 60, portalVisibility: "show" });
+    await d245MergeUpsert(ADD, { desc: "Test242 Sidebar Add-on", category: "Test242 SbCat", unit: "ea", list: 20, cost: 6 });
+    await d245MergeUpsert(FAB, { desc: "Test242 Velour", category: "Fabric", unit: "yd", list: 0, cost: 0, curtainAreaRate: 3 });
     for (const s of [P, ACC, PH, LAB, LABS, ADD, FAB]) registerFixture("catalog_parts", s);
-    await createFixture("part_accessory_links", { id: fixtureId(242, "sb-acc-link"), parentSku: P, accessorySku: ACC, source: "manual" });
-    await createFixture("part_accessory_links", { id: fixtureId(242, "sb-acc-link-h"), parentSku: P, accessorySku: PH, source: "manual" });
+    await createFixture("part_accessory_links", { id: fixtureId(245, "sb-acc-link"), parentSku: P, accessorySku: ACC, source: "manual" });
+    await createFixture("part_accessory_links", { id: fixtureId(245, "sb-acc-link-h"), parentSku: P, accessorySku: PH, source: "manual" });
     await createFixture("subassemblies", {
       id: FX, kind: "fixture", label: "Test242 Sidebar Kit", description: "Kit description", lightEngineSku: P, lensSku: null,
       lines: { data: [], power: [], mounting: [], accessories: [{ sku: ADD, qty: 0, label: "" }, { sku: PH, qty: 0, label: "" }] },
@@ -28522,143 +28522,143 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
       lines: { data: [], power: [], mounting: [{ sku: PH, qty: 1, label: "" }], accessories: [] },
       createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
     });
-    const labDoc = await d242CreateDoc({ kind: "datasheet", fileName: "lab.pdf", contentType: "application/pdf", size: 10, blobKey: "part-docs/PD-t11-lab/lab.pdf", sourceUrl: null, source: "upload", by: "Test" });
-    if (!labDoc) throw new Error("#242 fix 1: labor doc failed to create");
+    const labDoc = await d245CreateDoc({ kind: "datasheet", fileName: "lab.pdf", contentType: "application/pdf", size: 10, blobKey: "part-docs/PD-t11-lab/lab.pdf", sourceUrl: null, source: "upload", by: "Test" });
+    if (!labDoc) throw new Error("#245 fix 1: labor doc failed to create");
     registerFixture("part_documents", labDoc.id);
-    await d242Attach(labDoc.id, [LAB], "Test");
-    registerFixture("part_document_links", d242LinkId(LAB, labDoc.id));
+    await d245Attach(labDoc.id, [LAB], "Test");
+    registerFixture("part_document_links", d245LinkId(LAB, labDoc.id));
     await upsertCustomer({ id: CO, name: "Test242 Sidebar Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
-    d242Invalidate();
-    const ix = await d242Index({ fresh: true });
+    d245Invalidate();
+    const ix = await d245Index({ fresh: true });
 
     // Labor exclusion in the index.
-    ok(!ix.parts.has(LAB) && !ix.entries.some((e) => e.key === LAB), "#242 labor: an auto Labor row is absent from the portal index and search");
-    ok(ix.parts.has(LABS), "#242 labor: a Labor row set to Show stays quotable");
+    ok(!ix.parts.has(LAB) && !ix.entries.some((e) => e.key === LAB), "#245 labor: an auto Labor row is absent from the portal index and search");
+    ok(ix.parts.has(LABS), "#245 labor: a Labor row set to Show stays quotable");
     ok(ix.componentParts.has(LAB) && !ix.componentParts.has(PH) && !ix.componentParts.has(LABS) && !ix.servableDocIds.has(labDoc.id),
-      "#242 fix 1: an auto labor row is a fixture component only — its datasheet isn't servable; a Hide part is never a component");
-    const fLab = await d242Facts(LAB);
-    ok(fLab.reason === "Hidden from customers — labor/travel rate" && fLab.visibility === "auto", "#242 labor: the part editor's reason line names the labor/travel rule (Auto kept)");
-    ok((await d242Facts(LABS)).reason === "Shown by override", "#242 labor: a shown labor row reads Shown by override");
+      "#245 fix 1: an auto labor row is a fixture component only — its datasheet isn't servable; a Hide part is never a component");
+    const fLab = await d245Facts(LAB);
+    ok(fLab.reason === "Hidden from customers — labor/travel rate" && fLab.visibility === "auto", "#245 labor: the part editor's reason line names the labor/travel rule (Auto kept)");
+    ok((await d245Facts(LABS)).reason === "Shown by override", "#245 labor: a shown labor row reads Shown by override");
     ok(ix.fabrics.some((f) => f.sku === FAB && f.name === "Test242 Velour") && ix.fabrics.every((f) => Object.keys(f).sort().join() === "name,sku"),
-      "#242 curtain: the fabric list is quotable Fabric parts with a rate — sku + name only");
+      "#245 curtain: the fabric list is quotable Fabric parts with a rate — sku + name only");
 
-    const ctx = await d242Ctx({ customerId: CO, name: "" });
+    const ctx = await d245Ctx({ customerId: CO, name: "" });
     const sess = { grantId: GRANT, customerId: CO, name: "Pat Test", email: "pat@example.com" };
 
     // Part detail.
-    const d = await d242Detail(ctx, P);
-    ok(!!d && d.kind === "part" && d.unitPrice === (await d242PriceSku(P, ctx))?.unitPrice && d.mpn === "SBW-1" && d.mfr === "Test242 SbMfr",
-      "#242 sidebar: a part's detail is priced at the viewer's tier");
-    ok(!!d && d.kind === "part" && d.goesWith.map((t) => t.key).join() === ACC, "#242 sidebar: Goes with = quotable accessories only (a hidden accessory is left out)");
+    const d = await d245Detail(ctx, P);
+    ok(!!d && d.kind === "part" && d.unitPrice === (await d245PriceSku(P, ctx))?.unitPrice && d.mpn === "SBW-1" && d.mfr === "Test242 SbMfr",
+      "#245 sidebar: a part's detail is priced at the viewer's tier");
+    ok(!!d && d.kind === "part" && d.goesWith.map((t) => t.key).join() === ACC, "#245 sidebar: Goes with = quotable accessories only (a hidden accessory is left out)");
     const dj = JSON.stringify(d);
     ok(!dj.includes("\"cost\"") && !dj.includes("\"list\"") && !dj.includes("margin") && !dj.includes("silver") && !dj.includes("pricedAt") && !dj.includes("\"note\""),
-      "#242 sidebar: the detail JSON carries no cost, list, margin, tier or priced-at stamp");
-    ok((await d242Detail(ctx, PH)) === null && (await d242Detail(ctx, LAB)) === null && (await d242Detail(ctx, "no-such-sku-242")) === null && (await d242Detail(ctx, "fixture:nope")) === null,
-      "#242 sidebar: hidden, labor and unknown keys read as not available");
-    const nd = await d242DetailAction(null, P);
-    ok(!nd.ok && nd.error === "Your access link has expired — open the link we sent you again.", "#242 sidebar action: no session → the expired-link copy");
-    const hd = await d242DetailAction(sess, PH);
-    ok(!hd.ok && hd.error === "This item isn't available.", "#242 sidebar action: a hidden SKU → This item isn't available.");
+      "#245 sidebar: the detail JSON carries no cost, list, margin, tier or priced-at stamp");
+    ok((await d245Detail(ctx, PH)) === null && (await d245Detail(ctx, LAB)) === null && (await d245Detail(ctx, "no-such-sku-242")) === null && (await d245Detail(ctx, "fixture:nope")) === null,
+      "#245 sidebar: hidden, labor and unknown keys read as not available");
+    const nd = await d245DetailAction(null, P);
+    ok(!nd.ok && nd.error === "Your access link has expired — open the link we sent you again.", "#245 sidebar action: no session → the expired-link copy");
+    const hd = await d245DetailAction(sess, PH);
+    ok(!hd.ok && hd.error === "This item isn't available.", "#245 sidebar action: a hidden SKU → This item isn't available.");
 
     // Fixture detail + live price.
-    const fd = await d242Detail(ctx, "fixture:" + FX);
+    const fd = await d245Detail(ctx, "fixture:" + FX);
     const addKey = "accessories:" + ADD;
     ok(!!fd && fd.kind === "fixture" && fd.fixed.map((f) => f.sku).join() === P && fd.addOns.map((a) => a.key).join() === addKey && fd.description === "Kit description",
-      "#242 fixture sidebar: the light engine is fixed; the quotable qty-0 line is the one add-on (a hidden one isn't offered)");
-    const base = (await d242PriceFixture(FX, {}, ctx))?.unitPrice ?? NaN;
-    const addUnit = (await d242PriceSku(ADD, ctx))?.unitPrice ?? NaN;
-    const po = await d242PriceOpts(sess, false, FX, { [addKey]: 2, ["accessories:" + PH]: 3, "lens:x": 1 });
+      "#245 fixture sidebar: the light engine is fixed; the quotable qty-0 line is the one add-on (a hidden one isn't offered)");
+    const base = (await d245PriceFixture(FX, {}, ctx))?.unitPrice ?? NaN;
+    const addUnit = (await d245PriceSku(ADD, ctx))?.unitPrice ?? NaN;
+    const po = await d245PriceOpts(sess, false, FX, { [addKey]: 2, ["accessories:" + PH]: 3, "lens:x": 1 });
     ok(po.ok && !po.unavailable && po.unitPrice === Math.round((base + 2 * addUnit) * 100) / 100,
-      "#242 fixture price: the live price = included parts + chosen add-ons, same path as the cart; foreign keys ignored");
-    const pv = await d242PriceOpts({ grantId: "preview", customerId: CO, name: "", email: "" }, true, FX, {});
-    ok(pv.ok && pv.unitPrice === base, "#242 fixture price: works for a team preview viewer");
-    ok(ix.fixtures.has(FXL), "#242 fix 1: a fixture with a required labor line stays available");
-    ok(!ix.fixtures.has(FXH) && (await d242Detail(ctx, "fixture:" + FXH)) === null, "#242 fix 1: a fixture with a required HIDDEN part is still excluded");
+      "#245 fixture price: the live price = included parts + chosen add-ons, same path as the cart; foreign keys ignored");
+    const pv = await d245PriceOpts({ grantId: "preview", customerId: CO, name: "", email: "" }, true, FX, {});
+    ok(pv.ok && pv.unitPrice === base, "#245 fixture price: works for a team preview viewer");
+    ok(ix.fixtures.has(FXL), "#245 fix 1: a fixture with a required labor line stays available");
+    ok(!ix.fixtures.has(FXH) && (await d245Detail(ctx, "fixture:" + FXH)) === null, "#245 fix 1: a fixture with a required HIDDEN part is still excluded");
     const labUnit = Math.round((60 / (1 - 0.22)) * 100) / 100;
-    const pUnit = (await d242PriceSku(P, ctx))?.unitPrice ?? NaN;
-    const fxl = await d242PriceFixture(FXL, {}, ctx);
+    const pUnit = (await d245PriceSku(P, ctx))?.unitPrice ?? NaN;
+    const fxl = await d245PriceFixture(FXL, {}, ctx);
     ok(!!fxl && fxl.unitPrice != null && Math.abs(fxl.unitPrice - (pUnit + 2 * labUnit)) < 0.011,
-      "#242 fix 1: the labor line is priced inside the fixture (labor cost ÷ (1 − margin) × qty)");
-    ok((await d242PriceSku(LAB, ctx)) === null && (await d242Detail(ctx, LAB)) === null, "#242 fix 1: the labor SKU alone is still not quotable (priceSku null, no sidebar)");
-    const fxlD = await d242Detail(ctx, "fixture:" + FXL);
+      "#245 fix 1: the labor line is priced inside the fixture (labor cost ÷ (1 − margin) × qty)");
+    ok((await d245PriceSku(LAB, ctx)) === null && (await d245Detail(ctx, LAB)) === null, "#245 fix 1: the labor SKU alone is still not quotable (priceSku null, no sidebar)");
+    const fxlD = await d245Detail(ctx, "fixture:" + FXL);
     ok(!!fxlD && fxlD.kind === "fixture" && fxlD.fixed.some((f) => f.sku === LAB && f.qty === 2 && f.label === "Test242 Travel day") && !JSON.stringify(fxlD).includes("\"cost\""),
-      "#242 fix 1: the labor line shows in the fixture's included list like any part (sell only)");
-    const fxlAdd = await d242AddFor({ ...sess, grantId: GRANT_ASK }, { kind: "fixture", fixtureId: FXL, options: {}, qty: 1 });
-    ok(fxlAdd.ok, "#242 fix 1: the labor-bearing fixture can be added to a quote");
-    const fxlCart = await d242PriceCart(await d242GetCart(GRANT_ASK, CO), ctx);
-    ok(fxlCart.lines[0]?.unitPrice === fxl?.unitPrice && !fxlCart.lines[0]?.unavailable, "#242 fix 1: the cart prices the labor-bearing fixture the same way");
-    const pn = await d242PriceOpts(null, false, FX, {});
-    ok(!pn.ok && pn.error === "Your access link has expired — open the link we sent you again.", "#242 fixture price: no viewer → refused");
+      "#245 fix 1: the labor line shows in the fixture's included list like any part (sell only)");
+    const fxlAdd = await d245AddFor({ ...sess, grantId: GRANT_ASK }, { kind: "fixture", fixtureId: FXL, options: {}, qty: 1 });
+    ok(fxlAdd.ok, "#245 fix 1: the labor-bearing fixture can be added to a quote");
+    const fxlCart = await d245PriceCart(await d245GetCart(GRANT_ASK, CO), ctx);
+    ok(fxlCart.lines[0]?.unitPrice === fxl?.unitPrice && !fxlCart.lines[0]?.unavailable, "#245 fix 1: the cart prices the labor-bearing fixture the same way");
+    const pn = await d245PriceOpts(null, false, FX, {});
+    ok(!pn.ok && pn.error === "Your access link has expired — open the link we sent you again.", "#245 fixture price: no viewer → refused");
 
     // addToCart (session-taking body).
-    const noSess = await d242AddAction({ kind: "part", sku: P, qty: 1 });
-    ok(!noSess.ok && noSess.error === "Your access link has expired — open the link we sent you again.", "#242 add: the real action with no portal session is refused");
-    const hid = await d242AddFor(sess, { kind: "part", sku: PH, qty: 1 });
-    ok(!hid.ok && hid.error === "This part isn't available to quote.", "#242 add: a hidden SKU is refused");
-    const labAdd = await d242AddFor(sess, { kind: "part", sku: LAB, qty: 1 });
-    ok(!labAdd.ok && labAdd.error === "This part isn't available to quote.", "#242 add: a labor/travel rate is refused");
-    const q0 = await d242AddFor(sess, { kind: "part", sku: P, qty: 0 });
-    const q15 = await d242AddFor(sess, { kind: "part", sku: P, qty: 1.5 });
-    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && !q15.ok && q15.error === "Enter a quantity from 1 to 10,000.", "#242 add: qty errors come back as { ok:false, error }");
-    const a1 = await d242AddFor(sess, { kind: "part", sku: P, qty: 2 });
-    ok(a1.ok && a1.count === 1, "#242 add: a part adds and returns the line count");
-    const a1b = await d242AddFor(sess, { kind: "part", sku: P, qty: 1, unitPrice: 0.01 });
-    ok(a1b.ok && a1b.count === 1, "#242 add: the same part merges into its line (a client price is ignored)");
-    const a2 = await d242AddFor(sess, { kind: "fixture", fixtureId: FX, options: { [addKey]: 2, ["accessories:" + PH]: 1 }, qty: 1 });
-    ok(a2.ok && a2.count === 2, "#242 add: a configured fixture adds as its own line");
-    const a3 = await d242AddFor(sess, { kind: "curtain", curtain: { name: "Main Drape", fabricSku: FAB, fabricName: "Client says free", qty: "3", width: "40", height: "20", fullness: "100" } });
-    ok(a3.ok && a3.count === 3, "#242 add: a curtain request adds a line");
-    const badFab = await d242AddFor(sess, { kind: "curtain", curtain: { name: "X", fabricSku: PH, qty: "1", width: "1", height: "1", fullness: "0" } });
-    ok(!badFab.ok, "#242 add: a curtain naming a fabric off the list is refused");
-    const pvAdd = await d242AddFor({ grantId: "preview", customerId: CO, name: "", email: "" }, { kind: "part", sku: P, qty: 1 });
-    ok(!pvAdd.ok, "#242 add: a preview session never writes");
-    const cart = await d242GetCart(GRANT, CO);
+    const noSess = await d245AddAction({ kind: "part", sku: P, qty: 1 });
+    ok(!noSess.ok && noSess.error === "Your access link has expired — open the link we sent you again.", "#245 add: the real action with no portal session is refused");
+    const hid = await d245AddFor(sess, { kind: "part", sku: PH, qty: 1 });
+    ok(!hid.ok && hid.error === "This part isn't available to quote.", "#245 add: a hidden SKU is refused");
+    const labAdd = await d245AddFor(sess, { kind: "part", sku: LAB, qty: 1 });
+    ok(!labAdd.ok && labAdd.error === "This part isn't available to quote.", "#245 add: a labor/travel rate is refused");
+    const q0 = await d245AddFor(sess, { kind: "part", sku: P, qty: 0 });
+    const q15 = await d245AddFor(sess, { kind: "part", sku: P, qty: 1.5 });
+    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && !q15.ok && q15.error === "Enter a quantity from 1 to 10,000.", "#245 add: qty errors come back as { ok:false, error }");
+    const a1 = await d245AddFor(sess, { kind: "part", sku: P, qty: 2 });
+    ok(a1.ok && a1.count === 1, "#245 add: a part adds and returns the line count");
+    const a1b = await d245AddFor(sess, { kind: "part", sku: P, qty: 1, unitPrice: 0.01 });
+    ok(a1b.ok && a1b.count === 1, "#245 add: the same part merges into its line (a client price is ignored)");
+    const a2 = await d245AddFor(sess, { kind: "fixture", fixtureId: FX, options: { [addKey]: 2, ["accessories:" + PH]: 1 }, qty: 1 });
+    ok(a2.ok && a2.count === 2, "#245 add: a configured fixture adds as its own line");
+    const a3 = await d245AddFor(sess, { kind: "curtain", curtain: { name: "Main Drape", fabricSku: FAB, fabricName: "Client says free", qty: "3", width: "40", height: "20", fullness: "100" } });
+    ok(a3.ok && a3.count === 3, "#245 add: a curtain request adds a line");
+    const badFab = await d245AddFor(sess, { kind: "curtain", curtain: { name: "X", fabricSku: PH, qty: "1", width: "1", height: "1", fullness: "0" } });
+    ok(!badFab.ok, "#245 add: a curtain naming a fabric off the list is refused");
+    const pvAdd = await d245AddFor({ grantId: "preview", customerId: CO, name: "", email: "" }, { kind: "part", sku: P, qty: 1 });
+    ok(!pvAdd.ok, "#245 add: a preview session never writes");
+    const cart = await d245GetCart(GRANT, CO);
     const pl = cart.lines.find((l) => l.kind === "part");
     const fl = cart.lines.find((l) => l.kind === "fixture");
     const cl = cart.lines.find((l) => l.kind === "curtain");
-    ok(!!cl && cl.curtainInputs?.qty === String(cl.qty), "#242 fix 2: the curtain line qty is the source; curtainInputs.qty is stamped from it");
-    ok(pl?.sku === P && pl.qty === 3 && !("unitPrice" in pl), "#242 add: the part line holds the merged qty, never a price");
-    ok(fl?.fixtureId === FX && JSON.stringify(fl.fixtureOptions) === JSON.stringify({ [addKey]: 2 }), "#242 add: the fixture line stores only its own cleaned add-on keys");
+    ok(!!cl && cl.curtainInputs?.qty === String(cl.qty), "#245 fix 2: the curtain line qty is the source; curtainInputs.qty is stamped from it");
+    ok(pl?.sku === P && pl.qty === 3 && !("unitPrice" in pl), "#245 add: the part line holds the merged qty, never a price");
+    ok(fl?.fixtureId === FX && JSON.stringify(fl.fixtureOptions) === JSON.stringify({ [addKey]: 2 }), "#245 add: the fixture line stores only its own cleaned add-on keys");
     ok(cl?.qty === 3 && cl.curtainInputs?.fabricName === "Test242 Velour" && cl.curtainInputs?.fabricSku === FAB && cl.curtainInputs?.width === "40" && cl.curtainInputs?.fullness === "100",
-      "#242 add: the curtain line stores the inputs with the server's fabric name; line qty = curtain qty");
+      "#245 add: the curtain line stores the inputs with the server's fabric name; line qty = curtain qty");
 
     // askAboutPart (session-taking body).
-    const askNone = await d242AskAction({ sku: P, message: "hi" });
-    ok(!askNone.ok && askNone.error === "Your access link has expired — open the link we sent you again.", "#242 ask: the real action with no portal session is refused");
-    const askEmpty = await d242AskFor(sess, { sku: P, message: "   " });
-    ok(!askEmpty.ok, "#242 ask: an empty question is refused");
-    const askHidden = await d242AskFor(sess, { sku: PH, message: "Is this in stock?" });
-    ok(!askHidden.ok && askHidden.error === "This item isn't available.", "#242 ask: a hidden SKU is refused without confirming it exists");
+    const askNone = await d245AskAction({ sku: P, message: "hi" });
+    ok(!askNone.ok && askNone.error === "Your access link has expired — open the link we sent you again.", "#245 ask: the real action with no portal session is refused");
+    const askEmpty = await d245AskFor(sess, { sku: P, message: "   " });
+    ok(!askEmpty.ok, "#245 ask: an empty question is refused");
+    const askHidden = await d245AskFor(sess, { sku: PH, message: "Is this in stock?" });
+    ok(!askHidden.ok && askHidden.error === "This item isn't available.", "#245 ask: a hidden SKU is refused without confirming it exists");
     const leadsBefore = new Set((await listDocs<{ id: string }>("leads")).map((l) => l.id));
-    const asked = await d242AskFor(sess, { sku: P, message: "Is this in stock?", phone: " 555-0100 " });
+    const asked = await d245AskFor(sess, { sku: P, message: "Is this in stock?", phone: " 555-0100 " });
     const mine = (await listDocs<{ id: string; customerId?: string | null; source?: string; owner?: string; message?: string; email?: string; contact?: string; phone?: string; org?: string; stage?: string }>("leads"))
       .filter((l) => !leadsBefore.has(l.id));
     for (const l of mine) registerFixture("leads", l.id);
     const L = mine[0];
-    ok(asked.ok && mine.length === 1, "#242 ask: one lead is created");
+    ok(asked.ok && mine.length === 1, "#245 ask: one lead is created");
     ok(!!L && L.customerId === CO && L.source === "existing" && L.owner === "" && L.stage === "new" && L.org === "Test242 Sidebar Co" && L.contact === "Pat Test" && L.email === "pat@example.com" && L.phone === "555-0100",
-      "#242 ask: the lead is unassigned (SLA queue), source existing, on the SESSION's customer with the grant's name/email");
-    ok(!!L && typeof L.message === "string" && L.message.startsWith(`[Portal question — ${P}]`) && L.message.includes("Is this in stock?"), "#242 ask: the lead message starts [Portal question — <SKU>]");
-    const askFx = await d242AskFor(sess, { sku: "fixture:" + FX, message: "Colour temp?" });
+      "#245 ask: the lead is unassigned (SLA queue), source existing, on the SESSION's customer with the grant's name/email");
+    ok(!!L && typeof L.message === "string" && L.message.startsWith(`[Portal question — ${P}]`) && L.message.includes("Is this in stock?"), "#245 ask: the lead message starts [Portal question — <SKU>]");
+    const askFx = await d245AskFor(sess, { sku: "fixture:" + FX, message: "Colour temp?" });
     const fxLead = (await listDocs<{ id: string; message?: string }>("leads")).filter((l) => !leadsBefore.has(l.id) && !mine.some((m) => m.id === l.id));
     for (const l of fxLead) registerFixture("leads", l.id);
-    ok(askFx.ok && fxLead.length === 1 && (fxLead[0].message ?? "").startsWith(`[Portal question — ${P}] Test242 Sidebar Kit`), "#242 ask: a fixture question is headed by its light engine's SKU and the fixture name");
+    ok(askFx.ok && fxLead.length === 1 && (fxLead[0].message ?? "").startsWith(`[Portal question — ${P}] Test242 Sidebar Kit`), "#245 ask: a fixture question is headed by its light engine's SKU and the fixture name");
 
     const sessAsk = { ...sess, grantId: GRANT_ASK };
     const before2 = new Set((await listDocs<{ id: string }>("leads")).map((l) => l.id));
     let fiveOk = true;
-    for (let i = 0; i < 5; i++) if (!(await d242AskFor(sessAsk, { sku: P, message: "q" + i })).ok) fiveOk = false;
-    const sixth = await d242AskFor(sessAsk, { sku: P, message: "q6" });
+    for (let i = 0; i < 5; i++) if (!(await d245AskFor(sessAsk, { sku: P, message: "q" + i })).ok) fiveOk = false;
+    const sixth = await d245AskFor(sessAsk, { sku: P, message: "q6" });
     for (const l of (await listDocs<{ id: string }>("leads")).filter((x) => !before2.has(x.id))) registerFixture("leads", l.id);
-    ok(fiveOk && !sixth.ok && sixth.error === d242AskRate, "#242 ask: 5 questions an hour per grant, the 6th refused");
+    ok(fiveOk && !sixth.ok && sixth.error === d245AskRate, "#245 ask: 5 questions an hour per grant, the 6th refused");
   } finally {
-    d242Invalidate();
+    d245Invalidate();
     await removeCustomer(CO);
   }
 }
 
 /* ======================================================================
-   Portal catalog — the cart page + Generate (#242, Task 12; spec §3.4,
+   Portal catalog — the cart page + Generate (#245, Task 12; spec §3.4,
    §4.1–4.3, §8). Pure: the portal additions to the quote document data
    (review + tax lines, Valid until, freight miles — never a %), the
    "portal-firm" gate bypass (send only), the list rule. DB: Generate firm
@@ -28666,70 +28666,70 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
    Estimator totals, cart emptied) and review (numbered draft, reason, listed
    for its customer only), the guard copies, the owner fallback, the rate
    limit, preview/no-session refusals and the cart page's edit actions.
-   Registered in the async chain as portal242GenerateAsyncChecks().
+   Registered in the async chain as portal245GenerateAsyncChecks().
    ====================================================================== */
 import {
-  generatePortalQuote as d242Generate,
-  GENERATE_EMPTY_COPY as d242EmptyCopy,
-  GENERATE_NO_VENUE_COPY as d242NoVenueCopy,
-  GENERATE_RATE_COPY as d242GenRateCopy,
-  GENERATE_UNAVAILABLE_COPY as d242UnavailCopy,
-  GENERATE_LIMIT as d242GenLimit,
+  generatePortalQuote as d245Generate,
+  GENERATE_EMPTY_COPY as d245EmptyCopy,
+  GENERATE_NO_VENUE_COPY as d245NoVenueCopy,
+  GENERATE_RATE_COPY as d245GenRateCopy,
+  GENERATE_UNAVAILABLE_COPY as d245UnavailCopy,
+  GENERATE_LIMIT as d245GenLimit,
 } from "@/lib/portal-quotes";
-import { removeCartLineFor as d242RemoveFor, setCartVenueFor as d242VenueFor, updateCartLineFor as d242UpdateFor } from "@/lib/portal-cart-actions";
-import { portalDocumentExtras as d242DocExtras, quoteDocumentDataFor as d242DocData } from "@/lib/quote-pdf/quote-document-data";
-import { get as d242GetQuote, portalCanAcceptQuote as d242CanAcceptQuote, portalListsQuote as d242Lists, resolveStatusGate as d242Gate } from "@/lib/stores/quotes";
-import { totals as d242Totals } from "@/app/(app)/estimator/pricing";
-import { get as d242GetCustomer } from "@/lib/stores/customers";
-import { rateLimit as d242RateLimit } from "@/lib/rate-limit";
+import { removeCartLineFor as d245RemoveFor, setCartVenueFor as d245VenueFor, updateCartLineFor as d245UpdateFor } from "@/lib/portal-cart-actions";
+import { portalDocumentExtras as d245DocExtras, quoteDocumentDataFor as d245DocData } from "@/lib/quote-pdf/quote-document-data";
+import { get as d245GetQuote, portalCanAcceptQuote as d245CanAcceptQuote, portalListsQuote as d245Lists, resolveStatusGate as d245Gate } from "@/lib/stores/quotes";
+import { totals as d245Totals } from "@/app/(app)/estimator/pricing";
+import { get as d245GetCustomer } from "@/lib/stores/customers";
+import { rateLimit as d245RateLimit } from "@/lib/rate-limit";
 import type { SpecSection as D242Section } from "@/app/(app)/estimator/types";
-import { execFileSync as d242ExecFile } from "node:child_process";
+import { execFileSync as d245ExecFile } from "node:child_process";
 {
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const sec = (miles: number | null): D242Section => ({ id: "S", name: "S", kind: "materials", mfr: "", freightPct: 4, freightAuto: false, freightMiles: miles, items: [] });
-  ok(eq(d242DocExtras({ source: "estimator", portalFirm: null }, [sec(412)]), { standingLines: [], validUntilMs: null, freightLabel: "Freight & delivery" }),
-    "#242 quote document: a non-portal quote gets no standing lines, no validity and the plain freight label (miles never printed)");
+  ok(eq(d245DocExtras({ source: "estimator", portalFirm: null }, [sec(412)]), { standingLines: [], validUntilMs: null, freightLabel: "Freight & delivery" }),
+    "#245 quote document: a non-portal quote gets no standing lines, no validity and the plain freight label (miles never printed)");
   const until = new Date(2026, 9, 27, 12).getTime();
-  const firm = d242DocExtras({ source: "portal-catalog", portalFirm: { generatedAt: until - 30 * 86400000, validUntil: until } }, [sec(1234.4)]);
+  const firm = d245DocExtras({ source: "portal-catalog", portalFirm: { generatedAt: until - 30 * 86400000, validUntil: until } }, [sec(1234.4)]);
   ok(eq(firm.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax.", "Valid until October 27, 2026"]) && firm.validUntilMs === until,
-    "#242 quote document: a firm portal quote prints the review line, the tax line and Valid until <Month D, YYYY>");
-  ok(firm.freightLabel === "Freight & delivery — 1,234 mi" && !firm.freightLabel.includes("%"), "#242 quote document: portal freight reads Freight & delivery — N mi, never a %");
-  const review = d242DocExtras({ source: "portal-catalog", portalFirm: null }, [sec(null)]);
+    "#245 quote document: a firm portal quote prints the review line, the tax line and Valid until <Month D, YYYY>");
+  ok(firm.freightLabel === "Freight & delivery — 1,234 mi" && !firm.freightLabel.includes("%"), "#245 quote document: portal freight reads Freight & delivery — N mi, never a %");
+  const review = d245DocExtras({ source: "portal-catalog", portalFirm: null }, [sec(null)]);
   ok(eq(review.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax."]) && review.validUntilMs === null && review.freightLabel === "Freight & delivery",
-    "#242 quote document: a review portal quote has no Valid until; unknown distance prints the plain freight label");
+    "#245 quote document: a review portal quote has no Valid until; unknown distance prints the plain freight label");
   const none = { state: "none", submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" } as never;
-  ok(d242Gate("sent", none, { bypassApprovalGate: "portal-firm" }).ok && !d242Gate("won", none, { bypassApprovalGate: "portal-firm" }).ok && !d242Gate("sent", none).ok,
-    "#242 gate: the portal-firm bypass opens the send only — Approve (→ won) and every other caller stay gated");
+  ok(d245Gate("sent", none, { bypassApprovalGate: "portal-firm" }).ok && !d245Gate("won", none, { bypassApprovalGate: "portal-firm" }).ok && !d245Gate("sent", none).ok,
+    "#245 gate: the portal-firm bypass opens the send only — Approve (→ won) and every other caller stay gated");
   const base = { customerId: "CO-1", status: "draft" as const, source: "portal-catalog", portalAcceptance: null };
-  ok(d242Lists(base, "CO-1") && !d242Lists(base, "CO-2") && !d242Lists({ ...base, source: "estimator" }, "CO-1"), "#242 list rule: a portal-catalog draft is listed for its own customer only; internal drafts stay hidden");
+  ok(d245Lists(base, "CO-1") && !d245Lists(base, "CO-2") && !d245Lists({ ...base, source: "estimator" }, "CO-1"), "#245 list rule: a portal-catalog draft is listed for its own customer only; internal drafts stay hidden");
   const gen = readFileSync(join(process.cwd(), "src/lib/portal-quotes.ts"), "utf8");
   const firmBody = gen.slice(gen.indexOf("export async function sendPortalFirm"), gen.indexOf("function writable"));
-  const firmCallers = d242ExecFile("grep", ["-rl", 'bypassApprovalGate: "portal-firm"', "src"], { cwd: process.cwd(), encoding: "utf8" }).trim().split("\n");
+  const firmCallers = d245ExecFile("grep", ["-rl", 'bypassApprovalGate: "portal-firm"', "src"], { cwd: process.cwd(), encoding: "utf8" }).trim().split("\n");
   ok((gen.match(/bypassApprovalGate: "portal-firm"/g) || []).length === 1 && firmBody.includes('bypassApprovalGate: "portal-firm"') && eq(firmCallers, ["src/lib/portal-quotes.ts"]),
-    "#242 gate: sendPortalFirm is the one caller of the portal-firm bypass");
+    "#245 gate: sendPortalFirm is the one caller of the portal-firm bypass");
   const cc = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
   ok(cc.startsWith('"use client"') && !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db|lib\/portal-pricing|lib\/portal-quotes)/m.test(cc) && !/freight\.pct|\.sections\b|\bcost\b/.test(cc),
-    "#242 cart page: the client imports no store/pricing values and never reads a freight %, sections or cost");
+    "#245 cart page: the client imports no store/pricing values and never reads a freight %, sections or cost");
 }
 
-async function portal242GenerateAsyncChecks(): Promise<void> {
-  const P = fixtureId(242, "gen-part");
-  const PH = fixtureId(242, "gen-hidden");
-  const CO = fixtureId(242, "gen-co");
-  const CO2 = fixtureId(242, "gen-co-noowner");
-  const CO_X = fixtureId(242, "gen-co-other");
-  const COCF = fixtureId(242, "gen-co-clearfail");
-  const G = fixtureId(242, "gen-grant");
-  const G2 = fixtureId(242, "gen-grant-2");
-  const GR = fixtureId(242, "gen-grant-rate");
-  const GCF = fixtureId(242, "gen-grant-clearfail");
+async function portal245GenerateAsyncChecks(): Promise<void> {
+  const P = fixtureId(245, "gen-part");
+  const PH = fixtureId(245, "gen-hidden");
+  const CO = fixtureId(245, "gen-co");
+  const CO2 = fixtureId(245, "gen-co-noowner");
+  const CO_X = fixtureId(245, "gen-co-other");
+  const COCF = fixtureId(245, "gen-co-clearfail");
+  const G = fixtureId(245, "gen-grant");
+  const G2 = fixtureId(245, "gen-grant-2");
+  const GR = fixtureId(245, "gen-grant-rate");
+  const GCF = fixtureId(245, "gen-grant-clearfail");
   for (const g of [G, G2, GR, GCF]) registerFixture("portal_carts", g);
   const NOW = new Date(2026, 8, 27, 12).getTime();
   const DAY = 86400000;
   const made: string[] = [];
   const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
   const run = async (s: typeof sess | null) => {
-    const r = await d242Generate(s, { now: NOW, schedulePdf: false });
+    const r = await d245Generate(s, { now: NOW, schedulePdf: false });
     if (r.ok) {
       made.push(r.quoteId);
       registerFixture("quotes", r.quoteId);
@@ -28738,118 +28738,118 @@ async function portal242GenerateAsyncChecks(): Promise<void> {
   };
   try {
     const owner = (await activeUsers())[0]?.name || "";
-    await d242MergeUpsert(P, { desc: "Test242 Gen Part", category: "Test242 GenCat", unit: "ea", list: 120, cost: 70 });
-    await d242MergeUpsert(PH, { desc: "Test242 Gen Hidden", category: "Test242 GenCat", unit: "ea", list: 50, cost: 10, portalVisibility: "hide" });
+    await d245MergeUpsert(P, { desc: "Test242 Gen Part", category: "Test242 GenCat", unit: "ea", list: 120, cost: 70 });
+    await d245MergeUpsert(PH, { desc: "Test242 Gen Hidden", category: "Test242 GenCat", unit: "ea", list: 50, cost: 10, portalVisibility: "hide" });
     for (const s of [P, PH]) registerFixture("catalog_parts", s);
     const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 450 };
     await upsertCustomer({ id: CO, name: "Test242 Gen Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
     await upsertCustomer({ id: CO2, name: "Test242 Gen Co Two", type: "Education", locations: [{ ...venue, id: "w1" }], contacts: [] });
     await upsertCustomer({ id: CO_X, name: "Test242 Gen Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
     await upsertCustomer({ id: COCF, name: "Test242 Gen Co ClearFail", type: "Education", owner, locations: [{ ...venue, id: "z1" }], contacts: [] });
-    d242Invalidate();
-    const cust = await d242GetCustomer(CO);
+    d245Invalidate();
+    const cust = await d245GetCustomer(CO);
     const hall = cust?.locations.find((l) => l.id === "v1");
-    ok(!!owner && cust?.owner === owner && !!hall && hall.travelMiles === 450, "#242 generate: the fixture company has an owner and a venue 450 mi out");
+    ok(!!owner && cust?.owner === owner && !!hall && hall.travelMiles === 450, "#245 generate: the fixture company has an owner and a venue 450 mi out");
 
     // Refusals first — none of these spends a Generate or makes a quote.
-    ok(eq242(await run(null), { ok: false, error: "Your access link has expired — open the link we sent you again." }), "#242 generate: no session → the expired-link copy");
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
+    ok(eq242(await run(null), { ok: false, error: "Your access link has expired — open the link we sent you again." }), "#245 generate: no session → the expired-link copy");
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
     const pv = await run({ ...sess, grantId: "preview" });
-    ok(!pv.ok && pv.error === "Your access link has expired — open the link we sent you again.", "#242 generate: a team preview (grantId preview) never generates");
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "Your quote is empty." }) && d242EmptyCopy === "Your quote is empty.", "#242 generate: an empty cart → Your quote is empty.");
-    await d242SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }) && d242NoVenueCopy === "Pick the venue this is for.", "#242 generate: no venue → Pick the venue this is for.");
-    await d242SaveCart({ id: G, customerId: CO, locationId: "x1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }), "#242 generate: another company's venue id counts as no venue");
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
-    ok(eq242(await run(sess), { ok: false, error: "None of these items can be quoted right now." }) && d242UnavailCopy === "None of these items can be quoted right now.",
-      "#242 generate: every line no longer available → None of these items can be quoted right now.");
-    ok(made.length === 0, "#242 generate: no refusal made a quote");
+    ok(!pv.ok && pv.error === "Your access link has expired — open the link we sent you again.", "#245 generate: a team preview (grantId preview) never generates");
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "Your quote is empty." }) && d245EmptyCopy === "Your quote is empty.", "#245 generate: an empty cart → Your quote is empty.");
+    await d245SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }) && d245NoVenueCopy === "Pick the venue this is for.", "#245 generate: no venue → Pick the venue this is for.");
+    await d245SaveCart({ id: G, customerId: CO, locationId: "x1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }), "#245 generate: another company's venue id counts as no venue");
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "None of these items can be quoted right now." }) && d245UnavailCopy === "None of these items can be quoted right now.",
+      "#245 generate: every line no longer available → None of these items can be quoted right now.");
+    ok(made.length === 0, "#245 generate: no refusal made a quote");
 
     // Firm: one priced part (+ a no-longer-available line, left out).
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }, { lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }, { lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
     const rf = await run(sess);
-    ok(rf.ok && rf.mode === "firm", "#242 generate firm: every line priced → a firm quote");
-    const qf = rf.ok ? await d242GetQuote(rf.quoteId) : null;
+    ok(rf.ok && rf.mode === "firm", "#245 generate firm: every line priced → a firm quote");
+    const qf = rf.ok ? await d245GetQuote(rf.quoteId) : null;
     const secs = ((qf?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
-    ok(!!qf && qf.status === "sent" && qf.source === "portal-catalog" && typeof qf.estNo === "number", "#242 generate firm: sent at once, source portal-catalog, numbered on insert");
-    ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview, "#242 generate firm: portalFirm good for 30 days from generation; no review stamp");
+    ok(!!qf && qf.status === "sent" && qf.source === "portal-catalog" && typeof qf.estNo === "number", "#245 generate firm: sent at once, source portal-catalog, numbered on insert");
+    ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview, "#245 generate firm: portalFirm good for 30 days from generation; no review stamp");
     ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === "Portal quote — " + (hall?.label || hall?.locationName || "Venue"),
-      "#242 generate firm: owned by the company's owner, attn the grant's name, for the picked venue");
+      "#245 generate firm: owned by the company's owner, attn the grant's name, for the picked venue");
     ok(secs.length === 1 && secs[0].freightPct === 4 && secs[0].freightMiles === 450 && secs[0].items.length === 1 && secs[0].items[0].sku === P && secs[0].items[0].cost === 70,
-      "#242 generate firm: 450 mi → freight 4 %; the spec keeps cost for staff and leaves the unavailable line out");
-    ok(!!qf && qf.value === Math.round(d242Totals(secs, 0).grand) && qf.value > 0, "#242 generate firm: value = the Estimator's totals().grand");
-    ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"), "#242 generate firm: sent through setStatus (history + sent revision)");
-    ok(!!qf && d242Lists(qf, CO) && d242CanAcceptQuote(qf, CO) && !d242Lists(qf, CO_X), "#242 generate firm: listed and acceptable for its customer only");
-    ok((await d242GetCart(G, CO)).lines.length === 0, "#242 generate firm: the cart is empty afterwards");
+      "#245 generate firm: 450 mi → freight 4 %; the spec keeps cost for staff and leaves the unavailable line out");
+    ok(!!qf && qf.value === Math.round(d245Totals(secs, 0).grand) && qf.value > 0, "#245 generate firm: value = the Estimator's totals().grand");
+    ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"), "#245 generate firm: sent through setStatus (history + sent revision)");
+    ok(!!qf && d245Lists(qf, CO) && d245CanAcceptQuote(qf, CO) && !d245Lists(qf, CO_X), "#245 generate firm: listed and acceptable for its customer only");
+    ok((await d245GetCart(G, CO)).lines.length === 0, "#245 generate firm: the cart is empty afterwards");
     if (qf) {
-      const doc = d242DocData(qf, cust, { companyName: "Peak", logoDark: null });
+      const doc = d245DocData(qf, cust, { companyName: "Peak", logoDark: null });
       const untilLabel = new Date(NOW + 30 * DAY).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
       ok(eq242(doc.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax.", "Valid until " + untilLabel]) && doc.validUntilMs === NOW + 30 * DAY,
-        "#242 generate firm: the quote PDF data carries the review line, the tax line and Valid until");
-      ok(doc.freightLabel === "Freight & delivery — 450 mi" && !JSON.stringify(doc.standingLines).includes("%"), "#242 generate firm: the PDF freight line reads Freight & delivery — 450 mi");
+        "#245 generate firm: the quote PDF data carries the review line, the tax line and Valid until");
+      ok(doc.freightLabel === "Freight & delivery — 450 mi" && !JSON.stringify(doc.standingLines).includes("%"), "#245 generate firm: the PDF freight line reads Freight & delivery — 450 mi");
     }
 
     // Review: a part + a curtain (always price on request).
     const curtain = { name: "Main Drape", fabricSku: "", fabricName: "", qty: "1", width: "30", height: "18", fullness: "50" as const };
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "c", kind: "curtain", curtainInputs: curtain, qty: 1 }], updatedAt: NOW });
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "c", kind: "curtain", curtainInputs: curtain, qty: 1 }], updatedAt: NOW });
     const rr = await run(sess);
-    ok(rr.ok && rr.mode === "review", "#242 generate review: a price-on-request line → review");
-    const qr = rr.ok ? await d242GetQuote(rr.quoteId) : null;
-    ok(!!qr && qr.status === "draft" && typeof qr.estNo === "number" && qr.estNo !== qf?.estNo, "#242 generate review: a numbered draft (the customer has a reference)");
-    ok(!!qr?.portalReview && qr.portalReview.requestedAt === NOW && qr.portalReview.reasons[0] === "1 line is price on request" && !qr.portalFirm, "#242 generate review: portalReview carries the reason; no portalFirm");
-    ok(!!qr && d242Lists(qr, CO) && !d242Lists(qr, CO_X) && !d242CanAcceptQuote(qr, CO), "#242 generate review: listed for its customer (not another), not acceptable while in review");
+    ok(rr.ok && rr.mode === "review", "#245 generate review: a price-on-request line → review");
+    const qr = rr.ok ? await d245GetQuote(rr.quoteId) : null;
+    ok(!!qr && qr.status === "draft" && typeof qr.estNo === "number" && qr.estNo !== qf?.estNo, "#245 generate review: a numbered draft (the customer has a reference)");
+    ok(!!qr?.portalReview && qr.portalReview.requestedAt === NOW && qr.portalReview.reasons[0] === "1 line is price on request" && !qr.portalFirm, "#245 generate review: portalReview carries the reason; no portalFirm");
+    ok(!!qr && d245Lists(qr, CO) && !d245Lists(qr, CO_X) && !d245CanAcceptQuote(qr, CO), "#245 generate review: listed for its customer (not another), not acceptable while in review");
     if (qr) {
-      const doc = d242DocData(qr, cust, { companyName: "Peak", logoDark: null });
-      ok(doc.standingLines?.length === 2 && doc.validUntilMs === null, "#242 generate review: the PDF data prints the standing lines without a validity date");
+      const doc = d245DocData(qr, cust, { companyName: "Peak", logoDark: null });
+      ok(doc.standingLines?.length === 2 && doc.validUntilMs === null, "#245 generate review: the PDF data prints the standing lines without a validity date");
     }
-    ok((await d242GetCart(G, CO)).lines.length === 0, "#242 generate review: the cart is empty afterwards");
+    ok((await d245GetCart(G, CO)).lines.length === 0, "#245 generate review: the cart is empty afterwards");
 
     // Fix round 1 — clearCart failing AFTER the quote already exists (and,
     // for a firm generation, was already sent) must never turn into a
     // reported failure: a retry off a false "try again" would re-read the
     // still-full cart and mint a SECOND real quote for the same order.
-    await d242SaveCart({ id: GCF, customerId: COCF, locationId: "z1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
-    const beforeCF = (await d242GetAllQuotes()).filter((q) => q.customerId === COCF).length;
-    const rcf = await d242Generate(
+    await d245SaveCart({ id: GCF, customerId: COCF, locationId: "z1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    const beforeCF = (await d245GetAllQuotes()).filter((q) => q.customerId === COCF).length;
+    const rcf = await d245Generate(
       { grantId: GCF, customerId: COCF, name: "Pat Buyer", email: "pat@example.com" },
       { now: NOW, schedulePdf: false, deps: { clearCart: async () => { throw new Error("boom — clearCart down"); } } }
     );
     if (rcf.ok) registerFixture("quotes", rcf.quoteId);
-    const afterCF = (await d242GetAllQuotes()).filter((q) => q.customerId === COCF);
+    const afterCF = (await d245GetAllQuotes()).filter((q) => q.customerId === COCF);
     ok(rcf.ok === true && typeof (rcf as { quoteId?: string }).quoteId === "string" && afterCF.length === beforeCF + 1,
-      "#242 fix round 1: clearCart failing after the quote exists still reports ok:true and mints exactly one quote");
-    ok((await d242GetCart(GCF, COCF)).lines.length === 1, "#242 fix round 1: the cart is left full (not silently cleared) when clearCart itself is the thing that failed");
+      "#245 fix round 1: clearCart failing after the quote exists still reports ok:true and mints exactly one quote");
+    ok((await d245GetCart(GCF, COCF)).lines.length === 1, "#245 fix round 1: the cart is left full (not silently cleared) when clearCart itself is the thing that failed");
 
     // Owner fallback: a company with no owner → unassigned.
-    await d242SaveCart({ id: G2, customerId: CO2, locationId: "w1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    await d245SaveCart({ id: G2, customerId: CO2, locationId: "w1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
     const r2 = await run({ ...sess, grantId: G2, customerId: CO2 });
-    const q2 = r2.ok ? await d242GetQuote(r2.quoteId) : null;
-    ok(!!q2 && q2.owner === "" && q2.status === "sent", "#242 generate: a company with no owner → the quote is unassigned (owner \"\")");
+    const q2 = r2.ok ? await d245GetQuote(r2.quoteId) : null;
+    ok(!!q2 && q2.owner === "" && q2.status === "sent", "#245 generate: a company with no owner → the quote is unassigned (owner \"\")");
 
     // Rate limit: 10 an hour per grant.
-    await d242SaveCart({ id: GR, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
-    for (let i = 0; i < d242GenLimit; i++) d242RateLimit("portal-generate:" + GR, d242GenLimit, 3_600_000);
+    await d245SaveCart({ id: GR, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    for (let i = 0; i < d245GenLimit; i++) d245RateLimit("portal-generate:" + GR, d245GenLimit, 3_600_000);
     const before = made.length;
     const rl = await run({ ...sess, grantId: GR });
-    ok(d242GenLimit === 10 && !rl.ok && rl.error === d242GenRateCopy && made.length === before && (await d242GetCart(GR, CO)).lines.length === 1,
-      "#242 generate: the 11th Generate in an hour on one grant is refused, makes no quote and keeps the cart");
+    ok(d245GenLimit === 10 && !rl.ok && rl.error === d245GenRateCopy && made.length === before && (await d245GetCart(GR, CO)).lines.length === 1,
+      "#245 generate: the 11th Generate in an hour on one grant is refused, makes no quote and keeps the cart");
 
     // The cart page's edit actions.
-    await d242SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "b", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
-    const vBad = await d242VenueFor(sess, "x1");
-    const vOk = await d242VenueFor(sess, "v1");
-    ok(!vBad.ok && vOk.ok && (await d242GetCart(G, CO)).locationId === "v1", "#242 cart page: the venue must be one of the session customer's own");
-    ok((await d242VenueFor(sess, "")).ok && (await d242GetCart(G, CO)).locationId === null, "#242 cart page: the venue can be cleared");
-    const q0 = await d242UpdateFor(sess, "a", 0);
-    const q3 = await d242UpdateFor(sess, "a", 3);
-    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && q3.ok && (await d242GetCart(G, CO)).lines.find((l) => l.lineId === "a")?.qty === 3, "#242 cart page: the qty stepper takes 1..10,000 (removing is its own action)");
-    ok((await d242RemoveFor(sess, "b")).ok && (await d242GetCart(G, CO)).lines.length === 1, "#242 cart page: remove drops the line");
-    const pvEdit = await d242UpdateFor({ ...sess, grantId: "preview" }, "a", 2);
-    ok(!pvEdit.ok && !(await d242VenueFor(null, "v1")).ok, "#242 cart page: a preview or missing session never edits a cart");
+    await d245SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "b", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
+    const vBad = await d245VenueFor(sess, "x1");
+    const vOk = await d245VenueFor(sess, "v1");
+    ok(!vBad.ok && vOk.ok && (await d245GetCart(G, CO)).locationId === "v1", "#245 cart page: the venue must be one of the session customer's own");
+    ok((await d245VenueFor(sess, "")).ok && (await d245GetCart(G, CO)).locationId === null, "#245 cart page: the venue can be cleared");
+    const q0 = await d245UpdateFor(sess, "a", 0);
+    const q3 = await d245UpdateFor(sess, "a", 3);
+    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && q3.ok && (await d245GetCart(G, CO)).lines.find((l) => l.lineId === "a")?.qty === 3, "#245 cart page: the qty stepper takes 1..10,000 (removing is its own action)");
+    ok((await d245RemoveFor(sess, "b")).ok && (await d245GetCart(G, CO)).lines.length === 1, "#245 cart page: remove drops the line");
+    const pvEdit = await d245UpdateFor({ ...sess, grantId: "preview" }, "a", 2);
+    ok(!pvEdit.ok && !(await d245VenueFor(null, "v1")).ok, "#245 cart page: a preview or missing session never edits a cart");
   } finally {
-    d242Invalidate();
+    d245Invalidate();
     await removeCustomer(CO);
     await removeCustomer(CO2);
     await removeCustomer(CO_X);
@@ -28863,25 +28863,25 @@ function eq242(a: unknown, b: unknown): boolean {
 
 /* ======================================================================
    Portal catalog — Task 13: Accept, expiry/refresh, copy to new quote,
-   staff decline (#242, spec §4.4–§4.6, §5). Pure checks first; DB checks
-   registered in the async chain as portal242AcceptAsyncChecks().
+   staff decline (#245, spec §4.4–§4.6, §5). Pure checks first; DB checks
+   registered in the async chain as portal245AcceptAsyncChecks().
    ====================================================================== */
-import { clearPricedPor as d242ClearPor } from "@/lib/portal-quote-mode";
-import { navData as d242NavData } from "@/lib/nav-counts";
-import { setRevisionPdfPath as d242SetRevPdf } from "@/lib/stores/quotes";
+import { clearPricedPor as d245ClearPor } from "@/lib/portal-quote-mode";
+import { navData as d245NavData } from "@/lib/nav-counts";
+import { setRevisionPdfPath as d245SetRevPdf } from "@/lib/stores/quotes";
 import {
-  acceptPortal as d242AcceptPortal,
-  copyToCart as d242CopyToCart,
-  declinePortalAcceptance as d242DeclinePortalAcceptance,
-  refreshPortalQuote as d242RefreshPortalQuote,
-  ACCEPT_ALREADY_COPY as d242AcceptAlready,
-  ACCEPT_CARD_COPY as d242AcceptCard,
-  ACCEPT_EXPIRED_COPY as d242AcceptExpired,
-  ACCEPT_METHOD_COPY as d242AcceptMethod,
-  ACCEPT_NOTES_LENGTH_COPY as d242AcceptNotesLen,
-  ACCEPT_PO_FILE_COPY as d242AcceptPoFile,
-  DECLINE_NO_ACCEPTANCE_COPY as d242DeclineNoAccept,
-  PORTAL_NOT_FOUND_COPY as d242NotFound,
+  acceptPortal as d245AcceptPortal,
+  copyToCart as d245CopyToCart,
+  declinePortalAcceptance as d245DeclinePortalAcceptance,
+  refreshPortalQuote as d245RefreshPortalQuote,
+  ACCEPT_ALREADY_COPY as d245AcceptAlready,
+  ACCEPT_CARD_COPY as d245AcceptCard,
+  ACCEPT_EXPIRED_COPY as d245AcceptExpired,
+  ACCEPT_METHOD_COPY as d245AcceptMethod,
+  ACCEPT_NOTES_LENGTH_COPY as d245AcceptNotesLen,
+  ACCEPT_PO_FILE_COPY as d245AcceptPoFile,
+  DECLINE_NO_ACCEPTANCE_COPY as d245DeclineNoAccept,
+  PORTAL_NOT_FOUND_COPY as d245NotFound,
 } from "@/lib/portal-quotes";
 {
   const item = (over: Partial<SpecItem> = {}): SpecItem => ({ id: 1, sku: "S", desc: "D", qty: 1, unit: "ea", cost: 0, price: 0, ...over });
@@ -28889,36 +28889,36 @@ import {
   const priced = item({ por: true, price: 120 });
   const stillPor = item({ por: true, price: 0 });
   const noPorAtAll = item({ price: 50 }); // never carried `por` at all
-  const r1 = d242ClearPor([sec([priced, stillPor, noPorAtAll])]);
+  const r1 = d245ClearPor([sec([priced, stillPor, noPorAtAll])]);
   ok(
     !("por" in r1.sections[0].items[0]) && r1.sections[0].items[1].por === true && r1.sections[0].items[2] === noPorAtAll,
-    "#242 Task 13: clearPricedPor clears por once price > 0, leaves an unpriced POR line flagged, and never touches a line without por (same object)"
+    "#245 Task 13: clearPricedPor clears por once price > 0, leaves an unpriced POR line flagged, and never touches a line without por (same object)"
   );
-  ok(r1.anyPor === true, "#242 Task 13: clearPricedPor reports a POR line remains");
-  const r2 = d242ClearPor([sec([priced])]);
-  ok(r2.anyPor === false, "#242 Task 13: clearPricedPor reports nothing remains once every por line is priced");
+  ok(r1.anyPor === true, "#245 Task 13: clearPricedPor reports a POR line remains");
+  const r2 = d245ClearPor([sec([priced])]);
+  ok(r2.anyPor === false, "#245 Task 13: clearPricedPor reports nothing remains once every por line is priced");
   const untouchedSection = sec([noPorAtAll]);
-  const r3 = d242ClearPor([untouchedSection]);
-  ok(r3.sections[0] === untouchedSection, "#242 Task 13: a section with no por item at all comes back object-identical (non-portal quotes' saves untouched)");
+  const r3 = d245ClearPor([untouchedSection]);
+  ok(r3.sections[0] === untouchedSection, "#245 Task 13: a section with no por item at all comes back object-identical (non-portal quotes' saves untouched)");
 
   const nowX = 1_700_000_000_000;
   ok(
-    !d242CanAccept({ status: "sent", portalReview: { requestedAt: nowX, reasons: [] } }, nowX).ok,
-    "#242 Task 13: canAcceptPortal refuses while portalReview is set, even on a 'sent' quote (belt-and-suspenders alongside the status change)"
+    !d245CanAccept({ status: "sent", portalReview: { requestedAt: nowX, reasons: [] } }, nowX).ok,
+    "#245 Task 13: canAcceptPortal refuses while portalReview is set, even on a 'sent' quote (belt-and-suspenders alongside the status change)"
   );
 }
 
-async function portal242AcceptAsyncChecks(): Promise<void> {
-  const P = fixtureId(242, "acc-part");
-  const P2 = fixtureId(242, "acc-fx-engine");
-  const P3 = fixtureId(242, "acc-existing");
-  const P4 = fixtureId(242, "acc-por-flip");
-  const OPT = fixtureId(242, "acc-fx-opt");
-  const FX = fixtureId(242, "acc-fx");
-  const CO = fixtureId(242, "acc-co");
-  const CO_X = fixtureId(242, "acc-co-other");
-  const G = fixtureId(242, "acc-grant");
-  const GX = fixtureId(242, "acc-grant-other");
+async function portal245AcceptAsyncChecks(): Promise<void> {
+  const P = fixtureId(245, "acc-part");
+  const P2 = fixtureId(245, "acc-fx-engine");
+  const P3 = fixtureId(245, "acc-existing");
+  const P4 = fixtureId(245, "acc-por-flip");
+  const OPT = fixtureId(245, "acc-fx-opt");
+  const FX = fixtureId(245, "acc-fx");
+  const CO = fixtureId(245, "acc-co");
+  const CO_X = fixtureId(245, "acc-co-other");
+  const G = fixtureId(245, "acc-grant");
+  const GX = fixtureId(245, "acc-grant-other");
   for (const g of [G, GX]) registerFixture("portal_carts", g);
   const NOW = new Date(2026, 9, 1, 9).getTime();
   const DAY = 86400000;
@@ -28928,11 +28928,11 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
 
   try {
     const owner = (await activeUsers())[0]?.name || "";
-    await d242MergeUpsert(P, { desc: "Test242 Accept Part", category: "Test242 AcceptCat", unit: "ea", list: 120, cost: 70 });
-    await d242MergeUpsert(P2, { desc: "Test242 Accept Fixture Engine", category: "Test242 AcceptCat", unit: "ea", list: 90, cost: 50 });
-    await d242MergeUpsert(P3, { desc: "Test242 Accept Pre-existing", category: "Test242 AcceptCat", unit: "ea", list: 40, cost: 20 });
-    await d242MergeUpsert(P4, { desc: "Test242 Accept POR-flip Part", category: "Test242 AcceptCat", unit: "ea", list: 60, cost: 30 });
-    await d242MergeUpsert(OPT, { desc: "Test242 Accept Clamp", category: "Hardware", unit: "ea", list: 0, cost: 7.8 });
+    await d245MergeUpsert(P, { desc: "Test242 Accept Part", category: "Test242 AcceptCat", unit: "ea", list: 120, cost: 70 });
+    await d245MergeUpsert(P2, { desc: "Test242 Accept Fixture Engine", category: "Test242 AcceptCat", unit: "ea", list: 90, cost: 50 });
+    await d245MergeUpsert(P3, { desc: "Test242 Accept Pre-existing", category: "Test242 AcceptCat", unit: "ea", list: 40, cost: 20 });
+    await d245MergeUpsert(P4, { desc: "Test242 Accept POR-flip Part", category: "Test242 AcceptCat", unit: "ea", list: 60, cost: 30 });
+    await d245MergeUpsert(OPT, { desc: "Test242 Accept Clamp", category: "Hardware", unit: "ea", list: 0, cost: 7.8 });
     for (const s of [P, P2, P3, P4, OPT]) registerFixture("catalog_parts", s);
     await createFixture("subassemblies", {
       id: FX, kind: "fixture", label: "Test242 Accept Fixture", description: "", lightEngineSku: P2, lensSku: null,
@@ -28942,52 +28942,52 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
     const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 450 };
     await upsertCustomer({ id: CO, name: "Test242 Accept Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
     await upsertCustomer({ id: CO_X, name: "Test242 Accept Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
-    d242Invalidate();
+    d245Invalidate();
 
     /* ---------------- Quote A: accept + decline ---------------- */
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }] });
-    const genA = await d242Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genA.ok) throw new Error("#242 Task 13 setup (A) failed — " + genA.error);
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }] });
+    const genA = await d245Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genA.ok) throw new Error("#245 Task 13 setup (A) failed — " + genA.error);
     registerFixture("quotes", genA.quoteId);
-    ok(genA.mode === "firm", "#242 Task 13 setup: quote A (one priced part) generates firm");
+    ok(genA.mode === "firm", "#245 Task 13 setup: quote A (one priced part) generates firm");
 
-    const cardR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "Card on file 4111 1111 1111 1111", poDocumentId: null }, NOW);
-    ok(!cardR.ok && cardR.error === d242AcceptCard, "#242 accept: a 13–19 digit Luhn-valid run in the notes is refused with the card copy");
-    ok(!(await d242GetQuote(genA.quoteId))?.portalAcceptance, "#242 accept: the refused card attempt wrote nothing");
+    const cardR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "Card on file 4111 1111 1111 1111", poDocumentId: null }, NOW);
+    ok(!cardR.ok && cardR.error === d245AcceptCard, "#245 accept: a 13–19 digit Luhn-valid run in the notes is refused with the card copy");
+    ok(!(await d245GetQuote(genA.quoteId))?.portalAcceptance, "#245 accept: the refused card attempt wrote nothing");
 
-    const methodR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "bitcoin", notes: "", poDocumentId: null }, NOW);
-    ok(!methodR.ok && methodR.error === d242AcceptMethod, "#242 accept: an unrecognized purchase method is refused — \"Pick how you'll purchase.\"");
+    const methodR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "bitcoin", notes: "", poDocumentId: null }, NOW);
+    ok(!methodR.ok && methodR.error === d245AcceptMethod, "#245 accept: an unrecognized purchase method is refused — \"Pick how you'll purchase.\"");
 
-    const otherR = await d242AcceptPortal(sessX, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
-    ok(!otherR.ok && otherR.error === d242NotFound, "#242 accept: another customer's session can't accept this quote");
+    const otherR = await d245AcceptPortal(sessX, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
+    ok(!otherR.ok && otherR.error === d245NotFound, "#245 accept: another customer's session can't accept this quote");
 
     // Expired, and NOT YET accepted — canAcceptPortal's order (status →
     // accepted → review → expired) means this is the one moment "expired"
     // is reachable at all; testing it after a real accept would report
     // "already accepted" instead (accepted wins — see canAcceptPortal).
-    const expiredR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
-    ok(!expiredR.ok && expiredR.error === d242AcceptExpired, "#242 accept: past validUntil refuses with the expired copy");
+    const expiredR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, EXPIRED_NOW);
+    ok(!expiredR.ok && expiredR.error === d245AcceptExpired, "#245 accept: past validUntil refuses with the expired copy");
 
     // Fix round 1: notes over 1000 chars are refused outright, never
     // silently cut — writes nothing.
-    const longR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "x".repeat(1001), poDocumentId: null }, NOW);
-    ok(!longR.ok && longR.error === d242AcceptNotesLen, "#242 accept: notes over 1000 characters are refused, not truncated");
-    ok(!(await d242GetQuote(genA.quoteId))?.portalAcceptance, "#242 accept: the refused over-length note wrote nothing");
+    const longR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "x".repeat(1001), poDocumentId: null }, NOW);
+    ok(!longR.ok && longR.error === d245AcceptNotesLen, "#245 accept: notes over 1000 characters are refused, not truncated");
+    ok(!(await d245GetQuote(genA.quoteId))?.portalAcceptance, "#245 accept: the refused over-length note wrote nothing");
 
     // Fix round 1: staff declining a quote that was never accepted must
     // refuse outright and write nothing — no portalDecline appears out of
     // nowhere on a quote the customer never touched.
-    const declineNeverR = await d242DeclinePortalAcceptance(genA.quoteId, "Staff", "Not applicable");
-    ok(!declineNeverR.ok && declineNeverR.error === d242DeclineNoAccept, "#242 decline: a never-accepted portal quote refuses to decline");
-    ok(!(await d242GetQuote(genA.quoteId))?.portalDecline, "#242 decline: the refused attempt wrote no portalDecline");
+    const declineNeverR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "Not applicable");
+    ok(!declineNeverR.ok && declineNeverR.error === d245DeclineNoAccept, "#245 decline: a never-accepted portal quote refuses to decline");
+    ok(!(await d245GetQuote(genA.quoteId))?.portalDecline, "#245 decline: the refused attempt wrote no portalDecline");
 
     // Fix round 1: a non-portal quote can never be "declined" either (even
     // one some other code path managed to stamp portalAcceptance onto).
-    const nonPortalId = fixtureId(242, "acc-non-portal");
+    const nonPortalId = fixtureId(245, "acc-non-portal");
     await q222Create({ id: nonPortalId, name: "Test242 Non-portal Quote", customer: "Test242 Accept Co", customerId: CO, owner, source: "estimator", portalAcceptance: { at: NOW, by: "Pat Buyer", byEmail: "pat@example.com" } });
     registerFixture("quotes", nonPortalId);
-    const declineNonPortalR = await d242DeclinePortalAcceptance(nonPortalId, "Staff", "Wrong quote type");
-    ok(!declineNonPortalR.ok && declineNonPortalR.error === d242DeclineNoAccept, "#242 decline: a non-portal-catalog quote refuses to decline, even carrying a portalAcceptance");
+    const declineNonPortalR = await d245DeclinePortalAcceptance(nonPortalId, "Staff", "Wrong quote type");
+    ok(!declineNonPortalR.ok && declineNonPortalR.error === d245DeclineNoAccept, "#245 decline: a non-portal-catalog quote refuses to decline, even carrying a portalAcceptance");
 
     // Fix round 1: poDocumentId must resolve to a real, non-deleted,
     // CUSTOMER-sourced document belonging to THIS session's company —
@@ -28998,8 +28998,8 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO_X, siteId: null, projectId: null, notes: "", uploadedBy: "Rae Other",
     });
     registerFixture("documents", otherCoDoc.id);
-    const poOtherCoR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: otherCoDoc.id }, NOW);
-    ok(!poOtherCoR.ok && poOtherCoR.error === d242AcceptPoFile, "#242 accept: a PO file belonging to another company is refused");
+    const poOtherCoR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: otherCoDoc.id }, NOW);
+    ok(!poOtherCoR.ok && poOtherCoR.error === d245AcceptPoFile, "#245 accept: a PO file belonging to another company is refused");
 
     const teamDoc = await d218Create({
       title: "PO", fileName: "po-team.pdf", mime: "application/pdf", size: 100,
@@ -29007,9 +29007,9 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
       source: "team", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Staff",
     });
     registerFixture("documents", teamDoc.id);
-    const poTeamR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: teamDoc.id }, NOW);
-    ok(!poTeamR.ok && poTeamR.error === d242AcceptPoFile, "#242 accept: a team-sourced document (not the customer's own upload) is refused as a PO file");
-    ok(!(await d242GetQuote(genA.quoteId))?.portalAcceptance, "#242 accept: neither refused PO attempt wrote an acceptance");
+    const poTeamR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: teamDoc.id }, NOW);
+    ok(!poTeamR.ok && poTeamR.error === d245AcceptPoFile, "#245 accept: a team-sourced document (not the customer's own upload) is refused as a PO file");
+    ok(!(await d245GetQuote(genA.quoteId))?.portalAcceptance, "#245 accept: neither refused PO attempt wrote an acceptance");
 
     const ownDoc = await d218Create({
       title: "Purchase order 44812", fileName: "po-44812.pdf", mime: "application/pdf", size: 100,
@@ -29017,85 +29017,85 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
       source: "customer", customerId: CO, siteId: null, projectId: null, notes: "", uploadedBy: "Pat Buyer",
     });
     registerFixture("documents", ownDoc.id);
-    const okR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id }, NOW);
-    ok(okR.ok, "#242 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
-    const q1 = await d242GetQuote(genA.quoteId);
+    const okR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "PO 44812", poDocumentId: ownDoc.id }, NOW);
+    ok(okR.ok, "#245 accept: a firm in-date quote accepts with purchaseMethod po + notes + the customer's own PO file");
+    const q1 = await d245GetQuote(genA.quoteId);
     ok(
       !!q1?.portalAcceptance && q1.portalAcceptance.purchaseMethod === "po" && q1.portalAcceptance.notes === "PO 44812" &&
         q1.portalAcceptance.poDocumentId === ownDoc.id && q1.status === "sent",
-      "#242 accept: portalAcceptance carries purchaseMethod/notes/poDocumentId (the customer's own uploaded doc); status stays sent (Approve, not Accept, moves it to won)"
+      "#245 accept: portalAcceptance carries purchaseMethod/notes/poDocumentId (the customer's own uploaded doc); status stays sent (Approve, not Accept, moves it to won)"
     );
 
-    const againR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
-    ok(!againR.ok && againR.error === d242AcceptAlready, "#242 accept: an already-accepted quote refuses — \"This quote was already accepted.\"");
+    const againR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "po", notes: "", poDocumentId: null }, NOW);
+    ok(!againR.ok && againR.error === d245AcceptAlready, "#245 accept: an already-accepted quote refuses — \"This quote was already accepted.\"");
 
-    const nav = await d242NavData(owner);
+    const nav = await d245NavData(owner);
     ok(
       nav.bell.some((g) => g.key === "portal" && g.items.some((i) => i.id === genA.quoteId)),
-      "#242 accept: navData(owner)'s 'portal' bell group carries the accepted quote"
+      "#245 accept: navData(owner)'s 'portal' bell group carries the accepted quote"
     );
 
-    const declineR = await d242DeclinePortalAcceptance(genA.quoteId, "Staff", "Need a PO");
-    ok(declineR.ok, "#242 decline: a 1–500 char note declines");
-    const q2 = await d242GetQuote(genA.quoteId);
+    const declineR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "Need a PO");
+    ok(declineR.ok, "#245 decline: a 1–500 char note declines");
+    const q2 = await d245GetQuote(genA.quoteId);
     ok(
       q2?.portalAcceptance === null && q2?.portalDecline?.note === "Need a PO" && q2?.status === "sent",
-      "#242 decline: portalAcceptance clears, portalDecline stamps {by, note}, status stays sent"
+      "#245 decline: portalAcceptance clears, portalDecline stamps {by, note}, status stays sent"
     );
-    const badNoteR = await d242DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
-    ok(!badNoteR.ok, "#242 decline: an empty/whitespace-only note is refused");
-    const reAcceptR = await d242AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null }, NOW);
-    ok(reAcceptR.ok, "#242 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
-    ok((await d242GetQuote(genA.quoteId))?.portalDecline === null, "#242 accept: a fresh acceptance clears the prior portalDecline");
+    const badNoteR = await d245DeclinePortalAcceptance(genA.quoteId, "Staff", "   ");
+    ok(!badNoteR.ok, "#245 decline: an empty/whitespace-only note is refused");
+    const reAcceptR = await d245AcceptPortal(sess, { quoteId: genA.quoteId, purchaseMethod: "check", notes: "", poDocumentId: null }, NOW);
+    ok(reAcceptR.ok, "#245 accept: the customer can accept again after a staff decline (still 'sent', portalAcceptance was cleared)");
+    ok((await d245GetQuote(genA.quoteId))?.portalDecline === null, "#245 accept: a fresh acceptance clears the prior portalDecline");
 
     /* ---------------- Quote B: expiry + firm refresh ---------------- */
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
-    const genB = await d242Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genB.ok) throw new Error("#242 Task 13 setup (B) failed — " + genB.error);
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }] });
+    const genB = await d245Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genB.ok) throw new Error("#245 Task 13 setup (B) failed — " + genB.error);
     registerFixture("quotes", genB.quoteId);
-    const qB0 = await d242GetQuote(genB.quoteId);
+    const qB0 = await d245GetQuote(genB.quoteId);
     const rev1 = (qB0?.revisions || []).find((r) => r.reason === "sent");
-    if (!rev1) throw new Error("#242 Task 13 setup (B): no sent revision after Generate");
-    ok(await d242SetRevPdf(genB.quoteId, rev1.rev, "quote-pdfs/test-rev1.pdf"), "#242 Task 13 setup (B): simulate the original send's PDF landing");
-    const qB0pdf = await d242GetQuote(genB.quoteId);
-    ok(!!qB0pdf && portalQuotePdfSource(qB0pdf, CO)?.rev === rev1.rev, "#242 refresh setup: the portal PDF source points at the original sent revision before any refresh");
+    if (!rev1) throw new Error("#245 Task 13 setup (B): no sent revision after Generate");
+    ok(await d245SetRevPdf(genB.quoteId, rev1.rev, "quote-pdfs/test-rev1.pdf"), "#245 Task 13 setup (B): simulate the original send's PDF landing");
+    const qB0pdf = await d245GetQuote(genB.quoteId);
+    ok(!!qB0pdf && portalQuotePdfSource(qB0pdf, CO)?.rev === rev1.rev, "#245 refresh setup: the portal PDF source points at the original sent revision before any refresh");
 
-    const refreshEarlyR = await d242RefreshPortalQuote(sess, genB.quoteId, NOW);
-    ok(!refreshEarlyR.ok, "#242 refresh: refusing before validUntil has passed");
-    const refreshOtherR = await d242RefreshPortalQuote(sessX, genB.quoteId, EXPIRED_NOW);
-    ok(!refreshOtherR.ok && refreshOtherR.error === d242NotFound, "#242 refresh: another customer's session can't refresh this quote");
+    const refreshEarlyR = await d245RefreshPortalQuote(sess, genB.quoteId, NOW);
+    ok(!refreshEarlyR.ok, "#245 refresh: refusing before validUntil has passed");
+    const refreshOtherR = await d245RefreshPortalQuote(sessX, genB.quoteId, EXPIRED_NOW);
+    ok(!refreshOtherR.ok && refreshOtherR.error === d245NotFound, "#245 refresh: another customer's session can't refresh this quote");
 
-    const refreshR = await d242RefreshPortalQuote(sess, genB.quoteId, EXPIRED_NOW);
-    ok(refreshR.ok && refreshR.mode === "firm", "#242 refresh: past validUntil, still every line priced → mode firm");
-    const qB1 = await d242GetQuote(genB.quoteId);
-    ok(!!qB1 && qB1.status === "sent" && !!qB1.portalFirm && qB1.portalFirm.validUntil === EXPIRED_NOW + 30 * DAY, "#242 refresh: stays sent; validUntil restarts 30 days from the refresh");
-    ok((qB1?.revisions?.length || 0) > (qB0?.revisions?.length || 0), "#242 refresh: a new revision was appended");
+    const refreshR = await d245RefreshPortalQuote(sess, genB.quoteId, EXPIRED_NOW);
+    ok(refreshR.ok && refreshR.mode === "firm", "#245 refresh: past validUntil, still every line priced → mode firm");
+    const qB1 = await d245GetQuote(genB.quoteId);
+    ok(!!qB1 && qB1.status === "sent" && !!qB1.portalFirm && qB1.portalFirm.validUntil === EXPIRED_NOW + 30 * DAY, "#245 refresh: stays sent; validUntil restarts 30 days from the refresh");
+    ok((qB1?.revisions?.length || 0) > (qB0?.revisions?.length || 0), "#245 refresh: a new revision was appended");
     const rev2 = (qB1?.revisions || []).slice().reverse().find((r) => r.reason === "sent");
-    if (!rev2 || rev2.rev === rev1.rev) throw new Error("#242 Task 13: refresh cut no new sent revision");
-    ok(await d242SetRevPdf(genB.quoteId, rev2.rev, "quote-pdfs/test-rev2.pdf"), "#242 Task 13: simulate the refreshed price's PDF landing");
-    const afterRefreshPdf = portalQuotePdfSource((await d242GetQuote(genB.quoteId))!, CO);
-    ok(afterRefreshPdf?.rev === rev2.rev && afterRefreshPdf.path === "quote-pdfs/test-rev2.pdf", "#242 refresh: the portal PDF source now points at the NEWEST sent revision, not the original");
+    if (!rev2 || rev2.rev === rev1.rev) throw new Error("#245 Task 13: refresh cut no new sent revision");
+    ok(await d245SetRevPdf(genB.quoteId, rev2.rev, "quote-pdfs/test-rev2.pdf"), "#245 Task 13: simulate the refreshed price's PDF landing");
+    const afterRefreshPdf = portalQuotePdfSource((await d245GetQuote(genB.quoteId))!, CO);
+    ok(afterRefreshPdf?.rev === rev2.rev && afterRefreshPdf.path === "quote-pdfs/test-rev2.pdf", "#245 refresh: the portal PDF source now points at the NEWEST sent revision, not the original");
 
     /* ---------------- Quote C: refresh flips to review ---------------- */
-    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P4, qty: 1 }] });
-    const genC = await d242Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genC.ok) throw new Error("#242 Task 13 setup (C) failed — " + genC.error);
+    await d245SaveCart({ id: G, customerId: CO, locationId: "v1", updatedAt: NOW, lines: [{ lineId: "a", kind: "part", sku: P4, qty: 1 }] });
+    const genC = await d245Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genC.ok) throw new Error("#245 Task 13 setup (C) failed — " + genC.error);
     registerFixture("quotes", genC.quoteId);
-    ok(genC.mode === "firm", "#242 Task 13 setup: quote C generates firm before its part is flagged");
-    await d242MergeUpsert(P4, { note: "Verify current price" });
-    d242Invalidate();
-    const refreshReviewR = await d242RefreshPortalQuote(sess, genC.quoteId, EXPIRED_NOW);
-    ok(refreshReviewR.ok && refreshReviewR.mode === "review", "#242 refresh: a line now price-on-request flips the refresh to review");
-    const qC1 = await d242GetQuote(genC.quoteId);
+    ok(genC.mode === "firm", "#245 Task 13 setup: quote C generates firm before its part is flagged");
+    await d245MergeUpsert(P4, { note: "Verify current price" });
+    d245Invalidate();
+    const refreshReviewR = await d245RefreshPortalQuote(sess, genC.quoteId, EXPIRED_NOW);
+    ok(refreshReviewR.ok && refreshReviewR.mode === "review", "#245 refresh: a line now price-on-request flips the refresh to review");
+    const qC1 = await d245GetQuote(genC.quoteId);
     ok(
       !!qC1 && qC1.status === "draft" && !!qC1.portalReview && qC1.portalFirm === null,
-      "#242 refresh: the quote recalls to draft, stamps portalReview, and clears portalFirm"
+      "#245 refresh: the quote recalls to draft, stamps portalReview, and clears portalFirm"
     );
-    ok(!d242CanAccept(qC1!, EXPIRED_NOW).ok, "#242 refresh: the flipped quote can no longer be accepted (not-sent — it's back to draft)");
+    ok(!d245CanAccept(qC1!, EXPIRED_NOW).ok, "#245 refresh: the flipped quote can no longer be accepted (not-sent — it's back to draft)");
 
     /* ---------------- Quote D: copy to new quote ---------------- */
     const curtainInputs = { name: "Side Drape", fabricSku: "", fabricName: "Test242 Velour", qty: "1", width: "20", height: "16", fullness: "0" as const };
-    await d242SaveCart({
+    await d245SaveCart({
       id: G, customerId: CO, locationId: "v1", updatedAt: NOW,
       lines: [
         { lineId: "a", kind: "part", sku: P, qty: 2 },
@@ -29103,54 +29103,54 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
         { lineId: "c", kind: "curtain", curtainInputs, qty: 1 },
       ],
     });
-    const genD = await d242Generate(sess, { now: NOW, schedulePdf: false });
-    if (!genD.ok) throw new Error("#242 Task 13 setup (D) failed — " + genD.error);
+    const genD = await d245Generate(sess, { now: NOW, schedulePdf: false });
+    if (!genD.ok) throw new Error("#245 Task 13 setup (D) failed — " + genD.error);
     registerFixture("quotes", genD.quoteId);
-    ok(genD.mode === "review", "#242 Task 13 setup: quote D's curtain line makes it a review generation (POR)");
+    ok(genD.mode === "review", "#245 Task 13 setup: quote D's curtain line makes it a review generation (POR)");
 
     // Hide P (the plain part line) AFTER generating — it must be skipped on
     // copy without touching the fixture (a different light-engine SKU, P2)
     // or the curtain (never SKU-backed).
-    await d242MergeUpsert(P, { portalVisibility: "hide" });
-    d242Invalidate();
+    await d245MergeUpsert(P, { portalVisibility: "hide" });
+    d245Invalidate();
 
     // An existing, unrelated cart line survives the copy (never replaced).
-    await d242AddLine(G, CO, { kind: "part", sku: P3, qty: 1 });
+    await d245AddLine(G, CO, { kind: "part", sku: P3, qty: 1 });
 
-    const copyOtherR = await d242CopyToCart(sessX, genD.quoteId);
-    ok(!copyOtherR.ok && copyOtherR.error === d242NotFound, "#242 copy: another customer's session can't copy this quote");
+    const copyOtherR = await d245CopyToCart(sessX, genD.quoteId);
+    ok(!copyOtherR.ok && copyOtherR.error === d245NotFound, "#245 copy: another customer's session can't copy this quote");
 
-    const copyR = await d242CopyToCart(sess, genD.quoteId);
-    ok(copyR.ok && copyR.added === 2, "#242 copy: 2 of 3 lines copied — the hidden part is skipped, the fixture and the curtain are not");
-    const cartAfter = await d242GetCart(G, CO);
-    ok(cartAfter.lines.some((l) => l.kind === "part" && l.sku === P3), "#242 copy: the pre-existing P3 line is kept, not replaced");
-    ok(!cartAfter.lines.some((l) => l.kind === "part" && l.sku === P), "#242 copy: the now-hidden part is never added");
+    const copyR = await d245CopyToCart(sess, genD.quoteId);
+    ok(copyR.ok && copyR.added === 2, "#245 copy: 2 of 3 lines copied — the hidden part is skipped, the fixture and the curtain are not");
+    const cartAfter = await d245GetCart(G, CO);
+    ok(cartAfter.lines.some((l) => l.kind === "part" && l.sku === P3), "#245 copy: the pre-existing P3 line is kept, not replaced");
+    ok(!cartAfter.lines.some((l) => l.kind === "part" && l.sku === P), "#245 copy: the now-hidden part is never added");
     const copiedFixture = cartAfter.lines.find((l) => l.kind === "fixture");
     ok(
       !!copiedFixture && copiedFixture.fixtureId === FX && copiedFixture.fixtureOptions?.[`mounting:${OPT}`] === 1,
-      "#242 copy: the fixture line round-trips by fixture id + chosen options"
+      "#245 copy: the fixture line round-trips by fixture id + chosen options"
     );
     const copiedCurtain = cartAfter.lines.find((l) => l.kind === "curtain");
     ok(
       !!copiedCurtain && copiedCurtain.curtainInputs?.fabricName === "Test242 Velour" && copiedCurtain.curtainInputs?.width === "20",
-      "#242 copy: the curtain line round-trips by its free-text inputs"
+      "#245 copy: the curtain line round-trips by its free-text inputs"
     );
   } finally {
-    d242Invalidate();
+    d245Invalidate();
     await removeCustomer(CO);
     await removeCustomer(CO_X);
   }
 }
 
 /* ======================================================================
-   Portal catalog — Task 14 staff surfaces + datasheet thumbnails (#242,
+   Portal catalog — Task 14 staff surfaces + datasheet thumbnails (#245,
    spec §5/§8.2/§1.1). Pure checks below (bell derivations, thumbnail
    candidate selection + grouping, the widened print-token kind); the
    DB-backed render check (a fake screenshot standing in for headless
    Chrome, which can't run in this harness) is registered in the async
-   chain as portal242ThumbnailsAsyncChecks().
+   chain as portal245ThumbnailsAsyncChecks().
    ====================================================================== */
-import { portalBellGroups as d242BellGroups } from "@/lib/portal-bell";
+import { portalBellGroups as d245BellGroups } from "@/lib/portal-bell";
 {
   const NOW = 1_700_000_000_000;
   const HOUR = 3_600_000;
@@ -29164,19 +29164,19 @@ import { portalBellGroups as d242BellGroups } from "@/lib/portal-bell";
   const firmStale = { ...base, id: "Q-firm-stale", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 80 * HOUR, validUntil: NOW + 1000 } };
   const firmOther = { ...base, id: "Q-firm-other", owner: "Rae Other", status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
 
-  const g = d242BellGroups([mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never, ME, NOW);
+  const g = d245BellGroups([mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never, ME, NOW);
   const reviewIds = g.review.map((i) => i.id);
   const generatedIds = g.generated.map((i) => i.id);
-  ok(reviewIds.includes("Q-mine"), "#242 bell: my own portal-catalog review quote is in the review group");
-  ok(!reviewIds.includes("Q-other"), "#242 bell: another owner's review quote never shows on my bell");
-  ok(reviewIds.includes("Q-unowned"), "#242 bell: an unassigned review quote shows for everyone");
-  ok(!reviewIds.includes("Q-not-portal"), "#242 bell: a non-portal-catalog quote with a stray portalReview is never listed");
-  ok(generatedIds.includes("Q-firm-recent"), "#242 bell: a firm portal quote generated 10h ago is a 'new portal quote'");
-  ok(!generatedIds.includes("Q-firm-stale"), "#242 bell: a firm portal quote generated 80h ago has aged off the 72h window");
-  ok(!generatedIds.includes("Q-firm-other"), "#242 bell: another owner's firm generation never shows on my bell");
+  ok(reviewIds.includes("Q-mine"), "#245 bell: my own portal-catalog review quote is in the review group");
+  ok(!reviewIds.includes("Q-other"), "#245 bell: another owner's review quote never shows on my bell");
+  ok(reviewIds.includes("Q-unowned"), "#245 bell: an unassigned review quote shows for everyone");
+  ok(!reviewIds.includes("Q-not-portal"), "#245 bell: a non-portal-catalog quote with a stray portalReview is never listed");
+  ok(generatedIds.includes("Q-firm-recent"), "#245 bell: a firm portal quote generated 10h ago is a 'new portal quote'");
+  ok(!generatedIds.includes("Q-firm-stale"), "#245 bell: a firm portal quote generated 80h ago has aged off the 72h window");
+  ok(!generatedIds.includes("Q-firm-other"), "#245 bell: another owner's firm generation never shows on my bell");
 }
 
-import { groupCandidatesByDatasheet as d242GroupByDatasheet, thumbnailCandidates as d242ThumbCandidates } from "@/lib/part-docs/thumbnail-plan";
+import { groupCandidatesByDatasheet as d245GroupByDatasheet, thumbnailCandidates as d245ThumbCandidates } from "@/lib/part-docs/thumbnail-plan";
 {
   const imagesBySku = new Map<string, unknown[]>([
     ["SKU-HAS-IMAGE", [{ id: "PD-img" }]],
@@ -29192,54 +29192,54 @@ import { groupCandidatesByDatasheet as d242GroupByDatasheet, thumbnailCandidates
     ["SKU-SHARED-2", { id: "PD-shared", blobKey: "part-docs/PD-shared/x.pdf" }],
   ]);
   const skus = ["SKU-HAS-IMAGE", "SKU-HAS-HIDDEN", "SKU-NO-IMAGE", "SKU-LINK-ONLY", "SKU-NO-DATASHEET", "SKU-SHARED-1", "SKU-SHARED-2"];
-  const candidates = d242ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku });
+  const candidates = d245ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku });
   const bySku = new Map(candidates.map((c) => [c.sku, c.datasheetId]));
-  ok(!bySku.has("SKU-HAS-IMAGE"), "#242 thumbnails: a SKU with a real image is skipped, even with its own datasheet");
-  ok(!bySku.has("SKU-HAS-HIDDEN"), "#242 thumbnails: a SKU with only a HIDDEN image is still skipped — a hidden thumbnail is never regenerated");
-  ok(bySku.get("SKU-NO-IMAGE") === "PD-c", "#242 thumbnails: an own blob-backed datasheet with no image at all is a candidate");
-  ok(!bySku.has("SKU-LINK-ONLY"), "#242 thumbnails: a link-only datasheet (blobKey null) never renders a thumbnail");
-  ok(!bySku.has("SKU-NO-DATASHEET"), "#242 thumbnails: no own datasheet at all is never a candidate");
+  ok(!bySku.has("SKU-HAS-IMAGE"), "#245 thumbnails: a SKU with a real image is skipped, even with its own datasheet");
+  ok(!bySku.has("SKU-HAS-HIDDEN"), "#245 thumbnails: a SKU with only a HIDDEN image is still skipped — a hidden thumbnail is never regenerated");
+  ok(bySku.get("SKU-NO-IMAGE") === "PD-c", "#245 thumbnails: an own blob-backed datasheet with no image at all is a candidate");
+  ok(!bySku.has("SKU-LINK-ONLY"), "#245 thumbnails: a link-only datasheet (blobKey null) never renders a thumbnail");
+  ok(!bySku.has("SKU-NO-DATASHEET"), "#245 thumbnails: no own datasheet at all is never a candidate");
 
-  const groups = d242GroupByDatasheet(candidates);
-  ok(groups.length === 2, "#242 thumbnails: 3 candidate SKUs across 2 distinct datasheets (PD-c, PD-shared) group into 2 render entries — one per datasheet, not one per SKU");
+  const groups = d245GroupByDatasheet(candidates);
+  ok(groups.length === 2, "#245 thumbnails: 3 candidate SKUs across 2 distinct datasheets (PD-c, PD-shared) group into 2 render entries — one per datasheet, not one per SKU");
   const shared = groups.find((g) => g.datasheetId === "PD-shared");
-  ok(!!shared && shared.skus.length === 2 && shared.skus.includes("SKU-SHARED-1") && shared.skus.includes("SKU-SHARED-2"), "#242 thumbnails: two SKUs sharing one datasheet group into ONE render entry naming both — the renderer is called once per datasheet, not once per SKU");
+  ok(!!shared && shared.skus.length === 2 && shared.skus.includes("SKU-SHARED-1") && shared.skus.includes("SKU-SHARED-2"), "#245 thumbnails: two SKUs sharing one datasheet group into ONE render entry naming both — the renderer is called once per datasheet, not once per SKU");
 }
 
 {
   const S = "test-secret-242-thumb";
   const t0 = 1_700_000_000_000;
   const thumbToken = signPrintToken(S, "part-thumb", "PD-abcdef123456", t0);
-  ok(verifyPrintToken(S, thumbToken, "part-thumb", "PD-abcdef123456", t0), "#242 token: a part-thumb token verifies for its own kind + id");
-  ok(!verifyPrintToken(S, thumbToken, "quote", "PD-abcdef123456", t0), "#242 token: a part-thumb token never verifies as a quote token");
+  ok(verifyPrintToken(S, thumbToken, "part-thumb", "PD-abcdef123456", t0), "#245 token: a part-thumb token verifies for its own kind + id");
+  ok(!verifyPrintToken(S, thumbToken, "quote", "PD-abcdef123456", t0), "#245 token: a part-thumb token never verifies as a quote token");
   const quoteToken = signPrintToken(S, "quote", "Q-1", t0);
-  ok(!verifyPrintToken(S, quoteToken, "part-thumb", "Q-1", t0), "#242 token: a quote token never verifies as a part-thumb token");
+  ok(!verifyPrintToken(S, quoteToken, "part-thumb", "Q-1", t0), "#245 token: a quote token never verifies as a part-thumb token");
 }
 
-import { renderDatasheetThumbnail as d242RenderThumb } from "@/lib/part-docs/thumbnail";
-import { getDocument as d242GetPartDoc } from "@/lib/stores/part-documents";
-async function portal242ThumbnailsAsyncChecks(): Promise<void> {
-  const sku = fixtureId(242, "thumb-sku");
-  const otherSku = fixtureId(242, "thumb-sku-2");
+import { renderDatasheetThumbnail as d245RenderThumb } from "@/lib/part-docs/thumbnail";
+import { getDocument as d245GetPartDoc } from "@/lib/stores/part-documents";
+async function portal245ThumbnailsAsyncChecks(): Promise<void> {
+  const sku = fixtureId(245, "thumb-sku");
+  const otherSku = fixtureId(245, "thumb-sku-2");
 
-  const upload = await d242CreateDoc({
+  const upload = await d245CreateDoc({
     kind: "image", fileName: "hero.jpg", contentType: "image/jpeg", size: 1000,
     blobKey: "part-docs/PD-fixture-hero/hero.jpg", sourceUrl: null, source: "upload", by: "Test",
   });
-  const noFile = await d242CreateDoc({
+  const noFile = await d245CreateDoc({
     kind: "datasheet", fileName: "no-file.pdf", contentType: "", size: 0,
     blobKey: null, sourceUrl: "https://example.com/no-file.pdf", source: "fetch", by: "Test",
   });
-  const datasheet = await d242CreateDoc({
+  const datasheet = await d245CreateDoc({
     kind: "datasheet", fileName: "test242-ds.pdf", contentType: "application/pdf", size: 4000,
     blobKey: "part-docs/PD-fixture-thumb-ds/test242-ds.pdf", sourceUrl: null, source: "upload", by: "Test",
   });
-  if (!upload || !noFile || !datasheet) throw new Error("#242 thumbnails: fixture documents failed to create");
+  if (!upload || !noFile || !datasheet) throw new Error("#245 thumbnails: fixture documents failed to create");
   registerFixture("part_documents", upload.id);
   registerFixture("part_documents", noFile.id);
   registerFixture("part_documents", datasheet.id);
-  await d242Attach(upload.id, [sku], "Test");
-  registerFixture("part_document_links", d242LinkId(sku, upload.id));
+  await d245Attach(upload.id, [sku], "Test");
+  registerFixture("part_document_links", d245LinkId(sku, upload.id));
 
   const tinyPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const fakeDeps = {
@@ -29249,33 +29249,33 @@ async function portal242ThumbnailsAsyncChecks(): Promise<void> {
     putFile: async (pathname: string) => ({ pathname }),
   };
 
-  const badId = await d242RenderThumb("not-a-doc-id", [sku], "Test", fakeDeps);
-  ok(!badId.ok, "#242 thumbnails: renderDatasheetThumbnail refuses a malformed datasheet id");
+  const badId = await d245RenderThumb("not-a-doc-id", [sku], "Test", fakeDeps);
+  ok(!badId.ok, "#245 thumbnails: renderDatasheetThumbnail refuses a malformed datasheet id");
 
-  const noSkus = await d242RenderThumb(datasheet.id, [], "Test", fakeDeps);
-  ok(!noSkus.ok, "#242 thumbnails: renderDatasheetThumbnail refuses an empty SKU list");
+  const noSkus = await d245RenderThumb(datasheet.id, [], "Test", fakeDeps);
+  ok(!noSkus.ok, "#245 thumbnails: renderDatasheetThumbnail refuses an empty SKU list");
 
-  const noFileR = await d242RenderThumb(noFile.id, [sku], "Test", fakeDeps);
-  ok(!noFileR.ok, "#242 thumbnails: renderDatasheetThumbnail refuses a datasheet with no stored file (link-only)");
+  const noFileR = await d245RenderThumb(noFile.id, [sku], "Test", fakeDeps);
+  ok(!noFileR.ok, "#245 thumbnails: renderDatasheetThumbnail refuses a datasheet with no stored file (link-only)");
 
-  const r = await d242RenderThumb(datasheet.id, [sku, otherSku], "Test", fakeDeps);
-  if (!r.ok) throw new Error("#242 thumbnails: render failed — " + r.error);
+  const r = await d245RenderThumb(datasheet.id, [sku, otherSku], "Test", fakeDeps);
+  if (!r.ok) throw new Error("#245 thumbnails: render failed — " + r.error);
   registerFixture("part_documents", r.documentId);
-  registerFixture("part_document_links", d242LinkId(sku, r.documentId));
-  registerFixture("part_document_links", d242LinkId(otherSku, r.documentId));
+  registerFixture("part_document_links", d245LinkId(sku, r.documentId));
+  registerFixture("part_document_links", d245LinkId(otherSku, r.documentId));
 
-  const created = await d242GetPartDoc(r.documentId);
-  ok(!!created && created.kind === "image" && created.source === "datasheet-render" && created.sourceRef === datasheet.id, "#242 thumbnails: the rendered thumbnail is an image document sourced from the datasheet");
-  ok(created?.contentType === "image/png" && created?.blobKey != null, "#242 thumbnails: the rendered thumbnail carries a stored PNG");
+  const created = await d245GetPartDoc(r.documentId);
+  ok(!!created && created.kind === "image" && created.source === "datasheet-render" && created.sourceRef === datasheet.id, "#245 thumbnails: the rendered thumbnail is an image document sourced from the datasheet");
+  ok(created?.contentType === "image/png" && created?.blobKey != null, "#245 thumbnails: the rendered thumbnail carries a stored PNG");
 
-  const imagesA = await d242VisibleImages([sku]);
-  ok((imagesA.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${r.documentId}`, "#242 thumbnails: on the SKU that already had an uploaded image, the new render sorts AFTER it (datasheet-render always sorts last)");
-  const imagesB = await d242VisibleImages([otherSku]);
-  ok((imagesB.get(otherSku) ?? []).map((d) => d.id).join(",") === r.documentId, "#242 thumbnails: one render attaches to every SKU passed in — the second SKU (which had nothing) now has the same thumbnail");
+  const imagesA = await d245VisibleImages([sku]);
+  ok((imagesA.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${r.documentId}`, "#245 thumbnails: on the SKU that already had an uploaded image, the new render sorts AFTER it (datasheet-render always sorts last)");
+  const imagesB = await d245VisibleImages([otherSku]);
+  ok((imagesB.get(otherSku) ?? []).map((d) => d.id).join(",") === r.documentId, "#245 thumbnails: one render attaches to every SKU passed in — the second SKU (which had nothing) now has the same thumbnail");
 
   // A render failure for one datasheet must not stop a batch — proven at the
   // renderDatasheetThumbnail level: a screenshot that throws is reported,
   // never thrown past this call.
-  const failing = await d242RenderThumb(datasheet.id, [sku], "Test", { ...fakeDeps, renderScreenshot: async () => { throw new Error("Chrome crashed"); } });
-  ok(!failing.ok && failing.error === "Chrome crashed", "#242 thumbnails: a render failure is reported as { ok: false }, not thrown");
+  const failing = await d245RenderThumb(datasheet.id, [sku], "Test", { ...fakeDeps, renderScreenshot: async () => { throw new Error("Chrome crashed"); } });
+  ok(!failing.ok && failing.error === "Chrome crashed", "#245 thumbnails: a render failure is reported as { ok: false }, not thrown");
 }

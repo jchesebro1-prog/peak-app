@@ -327,13 +327,13 @@ export async function saveQuoteAction(
 ): Promise<SaveResult> {
   const user = await requireUser();
   // Read before the patch is built: a portal-catalog quote's `source` must
-  // survive a plain Estimator save (#242 Task 13) — staff price its
+  // survive a plain Estimator save (#245 Task 13) — staff price its
   // price-on-request lines right here before sending, and a save that
   // silently reclassified it to "estimator" would drop the Portal panel,
   // the customer's "in review" copy and every portal-only rule for good.
   // Every other quote keeps the prior unconditional "estimator" stamp.
   const prior = loadedId ? await get(loadedId) : null;
-  // #242 Task 13 (spec §4.3, controller decision 6): `por` clears on any
+  // #245 Task 13 (spec §4.3, controller decision 6): `por` clears on any
   // item staff have now priced; `portalReview` clears once none remain —
   // scoped to a portal-catalog quote so no other save's behavior changes.
   const isPortalCatalog = prior?.source === "portal-catalog";
@@ -779,7 +779,7 @@ export async function setStatusAction(
 }
 
 /**
- * Staff Decline (#242 Task 13, spec §4.4/§5) — the Portal panel's inline
+ * Staff Decline (#245 Task 13, spec §4.4/§5) — the Portal panel's inline
  * textarea + button, no browser confirm(). Same session gate as the
  * Quotes-hub status action (`requireUser()` only — the panel's Approve
  * button reuses that action directly for the mirror-image "won" case).

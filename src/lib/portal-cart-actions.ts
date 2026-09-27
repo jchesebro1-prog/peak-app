@@ -1,4 +1,4 @@
-// SERVER ONLY — the bodies of the portal catalog's mutating actions (#242
+// SERVER ONLY — the bodies of the portal catalog's mutating actions (#245
 // Task 11). The "use server" wrappers in src/app/portal/catalog/actions.ts
 // read the grant cookie and pass the session in; nothing here takes a
 // customer id, a price or a fabric name from the browser.
@@ -122,7 +122,7 @@ export async function askAboutPartFor(session: PortalSession | null, input: unkn
   return { ok: true };
 }
 
-/* ---------------- the cart page (#242 Task 12, spec §3.4) ---------------- */
+/* ---------------- the cart page (#245 Task 12, spec §3.4) ---------------- */
 
 export type CartEditResult = { ok: true } | { ok: false; error: string };
 const CART_EDIT_FAIL_COPY = "Couldn't update your quote — try again.";

@@ -1,6 +1,6 @@
 # Portal Catalog — customers browse, configure and quote the catalog themselves
 
-Date: 2026-09-27 · Branch `feat/portal-catalog` (off `origin/main` 90a9f830) · Punch **#242**
+Date: 2026-09-27 · Branch `feat/portal-catalog` (off `origin/main` 90a9f830) · Punch **#245**
 (proposed — recompute the next free punch/D numbers from `origin/main` right before writing docs).
 
 Jeff (2026-09-27):

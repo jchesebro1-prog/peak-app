@@ -20,7 +20,7 @@ export async function finalizePortalDocumentAction(
 }
 
 /**
- * The Accept dialog's PO file (#242 Task 13, spec §4.4, controller decision
+ * The Accept dialog's PO file (#245 Task 13, spec §4.4, controller decision
  * 6): same finalize as "Send us files" above, but returns the new `DOC-` id
  * so acceptPortalQuote can stamp it onto `portalAcceptance.poDocumentId`.
  */

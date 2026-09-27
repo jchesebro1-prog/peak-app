@@ -1,5 +1,5 @@
 /**
- * New-section freight defaults (#242, spec 2026-09-27-portal-catalog-design.md
+ * New-section freight defaults (#245, spec 2026-09-27-portal-catalog-design.md
  * §2.2) — pure. `sectionFreightDefault` decides what a fresh system's freight %
  * should start at: the rule's base % until a venue is picked, then the
  * distance rule (src/lib/freight-rule.ts). `applyAutoFreight` re-applies that

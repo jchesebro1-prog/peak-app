@@ -159,7 +159,7 @@ function pdfPreparing(q: Quote, cid: string): boolean {
   return !latestSentRevision(q.revisions) && pdfView(q.pdf, Date.now())?.status === "pending";
 }
 
-/** #242: a firm portal quote's validity date while it lasts (sent, not yet
+/** #245: a firm portal quote's validity date while it lasts (sent, not yet
  *  accepted, not past `validUntil`); null otherwise. */
 function firmValidUntil(q: Quote): number | null {
   if (q.status !== "sent" || q.portalAcceptance || !q.portalFirm) return null;
@@ -176,14 +176,14 @@ export default async function PortalPage({
   const denied = one(sp.denied) === "1";
   const sent = one(sp.sent) === "1";
   const accepted = one(sp.accepted) === "1";
-  // #242 Task 13: the Accept dialog's PO file failed to attach — the
+  // #245 Task 13: the Accept dialog's PO file failed to attach — the
   // acceptance itself still went through (controller decision 5).
   const fileWarn = one(sp.filewarn) === "1";
-  // #242 Task 13: Copy to new quote refused (expired grant, rate limit, or
+  // #245 Task 13: Copy to new quote refused (expired grant, rate limit, or
   // the quote wasn't found for this session) — a plain form, so it redirects
   // with a query param rather than returning a value to display inline.
   const copyErr = one(sp.copyerr) === "1";
-  // #242: Generate lands here — ?generated=firm|review&q=<quote id>.
+  // #245: Generate lands here — ?generated=firm|review&q=<quote id>.
   const generatedRaw = one(sp.generated);
   const generated = generatedRaw === "firm" || generatedRaw === "review" ? generatedRaw : null;
   const generatedId = one(sp.q);
@@ -211,7 +211,7 @@ export default async function PortalPage({
     flameRenewals({}),
     inspectionRenewals({}),
     getAllProjects(),
-    // #242: the nav's Quote (N) — never read in a team preview.
+    // #245: the nav's Quote (N) — never read in a team preview.
     preview ? Promise.resolve(null) : getCart(session.grantId, cid),
   ]);
   const custName = cust?.name || "your organization";
@@ -230,7 +230,7 @@ export default async function PortalPage({
   );
 
   // Published quotes the team sent, PLUS the customer's own portal quotes still
-  // in draft (#242 "portal-catalog" review quotes, and older "portal-self-serve"
+  // in draft (#245 "portal-catalog" review quotes, and older "portal-self-serve"
   // estimates) so they can see what they submitted. Internal drafts stay
   // hidden — only the customer's own drafts — and so does imported Daylite
   // history (portalListsQuote, stores/quotes).
@@ -238,7 +238,7 @@ export default async function PortalPage({
     .filter((q) => portalListsQuote(q, cid))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const quoteGroups = groupPortalQuotes(published);
-  // #242: the banner names the generated quote's estimate number — looked up
+  // #245: the banner names the generated quote's estimate number — looked up
   // among THIS customer's listed quotes only, so a hand-edited ?q= shows nothing.
   const generatedQuote = generated && generatedId ? published.find((q) => q.id === generatedId) ?? null : null;
   const generatedNo = generatedQuote ? displayQuoteNumber(generatedQuote) : "";

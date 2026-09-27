@@ -100,7 +100,7 @@ export type SectionCardProps = {
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
-  /** #242: the current selection's distance-rule default is unknown (no
+  /** #245: the current selection's distance-rule default is unknown (no
    *  locatable venue) — the freight % is pinned to the cap. Shown only for a
    *  section still on the auto default (`sec.freightAuto`); a hand-set % is
    *  never annotated. */

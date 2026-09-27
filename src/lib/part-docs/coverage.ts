@@ -83,7 +83,7 @@ export function buildCoverageIndex(input: {
   for (const l of input.links) {
     const doc = docsById.get(l.documentId);
     if (!doc) continue; // a link to a removed document covers nothing
-    if (doc.kind === "image") continue; // images never cover or satisfy a slot (#242)
+    if (doc.kind === "image") continue; // images never cover or satisfy a slot (#245)
     const key = `${l.partSku}\u0000${doc.id}`;
     if (seenLink.has(key)) continue;
     seenLink.add(key);

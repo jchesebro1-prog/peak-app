@@ -6,7 +6,7 @@ import PartThumbCanvas from "./thumb-canvas";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Datasheet thumbnail", robots: { index: false, follow: false } };
 
-/** The 120 s print token (#222/#242) — fails closed on anything but a valid,
+/** The 120 s print token (#222/#245) — fails closed on anything but a valid,
  *  unexpired signature for exactly this datasheet id. Module-level so the
  *  clock read stays out of the component body (react-hooks/purity). */
 function tokenOk(t: string | undefined, id: string): boolean {
@@ -14,7 +14,7 @@ function tokenOk(t: string | undefined, id: string): boolean {
 }
 
 /**
- * Signed print route for the datasheet page-1 thumbnail batch (#242).
+ * Signed print route for the datasheet page-1 thumbnail batch (#245).
  * Headless Chrome loads this with a 120 s token; the client component opens
  * the datasheet PDF with pdf.js (same engine as the design pdf-canvas) and
  * paints page 1 to a canvas, then flags the page ready. Outside the team

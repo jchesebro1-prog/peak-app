@@ -9,7 +9,7 @@ import { finalizePortalDocumentIdAction } from "./documents-actions";
 import { acceptPortalQuote } from "./actions";
 
 /**
- * Accept quote dialog (#242 Task 13, spec §4.4). Purchase method (required),
+ * Accept quote dialog (#245 Task 13, spec §4.4). Purchase method (required),
  * an optional note (helper text carries the card warning verbatim — the
  * server re-checks it with a Luhn match, this is guidance only) and an
  * optional PO file. A file that fails to upload/finalize never blocks

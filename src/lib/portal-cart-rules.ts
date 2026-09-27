@@ -1,7 +1,7 @@
 import type { CurtainRequest } from "@/lib/portal-cart-types";
 
 /**
- * Portal "Add to quote" guards (#242 Task 11) — pure, client-safe. The
+ * Portal "Add to quote" guards (#245 Task 11) — pure, client-safe. The
  * server actions run these before touching the cart store; the sidebar
  * uses the same limits for its inputs.
  */

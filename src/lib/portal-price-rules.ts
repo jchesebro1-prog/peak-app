@@ -1,4 +1,4 @@
-/** Portal unit pricing rules (#242, spec §2.1). Pure; sell-only outputs. */
+/** Portal unit pricing rules (#245, spec §2.1). Pure; sell-only outputs. */
 export type PriceInput = { cost: number | null | undefined; list: number | null | undefined; note?: string | null; pricedAt?: number | null };
 export type PriceRuleOpts = { margin: number; staleCostMonths: number; now: number };
 export type UnitPrice = { unitPrice: number | null; por: boolean; porReason?: "no-price" | "verify-price" | "stale-cost" };

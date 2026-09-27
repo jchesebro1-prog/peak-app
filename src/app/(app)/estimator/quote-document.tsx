@@ -46,13 +46,13 @@ export type QuoteDocumentProps = {
   pdfTerms: boolean;
   pdfOptions: boolean;
   paymentTerms: PaymentTerms;
-  /** #242 — a firm portal quote's "Valid until" date (replaces the issue
+  /** #245 — a firm portal quote's "Valid until" date (replaces the issue
    *  date + 30 days in the header and terms); absent on every other quote. */
   validUntilMs?: number | null;
-  /** #242 — lines that always print under the totals (portal-catalog quotes:
+  /** #245 — lines that always print under the totals (portal-catalog quotes:
    *  the review line, the tax line, "Valid until <date>"). */
   standingLines?: string[];
-  /** #242 — the freight row label ("Freight & delivery — 412 mi" on a portal
+  /** #245 — the freight row label ("Freight & delivery — 412 mi" on a portal
    *  quote whose distance is known). Never a freight %. */
   freightLabel?: string;
 };

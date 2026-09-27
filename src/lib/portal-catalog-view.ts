@@ -1,7 +1,7 @@
 import type { SearchEntry, SearchQuery } from "@/lib/portal-search";
 
 /**
- * Portal catalog browse page — pure, client-safe helpers (#242 Task 10,
+ * Portal catalog browse page — pure, client-safe helpers (#245 Task 10,
  * spec §3.1). No server imports (type-only above), so the "use client"
  * catalog component can use the URL + pager helpers directly.
  *

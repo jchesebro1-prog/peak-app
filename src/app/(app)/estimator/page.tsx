@@ -193,7 +193,7 @@ async function initialFrom(
     replaces: "",
     pdfOptions: normalizePdfOptions(q.pdfOptions),
     pdf: pdfView(q.pdf, Date.now()),
-    // #242 Task 13: the staff Portal panel — present only for a portal-
+    // #245 Task 13: the staff Portal panel — present only for a portal-
     // catalog quote. porItems is a point-in-time read of the loaded spec's
     // `por` lines; the next Save recomputes what remains (clearPricedPor).
     portal:
@@ -222,7 +222,7 @@ export default async function EstimatorPage({
   const sp = await searchParams;
   const rawId = Array.isArray(sp.id) ? sp.id[0] : sp.id;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-  // #242 Task 13: the Portal panel's Approve button reuses the Quotes-hub
+  // #245 Task 13: the Portal panel's Approve button reuses the Quotes-hub
   // status action verbatim (setQuoteStatus) — a gate refusal redirects back
   // here with ?statusError=; surfaced in the panel, cleared on the next load.
   const portalStatusError = one(sp.statusError) || null;

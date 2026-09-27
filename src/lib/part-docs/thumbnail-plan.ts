@@ -1,5 +1,5 @@
 /**
- * Datasheet page-1 thumbnail batch (#242, spec §5/§1.1): which parts still
+ * Datasheet page-1 thumbnail batch (#245, spec §5/§1.1): which parts still
  * need a rendered thumbnail. Pure — no store, no Blob, no Chrome — so the
  * harness tests candidate selection without a DB or a headless browser.
  *
@@ -28,7 +28,7 @@ export function thumbnailCandidates(input: {
   return out;
 }
 
-/** Group candidates by datasheet (#242) — one render per PDF, attached to
+/** Group candidates by datasheet (#245) — one render per PDF, attached to
  *  every SKU that shares it, not one render per SKU. */
 export function groupCandidatesByDatasheet(
   candidates: readonly ThumbnailCandidate[]

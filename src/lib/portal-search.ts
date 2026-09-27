@@ -1,4 +1,4 @@
-/** Portal catalog search + two-way facets + paging (#242, spec §3.1). Pure. */
+/** Portal catalog search + two-way facets + paging (#245, spec §3.1). Pure. */
 export type SearchEntry = { key: string; kind: "part" | "fixture"; title: string; sku: string; mfr: string; category: string; haystack: string; browsable: boolean; rank: number };
 export type SearchQuery = { q: string; mfr: string[]; cat: string[]; page: number; pageSize: number };
 export type Facet = { value: string; count: number; selected: boolean };

@@ -97,7 +97,7 @@ export const partDocumentLinks = docTable("part_document_links"); // Part docume
 export const partAccessoryLinks = docTable("part_accessory_links"); // Part documents (#207) — the fixture→accessory graph that computes accessory coverage; migration 0026_part_documents
 export const specDocuments = docTable("spec_documents"); // Spec builder (#205 Phase B) — one saved spec per CSI section: header, products, fill-in answers; migration 0027_spec_documents
 export const documents = docTable("documents"); // Documents (#218) — company/venue/project files in private Blob, shared both ways through the portal; migration 0029_documents
-export const portalCarts = docTable("portal_carts"); // Portal catalog (#242) — one cart per portal grant; never a quote row until Generate; migration 0032_portal_carts
+export const portalCarts = docTable("portal_carts"); // Portal catalog (#245) — one cart per portal grant; never a quote row until Generate; migration 0032_portal_carts
 
 export const DOC_TABLES = {
   quotes,

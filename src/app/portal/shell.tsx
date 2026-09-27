@@ -9,7 +9,7 @@ import type { PortalNavItem } from "./nav";
  * team nav), plus the signed-in person and a sign-out button. Server
  * component; sign-out posts the server action so it works without JS.
  *
- * #242: an optional `nav` row (Home · Catalog · Quote (N), built by
+ * #245: an optional `nav` row (Home · Catalog · Quote (N), built by
  * `portalNav` in ./nav.ts) sits under the top bar, and `wide` widens the
  * content column for the catalog's facet rail + tile grid.
  */

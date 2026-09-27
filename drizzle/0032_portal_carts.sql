@@ -1,4 +1,4 @@
--- Portal carts (#242 Task 8, spec 2026-09-27-portal-catalog-design.md) —
+-- Portal carts (#245 Task 8, spec 2026-09-27-portal-catalog-design.md) —
 -- one cart per portal grant (id = grant id). NOT a quote row: no estimate
 -- number is ever used here — a cart only ever becomes a quote through
 -- Generate, which spawns a real quotes row.

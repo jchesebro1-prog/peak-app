@@ -66,7 +66,7 @@ export function viewSatisfied(v: SlotView): boolean {
 }
 
 /**
- * Images (#242) are a gallery, not a coverage slot — `buildCoverageIndex`
+ * Images (#245) are a gallery, not a coverage slot — `buildCoverageIndex`
  * drops them entirely (coverage.ts:86), so they need their own data path
  * into these views rather than riding through `CoverageIndex`. `ImageRef` is
  * the small, pure shape both `documentRow` and `partDocsView` take; the
@@ -78,7 +78,7 @@ export type ImageRef = { id: string; title: string; source: PartDocumentSource; 
 
 export type ImageSlotView = { count: number; first: { id: string; title: string } | null };
 
-/** Gallery order (#242): `compareImages` (types.ts) — a datasheet-render
+/** Gallery order (#245): `compareImages` (types.ts) — a datasheet-render
  *  thumbnail always sorts after every real image, then explicit `sort`
  *  ascending (missing sorts last), then source rank, then upload time. The
  *  same comparator `visibleImagesForParts` uses for the customer-facing
@@ -89,7 +89,7 @@ function sortImages(images: readonly ImageRef[]): ImageRef[] {
 }
 
 /** Every live image link, by SKU, in gallery order — hidden ones included
- *  (staff see all; #242). Built from the same `documents`/`links` arrays
+ *  (staff see all; #245). Built from the same `documents`/`links` arrays
  *  `loadPartDocsState` already loads, so this needs no extra query. */
 export function buildImageIndex(documents: readonly PartDocument[], links: readonly PartDocumentLink[]): Map<string, ImageRef[]> {
   const docsById = new Map(documents.map((d) => [d.id, d] as const));
@@ -114,7 +114,7 @@ export function imagesFor(index: ReadonlyMap<string, ImageRef[]>, sku: string): 
   return index.get(sku) ?? [];
 }
 
-/** `count` includes hidden images — staff see all (#242); `first` is the
+/** `count` includes hidden images — staff see all (#245); `first` is the
  *  gallery's lead image for a thumbnail. */
 export function imageSlotView(images: readonly ImageRef[]): ImageSlotView {
   const sorted = sortImages(images);
@@ -209,7 +209,7 @@ export type PartDocRow = {
   history: Array<{ index: number; fileName: string; replacedAt: number; replacedBy: string }>;
 };
 
-/** One image in the part editor's gallery (#242) — staff see hidden images
+/** One image in the part editor's gallery (#245) — staff see hidden images
  *  too, with their `sort`/`hidden` and a source label the client maps to
  *  copy ("Upload" / "From URL" / "Datasheet thumbnail" / …). */
 export type PartDocsImage = { id: string; title: string; source: PartDocumentSource; hidden: boolean; sort: number | null };
@@ -224,7 +224,7 @@ export type PartDocsView = {
   coveredBy: Array<PartRef & { kinds: PartDocKind[] }>;
   /** Parts this one covers (its accessories). */
   accessories: PartRef[];
-  /** The image gallery, in display order (#242). */
+  /** The image gallery, in display order (#245). */
   images: PartDocsImage[];
 };
 

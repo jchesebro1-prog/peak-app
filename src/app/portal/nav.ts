@@ -1,5 +1,5 @@
 /**
- * Portal shell nav items (#242 Task 10): Home · Catalog · Quote (N). Pure.
+ * Portal shell nav items (#245 Task 10): Home · Catalog · Quote (N). Pure.
  * A team preview (`previewCid`) carries `?preview=` on Home and Catalog, and
  * shows the Quote item disabled with no count — a preview never touches the
  * customer's cart.
