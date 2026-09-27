@@ -1,5 +1,5 @@
 /**
- * #214 — the Link popup's one search box: companies, venues and people in
+ * #214 — the link panel's one search box: companies, venues and people in
  * three groups of at most 8, ranked the way every other typeahead ranks
  * (typeaheadMatches). Pure — the server action loads the rows and calls
  * rankLinkTargets; test:specs covers the ranking.

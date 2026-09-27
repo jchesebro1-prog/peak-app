@@ -20303,7 +20303,7 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
   const importsOf = (src: string) => [...src.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)";/gm)].map((m) => ({ typeOnly: !!m[1], spec: m[2] }));
   const clientFiles214 = [
-    "src/app/(app)/inbox/link-popup.tsx",
+    "src/app/(app)/inbox/link-panel.tsx",
     "src/app/(app)/inbox/link-sidebar.tsx",
     "src/app/(app)/inbox/work-link-card.tsx",
     "src/app/(app)/inbox/thread-reader.tsx",
@@ -20317,14 +20317,16 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     );
     ok(src.startsWith('"use client"') && bad.length === 0, `#214 UI: ${f} is a client component with no store/db/identity/gmail runtime import (${bad.map((b) => b.spec).join(", ")})`);
   }
-  const popup214 = read("src/app/(app)/inbox/link-popup.tsx");
-  ok(/onCreateTask\?: \(\) => void;/.test(popup214) && popup214.includes("{onCreateTask && ("), "#214 UI: the popup footer shows Create task only when #215 passes onCreateTask");
+  // #214 sidebar (Sep 27) — the popup became the sidebar's link panel.
+  const popup214 = read("src/app/(app)/inbox/link-panel.tsx");
+  const shell214 = read("src/app/(app)/inbox/inbox-shell.tsx");
+  ok(/onCreateTask\?: \(\) => void;/.test(popup214) && popup214.includes("{onCreateTask && ("), "#214 UI: the link panel shows Create task only when #215 passes onCreateTask");
   ok(
     ["People on this email", "Company &amp; venue", "From the signature", "<WorkLinkCard vm={vm} mode=\"edit\" />"].every((s) => popup214.includes(s)),
-    "#214 UI: the popup has the People / Company & venue / Work / signature sections"
+    "#214 UI: the link panel has the People / Company & venue / Work / signature sections"
   );
   ok(popup214.includes("setIdentityMessageAction(vm.id, messageId)") && popup214.includes("fromHeader"), "#214 UI: opening from a message header makes that message the Linking-from source");
-  ok(popup214.includes("fetchMessageCcAction(vm.id, messageId)") && popup214.includes("if (r.data.ccPending)"), "#214 UI: the popup runs the lazy Cc fetch only when the server says it is pending");
+  ok(popup214.includes("fetchMessageCcAction(vm.id, messageId)") && popup214.includes("if (r.data.ccPending)"), "#214 UI: the link panel runs the lazy Cc fetch only when the server says it is pending");
   const side214 = read("src/app/(app)/inbox/link-sidebar.tsx");
   ok(!side214.includes("<select") && !side214.includes("EntityQuickAdd") && !side214.includes("quickAdd"), "#214 UI: the sidebar has no dropdown editors or quick-add forms left");
   ok(side214.includes("onEditLinks: () => void;") && side214.includes("Edit links") && side214.includes("vm.linkedPeople.map("), "#214 UI: the sidebar summary has Edit links and linked-people chips");
@@ -20332,28 +20334,35 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
   const card214 = read("src/app/(app)/inbox/work-link-card.tsx");
   ok(card214.includes('mode?: "summary" | "edit";') && card214.includes('{mode === "edit" && open && ('), "#214 UI: WorkLinkCard's picker only renders in edit mode");
   const reader214 = read("src/app/(app)/inbox/thread-reader.tsx");
-  ok(reader214.includes("Link…") && reader214.includes("onOpenLinks={() => onOpenLinks(m.id)}") && reader214.includes("<LinkPopup"), "#214 UI: each message header has Link… and the reader mounts the popup");
+  ok(
+    reader214.includes("Link…") && reader214.includes("onOpenLinks={(el) => onOpenLinks(m.id, el)}") && reader214.includes("<LinkSidebar") && side214.includes("<LinkPanel"),
+    "#214 UI: each message header has Link…, which opens the sidebar's link panel"
+  );
 
   /* ---- #214 UI fix wave 1 ---- */
   // 1. The dialog takes focus on mount and hands it back to the opener on
   //    close — otherwise the inbox shell's own ArrowUp/ArrowDown handler
   //    (which only skips a target inside `[role="dialog"]`) keeps switching
   //    threads behind the popup and unmounting it.
+  //    #214 sidebar: the panel is no longer a dialog — it is a labelled,
+  //    focusable region the shell's arrow keys skip by `data-link-panel`,
+  //    and the sidebar hands focus back to the opener on Done.
   ok(
-    popup214.includes('role="dialog"') &&
-      popup214.includes('aria-modal="true"') &&
-      popup214.includes("aria-labelledby={titleId}") &&
+    popup214.includes('role="region"') &&
+      popup214.includes('aria-label="Link this email"') &&
       popup214.includes("tabIndex={-1}") &&
-      popup214.includes("dialogRef.current?.focus()") &&
-      popup214.includes("opener.focus()"),
-    "#214 UI fix 1: the dialog is a labelled, focusable role=dialog that takes focus on mount and restores it to the opener on close"
+      popup214.includes("el.focus({ preventScroll: true })") &&
+      popup214.includes("data-link-panel") &&
+      shell214.includes("[data-link-panel]") &&
+      side214.includes("opener.focus()"),
+    "#214 UI fix 1: the link panel is a labelled, focusable region that takes focus on entry, the shell's arrow keys skip it, and Done restores focus to the opener"
   );
   // 2. Escape doesn't fight a nested widget's own Escape handling: it backs
   //    off once that widget already preventDefault()ed the key.
   const popupEscIdx = popup214.indexOf('e.key !== "Escape"');
   ok(
     popupEscIdx !== -1 && popup214.slice(popupEscIdx, popupEscIdx + 60).includes("e.defaultPrevented"),
-    "#214 UI fix 2: the popup's Escape handler backs off when the key was already handled (e.defaultPrevented)"
+    "#214 UI fix 2: the link panel's Escape handler backs off when the key was already handled (e.defaultPrevented)"
   );
   const typeahead214 = read("src/components/search/typeahead.tsx");
   const tEscIdx = typeahead214.indexOf('e.key === "Escape"');
@@ -20366,8 +20375,9 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     reader214.includes("isEmail={vm.isEmail}") && reader214.includes("{isEmail && ("),
     "#214 UI fix 8: the per-message Link… button is hidden on a non-email thread (!vm.isEmail)"
   );
-  // 9. The ✕ close button has an accessible name.
-  ok(popup214.includes('aria-label="Close"'), "#214 UI fix 9: the popup's ✕ button has an accessible name");
+  // 9. The ✕ close button had an accessible name; #214 sidebar replaced it
+  //    with a visibly labelled Done.
+  ok(!popup214.includes("✕") && />\s*Done\s*</.test(popup214), "#214 UI fix 9: the link panel closes with a visibly labelled Done button (no unlabelled ✕)");
 
   /* ---- #214 UI fix wave 2 ---- */
   // 1. submitAdding reloads in a `finally` once the contact exists, even if
@@ -20391,14 +20401,16 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     tEscIdx !== -1 && typeahead214.slice(tEscIdx, tEscIdx + 40).includes("&& open"),
     "#214 UI fix wave 2: Typeahead's Escape is gated on the dropdown being open, so an idle box lets Escape bubble to a parent dialog"
   );
-  // 5. Tab/Shift+Tab is trapped inside the dialog so focus can't land on
-  //    the page behind it and re-enable the shell's arrow-key thread
-  //    switching while the popup is still open.
+  // 5. Tab/Shift+Tab was trapped inside the modal so the shell's arrow
+  //    keys couldn't switch threads while it was open. #214 sidebar: the
+  //    panel is not modal — no trap; arrow keys skip thread-switching while
+  //    focus is inside [data-link-panel], and Escape only acts on a target
+  //    inside the panel.
   ok(
-    popup214.includes('if (e.key !== "Tab") return;') &&
-      popup214.includes("querySelectorAll<HTMLElement>") &&
-      popup214.includes("dialog.contains(active)"),
-    "#214 UI fix wave 2: a Tab/Shift+Tab handler traps focus inside the dialog"
+    !popup214.includes('if (e.key !== "Tab") return;') &&
+      popup214.includes("panelRef.current?.contains(t)") &&
+      shell214.includes('[role="dialog"], [role="menu"], [data-link-panel]'),
+    "#214 UI fix wave 2: no focus trap; arrow keys never switch threads from inside the link panel and its Escape is scoped to it"
   );
 }
 
@@ -20794,7 +20806,7 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   const ta = rd215("src/app/(app)/inbox/task-actions.ts");
   ok(ta.startsWith('"use server"') && (ta.match(/await requireUser\(\)/g) || []).length === 2 && ta.includes("createTaskFromThread("), "#215 both inbox task actions require a user; create delegates to the writer");
   const reader = rd215("src/app/(app)/inbox/thread-reader.tsx");
-  ok(reader.includes("Task…") && reader.includes("<TaskDialog") && reader.includes("onCreateTask"), "#215 the reader has Task… per message, mounts the dialog, and wires the popup's Create task");
+  ok(reader.includes("Task…") && reader.includes("<TaskDialog") && reader.includes("onCreateTask"), "#215 the reader has Task… per message, mounts the dialog, and wires the link panel's Create task");
   ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
   const pg = rd215("src/app/(app)/inbox/page.tsx");
   ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
@@ -20814,7 +20826,7 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   );
   ok(
     /onCreateTask=\{\s*vm\.isEmail/.test(reader),
-    "#215 fix wave 1: the Link popup's Create task is gated on vm.isEmail (Edit links itself isn't email-gated)"
+    "#215 fix wave 1: the link panel's Create task is gated on vm.isEmail (Edit links itself isn't email-gated)"
   );
   ok(
     card.includes("isEmail") && card.includes("No open tasks on this thread.") && card.includes("Use “Task…” on a message to add one."),
@@ -25695,15 +25707,15 @@ import { resolveDocumentCategories as fwaResolveCats, mergeDocumentCategories as
   ok(aa.includes("Save a fixture, system or hardware assembly") && aa.includes("a system's or hardware\n * assembly's scope is emptied"), "#228 final: saveFixtureAction's doc covers fixture, system and hardware");
 
   // #216 final — quick-adds default to the first live venue type.
-  const lp = fwaRd("src/app/(app)/inbox/link-popup.tsx");
-  ok(lp.includes("emptyVenueQuickAdd(venueTypeOptions(vm.venueTypes)[0]?.key)") && !lp.includes("emptyVenueQuickAdd()"), "#216 final: the Link popup's venue quick-add defaults to the first live venue type");
+  const lp = fwaRd("src/app/(app)/inbox/link-panel.tsx");
+  ok(lp.includes("emptyVenueQuickAdd(venueTypeOptions(vm.venueTypes)[0]?.key)") && !lp.includes("emptyVenueQuickAdd()"), "#216 final: the link panel's venue quick-add defaults to the first live venue type");
   const qf = fwaRd("src/app/(app)/quotes/new/intake-form.tsx");
   ok(qf.includes("const defaultVenueKind = venueTypeOptions(venueTypes)[0]?.key;") && !qf.includes("emptyVenueQuickAdd()"), "#216 final: the quote intake's venue quick-add defaults to the first live venue type");
   const qa = fwaRd("src/app/(app)/quotes/new/actions.ts");
   ok(qa.includes('(venueTypeOptions(types)[0]?.key ?? "proscenium")') && qa.includes('id: "l" + Date.now() + Math.random().toString(36).slice(2, 6),'),
     "#216 final: the intake falls back to the first live type and mints a random-suffixed location id");
-  ok(fwaRd("src/app/(app)/inbox/link-actions.ts").includes("/** Link popup's \"new venue\" quick-add") && !/~\d{3}/.test(fwaRd("src/lib/inbox-task-write.ts").slice(0, 2000)),
-    "#216 final: the quick-add comments name the Link popup; inbox-task-write cites functions, not line numbers");
+  ok(fwaRd("src/app/(app)/inbox/link-actions.ts").includes("/** The link panel's \"new venue\" quick-add") && !/~\d{3}/.test(fwaRd("src/lib/inbox-task-write.ts").slice(0, 2000)),
+    "#216 final: the quick-add comments name the link panel; inbox-task-write cites functions, not line numbers");
 
   // #218 final — category labels cleaned; reset sweeps Blob; card key; route 404.
   const rc = fwaResolveCats([{ key: "drawings", label: "  Draw\u0007ings\u200b  ", order: 0 }]);
@@ -25938,7 +25950,7 @@ const fwbRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
   ok(v216Label([], "oldkind") === "oldkind" && v216Label([], "  ") === "Venue", "#216 final-B: an unlisted stored key shows its raw key; no key reads Venue");
 
   // #214: already on main — the Link search is debounced with a stale-response guard.
-  const lp = fwbRd("src/app/(app)/inbox/link-popup.tsx");
+  const lp = fwbRd("src/app/(app)/inbox/link-panel.tsx");
   ok(/const my = \+\+seq\.current;/.test(lp) && /if \(my !== seq\.current\) return;/.test(lp) && /\}, 2[0-9]0\);/.test(lp), "#214 final-B: searchLinkTargetsAction is debounced and stale answers are dropped");
 }
 
@@ -25994,4 +26006,87 @@ async function finalWaveBPdfChecks(): Promise<void> {
     },
   });
   ok((await store.read(kept))?.toString() === "%PDF-1.4 kept", "#222 final-B: a settle whose stored blobPath is the old path never deletes that file");
+}
+
+/* ====================================================================
+   #214 sidebar — linking moves out of the Link popup into the reader's
+   sidebar (Jeff, Sep 27): the name button / "Edit links" put the sidebar
+   into link mode for that message; no modal chrome left behind.
+   ==================================================================== */
+import { existsSync as sb214Exists, readdirSync as sb214Readdir } from "node:fs";
+{
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const has = (f: string) => sb214Exists(join(process.cwd(), f));
+  const PANEL = "src/app/(app)/inbox/link-panel.tsx";
+  ok(!has("src/app/(app)/inbox/link-popup.tsx") && has(PANEL), "#214 sidebar: link-popup.tsx is gone; the editor lives in link-panel.tsx");
+  const panel = has(PANEL) ? rd(PANEL) : "";
+  const side = rd("src/app/(app)/inbox/link-sidebar.tsx");
+  const reader = rd("src/app/(app)/inbox/thread-reader.tsx");
+  const shell = rd("src/app/(app)/inbox/inbox-shell.tsx");
+
+  // No modal chrome: no backdrop, no aria-modal dialog, no focus trap, no ✕.
+  ok(
+    panel.startsWith('"use client"') &&
+      /export default function LinkPanel\(/.test(panel) &&
+      !panel.includes("aria-modal") &&
+      !panel.includes('role="dialog"') &&
+      !panel.includes('position: "fixed"') &&
+      !panel.includes('if (e.key !== "Tab") return;') &&
+      !panel.includes("✕"),
+    "#214 sidebar: LinkPanel has no modal chrome (backdrop, aria-modal dialog, Tab trap, ✕)"
+  );
+  // Header names the message and has Done; Create task stays optional.
+  ok(
+    panel.includes("Linking from: ") && panel.includes("onDone: () => void;") && />\s*Done\s*</.test(panel) && panel.includes("{onCreateTask && ("),
+    "#214 sidebar: the panel header reads 'Linking from: …' with a Done button; Create task shows only when passed"
+  );
+  // Escape: only while focus is inside the panel, never over an open dropdown.
+  const escIdx = panel.indexOf('e.key !== "Escape"');
+  ok(
+    escIdx !== -1 && panel.slice(escIdx, escIdx + 60).includes("e.defaultPrevented") && panel.includes("panelRef.current?.contains("),
+    "#214 sidebar: Escape returns to the summary only when focus is inside the panel and no dropdown handled the key"
+  );
+  // Arrow keys inside the panel never switch threads (the popup relied on role=dialog).
+  ok(panel.includes("data-link-panel") && shell.includes('[role="dialog"], [role="menu"], [data-link-panel]'), "#214 sidebar: the shell's arrow-key thread switching skips a target inside the link panel");
+  // Focus + scroll on entry.
+  ok(
+    panel.includes("scrollIntoView(") && /querySelector<HTMLInputElement>\([^)]*Search a company, venue or person/.test(panel) && panel.includes(".focus()"),
+    "#214 sidebar: entering link mode scrolls the panel into view and focuses its search box"
+  );
+  // Sidebar hosts the panel, keyed by message; 300 → 380 in link mode.
+  ok(
+    side.includes('import LinkPanel from "./link-panel";') &&
+      /<LinkPanel\s+key=\{linkFor\.messageId\}/.test(side) &&
+      /width: linkFor \? 380 : 300/.test(side) &&
+      side.includes('transition: "width') &&
+      side.includes('maxWidth: "100%"'),
+    "#214 sidebar: the sidebar swaps in LinkPanel keyed by message, widening 300 → 380px in pane link mode"
+  );
+  ok(
+    side.includes("opener.isConnected") && side.includes("editLinksRef.current?.focus()"),
+    "#214 sidebar: Done returns focus to the button that opened link mode, else to Edit links"
+  );
+  // Reader: no popup; the name button opens link mode for its message.
+  ok(
+    !/\bLinkPopup\b/.test(reader) &&
+      !reader.includes('"./link-popup"') &&
+      reader.includes("linkFor={linkFor}") &&
+      reader.includes("onOpenLinks={(el) => onOpenLinks(m.id, el)}") &&
+      /setLinkFor\(\{ messageId, fromHeader: true \}\)/.test(reader),
+    "#214 sidebar: the reader mounts no popup; the per-message button opens the sidebar's link mode for that message"
+  );
+  ok(
+    /onCreateTask=\{\s*vm\.isEmail/.test(reader) && /setLinkFor\(null\);\s*openTask\(mid\);/.test(reader),
+    "#214 sidebar: Create task (email threads only) leaves link mode and opens the task dialog for that message"
+  );
+  // No "Link popup" left in src comments/copy.
+  const walk = (d: string): string[] =>
+    sb214Readdir(join(process.cwd(), d), { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(`${d}/${e.name}`) : /\.(ts|tsx)$/.test(e.name) ? [`${d}/${e.name}`] : []
+    );
+  const stale = walk("src").filter((f) => {
+    const s = rd(f);
+    return /Link popup/i.test(s) || /\bLinkPopup\b/.test(s) || s.includes("link-popup.tsx");
+  });
+  ok(stale.length === 0, `#214 sidebar: no src file still names the Link popup (${stale.join(", ")})`);
 }

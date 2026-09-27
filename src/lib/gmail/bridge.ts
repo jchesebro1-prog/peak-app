@@ -199,7 +199,7 @@ async function recordMessage(
     // #125 — keep the addresses so a picked identity message can be resolved
     fromEmail: p.from.email || undefined,
     to: p.to || undefined,
-    // #214 — who else was on it (the Link popup's participants). Message
+    // #214 — who else was on it (the link panel's participants). Message
     // only: the THREAD's cc below stays "" because deliverThreadOutbound
     // copies thread.cc onto every reply we send.
     cc: p.cc || undefined,
@@ -483,7 +483,7 @@ export async function pushInboxState(
 }
 
 /**
- * #214 — the Link popup's lazy Cc backfill for a message imported before Cc
+ * #214 — the link panel's lazy Cc backfill for a message imported before Cc
  * was stored: fetch that one message's Cc header (metadata format), stamp
  * `cc` + `ccFetched` so it never runs twice, and return the header ("" when
  * the message had no Cc). null = nothing to fetch (no such message, not a

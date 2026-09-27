@@ -265,7 +265,7 @@ export type ReaderVM = {
   threadTasks: ThreadTaskRow[];
 };
 
-/** #214 — one address on the Link popup's message, matched to a contact. */
+/** #214 — one address on the link panel's message, matched to a contact. */
 export type PopupParticipant = {
   name: string;
   email: string;
@@ -281,7 +281,7 @@ export type PopupParticipant = {
   linked: boolean;
 };
 
-/** #214 — everything the Link popup shows for one message (built on the
+/** #214 — everything the link panel shows for one message (built on the
  *  server by linkPopupDataAction; no store ever reaches the client). */
 export type LinkPopupData = {
   messageId: string;
@@ -291,7 +291,7 @@ export type LinkPopupData = {
   participants: PopupParticipant[];
   /** linked people who are not on this message */
   otherLinked: Array<{ id: string; name: string; companyName: string }>;
-  /** Gmail message whose Cc was never fetched — the popup calls
+  /** Gmail message whose Cc was never fetched — the panel calls
    *  fetchMessageCcAction once, then shows the fuller list */
   ccPending: boolean;
   /** the parsed signature of an inbound message's sender, else null */

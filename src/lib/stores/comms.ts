@@ -231,7 +231,7 @@ export type CommMessage = {
   fromEmail?: string;
   to?: string;
   /** #214 — the raw Cc header ("Name <a@b>, c@d"), stamped by the Gmail
-   *  bridge on import, or by the Link popup's one-time lazy fetch for
+   *  bridge on import, or by the link panel's one-time lazy fetch for
    *  messages imported before #214. */
   cc?: string;
   /** #214 — set once that lazy Cc fetch has run (whether or not the

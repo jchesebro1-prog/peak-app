@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * #214 — server actions behind the Inbox Link popup: load one message's
+ * #214 — server actions behind the Inbox link panel: load one message's
  * participants (matched to contacts) + its sender's parsed signature, the
  * lazy Cc backfill, link/unlink one person, the combined company / venue /
  * person search, and "Add missing details" from the signature. Company and
@@ -184,7 +184,7 @@ async function buildPopupData(t: CommThread, m: CommMessage, me: SessionUser): P
   };
 }
 
-/** The popup's data for one message. */
+/** The link panel's data for one message. */
 export async function linkPopupDataAction(threadId: string, messageId: string): Promise<DataR> {
   const me = await requireUser();
   const r = await loadThread(threadId, messageId, me);
@@ -193,8 +193,8 @@ export async function linkPopupDataAction(threadId: string, messageId: string): 
 }
 
 /** Lazy Cc backfill for a Gmail message imported before #214, then the
- *  refreshed popup data. Inert when Gmail is off or the fetch fails: the
- *  popup keeps its From/To participants. */
+ *  refreshed panel data. Inert when Gmail is off or the fetch fails: the
+ *  panel keeps its From/To participants. */
 export async function fetchMessageCcAction(threadId: string, messageId: string): Promise<DataR> {
   const me = await requireUser();
   const r = await loadThread(threadId, messageId, me);
@@ -209,7 +209,7 @@ export async function fetchMessageCcAction(threadId: string, messageId: string):
       console.error("[inbox] Cc fetch failed", threadId, messageId, err);
       if (shouldStampCcFetched(err)) {
         // Gmail no longer has this message (404) — it will never succeed,
-        // so stop asking on every popup open. A transient failure is left
+        // so stop asking on every panel open. A transient failure is left
         // un-stamped and retried next time.
         await patchDoc<CommThread>("comms", threadId, (d) => {
           const x = (d.messages || []).find((y) => y.id === messageId);
@@ -221,7 +221,7 @@ export async function fetchMessageCcAction(threadId: string, messageId: string):
   const again = await loadThread(threadId, messageId, me);
   if (!again.ok) return again;
   const data = await buildPopupData(again.t, again.m, me);
-  // A failed fetch must not make the popup ask again on every open render.
+  // A failed fetch must not make the panel ask again on every open render.
   return { ok: true, data: { ...data, ccPending: false } };
 }
 

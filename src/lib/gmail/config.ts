@@ -124,9 +124,9 @@ export function isRateLimit(err: unknown): boolean {
 
 /** #214 — a Cc fetch that failed because Gmail no longer has the message
  *  (404: it was deleted, or the id was never real) should stamp
- *  `ccFetched` so the Link popup stops asking every time it opens; a
+ *  `ccFetched` so the link panel stops asking every time it opens; a
  *  transient failure (network blip, 5xx, rate limit, an expired token)
- *  should not, so the next popup open retries it. Same DB-free module as
+ *  should not, so the next panel open retries it. Same DB-free module as
  *  isRateLimit, for the same reason: the pure test harness can exercise it
  *  without a network call. */
 export function shouldStampCcFetched(err: unknown): boolean {

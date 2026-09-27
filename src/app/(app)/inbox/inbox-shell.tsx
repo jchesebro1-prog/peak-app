@@ -575,14 +575,16 @@ export default function InboxShell({
       // link-type/link-record pickers in thread-reader.tsx) and the list's
       // scope dropdown are native <select>s — arrow keys are how you cycle
       // their options, and without this guard preventDefault() below would
-      // swap the open thread instead of changing the dropdown.
+      // swap the open thread instead of changing the dropdown. #214 sidebar
+      // — the reader sidebar's link panel is skipped too: switching threads
+      // from inside it would unmount link mode mid-edit.
       if (
         el &&
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
           el.tagName === "SELECT" ||
           el.isContentEditable ||
-          el.closest('[role="dialog"], [role="menu"]'))
+          el.closest('[role="dialog"], [role="menu"], [data-link-panel]'))
       )
         return;
       const ids = list.rows.filter((r) => !r.isDraft).map((r) => r.id);
@@ -1117,7 +1119,7 @@ export default function InboxShell({
       />
 
       {/* ===== reading pane (desktop) ===== */}
-      {/* minWidth 640: the reader now hosts a 300px link sidebar (#96 §2)
+      {/* minWidth 640: the reader now hosts a 300px link sidebar (#96 §2; 380px in link mode)
           beside the conversation — side 238 + list 392 leave only ~330px
           at the 961px desktop breakpoint, so the pane holds a floor and the
           shell scrolls sideways rather than squeezing the reader unreadable. */}
