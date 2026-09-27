@@ -27867,6 +27867,21 @@ async function portal242IndexAsyncChecks(): Promise<void> {
     d242Invalidate();
     ok((await d242Index()) !== ix, "#242 index: invalidatePortalIndex forces a rebuild");
 
+    // Spec §1.3: an own spec sheet (no datasheet) counts as a datasheet.
+    const SPEC = fixtureId(242, "p-spec");
+    await d242MergeUpsert(SPEC, { desc: "Test242 Spec-sheet Part", category: "Rigging", unit: "ea", list: 30, cost: 12 });
+    registerFixture("catalog_parts", SPEC);
+    const ss = await d242CreateDoc({ kind: "specsheet", fileName: "s.pdf", contentType: "application/pdf", size: 10, blobKey: "part-docs/PD-t7-ss/s.pdf", sourceUrl: null, source: "upload", by: "Test" });
+    if (!ss) throw new Error("#242 index: fixture spec sheet failed to create");
+    registerFixture("part_documents", ss.id);
+    await d242Attach(ss.id, [SPEC], "Test");
+    registerFixture("part_document_links", d242LinkId(SPEC, ss.id));
+    d242Invalidate();
+    const ixS = await d242Index({ fresh: true });
+    const fSpec = await d242Facts(SPEC);
+    ok(ixS.entries.find((e) => e.key === SPEC)?.browsable === true && fSpec.hasDatasheet && fSpec.reason === "Browsable: has datasheet" && ixS.parts.get(SPEC)?.datasheetIds.includes(ss.id) === true,
+      "#242 index: a part whose only document is an own spec sheet is browsable (has datasheet)");
+
     const fImg = await d242Facts(IMG);
     ok(fImg.hasVisibleImage && fImg.reason === "Browsable: has image", "#242 facts: portalFactsForSku reads the index for a listed part");
     ok((await d242Facts(HIDE)).reason === "Hidden from customers", "#242 facts: a hidden part reads Hidden from customers");
@@ -27942,6 +27957,8 @@ async function portal242IndexAsyncChecks(): Promise<void> {
 
     const sv = JSON.stringify(d242SellView(p));
     ok(!sv.includes("\"cost\"") && !sv.includes("\"sections\"") && !sv.includes("margin") && !sv.includes("silver"), "#242 cart: sellView carries no cost, sections, margin or tier name");
+    ok(!sv.includes("\"pct\"") && !sv.includes("\"unknown\"") && JSON.stringify(JSON.parse(sv).freight) === JSON.stringify({ amount: p.freight.amount, miles: null }),
+      "#242 cart: sellView freight is amount + miles only — no pct or unknown (cost could be backed out)");
   } finally {
     d242Invalidate();
     await removeCustomer(CO);

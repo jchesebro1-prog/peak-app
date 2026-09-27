@@ -9,9 +9,13 @@ import { createFixture, getFixture, removeFixture, updateFixture } from "@/lib/s
 import { fixturePairs, fixtureRef } from "@/lib/part-docs/assembly-graph";
 import { setOwnDatasheet, syncAccessoryLinks } from "@/lib/stores/part-accessory-links";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
+import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import type { PartHit } from "./fixture-form";
 
 const revalidateConsumers = () => {
+  // #242: fixtures and the accessory graph feed the portal catalog index —
+  // drop this process's cached copy (other instances converge within its TTL).
+  invalidatePortalIndex();
   // Grid checked (fix wave 1, I1/M4): no Grid route reads live fixtures
   // today. Grid's Scope panel wires the same ScopeInputsPanel fixture-picker
   // Quick Design uses, but scope-panel.tsx never passes it a fixtureAssemblies
@@ -99,6 +103,7 @@ export async function setOwnDatasheetAction(parentSku: string, accessorySku: str
   // Only a pair missing from the graph is an error; setting the flag to the
   // value it already has is a no-op success (final fix wave, M1).
   if (!linked) return { ok: false, error: "Save the assembly first — this part isn't linked to the fixture yet." };
+  invalidatePortalIndex(); // coverage (a customer-visible datasheet) changed
   revalidatePath("/design/assemblies");
   revalidatePath("/catalog/documents");
   return { ok: true };

@@ -308,13 +308,29 @@ export async function priceCart(cart: PortalCart, ctx: PortalPricingContext): Pr
   };
 }
 
+/**
+ * What a customer may see of a priced cart. Freight is amount + miles ONLY:
+ * the amount is `pct` × the section's COST base (Estimator math, spec §8.1),
+ * so exposing the % (or the at-cap "unknown" flag that pins it) would let a
+ * customer back out cost and margin. `pct`/`unknown` stay on the staff-side
+ * `PricedCart`.
+ */
+export type CustomerQuoteView = {
+  lines: SellLine[];
+  subtotal: number;
+  freight: { amount: number; miles: number | null };
+  total: number;
+  mode: "firm" | "review";
+  reason: string | null;
+};
+
 /** The customer-facing view: an explicit whitelist, so nothing staff-side
- *  (sections, cost) can ride along by accident. */
-export function sellView(p: PricedCart): Omit<PricedCart, "sections"> {
+ *  (sections, cost, freight %) can ride along by accident. */
+export function sellView(p: PricedCart): CustomerQuoteView {
   return {
     lines: p.lines.map((l) => ({ ...l })),
     subtotal: p.subtotal,
-    freight: { ...p.freight },
+    freight: { amount: p.freight.amount, miles: p.freight.miles },
     total: p.total,
     mode: p.mode,
     reason: p.reason,

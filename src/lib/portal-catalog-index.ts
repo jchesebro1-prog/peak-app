@@ -170,14 +170,18 @@ async function buildIndex(): Promise<Built> {
     const imageIds = (images.get(p.sku) ?? [])
       .filter((r) => !r.hidden && !!state.index.docsById.get(r.id)?.blobKey)
       .map((r) => r.id);
-    // "Has a datasheet" for the browse rule = one a customer can actually
-    // open, own or covered by a parent's — a "not needed" mark satisfies the
-    // staff slot but gives the customer nothing to read.
-    const ds = slotCoverage(state.index, p.sku, "datasheet").state;
+    // "Has a datasheet" for the browse rule (spec §1.3) = a document a
+    // customer can actually open in EITHER slot (datasheet or spec sheet),
+    // own or covered by a parent's — a "not needed" mark satisfies the staff
+    // slot but gives the customer nothing to read.
+    const hasDatasheet = DOC_SLOT_KINDS.some((kind) => {
+      const st = slotCoverage(state.index, p.sku, kind).state;
+      return st === "own" || st === "covered";
+    });
     const f: VisibilityFacts = {
       visibility,
       hasVisibleImage: imageIds.length > 0,
-      hasDatasheet: ds === "own" || ds === "covered",
+      hasDatasheet,
       quoteCount: counts.get(p.sku) ?? 0,
     };
     facts.set(p.sku, f);
