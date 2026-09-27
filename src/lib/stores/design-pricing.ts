@@ -6,7 +6,7 @@ import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 import { quickDesignPrice, type QuickDesignPrice, type QuickRates } from "@/lib/design/equipment-pricing";
 import { addToQuotesGuard } from "@/lib/design/scope-targets";
 import type { DesignRecordLike } from "@/app/(app)/design/quick/engine";
-import { num } from "@/lib/stores/pricing";
+import { loadWireLaborRules, num } from "@/lib/stores/pricing";
 import { createDesign, getDesign, updateDesign, type DesignRecord } from "@/lib/stores/designs";
 
 /**
@@ -51,14 +51,15 @@ export async function loadDesignPricing(
   return { table: buildEquipmentPriceTable(map, ctx), fixturePrices: fixturePricesFrom(fixtureIds, ctx) };
 }
 
-/** The install / freight / contingency percentages Quick Design totals with (its page reads the same keys). */
+/** The pricing-rule percentages and the wire/labor rules Quick Design totals with (its page reads the same keys). */
 async function quickRates(): Promise<QuickRates> {
-  const [installPct, freightPct, contingencyPct] = await Promise.all([
+  const [installPct, freightPct, contingencyPct, rules] = await Promise.all([
     num("system.installPct", 18),
     num("system.freightPct", 5),
     num("system.contingencyPct", 10),
+    loadWireLaborRules(),
   ]);
-  return { installPct, freightPct, contingencyPct };
+  return { installPct, freightPct, contingencyPct, rules };
 }
 
 /** The server's own price for one Quick design — needs-a-part count AND

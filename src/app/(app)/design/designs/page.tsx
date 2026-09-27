@@ -6,6 +6,7 @@ import { activeUsers, reviewers } from "@/lib/users";
 import { tasksForDesign } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { loadEquipmentPriceTable } from "@/lib/stores/equipment-map";
+import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
 import DesignClient from "./design-client";
 import "./design.css";
@@ -29,13 +30,14 @@ export default async function Page({
   const user = await requireUser();
   const sp = await searchParams;
 
-  const [designs, engagements, roster, prices, reviewerRows, templateSets] = await Promise.all([
+  const [designs, engagements, roster, prices, reviewerRows, templateSets, wireLabor] = await Promise.all([
     getAllDesigns(),
     allEngagements(),
     activeUsers(),
     loadEquipmentPriceTable(),
     reviewers(),
     taskTemplateSetsFor("design"),
+    loadWireLaborRules(),
   ]);
   // D149/#118 — the selected design's rows from the shared tasks collection
   // (tasks.ts's designId pointer, added alongside this feature — no design
@@ -65,6 +67,7 @@ export default async function Page({
       selectedId={sp.id || null}
       roster={roster.map((u) => ({ name: u.name, initials: u.initials, color: u.color }))}
       prices={prices}
+      wireLabor={wireLabor}
       reviewerNames={reviewerRows.map((u) => u.name)}
       engagementsForDesign={engagementsForDesign}
       people={roster.map((u) => ({ id: u.id, name: u.name }))}

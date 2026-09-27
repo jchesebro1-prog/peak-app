@@ -27,6 +27,7 @@ import {
 } from "../quick/engine";
 import { tierDefsFor, tierSystems } from "@/lib/design/equipment-pricing";
 import type { EquipmentPriceTable } from "@/lib/design/equipment-map";
+import type { WireLaborRules } from "@/lib/design/wire-labor";
 import { designRefreshHint, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import { PlanSvg, buildPlan } from "../quick/plan-svg";
 import {
@@ -98,6 +99,7 @@ export default function DesignClient({
   selectedId,
   roster,
   prices,
+  wireLabor,
   reviewerNames,
   engagementsForDesign,
   people,
@@ -112,6 +114,7 @@ export default function DesignClient({
   selectedId: string | null;
   roster: RosterEntry[];
   prices: EquipmentPriceTable;
+  wireLabor: WireLaborRules;
   reviewerNames: string[];
   /** Reverse lookup (derived server-side, not stored) — every engagement, if any, this design feeds. */
   engagementsForDesign: Record<string, Array<{ id: string; name: string }>>;
@@ -252,7 +255,7 @@ export default function DesignClient({
     const td = TIERS.find((t) => t.key === tierKey) || TIERS[1];
     // The design's own saved line-set dial (fix wave 3), as Quick Design and the server price it.
     const defs = tierDefsFor(s, tierDefs);
-    const systems = tierSystems(C, s, tierKey, defs, prices);
+    const systems = tierSystems(C, s, tierKey, defs, prices, {}, wireLabor);
     const tot = tierTotals(systems, td, 0, 0, 0);
     const targets = targetsFromSystems(systems);
     const rows = systems
@@ -267,7 +270,7 @@ export default function DesignClient({
       }));
     const plan = buildPlan(s, gridSets(s, defs), C.electrics, accentHex);
     return { s, tierLabel: td.label, rows, matRev: tot.matRev, needsPart: needsPartCount(systems), plan };
-  }, [sel, tierDefs, prices, accentHex]);
+  }, [sel, tierDefs, prices, wireLabor, accentHex]);
 
   /* --------------------------------- styles --------------------------------- */
 

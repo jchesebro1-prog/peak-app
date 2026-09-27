@@ -205,7 +205,7 @@ export function EquipmentCard({
                   ) : none ? (
                     "Not included in this tier"
                   ) : (
-                    `${l.refDesc ?? l.ref ?? ""}${l.swapped ? " · swapped for this design" : ""}`
+                    `${l.refDesc ?? l.ref ?? ""}${l.swapped ? " · swapped for this design" : ""}${l.note ? ` · ${l.note}` : ""}`
                   )}
                 </div>
               </div>

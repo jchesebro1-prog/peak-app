@@ -17574,7 +17574,7 @@ import { compute as gemCompute1, defaultAState as gemDefault1, type AState as Ge
 import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintText as gemHintText1 } from "@/lib/design/equipment-legacy-hints";
 {
   const keys = gemRows1.map((r) => r.key);
-  ok(keys.length === 46 && new Set(keys).size === 46, `#211 T1: 46 unique equipment rows (got ${keys.length})`);
+  ok(keys.length === 51 && new Set(keys).size === 51, `#211 T1 + #231: 51 unique equipment rows — 46 equation rows + 5 Wire pull rows (got ${keys.length})`);
   ok(gemRows1.every((r) => r.key === `${r.system}:${r.itemKey}` && /^[a-z]+:[a-zA-Z]+$/.test(r.key)), "#211 T1: every key is system:itemKey");
   ok(gemRows1.every((r) => gemRowByKey1.get(r.key) === r), "#211 T1: the by-key index covers every row");
   const emitted = new Map<string, string>();
@@ -17594,12 +17594,12 @@ import { LEGACY_HINTS as gemHints1, legacyHintSkus as gemHintSkus1, legacyHintTe
       }
   const unknown = [...emitted.keys()].filter((k) => !gemRowByKey1.has(k));
   ok(unknown.length === 0, `#211 T1: every item compute() emits has an Equipment map row (unknown: ${unknown.join(", ") || "none"})`);
-  const never = keys.filter((k) => !emitted.has(k));
+  const never = keys.filter((k) => !gemRowByKey1.get(k)!.derived && !emitted.has(k));
   ok(never.length === 0, `#211 T1: every Equipment map row is emitted by some configuration (never: ${never.join(", ") || "none"})`);
   ok([...emitted].every(([k, desc]) => gemRowByKey1.get(k)?.label === desc), "#211 T1: each row's label is the equation's own item name");
   ok(gemRows1.filter((r) => r.place === "curtain").map((r) => r.itemKey).join(",") === "draw,legs,border,fullstage", "#211 T1: the four fabric drapes are the curtain rows");
   ok(gemRows1.filter((r) => ["controls", "acoustical", "pit"].includes(r.system)).every((r) => r.place === "none"), "#211 T1: Controls / Acoustical / Pit rows are never Auto-placed");
-  ok(keys.every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#211 T1: every row carries its old built-in figure as a 'was' hint");
+  ok(keys.filter((k) => !gemRowByKey1.get(k)!.derived).every((k) => gemHintText1(gemHints1[k]).startsWith("was ")), "#211 T1: every row carries its old built-in figure as a 'was' hint");
   ok(gemHintText1(gemHints1["rigging:electricHoist"]) === "was $48,000 / $60,000 / $78,000", `#211 T1: rigging hints carry the old tier multipliers (got ${gemHintText1(gemHints1["rigging:electricHoist"])})`);
   ok(gemHintText1(gemHints1["lighting:par"]) === "was $500 / $750 / $1,150", "#211 T1: lighting hints are the old TIER_SKUS figures");
   ok(gemHintText1(gemHints1["curtains:scenerytrack"]) === "was $3 per ft", "#211 T1: one figure prints once, with its unit");
@@ -17704,7 +17704,7 @@ const gemValueImports = (src: string): string[] =>
   const ctx = { parts, fixtures: new Map([[rack.id, rack]]), margin: 0.3 };
   const hints = { "lighting:par": { text: "was $500 / $750 / $1,150", skus: [] as string[] } };
   const empty = gemView3({}, ctx, hints);
-  ok(empty.length === 46 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#211 T3: an empty map shows every row as Needs a part");
+  ok(empty.length === 51 && empty.every((r) => r.status === "needs-part" && r.cells.every((c) => c.kind === "empty" && c.input === null)), "#211 T3: an empty map shows every row as Needs a part");
   ok(empty.find((r) => r.key === "lighting:par")!.hint === "was $500 / $750 / $1,150" && empty[0].systemLabel === "Rigging", "#211 T3: rows carry their 'was' hint and their group label");
   const view = gemView3({
     "lighting:par": { tiers: { good: { kind: "part", sku: "GEM-PAR" }, better: { kind: "part", sku: "GEM-GONE" }, best: { kind: "part", sku: "GEM-PAR" } }, updatedBy: "Jeff", updatedAt: 9 },
@@ -17719,7 +17719,7 @@ const gemValueImports = (src: string): string[] =>
   const subIn = sub.cells[2].input;
   ok(sub.status === "allowance" && sub.cells[2].confirmedBy === "Chris" && subIn?.kind === "allowance" && subIn.confirmed, "#211 T3: an allowance row shows who confirmed it and re-posts as confirmed");
   const s = gemSummary3(view);
-  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 44, "#211 T3: the summary counts rows by status");
+  ok(s.mapped === 1 && s.allowance === 1 && s["needs-part"] === 49, "#211 T3: the summary counts rows by status");
   const catalog = [
     { sku: "RB-EN-16", desc: "Encore velour 16oz", category: "Fabric" },
     { sku: "RB-CHAR-25", desc: "Charisma velour 25oz", category: "Fabric" },
@@ -22026,7 +22026,7 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
   ];
   const wrong = expected.filter(([k, l]) => L(k) !== l).map(([k]) => `${k}=${L(k)}`);
   ok(wrong.length === 0, `#233: the eleven relabels (wrong: ${wrong.join(", ") || "none"})`);
-  ok(!r233ByKey.has("controls:outputStation") && r233ByKey.get("lighting:cablePackage")?.system === "lighting" && r233ByKey.get("lighting:cablePackage")?.place === "lot" && r233Rows.length === 46,
+  ok(!r233ByKey.has("controls:outputStation") && r233ByKey.get("lighting:cablePackage")?.system === "lighting" && r233ByKey.get("lighting:cablePackage")?.place === "lot" && r233Rows.filter((r) => !r.derived).length === 46,
     "#233: Output station moved to Lighting as Cable Package (a lot row) — still 46 rows");
 
   // One source: compute() reads name AND unit from the vocabulary.
@@ -22281,4 +22281,76 @@ async function wireLabor231AsyncChecks(): Promise<void> {
   await P.setValue("wire.lighting.runs", 0);
   await P.setValue("labor.audio.pct", 18);
   ok(JSON.stringify(await P.loadWireLaborRules()) === JSON.stringify(wl231.defaultWireLaborRules()), "#231/#232: resetting restores the defaults (later suites see the defaults)");
+}
+
+/* --- #231 T2: Wire pull rows, the wire-pull step, and pricing through the Equipment map --- */
+import { EQUIPMENT_ROWS as wp231Rows, EQUIPMENT_ROW_BY_KEY as wp231ByKey } from "@/lib/design/equipment-vocab";
+import { compute as wp231Compute, defaultAState as wp231Default, tierDefsDefault as wp231TierDefs, withQtyOverride as wp231Ov, type AState as Wp231AState } from "@/app/(app)/design/quick/engine";
+import { tierSystems as wp231TierSystems, quickScreenPrice as wp231Screen, quickDesignNeedsPart as wp231Needs } from "@/lib/design/equipment-pricing";
+import { buildEquipmentPriceTable as wp231Table } from "@/lib/design/equipment-map";
+import { autoEstimateCards as wp231Cards, autoQuoteNeedsPart as wp231AutoNeeds, sellOnlyCards as wp231Sell } from "@/lib/design/auto-estimate";
+import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
+{
+  const WL = wl231;
+  const wireRows = wp231Rows.filter((r) => r.derived === "wirePull");
+  ok(wireRows.map((r) => r.key).join() === "rigging:wirePull,lighting:wirePull,controls:wirePull,audio:wirePull,video:wirePull" && wireRows.every((r) => r.label === WL.WIRE_PULL_LABEL && r.unit === "ft" && r.itemKey === WL.WIRE_PULL_ITEM),
+    "#231: one Wire pull row per wire system, in feet");
+  ok(wp231ByKey.get("controls:wirePull")!.place === "none" && wireRows.filter((r) => r.system !== "controls").every((r) => r.place === "lot"),
+    "#231: Auto lands a Wire pull as one lot marker (Controls is never Auto-placed)");
+  const stored: Record<string, unknown> = { "wire.lighting.runs": 2, "wire.rigging.runs": 1 };
+  const rules = WL.wireLaborRulesFrom((id) => stored[id]);
+  const base = wp231Default(0);
+  const s: Wp231AState = {
+    ...base, venue: "school", size: "medium", width: 40, depth: 30, grid: 24, wing: 12, ph: 20, rigType: "counterweight", tier: "better",
+    sys: { ...base.sys, rigging: true, curtains: false, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false },
+  };
+  const C = wp231Compute(s);
+  const stepped = WL.withWirePull(C.systems, WL.wireDimsOf(s), "better", rules);
+  const wire = (k: string) => stepped.find((x) => x.key === k)!.items.find((i) => i.key === `${k}:wirePull`);
+  ok(wire("lighting")?.qty === 161 && wire("lighting")?.unit === "ft" && wire("lighting")?.note === "House depth not entered — counted as 0 ft",
+    `#231: Lighting pulls (40 + 30 + 0) × 2 runs × 1.15 = 161 ft, noting the missing house depth (${wire("lighting")?.qty})`);
+  ok(wire("rigging")?.qty === 81 && !wire("audio") && !wire("controls"), "#231: Rigging 70 × 1 × 1.15 → 81 ft; 0 runs (Audio) and an off system (Controls) get no line");
+  ok(WL.withWirePull(C.systems, WL.wireDimsOf(s), "better", WL.defaultWireLaborRules()).every((x, i) => x === C.systems[i]), "#231: the default rules (0 runs everywhere) change nothing");
+  ok(WL.withWirePull(stepped, WL.wireDimsOf(s), "good", rules).find((x) => x.key === "lighting")!.items.filter((i) => i.key === "lighting:wirePull").map((i) => i.qty).join() === "140",
+    "#231: re-running the step replaces the line (Good: 140 ft)");
+  const parts = new Map([["WP-DMX", { sku: "WP-DMX", desc: "DMX cable", unit: "ft", cost: 1, list: 1.5, category: "Wire & Cable" }]]);
+  const ctx = { parts, fixtures: new Map(), margin: 0.3 };
+  const mapped = wp231Table({ "lighting:wirePull": { tiers: { good: { kind: "part", sku: "WP-DMX" } }, sameAll: true, updatedBy: "t", updatedAt: 1 } }, ctx);
+  const priced = wp231TierSystems(C, s, "better", wp231TierDefs(), mapped, {}, rules);
+  const pl = priced.find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:wirePull")!;
+  ok(pl.status === "part" && pl.price === 1.5 && pl.qty === 161 && pl.ref === "WP-DMX", "#231: the Wire pull row prices from its mapped per-ft part");
+  const rw = priced.find((x) => x.key === "rigging")!.items.find((i) => i.key === "rigging:wirePull")!;
+  ok(rw.status === "needs-part" && rw.price === 0, "#231: an unmapped Wire pull row is needs-a-part — never a fallback number (D310)");
+  const noneTable = wp231Table({ "rigging:wirePull": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "t", updatedAt: 1 } }, ctx);
+  const rn = wp231TierSystems(C, s, "better", wp231TierDefs(), noneTable, {}, rules).find((x) => x.key === "rigging")!.items.find((i) => i.key === "rigging:wirePull")!;
+  ok(rn.status !== "needs-part" && rn.price === 0 && rn.cost === 0, "#231 + #229: a Wire pull row set to Not included resolves at $0");
+  const ovS = { ...s, qtyOverrides: wp231Ov(s.qtyOverrides, "better", "lighting", "Wire pull", "200") };
+  ok(wp231TierSystems(wp231Compute(ovS), ovS, "better", wp231TierDefs(), mapped, {}, rules).find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:wirePull")!.qty === 200,
+    "#231: Quick Design's per-tier qty override edits the Wire pull footage");
+  const allAllow = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(wp231Rows.filter((r) => !r.derived).map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const qr0 = { installPct: 18, freightPct: 5, contingencyPct: 10 };
+  const qr1 = { ...qr0, rules };
+  const r0 = wp231Screen(s, wp231TierDefs(), allAllow, {}, qr0);
+  const r1 = wp231Screen(s, wp231TierDefs(), allAllow, {}, qr1);
+  ok(r0.needsPart === 0 && r1.needsPart === 2, `#231: with runs set, the unmapped Wire pull rows make a Quick design Incomplete (${r1.needsPart})`);
+  const rec = { tier: "better", config: { ...s } as unknown as Record<string, unknown> };
+  ok(wp231Needs(rec, allAllow, {}, rules) === 2 && wp231Needs(rec, allAllow, {}) === 0, "#231: the server's needs-a-part count reads the same rules");
+  const inputs = { ...wp231Inputs(s), sys: s.sys };
+  const est = { tierByScope: { rigging: "best" as const, lighting: "better" as const, audio: "better" as const }, overrides: {} };
+  const cards = wp231Cards(inputs, est, mapped, {}, rules);
+  const lw = cards.find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:wirePull")!;
+  const rwc = cards.find((c) => c.scope === "rigging")!.lines.find((l) => l.rowKey === "rigging:wirePull")!;
+  ok(lw.qty === 161 && lw.status === "part" && lw.total === 241.5 && lw.note === "House depth not entered — counted as 0 ft" && lw.place === "lot",
+    "#231: the Auto Lighting card carries the Wire pull at its tier, priced and noted");
+  ok(rwc.qty === 91 && rwc.status === "needs-part" && wp231AutoNeeds(cards, est) >= 1, "#231: Rigging at Best pulls 70 × 1 × 1.3 = 91 ft; unmapped, it counts toward the D322 quote gate");
+  ok(wp231Sell(cards).find((c) => c.scope === "lighting")!.lines.some((l) => l.rowKey === "lighting:wirePull" && !!l.note), "#231: the sell-only card keeps the note");
+  ok(!wp231Cards(inputs, est, mapped, {}).some((c) => c.lines.some((l) => l.rowKey.endsWith(":wirePull"))), "#231: the default rules → no Wire pull on any card");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadWireLaborRules()") && rd("src/app/(app)/design/grid/[id]/actions.ts").includes("loadWireLaborRules()") &&
+      (rd("src/lib/design/grid-auto-fill.ts").match(/loadWireLaborRules\(\)/g) || []).length === 3 && rd("src/lib/stores/design-pricing.ts").includes("loadWireLaborRules()") &&
+      rd("src/app/(app)/design/quick/page.tsx").includes("loadWireLaborRules()") && rd("src/app/(app)/design/designs/page.tsx").includes("loadWireLaborRules()"),
+    "#231: every server path that prices an estimate loads the wire rules");
 }

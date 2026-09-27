@@ -6,7 +6,7 @@ import { all as allCustomers } from "@/lib/stores/customers";
 import { list as catalogList } from "@/lib/stores/catalog";
 import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
-import { num } from "@/lib/stores/pricing";
+import { loadWireLaborRules, num } from "@/lib/stores/pricing";
 import { reviewers } from "@/lib/users";
 import { loadDesignPricing, pickedFixtureIds } from "@/lib/stores/design-pricing";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
@@ -36,7 +36,7 @@ export default async function Page({
   const sp = await searchParams;
   const designId = sp.design || null;
 
-  const [design, customers, installPct, freightPct, contingencyPct, reviewerRows, fixtureRecords, catalogRows] =
+  const [design, customers, installPct, freightPct, contingencyPct, reviewerRows, fixtureRecords, catalogRows, wireLabor] =
     await Promise.all([
       designId ? getDesign(designId) : Promise.resolve(null),
       allCustomers(),
@@ -46,6 +46,7 @@ export default async function Page({
       reviewers(),
       listFixtures(),
       catalogList(),
+      loadWireLaborRules(),
     ]);
   // Final review M1: a Grid (manual-layout) design is never opened in Quick
   // Design — its record has no `config`, and a save here would overwrite it.
@@ -91,7 +92,7 @@ export default async function Page({
         })),
       }))}
       prices={prices}
-      rates={{ installPct, freightPct, contingencyPct }}
+      rates={{ installPct, freightPct, contingencyPct, rules: wireLabor }}
       reviewerNames={reviewerRows.map((u) => u.name)}
       fixtureAssemblies={fixtureAssemblies}
       fixturePrices={fixturePrices}

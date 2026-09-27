@@ -28,6 +28,8 @@ export type EquipRowDef = {
   place: EquipPlace;
   search: string[];
   curtain?: CurtainRowType;
+  /** #231: emitted by the wire-pull step (wire-labor.ts withWirePull), not by compute(). */
+  derived?: "wirePull";
 };
 
 function row(
@@ -40,6 +42,11 @@ function row(
   curtain?: CurtainRowType
 ): EquipRowDef {
   return { key: `${system}:${itemKey}`, system, itemKey, label, unit, place, search, ...(curtain ? { curtain } : {}) };
+}
+
+/** #231: a wire system's "Wire pull" row — footage from venue size × runs × tier (wire-labor.ts). */
+function wireRow(system: SysKey, place: EquipPlace, search: string[]): EquipRowDef {
+  return { key: `${system}:wirePull`, system, itemKey: "wirePull", label: "Wire pull", unit: "ft", place, search, derived: "wirePull" };
 }
 
 export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
@@ -101,6 +108,13 @@ export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
   // Pit filler (Quick Design only)
   row("pit", "legged", "Legged pit filler deck", "sqft", "none", ["pit", "deck"]),
   row("pit", "clearspan", "Clear-span pit filler deck", "sqft", "none", ["pit", "deck"]),
+  // Wire pull (#231) — one per wire system. The Equipment map groups rows by
+  // system, so each lands at the end of its own system's group.
+  wireRow("rigging", "lot", ["wire rope", "cable"]),
+  wireRow("lighting", "lot", ["dmx", "cable", "wire"]),
+  wireRow("controls", "none", ["network", "cable", "wire"]),
+  wireRow("audio", "lot", ["speaker cable", "cable", "wire"]),
+  wireRow("video", "lot", ["sdi", "hdmi", "cable"]),
 ];
 
 export const EQUIPMENT_ROW_BY_KEY: ReadonlyMap<string, EquipRowDef> = new Map(EQUIPMENT_ROWS.map((r) => [r.key, r]));

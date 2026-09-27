@@ -1,6 +1,7 @@
 import { compute, defaultAState, type SysKey } from "@/app/(app)/design/quick/engine";
 import { getProject, replaceAutoPlacements, type GridProject } from "@/lib/stores/grid-projects";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
+import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { ensureGridSymbolsFor } from "@/lib/stores/grid-catalog";
 import { buildEquipmentPriceTable } from "./equipment-map";
 import { autoEstimateCards, autoQuoteNeedsPart, clampScopeInputs, priceOverrides } from "./auto-estimate";
@@ -39,8 +40,11 @@ export async function fillAutoScopes(projectId: string, optionId: string, scopes
   const sheetId = project.sheetIds[0];
   if (!sheetId) return { ok: false, error: "No plan sheet to fill yet." };
   const refs = overrideRefs(est);
-  const { map, ctx, catalogParts } = await loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds });
-  const cards = autoEstimateCards(inputs, est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx)).filter((c) =>
+  const [{ map, ctx, catalogParts }, rules] = await Promise.all([
+    loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds }),
+    loadWireLaborRules(),
+  ]);
+  const cards = autoEstimateCards(inputs, est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx), rules).filter((c) =>
     scopes.includes(c.scope)
   );
   const deviceSkus = new Set(
@@ -103,8 +107,8 @@ export async function loadAutoNeedsCtx(items: ReadonlyArray<AutoNeedsItem>): Pro
 export async function autoNeedsPart(project: GridProject, optionId: string, loaded?: AutoNeedsCtx): Promise<number> {
   const c = autoChoices({ project, optionId });
   if (!c) return 0;
-  const { map, ctx } = loaded ?? (await loadAutoNeedsCtx([{ project, optionId }]));
-  return autoQuoteNeedsPart(autoEstimateCards(c.inputs, c.est, buildEquipmentPriceTable(map, ctx), priceOverrides(c.est.overrides, ctx)), c.est);
+  const [{ map, ctx }, rules] = await Promise.all([loaded ? Promise.resolve(loaded) : loadAutoNeedsCtx([{ project, optionId }]), loadWireLaborRules()]);
+  return autoQuoteNeedsPart(autoEstimateCards(c.inputs, c.est, buildEquipmentPriceTable(map, ctx), priceOverrides(c.est.overrides, ctx), rules), c.est);
 }
 
 /**
@@ -120,11 +124,14 @@ export async function autoNeedsPartMany(
 ): Promise<Array<number | null>> {
   const isAuto = items.map((it) => autoChoices(it) !== null);
   if (!isAuto.some(Boolean)) return items.map(() => null);
-  const loaded = preloaded ?? (await loadAutoNeedsCtx(items.filter((_, i) => isAuto[i])));
+  const [loaded, rules] = await Promise.all([
+    preloaded ? Promise.resolve(preloaded) : loadAutoNeedsCtx(items.filter((_, i) => isAuto[i])),
+    loadWireLaborRules(),
+  ]);
   const table = buildEquipmentPriceTable(loaded.map, loaded.ctx);
   return items.map((it, i) => {
     if (!isAuto[i]) return null;
     const c = autoChoices(it)!;
-    return autoQuoteNeedsPart(autoEstimateCards(c.inputs, c.est, table, priceOverrides(c.est.overrides, loaded.ctx)), c.est);
+    return autoQuoteNeedsPart(autoEstimateCards(c.inputs, c.est, table, priceOverrides(c.est.overrides, loaded.ctx), rules), c.est);
   });
 }

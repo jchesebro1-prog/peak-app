@@ -32,7 +32,8 @@ import {
   type TierKey,
   type ViewKey,
 } from "./engine";
-import { fixtureOverridesFor, quickSaveConfig, tierDefsFor, tierSystems, tierSystemsBase } from "@/lib/design/equipment-pricing";
+import { fixtureOverridesFor, quickSaveConfig, tierDefsFor, tierSystems, tierSystemsBase, type QuickRates } from "@/lib/design/equipment-pricing";
+import { defaultWireLaborRules } from "@/lib/design/wire-labor";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
@@ -118,7 +119,7 @@ export default function QuickDesignClient({
   initialDesign: DesignRecord | null;
   customers: CustomerOpt[];
   prices: EquipmentPriceTable;
-  rates: { installPct: number; freightPct: number; contingencyPct: number };
+  rates: QuickRates;
   reviewerNames: string[];
   fixtureAssemblies: Array<{ id: string; name: string }>;
   /** Server-priced fixture picks, keyed by fixture id (priceCell on an
@@ -193,6 +194,8 @@ export default function QuickDesignClient({
   const laborPct = rates.installPct / 100;
   const freightPct = rates.freightPct / 100;
   const contPct = (a.contingency ?? 0) / 100;
+  /** Wire-pull + system-labor rules (#231/#232), read on the server. */
+  const wireLabor = useMemo(() => rates.rules ?? defaultWireLaborRules(), [rates.rules]);
 
   /** A per-design fixture pick (Assembly Builder) overrides that fixture row's
    *  Equipment map price (#211) — the item keeps the equation's name. The
@@ -206,8 +209,8 @@ export default function QuickDesignClient({
   const selKey = (a.tier || "better") as TierKey;
   const selTd = TIERS.find((t) => t.key === selKey) || TIERS[1];
   const selBase = useMemo(
-    () => tierSystemsBase(C, a, selKey, tierDefs, prices, fixtureOverrides),
-    [C, a, selKey, tierDefs, prices, fixtureOverrides]
+    () => tierSystemsBase(C, a, selKey, tierDefs, prices, fixtureOverrides, wireLabor),
+    [C, a, selKey, tierDefs, prices, fixtureOverrides, wireLabor]
   );
   // The same step the server prices with (quickScreenPrice / quickDesignPrice).
   const selSystems = useMemo(() => applyOverrides(selBase, a, selKey), [selBase, a, selKey]);
@@ -221,14 +224,14 @@ export default function QuickDesignClient({
   const tierCards = useMemo(
     () =>
       TIERS.map((td) => {
-        const sys = tierSystems(C, a, td.key, tierDefs, prices, fixtureOverrides);
+        const sys = tierSystems(C, a, td.key, tierDefs, prices, fixtureOverrides, wireLabor);
         return {
           td,
           tot: tierTotals(sys, td, laborPct, freightPct, contPct),
           needsPart: needsPartCount(sys),
         };
       }),
-    [C, a, tierDefs, prices, fixtureOverrides, laborPct, freightPct, contPct]
+    [C, a, tierDefs, prices, fixtureOverrides, wireLabor, laborPct, freightPct, contPct]
   );
 
   /** A breakdown row's amount (#211 final review): "Incomplete" while the
@@ -258,7 +261,7 @@ export default function QuickDesignClient({
     const s = a;
     const td = TIERS.find((t) => t.key === (s.tier || "better")) || TIERS[1];
     const Cx = compute(s);
-    const sysForTot = tierSystems(Cx, s, td.key, tierDefs, prices, fixtureOverrides);
+    const sysForTot = tierSystems(Cx, s, td.key, tierDefs, prices, fixtureOverrides, wireLabor);
     const tot = tierTotals(sysForTot, td, laborPct, freightPct, (s.contingency ?? 0) / 100);
     const v = venueOf(s);
     const sysNames = Cx.systems.filter((x) => x.on).map((x) => SHORT[x.key] || x.name);
@@ -510,7 +513,7 @@ export default function QuickDesignClient({
         const upLabel = it.status === "needs-part" ? "Needs a part" : it.status === "none" ? "Not included" : up > 0 && up < 10 ? "$" + up.toFixed(2) : moneyRound(up);
         // An allowance's refDesc is just the row's own name (no distinct
         // product) — the " · Allowance" suffix already says it once (#211 M3).
-        const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "");
+        const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "") + (it.note ? ` · ${it.note}` : "");
         return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext };
       });
       return { key: x.key, name: x.name, dot: x.dot, sub, rows, open: !!bomOpen[x.key] };

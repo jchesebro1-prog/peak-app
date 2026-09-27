@@ -65,6 +65,8 @@ export type BomItem = {
   refDesc?: string;
   /** Curtain drapes only: the geometry the per-drape cost is computed from. */
   drape?: DrapeGeom;
+  /** #231: the line's caveat (e.g. a venue dimension counted as 0), shown next to the item. */
+  note?: string;
 };
 
 export type SystemBlock = {

@@ -8,7 +8,7 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
 import { sitesForCompany } from "@/lib/identity/sites";
-import { num } from "@/lib/stores/pricing";
+import { loadWireLaborRules, num } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
@@ -78,7 +78,7 @@ export default async function GridEditorPage({
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, laborHoursPerDevice, settings, linesetDesigns] = await Promise.all([
+  const [sheets, catalog, gridSymbols, laborHoursPerDevice, settings, linesetDesigns, wireLabor] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
@@ -89,6 +89,7 @@ export default async function GridEditorPage({
     num("grid.laborHoursPerDevice", 0.5),
     getSettings(),
     listDesigns({ kind: "lineset" }),
+    loadWireLaborRules(),
   ]);
   // Beta group resolution (Task 6, punch #39) — server-side only; the
   // editor receives each part's already-resolved `group` and never sees
@@ -115,7 +116,7 @@ export default async function GridEditorPage({
   const { map: equipMap, ctx: equipCtx } = await loadEquipPriceCtx({ catalog });
   const equipTable = buildEquipmentPriceTable(equipMap, equipCtx);
   const scopeTargets = project.scopeInputs
-    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable))
+    ? scopeTargetsByTier(project.scopeInputs, (s, t) => tierSystems(compute(s), s, t, tierDefsDefault(), equipTable, {}, wireLabor))
     : null;
 
   // Auto designs (#211): the chosen cards, priced server-side; the editor
@@ -127,7 +128,7 @@ export default async function GridEditorPage({
   const optionAutoEstimate = autoEstimateFor(project.autoEstimate, activeOptionId, defaultOptionId(project));
   const autoCards =
     optionAutoEstimate && project.scopeInputs
-      ? autoEstimateCards(project.scopeInputs, optionAutoEstimate, equipTable, priceOverrides(optionAutoEstimate.overrides, equipCtx))
+      ? autoEstimateCards(project.scopeInputs, optionAutoEstimate, equipTable, priceOverrides(optionAutoEstimate.overrides, equipCtx), wireLabor)
       : null;
   const auto =
     autoCards && optionAutoEstimate

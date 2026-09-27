@@ -20,6 +20,7 @@ import {
 import { EQUIPMENT_ROW_BY_KEY, type EquipPlace } from "./equipment-vocab";
 import { priceCell, sellFromCost, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
 import { applyEquipment } from "./equipment-pricing";
+import { defaultWireLaborRules, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
 import { fabricAreaRateOf } from "./curtain-pricing";
 import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
@@ -51,6 +52,8 @@ export type AutoLine = {
   total: number;
   swapped: boolean;
   drape?: DrapeGeom;
+  /** #231: the line's caveat (a venue dimension counted as 0). */
+  note?: string;
 };
 export type AutoCard = { scope: SysKey; tier: TierKey; lines: AutoLine[]; total: number; needsPart: number; allowances: number };
 export type SellLine = Omit<AutoLine, "unitCost">;
@@ -84,7 +87,9 @@ export function autoEstimateCards(
   rawInputs: QuickScopeInputs,
   est: AutoEstimate,
   table: EquipmentPriceTable,
-  overridePrices: Record<string, UnitPrice>
+  overridePrices: Record<string, UnitPrice>,
+  /** Wire-pull rules (#231) — the defaults (0 runs) add nothing. */
+  rules: WireLaborRules = defaultWireLaborRules()
 ): AutoCard[] {
   const inputs = clampScopeInputs(rawInputs);
   const s: AState = { ...defaultAState(0), ...inputs, tier: "better" };
@@ -95,7 +100,8 @@ export function autoEstimateCards(
     const sys = C.systems.find((x) => x.key === scope);
     if (!sys) continue;
     const tier = est.tierByScope[scope] ?? "better";
-    const [priced] = applyEquipment([sys], tier, table, overridePrices);
+    const [sized] = withWirePull([sys], wireDimsOf(s), tier, rules);
+    const [priced] = applyEquipment([sized], tier, table, overridePrices);
     const lines: AutoLine[] = [];
     for (const it of priced.items) {
       if (it.qty <= 0) continue;
@@ -123,6 +129,7 @@ export function autoEstimateCards(
         total: needs ? 0 : round2(qty * it.price),
         swapped: !!(o?.sku || o?.assemblyId),
         ...(it.drape ? { drape: it.drape } : {}),
+        ...(it.note ? { note: it.note } : {}),
       });
     }
     cards.push({
@@ -170,6 +177,7 @@ function sellLine(l: AutoLine): SellLine {
     total: l.total,
     swapped: l.swapped,
     ...(l.drape ? { drape: l.drape } : {}),
+    ...(l.note ? { note: l.note } : {}),
   };
 }
 

@@ -67,7 +67,7 @@ import { autoEstimateFor, mergeScopeEstimate, overrideRefs, sanitizeAutoEstimate
 import { buildEquipmentPriceTable, isTierKey, sellFromCost } from "@/lib/design/equipment-map";
 import { loadEquipPriceCtx } from "@/lib/stores/equipment-map";
 import { listFixtures } from "@/lib/stores/fixtures";
-import { getCatalogRates } from "@/lib/stores/pricing";
+import { getCatalogRates, loadWireLaborRules } from "@/lib/stores/pricing";
 import { fixtureSkus, resolveFixture } from "@/lib/fixture-assemblies";
 import { searchCatalog } from "@/app/(app)/estimator/actions";
 import { EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
@@ -165,8 +165,11 @@ export async function previewAutoEstimateAction(input: {
   if (!input?.inputs) return { ok: false, error: "Missing venue inputs." };
   const est = sanitizeAutoEstimate(input.estimate);
   const refs = overrideRefs(est);
-  const { map, ctx } = await loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds });
-  const cards = autoEstimateCards(clampScopeInputs(input.inputs), est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx));
+  const [{ map, ctx }, rules] = await Promise.all([
+    loadEquipPriceCtx({ extraSkus: refs.skus, extraFixtureIds: refs.assemblyIds }),
+    loadWireLaborRules(),
+  ]);
+  const cards = autoEstimateCards(clampScopeInputs(input.inputs), est, buildEquipmentPriceTable(map, ctx), priceOverrides(est.overrides, ctx), rules);
   return { ok: true, cards: sellOnlyCards(cards) };
 }
 

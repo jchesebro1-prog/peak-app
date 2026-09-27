@@ -19,7 +19,7 @@
  * wireLaborRulesFrom() here is the one sanitizer. An unset labor % takes the
  * stored flat install % (LEGACY_INSTALL_PCT_ID), else 18.
  */
-import type { SysKey, TierKey } from "@/app/(app)/design/quick/engine";
+import type { BomItem, SysKey, SystemBlock, TierKey } from "@/app/(app)/design/quick/engine";
 
 /* -------------------------------- the rules -------------------------------- */
 
@@ -182,6 +182,31 @@ export function wirePullNote(missing: readonly WireDimKey[]): string | undefined
   const names = missing.map((k) => DIM_LABEL[k]);
   const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
   return `${list} not entered — counted as 0 ft`;
+}
+
+/**
+ * The wire-pull step (#231) — a QUANTITY step, like scaleSets. Each wire
+ * system that is on gets one "Wire pull" item (feet, no dollars) when its
+ * rule yields footage, replacing any it already had. Runs between line-set
+ * scaling and map pricing. A system it doesn't touch comes back as the same
+ * object.
+ */
+export function withWirePull(
+  systems: SystemBlock[],
+  dims: WireDims,
+  tier: TierKey | null | undefined,
+  rules: WireLaborRules
+): SystemBlock[] {
+  return systems.map((sys) => {
+    if (!isWireSystem(sys.key)) return sys;
+    const key = wirePullKey(sys.key);
+    const kept = sys.items.filter((it) => it.key !== key);
+    const { feet, missing } = sys.on ? wirePullFeet(dims, rules.wire[sys.key], tier) : { feet: 0, missing: [] as WireDimKey[] };
+    if (!(feet > 0)) return kept.length === sys.items.length ? sys : { ...sys, items: kept };
+    const note = wirePullNote(missing);
+    const item: BomItem = { key, desc: WIRE_PULL_LABEL, unit: "ft", qty: feet, cost: 0, price: 0, ...(note ? { note } : {}) };
+    return { ...sys, items: [...kept, item] };
+  });
 }
 
 /* ---------------------------------- labor ---------------------------------- */

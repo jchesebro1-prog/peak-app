@@ -31,6 +31,7 @@ import {
 } from "@/app/(app)/design/quick/engine";
 import { sellFromCost, type EquipmentPriceTable, type UnitPrice } from "./equipment-map";
 import { needsPartCount } from "./scope-targets";
+import { defaultWireLaborRules, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
 
 /** One drape's make-it cost at a fabric's flat $/sq ft sewn (making included, #227) — the shared model (curtain-pricing.ts). */
 export function drapeUnitCost(drape: DrapeGeom, areaRate: number): number {
@@ -87,28 +88,32 @@ export function applyEquipment(
   });
 }
 
-/** The BOM's base rows for a tier: line-set scaling → map pricing (no qty overrides). */
+/** The BOM's base rows for a tier: line-set scaling → wire pull (#231) → map pricing (no qty overrides). */
 export function tierSystemsBase(
   C: ComputeResult,
   s: AState,
   tierKey: TierKey,
   tierDefs: TierDefs,
   table: EquipmentPriceTable,
-  overrides: Record<string, UnitPrice> = {}
+  overrides: Record<string, UnitPrice> = {},
+  /** Wire-pull rules (#231) — the defaults (0 runs) add nothing. */
+  rules: WireLaborRules = defaultWireLaborRules()
 ): SystemBlock[] {
-  return applyEquipment(scaleSets(C.systems, C, tierKey, tierDefs), tierKey, table, overrides);
+  const sized = withWirePull(scaleSets(C.systems, C, tierKey, tierDefs), wireDimsOf(s), tierKey, rules);
+  return applyEquipment(sized, tierKey, table, overrides);
 }
 
-/** The full per-tier pipeline: line-set scaling → map pricing → the tier's qty overrides. */
+/** The full per-tier pipeline: line-set scaling → wire pull → map pricing → the tier's qty overrides. */
 export function tierSystems(
   C: ComputeResult,
   s: AState,
   tierKey: TierKey,
   tierDefs: TierDefs,
   table: EquipmentPriceTable,
-  overrides: Record<string, UnitPrice> = {}
+  overrides: Record<string, UnitPrice> = {},
+  rules: WireLaborRules = defaultWireLaborRules()
 ): SystemBlock[] {
-  return applyOverrides(tierSystemsBase(C, s, tierKey, tierDefs, table, overrides), s, tierKey);
+  return applyOverrides(tierSystemsBase(C, s, tierKey, tierDefs, table, overrides, rules), s, tierKey);
 }
 
 /**
@@ -135,7 +140,13 @@ export function fixtureOverridesFor(
 const TIER_KEYS: readonly TierKey[] = ["good", "better", "best"];
 
 /** The pricing-rule percentages a Quick Design total uses (Settings → system.*Pct). */
-export type QuickRates = { installPct: number; freightPct: number; contingencyPct: number };
+export type QuickRates = {
+  installPct: number;
+  freightPct: number;
+  contingencyPct: number;
+  /** Wire-pull + system-labor rules (#231/#232); absent = the defaults. */
+  rules?: WireLaborRules;
+};
 
 /** A Quick design's server-derived price (#211 D319/D323). */
 export type QuickDesignPrice = { needsPart: number; budget: number };
@@ -181,7 +192,7 @@ export function quickScreenPrice(
 ): QuickDesignPrice {
   const tier = (a.tier || "better") as TierKey;
   const td = TIERS.find((t) => t.key === tier) || TIERS[1];
-  const base = tierSystemsBase(compute(a), a, tier, tierDefs, table, fixtureOverridesFor(a.fixtureAssemblies, fixturePrices));
+  const base = tierSystemsBase(compute(a), a, tier, tierDefs, table, fixtureOverridesFor(a.fixtureAssemblies, fixturePrices), rates.rules ?? defaultWireLaborRules());
   const systems = applyOverrides(base, a, tier);
   const tot = tierTotals(systems, td, rates.installPct / 100, rates.freightPct / 100, (a.contingency ?? 0) / 100);
   return { needsPart: needsPartCount(systems), budget: Number.isFinite(tot.grand) ? Math.round(tot.grand) : 0 };
@@ -225,11 +236,12 @@ export function quickDesignPrice(
   }
 }
 
-/** The needs-a-part half of quickDesignPrice (D319). */
+/** The needs-a-part half of quickDesignPrice (D319) — with the wire rules when the caller has them (#231). */
 export function quickDesignNeedsPart(
   d: DesignRecordLike,
   table: EquipmentPriceTable,
-  fixturePrices: Record<string, UnitPrice>
+  fixturePrices: Record<string, UnitPrice>,
+  rules?: WireLaborRules
 ): number {
-  return quickDesignPrice(d, table, fixturePrices, { installPct: 0, freightPct: 0, contingencyPct: 0 }).needsPart;
+  return quickDesignPrice(d, table, fixturePrices, { installPct: 0, freightPct: 0, contingencyPct: 0, rules }).needsPart;
 }
