@@ -10528,6 +10528,7 @@ seeded()
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   .then(() => tasks215AsyncChecks())
+  .then(() => calendarTasks215AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -20612,4 +20613,55 @@ import type { Assignment as Assignment215 } from "@/lib/stores/assignments";
   const ct215 = readFileSync(join(process.cwd(), "src/lib/calendar-tasks.ts"), "utf8");
   const ctImports215 = [...ct215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
   ok(ctImports215.length > 0 && ctImports215.every((m) => !!m[1]), "#215 calendar-tasks.ts imports types only");
+}
+
+/* ============ #215 — /calendar tasks (loader + wiring) ============ */
+async function calendarTasks215AsyncChecks(): Promise<void> {
+  const { loadCalendarTasks } = await import("../src/lib/calendar-tasks-load");
+  const { createAssignment, setAssignmentDone } = await import("../src/lib/stores/assignments");
+  const { setTaskStatus } = await import("../src/lib/stores/tasks");
+  const roster = await activeUsers();
+  ok(roster.length >= 2, "#215 calendar setup: the scratch roster has two active users");
+  if (roster.length < 2) return;
+  const [a, b] = roster;
+  const by = { id: "harness", name: "Test Harness" };
+  const tA = await createTask({ title: "#215 cal A", assigneeUserId: a.id, assigneeName: a.name, dueAt: Date.now() + 86_400_000 }, by);
+  registerFixture("tasks", tA.id);
+  const tB = await createTask({ title: "#215 cal B", assigneeUserId: b.id, assigneeName: b.name }, by);
+  registerFixture("tasks", tB.id);
+  const asA = await createAssignment({ title: "#215 asg A", assignee: a.name, createdBy: by.name });
+  registerFixture("assignments", asA.id);
+  const asB = await createAssignment({ title: "#215 asg B", assignee: b.name, createdBy: by.name });
+  registerFixture("assignments", asB.id);
+  const ids = new Set([tA.id, tB.id, asA.id, asB.id]);
+  const meA = { id: a.id, name: a.name };
+  const pick = async (everyone: boolean) => (await loadCalendarTasks(meA, everyone)).filter((x) => ids.has(x.id));
+
+  const mine = await pick(false);
+  ok(mine.map((x) => x.id).sort().join() === [tA.id, asA.id].sort().join(), "#215 loader: mine = my task + my assignment");
+  const every = await pick(true);
+  ok(every.length === 4 && every.every((x) => !!x.assigneeInitials || !x.assigneeName), "#215 loader: everyone = all four, with initials");
+  await setTaskStatus(tA.id, "done");
+  ok(!(await pick(false)).some((x) => x.id === tA.id), "#215 loader: a completed task leaves the calendar");
+  await setAssignmentDone(asA.id, true, "app");
+  ok(!(await pick(false)).some((x) => x.id === asA.id), "#215 loader: a completed assignment leaves the calendar");
+}
+
+{
+  const rd215 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const noStoreImport215 = (src: string) =>
+    !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/calendar-tasks-load"|lib\/inbox-task-write")/m.test(src);
+  const chip = rd215("src/app/(app)/calendar/task-chip.tsx");
+  const cal = rd215("src/app/(app)/calendar/calendar-client.tsx");
+  ok(chip.startsWith('"use client"') && noStoreImport215(chip) && noStoreImport215(cal), "#215 calendar client components import no store, db or loader");
+  const acts = rd215("src/app/(app)/calendar/task-actions.ts");
+  ok(acts.startsWith('"use server"') && (acts.match(/await requireUser\(\)/g) || []).length === 2, "#215 both calendar task actions require a signed-in user");
+  const page = rd215("src/app/(app)/calendar/page.tsx");
+  ok(
+    page.includes('one(sp.tasks) === "all"') && page.includes("loadCalendarTasks(") && page.includes("tasks={calendarTasks}") && page.includes("tasksEveryone={tasksEveryone}"),
+    "#215 /calendar loads tasks (mine; ?tasks=all for everyone) and passes them down"
+  );
+  ok((cal.match(/\$\{tasksQs\}/g) || []).length >= 7, "#215 every calendar nav link keeps the ?tasks=all choice");
+  ok(cal.includes("placeTasks(") && cal.includes("<TaskChip") && cal.includes("renderTasks(k, 3)"), "#215 the calendar places tasks and renders chips in month cells and the task strip");
+  ok(chip.includes("<ConfirmButton") && chip.includes("completeCalendarTaskAction(") && chip.includes("deleteCalendarTaskAction("), "#215 a chip completes via checkbox and deletes through the confirm button");
 }

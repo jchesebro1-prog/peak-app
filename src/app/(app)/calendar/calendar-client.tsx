@@ -6,6 +6,8 @@ import type { AgendaItem } from "@/lib/agenda";
 import EventModal, { type EventModalTarget } from "./event-modal";
 import CalendarFilterRail from "./calendar-filter-rail";
 import type { CalendarConnectionView } from "../calendar-actions";
+import { groupPlacedByDay, placeTasks, type CalendarTaskItem, type PlacedTask } from "@/lib/calendar-tasks";
+import TaskChip from "./task-chip";
 
 /**
  * Full-page calendar (S13 / D81, extended to day/week in the S13
@@ -116,6 +118,8 @@ export default function CalendarClient({
   gmailOn,
   calendarConnections,
   canConnectCalendar,
+  tasks,
+  tasksEveryone,
 }: {
   view: "month" | "week" | "day";
   year: number;
@@ -132,6 +136,9 @@ export default function CalendarClient({
   /** Whether "Connect an account" can be offered at all (googleConfigured()
    *  server-side) — independent of gmailOn, see calendar-actions.ts. */
   canConnectCalendar: boolean;
+  /** #215 — open tasks + My Queue assignments (mine, or everyone's with ?tasks=all). */
+  tasks: CalendarTaskItem[];
+  tasksEveryone: boolean;
 }) {
   const mounted = useSyncExternalStore(
     emptySubscribe,
@@ -183,6 +190,49 @@ export default function CalendarClient({
     const t = new Date();
     return keyFor(t.getFullYear(), t.getMonth(), t.getDate());
   })();
+
+  // #215 — the visible day range. Tasks are placed in the browser's timezone
+  // (dayKeyOf's convention); the month grid and the task strip only render
+  // them once mounted, so SSR never disagrees about "today".
+  const keyOfDate = (d: Date) => keyFor(d.getFullYear(), d.getMonth(), d.getDate());
+  const rangeStart =
+    view === "month" ? keyOfDate(weeks[0][0]) : view === "week" ? keyOfDate(weekDays[0]) : keyOfDate(dayDate);
+  const rangeEnd =
+    view === "month"
+      ? keyOfDate(weeks[weeks.length - 1][6])
+      : view === "week"
+        ? keyOfDate(weekDays[6])
+        : keyOfDate(dayDate);
+  const tasksByDay = useMemo(
+    () => groupPlacedByDay(placeTasks(tasks, { today: todayKey, rangeStart, rangeEnd })),
+    [tasks, todayKey, rangeStart, rangeEnd]
+  );
+  const tasksQs = tasksEveryone ? "&tasks=all" : "";
+
+  function dayViewHref(k: string): string {
+    return `/calendar?view=day&date=${k}${tasksQs}`;
+  }
+
+  function renderTasks(k: string, cap: number) {
+    const list: PlacedTask[] = tasksByDay.get(k) || [];
+    if (!list.length) return null;
+    return (
+      <>
+        {list.slice(0, cap).map((p) => (
+          <TaskChip key={`${p.item.kind}:${p.item.id}`} placed={p} showAssignee={tasksEveryone} />
+        ))}
+        {list.length > cap && (
+          <Link
+            href={dayViewHref(k)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "block", fontSize: 10, color: "#5b3a8a", fontWeight: 600, textDecoration: "none", marginBottom: 3 }}
+          >
+            +{list.length - cap} more task{list.length - cap === 1 ? "" : "s"}
+          </Link>
+        )}
+      </>
+    );
+  }
 
   function openCreateAt(y: number, m0: number, d: number, hour: number | null) {
     if (!calendarOn) return;
@@ -288,25 +338,31 @@ export default function CalendarClient({
 
   function switchViewHref(v: "month" | "week" | "day"): string {
     const base = view === "month" ? new Date(year, month, 1) : new Date(dateY, dateM, dateD);
-    if (v === "month") return `/calendar?view=month&month=${monthParam(base.getFullYear(), base.getMonth())}`;
-    return `/calendar?view=${v}&date=${dateParam(base.getFullYear(), base.getMonth(), base.getDate())}`;
+    if (v === "month") return `/calendar?view=month&month=${monthParam(base.getFullYear(), base.getMonth())}${tasksQs}`;
+    return `/calendar?view=${v}&date=${dateParam(base.getFullYear(), base.getMonth(), base.getDate())}${tasksQs}`;
   }
 
   function prevHref(): string {
-    if (view === "month") return `/calendar?view=month&month=${monthParam(year, month - 1)}`;
+    if (view === "month") return `/calendar?view=month&month=${monthParam(year, month - 1)}${tasksQs}`;
     const step = view === "week" ? 7 : 1;
     const d = new Date(dateY, dateM, dateD - step);
-    return `/calendar?view=${view}&date=${dateParam(d.getFullYear(), d.getMonth(), d.getDate())}`;
+    return `/calendar?view=${view}&date=${dateParam(d.getFullYear(), d.getMonth(), d.getDate())}${tasksQs}`;
   }
 
   function nextHref(): string {
-    if (view === "month") return `/calendar?view=month&month=${monthParam(year, month + 1)}`;
+    if (view === "month") return `/calendar?view=month&month=${monthParam(year, month + 1)}${tasksQs}`;
     const step = view === "week" ? 7 : 1;
     const d = new Date(dateY, dateM, dateD + step);
-    return `/calendar?view=${view}&date=${dateParam(d.getFullYear(), d.getMonth(), d.getDate())}`;
+    return `/calendar?view=${view}&date=${dateParam(d.getFullYear(), d.getMonth(), d.getDate())}${tasksQs}`;
   }
 
-  const todayHref = `/calendar?view=${view}`;
+  const todayHref = `/calendar?view=${view}${tasksQs}`;
+
+  // #215 — the current page without the tasks choice; the toggle adds it back.
+  const hereHref =
+    view === "month"
+      ? `/calendar?view=month&month=${monthParam(year, month)}`
+      : `/calendar?view=${view}&date=${dateParam(dateY, dateM, dateD)}`;
 
   const hourLabels = useMemo(() => {
     const out: string[] = [];
@@ -348,6 +404,19 @@ export default function CalendarClient({
                 >
                   {d.getDate()}
                 </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* #215 task strip — tasks float above the all-day row */}
+        <div style={{ display: "flex", borderBottom: "1px solid #eef0f3", minHeight: 26 }}>
+          <div style={{ width: 52, fontSize: 9.5, color: "#c4c9d2", textAlign: "right", padding: "4px 6px 0 0" }}>tasks</div>
+          {days.map((d) => {
+            const k = keyFor(d.getFullYear(), d.getMonth(), d.getDate());
+            return (
+              <div key={k} style={{ width: colWidth, padding: "3px 4px", minWidth: 0 }}>
+                {mounted ? renderTasks(k, Number.POSITIVE_INFINITY) : null}
               </div>
             );
           })}
@@ -518,6 +587,26 @@ export default function CalendarClient({
           >
             Calendars{calendarConnections.length > 0 ? ` (${calendarConnections.length})` : ""}
           </button>
+          {/* #215 — whose tasks float on the calendar */}
+          <div
+            title="Whose tasks show on the calendar"
+            style={{ display: "flex", border: "1px solid #e4e7ec", borderRadius: 8, overflow: "hidden" }}
+          >
+            <Link
+              href={hereHref}
+              className={!tasksEveryone ? "pk-btn-accent" : "pk-btn-outline"}
+              style={{ textDecoration: "none", fontSize: 12, padding: "5px 11px", border: "none", borderRadius: 0 }}
+            >
+              My tasks
+            </Link>
+            <Link
+              href={`${hereHref}&tasks=all`}
+              className={tasksEveryone ? "pk-btn-accent" : "pk-btn-outline"}
+              style={{ textDecoration: "none", fontSize: 12, padding: "5px 11px", border: "none", borderRadius: 0 }}
+            >
+              Everyone
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -581,6 +670,7 @@ export default function CalendarClient({
                       >
                         {day.getDate()}
                       </div>
+                      {renderTasks(k, 3)}
                       {list.slice(0, 3).map(renderMonthChip)}
                       {list.length > 3 && (
                         <div style={{ fontSize: 10, color: "#9aa0ab", fontWeight: 600 }}>+{list.length - 3} more</div>
