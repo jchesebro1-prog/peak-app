@@ -34,19 +34,23 @@ import {
   setLaborOverride,
   setSheetCalibration,
   setVenue,
+  setProjectCustomer,
   saveAccessory,
   saveCustomItem,
   saveGridIntake,
   setAutoEstimate,
 } from "@/lib/stores/grid-projects";
 import { defaultOptionId, hasOption, resolveOptionId } from "@/lib/design/grid-options";
-import { designPatchFromIntake, intakeScopeInputs } from "@/lib/design/grid-intake";
+import { coverFromVenue, designPatchFromIntake, intakeScopeInputs, siteForLocId } from "@/lib/design/grid-intake";
+import { resolveIntakeCustomer, validateIntakeCustomer } from "@/lib/intake-customer";
+import type { IntakeCustomerChoice } from "@/app/(app)/quotes/new/types";
+import { get as getCustomer } from "@/lib/stores/customers";
 import { buildGridQuote } from "@/lib/design/grid-quote";
 import type { GridCustomItemInput } from "@/lib/design/grid-custom-items";
 import { accessoryClampNote, type GridAccessoryInput } from "@/lib/design/grid-accessories";
 import { can } from "@/lib/team";
 import { designsForGridProject, removeDesign, updateDesign } from "@/lib/stores/designs";
-import { getSite } from "@/lib/identity/sites";
+import { getSite, sitesForCompany } from "@/lib/identity/sites";
 // Tier resolution, catalog listing and the BOM/curtain pricing moved verbatim
 // into lib/design/grid-quote.ts (D186) so a quote can be built per option on a
 // scratch DB; the blob upload this action used to do moved to
@@ -221,10 +225,24 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
   return { hits: [...asmHits, ...partHits] };
 }
 
+/**
+ * The one-page Grid intake's save (#211; #244 adds the title and the
+ * customer). Validation runs before any write — the customer is required
+ * (the quote intake's own rule and messages, lib/intake-customer), and a
+ * picked or new customer venue satisfies "Add a venue or location". The
+ * customer / new venue / new contact are then created exactly as the quote
+ * intake creates them, the project is linked (customer, contact, venue →
+ * siteId), and the first-save gate below runs unchanged, now also copying
+ * the title and customer onto the linked design record(s).
+ */
 export async function saveGridIntakeAction(input: {
   projectId: string;
   /** "auto" = Auto (equations); "manual" = Blank (stored as before, D307). */
   mode: "manual" | "auto";
+  /** #244 — the typed design title; "" keeps the "Venue — Location" auto-name. */
+  title?: string;
+  /** #244 — the customer / venue / contact picks (CustomerVenueContactPicker). */
+  customer: IntakeCustomerChoice;
   venueName: string;
   locationName: string;
   address: string;
@@ -233,8 +251,13 @@ export async function saveGridIntakeAction(input: {
   estimate?: AutoEstimate;
 }): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!input.venueName.trim() && !input.locationName.trim()) return { ok: false, error: "Add a venue or location to continue." };
   if (input.mode !== "manual" && input.mode !== "auto") return { ok: false, error: "Choose Auto or Blank." };
+  if (!input.customer) return { ok: false, error: "Pick a customer, or add a new one." };
+  const customerCheck = validateIntakeCustomer(input.customer);
+  if (!customerCheck.ok) return { ok: false, error: customerCheck.error };
+  const venueChosen =
+    (input.customer.locationMode === "pick" && !!(input.customer.locationId || "").trim()) || input.customer.locationMode === "new";
+  if (!input.venueName.trim() && !input.locationName.trim() && !venueChosen) return { ok: false, error: "Add a venue or location to continue." };
   const scopeInputs = intakeScopeInputs(input.autoConfig);
   const autoScopes = input.mode === "auto" ? AUTO_SCOPES.filter((k) => scopeInputs.sys[k]) : [];
   if (input.mode === "auto" && autoScopes.length === 0) return { ok: false, error: "Pick at least one scope for Auto to fill." };
@@ -251,13 +274,37 @@ export async function saveGridIntakeAction(input: {
   const project = await getProject(input.projectId);
   if (!project) return { ok: false, error: "That design could not be found." };
   const optionId = resolveOptionId(project, null);
+
+  // #244 — the customer, and any new venue/contact, exactly as the quote
+  // intake makes them; then the chosen venue's site (the project stores an
+  // identity siteId, the customer doc a docLocId).
+  const linked = await resolveIntakeCustomer(input.customer);
+  if (!linked.ok) return { ok: false, error: linked.error };
+  const site = linked.locationId ? siteForLocId(await sitesForCompany(linked.customerId), linked.locationId) : null;
+  // A cover page left blank takes the chosen venue's names and address.
+  const fromVenue = site
+    ? coverFromVenue({ label: site.name, locationName: site.locationName, address: site.address, city: site.city, state: site.state }, linked.customerName)
+    : null;
+  const coverBlank = !input.venueName.trim() && !input.locationName.trim();
+  const venueName = coverBlank && fromVenue ? fromVenue.venueName : input.venueName;
+  const locationName = coverBlank && fromVenue ? fromVenue.locationName : input.locationName;
+  const address = !input.address.trim() && fromVenue ? fromVenue.address : input.address;
+  const linkedProject = await setProjectCustomer(input.projectId, {
+    customer: linked.customerName,
+    customerId: linked.customerId,
+    contactName: linked.contactName,
+    siteId: site?.id ?? null,
+    siteName: site ? site.name || "Unnamed venue" : "",
+  });
+  if (!linkedProject) return { ok: false, error: "That design could not be found." };
+
   const saved = await saveGridIntake(input.projectId, {
     complete: true,
     measurementBased: true,
     mode: input.mode,
-    venueName: input.venueName.trim(),
-    locationName: input.locationName.trim(),
-    address: input.address.trim(),
+    venueName: venueName.trim(),
+    locationName: locationName.trim(),
+    address: address.trim(),
     notes: input.notes.trim(),
     autoConfig: input.autoConfig,
   });
@@ -284,13 +331,15 @@ export async function saveGridIntakeAction(input: {
     }
     const patch = designPatchFromIntake({
       projectName: project.name,
-      venueName: input.venueName,
-      locationName: input.locationName,
+      venueName,
+      locationName,
       a: input.autoConfig,
+      title: input.title,
+      customer: { customer: linked.customerName, customerId: linked.customerId, locationId: linked.locationId || null },
     });
     // A raw filtered read (fix wave 3, I3) — no live pricing of every design.
-    const linked = await designsForGridProject(input.projectId);
-    for (const d of linked) await updateDesign(d.id, patch);
+    const designs = await designsForGridProject(input.projectId);
+    for (const d of designs) await updateDesign(d.id, patch);
     if (patch.name) await renameProject(input.projectId, patch.name);
     await generateBaseSheet(input.projectId, input.autoConfig, "#3a3f4a", user.name);
     if (est && estimateSaved) {
@@ -746,6 +795,47 @@ export async function setVenueAction(
   return { ok: true };
 }
 
+/* ------------------------- title + customer (#244) ------------------------- */
+
+/** Rename the design from the editor header — the project and its linked
+ *  design record(s) together, so the Designs dashboard shows the same name. */
+export async function renameGridDesignAction(projectId: string, name: string): Promise<Result> {
+  await requireUser();
+  const clean = String(name ?? "").trim();
+  if (!clean) return { ok: false, error: "A design needs a name." };
+  const p = await renameProject(projectId, clean);
+  if (!p) return { ok: false, error: "Design not found." };
+  for (const d of await designsForGridProject(projectId)) await updateDesign(d.id, { name: clean });
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true };
+}
+
+/** Link (or change, or clear with "") the design's customer from the editor.
+ *  A different customer drops the venue and contact picked off the old one. */
+export async function setGridCustomerAction(projectId: string, customerId: string): Promise<Result> {
+  await requireUser();
+  const project = await getProject(projectId);
+  if (!project) return { ok: false, error: "Design not found." };
+  const id = String(customerId ?? "").trim();
+  const customer = id ? await getCustomer(id) : null;
+  if (id && !customer) return { ok: false, error: "That customer couldn't be found — refresh and try again." };
+  if ((customer?.id ?? null) === (project.customerId || null)) return { ok: true };
+  const p = await setProjectCustomer(projectId, {
+    customer: customer?.name || "",
+    customerId: customer?.id ?? null,
+    contactName: "",
+    siteId: null,
+    siteName: "",
+  });
+  if (!p) return { ok: false, error: "Design not found." };
+  for (const d of await designsForGridProject(projectId))
+    await updateDesign(d.id, { customer: customer?.name || "", customerId: customer?.id ?? null, locationId: null });
+  revalidatePath(editorPath(projectId));
+  revalidatePath("/design/designs");
+  return { ok: true };
+}
+
 /** Live-revisable basic-info snapshot for the Scope panel
  *  (D-manual-scope-targets) — no validation: any well-typed payload is
  *  accepted, including partial toggles the caller has already merged. */
@@ -942,6 +1032,8 @@ export async function createDraftQuoteAction(
       name: build.quoteName,
       customer: project.customer,
       customerId: project.customerId,
+      // #244 — the contact picked at intake (a name, as on every quote).
+      contactName: project.contactName || "",
       locationId: build.locationId,
       value: build.value,
       margin: build.margin,

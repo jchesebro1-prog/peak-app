@@ -2756,8 +2756,8 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
   ok(ov.costEach === 2080, "a Rose Brand cost override replaces the make cost in the quote");
 }
 
-import { defaultAState } from "@/app/(app)/design/quick/engine";
-import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
+import { defaultAState, SYS_ORDER as g244SysOrder, VENUES as g244Venues } from "@/app/(app)/design/quick/engine";
+import { coverFromVenue, designPatchFromIntake, gridIntakeDefaults, intakeDesignName, manualScopeInputs, siteForLocId } from "@/lib/design/grid-intake";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
 import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib/design/curtain-pricing";
@@ -4952,6 +4952,55 @@ async function xlsxFixture(): Promise<Buffer> {
   ok(designPatchFromIntake({ projectName: "Already named", venueName: "X", locationName: "", a }).name === undefined, "grid-intake: a named design keeps its name");
   ok(designPatchFromIntake({ projectName: "Untitled system design", venueName: "", locationName: "Only campus", a }).name === "Only campus", "grid-intake: falls back to whichever cover field is filled");
   ok(TRACKABLE_SYS_KEYS.join(",") === "rigging,curtains,lighting,audio,video", "grid-scopes: TRACKABLE_SYS_KEYS is exported in the Scope panel's order");
+}
+
+/* --- #244: Grid intake — Auditorium defaults, title rule, customer venue → site + cover page (pure) --- */
+{
+  const d = gridIntakeDefaults();
+  ok(d.venue === "school" && d.width === 50 && d.depth === 30 && d.ph === 20 && d.wing === 10 && d.grid === 45 && d.size === "large",
+    "#244: a new Grid intake opens on an Auditorium, 50 wide × 30 deep × 20 high, 10' wings, 45' grid, size Large");
+  const aud = g244Venues.find((v) => v.key === "school")!;
+  ok(g244SysOrder.every((k) => d.sys[k] === aud.sys[k]) && d.sys !== aud.sys, "#244: its systems are the Auditorium preset's (a copy, not the preset object)");
+  ok(defaultAState(0).venue === "concenter" && defaultAState(0).grid === 50, "#244: Quick Design's own defaultAState is unchanged");
+  const a = gridIntakeDefaults();
+  ok(intakeDesignName({ title: "  North HS Rigging  ", projectName: "Untitled system design", venueName: "Auditorium", locationName: "North HS" }) === "North HS Rigging",
+    "#244: a typed title wins over the auto-name (trimmed)");
+  ok(intakeDesignName({ title: "Typed", projectName: "Already named", venueName: "", locationName: "" }) === "Typed", "#244: a typed title renames an already-named design too");
+  ok(intakeDesignName({ title: "   ", projectName: "Untitled system design", venueName: "Auditorium", locationName: "North HS" }) === "Auditorium — North HS",
+    "#244: a blank title keeps the 'Venue — Location' auto-name");
+  ok(intakeDesignName({ title: "", projectName: "Already named", venueName: "X", locationName: "Y" }) === undefined, "#244: a blank title never renames a named design");
+  const patch = designPatchFromIntake({
+    projectName: "Untitled system design", venueName: "Auditorium", locationName: "North HS", a, title: "My design",
+    customer: { customer: "North ISD", customerId: "north-isd", locationId: "l123" },
+  });
+  ok(patch.name === "My design" && patch.customer === "North ISD" && patch.customerId === "north-isd" && patch.locationId === "l123" && patch.grid === 45 && patch.venue === "school",
+    "#244: designPatchFromIntake carries the typed title and the customer link onto the design record");
+  const bare = designPatchFromIntake({ projectName: "Untitled system design", venueName: "V", locationName: "", a });
+  ok(!("customer" in bare) && !("customerId" in bare) && !("locationId" in bare) && bare.name === "V", "#244: without a customer the patch leaves the design's customer fields alone");
+  const sites = [
+    { id: "site-1", legacyLocId: "loc1", name: "A" },
+    { id: "site-2", legacyLocId: null, name: "B" },
+  ];
+  ok(siteForLocId(sites, "loc1")?.id === "site-1", "#244: a migrated venue's legacy location id maps to its site");
+  ok(siteForLocId(sites, "site-2")?.id === "site-2", "#244: a native venue's location id is its own site id");
+  ok(siteForLocId(sites, "site-1") === null && siteForLocId(sites, "") === null, "#244: a site id hidden behind a legacy id, or a blank id, maps to nothing");
+  const c1 = coverFromVenue({ label: "North High School — Auditorium", locationName: "North High School", address: "1 Main St", city: "Tulsa", state: "OK" }, "North ISD");
+  ok(c1.locationName === "North High School" && c1.venueName === "Auditorium" && c1.address === "1 Main St, Tulsa, OK",
+    "#244: a derived 'Location — Type' venue fills campus, space and a street + city/state address");
+  const c2 = coverFromVenue({ label: "North ISD — Gym Stage", locationName: "", city: "Tulsa", state: "OK" }, "North ISD");
+  ok(c2.locationName === "North ISD" && c2.venueName === "Gym Stage" && c2.address === "Tulsa, OK", "#244: a venue named after its company takes the customer's name as the campus");
+  const c3 = coverFromVenue({ label: "Main Gym", locationName: "East Campus" }, "North ISD");
+  ok(c3.locationName === "East Campus" && c3.venueName === "Main Gym" && c3.address === "", "#244: a hand-named venue keeps its whole name as the space");
+  // Wiring: the quote intake keeps its order (customer checks → thread pre-check → the one save).
+  const g244Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const g244Qa = g244Read("src/app/(app)/quotes/new/actions.ts");
+  const g244V = g244Qa.indexOf("validateIntakeCustomer(input)"), g244T = g244Qa.indexOf("threadQuoteLinkStatus(thread"), g244R = g244Qa.indexOf("resolveIntakeCustomer(input)");
+  ok(g244V > 0 && g244T > g244V && g244R > g244T, "#244: the quote intake still validates the customer, then pre-checks the thread, then saves");
+  const g244Ga = g244Read("src/app/(app)/design/grid/[id]/actions.ts");
+  const g244Save = g244Ga.slice(g244Ga.indexOf("export async function saveGridIntakeAction"), g244Ga.indexOf("export async function linkLinesetDesignAction"));
+  ok(g244Save.indexOf("validateIntakeCustomer(") < g244Save.indexOf("resolveIntakeCustomer(") && g244Save.indexOf("resolveIntakeCustomer(") < g244Save.indexOf("saveGridIntake(input.projectId") &&
+    g244Save.indexOf("saveGridIntake(input.projectId") < g244Save.indexOf("generateBaseSheet("), "#244: the Grid intake checks the customer before any write, links it before the intake save, and the base sheet stays the last step of the first-save gate");
+  ok(g244Ga.includes("contactName: project.contactName || \"\""), "#244: the Grid's draft quote carries the design's contact");
 }
 /* ---- native auth hand-off (spec 2026-09-21-native-auth-handoff) ---- */
 {
@@ -18672,7 +18721,7 @@ import {
   const ds = read("src/lib/stores/designs.ts");
   const gq = read("src/lib/design/grid-quote.ts");
   ok(nav.includes("listDesignRecords()") && !nav.includes("getAllDesigns"), "#211 wave 3 I3: nav counts read design records only — no live Grid pricing on every page");
-  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 2, "#211 wave 3 I3: the Grid actions find linked designs with a filtered read");
+  ok(!ga.includes("getAllDesigns") && (ga.match(/designsForGridProject\(/g) || []).length === 4, "#211 wave 3 I3 (+ #244 rename/relink): the Grid actions find linked designs with a filtered read");
   ok(ds.includes("loadGridQuoteInputs(priceable") && ds.includes("getProjects(ids)") && gq.includes("inputs?: GridQuoteInputs") && gq.includes("inputs.tierFor(project.customerId)"), "#211 wave 3 I3: withLiveGrid shares one catalog / library / price ctx / tier memo across every design in the read");
   // Minors.
   ok(ds.includes("fail CLOSED") || ds.includes("Fail CLOSED"), "#211 wave 3 minor: an Auto completeness failure marks the design incomplete");
@@ -23936,8 +23985,10 @@ async function venues216Task3FixesAsyncChecks(): Promise<void> {
   const eqa = v216Read("src/components/entity-quick-add.tsx");
   ok(eqa.includes("venue: { locationName: string; venueKind: string; city: string; state: string }") && eqa.includes("venueTypeOptions(") && !eqa.includes("Venue name (e.g."),
     "#216 T6: the shared venue quick-add asks Location + Type, never a label");
-  const qa = v216Read("src/app/(app)/quotes/new/actions.ts");
-  ok(qa.includes("deriveName: true") && qa.includes("newLocationKind") && !qa.includes("newLocationLabel"), "#216 T6: the quote intake's new venue gets a derived name and a picked type");
+  // #244 — the quote intake's customer/venue/contact save moved verbatim into lib/intake-customer.
+  const qa = v216Read("src/lib/intake-customer.ts");
+  ok(qa.includes("deriveName: true") && qa.includes("newLocationKind") && !qa.includes("newLocationLabel") && v216Read("src/app/(app)/quotes/new/actions.ts").includes("resolveIntakeCustomer(input)"),
+    "#216 T6: the quote intake's new venue gets a derived name and a picked type");
   ok(v216Read("src/app/(app)/quotes/new/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"), "#216 T6: the intake page passes the venue types");
   const la = v216Read("src/app/(app)/inbox/link-actions.ts");
   const s = la.indexOf("export async function quickAddVenueAction");
@@ -25745,9 +25796,11 @@ import { resolveDocumentCategories as fwaResolveCats, mergeDocumentCategories as
   // #216 final — quick-adds default to the first live venue type.
   const lp = fwaRd("src/app/(app)/inbox/link-panel.tsx");
   ok(lp.includes("emptyVenueQuickAdd(venueTypeOptions(vm.venueTypes)[0]?.key)") && !lp.includes("emptyVenueQuickAdd()"), "#216 final: the link panel's venue quick-add defaults to the first live venue type");
-  const qf = fwaRd("src/app/(app)/quotes/new/intake-form.tsx");
-  ok(qf.includes("const defaultVenueKind = venueTypeOptions(venueTypes)[0]?.key;") && !qf.includes("emptyVenueQuickAdd()"), "#216 final: the quote intake's venue quick-add defaults to the first live venue type");
-  const qa = fwaRd("src/app/(app)/quotes/new/actions.ts");
+  // #244 — the quote intake's picker moved into components/customer-venue-contact-picker.tsx.
+  const qf = fwaRd("src/components/customer-venue-contact-picker.tsx");
+  ok(qf.includes("return venueTypeOptions(venueTypes)[0]?.key;") && qf.includes("emptyVenueQuickAdd(defaultVenueKindOf(venueTypes))") && !qf.includes("emptyVenueQuickAdd()") &&
+    fwaRd("src/app/(app)/quotes/new/intake-form.tsx").includes("initialCustomerVenueContact("), "#216 final: the quote intake's venue quick-add defaults to the first live venue type");
+  const qa = fwaRd("src/lib/intake-customer.ts");
   ok(qa.includes('(venueTypeOptions(types)[0]?.key ?? "proscenium")') && qa.includes('id: "l" + Date.now() + Math.random().toString(36).slice(2, 6),'),
     "#216 final: the intake falls back to the first live type and mints a random-suffixed location id");
   ok(fwaRd("src/app/(app)/inbox/link-actions.ts").includes("/** The link panel's \"new venue\" quick-add") && !/~\d{3}/.test(fwaRd("src/lib/inbox-task-write.ts").slice(0, 2000)),

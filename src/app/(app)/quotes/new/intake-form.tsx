@@ -1,22 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useMemo, useState, useTransition, type CSSProperties } from "react";
-import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
-import { CustomerCombobox } from "@/components/customer-combobox";
-import EntityQuickAdd, { INPUT, LABEL, emptyVenueQuickAdd, type QuickAddValues } from "@/components/entity-quick-add";
-import { venueTypeOptions, type VenueType } from "@/lib/venue-types";
+import { Fragment, useState, useTransition } from "react";
+import { INPUT, LABEL } from "@/components/entity-quick-add";
+import CustomerVenueContactPicker, {
+  customerChoiceOf,
+  customerReadyOf,
+  initialCustomerVenueContact,
+} from "@/components/customer-venue-contact-picker";
+import type { VenueType } from "@/lib/venue-types";
 import { createQuoteIntakeAction } from "./actions";
 import { replaceConfirmMessage, sameBuilder, type IntakeInitial, type IntakeReplacing } from "./handoff";
 import { SERVICE_TYPES, type IntakeCustomer, type IntakeSubmit, type ServiceType } from "./types";
-
-const ADD_NEW = "__add_new__";
-const SKIP = "__skip__";
-
-function locationLine(l: IntakeCustomer["locations"][number]): string {
-  const where = [l.city, l.state].filter(Boolean).join(", ");
-  return where ? `${l.label || "Venue"} — ${where}` : l.label || "Venue";
-}
 
 export default function QuoteIntakeForm({
   customers,
@@ -34,33 +29,20 @@ export default function QuoteIntakeForm({
   venueTypes: VenueType[];
 }) {
   const fromThread = !!threadId;
-  // #216 — a new venue starts on the first live venue type.
-  const defaultVenueKind = venueTypeOptions(venueTypes)[0]?.key;
   const [type, setType] = useState<ServiceType>(initial.type);
   // #110: the user-named category behind the trailing "Custom category" card.
   const [category, setCategory] = useState(initial.category);
   // #160: optional quote name — blank lets the builder auto-name.
   const [name, setName] = useState(initial.name);
 
-  const [customerMode, setCustomerMode] = useState<"pick" | "new">("pick");
-  const [customerId, setCustomerId] = useState(initial.customerId);
-  const [newCustomer, setNewCustomer] = useState<QuickAddValues["customer"]>({
-    name: "",
-    type: CUSTOMER_TYPES[0] || "",
-  });
-
-  const [locationMode, setLocationMode] = useState<"pick" | "new" | "skip">(initial.locationId ? "pick" : "skip");
-  const [locationId, setLocationId] = useState(initial.locationId);
-  const [newLocation, setNewLocation] = useState<QuickAddValues["venue"]>(() => emptyVenueQuickAdd(defaultVenueKind));
-
-  const [contactMode, setContactMode] = useState<"pick" | "new" | "skip">(initial.contactName ? "pick" : "skip");
-  const [contactName, setContactName] = useState(initial.contactName);
-  const [newContact, setNewContact] = useState<QuickAddValues["contact"]>({
-    name: "",
-    role: "",
-    email: "",
-    phone: "",
-  });
+  // #244 — customer / venue / contact live in the shared picker (the Grid
+  // intake uses it too); one value, same opening state as before.
+  const [pick, setPick] = useState(() =>
+    initialCustomerVenueContact(
+      { customerId: initial.customerId, locationId: initial.locationId, contactName: initial.contactName },
+      venueTypes
+    )
+  );
 
   const [error, setError] = useState("");
   // I4 review — the thread this intake was opened from already links
@@ -75,70 +57,7 @@ export default function QuoteIntakeForm({
   // "Continue" button) actually submits.
   const [confirmReplace, setConfirmReplace] = useState(false);
 
-  const selectedCustomer = customerMode === "pick" ? customers.find((c) => c.id === customerId) || null : null;
-  const locations = selectedCustomer?.locations || [];
-  const contacts = selectedCustomer?.contacts || [];
-  // A customer is "in play" once one is picked or a new one is being named —
-  // that's when the venue/contact steps make sense to show at all.
-  const hasCustomerContext = customerMode === "new" || !!customerId;
-
-  // #160: the shared typeahead replaces the search box + closed <select>
-  // pair, which filtered options nobody could see. Venue city and contact
-  // names are searchable too.
-  const customerOptions = useMemo(
-    () =>
-      customers.map((c) => ({
-        id: c.id,
-        name: c.name,
-        detail:
-          [c.type, c.locations.map((l) => l.label).filter(Boolean).slice(0, 3).join(" · ")].filter(Boolean).join(" — ") ||
-          undefined,
-        searchText: [
-          ...c.locations.map((l) => `${l.label} ${l.city} ${l.state}`),
-          ...c.contacts.map((ct) => ct.name),
-        ].join(" "),
-      })),
-    [customers]
-  );
-
-  function pickCustomer(id: string) {
-    if (id === ADD_NEW) {
-      setCustomerMode("new");
-      setCustomerId("");
-    } else {
-      setCustomerMode("pick");
-      setCustomerId(id);
-    }
-    // switching customers invalidates whatever venue/contact was picked off
-    // the previous one — reset back to skippable, not silently pointed at
-    // the wrong record.
-    setLocationMode("skip");
-    setLocationId("");
-    setContactMode("skip");
-    setContactName("");
-  }
-
-  function pickLocation(v: string) {
-    if (v === ADD_NEW) setLocationMode("new");
-    else if (v === SKIP) setLocationMode("skip");
-    else {
-      setLocationMode("pick");
-      setLocationId(v);
-    }
-  }
-
-  function pickContact(v: string) {
-    if (v === ADD_NEW) setContactMode("new");
-    else if (v === SKIP) setContactMode("skip");
-    else {
-      setContactMode("pick");
-      setContactName(v);
-    }
-  }
-
-  const customerReady =
-    (customerMode === "pick" && !!customerId) ||
-    (customerMode === "new" && newCustomer.name.trim().length > 0);
+  const customerReady = customerReadyOf(pick);
   // A custom category needs its name before the builder can be seeded with it.
   const canSubmit = customerReady && (type !== "custom" || category.trim().length > 0);
 
@@ -162,22 +81,7 @@ export default function QuoteIntakeForm({
       category: type === "custom" ? category.trim() : "",
       name: name.trim(),
       replaces: replacing?.id || "",
-      customerMode,
-      customerId,
-      newCustomerName: newCustomer.name,
-      newCustomerType: newCustomer.type,
-      locationMode,
-      locationId,
-      newLocationName: newLocation.locationName,
-      newLocationKind: newLocation.venueKind,
-      newLocationCity: newLocation.city,
-      newLocationState: newLocation.state,
-      contactMode,
-      contactName,
-      newContactName: newContact.name,
-      newContactRole: newContact.role,
-      newContactEmail: newContact.email,
-      newContactPhone: newContact.phone,
+      ...customerChoiceOf(pick),
       threadId: threadId || undefined,
       confirmReplaceLink,
     };
@@ -291,109 +195,7 @@ export default function QuoteIntakeForm({
         })}
       </div>
 
-      {/* ---- customer ---- */}
-      <label style={LABEL}>Customer</label>
-      {customerMode === "pick" ? (
-        <>
-          <CustomerCombobox
-            options={customerOptions}
-            value={customerId}
-            onChange={(id) => pickCustomer(id)}
-            placeholder="Search customers, venues or contacts…"
-            inputStyle={INPUT}
-          />
-          <button type="button" onClick={() => pickCustomer(ADD_NEW)} style={{ ...inlineLinkStyle, marginTop: 7 }}>
-            + Add new customer…
-          </button>
-        </>
-      ) : (
-        <EntityQuickAdd
-          kind="customer"
-          value={newCustomer}
-          onChange={setNewCustomer}
-          onCancel={() => pickCustomer("")}
-        />
-      )}
-
-      {/* ---- venue (skippable) ---- */}
-      <label style={LABEL}>Venue</label>
-      {!hasCustomerContext && (
-        <div style={{ fontSize: 12, color: "#9aa0ab" }}>Pick a customer above first.</div>
-      )}
-      {hasCustomerContext && locations.length > 0 && (
-        <select value={locationMode === "new" ? ADD_NEW : locationMode === "skip" ? SKIP : locationId} onChange={(e) => pickLocation(e.target.value)} style={INPUT}>
-          <option value={SKIP}>Skip for now — no venue yet</option>
-          {locations.map((l) => (
-            <option key={l.id} value={l.id}>
-              {locationLine(l)}
-            </option>
-          ))}
-          <option value={ADD_NEW}>+ Add new venue…</option>
-        </select>
-      )}
-      {hasCustomerContext && locationMode === "new" && (
-        <div style={{ marginTop: locations.length > 0 ? 8 : 0 }}>
-          <EntityQuickAdd
-            kind="venue"
-            value={newLocation}
-            onChange={setNewLocation}
-            venueTypes={venueTypes}
-            onCancel={() => {
-              setLocationMode("skip");
-              setNewLocation(emptyVenueQuickAdd(defaultVenueKind));
-            }}
-          />
-        </div>
-      )}
-      {hasCustomerContext && locationMode === "skip" && locations.length === 0 && (
-        <div style={{ fontSize: 12, color: "#9aa0ab" }}>
-          No venue yet —{" "}
-          <button type="button" onClick={() => setLocationMode("new")} style={inlineLinkStyle}>
-            add one now
-          </button>
-          .
-        </div>
-      )}
-
-      {/* ---- contact (skippable) ---- */}
-      <label style={LABEL}>Contact</label>
-      {!hasCustomerContext && (
-        <div style={{ fontSize: 12, color: "#9aa0ab" }}>Pick a customer above first.</div>
-      )}
-      {hasCustomerContext && contacts.length > 0 && (
-        <select value={contactMode === "new" ? ADD_NEW : contactMode === "skip" ? SKIP : contactName} onChange={(e) => pickContact(e.target.value)} style={INPUT}>
-          <option value={SKIP}>Skip for now — no contact yet</option>
-          {contacts.map((c) => (
-            <option key={c.name} value={c.name}>
-              {c.name}
-              {c.role ? ` — ${c.role}` : ""}
-            </option>
-          ))}
-          <option value={ADD_NEW}>+ Add new contact…</option>
-        </select>
-      )}
-      {hasCustomerContext && contactMode === "new" && (
-        <div style={{ marginTop: contacts.length > 0 ? 8 : 0 }}>
-          <EntityQuickAdd
-            kind="contact"
-            value={newContact}
-            onChange={setNewContact}
-            onCancel={() => {
-              setContactMode("skip");
-              setNewContact({ name: "", role: "", email: "", phone: "" });
-            }}
-          />
-        </div>
-      )}
-      {hasCustomerContext && contactMode === "skip" && contacts.length === 0 && (
-        <div style={{ fontSize: 12, color: "#9aa0ab" }}>
-          No contact yet —{" "}
-          <button type="button" onClick={() => setContactMode("new")} style={inlineLinkStyle}>
-            add one now
-          </button>
-          .
-        </div>
-      )}
+      <CustomerVenueContactPicker customers={customers} value={pick} onChange={setPick} venueTypes={venueTypes} />
 
       {/* ---- quote name (optional, #160) ---- */}
       <label style={LABEL}>Quote name</label>
@@ -554,14 +356,3 @@ export default function QuoteIntakeForm({
     </div>
   );
 }
-
-const inlineLinkStyle: CSSProperties = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  color: "var(--accent)",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-  textDecoration: "underline",
-};

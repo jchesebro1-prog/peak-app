@@ -7,7 +7,11 @@ import { list as listCatalog } from "@/lib/stores/catalog";
 import { loadPartDocsState } from "@/lib/part-docs/load";
 import { ownFiles } from "@/lib/part-docs/coverage";
 import { listGridSymbols } from "@/lib/stores/grid-catalog";
-import { sitesForCompany } from "@/lib/identity/sites";
+import { docLocId, sitesForCompany } from "@/lib/identity/sites";
+import { all as allCustomers } from "@/lib/stores/customers";
+import { allCompanies } from "@/lib/identity/companies";
+import { intakeCustomersFrom } from "@/lib/intake-customer";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { loadCurtainSewingPct, loadWireLaborRules } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
@@ -73,16 +77,34 @@ export default async function GridEditorPage({
   }
 
   if (project.intake && !project.intake.complete) {
+    // #244 — the intake picks the customer the way the quote intake does:
+    // the same directory view-model, loaded only when the intake renders.
+    const [customerDocs, intakeSettings] = await Promise.all([allCustomers(), getSettings()]);
+    const customers = intakeCustomersFrom(customerDocs);
+    const known = project.customerId ? customers.find((c) => c.id === project.customerId) : null;
+    const knownSite = known && project.siteId ? (await sitesForCompany(known.id)).find((s) => s.id === project.siteId) : null;
+    const knownLocId = knownSite ? docLocId(knownSite) : "";
     return (
       <CanMapProvider canMap={can("manage_users", user.roles)}>
-        <GridIntake projectId={project.id} projectName={project.name} initialAutoConfig={project.intake.autoConfig} />
+        <GridIntake
+          projectId={project.id}
+          projectName={project.name}
+          initialAutoConfig={project.intake.autoConfig}
+          customers={customers}
+          venueTypes={venueTypesFrom(intakeSettings.venueTypes)}
+          initialCustomer={{
+            customerId: known ? known.id : "",
+            locationId: known && known.locations.some((l) => l.id === knownLocId) ? knownLocId : "",
+            contactName: known && known.contacts.some((c) => c.name === project.contactName) ? project.contactName || "" : "",
+          }}
+        />
       </CanMapProvider>
     );
   }
 
   const activeOptionId = resolveOptionId(project, requestedOption);
 
-  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct] = await Promise.all([
+  const [sheets, catalog, gridSymbols, settings, linesetDesigns, wireLabor, sewingPct, companies] = await Promise.all([
     listSheets(project.id),
     listCatalog(),
     listGridSymbols(),
@@ -90,7 +112,10 @@ export default async function GridEditorPage({
     listDesigns({ kind: "lineset" }),
     loadWireLaborRules(),
     loadCurtainSewingPct(),
+    allCompanies(),
   ]);
+  // #244 — the header's customer control: a lean list (id, name, type).
+  const customerOptions = companies.map((c) => ({ id: c.id, name: c.name, ...(c.type ? { detail: c.type } : {}) }));
   // Beta group resolution (Task 6, punch #39) — server-side only; the
   // editor receives each part's already-resolved `group` and never sees
   // the map itself.
@@ -221,6 +246,7 @@ export default async function GridEditorPage({
         id: project.id,
         name: project.name,
         customer: project.customer,
+        customerId: project.customerId || null,
         siteId: project.siteId || null,
         siteName: project.siteName || "",
         quoteId: project.quoteId,
@@ -247,6 +273,7 @@ export default async function GridEditorPage({
       scopeTargets={scopeTargets}
       auto={auto}
       venues={venues}
+      customerOptions={customerOptions}
       symbolCtx={symbolContext(settings, deviceTypes.types)}
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}

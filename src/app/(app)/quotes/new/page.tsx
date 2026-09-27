@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
+import { all as allCustomers } from "@/lib/stores/customers";
+import { intakeCustomersFrom } from "@/lib/intake-customer";
 import { get as getQuote } from "@/lib/stores/quotes";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 import QuoteIntakeForm from "./intake-form";
@@ -40,25 +41,8 @@ export default async function NewQuotePage({
   const [, sp, customerDocs, settings] = await Promise.all([requireUser(), searchParams, allCustomers(), getSettings()]);
   const h = readHandoff(sp);
 
-  const customers: IntakeCustomer[] = customerDocs
-    .map((c: CustomerDoc) => ({
-      id: c.id,
-      name: c.name,
-      type: c.type || "",
-      locations: (c.locations || []).map((l) => ({
-        id: l.id || "",
-        label: l.label || "",
-        city: l.city || "",
-        state: l.state || "",
-        primary: !!l.primary,
-      })),
-      contacts: (c.contacts || []).map((ct) => ({
-        name: ct.name,
-        role: ct.role || "",
-        primary: !!ct.primary,
-      })),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // #244 — the shared builder (lib/intake-customer), also used by the Grid intake.
+  const customers: IntakeCustomer[] = intakeCustomersFrom(customerDocs);
 
   let seed = {
     type: h.type,

@@ -225,6 +225,9 @@ export type GridProject = {
   /** Venue link (D113 item 6) — identity sites.id + display name. */
   siteId?: string | null;
   siteName?: string;
+  /** The customer contact this design is for (#244) — a NAME, as on a quote
+   *  (contacts have no id). Absent on pre-#244 docs, read as "". */
+  contactName?: string;
   /** Cover-page intake captured before the drawing workspace opens. */
   intake?: {
     complete: boolean;
@@ -936,6 +939,26 @@ export async function setVenue(
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
     p.siteId = siteId;
     p.siteName = siteName;
+    p.updatedAt = Date.now();
+  });
+}
+
+/**
+ * Link (or re-link) the design's customer (#244): display name, id, contact
+ * and venue in one patch. The intake passes the venue it resolved; the
+ * editor's customer control passes none, so a changed customer never keeps
+ * the previous customer's venue or contact.
+ */
+export async function setProjectCustomer(
+  projectId: string,
+  input: { customer: string; customerId: string | null; contactName: string; siteId: string | null; siteName: string }
+): Promise<GridProject | null> {
+  return patchDoc<GridProject>("grid_projects", projectId, (p) => {
+    p.customer = input.customer.trim();
+    p.customerId = input.customerId;
+    p.contactName = input.contactName.trim();
+    p.siteId = input.siteId;
+    p.siteName = input.siteName;
     p.updatedAt = Date.now();
   });
 }
