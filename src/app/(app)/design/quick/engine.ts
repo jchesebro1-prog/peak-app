@@ -12,6 +12,7 @@
 
 import { drapeRule } from "@/lib/design/goods";
 import { battenLenFt, venueDimsFromEstimator } from "@/lib/design/venue-dims";
+import { EQUIPMENT_LABEL_ALIASES, EQUIPMENT_ROW_BY_KEY } from "@/lib/design/equipment-vocab";
 
 /* ---------------------------------- types ---------------------------------- */
 
@@ -482,7 +483,14 @@ export function compute(s: AState): ComputeResult {
   const pipeLenFt = venueOf(s).kind === "proscenium" ? battenLenFt(W) : W;
 
   type Eq = { key: string; desc: string; unit: string; qty: number; drape?: DrapeGeom };
-  const eq = (key: string, desc: string, unit: string, qty: number): Eq => ({ key, desc, unit, qty });
+  /** #233: an item's name and unit come from the vocabulary by key — ONE
+   *  source for Quick Design, Auto cards, the Equipment map and the qty-
+   *  override keys (D324). A key missing from the vocabulary is a bug the
+   *  #211 T1 spec block catches; it falls back to the key itself. */
+  const eq = (key: string, qty: number): Eq => {
+    const def = EQUIPMENT_ROW_BY_KEY.get(key);
+    return { key, desc: def ? def.label : key, unit: def ? def.unit : "ea", qty };
+  };
 
   // Rigging — single type
   const rigType = s.rigType || "counterweight";
@@ -490,20 +498,20 @@ export function compute(s: AState): ComputeResult {
   if (rigType === "motorized") {
     const m = pick({ el: 2, lo: 2, hi: 2, vs: 0 }, { el: 3, lo: 3, hi: 3, vs: 1 }, { el: 4, lo: 4, hi: 2, vs: 2 });
     rigItems = [
-      eq("rigging:electricHoist", "Electric hoist", "ea", m.el * Math.max(2, fl(D / 30))),
-      eq("rigging:lowCapHoist", "Low-capacity hoist", "ea", m.lo * dBlk),
-      eq("rigging:highCapHoist", "High-capacity hoist", "ea", m.hi * dBlk),
+      eq("rigging:electricHoist", m.el * Math.max(2, fl(D / 30))),
+      eq("rigging:lowCapHoist", m.lo * dBlk),
+      eq("rigging:highCapHoist", m.hi * dBlk),
     ];
-    if (m.vs) rigItems.push(eq("rigging:varSpeedHoist", "Variable-speed hoist", "ea", m.vs * dBlk));
+    if (m.vs) rigItems.push(eq("rigging:varSpeedHoist", m.vs * dBlk));
   } else if (rigType === "deadhung") {
     const sets = pick(5, 6, 7) * dBlk;
     const points = sets * fl(W / 10);
     rigItems = [
-      eq("rigging:riggingPoint", "Rigging point", "ea", points),
-      eq("rigging:pipe", "Pipe", "ft", sets * pipeLenFt),
-      eq("rigging:aircraftCable", "Aircraft cable", "ft", points * G),
-      eq("rigging:chainWrap", "Chain wrap, 3 ft", "ea", points),
-      eq("rigging:terminationKit", "Termination kit", "ea", points * 2),
+      eq("rigging:riggingPoint", points),
+      eq("rigging:pipe", sets * pipeLenFt),
+      eq("rigging:aircraftCable", points * G),
+      eq("rigging:chainWrap", points),
+      eq("rigging:terminationKit", points * 2),
     ];
   } else {
     // Counterweight — driven by the number of line sets.
@@ -511,17 +519,17 @@ export function compute(s: AState): ComputeResult {
     const loftPerSet = Math.max(1, fl(W / 10)); // 1 loftblock per 10 ft of pro width, per set
     const loft = sets * loftPerSet;
     rigItems = [
-      eq("rigging:headblock", "Headblock", "ea", sets),
-      eq("rigging:footblock", "Footblock", "ea", sets),
-      eq("rigging:arbor", "Arbor", "ea", sets),
-      eq("rigging:tbarTrack", "T-bar track", "ea", sets),
-      eq("rigging:lockRail", "Lock rail", "ea", sets),
-      eq("rigging:handline", "Handline", "ft", sets * 2 * G),
-      eq("rigging:pipe", "Pipe", "ft", sets * pipeLenFt),
-      eq("rigging:loftblock", "Loftblock", "ea", loft),
-      eq("rigging:aircraftCable", "Aircraft cable", "ft", loft * (2 * G + W)),
-      eq("rigging:terminationKit", "Termination kit", "ea", loft * 2),
-      eq("rigging:chainWrap", "Chain wrap, 3 ft", "ea", loft),
+      eq("rigging:headblock", sets),
+      eq("rigging:footblock", sets),
+      eq("rigging:arbor", sets),
+      eq("rigging:tbarTrack", sets),
+      eq("rigging:lockRail", sets),
+      eq("rigging:handline", sets * 2 * G),
+      eq("rigging:pipe", sets * pipeLenFt),
+      eq("rigging:loftblock", loft),
+      eq("rigging:aircraftCable", loft * (2 * G + W)),
+      eq("rigging:terminationKit", loft * 2),
+      eq("rigging:chainWrap", loft),
     ];
   }
 
@@ -532,36 +540,36 @@ export function compute(s: AState): ComputeResult {
   const curtainItems: Eq[] = [];
   // `proscenium` gates the wing addition inside venueDimsFromEstimator (#66).
   const gdims = venueDimsFromEstimator({ ...s, proscenium: venueOf(s).kind === "proscenium" });
-  const addDrape = (on: boolean | undefined, key: string, desc: string, count: number, fabricKey: string) => {
+  const addDrape = (on: boolean | undefined, key: string, count: number, fabricKey: string) => {
     if (!on || count <= 0) return;
     const type = CURTAIN_KEY_TO_TYPE[fabricKey];
     const rule = type ? drapeRule(type, gdims, "better") : null; // geometry is tier-independent
     if (!rule) return;
-    curtainItems.push({ key, desc, unit: "ea", qty: count, drape: { w: rule.w, h: rule.h, fullness: rule.fullness, qty: rule.qty } });
+    curtainItems.push({ ...eq(key, count), drape: { w: rule.w, h: rule.h, fullness: rule.fullness, qty: rule.qty } });
   };
-  addDrape(drape.draw, "curtains:draw", "Draw", dBlk * 1, "draw");
-  addDrape(drape.legs, "curtains:legs", "Leg", dBlk * 2, "legs");
-  addDrape(drape.border, "curtains:border", "Border", dBlk * 1, "border");
-  addDrape(drape.fullstage, "curtains:fullstage", "Full stage", dBlk * 1, "fullstage");
+  addDrape(drape.draw, "curtains:draw", dBlk * 1, "draw");
+  addDrape(drape.legs, "curtains:legs", dBlk * 2, "legs");
+  addDrape(drape.border, "curtains:border", dBlk * 1, "border");
+  addDrape(drape.fullstage, "curtains:fullstage", dBlk * 1, "fullstage");
   // Track hardware, not soft goods. Jeff 2026-07-27: it follows the pipe rule
   // (PRO width + 4 ft in a proscenium house, room width elsewhere). One run per
   // depth block, measured in FEET so a per-foot catalog track prices it.
-  if (drape.scenerytrack && dBlk > 0) curtainItems.push(eq("curtains:scenerytrack", "Scenery track", "ft", dBlk * pipeLenFt));
+  if (drape.scenerytrack && dBlk > 0) curtainItems.push(eq("curtains:scenerytrack", dBlk * pipeLenFt));
 
   // Fixtures — multi. E = unified electric count; wUnit ≈ 1 per 8 ft of width.
   const fx = s.fixtures || {};
   const E = Math.max(1, electrics);
   const wUnit = Math.max(1, Math.round(W / 8));
   const lightItems: Eq[] = [];
-  const addFix = (key: string, on: boolean | undefined, desc: string, qty: number) => {
-    if (on && qty > 0) lightItems.push(eq(`lighting:${key}`, desc, "ea", qty));
+  const addFix = (key: string, on: boolean | undefined, qty: number) => {
+    if (on && qty > 0) lightItems.push(eq(`lighting:${key}`, qty));
   };
-  addFix("par", fx.par, "Par", Math.round(E * wUnit * pick(0.7, 1, 1.2)));
-  addFix("front", fx.front, "Front", Math.round(wUnit * pick(2, 2.5, 3)));
-  addFix("cyc", fx.cyc, "Cyc", Math.round(wUnit * pick(1, 1.25, 1.5)));
-  addFix("side", fx.side, "Side light", Math.round(E * wUnit * pick(0, 0.5, 0.75)));
+  addFix("par", fx.par, Math.round(E * wUnit * pick(0.7, 1, 1.2)));
+  addFix("front", fx.front, Math.round(wUnit * pick(2, 2.5, 3)));
+  addFix("cyc", fx.cyc, Math.round(wUnit * pick(1, 1.25, 1.5)));
+  addFix("side", fx.side, Math.round(E * wUnit * pick(0, 0.5, 0.75)));
   const automatedQty = Math.round(E * wUnit * pick(0, 0.5, 0.9));
-  addFix("automated", fx.automated, "Automated", automatedQty);
+  addFix("automated", fx.automated, automatedQty);
   // dimmer racks derive from the real conventional-fixture total (movers are non-dim, DMX)
   const convFixTotal = lightItems.reduce((a, it) => a + it.qty, 0) - (fx.automated ? automatedQty : 0);
   dimmerRacks = s.sys.lighting ? Math.max(1, Math.ceil(convFixTotal / 48)) : 0;
@@ -570,35 +578,40 @@ export function compute(s: AState): ComputeResult {
   const ctrl = s.ctrl || {};
   const ctrlItems: Eq[] = [];
   if (ctrl.console) {
-    ctrlItems.push(eq("controls:console", "Console", "ea", 1));
-    ctrlItems.push(eq("controls:consoleTouch", "Console touch screen", "ea", pick(1, 2, 2)));
-    if (size === "large") ctrlItems.push(eq("controls:batteryBackup", "Battery backup", "ea", 1));
+    ctrlItems.push(eq("controls:console", 1));
+    ctrlItems.push(eq("controls:consoleTouch", pick(1, 2, 2)));
+    if (size === "large") ctrlItems.push(eq("controls:batteryBackup", 1));
   }
   if (ctrl.architectural) {
-    ctrlItems.push(eq("controls:processor", "Processor", "ea", 1));
-    ctrlItems.push(eq("controls:button", "Button", "ea", pick(fl(W / 20), fl(W / 10), fl(W / 5))));
-    if (size === "large") ctrlItems.push(eq("controls:archTouch", "Architectural touch screen", "ea", 1));
+    ctrlItems.push(eq("controls:processor", 1));
+    ctrlItems.push(eq("controls:button", pick(fl(W / 20), fl(W / 10), fl(W / 5))));
+    if (size === "large") ctrlItems.push(eq("controls:archTouch", 1));
   }
   if (ctrl.data) {
-    ctrlItems.push(eq("controls:inputStation", "Input station", "ea", pick(1, 2, 4)));
-    ctrlItems.push(eq("controls:outputStation", "Output station", "ea", pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3))));
-    ctrlItems.push(eq("controls:distro", "Distro system", "ea", 1));
+    ctrlItems.push(eq("controls:inputStation", pick(1, 2, 4)));
+    ctrlItems.push(eq("controls:distro", 1));
   }
+  // #233: Output station moved to Lighting as the Cable Package — its own
+  // formula AND its own gate (Controls in scope, Data picked), pushed after
+  // the dimmer-rack count above, so racks and every existing Quick Design
+  // total with Lighting on are unchanged. Grid Auto never turns Controls on,
+  // so no Auto card gains a line.
+  if (s.sys.controls && ctrl.data) lightItems.push(eq("lighting:cablePackage", pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3))));
 
   // Acoustical shell — multi (size-independent)
   const shell = s.shell || {};
   const shellItems: Eq[] = [];
-  if (shell.towers) shellItems.push(eq("acoustical:tower", "Tower", "ea", fl(W / 10) + 2 * fl(D / 10)));
-  if (shell.ceiling) shellItems.push(eq("acoustical:ceiling", "Ceiling", "ea", fl(D / 10)));
-  if (shell.transport) shellItems.push(eq("acoustical:transport", "Transport", "ea", fl(D / 10)));
+  if (shell.towers) shellItems.push(eq("acoustical:tower", fl(W / 10) + 2 * fl(D / 10)));
+  if (shell.ceiling) shellItems.push(eq("acoustical:ceiling", fl(D / 10)));
+  if (shell.transport) shellItems.push(eq("acoustical:transport", fl(D / 10)));
 
   // Pit filler — single. Per-sqft over Pro Width × 10 ft.
   const pitType = s.pitType || "legged";
   const pitArea = W * 10;
   const pitItems: Eq[] =
     pitType === "clearspan"
-      ? [eq("pit:clearspan", "Clear-span pit filler deck", "sqft", pitArea)]
-      : [eq("pit:legged", "Legged pit filler deck", "sqft", pitArea)];
+      ? [eq("pit:clearspan", pitArea)]
+      : [eq("pit:legged", pitArea)];
 
   const defs: Array<{ key: SysKey; name: string; on: boolean; m: number; dot: string; items: Eq[] }> = [
     { key: "rigging", name: "Rigging", on: s.sys.rigging, m: 0.3, dot: "#7b3f8a", items: rigItems },
@@ -610,17 +623,17 @@ export function compute(s: AState): ComputeResult {
     {
       key: "audio", name: "Audio", on: s.sys.audio, m: 0.3, dot: "#3155a8",
       items: [
-        eq("audio:lineArray", "Line-array loudspeaker", "ea", arrayBoxes),
-        eq("audio:subwoofer", "Subwoofer", "ea", subs),
-        eq("audio:mixerDsp", "Digital mixer, DSP & amplifiers", "lot", 1),
+        eq("audio:lineArray", arrayBoxes),
+        eq("audio:subwoofer", subs),
+        eq("audio:mixerDsp", 1),
       ],
     },
     {
       key: "video", name: "Video", on: s.sys.video, m: 0.31, dot: "#2a7d8a",
       items: [
-        eq("video:projector", "Laser projector, 4K", "ea", projectors),
-        eq("video:screen", "Projection screen / LED wall", "lot", 1),
-        eq("video:processor", "Video processor & switcher", "lot", 1),
+        eq("video:projector", projectors),
+        eq("video:screen", 1),
+        eq("video:processor", 1),
       ],
     },
   ];
@@ -848,23 +861,37 @@ export function contingencyValue(v: unknown): number {
  * row now emits FEET, and there is no safe conversion (the pipe length it was
  * saved against is unknown), so the calculated feet are used until the
  * designer re-edits it. A marked (feet) override is kept, so the server
- * prices the same quantity the screen showed (D324).
+ * prices the same quantity the screen showed (D324). An override saved under
+ * a pre-#233 label reads under its new label (EQUIPMENT_LABEL_ALIASES); when
+ * both were saved, the new label's value wins.
  */
 export function cleanQtyOverrides(raw: unknown, feet: boolean): AState["qtyOverrides"] {
   const out: AState["qtyOverrides"] = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
   for (const [tier, bySys] of Object.entries(raw as Record<string, unknown>)) {
     if (!bySys || typeof bySys !== "object" || Array.isArray(bySys)) continue;
     const sysOut: Record<string, Record<string, number>> = {};
+    const aliased: Array<[string, string, number]> = [];
     for (const [sysKey, byDesc] of Object.entries(bySys as Record<string, unknown>)) {
       if (!byDesc || typeof byDesc !== "object" || Array.isArray(byDesc)) continue;
-      const descOut: Record<string, number> = {};
+      const descOut: Record<string, number> = has(sysOut, sysKey) ? sysOut[sysKey] : (sysOut[sysKey] = {});
       for (const [desc, v] of Object.entries(byDesc as Record<string, unknown>)) {
         if (!feet && `${sysKey}:${desc}` === SCENERY_TRACK_OVERRIDE) continue;
         if (typeof v !== "number" || !Number.isFinite(v)) continue;
-        descOut[desc] = Math.max(0, Math.trunc(v));
+        const qty = Math.max(0, Math.trunc(v));
+        const to = EQUIPMENT_LABEL_ALIASES.get(`${sysKey}:${desc}`);
+        if (to) {
+          const i = to.indexOf(":");
+          aliased.push([to.slice(0, i), to.slice(i + 1), qty]);
+        } else descOut[desc] = qty;
       }
-      sysOut[sysKey] = descOut;
+    }
+    // #233: old-label overrides land under the new label unless the new
+    // label was saved too (then the new one wins).
+    for (const [sysKey, desc, qty] of aliased) {
+      const descOut: Record<string, number> = has(sysOut, sysKey) ? sysOut[sysKey] : (sysOut[sysKey] = {});
+      if (!has(descOut, desc)) descOut[desc] = qty;
     }
     out[tier as TierKey] = sysOut;
   }

@@ -2,9 +2,11 @@
  * The equation item vocabulary (#211, D301). Every item compute()
  * (quick/engine.ts) can emit, keyed `system:itemKey` — stable keys, never
  * display text. The Equipment map, the Auto intake and saved overrides all key
- * on these, so a relabel never orphans a mapping. `label` is the equation's
- * own item name (asserted equal by the #211 T1 spec block). Pure and
- * dollar-free: client components may import it.
+ * on these, so a relabel never orphans a mapping. `label` (and `unit`) is the
+ * ONE source of an item's name: compute() reads it by key (#233), so Quick
+ * Design, Auto cards and the Equipment map can never disagree. Pure and
+ * dollar-free: client components may import it. It imports only TYPES from
+ * the engine — the engine imports values from here.
  *
  * `place` is how Auto lands a row on the plan: "each" = one marker per unit,
  * "lot" = one marker carrying the quantity (count/length hardware), "curtain"
@@ -58,9 +60,9 @@ export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
   row("rigging", "loftblock", "Loftblock", "ea", "lot", ["loft block", "loftblock"]),
   // Rigging — shared by dead hung + counterweight
   row("rigging", "pipe", "Pipe", "ft", "lot", ["pipe", "batten"]),
-  row("rigging", "aircraftCable", "Aircraft cable", "ft", "lot", ["aircraft cable", "wire rope"]),
-  row("rigging", "chainWrap", "Chain wrap, 3 ft", "ea", "lot", ["chain"]),
-  row("rigging", "terminationKit", "Termination kit", "ea", "lot", ["termination", "swage", "thimble"]),
+  row("rigging", "aircraftCable", "Suspension Method", "ft", "lot", ["aircraft cable", "wire rope"]),
+  row("rigging", "chainWrap", "Batten Termination", "ea", "lot", ["chain"]),
+  row("rigging", "terminationKit", "Beginning Termination", "ea", "lot", ["termination", "swage", "thimble"]),
   // Curtains — the four drapes resolve per area from a mapped Fabric part
   row("curtains", "draw", "Draw", "ea", "curtain", ["velour", "drape"], { drape: "Draw", grid: "Draw" }),
   row("curtains", "legs", "Leg", "ea", "curtain", ["velour", "leg"], { drape: "Legs", grid: "Leg" }),
@@ -73,16 +75,17 @@ export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
   row("lighting", "cyc", "Cyc", "ea", "each", ["cyc"]),
   row("lighting", "side", "Side light", "ea", "each", ["wash", "side"]),
   row("lighting", "automated", "Automated", "ea", "each", ["moving", "automated"]),
+  // #233: was controls:outputStation ("Output station") — same equation, now a Fixtures item.
+  row("lighting", "cablePackage", "Cable Package", "ea", "lot", ["cable", "jumper", "extension"]),
   // Controls (Quick Design only)
   row("controls", "console", "Console", "ea", "none", ["console"]),
-  row("controls", "consoleTouch", "Console touch screen", "ea", "none", ["touch", "monitor"]),
-  row("controls", "batteryBackup", "Battery backup", "ea", "none", ["ups", "battery"]),
-  row("controls", "processor", "Processor", "ea", "none", ["processor", "architectural"]),
-  row("controls", "button", "Button", "ea", "none", ["button", "station"]),
-  row("controls", "archTouch", "Architectural touch screen", "ea", "none", ["touch"]),
-  row("controls", "inputStation", "Input station", "ea", "none", ["input", "node"]),
-  row("controls", "outputStation", "Output station", "ea", "none", ["output", "node"]),
-  row("controls", "distro", "Distro system", "ea", "none", ["distro", "switch", "gateway"]),
+  row("controls", "consoleTouch", "Console Accessories", "ea", "none", ["touch", "monitor"]),
+  row("controls", "batteryBackup", "Emergency", "ea", "none", ["ups", "battery"]),
+  row("controls", "processor", "Power Controls – Production", "ea", "none", ["processor", "architectural"]),
+  row("controls", "button", "Power Controls – Architectural", "ea", "none", ["button", "station"]),
+  row("controls", "archTouch", "Architectural Controls", "ea", "none", ["touch"]),
+  row("controls", "inputStation", "DMX Distribution", "ea", "none", ["input", "node"]),
+  row("controls", "distro", "Labor", "ea", "none", ["distro", "switch", "gateway"]),
   // Audio
   row("audio", "lineArray", "Line-array loudspeaker", "ea", "each", ["line array", "loudspeaker", "speaker"]),
   row("audio", "subwoofer", "Subwoofer", "ea", "each", ["subwoofer"]),
@@ -112,3 +115,32 @@ export const EQUIP_SYSTEM_LABEL: Record<SysKey, string> = {
   acoustical: "Acoustical",
   pit: "Pit",
 };
+
+/**
+ * #233 — a moved row's OLD key → its new key. Read-time only
+ * (sanitizeEquipmentMap): an Equipment map entry stored under the old key
+ * reads as the new row until the blob holds the new key at all (saved, or
+ * cleared as null) — then the old entry is ignored. Nothing is rewritten.
+ */
+export const EQUIPMENT_KEY_ALIASES: ReadonlyMap<string, string> = new Map([["controls:outputStation", "lighting:cablePackage"]]);
+
+/**
+ * #233 — Quick Design qty overrides are keyed system → item NAME (D324), so a
+ * relabel would orphan them. Old "system:label" → new "system:label", applied
+ * where a saved config is read (cleanQtyOverrides, quick/engine.ts), which is
+ * the screen's and the server's one read path. The next save writes the new
+ * names; no stored record is rewritten.
+ */
+export const EQUIPMENT_LABEL_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["rigging:Aircraft cable", "rigging:Suspension Method"],
+  ["rigging:Chain wrap, 3 ft", "rigging:Batten Termination"],
+  ["rigging:Termination kit", "rigging:Beginning Termination"],
+  ["controls:Console touch screen", "controls:Console Accessories"],
+  ["controls:Battery backup", "controls:Emergency"],
+  ["controls:Processor", "controls:Power Controls – Production"],
+  ["controls:Button", "controls:Power Controls – Architectural"],
+  ["controls:Architectural touch screen", "controls:Architectural Controls"],
+  ["controls:Input station", "controls:DMX Distribution"],
+  ["controls:Output station", "lighting:Cable Package"],
+  ["controls:Distro system", "controls:Labor"],
+]);

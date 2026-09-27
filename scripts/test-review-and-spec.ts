@@ -21996,3 +21996,93 @@ import { curtainSwapHits as fab227Swap3 } from "@/lib/design/auto-estimate";
   // field's local state must be keyed per part or part A's rate saves onto B.
   ok(/<FabricRateField[^>]*key=\{part\.sku\}/.test(src("src/app/(app)/catalog/page.tsx")), "#227 catalog editor: FabricRateField is keyed by part.sku so one part's rate never carries into the next");
 }
+
+/* --- #233: relabels — one label source (the vocabulary); old Quick Design overrides and the moved Equipment-map key still resolve --- */
+import {
+  EQUIPMENT_ROWS as r233Rows, EQUIPMENT_ROW_BY_KEY as r233ByKey,
+  EQUIPMENT_KEY_ALIASES as r233KeyAliases, EQUIPMENT_LABEL_ALIASES as r233LabelAliases,
+} from "@/lib/design/equipment-vocab";
+import {
+  compute as r233Compute, defaultAState as r233Default, cleanQtyOverrides as r233Clean, hydrateAState as r233Hydrate,
+  type AState as R233AState,
+} from "@/app/(app)/design/quick/engine";
+import { sanitizeEquipmentMap as r233Sanitize } from "@/lib/design/equipment-map";
+import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
+{
+  const L = (k: string) => r233ByKey.get(k)?.label;
+  const expected: Array<[string, string]> = [
+    ["rigging:aircraftCable", "Suspension Method"],
+    ["rigging:chainWrap", "Batten Termination"],
+    ["rigging:terminationKit", "Beginning Termination"],
+    ["controls:consoleTouch", "Console Accessories"],
+    ["controls:batteryBackup", "Emergency"],
+    ["controls:processor", "Power Controls – Production"],
+    ["controls:button", "Power Controls – Architectural"],
+    ["controls:archTouch", "Architectural Controls"],
+    ["controls:inputStation", "DMX Distribution"],
+    ["lighting:cablePackage", "Cable Package"],
+    ["controls:distro", "Labor"],
+  ];
+  const wrong = expected.filter(([k, l]) => L(k) !== l).map(([k]) => `${k}=${L(k)}`);
+  ok(wrong.length === 0, `#233: the eleven relabels (wrong: ${wrong.join(", ") || "none"})`);
+  ok(!r233ByKey.has("controls:outputStation") && r233ByKey.get("lighting:cablePackage")?.system === "lighting" && r233ByKey.get("lighting:cablePackage")?.place === "lot" && r233Rows.length === 46,
+    "#233: Output station moved to Lighting as Cable Package (a lot row) — still 46 rows");
+
+  // One source: compute() reads name AND unit from the vocabulary.
+  const base = r233Default(0);
+  const s: R233AState = {
+    ...base, venue: "pac", size: "medium", width: 60, depth: 40, grid: 50,
+    sys: { ...base.sys, lighting: true, controls: true }, ctrl: { console: true, architectural: true, data: true },
+  };
+  const C = r233Compute(s);
+  const light = C.systems.find((x) => x.key === "lighting")!;
+  const ctrl = C.systems.find((x) => x.key === "controls")!;
+  const cable = light.items.find((i) => i.key === "lighting:cablePackage");
+  ok(cable?.qty === 20 && cable.desc === "Cable Package" && cable.unit === "ea" && !ctrl.items.some((i) => i.key === "controls:outputStation"),
+    "#233: Cable Package keeps Output station's formula (2 × ⌊40/4⌋ = 20 at medium), now on the Lighting system");
+  const noCtrl = r233Compute({ ...s, sys: { ...s.sys, controls: false } });
+  ok(!noCtrl.systems.find((x) => x.key === "lighting")!.items.some((i) => i.key === "lighting:cablePackage"),
+    "#233: …and keeps its gate (Controls in scope, Data picked), so no existing Quick Design total moves");
+  const everyItem = C.systems.flatMap((x) => x.items);
+  ok(everyItem.every((i) => r233ByKey.get(i.key)?.label === i.desc && r233ByKey.get(i.key)?.unit === i.unit),
+    "#233: every emitted item's name and unit are the vocabulary's");
+  const engSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/quick/engine.ts"), "utf8");
+  ok(engSrc.includes('from "@/lib/design/equipment-vocab"') && !/\beq\(\s*"[a-z]+:[a-zA-Z]+",\s*"/.test(engSrc) &&
+      !/addFix\("[a-z]+", fx\.[a-z]+, "/.test(engSrc) && !/addDrape\([^)]*"curtains:[a-z]+", "/.test(engSrc),
+    "#233: compute() carries no item-name literals — one source");
+  const vocabSrc = readFileSync(join(process.cwd(), "src/lib/design/equipment-vocab.ts"), "utf8");
+  ok(!/^import\s+(?!type\b)[^;]*from\s+"@\/app\/\(app\)\/design\/quick\/engine"/m.test(vocabSrc),
+    "#233: the vocabulary imports only types from the engine (no runtime cycle)");
+
+  // Quick Design qty overrides keyed by the OLD label read under the new one.
+  const cleaned = r233Clean({ better: { rigging: { "Aircraft cable": 900, Pipe: 12 }, controls: { "Output station": 7, "Distro system": 1, Console: 2 } } }, true);
+  ok(cleaned.better?.rigging?.["Suspension Method"] === 900 && cleaned.better?.rigging?.Pipe === 12 && !("Aircraft cable" in (cleaned.better?.rigging || {})),
+    "#233: an override saved under an old label reads under the new label");
+  ok(cleaned.better?.lighting?.["Cable Package"] === 7 && !("Output station" in (cleaned.better?.controls || {})) && cleaned.better?.controls?.Labor === 1 && cleaned.better?.controls?.Console === 2,
+    "#233: the Output station override lands on Lighting · Cable Package; unrenamed rows are untouched");
+  const both = r233Clean({ good: { rigging: { "Aircraft cable": 5, "Suspension Method": 8 } } }, true);
+  ok(both.good?.rigging?.["Suspension Method"] === 8 && Object.keys(both.good?.rigging || {}).length === 1,
+    "#233: when both labels were saved, the new label's value wins");
+  const hyd = r233Hydrate({ config: { ...r233Default(0), qtyOverrides: { best: { rigging: { "Chain wrap, 3 ft": 3 } } }, overrideUnits: { "curtains:Scenery track": "ft" } } }, 0);
+  ok(hyd.qtyOverrides.best?.rigging?.["Batten Termination"] === 3,
+    "#233: a saved design hydrates its old overrides under the new labels (screen and server share this read)");
+  const aliasTargetsLive = [...(r233LabelAliases?.values() ?? [])].every((to) => {
+    const i = to.indexOf(":");
+    return r233Rows.some((r) => r.system === to.slice(0, i) && r.label === to.slice(i + 1));
+  });
+  ok(r233LabelAliases?.size === 11 && aliasTargetsLive, "#233: eleven label aliases, each pointing at a live row");
+
+  // Equipment map: the moved key reads as the new key until the new key is written.
+  const cell = { kind: "part", sku: "CAB-1" };
+  const oldOnly = r233Sanitize({ "controls:outputStation": { tiers: { good: cell }, updatedBy: "J", updatedAt: 1 } });
+  const oc = oldOnly["lighting:cablePackage"]?.tiers.good;
+  ok(oc?.kind === "part" && oc.sku === "CAB-1" && !("controls:outputStation" in oldOnly),
+    "#233: a stored controls:outputStation row reads as lighting:cablePackage");
+  const newWins = r233Sanitize({ "controls:outputStation": { tiers: { good: cell } }, "lighting:cablePackage": { tiers: { good: { kind: "part", sku: "CAB-2" } } } });
+  const nc = newWins["lighting:cablePackage"]?.tiers.good;
+  ok(nc?.kind === "part" && nc.sku === "CAB-2", "#233: once the new key is saved it wins over the old one");
+  const cleared = r233Sanitize({ "controls:outputStation": { tiers: { good: cell } }, "lighting:cablePackage": null });
+  ok(!("lighting:cablePackage" in cleared), "#233: clearing the new row is not undone by the old key");
+  ok(r233KeyAliases?.get("controls:outputStation") === "lighting:cablePackage" && r233KeyAliases?.size === 1, "#233: exactly one key moved");
+  ok(r233Hints["lighting:cablePackage"] !== undefined && !("controls:outputStation" in r233Hints), "#233: the 'was' hint moved with the row");
+}

@@ -22,7 +22,7 @@
  *                computed from the venue geometry in equipment-pricing.ts.
  */
 import type { TierKey } from "@/app/(app)/design/quick/engine";
-import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type EquipRowDef } from "./equipment-vocab";
+import { EQUIPMENT_KEY_ALIASES, EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type EquipRowDef } from "./equipment-vocab";
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
 import { fabricAreaRateOf } from "./curtain-pricing";
 import { NO_FABRIC_RATE } from "@/lib/curtain-geom";
@@ -87,11 +87,17 @@ export function sanitizeEquipCell(raw: unknown): EquipCell | null {
   return null;
 }
 
-/** The stored blob → a clean map: known rows only, valid cells only, cleared (null) rows dropped. */
+/** The stored blob → a clean map: known rows only, valid cells only, cleared (null) rows dropped.
+ *  #233: a moved row's old key reads as its new key while the blob holds no
+ *  entry at all under the new key (a saved or cleared new row wins). */
 export function sanitizeEquipmentMap(raw: unknown): EquipmentMap {
   const out: EquipmentMap = {};
   if (!raw || typeof raw !== "object") return out;
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+  const src = raw as Record<string, unknown>;
+  for (const [rawKey, value] of Object.entries(src)) {
+    const moved = EQUIPMENT_KEY_ALIASES.get(rawKey);
+    if (moved && Object.prototype.hasOwnProperty.call(src, moved)) continue;
+    const key = moved ?? rawKey;
     if (!EQUIPMENT_ROW_BY_KEY.has(key) || !value || typeof value !== "object") continue;
     const v = value as Record<string, unknown>;
     const tiersRaw = (v.tiers && typeof v.tiers === "object" ? v.tiers : {}) as Record<string, unknown>;

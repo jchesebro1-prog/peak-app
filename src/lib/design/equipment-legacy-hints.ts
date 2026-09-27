@@ -60,6 +60,7 @@ export const LEGACY_HINTS: Record<string, LegacyHint> = {
   "lighting:cyc": { perTier: T(1200, 1750, 2600) },
   "lighting:side": { perTier: T(1250, 1800, 2700) },
   "lighting:automated": { perTier: T(2100, 3000, 4600) },
+  "lighting:cablePackage": { perTier: T(90, 125, 190) }, // was controls:outputStation (#233)
   "controls:console": { perTier: T(4800, 7000, 10500) },
   "controls:consoleTouch": { perTier: T(1400, 2000, 3000) },
   "controls:batteryBackup": { perTier: T(20, 30, 45) },
@@ -67,7 +68,6 @@ export const LEGACY_HINTS: Record<string, LegacyHint> = {
   "controls:button": { perTier: T(180, 250, 380) },
   "controls:archTouch": { perTier: T(1400, 2000, 3000) },
   "controls:inputStation": { perTier: T(70, 100, 150) },
-  "controls:outputStation": { perTier: T(90, 125, 190) },
   "controls:distro": { perTier: T(2100, 3000, 4500) },
   "audio:lineArray": { perTier: T(1000, 1450, 2200) },
   "audio:subwoofer": { perTier: T(1300, 1850, 2800) },
