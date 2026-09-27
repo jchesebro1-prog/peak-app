@@ -42,8 +42,8 @@ export type GridAccessoryInput = { id?: string | null; partId?: string; qty: num
 export type AccessoryBomLine = BomLine & { accessoryId: string; group: BomGroupKey };
 
 const ID_RE = /^ba-[0-9a-f]{12}$/;
-/** Ids that are never a Grid-library part: Auto's virtual parts, custom items, seed placeholders. */
-const NOT_A_PART = /^(asm:|allow:|custom:|grid-seed:)/;
+/** Ids that are never a Grid-library part: Auto's virtual parts, custom items, seed placeholders, #232 labor lines. */
+const NOT_A_PART = /^(asm:|allow:|custom:|grid-seed:|labor:)/;
 const QTY_ERROR = "Quantity must be a whole number from 1 to 100,000.";
 
 export function isAccessoryId(v: unknown): v is string {

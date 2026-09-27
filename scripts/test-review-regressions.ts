@@ -4273,7 +4273,9 @@ async function main() {
     // The server figure is the screen's figure: tierTotals over the same pipeline with the page's default rates.
     const s = hydrateAState(c1, 10);
     const { table } = await DP.loadDesignPricing([]);
-    const screen = tierTotals(tierSystems(compute(s), s, "better", tierDefsFor(s), table, {}), TIERS[1], 0.18, 0.05, (s.contingency || 0) / 100).grand;
+    // #232: labor is per system × tier now — Better = 18 % × 1.15 by default, not a flat 0.18.
+    const { laborFracsFor, defaultWireLaborRules } = await import("@/lib/design/wire-labor");
+    const screen = tierTotals(tierSystems(compute(s), s, "better", tierDefsFor(s), table, {}), TIERS[1], laborFracsFor(defaultWireLaborRules(), "better"), 0.05, (s.contingency || 0) / 100).grand;
     assert.equal(price.budget, Math.round(screen), "#211 wave 2 I1: the server budget equals Quick Design's own total (whole dollars, as the screen shows it)");
     const q = await Designs.promoteDesignToQuote(c1.id, "Jeff Chesebro", price);
     assert.ok(q, "#211 wave 2 I1: promoted");

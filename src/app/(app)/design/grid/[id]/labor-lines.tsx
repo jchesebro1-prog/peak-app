@@ -30,9 +30,9 @@ function money(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
 }
 
-/** "18% × 1.15" — the multiplier only when a tier moved it off 1. */
+/** "18% × 1.15 of $8,571" — the multiplier only when a tier moved it off 1. */
 function rateLabel(l: GridLaborLine): string {
-  return l.mult === 1 ? `${l.pct}%` : `${l.pct}% × ${l.mult}`;
+  return `${l.mult === 1 ? `${l.pct}%` : `${l.pct}% × ${l.mult}`} of ${money(l.material)}`;
 }
 
 export function LaborLineRow({

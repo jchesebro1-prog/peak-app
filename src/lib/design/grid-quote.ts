@@ -34,6 +34,9 @@ import { loadWireLaborRules } from "@/lib/stores/pricing";
 import { gridLaborLines, sanitizeLaborOverrides, type GridLaborLine, type LaborOverrides, type WireLaborRules } from "@/lib/design/wire-labor";
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 
+/** Labor's cost share when the tier margin is unusable (negative or ≥ 95 %) — a 30 % margin. */
+const LABOR_COST_FRAC_FALLBACK = 0.7;
+
 export type GridQuoteSpecLine = {
   sku: string; desc: string; qty: number; unit: string; price: number; ext: number; tierFallback?: true; allowance?: true;
 };
@@ -179,8 +182,7 @@ export async function buildGridQuote(
       : { id: s.id, sku: s.modelNumber || s.id, desc: s.name, category: s.category, unit: "ea", list: 0, cost: 0, ports: s.ports };
   });
   const gridCatalog = [...symbolRows, ...virtualRows];
-  const tierSource = [...gridCatalog, ...catalog.filter((p) => (p.role || "").toLowerCase() === "labor")];
-  const tierCatalog = tierSource.map((p) => ({
+  const tierCatalog = gridCatalog.map((p) => ({
     ...p,
     list: isTierPriced(p.cost, tier.margin) ? Math.round((p.cost / (1 - tier.margin)) * 100) / 100 : p.list,
   }));
@@ -243,7 +245,7 @@ export async function buildGridQuote(
   const overrides: LaborOverrides = {};
   for (const [k, v] of Object.entries(sanitizeLaborOverrides(option.laborOverrides))) if (isBomGroupKey(k)) overrides[k] = v;
   const laborLines = gridLaborLines(material, laborTier, wireLabor, overrides);
-  const laborCostFrac = tier.margin >= 0 && tier.margin < 0.95 ? 1 - tier.margin : 0.7;
+  const laborCostFrac = tier.margin >= 0 && tier.margin < 0.95 ? 1 - tier.margin : LABOR_COST_FRAC_FALLBACK;
   const labor = laborLines
     .filter((l) => l.amount > 0)
     .map((l) => ({ sku: l.sku, desc: l.desc, qty: 1, unit: "lot", price: l.amount, ext: l.amount, cost: Math.round(l.amount * laborCostFrac * 100) / 100 }));

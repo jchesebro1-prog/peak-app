@@ -274,7 +274,8 @@ const LAYER_TO_LABOR: Readonly<Record<string, LaborSystem>> = {
   Video: "video",
 };
 
-/** A Grid line's labor system: an Auto tag's scope first, then the part's Grid layer, else General. */
+/** test-only — A Grid line's labor system: an Auto tag's scope first, then the part's Grid layer, else General.
+ *  (Production partitions material through groupedBomLines instead.) */
 export function laborSystemOf(scope: string | null | undefined, layer: string | null | undefined): LaborSystem {
   if (scope && scope !== "general" && isLaborSystem(scope)) return scope;
   if (layer && Object.prototype.hasOwnProperty.call(LAYER_TO_LABOR, layer)) return LAYER_TO_LABOR[layer];
