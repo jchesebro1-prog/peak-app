@@ -20819,3 +20819,208 @@ async function dayliteCalendarAsyncChecks219(): Promise<void> {
   const hist = read("src/app/(app)/import/daylite/page.tsx");
   ok(hist.includes('href="/import/daylite/calendar"'), "#219 T3: /import/daylite links to the calendar import");
 }
+
+/* ======================================================================
+   #226 Grid device types — Task 1: the pure model (seeds, suggestion
+   rules on realistic raw categories incl. the dealer-sheet per-brand
+   defaults, the map rules, review rows, list helpers, the scope fix).
+   ====================================================================== */
+import {
+  SEED_DEVICE_TYPES as dt226Seed, DEFAULT_TYPE_ICONS as dt226Icons, deviceTypesFrom as dt226From, slugOf as dt226Slug,
+  normalizeRawCategory as dt226Norm, suggestDeviceType as dt226Suggest, typeOfPart as dt226TypeOf, scopeOfType as dt226ScopeOf,
+  keywordScopeOf as dt226Keyword, autoTypeEntries as dt226Auto, sanitizeTypeMap as dt226Sanitize, typeReviewRows as dt226Rows,
+  acceptSuggestionEntries as dt226Accept, assignEntries as dt226Assign, mergeTypeEntries as dt226Merge,
+  cleanDeviceTypesInput as dt226Clean, typeLayerRows as dt226Layers, typeKeyOfPart as dt226KeyOf, typeLabel as dt226Label,
+  deviceTypeIcons as dt226TypeIcons, withTypeIcons as dt226WithIcons, cleanIdList as dt226Ids, withRecent as dt226Recent,
+  toggleInList as dt226Toggle, UNMAPPED_TYPE as DT226_UNMAPPED, ASSEMBLY_TYPE as DT226_ASM, type TypeMap as DT226Map,
+} from "@/lib/design/device-types";
+import { gridPartsFrom as dt226Parts } from "@/lib/design/grid-parts";
+import { scopeOfPart as dt226ScopeOfPart } from "@/lib/design/grid-scopes";
+import { isGridIconId as dt226IsIcon } from "@/lib/design/grid-icons";
+
+{
+  const j = (x: unknown) => JSON.stringify(x);
+  ok(dt226Seed.length === 25 && new Set(dt226Seed.map((t) => t.key)).size === 25, "#226 model: 25 seeded device types with unique keys");
+  ok(
+    dt226Seed.map((t) => t.key).join(",") ===
+      "fixtures,dimming-power,control-networking,lighting-accessories,hoists-motors,truss-pipe,rigging-hardware,rigging-control,drapery,tracks-hardware,speakers,microphones,mixing-processing,amplifiers,assistive-listening,intercom,displays-projectors,screens-lifts,cameras,switching-distribution,cable-connectors,racks-cases,power-distribution,networking,parts-consumables",
+    "#226 model: seed keys are slugs of the labels, in the spec's order"
+  );
+  ok(dt226Seed.filter((t) => t.scope === "Unscoped").map((t) => t.label).join("|") === "Cable & Connectors|Racks & Cases|Power Distribution|Networking|Parts & Consumables",
+    "#226 model: the General five are Unscoped");
+  ok(dt226Seed.every((t) => dt226IsIcon(dt226Icons[t.key])), "#226 model: every seeded type has a registered default icon");
+  ok(dt226Slug("Dimming & Power") === "dimming-power" && dt226Slug("  A/V  Racks!! ") === "a-v-racks", "#226 model: slugOf");
+  ok(dt226Norm("  Motorized   HOIST ") === "motorized hoist" && dt226Norm(null) === "" && dt226Norm("__proto__") === "",
+    "#226 model: normalizeRawCategory trims, lowercases, collapses whitespace (and refuses __proto__)");
+
+  // seed / sanitize / merge
+  ok(j(dt226From(undefined)) === j(dt226Seed) && dt226From(undefined) !== dt226From(undefined), "#226 model: absent → fresh seed copies");
+  const stored = dt226From([
+    { key: "fixtures", label: "Luminaires", scope: "Lighting", order: 5, icon: "wash" },
+    { key: "fixtures", label: "Dup", scope: "Lighting", order: 1 },
+    { key: "Bad Key", label: "x", scope: "Lighting", order: 1 },
+    { key: "fog", label: "Fog & Haze", scope: "Lighting", order: 900, archived: true },
+    { key: "x", label: "", scope: "Lighting", order: 2 },
+    { key: "y", label: "Y", scope: "Nope", order: 2 },
+  ]);
+  ok(stored[0].key === "fixtures" && stored[0].label === "Luminaires" && stored[0].icon === "wash", "#226 model: a stored type keeps its rename and icon");
+  ok(stored.filter((t) => t.key === "fixtures").length === 1 && !stored.some((t) => ["Bad Key", "x", "y"].includes(t.key)),
+    "#226 model: duplicate keys, bad keys, blank labels and unknown scopes are dropped");
+  ok(stored.length === 26 && stored.some((t) => t.key === "fog" && t.archived) && stored.some((t) => t.key === "parts-consumables"),
+    "#226 model: seeds missing from a stored list are merged back in; archived customs stay");
+
+  // suggestion rules — realistic raw categories (scripts/catalog-import-data.json,
+  // the dealer-sheet BRAND_CATEGORY defaults in scripts/convert-dealer-sheets.py,
+  // and common vendor-sheet section names)
+  const CASES: Array<[string, string | null, "high" | "low" | null]> = [
+    ["Fixtures", "fixtures", "high"], ["Track", "tracks-hardware", "high"], ["Pipe", "truss-pipe", "high"],
+    ["Loftblocks", "rigging-hardware", "high"], ["Headblocks", "rigging-hardware", "high"], ["Mule Block", "rigging-hardware", "high"],
+    ["Arbor", "rigging-hardware", "high"], ["Standard Arbor", "rigging-hardware", "high"], ["Front Arbor", "rigging-hardware", "high"],
+    ["Floor Block", "rigging-hardware", "high"], ["Manual Hoist", "hoists-motors", "high"], ["Motorized Hoist", "hoists-motors", "high"],
+    ["Rope Lock", "rigging-hardware", "high"], ["Hardware", "rigging-hardware", "high"], ["Shoes", "rigging-hardware", "high"],
+    ["Wire Mesh Strain Reliefs", "rigging-hardware", "high"], ["Mounts", "rigging-hardware", "high"], ["Curtains", "drapery", "high"],
+    ["Networking", "networking", "high"], ["Racks", "racks-cases", "high"], ["Rack Accessories", "racks-cases", "high"],
+    ["Rack Options", "racks-cases", "high"], ["Connectors", "cable-connectors", "high"], ["Cable Assemblies", "cable-connectors", "high"],
+    ["Lighting Controls", "control-networking", "high"], ["Video Controls", "switching-distribution", "high"], ["Speakers", "speakers", "high"],
+    ["Audio Controls", "mixing-processing", "high"], ["Power Distribution", "power-distribution", "high"], ["Power Controls", "dimming-power", "high"],
+    ["Cable", "cable-connectors", "high"], ["Lamp", "parts-consumables", "high"], ["Cases", "racks-cases", "high"], ["Carts", "racks-cases", "high"],
+    ["Parts", "parts-consumables", "high"], ["Distro Boxes", "power-distribution", "high"], ["Cable Crossovers", "cable-connectors", "high"],
+    ["Wire", "cable-connectors", "high"], ["Control", "control-networking", "low"], ["Architectural", "fixtures", "low"],
+    ["Uncategorized", null, null], ["Accessory", null, null], ["Atmospherics", null, null], ["Fabric", null, null], ["Labor", null, null],
+    // dealer-sheet per-brand defaults
+    ["Audio", null, null], ["AV Control", null, null], ["Networked AV", null, null], ["Video", null, null],
+    ["Displays", "displays-projectors", "high"], ["LED Video", "displays-projectors", "high"], ["Screens & Lifts", "screens-lifts", "high"],
+    ["AV Distribution", "switching-distribution", "high"], ["AV Infrastructure", null, null], ["Power", "power-distribution", "low"],
+    ["Assistive Listening", "assistive-listening", "high"], ["Comms", "intercom", "high"], ["Stage Accessories", null, null],
+    ["Rigging", "rigging-hardware", "low"], ["Staging", null, null], ["Lighting Control", "control-networking", "high"], ["Lighting", "fixtures", "low"],
+    // common section names
+    ["Moving Lights", "fixtures", "high"], ["Wireless Microphones", "microphones", "high"], ["Wireless", "microphones", "low"],
+    ["Wireless Access Points", "networking", "high"], ["Power Amplifiers", "amplifiers", "high"], ["Digital Mixing Consoles", "mixing-processing", "high"],
+    ["Lighting Consoles", "control-networking", "high"], ["PTZ Cameras", "cameras", "high"], ["Projection Screens", "screens-lifts", "high"],
+    ["HDBaseT Extenders", "switching-distribution", "high"], ["Dimmers", "dimming-power", "high"], ["Chain Hoists", "hoists-motors", "high"],
+    ["Motor Controllers", "rigging-control", "high"], ["Truss", "truss-pipe", "high"], ["Velour Curtains", "drapery", "high"],
+    ["Travelers", "tracks-hardware", "high"], ["Clear-Com", "intercom", "high"], ["Gobos", "lighting-accessories", "high"],
+    ["Clamps", "lighting-accessories", "low"], ["Network Switches", "networking", "high"], ["Stage Monitors", "speakers", "high"],
+    ["Monitors", "displays-projectors", "low"], ["  motorized   HOIST ", "hoists-motors", "high"],
+  ];
+  for (const [cat, key, conf] of CASES) {
+    const s = dt226Suggest(cat);
+    ok(key === null ? s === null : s?.typeKey === key && s.confidence === conf,
+      `#226 suggest: "${cat}" → ${key ?? "null"}${conf ? ` (${conf})` : ""} (got ${j(s)})`);
+  }
+  ok(j(dt226Suggest("Audio", ["QSC K12.2 powered loudspeaker", "QSC KS118 subwoofer", "Shure SM58 microphone"])) === j({ typeKey: "speakers", confidence: "low" }),
+    "#226 suggest: sample descriptions vote a LOW-confidence type when the category says nothing");
+  ok(dt226Suggest("Uncategorized", ["ETC Source Four ellipsoidal"]) === null && dt226Suggest("Fabric", ["velour"]) === null,
+    "#226 suggest: generic and excluded categories never get a suggestion, whatever the parts say");
+  ok(j(dt226Suggest("Fixtures", ["QSC loudspeaker"])) === j({ typeKey: "fixtures", confidence: "high" }), "#226 suggest: a category match beats the descriptions");
+
+  // typeOfPart / scopes
+  const types = dt226From(undefined);
+  const map: DT226Map = {
+    "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 1 },
+    widgets: { typeKey: null, by: "admin", at: 2 },
+    gone: { typeKey: "no-such-type", by: "admin", at: 3 },
+  };
+  ok(dt226TypeOf({ category: " Motorized  Hoist" }, map, types) === "hoists-motors", "#226 typeOfPart: matches the normalized category");
+  ok(dt226TypeOf({ category: "Widgets" }, map, types) === null && dt226TypeOf({ category: "Gone" }, map, types) === null && dt226TypeOf({ category: "Nothing" }, map, types) === null,
+    "#226 typeOfPart: an admin 'unmapped', an unknown type and no entry are all null");
+  ok(dt226TypeOf({ category: "Motorized Hoist" }, map, types.map((t) => (t.key === "hoists-motors" ? { ...t, archived: true } : t))) === null,
+    "#226 typeOfPart: an archived type maps nothing");
+  ok(dt226TypeOf({ category: "Fabric" }, { fabric: { typeKey: "drapery", by: "admin", at: 1 } }, types) === null, "#226 typeOfPart: Fabric/Labor never take a device type");
+  ok(dt226ScopeOf("hoists-motors", types) === "Rigging" && dt226ScopeOf("networking", types) === "Unscoped" && dt226ScopeOf(null, types) === "Unscoped" && dt226ScopeOf("nope", types) === "Unscoped",
+    "#226 scopeOfType: the type's scope; unmapped → Unscoped");
+  ok(dt226Keyword({ category: "Widgets", desc: "Blue thing" }) === "Unscoped" && dt226Keyword({ category: "X", desc: "Velour curtain" }) === "Curtains" && dt226Keyword({ category: "Speakers", desc: "" }) === "Audio",
+    "#226 scope fix: the keyword fallback ends in Unscoped, not Lighting");
+  const gc226 = readFileSync(join(process.cwd(), "src/lib/stores/grid-catalog.ts"), "utf8");
+  ok(gc226.includes("keywordScopeOf(") && !/return "Lighting";/.test(gc226), "#226 scope fix: grid-catalog's scopeFor delegates to keywordScopeOf (no Lighting fallback)");
+
+  // the map
+  ok(j(dt226Sanitize({ "  Motorized HOIST ": { typeKey: "hoists-motors", by: "auto", at: 5 }, a: { typeKey: "Bad Key", by: "admin", at: 1 }, b: { typeKey: "speakers", by: "robot", at: 1 }, c: null, d: { typeKey: null, by: "admin" } }))
+      === j({ "motorized hoist": { typeKey: "hoists-motors", by: "auto", at: 5 }, d: { typeKey: null, by: "admin", at: 0 } }),
+    "#226 map: sanitizeTypeMap normalizes keys, keeps admin 'unmapped', drops bad entries");
+  const auto = dt226Auto([{ category: "Truss" }, { category: "truss " }, { category: "Motorized Hoist" }, { category: "Control" }, { category: "Uncategorized" }, { category: "Widgets" }], map, types, 1000);
+  ok(j(auto) === j({ truss: { typeKey: "truss-pipe", by: "auto", at: 1000 } }),
+    "#226 auto: only unmapped categories with a HIGH suggestion become auto entries (existing entries — even an admin 'unmapped' — untouched; low/none skipped)");
+  ok(j(dt226Auto([{ category: "Truss" }], {}, types.map((t) => (t.key === "truss-pipe" ? { ...t, archived: true } : t)), 1)) === "{}", "#226 auto: never auto-maps to an archived type");
+
+  // review rows + accept
+  const rows = dt226Rows([
+    { category: "Truss", desc: "12in box truss" }, { category: "Truss", desc: "Corner block" },
+    { category: "Motorized Hoist", desc: "CM Lodestar" },
+    { category: "Audio", desc: "QSC loudspeaker" },
+    { category: "Widgets", desc: "Loudspeaker stand" },
+    { category: "Rigging", desc: "Shackle" },
+    { category: "Fabric", desc: "Velour" }, { category: "", desc: "blank" },
+  ], { ...map, truss: { typeKey: "truss-pipe", by: "admin", at: 9 } }, types);
+  ok(rows.map((r) => r.category).join("|") === "Audio|Rigging|Widgets|Motorized Hoist|Truss", "#226 review: unmapped first, then auto, then admin; Fabric and blanks left out");
+  const audio = rows.find((r) => r.category === "Audio")!;
+  ok(audio.status === "unmapped" && j(audio.suggestion) === j({ typeKey: "speakers", confidence: "low" }) && audio.entry === null, "#226 review: an unmapped row carries its (description-voted) suggestion");
+  ok(rows.find((r) => r.category === "Truss")!.count === 2 && rows.find((r) => r.category === "Motorized Hoist")!.status === "auto", "#226 review: counts parts per category; auto entries flagged");
+  ok(j(dt226Accept(rows, types, 77)) === j({ audio: { typeKey: "speakers", by: "admin", at: 77 }, rigging: { typeKey: "rigging-hardware", by: "admin", at: 77 } }),
+    "#226 review: Accept all suggestions writes admin entries for unmapped rows with any suggestion — never over an admin 'unmapped' (Widgets)");
+
+  // assign / merge / type-list edits
+  ok(j(dt226Assign([" Widgets ", "", "Labor", "Gizmos"], "speakers", 5)) === j({ widgets: { typeKey: "speakers", by: "admin", at: 5 }, gizmos: { typeKey: "speakers", by: "admin", at: 5 } }),
+    "#226 assign: normalized keys, admin entries, blanks/Labor skipped");
+  ok(j(dt226Assign(["Widgets"], null, 5)) === j({ widgets: { typeKey: null, by: "admin", at: 5 } }), "#226 assign: null = deliberately unmapped (auto never re-maps it)");
+  ok(j(dt226Merge({ a: { typeKey: "speakers", by: "auto", at: 1 }, b: { typeKey: "amplifiers", by: "admin", at: 1 }, c: { typeKey: "speakers", by: "admin", at: 1 } }, "speakers", "amplifiers", 9))
+      === j({ a: { typeKey: "amplifiers", by: "admin", at: 9 }, c: { typeKey: "amplifiers", by: "admin", at: 9 } }),
+    "#226 merge: every category of the merged type moves to the target as an admin entry");
+  const edited = dt226Clean(
+    [
+      ...types.filter((t) => t.key !== "intercom").map((t) => (t.key === "speakers" ? { ...t, label: "Loudspeakers" } : t)),
+      { label: "Fog & Haze", scope: "Lighting" },
+      { label: "Speakers", scope: "Audio" },
+    ],
+    types.map((t) => (t.key === "fixtures" ? { ...t, icon: "wash" } : t))
+  );
+  ok(edited.ok && edited.types.find((t) => t.key === "speakers")!.label === "Loudspeakers" && edited.types.find((t) => t.key === "fog-haze")?.scope === "Lighting",
+    "#226 types: rename keeps the key; a new type gets a slug key");
+  ok(edited.ok && edited.types.some((t) => t.key === "speakers-2") && edited.types.find((t) => t.key === "intercom")?.archived === true && edited.types.find((t) => t.key === "fixtures")?.icon === "wash",
+    "#226 types: a colliding slug gets a suffix; a dropped type is archived, never deleted; icons survive a list save");
+  ok(edited.ok && edited.types.map((t) => t.order).slice(0, 3).join() === "10,20,30", "#226 types: order follows the submitted list");
+  ok(!dt226Clean([{ label: "A", scope: "Lighting" }, { label: "a", scope: "Audio" }], []).ok && !dt226Clean([{ label: " ", scope: "Lighting" }], []).ok && !dt226Clean([{ label: "A", scope: "Nope" }], []).ok,
+    "#226 types: duplicate names, blank names and unknown scopes are refused");
+
+  // icons, labels, layer rows
+  const tIcons = dt226TypeIcons(dt226WithIcons(types, { speakers: "horn", amplifiers: null }).map((t) => (t.key === "cameras" ? { ...t, archived: true } : t)));
+  ok(tIcons.speakers === "horn" && tIcons.amplifiers === "amplifier" && !("cameras" in tIcons), "#226 icons: a type's own icon wins over the default; archived types have none");
+  ok(dt226KeyOf({ id: "GASM-1", kind: "assembly" }) === DT226_ASM && dt226KeyOf({ id: "asm:fa-1" }) === DT226_ASM && dt226KeyOf({ id: "x", deviceType: "speakers" }) === "speakers"
+      && dt226KeyOf({ id: "y", deviceType: null }) === DT226_UNMAPPED && dt226KeyOf(undefined) === DT226_UNMAPPED,
+    "#226 typeKeyOfPart: assemblies, typed parts, unmapped");
+  ok(dt226Label(DT226_UNMAPPED, types) === "Unmapped" && dt226Label("speakers", types) === "Speakers", "#226 typeLabel");
+  const lr = dt226Layers([
+    { scope: "Audio", typeKey: "amplifiers" }, { scope: "Audio", typeKey: DT226_UNMAPPED, sub: "Speakers" },
+    { scope: "Audio", typeKey: "speakers" }, { scope: "Audio", typeKey: "speakers" }, { scope: "Audio", typeKey: DT226_UNMAPPED, sub: "Speakers" },
+  ], types);
+  ok(j(lr.get("Audio")) === j([{ key: "speakers", label: "Speakers", count: 2, subs: [] }, { key: "amplifiers", label: "Amplifiers", count: 1, subs: [] }, { key: DT226_UNMAPPED, label: "Unmapped", count: 2, subs: ["Speakers"] }]),
+    "#226 layers: rows in type order, Unmapped last with its seeded categories as sub-labels");
+
+  // favorites / recent list rules
+  ok(j(dt226Ids(["a", "a", "", 5, "b", "x".repeat(121)], 10)) === j(["a", "b"]) && j(dt226Ids(null, 3)) === "[]", "#226 lists: cleanIdList dedupes and drops junk");
+  ok(j(dt226Recent(["b", "a", "c"], "a", 3)) === j(["a", "b", "c"]) && j(dt226Recent(["a", "b", "c"], "d", 3)) === j(["d", "a", "b"]), "#226 recent: moves to the front, capped");
+  const t1 = dt226Toggle(["a"], "b", 3);
+  const t2 = dt226Toggle(["b", "a"], "a", 3);
+  const t3 = dt226Toggle(["a", "b", "c"], "d", 3);
+  ok(t1.ok && t1.on && j(t1.list) === j(["b", "a"]) && t2.ok && !t2.on && j(t2.list) === j(["b"]) && !t3.ok && /3 favorites/.test(t3.error),
+    "#226 favorites: toggle adds to the front, removes, and refuses past the cap");
+
+  // gridPartsFrom stamps the type and the type's scope
+  const dtCtx = { types, map: { fixtures: { typeKey: "fixtures", by: "auto", at: 1 } } as DT226Map };
+  const sym226 = (id: string, scope: string, category: string, kind?: "assembly") => ({
+    id, name: id, manufacturer: "ETC", modelNumber: id, scope, category, width: 40, height: 30, ports: [],
+    pricingPartId: kind ? null : id, kind: kind ?? "device", createdBy: "t", createdAt: 1, updatedAt: 1,
+  });
+  const cat226 = [
+    { id: "P-FIX", sku: "P-FIX", desc: "Source Four", category: "Fixtures", unit: "ea", list: 1, cost: 1 },
+    { id: "P-WID", sku: "P-WID", desc: "Blue widget", category: "Widgets", unit: "ea", list: 1, cost: 1 },
+  ];
+  const lib226 = dt226Parts([sym226("P-FIX", "Lighting", "Fixtures"), sym226("P-WID", "Lighting", "Widgets"), sym226("GASM-1", "Audio", "Assembly", "assembly")] as never, cat226 as never, {}, { deviceTypes: dtCtx });
+  const by226 = new Map(lib226.map((p) => [p.id, p]));
+  ok(by226.get("P-FIX")!.deviceType === "fixtures" && by226.get("P-FIX")!.deviceTypeLabel === "Fixtures" && dt226ScopeOfPart(by226.get("P-FIX")) === "Lighting",
+    "#226 parts: a mapped part carries its type and the type's scope");
+  ok(by226.get("P-WID")!.deviceType === null && dt226ScopeOfPart(by226.get("P-WID")) === "Unscoped",
+    "#226 scope fix: an unmapped part stored with the old Lighting fallback now resolves Unscoped");
+  ok(by226.get("GASM-1")!.deviceType === null && dt226ScopeOfPart(by226.get("GASM-1")) === "Audio", "#226 parts: an assembly keeps its own scope");
+  ok(dt226Parts([sym226("P-WID", "Lighting", "Widgets")] as never, cat226 as never, {})[0].deviceType === undefined, "#226 parts: without a device-type context nothing changes (back-compat callers)");
+}

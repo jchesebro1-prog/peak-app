@@ -3,6 +3,7 @@ import type { CatalogPart } from "@/lib/stores/catalog";
 import type { GridSymbol } from "@/lib/stores/grid-catalog";
 import type { PartLite } from "./grid-bom";
 import { gridSymbolEntry } from "./grid-icons";
+import { keywordScopeOf, scopeOfType, typeLabel, typeOfPart, type DeviceTypeContext } from "./device-types";
 
 /**
  * The ONE Grid-library → PartLite builder (#209): the plan editor, the riser,
@@ -18,15 +19,33 @@ import { gridSymbolEntry } from "./grid-icons";
  * loadPartDocsState + ownFiles) — a replaced or detached legacy file no
  * longer counts. The default is the legacy blob check, kept only for pure
  * callers that never render the datasheet link (riser, set, schedule).
+ *
+ * `deviceTypes` (#226) stamps each part with its device type + label and
+ * writes the TYPE's scope into `gridScope` — the field scopeOfPart reads
+ * first — so every surface files the part the same way. A catalog-linked
+ * device with no type re-derives its scope from the keyword fallback (now
+ * Unscoped, not Lighting) instead of trusting the `scope` its Grid-library
+ * entry snapshotted at first seed. Assemblies keep their own scope.
  */
 export function gridPartsFrom(
   symbols: GridSymbol[],
   catalog: CatalogPart[],
   categoryMap: CategoryMap,
-  opts: { catalogFallback?: boolean; hasDatasheet?: (p: CatalogPart) => boolean } = {}
+  opts: { catalogFallback?: boolean; hasDatasheet?: (p: CatalogPart) => boolean; deviceTypes?: DeviceTypeContext } = {}
 ): PartLite[] {
   const hasDatasheet = opts.hasDatasheet ?? ((p: CatalogPart) => !!p.datasheetBlobKey);
+  const dt = opts.deviceTypes;
   const pricingById = new Map(catalog.map((p) => [p.id, p]));
+  const typed = (s: GridSymbol, p: CatalogPart | undefined) => {
+    if (!dt) return {};
+    const device = !!p && s.kind !== "assembly";
+    const key = device ? typeOfPart(p, dt.map, dt.types) : null;
+    return {
+      deviceType: key,
+      deviceTypeLabel: key ? typeLabel(key, dt.types) : null,
+      gridScope: key ? scopeOfType(key, dt.types) : device ? keywordScopeOf(p) : s.scope,
+    };
+  };
   const parts: PartLite[] = symbols.map((s) => {
     const p = s.pricingPartId ? pricingById.get(s.pricingPartId) : undefined;
     // Prefer the LIVE catalog part's ports over the grid_catalog symbol's
@@ -47,6 +66,8 @@ export function gridPartsFrom(
       // Category, icon/colour/shape overrides, Grid scope and the pricing
       // part's group/trade (final fix wave #3).
       ...gridSymbolEntry(s, p, categoryMap),
+      // #226: device type + the type's scope (overrides gridScope above).
+      ...typed(s, p),
       manufacturer: s.manufacturer,
       modelNumber: s.modelNumber,
       symbolWidth: s.width,
@@ -60,7 +81,18 @@ export function gridPartsFrom(
   const seen = new Set(parts.map((p) => p.id));
   for (const p of catalog) {
     if (seen.has(p.id)) continue;
-    parts.push({ id: p.id, sku: p.sku, desc: p.desc, category: p.category, unit: p.unit, list: p.list, cost: p.cost });
+    const key = dt ? typeOfPart(p, dt.map, dt.types) : undefined;
+    parts.push({
+      id: p.id,
+      sku: p.sku,
+      desc: p.desc,
+      category: p.category,
+      unit: p.unit,
+      list: p.list,
+      cost: p.cost,
+      ...(dt ? { deviceType: key ?? null, deviceTypeLabel: key ? typeLabel(key, dt.types) : null } : {}),
+      ...(dt && key ? { gridScope: scopeOfType(key, dt.types) } : {}),
+    });
   }
   return parts;
 }
