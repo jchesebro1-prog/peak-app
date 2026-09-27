@@ -13,6 +13,7 @@ import type { CompanyMapFilters, CompanyMapPoint } from "./map-filter";
 import EditCustomerModal from "./edit-modal";
 import { custLocation, mono, moneyK } from "./lib";
 import { getSettings } from "@/lib/settings";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { travelForPoints } from "@/lib/travel-bulk";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
@@ -73,6 +74,7 @@ export default async function CustomersPage({
     getSettings(),
   ]);
   const fieldDefs = resolveFieldDefs(settings.customerFieldDefs);
+  const venueTypes = venueTypesFrom(settings.venueTypes);
 
   const q = one(sp.q);
   const typeParam = one(sp.type) || "all";
@@ -436,7 +438,7 @@ export default async function CustomersPage({
         </div>
       )}
 
-      {edit === "new" && <EditCustomerModal mode="new" initial={null} fieldDefs={fieldDefs} closeHref="/companies" />}
+      {edit === "new" && <EditCustomerModal mode="new" initial={null} fieldDefs={fieldDefs} venueTypes={venueTypes} closeHref="/companies" />}
     </>
   );
 }

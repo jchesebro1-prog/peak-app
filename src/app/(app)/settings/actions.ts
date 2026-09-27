@@ -29,7 +29,7 @@ import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
-import { countSitesByVenueKind } from "@/lib/identity/sites";
+import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -719,7 +719,9 @@ export async function saveVenueTypesAction(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requirePerm("manage_users");
   const current = venueTypesFrom((await getSettings()).venueTypes);
-  const res = mergeVenueTypes(current, Array.isArray(input) ? input : []);
+  // Keys still on any site (soft-deleted too) are never minted again.
+  const reserved = await storedSiteVenueKinds();
+  const res = mergeVenueTypes(current, Array.isArray(input) ? input : [], reserved);
   if (!res.ok) return res;
   if (res.removed.length) {
     const used = await countSitesByVenueKind(res.removed);

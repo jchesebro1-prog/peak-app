@@ -9,7 +9,8 @@ import {
   saveCustomerAction,
   searchAddressAction,
 } from "./actions";
-import { CUSTOMER_TYPES, VENUE_KINDS, addressFromHit } from "./lib";
+import { CUSTOMER_TYPES, addressFromHit } from "./lib";
+import { deriveLocationLabels, venueTypeOptions, type VenueType } from "@/lib/venue-types";
 import { ConfirmButton } from "@/components/confirm-button";
 import type { AddressHitVM, SaveCustomerInput } from "./types";
 import { defsForType, type CustomFieldDef } from "@/lib/customer-fields";
@@ -42,6 +43,10 @@ type LocRow = {
   travelMin: string;
   routing: boolean;
   officeHint: string;
+  /** #216 — what was loaded, to tell whether this card's name must re-derive. */
+  origLocationName: string;
+  origVenueKind: string;
+  isNew: boolean;
 };
 
 type ContactRow = {
@@ -89,7 +94,7 @@ const modalCss = `
 `;
 
 let uid = 0;
-function newLoc(primary: boolean): LocRow {
+function newLoc(primary: boolean, venueKind = "proscenium"): LocRow {
   uid += 1;
   return {
     id: "l" + Date.now() + "-" + uid,
@@ -101,11 +106,14 @@ function newLoc(primary: boolean): LocRow {
     state: "",
     lat: null,
     lng: null,
-    venueKind: "proscenium",
+    venueKind,
     travelMiles: "",
     travelMin: "",
     routing: false,
     officeHint: "",
+    origLocationName: "",
+    origVenueKind: venueKind,
+    isNew: true,
   };
 }
 
@@ -167,14 +175,17 @@ export default function EditCustomerModal({
   initial,
   closeHref,
   fieldDefs = [],
+  venueTypes,
 }: {
   mode: "new" | "edit";
   initial: SaveCustomerInput | null;
   closeHref: string;
   fieldDefs?: CustomFieldDef[];
+  venueTypes: VenueType[];
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
+  const defaultKind = venueTypeOptions(venueTypes)[0]?.key || "proscenium";
 
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "Performing arts");
@@ -189,7 +200,7 @@ export default function EditCustomerModal({
   );
   const [locations, setLocations] = useState<LocRow[]>(() => {
     const src = initial?.locations || [];
-    if (!src.length) return [newLoc(true)];
+    if (!src.length) return [newLoc(true, defaultKind)];
     return src.map((l, i) => ({
       id: l.id || "l" + i,
       label: l.label || "",
@@ -205,6 +216,9 @@ export default function EditCustomerModal({
       travelMin: l.travelMin == null ? "" : String(l.travelMin),
       routing: false,
       officeHint: "",
+      origLocationName: l.locationName || "",
+      origVenueKind: l.venueKind || "proscenium",
+      isNew: false,
     }));
   });
   const [contacts, setContacts] = useState<ContactRow[]>(() => {
@@ -235,7 +249,19 @@ export default function EditCustomerModal({
     setLocations((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const makePrimaryLoc = (i: number) =>
     setLocations((rows) => rows.map((r, idx) => ({ ...r, primary: idx === i })));
-  const addLoc = () => setLocations((rows) => [...rows, newLoc(rows.length === 0)]);
+  const addLoc = () => setLocations((rows) => [...rows, newLoc(rows.length === 0, defaultKind)]);
+  // #216 — a card's name re-derives when it is new, has no name yet, or its
+  // location/type changed; an untouched venue keeps the name it has.
+  const derives = (l: LocRow) =>
+    l.isNew ||
+    !l.label.trim() ||
+    l.locationName.trim() !== l.origLocationName.trim() ||
+    l.venueKind !== l.origVenueKind;
+  const previewNames = deriveLocationLabels(
+    locations.map((l) => ({ label: l.label, locationName: l.locationName, venueKind: l.venueKind, derive: derives(l) })),
+    name,
+    venueTypes
+  );
   const removeLoc = (i: number) =>
     setLocations((rows) => {
       const next = rows.filter((_, idx) => idx !== i);
@@ -347,6 +373,7 @@ export default function EditCustomerModal({
           venueKind: l.venueKind,
           travelMiles: l.travelMiles === "" ? null : Number(l.travelMiles),
           travelMin: l.travelMin === "" ? null : Number(l.travelMin),
+          deriveName: derives(l),
         })),
         contacts: contacts.map((c) => ({
           name: c.name,
@@ -654,22 +681,15 @@ export default function EditCustomerModal({
 
           {locations.map((l, i) => (
             <div key={l.id} style={cardStyle}>
-              <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>Location / campus</label>
-              <input
-                className="cu-m-in"
-                value={l.locationName}
-                onChange={(e) => setLoc(i, { locationName: e.target.value })}
-                placeholder="e.g. High School"
-                style={{ ...inStyle, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 9 }}
-              />
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
-                <input
-                  className="cu-m-in"
-                  value={l.label}
-                  onChange={(e) => setLoc(i, { label: e.target.value })}
-                  placeholder="Venue label (e.g. Main Hall)"
-                  style={{ ...inStyle, flex: 1, minWidth: 0, fontWeight: 600, fontSize: 13, padding: "8px 11px", borderRadius: 8 }}
-                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 600, color: "#9aa0ab", textTransform: "uppercase", letterSpacing: ".04em" }}>
+                    {derives(l) ? "Will display as" : "Displays as"}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#16181d", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {previewNames[i] || "Venue"}
+                  </div>
+                </div>
                 <button onClick={() => makePrimaryLoc(i)} style={primaryPill(l.primary)}>
                   {l.primary ? "✓ Primary" : "Make primary"}
                 </button>
@@ -678,6 +698,15 @@ export default function EditCustomerModal({
                 )}
               </div>
 
+              <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>Location name</label>
+              <input
+                className="cu-m-in"
+                value={l.locationName}
+                onChange={(e) => setLoc(i, { locationName: e.target.value })}
+                placeholder={name.trim() || "e.g. Lincoln High School"}
+                style={{ ...inStyle, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 9 }}
+              />
+
               <label style={{ ...microLbl, fontSize: 9.5, marginBottom: 5 }}>Venue type</label>
               <select
                 className="cu-m-in"
@@ -685,9 +714,9 @@ export default function EditCustomerModal({
                 onChange={(e) => setLoc(i, { venueKind: e.target.value })}
                 style={{ ...selStyle, fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 9 }}
               >
-                {VENUE_KINDS.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
+                {venueTypeOptions(venueTypes, l.origVenueKind).map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
                   </option>
                 ))}
               </select>

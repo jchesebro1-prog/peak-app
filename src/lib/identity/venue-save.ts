@@ -28,7 +28,9 @@ import {
  * no coordinates keeps the stored lat/lng; a changed address with no
  * coordinates clears them (the geocode runner re-locates it). Whenever the
  * venue moves (address or coordinates changed) its cached drive distance
- * (travelMiles/travelMin) is cleared — it priced the old spot.
+ * (travelMiles/travelMin) is cleared — it priced the old spot. The zip
+ * follows the same rule: kept while the address is unchanged (a sent zip
+ * only fills a blank one), otherwise replaced by the sent zip or cleared.
  */
 
 export async function loadVenueTypes(): Promise<VenueType[]> {
@@ -76,6 +78,10 @@ export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult>
     (existing.address ?? "").trim() === address &&
     (existing.city ?? "").trim() === city &&
     (existing.state ?? "").trim() === state;
+  // A moved venue never keeps the old zip — the geocode backfill matches on
+  // it (zip-only hits too) and would re-locate the venue near its old spot.
+  const zipIn = cap(input.zip, 20) || null;
+  const zip = sameAddress ? (existing?.zip || zipIn) : zipIn;
   let lat = coord(input.lat);
   let lng = coord(input.lng);
   if (lat == null || lng == null) {
@@ -105,6 +111,7 @@ export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult>
       address: address || null,
       city: city || null,
       state: state || null,
+      zip,
       lat,
       lng,
       ...(moved ? { travelMiles: null, travelMin: null } : {}),

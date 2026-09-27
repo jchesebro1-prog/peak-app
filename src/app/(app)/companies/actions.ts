@@ -17,7 +17,7 @@ import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
 import { getSettings } from "@/lib/settings";
 import { getCompanySummary, type CompanySummary } from "@/lib/company-summary";
 import { saveVenue } from "@/lib/identity/venue-save";
-import type { SaveVenueInput, SaveVenueResult } from "@/lib/venue-types";
+import { deriveLocationLabels, venueTypesFrom, type SaveVenueInput, type SaveVenueResult } from "@/lib/venue-types";
 
 /**
  * Customers mutations — thin wrappers over CustomerStore. The Customers screen
@@ -63,15 +63,29 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
     const defs = resolveFieldDefs((await getSettings()).customerFieldDefs);
     extras.custom = validateFieldValues(defs, input.custom);
   }
+  // #216 — "Location — Type" names for venues the form marked deriveName;
+  // every other venue keeps its label (and is a fixed name they number against).
+  const rawLocs = input.locations || [];
+  const types = rawLocs.some((l) => l.deriveName) ? venueTypesFrom((await getSettings()).venueTypes) : [];
+  const labels = deriveLocationLabels(
+    rawLocs.map((l) => ({
+      label: (l.label || "").trim(),
+      locationName: (l.locationName || "").trim(),
+      venueKind: l.venueKind || "proscenium",
+      derive: !!l.deriveName,
+    })),
+    name,
+    types
+  );
   await upsert({
     id,
     name,
     type: input.type || "",
     pricingTier: (input.pricingTier || "").trim() || null,
-    locations: (input.locations || []).map((l) => ({
+    locations: rawLocs.map((l, i) => ({
       id: l.id,
       locationName: (l.locationName || "").trim(),
-      label: (l.label || "").trim() || "Venue",
+      label: labels[i] || "Venue",
       primary: !!l.primary,
       address: (l.address || "").trim(),
       city: (l.city || "").trim(),

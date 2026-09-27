@@ -109,6 +109,15 @@ export async function countSitesByVenueKind(
   return out;
 }
 
+/** #216 — every distinct venue-type key stored on a site, soft-deleted
+ *  rows included. Settings → Venue types never mints one of these as a new
+ *  type's key (a deleted venue can come back live and would change type). */
+export async function storedSiteVenueKinds(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.selectDistinct({ venueKind: sites.venueKind }).from(sites);
+  return rows.map((r) => r.venueKind).filter((k): k is string => typeof k === "string" && k !== "");
+}
+
 /** The id doc records store as `locationId` — legacy alias when present. */
 export function docLocId(s: SiteRow): string {
   return s.legacyLocId ?? s.id;

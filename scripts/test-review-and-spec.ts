@@ -10488,6 +10488,7 @@ seeded()
   .then(() => gridLabor232AsyncChecks())
   .then(() => venues216AsyncChecks())
   .then(() => venues216SaveFixesAsyncChecks())
+  .then(() => venues216Task3FixesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23781,5 +23782,73 @@ async function venues216SaveFixesAsyncChecks(): Promise<void> {
     for (const s of [...(await v216Sites(CO)), ...(await v216Sites(LEG))]) await v216SoftDel(s.id);
     await removeCustomer(CO);
     await removeCustomer(LEG);
+  }
+}
+
+/* --- #216 T4: the company modal asks Location + Type and derives names --- */
+{
+  const v216Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const em = v216Read("src/app/(app)/companies/edit-modal.tsx");
+  ok(!em.includes("Venue label") && !em.includes("VENUE_KINDS") && em.includes("venueTypeOptions(venueTypes") && em.includes("deriveLocationLabels(") && em.includes("deriveName: derives(l)") && em.includes("Will display as"),
+    "#216 T4: the company modal has no label input; types come from the list; names preview and derive");
+  const ca = v216Read("src/app/(app)/companies/actions.ts");
+  ok(ca.includes("deriveLocationLabels(") && ca.includes('label: labels[i] || "Venue"'), "#216 T4: saveCustomerAction stores the derived name for new/changed venues");
+  ok(v216Read("src/app/(app)/companies/page.tsx").includes("venueTypes={venueTypes}") && v216Read("src/app/(app)/companies/[id]/page.tsx").includes("venueTypes={venueTypes}"),
+    "#216 T4: both modal hosts pass the venue types");
+  // What saveCustomerAction does with a phone-only edit: no card is marked
+  // deriveName, so every stored name comes back exactly as it was.
+  const kept = v216DeriveLabels(
+    [
+      { label: "Main Hall", locationName: "", venueKind: "proscenium", derive: false },
+      { label: "Old Gym", locationName: "LHS", venueKind: "gymstage", derive: false },
+    ],
+    "Lincoln Public Schools",
+    v216From(undefined)
+  );
+  ok(kept.join("|") === "Main Hall|Old Gym", "#216 T4: a save with no venue marked deriveName keeps every venue's name");
+}
+
+/* --- #216 Task 3 fixes: reserved venue-type keys, a moved venue's zip --- */
+{
+  const seed = v216From(undefined);
+  const noGym = seed.filter((t) => t.key !== "gymstage").map((t) => ({ key: t.key, label: t.label, worksLike: t.worksLike }));
+  const cur = v216From(noGym.map((t, i) => ({ ...t, order: i })));
+  const readd = v216Merge(cur, [...noGym, { label: "Gym Stage", worksLike: "proscenium" }], new Set(["gymstage"]));
+  const readdKey = readd.ok ? readd.types[readd.types.length - 1].key : "";
+  ok(readd.ok && readdKey === "gymstage2", `#216 Task 3 fix: a key still stored on a venue (even a deleted one) is never minted again (got ${readdKey})`);
+  const free = v216Merge(cur, [...noGym, { label: "Gym Stage", worksLike: "proscenium" }]);
+  ok(free.ok && free.types[free.types.length - 1].key === "gymstage", "#216 Task 3 fix: with nothing reserved the slug is minted as before");
+  const sa = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
+  const s0 = sa.indexOf("export async function saveVenueTypesAction");
+  const body = sa.slice(s0, sa.indexOf("\nexport ", s0 + 10));
+  ok(body.includes("storedSiteVenueKinds()") && body.includes("input : [], reserved)"),
+    "#216 Task 3 fix: saveVenueTypesAction reserves every venueKind stored on a site, soft-deleted included");
+}
+import { storedSiteVenueKinds as v216StoredKinds } from "@/lib/identity/sites";
+async function venues216Task3FixesAsyncChecks(): Promise<void> {
+  const CO = fixtureId(216, "zip-co");
+  const base = { siteId: null, locationName: "", city: "Omaha", state: "NE", lat: null, lng: null, primary: false };
+  try {
+    await upsertCustomer({ id: CO, name: "Zip Arts Center", type: "Education", locations: [], contacts: [] });
+    for (const s0 of await v216Sites(CO)) await v216SoftDel(s0.id);
+    const a = await v216Save({ ...base, companyId: CO, venueKind: "church", address: "1 Main St", zip: "68102" });
+    const aId = a.ok ? a.siteId : "";
+    ok(a.ok && (await v216GetSite(aId))?.zip === "68102", "#216 Task 3 fix: a new venue saves the picked address's zip");
+    await v216Save({ ...base, companyId: CO, siteId: aId, venueKind: "church", address: "1 Main St" });
+    ok((await v216GetSite(aId))?.zip === "68102", "#216 Task 3 fix: an unchanged address keeps its zip");
+    await v216Save({ ...base, companyId: CO, siteId: aId, venueKind: "church", address: "2 Oak St" });
+    ok((await v216GetSite(aId))?.zip == null, "#216 Task 3 fix: a moved venue with no zip sent drops the old zip");
+    await v216Save({ ...base, companyId: CO, siteId: aId, venueKind: "church", address: "3 Elm St", zip: "68131" });
+    ok((await v216GetSite(aId))?.zip === "68131", "#216 Task 3 fix: a moved venue saves the new zip");
+    const b = await v216Save({ ...base, companyId: CO, venueKind: "arena", address: "9 Pine St" });
+    if (b.ok) {
+      const row = await v216GetSite(b.siteId);
+      if (row) await v216SaveSite({ ...row, venueKind: "zz216reserved" });
+      await v216SoftDel(b.siteId);
+    }
+    ok((await v216StoredKinds()).includes("zz216reserved"), "#216 Task 3 fix: storedSiteVenueKinds includes keys only soft-deleted venues carry");
+  } finally {
+    for (const s of await v216Sites(CO)) await v216SoftDel(s.id);
+    await removeCustomer(CO);
   }
 }

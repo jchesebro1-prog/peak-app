@@ -117,13 +117,19 @@ export type VenueTypeMerge =
  * editor. Existing keys are immutable; a row without a key is new and gets
  * a key minted from its label. `renamed` = keys whose label changed (their
  * auto-named venues re-derive); `removed` = keys dropped (the action refuses
- * any still used by a venue).
+ * any still used by a venue). `reserved` = keys still stored on any site,
+ * soft-deleted ones included: a new type never mints one, or it would
+ * silently re-type those venues (a soft-deleted site can come back live).
  */
-export function mergeVenueTypes(current: readonly VenueType[], input: readonly VenueTypeInput[]): VenueTypeMerge {
+export function mergeVenueTypes(
+  current: readonly VenueType[],
+  input: readonly VenueTypeInput[],
+  reserved: Iterable<string> = []
+): VenueTypeMerge {
   const byKey = new Map(current.map((t) => [t.key, t]));
   // Built-in keys are reserved even when absent from `current`, so a new
   // "Church" can never mint the built-in `church` key.
-  const taken = new Set<string>([...BUILT_IN_VENUE_KINDS, ...current.map((t) => t.key)]);
+  const taken = new Set<string>([...BUILT_IN_VENUE_KINDS, ...current.map((t) => t.key), ...reserved]);
   const labels = new Set<string>();
   const kept = new Set<string>();
   const renamed: string[] = [];
@@ -249,6 +255,8 @@ export type SaveVenueInput = {
   state: string;
   lat: number | null;
   lng: number | null;
+  /** the picked address-search hit's postcode; absent = none sent. */
+  zip?: string | null;
   primary: boolean;
 };
 

@@ -20,6 +20,9 @@ export type LocationInput = {
   venueKind: string;
   travelMiles: number | null;
   travelMin: number | null;
+  /** #216 — true: ignore `label` and store the derived "Location — Type"
+   *  name (new venue, or its location/type changed). Absent = keep label. */
+  deriveName?: boolean;
 };
 
 export type ContactInput = {

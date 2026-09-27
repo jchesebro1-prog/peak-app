@@ -34,6 +34,7 @@ import ActivityComposer from "./activity-composer";
 import NoteDeleteButton from "./note-delete-button";
 import { Avatar } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { defsForType, resolveFieldDefs } from "@/lib/customer-fields";
 import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
@@ -123,6 +124,7 @@ export default async function CustomerDetailPage({
   ]);
 
   const edit = one(sp.edit);
+  const venueTypes = venueTypesFrom(settings.venueTypes);
   const addVenue = one(sp.addVenue);
 
   const roster = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
@@ -805,7 +807,7 @@ export default async function CustomerDetailPage({
       </div>
 
       {edit === "1" && (
-        <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
+        <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} venueTypes={venueTypes} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
       )}
       {addVenue === "1" && <VenueQuickAdd initial={editInitial} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />}
     </>
