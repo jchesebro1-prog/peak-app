@@ -394,7 +394,7 @@ method, notes and PO file with **Approve** / **Decline with note**.
 - **DB-backed specs:** cart create/one-per-grant (no quote row, no estimate number until Generate); generate firm (number, sent, validUntil, owner,
   notice) and review (draft, queue item, portal listing); accept → approve → won; accept → decline;
   expiry → refresh as a new revision, and refresh flipping to review; doc route allow/deny (hidden
-  link, hidden part, other customer, accessory coverage, image not coverable);  Estimator new-section freight default from a venue.
+  link, hidden part, other customer, accessory coverage, image not coverable); Estimator new-section freight default from a venue.
 - **Smoke GETs:** `/portal/catalog`, `/portal/catalog/quote`, `/portal/estimate` → redirect.
 - The four gates (tsc, test:specs, test:smoke, eslint vs baseline) plus `next build` (the portal
   pages are client-heavy; guard against a client component importing a store).
