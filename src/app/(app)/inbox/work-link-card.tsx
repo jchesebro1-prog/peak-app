@@ -14,9 +14,17 @@ import { setLinkAction } from "./actions";
 import { LINK_TYPE_OPTIONS, newQuoteHref, type LinkWorkType } from "@/lib/inbox-links";
 import { ACCENT_BTN, BTN, CARD, H, MUTED, SELECT } from "./sidebar-styles";
 
-export default function WorkLinkCard({ vm }: { vm: ReaderVM }) {
+export default function WorkLinkCard({
+  vm,
+  mode = "edit",
+}: {
+  vm: ReaderVM;
+  /** #214 — "summary" (the sidebar): the chip, × and "+ New quote" only;
+   *  "edit" (the Link popup): the type + record picker too, open at once. */
+  mode?: "summary" | "edit";
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(mode === "edit");
   const [linkType, setLinkType] = useState<LinkWorkType>("quote");
   const [busy, setBusy] = useState(false);
   const options = open ? vm.linkOptions[linkType] || [] : [];
@@ -123,9 +131,12 @@ export default function WorkLinkCard({ vm }: { vm: ReaderVM }) {
             </button>
           </>
         )}
-        <button onClick={() => setOpen(!open)} style={ACCENT_BTN}>
-          {vm.link ? "Change link" : "+ Link to work"}
-        </button>
+        {mode === "edit" && (
+          <button onClick={() => setOpen(!open)} style={ACCENT_BTN}>
+            {vm.link ? "Change link" : "+ Link to work"}
+          </button>
+        )}
+        {mode === "summary" && !vm.link && <span style={MUTED}>No work linked.</span>}
         <button
           onClick={newQuote}
           title="Start a draft quote for this thread's customer — it links back here"
@@ -134,7 +145,7 @@ export default function WorkLinkCard({ vm }: { vm: ReaderVM }) {
           + New quote
         </button>
       </div>
-      {open && (
+      {mode === "edit" && open && (
         <>
           {vm.resolvedCustomerId ? (
             <div style={{ ...MUTED, marginTop: 9 }}>

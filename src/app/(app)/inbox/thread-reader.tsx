@@ -16,6 +16,7 @@ import {
 import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./icons";
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
+import LinkPopup from "./link-popup";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
@@ -137,12 +138,15 @@ function ExpandedMessage({
   onCollapse,
   linkOptions,
   onLink,
+  onOpenLinks,
 }: {
   m: MessageVM;
   collapsible: boolean;
   onCollapse: () => void;
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
   onLink: (link: { type: string; id: string; label: string } | null) => void;
+  /** #214 — open the Link popup on this message */
+  onOpenLinks: () => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
@@ -197,6 +201,27 @@ function ExpandedMessage({
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenLinks();
+            }}
+            title="Link the people, company and work on this message"
+            style={{
+              border: "1px solid #e4e7ec",
+              borderRadius: 6,
+              padding: "2px 8px",
+              color: "#3a3f4a",
+              fontSize: 10.5,
+              fontWeight: 600,
+              background: "#fff",
+              cursor: "pointer",
+              fontFamily: "var(--font-ui)",
+            }}
+          >
+            Link…
+          </button>
           <select
             value={m.link ? `${m.link.type}|${m.link.label}` : ""}
             onClick={(e) => e.stopPropagation()}
@@ -283,10 +308,13 @@ function Conversation({
   messages,
   linkOptions,
   onLink,
+  onOpenLinks,
 }: {
   messages: MessageVM[];
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
   onLink: (messageId: string, link: { type: string; id: string; label: string } | null) => void;
+  /** #214 — a message header's "Link…" */
+  onOpenLinks: (messageId: string) => void;
 }) {
   // id -> explicit user choice; anything absent falls back to "newest is open"
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -317,6 +345,7 @@ function Conversation({
         onCollapse={() => toggle(m.id, false)}
         linkOptions={linkOptions}
         onLink={(link) => onLink(m.id, link)}
+        onOpenLinks={() => onOpenLinks(m.id)}
       />
     ) : (
       <CollapsedMessage key={m.id} m={m} onOpen={() => toggle(m.id, true)} />
@@ -368,6 +397,7 @@ function Conversation({
             onCollapse={() => toggle(newest.id, false)}
             linkOptions={linkOptions}
             onLink={(link) => onLink(newest.id, link)}
+            onOpenLinks={() => onOpenLinks(newest.id)}
           />
         ) : (
           <CollapsedMessage
@@ -422,6 +452,8 @@ export default function ThreadReader({
   }, [mode]);
   // D76 — schedule-site-visit modal
   const [visitOpen, setVisitOpen] = useState(false);
+  // #214 — the Link popup: which message, and whether a header opened it
+  const [linkFor, setLinkFor] = useState<{ messageId: string; fromHeader: boolean } | null>(null);
   const [sending, setSending] = useState(false);
 
   // call/meeting quick log
@@ -549,9 +581,20 @@ export default function ThreadReader({
   const composerOpen = vm.isEmail && !!mode;
   const modeLabel = mode === "forward" ? "Forward" : mode === "replyAll" ? "Reply all" : "Reply";
 
-  // #96 §2 / #123 — the link sidebar now owns the "+ Link to work" picker
-  // itself (WorkLinkCard, rendered first inside LinkSidebar).
-  const sidebar = <LinkSidebar vm={vm} variant={variant} />;
+  // #214 — the sidebar is a summary; "Edit links" opens the popup on the
+  // identity message, else the newest received one, else the newest.
+  const popupDefaultId =
+    vm.identityMessageId ||
+    [...vm.messages].reverse().find((m) => !m.out)?.id ||
+    vm.messages[vm.messages.length - 1]?.id ||
+    "";
+  const sidebar = (
+    <LinkSidebar
+      vm={vm}
+      variant={variant}
+      onEditLinks={() => popupDefaultId && setLinkFor({ messageId: popupDefaultId, fromHeader: false })}
+    />
+  );
 
   return (
     <div style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column" }}>
@@ -736,6 +779,7 @@ export default function ThreadReader({
             onLink={(messageId, link) => {
               void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
             }}
+            onOpenLinks={(messageId) => setLinkFor({ messageId, fromHeader: true })}
           />
         </div>
 
@@ -1153,6 +1197,15 @@ export default function ThreadReader({
         </div>
       </div>
       {variant === "pane" && sidebar}
+      {linkFor && (
+        <LinkPopup
+          key={linkFor.messageId}
+          vm={vm}
+          messageId={linkFor.messageId}
+          fromHeader={linkFor.fromHeader}
+          onClose={() => setLinkFor(null)}
+        />
+      )}
     </div>
   );
 }

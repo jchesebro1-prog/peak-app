@@ -20313,3 +20313,43 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     "#214 fix wave 2: the thread's existing live company is unchanged — the auto-company step only ever runs when the thread has no company yet"
   );
 }
+
+/* ====== #214 Inbox Link popup — UI (Task 5) ======
+   Client components can't import a store (postgres lands in the client
+   bundle and only next build notices), so their imports are checked here;
+   the popup's #215 seam and the slimmed sidebar are checked as source. */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const importsOf = (src: string) => [...src.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)";/gm)].map((m) => ({ typeOnly: !!m[1], spec: m[2] }));
+  const clientFiles214 = [
+    "src/app/(app)/inbox/link-popup.tsx",
+    "src/app/(app)/inbox/link-sidebar.tsx",
+    "src/app/(app)/inbox/work-link-card.tsx",
+    "src/app/(app)/inbox/thread-reader.tsx",
+  ];
+  for (const f of clientFiles214) {
+    const src = read(f);
+    const bad = importsOf(src).filter(
+      (i) =>
+        !i.typeOnly &&
+        (i.spec.startsWith("@/lib/stores/") || i.spec.startsWith("@/db") || i.spec.startsWith("@/lib/identity/") || i.spec.startsWith("@/lib/gmail/"))
+    );
+    ok(src.startsWith('"use client"') && bad.length === 0, `#214 UI: ${f} is a client component with no store/db/identity/gmail runtime import (${bad.map((b) => b.spec).join(", ")})`);
+  }
+  const popup214 = read("src/app/(app)/inbox/link-popup.tsx");
+  ok(/onCreateTask\?: \(\) => void;/.test(popup214) && popup214.includes("{onCreateTask && ("), "#214 UI: the popup footer shows Create task only when #215 passes onCreateTask");
+  ok(
+    ["People on this email", "Company &amp; venue", "From the signature", "<WorkLinkCard vm={vm} mode=\"edit\" />"].every((s) => popup214.includes(s)),
+    "#214 UI: the popup has the People / Company & venue / Work / signature sections"
+  );
+  ok(popup214.includes("setIdentityMessageAction(vm.id, messageId)") && popup214.includes("fromHeader"), "#214 UI: opening from a message header makes that message the Linking-from source");
+  ok(popup214.includes("fetchMessageCcAction(vm.id, messageId)") && popup214.includes("if (r.data.ccPending)"), "#214 UI: the popup runs the lazy Cc fetch only when the server says it is pending");
+  const side214 = read("src/app/(app)/inbox/link-sidebar.tsx");
+  ok(!side214.includes("<select") && !side214.includes("EntityQuickAdd") && !side214.includes("quickAdd"), "#214 UI: the sidebar has no dropdown editors or quick-add forms left");
+  ok(side214.includes("onEditLinks: () => void;") && side214.includes("Edit links") && side214.includes("vm.linkedPeople.map("), "#214 UI: the sidebar summary has Edit links and linked-people chips");
+  ok(side214.includes('<WorkLinkCard vm={vm} mode="summary" />'), "#214 UI: the sidebar's work card is the summary mode");
+  const card214 = read("src/app/(app)/inbox/work-link-card.tsx");
+  ok(card214.includes('mode?: "summary" | "edit";') && card214.includes('{mode === "edit" && open && ('), "#214 UI: WorkLinkCard's picker only renders in edit mode");
+  const reader214 = read("src/app/(app)/inbox/thread-reader.tsx");
+  ok(reader214.includes("Link…") && reader214.includes("onOpenLinks={() => onOpenLinks(m.id)}") && reader214.includes("<LinkPopup"), "#214 UI: each message header has Link… and the reader mounts the popup");
+}
