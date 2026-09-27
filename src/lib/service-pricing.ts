@@ -32,13 +32,33 @@ export function roundToStep(x: number, step: number = PRICE_STEP): number {
   return Math.floor(x / step + 0.5 + 1e-9) * step;
 }
 
-/** A posted/typed dollar figure → whole dollars; undefined for blank or junk. */
+/**
+ * Nearest multiple of `step` at or ABOVE `x`; NaN → 0. Used when a floor
+ * (flame baseFee, inspection minFee, repair minCallout) set the price:
+ * nearest-rounding a floored total can round it back DOWN below the floor
+ * (a $360 call-out would round to $350), so a floored total always rounds up.
+ * The −1e-9 keeps an exact multiple (float noise aside) from bumping up.
+ */
+function ceilToStep(x: number, step: number = PRICE_STEP): number {
+  if (!Number.isFinite(x)) return 0;
+  if (!(step > 0)) return x;
+  return Math.ceil(x / step - 1e-9) * step;
+}
+
+/**
+ * A posted/typed dollar figure → whole dollars; undefined for blank or junk.
+ * A string is stripped of `$`, commas and spaces, then must be plain digits
+ * (optionally with a decimal point) — no hex, exponent or leading minus, so
+ * "0x10", "1e3" and "-0.4" are rejected rather than silently parsed by
+ * `Number()`. A raw JS number is trusted as-is (it carries no such notation).
+ */
 function wholeDollars(raw: unknown): number | undefined {
-  let s: string;
-  if (typeof raw === "number") s = String(raw);
-  else if (typeof raw === "string") s = raw.replace(/[$,\s]/g, "");
-  else return undefined;
-  if (s === "") return undefined;
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? Math.round(raw) : undefined;
+  }
+  if (typeof raw !== "string") return undefined;
+  const s = raw.replace(/[$,\s]/g, "");
+  if (!/^\d+(\.\d+)?$/.test(s)) return undefined;
   const n = Number(s);
   return Number.isFinite(n) ? Math.round(n) : undefined;
 }
@@ -74,14 +94,23 @@ export type FinishedPrice = {
   effectiveMargin: number;
 };
 
-/** Round the auto total, apply a typed total, back-solve the margin. */
+/**
+ * Round the auto total, apply a typed total, back-solve the margin.
+ * `priceOverride` is normalized here (whole dollars, $1–$10,000,000, else
+ * ignored) rather than trusted pre-normalized, so a builder or a save path
+ * that hands this a raw typed value can never diverge from one that
+ * pre-normalizes it. `floored` — a flame/inspection/repair floor is what
+ * set `totalRaw` — rounds UP to the next $25 instead of to the nearest, so
+ * the floor is never rounded back below itself.
+ */
 export function finishPrice(
   totalRaw: number,
   cost: number,
-  priceOverride?: number | null
+  priceOverride?: unknown,
+  floored: boolean = false
 ): FinishedPrice {
-  const autoTotal = roundToStep(totalRaw);
-  const o = priceOverride != null && priceOverride > 0 ? priceOverride : null;
+  const autoTotal = floored ? ceilToStep(totalRaw) : roundToStep(totalRaw);
+  const o = normalizePriceOverride(priceOverride) ?? null;
   const total = o ?? autoTotal;
   return {
     totalRaw,
@@ -118,7 +147,7 @@ export function finishFlame(i: {
     baseApplied,
     cost,
     margin: i.margin,
-    ...finishPrice(sellAtMargin(cost, i.margin), cost, i.priceOverride),
+    ...finishPrice(sellAtMargin(cost, i.margin), cost, i.priceOverride, baseApplied),
   };
 }
 
@@ -145,7 +174,7 @@ export function finishInspection(i: {
     minFee: i.minFee,
     minApplied,
     margin: i.margin,
-    ...finishPrice(minApplied ? i.minFee : sellRaw, i.cost, i.priceOverride),
+    ...finishPrice(minApplied ? i.minFee : sellRaw, i.cost, i.priceOverride, minApplied),
   };
 }
 
@@ -184,8 +213,21 @@ export function finishRepair(i: {
   const serviceSellAuto = calloutApplied ? i.minCallout : serviceSellRaw;
   const partsSell = sellAtMargin(i.partsCost, i.partsMargin);
   const cost = i.serviceCost + i.partsCost;
-  const fin = finishPrice(serviceSellAuto + partsSell, cost, i.priceOverride);
+  const fin = finishPrice(serviceSellAuto + partsSell, cost, i.priceOverride, calloutApplied);
   const serviceSell = fin.total - partsSell;
+  // #217 fix wave: the service-only ratio (1 − serviceCost ÷ serviceSell)
+  // blows up — or goes negative — right where serviceSell is thin or
+  // negative: a typed total that lands below what the parts alone are
+  // selling for, or an auto price whose floored service sell is $0 (a
+  // parts-only job with no call-out floor). In both cases report the
+  // whole-job effectiveMargin (already 1 − cost ÷ total) instead, so the
+  // slider/save-margin never shows a wild or negative number near zero.
+  const serviceMargin =
+    fin.overridden || serviceSellAuto <= 0
+      ? fin.effectiveMargin
+      : serviceSell > 0
+        ? 1 - i.serviceCost / serviceSell
+        : 0;
   return {
     ...fin,
     serviceCost: i.serviceCost,
@@ -199,7 +241,7 @@ export function finishRepair(i: {
     cost,
     margin: i.margin,
     partsMargin: i.partsMargin,
-    serviceMargin: serviceSell > 0 ? 1 - i.serviceCost / serviceSell : 0,
+    serviceMargin,
   };
 }
 
@@ -229,10 +271,29 @@ export function sliderPts(margin: number): number {
   return Math.max(MARGIN_SLIDER_MIN, Math.min(MARGIN_SLIDER_MAX, pts));
 }
 
-export type PriceWarning = { kind: "below-cost" | "low-margin"; text: string } | null;
+export type PriceWarning = {
+  kind: "below-cost" | "low-margin" | "below parts price";
+  text: string;
+} | null;
 
-/** Warning (never a block) for a typed total below cost or under a 10% margin. */
-export function typedPriceWarning(total: number, cost: number, margin: number): PriceWarning {
+/**
+ * Warning (never a block) for a typed total below cost or under a 10%
+ * margin. `partsSell` (repairs only) checks first: a typed total under what
+ * the parts alone are selling for is a sharper signal than the whole-job
+ * below-cost check — it can fire even when the total still clears the raw
+ * job cost, since parts sell at a margin above their raw cost.
+ */
+export function typedPriceWarning(
+  total: number,
+  cost: number,
+  margin: number,
+  partsSell?: number | null
+): PriceWarning {
+  if (partsSell != null && total < partsSell)
+    return {
+      kind: "below parts price",
+      text: `Below parts price — ${fmtDollars(total)} doesn't cover the ${fmtDollars(partsSell)} parts alone.`,
+    };
   if (total < cost)
     return {
       kind: "below-cost",

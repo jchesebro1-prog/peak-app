@@ -20739,11 +20739,13 @@ import {
       mk({ id: "c", dueAt: NOW215 + 86_400_000 }),
       mk({ id: "d", status: "done" }),
     ],
-    NOW215,
     (n) => (n === "Sam Rivera" ? "SR" : "?")
   );
   ok(rows.map((r) => r.id).join(",") === "b,c,a", "#215 thread tasks: open only, soonest due first, undated last");
-  ok(rows[0].overdue && rows[0].assigneeInitials === "SR" && !rows[1].overdue && rows[2].due === "" && rows[2].assigneeInitials === "", "#215 thread task rows carry overdue, initials and due label");
+  ok(
+    rows[0].dueAt === NOW215 - 2 * 86_400_000 && rows[0].assigneeInitials === "SR" && rows[2].dueAt === null && rows[2].assigneeInitials === "",
+    "#215 fix wave 1: thread task rows carry the raw dueAt and initials — no precomputed overdue/day label, since only the browser knows its own calendar day"
+  );
   const it215 = readFileSync(join(process.cwd(), "src/lib/inbox-task.ts"), "utf8");
   const itImports = [...it215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
   ok(itImports.every((m) => !!m[1]), "#215 inbox-task.ts imports types only (the dialog imports it)");
@@ -20759,14 +20761,19 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   if (!cust || !roster.length) return;
   const loc = cust.locations.find((l) => !!l.id)!.id as string;
   const now = Date.now();
+  const me = { id: roster[0].id, name: roster[0].name };
   const thread = {
-    id: "C-T215", mailbox: "personal", mailboxUser: "Test Harness", unread: false, customerId: cust.id, customer: cust.name,
+    // #215 fix wave 1 — visibleTo(t, me.name) requires mailbox === "personal"
+    // && mailboxUser === me.name; a fixture stamped with an arbitrary name
+    // was never actually visible to `me`; the "missing thread" test below
+    // used to pass for the wrong reason (createTaskFromThread only checked
+    // `!thread`), which is exactly the gap fix wave 1 closes.
+    id: "C-T215", mailbox: "personal", mailboxUser: me.name, unread: false, customerId: cust.id, customer: cust.name,
     contactName: "Pat Lee", contactEmail: "pat@example.com", subject: "Re: rigging bid", channel: "email", status: "waiting_us",
     assignedTo: "", link: { type: "survey", id: "S-T215", label: "S-T215 · Main hall" }, messages: [], createdAt: now, updatedAt: now,
     resolvedContactId: "ct-T215-a", linkedContactIds: ["ct-T215-a", "ct-T215-b"], siteId: loc,
   };
   await createFixture("comms", thread as never);
-  const me = { id: roster[0].id, name: roster[0].name };
   const r = await createTaskFromThread(
     { threadId: "C-T215", title: "Send revised bid", notes: "From email", assigneeUserId: "", dueDate: "2026-10-05", linkKeys: ["contact:ct-T215-b", "customer", "site", "work", "contact:ct-forged"] },
     me
@@ -20791,6 +20798,12 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   ok(r2.ok && r2.task.siteId === undefined, "#215 writer: a venue that isn't the company's is never linked");
   const r3 = await createTaskFromThread({ threadId: "C-T215-missing", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
   ok(!r3.ok, "#215 writer: a missing thread is refused");
+  await createFixture("comms", { ...thread, id: "C-T215-notmine", mailboxUser: "Somebody Else" } as never);
+  const r4 = await createTaskFromThread({ threadId: "C-T215-notmine", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
+  ok(
+    !r4.ok && r4.error === "That email thread no longer exists.",
+    "#215 fix wave 1: another person's personal thread (visibleTo false) is refused the same as a missing one, not just a missing thread"
+  );
 }
 
 {
@@ -20807,6 +20820,32 @@ async function inboxTask215AsyncChecks(): Promise<void> {
   ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
   const pg = rd215("src/app/(app)/inbox/page.tsx");
   ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
+
+  // #215 fix wave 1
+  ok(!dlg.includes("autoFocus"), "#215 fix wave 1: the task dialog doesn't use the uncontrolled autoFocus attribute");
+  ok(
+    dlg.includes("openerRef.current = document.activeElement") &&
+      dlg.includes("titleRef.current?.focus()") &&
+      dlg.includes("opener.isConnected") &&
+      dlg.includes("containerRef?.current"),
+    "#215 fix wave 1: the mount effect records the opener and focuses the Title field via a ref; close restores focus only to a still-connected opener, else the reader's container"
+  );
+  ok(
+    dlg.includes('t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT"') && dlg.includes("if (inField) return;"),
+    "#215 fix wave 1: Escape in a field doesn't discard the task dialog's typed text"
+  );
+  ok(
+    /onCreateTask=\{\s*vm\.isEmail/.test(reader),
+    "#215 fix wave 1: the Link popup's Create task is gated on vm.isEmail (Edit links itself isn't email-gated)"
+  );
+  ok(
+    card.includes("isEmail") && card.includes("No open tasks on this thread.") && card.includes("Use “Task…” on a message to add one."),
+    "#215 fix wave 1: the empty tasks-card hint only mentions Task… on an email thread"
+  );
+  ok(
+    dlg.includes("(vm.subject || \"\").slice(0, THREAD_TASK_TITLE_MAX)"),
+    "#215 fix wave 1: the pre-filled title (the subject) is capped to THREAD_TASK_TITLE_MAX"
+  );
 }
 
 /* ====================================================================
@@ -20818,6 +20857,7 @@ import {
   roundToStep as roundToStep217,
   normalizePriceOverride as normalizePriceOverride217,
   normalizeTestingOverride as normalizeTestingOverride217,
+  finishPrice as finishPrice217,
   finishFlame as finishFlame217,
   finishRepair as finishRepair217,
   finishInspection as finishInspection217,
@@ -20841,10 +20881,20 @@ import {
     "#217 priceOverride: whole dollars, $ and commas tolerated, up to $10,000,000");
   ok([0, -5, 10_000_001, "abc", "", null, undefined, true].every((v) => normalizePriceOverride217(v) === undefined),
     "#217 priceOverride: zero, negative, over the cap, junk and blank are no override");
+  ok(normalizePriceOverride217("0x10") === undefined && normalizePriceOverride217("1e3") === undefined && normalizePriceOverride217("-0.4") === undefined,
+    "#217 fix wave: hex, exponent and a leading minus are not plain digits — rejected, not silently parsed by Number()");
   ok(normalizeTestingOverride217("0") === 0 && normalizeTestingOverride217(" 120 ") === 120 && normalizeTestingOverride217("") === undefined && normalizeTestingOverride217(-1) === undefined,
     "#217 testingOverride: $0 is a real figure, blank is computed, negatives refused");
+  ok(finishPrice217(1000, 500, "$900").total === 900 && finishPrice217(1000, 500, 0).total === 1000 && finishPrice217(1000, 500, -5).total === 1000 && finishPrice217(1000, 500, 20_000_000).total === 1000,
+    "#217 fix wave: finishPrice normalizes priceOverride itself — a typed string works there directly, and zero/negative/over-cap fall back to auto");
   ok(typedPriceWarning217(500, 575, 1 - 575 / 500)?.kind === "below-cost" && typedPriceWarning217(600, 575, 1 - 575 / 600)?.kind === "low-margin" && typedPriceWarning217(800, 575, 1 - 575 / 800) === null,
     "#217 warning: below cost first, then under a 10% margin, otherwise none");
+  ok(typedPriceWarning217(1200, 1100, 1 - 1100 / 1200, 1428.57)?.kind === "below parts price",
+    "#217 fix wave warning: a typed total under the parts' own sell price warns distinctly, even though it still clears the whole job's raw cost");
+  ok(typedPriceWarning217(1500, 1100, 1 - 1100 / 1500, 1428.57) === null,
+    "#217 fix wave warning: once the typed total clears the parts sell, the cost and the 10% floor, there's no warning");
+  ok(typedPriceWarning217(500, 575, 1 - 575 / 500, 100)?.kind === "below-cost",
+    "#217 fix wave warning: below-cost still wins when parts sell isn't the binding constraint");
   ok(sliderPts217(0.05) === 10 && sliderPts217(0.62) === 50 && sliderPts217(0.3) === 30 && sliderPts217(0.28125) === 28,
     "#217 slider: the back-solved margin moves the slider, clamped to 10–50");
   ok(fmtPts217(0.28125) === "28.1" && fmtPts217(0.3) === "30", "#217: the margin label shows the true value to one decimal");
@@ -20887,6 +20937,9 @@ import {
   const fFloor = computeFlameQuote({ venues: [{ id: "r217-here", label: "Here", curtains: 1, oneWayMiles: 0, oneWayMin: 0 }] }, fRates217);
   ok(fFloor.baseApplied && fFloor.cost === 150 && fFloor.total === 225,
     "#217 flame: the base fee floors the cost first, then the total rounds (214.29 → 225)");
+  const ff360 = finishFlame217({ rawCost: 50, baseFee: 360, margin: 0, priceOverride: null });
+  ok(ff360.baseApplied && ff360.totalRaw === 360 && ff360.total === 375,
+    "#217 fix wave floors: a $360 base fee floors the total, which rounds UP to $375, never down to $350");
 
   // ---- repair engine ----
   const rRates217 = { laborRate: 75, mileageRate: 1, minCallout: 350, partsMargin: 0.3, margin: 0.3, emergencyMult: 1.5, travelRoundMin: 15 };
@@ -20898,10 +20951,25 @@ import {
   ok(rp.total === 1150 && near217(rp.partsSell, 200 / 0.7) && near217(rp.serviceSell, 1150 - 200 / 0.7) && near217(rp.serviceSell + rp.partsSell, rp.total),
     "#217 repair: with parts the total rounds 1,153.57 → 1,150 and service + parts sell still sum to it");
   const ro = trvRepairEstimate({ venues: rNear217, laborHours: 4, parts: [{ name: "Cable", qty: 2, cost: 100 }], priceOverride: 1000 }, rRates217);
-  ok(ro.total === 1000 && ro.overridden && near217(ro.serviceMargin, 1 - 607.5 / (1000 - 200 / 0.7)) && near217(ro.marginAmount, 1000 - 807.5),
-    "#217 repair: a typed total back-solves the SERVICE margin; parts keep their markup");
+  ok(ro.total === 1000 && ro.overridden && near217(ro.partsSell, 200 / 0.7) && near217(ro.marginAmount, 1000 - 807.5) && near217(ro.serviceMargin, ro.effectiveMargin) && near217(ro.effectiveMargin, 1 - 807.5 / 1000),
+    "#217 fix wave repair: a typed total reports the whole-job EFFECTIVE margin (never the service-only ratio) — parts still sell at their own markup");
   const rc = trvRepairEstimate({ venues: [{ label: "Here", oneWayMiles: 0, oneWayMin: 0 }], laborHours: 1 }, rRates217);
   ok(rc.calloutApplied && rc.total === 350, "#217 repair: the minimum call-out floors the service sell before rounding");
+  const rf360 = finishRepair217({ serviceCost: 50, minCallout: 360, margin: 0, partsCost: 0, partsMargin: 0.3, priceOverride: null });
+  ok(rf360.calloutApplied && rf360.totalRaw === 360 && rf360.total === 375,
+    "#217 fix wave floors: a $360 minimum call-out floors the total, which rounds UP to $375, never down to $350");
+  ok(finishRepair217({ serviceCost: 812, minCallout: 0, margin: 0, partsCost: 0, partsMargin: 0.3, priceOverride: null }).total === 800 &&
+      finishPrice217(812, 500, null, true).total === 825,
+    "#217 fix wave floors: the same raw total rounds to the NEAREST $25 with no floor applied, but rounds UP when a floor set the price");
+  const rTyped1 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: 1200 });
+  ok(rTyped1.total === 1200 && rTyped1.overridden && near217(rTyped1.serviceMargin, rTyped1.effectiveMargin) && near217(rTyped1.effectiveMargin, 1 - 1100 / 1200),
+    "#217 fix wave repair margin: a $1,200 typed total (service $100 cost, $1,000 parts cost) reports the effective margin");
+  const rTyped2 = finishRepair217({ serviceCost: 100, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: 1430 });
+  ok(rTyped2.total === 1430 && rTyped2.serviceSell > 0 && near217(rTyped2.serviceMargin, rTyped2.effectiveMargin) && near217(rTyped2.effectiveMargin, 1 - 1100 / 1430),
+    "#217 fix wave repair margin: even once the typed total lifts the service sell back to a thin positive sliver, it still reports the effective margin — no discontinuity near zero");
+  const rAutoZero = finishRepair217({ serviceCost: 0, minCallout: 0, margin: 0.3, partsCost: 1000, partsMargin: 0.3, priceOverride: null });
+  ok(!rAutoZero.overridden && rAutoZero.serviceSellAuto === 0 && near217(rAutoZero.serviceMargin, rAutoZero.effectiveMargin) && rAutoZero.serviceMargin > 0,
+    "#217 fix wave repair margin: a parts-only auto job with no call-out floor (service sell $0) reports the effective margin instead of a flat 0");
 
   // ---- inspection engine ----
   const iRates217 = { laborRate: 75, mileageRate: 1, lineSetMinutes: 15, baseHours: 2, level2Mult: 1.75, minFee: 650, margin: 0.3, travelRoundMin: 15 };
@@ -20914,6 +20982,9 @@ import {
     "#217 inspection: a typed total is used exactly");
   const im = trvInspectionEstimate({ venues: [{ id: "r217-i2", label: "Here", lineSets: 0, oneWayMiles: 0, oneWayMin: 0 }] }, iRates217);
   ok(im.minApplied && im.total === 650, "#217 inspection: the minimum fee floors before rounding");
+  const if660 = finishInspection217({ cost: 50, minFee: 660, margin: 0, priceOverride: null });
+  ok(if660.minApplied && if660.totalRaw === 660 && if660.total === 675,
+    "#217 fix wave floors: a $660 minimum fee floors the total, which rounds UP to $675, never down to $650");
 
   // ---- parity: each engine's finish IS the shared finish the builders will call ----
   const pf = finishFlame217({ rawCost: fa.rawCost, baseFee: 150, margin: 0.3, priceOverride: null });
