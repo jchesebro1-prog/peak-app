@@ -24319,6 +24319,7 @@ import {
   quoteNumberMatches as e223QuoteNoMatches,
   leadNumberMatches as e223LeadNoMatches,
   quoteMatchesSearch as e223QuoteSearch,
+  quoteSearchRank as e223Rank,
   isEstimateNo as e223IsNo,
   withoutEstimateFields as e223Strip,
 } from "@/lib/estimate-number";
@@ -24349,10 +24350,27 @@ import {
   ok(e223Parse("Q-2041") === null && e223Parse("XYZ-1002") === null && e223Parse("") === null && e223Parse(null) === null && e223Parse("lakefront") === null, "#223 parse: old ids, unknown prefixes and words are not numbers");
   const e223Q = { id: "Q-2041", estNo: 1005, estSuffix: 2, quoteType: "flame_test", name: "Lakefront PAC", customer: "Lakefront" };
   ok(e223QuoteNoMatches(e223Q, e223Parse("1005")!) && e223QuoteNoMatches(e223Q, e223Parse("flm-1005-2")!), "#223 match: bare number and exact number both hit");
-  ok(!e223QuoteNoMatches(e223Q, e223Parse("EST-1005")!) && !e223QuoteNoMatches(e223Q, e223Parse("1005-3")!), "#223 match: wrong prefix or wrong suffix misses");
-  ok(e223LeadNoMatches({ estNo: 1005 }, e223Parse("OPP-1005")!) && !e223LeadNoMatches({ estNo: 1005 }, e223Parse("FLM-1005")!), "#223 match: leads answer only to OPP or a bare number");
+  ok(e223QuoteNoMatches(e223Q, e223Parse("EST-1005")!) && !e223QuoteNoMatches(e223Q, e223Parse("1005-3")!), "#223 match: the number wins — a different prefix still hits (quoteType can change after printing); a wrong suffix misses");
+  ok(e223LeadNoMatches({ estNo: 1005 }, e223Parse("OPP-1005")!) && e223LeadNoMatches({ estNo: 1005 }, e223Parse("FLM-1005")!) && !e223LeadNoMatches({ estNo: 1005 }, e223Parse("1005-2")!), "#223 match: a lead answers to its number under any prefix (FLM-1005 finds OPP-1005), never to a suffix");
+  const e223First = { id: "Q-2040", estNo: 1005, quoteType: "flame_test" };
+  ok(e223Same(e223Parse("1005-1"), { estNo: 1005, suffix: 1, prefix: null }) && e223QuoteNoMatches(e223First, e223Parse("1005-1")!) && e223QuoteNoMatches({ ...e223First, estSuffix: 1 }, e223Parse("1005-1")!) && !e223QuoteNoMatches(e223Q, e223Parse("1005-1")!), "#223 match: -1 means the first (unsuffixed) quote only");
+  ok(e223QuoteNoMatches(e223Q, e223Parse("1005-2")!) && !e223QuoteNoMatches(e223First, e223Parse("1005-2")!), "#223 match: -2 names only the second quote");
+  ok(e223Parse("1005-0") === null && e223Parse("1005-00") === null && e223Parse("FLM-1005 0") === null, "#223 parse: a zero suffix is invalid → null");
+  ok(e223Parse("1002.5") === null, "#223 parse: a dot is not a suffix separator (1002.5 is not 1002 -5)");
+  ok(e223QuoteSearch(e223Q, "flm100") && e223QuoteSearch(e223Q, "FLM 10052") && !e223QuoteSearch(e223Q, "est100"), "#223 search: compact partials match the display form with separators stripped");
+  const e223Other = { id: "Q-1999", estNo: 1005, quoteType: "system", name: "Other", customer: "Other" };
+  const e223Legacy = { id: "Q-1005", name: "Legacy", customer: "Old" };
+  ok(
+    e223Rank(e223Q, "FLM-1005") === 0 && e223Rank(e223Other, "FLM-1005") === 1 && e223Rank(e223Legacy, "FLM-1005") === null &&
+      e223Rank(e223Legacy, "1005") === 2 && e223Rank(e223Other, "1005") === 0 && e223Rank(e223Q, "nomatch") === null,
+    "#223 rank: exact number + prefix first, exact number other prefix next, substring hits last, misses null"
+  );
+  ok(
+    [e223Legacy, e223Other, e223Q].map((q) => ({ q, r: e223Rank(q, "FLM-1005") })).filter((x) => x.r !== null).sort((a, b) => a.r! - b.r!).map((x) => x.q.id).join(",") === "Q-2041,Q-1999",
+    "#223 rank: sorting by rank puts the prefix-matching FLM-1005 ahead of EST-1005"
+  );
   ok(e223QuoteSearch(e223Q, "FLM-1005-2") && e223QuoteSearch(e223Q, "q-2041") && e223QuoteSearch(e223Q, "lakefront") && e223QuoteSearch(e223Q, "flm-10"), "#223 search: number, old id, name and partial number all find the quote");
-  ok(!e223QuoteSearch(e223Q, "EST-1005") && e223QuoteSearch(e223Q, "  "), "#223 search: a wrong-prefix number misses; a blank term matches everything");
+  ok(e223QuoteSearch(e223Q, "EST-1005") && e223QuoteSearch(e223Q, "  "), "#223 search: the number wins over the prefix (EST-1005 finds FLM-1005-2); a blank term matches everything");
   ok(e223IsNo(1001) && !e223IsNo(0) && !e223IsNo(-3) && !e223IsNo(1.5) && !e223IsNo("1001"), "#223 isEstimateNo: positive integers only");
   const e223Patched = e223Strip({ name: "x", estNo: 5, estSuffix: 2 });
   ok(e223Same(e223Patched, { name: "x" }), "#223 withoutEstimateFields drops estNo/estSuffix and keeps the rest");

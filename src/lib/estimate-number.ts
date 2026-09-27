@@ -79,58 +79,84 @@ export type ParsedEstimateNumber = { estNo: number; suffix: number | null; prefi
 /**
  * Read a typed estimate number, case- and separator-tolerant:
  * `flm-1002`, `FLM1002`, `1002`, `#1002`, `1005-2`, `est 1005 2`.
+ * A suffix of 1 names the first (unsuffixed) quote; a suffix of 0 is invalid.
+ * A dot never separates a suffix (`1002.5` is not a number).
  * Returns null for anything else, including old internal ids (`Q-2041`: a
  * one-letter prefix is not an estimate prefix) and unknown prefixes.
  */
 export function parseEstimateNumber(raw: string | null | undefined): ParsedEstimateNumber | null {
   const s = String(raw ?? "").trim().toUpperCase().replace(/^#\s*/, "");
-  const m = /^(?:([A-Z]{3})[\s\-_#.]*)?(\d{1,9})(?:[\s\-_./]+(\d{1,3}))?$/.exec(s);
+  const m = /^(?:([A-Z]{3})[\s\-_#.]*)?(\d{1,9})(?:[\s\-_/]+(\d{1,3}))?$/.exec(s);
   if (!m) return null;
   const prefix = m[1] ?? null;
   if (prefix !== null && !KNOWN_PREFIXES.has(prefix)) return null;
   const estNo = Number(m[2]);
   if (!isEstimateNo(estNo)) return null;
-  const suffixNum = m[3] ? Number(m[3]) : null;
-  return { estNo, suffix: suffixNum !== null && suffixNum >= 2 ? suffixNum : null, prefix };
+  const suffix = m[3] ? Number(m[3]) : null;
+  if (suffix !== null && suffix < 1) return null;
+  return { estNo, suffix, prefix };
 }
 
-/** A parsed number names this quote: same counter value, and — when typed —
- *  the same prefix and suffix. A bare `1005` matches `EST-1005` and `EST-1005-2`. */
+/** The suffix a quote answers to: its `-2`, `-3`…, or 1 for the first quote. */
+function effectiveSuffix(q: QuoteNumberFields): number {
+  return isEstimateNo(q.estSuffix) && q.estSuffix >= 2 ? q.estSuffix : 1;
+}
+
+/** A parsed number names this quote: same counter value and, when typed, the
+ *  same suffix (`-1` = the unsuffixed first quote). The number wins — the
+ *  counter is shared, so estNo + suffix is unique, and a quote's type (hence
+ *  its prefix) can change after the number was printed. A typed prefix only
+ *  ranks (quoteSearchRank). A bare `1005` matches `EST-1005` and `EST-1005-2`. */
 export function quoteNumberMatches(q: QuoteNumberFields, p: ParsedEstimateNumber): boolean {
   if (!isEstimateNo(q.estNo) || q.estNo !== p.estNo) return false;
-  if (p.prefix !== null && p.prefix !== prefixForQuoteType(q.quoteType)) return false;
-  if (p.suffix !== null && (isEstimateNo(q.estSuffix) ? q.estSuffix : null) !== p.suffix) return false;
-  return true;
+  return p.suffix === null || effectiveSuffix(q) === p.suffix;
 }
 
-/** A parsed number names this lead: same counter value; prefix OPP or none; no suffix. */
+/** A parsed number names this lead: same counter value under any prefix
+ *  (`FLM-1005` finds its opportunity `OPP-1005`); never a suffix. */
 export function leadNumberMatches(l: LeadNumberFields, p: ParsedEstimateNumber): boolean {
   if (!isEstimateNo(l.estNo) || l.estNo !== p.estNo) return false;
-  if (p.prefix !== null && p.prefix !== ESTIMATE_PREFIX.opportunity) return false;
   return p.suffix === null;
 }
 
+/** Search-result tiers: lower sorts first. */
+export const SEARCH_RANK = { exactNumber: 0, numberOtherPrefix: 1, text: 2 } as const;
+
+const compact = (v: string) => v.replace(/[\s\-_#./]+/g, "").toUpperCase();
+
 /**
- * The one quote search rule (quotes hub `?q=`, ⌘K): a typed estimate number
- * (exact, via parseEstimateNumber), or a case-insensitive substring of the
- * displayed number, the OLD internal id, the name or the customer — so
- * "Q-2041" still finds the quote it always found.
+ * The one quote search rule (quotes hub `?q=`, ⌘K), as a rank: null when the
+ * term misses; SEARCH_RANK.exactNumber for an exact number whose typed prefix
+ * (if any) is this quote's; numberOtherPrefix for an exact number under
+ * another prefix; text for a case-insensitive substring of the displayed
+ * number (also with separators stripped, so `flm100` finds FLM-1005), the OLD
+ * internal id, the name or the customer — so "Q-2041" still finds its quote.
  */
+export function quoteSearchRank(
+  q: QuoteNumberFields & { id: string; name?: string | null; customer?: string | null },
+  term: string
+): number | null {
+  const t = term.trim().toLowerCase();
+  if (!t) return SEARCH_RANK.text;
+  const parsed = parseEstimateNumber(t);
+  if (parsed && quoteNumberMatches(q, parsed)) {
+    return parsed.prefix === null || parsed.prefix === prefixForQuoteType(q.quoteType)
+      ? SEARCH_RANK.exactNumber
+      : SEARCH_RANK.numberOtherPrefix;
+  }
+  const shown = formatQuoteNumber(q);
+  const hit = [q.id, shown, q.name, q.customer].some((f) => typeof f === "string" && f.toLowerCase().includes(t));
+  if (hit) return SEARCH_RANK.text;
+  const ct = compact(t);
+  return ct && shown && compact(shown).includes(ct) ? SEARCH_RANK.text : null;
+}
+
+/** quoteSearchRank as a filter: does the term find this quote at all? */
 export function quoteMatchesSearch(
   q: QuoteNumberFields & { id: string; name?: string | null; customer?: string | null },
   term: string
 ): boolean {
-  const t = term.trim().toLowerCase();
-  if (!t) return true;
-  const parsed = parseEstimateNumber(t);
-  if (parsed && quoteNumberMatches(q, parsed)) return true;
-  // A typed prefix that isn't this quote's type rules it out ("EST-1005" never
-  // finds FLM-1005). Otherwise fall through, so partial typing ("flm-10" →
-  // parses as FLM + 10) still finds FLM-1005 as a substring.
-  if (parsed && parsed.prefix !== null && parsed.prefix !== prefixForQuoteType(q.quoteType)) return false;
-  return [q.id, formatQuoteNumber(q), q.name, q.customer].some(
-    (f) => typeof f === "string" && f.toLowerCase().includes(t)
-  );
+  return quoteSearchRank(q, term) !== null;
 }
 
 /** A store patch minus the allocated number — numbers never change after allocation. */
