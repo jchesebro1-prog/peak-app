@@ -413,3 +413,34 @@ method, notes and PO file with **Approve** / **Decline with note**.
 - Abandoned-cart row cleanup.
 - Stale-doc cleanup: `DECISIONS.md` D60 (grant length 6 months vs the 90-day code) and D63 (#48
   "parked") are out of date.
+
+## 8. Build-time adjustments (from plan recon, 2026-09-27)
+
+Recon against `origin/main` forced four refinements. Each gets a DECISIONS entry at build time.
+
+1. **Freight uses the Estimator's own base.** Portal quotes are stored in the Estimator's
+   `{sections}` shape and totalled by its `totals()` (`src/app/(app)/estimator/pricing.ts:184`), where
+   freight = `freightPct` × the section's **cost** base (`systemFreightBase`). Pricing freight on sell
+   in the portal would disagree with the same quote opened in the Estimator. So the rule sets the
+   section's `freightPct`, the Estimator math prices it, and the **customer sees the freight amount +
+   miles ("Freight & delivery — 412 mi"), not the %** (a % of cost would read wrong against a sell
+   subtotal). Supersedes §2.2's "applied to sell" and §3.4's "(miles, %)".
+2. **Review and approval notices are bell groups, not Leads-queue records.** The staff bell is
+   derived from records on every request (`src/lib/nav-counts.ts`, no writer), and the "Portal
+   acceptances to confirm" group already exists. A review quote adds a derived **"Portal quotes to
+   review"** group; a firm generation adds **"New portal quotes"** (last 72 h, owner = me or
+   unassigned). No lead is created for a review quote. Supersedes §4.2 "bell notice", §4.3 "Leads SLA
+   queue", §4.4 "to-do".
+3. **The fixture configurator follows the real fixture model.** `FixtureRecord` boxes are flat part
+   lists where `qty > 0` = included and `qty 0` = optional add-on (`src/lib/fixture-assemblies.ts:227`);
+   there are no either/or choice groups. The sidebar shows the light engine + lens + included parts as
+   fixed, and each optional add-on as a toggle with its qty. Only `kind: "fixture"` records are offered.
+   Supersedes §3.2's "one picker per option box".
+4. **Firm generation sends through a named gate bypass.** `setStatus(…,"sent")` enforces the approval
+   gate (`src/lib/stores/quotes.ts:880`); a firm portal quote passes a new, explicit
+   `bypassApprovalGate: "portal-firm"`. Approve (→ won) stays on the normal gated path.
+5. **Miles** come from `travelForId(customerId, locationId)` (`src/lib/stores/customers.ts:920`) —
+   manual `travelMiles` > cached route > haversine × road factor — the same number the Estimator's
+   travel chip shows. `source: "none"` → unknown → cap.
+6. **The PO file** uploads through the #218 portal document flow as an ordinary shared customer
+   document; `portalAcceptance.poDocumentId` holds its `DOC-` id (documents have no quote link).
