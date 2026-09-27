@@ -12,7 +12,9 @@ import { getAll as allQuotes } from "@/lib/stores/quotes";
 import { getAll as allSurveys } from "@/lib/stores/surveys";
 import { getAll as allInspections } from "@/lib/stores/inspections";
 import { getAllProjects } from "@/lib/stores/projects";
+import { tasksForThread } from "@/lib/stores/tasks";
 import { isDone } from "@/lib/pipelines";
+import { threadTaskLinkCandidates, threadTaskRows } from "@/lib/inbox-task";
 import {
   domainOf,
   GMAIL_MODIFY_SCOPE,
@@ -790,6 +792,56 @@ export default async function InboxPage({
       .filter((c): c is NonNullable<typeof c> => !!c)
       .map((c) => ({ id: c.id, name: contactDisplayName(c), primary: c.id === linkedIds[0] }));
 
+    // #215 — the task dialog's link candidates (labels resolved here; the
+    // writer re-derives the same candidates from the stored thread) and the
+    // sidebar's open tasks on this thread.
+    const taskCandidates = threadTaskLinkCandidates({
+      threadId: sel.id,
+      // Fix wave 1 — resolvedCid can be an id resolveCustomerId still
+      // returns but that no longer maps to a real customer record; only
+      // offer/link the company (and, transitively, its venue) once it
+      // actually resolves to one (mirrors inbox-task-write.ts).
+      customerId: linkedCustomer ? resolvedCid : null,
+      siteId,
+      link: sel.link,
+      primaryContactId: sel.resolvedContactId ?? null,
+      contactIds: sel.linkedContactIds ?? [],
+    });
+    const taskContactRows = await Promise.all(
+      taskCandidates.filter((c) => c.kind === "contact").map((c) => getContact(c.id))
+    );
+    const taskContactName = new Map(
+      taskContactRows
+        .filter((r): r is NonNullable<typeof r> => !!r)
+        .map((r) => [r.id, contactDisplayName(r)] as const)
+    );
+    const workKindLabel = sel.link ? sel.link.type.charAt(0).toUpperCase() + sel.link.type.slice(1) : "";
+    const taskLinks: ReaderVM["taskLinks"] = taskCandidates.flatMap((c): ReaderVM["taskLinks"] => {
+      switch (c.kind) {
+        case "thread":
+          return [{ key: c.key, kind: c.kind, label: "This email thread" }];
+        case "contact": {
+          const name = taskContactName.get(c.id);
+          return name ? [{ key: c.key, kind: c.kind, label: name }] : [];
+        }
+        case "customer":
+          return [{ key: c.key, kind: c.kind, label: linkedCustomer?.name || resolvedCustomer || c.id }];
+        case "site":
+          return [{ key: c.key, kind: c.kind, label: siteOptions.find((o) => o.value === c.id)?.label || "Venue" }];
+        default:
+          return [
+            {
+              key: c.key,
+              kind: c.kind,
+              label:
+                `${workKindLabel} · ${sel.link?.label || c.id}` +
+                (c.kind === "survey" || c.kind === "inspection" ? " (noted in the task)" : ""),
+            },
+          ];
+      }
+    });
+    const threadTasks = threadTaskRows(await tasksForThread(sel.id), (n) => initialsOf(n));
+
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,
       author: m.author,
@@ -883,6 +935,10 @@ export default async function InboxPage({
             : []
       ),
       linkedPeople,
+      taskLinks,
+      taskTeam: roster.map((u) => ({ id: u.id, name: u.name })),
+      meId: user.id,
+      threadTasks,
     };
   }
 

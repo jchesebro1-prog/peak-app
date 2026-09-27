@@ -31,7 +31,13 @@ export function quoteBuilderHref(q: QuoteLinkInput): string {
 }
 
 /** True when this quote's builder is NOT the Estimator — i.e. the
- *  Estimator page should redirect an ?id= lookup to the real builder. */
+ *  Estimator page should redirect an ?id= lookup to the real builder.
+ *  #221 fix: derived purely from quoteBuilderHref itself, so an unmapped
+ *  quoteType (falls through to the Estimator's own href) never redirects
+ *  to the page it's already on — the old `!!quoteType && quoteType !==
+ *  "system"` check redirected for ANY other truthy quoteType (e.g. a
+ *  "service" value from the Import hub), which sent estimator/page.tsx
+ *  into a self-redirect loop. */
 export function estimatorShouldRedirect(q: QuoteLinkInput): boolean {
-  return !!q.quoteType && q.quoteType !== "system";
+  return !quoteBuilderHref(q).startsWith("/estimator?");
 }

@@ -60,6 +60,16 @@ export type TaskRecord = {
   createdAt: number;
   updatedAt: number;
   doneAt: number | null;
+  /** #215 — email-task links. All optional and written only when set, so a
+   *  pre-#215 doc and a new unlinked task read identically (no null keys).
+   *  Same no-FK convention as projectId/quoteId (D85). */
+  contactIds?: string[];
+  customerId?: string | null;
+  /** a CustomerLocation.id of customerId (the thread's venue) */
+  siteId?: string | null;
+  leadId?: string | null;
+  /** the comms thread the task was created from */
+  threadId?: string | null;
 };
 
 export type TaskTemplateItem = { key: string; title: string; section?: string };
@@ -252,6 +262,35 @@ export function taskBellItems(all: TaskRecord[], me: string, nowMs: number): Tas
 
 /* ---------- normalize + CRUD ---------- */
 
+/** #215 — cap on people linked to one task (matches the thread's linkedContactIds cap). */
+export const TASK_CONTACT_IDS_MAX = 25;
+const TASK_LINK_ID_MAX = 120;
+
+function taskLinkId(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  return s && s.length <= TASK_LINK_ID_MAX ? s : null;
+}
+
+/** #215 — the sanitized link fields of a raw task: only present, valid ids
+ *  come back (trimmed; contactIds deduped and capped). */
+export function taskLinksOf(
+  raw: Partial<TaskRecord>
+): Pick<TaskRecord, "contactIds" | "customerId" | "siteId" | "leadId" | "threadId"> {
+  const out: Pick<TaskRecord, "contactIds" | "customerId" | "siteId" | "leadId" | "threadId"> = {};
+  if (Array.isArray(raw.contactIds)) {
+    const ids = Array.from(
+      new Set(raw.contactIds.map(taskLinkId).filter((x): x is string => !!x))
+    ).slice(0, TASK_CONTACT_IDS_MAX);
+    if (ids.length) out.contactIds = ids;
+  }
+  for (const k of ["customerId", "siteId", "leadId", "threadId"] as const) {
+    const v = taskLinkId(raw[k]);
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
 export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRecord {
   const at = raw.createdAt ?? now();
   const t: TaskRecord = {
@@ -276,7 +315,7 @@ export function normalizeTask(raw: Partial<TaskRecord> & { id: string }): TaskRe
     notes: raw.notes ?? "", createdBy: raw.createdBy ?? "",
     createdAt: at, updatedAt: raw.updatedAt ?? at, doneAt: raw.doneAt ?? null,
   };
-  return t;
+  return { ...t, ...taskLinksOf(raw) };
 }
 
 export async function allTasks(): Promise<TaskRecord[]> {
@@ -303,6 +342,24 @@ export async function tasksForDesign(designId: string): Promise<TaskRecord[]> {
 /** #145 — the consulting side of the collection. */
 export async function tasksForEngagement(engagementId: string): Promise<TaskRecord[]> {
   return (await allTasks()).filter((t) => t.engagementId === engagementId);
+}
+
+/** #215 — tasks created from (or linked to) one email thread. */
+export async function tasksForThread(threadId: string): Promise<TaskRecord[]> {
+  if (!threadId) return [];
+  return (await allTasks()).filter((t) => t.threadId === threadId);
+}
+
+/** #215 — tasks linked to a company. */
+export async function tasksForCustomer(customerId: string): Promise<TaskRecord[]> {
+  if (!customerId) return [];
+  return (await allTasks()).filter((t) => t.customerId === customerId);
+}
+
+/** #215 — tasks linked to a person (any of the task's contactIds). */
+export async function tasksForContact(contactId: string): Promise<TaskRecord[]> {
+  if (!contactId) return [];
+  return (await allTasks()).filter((t) => (t.contactIds || []).includes(contactId));
 }
 
 export async function getTask(id: string): Promise<TaskRecord | null> {

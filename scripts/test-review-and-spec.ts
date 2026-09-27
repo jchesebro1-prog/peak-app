@@ -10529,6 +10529,9 @@ seeded()
   .then(() => emailsMatchingCompanyDeletedAsyncChecks())
   .then(() => setThreadContactsDeletedCompanyAsyncChecks())
   .then(() => deviceTypesAsyncChecks())
+  .then(() => tasks215AsyncChecks())
+  .then(() => calendarTasks215AsyncChecks())
+  .then(() => inboxTask215AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -20071,7 +20074,7 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   );
   ok(fn214("searchLinkTargetsAction").includes("rankLinkTargets(") && fn214("searchLinkTargetsAction").includes("docLocId(s)"), "#214 actions: search ranks through the pure helper; venue ids are the CustomerLocation ids threads store");
   const page214 = read("src/app/(app)/inbox/page.tsx");
-  ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n    \};/.test(page214), "#214 page: the reader VM carries the linked people");
+  ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n/.test(page214), "#214 page: the reader VM carries the linked people");
 }
 
 /* ====== #214 Inbox Link popup — review fix wave 1 (Task 4 follow-up),
@@ -20354,6 +20357,497 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
   ok(card214.includes('mode?: "summary" | "edit";') && card214.includes('{mode === "edit" && open && ('), "#214 UI: WorkLinkCard's picker only renders in edit mode");
   const reader214 = read("src/app/(app)/inbox/thread-reader.tsx");
   ok(reader214.includes("Link…") && reader214.includes("onOpenLinks={() => onOpenLinks(m.id)}") && reader214.includes("<LinkPopup"), "#214 UI: each message header has Link… and the reader mounts the popup");
+
+  /* ---- #214 UI fix wave 1 ---- */
+  // 1. The dialog takes focus on mount and hands it back to the opener on
+  //    close — otherwise the inbox shell's own ArrowUp/ArrowDown handler
+  //    (which only skips a target inside `[role="dialog"]`) keeps switching
+  //    threads behind the popup and unmounting it.
+  ok(
+    popup214.includes('role="dialog"') &&
+      popup214.includes('aria-modal="true"') &&
+      popup214.includes("aria-labelledby={titleId}") &&
+      popup214.includes("tabIndex={-1}") &&
+      popup214.includes("dialogRef.current?.focus()") &&
+      popup214.includes("opener.focus()"),
+    "#214 UI fix 1: the dialog is a labelled, focusable role=dialog that takes focus on mount and restores it to the opener on close"
+  );
+  // 2. Escape doesn't fight a nested widget's own Escape handling: it backs
+  //    off once that widget already preventDefault()ed the key.
+  const popupEscIdx = popup214.indexOf('e.key !== "Escape"');
+  ok(
+    popupEscIdx !== -1 && popup214.slice(popupEscIdx, popupEscIdx + 60).includes("e.defaultPrevented"),
+    "#214 UI fix 2: the popup's Escape handler backs off when the key was already handled (e.defaultPrevented)"
+  );
+  const typeahead214 = read("src/components/search/typeahead.tsx");
+  const tEscIdx = typeahead214.indexOf('e.key === "Escape"');
+  ok(
+    tEscIdx !== -1 && typeahead214.slice(tEscIdx, tEscIdx + 400).includes("e.preventDefault()"),
+    "#214 UI fix 2: Typeahead preventDefault()s its own Escape so an outer dialog can tell it was already handled"
+  );
+  // 8. The old inline picker was gated to email threads; "Link…" follows.
+  ok(
+    reader214.includes("isEmail={vm.isEmail}") && reader214.includes("{isEmail && ("),
+    "#214 UI fix 8: the per-message Link… button is hidden on a non-email thread (!vm.isEmail)"
+  );
+  // 9. The ✕ close button has an accessible name.
+  ok(popup214.includes('aria-label="Close"'), "#214 UI fix 9: the popup's ✕ button has an accessible name");
+
+  /* ---- #214 UI fix wave 2 ---- */
+  // 1. submitAdding reloads in a `finally` once the contact exists, even if
+  //    setThreadContactsAction throws instead of returning !ok — otherwise
+  //    the row still shows "Add" and a retry duplicates the contact — and
+  //    that catch's message goes to the general `error` slot, since
+  //    `addError` renders nothing once `closeAdding()` has run.
+  const submitAddingIdx = popup214.indexOf("const submitAdding = () => {");
+  const submitAddingSrc = popup214.slice(submitAddingIdx, submitAddingIdx + 2400);
+  ok(
+    submitAddingIdx !== -1 &&
+      submitAddingSrc.includes("let created = false") &&
+      /}\s*catch\s*{[\s\S]*?if \(created\) setError\(/.test(submitAddingSrc) &&
+      /}\s*finally\s*{[\s\S]*?if \(created\) {[\s\S]*?setRev\(\(v\) => v \+ 1\);[\s\S]*?router\.refresh\(\);/.test(submitAddingSrc),
+    "#214 UI fix wave 2: submitAdding reloads in a finally once the contact exists (even if the link step throws) and routes that catch's message to the general error slot"
+  );
+  // 2. Typeahead's Escape only preventDefault()s/closes while the dropdown
+  //    is open — an idle box lets Escape bubble so a parent dialog's own
+  //    handler can close a quick-add form or the dialog itself.
+  ok(
+    tEscIdx !== -1 && typeahead214.slice(tEscIdx, tEscIdx + 40).includes("&& open"),
+    "#214 UI fix wave 2: Typeahead's Escape is gated on the dropdown being open, so an idle box lets Escape bubble to a parent dialog"
+  );
+  // 5. Tab/Shift+Tab is trapped inside the dialog so focus can't land on
+  //    the page behind it and re-enable the shell's arrow-key thread
+  //    switching while the popup is still open.
+  ok(
+    popup214.includes('if (e.key !== "Tab") return;') &&
+      popup214.includes("querySelectorAll<HTMLElement>") &&
+      popup214.includes("dialog.contains(active)"),
+    "#214 UI fix wave 2: a Tab/Shift+Tab handler traps focus inside the dialog"
+  );
+}
+
+/* ============ #215 — task links (store) ============ */
+import {
+  taskLinksOf as taskLinksOf215,
+  tasksForThread as tasksForThread215,
+  tasksForCustomer as tasksForCustomer215,
+  tasksForContact as tasksForContact215,
+  TASK_CONTACT_IDS_MAX as TASK_CONTACT_IDS_MAX215,
+} from "@/lib/stores/tasks";
+
+{
+  const bare215 = normalizeTask({ id: "T-6101", title: "x" } as never);
+  ok(
+    !("threadId" in bare215) && !("contactIds" in bare215) && !("customerId" in bare215) && !("siteId" in bare215) && !("leadId" in bare215),
+    "#215 a pre-existing task reads with no link keys at all"
+  );
+  const linked215 = normalizeTask({
+    id: "T-6102", title: "x", threadId: " C-1040 ", customerId: "rose-brand", siteId: "loc-1", leadId: "L-2001",
+    contactIds: ["ct-1", " ct-2 ", "ct-1", "", 7],
+  } as never);
+  ok(
+    linked215.threadId === "C-1040" && linked215.customerId === "rose-brand" && linked215.siteId === "loc-1" && linked215.leadId === "L-2001",
+    "#215 normalizeTask keeps the four single link ids, trimmed"
+  );
+  ok(JSON.stringify(linked215.contactIds) === '["ct-1","ct-2"]', "#215 contactIds are trimmed and deduped; blanks and non-strings dropped");
+  ok(
+    Object.keys(taskLinksOf215({ threadId: "  ", customerId: null, siteId: undefined, contactIds: [] } as never)).length === 0,
+    "#215 blank / null link ids are omitted, not stored as empty"
+  );
+  const many215 = taskLinksOf215({ contactIds: Array.from({ length: 40 }, (_, i) => "ct-" + i) } as never);
+  ok(TASK_CONTACT_IDS_MAX215 === 25 && many215.contactIds?.length === 25, "#215 contactIds cap at 25");
+  ok(taskLinksOf215({ threadId: "x".repeat(121) } as never).threadId === undefined, "#215 an over-long link id is dropped");
+  ok(
+    typeof tasksForThread215 === "function" && typeof tasksForCustomer215 === "function" && typeof tasksForContact215 === "function",
+    "#215 thread / customer / contact readers are exported"
+  );
+}
+
+async function tasks215AsyncChecks(): Promise<void> {
+  const me = { id: "harness", name: "Test Harness" };
+  const t = await createTask(
+    {
+      title: "#215 harness task", section: "Email", threadId: "C-T215-A", customerId: "CUST-T215",
+      siteId: "LOC-T215", leadId: "L-T215", contactIds: ["ct-T215-a", "ct-T215-b"],
+    },
+    me
+  );
+  registerFixture("tasks", t.id);
+  const back = await getTask(t.id);
+  ok(
+    back?.threadId === "C-T215-A" && back.customerId === "CUST-T215" && back.siteId === "LOC-T215" &&
+      back.leadId === "L-T215" && JSON.stringify(back.contactIds) === '["ct-T215-a","ct-T215-b"]',
+    "#215 createTask round-trips every link field"
+  );
+  ok((await tasksForThread215("C-T215-A")).some((x) => x.id === t.id), "#215 tasksForThread finds the task");
+  ok((await tasksForCustomer215("CUST-T215")).some((x) => x.id === t.id), "#215 tasksForCustomer finds the task");
+  ok((await tasksForContact215("ct-T215-b")).some((x) => x.id === t.id), "#215 tasksForContact finds it by any linked person");
+  ok(!(await tasksForContact215("ct-T215-zzz")).some((x) => x.id === t.id), "#215 tasksForContact ignores people not on the task");
+  ok((await tasksForThread215("")).length === 0, "#215 an empty thread id matches nothing");
+  await removeTask(t.id);
+  ok(!(await tasksForThread215("C-T215-A")).some((x) => x.id === t.id), "#215 a deleted task leaves the thread's list");
+}
+
+/* ============ #215 — calendar task planner (pure) ============ */
+import {
+  placeTasks as placeTasks215,
+  groupPlacedByDay as groupPlacedByDay215,
+  localDayKey as localDayKey215,
+  dayKeyDiff as dayKeyDiff215,
+  taskHref as taskHref215,
+  initialsFor as initialsFor215,
+  calendarItemFromTask as calendarItemFromTask215,
+  calendarItemFromAssignment as calendarItemFromAssignment215,
+  selectCalendarTasks as selectCalendarTasks215,
+  type CalendarTaskItem as CalendarTaskItem215,
+} from "@/lib/calendar-tasks";
+import type { Assignment as Assignment215 } from "@/lib/stores/assignments";
+
+{
+  // Local noon — the day key is then the same in any timezone the harness runs in.
+  const at = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).getTime();
+  const it = (id: string, dueAt: number | null, extra: Partial<CalendarTaskItem215> = {}): CalendarTaskItem215 => ({
+    kind: "task", id, title: id, dueAt, done: false, assigneeName: "Jeff Chesebro", assigneeUserId: "u1",
+    assigneeInitials: "JC", href: "", ...extra,
+  });
+  const TODAY = "2026-09-26";
+  const oct = { today: TODAY, rangeStart: "2026-08-30", rangeEnd: "2026-10-10" };
+
+  ok(localDayKey215(at(2026, 9, 26)) === "2026-09-26", "#215 localDayKey is the local calendar day");
+  ok(
+    localDayKey215(new Date(2026, 0, 5, 0, 0, 1).getTime()) === "2026-01-05" && localDayKey215(new Date(2026, 0, 5, 23, 59).getTime()) === "2026-01-05",
+    "#215 localDayKey holds from just after midnight to just before the next"
+  );
+  ok(
+    dayKeyDiff215("2026-09-20", "2026-09-26") === 6 && dayKeyDiff215("2026-03-01", "2026-03-15") === 14 && dayKeyDiff215("2026-10-30", "2026-11-02") === 3,
+    "#215 dayKeyDiff counts whole days, across DST changes"
+  );
+  ok(Number.isNaN(dayKeyDiff215("2026-9-1", TODAY)), "#215 a malformed day key diffs to NaN");
+
+  const p = placeTasks215(
+    [
+      it("future", at(2026, 10, 2)),
+      it("undated", null),
+      it("overdue", at(2026, 9, 20)),
+      it("today", at(2026, 9, 26)),
+      it("done", at(2026, 9, 28), { done: true }),
+      it("doneOld", at(2026, 9, 1), { done: true }),
+    ],
+    oct
+  );
+  const by = (id: string) => p.find((x) => x.item.id === id);
+  ok(by("future")?.dayKey === "2026-10-02" && by("future")?.carried === false && by("future")?.overdueDays === 0, "#215 a future task sits on its due day");
+  ok(by("undated")?.dayKey === TODAY && by("undated")?.carried === true && by("undated")?.overdueDays === 0, "#215 an undated task floats on today, carried");
+  ok(by("overdue")?.dayKey === TODAY && by("overdue")?.carried === true && by("overdue")?.overdueDays === 6, "#215 an overdue task floats on today with its days overdue");
+  ok(by("today")?.dayKey === TODAY && by("today")?.carried === false && by("today")?.overdueDays === 0, "#215 a task due today sits on today and is not carried");
+  ok(!by("done") && !by("doneOld"), "#215 done tasks are never placed");
+  ok(p.every((x) => x.dayKey >= TODAY), "#215 nothing is ever placed on a past day");
+  const todays = p.filter((x) => x.dayKey === TODAY).map((x) => x.item.id).join(",");
+  ok(todays === "overdue,undated,today", `#215 today's order: overdue, undated carried, then due today (${todays})`);
+
+  const edges = placeTasks215([it("start", at(2026, 9, 26)), it("end", at(2026, 10, 10)), it("after", at(2026, 10, 11))], { today: TODAY, rangeStart: TODAY, rangeEnd: "2026-10-10" });
+  ok(edges.map((x) => x.item.id).join(",") === "start,end", "#215 range edges are inclusive; the day after is dropped");
+  const nextMonth = placeTasks215([it("undated", null), it("overdue", at(2026, 9, 1)), it("nov", at(2026, 11, 3))], { today: TODAY, rangeStart: "2026-11-01", rangeEnd: "2026-12-05" });
+  ok(nextMonth.map((x) => x.item.id).join(",") === "nov", "#215 with today outside the range, carried items are omitted");
+  const lastMonth = placeTasks215([it("aug", at(2026, 8, 15)), it("undated", null)], { today: TODAY, rangeStart: "2026-07-26", rangeEnd: "2026-09-05" });
+  ok(lastMonth.length === 0, "#215 a past range shows nothing — an overdue task is never drawn on its old due day");
+  ok(placeTasks215([it("zero", 0)], oct)[0]?.carried === true, "#215 a zero dueAt reads as undated");
+  const grouped = groupPlacedByDay215(p);
+  ok(grouped.get(TODAY)?.length === 3 && grouped.get("2026-10-02")?.length === 1, "#215 groupPlacedByDay buckets placements by day key");
+
+  ok(
+    initialsFor215("Jeff Chesebro", [{ id: "u1", name: "Jeff Chesebro", initials: "JC" }]) === "JC" &&
+      initialsFor215("sam de rivera", []) === "SD" && initialsFor215("", []) === "",
+    "#215 initials: roster first, else the first letters of the first two words"
+  );
+  ok(taskHref215({ threadId: "C-1", projectId: "P-1" }) === "/inbox?thread=C-1", "#215 a thread-linked task links to its thread first");
+  ok(
+    taskHref215({ projectId: "P-3001" }) === "/projects/P-3001" && taskHref215({ quoteId: "Q-2041" }) === "/quotes?id=Q-2041" &&
+      taskHref215({ engagementId: "E-1" }) === "/design/engagements/E-1?tab=schedule" && taskHref215({ designId: "D-1" }) === "/design/designs?id=D-1" &&
+      taskHref215({ leadId: "L-1" }) === "/leads?lead=L-1" && taskHref215({ customerId: "rose-brand" }) === "/companies/rose-brand" && taskHref215({}) === "",
+    "#215 taskHref falls through project, quote, engagement, design, lead, customer, then none"
+  );
+
+  const roster215 = [{ id: "u1", name: "Jeff Chesebro", initials: "JC" }, { id: "u2", name: "Sam Rivera", initials: "SR" }];
+  const mkT = (o: Partial<TaskRecord> & { id: string }): TaskRecord => normalizeTask({ title: o.id, ...o });
+  const tasks215 = [
+    mkT({ id: "T-mine", assigneeUserId: "u1", assigneeName: "Jeff Chesebro", dueAt: at(2026, 10, 1) }),
+    mkT({ id: "T-theirs", assigneeUserId: "u2", assigneeName: "Sam Rivera" }),
+    mkT({ id: "T-nobody", assigneeUserId: null, assigneeName: "" }),
+    mkT({ id: "T-done", assigneeUserId: "u1", assigneeName: "Jeff Chesebro", status: "done" }),
+    mkT({ id: "T-nameonly", assigneeUserId: null, assigneeName: "Jeff Chesebro" }),
+  ];
+  const asg = (o: Partial<Assignment215> & { id: string }): Assignment215 => ({
+    title: o.id, assignee: "", createdBy: "Sam Rivera", createdAt: 1, dueDate: 0, link: null,
+    done: false, doneAt: null, doneVia: null, source: "", ...o,
+  });
+  const asg215 = [
+    asg({ id: "as-mine", assignee: "Jeff Chesebro" }),
+    asg({ id: "as-theirs", assignee: "Sam Rivera", dueDate: at(2026, 9, 20) }),
+    asg({ id: "as-done", assignee: "Jeff Chesebro", done: true }),
+    asg({ id: "as-blank", assignee: "" }),
+  ];
+  const me215 = { id: "u1", name: "Jeff Chesebro" };
+  const mine215 = selectCalendarTasks215(tasks215, asg215, { me: me215, everyone: false, roster: roster215 });
+  ok(
+    mine215.map((x) => `${x.kind}:${x.id}`).join(",") === "task:T-mine,assignment:as-mine",
+    "#215 mine: tasks by user id, assignments by name; done, unassigned and name-only tasks excluded"
+  );
+  const all215 = selectCalendarTasks215(tasks215, asg215, { me: me215, everyone: true, roster: roster215 });
+  ok(
+    all215.map((x) => `${x.kind}:${x.id}`).join(",") === "task:T-mine,task:T-theirs,assignment:as-mine,assignment:as-theirs",
+    "#215 everyone: every assigned open task and assignment"
+  );
+  const asgItem = all215.find((x) => x.id === "as-theirs")!;
+  ok(
+    asgItem.dueAt === at(2026, 9, 20) && asgItem.assigneeUserId === "u2" && asgItem.assigneeInitials === "SR" && asgItem.href === "/queue?who=Sam%20Rivera",
+    "#215 an assignment normalizes its due date, roster id, initials and a /queue?who= link"
+  );
+  ok(all215.find((x) => x.id === "as-mine")!.dueAt === null, "#215 an assignment's dueDate 0 reads as no date");
+  const taskItem = all215.find((x) => x.id === "T-mine")!;
+  ok(
+    taskItem.kind === "task" && taskItem.assigneeInitials === "JC" && taskItem.done === false && taskItem.dueAt === at(2026, 10, 1) && taskItem.href === "",
+    "#215 a task normalizes to the calendar item shape"
+  );
+  ok(
+    calendarItemFromTask215(mkT({ id: "T-d", status: "done" }), []).done === true && calendarItemFromAssignment215(asg({ id: "as-d", done: true }), []).done === true,
+    "#215 done maps through both normalizers"
+  );
+  const ct215 = readFileSync(join(process.cwd(), "src/lib/calendar-tasks.ts"), "utf8");
+  const ctImports215 = [...ct215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
+  ok(ctImports215.length > 0 && ctImports215.every((m) => !!m[1]), "#215 calendar-tasks.ts imports types only");
+}
+
+/* ============ #215 — /calendar tasks (loader + wiring) ============ */
+async function calendarTasks215AsyncChecks(): Promise<void> {
+  const { loadCalendarTasks } = await import("../src/lib/calendar-tasks-load");
+  const { createAssignment, setAssignmentDone } = await import("../src/lib/stores/assignments");
+  const { setTaskStatus } = await import("../src/lib/stores/tasks");
+  const roster = await activeUsers();
+  ok(roster.length >= 2, "#215 calendar setup: the scratch roster has two active users");
+  if (roster.length < 2) return;
+  const [a, b] = roster;
+  const by = { id: "harness", name: "Test Harness" };
+  const tA = await createTask({ title: "#215 cal A", assigneeUserId: a.id, assigneeName: a.name, dueAt: Date.now() + 86_400_000 }, by);
+  registerFixture("tasks", tA.id);
+  const tB = await createTask({ title: "#215 cal B", assigneeUserId: b.id, assigneeName: b.name }, by);
+  registerFixture("tasks", tB.id);
+  const asA = await createAssignment({ title: "#215 asg A", assignee: a.name, createdBy: by.name });
+  registerFixture("assignments", asA.id);
+  const asB = await createAssignment({ title: "#215 asg B", assignee: b.name, createdBy: by.name });
+  registerFixture("assignments", asB.id);
+  const ids = new Set([tA.id, tB.id, asA.id, asB.id]);
+  const meA = { id: a.id, name: a.name };
+  const pick = async (everyone: boolean) => (await loadCalendarTasks(meA, everyone)).filter((x) => ids.has(x.id));
+
+  const mine = await pick(false);
+  ok(mine.map((x) => x.id).sort().join() === [tA.id, asA.id].sort().join(), "#215 loader: mine = my task + my assignment");
+  const every = await pick(true);
+  ok(every.length === 4 && every.every((x) => !!x.assigneeInitials || !x.assigneeName), "#215 loader: everyone = all four, with initials");
+  await setTaskStatus(tA.id, "done");
+  ok(!(await pick(false)).some((x) => x.id === tA.id), "#215 loader: a completed task leaves the calendar");
+  await setAssignmentDone(asA.id, true, "app");
+  ok(!(await pick(false)).some((x) => x.id === asA.id), "#215 loader: a completed assignment leaves the calendar");
+}
+
+{
+  const rd215 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const noStoreImport215 = (src: string) =>
+    !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/calendar-tasks-load"|lib\/inbox-task-write")/m.test(src);
+  const chip = rd215("src/app/(app)/calendar/task-chip.tsx");
+  const cal = rd215("src/app/(app)/calendar/calendar-client.tsx");
+  ok(chip.startsWith('"use client"') && noStoreImport215(chip) && noStoreImport215(cal), "#215 calendar client components import no store, db or loader");
+  const acts = rd215("src/app/(app)/calendar/task-actions.ts");
+  ok(acts.startsWith('"use server"') && (acts.match(/await requireUser\(\)/g) || []).length === 2, "#215 both calendar task actions require a signed-in user");
+  const page = rd215("src/app/(app)/calendar/page.tsx");
+  ok(
+    page.includes('one(sp.tasks) === "all"') && page.includes("loadCalendarTasks(") && page.includes("tasks={calendarTasks}") && page.includes("tasksEveryone={tasksEveryone}"),
+    "#215 /calendar loads tasks (mine; ?tasks=all for everyone) and passes them down"
+  );
+  ok((cal.match(/\$\{tasksQs\}/g) || []).length >= 7, "#215 every calendar nav link keeps the ?tasks=all choice");
+  ok(cal.includes("placeTasks(") && cal.includes("<TaskChip") && cal.includes("renderTasks(k, 3)"), "#215 the calendar places tasks and renders chips in month cells and the task strip");
+  ok(chip.includes("<ConfirmButton") && chip.includes("completeCalendarTaskAction(") && chip.includes("deleteCalendarTaskAction("), "#215 a chip completes via checkbox and deletes through the confirm button");
+}
+
+/* ============ #215 — tasks from email ============ */
+import {
+  threadTaskLinkCandidates as ttCandidates215,
+  buildThreadTaskInput as buildTTInput215,
+  dueAtFromDateInput as dueAt215,
+  defaultThreadTaskNotes as ttNotes215,
+  threadTaskRows as ttRows215,
+  type ThreadTaskRequest as ThreadTaskRequest215,
+} from "@/lib/inbox-task";
+
+{
+  const c = ttCandidates215({
+    threadId: "C-1", customerId: "rose-brand", siteId: "loc-1",
+    link: { type: "quote", id: "Q-2041", label: "Q-2041 · Main" },
+    primaryContactId: "ct-1", contactIds: ["ct-2", "ct-1", " "],
+  });
+  ok(c.map((x) => x.key).join(",") === "thread,contact:ct-1,contact:ct-2,customer,site,work", "#215 candidates: thread, primary + linked people (deduped), company, venue, work link");
+  ok(c.find((x) => x.key === "work")?.kind === "quote" && c.find((x) => x.key === "work")?.id === "Q-2041", "#215 the work candidate carries the link's type and id");
+  ok(
+    ttCandidates215({ threadId: "C-1", customerId: null, siteId: "loc-1", link: { type: "flame_job", id: "FT-3001" } }).map((x) => x.key).join(",") === "thread",
+    "#215 no company → no venue; a link type outside the work picker is not offered"
+  );
+
+  ok(dueAt215("") === null, "#215 an empty date means no due date");
+  ok(dueAt215("2026-10-05") === new Date(2026, 9, 5, 12).getTime(), "#215 a picked date saves as noon of that date");
+  ok(dueAt215("2026-02-30") === "invalid" && dueAt215("10/05/2026") === "invalid" && dueAt215("2026-13-01") === "invalid", "#215 an impossible or mis-formatted date is invalid");
+  ok(
+    ttNotes215("Re: rigging", "Pat Lee", "Sep 24, 2026, 3:10 PM") === 'From email: "Re: rigging" — Pat Lee, Sep 24, 2026, 3:10 PM' &&
+      ttNotes215("", "", "") === 'From email: "(no subject)" — unknown sender',
+    "#215 default notes name the subject, sender and date"
+  );
+
+  const roster = [{ id: "u1", name: "Jeff Chesebro" }, { id: "u2", name: "Sam Rivera" }];
+  const me = { id: "u1", name: "Jeff Chesebro" };
+  const base: ThreadTaskRequest215 = {
+    threadId: "C-1", title: "  Follow up   on bid ", notes: "n", assigneeUserId: "u2", dueDate: "2026-10-05",
+    linkKeys: ["contact:ct-2", "customer", "work", "contact:ct-forged"],
+  };
+  const build = (req: ThreadTaskRequest215, cands = c, workLabel = "Q-2041 · Main") => buildTTInput215({ req, candidates: cands, workLabel, roster, me });
+  const b1 = build(base);
+  ok(
+    b1.ok && b1.input.title === "Follow up on bid" && b1.input.section === "Email" && b1.input.assigneeUserId === "u2" &&
+      b1.input.assigneeName === "Sam Rivera" && b1.input.dueAt === new Date(2026, 9, 5, 12).getTime(),
+    "#215 build: title squashed, section Email, assignee from the roster, due at noon"
+  );
+  ok(
+    b1.ok && b1.input.threadId === "C-1" && b1.input.customerId === "rose-brand" && b1.input.quoteId === "Q-2041" &&
+      JSON.stringify(b1.input.contactIds) === '["ct-2"]' && b1.input.siteId === undefined,
+    "#215 build: only ticked candidates link, the thread always does, a forged key is ignored"
+  );
+  const surveyC = ttCandidates215({ threadId: "C-2", customerId: null, link: { type: "survey", id: "S-11", label: "S-11 · Main hall" } });
+  const b2 = build({ ...base, threadId: "C-2", linkKeys: ["work"], assigneeUserId: "" }, surveyC, "S-11 · Main hall");
+  ok(b2.ok && b2.input.notes === "n\nLinked survey: S-11 · Main hall" && b2.input.assigneeUserId === "u1", "#215 build: a survey becomes a notes reference line; blank assignee = me");
+  const inspC = ttCandidates215({ threadId: "C-3", customerId: null, link: { type: "inspection", id: "I-5", label: "Gym" } });
+  const b2b = build({ ...base, threadId: "C-3", notes: "", linkKeys: ["work"] }, inspC, "Gym");
+  ok(b2b.ok && b2b.input.notes === "Linked inspection: I-5 — Gym", "#215 build: an inspection reference line names the id when the label lacks it");
+  ok(!build({ ...base, title: "   " }).ok, "#215 build: a blank title is refused");
+  ok(!build({ ...base, assigneeUserId: "u9" }).ok, "#215 build: an assignee off the active team is refused");
+  ok(!build({ ...base, dueDate: "2026-13-01" }).ok, "#215 build: a bad due date is refused");
+  ok(!build({ ...base, title: "x".repeat(201) }).ok, "#215 build: a title over 200 characters is refused");
+  const b3 = build({ ...base, dueDate: "" });
+  ok(b3.ok && b3.input.dueAt === null, "#215 build: no date saves an undated task");
+
+  const NOW215 = new Date(2026, 8, 26, 12).getTime();
+  const mk = (o: Partial<TaskRecord> & { id: string }): TaskRecord => normalizeTask({ title: o.id, ...o });
+  const rows = ttRows215(
+    [
+      mk({ id: "a" }),
+      mk({ id: "b", dueAt: NOW215 - 2 * 86_400_000, assigneeName: "Sam Rivera" }),
+      mk({ id: "c", dueAt: NOW215 + 86_400_000 }),
+      mk({ id: "d", status: "done" }),
+    ],
+    (n) => (n === "Sam Rivera" ? "SR" : "?")
+  );
+  ok(rows.map((r) => r.id).join(",") === "b,c,a", "#215 thread tasks: open only, soonest due first, undated last");
+  ok(
+    rows[0].dueAt === NOW215 - 2 * 86_400_000 && rows[0].assigneeInitials === "SR" && rows[2].dueAt === null && rows[2].assigneeInitials === "",
+    "#215 fix wave 1: thread task rows carry the raw dueAt and initials — no precomputed overdue/day label, since only the browser knows its own calendar day"
+  );
+  const it215 = readFileSync(join(process.cwd(), "src/lib/inbox-task.ts"), "utf8");
+  const itImports = [...it215.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"[^"]+"/gm)];
+  ok(itImports.every((m) => !!m[1]), "#215 inbox-task.ts imports types only (the dialog imports it)");
+}
+
+async function inboxTask215AsyncChecks(): Promise<void> {
+  const { createTaskFromThread } = await import("../src/lib/inbox-task-write");
+  const { all: allCustomers215 } = await import("../src/lib/stores/customers");
+  const { createFixture } = await import("./test-fixtures");
+  const roster = await activeUsers();
+  const cust = (await allCustomers215()).find((x) => (x.locations || []).some((l) => !!l.id));
+  ok(!!cust && roster.length > 0, "#215 inbox setup: a customer with a venue and an active user exist");
+  if (!cust || !roster.length) return;
+  const loc = cust.locations.find((l) => !!l.id)!.id as string;
+  const now = Date.now();
+  const me = { id: roster[0].id, name: roster[0].name };
+  const thread = {
+    // #215 fix wave 1 — visibleTo(t, me.name) requires mailbox === "personal"
+    // && mailboxUser === me.name; a fixture stamped with an arbitrary name
+    // was never actually visible to `me`; the "missing thread" test below
+    // used to pass for the wrong reason (createTaskFromThread only checked
+    // `!thread`), which is exactly the gap fix wave 1 closes.
+    id: "C-T215", mailbox: "personal", mailboxUser: me.name, unread: false, customerId: cust.id, customer: cust.name,
+    contactName: "Pat Lee", contactEmail: "pat@example.com", subject: "Re: rigging bid", channel: "email", status: "waiting_us",
+    assignedTo: "", link: { type: "survey", id: "S-T215", label: "S-T215 · Main hall" }, messages: [], createdAt: now, updatedAt: now,
+    resolvedContactId: "ct-T215-a", linkedContactIds: ["ct-T215-a", "ct-T215-b"], siteId: loc,
+  };
+  await createFixture("comms", thread as never);
+  const r = await createTaskFromThread(
+    { threadId: "C-T215", title: "Send revised bid", notes: "From email", assigneeUserId: "", dueDate: "2026-10-05", linkKeys: ["contact:ct-T215-b", "customer", "site", "work", "contact:ct-forged"] },
+    me
+  );
+  ok(r.ok, "#215 writer: a task is created from a thread");
+  if (!r.ok) return;
+  registerFixture("tasks", r.task.id);
+  const t = await getTask(r.task.id);
+  ok(
+    t?.threadId === "C-T215" && t.customerId === cust.id && t.siteId === loc && JSON.stringify(t.contactIds) === '["ct-T215-b"]',
+    "#215 writer: thread, company, venue and the ticked person are stored"
+  );
+  ok(
+    t?.section === "Email" && t.createdBy === me.name && t.assigneeUserId === me.id &&
+      t.notes === "From email\nLinked survey: S-T215 · Main hall" && t.dueAt === new Date(2026, 9, 5, 12).getTime(),
+    "#215 writer: section Email, created by and assigned to me, survey as a notes line, due at noon"
+  );
+  ok((await tasksForThread215("C-T215")).some((x) => x.id === r.task.id), "#215 writer: the thread's reader finds it");
+  await createFixture("comms", { ...thread, id: "C-T215-stale", siteId: "loc-not-this-customer" } as never);
+  const r2 = await createTaskFromThread({ threadId: "C-T215-stale", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: ["site"] }, me);
+  if (r2.ok) registerFixture("tasks", r2.task.id);
+  ok(r2.ok && r2.task.siteId === undefined, "#215 writer: a venue that isn't the company's is never linked");
+  const r3 = await createTaskFromThread({ threadId: "C-T215-missing", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
+  ok(!r3.ok, "#215 writer: a missing thread is refused");
+  await createFixture("comms", { ...thread, id: "C-T215-notmine", mailboxUser: "Somebody Else" } as never);
+  const r4 = await createTaskFromThread({ threadId: "C-T215-notmine", title: "x", notes: "", assigneeUserId: "", dueDate: "", linkKeys: [] }, me);
+  ok(
+    !r4.ok && r4.error === "That email thread no longer exists.",
+    "#215 fix wave 1: another person's personal thread (visibleTo false) is refused the same as a missing one, not just a missing thread"
+  );
+}
+
+{
+  const rd215 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const noStoreImport215 = (src: string) =>
+    !/^import\s+(?!type\b)[^;]*from\s+"@\/(lib\/stores\/|db\b|db\/|lib\/users"|lib\/calendar-tasks-load"|lib\/inbox-task-write")/m.test(src);
+  const dlg = rd215("src/app/(app)/inbox/task-dialog.tsx");
+  const card = rd215("src/app/(app)/inbox/thread-tasks-card.tsx");
+  ok(dlg.startsWith('"use client"') && card.startsWith('"use client"') && noStoreImport215(dlg) && noStoreImport215(card), "#215 inbox task UI imports no store, db or writer");
+  const ta = rd215("src/app/(app)/inbox/task-actions.ts");
+  ok(ta.startsWith('"use server"') && (ta.match(/await requireUser\(\)/g) || []).length === 2 && ta.includes("createTaskFromThread("), "#215 both inbox task actions require a user; create delegates to the writer");
+  const reader = rd215("src/app/(app)/inbox/thread-reader.tsx");
+  ok(reader.includes("Task…") && reader.includes("<TaskDialog") && reader.includes("onCreateTask"), "#215 the reader has Task… per message, mounts the dialog, and wires the popup's Create task");
+  ok(rd215("src/app/(app)/inbox/link-sidebar.tsx").includes("<ThreadTasksCard"), "#215 the link sidebar lists the thread's open tasks");
+  const pg = rd215("src/app/(app)/inbox/page.tsx");
+  ok(pg.includes("threadTaskLinkCandidates(") && pg.includes("tasksForThread(") && pg.includes("taskTeam:"), "#215 the Inbox page builds the dialog links, team and thread tasks");
+
+  // #215 fix wave 1
+  ok(!dlg.includes("autoFocus"), "#215 fix wave 1: the task dialog doesn't use the uncontrolled autoFocus attribute");
+  ok(
+    dlg.includes("openerRef.current = document.activeElement") &&
+      dlg.includes("titleRef.current?.focus()") &&
+      dlg.includes("opener.isConnected") &&
+      dlg.includes("containerRef?.current"),
+    "#215 fix wave 1: the mount effect records the opener and focuses the Title field via a ref; close restores focus only to a still-connected opener, else the reader's container"
+  );
+  ok(
+    dlg.includes('t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT"') && dlg.includes("if (inField) return;"),
+    "#215 fix wave 1: Escape in a field doesn't discard the task dialog's typed text"
+  );
+  ok(
+    /onCreateTask=\{\s*vm\.isEmail/.test(reader),
+    "#215 fix wave 1: the Link popup's Create task is gated on vm.isEmail (Edit links itself isn't email-gated)"
+  );
+  ok(
+    card.includes("isEmail") && card.includes("No open tasks on this thread.") && card.includes("Use “Task…” on a message to add one."),
+    "#215 fix wave 1: the empty tasks-card hint only mentions Task… on an email thread"
+  );
+  ok(
+    dlg.includes("(vm.subject || \"\").slice(0, THREAD_TASK_TITLE_MAX)"),
+    "#215 fix wave 1: the pre-filled title (the subject) is capped to THREAD_TASK_TITLE_MAX"
+  );
 }
 
 /* ====== #225 Consulting proposal document fixes ======
@@ -21255,4 +21749,75 @@ async function deviceTypesAsyncChecks(): Promise<void> {
     await db.delete(blobs226).where(inArray(blobs226.id, ids));
     for (const row of snapshot) await db.insert(blobs226).values(row);
   }
+}
+
+/* ====== Batch 1 final-review fixes — #221 redirect loop, #224 ?n= cap,
+   #212 custom-item save/remove never sticks ====== */
+import { estimatorShouldRedirect as fr221Redirect, quoteBuilderHref as fr221Href } from "@/lib/quote-links";
+import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  // --- #221: estimatorShouldRedirect is now defined purely off quoteBuilderHref,
+  // so a quoteType that falls through to the Estimator (e.g. "service", coming
+  // from the Import hub) no longer redirects estimator/page.tsx back to itself.
+  const fr221False: Array<string | undefined | null> = ["service", "some-unknown-type", "system", "", null];
+  for (const t of fr221False)
+    ok(
+      fr221Redirect({ id: "x", quoteType: t }) === false,
+      `#221: estimatorShouldRedirect is false for quoteType=${JSON.stringify(t)} (quoteBuilderHref falls back to /estimator?id=…, so no redirect)`
+    );
+  const fr221True = ["flame_test", "repair", "inspection", "consulting", "rental"];
+  for (const t of fr221True)
+    ok(fr221Redirect({ id: "x", quoteType: t }) === true, `#221: estimatorShouldRedirect stays true for quoteType=${t}`);
+  // Purity check: the result always agrees with quoteBuilderHref's own prefix,
+  // for every case above — i.e. there is no separate allow-list to drift.
+  for (const t of [...fr221False, ...fr221True]) {
+    const href = fr221Href({ id: "x", quoteType: t });
+    ok(
+      fr221Redirect({ id: "x", quoteType: t }) === !href.startsWith("/estimator?"),
+      `#221: estimatorShouldRedirect(quoteType=${JSON.stringify(t)}) matches !quoteBuilderHref(...).startsWith("/estimator?") (href was ${href})`
+    );
+  }
+
+  // --- #224: ?n= is parsed by one shared, exported, clamped parsePageSize.
+  ok(fr224ParsePageSize("999999") === 500, "#224: parsePageSize clamps a huge ?n= to the max (500)");
+  ok(fr224ParsePageSize("-5") === 50, "#224: parsePageSize falls back to the default (50) for a negative ?n=");
+  ok(fr224ParsePageSize("abc") === 50, "#224: parsePageSize falls back to the default (50) for a non-numeric ?n=");
+  ok(fr224ParsePageSize("") === 50, "#224: parsePageSize falls back to the default (50) for an empty ?n=");
+  ok(fr224ParsePageSize("100") === 100, "#224: parsePageSize passes an in-range ?n= through unchanged");
+  ok(fr224ParsePageSize("500") === 500, "#224: parsePageSize passes the max itself through unchanged");
+  ok(fr224ParsePageSize("50", 25, 200) === 50, "#224: parsePageSize honors a caller's own default/max");
+
+  const companiesSrc224 = read("src/app/(app)/companies/page.tsx");
+  const venuesSrc224 = read("src/app/(app)/venues/page.tsx");
+  for (const [name, src] of [
+    ["companies/page.tsx", companiesSrc224],
+    ["venues/page.tsx", venuesSrc224],
+  ] as const) {
+    ok(src.includes('from "@/lib/short-list"'), `#224: ${name} imports the shared short-list module`);
+    ok(!/function parsePageSize\(/.test(src), `#224: ${name} no longer defines its own local parsePageSize`);
+  }
+  const shortListLibSrc224 = read("src/lib/short-list.ts");
+  ok(/export function parsePageSize\(/.test(shortListLibSrc224), "#224: short-list.ts exports the shared parsePageSize");
+
+  const shortListUiSrc224 = read("src/components/short-list.tsx");
+  ok(/<input[\s\S]*?aria-label=\{searchPlaceholder\}/.test(shortListUiSrc224), "#224: the ShortList filter input carries an aria-label built from its own placeholder text");
+
+  // --- #212: a thrown save or remove on a Grid custom item never leaves the
+  // button stuck reading "Saving…"/"Removing…" — both wrap their action in
+  // try/catch/finally and show the same generic retry message.
+  const customItemsSrc212 = read("src/app/(app)/design/grid/[id]/custom-items.tsx");
+  ok(
+    /const save = async \(\) => \{[\s\S]*?try \{[\s\S]*?saveCustomItemAction[\s\S]*?\} catch \{[\s\S]*?\} finally \{\s*setSaving\(false\);\s*\}\s*\};/.test(customItemsSrc212),
+    "#212: save() wraps saveCustomItemAction in try/catch/finally, and finally unconditionally clears setSaving — a throw can't leave the button stuck on \"Saving…\""
+  );
+  ok(
+    /onConfirm=\{async \(\) => \{\s*try \{[\s\S]*?removeCustomItemAction[\s\S]*?\} catch \{/.test(customItemsSrc212),
+    "#212: the remove confirm's onConfirm also wraps removeCustomItemAction in try/catch"
+  );
+  ok(
+    (customItemsSrc212.match(/Something went wrong — try again\./g) || []).length === 2,
+    "#212: both the save and remove catch blocks show the same generic \"Something went wrong — try again.\" message"
+  );
 }

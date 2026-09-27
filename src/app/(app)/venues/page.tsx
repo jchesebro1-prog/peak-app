@@ -6,6 +6,7 @@ import { timeAgo } from "@/lib/format";
 import { cityState, mono } from "../companies/lib";
 import { travelForPoints } from "@/lib/travel-bulk";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
+import { parsePageSize } from "@/lib/short-list";
 
 /**
  * Venues directory (D101) — mirrors the Companies list's server-component +
@@ -26,13 +27,9 @@ function one(v: string | string[] | undefined): string {
 
 /** Directory paging (#224) — replaces the old hard PAGE=200 cap with the
  *  companies directory's "Show more" idiom: first PAGE rows, then a link
- *  that raises `?n=` by PAGE, preserving the other filters. */
+ *  that raises `?n=` by PAGE, preserving the other filters. `?n=` itself is
+ *  clamped to a max of 500 by the shared parsePageSize (src/lib/short-list.ts). */
 const PAGE = 50;
-
-function parsePageSize(raw: string): number {
-  const v = parseInt(raw, 10);
-  return Number.isFinite(v) && v > 0 ? v : PAGE;
-}
 
 const CSS = `
   .ve-row:hover { background: #fafbff; }

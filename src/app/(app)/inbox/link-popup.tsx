@@ -14,7 +14,7 @@
  * action, then reloads that data and router.refresh()es the reader. No store
  * imports — a store pulls postgres into the client bundle (next build only).
  */
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import EntityQuickAdd, { INPUT, type QuickAddValues } from "@/components/entity-quick-add";
 import { Typeahead } from "@/components/search/typeahead";
@@ -82,22 +82,31 @@ function HitRow({ hit }: { hit: LinkTargetHit }) {
 
 /** Debounced server search with a stale-response guard — the #121 pattern
  *  (design/assemblies/fixture-form.tsx usePartSearch): items are DERIVED
- *  from whether the last answered query still matches the live one. */
+ *  from whether the last answered query still matches the live one. A
+ *  rejected search (#214 fix wave 1) never leaves the box stuck reading
+ *  "Searching…" — it reports failure and lets the next keystroke retry. */
 function useLinkSearch(only?: LinkTargetKind) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LinkTargetHit[]>([]);
   const [resultQuery, setResultQuery] = useState("");
+  const [searchError, setSearchError] = useState(false);
   const seq = useRef(0);
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) return;
     const my = ++seq.current;
     const t = setTimeout(() => {
-      searchLinkTargetsAction(q, only).then((g) => {
-        if (my !== seq.current) return;
-        setResults([...g.companies, ...g.venues, ...g.people]);
-        setResultQuery(q);
-      });
+      setSearchError(false);
+      searchLinkTargetsAction(q, only)
+        .then((g) => {
+          if (my !== seq.current) return;
+          setResults([...g.companies, ...g.venues, ...g.people]);
+          setResultQuery(q);
+        })
+        .catch(() => {
+          if (my !== seq.current) return;
+          setSearchError(true);
+        });
     }, 220);
     return () => clearTimeout(t);
   }, [query, only]);
@@ -106,17 +115,26 @@ function useLinkSearch(only?: LinkTargetKind) {
   return {
     setQuery,
     items: fresh ? results : [],
-    emptyText: trimmed.length < 2 ? "Type at least 2 letters." : fresh ? "Nothing matches." : "Searching…",
+    emptyText: searchError
+      ? "Search failed — try again."
+      : trimmed.length < 2
+        ? "Type at least 2 letters."
+        : fresh
+          ? "Nothing matches."
+          : "Searching…",
   };
 }
 
 function LinkSearchBox({
   only,
   placeholder,
+  disabled,
   onPick,
 }: {
   only?: LinkTargetKind;
   placeholder: string;
+  /** #214 fix wave 1 — block further picks while one is still being applied */
+  disabled?: boolean;
   onPick: (hit: LinkTargetHit) => void;
 }) {
   const { setQuery, items, emptyText } = useLinkSearch(only);
@@ -134,6 +152,7 @@ function LinkSearchBox({
       inputStyle={{ ...INPUT, padding: "8px 10px", fontSize: 12.5 }}
       emptyText={emptyText}
       onQueryChange={setQuery}
+      disabled={disabled}
     />
   );
 }
@@ -160,11 +179,29 @@ export default function LinkPopup({
   onCreateTask?: () => void;
 }) {
   const router = useRouter();
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<Element | null>(null);
   const [pending, start] = useTransition();
   const [data, setData] = useState<LinkPopupData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rev, setRev] = useState(0);
+  // #214 fix wave 1 — `dataRev` tracks which `rev` the loaded `data` belongs
+  // to. After an action succeeds, `pending` clears as soon as the server
+  // action itself resolves, but the popup's lists are still showing
+  // pre-action data until the reload triggered by `rev` lands — without
+  // this, checkboxes were briefly re-enabled with stale `checked` values
+  // (a visible bounce) in that gap.
+  const [dataRev, setDataRev] = useState(-1);
+  const busy = pending || dataRev !== rev;
+  // Per-form error state (#214 fix wave 1): a shared `error` let a failure
+  // from one action show up inside an unrelated open form. `error` is now
+  // only for actions with no form of their own (checkbox toggles, the
+  // company/venue/person search, "Add missing details").
   const [error, setError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [companyError, setCompanyError] = useState<string | null>(null);
+  const [venueError, setVenueError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [adding, setAdding] = useState<Adding | null>(null);
   const [newCompany, setNewCompany] = useState<QuickAddValues["customer"] | null>(null);
@@ -173,22 +210,37 @@ export default function LinkPopup({
   const [claim, setClaim] = useState(false);
 
   // Load (and, once, lazily backfill Cc for) the popup's message. `rev`
-  // bumps after every write so the lists re-read the server.
+  // bumps after every write so the lists re-read the server. A rejected
+  // load (#214 fix wave 1) sets an error instead of leaving "Loading…" up
+  // forever, and a later successful load clears any earlier error.
   useEffect(() => {
     let alive = true;
-    linkPopupDataAction(vm.id, messageId).then((r) => {
-      if (!alive) return;
-      if (!r.ok) {
-        setLoadError(r.error);
-        return;
-      }
-      setData(r.data);
-      if (r.data.ccPending) {
-        fetchMessageCcAction(vm.id, messageId).then((r2) => {
-          if (alive && r2.ok) setData(r2.data);
-        });
-      }
-    });
+    linkPopupDataAction(vm.id, messageId)
+      .then((r) => {
+        if (!alive) return;
+        if (!r.ok) {
+          setLoadError(r.error);
+          setDataRev(rev);
+          return;
+        }
+        setLoadError(null);
+        setData(r.data);
+        setDataRev(rev);
+        if (r.data.ccPending) {
+          // #214 fix wave 2 — a rejected lazy backfill is not surfaced as
+          // an error; Cc simply stays un-backfilled for this load.
+          fetchMessageCcAction(vm.id, messageId)
+            .then((r2) => {
+              if (alive && r2.ok) setData(r2.data);
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {
+        if (!alive) return;
+        setLoadError("Couldn't load this message's links — try again.");
+        setDataRev(rev);
+      });
     return () => {
       alive = false;
     };
@@ -203,27 +255,97 @@ export default function LinkPopup({
     setIdentityMessageAction(vm.id, messageId).then(() => router.refresh());
   }, [fromHeader, messageId, vm.id, vm.identityMessageId, router]);
 
+  // #214 fix wave 1 — the dialog never took focus, so the inbox shell's
+  // ArrowUp/ArrowDown handler (which only skips inputs/selects/textareas or
+  // a target inside `[role="dialog"]`) kept switching threads behind it and
+  // unmounting the popup. Focus it on mount and hand focus back to whatever
+  // opened it ("Link…" or "Edit links") when it closes.
+  useEffect(() => {
+    openerRef.current = document.activeElement;
+    dialogRef.current?.focus();
+    return () => {
+      const opener = openerRef.current;
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, []);
+
+  // #214 fix wave 2 — trap Tab/Shift+Tab inside the dialog. Without this,
+  // Tabbing off either end of the popup lands focus on the page behind it,
+  // and the shell's own ArrowUp/ArrowDown handler (which only skips a
+  // target inside `[role="dialog"]`) starts switching threads again while
+  // the popup is still open — the same class of bug fix wave 1's mount
+  // focus fixed for the initial focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
-  const run = (fn: () => Promise<ActionResult>, onSuccess?: () => void) =>
-    start(async () => {
-      setError(null);
-      setNotice(null);
-      const r = await fn();
-      if (!r.ok) {
-        setError(r.error || "Something went wrong.");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      const inField = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+      if (adding || newCompany || newVenue) {
+        // First Escape closes the open quick-add form (a Typeahead's own
+        // Escape already preventDefault()s above, so this only runs for a
+        // plain form field or a target outside any input). A second
+        // Escape, with nothing left open, closes the popup.
+        setAdding(null);
+        setNewCompany(null);
+        setNewVenue(null);
         return;
       }
-      if (r.note) setNotice(r.note);
-      onSuccess?.();
-      setRev((v) => v + 1);
-      router.refresh();
+      if (inField) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, adding, newCompany, newVenue]);
+
+  const run = (
+    fn: () => Promise<ActionResult>,
+    onSuccess?: () => void,
+    setErr: (e: string | null) => void = setError
+  ) =>
+    start(async () => {
+      setErr(null);
+      setNotice(null);
+      try {
+        const r = await fn();
+        if (!r.ok) {
+          setErr(r.error || "Something went wrong.");
+          return;
+        }
+        if (r.note) setNotice(r.note);
+        onSuccess?.();
+        setRev((v) => v + 1);
+        router.refresh();
+      } catch {
+        setErr("Something went wrong — try again.");
+      }
     });
 
   const senderEmail = vm.identity?.email || vm.contactEmail;
@@ -250,6 +372,11 @@ export default function LinkPopup({
     else run(() => setThreadContactsAction(vm.id, hit.id, true));
   };
 
+  const closeAdding = () => {
+    setAdding(null);
+    setAddError(null);
+  };
+
   const startAdding = (p: PopupParticipant) => {
     const pre = data?.prefill && data.prefill.email === p.email ? data.prefill : null;
     const company = pre?.companyId
@@ -257,7 +384,7 @@ export default function LinkPopup({
       : companyId && vm.customerCard
         ? { id: companyId, name: vm.customerCard.name }
         : null;
-    setError(null);
+    setAddError(null);
     setAdding({
       email: p.email,
       values: {
@@ -273,18 +400,50 @@ export default function LinkPopup({
   const submitAdding = () => {
     if (!adding) return;
     if (!adding.company) {
-      setError("Pick the company this person works for.");
+      setAddError("Pick the company this person works for.");
       return;
     }
     const a = adding;
-    run(
-      async () => {
+    start(async () => {
+      setAddError(null);
+      setNotice(null);
+      // #214 fix wave 2 — tracks whether quickAddContactAction actually
+      // created the contact. Once it has, the form is closed and can no
+      // longer show `addError`, and the reload must run even if the
+      // link step below throws (not just returns !ok) — otherwise the
+      // row still shows "Add" and a retry creates a duplicate contact.
+      let created = false;
+      try {
         const res = await quickAddContactAction({ customerId: a.company!.id, ...a.values });
-        if (!res.ok) return res;
-        return setThreadContactsAction(vm.id, res.id, true);
-      },
-      () => setAdding(null)
-    );
+        if (!res.ok) {
+          setAddError(res.error || "Something went wrong.");
+          return;
+        }
+        // #214 fix wave 1 — the contact now exists, so the form closes here
+        // regardless of whether the link below succeeds: a stale open form
+        // left up after a partial failure could otherwise be retried and
+        // create a duplicate contact. The reload always runs so the new
+        // person shows up — linked, or listed unlinked if only the link
+        // step failed.
+        created = true;
+        closeAdding();
+        const link = await setThreadContactsAction(vm.id, res.id, true);
+        if (!link.ok) setError(link.error || "Added the contact, but couldn't link them to this thread.");
+        else if (link.note) setNotice(link.note);
+      } catch {
+        // #214 fix wave 2 — a throw after `closeAdding()` ran would
+        // otherwise land in `addError`, which nothing renders once the
+        // form is closed. Route it to the general `error` slot instead so
+        // it's actually visible.
+        if (created) setError("Added the contact, but couldn't link them to this thread — try again.");
+        else setAddError("Something went wrong — try again.");
+      } finally {
+        if (created) {
+          setRev((v) => v + 1);
+          router.refresh();
+        }
+      }
+    });
   };
 
   const sender = data?.participants.find((p) => p.role === "from") || null;
@@ -304,9 +463,11 @@ export default function LinkPopup({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Link this email"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 580,
@@ -319,14 +480,16 @@ export default function LinkPopup({
           boxShadow: "0 18px 50px rgba(0,0,0,.22)",
           fontFamily: "var(--font-ui)",
           color: "#16181d",
+          outline: "none",
         }}
       >
         <div style={{ padding: "16px 20px 10px", borderBottom: "1px solid #eef0f3", background: "#fff", borderRadius: "14px 14px 0 0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 15.5, fontWeight: 700, flex: 1 }}>Link this email</div>
+            <div id={titleId} style={{ fontSize: 15.5, fontWeight: 700, flex: 1 }}>Link this email</div>
             <button
               onClick={onClose}
               title="Close"
+              aria-label="Close"
               style={{ border: "none", background: "transparent", color: "#c4c9d2", fontSize: 17, cursor: "pointer" }}
             >
               ✕
@@ -356,7 +519,7 @@ export default function LinkPopup({
                         <input
                           type="checkbox"
                           checked={p.linked}
-                          disabled={pending}
+                          disabled={busy}
                           aria-label={`Link ${p.contactName || p.email}`}
                           onChange={(e) => run(() => setThreadContactsAction(vm.id, p.contactId!, e.target.checked))}
                         />
@@ -377,8 +540,8 @@ export default function LinkPopup({
                         <button
                           type="button"
                           style={adding?.email === p.email ? ACCENT_BTN : BTN}
-                          disabled={pending}
-                          onClick={() => (adding?.email === p.email ? setAdding(null) : startAdding(p))}
+                          disabled={busy}
+                          onClick={() => (adding?.email === p.email ? closeAdding() : startAdding(p))}
                         >
                           Add
                         </button>
@@ -408,6 +571,7 @@ export default function LinkPopup({
                           <LinkSearchBox
                             only="company"
                             placeholder="Search companies…"
+                            disabled={busy}
                             onPick={(h) => setAdding({ ...adding, company: { id: h.id, name: h.label } })}
                           />
                         )}
@@ -416,8 +580,8 @@ export default function LinkPopup({
                           value={adding.values}
                           onChange={(v) => setAdding({ ...adding, values: v })}
                           submitting={pending}
-                          error={error}
-                          onCancel={() => setAdding(null)}
+                          error={addError}
+                          onCancel={closeAdding}
                           onSubmit={submitAdding}
                         />
                       </div>
@@ -432,7 +596,7 @@ export default function LinkPopup({
                         <input
                           type="checkbox"
                           checked
-                          disabled={pending}
+                          disabled={busy}
                           onChange={() => run(() => setThreadContactsAction(vm.id, o.id, false))}
                         />
                         <span>
@@ -457,7 +621,7 @@ export default function LinkPopup({
                         <button
                           type="button"
                           style={{ ...BTN, padding: "1px 6px", fontSize: 11, marginLeft: 6 }}
-                          disabled={pending}
+                          disabled={busy}
                           onClick={() => run(() => setThreadSiteAction(vm.id, null))}
                         >
                           Clear venue
@@ -469,6 +633,7 @@ export default function LinkPopup({
                 <div style={{ marginTop: 10 }}>
                   <LinkSearchBox
                     placeholder="Search a company, venue or person…"
+                    disabled={busy}
                     onPick={pickTarget}
                   />
                 </div>
@@ -502,8 +667,11 @@ export default function LinkPopup({
                   <button
                     type="button"
                     style={newCompany ? ACCENT_BTN : BTN}
-                    disabled={pending}
-                    onClick={() => setNewCompany(newCompany ? null : { name: "", type: CUSTOMER_TYPES[0] || "" })}
+                    disabled={busy}
+                    onClick={() => {
+                      setNewCompany(newCompany ? null : { name: "", type: CUSTOMER_TYPES[0] || "" });
+                      setCompanyError(null);
+                    }}
                   >
                     + New company
                   </button>
@@ -511,8 +679,11 @@ export default function LinkPopup({
                     <button
                       type="button"
                       style={newVenue ? ACCENT_BTN : BTN}
-                      disabled={pending}
-                      onClick={() => setNewVenue(newVenue ? null : { label: "", city: "", state: "" })}
+                      disabled={busy}
+                      onClick={() => {
+                        setNewVenue(newVenue ? null : { label: "", city: "", state: "" });
+                        setVenueError(null);
+                      }}
                     >
                       + New venue
                     </button>
@@ -525,8 +696,11 @@ export default function LinkPopup({
                       value={newCompany}
                       onChange={setNewCompany}
                       submitting={pending}
-                      error={error}
-                      onCancel={() => setNewCompany(null)}
+                      error={companyError}
+                      onCancel={() => {
+                        setNewCompany(null);
+                        setCompanyError(null);
+                      }}
                       onSubmit={() =>
                         run(
                           () =>
@@ -537,7 +711,8 @@ export default function LinkPopup({
                               remember: remember && !!senderEmail,
                               threadId: vm.id,
                             }),
-                          () => setNewCompany(null)
+                          () => setNewCompany(null),
+                          setCompanyError
                         )
                       }
                     />
@@ -550,12 +725,16 @@ export default function LinkPopup({
                       value={newVenue}
                       onChange={setNewVenue}
                       submitting={pending}
-                      error={error}
-                      onCancel={() => setNewVenue(null)}
+                      error={venueError}
+                      onCancel={() => {
+                        setNewVenue(null);
+                        setVenueError(null);
+                      }}
                       onSubmit={() =>
                         run(
                           () => quickAddVenueAction({ customerId: companyId, ...newVenue, threadId: vm.id }),
-                          () => setNewVenue(null)
+                          () => setNewVenue(null),
+                          setVenueError
                         )
                       }
                     />
@@ -600,7 +779,7 @@ export default function LinkPopup({
                             <button
                               type="button"
                               style={{ ...PRIMARY, marginTop: 8 }}
-                              disabled={pending}
+                              disabled={busy}
                               onClick={() =>
                                 run(async () => {
                                   const r = await fillContactBlanksAction(vm.id, messageId);
@@ -622,7 +801,7 @@ export default function LinkPopup({
                           <button
                             type="button"
                             style={{ ...PRIMARY, marginTop: 10 }}
-                            disabled={pending}
+                            disabled={busy}
                             onClick={() => startAdding(sender)}
                           >
                             Add as contact
@@ -637,9 +816,11 @@ export default function LinkPopup({
           )}
 
           {notice && <div style={{ fontSize: 12, color: "#1f7a52" }}>{notice}</div>}
-          {error && !adding && !newCompany && !newVenue && (
-            <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>
-          )}
+          {/* #214 fix wave 1 — this is only ever set by an action with no
+              form of its own (a checkbox toggle, the company/venue/person
+              search, "Add missing details"); the add-contact/new-company/
+              new-venue forms each read their own scoped error above. */}
+          {error && <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>}
         </div>
 
         <div

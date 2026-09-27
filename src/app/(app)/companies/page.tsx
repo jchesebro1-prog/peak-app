@@ -16,6 +16,7 @@ import { getSettings } from "@/lib/settings";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { travelForPoints } from "@/lib/travel-bulk";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
+import { parsePageSize } from "@/lib/short-list";
 
 export const metadata = { title: "Companies — Quartzite-6" };
 
@@ -24,14 +25,11 @@ function one(v: string | string[] | undefined): string {
 }
 
 /** Directory paging (#224) — first PAGE rows, then "Show more" raises `?n=`
- *  by PAGE. Filters/search apply before this (they narrow `sorted` itself);
- *  this only limits how much of the already-filtered list renders. */
+ *  by PAGE (clamped to a max of 500 by the shared parsePageSize — see
+ *  src/lib/short-list.ts). Filters/search apply before this (they narrow
+ *  `sorted` itself); this only limits how much of the already-filtered
+ *  list renders. */
 const PAGE = 50;
-
-function parsePageSize(raw: string): number {
-  const v = parseInt(raw, 10);
-  return Number.isFinite(v) && v > 0 ? v : PAGE;
-}
 
 /** Every current query param carries over except `n` (bumped) and `edit`
  *  (a transient modal-open flag, not a filter worth preserving across a

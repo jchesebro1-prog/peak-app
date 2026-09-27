@@ -38,6 +38,10 @@ export type TypeaheadProps<T> = {
   /** Fires on every keystroke with the raw box text — for a parent that
    *  debounces a server search action instead of filtering `items` here. */
   onQueryChange?: (q: string) => void;
+  /** #214 fix wave 1 — while a previous pick is still being applied, block
+   *  further picks: the native `disabled` on the input and every option
+   *  button, so no click or keyboard pick can land mid-mutation. */
+  disabled?: boolean;
 };
 
 export function Typeahead<T>({
@@ -57,6 +61,7 @@ export function Typeahead<T>({
   inputStyle,
   emptyText = "Nothing matches.",
   onQueryChange,
+  disabled = false,
 }: TypeaheadProps<T>) {
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -113,6 +118,7 @@ export function Typeahead<T>({
         aria-controls={listId}
         aria-label={ariaLabel}
         autoComplete="off"
+        disabled={disabled}
         value={query}
         placeholder={placeholder}
         onFocus={() => setOpen(true)}
@@ -133,11 +139,16 @@ export function Typeahead<T>({
           } else if (e.key === "Enter" && open && matches[activeIdx]) {
             e.preventDefault();
             pick(matches[activeIdx]);
-          } else if (e.key === "Escape") {
+          } else if (e.key === "Escape" && open) {
+            // #214 fix wave 2 — gated on `open` so an idle box lets Escape
+            // bubble to a parent dialog. e.preventDefault() tells that
+            // dialog's own handler (checking e.defaultPrevented) this
+            // keypress already closed the dropdown, not the dialog itself.
+            e.preventDefault();
             setOpen(false);
           }
         }}
-        style={inputStyle}
+        style={disabled ? { ...inputStyle, opacity: 0.6, cursor: "not-allowed" } : inputStyle}
       />
       {open && (
         <div
@@ -164,6 +175,7 @@ export function Typeahead<T>({
               type="button"
               role="option"
               aria-selected={keyOf(item) === key}
+              disabled={disabled}
               onMouseDown={(e) => e.preventDefault()}
               onMouseEnter={() => setActive(i)}
               onClick={() => pick(item)}
@@ -174,7 +186,7 @@ export function Typeahead<T>({
                 padding: "7px 9px",
                 textAlign: "left",
                 fontFamily: "var(--font-ui)",
-                cursor: "pointer",
+                cursor: disabled ? "not-allowed" : "pointer",
                 color: "#16181d",
                 background: i === activeIdx ? "var(--accent-soft)" : "transparent",
               }}

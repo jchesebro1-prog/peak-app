@@ -6357,3 +6357,177 @@ re-applies it elsewhere. Each answer also stores the (normalized) label of the b
 on the server; when a library edit moves a different blank to that position, the label no longer matches and the
 answer is stale too, instead of printing in the wrong blank. Answers saved before labels were kept apply by
 position, as before.
+
+## D333. Grid custom items are option-scoped allowance lines, never placed, kept out of bid specs (#212, 2026-09-26)
+
+A per-design "custom item" (a product with no catalog row) lives on `GridOption.customItems`, not as a placement —
+it has no location on the plan sheet and isn't offered a symbol. It prices exactly like an Equipment-map allowance
+(sell = cost ÷ (1 − the customer's tier margin)) and is always considered priced, so it never makes an estimate
+"Incomplete". The bid-spec BOM already drops allowance lines (`gridSpecBomRows`); custom items follow the same
+rule and stay off a bid spec, same as any allowance.
+
+## D334. Editing an allowance's quote description doesn't touch its confirmation stamp (#212, 2026-09-26)
+
+The Equipment map's new "Quote description" field is cosmetic — it changes what a customer reads, not what the row
+resolves to. `mergeEquipRow` validates and stores it like `note`, but neither field re-runs the confirmation logic
+or clears the row's who/when stamp. Only changing the mapped part, assembly, or allowance status re-confirms a row.
+
+## D335. Grid quote lines still print on no customer document — flagged, not fixed here (#212, 2026-09-26)
+
+A Grid quote (`source: "grid"`, `spec.lines`) opens in the Estimator (or another builder, per #221), and every
+renderer of a customer document reads `spec.sections`, not `spec.lines` — the bid-spec generator is the only reader
+of `spec.lines`, and it drops allowance lines entirely. So neither an allowance's new description nor a custom
+item's text reaches any customer-facing document yet, priced or not. This is a pre-existing gap the #212 plan
+surfaced, not a regression it introduced; fixing it means giving Grid quotes a document of their own, which is out
+of scope here.
+
+## D336. Catalog's new Estimating tab gets no extra permission gate (#213, 2026-09-26)
+
+`/catalog` already worked for any signed-in user and gates its own admin-only parts internally, so adding it to the
+Estimating nav group (`activeKeyFor("/catalog")` now resolves to that group instead of `"settings"`) needed no new
+`requirePerm` check. The Settings → Company "Catalog" link is left in place as a second door to the same page.
+
+## D337. Inbound Cc is stored on the message only, never copied to the thread's outbound Cc (#214, 2026-09-26)
+
+`deliverThreadOutbound` copies the *thread's* `cc` onto every reply the team sends. Storing an inbound Cc there
+would silently Cc those people on every future reply on the thread. So `CommMessage.cc` carries the header read
+off that one message; the thread record's own `cc` stays `""` unless a person explicitly sets it through the
+popup's Work-link flow.
+
+## D338. A thread's company can be changed but not cleared (#214, 2026-09-26)
+
+A thread whose sender is a known contact re-resolves its company at read time (`resolveCustomerId`), so a "clear
+company" action would not stick — the next read would just put it back. The popup offers **change** (the search
+box) for the company; the venue keeps its existing **Clear** (`setThreadSiteAction(threadId, null)`), which has no
+such re-resolve step.
+
+## D339. The sidebar keeps its one-click cards; only the editors moved into the popup (#214, 2026-09-26)
+
+"Dropdown editors are removed" from the sidebar is read literally: the customer/venue/"Linking from"/"on contact:"
+`<select>`s, the Work picker and every quick-add form move into the Link popup. The Suggested (Link / Always / Not
+them), Ambiguous (This thread / Always), "Save link" and domain "Stop" buttons stay on the sidebar — they're
+buttons, not editors, and removing them would cost a click on the common path.
+
+## D340. "Linking from" changes only by opening a message's own Link…, and never resets to the thread contact
+(#214, 2026-09-26)
+
+Opening the popup from a message's "Link…" calls `setIdentityMessageAction` for that message unless it already is
+the identity message. "Edit links" opens on the identity message, else the newest received message, else the
+newest — without changing the identity. There is no control that resets "Linking from" back to the thread's
+original contact once it has moved; picking a different message's Link… is how it moves again.
+
+## D341. The "on contact:" picker is retired; `rememberAddress` reuses by name instead (#214, 2026-09-26)
+
+The old sidebar let a person choose which known contact an ambiguous address should be remembered as. That picker
+is gone from the popup; instead, an address is matched to an existing contact by name when one is a clear match,
+and otherwise treated as new. This trades a rare manual disambiguation for a simpler popup.
+
+## D342. The claim-domain checkbox defaults off (#214, 2026-09-26)
+
+The old sidebar's one-click "claim domain" action linked the domain **and** the thread in one step. The popup
+splits that into a checkbox (default **off**) beside the normal link action, so claiming a whole domain — which
+affects every future sender at that domain, not just this thread — takes a deliberate extra click instead of
+riding along with the common case.
+
+## D343. A person whose company was deleted still links; only the company step is skipped (#214, 2026-09-26)
+
+Linking a person from the popup does not require their home company to still exist. When it has been deleted, the
+person still links to the thread and to `linkedContactIds`; the popup simply skips setting a company from that
+person (there is nothing live to set it to) rather than refusing the whole link.
+
+## D344. The signature reader is deterministic and bounded — no AI (#214, 2026-09-26)
+
+`extractSignature` (`src/lib/inbox-signature-parse.ts`) is pure regex/heuristic, per D89 (no `ANTHROPIC_API_KEY`
+anywhere). It is bounded so one adversarial or malformed email can't make it slow or wrong in a big way: it reads
+at most the last 4,000 characters of the message body and skips any line longer than 200 characters when hunting
+for name/title/phone/email/website. Quoted history (`>` lines, "On … wrote:", "-----Original Message-----",
+"From: … Sent: …" blocks) is cut first, so a long reply chain doesn't drown the real signature.
+
+## D345. Tasks carry optional links; unassigned or name-only legacy tasks stay off the calendar (#215, 2026-09-26)
+
+`TaskRecord` gains optional `contactIds`, `customerId`, `siteId`, `leadId`, `threadId` — all absent unless a task
+was created with one, so pre-#215 tasks read unchanged. `placeTasks` only considers a task with `assigneeUserId`
+set; a legacy task assigned only by name (no user id) never appears, in Mine or in Everyone — showing every old,
+undated, name-only checklist item on "today" would flood the calendar with noise nobody meant to put there.
+
+## D346. Everyone mode lets any teammate complete or delete a colleague's task (#215, 2026-09-26)
+
+`?tasks=all` shows everyone's tasks and assignments, and the same complete/delete actions that already worked from
+a task's own screen work from the calendar chip too — no new permission check was added for "someone else's task,
+seen from the calendar." This is the same permission rule the app already had; Everyone mode just makes those
+tasks reachable from a new screen.
+
+## D347. A picked due date is stored at local noon (#215, 2026-09-26)
+
+`dueAtFromDateInput` stores `new Date(d + "T12:00:00").getTime()`, the same convention `projects/actions.ts`
+already uses for a date-only input. On Vercel (UTC) that's 12:00 UTC, which falls on the same calendar date in
+every US time zone, so the browser's day key always lands on the date the user picked.
+
+## D348. Surveys and inspections are referenced in a task's notes, not linked (#215, 2026-09-26)
+
+`TaskRecord`'s new link fields cover contacts, customer, site, lead and thread — surveys and inspections have no
+task-link field today. Creating a task from an email that touches one writes a reference line into the notes
+instead ("From email: …") rather than adding a new link field for a case #215 didn't otherwise need.
+
+## D349. Daylite calendar owners match active users by full name; events land only in their own calendar (#219,
+2026-09-26)
+
+`matchOwner` tries an exact case-insensitive full-name match against **active** users, then first+last token; more
+than one match is treated as no match (an ambiguity), not a guess. Each event is written only to that one matched
+owner's own connected Google Calendar through the existing mailbox-token path — an owner with no match, or whose
+mailbox lacks the calendar scope, is reported and skipped rather than written to someone else's calendar.
+
+## D350. A deterministic Google event id makes a re-run — or a resume after a stop — safe (#219, 2026-09-26)
+
+Each event's Google id is `"dlc" + eventKey`, where `eventKey` is a stable hash of owner + name + start +
+duration. Re-importing the same TSV, or resuming after a quota stop, tries to insert the same id again; Google's
+409 on a duplicate id is treated as "already in Google," not as a new event, so nothing is ever double-booked.
+
+## D351. A repeating series (same owner + name, four or more rows) is skipped on import (#219, 2026-09-26)
+
+`classify` groups rows by owner + name (case/space-insensitive); a group of 4 or more is a series and every row in
+it is left out of the import entirely. Jeff sets those up once in Google as real repeating events; re-creating
+~733 expanded one-off rows per series would just create clutter that a real recurring event already covers.
+
+## D352. Daylite calendar times are wall-clock America/Chicago, sent to Google with that zone (#219, 2026-09-26)
+
+`insertEvent`'s existing signature only takes epoch-ms and converts through UTC, which would shift a Daylite time
+that was always meant as Wisconsin wall-clock. `insertZonedEvent` is a new sibling that sends
+`{ dateTime, timeZone: "America/Chicago" }` instead, so a 9:00 AM event from the TSV stays 9:00 AM in Google
+regardless of the server's own time zone. `insertEvent` itself is untouched.
+
+## D353. The calendar-import upload cap is 1.1 MB, set by the server-action body limit (#219, 2026-09-26)
+
+The spec's ≤ 5 MB target assumed a bigger transport, but the TSV text travels through a server action capped at
+1,200 kb (`next.config.ts`). The page uses the same caps the Daylite history import already settled on — 1,100,000
+characters client-side, 1,180,000 JSON-encoded bytes — which comfortably covers the real 0.3 MB export.
+
+## D354. One shared `quoteBuilderHref` plus an Estimator redirect backstop (#221, 2026-09-26)
+
+Rather than fixing each of the five screens that hard-coded `/estimator?id=` in place, every quote-type-to-route
+mapping now lives once in `src/lib/quote-links.ts`, and the two existing partial helpers (`editHrefFor` on the
+quotes hub, `quoteDeepLink` for venue map pop-outs) delegate to it instead of keeping their own copies. As a
+backstop against any link this pass missed, the Estimator itself redirects a loaded quote whose `quoteType` is set
+and isn't `"system"` to that quote's real builder — so a stale or future hard-coded link still lands correctly
+instead of silently reopening in the wrong tool.
+
+## D355. Short lists show 5 rows; the directory and venues pages page by 50 (#224, 2026-09-26)
+
+`ShortList`'s default `initial` is 5 — enough to see what's there without a click, short enough that "Show all N"
+reads as a real expansion. The companies directory and venues list, which can run into the thousands, page 50 rows
+at a time via `?n=` (URL-driven, so it composes with existing filters) rather than using `ShortList`'s in-page
+expand, which would still have to render every row to the client.
+
+## D356. The consulting proposal prints with its own scoped `@page` margin (#225, 2026-09-26)
+
+The global print rule (`@page { margin: 0.9in 1in }`) leaves Chrome free to print its own title/URL/date into that
+margin. The proposal page scopes `@page { size: letter; margin: 0 }` to itself and adds equivalent spacing inside
+the sheet, the same pattern the inspection report already uses — rather than changing the global `@page`, which
+every other document also relies on.
+
+## D357. `termsBlock` stays defined but unused by the proposal (#225, 2026-09-26)
+
+The proposal now prints only the quote's own `consulting.terms` (the builder's Terms box) and never the template's
+default `termsBlock` — Jeff's ask was that a default he didn't type was showing up uninvited. The `termsBlock`
+field itself is left in `src/lib/templates.ts`, noted in a code comment as unused here, rather than deleted;
+removing template fields outright is a separate cleanup this punch item didn't need to do.

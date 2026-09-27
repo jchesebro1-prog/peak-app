@@ -92,6 +92,7 @@ export function ShortList({
             className="pk-input"
             style={{ width: "100%", fontSize: 12.5 }}
             placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />

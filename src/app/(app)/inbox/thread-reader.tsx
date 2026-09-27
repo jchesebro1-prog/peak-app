@@ -17,6 +17,7 @@ import { ChanGlyph, MailEmptyIcon, PaperclipIcon, ReplyIcon, SendIcon } from "./
 import SiteVisitModal from "./site-visit-modal";
 import LinkSidebar from "./link-sidebar";
 import LinkPopup from "./link-popup";
+import TaskDialog from "./task-dialog";
 import { hasSignature, stripSignature, withSignature } from "@/lib/inbox-signature";
 
 const ACCENT_SOFT = "color-mix(in srgb, var(--accent) 12%, #fff)";
@@ -139,6 +140,8 @@ function ExpandedMessage({
   linkOptions,
   onLink,
   onOpenLinks,
+  onTask,
+  isEmail,
 }: {
   m: MessageVM;
   collapsible: boolean;
@@ -147,6 +150,11 @@ function ExpandedMessage({
   onLink: (link: { type: string; id: string; label: string } | null) => void;
   /** #214 — open the Link popup on this message */
   onOpenLinks: () => void;
+  /** #215 — open the create-task dialog on this message */
+  onTask: () => void;
+  /** #214 fix wave 1 — the old picker was gated to email threads only;
+   *  "Link…" is hidden on a call/meeting thread for the same reason. */
+  isEmail: boolean;
 }) {
   return (
     <div style={{ display: "flex", gap: 11, marginBottom: 16 }}>
@@ -201,27 +209,52 @@ function ExpandedMessage({
             </span>
           )}
           <span style={{ fontSize: 11, color: "#aab0bb" }}>{m.time}</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenLinks();
-            }}
-            title="Link the people, company and work on this message"
-            style={{
-              border: "1px solid #e4e7ec",
-              borderRadius: 6,
-              padding: "2px 8px",
-              color: "#3a3f4a",
-              fontSize: 10.5,
-              fontWeight: 600,
-              background: "#fff",
-              cursor: "pointer",
-              fontFamily: "var(--font-ui)",
-            }}
-          >
-            Link…
-          </button>
+          {isEmail && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenLinks();
+              }}
+              title="Link the people, company and work on this message"
+              style={{
+                border: "1px solid #e4e7ec",
+                borderRadius: 6,
+                padding: "2px 8px",
+                color: "#3a3f4a",
+                fontSize: 10.5,
+                fontWeight: 600,
+                background: "#fff",
+                cursor: "pointer",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              Link…
+            </button>
+          )}
+          {isEmail && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTask();
+              }}
+              title="Create a task from this message"
+              style={{
+                border: "1px solid #e4e7ec",
+                borderRadius: 6,
+                padding: "2px 7px",
+                color: "#68707b",
+                fontSize: 10.5,
+                fontWeight: 600,
+                background: "#fff",
+                cursor: "pointer",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              Task…
+            </button>
+          )}
           <select
             value={m.link ? `${m.link.type}|${m.link.label}` : ""}
             onClick={(e) => e.stopPropagation()}
@@ -309,12 +342,18 @@ function Conversation({
   linkOptions,
   onLink,
   onOpenLinks,
+  onTask,
+  isEmail,
 }: {
   messages: MessageVM[];
   linkOptions: Record<"quote" | "survey" | "inspection" | "project", Opt[]>;
   onLink: (messageId: string, link: { type: string; id: string; label: string } | null) => void;
   /** #214 — a message header's "Link…" */
   onOpenLinks: (messageId: string) => void;
+  /** #215 — a message header's "Task…" */
+  onTask: (messageId: string) => void;
+  /** #214 fix wave 1 — hide "Link…" on a non-email thread */
+  isEmail: boolean;
 }) {
   // id -> explicit user choice; anything absent falls back to "newest is open"
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -346,6 +385,8 @@ function Conversation({
         linkOptions={linkOptions}
         onLink={(link) => onLink(m.id, link)}
         onOpenLinks={() => onOpenLinks(m.id)}
+        onTask={() => onTask(m.id)}
+        isEmail={isEmail}
       />
     ) : (
       <CollapsedMessage key={m.id} m={m} onOpen={() => toggle(m.id, true)} />
@@ -398,6 +439,8 @@ function Conversation({
             linkOptions={linkOptions}
             onLink={(link) => onLink(newest.id, link)}
             onOpenLinks={() => onOpenLinks(newest.id)}
+            onTask={() => onTask(newest.id)}
+            isEmail={isEmail}
           />
         ) : (
           <CollapsedMessage
@@ -428,6 +471,11 @@ export default function ThreadReader({
   signature: string;
 }) {
   const router = useRouter();
+  // #215 fix wave 1 — TaskDialog's fallback focus target when its own
+  // opener is no longer on the page (e.g. it was opened from the Link
+  // popup's footer, whose own restore-focus can leave that opener
+  // re-rendered away by the time the task dialog closes).
+  const readerRootRef = useRef<HTMLDivElement>(null);
 
   // email composer state (component is keyed by thread id — resets per thread)
   const [mode, setMode] = useState<Mode | null>(null);
@@ -454,6 +502,8 @@ export default function ThreadReader({
   const [visitOpen, setVisitOpen] = useState(false);
   // #214 — the Link popup: which message, and whether a header opened it
   const [linkFor, setLinkFor] = useState<{ messageId: string; fromHeader: boolean } | null>(null);
+  // #215 — the create-task dialog; messageId = the message it was opened from
+  const [taskFor, setTaskFor] = useState<{ messageId: string | null } | null>(null);
   const [sending, setSending] = useState(false);
 
   // call/meeting quick log
@@ -541,6 +591,8 @@ export default function ThreadReader({
     setAttachNote("");
   };
 
+  const openTask = (messageId: string | null) => setTaskFor({ messageId });
+
   const doSend = async () => {
     const b = cBody.trim();
     if (!b || sending) return;
@@ -597,7 +649,11 @@ export default function ThreadReader({
   );
 
   return (
-    <div style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column" }}>
+    <div
+      ref={readerRootRef}
+      tabIndex={-1}
+      style={{ ...rootStyle, flexDirection: variant === "pane" ? "row" : "column", outline: "none" }}
+    >
       <div
         style={{
           flex: 1,
@@ -780,6 +836,8 @@ export default function ThreadReader({
               void setMessageLinkAction(vm.id, messageId, link).then(() => router.refresh());
             }}
             onOpenLinks={(messageId) => setLinkFor({ messageId, fromHeader: true })}
+            onTask={(messageId) => openTask(messageId)}
+            isEmail={vm.isEmail}
           />
         </div>
 
@@ -893,6 +951,14 @@ export default function ThreadReader({
                 contactEmail={vm.contactEmail}
                 visit={vm.visit}
                 onClose={() => setVisitOpen(false)}
+              />
+            )}
+            {taskFor && (
+              <TaskDialog
+                vm={vm}
+                messageId={taskFor.messageId}
+                onClose={() => setTaskFor(null)}
+                containerRef={readerRootRef}
               />
             )}
           </div>
@@ -1204,6 +1270,19 @@ export default function ThreadReader({
           messageId={linkFor.messageId}
           fromHeader={linkFor.fromHeader}
           onClose={() => setLinkFor(null)}
+          // #215 fix wave 1 — "Create task" only makes sense on an email
+          // thread ("Task…" itself is already isEmail-gated per message);
+          // Edit links opens on any channel, so this has to be gated here
+          // rather than relying on the popup never being asked for it.
+          onCreateTask={
+            vm.isEmail
+              ? () => {
+                  const mid = linkFor.messageId;
+                  setLinkFor(null);
+                  openTask(mid);
+                }
+              : undefined
+          }
         />
       )}
     </div>

@@ -6,6 +6,7 @@
 import type { LinkWorkType } from "@/lib/inbox-links";
 import type { ParsedSignature, SigPhone } from "@/lib/inbox-signature-parse";
 import type { ParticipantRole } from "@/lib/inbox-participants";
+import type { ThreadTaskLinkKind, ThreadTaskRow } from "@/lib/inbox-task";
 
 export type Opt = { value: string; label: string };
 
@@ -250,6 +251,15 @@ export type ReaderVM = {
   /** #214 — every person linked to the thread, primary first (the
    *  sidebar's chips). */
   linkedPeople: Array<{ id: string; name: string; primary: boolean }>;
+  /* ---- #215 tasks from email ---- */
+  /** task-dialog link candidates, pre-ticked; "thread" always saves */
+  taskLinks: Array<{ key: string; kind: ThreadTaskLinkKind; label: string }>;
+  /** the active team, for the dialog's Assign to */
+  taskTeam: Array<{ id: string; name: string }>;
+  /** the signed-in user's id — the dialog's default assignee */
+  meId: string;
+  /** open tasks created from / linked to this thread, for the sidebar */
+  threadTasks: ThreadTaskRow[];
 };
 
 /** #214 — one address on the Link popup's message, matched to a contact. */
