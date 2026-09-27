@@ -2209,7 +2209,7 @@ export default function SettingsClient({
             defs={customerFieldDefs}
           />
           <VenueTypesCard
-            key={venueTypes.map((t) => `${t.key}:${t.label}:${t.worksLike}:${t.archived ? 1 : 0}`).join("|")}
+            key={venueTypes.map((t) => t.key).join("|")}
             types={venueTypes}
           />
           <DocumentCategoriesCard

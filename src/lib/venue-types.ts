@@ -78,9 +78,14 @@ export function venueTypesFrom(raw: unknown): VenueType[] {
   return out.map((t, i) => ({ ...t, order: i }));
 }
 
+/** A type's label. A stored key the list no longer has shows as itself (#216
+ *  final wave B) — "Venue" would hide which type the record carries; only
+ *  no key at all reads "Venue". */
 export function venueTypeLabel(types: readonly VenueType[], key: string | null | undefined): string {
-  const t = key ? types.find((x) => x.key === key) : undefined;
-  return t ? t.label : "Venue";
+  const k = (key || "").trim();
+  if (!k) return "Venue";
+  const t = types.find((x) => x.key === k);
+  return t ? t.label : k;
 }
 
 /** The built-in behaviour a type key stands for. Unknown → proscenium. */

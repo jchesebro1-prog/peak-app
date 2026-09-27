@@ -10504,6 +10504,7 @@ seeded()
   .then(() => pdfPoll222AsyncChecks())
   .then(() => documentsPortalFixAsyncChecks())
   .then(() => finalWaveAAsyncChecks())
+  .then(() => finalWaveBAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -21120,7 +21121,7 @@ import {
     "#225: the proposal no longer prints the template's canned termsBlock boilerplate"
   );
   ok(
-    /\{pay\.terms && \(/.test(letter225) || /pay\.terms &&[\s\S]{0,80}Terms<\/div>/.test(letter225),
+    /\{termsText && \(/.test(letter225) || /termsText &&[\s\S]{0,80}Terms<\/div>/.test(letter225),
     "#225: the Terms heading + block print only when the quote itself has terms"
   );
   const templates225 = read225("src/lib/templates.ts");
@@ -23572,7 +23573,7 @@ import { readdirSync as v216Readdir } from "node:fs";
   ok(["proscenium", "flat", "blackbox", "arena"].every((k) => junk.some((t) => t.key === k)), "#216: a built-in missing from storage is restored");
   ok(junk[0].key === "church" && junk.every((t, i) => t.order === i), "#216: types read in stored order, renumbered 0..n");
 
-  ok(v216Label(seed, "gymstage") === "Gym Stage" && v216Label(seed, "gone") === "Venue" && v216Label(seed, null) === "Venue", "#216: venueTypeLabel falls back to Venue");
+  ok(v216Label(seed, "gymstage") === "Gym Stage" && v216Label(seed, "gone") === "gone" && v216Label(seed, null) === "Venue", "#216: venueTypeLabel falls back to Venue only with no key; an unlisted key shows raw (final wave B)");
   ok(v216WorksLike(seed, "gymstage") === "proscenium" && v216WorksLike(seed, "church") === "church" && v216WorksLike(seed, "gone") === "proscenium" && v216WorksLike([], "arena") === "arena",
     "#216: worksLikeOf maps a custom type to its built-in, unknown to proscenium, a built-in key to itself");
 
@@ -25281,7 +25282,7 @@ import { PDF_OUT_OF_DATE as PDF_OUT_OF_DATE222, pdfRetryPlan as pdfRetryPlan222t
   const owed = { revisions: sentAt10, pdf: { status: "pending" as const, at: 11, savedAt: 9 } };
   ok(!portalPdfPreparing222t5(legacySent) && portalPdfUnavailable222(legacySent), "#222 T4 re-review: a quote sent before saved PDFs is not 'being prepared' — it is unavailable");
   ok(!portalPdfPreparing222t5(editedAfterSend) && !portalPdfPreparing222t5(reRendering) && portalPdfUnavailable222(editedAfterSend), "#222 T4 re-review: a quote edited after its send is not 'being prepared' (its PDF belongs to a newer save)");
-  ok(portalPdfPreparing222t5(owed) && !portalPdfUnavailable222(owed), "#222 T4 re-review: a send whose own save is still rendering is 'being prepared'");
+  ok(portalPdfPreparing222t5(owed, 12) && !portalPdfUnavailable222(owed, 12), "#222 T4 re-review: a send whose own save is still rendering is 'being prepared'");
   ok(!portalPdfUnavailable222({ revisions: [], pdf: null }) && !portalPdfUnavailable222({ revisions: [{ rev: 1, at: 10, reason: "sent", pdfBlobPath: "r1" }], pdf: null }), "#222 T4 re-review: never-sent quotes and sent copies on file are never 'unavailable'");
   const proute5 = s5("src/app/portal/quotes/[id]/pdf/route.ts");
   ok(proute5.includes("No PDF is available for this version — please contact your rep.") && /portalQuotePdfUnavailable\(q, session\.customerId\)/.test(proute5) && /portalListsQuote\(q, customerId\) && portalPdfUnavailable\(q\)/.test(s5("src/lib/quote-pdf/portal-access.ts")), "#222 T4 re-review: the portal route says to contact the rep when a sent copy will never come");
@@ -25377,7 +25378,7 @@ import { PDF_UPLOAD_ALLOWANCE_MS as PDF_UPLOAD_ALLOWANCE_MS222 } from "@/lib/quo
   // (3) Fonts race a cap; the budget counts launch + navigation + fonts + print + upload.
   const rs222r = readFileSync(join(process.cwd(), "src/lib/quote-pdf/render.ts"), "utf8");
   ok(/Promise\.race\(\[document\.fonts\.ready/.test(rs222r) && /timeout: RENDER_LAUNCH_TIMEOUT_MS/.test(rs222r), "#222 T5 review: document.fonts.ready is raced against a cap and the launch has its own timeout");
-  ok(RENDER_FONTS_TIMEOUT_MS222 > 0 && RENDER_FONTS_TIMEOUT_MS222 < 30_000 && RENDER_WORST_CASE_MS222 >= 20_000 + 2 * 30_000 + RENDER_FONTS_TIMEOUT_MS222, "#222 T5 review: the worst case counts launch + navigation + fonts + print, and the fonts cap is short");
+  // (The worst-case sum is checked against render.ts's real waits in "final wave B" at the end of this file.)
 
   // (4) The iframe reloads only when the FILE changes.
   const v222 = (status: "pending" | "ready" | "failed", savedAt: number, at: number, hasFile = true) => ({ status, at, savedAt, error: null, hasFile });
@@ -25839,4 +25840,158 @@ async function finalWaveAAsyncChecks(): Promise<void> {
     "#216 final: typeSpot (hand-typed street/city/state edits) clears travelMiles/travelMin so stale travel never survives a moved card");
   ok(pickAddressBody.includes('travelMiles: "", travelMin: ""'),
     "#216 final: pickAddress (a picked address hit) clears travelMiles/travelMin so stale travel never survives a moved card");
+}
+
+/* ======================================================================
+   final wave B — batch 2 review minors (#212, #214, #216, #219, #222,
+   #224–#227, #230). Pure/structural checks here; DB-backed ones in
+   finalWaveBAsyncChecks.
+   ====================================================================== */
+import { RENDER_LAUNCH_TIMEOUT_MS as fwbLaunchMs, RENDER_STEP_TIMEOUT_MS as fwbStepMs } from "@/lib/quote-pdf/render";
+import { pdfStoragePath as fwbPdfPath, portalPdfPreparing as fwbPreparing, portalPdfUnavailable as fwbUnavailable, PDF_PENDING_STALE_MS as fwbStaleMs } from "@/lib/quote-pdf/state";
+import { accessoryClampNote as fwbClampNote, ACCESSORY_QTY_MAX as fwbAccMax } from "@/lib/design/grid-accessories";
+import { sanitizeTypeMap as fwbSanitizeTypeMap } from "@/lib/design/device-types";
+import { fabricRateProblem as fwbFabricProblem, FABRIC_AREA_RATE_MAX as fwbFabricMax } from "@/app/(app)/catalog/part-form";
+const fwbRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+{
+  // #222 (3) + (4) + (7): render.ts — the page is re-checked right before
+  // print, a capped fonts wait warns, and the worst case is the sum of the
+  // waits renderOnce actually performs (not a constant restated).
+  const rs = fwbRd("src/lib/quote-pdf/render.ts");
+  const body = rs.slice(rs.indexOf("async function renderOnce("));
+  const recheck = body.indexOf("landedOnRequested(url, page.url())");
+  ok(recheck > body.indexOf("page.evaluate(") && recheck < body.indexOf("page.pdf("), "#222 final-B: render re-checks the landed URL after the fonts wait and before page.pdf()");
+  ok(/if \(fontsCapped\) console\.warn\(/.test(body) && /document\.fonts\.ready\.then\(\(\) => false\)/.test(body) && !/throw[^\n]*fonts/i.test(body), "#222 final-B: a capped fonts wait logs console.warn and never fails the render");
+  const stepWaits = (body.match(/[{,]\s*timeout\s*[,}]/g) || []).length;
+  ok(
+    stepWaits >= 2 && /timeout: RENDER_LAUNCH_TIMEOUT_MS/.test(body) && /Math\.min\(timeout, RENDER_FONTS_TIMEOUT_MS\)/.test(body) &&
+      RENDER_WORST_CASE_MS222 === fwbLaunchMs + stepWaits * fwbStepMs + RENDER_FONTS_TIMEOUT_MS222 && RENDER_FONTS_TIMEOUT_MS222 < fwbStepMs,
+    `#222 final-B: RENDER_WORST_CASE_MS is launch + ${stepWaits} step-timeout waits + the fonts cap — exactly the waits renderOnce performs`
+  );
+
+  // #222 (5): "being prepared" needs a non-failed view.
+  const sentAt10 = [{ rev: 1, at: 10, reason: "sent" }];
+  const failed = { revisions: sentAt10, pdf: { status: "failed" as const, at: 11, savedAt: 9, error: "Chrome crashed" } };
+  const livePending = { revisions: sentAt10, pdf: { status: "pending" as const, at: 11, savedAt: 9 } };
+  ok(!fwbPreparing(failed, 12) && fwbUnavailable(failed, 12), "#222 final-B: a failed render is never 'being prepared' — it reads unavailable");
+  ok(fwbPreparing(livePending, 12) && !fwbPreparing(livePending, 11 + fwbStaleMs + 1) && fwbUnavailable(livePending, 11 + fwbStaleMs + 1), "#222 final-B: a pending render is 'being prepared' only until pdfView calls it failed (stale)");
+
+  // #222 (6): project status comes only from this customer's quotes.
+  ok(/const quoteStatusById = new Map\(quotes\.filter\(\(q\) => q\.customerId === cid\)\.map\(/.test(fwbRd("src/app/portal/page.tsx")), "#222 final-B: the portal's quoteStatusById is built from the session customer's quotes only");
+
+  // #222 (2): source guard (the behaviour is exercised in finalWaveBAsyncChecks).
+  ok(/prev && prev !== path && prev !== res\.after\?\.blobPath/.test(fwbRd("src/lib/quote-pdf/generate.ts")), "#222 final-B: generate never deletes the old file when it is the stored blobPath");
+
+  // #212: each unit-cost refusal says what is wrong.
+  const ciErr = (unitCost: unknown) => { const r = ci212Sanitize({ desc: "x", qty: 1, unitCost }, "ci-0123456789ab"); return r.ok ? "" : r.error; };
+  ok(ciErr("abc") === "Enter the unit cost as a number." && /can't be more than \$10,000,000/.test(ciErr(10_000_001)) && ciErr(0) === "A custom item needs a unit cost above $0." && ciErr(-5) === "A custom item needs a unit cost above $0.",
+    "#212 final-B: junk, over-ceiling and zero unit costs each get an accurate message");
+  const ci = fwbRd("src/app/(app)/design/grid/[id]/custom-items.tsx");
+  ok(/finally \{\s*setSaving\(false\);/.test(ci), "#212 final-B: save() clears Saving… in a finally");
+
+  // #230: removed-part chip, clamp note, picker closes.
+  const lines = a230Lines([{ id: "ba-000000000001", partId: "GONE-1", qty: 2, scope: "general" }, { id: "ba-000000000002", partId: "P-1", qty: 1, scope: "general" }], [{ id: "P-1", desc: "Clamp", unit: "ea", list: 10 }]);
+  ok(lines[0].removed === true && lines[0].ext === 0 && !("removed" in lines[1]), "#230 final-B: a part that left the library marks its accessory line removed (prices $0); a live one doesn't");
+  const base230 = [{ id: "ba-000000000003", partId: "P-1", qty: fwbAccMax - 1, scope: "general" as const }];
+  const bump = a230Save(base230, { partId: "P-1", qty: 5, scope: "general" }, () => "ba-000000000004");
+  const plain = a230Save(base230, { partId: "P-1", qty: 1, scope: "general" }, () => "ba-000000000004");
+  ok(bump.ok && bump.clamped === true && bump.item.qty === fwbAccMax && plain.ok && !("clamped" in plain), "#230 final-B: an over-cap bump is clamped and says so; an exact fit doesn't");
+  ok(fwbClampNote(fwbAccMax) === "That accessory line is capped at 100,000 — it now holds 100,000.", "#230 final-B: the clamp note names the cap");
+  const acc = fwbRd("src/app/(app)/design/grid/[id]/accessories.tsx");
+  const ed = fwbRd("src/app/(app)/design/grid/[id]/editor.tsx");
+  const gridActs = fwbRd("src/app/(app)/design/grid/[id]/actions.ts");
+  ok(/line\.removed \?/.test(acc) && acc.includes("Removed part") && /onDone\(true, r\.note\)/.test(acc), "#230 final-B: the row shows a Removed part chip; the picker hands the clamp note back");
+  ok(/onDone=\{\(added, note\) => \{\s*setAddingTo\(null\);[\s\S]{0,120}if \(note\) setErr\(note\);/.test(ed), "#230 final-B: the picker closes after adding and the clamp note is shown");
+  ok(/r\.clamped \? \{ note: accessoryClampNote\(r\.item\.qty\) \}/.test(gridActs), "#230 final-B: saveAccessoryAction returns the clamp note");
+
+  // #226: a stored Fabric/Labor entry is dropped on read; bulk default + cap note stay.
+  ok(JSON.stringify(fwbSanitizeTypeMap({ fabric: { typeKey: "speakers", by: "admin", at: 1 }, " Labor ": { typeKey: null, by: "admin", at: 1 }, hoist: { typeKey: "hoists-motors", by: "auto", at: 1 } })) === JSON.stringify({ hoist: { typeKey: "hoists-motors", by: "auto", at: 1 } }),
+    "#226 final-B: sanitizeTypeMap drops Fabric/Labor keys like every writer does");
+  const dtc = fwbRd("src/app/(app)/catalog/device-types/device-types-client.tsx");
+  ok(/useState\(""\);\s*\n/.test(dtc.slice(dtc.indexOf("const [bulkChoice, setBulkChoice]"))) && /disabled=\{!picked\.length \|\| !bulkChoice \|\| pending\}/.test(dtc) && /Showing \{ROW_CAP\} of/.test(dtc), "#226 final-B: bulk assign has no default type, and the 200-row cap says so");
+
+  // #227: the fabric rate is refused server-side off Fabric and above the ceiling.
+  ok(fwbFabricProblem("Fabric", undefined) === null && fwbFabricProblem("Lighting", undefined) === null && fwbFabricProblem("Fabric", 4.85) === null && fwbFabricProblem("Fabric", fwbFabricMax) === null,
+    "#227 final-B: a cleared rate, or a Fabric rate up to $500/sq ft, is fine");
+  ok(/Only a Fabric part/.test(fwbFabricProblem("Lighting", 4) || "") && /over \$500\/sq ft/.test(fwbFabricProblem("Fabric", 500.01) || ""), "#227 final-B: a non-Fabric rate and one over $500/sq ft are refused with a clear message");
+  const cat = fwbRd("src/app/(app)/catalog/actions.ts");
+  const up = cat.slice(cat.indexOf("export async function upsertPart("), cat.indexOf("export async function importCatalog("));
+  ok(up.indexOf("fabricRateProblem(category, optional.curtainAreaRate)") > -1 && up.indexOf("fabricRateProblem(") < up.indexOf("await mergeUpsert(") && /partError=\$\{encodeURIComponent\(rateProblem\)\}/.test(up), "#227 final-B: upsertPart refuses a bad rate before it writes, back to the modal with the message");
+
+  // #219: Done banner when every owner stopped; per-owner lines say reload to retry.
+  const cal = fwbRd("src/app/(app)/import/daylite/calendar/calendar-client.tsx");
+  ok(/const allStopped = picked\.length > 0 && picked\.every\(\(o\) => stoppedOwners\.includes\(o\.owner\)\)/.test(cal) && /phase === "paused" && allStopped/.test(cal) && /\{finished && \(\s*<div role="status"/.test(cal), "#219 final-B: the run shows a Done banner when every selected owner has stopped");
+  ok(/\{e\.lastError\} — reload to retry/.test(cal), "#219 final-B: each per-owner error line ends '— reload to retry'");
+
+  // #224: already on main — one parsePageSize, labelled filter input.
+  ok(/aria-label=\{searchPlaceholder\}/.test(fwbRd("src/components/short-list.tsx")), "#224 final-B: the ShortList filter input has an aria-label");
+
+  // #225: whitespace-only terms print no heading.
+  const letter = fwbRd("src/app/(app)/design/engagements/letter/page.tsx");
+  ok(/const termsText = \(pay\.terms \|\| ""\)\.trim\(\);/.test(letter) && /\{termsText && \(/.test(letter) && !/\{pay\.terms && \(/.test(letter), "#225 final-B: the Terms heading prints only for non-blank terms");
+
+  // #216: Saved note survives a save (card keyed by type keys only); raw unlisted key.
+  const sc = fwbRd("src/app/(app)/settings/settings-client.tsx");
+  ok(/<VenueTypesCard\s+key=\{venueTypes\.map\(\(t\) => t\.key\)\.join\("\|"\)\}/.test(sc), "#216 final-B: the Venue types card is keyed by type keys only, so a rename save keeps it mounted");
+  const vc = fwbRd("src/app/(app)/settings/venue-types-card.tsx");
+  ok(/if \(serverSig !== seenSig\)/.test(vc) && /justSaved && !dirty/.test(vc), "#216 final-B: the card adopts the refreshed list without remounting, so ✓ Saved shows");
+  ok(v216Label([], "oldkind") === "oldkind" && v216Label([], "  ") === "Venue", "#216 final-B: an unlisted stored key shows its raw key; no key reads Venue");
+
+  // #214: already on main — the Link search is debounced with a stale-response guard.
+  const lp = fwbRd("src/app/(app)/inbox/link-popup.tsx");
+  ok(/const my = \+\+seq\.current;/.test(lp) && /if \(my !== seq\.current\) return;/.test(lp) && /\}, 2[0-9]0\);/.test(lp), "#214 final-B: searchLinkTargetsAction is debounced and stale answers are dropped");
+}
+
+async function finalWaveBAsyncChecks(): Promise<void> {
+  await withPdfEnv222(finalWaveBPdfChecks);
+}
+async function finalWaveBPdfChecks(): Promise<void> {
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.VERCEL;
+  process.env.QUOTE_PDF_DIR = mkdtempSync(join(tmpdir(), "quote-pdfs-fwb-"));
+  const store = pdfStorage();
+  if ("unavailable" in store || store.backend !== "fs") {
+    ok(false, "#222 final-B: local PDF store available");
+    return;
+  }
+  const origin = "http://print.test";
+  const secret = "spec-secret-fwb";
+
+  // #222 (1): the settle and an unrelated update start in the SAME tick,
+  // through the updatePdf seam, 50 times. Confirmed to bite: with the
+  // compare-and-set removed (patchQuote/updateQuotePdf writing a doc read
+  // before the row lock) all 50 runs lose the name or the pdf state.
+  const id = fixtureId222("222", "fwb-race");
+  registerFixture222("quotes", id);
+  await q222Create({ id, name: "#222 fwb race", customer: "Spec fixture", owner: "spec" });
+  let lost = 0;
+  for (let i = 0; i < 50; i++) {
+    const at = 1_000 + i;
+    await q222UpdatePdf(id, (cur) => pendingPdf(cur, at, at));
+    const settled = await generateQuotePdf({
+      quoteId: id, savedAt: at, origin, secret,
+      render: async () => Buffer.from(`%PDF-1.4 fwb ${i}`),
+      updatePdf: (qid, mutate) => Promise.all([q222UpdatePdf(qid, mutate), q222Update(qid, { name: `fwb race ${i}` })]).then(([r]) => r),
+    });
+    const q = await q222Get(id);
+    if (!settled || q?.pdf?.status !== "ready" || q.pdf.savedAt !== at || q.name !== `fwb race ${i}`) lost++;
+  }
+  ok(lost === 0, `#222 final-B: a settle and an update landing in the same tick never lose either write (50 runs, ${lost} lost)`);
+
+  // #222 (2): the old file is never deleted when it is the stored blobPath.
+  const kid = fixtureId222("222", "fwb-keep");
+  registerFixture222("quotes", kid);
+  await q222Create({ id: kid, name: "#222 fwb keep", customer: "Spec fixture", owner: "spec" });
+  const kept = await store.put(fwbPdfPath(kid, "kept"), Buffer.from("%PDF-1.4 kept"));
+  await q222UpdatePdf(kid, (cur) => pendingPdf(cur, 10, 10));
+  await generateQuotePdf({
+    quoteId: kid, savedAt: 10, origin, secret,
+    render: async () => Buffer.from("%PDF-1.4 new"),
+    // The store reports the committed state as still recording `kept`.
+    updatePdf: async (qid, mutate) => {
+      const r = await q222UpdatePdf(qid, mutate);
+      return r && r.after ? { ...r, before: { ...r.after, blobPath: kept }, after: { ...r.after, blobPath: kept } } : r;
+    },
+  });
+  ok((await store.read(kept))?.toString() === "%PDF-1.4 kept", "#222 final-B: a settle whose stored blobPath is the old path never deletes that file");
 }

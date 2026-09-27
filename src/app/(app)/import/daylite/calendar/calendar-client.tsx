@@ -106,6 +106,16 @@ const primaryBtn = (enabled: boolean): React.CSSProperties => ({
   borderRadius: 8,
   cursor: enabled ? "pointer" : "default",
 });
+const doneBox: React.CSSProperties = {
+  marginTop: 12,
+  background: "#eaf6ef",
+  border: "1px solid #cfe8da",
+  borderRadius: 9,
+  padding: "10px 12px",
+  fontSize: 12.5,
+  color: "#1f5c3d",
+  lineHeight: 1.45,
+};
 const outlineBtn: React.CSSProperties = {
   fontSize: 12.5,
   fontWeight: 600,
@@ -269,6 +279,11 @@ export function DayliteCalendarImport() {
   const toImport = selected.reduce((n, o) => n + o.toImport, 0);
   const pct = progress.total ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : phase === "done" ? 100 : 0;
   const errOwners = Object.entries(ownerErrs);
+  // #219 final wave B: every owner picked for this run has stopped (Google
+  // errors) — nothing is left to resume, so the run reads Done, not Paused.
+  const picked = preview ? preview.owners.filter((o) => o.calendar === "connected" && include[o.owner]) : [];
+  const allStopped = picked.length > 0 && picked.every((o) => stoppedOwners.includes(o.owner));
+  const finished = !running && (phase === "done" || (phase === "paused" && allStopped));
 
   return (
     <>
@@ -449,13 +464,16 @@ export function DayliteCalendarImport() {
             )}
             <span style={{ fontSize: 12.5, color: "#5b616e" }}>
               {running && `Importing… ${fmt(progress.done)} of ${fmt(progress.total)}`}
-              {phase === "paused" && "Paused."}
-              {phase === "done" &&
-                `Done — ${fmt(tally.written)} written, ${fmt(tally.alreadyThere)} already in Google, ${fmt(tally.failed)} failed${
-                  tally.failed ? " — reload the page to retry" : ""
-                }.`}
+              {phase === "paused" && !finished && "Paused."}
             </span>
           </div>
+          {finished && (
+            <div role="status" style={doneBox}>
+              <strong>Done</strong> — {fmt(tally.written)} written, {fmt(tally.alreadyThere)} already in Google,{" "}
+              {fmt(tally.failed)} failed
+              {allStopped ? ". Every selected calendar stopped on a Google error — reload to retry." : tally.failed ? " — reload to retry." : "."}
+            </div>
+          )}
           {phase !== "idle" && (
             <div style={{ marginTop: 12, height: 8, borderRadius: 4, background: "#eef0f3", overflow: "hidden", maxWidth: 520 }}>
               <div style={{ width: `${pct}%`, height: "100%", background: ACCENT, transition: "width .3s" }} />
@@ -468,7 +486,7 @@ export function DayliteCalendarImport() {
               <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                 {errOwners.map(([owner, e]) => (
                   <li key={owner}>
-                    {owner}: {fmt(e.failed)} failed{stoppedOwners.includes(owner) ? " (stopped)" : ""} — {e.lastError}
+                    {owner}: {fmt(e.failed)} failed{stoppedOwners.includes(owner) ? " (stopped)" : ""} — {e.lastError} — reload to retry
                   </li>
                 ))}
               </ul>

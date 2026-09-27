@@ -143,6 +143,7 @@ export default async function ConsultingLetterPage({
       : null;
   const scopes = pay.scopes || [];
   const assumptions = pay.assumptions || [];
+  const termsText = (pay.terms || "").trim();
   const total = scopes.length
     ? scopesTotal(scopes)
     : pay.feeMode === "milestones"
@@ -301,11 +302,12 @@ export default async function ConsultingLetterPage({
                 one asked for. The termsBlock field stays defined in
                 templates.ts for now (it may still back a different
                 document later); it's just not read here. Omit the
-                heading entirely when the quote has no terms. */}
-            {pay.terms && (
+                heading entirely when the quote has no terms — whitespace
+                only counts as none (#225 final wave B). */}
+            {termsText && (
               <>
                 <div className="pk-keep-next" style={{ ...H2, color: accent }}>Terms</div>
-                <p style={BODY}>{pay.terms}</p>
+                <p style={BODY}>{termsText}</p>
               </>
             )}
 

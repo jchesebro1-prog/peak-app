@@ -15,9 +15,12 @@ import { saveVenueTypesAction } from "./actions";
  * Admin "Venue types" editor (#216) — the CustomerFieldsCard idiom: seeded
  * from the server-resolved list, whole-list save, server validates. Keys are
  * minted server-side on first save and shown read-only; the parent keys this
- * card by the saved list so a save-then-refresh remounts it with the minted
- * keys (a second save can never mint twice). Built-ins can be renamed and
- * archived but not removed, and always work like themselves.
+ * card by the saved KEYS so a save that mints one remounts it with the minted
+ * keys (a second save can never mint twice), while a rename/archive/reorder
+ * save keeps the card mounted so its "✓ Saved" note stays visible (#216 final
+ * wave B — keying by the whole list remounted on every save and reset it).
+ * Built-ins can be renamed and archived but not removed, and always work like
+ * themselves.
  */
 
 type Row = { key: string; label: string; worksLike: string; archived: boolean };
@@ -53,6 +56,17 @@ export function VenueTypesCard({ types }: { types: VenueType[] }) {
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const dirty = JSON.stringify(rows) !== JSON.stringify(saved);
+  // The refreshed server list (normalized labels) replaces the local copy when
+  // nothing is being edited — adjusted during render, not in an effect.
+  const serverSig = JSON.stringify(types.map(rowOf));
+  const [seenSig, setSeenSig] = useState(serverSig);
+  if (serverSig !== seenSig) {
+    setSeenSig(serverSig);
+    if (!dirty) {
+      setSaved(types.map(rowOf));
+      setRows(types.map(rowOf));
+    }
+  }
 
   const touch = () => {
     setJustSaved(false);
