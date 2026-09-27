@@ -424,3 +424,35 @@ export async function removeManagedEvent(mailboxKey: string, eventId: string): P
       throw err;
   }
 }
+
+/* ---- #219: wall-clock event writes (Daylite calendar import) ------------
+ * insertEvent above takes epoch-ms and sends UTC ISO strings. An imported
+ * Daylite event is a local wall-clock time in a named zone and must reach
+ * Google exactly as written, so this sibling sends a pre-built body. */
+
+/** A local dateTime with no offset plus its IANA zone, or an all-day date
+ *  (Google's end.date is exclusive). */
+export type ZonedEventTime = { dateTime: string; timeZone: string } | { date: string };
+
+export type ZonedEventBody = {
+  /** Optional caller-chosen id (base32hex, 5–1024 chars). A repeat insert
+   *  with the same id fails with 409 instead of creating a duplicate. */
+  id?: string;
+  summary: string;
+  description?: string;
+  start: ZonedEventTime;
+  end: ZonedEventTime;
+};
+
+/** Insert a pre-built event on the mailbox's PRIMARY calendar, never sending
+ *  invite emails. Same token path and 5 s timeout as every call here. */
+export async function insertZonedEvent(
+  mailboxKey: string,
+  body: ZonedEventBody
+): Promise<{ id: string; htmlLink: string }> {
+  const r = await gcal<GoogleEvent>(mailboxKey, "/calendars/primary/events?sendUpdates=none", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return { id: r.id, htmlLink: r.htmlLink || "" };
+}

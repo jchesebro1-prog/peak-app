@@ -8476,3 +8476,257 @@ Equipment map**. Map the rows — Lighting, Audio and Rigging first (Auto leaves
 says so); pick per-foot parts for pipe / cable / handline / scenery track; decide whether the video screen, pit and
 shell rows get parts or confirmed allowances. Then run one Auto design end-to-end on a preview and check the
 placements and the quote.
+
+---
+
+## 212. The Grid — an allowance description, and per-design custom items — DONE 2026-09-26 (D333–D335)
+
+**Reported:** 2026-09-26 (Jeff): "In the Grid, we should allow for a description of the allowance besides just an
+allowance, so that way if it is a product that just doesn't have a catalog item we can say it so it comes through."
+Spec: `docs/superpowers/specs/2026-09-26-inbox-link-popup-tasks-calendar-design.md` (§212); plan:
+`docs/superpowers/plans/2026-09-26-grid-allowance-desc-catalog-nav.md`.
+
+**Done.**
+- Equipment-map allowances gain an optional customer-facing "Quote description" (≤ 200 chars) beside the internal
+  "Why…" note in Grid Settings → Equipment map; the virtual allowance part prints it (falling back to the row
+  label) — the internal note never reaches a quote.
+- A Grid option can now carry per-design **custom items** — description, optional mfr/model, qty, unit cost — for a
+  product with no catalog row. "+ Custom item" in the editor's BOM panel adds/edits/removes them; each prices
+  through the allowance margin path (sell = cost ÷ (1 − the customer's tier margin)) and is always priced, so a
+  custom line never makes an estimate "Incomplete". Custom items are copied by option duplication and carried by
+  revisions/restore, same as placements.
+- The bid-spec BOM keeps dropping allowance lines (unchanged), so custom items stay out of specs, same as any
+  allowance.
+
+**Still open.** Neither an allowance's new description nor a custom item's text prints on any customer document
+yet — a Grid quote still opens in the Estimator (or another builder) reading only `spec.sections`, and nothing
+renders `spec.lines` to a customer. Pre-existing gap, not fixed here; flagged for a follow-up. Placing a custom item
+on the plan sheet, and "add to catalog" from a custom item, stay out of scope. See D333–D335.
+
+---
+
+## 213. Catalog gets a tab under Estimating — DONE 2026-09-26 (D336)
+
+**Reported:** 2026-09-26 (Jeff): "Catalog needs a tab under estimation." Spec:
+`docs/superpowers/specs/2026-09-26-inbox-link-popup-tasks-calendar-design.md` (§213); plan:
+`docs/superpowers/plans/2026-09-26-grid-allowance-desc-catalog-nav.md`.
+
+**Done.** Catalog is now the last tab of the Estimating nav group (`src/components/nav/nav-data.ts`); `/catalog`
+highlights that group instead of Settings. The Settings → Company "Catalog" link stays as a second door.
+
+**Still open.** None — `/catalog` already worked for any signed-in user and gates its own admin parts, so no new
+permission gate was needed. See D336.
+
+---
+
+## 214. Inbox — a Link popup: multi-person linking, better search, signature pre-fill — DONE 2026-09-26 (D337–D344)
+
+**Reported:** 2026-09-26 (Jeff): "Linking in the inbox needs to be cleaner, right now I want to be able to select
+the message and pop up stuff to link from it. If multiple people are on the email give the option to link multiple
+people. I want a better search button so you can type in the name or venue. I would also like some logic built in
+for reading the message that is selected and finding the signature and filling that in." Spec:
+`docs/superpowers/specs/2026-09-26-inbox-link-popup-tasks-calendar-design.md` (§214); plan:
+`docs/superpowers/plans/2026-09-26-inbox-link-popup.md`.
+
+**Done.**
+- A "Link…" button on each message header (and the sidebar's "Edit links") opens one popup scoped to that message
+  ("Linking from"): every participant (From/To/Cc, parsed and deduped, the team's own addresses dropped) as a
+  checkable row, so several people on one email can be linked at once; company & venue search-and-change; the
+  existing Work-link picker; and a signature card.
+- Search is one query across companies, venues and people (name/city/address/email), ranked like the app's other
+  typeaheads — replacing the old plain company/venue `<select>`s.
+- The signature reader (deterministic, no AI — D89) reads the selected message's body and either pre-fills a
+  quick-add for an unknown sender or offers to fill in just the fields a known contact is missing (title, a phone
+  not already on file) — it never overwrites what's on file.
+- The sidebar becomes a read-only summary (company, venue, linked-people chips, work link) with one "Edit links"
+  button; its dropdown editors moved into the popup. Inbound Cc is now parsed and kept on the message.
+
+**Still open / decisions to confirm.** Company linking is change-only (no Clear — a known sender's company
+re-resolves at read time); "Linking from" changes only by opening a message's own Link…, and can't be reset back to
+the thread's original contact; the old "on contact:" picker is gone in favor of by-name reuse; the claim-domain
+checkbox now defaults off (the old one-click linked the domain **and** the thread). Jeff to confirm these read the
+way he wants. See D337–D344.
+
+---
+
+## 215. Tasks from email; every task shows on the calendar — DONE 2026-09-26 (D345–D348)
+
+**Reported:** 2026-09-26 (Jeff): "I also would like a task to be able to be created from the email with links to the
+contact, opportunity, project, or whatever else inside the app that is linkable to a contact. From there I also
+would like to add any notes and assign it to an internal person. I would also like to set a due date that shows up
+in the calendar view. Ultimately all tasks should show up in the calendar view and if there is no due date or the
+due date is passed it should float with the day until they are either completed or deleted." Spec:
+`docs/superpowers/specs/2026-09-26-inbox-link-popup-tasks-calendar-design.md` (§215); plan:
+`docs/superpowers/plans/2026-09-26-tasks-from-email-calendar.md`.
+
+**Done.**
+- "Task…" on any inbox message opens a dialog pre-filled from the thread — title from the subject, every linked
+  person/company/venue/work-record pre-ticked, notes citing the email, assignee (default me), an optional due
+  date — and saves a `TaskRecord` carrying those links; the thread sidebar lists its open tasks.
+- `/calendar` now places every open task and queue assignment: due today lands on its day; no due date, or a due
+  date already passed, floats on today tagged "carried" / "overdue N d" until completed or deleted; done/deleted
+  items disappear. A Mine/Everyone toggle switches whose tasks show; each chip completes or deletes in place.
+
+**Still open / decisions to confirm.** Unassigned or name-only legacy tasks don't appear on the calendar even in
+Everyone mode (old auto-stage checklists would otherwise flood "today"); Everyone mode lets any teammate complete
+or delete a colleague's task (same permission rule as before, just more reachable now); surveys/inspections aren't
+a linkable task field yet, so a task created against one cites it in the notes instead. Jeff to confirm these. See
+D345–D348.
+
+---
+
+## 219. Import Daylite calendar history into Google Calendar — DONE 2026-09-26 (D349–D353)
+
+**Reported:** 2026-09-26 (Jeff): "Did we figure out a way to import calendar events out of Daylite? I really want
+to import it to track with my calendar." Spec:
+`docs/superpowers/specs/2026-09-26-daylite-calendar-import-design.md`; plan:
+`docs/superpowers/plans/2026-09-26-daylite-calendar-import.md`.
+
+**Done.**
+- `/import/daylite/calendar` (admin) uploads the Daylite `Calendar Events.tsv`, previews per owner (matched user +
+  calendar connection, one-offs to import, already-imported, skipped repeating series, parse errors), and imports
+  in resumable batches under a 45 s budget with live progress.
+- Each one-off event lands only in its matched owner's own connected Google Calendar, wall-clock
+  `America/Chicago`, with a deterministic Google event id so a re-run — or a resume after a quota stop — never
+  duplicates.
+- Repeating series (the same owner + name, four or more occurrences — weekly meetings, rent, payroll) are skipped
+  by design; Jeff re-creates those once in Google as real repeating events.
+
+**Still open (Jeff-gated).** Run it at `/import/daylite/calendar` — each owner needs a connected mailbox with the
+calendar scope, or their events are reported and skipped rather than written to someone else's calendar. Repeating
+series are never re-created by this import; set those up by hand in Google. See D349–D353.
+
+---
+
+## 221. Every quote link opens the quote's own builder, not always the Estimator — DONE 2026-09-26 (D354)
+
+**Reported:** 2026-09-26 (Jeff): "Flame Tests now open into Estimator." (bug, from the same conversation as #220/
+#222). Spec: `docs/superpowers/specs/2026-09-26-quote-pdfs-portal-history-design.md` (§221).
+
+**Done.** New pure `src/lib/quote-links.ts` maps every `quoteType` to its own builder route (flame_test →
+`/flame-tests/quote`, repair → `/repairs/quote`, inspection → `/inspections/quote`, consulting → its engagement
+quote route, rental → `/rentals/quote`, anything else/missing → `/estimator`); the two existing partial helpers
+(`editHrefFor`, `quoteDeepLink`) now delegate to it, and the five screens that hard-coded `/estimator?id=` (the
+company record, its map pop-out, the Home stage sheet, Home metrics, Reviews) use it instead. Backstop: the
+Estimator itself now redirects a loaded quote whose `quoteType` isn't `"system"` to its own builder, so any link
+still missed lands correctly.
+
+**Still open.** None — straight bug fix. See D354.
+
+---
+
+## 224. Companies — short lists instead of endless scroll — DONE 2026-09-26 (D355)
+
+**Reported:** 2026-09-26 (Jeff): "Let's make the views on companies only show a short list and then a 'show more'
+or Search bar function so you don't have to endless scroll for everything." Spec:
+`docs/superpowers/specs/2026-09-26-company-lists-consulting-proposal-design.md` (§224).
+
+**Done.**
+- A new `ShortList` component shows the first 5 rows with a "Show all N" / "Show fewer" toggle, and a filter box
+  appears once a list is long enough (> 10 rows); used across the company record's Locations & venues,
+  Communications, Activity, Projects & orders, Quotes, Site surveys, Contacts and Site visits cards (the old
+  silent 6-row slice on Site visits is gone).
+- The companies directory and the venues list both page 50 rows at a time via `?n=`, showing "Showing X of N",
+  instead of a hard cap or infinite scroll.
+
+**Still open.** None. See D355.
+
+---
+
+## 225. Consulting proposal document — drop boilerplate, add a Dear line, fix the PDF — DONE 2026-09-26 (D356, D357)
+
+**Reported:** 2026-09-26 (Jeff): "The template for a consulting proposal can remove the top bit that says Peak
+Systems Group since it is in the header as well as the Consulting Proposal line. It does need a Dear line that has
+the Contact's name in it. I also need the PDF export option to not include links or other information on the top
+or bottom of the page. I also need the assumptions to be bullet pointed. Terms also need to be editable, via the
+terms at the bottom of the estimate — I think it is pulling in a default that needs to be removed. The Anticipated
+Phases should also be removed from the PDF. Finally the acceptance should just [be] the contact name, and the
+estimator name. Not the companies, I still want the date though." Spec:
+`docs/superpowers/specs/2026-09-26-company-lists-consulting-proposal-design.md` (§225).
+
+**Done.**
+- The proposal document (`design/engagements/letter?kind=proposal`) drops the header-band company name and
+  "Consulting Proposal & Professional Services Agreement" lines, adds a "Dear {contact},…" line, bullets the
+  assumptions, and prints only the quote's own Terms box instead of the template's default `termsBlock`.
+- The PDF prints with its own scoped `@page` margin (no browser-injected title/URL/date in the margins), and the
+  Anticipated Phases block is gone from the document.
+- Acceptance now reads the contact's name and the estimator's name (`quote.owner`), not the two companies — the
+  date stays.
+
+**Still open.** None. See D356, D357.
+
+---
+
+## 216. Venues — edit after creation, derived names, editable venue types — OPEN
+
+**Reported:** 2026-09-26 (Jeff): "We need the ability to edit a venue after it is added. We also need to display
+the Venue's main name like Elementary or High School of what was typed in as well as the type of space. I also
+would like to edit what displays for the options when selecting the type of venue. There needs to be a Gym Stage
+option. Then that can eliminate the Venue Label, basically using the logic of the location name and venue type to
+be the name of the venue." Spec: `docs/superpowers/specs/2026-09-26-venues-and-service-rounding-design.md` (§216);
+plan: `docs/superpowers/plans/2026-09-26-venues.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
+`feat/punch-lane-b`.
+
+---
+
+## 217. Service quotes — round to the nearest $25, typed total, editable testing cost — IN PROGRESS
+
+**Reported:** 2026-09-26 (Jeff): "Auto-estimates should round to the nearest 25 dollars. It should allow the
+estimator to change the figure and auto-adjust the margin. I also would like the venue testing cost to be editable
+in order to help with the rounding." Spec:
+`docs/superpowers/specs/2026-09-26-venues-and-service-rounding-design.md` (§217); plan:
+`docs/superpowers/plans/2026-09-26-service-rounding.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
+`feat/punch-lane-b`.
+
+---
+
+## 218. Documents — company / venue / project files, shared through the portal — OPEN
+
+**Reported:** 2026-09-26 (Jeff): "I would like to add a documents portion of the app and have it mostly be linked
+to companies. I am hoping to [have] internal and external documents that upload to the company and link to the
+venue. This is what would also happen for projects where the documents would be linked to a project, venue and
+company. Ultimately this is how we are going to build out the customer portal where we can share all relevant
+information to the customer but also allow them to share documents with us by uploading them. We will also be able
+to store drawings, show files, user data, and relevant forms this way." Spec:
+`docs/superpowers/specs/2026-09-26-documents-design.md`; plan: `docs/superpowers/plans/2026-09-26-documents.md`.
+Batch 2 — in progress on `feat/punch-inbox-tasks` / `feat/punch-lane-b`.
+
+---
+
+## 220. Customer portal — all estimates and project history — OPEN
+
+**Reported:** 2026-09-26 (Jeff): "Customers Portal should show all estimates, and projects in history. Selecting a
+quote should pop up to what mode it was created in." Spec:
+`docs/superpowers/specs/2026-09-26-quote-pdfs-portal-history-design.md` (§220); plan:
+`docs/superpowers/plans/2026-09-26-quote-pdfs-portal-history.md`. Batch 2 — in progress on
+`feat/punch-inbox-tasks` / `feat/punch-lane-b`.
+
+---
+
+## 222. Saved estimates keep their PDF; the customer preview shows that PDF — OPEN
+
+**Reported:** 2026-09-26 (Jeff): "I also want when you save the estimate and customer preview it saves the PDF
+version and that is what shows up in the customer preview." Spec:
+`docs/superpowers/specs/2026-09-26-quote-pdfs-portal-history-design.md` (§222); plan:
+`docs/superpowers/plans/2026-09-26-quote-pdfs-portal-history.md`. Batch 2 — in progress on
+`feat/punch-inbox-tasks` / `feat/punch-lane-b`.
+
+---
+
+## 223. Estimate numbers — one shared counter, a prefix per type — OPEN
+
+**Reported:** 2026-09-26 (Jeff): "I want the quote format to look less random. Let's just follow a simple estimate
+number growth so let's just renumber and start over but every opportunity, flame test, or really any estimate gets
+its own unique number." Spec: `docs/superpowers/specs/2026-09-26-estimate-numbers-design.md`; plan:
+`docs/superpowers/plans/2026-09-26-estimate-numbers.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
+`feat/punch-lane-b`.
+
+---
+
+## 226. The Grid — curated device types replace raw vendor categories — IN PROGRESS
+
+**Reported:** 2026-09-26 (Jeff, brainstorm): "Can we brainstorm how we solve the fact that there are too many
+categories in the grid? I need to resolve that as it is too many to be functional." Spec:
+`docs/superpowers/specs/2026-09-26-grid-device-types-design.md`; plan:
+`docs/superpowers/plans/2026-09-26-grid-device-types.md`. Batch 2 — in progress on `feat/punch-inbox-tasks` /
+`feat/punch-lane-b`.

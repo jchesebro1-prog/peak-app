@@ -103,21 +103,28 @@ export default function CustomItemsSection({
     if (!draft) return;
     setSaving(true);
     setError(null);
-    const r = await saveCustomItemAction(projectId, optionId, {
-      ...(draft.id ? { id: draft.id } : {}),
-      desc: draft.desc,
-      mfr: draft.mfr,
-      model: draft.model,
-      qty: Number(draft.qty),
-      unitCost: Number(draft.unitCost),
-    });
-    setSaving(false);
-    if (!r.ok) {
-      setError(r.error);
-      return;
+    try {
+      const r = await saveCustomItemAction(projectId, optionId, {
+        ...(draft.id ? { id: draft.id } : {}),
+        desc: draft.desc,
+        mfr: draft.mfr,
+        model: draft.model,
+        qty: Number(draft.qty),
+        unitCost: Number(draft.unitCost),
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setDraft(null);
+      onChanged();
+    } catch {
+      // #212: a thrown action (network hiccup, server exception) must not
+      // leave the button stuck reading "Saving…" forever.
+      setError("Something went wrong — try again.");
+    } finally {
+      setSaving(false);
     }
-    setDraft(null);
-    onChanged();
   };
 
   return (
@@ -144,9 +151,17 @@ export default function CustomItemsSection({
               className=""
               style={LINK_BTN}
               onConfirm={async () => {
-                const r = await removeCustomItemAction(projectId, optionId, it.id);
-                if (!r.ok) setError(r.error);
-                else onChanged();
+                try {
+                  const r = await removeCustomItemAction(projectId, optionId, it.id);
+                  if (!r.ok) setError(r.error);
+                  else onChanged();
+                } catch {
+                  // #212: same guard as save() — ConfirmButton's own
+                  // try/finally already clears its pending state, but we
+                  // still want the same generic message in this section's
+                  // error slot rather than a raw Error message bubbling up.
+                  setError("Something went wrong — try again.");
+                }
               }}
             />
             <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l ? l.ext : 0)}</span>

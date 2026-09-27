@@ -47,6 +47,20 @@ const TOOLBAR_CSS = `
   @media print { .cl-toolbar { display: none; } }
 `;
 
+// #225: the proposal is a plain letter, not a dimensioned sheet like the
+// inspection report — printing it needs a browser page with NO header/
+// footer gutter (that gutter is where Chrome puts the page title, URL and
+// date). The shared @page rule in globals.css (0.9in 1in) leaves that
+// gutter in place; this document overrides it to margin: 0 and puts the
+// equivalent spacing back as padding on its own .pk-doc-page instance
+// only — the global rule stays untouched for every other document.
+const PROPOSAL_PRINT_CSS = `
+  @media print {
+    @page { size: letter; margin: 0; }
+    .cl-proposal-page.pk-doc-page { padding: 0.9in 1in !important; }
+  }
+`;
+
 const SANS =
   'var(--font-ui, "Public Sans"), system-ui, -apple-system, "Segoe UI", sans-serif';
 
@@ -169,6 +183,7 @@ export default async function ConsultingLetterPage({
   return (
     <div style={{ minHeight: "100%", background: "#f1f2f5" }}>
       <style>{TOOLBAR_CSS}</style>
+      {kind === "proposal" && <style>{PROPOSAL_PRINT_CSS}</style>}
       <div className="cl-toolbar">
         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
           <Link href={backHref} style={{ fontFamily: SANS, fontSize: 12.5, color: "#5b616e", textDecoration: "none" }}>
@@ -184,7 +199,7 @@ export default async function ConsultingLetterPage({
         <PrintButton accent={accent} />
       </div>
 
-      <div className="pk-doc-page" style={{ maxWidth: 760, margin: "26px auto 60px", background: "#fff", padding: "48px 56px", boxShadow: "0 2px 14px rgba(16,22,30,.09)" }}>
+      <div className={`pk-doc-page${kind === "proposal" ? " cl-proposal-page" : ""}`} style={{ maxWidth: 760, margin: "26px auto 60px", background: "#fff", padding: "48px 56px", boxShadow: "0 2px 14px rgba(16,22,30,.09)" }}>
         {/* Peak letterhead shared by every generated customer document. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -194,13 +209,21 @@ export default async function ConsultingLetterPage({
             ? { display: "block", maxHeight: 64, maxWidth: "100%", objectFit: "contain", marginBottom: 16 }
             : { display: "block", width: "100%", height: "auto", marginBottom: 16 }}
         />
-        {/* header band */}
+        {/* header band. #225: the proposal drops the company-name and
+            document-type lines here — the letterhead above already carries
+            the company name/logo, and repeating "Consulting Proposal &
+            Professional Services Agreement" under it was redundant. The
+            spec package keeps both. */}
         <div className="pk-keep" style={{ borderBottom: `3px solid ${accent}`, paddingBottom: 14, marginBottom: 22 }}>
-          <div style={{ fontFamily: SANS, fontSize: 17, fontWeight: 800, letterSpacing: "-.01em" }}>{companyName}</div>
-          <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: accent, marginTop: 6 }}>
-            {kind === "spec" ? "Specification Package" : "Consulting Proposal & Professional Services Agreement"}
-          </div>
-          <div style={{ fontFamily: SANS, fontSize: 11.5, color: "#5b616e", marginTop: 8, display: "flex", gap: 18, flexWrap: "wrap" }}>
+          {kind === "spec" && (
+            <>
+              <div style={{ fontFamily: SANS, fontSize: 17, fontWeight: 800, letterSpacing: "-.01em" }}>{companyName}</div>
+              <div style={{ fontFamily: SANS, fontSize: 11, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: accent, marginTop: 6 }}>
+                Specification Package
+              </div>
+            </>
+          )}
+          <div style={{ fontFamily: SANS, fontSize: 11.5, color: "#5b616e", marginTop: kind === "spec" ? 8 : 0, display: "flex", gap: 18, flexWrap: "wrap" }}>
             <span><b>{kind === "spec" ? "Engagement" : "Quote"}:</b> {kind === "spec" ? eng!.id : quoteId}</span>
             <span><b>Customer:</b> {customer}</span>
             {venueCustomer !== customer && <span><b>Venue:</b> {venueCustomer}</span>}
@@ -210,6 +233,7 @@ export default async function ConsultingLetterPage({
 
         {kind === "proposal" ? (
           <>
+            <p style={BODY}>Dear {contact?.name || "Sir or Madam"},</p>
             <p style={BODY}>{renderField(t, "consulting_proposal", "intro", vars)}</p>
 
             <div className="pk-keep-next" style={{ ...H2, color: accent }}>Scope of services</div>
@@ -241,12 +265,6 @@ export default async function ConsultingLetterPage({
                 {pay.scope || "Scope to be defined."}
               </p>
             )}
-            {pay.phases.length > 0 && (
-              <p style={{ ...BODY, color: "#5b616e" }}>
-                Anticipated phases: {pay.phases.join(" · ")}. Progress gates on internal review by {companyName}.
-              </p>
-            )}
-
             {scopes.length ? null : (
               <>
                 <div className="pk-keep-next" style={{ ...H2, color: accent }}>Professional fee</div>
@@ -277,15 +295,25 @@ export default async function ConsultingLetterPage({
               </>
             )}
 
-            <div className="pk-keep-next" style={{ ...H2, color: accent }}>Terms</div>
-            <p style={BODY}>{renderField(t, "consulting_proposal", "termsBlock", vars)}</p>
-            {pay.terms && <p style={BODY}>{pay.terms}</p>}
+            {/* #225: print only the quote's own terms (the builder's Terms
+                box, consulting.terms) — never the template's canned
+                termsBlock boilerplate, which was printing as a default no
+                one asked for. The termsBlock field stays defined in
+                templates.ts for now (it may still back a different
+                document later); it's just not read here. Omit the
+                heading entirely when the quote has no terms. */}
+            {pay.terms && (
+              <>
+                <div className="pk-keep-next" style={{ ...H2, color: accent }}>Terms</div>
+                <p style={BODY}>{pay.terms}</p>
+              </>
+            )}
 
             {assumptions.length > 0 && (
               <>
                 <div className="pk-keep-next" style={{ ...H2, color: accent }}>Assumptions</div>
                 <p style={BODY}>{renderField(t, "consulting_proposal", "assumptionsLead", vars)}</p>
-                <ul style={{ fontFamily: SANS, fontSize: 12.5, lineHeight: 1.65, margin: "0 0 10px", paddingLeft: 22 }}>
+                <ul style={{ fontFamily: SANS, fontSize: 12.5, lineHeight: 1.65, margin: "0 0 10px", paddingLeft: 22, listStyle: "disc" }}>
                   {assumptions.map((a, i) => (
                     <li key={i} style={{ marginBottom: 3 }}>{a}</li>
                   ))}
@@ -296,9 +324,12 @@ export default async function ConsultingLetterPage({
             <div className="pk-keep-next" style={{ ...H2, color: accent }}>Acceptance</div>
             <div className="pk-keep">
               <p style={BODY}>{renderField(t, "consulting_proposal", "signoff", vars)}</p>
+              {/* #225: sign the people, not the companies — the contact
+                  and the estimator (quote.owner), same fallback as
+                  repairs/letter uses for its signer. */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 34, fontFamily: SANS, fontSize: 11.5 }}>
-                {[customer || "Customer", companyName].map((party) => (
-                  <div key={party}>
+                {[contact?.name || "Customer", quote?.owner || "Jeff Chesebro"].map((party, i) => (
+                  <div key={i}>
                     <div style={{ borderBottom: "1.5px solid #16181d", height: 34 }} />
                     <div style={{ marginTop: 6, color: "#5b616e" }}>{party} — signature / date</div>
                   </div>

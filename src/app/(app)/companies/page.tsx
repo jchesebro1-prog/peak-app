@@ -16,11 +16,33 @@ import { getSettings } from "@/lib/settings";
 import { resolveFieldDefs } from "@/lib/customer-fields";
 import { travelForPoints } from "@/lib/travel-bulk";
 import { compareDrive, driveTitle, fmtDrive, parseDriveSort } from "@/lib/drive-format";
+import { parsePageSize } from "@/lib/short-list";
 
 export const metadata = { title: "Companies — Quartzite-6" };
 
 function one(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+}
+
+/** Directory paging (#224) — first PAGE rows, then "Show more" raises `?n=`
+ *  by PAGE (clamped to a max of 500 by the shared parsePageSize — see
+ *  src/lib/short-list.ts). Filters/search apply before this (they narrow
+ *  `sorted` itself); this only limits how much of the already-filtered
+ *  list renders. */
+const PAGE = 50;
+
+/** Every current query param carries over except `n` (bumped) and `edit`
+ *  (a transient modal-open flag, not a filter worth preserving across a
+ *  page navigation). */
+function showMoreHref(sp: Record<string, string | string[] | undefined>, nextN: number): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (k === "n" || k === "edit" || v === undefined) continue;
+    const val = Array.isArray(v) ? v[0] : v;
+    if (val) params.set(k, val);
+  }
+  params.set("n", String(nextN));
+  return "/companies?" + params.toString();
 }
 
 const CSS = `
@@ -161,6 +183,7 @@ export default async function CustomersPage({
       };
     })
   );
+  const n = parsePageSize(one(sp.n));
   const sort = parseDriveSort(one(sp.sort));
   const sorted = sort
     ? [...filtered].sort(
@@ -169,6 +192,10 @@ export default async function CustomersPage({
           a.c.name.localeCompare(b.c.name)
       )
     : filtered;
+
+  const matchCount = sorted.length;
+  const pageRows = sorted.slice(0, n);
+  const hasMore = matchCount > pageRows.length;
 
   const types = ["all", ...Array.from(new Set(customers.map((c) => c.type).filter(Boolean)))];
   const ownerOptions = [
@@ -320,8 +347,14 @@ export default async function CustomersPage({
               </Link>
             </div>
           ) : (
+            <>
+            {sorted.length > 0 && (
+              <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 8 }}>
+                Showing {pageRows.length} of {matchCount}
+              </div>
+            )}
             <div className="pk-card" style={{ padding: 0, overflow: "hidden" }}>
-              {sorted.map(({ c, openValue, quoteCount, owner }) => {
+              {pageRows.map(({ c, openValue, quoteCount, owner }) => {
                 const ident = owner ? identOf(owner) : null;
                 const venueN = (c.locations || []).length;
                 const sub =
@@ -387,6 +420,18 @@ export default async function CustomersPage({
                 </div>
               )}
             </div>
+            {hasMore && (
+              <div style={{ textAlign: "center", marginTop: 14 }}>
+                <Link
+                  href={showMoreHref(sp, n + PAGE)}
+                  className="pk-btn-outline"
+                  style={{ display: "inline-block", fontSize: 12.5, fontWeight: 600, textDecoration: "none", padding: "9px 16px", borderRadius: 8 }}
+                >
+                  Show more ({matchCount - pageRows.length} left)
+                </Link>
+              </div>
+            )}
+            </>
           )}
         </div>
       )}

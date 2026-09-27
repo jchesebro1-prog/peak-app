@@ -29,6 +29,7 @@ import { quoteBuilderHref } from "@/lib/quote-links";
 import { hasVenueCalendar } from "@/lib/stores/venue-calendars";
 import { loadCustomerFeed } from "@/lib/customer-feed";
 import { groupRows } from "@/lib/feed-buckets";
+import { ShortList, type ShortListGroup } from "@/components/short-list";
 import ActivityComposer from "./activity-composer";
 import NoteDeleteButton from "./note-delete-button";
 import { Avatar } from "@/components/ui";
@@ -361,49 +362,55 @@ export default async function CustomerDetailPage({
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ fontSize: 14.5, fontWeight: 600 }}>Locations &amp; venues</div><span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{locN} venue{locN === 1 ? "" : "s"}</span></div>
             <Link href={`/companies/${encodeURIComponent(cust.id)}?addVenue=1`} style={{ fontSize: 12, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, borderRadius: 8, padding: "7px 10px", textDecoration: "none" }}>+ Add venue</Link>
           </div>
-          {locations.map((l) => (
-            <div key={l.key} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 196px", gap: 16, padding: "15px 18px", borderBottom: "1px solid #f5f6f8", alignItems: "start" }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{l.label}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 8px", borderRadius: 20 }}>
-                    {l.kindLabel}
-                  </span>
-                  {l.category && (
-                    <span style={{ fontSize: 10, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 8px", borderRadius: 20 }}>
-                      {l.category}
+          {locN > 0 && (
+            <ShortList
+              searchPlaceholder="Search venues…"
+              items={locations.map((l) => (
+                <div key={l.key} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 196px", gap: 16, padding: "15px 18px", borderBottom: "1px solid #f5f6f8", alignItems: "start" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{l.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 8px", borderRadius: 20 }}>
+                        {l.kindLabel}
+                      </span>
+                      {l.category && (
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "#5b616e", background: "#f1f2f5", border: "1px solid #e4e7ec", padding: "2px 8px", borderRadius: 20 }}>
+                          {l.category}
+                        </span>
+                      )}
+                      {l.primary && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, padding: "1px 6px", borderRadius: 4, letterSpacing: ".03em" }}>
+                          PRIMARY
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#8c919c", marginTop: 5 }}>{l.address}</div>
+                    {l.calendarHref && (
+                      <Link
+                        href={l.calendarHref}
+                        style={{ display: "inline-block", marginTop: 6, fontSize: 11.5, fontWeight: 600, color: l.calendarOn ? "#1f7a52" : ACCENT_INK, textDecoration: "none" }}
+                      >
+                        {l.calendarOn ? "✓ Calendar" : "Calendar"}
+                      </Link>
+                    )}
+                  </div>
+                  <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "11px 12px" }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      Travel · {l.officeName}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 600, color: "#16181d" }}>{l.miles}</span>
+                      <span style={{ fontSize: 12, color: "#5b616e" }}>· {l.time}</span>
+                    </div>
+                    <span style={{ display: "inline-block", marginTop: 7, fontSize: 9, fontWeight: 600, letterSpacing: ".03em", padding: "2px 7px", borderRadius: 5, color: l.sourceInk, background: l.sourceSoft }}>
+                      {l.sourceLabel}
                     </span>
-                  )}
-                  {l.primary && (
-                    <span style={{ fontSize: 9, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, padding: "1px 6px", borderRadius: 4, letterSpacing: ".03em" }}>
-                      PRIMARY
-                    </span>
-                  )}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: "#8c919c", marginTop: 5 }}>{l.address}</div>
-                {l.calendarHref && (
-                  <Link
-                    href={l.calendarHref}
-                    style={{ display: "inline-block", marginTop: 6, fontSize: 11.5, fontWeight: 600, color: l.calendarOn ? "#1f7a52" : ACCENT_INK, textDecoration: "none" }}
-                  >
-                    {l.calendarOn ? "✓ Calendar" : "Calendar"}
-                  </Link>
-                )}
-              </div>
-              <div style={{ background: "#fafbfc", border: "1px solid #eef0f3", borderRadius: 10, padding: "11px 12px" }}>
-                <div style={{ fontSize: 9.5, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  Travel · {l.officeName}
-                </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 17, fontWeight: 600, color: "#16181d" }}>{l.miles}</span>
-                  <span style={{ fontSize: 12, color: "#5b616e" }}>· {l.time}</span>
-                </div>
-                <span style={{ display: "inline-block", marginTop: 7, fontSize: 9, fontWeight: 600, letterSpacing: ".03em", padding: "2px 7px", borderRadius: 5, color: l.sourceInk, background: l.sourceSoft }}>
-                  {l.sourceLabel}
-                </span>
-              </div>
-            </div>
-          ))}
+              ))}
+              searchText={locations.map((l) => [l.label, l.kindLabel, l.category, l.address].filter(Boolean).join(" "))}
+            />
+          )}
           {locN === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               No locations yet — add one in Edit.
@@ -429,36 +436,42 @@ export default async function CustomerDetailPage({
               + Log interaction
             </Link>
           </div>
-          {threads.map((t) => {
-            const sm = commStatusMeta(t.status);
-            const ident = t.assignedTo ? identOf(t.assignedTo) : null;
-            return (
-              <Link
-                key={t.id}
-                href={`/inbox?thread=${encodeURIComponent(t.id)}`}
-                className="cu-d-row"
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-              >
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 9.5, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 8px", borderRadius: 20, flexShrink: 0 }}>
-                      {sm.label}
+          {threads.length > 0 && (
+            <ShortList
+              searchPlaceholder="Search communications…"
+              items={threads.map((t) => {
+                const sm = commStatusMeta(t.status);
+                const ident = t.assignedTo ? identOf(t.assignedTo) : null;
+                return (
+                  <Link
+                    key={t.id}
+                    href={`/inbox?thread=${encodeURIComponent(t.id)}`}
+                    className="cu-d-row"
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 9.5, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 8px", borderRadius: 20, flexShrink: 0 }}>
+                          {sm.label}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {t.subject || "Conversation"}
+                        </span>
+                      </span>
+                      <span style={{ display: "block", fontSize: 11.5, color: "#9aa0ab", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {commSnippet(t)}
+                      </span>
                     </span>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {t.subject || "Conversation"}
+                    <span style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                      {ident && <Avatar name={t.assignedTo} initials={ident.initials} color={ident.color} size={22} />}
+                      <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{timeAgo(t.updatedAt)}</span>
                     </span>
-                  </span>
-                  <span style={{ display: "block", fontSize: 11.5, color: "#9aa0ab", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {commSnippet(t)}
-                  </span>
-                </span>
-                <span style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                  {ident && <Avatar name={t.assignedTo} initials={ident.initials} color={ident.color} size={22} />}
-                  <span style={{ fontSize: 10.5, color: "#aab0bb" }}>{timeAgo(t.updatedAt)}</span>
-                </span>
-              </Link>
-            );
-          })}
+                  </Link>
+                );
+              })}
+              searchText={threads.map((t) => [t.subject, commSnippet(t), t.assignedTo].filter(Boolean).join(" "))}
+            />
+          )}
           {threads.length === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               No logged interactions yet. Log a call, email, or meeting to start this company&apos;s history.
@@ -473,43 +486,54 @@ export default async function CustomerDetailPage({
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{feedRows.length}</span>
           </div>
           <ActivityComposer customerId={cust.id} />
-          {feedGroups.map((g) => (
-            <div key={g.bucket}>
-              <div style={{ padding: "9px 18px 7px", fontSize: 10, fontWeight: 600, color: "#aab0bb", letterSpacing: ".05em", textTransform: "uppercase", background: "#fafbfc", borderBottom: "1px solid #f0f1f4" }}>
-                {g.bucket}
-              </div>
-              {g.rows.map((r) => {
-                const rowStyle: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" };
-                const inner = (
-                  <>
-                    <span style={{ width: 26, height: 26, borderRadius: "50%", background: r.soft, color: r.ink, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>
-                      {r.letter}
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>
-                        {r.title}
-                      </span>
-                      <span style={{ display: "block", fontSize: 11, color: "#aab0bb", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {[r.sub, r.by, timeAgo(r.ts)].filter(Boolean).join(" · ")}
-                      </span>
-                    </span>
-                  </>
-                );
-                return r.href ? (
-                  <Link key={r.id} href={r.href} className="cu-d-row" style={rowStyle}>
-                    {inner}
-                  </Link>
-                ) : (
-                  <div key={r.id} style={rowStyle}>
-                    {inner}
-                    {r.deletableNoteId && (
-                      <NoteDeleteButton customerId={cust.id} noteId={r.deletableNoteId} />
-                    )}
+          {feedRows.length > 0 && (
+            <ShortList
+              searchPlaceholder="Search activity…"
+              groups={feedGroups.map((g): ShortListGroup => ({
+                count: g.rows.length,
+                header: (
+                  <div style={{ padding: "9px 18px 7px", fontSize: 10, fontWeight: 600, color: "#aab0bb", letterSpacing: ".05em", textTransform: "uppercase", background: "#fafbfc", borderBottom: "1px solid #f0f1f4" }}>
+                    {g.bucket}
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                ),
+              }))}
+              items={feedGroups.flatMap((g) =>
+                g.rows.map((r) => {
+                  const rowStyle: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" };
+                  const inner = (
+                    <>
+                      <span style={{ width: 26, height: 26, borderRadius: "50%", background: r.soft, color: r.ink, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>
+                        {r.letter}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>
+                          {r.title}
+                        </span>
+                        <span style={{ display: "block", fontSize: 11, color: "#aab0bb", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {[r.sub, r.by, timeAgo(r.ts)].filter(Boolean).join(" · ")}
+                        </span>
+                      </span>
+                    </>
+                  );
+                  return r.href ? (
+                    <Link key={r.id} href={r.href} className="cu-d-row" style={rowStyle}>
+                      {inner}
+                    </Link>
+                  ) : (
+                    <div key={r.id} style={rowStyle}>
+                      {inner}
+                      {r.deletableNoteId && (
+                        <NoteDeleteButton customerId={cust.id} noteId={r.deletableNoteId} />
+                      )}
+                    </div>
+                  );
+                })
+              )}
+              searchText={feedGroups.flatMap((g) =>
+                g.rows.map((r) => [r.title, r.sub, r.by].filter(Boolean).join(" "))
+              )}
+            />
+          )}
           {feedRows.length === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               No activity yet — quotes, messages, visits and notes will land here.
@@ -523,36 +547,42 @@ export default async function CustomerDetailPage({
             <div style={{ fontSize: 14.5, fontWeight: 600 }}>Projects &amp; orders</div>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custProjects.length}</span>
           </div>
-          {custProjects.map((p) => {
-            const label = p.stageMeta?.label ?? p.stage;
-            const done = isDone(p);
-            const risk = !done && riskFlags(p).length > 0;
-            const m = done
-              ? { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", l: label }
-              : risk
-                ? { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4", l: label }
-                : { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", l: label };
-            return (
-              <Link
-                key={p.id}
-                href={`/projects?id=${encodeURIComponent(p.id)}`}
-                className="cu-d-row"
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-              >
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {p.name || p.id}
-                  </span>
-                  <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
-                    {p.id} · {p.kind === "order" ? "Sales order" : "Project"} · {formatJobValue(p, money)}
-                  </span>
-                </span>
-                <span style={{ fontSize: 9.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
-                  {m.l}
-                </span>
-              </Link>
-            );
-          })}
+          {custProjects.length > 0 && (
+            <ShortList
+              searchPlaceholder="Search projects & orders…"
+              items={custProjects.map((p) => {
+                const label = p.stageMeta?.label ?? p.stage;
+                const done = isDone(p);
+                const risk = !done && riskFlags(p).length > 0;
+                const m = done
+                  ? { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", l: label }
+                  : risk
+                    ? { ink: "#b4543a", soft: "#f8ece7", bd: "#eccfc4", l: label }
+                    : { ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3", l: label };
+                return (
+                  <Link
+                    key={p.id}
+                    href={`/projects?id=${encodeURIComponent(p.id)}`}
+                    className="cu-d-row"
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {p.name || p.id}
+                      </span>
+                      <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>
+                        {p.id} · {p.kind === "order" ? "Sales order" : "Project"} · {formatJobValue(p, money)}
+                      </span>
+                    </span>
+                    <span style={{ fontSize: 9.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
+                      {m.l}
+                    </span>
+                  </Link>
+                );
+              })}
+              searchText={custProjects.map((p) => [p.name, p.id, p.stageMeta?.label ?? p.stage].filter(Boolean).join(" "))}
+            />
+          )}
           {custProjects.length === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
               No active projects for this company.
@@ -570,31 +600,37 @@ export default async function CustomerDetailPage({
               <span style={{ textAlign: "right" }}>Value</span>
               <span style={{ textAlign: "right" }}>Date</span>
             </div>
-            {custQuotes.map((qt) => {
-              const m = quoteStatusMeta(qt.status);
-              return (
-                <Link
-                  key={qt.id}
-                  href={quoteBuilderHref(qt)}
-                  className="cu-d-row"
-                  style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 102px 96px 92px", gap: 10, padding: "13px 18px", alignItems: "center", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {qt.name || qt.id}
-                    </div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>{qt.id}</div>
-                  </div>
-                  <span>
-                    <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "3px 9px", borderRadius: 20 }}>
-                      {m.label}
-                    </span>
-                  </span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, textAlign: "right" }}>{moneyDash(qt.value)}</span>
-                  <span style={{ fontSize: 11.5, color: "#8c919c", textAlign: "right" }}>{shortDate(qt.updatedAt)}</span>
-                </Link>
-              );
-            })}
+            {custQuotes.length > 0 && (
+              <ShortList
+                searchPlaceholder="Search quotes…"
+                items={custQuotes.map((qt) => {
+                  const m = quoteStatusMeta(qt.status);
+                  return (
+                    <Link
+                      key={qt.id}
+                      href={quoteBuilderHref(qt)}
+                      className="cu-d-row"
+                      style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 102px 96px 92px", gap: 10, padding: "13px 18px", alignItems: "center", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {qt.name || qt.id}
+                        </div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2 }}>{qt.id}</div>
+                      </div>
+                      <span>
+                        <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: m.ink, background: m.soft, border: `1px solid ${m.bd}`, padding: "3px 9px", borderRadius: 20 }}>
+                          {m.label}
+                        </span>
+                      </span>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, fontWeight: 600, textAlign: "right" }}>{moneyDash(qt.value)}</span>
+                      <span style={{ fontSize: 11.5, color: "#8c919c", textAlign: "right" }}>{shortDate(qt.updatedAt)}</span>
+                    </Link>
+                  );
+                })}
+                searchText={custQuotes.map((qt) => [qt.name, qt.id, quoteStatusMeta(qt.status).label].filter(Boolean).join(" "))}
+              />
+            )}
             {custQuotes.length === 0 && (
               <div style={{ padding: "34px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
                 No quotes yet for this company.
@@ -609,25 +645,31 @@ export default async function CustomerDetailPage({
                 <span style={{ fontSize: 14.5, fontWeight: 600 }}>Site surveys</span>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "#9aa0ab" }}>{custSurveys.length}</span>
               </div>
-              {custSurveys.map((s) => {
-                const sm = surveyStageMeta(s.stage || "requested");
-                return (
-                  <Link
-                    key={s.id}
-                    href={`/venue-assessments?id=${encodeURIComponent(s.id)}`}
-                    className="cu-d-row"
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
-                  >
-                    <span style={{ fontSize: 10, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
-                      {sm.label}
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {s.venue || s.venueType || "Site survey"}
-                    </span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", flexShrink: 0 }}>{s.id}</span>
-                  </Link>
-                );
-              })}
+              {custSurveys.length > 0 && (
+                <ShortList
+                  searchPlaceholder="Search site surveys…"
+                  items={custSurveys.map((s) => {
+                    const sm = surveyStageMeta(s.stage || "requested");
+                    return (
+                      <Link
+                        key={s.id}
+                        href={`/venue-assessments?id=${encodeURIComponent(s.id)}`}
+                        className="cu-d-row"
+                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 18px", borderBottom: "1px solid #f5f6f8", textDecoration: "none", color: "inherit" }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 600, color: sm.ink, background: sm.soft, border: `1px solid ${sm.bd}`, padding: "2px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
+                          {sm.label}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {s.venue || s.venueType || "Site survey"}
+                        </span>
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", flexShrink: 0 }}>{s.id}</span>
+                      </Link>
+                    );
+                  })}
+                  searchText={custSurveys.map((s) => [s.venue, s.venueType, s.id, surveyStageMeta(s.stage || "requested").label].filter(Boolean).join(" "))}
+                />
+              )}
               {custSurveys.length === 0 && (
                 <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
                   No site surveys yet.
@@ -654,34 +696,40 @@ export default async function CustomerDetailPage({
 
             <div style={{ background: "#fff", border: "1px solid #ececf0", borderRadius: 12, boxShadow: "0 1px 2px rgba(0,0,0,.04)", padding: "15px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>Contacts</div>
-              {contacts.map((ct, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
-                  <span style={{ width: 30, height: 30, borderRadius: "50%", background: "#f1f2f5", color: "#5b616e", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
-                    {ct.mono}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
-                      {ct.name}
-                      {ct.primary && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, padding: "1px 5px", borderRadius: 4, marginLeft: 5, letterSpacing: ".03em" }}>
-                          PRIMARY
-                        </span>
-                      )}
+              {contacts.length > 0 && (
+                <ShortList
+                  searchPlaceholder="Search contacts…"
+                  items={contacts.map((ct, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
+                      <span style={{ width: 30, height: 30, borderRadius: "50%", background: "#f1f2f5", color: "#5b616e", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
+                        {ct.mono}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3 }}>
+                          {ct.name}
+                          {ct.primary && (
+                            <span style={{ fontSize: 9, fontWeight: 700, color: ACCENT_INK, background: ACCENT_SOFT, padding: "1px 5px", borderRadius: 4, marginLeft: 5, letterSpacing: ".03em" }}>
+                              PRIMARY
+                            </span>
+                          )}
+                        </div>
+                        {ct.role && <div style={{ fontSize: 11, color: "#8c919c", marginTop: 1 }}>{ct.role}</div>}
+                        {ct.email && (
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {ct.email}
+                          </div>
+                        )}
+                        {ct.phone && (
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {ct.phone}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    {ct.role && <div style={{ fontSize: 11, color: "#8c919c", marginTop: 1 }}>{ct.role}</div>}
-                    {ct.email && (
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {ct.email}
-                      </div>
-                    )}
-                    {ct.phone && (
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {ct.phone}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                  ))}
+                  searchText={contacts.map((ct) => [ct.name, ct.role, ct.email, ct.phone].filter(Boolean).join(" "))}
+                />
+              )}
               {contacts.length === 0 && (
                 <div style={{ fontSize: 12, color: "#9aa0ab", paddingTop: 4 }}>No contacts yet.</div>
               )}
@@ -702,45 +750,49 @@ export default async function CustomerDetailPage({
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#9aa0ab", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: 12 }}>
                   Site visits
                 </div>
-                {visits.slice(0, 6).map((v) => {
-                  const sm = VISIT_STAGE_META[v.stage];
-                  return (
-                    <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
-                          {v.reason}
-                          {v.venue ? " · " + v.venue : ""}
+                <ShortList
+                  searchPlaceholder="Search site visits…"
+                  items={visits.map((v) => {
+                    const sm = VISIT_STAGE_META[v.stage];
+                    return (
+                      <div key={v.id} style={{ padding: "8px 0", borderTop: "1px solid #f3f4f7" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, minWidth: 0 }}>
+                            {v.reason}
+                            {v.venue ? " · " + v.venue : ""}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 9.5,
+                              fontWeight: 600,
+                              color: sm.ink,
+                              background: sm.soft,
+                              border: `1px solid ${sm.bd}`,
+                              padding: "1px 7px",
+                              borderRadius: 20,
+                              whiteSpace: "nowrap",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {sm.label}
+                          </span>
+                          <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
+                          <span style={{ marginLeft: "auto" }}>
+                            <DeleteVisitButton id={v.id} />
+                          </span>
                         </div>
-                        <span
-                          style={{
-                            fontSize: 9.5,
-                            fontWeight: 600,
-                            color: sm.ink,
-                            background: sm.soft,
-                            border: `1px solid ${sm.bd}`,
-                            padding: "1px 7px",
-                            borderRadius: 20,
-                            whiteSpace: "nowrap",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {sm.label}
-                        </span>
-                        <RecordingCountBadge count={visitRecCounts.get(v.id) ?? 0} />
-                        <span style={{ marginLeft: "auto" }}>
-                          <DeleteVisitButton id={v.id} />
-                        </span>
+                        <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
+                          {v.startAt != null
+                            ? new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                            : v.preferredTiming || "Not scheduled yet"}
+                          {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
+                          {v.invite?.sentAt ? " · invite sent" : ""}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: "#8c919c", marginTop: 2 }}>
-                        {v.startAt != null
-                          ? new Date(v.startAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-                          : v.preferredTiming || "Not scheduled yet"}
-                        {v.assignedTo ? " · " + v.assignedTo : " · unclaimed"}
-                        {v.invite?.sentAt ? " · invite sent" : ""}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                  searchText={visits.map((v) => [v.reason, v.venue, VISIT_STAGE_META[v.stage]?.label, v.assignedTo].filter(Boolean).join(" "))}
+                />
               </div>
             )}
 
