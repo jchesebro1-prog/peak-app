@@ -10492,6 +10492,8 @@ seeded()
   .then(() => venues216NameAutoAsyncChecks())
   .then(() => venues216T7FixAsyncChecks())
   .then(() => specSeedOnceAsyncChecks())
+  .then(() => documentsStoreAsyncChecks())
+  .then(() => documentsFixesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -24325,4 +24327,102 @@ import {
   const r1 = d218BlockedExt(run);
   const r2 = d218Safe("a" + "_".repeat(50_000) + "b");
   ok(r1 === null && r2 === "a" && Date.now() - t0 < 500, `#218 files: long dot/space/underscore runs are trimmed in linear time (${Date.now() - t0} ms)`);
+}
+
+/* ======================================================================
+   Documents (#218) — Task 2: the store (DB-backed) + the Settings card.
+   ====================================================================== */
+import {
+  createDocument as d218Create, getDocument as d218Get, updateDocument as d218Update, removeDocument as d218Remove,
+  documentsForCustomer as d218ForCustomer, markSeen as d218MarkSeen, markCustomerSeen as d218MarkCustomerSeen,
+  unseenCustomerDocuments as d218Unseen, documentByBlobPath as d218ByPath, documentCategories as d218Cats,
+} from "@/lib/stores/documents";
+
+{
+  const src218s = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  ok(src218s("src/app/(app)/settings/settings-client.tsx").includes("<DocumentCategoriesCard"), "#218 settings: the Document categories card is on Settings → Admin");
+  const sa = src218s("src/app/(app)/settings/actions.ts");
+  ok(/export async function saveDocumentCategoriesAction[\s\S]{0,400}await requirePerm\("manage_users"\)[\s\S]{0,400}mergeDocumentCategories\(/.test(sa), "#218 settings: saving categories is admin-only and goes through mergeDocumentCategories");
+}
+
+async function documentsStoreAsyncChecks(): Promise<void> {
+  const CO = fixtureId(218, "co-a");
+  const CO2 = fixtureId(218, "co-b");
+  const mk = async (over: Partial<Parameters<typeof d218Create>[0]> = {}) => {
+    const d = await d218Create({
+      title: "Stage plot", fileName: "plot.pdf", mime: "application/pdf", size: 1234,
+      blobPath: `documents/TEST218_co-a/UP-0000000000000218/plot-${Math.random().toString(36).slice(2, 8)}.pdf`,
+      category: "drawings", visibility: "internal", source: "team", customerId: CO, siteId: null, projectId: null,
+      notes: "", uploadedBy: "Jeff", ...over,
+    });
+    registerFixture("documents", d.id);
+    return d;
+  };
+  const a = await mk();
+  ok(/^DOC-\d{4,}$/.test(a.id) && Number(a.id.slice(4)) >= 1000 && a.seenByTeamAt === a.uploadedAt && !a.deleted, "#218 store: a team upload gets a DOC- id from 1000 and counts as seen");
+  const c = await mk({ source: "customer", visibility: "shared", siteId: "v1", uploadedBy: "Pat Customer" });
+  ok(c.seenByTeamAt === null && Number(c.id.slice(4)) > Number(a.id.slice(4)), "#218 store: a customer upload starts unseen; ids climb");
+  await mk({ customerId: CO2, visibility: "shared" });
+  const forCo = await d218ForCustomer(CO);
+  ok(forCo.map((d) => d.id).sort().join(",") === [a.id, c.id].sort().join(","), "#218 store: documentsForCustomer never returns another company's files");
+  ok((await d218ForCustomer(CO, { siteId: "v1" })).map((d) => d.id).join(",") === c.id && (await d218ForCustomer(CO, { portal: true })).map((d) => d.id).join(",") === c.id, "#218 store: venue and portal scoping");
+  ok((await d218ByPath(a.blobPath))?.id === a.id && (await d218ByPath("documents/none")) === null, "#218 store: lookup by blob path");
+  const up = await d218Update(a.id, { title: "  Revised plot  ", category: "photos", visibility: "shared", siteId: "v2", projectId: "P-9", notes: "n".repeat(2100), customerId: CO2, blobPath: "documents/evil" } as Parameters<typeof d218Update>[1]);
+  ok(up?.title === "Revised plot" && up.category === "photos" && up.visibility === "shared" && up.siteId === "v2" && up.projectId === "P-9" && up.notes.length === 2000, "#218 store: title/category/visibility/venue/project/notes update, trimmed and capped");
+  ok(up?.customerId === CO && up.blobPath === a.blobPath, "#218 store: an update can never move a file to another company or swap its blob");
+  ok((await d218Update(a.id, { title: "   " }))?.title === "Revised plot", "#218 store: a blank title keeps the old one");
+  const unseen = await d218Unseen();
+  ok(unseen.some((d) => d.id === c.id) && !unseen.some((d) => d.id === a.id), "#218 store: unseen customer uploads are listed; team files never are");
+  ok((await d218MarkSeen([c.id, a.id], 5000)) === 1 && (await d218Get(c.id))?.seenByTeamAt === 5000, "#218 store: markSeen stamps only unseen customer uploads");
+  const c2 = await mk({ source: "customer", visibility: "shared" });
+  ok((await d218MarkCustomerSeen(CO, 6000)) === 1 && (await d218Get(c2.id))?.seenByTeamAt === 6000, "#218 store: markCustomerSeen acknowledges one company's new uploads");
+  const removed = await d218Remove(a.id);
+  ok(removed?.id === a.id && (await d218Get(a.id)) === null && !(await d218ForCustomer(CO)).some((d) => d.id === a.id) && (await d218Remove(a.id)) === null, "#218 store: delete is soft, hides the file everywhere, and is idempotent");
+  ok((await d218Cats()).some((x) => x.key === "other"), "#218 store: documentCategories resolves the settings list (the seed on a fresh database)");
+}
+
+/* ======================================================================
+   Documents (#218) — Task 1 review fixes: length caps never split a
+   surrogate pair (a lone surrogate makes the JSONB write throw), and
+   invisible / direction-flipping characters never reach a stored name.
+   ====================================================================== */
+import {
+  displayFileName as d218fxDisplay, blockedExtension as d218fxBlocked, titleFromFileName as d218fxTitle,
+} from "@/lib/document-files";
+import { cleanTitle as d218fxCleanTitle, cleanNotes as d218fxCleanNotes, MAX_TITLE as d218fxMaxTitle, MAX_NOTES as d218fxMaxNotes } from "@/lib/document-rules";
+
+const d218fxLone = (s: string) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(s);
+const d218fxJsonbSafe = (s: string) => !d218fxLone(s);
+
+{
+  const EMOJI = "\u{1F600}";
+  const straddle = d218fxDisplay("a".repeat(179) + EMOJI + ".pdf");
+  ok(d218fxJsonbSafe(straddle) && straddle === "a".repeat(179) + EMOJI, "#218 fix: a file name capped at 180 keeps a straddling emoji whole (no lone surrogate)");
+  const t = d218fxTitle("b".repeat(179) + EMOJI + ".pdf");
+  ok(d218fxJsonbSafe(t), "#218 fix: the default title never ends in half an emoji");
+  ok(d218fxCleanTitle("a\uD800b", "f.pdf") === "ab" && d218fxCleanTitle("\uDC00", "Stage plot.pdf") === "Stage plot", "#218 fix: cleanTitle drops lone surrogates (and falls back to the file name when nothing is left)");
+  const capT = d218fxCleanTitle("t".repeat(d218fxMaxTitle - 1) + EMOJI + "x", "f.pdf");
+  ok(d218fxJsonbSafe(capT) && capT.endsWith(EMOJI) && Array.from(capT).length === d218fxMaxTitle, "#218 fix: cleanTitle caps by code point — an emoji at the cap stays whole");
+  ok(d218fxCleanNotes("a\uD800b\nc") === "ab\nc" && d218fxCleanNotes("x\u0000y\u200Bz") === "xyz", "#218 fix: cleanNotes drops lone surrogates, controls and zero-width characters but keeps line breaks");
+  const capN = d218fxCleanNotes("n".repeat(d218fxMaxNotes - 1) + EMOJI + EMOJI);
+  ok(d218fxJsonbSafe(capN) && capN.endsWith(EMOJI) && Array.from(capN).length === d218fxMaxNotes, "#218 fix: cleanNotes caps by code point — an emoji at the cap stays whole");
+  ok(d218fxBlocked("x.vbs\0") === "vbs" && d218fxBlocked("x.vbs\u200B") === "vbs" && d218fxBlocked("x.e\u200Dxe") === "exe" && d218fxBlocked("x.ps1\u0085") === "ps1", "#218 fix: a control or zero-width character can't hide a blocked extension");
+  ok(d218fxBlocked("photo\u202Egpj.exe") === "exe" && d218fxDisplay("photo\u202Egpj.exe") === "photogpj.exe", "#218 fix: a right-to-left override is stripped from the stored name and can't disguise .exe");
+  ok(d218fxDisplay("a\u0085\u009Fb\u200B\u200F\u202A\u202E\u2066\u2069c.pdf") === "abc.pdf", "#218 fix: C1 controls, bidi overrides/isolates and zero-width characters never reach a stored name");
+  ok(d218fxBlocked("x".repeat(176) + ".exeZZZ") === "exe" && d218fxDisplay("x".repeat(176) + ".exeZZZ").endsWith(".exe"), "#218 fix: a blocked extension the 180 cap would create is still caught");
+}
+
+async function documentsFixesAsyncChecks(): Promise<void> {
+  const EMOJI = "\u{1F600}";
+  const d = await d218Create({
+    title: "t".repeat(d218fxMaxTitle - 1) + EMOJI + "\uD800", fileName: "a".repeat(179) + EMOJI + ".pdf\uDC00", mime: "application/pdf", size: 10,
+    blobPath: `documents/TEST218_co-fx/UP-00000000000218fx/emoji-${Math.random().toString(36).slice(2, 8)}.pdf`,
+    category: "other", visibility: "internal", source: "team", customerId: fixtureId(218, "co-fx"), siteId: null, projectId: null,
+    notes: "n".repeat(d218fxMaxNotes - 1) + EMOJI + "\uD800", uploadedBy: "Jeff\uDC00",
+  });
+  registerFixture("documents", d.id);
+  const back = await d218Get(d.id);
+  ok(!!back && d218fxJsonbSafe(back.title) && d218fxJsonbSafe(back.fileName) && d218fxJsonbSafe(back.notes) && d218fxJsonbSafe(back.uploadedBy) && back.fileName === "a".repeat(179) + EMOJI && back.title.endsWith(EMOJI), "#218 fix: a title/file name/notes with an emoji at the cap and a lone surrogate round-trip through the JSONB store");
+  const up = await d218Update(d.id, { title: "u".repeat(d218fxMaxTitle - 1) + EMOJI + "z", notes: "m\uD800" });
+  ok(!!up && d218fxJsonbSafe(up.title) && up.title.endsWith(EMOJI) && up.notes === "m" && (await d218Get(d.id))?.notes === "m", "#218 fix: an edit is capped and cleaned the same way before the JSONB write");
 }

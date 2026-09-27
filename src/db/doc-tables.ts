@@ -96,6 +96,7 @@ export const partDocuments = docTable("part_documents"); // Part documents (#207
 export const partDocumentLinks = docTable("part_document_links"); // Part documents (#207) — one row per part↔document, soft-deleted to detach; migration 0026_part_documents
 export const partAccessoryLinks = docTable("part_accessory_links"); // Part documents (#207) — the fixture→accessory graph that computes accessory coverage; migration 0026_part_documents
 export const specDocuments = docTable("spec_documents"); // Spec builder (#205 Phase B) — one saved spec per CSI section: header, products, fill-in answers; migration 0027_spec_documents
+export const documents = docTable("documents"); // Documents (#218) — company/venue/project files in private Blob, shared both ways through the portal; migration 0029_documents
 
 export const DOC_TABLES = {
   quotes,
@@ -134,6 +135,7 @@ export const DOC_TABLES = {
   part_document_links: partDocumentLinks,
   part_accessory_links: partAccessoryLinks,
   spec_documents: specDocuments,
+  documents,
 } as const;
 
 export type CollectionName = keyof typeof DOC_TABLES;

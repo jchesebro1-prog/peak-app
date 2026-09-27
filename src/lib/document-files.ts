@@ -32,17 +32,61 @@ const MAGIC: ReadonlyArray<{ sig: readonly number[]; label: string }> = [
   { sig: [0x23, 0x21], label: "a script" },
 ];
 
-/** Drops C0 controls, DEL and lone surrogates (a lone surrogate would make
- *  `encodeURIComponent` throw in the download header). `for…of` yields a
- *  valid surrogate pair as one code point, so emoji survive. */
-function stripControl(s: string): string {
+/** A character no stored name or text may carry: C0/C1 controls and DEL,
+ *  zero-width characters (U+200B–U+200D, U+2060, U+FEFF), direction marks,
+ *  overrides and isolates (U+200E/F, U+202A–U+202E, U+2066–U+2069, which can
+ *  make `x\u202Egpj.exe` read as `xexe.jpg`), the line/paragraph separators,
+ *  and lone surrogates — a lone surrogate makes `encodeURIComponent` throw in
+ *  the download header and Postgres refuse the JSONB write. */
+function isStripped(c: number): boolean {
+  return (
+    c < 32 ||
+    (c >= 0x7f && c <= 0x9f) ||
+    (c >= 0x200b && c <= 0x200f) ||
+    (c >= 0x2028 && c <= 0x202e) ||
+    (c >= 0x2060 && c <= 0x2069) ||
+    c === 0xfeff ||
+    (c >= 0xd800 && c <= 0xdfff)
+  );
+}
+
+/** Drops every `isStripped` character (`\n` and tab too, unless
+ *  `keepNewlines`). `for…of` walks code points — a valid surrogate pair
+ *  arrives as one, so emoji survive, while a lone surrogate arrives alone and
+ *  is dropped. */
+function stripControl(s: string, keepNewlines = false): string {
   let out = "";
   for (const ch of s) {
     const c = ch.codePointAt(0) ?? 0;
-    if (c < 32 || c === 127 || (c >= 0xd800 && c <= 0xdfff)) continue;
+    if (keepNewlines && (c === 10 || c === 9)) {
+      out += ch;
+      continue;
+    }
+    if (isStripped(c)) continue;
     out += ch;
   }
   return out;
+}
+
+/** The first `max` code points — never half a surrogate pair. */
+function clipCodePoints(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let out = "";
+  let n = 0;
+  for (const ch of s) {
+    if (n++ >= max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** THE text cleaner for anything stored on a document (names, titles,
+ *  notes, uploader names): stripped (see `isStripped`; `multiline` keeps
+ *  `\n` and tab), trimmed, then capped at `max` CODE POINTS so a cap can
+ *  never split an emoji into a lone surrogate. Always JSONB-safe. */
+export function cleanText(raw: unknown, max: number, opts: { multiline?: boolean } = {}): string {
+  const stripped = stripControl(String(raw ?? ""), !!opts.multiline).trim();
+  return clipCodePoints(stripped, max).trim();
 }
 
 /** Trims any of `chars` off the end — a loop, not `[…]+$`, which backtracks
@@ -68,7 +112,7 @@ export function baseName(raw: unknown): string {
 /** The name we store and show: base name, no control characters (so it can
  *  never break a header), capped at 180. */
 export function displayFileName(raw: unknown): string {
-  return stripControl(baseName(raw)).trim().slice(0, 180) || "file";
+  return cleanText(baseName(raw), 180) || "file";
 }
 
 /** A Blob pathname segment: letters, digits, `._-` only, no `..`, ≤ 80. */
@@ -80,17 +124,22 @@ export function safeFileName(raw: unknown): string {
 /** Default title: the file name without its last extension. */
 export function titleFromFileName(raw: unknown): string {
   const name = displayFileName(raw);
-  return name.replace(/\.[^.\s]{1,10}$/, "").trim().slice(0, 200) || name;
+  return cleanText(name.replace(/\.[^.\s]{1,10}$/, ""), 200) || name;
 }
 
 /** The blocked extension this name carries, or null. Every dot-separated
  *  segment after the first counts, so `x.pdf.exe` and `x.exe.pdf` are both
- *  blocked; trailing dots and spaces are ignored the way Windows ignores them. */
+ *  blocked; trailing dots and spaces are ignored the way Windows ignores them.
+ *  The name is judged the way it is stored — stripped of controls and
+ *  invisible characters (so `x.vbs\0` and `x.e\u200Dxe` are caught) — both
+ *  whole and at the 180 cap (a cap can turn `x.exeZZZ` into `x.exe`). */
 export function blockedExtension(name: unknown): string | null {
-  const base = trimEndChars(baseName(name), ". \t\r\n\f\v ");
-  for (const seg of base.split(".").slice(1)) {
-    const ext = seg.trim().toLowerCase();
-    if (BLOCKED_EXTENSIONS.has(ext)) return ext;
+  for (const candidate of [stripControl(baseName(name)), displayFileName(name)]) {
+    const base = trimEndChars(candidate, ". \t\r\n\f\v\u00a0");
+    for (const seg of base.split(".").slice(1)) {
+      const ext = seg.trim().toLowerCase();
+      if (BLOCKED_EXTENSIONS.has(ext)) return ext;
+    }
   }
   return null;
 }

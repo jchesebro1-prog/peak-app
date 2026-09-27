@@ -1,5 +1,5 @@
 import { categoryLabel, OTHER_CATEGORY, type DocumentCategory } from "./document-categories";
-import { formatBytes, titleFromFileName } from "./document-files";
+import { cleanText, formatBytes, titleFromFileName } from "./document-files";
 
 /**
  * Documents (#218) — the record and every rule about who sees what. Pure:
@@ -50,18 +50,15 @@ export function isVisibility(v: unknown): v is DocumentVisibility {
   return v === "internal" || v === "shared";
 }
 
+/** Controls, invisible characters and lone surrogates dropped; capped at
+ *  MAX_TITLE code points (never half an emoji); blank → the file's title. */
 export function cleanTitle(raw: unknown, fileName: string): string {
-  let t = "";
-  for (const ch of String(raw ?? "")) {
-    const c = ch.charCodeAt(0);
-    if (c >= 32 && c !== 127) t += ch;
-  }
-  t = t.trim().slice(0, MAX_TITLE);
-  return t || titleFromFileName(fileName).slice(0, MAX_TITLE);
+  return cleanText(raw, MAX_TITLE) || cleanText(titleFromFileName(fileName), MAX_TITLE);
 }
 
+/** cleanTitle's rules, but line breaks (and tabs) survive. */
 export function cleanNotes(raw: unknown): string {
-  return String(raw ?? "").trim().slice(0, MAX_NOTES);
+  return cleanText(raw, MAX_NOTES, { multiline: true });
 }
 
 export function cleanMime(raw: unknown): string {

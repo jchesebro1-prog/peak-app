@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePerm } from "@/lib/session";
-import { getSettings, setSettings, type Office } from "@/lib/settings";
+import { getSettings, getSettingsStrict, setSettings, type Office } from "@/lib/settings";
 import {
   geocode as geoGeocode,
   search as geoSearch,
@@ -27,6 +27,11 @@ import {
 } from "@/lib/customer-fields";
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
+import {
+  mergeDocumentCategories,
+  resolveDocumentCategories,
+  type DocumentCategoryInput,
+} from "@/lib/document-categories";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
@@ -821,4 +826,23 @@ export async function moveStageRecordsAction(
   const res = await moveStageRecords(kind, pipelineId, fromStage, toStage, me.name);
   revalidatePath("/", "layout");
   return res;
+}
+
+/* ---- Document categories (#218) ---- */
+
+/** Whole-list save of Settings → Admin → Document categories. Keys are
+ *  minted here from the label and never change; dropped rows are archived
+ *  (mergeDocumentCategories). Returns the refusal instead of throwing. */
+export async function saveDocumentCategoriesAction(
+  input: DocumentCategoryInput[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  // Strict read: a failed read must never pass for "no list saved yet" —
+  // merging onto the seed would silently lose every custom category.
+  const stored = resolveDocumentCategories((await getSettingsStrict()).documentCategories);
+  const merged = mergeDocumentCategories(stored, input);
+  if (!merged.ok) return merged;
+  await setSettings({ documentCategories: merged.categories });
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

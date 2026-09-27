@@ -48,6 +48,8 @@ import { VenueTypesCard } from "./venue-types-card";
 import type { VenueType } from "@/lib/venue-types";
 import type { Pipelines } from "@/lib/pipelines";
 import { PipelinesCard } from "./pipelines-card";
+import { DocumentCategoriesCard } from "./document-categories-card";
+import type { DocumentCategory } from "@/lib/document-categories";
 import Link from "next/link";
 import { SegmentedToggle } from "@/components/ui";
 import {
@@ -179,6 +181,7 @@ export default function SettingsClient({
   consultingDisciplines,
   customerFieldDefs,
   venueTypes,
+  documentCategories,
   pipelines,
   pipelineUsage,
   offices,
@@ -209,6 +212,8 @@ export default function SettingsClient({
   consultingDisciplines: string[];
   customerFieldDefs: CustomFieldDef[];
   venueTypes: VenueType[];
+  /** #218 — Settings → Admin → Document categories (resolved, archived included). */
+  documentCategories: DocumentCategory[];
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id — the editor's
@@ -2206,6 +2211,10 @@ export default function SettingsClient({
           <VenueTypesCard
             key={venueTypes.map((t) => `${t.key}:${t.label}:${t.worksLike}:${t.archived ? 1 : 0}`).join("|")}
             types={venueTypes}
+          />
+          <DocumentCategoriesCard
+            key={documentCategories.map((c) => c.key).join("|")}
+            categories={documentCategories}
           />
         </>
       )}

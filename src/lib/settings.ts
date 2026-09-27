@@ -90,6 +90,11 @@ export type AppSettingsData = {
    *  VALUES live per-company in the relational companies.custom column,
    *  keyed by CustomFieldDef.id. */
   customerFieldDefs?: import("@/lib/customer-fields").CustomFieldDef[];
+  /** Documents (#218) — the category list for company / venue / project
+   *  files. FULL REPLACEMENT on save (the customerFieldDefs idiom);
+   *  resolveDocumentCategories in lib/document-categories returns the seed
+   *  when absent. Edited in Settings → Admin → Document categories. */
+  documentCategories?: import("@/lib/document-categories").DocumentCategory[];
   /** #216 — Settings → Venue types. FULL REPLACEMENT list; resolved by
    *  venueTypesFrom (lib/venue-types) — absent = the seed (5 built-ins +
    *  Gym Stage). sites.venue_kind stores a type key. */
