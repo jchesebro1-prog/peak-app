@@ -20,6 +20,7 @@ import { nameFor as customerNameFor } from "@/lib/stores/customers";
 import { customerUploadBell } from "@/lib/document-rules";
 import { shortDate } from "@/lib/format";
 import { displayLeadNumber } from "@/lib/estimate-number";
+import { portalBellGroups } from "@/lib/portal-bell";
 import type {
   NavCounts,
   BellGroup,
@@ -249,12 +250,21 @@ export async function navData(me: string): Promise<{
     portalAccepted.map((q) => ({
       id: q.id,
       title: q.name,
-      sub: `${q.customer || ""} · accepted by ${q.portalAcceptance?.by || "customer"} — confirm by marking Won`,
+      sub: `${q.customer || ""} — approve or decline in the quote`,
       href: "/quotes?id=" + encodeURIComponent(q.id),
       letter: "✓",
       color: "#1f7a52",
     }))
   );
+  // #242 (spec §8.2) — two derived groups over the same quotes already
+  // fetched above; no extra table scan, no writer, no Leads-queue record.
+  const { review: portalReviewItems, generated: portalNewItems } = portalBellGroups(
+    quotes,
+    me,
+    Date.now()
+  );
+  push("portalReview", "Portal quotes to review", portalReviewItems);
+  push("portalNew", "New portal quotes", portalNewItems);
   push(
     "leads",
     "Leads needing follow-up",

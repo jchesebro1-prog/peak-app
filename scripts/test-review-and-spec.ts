@@ -10553,6 +10553,7 @@ seeded()
   .then(() => portal242SidebarAsyncChecks())
   .then(() => portal242GenerateAsyncChecks())
   .then(() => portal242AcceptAsyncChecks())
+  .then(() => portal242ThumbnailsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -29139,4 +29140,142 @@ async function portal242AcceptAsyncChecks(): Promise<void> {
     await removeCustomer(CO);
     await removeCustomer(CO_X);
   }
+}
+
+/* ======================================================================
+   Portal catalog — Task 14 staff surfaces + datasheet thumbnails (#242,
+   spec §5/§8.2/§1.1). Pure checks below (bell derivations, thumbnail
+   candidate selection + grouping, the widened print-token kind); the
+   DB-backed render check (a fake screenshot standing in for headless
+   Chrome, which can't run in this harness) is registered in the async
+   chain as portal242ThumbnailsAsyncChecks().
+   ====================================================================== */
+import { portalBellGroups as d242BellGroups } from "@/lib/portal-bell";
+{
+  const NOW = 1_700_000_000_000;
+  const HOUR = 3_600_000;
+  const ME = "Test242 Owner";
+  const base = { id: "x", name: "Test Q", customer: "Acme", source: "portal-catalog", status: "draft", owner: "" };
+  const mine = { ...base, id: "Q-mine", owner: ME, portalReview: { requestedAt: NOW, reasons: [] } };
+  const someoneElse = { ...base, id: "Q-other", owner: "Rae Other", portalReview: { requestedAt: NOW, reasons: [] } };
+  const unowned = { ...base, id: "Q-unowned", owner: "", portalReview: { requestedAt: NOW, reasons: [] } };
+  const notPortal = { ...base, id: "Q-not-portal", source: "estimator", owner: "", portalReview: { requestedAt: NOW, reasons: [] } };
+  const firmRecent = { ...base, id: "Q-firm-recent", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
+  const firmStale = { ...base, id: "Q-firm-stale", owner: ME, status: "sent", portalFirm: { generatedAt: NOW - 80 * HOUR, validUntil: NOW + 1000 } };
+  const firmOther = { ...base, id: "Q-firm-other", owner: "Rae Other", status: "sent", portalFirm: { generatedAt: NOW - 10 * HOUR, validUntil: NOW + 1000 } };
+
+  const g = d242BellGroups([mine, someoneElse, unowned, notPortal, firmRecent, firmStale, firmOther] as never, ME, NOW);
+  const reviewIds = g.review.map((i) => i.id);
+  const generatedIds = g.generated.map((i) => i.id);
+  ok(reviewIds.includes("Q-mine"), "#242 bell: my own portal-catalog review quote is in the review group");
+  ok(!reviewIds.includes("Q-other"), "#242 bell: another owner's review quote never shows on my bell");
+  ok(reviewIds.includes("Q-unowned"), "#242 bell: an unassigned review quote shows for everyone");
+  ok(!reviewIds.includes("Q-not-portal"), "#242 bell: a non-portal-catalog quote with a stray portalReview is never listed");
+  ok(generatedIds.includes("Q-firm-recent"), "#242 bell: a firm portal quote generated 10h ago is a 'new portal quote'");
+  ok(!generatedIds.includes("Q-firm-stale"), "#242 bell: a firm portal quote generated 80h ago has aged off the 72h window");
+  ok(!generatedIds.includes("Q-firm-other"), "#242 bell: another owner's firm generation never shows on my bell");
+}
+
+import { groupCandidatesByDatasheet as d242GroupByDatasheet, thumbnailCandidates as d242ThumbCandidates } from "@/lib/part-docs/thumbnail-plan";
+{
+  const imagesBySku = new Map<string, unknown[]>([
+    ["SKU-HAS-IMAGE", [{ id: "PD-img" }]],
+    ["SKU-HAS-HIDDEN", [{ id: "PD-hidden", hidden: true }]],
+    ["SKU-NO-IMAGE", []],
+  ]);
+  const ownDatasheetBySku = new Map([
+    ["SKU-HAS-IMAGE", { id: "PD-a", blobKey: "part-docs/PD-a/x.pdf" }],
+    ["SKU-HAS-HIDDEN", { id: "PD-b", blobKey: "part-docs/PD-b/x.pdf" }],
+    ["SKU-NO-IMAGE", { id: "PD-c", blobKey: "part-docs/PD-c/x.pdf" }],
+    ["SKU-LINK-ONLY", { id: "PD-d", blobKey: null }],
+    ["SKU-SHARED-1", { id: "PD-shared", blobKey: "part-docs/PD-shared/x.pdf" }],
+    ["SKU-SHARED-2", { id: "PD-shared", blobKey: "part-docs/PD-shared/x.pdf" }],
+  ]);
+  const skus = ["SKU-HAS-IMAGE", "SKU-HAS-HIDDEN", "SKU-NO-IMAGE", "SKU-LINK-ONLY", "SKU-NO-DATASHEET", "SKU-SHARED-1", "SKU-SHARED-2"];
+  const candidates = d242ThumbCandidates({ skus, imagesBySku, ownDatasheetBySku });
+  const bySku = new Map(candidates.map((c) => [c.sku, c.datasheetId]));
+  ok(!bySku.has("SKU-HAS-IMAGE"), "#242 thumbnails: a SKU with a real image is skipped, even with its own datasheet");
+  ok(!bySku.has("SKU-HAS-HIDDEN"), "#242 thumbnails: a SKU with only a HIDDEN image is still skipped — a hidden thumbnail is never regenerated");
+  ok(bySku.get("SKU-NO-IMAGE") === "PD-c", "#242 thumbnails: an own blob-backed datasheet with no image at all is a candidate");
+  ok(!bySku.has("SKU-LINK-ONLY"), "#242 thumbnails: a link-only datasheet (blobKey null) never renders a thumbnail");
+  ok(!bySku.has("SKU-NO-DATASHEET"), "#242 thumbnails: no own datasheet at all is never a candidate");
+
+  const groups = d242GroupByDatasheet(candidates);
+  ok(groups.length === 2, "#242 thumbnails: 3 candidate SKUs across 2 distinct datasheets (PD-c, PD-shared) group into 2 render entries — one per datasheet, not one per SKU");
+  const shared = groups.find((g) => g.datasheetId === "PD-shared");
+  ok(!!shared && shared.skus.length === 2 && shared.skus.includes("SKU-SHARED-1") && shared.skus.includes("SKU-SHARED-2"), "#242 thumbnails: two SKUs sharing one datasheet group into ONE render entry naming both — the renderer is called once per datasheet, not once per SKU");
+}
+
+{
+  const S = "test-secret-242-thumb";
+  const t0 = 1_700_000_000_000;
+  const thumbToken = signPrintToken(S, "part-thumb", "PD-abcdef123456", t0);
+  ok(verifyPrintToken(S, thumbToken, "part-thumb", "PD-abcdef123456", t0), "#242 token: a part-thumb token verifies for its own kind + id");
+  ok(!verifyPrintToken(S, thumbToken, "quote", "PD-abcdef123456", t0), "#242 token: a part-thumb token never verifies as a quote token");
+  const quoteToken = signPrintToken(S, "quote", "Q-1", t0);
+  ok(!verifyPrintToken(S, quoteToken, "part-thumb", "Q-1", t0), "#242 token: a quote token never verifies as a part-thumb token");
+}
+
+import { renderDatasheetThumbnail as d242RenderThumb } from "@/lib/part-docs/thumbnail";
+import { getDocument as d242GetPartDoc } from "@/lib/stores/part-documents";
+async function portal242ThumbnailsAsyncChecks(): Promise<void> {
+  const sku = fixtureId(242, "thumb-sku");
+  const otherSku = fixtureId(242, "thumb-sku-2");
+
+  const upload = await d242CreateDoc({
+    kind: "image", fileName: "hero.jpg", contentType: "image/jpeg", size: 1000,
+    blobKey: "part-docs/PD-fixture-hero/hero.jpg", sourceUrl: null, source: "upload", by: "Test",
+  });
+  const noFile = await d242CreateDoc({
+    kind: "datasheet", fileName: "no-file.pdf", contentType: "", size: 0,
+    blobKey: null, sourceUrl: "https://example.com/no-file.pdf", source: "fetch", by: "Test",
+  });
+  const datasheet = await d242CreateDoc({
+    kind: "datasheet", fileName: "test242-ds.pdf", contentType: "application/pdf", size: 4000,
+    blobKey: "part-docs/PD-fixture-thumb-ds/test242-ds.pdf", sourceUrl: null, source: "upload", by: "Test",
+  });
+  if (!upload || !noFile || !datasheet) throw new Error("#242 thumbnails: fixture documents failed to create");
+  registerFixture("part_documents", upload.id);
+  registerFixture("part_documents", noFile.id);
+  registerFixture("part_documents", datasheet.id);
+  await d242Attach(upload.id, [sku], "Test");
+  registerFixture("part_document_links", d242LinkId(sku, upload.id));
+
+  const tinyPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const fakeDeps = {
+    origin: "http://localhost:3000",
+    secret: "test-secret-242-thumb-render",
+    renderScreenshot: async () => tinyPng,
+    putFile: async (pathname: string) => ({ pathname }),
+  };
+
+  const badId = await d242RenderThumb("not-a-doc-id", [sku], "Test", fakeDeps);
+  ok(!badId.ok, "#242 thumbnails: renderDatasheetThumbnail refuses a malformed datasheet id");
+
+  const noSkus = await d242RenderThumb(datasheet.id, [], "Test", fakeDeps);
+  ok(!noSkus.ok, "#242 thumbnails: renderDatasheetThumbnail refuses an empty SKU list");
+
+  const noFileR = await d242RenderThumb(noFile.id, [sku], "Test", fakeDeps);
+  ok(!noFileR.ok, "#242 thumbnails: renderDatasheetThumbnail refuses a datasheet with no stored file (link-only)");
+
+  const r = await d242RenderThumb(datasheet.id, [sku, otherSku], "Test", fakeDeps);
+  if (!r.ok) throw new Error("#242 thumbnails: render failed — " + r.error);
+  registerFixture("part_documents", r.documentId);
+  registerFixture("part_document_links", d242LinkId(sku, r.documentId));
+  registerFixture("part_document_links", d242LinkId(otherSku, r.documentId));
+
+  const created = await d242GetPartDoc(r.documentId);
+  ok(!!created && created.kind === "image" && created.source === "datasheet-render" && created.sourceRef === datasheet.id, "#242 thumbnails: the rendered thumbnail is an image document sourced from the datasheet");
+  ok(created?.contentType === "image/png" && created?.blobKey != null, "#242 thumbnails: the rendered thumbnail carries a stored PNG");
+
+  const imagesA = await d242VisibleImages([sku]);
+  ok((imagesA.get(sku) ?? []).map((d) => d.id).join(",") === `${upload.id},${r.documentId}`, "#242 thumbnails: on the SKU that already had an uploaded image, the new render sorts AFTER it (datasheet-render always sorts last)");
+  const imagesB = await d242VisibleImages([otherSku]);
+  ok((imagesB.get(otherSku) ?? []).map((d) => d.id).join(",") === r.documentId, "#242 thumbnails: one render attaches to every SKU passed in — the second SKU (which had nothing) now has the same thumbnail");
+
+  // A render failure for one datasheet must not stop a batch — proven at the
+  // renderDatasheetThumbnail level: a screenshot that throws is reported,
+  // never thrown past this call.
+  const failing = await d242RenderThumb(datasheet.id, [sku], "Test", { ...fakeDeps, renderScreenshot: async () => { throw new Error("Chrome crashed"); } });
+  ok(!failing.ok && failing.error === "Chrome crashed", "#242 thumbnails: a render failure is reported as { ok: false }, not thrown");
 }

@@ -10,17 +10,22 @@ import type { PdfKind } from "./state";
  */
 export const PRINT_TOKEN_TTL_MS = 120_000;
 
-function mac(secret: string, kind: PdfKind, id: string, exp: number): string {
+/** Every print route this token can gate — the four quote/letter kinds
+ *  (`PdfKind`, unwidened: other code still switches on it exhaustively) plus
+ *  #242's datasheet-thumbnail render, which prints no quote. */
+export type PrintTokenKind = PdfKind | "part-thumb";
+
+function mac(secret: string, kind: PrintTokenKind, id: string, exp: number): string {
   return createHmac("sha256", secret).update(`print:${kind}:${id}:${exp}`).digest("base64url");
 }
 
-export function signPrintToken(secret: string, kind: PdfKind, id: string, nowMs: number): string {
+export function signPrintToken(secret: string, kind: PrintTokenKind, id: string, nowMs: number): string {
   if (!secret) throw new Error("AUTH_SECRET is required to sign a print token.");
   const exp = nowMs + PRINT_TOKEN_TTL_MS;
   return `${exp}.${mac(secret, kind, id, exp)}`;
 }
 
-export function verifyPrintToken(secret: string, token: string, kind: PdfKind, id: string, nowMs: number): boolean {
+export function verifyPrintToken(secret: string, token: string, kind: PrintTokenKind, id: string, nowMs: number): boolean {
   if (!secret || typeof token !== "string") return false;
   // A NaN clock makes both expiry comparisons false — fail closed instead.
   if (!Number.isFinite(nowMs)) return false;

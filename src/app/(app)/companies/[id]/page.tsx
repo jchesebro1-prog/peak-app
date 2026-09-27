@@ -145,6 +145,12 @@ export default async function CustomerDetailPage({
   const custQuotes = quotes.filter((qt) =>
     qt.customerId ? qt.customerId === cust.id : qt.customer === cust.name
   );
+  /* #242 (spec §5) — "Portal activity" line under PortalAccessCard. */
+  const portalQuotes = custQuotes.filter((qt) => qt.source === "portal-catalog");
+  const portalAwaitingApproval = portalQuotes.filter(
+    (qt) => qt.status === "sent" && !!qt.portalAcceptance
+  ).length;
+  const portalInReview = portalQuotes.filter((qt) => !!qt.portalReview).length;
   const openValue = custQuotes
     .filter((qt) => qt.status === "draft" || qt.status === "sent")
     .reduce((a, qt) => a + (qt.value || 0), 0);
@@ -759,6 +765,19 @@ export default async function CustomerDetailPage({
               }))}
               grants={portalGrants}
             />
+
+            {/* #242 — Portal activity: counts over this company's portal-catalog
+                quotes. Hidden when there are none; no /quotes?customer= filter
+                exists yet, so this is plain text, not a link. */}
+            {portalQuotes.length > 0 && (
+              <div style={{ fontSize: 12, color: "#8c919c", padding: "0 2px" }}>
+                Portal activity: {portalQuotes.length} portal quote
+                {portalQuotes.length === 1 ? "" : "s"}
+                {portalAwaitingApproval > 0 &&
+                  ` · ${portalAwaitingApproval} awaiting approval`}
+                {portalInReview > 0 && ` · ${portalInReview} in review`}
+              </div>
+            )}
 
             {/* ---- site visits (D76/#34) — Inbox-scheduled + lead-requested ---- */}
             {visits.length > 0 && (

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { requirePerm, requireUser } from "@/lib/session";
 import { blobEnabled, deleteBlob, putBlob } from "@/lib/blob";
 import { searchDocs } from "@/db/doc-store";
@@ -11,16 +12,26 @@ import {
   createDocument,
   detachDocument,
   getDocument,
+  linkedDocumentsForParts,
   replaceDocumentFile,
   setDocumentLinkDisplay,
   setImageOrder,
 } from "@/lib/stores/part-documents";
+import { getAll as allQuotes } from "@/lib/stores/quotes";
+import { listProjects } from "@/lib/stores/grid-projects";
+import { allGeneratedSpecs } from "@/lib/stores/generated-specs";
 import { applyPrefill, createPrefillStopper, planPrefillFromDavinci } from "@/lib/part-docs/davinci-apply";
 import { buildFetchContext, createFetchBudget, fetchSlot, type FetchOutcome, type FetchTarget } from "@/lib/part-docs/fetch-links";
 import { fetchImageBytes } from "@/lib/part-docs/fetch";
 import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
+import { ownFiles } from "@/lib/part-docs/coverage";
+import { quotedPartStats } from "@/lib/part-docs/quoted-parts";
+import { groupCandidatesByDatasheet, thumbnailCandidates } from "@/lib/part-docs/thumbnail-plan";
+import { renderDatasheetThumbnail } from "@/lib/part-docs/thumbnail";
+import { printOriginFor } from "@/lib/quote-pdf/origin";
+import { RENDER_WORST_CASE_MS } from "@/lib/quote-pdf/render";
 import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
@@ -434,4 +445,87 @@ export async function addImageFromUrlAction(input: { sku: string; url: string })
   await attachDocument(doc.id, [sku], user.name);
   revalidate();
   return { ok: true, documentId: doc.id };
+}
+
+/**
+ * Admin: "Datasheet thumbnails" (#242, spec §5/§1.1). Every quoted part
+ * (the same scope as this page's rows, Labor excluded) that has its own
+ * blob-backed datasheet and no image yet gets one rendered from that
+ * datasheet's page 1 — one PDF renders once and attaches to every SKU that
+ * shares it (thumbnailCandidates groups by datasheet). Runs under a 45s
+ * wall-clock budget like fetchLinksAction; the client button loops calls
+ * until `remaining` reaches 0, since production's gap can exceed one call's
+ * render budget. A single datasheet's render failing (bad PDF, Chrome
+ * unavailable, …) is recorded and the batch moves on — never aborts the
+ * rest of the run.
+ */
+export async function renderThumbnailsAction(): Promise<DocActionResult<{ done: number; failed: number; remaining: number }>> {
+  const user = await requirePerm("manage_users");
+  if (!blobEnabled()) {
+    return { ok: false, error: "File storage isn't configured (no BLOB_READ_WRITE_TOKEN) — nothing can be rendered on this deployment." };
+  }
+  // Resolved once here (this action has real request headers, unlike
+  // renderDatasheetThumbnail's headless-Chrome target) and handed to every
+  // render call in the loop below — see RenderThumbnailDeps.origin.
+  let h: Awaited<ReturnType<typeof headers>> | null = null;
+  try {
+    h = await headers();
+  } catch {
+    h = null;
+  }
+  if (!h) return { ok: false, error: "No request to render thumbnails from." };
+  const where = printOriginFor(process.env, h.get("x-forwarded-host") || h.get("host"), h.get("x-forwarded-proto"));
+  if ("error" in where) return { ok: false, error: where.error };
+  const origin = where.origin;
+
+  const budget = createFetchBudget(FETCH_ACTION_BUDGET_MS);
+
+  const [parts, quotes, gridProjects, generated] = await Promise.all([
+    listCatalog(),
+    allQuotes(),
+    listProjects(),
+    allGeneratedSpecs(),
+  ]);
+  const bySku = new Map(parts.map((p) => [p.sku, p]));
+  // Labor rows are rates, not products — they never take a datasheet or an
+  // image, same exclusion as this page's own quoted-parts scope.
+  const stats = quotedPartStats({ quotes, gridProjects, generated }, (sku) => {
+    const p = bySku.get(sku);
+    return !!p && p.category !== "Labor";
+  });
+  const skus = [...stats.keys()];
+
+  const state = await loadPartDocsState(parts);
+  const imagesBySku = await linkedDocumentsForParts(skus, "image");
+  const ownDatasheetBySku = new Map<string, { id: string; blobKey: string | null }>();
+  for (const sku of skus) {
+    const own = ownFiles(state.index, sku, "datasheet")[0];
+    if (own) ownDatasheetBySku.set(sku, { id: own.id, blobKey: own.blobKey });
+  }
+
+  const candidates = thumbnailCandidates({ skus, imagesBySku, ownDatasheetBySku });
+  const groups = groupCandidatesByDatasheet(candidates);
+
+  let done = 0;
+  let failed = 0;
+  let i = 0;
+  for (; i < groups.length; i++) {
+    // Same rule as fetch-links' budget (I1): the very first render of the
+    // whole call always runs, even if the budget is already tight; every
+    // later one only starts with room for a full worst-case render.
+    if (budget.attempted.count > 0 && budget.deadline - budget.now() < RENDER_WORST_CASE_MS) break;
+    budget.attempted.count++;
+    const g = groups[i];
+    const r = await renderDatasheetThumbnail(g.datasheetId, g.skus, user.name, { origin });
+    if (r.ok) done++;
+    else failed++;
+  }
+  const remaining = groups.length - i;
+
+  if (done > 0) {
+    invalidatePortalIndex();
+    revalidatePath("/catalog/documents");
+    revalidatePath("/catalog");
+  }
+  return { ok: true, done, failed, remaining };
 }
