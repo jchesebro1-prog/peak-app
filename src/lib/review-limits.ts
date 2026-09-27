@@ -67,7 +67,12 @@ export type AutoApprovalSnapshot = { kind: ReviewKind; limit: ReviewLimit; value
 
 /* ---------------- structural inputs (QuoteReview / Quote satisfy them) ---------------- */
 
-export type ReviewLike = { state: string; method?: string | null; auto?: AutoApprovalSnapshot | null };
+export type ReviewLike = {
+  state: string;
+  method?: string | null;
+  decidedBy?: string | null;
+  auto?: AutoApprovalSnapshot | null;
+};
 export type ReviewableQuote = {
   quoteType?: string | null;
   value: number;
@@ -220,15 +225,49 @@ export function canAutoApprove(q: ReviewableQuote, ctx: ReviewLimitContext): Aut
   return ev.fits ? (ev as AutoApprovalEval) : null;
 }
 
+/**
+ * Is the quote unchanged against its auto-approval snapshot? Same kind, a
+ * value at or under the snapshot's, and the same owner (the stamp's
+ * decidedBy). A missing snapshot or owner counts as changed.
+ */
+export function autoSnapshotUnchanged(q: ReviewableQuote): boolean {
+  const r = q.review;
+  const a = r?.auto;
+  if (!r || !a) return false;
+  const owner = quoteOwnerName(q).toLowerCase();
+  const stamped = (r.decidedBy || "").trim().toLowerCase();
+  if (!owner || owner !== stamped) return false;
+  if (typeof q.value !== "number" || !Number.isFinite(q.value) || q.value > a.value) return false;
+  return reviewKindOf(q) === a.kind;
+}
+
 /** Does the quote's approval count right now? In-app, attested and legacy
- *  approvals: exactly as hasApproval. An auto_limit approval: only while the
- *  quote still fits its owner's current limit (value raised, labor added or
- *  limit lowered → no longer approved). */
+ *  approvals: exactly as hasApproval. An auto_limit approval holds while the
+ *  quote is unchanged against its snapshot (autoSnapshotUnchanged) — even if
+ *  the owner's limit was lowered or the owner left the roster afterwards: a
+ *  lowered limit governs NEW grants only. Once the quote changed (value
+ *  raised past the snapshot, labor added, owner changed) it is re-checked
+ *  against the owner's CURRENT limit. */
 export function approvalHolds(q: ReviewableQuote, ctx: ReviewLimitContext): boolean {
   const r = q.review;
   if (!r || r.state !== "approved") return false;
   if (r.method !== "auto_limit") return true;
-  return evaluateReviewLimit(q, ctx).fits;
+  return autoSnapshotUnchanged(q) || evaluateReviewLimit(q, ctx).fits;
+}
+
+/** The auto-approval record should be rewritten when the current evaluation
+ *  fits but no longer matches its snapshot (kind, limit, owner, or a value
+ *  above the granted one) — so the banner never describes an old grant. */
+export function autoSnapshotStale(q: ReviewableQuote, ev: AutoApprovalEval): boolean {
+  const r = q.review;
+  const a = r?.auto;
+  if (!r || r.method !== "auto_limit" || !a) return true;
+  return (
+    a.kind !== ev.kind ||
+    a.limit !== ev.limit ||
+    ev.value > a.value ||
+    (r.decidedBy || "").trim().toLowerCase() !== ev.ownerName.trim().toLowerCase()
+  );
 }
 
 /* ---------------- chip ---------------- */
@@ -256,7 +295,11 @@ export function reviewLimitChip(q: ReviewableQuote, ctx: ReviewLimitContext, vie
   if (approved && r?.method !== "auto_limit") return null;
   if (r?.state === "changes") return null;
   const ev = evaluateReviewLimit(q, ctx);
-  const staleAuto = approved && !ev.fits;
+  const holds = approved && approvalHolds(q, ctx);
+  // An unchanged auto approval stands on its own snapshot after a limit is
+  // lowered; the banner describes that grant, so no "over" chip contradicts it.
+  if (holds && !ev.fits) return null;
+  const staleAuto = approved && !holds;
   if (ev.ownerId == null || ev.limit == null) {
     return staleAuto
       ? { tone: "over", text: "No review limit covers this quote any more — needs review", short: "Needs review", staleAuto: true }

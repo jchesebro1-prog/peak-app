@@ -29,6 +29,7 @@ import {
 } from "@/lib/pipelines";
 import {
   approvalHolds,
+  autoSnapshotStale,
   canAutoApprove,
   NO_REVIEW_LIMITS,
   type AutoApprovalEval,
@@ -138,7 +139,8 @@ export type ReviewState = "none" | "in_review" | "approved" | "changes";
  *   a hard `can("approve")` gate would block that legitimate workflow.
  * - "auto_limit" — #242: the quote fit its OWNER's review limit (Settings →
  *   Admin → Review limits) when it moved to sent/won, so the gate approved
- *   it itself. It counts only while the quote still fits — approvalHolds().
+ *   it itself. It counts while the quote is unchanged against its snapshot,
+ *   or still fits the owner's current limit — approvalHolds().
  * Absent/null on legacy docs decided before this field existed (seed data,
  * pre-punch-60 approvals) — those are still valid approvals, just with an
  * unknown method.
@@ -953,7 +955,10 @@ export function autoApprovedReview(ev: AutoApprovalEval, now: number): QuoteRevi
  * the caller loads the limits.
  * - bypassed or ungated statuses → open (resolveStatusGate, unchanged);
  * - an approval that still holds (in-app, attested, legacy, or an auto
- *   approval the quote still fits) → open, nothing re-stamped;
+ *   approval the quote is unchanged against or still fits) → open; an auto
+ *   approval whose snapshot no longer matches a fitting evaluation (kind,
+ *   limit, owner, or a higher value) is re-stamped in the same write, so the
+ *   banner never describes an old grant — otherwise nothing is re-stamped;
  * - else the owner's review limit: fits → open, with the auto-approval
  *   record to write in the same patch; over / blank / owner off the roster /
  *   changes requested → today's refusal sentence, verbatim.
@@ -967,7 +972,11 @@ export function decideApprovalGate(
 ): ApprovalGateDecision {
   const open = resolveStatusGate(status, null, opts);
   if (open.ok) return { ok: true, stamp: null };
-  if (approvalHolds(q, ctx)) return { ok: true, stamp: null };
+  if (approvalHolds(q, ctx)) {
+    if (q.review?.method !== "auto_limit") return { ok: true, stamp: null };
+    const cur = canAutoApprove(q, ctx);
+    return { ok: true, stamp: cur && autoSnapshotStale(q, cur) ? autoApprovedReview(cur, now) : null };
+  }
   const ev = canAutoApprove(q, ctx);
   if (ev) return { ok: true, stamp: autoApprovedReview(ev, now) };
   return open;

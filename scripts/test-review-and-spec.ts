@@ -10528,6 +10528,7 @@ seeded()
   .then(() => daylite241AsyncChecks())
   .then(() => reviewLimits242AsyncChecks())
   .then(() => reviewLimitChips242AsyncChecks())
+  .then(() => reviewLimitsFix242AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27528,11 +27529,19 @@ import {
       r242Holds(q({ review: { state: "approved", method: null } }), r242None),
     "#242: in-app, attested and legacy approvals hold exactly as today, whatever the limits"
   );
-  const auto = { state: "approved", method: "auto_limit", auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
+  const auto = { state: "approved", method: "auto_limit", decidedBy: "Nic Trapani", auto: { kind: "system_plain" as const, limit: 25000, value: 20000 } };
   ok(r242Holds(q({ review: auto, value: 20000 }), ctx), "#242: an auto_limit approval holds while the quote still fits");
   ok(!r242Holds(q({ review: auto, value: 30000 }), ctx), "#242: stale — value raised over the limit, the auto approval no longer holds");
   ok(!r242Holds(q({ review: auto, value: 20000, spec: est([{ sku: "L", qty: 1, price: 1, cost: 0 }], "labor") }), ctx), "#242: stale — labor added (now the $10,000 with-labor limit), no longer holds");
-  ok(!r242Holds(q({ review: auto, value: 20000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: stale — limit lowered, no longer holds");
+  // Review fix: a lowered limit governs NEW grants only — an unchanged quote keeps its auto approval.
+  ok(r242Holds(q({ review: auto, value: 20000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: limit lowered, quote unchanged against its snapshot — the auto approval still holds");
+  ok(r242Holds(q({ review: auto, value: 18000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: a value LOWERED under the snapshot is still unchanged — holds after a lowered limit");
+  ok(!r242Holds(q({ review: auto, value: 21000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }), "#242: limit lowered AND the value raised past the snapshot — re-checked against the new limit, no longer holds");
+  ok(r242Holds(q({ review: auto, value: 21000 }), ctx), "#242: value raised past the snapshot but still within the current limit — re-checked, holds");
+  ok(r242Holds(q({ review: auto, value: 20000 }), { ...ctx, roster: [] }), "#242: owner removed from the roster, quote unchanged — still holds");
+  ok(!r242Holds(q({ review: auto, value: 21000 }), { ...ctx, roster: [] }), "#242: owner removed and the quote changed — re-checked, no longer holds");
+  ok(!r242Holds(q({ review: auto, value: 20000, owner: "Jena Tolksdorf" }), ctx), "#242: owner changed (not on the stamp) — re-checked against the new owner's limit");
+  ok(!r242Holds(q({ review: { ...auto, auto: null }, value: 1 }), r242None), "#242: an auto approval with no snapshot is re-checked (fails closed with no limits)");
   ok(!r242Holds(q({ review: { state: "in_review" } }), ctx) && !r242Holds(q({ review: null }), ctx), "#242: no approval → does not hold");
 
   const within = r242Chip(q({ value: 20000 }), ctx, "Nic Trapani");
@@ -27552,8 +27561,13 @@ import {
   );
   const stale = r242Chip(q({ review: auto, value: 30000 }), ctx, "Nic Trapani");
   ok(!!stale && stale.tone === "over" && stale.staleAuto === true, "#242 chip: a stale auto approval shows as over the limit, flagged staleAuto");
-  const staleBlank = r242Chip(q({ review: auto, value: 20000 }), { ...ctx, limits: {} }, "Nic Trapani");
-  ok(!!staleBlank && staleBlank.staleAuto && staleBlank.short === "Needs review", "#242 chip: a stale auto approval whose limit was cleared still shows 'needs review'");
+  const staleBlank = r242Chip(q({ review: auto, value: 21000 }), { ...ctx, limits: {} }, "Nic Trapani");
+  ok(!!staleBlank && staleBlank.staleAuto && staleBlank.short === "Needs review", "#242 chip: a changed quote whose limit was cleared shows a stale auto approval 'needs review'");
+  ok(
+    r242Chip(q({ review: auto, value: 20000 }), { ...ctx, limits: {} }, "Nic Trapani") === null &&
+      r242Chip(q({ review: auto, value: 20000 }), { ...ctx, limits: { u1: { system_plain: 15000 } } }, "Nic Trapani") === null,
+    "#242 chip: an unchanged auto approval after the limit was cleared or lowered shows no chip — the banner describes the grant"
+  );
 
   ok(r242Phrase("system_plain") === "system estimates without labor" && r242Phrase("nope") === "this kind of quote", "#242: kind phrases for the approval sentence");
   const r242Src = readFileSync(join(process.cwd(), "src/lib/review-limits.ts"), "utf8");
@@ -27642,7 +27656,32 @@ import { fixtureId as r242Fx, registerFixture as r242Reg } from "./test-fixtures
     !r242Decide("won", { ...base, spec: { sections: [{ kind: "labor", items: [{ sku: "L", qty: 1, price: 100, cost: 0 }] }] }, review: autoRev }, ctx).ok,
     "#242 gate: stale auto approval (labor added, no with-labor limit) is refused"
   );
-  ok(!r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 10000 } } }).ok, "#242 gate: stale auto approval (limit lowered) is refused");
+  const lowered = { ...ctx, limits: { u1: { system_plain: 10000 } } };
+  const keep = r242Decide("won", { ...base, review: autoRev }, lowered);
+  ok(keep.ok && keep.stamp === null, "#242 gate: limit lowered, quote unchanged — the auto approval still passes, snapshot kept (a lowered limit governs new grants only)");
+  ok(!r242Decide("won", { ...base, value: 21000, review: autoRev }, lowered).ok, "#242 gate: limit lowered and the quote changed — re-checked against the new limit, refused");
+  const raisedV = r242Decide("won", { ...base, value: 22000, review: autoRev }, ctx, {}, 2000);
+  ok(
+    raisedV.ok && raisedV.stamp?.method === "auto_limit" && raisedV.stamp.decidedAt === 2000 &&
+      JSON.stringify(raisedV.stamp.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 22000 }),
+    "#242 gate: a changed quote that still fits is re-stamped with the current value in the same write"
+  );
+  const raisedL = r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 40000 } } }, {}, 3000);
+  ok(
+    raisedL.ok && JSON.stringify(raisedL.stamp?.auto) === JSON.stringify({ kind: "system_plain", limit: 40000, value: 20000 }),
+    "#242 gate: snapshot refresh — the owner's limit changed and still fits, so the record names the current limit"
+  );
+  const ctx2 = { roster: [...ctx.roster, { id: "u2", name: "Jena Tolksdorf", status: "active" }], limits: { ...ctx.limits, u2: { system_plain: 50000 } } };
+  const moved = r242Decide("won", { ...base, owner: "Jena Tolksdorf", review: autoRev }, ctx2, {}, 4000);
+  ok(
+    moved.ok && moved.stamp?.decidedBy === "Jena Tolksdorf" && JSON.stringify(moved.stamp.auto) === JSON.stringify({ kind: "system_plain", limit: 50000, value: 20000 }),
+    "#242 gate: snapshot refresh — the owner changed and the new owner's limit fits, re-stamped to the new owner"
+  );
+  const loweredFits = r242Decide("won", { ...base, review: autoRev }, { ...ctx, limits: { u1: { system_plain: 20000 } } }, {}, 5000);
+  ok(
+    loweredFits.ok && loweredFits.stamp?.auto?.limit === 20000,
+    "#242 gate: snapshot refresh — a lowered limit the unchanged quote still fits re-stamps to the current limit"
+  );
   ok(
     r242Decide("won", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "engine-owned-flow" }).ok &&
       r242Decide("sent", { ...base, value: 30000, review: rv() }, ctx, { bypassApprovalGate: "historical-import" }).ok,
@@ -27716,14 +27755,23 @@ async function reviewLimits242AsyncChecks(): Promise<void> {
 
     const d = await mk("lowered");
     await r242SetStatus(d.id, "sent", "Test");
+    const d2 = await mk("lowered-changed");
+    await r242SetStatus(d2.id, "sent", "Test");
+    await r242Update(d2.id, { value: 21000 });
     await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 10000 } } });
+    const wonD = await r242SetStatus(d.id, "won", "Test");
+    const reD = await r242Get(d.id);
+    ok(
+      wonD?.status === "won" && reD?.review.method === "auto_limit" && reD.review.auto?.limit === 25000,
+      "#242 store: lowering the owner's limit leaves an UNCHANGED quote's auto approval standing — Won passes, the original grant kept"
+    );
     let refusedD = false;
     try {
-      await r242SetStatus(d.id, "won", "Test");
+      await r242SetStatus(d2.id, "won", "Test");
     } catch (e) {
       refusedD = r242IsRefusal(e);
     }
-    ok(refusedD, "#242 store: lowering the owner's limit un-approves an auto approval that no longer fits");
+    ok(refusedD && (await r242Get(d2.id))?.status === "sent", "#242 store: after a lowered limit, a CHANGED quote is re-checked against the new limit and refused");
 
     const e2 = await mk("inapp", { value: 90000 });
     await r242Approve(e2.id, { by: "Jeff Chesebro" });
@@ -27799,6 +27847,90 @@ async function reviewLimitChips242AsyncChecks(): Promise<void> {
     const theirs = await r242ChipFor({ ...q, value: 6000 }, "Jeff Chesebro");
     ok(theirs?.tone === "over" && theirs.text === "Over Rae's $5,000 limit — needs review", "#242 store: another viewer sees the owner's name and dollar limit");
   } finally {
+    await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
+  }
+}
+
+/* --- #242 T3 review fixes: snapshot refresh, lowered limit = new grants only --- */
+import { attestApproval as r242Attest, requestChanges as r242RequestChanges } from "@/lib/stores/quotes";
+import { setStatus as r242SetUserStatus } from "@/lib/users";
+async function reviewLimitsFix242AsyncChecks(): Promise<void> {
+  const before = await r242Patch();
+  const email = "r242.owner@example.test";
+  const owner = (await r242UserByEmail(email)) ?? (await r242AddUser({ name: "Rae Twofortytwo", email }));
+  const leaverEmail = "r242.leaver@example.test";
+  const leaver = (await r242UserByEmail(leaverEmail)) ?? (await r242AddUser({ name: "Lee Twofortytwo", email: leaverEmail }));
+  await r242SetUserStatus(leaver.id, "active");
+  const mk = async (slug: string, who: string, over: Partial<R242Quote> = {}) => {
+    const id = r242Fx(242, "fix-" + slug);
+    r242Reg("quotes", id);
+    return r242Create({ id, name: "#242 fix " + slug, customer: "Spec fixture", owner: who, value: 20000, ...over });
+  };
+  try {
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 25000 }, [leaver.id]: { system_plain: 25000 } } });
+
+    const w = await mk("won", owner.name);
+    const wonW = await r242SetStatus(w.id, "won", "Someone Else");
+    const reW = await r242Get(w.id);
+    ok(
+      wonW?.status === "won" && reW?.review.state === "approved" && reW.review.method === "auto_limit" && reW.review.decidedBy === owner.name &&
+        JSON.stringify(reW.review.auto) === JSON.stringify({ kind: "system_plain", limit: 25000, value: 20000 }),
+      "#242 store: draft → Won within the owner's limit auto-approves in the same write"
+    );
+
+    const l = await mk("labor", owner.name);
+    await r242SetStatus(l.id, "sent", "Test");
+    await r242Update(l.id, { spec: { sections: [{ kind: "labor", items: [{ sku: "LAB-1", qty: 1, price: 500, cost: 0 }] }] } });
+    let refusedL = false;
+    try {
+      await r242SetStatus(l.id, "won", "Test");
+    } catch (e) {
+      refusedL = r242IsRefusal(e);
+    }
+    ok(refusedL && (await r242Get(l.id))?.status === "sent", "#242 store: labor added after the auto approval → re-evaluated (no with-labor limit) and Won is refused");
+
+    const u = await mk("leaver-unchanged", leaver.name);
+    await r242SetStatus(u.id, "sent", "Test");
+    const c = await mk("leaver-changed", leaver.name);
+    await r242SetStatus(c.id, "sent", "Test");
+    await r242Update(c.id, { value: 21000 });
+    await r242SetUserStatus(leaver.id, "removed");
+    const wonU = await r242SetStatus(u.id, "won", "Test");
+    ok(wonU?.status === "won", "#242 store: owner removed, quote unchanged — the auto approval still holds and Won passes");
+    let refusedC = false;
+    try {
+      await r242SetStatus(c.id, "won", "Test");
+    } catch (e) {
+      refusedC = r242IsRefusal(e);
+    }
+    ok(refusedC && (await r242Get(c.id))?.status === "sent", "#242 store: owner removed and the quote changed — re-checked, Won refused");
+    await r242SetUserStatus(leaver.id, "active");
+
+    const r = await mk("refresh", owner.name);
+    await r242SetStatus(r.id, "sent", "Test");
+    await r242Update(r.id, { value: 23000 });
+    await r242SetSettings({ reviewLimits: { [owner.id]: { system_plain: 30000 } } });
+    await r242SetStatus(r.id, "won", "Test");
+    const reR = await r242Get(r.id);
+    ok(
+      reR?.status === "won" && reR.review.method === "auto_limit" &&
+        JSON.stringify(reR.review.auto) === JSON.stringify({ kind: "system_plain", limit: 30000, value: 23000 }),
+      "#242 store: snapshot refresh — a changed quote that still fits is re-stamped with the current limit and value in the Won write"
+    );
+
+    const a = await mk("attest", owner.name);
+    await r242SetStatus(a.id, "sent", "Test");
+    await r242Attest(a.id, { by: owner.name, note: "Reviewed with Jeff on Teams" });
+    const reA = await r242Get(a.id);
+    ok(reA?.review.method === "attested" && reA.review.auto === null, "#242 store: attestApproval over an auto approval clears its snapshot");
+
+    const ch = await mk("changes", owner.name);
+    await r242SetStatus(ch.id, "sent", "Test");
+    await r242RequestChanges(ch.id, { by: "Jeff Chesebro", note: "Tighten scope" });
+    const reCh = await r242Get(ch.id);
+    ok(reCh?.review.state === "changes" && reCh.review.auto === null, "#242 store: requestChanges over an auto approval clears its snapshot");
+  } finally {
+    await r242SetUserStatus(leaver.id, "active");
     await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
   }
 }
