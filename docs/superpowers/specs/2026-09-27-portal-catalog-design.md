@@ -120,7 +120,7 @@ browseReason(f, rule) → "Shown by override" | "Hidden by override" | "Has imag
 ```
 
 `quoteCount` counts distinct non-deleted quotes (any status, any customer, excluding Daylite
-imports and portal carts) whose spec lines carry the SKU and whose `createdAt` falls inside the
+imports) whose spec lines carry the SKU and whose `createdAt` falls inside the
 window. It is computed server-side into a cached per-SKU map (recomputed at most hourly and on
 catalog/document writes), not per request.
 
@@ -270,24 +270,34 @@ margins, plus `por?: true`, `fixtureOptions?`, `curtainInputs?`.
 
 ### 4.1 Cart
 
-A draft quote with `portalCart: { grantId }` — **one open cart per portal user** (grant). Carts are
-excluded from the Quotes hub, pipeline, Home metrics, reports, search and the browsable quote count.
-Abandoned carts are left in place (invisible to staff); a cleanup is a follow-up if they pile up.
+The cart is **not** a quote row. Every quote insert gets an estimate number immediately (#223:
+`numberNewDoc` → `assign_estimate_numbers()`), so a cart-as-draft-quote would burn a number per
+abandoned cart and need a "hide carts" exception on every staff surface. Instead:
+
+- A new doc collection **`portal_carts`**, one document per portal grant (`id` = grant id):
+  `{ id, customerId, venueId?, lines: CartLine[], updatedAt }`, where `CartLine` =
+  `{ lineId, kind: "part" | "fixture" | "curtain", sku?, fixtureId?, fixtureOptions?, curtainInputs?, qty }`.
+  **No prices are stored on the cart** — they are computed on every read (§2.1).
+- Carts never appear on any staff surface, so no exclusion logic is needed anywhere.
+- **Generate** creates the quote (§4.2/§4.3) — that insert is what allocates the estimate number —
+  then empties the cart.
+- A cart untouched for 90 days is simply shown empty-with-notice on next visit (cleanup of the rows
+  themselves is a follow-up).
 
 ### 4.2 Generate — firm path
 
-- Clear `portalCart`; allocate the estimate number (#223); `status: "sent"`; stamp
+- Create the quote (the insert allocates its estimate number, #223); `status: "sent"`; stamp
   `portalFirm: { generatedAt, validUntil: generatedAt + validityDays }`.
 - Generate the saved PDF (#222) with the review line, freight with miles, "Plus applicable sales tax"
   and "Valid until <date>".
 - **Owner** = the company's account owner; none → unassigned (Sales queue).
-- Bell notice to the owner: "Portal quote Q-2107 generated — $4,812".
+- Bell notice to the owner: "Portal quote EST-1107 generated — $4,812".
 - The portal lists it with its PDF and **Accept**.
 
 ### 4.3 Generate — review path
 
-- Clear `portalCart`; stay `draft`; stamp `portalReview: { requestedAt, reasons: string[] }`;
-  allocate the estimate number so the customer has a reference.
+- Create the quote as `draft` (numbered on insert, so the customer has a reference); stamp
+  `portalReview: { requestedAt, reasons: string[] }`.
 - A **"Portal quote needs review"** item in the Leads SLA queue for the owner (unassigned → queue).
 - The customer sees it as **"In review — Peak will confirm pricing"** (the existing
   `portalListsQuote` rule already lists a customer's own portal drafts; it is extended to
@@ -311,7 +321,7 @@ The dialog asks:
 - **PO file** (optional) through the #218 portal upload, linked to the quote.
 
 `portalAcceptance` extends to `{ at, by, byEmail, purchaseMethod, notes?, poDocumentId? }`
-(additive; old records stay valid). The owner gets a to-do **"Approve portal order Q-2107"**.
+(additive; old records stay valid). The owner gets a to-do **"Approve portal order EST-1107"**.
 
 Staff, on the quote: **Approve** → `won` through the normal status path (the normal Won flow runs).
 **Decline with note** → clears `portalAcceptance`, stores `portalDecline: { at, by, note }` shown in
@@ -381,11 +391,10 @@ method, notes and PO file with **Approve** / **Decline with note**.
   `quoteMode`; unit pricing (cost path, list fallback, each POR reason, stale-cost on/off); fixture
   pricing with a POR component and a hidden required component; `validUntil` / accept eligibility;
   the Luhn guard.
-- **DB-backed specs:** cart create/one-per-grant; generate firm (number, sent, validUntil, owner,
+- **DB-backed specs:** cart create/one-per-grant (no quote row, no estimate number until Generate); generate firm (number, sent, validUntil, owner,
   notice) and review (draft, queue item, portal listing); accept → approve → won; accept → decline;
   expiry → refresh as a new revision, and refresh flipping to review; doc route allow/deny (hidden
-  link, hidden part, other customer, accessory coverage, image not coverable); cart exclusion from
-  hub/metrics/quote counts; Estimator new-section freight default from a venue.
+  link, hidden part, other customer, accessory coverage, image not coverable);  Estimator new-section freight default from a venue.
 - **Smoke GETs:** `/portal/catalog`, `/portal/catalog/quote`, `/portal/estimate` → redirect.
 - The four gates (tsc, test:specs, test:smoke, eslint vs baseline) plus `next build` (the portal
   pages are client-heavy; guard against a client component importing a store).
@@ -401,6 +410,6 @@ method, notes and PO file with **Approve** / **Decline with note**.
 - **Quick Design** adopting the freight rule.
 - **Public sign-up** (creates a customer + grant) and public browse.
 - Stock / lead time; online card payment.
-- Abandoned-cart cleanup.
+- Abandoned-cart row cleanup.
 - Stale-doc cleanup: `DECISIONS.md` D60 (grant length 6 months vs the 90-day code) and D63 (#48
   "parked") are out of date.
