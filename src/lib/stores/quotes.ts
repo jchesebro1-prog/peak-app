@@ -209,7 +209,24 @@ export type Quote = {
   /** Non-binding portal acceptance (IDEAS #47 P3): a customer accepted this
    *  quote in the portal. Purely a follow-up flag — the team confirms by
    *  marking the quote Won, which runs the normal spawn machinery. */
-  portalAcceptance?: { at: number; by: string; byEmail: string } | null;
+  portalAcceptance?: {
+    at: number;
+    by: string;
+    byEmail: string;
+    /** #242 (spec §4.4) — additive; pre-#242 acceptances carry none of these. */
+    purchaseMethod?: "po" | "card" | "check" | "other";
+    notes?: string;
+    poDocumentId?: string | null;
+  } | null;
+  /** #242 (spec §4.2) — a FIRM portal-catalog generation: every line priced by
+   *  rule (portal-pricing.ts), sent at once, good until `validUntil`. Absent /
+   *  null on every other quote, including a review quote staff later send. */
+  portalFirm?: { generatedAt: number; validUntil: number } | null;
+  /** #242 (spec §4.3) — a portal-catalog generation waiting on Peak: some line
+   *  is price on request. Cleared when staff send it. */
+  portalReview?: { requestedAt: number; reasons: string[] } | null;
+  /** #242 (spec §4.4) — staff declined the customer's portal acceptance. */
+  portalDecline?: { at: number; by: string; note: string } | null;
   /** Renewal provenance (IDEAS #36): the completed flame job / inspection
    *  record this quote renews — the ✉ one-click outreach reuses an existing
    *  renewal quote for the cycle instead of minting a duplicate. */
@@ -283,6 +300,8 @@ export const QUOTE_CONTENT_FIELDS = [
   "inspection",
   "vendorQuotes",
   "pdfOptions",
+  // #242: a firm portal quote prints "Valid until <date>".
+  "portalFirm",
 ] as const;
 
 /** A comparable key of what the customer document shows. Pure. */
@@ -386,12 +405,13 @@ export function isImportedHistoryQuote(q: Pick<Quote, "source">): boolean {
 type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "portalAcceptance">;
 
 /** Customer portal list rule: the grant's customer's published quotes plus
- *  their own self-serve drafts — never an internal draft, never imported
- *  Daylite history. */
+ *  their own self-serve drafts (the retired estimate builder's
+ *  "portal-self-serve", and #242's "portal-catalog" review quotes) — never an
+ *  internal draft, never imported Daylite history. */
 export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
   if (!customerId || q.customerId !== customerId) return false;
   if (isImportedHistoryQuote(q)) return false;
-  return q.status !== "draft" || q.source === "portal-self-serve";
+  return q.status !== "draft" || q.source === "portal-self-serve" || q.source === "portal-catalog";
 }
 
 /** Customer portal Accept rule (button AND server action): a listed quote,
@@ -876,9 +896,13 @@ export async function restoreQuoteRevision(
  * approval record to find because the approval (if any) happened elsewhere.
  * Without this, importing a spreadsheet of won/lost history would throw on the
  * first non-draft row. The importer is already gated behind `manage_users`.
+ *
+ * `"portal-firm"` exists for `sendPortalFirm` (src/lib/portal-quotes.ts) only,
+ * and opens `sent` only — a portal quote reaches `won` through the real gate.
  */
 export type SetStatusOpts = {
-  bypassApprovalGate?: "engine-owned-flow" | "historical-import";
+  // #242: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
+  bypassApprovalGate?: "engine-owned-flow" | "historical-import" | "portal-firm";
 };
 
 /**
@@ -901,6 +925,9 @@ export function resolveStatusGate(
     opts.bypassApprovalGate === "historical-import"
   )
     return { ok: true };
+  // #242: a firm portal quote is priced by rule end to end (portal-pricing.ts); Peak's approval is the Approve step on acceptance.
+  // It opens the SEND only — Approve (→ won) stays on the normal gate.
+  if (opts.bypassApprovalGate === "portal-firm" && status === "sent") return { ok: true };
   if (status !== "won" && status !== "sent") return { ok: true };
   return requireApprovalToAdvance(review, status === "won" ? "won" : "send");
 }

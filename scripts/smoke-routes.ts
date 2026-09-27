@@ -158,6 +158,12 @@ const ROUTES = [
   "/portal/catalog?preview=lakefront&part=no-such-part",
   "/portal/estimate",
   "/portal/estimate?preview=lakefront",
+  // #242 Task 12: the cart page — signed out, and a team preview (read-only);
+  // /portal with a Generate banner flag (the quote id isn't this customer's,
+  // so the banner names no number).
+  "/portal/catalog/quote",
+  "/portal/catalog/quote?preview=lakefront",
+  "/portal?preview=lakefront&generated=firm&q=Q-0",
   // native sign-in hand-off (spec 2026-09-21-native-auth-handoff): bad GET
   // input redirects to /login rather than 4xx, so both must stay 3xx here.
   "/api/native/auth/start",

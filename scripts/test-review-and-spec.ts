@@ -10543,6 +10543,7 @@ seeded()
   .then(() => portal242CartAsyncChecks())
   .then(() => portal242CatalogBrowseAsyncChecks())
   .then(() => portal242SidebarAsyncChecks())
+  .then(() => portal242GenerateAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -22390,7 +22391,8 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
     "src/lib/design/curtain-pricing.ts", "src/lib/curtain-pricing.ts", "src/lib/curtain-geom.ts",
     "src/lib/design/equipment-pricing.ts", "src/lib/design/equipment-map.ts", "src/lib/design/grid-curtains.ts",
     "src/lib/design/auto-estimate.ts", "src/app/(app)/estimator/pricing.ts", "src/app/(app)/estimator/page.tsx",
-    "src/app/portal/actions.ts", "src/app/portal/estimate/page.tsx", "src/app/portal/estimate/estimate-builder.tsx",
+    // #242 Task 12: the portal estimate builder is deleted (the catalog cart replaced it).
+    "src/app/portal/actions.ts", "src/app/portal/estimate/page.tsx",
     "src/app/(app)/design/grid/[id]/page.tsx", "src/app/(app)/design/grid/[id]/editor.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx",
   ];
   for (const f of mirrors227) {
@@ -25042,10 +25044,16 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
     ok(/  if \(q\) await scheduleQuotePdf\(q\.id\);\n  return \(q && q\.id\) \|\| editingId \|\| null;/.test(s222(`src/app/(app)/${k}/quote/actions.ts`)), `#222 ${k}: every save schedules the proposal-letter PDF`);
     ok(/export const maxDuration = 120;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 120 s`);
   }
-  // #242 Task 10: /portal/estimate is retired to a redirect (it hosts no
-  // submit any more), so the maxDuration half of this check moved off it;
-  // submitPortalEstimate itself goes in Task 12.
-  ok(/scheduleQuotePdf\(created\.id\)/.test(s222("src/app/portal/actions.ts")) && /redirect\(/.test(s222("src/app/portal/estimate/page.tsx")), "#222 a portal self-serve estimate gets its PDF too (#242: the estimate page now only redirects)");
+  // #242 Tasks 10/12: /portal/estimate only redirects and submitPortalEstimate
+  // is gone; a portal quote is now made by the catalog cart's Generate, which
+  // schedules its PDF — before the firm send, as every save does — from a page
+  // that gives the after() render 120 s.
+  const pq222 = s222("src/lib/portal-quotes.ts");
+  const firm222 = pq222.slice(pq222.indexOf("export async function sendPortalFirm"), pq222.indexOf("function writable"));
+  ok(/redirect\(/.test(s222("src/app/portal/estimate/page.tsx")) && !/submitPortalEstimate/.test(s222("src/app/portal/actions.ts")), "#222 the retired portal estimate page only redirects; its submit is gone (#242)");
+  ok(firm222.includes("scheduleQuotePdf(quoteId)") && firm222.indexOf("scheduleQuotePdf(quoteId)") < firm222.indexOf("setStatus(quoteId") && /scheduleQuotePdf\(created\.id\)/.test(pq222),
+    "#222 a portal catalog quote gets its PDF too — pending before the firm send (#242)");
+  ok(/export const maxDuration = 120;/.test(s222("src/app/portal/catalog/quote/page.tsx")), "#222 the portal cart page (Generate) gives its after() render 120 s (#242)");
   const cfg = s222("next.config.ts");
   ok(/source: "\/api\/quotes\/:id\/pdf"[\s\S]{0,200}SAMEORIGIN/.test(cfg) && cfg.indexOf("SAMEORIGIN") > cfg.indexOf('value: "DENY"'), "#222 next.config: only the team PDF route may be framed, by the app itself — after the global DENY");
   const team = s222("src/app/api/quotes/[id]/pdf/route.ts");
@@ -26333,12 +26341,15 @@ import { GROUPS as sew227Groups } from "@/lib/stores/pricing";
   ok(rd("src/app/(app)/estimator/page.tsx").includes("loadCurtainSewingPct()") && rd("src/app/(app)/estimator/page.tsx").includes("curtainSewingPct={curtainSewingPct}") &&
       rd("src/app/(app)/estimator/estimator-client.tsx").includes("{ sewingPct: curtainSewingPct }") && rd("src/app/(app)/estimator/curtain-modal.tsx").includes("{ sewingPct }"),
     "#227 late: the Estimator reads the rule on the server and hands it to its client curtain math");
-  // #242 Task 10: the portal estimate PAGE is retired to a redirect (no preview
-  // pricing left there); the submit path keeps reading the rule until Task 12.
-  ok(rd("src/app/portal/actions.ts").includes("loadCurtainSewingPct()") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft"), "#227 late: the portal estimate submit reads the rule (#242: the preview page is retired)");
+  // #242 Tasks 10/12: the portal estimate page and its submit are retired —
+  // portal curtains are price on request (Peak prices them in the Estimator,
+  // which reads the rule above), so no portal path prices fabric any more.
+  ok(!rd("src/app/portal/actions.ts").includes("curtainCost(") && !rd("src/app/portal/estimate/page.tsx").includes("fabricSellPerSqft") && !rd("src/lib/portal-pricing.ts").includes("curtainCost("),
+    "#227 late: no portal path prices a curtain outside the rule (#242: portal curtains are price on request)");
   ok(rd("src/app/(app)/design/grid/[id]/page.tsx").includes("loadCurtainSewingPct()") && rd("src/lib/design/grid-quote.ts").includes("loadCurtainSewingPct()") && rd("src/lib/stores/equipment-map.ts").includes("loadCurtainSewingPct()"),
     "#227 late: the Grid editor, the Grid quote and the Equipment-map price context read the rule");
-  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/estimate/estimate-builder.tsx"];
+  // #242 Task 12: the portal estimate builder is deleted; the portal cart (which shows curtain requests) takes its place here.
+  const clients = ["src/app/(app)/estimator/estimator-client.tsx", "src/app/(app)/estimator/curtain-modal.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx", "src/app/portal/catalog/quote/cart-client.tsx"];
   ok(clients.every((f) => !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db)/m.test(rd(f))), "#227 late: no client curtain file imports a VALUE from a store");
 }
 
@@ -28634,4 +28645,188 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
     d242Invalidate();
     await removeCustomer(CO);
   }
+}
+
+/* ======================================================================
+   Portal catalog — the cart page + Generate (#242, Task 12; spec §3.4,
+   §4.1–4.3, §8). Pure: the portal additions to the quote document data
+   (review + tax lines, Valid until, freight miles — never a %), the
+   "portal-firm" gate bypass (send only), the list rule. DB: Generate firm
+   (numbered, sent, 30-day validity, owner, freight % by distance, value =
+   Estimator totals, cart emptied) and review (numbered draft, reason, listed
+   for its customer only), the guard copies, the owner fallback, the rate
+   limit, preview/no-session refusals and the cart page's edit actions.
+   Registered in the async chain as portal242GenerateAsyncChecks().
+   ====================================================================== */
+import {
+  generatePortalQuote as d242Generate,
+  GENERATE_EMPTY_COPY as d242EmptyCopy,
+  GENERATE_NO_VENUE_COPY as d242NoVenueCopy,
+  GENERATE_RATE_COPY as d242GenRateCopy,
+  GENERATE_UNAVAILABLE_COPY as d242UnavailCopy,
+  GENERATE_LIMIT as d242GenLimit,
+} from "@/lib/portal-quotes";
+import { removeCartLineFor as d242RemoveFor, setCartVenueFor as d242VenueFor, updateCartLineFor as d242UpdateFor } from "@/lib/portal-cart-actions";
+import { portalDocumentExtras as d242DocExtras, quoteDocumentDataFor as d242DocData } from "@/lib/quote-pdf/quote-document-data";
+import { get as d242GetQuote, portalCanAcceptQuote as d242CanAcceptQuote, portalListsQuote as d242Lists, resolveStatusGate as d242Gate } from "@/lib/stores/quotes";
+import { totals as d242Totals } from "@/app/(app)/estimator/pricing";
+import { get as d242GetCustomer } from "@/lib/stores/customers";
+import { rateLimit as d242RateLimit } from "@/lib/rate-limit";
+import type { SpecSection as D242Section } from "@/app/(app)/estimator/types";
+import { execFileSync as d242ExecFile } from "node:child_process";
+{
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const sec = (miles: number | null): D242Section => ({ id: "S", name: "S", kind: "materials", mfr: "", freightPct: 4, freightAuto: false, freightMiles: miles, items: [] });
+  ok(eq(d242DocExtras({ source: "estimator", portalFirm: null }, [sec(412)]), { standingLines: [], validUntilMs: null, freightLabel: "Freight & delivery" }),
+    "#242 quote document: a non-portal quote gets no standing lines, no validity and the plain freight label (miles never printed)");
+  const until = new Date(2026, 9, 27, 12).getTime();
+  const firm = d242DocExtras({ source: "portal-catalog", portalFirm: { generatedAt: until - 30 * 86400000, validUntil: until } }, [sec(1234.4)]);
+  ok(eq(firm.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax.", "Valid until October 27, 2026"]) && firm.validUntilMs === until,
+    "#242 quote document: a firm portal quote prints the review line, the tax line and Valid until <Month D, YYYY>");
+  ok(firm.freightLabel === "Freight & delivery — 1,234 mi" && !firm.freightLabel.includes("%"), "#242 quote document: portal freight reads Freight & delivery — N mi, never a %");
+  const review = d242DocExtras({ source: "portal-catalog", portalFirm: null }, [sec(null)]);
+  ok(eq(review.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax."]) && review.validUntilMs === null && review.freightLabel === "Freight & delivery",
+    "#242 quote document: a review portal quote has no Valid until; unknown distance prints the plain freight label");
+  const none = { state: "none", submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" } as never;
+  ok(d242Gate("sent", none, { bypassApprovalGate: "portal-firm" }).ok && !d242Gate("won", none, { bypassApprovalGate: "portal-firm" }).ok && !d242Gate("sent", none).ok,
+    "#242 gate: the portal-firm bypass opens the send only — Approve (→ won) and every other caller stay gated");
+  const base = { customerId: "CO-1", status: "draft" as const, source: "portal-catalog", portalAcceptance: null };
+  ok(d242Lists(base, "CO-1") && !d242Lists(base, "CO-2") && !d242Lists({ ...base, source: "estimator" }, "CO-1"), "#242 list rule: a portal-catalog draft is listed for its own customer only; internal drafts stay hidden");
+  const gen = readFileSync(join(process.cwd(), "src/lib/portal-quotes.ts"), "utf8");
+  const firmBody = gen.slice(gen.indexOf("export async function sendPortalFirm"), gen.indexOf("function writable"));
+  const firmCallers = d242ExecFile("grep", ["-rl", 'bypassApprovalGate: "portal-firm"', "src"], { cwd: process.cwd(), encoding: "utf8" }).trim().split("\n");
+  ok((gen.match(/bypassApprovalGate: "portal-firm"/g) || []).length === 1 && firmBody.includes('bypassApprovalGate: "portal-firm"') && eq(firmCallers, ["src/lib/portal-quotes.ts"]),
+    "#242 gate: sendPortalFirm is the one caller of the portal-firm bypass");
+  const cc = readFileSync(join(process.cwd(), "src/app/portal/catalog/quote/cart-client.tsx"), "utf8");
+  ok(cc.startsWith('"use client"') && !/^import\s+(?!type\b)[^;]*?from "@\/(lib\/stores\/|db|lib\/portal-pricing|lib\/portal-quotes)/m.test(cc) && !/freight\.pct|\.sections\b|\bcost\b/.test(cc),
+    "#242 cart page: the client imports no store/pricing values and never reads a freight %, sections or cost");
+}
+
+async function portal242GenerateAsyncChecks(): Promise<void> {
+  const P = fixtureId(242, "gen-part");
+  const PH = fixtureId(242, "gen-hidden");
+  const CO = fixtureId(242, "gen-co");
+  const CO2 = fixtureId(242, "gen-co-noowner");
+  const CO_X = fixtureId(242, "gen-co-other");
+  const G = fixtureId(242, "gen-grant");
+  const G2 = fixtureId(242, "gen-grant-2");
+  const GR = fixtureId(242, "gen-grant-rate");
+  for (const g of [G, G2, GR]) registerFixture("portal_carts", g);
+  const NOW = new Date(2026, 8, 27, 12).getTime();
+  const DAY = 86400000;
+  const made: string[] = [];
+  const sess = { grantId: G, customerId: CO, name: "Pat Buyer", email: "pat@example.com" };
+  const run = async (s: typeof sess | null) => {
+    const r = await d242Generate(s, { now: NOW, schedulePdf: false });
+    if (r.ok) {
+      made.push(r.quoteId);
+      registerFixture("quotes", r.quoteId);
+    }
+    return r;
+  };
+  try {
+    const owner = (await activeUsers())[0]?.name || "";
+    await d242MergeUpsert(P, { desc: "Test242 Gen Part", category: "Test242 GenCat", unit: "ea", list: 120, cost: 70 });
+    await d242MergeUpsert(PH, { desc: "Test242 Gen Hidden", category: "Test242 GenCat", unit: "ea", list: 50, cost: 10, portalVisibility: "hide" });
+    for (const s of [P, PH]) registerFixture("catalog_parts", s);
+    const venue = { id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium", travelMiles: 450 };
+    await upsertCustomer({ id: CO, name: "Test242 Gen Co", type: "Education", pricingTier: "silver", owner, locations: [venue], contacts: [] });
+    await upsertCustomer({ id: CO2, name: "Test242 Gen Co Two", type: "Education", locations: [{ ...venue, id: "w1" }], contacts: [] });
+    await upsertCustomer({ id: CO_X, name: "Test242 Gen Co Other", type: "Education", locations: [{ ...venue, id: "x1" }], contacts: [] });
+    d242Invalidate();
+    const cust = await d242GetCustomer(CO);
+    const hall = cust?.locations.find((l) => l.id === "v1");
+    ok(!!owner && cust?.owner === owner && !!hall && hall.travelMiles === 450, "#242 generate: the fixture company has an owner and a venue 450 mi out");
+
+    // Refusals first — none of these spends a Generate or makes a quote.
+    ok(eq242(await run(null), { ok: false, error: "Your access link has expired — open the link we sent you again." }), "#242 generate: no session → the expired-link copy");
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
+    const pv = await run({ ...sess, grantId: "preview" });
+    ok(!pv.ok && pv.error === "Your access link has expired — open the link we sent you again.", "#242 generate: a team preview (grantId preview) never generates");
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "Your quote is empty." }) && d242EmptyCopy === "Your quote is empty.", "#242 generate: an empty cart → Your quote is empty.");
+    await d242SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }) && d242NoVenueCopy === "Pick the venue this is for.", "#242 generate: no venue → Pick the venue this is for.");
+    await d242SaveCart({ id: G, customerId: CO, locationId: "x1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "Pick the venue this is for." }), "#242 generate: another company's venue id counts as no venue");
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
+    ok(eq242(await run(sess), { ok: false, error: "None of these items can be quoted right now." }) && d242UnavailCopy === "None of these items can be quoted right now.",
+      "#242 generate: every line no longer available → None of these items can be quoted right now.");
+    ok(made.length === 0, "#242 generate: no refusal made a quote");
+
+    // Firm: one priced part (+ a no-longer-available line, left out).
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 2 }, { lineId: "h", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
+    const rf = await run(sess);
+    ok(rf.ok && rf.mode === "firm", "#242 generate firm: every line priced → a firm quote");
+    const qf = rf.ok ? await d242GetQuote(rf.quoteId) : null;
+    const secs = ((qf?.spec as { sections?: D242Section[] } | null)?.sections ?? []) as D242Section[];
+    ok(!!qf && qf.status === "sent" && qf.source === "portal-catalog" && typeof qf.estNo === "number", "#242 generate firm: sent at once, source portal-catalog, numbered on insert");
+    ok(!!qf?.portalFirm && qf.portalFirm.generatedAt === NOW && qf.portalFirm.validUntil === NOW + 30 * DAY && !qf.portalReview, "#242 generate firm: portalFirm good for 30 days from generation; no review stamp");
+    ok(qf?.owner === owner && qf?.contactName === "Pat Buyer" && qf?.customerId === CO && qf?.locationId === "v1" && qf?.name === "Portal quote — " + (hall?.label || hall?.locationName || "Venue"),
+      "#242 generate firm: owned by the company's owner, attn the grant's name, for the picked venue");
+    ok(secs.length === 1 && secs[0].freightPct === 4 && secs[0].freightMiles === 450 && secs[0].items.length === 1 && secs[0].items[0].sku === P && secs[0].items[0].cost === 70,
+      "#242 generate firm: 450 mi → freight 4 %; the spec keeps cost for staff and leaves the unavailable line out");
+    ok(!!qf && qf.value === Math.round(d242Totals(secs, 0).grand) && qf.value > 0, "#242 generate firm: value = the Estimator's totals().grand");
+    ok(!!qf && (qf.history || []).some((h) => h.to === "sent") && (qf.revisions || []).some((r) => r.reason === "sent"), "#242 generate firm: sent through setStatus (history + sent revision)");
+    ok(!!qf && d242Lists(qf, CO) && d242CanAcceptQuote(qf, CO) && !d242Lists(qf, CO_X), "#242 generate firm: listed and acceptable for its customer only");
+    ok((await d242GetCart(G, CO)).lines.length === 0, "#242 generate firm: the cart is empty afterwards");
+    if (qf) {
+      const doc = d242DocData(qf, cust, { companyName: "Peak", logoDark: null });
+      const untilLabel = new Date(NOW + 30 * DAY).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      ok(eq242(doc.standingLines, ["All quotes are subject to Peak review and approval.", "Plus applicable sales tax.", "Valid until " + untilLabel]) && doc.validUntilMs === NOW + 30 * DAY,
+        "#242 generate firm: the quote PDF data carries the review line, the tax line and Valid until");
+      ok(doc.freightLabel === "Freight & delivery — 450 mi" && !JSON.stringify(doc.standingLines).includes("%"), "#242 generate firm: the PDF freight line reads Freight & delivery — 450 mi");
+    }
+
+    // Review: a part + a curtain (always price on request).
+    const curtain = { name: "Main Drape", fabricSku: "", fabricName: "", qty: "1", width: "30", height: "18", fullness: "50" as const };
+    await d242SaveCart({ id: G, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "c", kind: "curtain", curtainInputs: curtain, qty: 1 }], updatedAt: NOW });
+    const rr = await run(sess);
+    ok(rr.ok && rr.mode === "review", "#242 generate review: a price-on-request line → review");
+    const qr = rr.ok ? await d242GetQuote(rr.quoteId) : null;
+    ok(!!qr && qr.status === "draft" && typeof qr.estNo === "number" && qr.estNo !== qf?.estNo, "#242 generate review: a numbered draft (the customer has a reference)");
+    ok(!!qr?.portalReview && qr.portalReview.requestedAt === NOW && qr.portalReview.reasons[0] === "1 line is price on request" && !qr.portalFirm, "#242 generate review: portalReview carries the reason; no portalFirm");
+    ok(!!qr && d242Lists(qr, CO) && !d242Lists(qr, CO_X) && !d242CanAcceptQuote(qr, CO), "#242 generate review: listed for its customer (not another), not acceptable while in review");
+    if (qr) {
+      const doc = d242DocData(qr, cust, { companyName: "Peak", logoDark: null });
+      ok(doc.standingLines?.length === 2 && doc.validUntilMs === null, "#242 generate review: the PDF data prints the standing lines without a validity date");
+    }
+    ok((await d242GetCart(G, CO)).lines.length === 0, "#242 generate review: the cart is empty afterwards");
+
+    // Owner fallback: a company with no owner → unassigned.
+    await d242SaveCart({ id: G2, customerId: CO2, locationId: "w1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    const r2 = await run({ ...sess, grantId: G2, customerId: CO2 });
+    const q2 = r2.ok ? await d242GetQuote(r2.quoteId) : null;
+    ok(!!q2 && q2.owner === "" && q2.status === "sent", "#242 generate: a company with no owner → the quote is unassigned (owner \"\")");
+
+    // Rate limit: 10 an hour per grant.
+    await d242SaveCart({ id: GR, customerId: CO, locationId: "v1", lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }], updatedAt: NOW });
+    for (let i = 0; i < d242GenLimit; i++) d242RateLimit("portal-generate:" + GR, d242GenLimit, 3_600_000);
+    const before = made.length;
+    const rl = await run({ ...sess, grantId: GR });
+    ok(d242GenLimit === 10 && !rl.ok && rl.error === d242GenRateCopy && made.length === before && (await d242GetCart(GR, CO)).lines.length === 1,
+      "#242 generate: the 11th Generate in an hour on one grant is refused, makes no quote and keeps the cart");
+
+    // The cart page's edit actions.
+    await d242SaveCart({ id: G, customerId: CO, locationId: null, lines: [{ lineId: "a", kind: "part", sku: P, qty: 1 }, { lineId: "b", kind: "part", sku: PH, qty: 1 }], updatedAt: NOW });
+    const vBad = await d242VenueFor(sess, "x1");
+    const vOk = await d242VenueFor(sess, "v1");
+    ok(!vBad.ok && vOk.ok && (await d242GetCart(G, CO)).locationId === "v1", "#242 cart page: the venue must be one of the session customer's own");
+    ok((await d242VenueFor(sess, "")).ok && (await d242GetCart(G, CO)).locationId === null, "#242 cart page: the venue can be cleared");
+    const q0 = await d242UpdateFor(sess, "a", 0);
+    const q3 = await d242UpdateFor(sess, "a", 3);
+    ok(!q0.ok && q0.error === "Enter a quantity from 1 to 10,000." && q3.ok && (await d242GetCart(G, CO)).lines.find((l) => l.lineId === "a")?.qty === 3, "#242 cart page: the qty stepper takes 1..10,000 (removing is its own action)");
+    ok((await d242RemoveFor(sess, "b")).ok && (await d242GetCart(G, CO)).lines.length === 1, "#242 cart page: remove drops the line");
+    const pvEdit = await d242UpdateFor({ ...sess, grantId: "preview" }, "a", 2);
+    ok(!pvEdit.ok && !(await d242VenueFor(null, "v1")).ok, "#242 cart page: a preview or missing session never edits a cart");
+  } finally {
+    d242Invalidate();
+    await removeCustomer(CO);
+    await removeCustomer(CO2);
+    await removeCustomer(CO_X);
+  }
+}
+
+function eq242(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }

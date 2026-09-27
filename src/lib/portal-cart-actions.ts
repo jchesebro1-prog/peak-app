@@ -12,7 +12,7 @@ import { priceFixture, pricingContextFor } from "@/lib/portal-pricing";
 import { rateLimit, rateLimitRefund } from "@/lib/rate-limit";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { create as createLead } from "@/lib/stores/leads";
-import { addLine } from "@/lib/stores/portal-carts";
+import { addLine, removeLine, setVenue, updateLine } from "@/lib/stores/portal-carts";
 
 export type AddToCartInput =
   | { kind: "part"; sku: string; qty: number }
@@ -120,4 +120,61 @@ export async function askAboutPartFor(session: PortalSession | null, input: unkn
     return { ok: false, error: ASK_FAIL_COPY };
   }
   return { ok: true };
+}
+
+/* ---------------- the cart page (#242 Task 12, spec §3.4) ---------------- */
+
+export type CartEditResult = { ok: true } | { ok: false; error: string };
+const CART_EDIT_FAIL_COPY = "Couldn't update your quote — try again.";
+const VENUE_COPY = "Pick one of your venues.";
+
+/** The cart page's venue picker. Only one of the SESSION customer's own
+ *  venues (or "" to clear) — never a location id taken on trust. */
+export async function setCartVenueFor(session: PortalSession | null, locationId: unknown): Promise<CartEditResult> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  if (!rateLimit("portal-cart:" + session.grantId, 120, 60_000).ok) return { ok: false, error: CART_RATE_COPY };
+  const id = typeof locationId === "string" ? locationId : "";
+  let loc: string | null = null;
+  if (id) {
+    const cust = await getCustomer(session.customerId);
+    if (!cust) return { ok: false, error: PORTAL_EXPIRED_COPY };
+    if (!(cust.locations || []).some((l) => l.id === id)) return { ok: false, error: VENUE_COPY };
+    loc = id;
+  }
+  try {
+    await setVenue(session.grantId, session.customerId, loc);
+    return { ok: true };
+  } catch (e) {
+    console.error("setCartVenue failed", e);
+    return { ok: false, error: CART_EDIT_FAIL_COPY };
+  }
+}
+
+/** Qty stepper: a whole number 1..10,000 (removing is its own action). */
+export async function updateCartLineFor(session: PortalSession | null, lineId: unknown, qty: unknown): Promise<CartEditResult> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  if (!rateLimit("portal-cart:" + session.grantId, 120, 60_000).ok) return { ok: false, error: CART_RATE_COPY };
+  if (typeof lineId !== "string" || !lineId) return { ok: false, error: CART_EDIT_FAIL_COPY };
+  const problem = cartAddProblem(true, qty as number);
+  if (problem) return { ok: false, error: problem };
+  try {
+    await updateLine(session.grantId, session.customerId, lineId, { qty: qty as number });
+    return { ok: true };
+  } catch (e) {
+    console.error("updateCartLine failed", e);
+    return { ok: false, error: CART_EDIT_FAIL_COPY };
+  }
+}
+
+export async function removeCartLineFor(session: PortalSession | null, lineId: unknown): Promise<CartEditResult> {
+  if (!writable(session)) return { ok: false, error: PORTAL_EXPIRED_COPY };
+  if (!rateLimit("portal-cart:" + session.grantId, 120, 60_000).ok) return { ok: false, error: CART_RATE_COPY };
+  if (typeof lineId !== "string" || !lineId) return { ok: false, error: CART_EDIT_FAIL_COPY };
+  try {
+    await removeLine(session.grantId, session.customerId, lineId);
+    return { ok: true };
+  } catch (e) {
+    console.error("removeCartLine failed", e);
+    return { ok: false, error: CART_EDIT_FAIL_COPY };
+  }
 }

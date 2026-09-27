@@ -1,11 +1,22 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { portalSession } from "@/lib/portal";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { searchPortalCatalogFor, type SearchPortalCatalogResult } from "@/lib/portal-catalog-browse";
 import { partDetailActionFor, priceFixtureOptionsFor, type FixturePriceResult, type PartDetailResult } from "@/lib/portal-part-detail";
-import { addToCartFor, askAboutPartFor, type AddToCartResult, type AskResult } from "@/lib/portal-cart-actions";
+import {
+  addToCartFor,
+  askAboutPartFor,
+  removeCartLineFor,
+  setCartVenueFor,
+  updateCartLineFor,
+  type AddToCartResult,
+  type AskResult,
+  type CartEditResult,
+} from "@/lib/portal-cart-actions";
+import { generatePortalQuote } from "@/lib/portal-quotes";
 import type { SearchQuery } from "@/lib/portal-search";
 import type { CurtainRequest } from "@/lib/portal-cart-types";
 
@@ -68,4 +79,51 @@ export async function addToCart(
 export async function askAboutPart(input: { sku: string; message: string; phone?: string }): Promise<AskResult> {
   const session = await portalSession().catch(() => null);
   return askAboutPartFor(session, input);
+}
+
+/* ---------------- the cart page — /portal/catalog/quote (#242 Task 12) ---------------- */
+
+function cartChanged(r: { ok: boolean }) {
+  if (r.ok) {
+    revalidatePath("/portal/catalog/quote");
+    revalidatePath("/portal/catalog");
+  }
+}
+
+/** The venue this quote is for — one of the session customer's own venues. */
+export async function setCartVenue(locationId: string): Promise<CartEditResult> {
+  const session = await portalSession().catch(() => null);
+  const r = await setCartVenueFor(session, locationId);
+  cartChanged(r);
+  return r;
+}
+
+export async function updateCartLine(lineId: string, qty: number): Promise<CartEditResult> {
+  const session = await portalSession().catch(() => null);
+  const r = await updateCartLineFor(session, lineId, qty);
+  cartChanged(r);
+  return r;
+}
+
+export async function removeCartLine(lineId: string): Promise<CartEditResult> {
+  const session = await portalSession().catch(() => null);
+  const r = await removeCartLineFor(session, lineId);
+  cartChanged(r);
+  return r;
+}
+
+/**
+ * Generate quote (spec §4.2/§4.3): the SERVER prices the grant's cart and
+ * makes the quote; on success the customer lands on /portal with a banner
+ * naming its estimate number. Its saved PDF renders in after() — the cart
+ * page exports `maxDuration = 120` for it (#222).
+ */
+export async function generateQuote(): Promise<{ ok: false; error: string }> {
+  const session = await portalSession().catch(() => null);
+  const r = await generatePortalQuote(session);
+  if (!r.ok) return r;
+  revalidatePath("/portal");
+  revalidatePath("/portal/catalog/quote");
+  revalidatePath("/portal/catalog");
+  redirect(`/portal?generated=${r.mode}&q=${encodeURIComponent(r.quoteId)}`);
 }

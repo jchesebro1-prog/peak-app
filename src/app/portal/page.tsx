@@ -156,6 +156,13 @@ function pdfPreparing(q: Quote, cid: string): boolean {
   return !latestSentRevision(q.revisions) && pdfView(q.pdf, Date.now())?.status === "pending";
 }
 
+/** #242: a firm portal quote's validity date while it lasts (sent, not yet
+ *  accepted, not past `validUntil`); null otherwise. */
+function firmValidUntil(q: Quote): number | null {
+  if (q.status !== "sent" || q.portalAcceptance || !q.portalFirm) return null;
+  return Date.now() <= q.portalFirm.validUntil ? q.portalFirm.validUntil : null;
+}
+
 export default async function PortalPage({
   searchParams,
 }: {
@@ -166,7 +173,10 @@ export default async function PortalPage({
   const denied = one(sp.denied) === "1";
   const sent = one(sp.sent) === "1";
   const accepted = one(sp.accepted) === "1";
-  const estimate = one(sp.estimate) === "1";
+  // #242: Generate lands here — ?generated=firm|review&q=<quote id>.
+  const generatedRaw = one(sp.generated);
+  const generated = generatedRaw === "firm" || generatedRaw === "review" ? generatedRaw : null;
+  const generatedId = one(sp.q);
 
   // Team-gated PREVIEW (?preview=<customerId>): resolvePortalViewer is the one
   // rule, shared with the portal PDF route (#222) so a preview opens PDFs too.
@@ -209,14 +219,19 @@ export default async function PortalPage({
     docVenues
   );
 
-  // Published quotes the team sent, PLUS the customer's own self-serve estimates
-  // still in draft (source "portal-self-serve") so they can see what they
-  // submitted. Internal drafts stay hidden — only the customer's own drafts —
-  // and so does imported Daylite history (portalListsQuote, stores/quotes).
+  // Published quotes the team sent, PLUS the customer's own portal quotes still
+  // in draft (#242 "portal-catalog" review quotes, and older "portal-self-serve"
+  // estimates) so they can see what they submitted. Internal drafts stay
+  // hidden — only the customer's own drafts — and so does imported Daylite
+  // history (portalListsQuote, stores/quotes).
   const published = quotes
     .filter((q) => portalListsQuote(q, cid))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const quoteGroups = groupPortalQuotes(published);
+  // #242: the banner names the generated quote's estimate number — looked up
+  // among THIS customer's listed quotes only, so a hand-edited ?q= shows nothing.
+  const generatedQuote = generated && generatedId ? published.find((q) => q.id === generatedId) ?? null : null;
+  const generatedNo = generatedQuote ? displayQuoteNumber(generatedQuote) : "";
 
   // #220: project history, app-era only (never Daylite imports), through the
   // portalProjectView whitelist — value only when known and the quote is won.
@@ -259,8 +274,13 @@ export default async function PortalPage({
     const isDraft = q.status === "draft"; // only the customer's own self-serve drafts reach here
     const pendingAccept = q.status === "sent" && !!q.portalAcceptance;
     const canAccept = portalCanAcceptQuote(q, cid) && !preview;
+    const firmUntil = firmValidUntil(q);
     const chip = isDraft
-      ? { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+      ? q.source === "portal-catalog" && q.portalReview
+        ? { label: "In review — Peak will confirm pricing", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+        : { label: "In review with our team", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
+      : firmUntil != null
+      ? { label: "Valid until " + fmtDate(firmUntil), ink: "#3155a8", soft: "#e9eefb", bd: "#d4ddf3" }
       : pendingAccept
       ? { label: "Accepted — awaiting confirmation", ink: "#8a6d1f", soft: "#fbf3dd", bd: "#f0e2bd" }
       : QUOTE_CHIP[q.status] || QUOTE_CHIP.sent;
@@ -467,7 +487,7 @@ export default async function PortalPage({
           shortly. It also appears under “Your open requests” below.
         </div>
       )}
-      {estimate && (
+      {generated && (
         <div
           style={{
             marginBottom: 18,
@@ -480,9 +500,9 @@ export default async function PortalPage({
             fontWeight: 600,
           }}
         >
-          Estimate received — the {companyName} team will review the numbers and follow up with a
-          confirmed quote. It appears under “Your quotes &amp; estimates” below. Nothing is binding
-          until they do.
+          {generated === "firm"
+            ? `Your quote ${generatedNo ? generatedNo + " " : ""}is ready — open the PDF or accept it below.`
+            : `Thanks — Peak will confirm pricing on ${generatedNo || "your quote"} and let you know.`}
         </div>
       )}
       {accepted && (
@@ -567,7 +587,7 @@ export default async function PortalPage({
         )}
         {published.length === 0 && (
           <div style={{ padding: "22px 20px", fontSize: 12.5, color: "#9aa0ab", textAlign: "center" }}>
-            Nothing here yet — build an estimate or anything we send you will appear here.
+            Nothing here yet — quotes you generate from the catalog, and anything we send you, will appear here.
           </div>
         )}
       </div>

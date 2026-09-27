@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * Retired (#242, spec §3.1): the self-serve drapery/equipment estimate is
- * replaced by the portal catalog. Old links land on `/portal/catalog`; a team
- * preview keeps its `?preview=`. (estimate-builder.tsx and
- * `submitPortalEstimate` are removed in Task 12.)
+ * replaced by the portal catalog and its cart (`/portal/catalog/quote`, whose
+ * Generate makes the quote). Old links land on `/portal/catalog`; a team
+ * preview keeps its `?preview=`. The builder and its submit action are gone.
  */
 export default async function PortalEstimatePage({
   searchParams,

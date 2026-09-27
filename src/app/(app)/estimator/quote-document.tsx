@@ -46,6 +46,15 @@ export type QuoteDocumentProps = {
   pdfTerms: boolean;
   pdfOptions: boolean;
   paymentTerms: PaymentTerms;
+  /** #242 — a firm portal quote's "Valid until" date (replaces the issue
+   *  date + 30 days in the header and terms); absent on every other quote. */
+  validUntilMs?: number | null;
+  /** #242 — lines that always print under the totals (portal-catalog quotes:
+   *  the review line, the tax line, "Valid until <date>"). */
+  standingLines?: string[];
+  /** #242 — the freight row label ("Freight & delivery — 412 mi" on a portal
+   *  quote whose distance is known). Never a freight %. */
+  freightLabel?: string;
 };
 
 /** Page CSS for the print route: Letter, 0.6in margins, the on-screen sheet
@@ -87,7 +96,9 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
   const lineCols = [p.pdfNotes ? "1fr" : "", p.pdfQty ? "70px" : "", p.pdfPrices ? "104px" : ""].filter(Boolean).join(" ");
   const showCover = !!(p.pdfCover && p.quoteNote && p.quoteNote.trim());
   const revDateLabel = longDate(p.revDateMs);
-  const validThruLabel = longDate(p.revDateMs + 30 * DAY_MS);
+  const validThruLabel = longDate(p.validUntilMs ?? p.revDateMs + 30 * DAY_MS);
+  const freightRowLabel = p.freightLabel || "Freight & delivery";
+  const standingLines = (p.standingLines || []).filter((l) => l.trim());
 
   const previewSections = p.sections
     .filter((sec) => systemItemsRev(sec) > 0 || systemFreight(sec) > 0)
@@ -255,7 +266,8 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 Issued <strong style={{ color: "#16181d" }}>{revDateLabel}</strong>
               </div>
               <div>
-                Valid through <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
+                {p.validUntilMs != null ? "Valid until" : "Valid through"}{" "}
+                <strong style={{ color: "#16181d" }}>{validThruLabel}</strong>
               </div>
             </div>
           </div>
@@ -467,7 +479,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                         color: "#5b616e",
                       }}
                     >
-                      {p.pdfNotes && <span>Freight &amp; delivery</span>}
+                      {p.pdfNotes && <span>{freightRowLabel}</span>}
                       {p.pdfQty && <span></span>}
                       {p.pdfPrices && (
                         <span
@@ -598,7 +610,7 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 marginBottom: 10,
               }}
             >
-              <span>Freight &amp; delivery</span>
+              <span>{freightRowLabel}</span>
               <span style={{ fontFamily: "var(--font-mono)" }}>{fmt(p.t.fr)}</span>
             </div>
             {p.t.tax > 0 && (
@@ -631,6 +643,13 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                 {fmt(p.t.grand)}
               </span>
             </div>
+            {standingLines.length > 0 && (
+              <div className="est-standing" style={{ marginTop: 8, fontSize: 11, color: "#5b616e", lineHeight: 1.6, textAlign: "right" }}>
+                {standingLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+            )}
             </div>
 
             {p.pdfTerms && (
@@ -646,7 +665,10 @@ export default function QuoteDocument(p: QuoteDocumentProps) {
                       lineHeight: 1.75,
                     }}
                   >
-                    {["This quote is valid for 30 days from the issue date.", `Payment terms: ${p.paymentTerms}.`].map((line) => (
+                    {[
+                      p.validUntilMs != null ? `This quote is valid until ${validThruLabel}.` : "This quote is valid for 30 days from the issue date.",
+                      `Payment terms: ${p.paymentTerms}.`,
+                    ].map((line) => (
                       <li key={line}>{line}</li>
                     ))}
                   </ul>

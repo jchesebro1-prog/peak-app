@@ -249,7 +249,9 @@ function priceCurtain(l: CartLine, qty: number): Priced {
   const c = l.curtainInputs;
   if (!c) return { sell: unavailableLine(l, qty, null), item: null, section: "drape" };
   const name = (c.name || "").trim() || "Curtain";
-  const spec = `${(c.fabricName || "").trim() || "Fabric to confirm"}, ${c.width || "?"}'W × ${c.height || "?"}'H, ${c.fullness || "0"}% fullness`;
+  const fabric = (c.fabricName || "").trim() || "Fabric to confirm";
+  const size = `${c.width || "?"}'W × ${c.height || "?"}'H, ${c.fullness || "0"}% fullness`;
+  const spec = `${fabric}, ${size}`;
   const sell: SellLine = {
     lineId: l.lineId,
     kind: "curtain",
@@ -262,7 +264,8 @@ function priceCurtain(l: CartLine, qty: number): Priced {
     por: true,
     porReason: "curtain",
     unavailable: false,
-    detail: spec,
+    // The cart's curtain summary (#242 Task 12): "30'W × 18'H, 50% fullness — IFR Velour".
+    detail: `${size} — ${fabric}`,
   };
   const item: Omit<SpecItem, "id"> = {
     sku: "CRT-REQ",
@@ -309,7 +312,8 @@ export async function priceCart(cart: PortalCart, ctx: PortalPricingContext): Pr
   }));
 
   // `mat` = sell of non-labor, non-option lines — the materials subtotal
-  // before freight (portal carts carry no labor, so it equals `rev`).
+  // before freight. Labor rides only INSIDE a fixture item (its components),
+  // never as a labor item of its own, so it equals `rev`.
   const t = totals(sections, 0);
   const subtotal = cents(t.mat);
   const amount = cents(t.fr);
