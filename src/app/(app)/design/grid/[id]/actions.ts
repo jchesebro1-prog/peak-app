@@ -192,7 +192,7 @@ export async function searchAutoEquipmentAction(query: string, rowKey: string): 
     if (!hits.length) return { hits: [] };
     const [parts, rates] = await Promise.all([getCatalogParts(hits.map((h) => h.sku)), getCatalogRates()]);
     const bySku = new Map(parts.map((p) => [p.sku, p]));
-    return { hits: curtainSwapHits(hits.map((h) => ({ sku: h.sku, desc: h.desc, curtainAreaRate: bySku.get(h.sku)?.curtainAreaRate })), rates.defaultMargin) };
+    return { hits: curtainSwapHits(hits.map((h) => ({ sku: h.sku, desc: h.desc, curtainAreaRate: bySku.get(h.sku)?.curtainAreaRate, costPerSqft: bySku.get(h.sku)?.costPerSqft })), rates.defaultMargin) };
   }
   const [{ hits }, fixtures, rates] = await Promise.all([searchCatalog(q, "", 15), listFixtures(), getCatalogRates()]);
   const m = rates.defaultMargin;

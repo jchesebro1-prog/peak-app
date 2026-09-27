@@ -6,6 +6,7 @@ import { quoteBuilderHref, estimatorShouldRedirect } from "@/lib/quote-links";
 import { byCategory, list as catalogList } from "@/lib/stores/catalog";
 import { fixtureAssembliesFrom } from "@/lib/fixture-assemblies";
 import { listFixtures } from "@/lib/stores/fixtures";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import {
   all as allCustomers,
   resolveId,
@@ -244,17 +245,19 @@ export default async function EstimatorPage({
   // "Apply template" control next to the Tasks card.
   const templateSets = await taskTemplateSetsFor("quote");
 
-  // Only catalog fabrics with a real per-sq-ft basis feed the curtain
-  // configurator — imported vendor fabric rows (priced per unit, no costPerSqft)
-  // would otherwise show up as $0/sq ft options.
+  // Only catalog fabrics with a $/sq ft rate feed the curtain configurator
+  // (#227: fabricAreaRateOf — the catalog rate, a seed, or cost per sq ft).
+  // Imported per-unit fabric rows with no rate would otherwise show up as
+  // $0/sq ft options. curtainAreaRate carries the RESOLVED rate, so the
+  // modal's label and computeCurtain read the same number.
   const fabrics = fabricRows
-    .filter((p) => (p.costPerSqft ?? 0) > 0)
     .map((p) => ({
       sku: p.sku,
       name: p.desc,
       costPerSqft: p.costPerSqft ?? 0,
-      curtainAreaRate: p.curtainAreaRate,
-    }));
+      curtainAreaRate: fabricAreaRateOf(p),
+    }))
+    .filter((f) => f.curtainAreaRate > 0);
   // #143: distinct catalog manufacturers seed the vendor-name datalist — no
   // new server action, the catalog rows are already loaded for the fixture
   // assemblies.

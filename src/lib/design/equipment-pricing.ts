@@ -5,11 +5,11 @@
  * Quick Design fixture pick, an Auto intake swap). A needs-a-part item stays
  * at $0 with status "needs-part" — never a fallback number.
  *
- * Cost-bearing (unit costs, curtain making rates): server code and the Quick
+ * Cost-bearing (unit costs, curtain area rates): server code and the Quick
  * Design / Designs dashboard clients (already cost views) may import it. NO
  * Grid client file does — the #211 T5 spec guard walks them.
  */
-import { curtainCost, makingRateFor } from "./curtain-pricing";
+import { curtainCost } from "./curtain-pricing";
 import {
   applyOverrides,
   clamp,
@@ -32,12 +32,12 @@ import {
 import { sellFromCost, type EquipmentPriceTable, type UnitPrice } from "./equipment-map";
 import { needsPartCount } from "./scope-targets";
 
-/** One drape's make-it cost at a fabric's area rate — the shared two-term model (curtain-pricing.ts). */
+/** One drape's make-it cost at a fabric's flat $/sq ft sewn (making included, #227) — the shared model (curtain-pricing.ts). */
 export function drapeUnitCost(drape: DrapeGeom, areaRate: number): number {
   return Math.round(
     curtainCost(
       { finishedWidthFt: drape.w, finishedHeightFt: drape.h, fullnessPct: drape.fullness, qty: drape.qty },
-      { fabricRate: areaRate, makingRate: makingRateFor(drape.fullness) }
+      { fabricRate: areaRate }
     ).costTotal
   );
 }

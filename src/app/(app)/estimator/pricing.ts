@@ -1,4 +1,4 @@
-import { curtainCost, curtainPrice, makingRateFor, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import { curtainCost, curtainPrice, fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import {
   DISC_LABEL,
   FIXTURES,
@@ -228,10 +228,10 @@ export type CurtainCalc = {
 };
 
 /**
- * CURTAIN PRICING — two-term make-it model (area × fabricRate + sewn width ×
- * makingRate), shared with the budget side (src/lib/design/curtain-pricing.ts,
- * spec 2026-07-24-curtain-pricing-rebuild). A per-line Rose Brand vendor cost
- * overrides the computed make-it cost when set.
+ * CURTAIN PRICING — flat $/sq ft of sewn fabric, making included (#227),
+ * shared with the budget side (src/lib/design/curtain-pricing.ts). The rate
+ * comes from fabricAreaRateOf, the one chain every curtain path reads. A
+ * per-line Rose Brand vendor cost overrides the computed make-it cost when set.
  */
 export function computeCurtain(
   d: CurtainDraft,
@@ -247,12 +247,11 @@ export function computeCurtain(
   const h = parseFloat(d.height) || 0; // finished height (ft)
   const w = parseFloat(d.width) || 0; // finished width (ft)
   const fullness = parseFloat(d.fullness) || 0; // percent, e.g. 50
-  const fabricRate = fab.curtainAreaRate ?? SEED_FABRIC_RATES[fab.sku] ?? fab.costPerSqft ?? 0;
   const override =
     d.vendorCostOverride != null && d.vendorCostOverride !== "" ? parseFloat(d.vendorCostOverride) : null;
   const cc = curtainCost(
     { finishedWidthFt: w, finishedHeightFt: h, fullnessPct: fullness, qty: 1, vendorCostOverride: override },
-    { fabricRate, makingRate: makingRateFor(fullness) }
+    { fabricRate: fabricAreaRateOf(fab) }
   );
   return {
     fab,

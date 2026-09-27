@@ -15,7 +15,7 @@ import {
 import { byCategory, get as getCatalogPart } from "@/lib/stores/catalog";
 import { isCustomerBuyable } from "@/lib/portal-catalog";
 import { curtainCost } from "@/lib/curtain-pricing";
-import { SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
 import { curtainQty, type CurtainSpec } from "@/lib/curtain-geom";
 
@@ -165,7 +165,7 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
       };
     });
 
-  // Fabric cost basis — server-side only. Map sku → { costPerSqft, desc }.
+  // Fabric cost basis — server-side only. Map sku → catalog row; its rate comes from fabricAreaRateOf (#227).
   const fabricRows = await byCategory("Fabric");
   const fabricById = new Map(fabricRows.map((p) => [p.sku, p]));
 
@@ -188,7 +188,7 @@ export async function submitPortalEstimate(formData: FormData): Promise<void> {
   for (const spec of specs) {
     const fab = fabricById.get(spec.fabric);
     if (!fab) continue; // unknown fabric — drop the line
-    const rate = fab.curtainAreaRate ?? SEED_FABRIC_RATES[fab.sku] ?? fab.costPerSqft ?? 0;
+    const rate = fabricAreaRateOf(fab);
     const { costEach, priceEach } = curtainCost(spec, rate, tier.margin);
     if (priceEach <= 0) continue; // no dimensions — skip
     const qty = curtainQty(spec);

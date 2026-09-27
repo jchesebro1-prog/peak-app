@@ -1,24 +1,20 @@
 /**
- * Curtain pricing — one shared model for the budget (Quick Design) and the
- * quote (estimator), built from the same finished geometry the lineset weights
- * use (spec 2026-07-24-curtain-pricing-rebuild).
+ * Curtain pricing — one shared model for the budget (Quick Design, the Grid
+ * Equipment map) and the quote (estimator, Grid, portal), built from the same
+ * finished geometry the lineset weights use (spec 2026-07-24-curtain-pricing-
+ * rebuild).
  *
- * "Make-it-ourselves" two-term cost, calibrated ~10% above Rose Brand so Peak
- * can quote fast/safe without waiting on a vendor quote; a per-line vendor cost
- * override drops in the real Rose Brand price when it arrives.
- *
- * Reconciled from Rose Brand quote 423939 (2026-07-23): a single per-ft² rate
- * does not fit real drapes — top webbing and bottom chain hem scale with WIDTH,
- * not area — so cost has two terms: area (fabric) + width (making).
+ * #227 (2026-09-26, Jeff: "We need fabric to price via sqft"): ONE flat rate.
+ * A fabric's `curtainAreaRate` is its cost per sq ft of SEWN fabric INCLUDING
+ * making / sewing, so cost = sewn area × rate. The two-term model's separate
+ * per-foot making charge (the Rose Brand 423939 calibration) is gone — the
+ * rate carries it. A per-line vendor cost override still replaces the
+ * computed cost when a real Rose Brand price arrives.
  */
 
 export type CurtainRates = {
-  /** Make-it area cost, $/ft² of SEWN fabric (finished × fullness). */
+  /** $/ft² of SEWN fabric (finished width × (1 + fullness) × height), making included. */
   fabricRate: number;
-  /** Make-it making cost, $/ft of SEWN width (webbing, chain hem, side hems,
-   *  setup) — fabric-independent. Pleated velour uses DEFAULT_MAKING_RATE; a
-   *  flat 0%-fullness cyc uses DEFAULT_CYC_MAKING_RATE (see makingRateFor). */
-  makingRate: number;
 };
 
 export type CurtainCostInput = {
@@ -42,20 +38,11 @@ export type CurtainCost = {
 /** Peak's flat curtain margin on price. */
 export const CURTAIN_MARGIN = 0.3;
 
-/** $/ft sewn width — pleated velour (≈ Rose Brand 8.661 + 10%). */
-export const DEFAULT_MAKING_RATE = 9.53;
-/** $/ft sewn width — flat goods (a 0%-fullness cyc): no pleating setup. */
-export const DEFAULT_CYC_MAKING_RATE = 4.75;
-
-/** Flat goods (fullness 0) make cheaper — no pleating. */
-export function makingRateFor(fullnessPct: number): number {
-  return fullnessPct <= 0 ? DEFAULT_CYC_MAKING_RATE : DEFAULT_MAKING_RATE;
-}
-
 /**
- * Seed make-it area rates by fabric SKU (Rose-Brand-reconciled × 1.10). These
- * are the canonical defaults; the catalog's editable curtainAreaRate is seeded
- * from the same numbers. Only the five fabrics the drape table uses.
+ * Seed area rates by fabric SKU — the fallback when a catalog fabric has no
+ * `curtainAreaRate` of its own. Calibrated FABRIC-ONLY (Rose-Brand-reconciled
+ * × 1.10) before #227 folded making into the rate, so they under-price a sewn
+ * drape until they are raised to include making (see DECISIONS).
  */
 export const SEED_FABRIC_RATES: Record<string, number> = {
   "RB-CHAR-25": 3.64, // Charisma 25oz (anchor: RB 3.313 ×1.10)
@@ -65,15 +52,36 @@ export const SEED_FABRIC_RATES: Record<string, number> = {
   "RB-MUS": 0.9,      // Seamless Muslin (seed)
 };
 
+/** The catalog fields a fabric's area rate is read from. */
+export type FabricRateSource = {
+  sku?: string;
+  curtainAreaRate?: number | null;
+  costPerSqft?: number | null;
+};
+
+/**
+ * THE fabric area rate (#227) — every curtain path reads it here, so no path
+ * can drift: the catalog's editable `curtainAreaRate`, else the seed rate for
+ * that SKU, else the raw `costPerSqft`, else 0 ("No $/sq ft set" — the drape
+ * prices at $0). A non-finite or non-positive result is 0. Pure.
+ */
+export function fabricAreaRateOf(part: FabricRateSource | null | undefined): number {
+  if (!part) return 0;
+  const sku = part.sku ?? "";
+  const seed = Object.prototype.hasOwnProperty.call(SEED_FABRIC_RATES, sku) ? SEED_FABRIC_RATES[sku] : undefined;
+  const rate = Number(part.curtainAreaRate ?? seed ?? part.costPerSqft ?? 0);
+  return Number.isFinite(rate) && rate > 0 ? rate : 0;
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Two-term make-it cost, with optional vendor override. Pure. */
+/** Flat make-it cost (sewn area × rate), with optional vendor override. Pure. */
 export function curtainCost(input: CurtainCostInput, rates: CurtainRates): CurtainCost {
   const sewnWidthFt = input.finishedWidthFt * (1 + input.fullnessPct / 100);
   const sewnAreaSqft = sewnWidthFt * input.finishedHeightFt;
-  const makeCostEach = round2(sewnAreaSqft * rates.fabricRate + sewnWidthFt * rates.makingRate);
+  const makeCostEach = round2(sewnAreaSqft * (rates.fabricRate || 0));
   const overridden = input.vendorCostOverride != null && input.vendorCostOverride > 0;
   const costEach = overridden ? round2(input.vendorCostOverride as number) : makeCostEach;
   return {

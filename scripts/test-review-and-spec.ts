@@ -59,7 +59,7 @@ import {
   startOfDay as opStartOfDay,
 } from "@/lib/operations-work";
 import { venueDimsFromEstimator, venueDimsFromLineset, DEFAULT_VENUE_DIMS, battenLenFt, BATTEN_OVERHANG_FT } from "@/lib/design/venue-dims";
-import { curtainCost, curtainPrice, makingRateFor, DEFAULT_MAKING_RATE, DEFAULT_CYC_MAKING_RATE, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import { curtainCost, curtainPrice, fabricAreaRateOf, SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
 import {
   DEFAULT_OPTION_ID,
   DEFAULT_OPTION_NAME,
@@ -2719,43 +2719,31 @@ ok(isOpenEngagement({ status: "active" }) && isOpenEngagement({ status: "deliver
   "legacy active/delivered/bid_supported map to open stages");
 ok(!isOpenEngagement({ status: "oversight_complete" }), "legacy oversight_complete maps to closed");
 
-/* --- curtain pricing: reconcile Rose Brand quote 423939 (task 1) --- */
-// Rose Brand rates (NOT the +10% make-it seeds): Charisma area 3.313, Encore-22 area 2.582, making 8.661.
-const RB_CHAR = { fabricRate: 3.313, makingRate: 8.661 };
-const RB_EN22 = { fabricRate: 2.582, makingRate: 8.661 };
-const border = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, RB_CHAR);
-ok(Math.abs(border.costEach - 1395) < 2, `RB line 1 border ≈ $1,395 (got ${border.costEach.toFixed(2)})`);
-const main = curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15 + 7 / 12, fullnessPct: 50, qty: 1 }, RB_CHAR);
-ok(Math.abs(main.costEach - 2080) < 2, `RB line 2 main ≈ $2,080 (got ${main.costEach.toFixed(2)})`);
-const legs = curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 1 }, RB_EN22);
-ok(Math.abs(legs.costEach - 525) < 2, `RB line 3 legs ≈ $525 (got ${legs.costEach.toFixed(2)})`);
+/* --- curtain pricing: flat $/sq ft sewn, making included (#227) ---
+ * Replaces the two-term Rose Brand 423939 reconciliation (spec 2026-07-24):
+ * a fabric's rate now carries making, so cost = sewn area × rate, no width term. */
+const border = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64 });
+ok(border.costEach === 819, `#227 flat: a 50×3 border at 50% = sewn area 225 × 3.64 = 819, no width term (got ${border.costEach})`);
+const legs = curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 1 }, { fabricRate: 2.84 });
+ok(Math.abs(legs.costEach - 441.8) < 0.01, `#227 flat: legs = sewn area 155.5625 × 2.84 ≈ 441.80 (got ${legs.costEach.toFixed(2)})`);
 
 // sewn geometry
 ok(border.sewnWidthFt === 75 && Math.abs(border.sewnAreaSqft - 225) < 1e-6, "sewnWidth = W×(1+fullness); sewnArea = sewnWidth×H");
 // qty multiplies the total, not the unit
-ok(Math.abs(curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 4 }, RB_EN22).costTotal - legs.costEach * 4) < 1e-6, "costTotal = costEach × qty");
+ok(Math.abs(curtainCost({ finishedWidthFt: 9.5, finishedHeightFt: 10 + 11 / 12, fullnessPct: 50, qty: 4 }, { fabricRate: 2.84 }).costTotal - legs.costEach * 4) < 1e-6, "costTotal = costEach × qty");
 
 // vendor override replaces the make cost and flags the line
-const ov = curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, RB_CHAR);
+const ov = curtainCost({ finishedWidthFt: 23, finishedHeightFt: 15, fullnessPct: 50, qty: 2, vendorCostOverride: 2080 }, { fabricRate: 3.64 });
 ok(ov.costEach === 2080 && ov.overridden === true && ov.costTotal === 4160, "vendorCostOverride replaces make cost, flags overridden, ×qty");
-ok(curtainCost({ finishedWidthFt: 10, finishedHeightFt: 10, fullnessPct: 50, qty: 1 }, RB_CHAR).overridden === false, "no override → overridden false");
+ok(curtainCost({ finishedWidthFt: 10, finishedHeightFt: 10, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64 }).overridden === false, "no override → overridden false");
 
-// cyc flatness: 0% fullness → sewn area equals finished face
-const cyc = curtainCost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9, makingRate: DEFAULT_CYC_MAKING_RATE });
+// cyc flatness: 0% fullness → sewn area equals finished face, same one rate
+const cyc = curtainCost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9 });
 ok(cyc.sewnAreaSqft === 800 && cyc.sewnWidthFt === 40, "cyc at 0% fullness: sewn area = finished face, no 1.5× applied");
-
-// making rate selector
-ok(makingRateFor(50) === DEFAULT_MAKING_RATE && makingRateFor(0) === DEFAULT_CYC_MAKING_RATE, "flat goods use the lower cyc making rate");
+ok(cyc.costEach === 720, `#227 flat: flat goods price at the same one rate — 800 × 0.9 = 720, no cyc making charge (got ${cyc.costEach})`);
 
 // margin
 ok(Math.abs(curtainPrice(700) - 1000) < 1e-6, "price = cost / (1 − 0.30)");
-
-// make-it rate constants pinned to their dollar values — the reconciliation
-// above hardcodes the Rose Brand rate (8.661) and never touches these, so a
-// fat-finger to either would silently shift every make-it price with nothing
-// above to catch it.
-ok(DEFAULT_MAKING_RATE === 9.53, `DEFAULT_MAKING_RATE is 9.53 (got ${DEFAULT_MAKING_RATE})`);
-ok(DEFAULT_CYC_MAKING_RATE === 4.75, `DEFAULT_CYC_MAKING_RATE is 4.75 (got ${DEFAULT_CYC_MAKING_RATE})`);
 
 // SEED_FABRIC_RATES: all five SKUs pinned to their dollar values, plus the
 // key count pinned too so an added-but-unused fabric rate is caught as well.
@@ -2769,13 +2757,10 @@ ok(Object.keys(SEED_FABRIC_RATES).length === 5, `SEED_FABRIC_RATES has exactly 5
 // so they weigh the same (correct), but Memorable is Rose Brand's premium velour and carries a premium rate.
 ok(SEED_FABRIC_RATES["RB-MV-MN"] > SEED_FABRIC_RATES["RB-CHAR-25"], "best-main Memorable prices above better-main Charisma (premium 25oz velour, not a cloned rate)");
 
-// seed-rate analog of the RB reconciliation above: exercises the make-it
-// (non-Rose-Brand) rates end to end through curtainCost, so a regression in
-// either make-rate constant is caught by an actual computed cost — unlike
-// makingRateFor(50) === DEFAULT_MAKING_RATE above, which only checks branch
-// selection, not the value.
-const seedBorder = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: SEED_FABRIC_RATES["RB-CHAR-25"], makingRate: DEFAULT_MAKING_RATE });
-ok(seedBorder.costEach === 1533.75, `seed-rate border = sewnArea(225)×3.64 + sewnWidth(75)×9.53 = 1533.75 (got ${seedBorder.costEach})`);
+// seed-rate analog, end to end through curtainCost and the one helper (#227).
+const seedBorder = curtainCost({ finishedWidthFt: 50, finishedHeightFt: 3, fullnessPct: 50, qty: 1 }, { fabricRate: SEED_FABRIC_RATES["RB-CHAR-25"] });
+ok(seedBorder.costEach === 819, `#227 seed-rate border = sewnArea(225)×3.64 = 819 (got ${seedBorder.costEach})`);
+ok(fabricAreaRateOf({ sku: "RB-CHAR-25" }) === 3.64, "#227: fabricAreaRateOf reads the seed rate for a seeded SKU");
 
 /* --- curtain seed rates cover exactly the five used fabrics (task 2) --- */
 ok(SEED_FABRIC_RATES["RB-CHAR-25"] === 3.64 && SEED_FABRIC_RATES["RB-EN-22"] === 2.84, "anchor fabrics carry their reconciled +10% seed rates");
@@ -2792,8 +2777,8 @@ import { computeCurtain as computeCurtainQuote } from "@/app/(app)/estimator/pri
     fabrics as any,
     0.3
   );
-  // make cost = sewnArea(30×19=570)×3.64 + sewnWidth(30)×9.53 = 2074.8 + 285.9 = 2360.7
-  ok(Math.abs(cc.costEach - 2360.7) < 1, `computeCurtain uses the two-term make-it cost (got ${cc.costEach})`);
+  // #227 flat: make cost = sewnArea(30×19=570) × 3.64 = 2074.8 (making is in the rate)
+  ok(Math.abs(cc.costEach - 2074.8) < 0.01, `computeCurtain uses the flat $/sq ft cost (got ${cc.costEach})`);
   ok(Math.abs(cc.priceEach - cc.costEach / 0.7) < 0.02, "price = cost / (1 − 0.30)");
   // Rose Brand override wins
   const ov = computeCurtainQuote(
@@ -2808,7 +2793,7 @@ import { defaultAState } from "@/app/(app)/design/quick/engine";
 import { designPatchFromIntake, manualScopeInputs } from "@/lib/design/grid-intake";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import { drapeRule as drapeRuleQ } from "@/lib/design/goods";
-import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFor as makingForQ } from "@/lib/design/curtain-pricing";
+import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q } from "@/lib/design/curtain-pricing";
 /* The three pre-#211 blocks that stood here (compute()'s own curtain cost, a
  * Quick Design fixture pick, the tier pipeline's curtain cost) moved into the
  * "#211 T5" block at EOF: compute() no longer carries dollars (D304). */
@@ -2823,7 +2808,7 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
   const rule = drapeRuleQ("Draw", dims as any, "better")!;
   const budget = curtainCostQ(
     { finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty },
-    { fabricRate: RATES_Q[rule.fabricSku], makingRate: makingForQ(rule.fullness) }
+    { fabricRate: RATES_Q[rule.fabricSku] }
   ).costTotal;
   // Quote: same geometry typed into computeCurtain, one panel × qty summed.
   const fabrics = [{ sku: rule.fabricSku, name: "x", costPerSqft: 0, curtainAreaRate: RATES_Q[rule.fabricSku] }];
@@ -2839,30 +2824,29 @@ import { curtainCost as curtainCostQ, SEED_FABRIC_RATES as RATES_Q, makingRateFo
 {
   const marvelFab = [{ sku: "RB-MARVEL", name: "21 oz Marvel Velour", costPerSqft: 3.45 }];
   const cc = computeCurtainQuote({ name: "x", hang: "", fabric: "RB-MARVEL", qty: "1", height: "20", width: "40", fullness: "50", bottom: "" } as any, marvelFab as any, 0.3);
-  // fabricRate falls back to costPerSqft 3.45: sewnArea 40×1.5×20=1200, making 60×9.53=571.8 → 1200×3.45+571.8=4711.8
-  ok(Math.abs(cc.costEach - 4711.8) < 1, `unrated fabric prices via costPerSqft, not $0 (got ${cc.costEach})`);
+  // fabricRate falls back to costPerSqft 3.45 through fabricAreaRateOf (#227): sewnArea 40×1.5×20=1200 → 1200×3.45=4140
+  ok(Math.abs(cc.costEach - 4140) < 0.01, `unrated fabric prices via costPerSqft, not $0 (got ${cc.costEach})`);
 }
 
-import { curtainCost as portalCurtainCost, sellCoeffs as portalSellCoeffs, fabricSellPerSqft as portalFabricSell } from "@/lib/curtain-pricing";
+import { curtainCost as portalCurtainCost, fabricSellPerSqft as portalFabricSell } from "@/lib/curtain-pricing";
 import { curtainPriceEach as portalPriceEach } from "@/lib/curtain-geom";
-/* --- portal curtain pricing unified onto the two-term model + cent-match invariant --- */
+/* --- portal curtain pricing on the shared flat $/sq ft model (#227) + cent-match invariant --- */
 {
   const spec = (fab: string, w: string, h: string, full: string) => ({ name: "d", hang: "Pipe", fabric: fab, qty: "1", width: w, height: h, fullness: full, bottom: "Chain" });
   const AREA_RATE = 3.64; // Charisma
   const margin = 0.30;
-  // server two-term cost: sewnW = 20×1.5=30, sewnA=30×19=570, cost=570×3.64+30×9.53=2360.7
+  // server flat cost: sewnW = 20×1.5=30, sewnA=30×19=570, cost=570×3.64=2074.8
   const sv = portalCurtainCost(spec("RB-CHAR-25", "20", "19", "50"), AREA_RATE, margin);
-  ok(Math.abs(sv.costEach - 2360.7) < 0.01, `portal server cost = two-term make cost (got ${sv.costEach})`);
-  ok(Math.abs(sv.priceEach - 2360.7 / 0.7) < 0.02, "portal price = cost / (1 − 0.30)");
+  ok(Math.abs(sv.costEach - 2074.8) < 0.01, `portal server cost = flat $/sq ft cost (got ${sv.costEach})`);
+  ok(Math.abs(sv.priceEach - 2074.8 / 0.7) < 0.02, "portal price = cost / (1 − 0.30)");
   // CENT-MATCH: client preview equals server priceEach exactly
-  const coeffs = portalSellCoeffs(margin);
   const px = portalFabricSell(AREA_RATE, margin);
-  const clientPrice = portalPriceEach(spec("RB-CHAR-25", "20", "19", "50"), px, coeffs);
+  const clientPrice = portalPriceEach(spec("RB-CHAR-25", "20", "19", "50"), px);
   ok(Math.abs(clientPrice - sv.priceEach) < 0.01, `client preview == server price to the cent (client ${clientPrice}, server ${sv.priceEach})`);
-  // flat cyc uses the lower making rate on both sides
+  // flat cyc: the same one rate on both sides
   const svFlat = portalCurtainCost(spec("RB-MUS", "40", "20", "0"), 0.9, margin);
-  const clientFlat = portalPriceEach(spec("RB-MUS", "40", "20", "0"), portalFabricSell(0.9, margin), coeffs);
-  ok(Math.abs(clientFlat - svFlat.priceEach) < 0.01, "flat cyc: client == server (uses cyc making rate both sides)");
+  const clientFlat = portalPriceEach(spec("RB-MUS", "40", "20", "0"), portalFabricSell(0.9, margin));
+  ok(Math.abs(clientFlat - svFlat.priceEach) < 0.01 && svFlat.costEach === 720, "flat cyc: client == server, 800 sq ft × 0.9 = 720 (no cyc making charge)");
 }
 
 /* --- Blob helpers (D116) --- */
@@ -17671,7 +17655,7 @@ import { EQUIPMENT_ROW_BY_KEY as gemRowByKey2 } from "@/lib/design/equipment-voc
   ok(vel.status === "part" && vel.areaRate === 3.5 && vel.unitCost === 0, "#211 T2: a fabric row resolves the mapped fabric's area rate");
   const mus = p({ kind: "part", sku: "GEM-MUS" }, "curtains:draw");
   ok(mus.status === "part" && mus.areaRate === 0.9, "#211 T2: …falling back to the fabric's own cost per sq ft");
-  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#211 T2: a rateless or non-fabric part on a fabric row is needs-a-part (no seed-rate fallback)");
+  ok(p({ kind: "part", sku: "GEM-BARE" }, "curtains:draw").status === "needs-part" && p({ kind: "part", sku: "GEM-PAR" }, "curtains:draw").status === "needs-part", "#211 T2 / #227: a rateless non-seed fabric or a non-fabric part on a fabric row is needs-a-part");
   ok(p({ kind: "assembly", id: "SA-GEM2" }, "curtains:draw").status === "needs-part", "#211 T2: a fabric row never maps to an assembly");
   const same = { tiers: { good: { kind: "part" as const, sku: "GEM-PAR" } }, sameAll: true, updatedBy: "t", updatedAt: 1 };
   ok(gemCellFor2(same, "best")?.kind === "part" && gemCellFor2({ ...same, sameAll: false }, "best") === null, "#211 T2: same-for-all reads the Good cell for every tier");
@@ -17798,7 +17782,7 @@ import { compute as gemCompute5, defaultAState as gemDefault5, tierDefsDefault a
 import { applyEquipment as gemApply5, drapeUnitCost as gemDrape5, tierSystems as gemTierSystems5 } from "@/lib/design/equipment-pricing";
 import { buildEquipmentPriceTable as gemTable5 } from "@/lib/design/equipment-map";
 import { EQUIPMENT_ROW_BY_KEY as gemRowByKey5 } from "@/lib/design/equipment-vocab";
-import { curtainCost as gemCurtainCost5, makingRateFor as gemMaking5 } from "@/lib/design/curtain-pricing";
+import { curtainCost as gemCurtainCost5 } from "@/lib/design/curtain-pricing";
 import { drapeRule as gemDrapeRule5 } from "@/lib/design/goods";
 import { readdirSync as gemReaddir5 } from "node:fs";
 {
@@ -17838,8 +17822,8 @@ import { readdirSync as gemReaddir5 } from "node:fs";
   const arbor = item("rigging", "rigging:arbor");
   ok(arbor.status === "needs-part" && arbor.cost === 0 && arbor.price === 0, "#211 T5: an unmapped item is needs-a-part — never a fallback dollar");
   const d = item("curtains", "curtains:draw");
-  const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5, makingRate: gemMaking5(rule.fullness) }).costTotal);
-  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#211 T5: a drape costs the shared two-term model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
+  const expected = Math.round(gemCurtainCost5({ finishedWidthFt: rule.w, finishedHeightFt: rule.h, fullnessPct: rule.fullness, qty: rule.qty }, { fabricRate: 3.5 }).costTotal);
+  ok(d.cost === expected && d.cost === gemDrape5(draw.drape!, 3.5) && d.price === Math.round((expected / 0.7) * 100) / 100, `#211 T5 / #227: a drape costs the shared flat $/sq ft model at the mapped fabric's area rate (got ${d.cost}, expected ${expected})`);
   const sub = item("audio", "audio:subwoofer");
   ok(sub.status === "allowance" && sub.cost === 1200, "#211 T5: a confirmed allowance prices as its unit cost");
   // Fix wave 1 (M5): a curtain row mapped to a CONFIRMED ALLOWANCE (not a
@@ -21843,4 +21827,81 @@ import { deriveSeededMarker as deriveSeededMarker217 } from "@/lib/service-prici
     "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved margin) instead of naming a figure Reset won't reproduce");
   ok(/disabled \? "—" : String\(Math\.round\(autoTotal\)\)/.test(stf217fix),
     "#217 fix wave (c): a disabled Total field shows \"—\", never a bare 0 that reads as a real free quote");
+}
+
+/* ====== #227 T1: one flat $/sq ft, one helper, every mirror agrees ====== */
+import { curtainCost as fab227Cost, curtainPrice as fab227Price, fabricAreaRateOf as fab227RateOf, SEED_FABRIC_RATES as fab227Seeds } from "@/lib/design/curtain-pricing";
+import { curtainCost as fab227PortalCost, fabricSellPerSqft as fab227Sell } from "@/lib/curtain-pricing";
+import { curtainPriceEach as fab227PriceEach } from "@/lib/curtain-geom";
+import { drapeUnitCost as fab227Drape } from "@/lib/design/equipment-pricing";
+import { computeCurtain as fab227Compute } from "@/app/(app)/estimator/pricing";
+import { priceGridCurtains as fab227Grid } from "@/lib/design/grid-curtains";
+import { priceCell as fab227PriceCell, type PricingPart as Fab227Part } from "@/lib/design/equipment-map";
+import { EQUIPMENT_ROW_BY_KEY as fab227Rows } from "@/lib/design/equipment-vocab";
+import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
+{
+  // The formula: sewn area × rate, pleated and flat alike.
+  const pleated = fab227Cost({ finishedWidthFt: 20, finishedHeightFt: 19, fullnessPct: 50, qty: 1 }, { fabricRate: 3.64 });
+  ok(pleated.sewnAreaSqft === 570 && pleated.costEach === 2074.8, `#227: pleated cost = sewn area 570 × 3.64 = 2074.8, no width term (got ${pleated.costEach})`);
+  const flat = fab227Cost({ finishedWidthFt: 40, finishedHeightFt: 20, fullnessPct: 0, qty: 1 }, { fabricRate: 0.9 });
+  ok(flat.sewnAreaSqft === 800 && flat.costEach === 720, `#227: flat goods cost = 800 × 0.9 = 720 (got ${flat.costEach})`);
+  ok(fab227Price(pleated.costEach, 0.3) === Math.round((2074.8 / 0.7) * 100) / 100, "#227: sell = cost ÷ (1 − margin), unchanged");
+
+  // The one fallback chain.
+  ok(fab227RateOf({ sku: "RB-EN-16", curtainAreaRate: 5, costPerSqft: 1 }) === 5, "#227 chain: the catalog's curtainAreaRate wins");
+  ok(fab227RateOf({ sku: "RB-EN-16", costPerSqft: 2.6 }) === fab227Seeds["RB-EN-16"], "#227 chain: then the seed rate for that SKU");
+  ok(fab227RateOf({ sku: "RB-EN-16", curtainAreaRate: null, costPerSqft: 2.6 }) === 2.1, "#227 chain: a null curtainAreaRate falls through like an absent one");
+  ok(fab227RateOf({ sku: "FAB227-X", costPerSqft: 1.1 }) === 1.1, "#227 chain: then the raw costPerSqft");
+  ok(fab227RateOf({ sku: "FAB227-X" }) === 0 && fab227RateOf(null) === 0 && fab227RateOf(undefined) === 0, "#227 chain: else 0 (No $/sq ft set)");
+  ok(fab227RateOf({ sku: "toString" }) === 0 && fab227RateOf({ sku: "FAB227-X", curtainAreaRate: -2 }) === 0, "#227 chain: a prototype key is never a seed, and a negative rate is 0");
+
+  // Parity: every mirror returns the same number for the same drape.
+  const cases = [
+    { w: 20, h: 19, full: 50, rate: 3.64 },
+    { w: 40, h: 20, full: 0, rate: 0.9 },
+    { w: 9.5, h: 10 + 11 / 12, full: 100, rate: 2.84 },
+    { w: 50, h: 3, full: 75, rate: 4.37 },
+  ];
+  for (const c of cases) {
+    const tag = `${c.w}×${c.h.toFixed(2)} @${c.full}% $${c.rate}`;
+    const shared = fab227Cost({ finishedWidthFt: c.w, finishedHeightFt: c.h, fullnessPct: c.full, qty: 1 }, { fabricRate: c.rate }).costEach;
+    const spec = { name: "d", hang: "", fabric: "FAB227", qty: "1", width: String(c.w), height: String(c.h), fullness: String(c.full), bottom: "" };
+    const portal = fab227PortalCost(spec, c.rate, 0.3);
+    const est = fab227Compute({ ...spec, vendorCostOverride: "" }, [{ sku: "FAB227", name: "x", costPerSqft: 0, curtainAreaRate: c.rate }], 0.3);
+    const grid = fab227Grid(
+      [{ id: "pl1", curtain: { type: "Draw", name: "d", widthFt: c.w, heightFt: c.h, fullnessPct: c.full, fabricSku: "FAB227" } }],
+      [{ id: "FAB227", sku: "FAB227", desc: "x", category: "Fabric", curtainAreaRate: c.rate }],
+      0.3
+    ).get("pl1")!;
+    const drape = fab227Drape({ w: c.w, h: c.h, fullness: c.full, qty: 1 }, c.rate);
+    const client = fab227PriceEach(spec, fab227Sell(c.rate, 0.3));
+    ok(portal.costEach === shared && est.costEach === shared && grid.costEach === shared, `#227 parity ${tag}: portal, estimator and Grid cost = shared model ${shared} (got ${portal.costEach} / ${est.costEach} / ${grid.costEach})`);
+    ok(drape === Math.round(shared), `#227 parity ${tag}: the Equipment map drape cost is the shared cost, dollar-rounded (got ${drape})`);
+    ok(grid.priceEach === portal.priceEach && Math.abs(client - portal.priceEach) < 0.011, `#227 parity ${tag}: Grid + client preview sell = portal sell (client ${client}, server ${portal.priceEach})`);
+    ok(Math.abs(est.priceEach - portal.priceEach) <= 0.011, `#227 parity ${tag}: estimator sell within a cent of the portal sell`);
+  }
+
+  // The Equipment map and the swap search read the same helper.
+  const drawDef = fab227Rows.get("curtains:draw")!;
+  const ctxOf = (p: Fab227Part) => ({ parts: new Map<string, Fab227Part>([[p.sku, p]]), fixtures: new Map(), margin: 0.3 });
+  const seeded = fab227PriceCell({ kind: "part", sku: "RB-EN-16" }, drawDef, ctxOf({ sku: "RB-EN-16", desc: "Encore 16", unit: "sq ft", cost: 0, list: 0, category: "Fabric" }));
+  ok(seeded.status === "part" && seeded.areaRate === 2.1, "#227: the Equipment map resolves a fabric through fabricAreaRateOf — seed rates included (spec §2)");
+  const cps = fab227PriceCell({ kind: "part", sku: "FAB227-CPS" }, drawDef, ctxOf({ sku: "FAB227-CPS", desc: "Muslin", unit: "sq ft", cost: 0, list: 0, category: "Fabric", costPerSqft: 1.4 }));
+  ok(cps.status === "part" && cps.areaRate === 1.4, "#227: …and falls back to the fabric's cost per sq ft");
+  const hits = fab227SwapHits([{ sku: "FAB227-CPS", desc: "cost/sq ft only", costPerSqft: 1.4 }, { sku: "FAB227-NONE", desc: "no rate" }], 0.3);
+  ok(hits.length === 1 && hits[0].ref === "FAB227-CPS" && hits[0].unitSell === 2, "#227: the swap search finds a fabric priced only by cost per sq ft (the one helper), sold through the margin");
+
+  // No making term and no private rate chain survives in any mirror.
+  const mirrors227 = [
+    "src/lib/design/curtain-pricing.ts", "src/lib/curtain-pricing.ts", "src/lib/curtain-geom.ts",
+    "src/lib/design/equipment-pricing.ts", "src/lib/design/equipment-map.ts", "src/lib/design/grid-curtains.ts",
+    "src/lib/design/auto-estimate.ts", "src/app/(app)/estimator/pricing.ts", "src/app/(app)/estimator/page.tsx",
+    "src/app/portal/actions.ts", "src/app/portal/estimate/page.tsx", "src/app/portal/estimate/estimate-builder.tsx",
+    "src/app/(app)/design/grid/[id]/page.tsx", "src/app/(app)/design/grid/[id]/editor.tsx", "src/app/(app)/design/grid/[id]/curtain-drop.tsx",
+  ];
+  for (const f of mirrors227) {
+    const s = readFileSync(join(process.cwd(), f), "utf8");
+    ok(!/makingRate|MAKING_RATE|sellCoeffs|SellCoeffs|makingPerFt|curtainCoeffs/.test(s), `#227: ${f} carries no making term or sell coefficients`);
+    if (f !== "src/lib/design/curtain-pricing.ts") ok(!/curtainAreaRate\s*\?\?|SEED_FABRIC_RATES\[/.test(s), `#227: ${f} resolves a fabric rate only through fabricAreaRateOf`);
+  }
 }

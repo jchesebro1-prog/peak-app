@@ -7,7 +7,6 @@ import {
   curtainQty,
   type CurtainSpec,
   type FabricSell,
-  type SellCoeffs,
 } from "@/lib/curtain-geom";
 import { submitPortalEstimate } from "../actions";
 
@@ -66,12 +65,11 @@ function fresh(fabricSku: string): CurtainSpec {
 }
 
 export function EstimateBuilder({
-  companyName, venues, fabrics, coeffs, equipment, initialTab = "drapery",
+  companyName, venues, fabrics, equipment, initialTab = "drapery",
 }: {
   companyName: string;
   venues: Array<{ id: string; label: string; place: string }>;
   fabrics: FabricSell[];
-  coeffs: SellCoeffs;
   equipment: EquipPart[];
   initialTab?: "drapery" | "equipment";
 }) {
@@ -81,7 +79,7 @@ export function EstimateBuilder({
     const map = new Map(fabrics.map((f) => [f.sku, f.pricePerSqft]));
     return (sku: string) => map.get(sku) ?? 0;
   }, [fabrics]);
-  const priceEach = (l: CurtainSpec) => curtainPriceEach(l, priceOf(l.fabric), coeffs);
+  const priceEach = (l: CurtainSpec) => curtainPriceEach(l, priceOf(l.fabric));
 
   const partBySku = useMemo(() => new Map(equipment.map((p) => [p.sku, p])), [equipment]);
   const groups = useMemo(

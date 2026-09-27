@@ -15,14 +15,16 @@
  *  - assembly  → resolveFixture's included cost / sell;
  *  - allowance → the confirmed amount is a unit cost, sold like a list-less
  *                part;
- *  - fabric rows (curtains) → the mapped Fabric part's area rate
- *                (curtainAreaRate, else costPerSqft) — the per-drape cost is
+ *  - fabric rows (curtains) → the mapped Fabric part's flat $/sq ft sewn
+ *                (making included), read through fabricAreaRateOf — the one
+ *                chain every curtain path uses, seed rates included (#227,
+ *                reverses the #211 no-seed rule). The per-drape cost is
  *                computed from the venue geometry in equipment-pricing.ts.
- *                No SEED_FABRIC_RATES fallback.
  */
 import type { TierKey } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY, type EquipRowDef } from "./equipment-vocab";
 import { fixtureSkus, resolveFixture, type FixtureCatalogPart, type FixtureRecord } from "@/lib/fixture-assemblies";
+import { fabricAreaRateOf } from "./curtain-pricing";
 
 export const EQUIPMENT_MAP_BLOB = "grid_equipment_map";
 export const EQUIP_TIERS: readonly TierKey[] = ["good", "better", "best"];
@@ -216,7 +218,7 @@ export function priceCell(cell: EquipCell | null, def: EquipRowDef, ctx: EquipPr
     const p = ctx.parts.get(cell.sku);
     if (!p) return needs(`${cell.sku} is no longer in the catalog`);
     if (def.curtain) {
-      const rate = p.category === "Fabric" ? Number(p.curtainAreaRate ?? p.costPerSqft ?? 0) : 0;
+      const rate = p.category === "Fabric" ? fabricAreaRateOf(p) : 0;
       if (!(rate > 0)) return needs(`${p.sku} is not a fabric with an area rate`);
       return { status: "part", ref: p.sku, desc: p.desc, unit: def.unit, unitCost: 0, unitSell: 0, areaRate: rate };
     }

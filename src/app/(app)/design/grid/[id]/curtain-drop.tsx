@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
+import { curtainPriceEach, type FabricSell } from "@/lib/curtain-geom";
 import { GRID_FULLNESS, curtainSpecOf, type GridCurtain, type GridCurtainType } from "@/lib/design/grid-bom";
 
 /**
@@ -14,7 +14,7 @@ import { GRID_FULLNESS, curtainSpecOf, type GridCurtain, type GridCurtainType } 
  * The live price is computed from SELL numbers only (lib/curtain-geom, the
  * customer-safe mirror). No margin and no cost basis reach this component; the
  * server prices the line authoritatively on drop and again at quote time, and
- * the two agree to the cent because they run the same two-term model.
+ * the two agree to the cent because they run the same flat $/sq ft model (#227).
  */
 
 const BTN: React.CSSProperties = {
@@ -57,14 +57,12 @@ function moneyFmt(n: number): string {
 export default function CurtainDrop({
   type,
   fabrics,
-  coeffs,
   busy,
   onConfirm,
   onCancel,
 }: {
   type: GridCurtainType;
   fabrics: FabricSell[];
-  coeffs: SellCoeffs;
   busy: boolean;
   onConfirm: (curtain: GridCurtain) => void;
   onCancel: () => void;
@@ -88,7 +86,7 @@ export default function CurtainDrop({
     color: color.trim() || undefined,
   };
   const fabric = fabrics.find((f) => f.sku === fabricSku);
-  const price = curtainPriceEach(curtainSpecOf(draft), fabric?.pricePerSqft || 0, coeffs);
+  const price = curtainPriceEach(curtainSpecOf(draft), fabric?.pricePerSqft || 0);
   const sewnArea = widthFt * (1 + fullnessPct / 100) * heightFt;
   const valid = Boolean(draft.name) && widthFt > 0 && heightFt > 0 && Boolean(fabricSku);
 

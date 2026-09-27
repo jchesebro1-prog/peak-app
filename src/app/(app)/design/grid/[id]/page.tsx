@@ -12,9 +12,10 @@ import { num } from "@/lib/stores/pricing";
 import { getSettings } from "@/lib/settings";
 import { listDesigns } from "@/lib/stores/studio-designs";
 import { resolveCategoryMap } from "@/lib/catalog-taxonomy";
-import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
+import { fabricSellPerSqft } from "@/lib/curtain-pricing";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { resolveTier } from "@/lib/pricing-tiers";
-import { fabricAreaRate, isFabricRow } from "@/lib/design/grid-curtains";
+import { isFabricRow } from "@/lib/design/grid-curtains";
 import { symbolContext } from "@/lib/design/grid-icons";
 import { gridPartsFrom } from "@/lib/design/grid-parts";
 import { resolveWireTypes } from "@/lib/catalog-connect";
@@ -149,11 +150,11 @@ export default async function GridEditorPage({
   ];
 
   /**
-   * Curtain drop-in (punch #49): the fabric list and the sell coefficients for
+   * Curtain drop-in (punch #49): the fabric list with its sell price/sq ft for
    * the editor's live price preview. These are SELL numbers only - the margin
    * and the cost basis stay on the server (lib/design/curtain-pricing is never
    * imported by the editor). The preview matches the quote to the cent because
-   * both run the same two-term model at the same tier margin.
+   * both run the same flat $/sq ft model (#227) at the same tier margin.
    */
   const tier = await resolveTier(project.customerId);
   const fabrics: FabricSell[] = catalog
@@ -161,11 +162,9 @@ export default async function GridEditorPage({
     .map((p) => ({
       sku: p.id,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft(fabricAreaRate(p), tier.margin),
+      pricePerSqft: fabricSellPerSqft(fabricAreaRateOf(p), tier.margin),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-
-  const curtainCoeffs = sellCoeffs(tier.margin);
   // #212: the active option's custom items, sell-priced at this customer's
   // tier margin exactly as buildGridQuote prices them. Sell numbers only —
   // the margin stays on the server (the curtain rule above).
@@ -221,7 +220,6 @@ export default async function GridEditorPage({
       fabrics={fabrics}
       scopeTargets={scopeTargets}
       auto={auto}
-      curtainCoeffs={curtainCoeffs}
       laborParts={laborParts}
       laborHoursPerDevice={laborHoursPerDevice}
       venues={venues}

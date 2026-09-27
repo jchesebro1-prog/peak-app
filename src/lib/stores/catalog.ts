@@ -86,9 +86,10 @@ export type CatalogPart = {
   ozBasis?: "lin-yd" | "sq-yd";
   /** Bolt width in inches — only meaningful when ozBasis is "lin-yd". */
   boltWidthIn?: number;
-  /** Curtain make-it-ourselves area cost, $/ft² of sewn fabric. Fabric rows
-   *  only. Seeded ~10% above the Rose-Brand-reconciled rate; edit toward real
-   *  shop cost when the curtain shop exists. Distinct from raw costPerSqft. */
+  /** Curtain cost, $/ft² of SEWN fabric INCLUDING making/sewing (#227 — the
+   *  one flat rate; no separate making charge). Fabric rows only. Edited in
+   *  the catalog part editor or imported as "Fabric $/sq ft"; read only
+   *  through fabricAreaRateOf. Distinct from raw costPerSqft. */
   curtainAreaRate?: number;
   /** Labor rows — 'RIG' | 'LIG' | 'AUD' | 'VID' picks the rate set. */
   discipline?: string;

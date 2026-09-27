@@ -527,7 +527,7 @@ export function compute(s: AState): ComputeResult {
 
   // Curtains — the four fabric drapes carry the goods.ts drape geometry
   // (finished width/height, fullness, panels) so equipment-pricing.ts costs
-  // each one from the mapped fabric's area rate + making; qty per depth block.
+  // each one from the mapped fabric's flat $/sq ft sewn (#227); qty per depth block.
   const drape = s.drape || {};
   const curtainItems: Eq[] = [];
   // `proscenium` gates the wing addition inside venueDimsFromEstimator (#66).

@@ -45,7 +45,7 @@ import {
 import { markerColor } from "@/lib/design/grid-symbols";
 import { legendRows, symbolLook, type SymbolContext, type SymbolEntry, type SymbolLook } from "@/lib/design/grid-icons";
 import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
-import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
+import { curtainPriceEach, type FabricSell } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
 import { suggestLabor, type LaborPartLite } from "@/lib/design/grid-labor";
@@ -246,7 +246,6 @@ export default function GridEditor({
   fabrics,
   scopeTargets,
   auto,
-  curtainCoeffs,
   laborParts,
   laborHoursPerDevice,
   venues,
@@ -267,8 +266,6 @@ export default function GridEditor({
   scopeTargets: ScopeTargetsByTier | null;
   /** Auto designs (#211): the chosen cards (sell-only) + their targets; null for Blank. */
   auto: { estimate: AutoEstimate; cards: SellCard[]; targets: ScopeTargets } | null;
-  /** Sell-side making coefficients for the live curtain price (punch #49). */
-  curtainCoeffs: SellCoeffs;
   /** Catalog labor rows (role "labor") for the auto-suggest (D114). */
   laborParts: LaborPartLite[];
   /** Install-hours-per-device knob from the pricing rules. */
@@ -619,11 +616,11 @@ export default function GridEditor({
       const fabric = fabricBySku.get(pl.curtain.fabricSku);
       m.set(
         pl.id,
-        curtainPriceEach(curtainSpecOf(pl.curtain), fabric?.pricePerSqft || 0, curtainCoeffs)
+        curtainPriceEach(curtainSpecOf(pl.curtain), fabric?.pricePerSqft || 0)
       );
     }
     return m;
-  }, [placements, fabricBySku, curtainCoeffs]);
+  }, [placements, fabricBySku]);
   const curtains = useMemo(
     () => curtainLines(placements, curtainPrices, fabricNames),
     [placements, curtainPrices, fabricNames]
@@ -2369,7 +2366,6 @@ export default function GridEditor({
                   <CurtainDrop
                     type={armedCurtainType}
                     fabrics={fabrics}
-                    coeffs={curtainCoeffs}
                     busy={busy}
                     onConfirm={dropCurtain}
                     onCancel={() => setCurtainAt(null)}

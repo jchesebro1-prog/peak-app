@@ -4,8 +4,8 @@ import { getSettings } from "@/lib/settings";
 import { portalSession } from "@/lib/portal";
 import { get as getCustomer } from "@/lib/stores/customers";
 import { byCategory } from "@/lib/stores/catalog";
-import { fabricSellPerSqft, sellCoeffs } from "@/lib/curtain-pricing";
-import { SEED_FABRIC_RATES } from "@/lib/design/curtain-pricing";
+import { fabricSellPerSqft } from "@/lib/curtain-pricing";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import type { FabricSell } from "@/lib/curtain-geom";
 import { customerCatalog } from "@/lib/portal-catalog";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * never self-publishes a binding quote.
  *
  * PRICING SAFETY: fabrics reach the browser as a SELL price/sq ft only
- * (costPerSqft ÷ (1 − margin)). Peak's cost basis and margin never leave the
+ * (the fabric's $/sq ft ÷ (1 − margin)). Peak's cost basis and margin never leave the
  * server. The submit action recomputes authoritatively — see ../actions.ts.
  */
 
@@ -82,19 +82,18 @@ export default async function PortalEstimatePage({
     place: [l.city, l.state].filter(Boolean).join(", "),
   }));
 
-  // Cost basis → customer sell price/sq ft. costPerSqft NEVER leaves the server;
-  // sell numbers ship at full precision so the preview equals the stored quote.
-  // Only fabrics with a real per-sq-ft basis are offered — imported vendor
-  // fabric rows (per-unit pricing, no costPerSqft) are excluded so the customer
-  // never sees a $0/sq ft option.
+  // Cost basis → customer sell price/sq ft. The cost rate NEVER leaves the
+  // server; sell numbers ship at full precision so the preview equals the
+  // stored quote. Only fabrics with a $/sq ft rate (fabricAreaRateOf, #227)
+  // are offered, so the customer never sees a $0/sq ft option.
   const fabrics: FabricSell[] = fabricRows
-    .filter((p) => (p.costPerSqft ?? 0) > 0)
-    .map((p) => ({
+    .map((p) => ({ p, rate: fabricAreaRateOf(p) }))
+    .filter((x) => x.rate > 0)
+    .map(({ p, rate }) => ({
       sku: p.sku,
       name: p.desc,
-      pricePerSqft: fabricSellPerSqft(p.curtainAreaRate ?? SEED_FABRIC_RATES[p.sku] ?? p.costPerSqft ?? 0, tier.margin),
+      pricePerSqft: fabricSellPerSqft(rate, tier.margin),
     }));
-  const coeffs = sellCoeffs(tier.margin);
 
   return (
     <PortalShell
@@ -136,7 +135,6 @@ export default async function PortalEstimatePage({
         companyName={companyName}
         venues={venues}
         fabrics={fabrics}
-        coeffs={coeffs}
         equipment={equipment}
         initialTab={initialTab}
       />
