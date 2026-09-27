@@ -84,6 +84,10 @@ export const EQUIPMENT_ROWS: readonly EquipRowDef[] = [
   row("lighting", "automated", "Automated", "ea", "each", ["moving", "automated"]),
   // #233: was controls:outputStation ("Output station"), now a Fixtures item.
   // #233 late: qty = ⌈fixtures × per fixture × tier ×⌉ (cable-package.ts).
+  // D393: an old Output-station part mapping or typed Output-station qty does
+  // NOT carry to Cable Package — it's now counted per cable, not per the old
+  // row's math, so the old figure would misprice it. Cable Package starts
+  // unmapped (Incomplete until Jeff maps it in Grid Settings).
   row("lighting", "cablePackage", "Cable Package", "ea", "lot", ["cable", "jumper", "extension"]),
   // Controls (Quick Design only)
   row("controls", "console", "Console", "ea", "none", ["console"]),
@@ -154,8 +158,15 @@ export const EQUIP_SYSTEM_LABEL: Record<SysKey, string> = {
  * (sanitizeEquipmentMap): an Equipment map entry stored under the old key
  * reads as the new row until the blob holds the new key at all (saved, or
  * cleared as null) — then the old entry is ignored. Nothing is rewritten.
+ *
+ * D393: empty — controls:outputStation → lighting:cablePackage was removed.
+ * Cable Package is now counted per cable (fixtures × per fixture × tier), so
+ * an old Output-station part mapping must NOT carry over and misprice it; a
+ * stored controls:outputStation row is simply unknown now and dropped
+ * (sanitizeEquipmentMap's own EQUIPMENT_ROW_BY_KEY check), leaving Cable
+ * Package unmapped. Left exported (empty) as the seam for a future row move.
  */
-export const EQUIPMENT_KEY_ALIASES: ReadonlyMap<string, string> = new Map([["controls:outputStation", "lighting:cablePackage"]]);
+export const EQUIPMENT_KEY_ALIASES: ReadonlyMap<string, string> = new Map();
 
 /**
  * #233 — Quick Design qty overrides are keyed system → item NAME (D324), so a
@@ -167,6 +178,12 @@ export const EQUIPMENT_KEY_ALIASES: ReadonlyMap<string, string> = new Map([["con
  * One hop only: each old label maps straight to its CURRENT label, and the
  * lookup is applied once — never chained. A future relabel of a target here
  * must update every entry pointing at it (and add the old target as a key).
+ *
+ * D393: no "controls:Output station" → "lighting:Cable Package" entry — a
+ * typed Output-station qty must NOT carry to Cable Package (it's counted per
+ * cable now, not by the old row's math). cleanQtyOverrides falls through to
+ * its unaliased branch for that key, so an old override just sits inertly
+ * under controls (no live row reads it) instead of mispricing the new one.
  */
 export const EQUIPMENT_LABEL_ALIASES: ReadonlyMap<string, string> = new Map([
   ["rigging:Aircraft cable", "rigging:Suspension Method"],
@@ -178,6 +195,5 @@ export const EQUIPMENT_LABEL_ALIASES: ReadonlyMap<string, string> = new Map([
   ["controls:Button", "controls:Power Controls – Architectural"],
   ["controls:Architectural touch screen", "controls:Architectural Controls"],
   ["controls:Input station", "controls:DMX Distribution"],
-  ["controls:Output station", "lighting:Cable Package"],
   ["controls:Distro system", "controls:Labor"],
 ]);

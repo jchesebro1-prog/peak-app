@@ -22508,8 +22508,8 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
   const cleaned = r233Clean({ better: { rigging: { "Aircraft cable": 900, Pipe: 12 }, controls: { "Output station": 7, "Distro system": 1, Console: 2 } } }, true);
   ok(cleaned.better?.rigging?.["Suspension Method"] === 900 && cleaned.better?.rigging?.Pipe === 12 && !("Aircraft cable" in (cleaned.better?.rigging || {})),
     "#233: an override saved under an old label reads under the new label");
-  ok(cleaned.better?.lighting?.["Cable Package"] === 7 && !("Output station" in (cleaned.better?.controls || {})) && cleaned.better?.controls?.Labor === 1 && cleaned.better?.controls?.Console === 2,
-    "#233: the Output station override lands on Lighting · Cable Package; unrenamed rows are untouched");
+  ok(!("Cable Package" in (cleaned.better?.lighting || {})) && cleaned.better?.controls?.["Output station"] === 7 && cleaned.better?.controls?.Labor === 1 && cleaned.better?.controls?.Console === 2,
+    "D393: a typed Output-station qty does NOT carry to Lighting · Cable Package — it's counted per cable now, not by the old row's math, so it just sits inertly under controls (no live row reads it); unrenamed rows are untouched");
   const both = r233Clean({ good: { rigging: { "Aircraft cable": 5, "Suspension Method": 8 } } }, true);
   ok(both.good?.rigging?.["Suspension Method"] === 8 && Object.keys(both.good?.rigging || {}).length === 1,
     "#233: when both labels were saved, the new label's value wins");
@@ -22520,20 +22520,25 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
     const i = to.indexOf(":");
     return r233Rows.some((r) => r.system === to.slice(0, i) && r.label === to.slice(i + 1));
   });
-  ok(r233LabelAliases?.size === 11 && aliasTargetsLive, "#233: eleven label aliases, each pointing at a live row");
+  ok(r233LabelAliases?.size === 10 && !r233LabelAliases?.has("controls:Output station") && aliasTargetsLive,
+    "D393: ten label aliases, each pointing at a live row — no controls:Output station → lighting:Cable Package entry");
 
-  // Equipment map: the moved key reads as the new key until the new key is written.
+  // Equipment map: D393 removed the controls:outputStation → lighting:cablePackage
+  // key alias — an old part mapping stored under the old key is now simply
+  // unknown (EQUIPMENT_ROW_BY_KEY has no controls:outputStation row) and is
+  // dropped, never carried onto Cable Package.
   const cell = { kind: "part", sku: "CAB-1" };
   const oldOnly = r233Sanitize({ "controls:outputStation": { tiers: { good: cell }, updatedBy: "J", updatedAt: 1 } });
-  const oc = oldOnly["lighting:cablePackage"]?.tiers.good;
-  ok(oc?.kind === "part" && oc.sku === "CAB-1" && !("controls:outputStation" in oldOnly),
-    "#233: a stored controls:outputStation row reads as lighting:cablePackage");
-  const newWins = r233Sanitize({ "controls:outputStation": { tiers: { good: cell } }, "lighting:cablePackage": { tiers: { good: { kind: "part", sku: "CAB-2" } } } });
-  const nc = newWins["lighting:cablePackage"]?.tiers.good;
-  ok(nc?.kind === "part" && nc.sku === "CAB-2", "#233: once the new key is saved it wins over the old one");
+  ok(!("lighting:cablePackage" in oldOnly) && !("controls:outputStation" in oldOnly),
+    "D393: a stored controls:outputStation row does NOT carry to lighting:cablePackage — it's dropped, leaving Cable Package unmapped");
+  const newOnly = r233Sanitize({ "controls:outputStation": { tiers: { good: cell } }, "lighting:cablePackage": { tiers: { good: { kind: "part", sku: "CAB-2" } } } });
+  const nc = newOnly["lighting:cablePackage"]?.tiers.good;
+  ok(nc?.kind === "part" && nc.sku === "CAB-2" && !("controls:outputStation" in newOnly),
+    "D393: a directly-saved lighting:cablePackage row reads normally regardless of any old controls:outputStation entry alongside it");
   const cleared = r233Sanitize({ "controls:outputStation": { tiers: { good: cell } }, "lighting:cablePackage": null });
-  ok(!("lighting:cablePackage" in cleared), "#233: clearing the new row is not undone by the old key");
-  ok(r233KeyAliases?.get("controls:outputStation") === "lighting:cablePackage" && r233KeyAliases?.size === 1, "#233: exactly one key moved");
+  ok(!("lighting:cablePackage" in cleared), "D393: clearing Cable Package (null) keeps it cleared — the old key never resurrects it");
+  ok(r233KeyAliases?.size === 0 && r233KeyAliases?.get("controls:outputStation") === undefined,
+    "D393: no key alias for Output station — Cable Package starts unmapped, not carried from an old part mapping");
   ok(r233Hints["lighting:cablePackage"] === undefined && !("controls:outputStation" in r233Hints),
     "#233 late review: the row has no 'was' hint — the old Output-station price was scaled to the pre-#233-late count and no longer applies; the row starts unmapped");
 }
