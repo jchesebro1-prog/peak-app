@@ -9,10 +9,13 @@ import {
 import { quotesSeed } from "@/db/seeds/quotes";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
-import { withTransaction } from "@/db";
+import { getDb, withTransaction } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
+import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import type { QuotePdfState } from "@/lib/quote-pdf/state";
 import {
   carriesPipeline,
   firstStage,
@@ -228,6 +231,9 @@ export type Quote = {
   /** Customer-preview "Show on PDF" choices (#222) — saved with the quote so the
    *  stored PDF is reproducible. Read through normalizePdfOptions. */
   pdfOptions?: QuotePdfOptions | null;
+  /** The saved customer PDF (#222) — server-written by lib/quote-pdf only.
+   *  `blobPath` never leaves the server; browsers get a QuotePdfView. */
+  pdf?: QuotePdfState | null;
 };
 
 /**
@@ -274,6 +280,10 @@ export type QuoteRevision = {
    *  a snapshot that copied only `spec` recalled a priced vendor line whose
    *  source document, terms and notes had already been pruned away. */
   vendorQuotes?: unknown;
+  /** #222 — the exact PDF that went to the customer with a "sent" revision.
+   *  An annex stamped once after the snapshot is cut; the priced fields above
+   *  are still never rewritten. */
+  pdfBlobPath?: string;
 };
 
 export type ReviewOpts = {
@@ -629,6 +639,70 @@ export async function addQuoteRevision(
 }
 
 /**
+ * Take the quote row's write lock for the rest of the current transaction
+ * (#222). patchDoc is read-then-write; under the lock its re-read is the
+ * latest committed doc and no other writer can land between that read and
+ * its write — so the mutate callback is a true compare-and-set.
+ */
+async function lockQuoteRow(id: string): Promise<void> {
+  const db = await getDb();
+  const t = DOC_TABLES.quotes;
+  await db.select({ id: t.id }).from(t).where(eq(t.id, id)).for("update");
+}
+
+/**
+ * Read-modify-write the quote's `pdf` state (#222) as a compare-and-set:
+ * `mutate` sees the state re-read under the row lock and returns the next
+ * state, or `undefined` to leave it (a superseded render). Deliberately does
+ * NOT bump `updatedAt`: the PDF is a by-product of a save, and `updatedAt` is
+ * the document's printed revision date and the portal's sort key.
+ */
+export async function updateQuotePdf(
+  id: string,
+  mutate: (cur: QuotePdfState | null) => QuotePdfState | undefined
+): Promise<{ before: QuotePdfState | null; after: QuotePdfState | null; changed: boolean } | null> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    let out: { before: QuotePdfState | null; after: QuotePdfState | null; changed: boolean } | null = null;
+    const res = await patchDoc<Quote>("quotes", id, (doc) => {
+      const before = doc.pdf ?? null;
+      const next = mutate(before);
+      if (next !== undefined) doc.pdf = next;
+      out = { before, after: next === undefined ? before : next, changed: next !== undefined };
+    });
+    return res ? out : null;
+  });
+}
+
+/** Stamp a revision's PDF copy once (#222). False when the revision is gone or already has one. */
+export async function setRevisionPdfPath(id: string, rev: number, path: string): Promise<boolean> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    let hit = false;
+    await patchDoc<Quote>("quotes", id, (doc) => {
+      const r = (doc.revisions || []).find((x) => x.rev === rev);
+      if (r && !r.pdfBlobPath) {
+        r.pdfBlobPath = path;
+        hit = true;
+      }
+    });
+    return hit;
+  });
+}
+
+/** After a send commits: copy the current PDF onto the new sent revision (#222).
+ *  Never fails the send — a missing copy is logged, and the generator retries
+ *  it when a still-rendering PDF lands. */
+async function copySentPdfSafely(id: string): Promise<void> {
+  try {
+    const { copySentRevisionPdf } = await import("../quote-pdf/generate");
+    await copySentRevisionPdf(id);
+  } catch (e) {
+    console.error("[quotes] copying the sent revision's PDF failed", id, e);
+  }
+}
+
+/**
  * Recall an earlier revision onto the live quote.
  *
  * Non-destructive by construction: the current state is snapshotted FIRST, so
@@ -850,7 +924,8 @@ export async function setStatus(
   by?: string | null,
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
-  return withTransaction(async () => {
+  const sentCut = { value: false };
+  const out = await withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return null;
@@ -895,6 +970,7 @@ export async function setStatus(
     }
     if (status === "sent") {
       pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
+      sentCut.value = true;
     }
     doc.updatedAt = t;
   });
@@ -928,6 +1004,10 @@ export async function setStatus(
   }
   return result;
   });
+  // #222: Blob I/O stays out of the status transaction. A same-status no-op
+  // cuts no revision, so it copies nothing.
+  if (out && sentCut.value) await copySentPdfSafely(id);
+  return out;
 }
 
 /**

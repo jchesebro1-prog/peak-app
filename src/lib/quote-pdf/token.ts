@@ -22,6 +22,8 @@ export function signPrintToken(secret: string, kind: PdfKind, id: string, nowMs:
 
 export function verifyPrintToken(secret: string, token: string, kind: PdfKind, id: string, nowMs: number): boolean {
   if (!secret || typeof token !== "string") return false;
+  // A NaN clock makes both expiry comparisons false — fail closed instead.
+  if (!Number.isFinite(nowMs)) return false;
   const m = /^(\d{1,15})\.([A-Za-z0-9_-]{43})$/.exec(token);
   if (!m) return false;
   const exp = Number(m[1]);

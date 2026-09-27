@@ -10520,6 +10520,7 @@ seeded()
   .then(() => wireLabor231AsyncChecks())
   .then(() => gridAccessoriesAsyncChecks230())
   .then(() => quotePdfOptions222AsyncChecks())
+  .then(() => quotePdfEngine222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23431,4 +23432,186 @@ async function quotePdfOptions222AsyncChecks(): Promise<void> {
   await q222Update(id, { pdfOptions: { ...DEFAULT_PDF_OPTIONS, detail: "sectioned", pdfTerms: false } });
   const back = normalizePdfOptions((await q222Get(id))?.pdfOptions);
   ok(back.detail === "sectioned" && back.pdfTerms === false && back.pdfQty === true, "#222 pdfOptions: saved on the quote and read back");
+}
+
+/* ============ #222 Task 3 — PDF engine: storage, generator, sent-revision copy ============ */
+import { copySentRevisionPdf, generateQuotePdf } from "@/lib/quote-pdf/generate";
+import { isQuotePdfPath, pdfStorage } from "@/lib/quote-pdf/storage";
+import { portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
+import { chromeLaunch, renderPrintRouteToPdf } from "@/lib/quote-pdf/render";
+import { setStatus as q222SetStatus, updateQuotePdf as q222UpdatePdf } from "@/lib/stores/quotes";
+import { readdirSync as readdirSync222 } from "node:fs";
+{
+  const cfg222 = readFileSync(join(process.cwd(), "next.config.ts"), "utf8");
+  ok(/serverExternalPackages:[^\n]*"puppeteer-core"[^\n]*"@sparticuz\/chromium"/.test(cfg222), "#222 next.config: puppeteer-core and @sparticuz/chromium stay external");
+  ok(/"\/estimator": \[[^\]]*@sparticuz\/chromium\/bin/.test(cfg222), "#222 next.config: the Chromium binary is traced into the functions that render");
+  const pkg222 = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { dependencies?: Record<string, string> };
+  const revs222 = readFileSync(join(process.cwd(), "node_modules/puppeteer-core/lib/puppeteer/revisions.js"), "utf8");
+  const chromeMajor222 = /chrome: '(\d+)\./.exec(revs222)?.[1];
+  const sparticuz222 = pkg222.dependencies?.["@sparticuz/chromium"] || "";
+  ok(
+    /^\d+\.\d+\.\d+$/.test(pkg222.dependencies?.["puppeteer-core"] || "") && /^\d+\.\d+\.\d+$/.test(sparticuz222) && !!chromeMajor222 && sparticuz222.split(".")[0] === chromeMajor222,
+    "#222 deps: puppeteer-core and @sparticuz/chromium are exact-pinned and the Chromium major is the one puppeteer expects"
+  );
+  const tok222 = signPrintToken("s-222", "quote", "Q-1", 1_000);
+  ok(
+    !verifyPrintToken("s-222", tok222, "quote", "Q-1", NaN) && !verifyPrintToken("s-222", tok222, "quote", "Q-1", -Infinity) && !verifyPrintToken("s-222", tok222, "quote", "Q-1", Infinity),
+    "#222 print token: a non-finite clock fails closed"
+  );
+  const qs222 = readFileSync(join(process.cwd(), "src/lib/stores/quotes.ts"), "utf8");
+  const upd222 = qs222.slice(qs222.indexOf("export async function updateQuotePdf"), qs222.indexOf("export async function setRevisionPdfPath"));
+  ok(/lockQuoteRow\(/.test(upd222) && /patchDoc<Quote>\(/.test(upd222), "#222 updateQuotePdf: the pdf state is compare-and-set under a row lock on a fresh re-read");
+}
+
+async function quotePdfEngine222AsyncChecks(): Promise<void> {
+  // Never Blob — a stray token would point this at the real store.
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.VERCEL;
+  const root = mkdtempSync(join(tmpdir(), "quote-pdfs-222-"));
+  process.env.QUOTE_PDF_DIR = root;
+  const store = pdfStorage();
+  ok(!("unavailable" in store) && store.backend === "fs", "#222 storage: no Blob token and not on Vercel → local files under QUOTE_PDF_DIR");
+  if ("unavailable" in store || store.backend !== "fs") return;
+  ok(
+    isQuotePdfPath("quote-pdfs/Q-1/2.pdf") && !isQuotePdfPath("quote-pdfs/../etc/passwd.pdf") && !isQuotePdfPath("/etc/x.pdf") && !isQuotePdfPath("quote-pdfs/Q-1/x.txt"),
+    "#222 storage: only quote-pdfs/<id>/<name>.pdf paths are ever read or written"
+  );
+  const put = await store.put("quote-pdfs/TEST222_s/1.pdf", Buffer.from("%PDF-1.4 x"));
+  ok((await store.read(put))?.toString() === "%PDF-1.4 x", "#222 storage: a written PDF reads back");
+  await store.remove(put);
+  ok((await store.read(put)) === null, "#222 storage: a removed PDF is gone");
+
+  const origin = "http://print.test";
+  const secret = "spec-secret-222";
+  const fake = (label: string) => async () => Buffer.from(`%PDF-1.4 ${label}`);
+  const dirOf = (qid: string) => join(root, "quote-pdfs", qid.replace(/[^A-Za-z0-9_-]/g, "_"));
+
+  const id = fixtureId222("222", "gen");
+  registerFixture222("quotes", id);
+  await q222Create({ id, name: "#222 gen", customer: "Spec fixture", owner: "spec" });
+  let seenUrl = "";
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 100, 100));
+  const r1 = await generateQuotePdf({ quoteId: id, savedAt: 100, origin, secret, render: async (u) => { seenUrl = u; return Buffer.from("%PDF-1.4 one"); } });
+  ok(r1?.status === "ready" && !!r1.blobPath, "#222 generate: a render lands ready with a stored file");
+  ok(seenUrl.startsWith(`${origin}/print/quote/${encodeURIComponent(id)}?t=`), "#222 generate: prints the quote's own print route");
+  ok(verifyPrintToken(secret, decodeURIComponent(seenUrl.split("?t=")[1]), "quote", id, Date.now()), "#222 generate: the print URL carries a token that verifies for that quote");
+
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 200, 200));
+  const raced = await generateQuotePdf({
+    quoteId: id, savedAt: 200, origin, secret,
+    render: async () => { await q222UpdatePdf(id, (cur) => pendingPdf(cur, 300, 300)); return Buffer.from("%PDF-1.4 two"); },
+  });
+  const afterRace = (await q222Get(id))?.pdf;
+  ok(raced === null && afterRace?.status === "pending" && afterRace.savedAt === 300 && afterRace.blobPath === r1?.blobPath, "#222 generate: a save landing mid-render supersedes it — the newer pending state stands");
+  ok(readdirSync222(dirOf(id)).join(",") === "100.pdf", "#222 generate: the superseded render's file is deleted");
+  ok((await generateQuotePdf({ quoteId: id, savedAt: 250, origin, secret, render: fake("stale") })) === null, "#222 generate: a render for a save that is no longer current doesn't start");
+
+  const r3 = await generateQuotePdf({ quoteId: id, savedAt: 300, origin, secret, render: fake("three") });
+  ok(r3?.status === "ready" && r3.savedAt === 300 && readdirSync222(dirOf(id)).join(",") === "300.pdf", "#222 generate: the newest save lands ready and the previous file is deleted");
+
+  // Settle only from pending: a second render of an already-settled save is a no-op.
+  let reran = false;
+  const again = await generateQuotePdf({ quoteId: id, savedAt: 300, origin, secret, render: async () => { reran = true; return Buffer.from("%PDF-1.4 again"); } });
+  const stillReady = (await q222Get(id))?.pdf;
+  ok(again === null && !reran && stillReady?.status === "ready" && stillReady.at === r3?.at, "#222 generate: a save that already settled is never re-rendered or re-settled");
+
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 400, 400));
+  const r4 = await generateQuotePdf({ quoteId: id, savedAt: 400, origin, secret, render: async () => { throw new Error("Chrome crashed"); } });
+  ok(r4?.status === "failed" && r4.error === "Chrome crashed" && r4.blobPath === r3?.blobPath, "#222 generate: a failed render records why and keeps the last good file");
+
+  // Two renders of the SAME save (a Retry while the first still runs): the
+  // first to finish wins, the other never overwrites it or deletes its file.
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 450, 450));
+  let inner: Awaited<ReturnType<typeof generateQuotePdf>> = null;
+  const outer = await generateQuotePdf({
+    quoteId: id, savedAt: 450, origin, secret,
+    render: async () => {
+      inner = await generateQuotePdf({ quoteId: id, savedAt: 450, origin, secret, render: fake("inner") });
+      return Buffer.from("%PDF-1.4 outer");
+    },
+  });
+  const dup = (await q222Get(id))?.pdf;
+  ok(
+    outer === null && (inner as { status?: string } | null)?.status === "ready" && dup?.status === "ready" && dup.savedAt === 450 && !!dup.blobPath && (await store.read(dup.blobPath)) !== null,
+    "#222 generate: a duplicate render of a settled save loses without deleting the winner's file"
+  );
+  // A failure landing after the same save already settled ready never flips it.
+  const lateFail = await generateQuotePdf({ quoteId: id, savedAt: 450, origin, secret, render: async () => { throw new Error("late"); } });
+  ok(lateFail === null && (await q222Get(id))?.pdf?.status === "ready", "#222 generate: a late failure never overwrites a ready PDF");
+
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 500, 500));
+  const r5 = await generateQuotePdf({ quoteId: id, savedAt: 500, origin, secret: "", render: fake("x") });
+  ok(r5?.status === "failed" && /AUTH_SECRET/.test(r5.error || ""), "#222 generate: no AUTH_SECRET → failed with the reason, nothing rendered");
+
+  // A send copies the current PDF onto the sent revision.
+  const sid = fixtureId222("222", "send");
+  registerFixture222("quotes", sid);
+  await q222Create({ id: sid, name: "#222 send", customer: "Spec fixture", owner: "spec" });
+  await q222UpdatePdf(sid, (cur) => pendingPdf(cur, 1000, 1000));
+  await generateQuotePdf({ quoteId: sid, savedAt: 1000, origin, secret, render: fake("sent-doc") });
+  await q222SetStatus(sid, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+  const rev = latestSentRevision((await q222Get(sid))?.revisions);
+  ok(!!rev?.pdfBlobPath && rev.pdfBlobPath.endsWith(`/rev-${rev.rev}.pdf`), "#222 send: the sent revision records its own copy of the PDF");
+  ok((await store.read(rev?.pdfBlobPath || ""))?.toString() === "%PDF-1.4 sent-doc", "#222 send: the copy is the exact document that was current at send");
+  const later = Date.now() + 1;
+  await q222UpdatePdf(sid, (cur) => pendingPdf(cur, later, later));
+  await generateQuotePdf({ quoteId: sid, savedAt: later, origin, secret, render: fake("edited") });
+  const edited = await q222Get(sid);
+  ok(
+    latestSentRevision(edited?.revisions)?.pdfBlobPath === rev?.pdfBlobPath && (await store.read(rev?.pdfBlobPath || ""))?.toString() === "%PDF-1.4 sent-doc",
+    "#222 send: later edits regenerate the current PDF, never the sent copy"
+  );
+  ok(!!edited && portalPdfSource(edited)?.path === rev?.pdfBlobPath, "#222 portal: a sent quote serves the sent revision's copy, not later edits");
+
+  // A send while the PDF is still rendering: the generator copies on completion.
+  const pid = fixtureId222("222", "pending-send");
+  registerFixture222("quotes", pid);
+  await q222Create({ id: pid, name: "#222 pending send", customer: "Spec fixture", owner: "spec" });
+  const savedAt = Date.now() - 5;
+  await q222UpdatePdf(pid, (cur) => pendingPdf(cur, savedAt, savedAt));
+  await q222SetStatus(pid, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+  ok(!latestSentRevision((await q222Get(pid))?.revisions)?.pdfBlobPath, "#222 send: nothing to copy while the PDF is still rendering");
+  await generateQuotePdf({ quoteId: pid, savedAt, origin, secret, render: fake("late") });
+  const lateRev = latestSentRevision((await q222Get(pid))?.revisions);
+  ok(!!lateRev?.pdfBlobPath && (await store.read(lateRev.pdfBlobPath))?.toString() === "%PDF-1.4 late", "#222 send: a render finishing after the send copies itself onto the sent revision");
+  ok((await copySentRevisionPdf(pid)) === null, "#222 send: copying again is a no-op");
+
+  // Portal access rules.
+  const cust = fixtureId222("222", "cust");
+  const mk = async (slug: string, source: string) => {
+    const qid = fixtureId222("222", slug);
+    registerFixture222("quotes", qid);
+    await q222Create({ id: qid, name: slug, customer: "Spec fixture", customerId: cust, owner: "spec", source });
+    await q222UpdatePdf(qid, (c) => pendingPdf(c, 1, 1));
+    await generateQuotePdf({ quoteId: qid, savedAt: 1, origin, secret, render: fake(slug) });
+    return qid;
+  };
+  const own = await mk("selfserve", "portal-self-serve");
+  const internal = await mk("internal", "estimator");
+  const sentQ = await mk("sentq", "estimator");
+  const dl = await mk("daylite", "daylite");
+  await q222SetStatus(sentQ, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+  await q222Update(dl, { status: "sent" });
+  const src = async (qid: string, c: string) => {
+    const q = await q222Get(qid);
+    return q ? portalQuotePdfSource(q, c) : null;
+  };
+  ok(!!(await src(own, cust)), "#222 portal PDF: the customer's own self-serve draft opens");
+  ok((await src(internal, cust)) === null, "#222 portal PDF: an unsent internal draft is 404");
+  ok(!!(await src(sentQ, cust)) && (await src(sentQ, "someone-else")) === null, "#222 portal PDF: a sent quote opens for its own customer only");
+  ok((await src(dl, cust)) === null, "#222 portal PDF: Daylite history never opens on the portal");
+
+  // Smoke: a real Chrome prints a real PDF (skipped, with the reason, when there's no Chrome).
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) {
+    console.log(`SKIP #222 smoke render: ${launch.unavailable}`);
+  } else {
+    const pdf = await renderPrintRouteToPdf("data:text/html,<h1>Quartzite quote</h1>");
+    ok(pdf.subarray(0, 5).toString() === "%PDF-" && pdf.length > 500, "#222 smoke: headless Chrome prints a page to a real PDF");
+  }
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    /* temp dir */
+  }
 }
