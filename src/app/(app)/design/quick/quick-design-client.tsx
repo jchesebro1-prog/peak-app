@@ -32,8 +32,8 @@ import {
   type TierKey,
   type ViewKey,
 } from "./engine";
-import { fixtureOverridesFor, quickSaveConfig, tierDefsFor, tierSystems, tierSystemsBase, type QuickRates } from "@/lib/design/equipment-pricing";
-import { defaultWireLaborRules } from "@/lib/design/wire-labor";
+import { fixtureOverridesFor, quickSaveConfig, systemLabor, tierDefsFor, tierSystems, tierSystemsBase, type QuickRates } from "@/lib/design/equipment-pricing";
+import { defaultWireLaborRules, laborFracsFor } from "@/lib/design/wire-labor";
 import type { EquipmentPriceTable, UnitPrice } from "@/lib/design/equipment-map";
 import { addToQuotesGuard, needsPartCount, targetsFromSystems } from "@/lib/design/scope-targets";
 import ScopeInputsPanel from "@/components/design/scope-inputs-panel";
@@ -191,7 +191,6 @@ export default function QuickDesignClient({
 
   /* ------------------------------ derived ------------------------------ */
 
-  const laborPct = rates.installPct / 100;
   const freightPct = rates.freightPct / 100;
   const contPct = (a.contingency ?? 0) / 100;
   /** Wire-pull + system-labor rules (#231/#232), read on the server. */
@@ -214,7 +213,12 @@ export default function QuickDesignClient({
   );
   // The same step the server prices with (quickScreenPrice / quickDesignPrice).
   const selSystems = useMemo(() => applyOverrides(selBase, a, selKey), [selBase, a, selKey]);
-  const selTot = useMemo(() => tierTotals(selSystems, selTd, laborPct, freightPct, contPct), [selSystems, selTd, laborPct, freightPct, contPct]);
+  const selTot = useMemo(
+    () => tierTotals(selSystems, selTd, laborFracsFor(wireLabor, selKey), freightPct, contPct),
+    [selSystems, selTd, wireLabor, selKey, freightPct, contPct]
+  );
+  /** #232: the Labor row's per-system breakdown at the selected tier. */
+  const selLabor = useMemo(() => systemLabor(selSystems, selKey, wireLabor), [selSystems, selKey, wireLabor]);
   /** Per-system needs-a-part counts for the SELECTED tier (#211 D310) —
    *  the Equipment map is empty/partial → the estimate is INCOMPLETE, never
    *  $0. Drives the per-system rows, the summary panel and the Add-to-Quotes
@@ -227,16 +231,16 @@ export default function QuickDesignClient({
         const sys = tierSystems(C, a, td.key, tierDefs, prices, fixtureOverrides, wireLabor);
         return {
           td,
-          tot: tierTotals(sys, td, laborPct, freightPct, contPct),
+          tot: tierTotals(sys, td, laborFracsFor(wireLabor, td.key), freightPct, contPct),
           needsPart: needsPartCount(sys),
         };
       }),
-    [C, a, tierDefs, prices, fixtureOverrides, wireLabor, laborPct, freightPct, contPct]
+    [C, a, tierDefs, prices, fixtureOverrides, wireLabor, freightPct, contPct]
   );
 
   /** A breakdown row's amount (#211 final review): "Incomplete" while the
    *  selected tier has any needs-a-part line — a partial materials figure
-   *  (and the install / freight / contingency derived from it) is not a
+   *  (and the labor / freight / contingency derived from it) is not a
    *  price, the same rule as the tier total. */
   const breakdownAmount = (n: number, extra?: CSSProperties) =>
     selNeedsPart > 0 ? (
@@ -262,7 +266,7 @@ export default function QuickDesignClient({
     const td = TIERS.find((t) => t.key === (s.tier || "better")) || TIERS[1];
     const Cx = compute(s);
     const sysForTot = tierSystems(Cx, s, td.key, tierDefs, prices, fixtureOverrides, wireLabor);
-    const tot = tierTotals(sysForTot, td, laborPct, freightPct, (s.contingency ?? 0) / 100);
+    const tot = tierTotals(sysForTot, td, laborFracsFor(wireLabor, td.key), freightPct, (s.contingency ?? 0) / 100);
     const v = venueOf(s);
     const sysNames = Cx.systems.filter((x) => x.on).map((x) => SHORT[x.key] || x.name);
     return {
@@ -785,10 +789,22 @@ export default function QuickDesignClient({
                       <span style={{ color: "#5b616e" }}>Materials &amp; equipment</span>
                       {breakdownAmount(selTot.matRev)}
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 8 }}>
-                      <span style={{ color: "#5b616e" }}>Installation &amp; commissioning</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: selNeedsPart === 0 && selLabor.length ? 4 : 8 }}>
+                      <span style={{ color: "#5b616e" }}>Labor (per system)</span>
                       {breakdownAmount(selTot.install)}
                     </div>
+                    {selNeedsPart === 0 && selLabor.length > 0 && (
+                      <div style={{ display: "grid", gap: 2, margin: "0 0 8px 10px" }}>
+                        {selLabor.map((l) => (
+                          <div key={l.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#8c919c" }}>
+                            <span>
+                              {SHORT[l.key]} · {l.pct}% × {l.mult}
+                            </span>
+                            <span style={{ fontFamily: MONO }}>{moneyRound(l.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 11 }}>
                       <span style={{ color: "#5b616e" }}>Freight &amp; delivery</span>
                       {breakdownAmount(selTot.freight)}
@@ -873,7 +889,7 @@ export default function QuickDesignClient({
                     </div>
                   ))}
                   <div style={{ fontSize: 11, color: "#aab0bb", lineHeight: 1.5, marginTop: 4 }}>
-                    {selTd.label} tier · materials only. Installation, freight, and contingency are applied on the Estimate tab. Edit any quantity above — changes save per tier and roll up to the totals.
+                    {selTd.label} tier · materials only. Labor, freight, and contingency are applied on the Estimate tab. Edit any quantity above — changes save per tier and roll up to the totals.
                   </div>
                 </div>
               )}

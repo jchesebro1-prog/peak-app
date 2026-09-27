@@ -231,6 +231,14 @@ export function EquipmentCard({
           );
         })}
       </div>
+      {card.labor > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, padding: "6px 8px", marginTop: 6, borderTop: "1px dashed #ececf0" }}>
+          <span style={{ color: "#5b616e" }}>
+            Labor · {card.laborRule.pct}% × {card.laborRule.mult}
+          </span>
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{money(card.labor)}</span>
+        </div>
+      )}
       {card.needsPart > 0 && (
         <div style={{ fontSize: 11.5, color: "#a0442b", marginTop: 8 }}>
           {card.needsPart} line{card.needsPart === 1 ? "" : "s"} need{card.needsPart === 1 ? "s" : ""} a part: left off the plan and out of this total.
@@ -255,6 +263,7 @@ export function EquipmentCards({
 }) {
   if (!cards) return <div style={{ fontSize: 13, color: error ? "#a0442b" : "#8c919c" }}>{error || "Pricing your equipment from the catalog…"}</div>;
   const grand = cards.reduce((s, c) => s + c.total, 0);
+  const labor = cards.reduce((s, c) => s + c.labor, 0);
   const needs = cards.reduce((s, c) => s + c.needsPart, 0);
   return (
     <div style={{ display: "grid", gap: 12 }}>
@@ -266,7 +275,8 @@ export function EquipmentCards({
           {needs ? `${needs} line${needs === 1 ? "" : "s"} still need a part (left off the plan)` : "Every line is priced from the catalog"}
         </span>
         <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>
-          Total {money(grand)}
+          Total {money(grand + labor)}
+          {labor > 0 ? ` (incl. ${money(labor)} labor)` : ""}
           {loading ? " · updating…" : ""}
         </span>
       </div>

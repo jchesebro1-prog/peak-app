@@ -20,7 +20,7 @@ import {
 import { EQUIPMENT_ROW_BY_KEY, type EquipPlace } from "./equipment-vocab";
 import { priceCell, sellFromCost, type EquipmentPriceTable, type EquipPriceCtx, type PricedStatus, type UnitPrice } from "./equipment-map";
 import { applyEquipment } from "./equipment-pricing";
-import { defaultWireLaborRules, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
+import { defaultWireLaborRules, laborAmount, tierMult, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
 import { fabricAreaRateOf } from "./curtain-pricing";
 import { FABRIC_RATE_UNIT } from "@/lib/curtain-geom";
 import { TRACKABLE_SYS_KEYS } from "./grid-scopes";
@@ -55,7 +55,18 @@ export type AutoLine = {
   /** #231: the line's caveat (a venue dimension counted as 0). */
   note?: string;
 };
-export type AutoCard = { scope: SysKey; tier: TierKey; lines: AutoLine[]; total: number; needsPart: number; allowances: number };
+export type AutoCard = {
+  scope: SysKey;
+  tier: TierKey;
+  lines: AutoLine[];
+  /** Equipment only — the Scope panel's target. */
+  total: number;
+  needsPart: number;
+  allowances: number;
+  /** #232: calculated labor for this scope — total × labor % × the card's tier multiplier (sell). Not in `total`. */
+  labor: number;
+  laborRule: { pct: number; mult: number };
+};
 export type SellLine = Omit<AutoLine, "unitCost">;
 export type SellCard = Omit<AutoCard, "lines"> & { lines: SellLine[] };
 
@@ -132,13 +143,17 @@ export function autoEstimateCards(
         ...(it.note ? { note: it.note } : {}),
       });
     }
+    const total = round2(lines.reduce((sum, l) => sum + l.total, 0));
+    const rule = rules.labor[scope];
     cards.push({
       scope,
       tier,
       lines,
-      total: round2(lines.reduce((sum, l) => sum + l.total, 0)),
+      total,
       needsPart: lines.filter((l) => l.status === "needs-part").length,
       allowances: lines.filter((l) => l.status === "allowance").length,
+      labor: laborAmount(total, rule, tier),
+      laborRule: { pct: rule.pct, mult: tierMult(rule.mult, tier) },
     });
   }
   return cards;
@@ -183,7 +198,16 @@ function sellLine(l: AutoLine): SellLine {
 
 /** What a client may see: every line without its unit cost. */
 export function sellOnlyCards(cards: AutoCard[]): SellCard[] {
-  return cards.map((c) => ({ scope: c.scope, tier: c.tier, lines: c.lines.map(sellLine), total: c.total, needsPart: c.needsPart, allowances: c.allowances }));
+  return cards.map((c) => ({
+    scope: c.scope,
+    tier: c.tier,
+    lines: c.lines.map(sellLine),
+    total: c.total,
+    needsPart: c.needsPart,
+    allowances: c.allowances,
+    labor: c.labor,
+    laborRule: { ...c.laborRule },
+  }));
 }
 
 /** The Scope panel's target for Auto scopes = the chosen cards. */

@@ -51,15 +51,14 @@ export async function loadDesignPricing(
   return { table: buildEquipmentPriceTable(map, ctx), fixturePrices: fixturePricesFrom(fixtureIds, ctx) };
 }
 
-/** The pricing-rule percentages and the wire/labor rules Quick Design totals with (its page reads the same keys). */
+/** The freight / contingency percentages and the wire + labor rules Quick Design totals with (its page reads the same keys). */
 async function quickRates(): Promise<QuickRates> {
-  const [installPct, freightPct, contingencyPct, rules] = await Promise.all([
-    num("system.installPct", 18),
+  const [freightPct, contingencyPct, rules] = await Promise.all([
     num("system.freightPct", 5),
     num("system.contingencyPct", 10),
     loadWireLaborRules(),
   ]);
-  return { installPct, freightPct, contingencyPct, rules };
+  return { freightPct, contingencyPct, rules };
 }
 
 /** The server's own price for one Quick design — needs-a-part count AND

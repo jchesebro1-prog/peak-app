@@ -5,6 +5,7 @@ import { requirePerm } from "@/lib/session";
 import {
   GROUPS,
   setValue,
+  resetValue,
   resetAll,
   exportCSV,
   exportJSON,
@@ -41,12 +42,12 @@ export async function setValueAction(id: string, val: number) {
   return { ok: true as const };
 }
 
-/** Reset a single rate to its documented default (prototype: setValue(id, def)). */
+/** Reset a single rate to its default — a labor % back to following the install % (#232), any other rate to its registry def. */
 export async function resetItemAction(id: string) {
   await requirePerm("manage_users");
   const it = findRate(id);
   if (!it || it.kind !== "rate") return { ok: false as const };
-  await setValue(it, it.def);
+  await resetValue(it);
   revalidatePath("/", "layout");
   return { ok: true as const };
 }

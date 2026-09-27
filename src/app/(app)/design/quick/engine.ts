@@ -653,21 +653,26 @@ export function compute(s: AState): ComputeResult {
 export function tierTotals(
   systems: SystemBlock[],
   td: TierMeta,
-  laborPct: number,
+  /** Labor as a fraction of materials — one flat fraction, or per system
+   *  (#232: laborFracsFor = labor % × the tier's multiplier). One rounding
+   *  either way, so a uniform per-system 18 % equals the flat 18 %. */
+  laborPct: number | Partial<Record<SysKey, number>>,
   freightPct: number,
   contPct: number
 ): TierTotals {
   let matRev = 0;
   let matCost = 0;
+  let laborBase = 0;
   systems.forEach((x) => {
     if (x.on) {
       const pm = x.tierFixed ? 1 : td.priceMul;
       const cm = x.tierFixed ? 1 : td.costMul;
       matRev += x.rev * pm;
       matCost += x.cost * cm;
+      if (typeof laborPct !== "number") laborBase += x.rev * pm * (laborPct[x.key] ?? 0);
     }
   });
-  const install = Math.round(matRev * laborPct);
+  const install = Math.round(typeof laborPct === "number" ? matRev * laborPct : laborBase);
   const freight = Math.round(matRev * freightPct);
   const subtotal = matRev + install + freight;
   const contingency = Math.round(subtotal * (contPct || 0));

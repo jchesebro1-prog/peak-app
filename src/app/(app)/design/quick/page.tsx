@@ -36,11 +36,10 @@ export default async function Page({
   const sp = await searchParams;
   const designId = sp.design || null;
 
-  const [design, customers, installPct, freightPct, contingencyPct, reviewerRows, fixtureRecords, catalogRows, wireLabor] =
+  const [design, customers, freightPct, contingencyPct, reviewerRows, fixtureRecords, catalogRows, wireLabor] =
     await Promise.all([
       designId ? getDesign(designId) : Promise.resolve(null),
       allCustomers(),
-      num("system.installPct", 18),
       num("system.freightPct", 5),
       num("system.contingencyPct", 10),
       reviewers(),
@@ -92,7 +91,7 @@ export default async function Page({
         })),
       }))}
       prices={prices}
-      rates={{ installPct, freightPct, contingencyPct, rules: wireLabor }}
+      rates={{ freightPct, contingencyPct, rules: wireLabor }}
       reviewerNames={reviewerRows.map((u) => u.name)}
       fixtureAssemblies={fixtureAssemblies}
       fixturePrices={fixturePrices}

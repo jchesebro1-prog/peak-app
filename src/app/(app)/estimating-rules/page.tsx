@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/team";
-import { GROUPS, value } from "@/lib/stores/pricing";
+import { GROUPS, defaultOf, value } from "@/lib/stores/pricing";
 import { RulesActions, RulesEditor, type GroupVM, type ItemVM } from "./controls";
 import { getSettings } from "@/lib/settings";
 import { resolveVenueDoctrine } from "@/lib/venue-doctrine";
@@ -50,7 +50,8 @@ export default async function EstimatingRulesPage() {
                 label: it.label,
                 unit: it.unit,
                 value: v == null ? it.def : v,
-                def: it.def,
+                // The EFFECTIVE default (#232): a labor % row's is the stored install %, so it isn't "modified" when that ≠ 18.
+                def: (await defaultOf(it)) ?? it.def,
                 min: it.min,
                 max: it.max,
                 step: it.step,

@@ -10519,6 +10519,7 @@ seeded()
   .then(() => inboxTask215AsyncChecks())
   .then(() => wireLabor231AsyncChecks())
   .then(() => gridAccessoriesAsyncChecks230())
+  .then(() => laborPerSystem232AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18493,8 +18494,8 @@ import { defaultAState as gemFrDefault } from "@/app/(app)/design/quick/engine";
   ok(kept["lighting:par"] === 2 && kept["rigging:pipe"] === 40 && Object.keys(kept).length === 2, "#211 final review I6: keptUnitsByRow counts units per row — this option only, never an auto-tagged or origin-less device");
   const lineOf = (rowKey: string, scope: string, qty: number) => ({ rowKey, scope, label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref: "SKU-" + rowKey, unitCost: 1, unitSell: 2, total: 2 * qty, swapped: false });
   const cardsFr = [
-    { scope: "lighting", tier: "best", lines: [lineOf("lighting:par", "lighting", 12)], total: 0, needsPart: 0, allowances: 0 },
-    { scope: "rigging", tier: "best", lines: [{ ...lineOf("rigging:pipe", "rigging", 240), place: "lot" }], total: 0, needsPart: 0, allowances: 0 },
+    { scope: "lighting", tier: "best", lines: [lineOf("lighting:par", "lighting", 12)], total: 0, needsPart: 0, allowances: 0, labor: 0, laborRule: { pct: 18, mult: 1 } },
+    { scope: "rigging", tier: "best", lines: [{ ...lineOf("rigging:pipe", "rigging", 240), place: "lot" }], total: 0, needsPart: 0, allowances: 0, labor: 0, laborRule: { pct: 18, mult: 1 } },
   ] as never;
   const aFr = { ...gemFrDefault(0), venue: "school" };
   const placedFor = (keptMap?: Record<string, number>) => {
@@ -18552,7 +18553,7 @@ import { compute as gemW2Compute, hydrateAState as gemW2Hydrate, tierTotals as g
   const rec = { tier: "better", config: cfg };
   // I1 — the server budget is exactly the screen's makeDesign() total.
   const s0 = gemW2Hydrate(rec, 10);
-  const screen = gemW2Totals(gemW2TierSystems(gemW2Compute(s0), s0, "better", gemW2TierDefs(s0), table, {}), gemW2Tiers[1], 0.18, 0.05, 0.1).grand;
+  const screen = gemW2Totals(gemW2TierSystems(gemW2Compute(s0), s0, "better", gemW2TierDefs(s0), table, {}), gemW2Tiers[1], wl231.laborFracsFor(wl231.defaultWireLaborRules(), "better"), 0.05, 0.1).grand;
   const p0 = gemW2Price(rec, table, {}, rates);
   ok(p0.needsPart === 0 && p0.budget > 0 && p0.budget === Math.round(screen), `#211 wave 2 I1: quickDesignPrice totals exactly as Quick Design's screen does (${p0.budget} vs ${screen})`);
   const pSets = gemW2Price({ tier: "better", config: { ...cfg, tierSets: { better: 23 } } }, table, {}, rates);
@@ -18614,7 +18615,7 @@ import {
   const server = gemW3Price({ tier: "better", config: cfg }, table, {}, rates);
   ok(screen.budget !== calc.budget, `#211 wave 3 I1: the Scenery-track edit changes the screen total (${calc.budget} → ${screen.budget})`);
   ok(server.budget === screen.budget && server.needsPart === screen.needsPart, `#211 wave 3 I1: screen total == server total with a Scenery-track edit of 5 (${screen.budget} vs ${server.budget}; was ${calc.budget} on the server before wave 3)`);
-  ok(screen.budget === 13321 && calc.budget === 16125, `#211 wave 3 I1: the reviewer's figures reproduce — 13321 on the screen, 16125 when the edit is dropped (${screen.budget} / ${calc.budget})`);
+  ok(screen.budget === 13614 && calc.budget === 16479, `#211 wave 3 I1 + #232: the reviewer's figures at per-system Better labor (18% × 1.15) — 13614 on the screen, 16479 when the edit is dropped; were 13321 / 16125 at a flat 18% (${screen.budget} / ${calc.budget})`);
   ok(JSON.stringify(cfg.overrideUnits) === JSON.stringify({ "curtains:Scenery track": "ft" }) && JSON.stringify(gemW3Units) === JSON.stringify(cfg.overrideUnits), "#211 wave 3 I1: a save marks its overrides as feet");
   const { overrideUnits: _drop, ...oldCfg } = cfg;
   void _drop;
@@ -23377,4 +23378,88 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
     { id: "d", status: "lost", updatedAt: 4 },
   ]);
   ok(gq.open.map((q) => q.id).join(",") === "c,a" && gq.history.map((q) => q.id).join(",") === "d,b", "#220 groupPortalQuotes: sent + own drafts Open, won + lost History, newest first");
+}
+
+/* --- #232 T3: Quick Design labor per system; Auto cards carry labor --- */
+import { tierTotals as lb232Totals, TIERS as lb232Tiers, defaultAState as lb232Default, compute as lb232Compute, tierDefsDefault as lb232TierDefs, type AState as Lb232AState } from "@/app/(app)/design/quick/engine";
+import { tierSystems as lb232TierSystems, systemLabor as lb232SystemLabor, quickScreenPrice as lb232Screen } from "@/lib/design/equipment-pricing";
+import { autoEstimateCards as lb232Cards, sellOnlyCards as lb232Sell } from "@/lib/design/auto-estimate";
+import { manualScopeInputs as lb232Inputs } from "@/lib/design/grid-intake";
+import { EQUIPMENT_ROWS as lb232Rows } from "@/lib/design/equipment-vocab";
+{
+  const d = wl231.defaultWireLaborRules();
+  const table = {
+    margin: 0.3,
+    byTier: Object.fromEntries((["good", "better", "best"] as const).map((t) => [t, Object.fromEntries(lb232Rows.map((r) => [r.key, { status: "allowance" as const, ref: r.key, desc: r.label, unit: r.unit, unitCost: 10, unitSell: 14.29 }]))])) as never,
+  };
+  const a: Lb232AState = { ...lb232Default(10), tier: "better" };
+  const sys = lb232TierSystems(lb232Compute(a), a, "better", lb232TierDefs(), table, {}, d);
+  const flat = lb232Totals(sys, lb232Tiers[1], 0.18, 0.05, 0.1);
+  const good = lb232Totals(sys, lb232Tiers[1], wl231.laborFracsFor(d, "good"), 0.05, 0.1);
+  ok(good.install === flat.install && good.grand === flat.grand, `#232: at Good, per-system labor equals today's flat 18% install (${good.install} vs ${flat.install})`);
+  const better = lb232Totals(sys, lb232Tiers[1], wl231.laborFracsFor(d, "better"), 0.05, 0.1);
+  ok(better.install === Math.round(flat.matRev * 0.18 * 1.15) && better.matRev === flat.matRev, `#232: Better labor = materials × 18% × 1.15 (${better.install})`);
+  const customStored: Record<string, unknown> = { "labor.pit.pct": 0, "labor.curtains.better": 2 };
+  const custom = wl231.wireLaborRulesFrom((id) => customStored[id]);
+  const rows = lb232SystemLabor(sys, "better", custom);
+  const pit = rows.find((r) => r.key === "pit");
+  const cur = rows.find((r) => r.key === "curtains")!;
+  ok(!!pit && pit.amount === 0 && Math.abs(cur.amount - cur.material * 0.18 * 2) < 1e-9 && cur.mult === 2 && cur.pct === 18, "#232: each system uses its own labor % and tier multiplier");
+  const perSys = lb232Totals(sys, lb232Tiers[1], wl231.laborFracsFor(custom, "better"), 0.05, 0.1);
+  ok(perSys.install === Math.round(rows.reduce((n, r) => n + r.amount, 0)), "#232: the Labor row is the sum of the per-system breakdown");
+  const q = lb232Screen(a, lb232TierDefs(), table, {}, { freightPct: 5, contingencyPct: 10, rules: d });
+  ok(q.budget === Math.round(better.grand), `#232: quickScreenPrice totals with per-system labor at the design's tier (${q.budget})`);
+  const s: Lb232AState = {
+    ...lb232Default(0), venue: "school", size: "medium", width: 40, depth: 30, grid: 24, wing: 12, ph: 20, rigType: "counterweight",
+    sys: { rigging: false, curtains: false, lighting: true, controls: false, audio: true, video: false, acoustical: false, pit: false },
+  };
+  const cards = lb232Cards({ ...lb232Inputs(s), sys: s.sys }, { tierByScope: { lighting: "best", audio: "good" }, overrides: {} }, table, {}, d);
+  const lc = cards.find((c) => c.scope === "lighting")!;
+  const ac = cards.find((c) => c.scope === "audio")!;
+  ok(lc.total > 0 && Math.abs(lc.labor - lc.total * 0.18 * 1.3) < 0.006 && lc.laborRule.pct === 18 && lc.laborRule.mult === 1.3 && ac.laborRule.mult === 1,
+    "#232: each Auto card carries its scope's labor at the card's tier");
+  ok(Math.abs(lc.total - lc.lines.reduce((n, l) => n + l.total, 0)) < 0.005, "#232: a card's total stays equipment only (the Scope panel target is unchanged)");
+  ok(lb232Sell(cards)[0].labor === cards[0].labor && lb232Sell(cards)[0].laborRule.pct === cards[0].laborRule.pct, "#232: the sell-only card keeps its labor");
+  const rd = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const ids = new Set(wl231Groups.flatMap((g) => g.items.map((it) => it.id)));
+  ok(!ids.has("system.installPct") && !rd("src/app/(app)/design/quick/page.tsx").includes("system.installPct") && !rd("src/lib/stores/design-pricing.ts").includes("system.installPct"),
+    "#232: the flat install % is retired — Quick Design reads System labor");
+  const qc = rd("src/app/(app)/design/quick/quick-design-client.tsx");
+  ok(qc.includes("laborFracsFor(wireLabor, selKey)") && qc.includes("systemLabor(selSystems, selKey, wireLabor)") && qc.includes("Labor (per system)"), "#232: Quick Design's Estimate tab shows labor per system");
+  const card = rd("src/app/(app)/design/grid/[id]/equipment-card.tsx");
+  ok(card.includes("card.labor") && card.includes("card.laborRule.pct"), "#232: the Auto Equipment card shows its calculated labor");
+  // Task 1 review follow-ups: the labor group's note, and the Estimating Rules page / reset wiring.
+  const laborNote = wl231Groups.find((g) => g.key === "labor")!.note ?? "";
+  ok(laborNote.includes("former install %") && laborNote.includes("export CSV before changing") && !laborNote.includes("stored install %") && !wl231Groups.some((g) => /Install \/ freight|install%/.test((g.note ?? "") + g.items.map((it) => (it.kind === "formula" ? it.expr : "")).join(" "))),
+    "#232: no Estimating Rules note or formula points at the retired install % row");
+  const er = rd("src/app/(app)/estimating-rules/page.tsx");
+  const ea = rd("src/app/(app)/estimating-rules/actions.ts");
+  ok(/def:\s*\(await defaultOf\(it\)\) \?\? it\.def/.test(er) && ea.includes("await resetValue(it)") && !ea.includes("setValue(it, it.def)"),
+    "#232: Estimating Rules shows each row's EFFECTIVE default and per-row Reset goes through resetValue");
+}
+
+/* #232 T3 (b) — the retired install % row: the loader, the effective default and per-row Reset, against the scratch DB. Leaves the defaults behind. */
+async function laborPerSystem232AsyncChecks(): Promise<void> {
+  const P = await import("@/lib/stores/pricing");
+  const { getBlob } = await import("@/db/doc-store");
+  const raw = async () => getBlob<Record<string, number | null>>("pricing_rules", {});
+  // 1. Its registry row is gone, but the stored value still seeds every unset labor %.
+  await setBlob219("pricing_rules", { [wl231.LEGACY_INSTALL_PCT_ID]: 20 });
+  const r = await P.loadWireLaborRules();
+  ok(r.labor.lighting.pct === 20 && r.labor.general.pct === 20 && (await P.value("labor.lighting.pct")) === 20,
+    "#232: with its Estimating Rules row removed, a stored install % of 20 still seeds the loader and the labor rows");
+  // 2. The effective default is the stored install %, so an untouched row isn't "modified".
+  ok((await P.defaultOf("labor.lighting.pct")) === 20 && (await P.isDefault("labor.lighting.pct")) && (await P.defaultOf("labor.lighting.better")) === 1.15 && (await P.defaultOf("system.freightPct")) === 5,
+    "#232: a labor % row's effective default is the stored install % (other rows keep their registry default)");
+  await P.setValue("labor.lighting.pct", 25);
+  ok(!(await P.isDefault("labor.lighting.pct")) && (await P.value("labor.lighting.pct")) === 25, "#232: an edited labor % reads as modified");
+  await P.resetValue("labor.lighting.pct");
+  const after = await raw();
+  ok(after["labor.lighting.pct"] === null && (await P.value("labor.lighting.pct")) === 20 && (await P.loadWireLaborRules()).labor.lighting.pct === 20,
+    "#232: per-row Reset of a labor % stores null, so the row follows the install % again (not a literal 18)");
+  await P.setValue("labor.lighting.better", 1.4);
+  await P.resetValue("labor.lighting.better");
+  ok((await raw())["labor.lighting.better"] === 1.15, "#232: per-row Reset of any other rate still writes its registry default");
+  await setBlob219("pricing_rules", { [wl231.LEGACY_INSTALL_PCT_ID]: null, "labor.lighting.pct": null, "labor.lighting.better": null });
+  ok(JSON.stringify(await P.loadWireLaborRules()) === JSON.stringify(wl231.defaultWireLaborRules()), "#232: resetting restores the defaults (later suites see the defaults)");
 }

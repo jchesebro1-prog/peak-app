@@ -25,13 +25,14 @@ import {
   type BomItem,
   type ComputeResult,
   type DrapeGeom,
+  type SysKey,
   type SystemBlock,
   type TierDefs,
   type TierKey,
 } from "@/app/(app)/design/quick/engine";
 import { sellFromCost, type EquipmentPriceTable, type UnitPrice } from "./equipment-map";
 import { needsPartCount } from "./scope-targets";
-import { defaultWireLaborRules, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
+import { defaultWireLaborRules, laborFrac, laborFracsFor, tierMult, wireDimsOf, withWirePull, type WireLaborRules } from "./wire-labor";
 
 /** One drape's make-it cost at a fabric's flat $/sq ft sewn (making included, #227) — the shared model (curtain-pricing.ts). */
 export function drapeUnitCost(drape: DrapeGeom, areaRate: number): number {
@@ -139,14 +140,29 @@ export function fixtureOverridesFor(
 
 const TIER_KEYS: readonly TierKey[] = ["good", "better", "best"];
 
-/** The pricing-rule percentages a Quick Design total uses (Settings → system.*Pct). */
+/** The pricing-rule percentages a Quick Design total uses (freight / contingency) and the wire + labor rules (#231/#232). */
 export type QuickRates = {
-  installPct: number;
   freightPct: number;
   contingencyPct: number;
-  /** Wire-pull + system-labor rules (#231/#232); absent = the defaults. */
+  /** Wire-pull + system-labor rules; absent = the defaults. */
   rules?: WireLaborRules;
 };
+
+/** One system's labor on the Estimate tab (#232) — unrounded; the Labor row rounds the sum once. */
+export type SystemLaborRow = { key: SysKey; name: string; material: number; pct: number; mult: number; amount: number };
+
+/** The per-system labor breakdown for a priced tier: every on system with material.
+ *  Material is what tierTotals sums (map-priced systems are tierFixed, D304). */
+export function systemLabor(systems: SystemBlock[], tierKey: TierKey, rules: WireLaborRules = defaultWireLaborRules()): SystemLaborRow[] {
+  const pm = (TIERS.find((t) => t.key === tierKey) || TIERS[1]).priceMul;
+  return systems
+    .filter((x) => x.on && x.rev > 0)
+    .map((x) => {
+      const rule = rules.labor[x.key];
+      const material = x.rev * (x.tierFixed ? 1 : pm);
+      return { key: x.key, name: x.name, material, pct: rule.pct, mult: tierMult(rule.mult, tierKey), amount: material * laborFrac(rule, tierKey) };
+    });
+}
 
 /** A Quick design's server-derived price (#211 D319/D323). */
 export type QuickDesignPrice = { needsPart: number; budget: number };
@@ -179,7 +195,8 @@ export function tierDefsFor(s: Pick<AState, "tierSets">, base: TierDefs = tierDe
 /**
  * Quick Design's live figure for its current state (#211 fix wave 3) — the
  * same calls the screen's selected-tier total makes (map pricing on the
- * line-set-scaled BOM, the tier's qty overrides, tierTotals), in whole
+ * line-set-scaled BOM, the tier's qty overrides, tierTotals with per-system
+ * labor (#232), freight and contingency), in whole
  * dollars as the screen shows it. The parity specs hold this equal to
  * quickDesignPrice() of the record the screen saves.
  */
@@ -192,9 +209,10 @@ export function quickScreenPrice(
 ): QuickDesignPrice {
   const tier = (a.tier || "better") as TierKey;
   const td = TIERS.find((t) => t.key === tier) || TIERS[1];
-  const base = tierSystemsBase(compute(a), a, tier, tierDefs, table, fixtureOverridesFor(a.fixtureAssemblies, fixturePrices), rates.rules ?? defaultWireLaborRules());
+  const rules = rates.rules ?? defaultWireLaborRules();
+  const base = tierSystemsBase(compute(a), a, tier, tierDefs, table, fixtureOverridesFor(a.fixtureAssemblies, fixturePrices), rules);
   const systems = applyOverrides(base, a, tier);
-  const tot = tierTotals(systems, td, rates.installPct / 100, rates.freightPct / 100, (a.contingency ?? 0) / 100);
+  const tot = tierTotals(systems, td, laborFracsFor(rules, tier), rates.freightPct / 100, (a.contingency ?? 0) / 100);
   return { needsPart: needsPartCount(systems), budget: Number.isFinite(tot.grand) ? Math.round(tot.grand) : 0 };
 }
 
@@ -213,7 +231,7 @@ export function quickSaveConfig(a: AState, tierDefs: TierDefs): Record<string, u
  * record (#211 D319, D323): hydrate its config (or reconstruct a
  * pre-config seed record from its display fields), run the equations, price
  * the chosen tier from the Equipment map and total it exactly as the screen
- * does (tierTotals with the install / freight / contingency percentages).
+ * does (tierTotals with per-system labor and the freight / contingency percentages).
  * Neither the client's `incomplete` nor its `budget` is ever read. A config
  * that won't compute counts as 1 needs-a-part line and $0 (never promotable)
  * rather than throwing.
@@ -243,5 +261,5 @@ export function quickDesignNeedsPart(
   fixturePrices: Record<string, UnitPrice>,
   rules?: WireLaborRules
 ): number {
-  return quickDesignPrice(d, table, fixturePrices, { installPct: 0, freightPct: 0, contingencyPct: 0, rules }).needsPart;
+  return quickDesignPrice(d, table, fixturePrices, { freightPct: 0, contingencyPct: 0, rules }).needsPart;
 }

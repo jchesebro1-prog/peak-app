@@ -38,7 +38,8 @@ import {
  *     immediately.
  *   • All other editable rates persist to blob `pricing_rules`
  *     (rss_pricing_rules_v1) and are the canonical defaults. Quick Design
- *     reads its install / freight / contingency defaults from here (see num()).
+ *     reads its freight / contingency defaults from here (see num()) and
+ *     its wire / labor rules through loadWireLaborRules().
  *
  * Server deltas: the `rss-pricing` window event and the DOM download() helper
  * are dropped (screens re-read per request; a route can serve exportCSV /
@@ -370,11 +371,10 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "system", label: "System design", live: true,
     sub: "Quick Design budgetary roll-up + Estimator defaults",
-    note: "Install / freight / contingency below drive the Quick Design estimate live. Tier multipliers, base margin and the fabric rate are the documented reference the estimators are built on.",
+    note: "Freight / contingency below drive the Quick Design estimate live; labor is per system (see System labor). Tier multipliers, base margin and the fabric rate are the documented reference the estimators are built on.",
     items: [
-      rate("system.installPct", "Installation & commissioning", 18, "%", { min: 0, max: 40, step: 1, help: "Install labor as a % of materials.  install = materials × this" }),
       rate("system.freightPct", "Freight & delivery", 5, "%", { min: 0, max: 20, step: 0.5, help: "freight = materials × this" }),
-      rate("system.contingencyPct", "Default contingency", 10, "%", { min: 0, max: 25, step: 1, help: "Applied to materials + install + freight. New designs start at this value." }),
+      rate("system.contingencyPct", "Default contingency", 10, "%", { min: 0, max: 25, step: 1, help: "Applied to materials + labor + freight. New designs start at this value." }),
       rate("system.baseMargin", "Base margin", 30, "%", { min: 0, max: 60, step: 1, ref: true, help: "Baseline margin baked into catalog list vs cost.  sell = cost ÷ (1 − margin)" }),
       rate("system.tierGoodCost", "Good tier — cost ×", 0.80, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true, help: "Good multiplies each line’s cost by this." }),
       rate("system.tierGoodPrice", "Good tier — price ×", 0.84, "×", { min: 0.3, max: 1.5, step: 0.01, ref: true }),
@@ -383,7 +383,7 @@ export const GROUPS: PricingGroup[] = [
       rate("system.tierBestCost", "Best tier — cost ×", 1.30, "×", { min: 0.5, max: 2.5, step: 0.01, ref: true }),
       rate("system.tierBestPrice", "Best tier — price ×", 1.42, "×", { min: 0.5, max: 2.5, step: 0.01, ref: true }),
       rate("system.curtainFabric", "Curtain fabric fallback", 3.00, "$/ft²", { min: 0, max: 20, step: 0.25, ref: true, help: "Used when a fabric SKU has no catalog rate." }),
-      formula("system.rollup", "Budgetary total", "materials + install + freight, then + contingency  →  materials + (materials × install%) + (materials × freight%), × (1 + contingency%)"),
+      formula("system.rollup", "Budgetary total", "materials + Σ system labor + freight, then + contingency  →  materials + Σ(system material × labor % × tier ×) + (materials × freight%), × (1 + contingency%)"),
       formula("system.sell", "Sell price from cost", "sell = cost ÷ (1 − margin)"),
       formula("system.tier", "Good / Better / Best", "each line: cost × (tier cost ×), price × (tier price ×)"),
       formula("system.margin", "Blended margin", "margin = (materialsRevenue − materialsCost) ÷ materialsRevenue"),
@@ -558,7 +558,7 @@ export const GROUPS: PricingGroup[] = [
   {
     key: "labor", label: "System labor", live: true,
     sub: "Per-system labor as a % of that system's material × tier (#232)",
-    note: "Live — replaces the flat install % and the Grid's hours-per-device suggestion. Material = the system's priced equipment and wire pull. The tier is the design's (Quick Design) or the scope's Auto choice (the Grid); none chosen → ×1.0. General = Grid lines with no system. A system with no labor % of its own uses the stored install %, else 18.",
+    note: "Live — replaces the flat install % and the Grid's hours-per-device suggestion. Material = the system's priced equipment and wire pull. The tier is the design's (Quick Design) or the scope's Auto choice (the Grid); none chosen → ×1.0. General = Grid lines with no system. A labor % with no value of its own defaults to the former install % (18 unless it was changed) — export CSV before changing.",
     items: [
       ...LABOR_SYSTEMS.flatMap((sys) => [
         rate(laborRateId(sys, "pct"), `${LABOR_SYSTEM_LABEL[sys]} — labor %`, DEFAULT_LABOR_PCT, "%", { min: 0, max: LABOR_PCT_MAX, step: 0.5, help: "labor = system material × this % × tier ×" }),
@@ -569,7 +569,9 @@ export const GROUPS: PricingGroup[] = [
   },
 ];
 
-/** #232: the per-system labor % ids — unset, they read the stored install % (laborPctDefault), not their registry def. */
+/** #232: the per-system labor % ids — unset, they read the stored install % (laborPctDefault), not their registry def.
+ *  That install % has no registry row any more (retired, #232), but its stored value stays in the blob and is
+ *  read straight from it (loadWireLaborRules, value, defaultOf). */
 const LABOR_PCT_IDS: ReadonlySet<string> = new Set(LABOR_SYSTEMS.map((sys) => laborRateId(sys, "pct")));
 
 let BY_ID: Record<string, PricingEntry> = {};
@@ -620,7 +622,40 @@ export async function value(
   const g = await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {});
   const gv = g[it.id];
   if (gv != null) return gv;
+  return generalDefault(it, g);
+}
+
+/** A general rate's EFFECTIVE default: a labor % follows the stored install % (#232); every other rate is its registry def. */
+function generalDefault(it: RateEntry, g: Record<string, number | null>): number {
   return LABOR_PCT_IDS.has(it.id) ? laborPctDefault((id) => g[id]) : it.def;
+}
+
+/**
+ * The value a rate falls back to when it has none of its own — what the
+ * Estimating Rules row shows as its default and resets to. A labor % row's is
+ * the stored (retired) install %, so with install % ≠ 18 an untouched row
+ * isn't "modified" (#232); every other rate's is its registry def.
+ */
+export async function defaultOf(item: PricingEntry | string): Promise<number | null> {
+  const it = typeof item === "string" ? BY_ID[item] : item;
+  if (!it || it.kind !== "rate") return null;
+  if (it.store !== "general" || !LABOR_PCT_IDS.has(it.id)) return it.def;
+  return generalDefault(it, await getBlob<Record<string, number | null>>(PRICING_RULES_BLOB, {}));
+}
+
+/**
+ * Reset one rate (Estimating Rules' per-row ↺). A labor % is cleared to null,
+ * so it follows the install % again rather than pinning a literal 18 (#232);
+ * every other rate is written back to its registry def (prototype: setValue(id, def)).
+ */
+export async function resetValue(item: PricingEntry | string): Promise<void> {
+  const it = typeof item === "string" ? BY_ID[item] : item;
+  if (!it || it.kind !== "rate") return;
+  if (it.store === "general" && LABOR_PCT_IDS.has(it.id)) {
+    await setBlob(PRICING_RULES_BLOB, { [it.id]: null });
+    return;
+  }
+  await setValue(it, it.def);
 }
 
 export async function setValue(
@@ -643,7 +678,8 @@ export async function isDefault(item: PricingEntry | string): Promise<boolean> {
   const it = typeof item === "string" ? BY_ID[item] : item;
   if (!it || it.kind !== "rate") return true;
   const v = await value(it);
-  return v == null || Math.abs(v - it.def) < 1e-9;
+  const def = await defaultOf(it);
+  return v == null || def == null || Math.abs(v - def) < 1e-9;
 }
 
 export async function resetAll(): Promise<void> {
@@ -663,7 +699,7 @@ export async function resetAll(): Promise<void> {
   await setBlob(FIXTURE_RATES_BLOB, { ...FIXTURE_RATE_DEFAULTS });
 }
 
-/** Read a general rate by id with fallback (Quick Design install/freight/contingency). */
+/** Read a general rate by id with fallback (Quick Design freight/contingency). */
 export async function num(id: string, fb: number): Promise<number> {
   const it = BY_ID[id];
   if (!it) return fb;
@@ -671,7 +707,7 @@ export async function num(id: string, fb: number): Promise<number> {
   return v == null ? fb : v;
 }
 
-/** num() as a fraction: frac('system.installPct', 0.18) → 0.18 when default. */
+/** num() as a fraction: frac('system.freightPct', 0.05) → 0.05 when default. */
 export async function frac(id: string, fb?: number): Promise<number> {
   return (await num(id, fb != null ? fb * 100 : 0)) / 100;
 }
