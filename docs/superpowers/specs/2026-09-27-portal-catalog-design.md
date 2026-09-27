@@ -444,3 +444,10 @@ Recon against `origin/main` forced four refinements. Each gets a DECISIONS entry
    travel chip shows. `source: "none"` → unknown → cap.
 6. **The PO file** uploads through the #218 portal document flow as an ordinary shared customer
    document; `portalAcceptance.poDocumentId` holds its `DOC-` id (documents have no quote link).
+7. **No DaVinci image import.** The DaVinci export's 2,122 images are 1,427 `Icon` and 626 `Riser`
+   line-art SVGs (plus template previews/title blocks) — no product photos
+   (`data/davinci/source/*/library.json` `images[].imageMetadata.imageType`). They would make poor
+   storefront tiles, and SVG is not served to customers (script risk). Sources in this build are
+   upload, URL fetch and the datasheet page-1 thumbnail; image content types are **PNG, JPEG, WebP
+   only**. Logged as a follow-up in case a DaVinci product-photo export exists. Supersedes pick 7 and
+   §1.1 source 3.
