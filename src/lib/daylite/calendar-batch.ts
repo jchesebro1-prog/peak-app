@@ -228,9 +228,17 @@ function shortText(err: unknown): string {
   return m.length > 300 ? m.slice(0, 300) + "…" : m;
 }
 
-/** Google's per-user rate limit or its calendar usage limit — stop and resume later. */
+/**
+ * Google's per-user rate limit — stop the whole batch and let the client
+ * Resume later. Matches only the `reason` values that are actually
+ * transient (quotaExceeded, rateLimitExceeded, userRateLimitExceeded, HTTP
+ * 429). A bare `"domain":"usageLimits"` is NOT enough: that domain also
+ * covers permanent per-owner problems like accessNotConfigured (Calendar
+ * API not enabled) and dailyLimitExceededUnreg, which must fail just that
+ * owner (via OWNER_STOP_AFTER) instead of pausing every owner's import.
+ */
 export function isQuotaStop(err: unknown): boolean {
-  return isRateLimit(err) || /quotaExceeded|usageLimits|usage limits exceeded/i.test(messageOf(err));
+  return isRateLimit(err) || /\b(quotaExceeded|rateLimitExceeded|userRateLimitExceeded|429)\b/i.test(messageOf(err));
 }
 
 /** calendar.ts formats errors as "Calendar API <path> → <status> <body>". */

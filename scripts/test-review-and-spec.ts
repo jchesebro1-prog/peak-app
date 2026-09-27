@@ -20728,6 +20728,8 @@ async function dayliteCalendarAsyncChecks219(): Promise<void> {
   }, storeQ));
   ok(rq.stoppedFor === "quota" && rq.written === 1 && rq.remaining === 3 && rq.failed === 0 && rq.failedKeys.length === 0 && Object.keys(storeQ).length === 1 && rq.quotaMessage.includes("rateLimitExceeded"), "#219 batch: a rate-limit error stops the batch; the event stays pending, not failed");
   ok(dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"reason":"quotaExceeded","message":"Calendar usage limits exceeded."}]}}')) && dc219IsQuota(new Error("→ 429 Too Many Requests")) && !dc219IsQuota(new Error("→ 500 backend")), "#219 isQuotaStop: quotaExceeded / usage limits / 429 stop; a 500 does not");
+  ok(dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}')), "#219 isQuotaStop: userRateLimitExceeded also stops for quota");
+  ok(!dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"domain":"usageLimits","reason":"accessNotConfigured","message":"Calendar API has not been used in this project."}]}}')) && !dc219IsQuota(new Error('→ 403 {"error":{"errors":[{"domain":"usageLimits","reason":"dailyLimitExceededUnreg"}]}}')), "#219 isQuotaStop: accessNotConfigured / dailyLimitExceededUnreg (also domain usageLimits) are per-owner failures, not a quota pause");
   ok(dc219Is409(new Error("Calendar API x → 409 {}")) && !dc219Is409(new Error("Calendar API x → 404 {}")), "#219 isAlreadyExists: matches only a 409");
 
   clock.t = 0;
