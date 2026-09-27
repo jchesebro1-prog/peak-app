@@ -10312,7 +10312,7 @@ import { renderField as trvRenderField } from "@/lib/templates";
   ];
   for (const [f, line] of trvLetters) {
     const src = readFileSync(join(process.cwd(), f), "utf8");
-    ok(/flightOf\(/.test(src) && line.test(src) && /travelLineAmount\(/.test(src),
+    ok(/flightOf\(/.test(src) && line.test(src) && /travelLineAmount\(|travelLineShare\(/.test(src),
       `#208: ${f} prints the one travel line at travel's share of the sell price in fly mode`);
     ok(!/lodging|perDiem|airfare/.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")),
       `#208: ${f} never prints the itemized airfare / lodging / per diem`);
@@ -21022,4 +21022,69 @@ import {
       formula217("repair", "repair.total").includes("rounded to the nearest $25") &&
       formula217("inspection", "inspection.total").includes("rounded to the nearest $25"),
     "#217: the Estimating Rules formulas say service totals round to the nearest $25");
+}
+
+/* ====================================================================
+   #217 T2 — save paths persist the typed total / testing cost and the
+   back-solved margin; renewals re-price without them and say when last
+   year's price was hand-set; letters print travel's share of the final total.
+   ==================================================================== */
+import {
+  priceParagraph as priceParagraph217,
+  priorHandSetPrice as priorHandSetPrice217,
+} from "@/lib/renewal-outreach";
+{
+  const src217 = (f: string): string => readFileSync(join(process.cwd(), f), "utf8");
+  const typedIn = /const priceOverride = normalizePriceOverride\(formData\.get\("priceOverride"\)\);/;
+  const storedTyped = /\.\.\.\(r\.priceOverride != null \? \{ priceOverride: r\.priceOverride \} : \{\}\)/;
+  const storedAuto = /autoTotal: Math\.round\(r\.autoTotal\),/;
+
+  const fa = src217("src/app/(app)/flame-tests/quote/actions.ts");
+  ok(typedIn.test(fa) && /venues: venueInputs, travel: travelOverride, priceOverride \}/.test(fa),
+    "#217 flame save: reads the typed total and prices with it");
+  ok(/testingOverride: normalizeTestingOverride\(v\.testingOverride\),/.test(fa) &&
+      /\.\.\.\(v\.testingOverride != null \? \{ testingOverride: v\.testingOverride \} : \{\}\)/.test(fa),
+    "#217 flame save: each venue's typed testing cost is validated, priced and saved on the venue");
+  ok(/margin: r\.effectiveMargin,/.test(fa) && storedTyped.test(fa) && storedAuto.test(fa),
+    "#217 flame save: stores the back-solved margin, the typed total (when set) and the auto figure");
+
+  const ra = src217("src/app/(app)/repairs/quote/actions.ts");
+  ok(typedIn.test(ra) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ra) && /margin: r\.serviceMargin,/.test(ra) && storedTyped.test(ra) && storedAuto.test(ra),
+    "#217 repair save: typed total in; service margin, typed total and auto figure out");
+
+  const ia = src217("src/app/(app)/inspections/quote/actions.ts");
+  ok(typedIn.test(ia) && /travel: travelOverride,\n\s*priceOverride,\n/.test(ia) && /margin: r\.effectiveMargin,/.test(ia) && storedTyped.test(ia) && storedAuto.test(ia),
+    "#217 inspection save: typed total in; back-solved margin, typed total and auto figure out");
+
+  const rn = src217("src/lib/renewal-outreach.ts");
+  const fnBody = (name: string): string => {
+    const at = rn.indexOf(`async function ${name}`);
+    return at < 0 ? "" : rn.slice(at, rn.indexOf("\n}\n", at));
+  };
+  for (const fn of ["ensureFlameRenewalQuote", "ensureInspectionRenewalQuote"]) {
+    const b = fnBody(fn);
+    ok(b.length > 0 && !/priceOverride:/.test(b) && !/testingOverride/.test(b),
+      `#217 renewal: ${fn} re-prices without last year's typed total or testing cost`);
+    ok(/lastHandSet: priorHandSetPrice\(/.test(b) && /margin: r\.effectiveMargin,/.test(b) && storedAuto.test(b),
+      `#217 renewal: ${fn} notes a hand-set prior price and stores the rounded price's margin`);
+  }
+  ok(priorHandSetPrice217({ priceOverride: 850 }) === 850 && priorHandSetPrice217({}) === null && priorHandSetPrice217(null) === null,
+    "#217 renewal: last year's hand-set price is read from its priceOverride");
+  type PP217 = Parameters<typeof priceParagraph217>[0];
+  const para = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: [], lastHandSet: 850 } as unknown as PP217, "inspection");
+  ok(para.includes("Last year's price was hand-set at $850; this year's is priced at our current rates.") && para.includes("compared with $850 last year"),
+    "#217 renewal: the draft body says last year's price was hand-set");
+  const para2 = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: [] } as unknown as PP217, "inspection");
+  ok(!para2.includes("hand-set"), "#217 renewal: no hand-set sentence when last year's price was auto");
+
+  for (const f of [
+    "src/app/(app)/flame-tests/letter/page.tsx",
+    "src/app/(app)/inspections/letter/page.tsx",
+    "src/app/(app)/repairs/letter/page.tsx",
+    "src/lib/renewal-outreach.ts",
+  ]) {
+    const s = src217(f);
+    ok(/travelLineShare\(\{/.test(s) && !/travelLineAmount\(/.test(s),
+      `#217 printed lines: ${f} prints travel's share of the final total`);
+  }
 }

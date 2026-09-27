@@ -23,6 +23,7 @@ import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
+import { normalizePriceOverride } from "@/lib/service-pricing";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -111,12 +112,16 @@ async function persist(formData: FormData): Promise<string | null> {
   // Flights over drive (spec 2026-09-25): the builder posts its Auto · Drive ·
   // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
   const travelOverride = parseTravelOverride(formData.get("travel"));
+  // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
+  // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
+  const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
   const r = computeEstimate(
     {
       office: office || undefined,
       venues: venueInputs,
       level,
       travel: travelOverride,
+      priceOverride,
       geo: {
         driveMiles: (a, b) => driveMiles(a, b, travelRates),
         driveMinutes: (a, b) => driveMinutes(a, b, travelRates),
@@ -140,7 +145,7 @@ async function persist(formData: FormData): Promise<string | null> {
     customerId: customerId || null,
     locationId: venueInputs[0].id ?? null,
     value: Math.round(r.total),
-    margin: r.margin,
+    margin: r.effectiveMargin,
     pricingTier: tier.tier,
     tierMargin: tier.margin,
     source: "inspection",
@@ -164,6 +169,8 @@ async function persist(formData: FormData): Promise<string | null> {
       minFee: r.minFee,
       minApplied: r.minApplied,
       marginAmount: Math.round(r.marginAmount),
+      autoTotal: Math.round(r.autoTotal),
+      ...(r.priceOverride != null ? { priceOverride: r.priceOverride } : {}),
       total: Math.round(r.total),
       contact,
     },

@@ -11,7 +11,8 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { flightOf, flyTravelSentence, travelLineAmount } from "@/lib/travel-plan";
+import { flightOf, flyTravelSentence } from "@/lib/travel-plan";
+import { travelLineShare } from "@/lib/service-pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -66,6 +67,9 @@ type RepairDoc = {
   trip?: { miles?: number; minutes?: number } | null;
   rates?: { margin?: number } | null;
   total?: number | null;
+  serviceCost?: number | null;
+  serviceSell?: number | null;
+  partsSell?: number | null;
 };
 
 const TOOLBAR_CSS = `
@@ -220,7 +224,17 @@ export default async function RepairLetterPage({
     ? flyTravelSentence(
         companyName + " (" + originCity + ")",
         venueName,
-        travelLineAmount(flight.total, travelMargin)
+        // #217: travel's share of the service sell (parts excluded), which
+        // already absorbs the $25 rounding or a typed total.
+        travelLineShare({
+          flightTotal: flight.total,
+          total:
+            rp.serviceSell != null
+              ? rp.serviceSell
+              : Math.max(0, (quote.value != null ? quote.value : rp.total || 0) - (rp.partsSell || 0)),
+          cost: rp.serviceCost,
+          margin: travelMargin,
+        }).travel
       ) + crewSentence
     : "The distance from " +
       companyName +

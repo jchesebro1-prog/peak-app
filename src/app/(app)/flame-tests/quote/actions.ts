@@ -17,6 +17,7 @@ import { resolveTier } from "@/lib/pricing-tiers";
 import { getSettings } from "@/lib/settings";
 import { coordsOf, quoteOrigin } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
+import { normalizePriceOverride, normalizeTestingOverride } from "@/lib/service-pricing";
 
 /**
  * Flame-test quote mutations (server port of Flame Test Quote.dc.html
@@ -28,7 +29,13 @@ import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
  * exactly like the prototype's FlameTest.setRates before a save.
  */
 
-type PostedVenue = { id: string; label: string; curtains: number };
+type PostedVenue = {
+  id: string;
+  label: string;
+  curtains: number;
+  /** #217: the builder's typed Testing cell (null/absent = computed). */
+  testingOverride?: number | string | null;
+};
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -83,6 +90,7 @@ async function persist(formData: FormData): Promise<string | null> {
       id: v.id,
       label: v.label || loc?.label || "Venue",
       curtains: v.curtains,
+      testingOverride: normalizeTestingOverride(v.testingOverride),
       coords: coords ? { lat: coords.lat, lng: coords.lng } : null,
       oneWayMiles: loc?.travelMiles ?? null,
       oneWayMin: loc?.travelMin ?? null,
@@ -97,8 +105,11 @@ async function persist(formData: FormData): Promise<string | null> {
   // Flights over drive (spec 2026-09-25): the builder posts its Auto · Drive ·
   // Fly choice + crew/nights/airfare overrides as JSON; absent = auto.
   const travelOverride = parseTravelOverride(formData.get("travel"));
+  // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
+  // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
+  const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
   const r = compute(
-    { office: office || undefined, venues: venueInputs, travel: travelOverride },
+    { office: office || undefined, venues: venueInputs, travel: travelOverride, priceOverride },
     rates,
     travelRates
   );
@@ -125,7 +136,7 @@ async function persist(formData: FormData): Promise<string | null> {
     customerId: customerId || null,
     locationId: venueInputs[0].id ?? null,
     value: Math.round(r.total),
-    margin: r.margin,
+    margin: r.effectiveMargin,
     pricingTier: tier.tier,
     tierMargin: tier.margin,
     source: "flametest",
@@ -141,6 +152,7 @@ async function persist(formData: FormData): Promise<string | null> {
         label: v.label,
         curtains: v.curtains,
         testingCost: Math.round(v.laborCost),
+        ...(v.testingOverride != null ? { testingOverride: v.testingOverride } : {}),
       })),
       curtainsTotal: r.curtainsTotal,
       trip: savedTrip(r.trip),
@@ -150,6 +162,8 @@ async function persist(formData: FormData): Promise<string | null> {
       baseApplied: r.baseApplied,
       cost: Math.round(r.cost),
       marginAmount: Math.round(r.marginAmount),
+      autoTotal: Math.round(r.autoTotal),
+      ...(r.priceOverride != null ? { priceOverride: r.priceOverride } : {}),
       total: Math.round(r.total),
       contact,
     },

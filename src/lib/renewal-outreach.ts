@@ -50,10 +50,10 @@ import {
   flightOf,
   flyTravelSentence,
   savedTrip,
-  travelLineAmount,
   travelModeChangeReason,
   type TravelOverride,
 } from "@/lib/travel-plan";
+import { normalizePriceOverride, travelLineShare } from "@/lib/service-pricing";
 
 /**
  * IDEAS #36 — one-click renewal outreach. The ✉ on a renewal row runs this:
@@ -120,38 +120,50 @@ function listJoin(items: string[]): string {
 
 /** What the ✉ flow learned while minting this year's quote — feeds the
  *  email's price-comparison sentence (D69). */
-type RenewalPricing = {
+export type RenewalPricing = {
   quote: Quote;
   /** Last year's price (0 = unknown, e.g. seed-era records). */
   lastPrice: number;
   /** Customer-safe phrases explaining a changed price (may be empty). */
   reasons: string[];
+  /** #217: last year's typed total, when it had one (renewals never carry it). */
+  lastHandSet?: number | null;
 };
 
 /**
  * The email's price paragraph: always cites last year's price when known,
  * and explains a change (or falls back to generic "current rates" wording
- * when the components can't be reconstructed).
+ * when the components can't be reconstructed). #217: when last year's price
+ * was typed by hand, says so — this year's is re-priced and rounded instead.
  */
-function priceParagraph(p: RenewalPricing, kind: string): string {
+export function priceParagraph(p: RenewalPricing, kind: string): string {
   const newPrice = p.quote.value || 0;
   const closing = ` If it looks good, just reply here and we'll get this year's ${kind} on the schedule.`;
+  const handSet = p.lastHandSet
+    ? ` Last year's price was hand-set at ${money(p.lastHandSet)}; this year's is priced at our current rates.`
+    : "";
   if (newPrice > 0 && p.lastPrice > 0) {
     if (newPrice === p.lastPrice)
       return (
         `I've attached this year's quote — ${money(newPrice)}, unchanged ` +
-        `from last year.` + closing
+        `from last year.` + handSet + closing
       );
     const dir = newPrice > p.lastPrice ? "increase" : "decrease";
     const why = p.reasons.length ? listJoin(p.reasons) : "our current rates";
     return (
       `I've attached this year's quote — ${money(newPrice)}, compared with ` +
-      `${money(p.lastPrice)} last year. The ${dir} reflects ${why}.` + closing
+      `${money(p.lastPrice)} last year. The ${dir} reflects ${why}.` + handSet + closing
     );
   }
   if (newPrice > 0)
-    return `I've attached this year's quote — ${money(newPrice)}.` + closing;
-  return `I've attached this year's quote.` + closing;
+    return `I've attached this year's quote — ${money(newPrice)}.` + handSet + closing;
+  return `I've attached this year's quote.` + handSet + closing;
+}
+
+/** #217: last year's typed total from a prior service subdoc, or null. */
+export function priorHandSetPrice(doc: unknown): number | null {
+  if (!doc || typeof doc !== "object") return null;
+  return normalizePriceOverride((doc as { priceOverride?: unknown }).priceOverride) ?? null;
 }
 
 /* ---------------- letterhead ---------------- */
@@ -211,6 +223,10 @@ type FlameTestDoc = {
   /** Rate snapshot the quote was priced with (persist saves r.rates). */
   rates?: Partial<FlameTestRates> | null;
   total?: number | null;
+  /** Whole-job cost as saved (for the printed travel share, #217). */
+  cost?: number | null;
+  /** #217: a typed total — read only to mention it; never carried. */
+  priceOverride?: unknown;
 };
 
 /** Customer-safe reasons why this year's flame price differs from last
@@ -351,7 +367,7 @@ async function ensureFlameRenewalQuote(
     customerId: job.customerId || prior?.customerId || null,
     locationId: job.locationId || prior?.locationId || null,
     value: Math.round(r.total), // this year's price at current rates (D69)
-    margin: r.margin,
+    margin: r.effectiveMargin,
     source: "flametest",
     quoteType: "flame_test",
     owner: me,
@@ -374,12 +390,18 @@ async function ensureFlameRenewalQuote(
       baseApplied: r.baseApplied,
       cost: Math.round(r.cost),
       marginAmount: Math.round(r.marginAmount),
+      autoTotal: Math.round(r.autoTotal),
       total: Math.round(r.total),
       contact,
     },
     renewalOf: job.id,
   });
-  return { quote, lastPrice, reasons: flameChangeReasons(priorFt, r) };
+  return {
+    quote,
+    lastPrice,
+    reasons: flameChangeReasons(priorFt, r),
+    lastHandSet: priorHandSetPrice(priorFt),
+  };
 }
 
 /** The /flame-tests/letter proposal, composed for the PDF renderer. */
@@ -466,7 +488,16 @@ async function flameLetterDoc(
     blocks.push({
       kind: "p",
       text:
-        flyTravelSentence(`${companyName} (${originCity})`, venueName, travelLineAmount(flight.total, margin)) +
+        flyTravelSentence(
+          `${companyName} (${originCity})`,
+          venueName,
+          travelLineShare({
+            flightTotal: flight.total,
+            total: quote.value != null ? quote.value : ft.total || 0,
+            cost: ft.cost,
+            margin,
+          }).travel
+        ) +
         ` The on-site inspection should take approximately ${num1((curtainsTotal * curtainMin) / 60)} hours.`,
     });
   } else if (rtMiles > 0) {
@@ -534,6 +565,10 @@ type InspectionDoc = {
   rates?: Partial<InspectionRates> | null;
   total?: number | null;
   contact?: FtContact;
+  /** Whole-job cost as saved (for the printed travel share, #217). */
+  cost?: number | null;
+  /** #217: a typed total — read only to mention it; never carried. */
+  priceOverride?: unknown;
 };
 
 /** Customer-safe reasons why this year's inspection price differs — rate
@@ -706,7 +741,7 @@ async function ensureInspectionRenewalQuote(
     customerId: rec.customerId || prior?.customerId || null,
     locationId: rec.locationId || null,
     value: Math.round(r.total), // this year's price at current rates (D69)
-    margin: r.margin,
+    margin: r.effectiveMargin,
     source: "inspection",
     quoteType: "inspection",
     owner: me,
@@ -730,6 +765,7 @@ async function ensureInspectionRenewalQuote(
       minFee: r.minFee,
       minApplied: r.minApplied,
       marginAmount: Math.round(r.marginAmount),
+      autoTotal: Math.round(r.autoTotal),
       total: Math.round(r.total),
       contact,
     },
@@ -739,6 +775,7 @@ async function ensureInspectionRenewalQuote(
     quote,
     lastPrice,
     reasons: inspectionChangeReasons(priorIn, r, venueInput.label || "this venue"),
+    lastHandSet: priorHandSetPrice(priorIn),
   };
 }
 
@@ -823,7 +860,16 @@ async function inspectionLetterDoc(
     blocks.push({
       kind: "p",
       text:
-        flyTravelSentence(`${companyName} (${insp.office || "our office"})`, venueName, travelLineAmount(flight.total, margin)) +
+        flyTravelSentence(
+          `${companyName} (${insp.office || "our office"})`,
+          venueName,
+          travelLineShare({
+            flightTotal: flight.total,
+            total: quote.value != null ? quote.value : insp.total || 0,
+            cost: insp.cost,
+            margin,
+          }).travel
+        ) +
         ` The on-site inspection should take approximately ${num1(insp.inspectHours || 0)} hours.`,
     });
   } else if (rtMiles > 0) {

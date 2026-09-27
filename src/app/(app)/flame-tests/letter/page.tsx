@@ -7,7 +7,8 @@ import { getSettings } from "@/lib/settings";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
-import { TRAVEL_FLY_LINE, flightOf, travelLineAmount } from "@/lib/travel-plan";
+import { TRAVEL_FLY_LINE, flightOf } from "@/lib/travel-plan";
+import { travelLineShare } from "@/lib/service-pricing";
 import { PrintButton } from "./controls";
 import letterhead from "./peak-letterhead.jpg";
 
@@ -80,6 +81,7 @@ type FlameTestDoc = {
   trip?: { miles?: number; minutes?: number } | null;
   rates?: { curtainMinutes?: number; margin?: number } | null;
   total?: number | null;
+  cost?: number | null;
 };
 
 const TOOLBAR_CSS = `
@@ -291,7 +293,16 @@ export default async function FlameTestLetterPage({
       item: pad2(sr++),
       desc: TRAVEL_FLY_LINE,
       sub: "From " + originCity,
-      qty: money(travelLineAmount(flight.total, travelMargin)),
+      // #217: travel's share of the final (rounded or typed) total — the service
+      // part absorbs the difference, so the printed parts sum to the total.
+      qty: money(
+        travelLineShare({
+          flightTotal: flight.total,
+          total: quote.value != null ? quote.value : ft.total || 0,
+          cost: ft.cost,
+          margin: travelMargin,
+        }).travel
+      ),
       hours: num1(flight.travelHours) + " hrs",
     });
   } else if (hasTrip) {
