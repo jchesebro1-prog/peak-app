@@ -6,6 +6,7 @@ import { mergedVisitReasons } from "@/lib/stores/site-visits";
 import { mergedConsultingPhases } from "@/lib/stores/engagements";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { resolveFieldDefs } from "@/lib/customer-fields";
+import { venueTypesFrom } from "@/lib/venue-types";
 import { allUsers } from "@/lib/users";
 import {
   callbackUrl,
@@ -192,6 +193,7 @@ export default async function SettingsPage() {
           )}
           consultingDisciplines={mergedConsultingDisciplines(settings.consultingDisciplines)}
           customerFieldDefs={resolveFieldDefs(settings.customerFieldDefs)}
+          venueTypes={venueTypesFrom(settings.venueTypes)}
           offices={settings.offices.map((o) => ({
             id: o.id,
             type: o.type || "Main Office",

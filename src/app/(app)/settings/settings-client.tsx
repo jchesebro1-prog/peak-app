@@ -44,6 +44,8 @@ import type { UserStatus } from "@/lib/users";
 import type { GeoSearchHit } from "@/lib/geo";
 import type { CustomFieldDef } from "@/lib/customer-fields";
 import { CustomerFieldsCard } from "./customer-fields-card";
+import { VenueTypesCard } from "./venue-types-card";
+import type { VenueType } from "@/lib/venue-types";
 import type { Pipelines } from "@/lib/pipelines";
 import { PipelinesCard } from "./pipelines-card";
 import Link from "next/link";
@@ -176,6 +178,7 @@ export default function SettingsClient({
   phaseWeights,
   consultingDisciplines,
   customerFieldDefs,
+  venueTypes,
   pipelines,
   pipelineUsage,
   offices,
@@ -205,6 +208,7 @@ export default function SettingsClient({
   /** #145 D165 — the discipline vocabulary (mergedConsultingDisciplines). */
   consultingDisciplines: string[];
   customerFieldDefs: CustomFieldDef[];
+  venueTypes: VenueType[];
   /** Settings → Pipelines (Task 7). */
   pipelines: Pipelines;
   /** Stage usage counts, keyed by pipeline id then stage id — the editor's
@@ -2198,6 +2202,10 @@ export default function SettingsClient({
           <CustomerFieldsCard
             key={customerFieldDefs.map((d) => d.id).join("|")}
             defs={customerFieldDefs}
+          />
+          <VenueTypesCard
+            key={venueTypes.map((t) => `${t.key}:${t.label}:${t.worksLike}:${t.archived ? 1 : 0}`).join("|")}
+            types={venueTypes}
           />
         </>
       )}

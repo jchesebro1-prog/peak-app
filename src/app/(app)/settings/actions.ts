@@ -28,6 +28,8 @@ import {
 import type { DashboardLayout } from "@/lib/dashboard-layout";
 import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
+import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
+import { countSitesByVenueKind } from "@/lib/identity/sites";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -706,6 +708,31 @@ export async function saveCustomerFieldDefsAction(
   if (!res.ok) throw new Error(res.error);
   await setSettings({ customerFieldDefs: defs });
   revalidatePath("/", "layout");
+}
+
+/* ---- Venue types (#216) ---- */
+
+/** Whole-list save of Settings → Venue types. Returns (never throws) so the
+ *  card can show the message in production. */
+export async function saveVenueTypesAction(
+  input: VenueTypeInput[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const current = venueTypesFrom((await getSettings()).venueTypes);
+  const res = mergeVenueTypes(current, Array.isArray(input) ? input : []);
+  if (!res.ok) return res;
+  if (res.removed.length) {
+    const used = await countSitesByVenueKind(res.removed);
+    const busy = res.removed.find((k) => (used[k] || 0) > 0);
+    if (busy) {
+      const label = current.find((t) => t.key === busy)?.label ?? busy;
+      const n = used[busy];
+      return { ok: false, error: `"${label}" is used by ${n} venue${n === 1 ? "" : "s"} — archive it instead of removing it.` };
+    }
+  }
+  await setSettings({ venueTypes: res.types });
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 /* ---- Recordings (Krisp recordings spec §1.3 / §5.1) ---- */

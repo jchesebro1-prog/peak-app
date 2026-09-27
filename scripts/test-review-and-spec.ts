@@ -10487,6 +10487,7 @@ seeded()
   .then(() => laborPerSystem232AsyncChecks())
   .then(() => gridLabor232AsyncChecks())
   .then(() => venues216AsyncChecks())
+  .then(() => venues216SaveFixesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23713,5 +23714,72 @@ async function venues216AsyncChecks(): Promise<void> {
     for (const s of [...(await v216Sites(CID)), ...(await v216Sites(OTHER))]) await v216SoftDel(s.id);
     await removeCustomer(CID);
     await removeCustomer(OTHER);
+  }
+}
+
+/* --- #216 T3: Settings → Venue types --- */
+{
+  const v216Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const card = v216Read("src/app/(app)/settings/venue-types-card.tsx");
+  ok(card.startsWith('"use client"') && card.includes("saveVenueTypesAction(") && card.includes("Works like"),
+    "#216 T3: the Venue types card edits labels, works-like, order, archive");
+  ok(!gemValueImports(card).some((m) => /^@\/lib\/stores\/|^@\/db|identity\/|venue-save|^@\/lib\/settings$/.test(m)),
+    "#216 T3: the card imports no store/DB/server value");
+  const sa = v216Read("src/app/(app)/settings/actions.ts");
+  const s = sa.indexOf("export async function saveVenueTypesAction");
+  const body = sa.slice(s, sa.indexOf("\nexport ", s + 10));
+  ok(s > 0 && body.includes('requirePerm("manage_users")') && body.includes("mergeVenueTypes(") && body.includes("countSitesByVenueKind(res.removed)") && body.includes("setSettings({ venueTypes: res.types })"),
+    "#216 T3: saveVenueTypesAction is admin-only, merges, refuses in-use removals, stores the list");
+  ok(v216Read("src/app/(app)/settings/settings-client.tsx").includes("<VenueTypesCard") && v216Read("src/app/(app)/settings/page.tsx").includes("venueTypes={venueTypesFrom(settings.venueTypes)}"),
+    "#216 T3: Settings renders the card from the resolved list");
+}
+
+/* --- #216 T2 review fixes: saveVenue coordinates, primary, forged ids --- */
+import { saveSite as v216SaveSite } from "@/lib/identity/sites";
+async function venues216SaveFixesAsyncChecks(): Promise<void> {
+  const CO = fixtureId(216, "fix-co");
+  const LEG = fixtureId(216, "fix-legacy");
+  const base = { siteId: null, locationName: "", address: "", city: "Omaha", state: "NE", lat: null, lng: null, primary: false };
+  try {
+    await upsertCustomer({ id: CO, name: "Fix Arts Center", type: "Education", locations: [], contacts: [] });
+    // A customer record always gets a default site — drop it so CO has no venues.
+    for (const s0 of await v216Sites(CO)) await v216SoftDel(s0.id);
+    ok((await v216Sites(CO)).length === 0, "#216 T2 fix: fixture company starts with no venues");
+    await upsertCustomer({ id: LEG, name: "Legacy Hall Co", type: "Education", locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium" }], contacts: [] });
+
+    const first = await v216Save({ ...base, companyId: CO, venueKind: "church", address: "1 Main St", lat: 41.25, lng: -95.9, primary: false });
+    let row = first.ok ? await v216GetSite(first.siteId) : null;
+    ok(first.ok && row?.isPrimary === true, "#216 T2 fix: the first venue on a company with none is primary even when primary:false is sent");
+
+    const again = await v216Save({ ...base, companyId: CO, siteId: first.ok ? first.siteId : null, venueKind: "church", address: "1 Main St", primary: false });
+    row = first.ok ? await v216GetSite(first.siteId) : null;
+    ok(again.ok && row?.isPrimary === true, "#216 T2 fix: primary:false on the current primary leaves it primary");
+
+    const second = await v216Save({ ...base, companyId: CO, venueKind: "arena", address: "9 Elm St", primary: false });
+    ok(second.ok && (await v216GetSite(first.ok ? first.siteId : ""))?.isPrimary === true, "#216 T2 fix: primary:false on a second venue leaves the first primary");
+
+    if (row) await v216SaveSite({ ...row, travelMiles: "12", travelMin: "20" });
+    const keep = await v216Save({ ...base, companyId: CO, siteId: first.ok ? first.siteId : null, venueKind: "church", address: " 1 Main St ", lat: null, lng: null });
+    row = first.ok ? await v216GetSite(first.siteId) : null;
+    ok(keep.ok && Number(row?.lat) === 41.25 && Number(row?.lng) === -95.9 && row?.travelMiles === "12" && row?.travelMin === "20",
+      "#216 T2 fix: re-saving with an unchanged address and no coordinates keeps lat/lng and drive distance");
+
+    const moved = await v216Save({ ...base, companyId: CO, siteId: first.ok ? first.siteId : null, venueKind: "church", address: "2 Oak St", lat: null, lng: null });
+    row = first.ok ? await v216GetSite(first.siteId) : null;
+    ok(moved.ok && row?.lat == null && row?.lng == null && row?.travelMiles == null && row?.travelMin == null,
+      "#216 T2 fix: a changed address with no coordinates clears lat/lng and drive distance");
+
+    const n = (await v216Sites(CO)).length;
+    const forged = await v216Save({ ...base, companyId: CO, siteId: 12345 as unknown as string, venueKind: "church" });
+    ok(!forged.ok && (await v216Sites(CO)).length === n, "#216 T2 fix: a non-string siteId is refused, never turned into a create");
+
+    const legacy = (await v216Sites(LEG)).find((s) => s.legacyLocId === "v1");
+    const re = await v216Save({ ...base, companyId: LEG, siteId: legacy?.id ?? null, venueKind: "proscenium" });
+    ok(!!legacy && re.ok && (await v216GetSite(legacy.id))?.name === "Legacy Hall Co — Proscenium / Auditorium",
+      "#216 T2 fix: re-saving a legacy-named venue switches it to the derived name");
+  } finally {
+    for (const s of [...(await v216Sites(CO)), ...(await v216Sites(LEG))]) await v216SoftDel(s.id);
+    await removeCustomer(CO);
+    await removeCustomer(LEG);
   }
 }
