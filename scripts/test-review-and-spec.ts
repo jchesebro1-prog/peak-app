@@ -27560,3 +27560,40 @@ import {
     "#242: review-limits.ts stays client-safe — no store, db, settings, users or session import"
   );
 }
+
+/* --- #242 T2: Settings → Admin → Review limits (storage, action, card) --- */
+import { applyLimitCells as r242Apply } from "@/lib/review-limits";
+{
+  const stored = { u1: { system_plain: 25000 }, u9: { rental: "none" as const } };
+  const res = r242Apply(stored, { u1: { system_plain: "$30,000", rental: "No limit" }, u2: { consulting: "" } }, (id) => id);
+  ok(
+    res.ok && JSON.stringify(res.limits) === JSON.stringify({ u1: { system_plain: 30000, rental: "none" }, u9: { rental: "none" } }),
+    `#242 card: edited rows replace, hidden rows (archived people) are kept, an all-blank row is dropped (got ${JSON.stringify(res)})`
+  );
+  const cleared = r242Apply(stored, { u1: { system_plain: "" } }, (id) => id);
+  ok(cleared.ok && !("u1" in cleared.limits), "#242 card: clearing every cell of a row removes that person's limits (always needs review)");
+  const bad = r242Apply(stored, { u1: { flame_typed: "25k" } }, () => "Nic Trapani");
+  ok(!bad.ok && bad.error.startsWith("Nic Trapani · Flame test — typed total: "), `#242 card: a bad cell is refused naming the person and column (got ${JSON.stringify(bad)})`);
+
+  const act = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
+  const at = act.indexOf("export async function saveReviewLimitsAction");
+  const body = act.slice(at, at + 1500);
+  ok(
+    at > 0 && body.includes('await requirePerm("manage_users")') && body.includes("sanitizeReviewLimits(") && body.includes("allUsers()") && body.includes("setSettings({ reviewLimits"),
+    "#242: saveReviewLimitsAction is manage_users-gated, sanitizes against the roster, and writes the settings blob"
+  );
+  const st = readFileSync(join(process.cwd(), "src/lib/settings.ts"), "utf8");
+  ok(st.includes('reviewLimits?: import("@/lib/review-limits").ReviewLimits;'), "#242: AppSettingsData declares reviewLimits");
+  const pg = readFileSync(join(process.cwd(), "src/app/(app)/settings/page.tsx"), "utf8");
+  const sc = readFileSync(join(process.cwd(), "src/app/(app)/settings/settings-client.tsx"), "utf8");
+  ok(
+    pg.includes("reviewLimits={reviewLimitsFrom(settings.reviewLimits)}") && sc.includes("<ReviewLimitsCard") && sc.includes("reviewLimits: ReviewLimits;"),
+    "#242: Settings → Admin renders the Review limits card from the stored blob"
+  );
+  const card = readFileSync(join(process.cwd(), "src/app/(app)/settings/review-limits-card.tsx"), "utf8");
+  ok(
+    card.startsWith('"use client";') && card.includes("saveReviewLimitsAction(") && card.includes("applyLimitCells(") &&
+      !/from "@\/(db|lib\/stores|lib\/settings|lib\/users)"/.test(card),
+    "#242: the card is a client component over the pure rules + the server action — no store/db/settings import"
+  );
+}

@@ -320,3 +320,29 @@ export function formatLimitInput(limit: ReviewLimit | null | undefined): string 
   if (limit === "none") return "No limit";
   return money(limit);
 }
+
+/**
+ * The Settings card's save: `cells` holds the rows the card showed (one per
+ * active person, every kind as typed text). A shown row REPLACES that
+ * person's stored row (all blank → removed); rows the card didn't show
+ * (archived people) are kept as stored. A bad cell refuses the whole save,
+ * naming the person and the column.
+ */
+export function applyLimitCells(
+  stored: ReviewLimits,
+  cells: Record<string, Partial<Record<ReviewKind, string>>>,
+  nameOf: (userId: string) => string
+): { ok: true; limits: ReviewLimits } | { ok: false; error: string } {
+  const next: ReviewLimits = { ...stored };
+  for (const [uid, row] of Object.entries(cells)) {
+    const out: Partial<Record<ReviewKind, ReviewLimit>> = {};
+    for (const k of REVIEW_KIND_KEYS) {
+      const p = parseLimitInput(row[k] ?? "");
+      if (!p.ok) return { ok: false, error: `${nameOf(uid)} · ${reviewKindColumn(k)}: ${p.error}` };
+      if (p.limit !== null) out[k] = p.limit;
+    }
+    if (Object.keys(out).length) next[uid] = out;
+    else delete next[uid];
+  }
+  return { ok: true, limits: next };
+}

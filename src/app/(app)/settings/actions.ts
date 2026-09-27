@@ -34,6 +34,7 @@ import {
 } from "@/lib/document-categories";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
+import { sanitizeReviewLimits, type ReviewLimits } from "@/lib/review-limits";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
 import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 import { withTransaction } from "@/db";
@@ -844,6 +845,22 @@ export async function saveDocumentCategoriesAction(
   const merged = mergeDocumentCategories(stored, input);
   if (!merged.ok) return merged;
   await setSettings({ documentCategories: merged.categories });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/* ---- Review limits (#242) ---- */
+
+/** Whole-map save of Settings → Admin → Review limits. Sanitized against the
+ *  roster (unknown people and kinds dropped, whole dollars, capped at
+ *  $10,000,000); the card has already refused malformed cells. */
+export async function saveReviewLimitsAction(
+  input: ReviewLimits
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requirePerm("manage_users");
+  const roster = await allUsers();
+  const limits = sanitizeReviewLimits(input, new Set(roster.map((u) => u.id)));
+  await setSettings({ reviewLimits: limits });
   revalidatePath("/", "layout");
   return { ok: true };
 }
