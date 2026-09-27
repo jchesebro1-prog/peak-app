@@ -321,7 +321,7 @@ export function DocumentsCardClient({
             <>
               <span style={chip("#b4543a", "#f8ece7", "#eccfc4")}>{newCount} new from customer</span>
               <button type="button" style={LINK_BTN} disabled={marking} onClick={markSeen}>
-                {marking ? "Marking…" : "Mark seen"}
+                {marking ? "Marking…" : scope === "company" ? "Mark seen" : "Mark all of this company’s new uploads seen"}
               </button>
             </>
           )}

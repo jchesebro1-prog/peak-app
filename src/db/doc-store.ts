@@ -163,11 +163,14 @@ export async function getDocsByIdAnyCase<T extends Doc = Doc>(
  * filtered in SQL (`doc->>field IN (…)`) so a per-request lookup (one SKU's
  * links, a page of SKUs) never materializes the whole collection (#207
  * final fix wave). `field` is a code constant, passed as a bound parameter.
+ * `nullFields` (#218) further keeps only rows where each of those top-level
+ * fields is absent or JSON null (`doc->>f IS NULL`) — also code constants.
  */
 export async function listDocsByField<T extends Doc = Doc>(
   coll: CollectionName,
   field: string,
-  values: readonly string[]
+  values: readonly string[],
+  opts: { nullFields?: readonly string[] } = {}
 ): Promise<T[]> {
   const unique = [...new Set(values)].filter(Boolean);
   if (!unique.length) return [];
@@ -178,7 +181,13 @@ export async function listDocsByField<T extends Doc = Doc>(
     const rows = await db
       .select()
       .from(t)
-      .where(and(eq(t.deleted, false), inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK))))
+      .where(
+        and(
+          eq(t.deleted, false),
+          inArray(sql<string>`${t.doc}->>${field}`, unique.slice(i, i + DOC_BATCH_CHUNK)),
+          ...(opts.nullFields ?? []).map((f) => sql`${t.doc}->>${f} IS NULL`)
+        )
+      )
       .orderBy(asc(t.id));
     for (const r of rows) out.push({ ...(r.doc as T), id: r.id });
   }

@@ -19,6 +19,10 @@ import {
 } from "@/lib/stores/inspections";
 import { PortalShell } from "./shell";
 import { acceptPortalQuote } from "./actions";
+import { documentsForCustomer } from "@/lib/stores/documents";
+import { activeDocumentCategories, resolveDocumentCategories } from "@/lib/document-categories";
+import { groupForPortal } from "@/lib/document-rules";
+import { PortalDocumentsSection } from "./documents-section";
 import { resolvePortalViewer } from "@/lib/portal-viewer";
 import { portalQuotePdfPreparing, portalQuotePdfSource } from "@/lib/quote-pdf/portal-access";
 import { latestSentRevision, pdfView } from "@/lib/quote-pdf/state";
@@ -211,6 +215,18 @@ export default async function PortalPage({
   ]);
   const custName = cust?.name || "your organization";
   const venues = cust?.locations || [];
+
+  // #218 — documents: the viewer's company only (portal session, or the team
+  // preview's customer via resolvePortalViewer), and only what the portal may
+  // show (portalCanSee inside documentsForCustomer's portal filter).
+  const docCategories = resolveDocumentCategories(settings.documentCategories);
+  const docVenues = venues.flatMap((v) => (v.id ? [{ id: v.id, label: v.label || "Venue" }] : []));
+  const docGroups = groupForPortal(
+    await documentsForCustomer(cid, { portal: true }),
+    cid,
+    docCategories,
+    docVenues
+  );
 
   // Published quotes the team sent, PLUS the customer's own self-serve estimates
   // still in draft (source "portal-self-serve") so they can see what they
@@ -671,6 +687,17 @@ export default async function PortalPage({
           </div>
         )}
       </div>
+
+      {/* documents (#218) — shared files + the customer's own uploads, both ways;
+          the team preview downloads through the team route and can't upload */}
+      <PortalDocumentsSection
+        groups={docGroups}
+        preview={preview}
+        customerId={cid}
+        venues={docVenues}
+        categories={activeDocumentCategories(docCategories).map((c) => ({ key: c.key, label: c.label }))}
+        companyName={companyName}
+      />
     </PortalShell>
   );
 }

@@ -69,7 +69,7 @@ export async function navData(me: string): Promise<{
     renewals({ dueOnly: true }),
     allTasks(),
     getPrefs(me),
-    // #218 — one SQL-filtered read (source = customer), usually empty.
+    // #218 — one SQL-filtered read (source = customer AND seenByTeamAt IS NULL), usually empty.
     unseenCustomerDocuments(),
   ]);
   // Everything below is derived from the arrays already fetched above — no
@@ -285,15 +285,17 @@ export async function navData(me: string): Promise<{
   // #218 — one item per company with customer uploads nobody has opened;
   // downloading one (or "Mark seen" on the card) clears it.
   const docBell = customerUploadBell(unseenDocs);
+  // A company that no longer resolves has no page to clear it from, so its
+  // item is dropped rather than left sitting in the bell for good.
   const docNames = await Promise.all(docBell.map((b) => customerNameFor(b.customerId)));
-  push("documents", "New documents from customers", docBell.map((b, i) => ({
+  push("documents", "New documents from customers", docBell.flatMap((b, i) => (docNames[i] ? [{
     id: "docs-" + b.customerId,
-    title: docNames[i] || b.customerId,
+    title: docNames[i],
     sub: b.count === 1 ? "1 new document" : `${b.count} new documents`,
     href: `/companies/${encodeURIComponent(b.customerId)}#documents`,
     letter: "D",
     color: "#3155a8",
-  })));
+  }] : [])));
 
   const bellCount = groups.reduce((n, g) => n + g.items.length, 0);
   return { counts, bell: groups, bellCount };

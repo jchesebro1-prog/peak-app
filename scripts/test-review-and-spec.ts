@@ -10502,6 +10502,7 @@ seeded()
   .then(() => quotePdfT4Fix222AsyncChecks())
   .then(() => quotePdfCoalesce222AsyncChecks())
   .then(() => pdfPoll222AsyncChecks())
+  .then(() => documentsPortalFixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25536,4 +25537,62 @@ import {
   ok(e223IsNo(1001) && !e223IsNo(0) && !e223IsNo(-3) && !e223IsNo(1.5) && !e223IsNo("1001"), "#223 isEstimateNo: positive integers only");
   const e223Patched = e223Strip({ name: "x", estNo: 5, estSuffix: 2 });
   ok(e223Same(e223Patched, { name: "x" }), "#223 withoutEstimateFields drops estNo/estSuffix and keeps the rest");
+}
+
+/* ======================================================================
+   Documents (#218) — Task 5: portal routes + section (structural; the
+   access rule itself is portalCanSee, tested in Task 1, and the finalize
+   path for a customer actor is tested in Task 3).
+   ====================================================================== */
+import { listDocsByField as d218ByField } from "@/db/doc-store";
+{
+  const src218p = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const pup = src218p("src/app/portal/documents/upload/route.ts");
+  ok(pup.includes("await portalSession()") && pup.includes("parseUploadKey(clientPayload)") && pup.includes("uploadGrantError(pathname, session.customerId, uploadKey)") && !pup.includes("payload.customerId") && !pup.includes("requireUser"), "#218 route: the portal upload grant takes the company from the session only");
+  const pdl = src218p("src/app/portal/documents/[id]/route.ts");
+  ok(pdl.includes("await portalSession()") && pdl.includes("portalCanSee(doc, session.customerId)") && pdl.includes("status: 404") && pdl.includes("documentDownloadHeaders(doc.fileName)") && !pdl.includes("requireUser"), "#218 route: portal download is scoped by portalCanSee and refuses with 404");
+  const pact = src218p("src/app/portal/documents-actions.ts");
+  ok(pact.startsWith('"use server"') && pact.includes("await portalSession()") && pact.includes('kind: "customer"') && pact.includes("customerId: session.customerId"), "#218 portal: finalize takes the company from the session");
+  const pupc = src218p("src/app/portal/document-upload.tsx");
+  ok(pupc.startsWith('"use client"') && !/from "@\/lib\/stores\//.test(pupc) && !/from "@\/lib\/portal"/.test(pupc) && pupc.includes('handleUploadUrl: "/portal/documents/upload"'), "#218 portal: the upload control is a client component that never imports a store or the session module");
+  const ppage = src218p("src/app/portal/page.tsx");
+  ok(ppage.includes("documentsForCustomer(cid, { portal: true })") && ppage.includes("<PortalDocumentsSection"), "#218 portal: the dashboard lists only portal-visible documents of the session's company");
+  ok(src218p("src/middleware.ts").includes("|portal|"), "#218 portal: /portal routes stay outside the team login (existing exemption, unchanged)");
+  // Team preview (?preview=<id>, resolvePortalViewer): team download links, no upload.
+  const psec = src218p("src/app/portal/documents-section.tsx");
+  ok(psec.includes('preview ? "/api/documents/" : "/portal/documents/"') && psec.includes("disabled={preview}") && ppage.includes("preview={preview}"), "#218 portal: the team preview links to the team download route and disables upload");
+  // Portal finalize forces the customer shape whatever the browser sent.
+  ok(/finalizeDocumentUpload\(\s*\{ \.\.\.input, customerId: session\.customerId, projectId: null, visibility: "shared" \}/.test(pact) && !pact.includes("seenByTeamAt"), "#218 portal: finalize pins company, project (none) and Shared; the customer actor makes it unseen");
+
+  // Task 4 review fixes.
+  const nav218 = src218p("src/lib/nav-counts.ts");
+  ok(/docBell\.flatMap\(\(b, i\) =>\s*\(?\s*docNames\[i\]\s*\?/.test(nav218) && !nav218.includes("docNames[i] || b.customerId"), "#218 bell: an item whose company no longer resolves is dropped, never left un-clearable");
+  ok(nav218.includes("seenByTeamAt IS NULL"), "#218 bell: the nav-counts comment states the SQL filter");
+  const store218 = src218p("src/lib/stores/documents.ts");
+  ok(/listDocsByField<DocumentRecord>\(COLL, "source", \["customer"\], \{ nullFields: \["seenByTeamAt"\] \}\)/.test(store218), "#218 bell: unseenCustomerDocuments filters seenByTeamAt IS NULL in SQL");
+  const card218 = src218p("src/components/documents/documents-card-client.tsx");
+  ok(card218.includes('scope === "company" ? "Mark seen" : "Mark all of this company’s new uploads seen"'), "#218 UI: a venue/project card's Mark seen says it acknowledges the whole company");
+}
+
+async function documentsPortalFixAsyncChecks(): Promise<void> {
+  const CO = fixtureId(218, "co-t5");
+  const mk = async (source: "team" | "customer") => {
+    const d = await d218Create({
+      title: "T5", fileName: "t5.pdf", mime: "application/pdf", size: 10,
+      blobPath: `documents/TEST218_co-t5/UP-0000000000005a18/t5-${Math.random().toString(36).slice(2, 8)}.pdf`,
+      category: "other", visibility: "shared", source, customerId: CO, siteId: null, projectId: null,
+      notes: "", uploadedBy: "T5",
+    });
+    registerFixture("documents", d.id);
+    return d;
+  };
+  const seen = await mk("customer");
+  const fresh = await mk("customer");
+  const team = await mk("team");
+  await d218MarkSeen([seen.id], 7000);
+  const sqlRows = await d218ByField<{ id: string }>("documents", "source", ["customer"], { nullFields: ["seenByTeamAt"] });
+  const ids = new Set(sqlRows.map((r) => r.id));
+  ok(ids.has(fresh.id) && !ids.has(seen.id) && !ids.has(team.id), "#218 doc-store: nullFields filters in SQL (a seen customer upload and a team file never come back)");
+  const unseen = new Set((await d218Unseen()).map((d) => d.id));
+  ok(unseen.has(fresh.id) && !unseen.has(seen.id) && !unseen.has(team.id), "#218 bell: unseenCustomerDocuments returns only unseen customer uploads");
 }
