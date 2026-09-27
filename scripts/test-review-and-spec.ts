@@ -10533,6 +10533,7 @@ seeded()
   .then(() => tasks215AsyncChecks())
   .then(() => calendarTasks215AsyncChecks())
   .then(() => inboxTask215AsyncChecks())
+  .then(() => gridAccessoriesAsyncChecks230())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -22009,4 +22010,234 @@ import { DRAPERY_TYPE_KEY as T4F_DRAPERY, DEFAULT_TYPE_ICONS as T4F_TYPE_ICONS }
   ok(T4F_DRAPERY === "drapery" && Object.hasOwn(T4F_TYPE_ICONS, T4F_DRAPERY), "#226 T4 fix: DRAPERY_TYPE_KEY names a seeded type");
   const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
   ok(ed.includes("pl.curtain ? DRAPERY_TYPE_KEY :") && !ed.includes('"drapery"'), "#226 T4 fix: the editor's curtain layer uses DRAPERY_TYPE_KEY");
+}
+
+/* ======================================================================
+   #230 Grid BOM by category + accessories — Task 1: the pure model
+   (grouping rule, accessory sanitize/list edits/pricing/search) and
+   source pins for the store, quote and actions.
+   ====================================================================== */
+import {
+  BOM_GROUPS as g230Groups, CUSTOM_SYSTEM_OF_GROUP as g230SysOf, autoSystemsByPart as g230Auto, bomGroups as g230BomGroups,
+  groupOfCustomSystem as g230CustomGroup, groupOfPart as g230GroupOf, groupedBomLines as g230Grouped, isBomGroupKey as g230IsKey,
+} from "@/lib/design/grid-bom-groups";
+import {
+  ACCESSORIES_MAX as a230Max, accessoriesCost as a230Cost, accessoriesOf as a230Of, accessoryBomLines as a230Lines,
+  accessoryCandidates as a230Cands, applyAccessorySave as a230Save, copyAccessories as a230Copy, sanitizeAccessory as a230Sanitize,
+  withoutAccessory as a230Without, type GridAccessory as A230,
+} from "@/lib/design/grid-accessories";
+import { sanitizeCustomItem as ci230Sanitize } from "@/lib/design/grid-custom-items";
+import type { PartLite as P230 } from "@/lib/design/grid-bom";
+
+{
+  // --- groups + the grouping rule
+  ok(g230Groups.map((g) => g.label).join("|") === "Rigging|Curtains|Lighting|Audio|Video|Controls|General", "#230 groups: seven headings in Jeff's order");
+  ok(g230IsKey("controls") && g230IsKey("general") && !g230IsKey("Controls") && !g230IsKey("acoustical"), "#230 groups: keys are the lower-case system keys");
+  ok(g230GroupOf({ gridScope: "Audio", deviceType: "speakers" }) === "audio" && g230GroupOf({ gridScope: "Unscoped", deviceType: "cable-connectors" }) === "general" && g230GroupOf(undefined) === "general",
+    "#230 groups: a part files by its (device-type) scope; Unscoped → General");
+  ok(g230GroupOf({ gridScope: "Lighting", deviceType: "control-networking" }) === "controls" && g230GroupOf({ gridScope: "Lighting", deviceType: "dimming-power" }) === "controls" && g230GroupOf({ gridScope: "Rigging", deviceType: "rigging-control" }) === "controls",
+    "#230 groups: control, dimming and rigging-control device types file under Controls");
+  ok(g230GroupOf({ gridScope: "Unscoped" }, new Set(["controls"])) === "controls" && g230GroupOf({ gridScope: "Audio" }, new Set(["video"])) === "video",
+    "#230 groups: an Auto-painted part files under the system it was painted for");
+  ok(g230GroupOf({ gridScope: "Audio" }, new Set(["audio", "video"])) === "audio" && g230GroupOf({ gridScope: "Audio" }, new Set(["acoustical"])) === "audio",
+    "#230 groups: ambiguous or non-BOM Auto systems fall back to the part's own scope");
+  const auto230 = g230Auto([
+    { partId: "A", auto: { scope: "controls" } }, { partId: "A" },
+    { partId: "B", autoOrigin: { scope: "lighting" } },
+    { partId: "F", curtain: {}, auto: { scope: "curtains" } },
+  ]);
+  ok([...(auto230.get("A") || [])].join() === "controls" && [...(auto230.get("B") || [])].join() === "lighting" && !auto230.has("F"),
+    "#230 groups: Auto systems per part come from auto tags and D320 origins; curtains are skipped");
+  ok(g230CustomGroup("Controls") === "controls" && g230CustomGroup("Rigging") === "rigging" && g230CustomGroup("Unscoped") === "general" && g230CustomGroup(undefined) === "general" && g230CustomGroup("Plumbing") === "general",
+    "#230 groups: a custom item's system maps to its group");
+  ok(Object.entries(g230SysOf).every(([k, s]) => g230CustomGroup(s ?? undefined) === k), "#230 groups: every group's custom-item system round-trips");
+  const ctl230 = ci230Sanitize({ desc: "Console desk", system: "Controls", qty: 1, unitCost: 10 }, "ci-0123456789ab");
+  ok(ctl230.ok && ctl230.item.system === "Controls", "#230 custom: a custom item can be filed under Controls");
+
+  // --- accessories: sanitize + list edits
+  const ID = "ba-0123456789ab";
+  const s230 = a230Sanitize({ partId: " ETC-S4 ", qty: 3, scope: "lighting" }, ID);
+  ok(s230.ok && s230.item.id === ID && s230.item.partId === "ETC-S4" && s230.item.qty === 3 && s230.item.scope === "lighting",
+    "#230 accessory: sanitize trims the part id and keeps qty + group");
+  ok(!a230Sanitize({ partId: "", qty: 1, scope: "lighting" }, ID).ok && !a230Sanitize({ partId: "asm:fa-1", qty: 1, scope: "lighting" }, ID).ok &&
+    !a230Sanitize({ partId: "allow:lighting:par:good", qty: 1, scope: "lighting" }, ID).ok && !a230Sanitize({ partId: "custom:ci-0123456789ab", qty: 1, scope: "lighting" }, ID).ok &&
+    !a230Sanitize({ partId: "grid-seed:x", qty: 1, scope: "lighting" }, ID).ok && !a230Sanitize({ partId: "x".repeat(201), qty: 1, scope: "lighting" }, ID).ok,
+    "#230 accessory: blank, virtual, custom, seed and over-long ids are never accessories");
+  ok(!a230Sanitize({ partId: "X", qty: 0, scope: "audio" }, ID).ok && !a230Sanitize({ partId: "X", qty: 1.5, scope: "audio" }, ID).ok && !a230Sanitize({ partId: "X", qty: 100001, scope: "audio" }, ID).ok,
+    "#230 accessory: qty is a whole number from 1 to 100,000");
+  ok(!a230Sanitize({ partId: "X", qty: 1, scope: "Lighting" }, ID).ok && !a230Sanitize({ partId: "X", qty: 1 }, ID).ok, "#230 accessory: the group key is required and exact");
+  const read230 = a230Of([
+    { id: ID, partId: "X", qty: 1, scope: "audio" }, { id: ID, partId: "Y", qty: 1, scope: "audio" },
+    { id: "bad", partId: "X", qty: 1, scope: "audio" }, { id: "ba-bbbbbbbbbbbb", partId: "", qty: 1, scope: "audio" }, 5,
+  ]);
+  ok(read230.length === 1 && read230[0].partId === "X" && a230Of(undefined).length === 0 && a230Of("junk").length === 0,
+    "#230 accessory: a stored list drops bad ids, invalid rows and duplicates");
+  let n230 = 0;
+  const mk230 = () => `ba-${String(++n230).padStart(12, "0")}`;
+  const add1 = a230Save([], { partId: "X", qty: 2, scope: "audio" }, mk230);
+  ok(add1.ok && add1.items.length === 1 && add1.item.id === "ba-000000000001" && add1.item.qty === 2, "#230 accessory: saving without an id adds a line");
+  const add2 = add1.ok ? a230Save(add1.items, { partId: "X", qty: 3, scope: "audio" }, mk230) : add1;
+  ok(add2.ok && add2.items.length === 1 && add2.item.qty === 5 && add2.item.id === "ba-000000000001", "#230 accessory: adding the same part to the same group bumps its qty");
+  const add3 = add2.ok ? a230Save(add2.items, { partId: "X", qty: 1, scope: "video" }, mk230) : add2;
+  ok(add3.ok && add3.items.length === 2 && add3.item.scope === "video", "#230 accessory: the same part under another group is its own line");
+  const ed230 = add3.ok ? a230Save(add3.items, { id: "ba-000000000001", qty: 9, partId: "IGNORED", scope: "rigging" }, mk230) : add3;
+  ok(ed230.ok && ed230.item.qty === 9 && ed230.item.partId === "X" && ed230.item.scope === "audio" && ed230.items.length === 2, "#230 accessory: an edit changes the qty only");
+  const gone230 = a230Save([], { id: "ba-000000000001", qty: 2 }, mk230);
+  ok(!gone230.ok && gone230.reason === "no-such-accessory", "#230 accessory: editing an accessory removed elsewhere is refused");
+  const badQty230 = add1.ok ? a230Save(add1.items, { id: "ba-000000000001", qty: 0 }, mk230) : add1;
+  ok(!badQty230.ok && badQty230.reason === "invalid", "#230 accessory: an edit to an invalid qty is refused");
+  const bad230 = a230Save([], { partId: "X", qty: 0, scope: "audio" }, mk230);
+  ok(!bad230.ok && bad230.reason === "invalid" && bad230.error.length > 0, "#230 accessory: an invalid add is refused with a message");
+  const full230: A230[] = Array.from({ length: a230Max }, (_, i) => ({ id: `ba-${String(i).padStart(12, "0")}`, partId: `P${i}`, qty: 1, scope: "general" }));
+  const over230 = a230Save(full230, { partId: "NEW", qty: 1, scope: "general" }, mk230);
+  ok(!over230.ok && over230.reason === "too-many", `#230 accessory: an option holds at most ${a230Max} accessories`);
+  const two230: A230[] = [
+    { id: "ba-aaaaaaaaaaaa", partId: "X", qty: 2, scope: "audio" },
+    { id: "ba-bbbbbbbbbbbb", partId: "GONE", qty: 1, scope: "general" },
+  ];
+  ok(a230Without(two230, "ba-aaaaaaaaaaaa").map((a) => a.id).join() === "ba-bbbbbbbbbbbb", "#230 accessory: remove drops exactly that line");
+  const copies230 = a230Copy(two230, mk230);
+  ok(copies230.length === 2 && copies230.every((c, i) => c.id !== two230[i].id && /^ba-[0-9a-f]{12}$/.test(c.id) && c.partId === two230[i].partId && c.qty === two230[i].qty && c.scope === two230[i].scope),
+    "#230 accessory: a copied option gets the same lines under fresh ids");
+
+  // --- pricing: the same part row a placement reads
+  const parts230: P230[] = [
+    { id: "X", sku: "X-SKU", desc: "Speaker bracket", category: "Speakers", unit: "ea", list: 120, cost: 70, gridScope: "Audio", deviceType: "speakers" },
+    { id: "CN", sku: "CN-SKU", desc: "Lighting console", category: "Consoles", unit: "ea", list: 900, cost: 600, gridScope: "Lighting", deviceType: "control-networking" },
+    { id: "FX", sku: "FX-SKU", desc: "LED fixture", category: "Fixtures", unit: "ea", list: 400, cost: 250, gridScope: "Lighting", deviceType: "fixtures" },
+    { id: "UN", sku: "UN-SKU", desc: "Unmapped audio widget", category: "Widgets", unit: "ea", list: 10, cost: 5, gridScope: "Audio", deviceType: null },
+    { id: "VIRT", sku: "VIRT", desc: "Virt assembly", category: "Assembly", unit: "ea", list: 10, cost: 5, gridScope: "Audio", deviceType: "speakers", virtual: true },
+    { id: "FAB", sku: "FAB", desc: "Velour fabric", category: "Fabric", unit: "sqft", list: 3, cost: 2, gridScope: "Curtains", deviceType: "drapery" },
+    { id: "W", sku: "W", desc: "DMX cable", category: "Cable", unit: "ft", list: 1, cost: 0.5, gridScope: "Unscoped", deviceType: "cable-connectors" },
+  ];
+  const lines230 = a230Lines(two230, parts230);
+  ok(lines230[0].partId === "X" && lines230[0].desc === "Speaker bracket" && lines230[0].unit === "ea" && lines230[0].qty === 2 && lines230[0].list === 120 && lines230[0].ext === 240 && lines230[0].accessoryId === "ba-aaaaaaaaaaaa" && lines230[0].group === "audio",
+    "#230 accessory: priced from the same part row a placement reads (ext = qty × list)");
+  ok(lines230[1].list === 0 && lines230[1].ext === 0 && lines230[1].desc.includes("removed part"), "#230 accessory: a part gone from the library prices $0, flagged, never dropped");
+  ok(a230Cost(two230, parts230) === 140, "#230 accessory: the cost basis is qty × part cost");
+
+  // --- search candidates
+  const ids230 = (rows: P230[]) => rows.map((p) => p.id).join();
+  ok(ids230(a230Cands(parts230, "audio", "", false)) === "X", "#230 search: a group lists its own device types' parts — not unmapped, virtual or other groups'");
+  ok(ids230(a230Cands(parts230, "controls", "", false)) === "CN" && ids230(a230Cands(parts230, "lighting", "", false)) === "FX",
+    "#230 search: Controls lists the control types; Lighting no longer does");
+  ok(ids230(a230Cands(parts230, "audio", "bracket", false)) === "X" && a230Cands(parts230, "audio", "console", false).length === 0, "#230 search: the query narrows within the group");
+  ok(a230Cands(parts230, "audio", "", true).length === 0 && ids230(a230Cands(parts230, "audio", "console", true)) === "CN" && ids230(a230Cands(parts230, "audio", "unmapped", true)) === "UN",
+    "#230 search: Search all reaches every placeable part, mapped or not, once there is a query");
+  ok(a230Cands(parts230, "curtains", "", false).length === 0 && a230Cands(parts230, "general", "virt", true).length === 0 && a230Cands(parts230, "general", "velour", true).length === 0,
+    "#230 search: Fabric/Labor rows and virtual parts are never offered");
+
+  // --- grouping every BOM source
+  const groups230 = g230BomGroups(g230Grouped({
+    devices: [
+      { partId: "X", desc: "Speaker bracket", unit: "ea", qty: 1, list: 120, ext: 120 },
+      { partId: "CN", desc: "Lighting console", unit: "ea", qty: 1, list: 900, ext: 900 },
+    ],
+    wires: [{ partId: "W", desc: "DMX cable", unit: "ft", qty: 50, list: 1, ext: 50 }],
+    curtains: [{ partId: "gp-1", desc: "Main", unit: "ea", qty: 1, list: 800, ext: 800, kind: "curtain" }],
+    custom: [{ partId: "custom:ci-0123456789ab", desc: "Stage lift", unit: "ea", qty: 1, list: 500, ext: 500, allowance: true, custom: true }],
+    customItems: [{ id: "ci-0123456789ab", desc: "Stage lift", qty: 1, unitCost: 350, system: "Rigging" }],
+    accessories: lines230,
+    parts: parts230,
+    placements: [{ partId: "X" }, { partId: "CN" }],
+  }));
+  const by230 = (k: string) => groups230.find((g) => g.key === k)!;
+  const tag230 = (k: string) => by230(k).lines.map((l) => `${l.source}:${l.partId}`).join();
+  ok(groups230.length === 7 && tag230("audio") === "device:X,accessory:X", "#230 grouping: a group lists its devices, then its accessories");
+  ok(tag230("controls") === "device:CN" && tag230("general") === "accessory:GONE,wire:W" && tag230("curtains") === "curtain:gp-1" && tag230("rigging") === "custom:custom:ci-0123456789ab",
+    "#230 grouping: devices, wires, curtains and custom items each land in their group");
+  ok(by230("audio").value === 360 && by230("video").lines.length === 0 && by230("video").value === 0, "#230 grouping: each group totals its lines; an empty group still appears");
+  ok(groups230.reduce((a, g) => a + g.value, 0) === 2610, "#230 grouping: the groups partition the BOM — nothing lost or double-counted");
+
+  // --- source pins: purity, quote, store, options, actions
+  const src230 = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  for (const f of ["src/lib/design/grid-bom-groups.ts", "src/lib/design/grid-accessories.ts"]) {
+    const vi = [...src230(f).matchAll(/^import\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gm)].map((mm) => mm[1]);
+    ok(vi.every((s) => s.startsWith("./")), `#230: ${f} value-imports only sibling pure modules (${vi.join(", ")})`);
+  }
+  const gq230 = src230("src/lib/design/grid-quote.ts");
+  ok(gq230.includes("accessoryBomLines(accessories, tierCatalog)") && gq230.includes("accessoriesCost(accessories, tierCatalog)") && gq230.includes("!accessories.length"),
+    "#230 quote: accessories price from the tier catalog placements use, and an accessory-only option can quote");
+  const st230 = src230("src/lib/stores/grid-projects.ts");
+  ok(st230.includes("copyAccessories(accessoriesOf(src?.accessories)") && st230.includes("accessories: o.accessories.map((a) => ({ ...a }))") && st230.includes("await getGridSymbol("),
+    "#230 store: option copy and revision snapshots carry accessories; an add is checked against the Grid library");
+  ok(src230("src/lib/design/grid-options.ts").includes("accessories?: GridAccessory[]"), "#230: accessories live on the Grid option");
+  const acts230 = src230("src/app/(app)/design/grid/[id]/actions.ts");
+  const body230 = (name: string) => acts230.slice(acts230.indexOf(`export async function ${name}`), acts230.indexOf("\n}\n", acts230.indexOf(`export async function ${name}`)));
+  ok(body230("saveAccessoryAction").includes("await requireUser()") && body230("saveAccessoryAction").includes("saveAccessory(") &&
+    body230("removeAccessoryAction").includes("await requireUser()") && body230("removeAccessoryAction").includes("removeAccessory("),
+    "#230: both accessory actions use the placement-edit gate and the server-side store");
+}
+
+/* #230 — accessories through the store, option copy, revisions and buildGridQuote on the scratch DB. */
+async function gridAccessoriesAsyncChecks230(): Promise<void> {
+  const { fixtureId } = await import("./test-fixtures");
+  const GP = await import("../src/lib/stores/grid-projects");
+  const GC = await import("../src/lib/stores/grid-catalog");
+  const { buildGridQuote } = await import("../src/lib/design/grid-quote");
+  const { resolveTier } = await import("../src/lib/pricing-tiers");
+  const { isTierPriced } = await import("../src/lib/tier-pricing");
+
+  const PART = fixtureId(230, "bracket");
+  await upsertPart({ id: PART, sku: PART, desc: "TEST230 speaker bracket", category: "Speakers", unit: "ea", list: 150, cost: 90 });
+  registerFixture("catalog_parts", PART);
+  const part = await getPart(PART);
+  await GC.ensureGridSymbolsFor(part ? [part] : [], "Test Harness");
+  registerFixture("grid_catalog", PART);
+  ok(!!(await GC.getGridSymbol(PART)), "#230 store setup: the fixture part is in the Grid library");
+
+  const gp = await GP.createProject({ name: "TEST230 grid project", customer: "Test Customer 230", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  const base = (await GP.getProject(gp.id))!.options![0].id;
+  const accOf = async (optionId: string) => (await GP.getProject(gp.id))!.options!.find((o) => o.id === optionId)?.accessories || [];
+
+  const unknown = await GP.saveAccessory(gp.id, base, { partId: "TEST230:nope", qty: 1, scope: "audio" });
+  ok(!unknown.ok && /Grid library/.test(unknown.error), "#230 store: a part that isn't in the Grid library is refused");
+  ok(!(await GP.saveAccessory(gp.id, "opt-nope", { partId: PART, qty: 1, scope: "audio" })).ok, "#230 store: an unknown option is refused");
+  const badScope = await GP.saveAccessory(gp.id, base, { partId: PART, qty: 1, scope: "Audio" });
+  ok(!badScope.ok && /category/.test(badScope.error), "#230 store: an invalid group is refused with the sanitizer's message");
+
+  const a = await GP.saveAccessory(gp.id, base, { partId: PART, qty: 2, scope: "audio" });
+  const id = a.ok ? a.item.id : "";
+  ok(a.ok && /^ba-[0-9a-f]{12}$/.test(id), "#230 store: a new accessory gets a ba- id");
+
+  const tier = await resolveTier(null);
+  const unit = isTierPriced(90, tier.margin) ? Math.round((90 / (1 - tier.margin)) * 100) / 100 : 150;
+  const only = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const onlyLine = only.ok ? only.build.spec.lines.find((l) => l.sku === PART) : undefined;
+  ok(only.ok && Math.abs(only.build.value - 2 * unit) < 0.005,
+    `#230 quote: an accessory-only option quotes at the part's tier price × qty (${only.ok ? only.build.value : only.error})`);
+  ok(!!onlyLine && onlyLine.qty === 2 && onlyLine.price === unit && !onlyLine.allowance && onlyLine.desc === "TEST230 speaker bracket",
+    "#230 quote: the accessory is a real catalog line on the spec, never an allowance");
+
+  await GP.addPlacement(gp.id, { sheetId: "TEST230:sheet", page: 1, x: 0.5, y: 0.5, partId: PART, optionId: base, by: "Test Harness" });
+  const both = await buildGridQuote((await GP.getProject(gp.id))!, base);
+  const same = both.ok ? both.build.spec.lines.filter((l) => l.sku === PART) : [];
+  ok(same.length === 2 && same[0].price === unit && same[1].price === unit && same.map((l) => l.qty).sort().join() === "1,2",
+    "#230 quote: an accessory prices exactly like a placed part of the same partId (two lines, one price)");
+  ok(both.ok && Math.abs(both.build.value - 3 * unit) < 0.005 && Math.abs(both.build.margin - (3 * unit - 3 * 90) / (3 * unit)) < 1e-6,
+    "#230 quote: the accessory counts in the value and its cost in the margin");
+
+  const e = await GP.saveAccessory(gp.id, base, { id, qty: 4 });
+  const afterEdit = await accOf(base);
+  ok(e.ok && afterEdit.length === 1 && afterEdit[0].id === id && afterEdit[0].qty === 4, "#230 store: editing changes the qty in place");
+  const bump = await GP.saveAccessory(gp.id, base, { partId: PART, qty: 1, scope: "audio" });
+  ok(bump.ok && bump.item.id === id && (await accOf(base))[0].qty === 5, "#230 store: re-adding the part under the same heading bumps the line");
+  await GP.saveAccessory(gp.id, base, { id, qty: 4 });
+
+  const alt = await GP.addOption(gp.id, { name: "Alt", copyFromOptionId: base, by: "Test Harness" });
+  const altAcc = alt.ok ? await accOf(alt.option.id) : [];
+  ok(altAcc.length === 1 && altAcc[0].id !== id && altAcc[0].partId === PART && altAcc[0].qty === 4 && altAcc[0].scope === "audio",
+    "#230 store: copying an option copies its accessories under fresh ids");
+
+  const rev = await GP.addRevision(gp.id, { by: "Test Harness", note: "with an accessory" });
+  ok((rev?.options?.find((o) => o.id === base)?.accessories || []).length === 1, "#230 store: a revision snapshot holds the option's accessories");
+
+  const r = await GP.removeAccessory(gp.id, base, id);
+  ok(r.ok && (await accOf(base)).length === 0, "#230 store: remove drops the accessory");
+  ok((await GP.removeAccessory(gp.id, base, id)).ok, "#230 store: removing an accessory already gone is not an error");
+
+  const restored = rev ? await GP.restoreRevision(gp.id, rev.rev, "Test Harness") : { ok: false as const };
+  const back = await accOf(base);
+  ok(restored.ok && back.length === 1 && back[0].id === id && back[0].qty === 4, "#230 store: restoring a revision brings its accessories back");
 }

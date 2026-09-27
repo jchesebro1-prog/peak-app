@@ -25,14 +25,23 @@ export const CUSTOM_ITEM_QTY_MAX = 100_000;
 /** Typo/abuse guard per option, not a policy. */
 export const CUSTOM_ITEMS_MAX = 200;
 
+/** The BOM category a custom item prints under (#230): a Grid layer, or
+ *  "Controls" (the BOM's Controls heading has no Grid layer). Absent =
+ *  General. */
+export type CustomItemSystem = GridLayer | "Controls";
+
+export function isCustomItemSystem(v: unknown): v is CustomItemSystem {
+  return isGridLayer(v) || v === "Controls";
+}
+
 export type GridCustomItem = {
   id: string; // "ci-" + 12 hex
   /** Customer-facing text — required, trimmed, ≤ 200. */
   desc: string;
   mfr?: string;
   model?: string;
-  /** Optional Grid layer (Lighting, Rigging, …), for grouping later. */
-  system?: GridLayer;
+  /** The BOM category it prints under (#230); absent = General. */
+  system?: CustomItemSystem;
   /** Whole number, 1…100,000. */
   qty: number;
   /** Unit COST, > 0 and ≤ ALLOWANCE_MAX. */
@@ -85,7 +94,7 @@ export function sanitizeCustomItem(
       desc,
       ...(mfr ? { mfr } : {}),
       ...(model ? { model } : {}),
-      ...(isGridLayer(r.system) ? { system: r.system } : {}),
+      ...(isCustomItemSystem(r.system) ? { system: r.system } : {}),
       qty,
       unitCost,
     },
