@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
 import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
-import type { QuotePdfState } from "@/lib/quote-pdf/state";
+import { canHavePdf, type QuotePdfState } from "@/lib/quote-pdf/state";
 import {
   carriesPipeline,
   firstStage,
@@ -538,7 +538,7 @@ export async function update(
   id: string,
   patch: Partial<Quote>
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     Object.assign(q, patch, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -626,7 +626,7 @@ export async function addQuoteRevision(
   opts: { by?: string | null; reason?: QuoteRevision["reason"]; note?: string } = {}
 ): Promise<QuoteRevision | null> {
   let out: QuoteRevision | null = null;
-  const res = await patchDoc<Quote>("quotes", id, (doc) => {
+  const res = await patchQuote(id, (doc) => {
     out = pushRevision(
       doc,
       opts.by || DEFAULT_ACTOR,
@@ -651,6 +651,21 @@ async function lockQuoteRow(id: string): Promise<void> {
 }
 
 /**
+ * The one way a quote is patched (#222 fix wave). Every writer takes the row
+ * lock first, so its patchDoc re-read is the latest committed doc and nothing
+ * lands between that read and its write. Without this, a plain `update` that
+ * read the doc before a PDF render settled would write back the stale `pdf`
+ * state and orphan the file the render just stored. Joins an outer
+ * transaction when there is one (the lock then lives until it commits).
+ */
+async function patchQuote(id: string, mutate: (doc: Quote) => Quote | void): Promise<Quote | null> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    return patchDoc<Quote>("quotes", id, mutate);
+  });
+}
+
+/**
  * Read-modify-write the quote's `pdf` state (#222) as a compare-and-set:
  * `mutate` sees the state re-read under the row lock and returns the next
  * state, or `undefined` to leave it (a superseded render). Deliberately does
@@ -666,7 +681,9 @@ export async function updateQuotePdf(
     let out: { before: QuotePdfState | null; after: QuotePdfState | null; changed: boolean } | null = null;
     const res = await patchDoc<Quote>("quotes", id, (doc) => {
       const before = doc.pdf ?? null;
-      const next = mutate(before);
+      let next = mutate(before);
+      // A type with no PDF kind is never marked pending — nothing would ever settle it.
+      if (next?.status === "pending" && !canHavePdf(doc.quoteType)) next = undefined;
       if (next !== undefined) doc.pdf = next;
       out = { before, after: next === undefined ? before : next, changed: next !== undefined };
     });
@@ -728,7 +745,7 @@ export async function restoreQuoteRevision(
   if (!target) return { ok: false, reason: "no-such-rev" };
 
   const actor = by || DEFAULT_ACTOR;
-  const updated = await patchDoc<Quote>("quotes", id, (doc) => {
+  const updated = await patchQuote(id, (doc) => {
     // 1. preserve where we are now, 2. apply the old payload, 3. record the recall.
     pushRevision(doc, actor, "manual", `Auto-saved before recalling v${rev}`);
     doc.name = target.name;
@@ -927,6 +944,8 @@ export async function setStatus(
   const sentCut = { value: false };
   const out = await withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
+  // #222: lock before the read, so the gate and the write see one version.
+  await lockQuoteRow(id);
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return null;
   if (q.status === status) {
@@ -957,7 +976,7 @@ export async function setStatus(
   if (!gate.ok) throw new ApprovalGateRefused(status === "won" ? "won" : "send", gate.error);
   // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
   const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
-  const result = await patchDoc<Quote>("quotes", id, (doc) => {
+  const result = await patchQuote(id, (doc) => {
     const t = Date.now();
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
@@ -1006,6 +1025,17 @@ export async function setStatus(
   });
   // #222: Blob I/O stays out of the status transaction. A same-status no-op
   // cuts no revision, so it copies nothing.
+  // Trade-off: withTransaction JOINS an outer transaction, so when a caller
+  // wraps setStatus in its own (setQuoteStage does), this copy — a storage
+  // read + write, then setRevisionPdfPath's row lock — runs inside that outer
+  // transaction while it still holds this quote's row lock. Accepted: it is
+  // one bounded file copy, and the DB layer has no after-commit hook to defer
+  // it to. The costs are known: other writers to THIS quote wait for the copy;
+  // if the outer transaction then rolls back, the revision stamp rolls back
+  // with it and the copied file is an orphan (a stray file, never a wrong
+  // record — the generator re-copies on its next settle); and a DB error in
+  // the stamp, though swallowed here, leaves the outer Postgres transaction
+  // aborted, so the caller's next statement fails instead of committing.
   if (out && sentCut.value) await copySentPdfSafely(id);
   return out;
 }
@@ -1035,7 +1065,7 @@ export async function setQuoteStage(
       const moved = await setStatus(id, tag, by);
       if (!moved || moved.status !== tag) return moved ? get(id) : null;
     }
-    const res = await patchDoc<Quote>("quotes", id, (doc) => {
+    const res = await patchQuote(id, (doc) => {
       doc.pipelineId = pl.id;
       doc.stage = stageId;
       doc.updatedAt = Date.now();
@@ -1054,7 +1084,7 @@ export async function setQuotePipeline(id: string, pipelineId: string): Promise<
   if (!q || !carriesPipeline(q.quoteType) || q.status !== "draft") return null;
   const pl = (await loadPipelines()).quote.find((p) => p.id === pipelineId);
   if (!pl) return null;
-  const res = await patchDoc<Quote>("quotes", id, (doc) => {
+  const res = await patchQuote(id, (doc) => {
     doc.pipelineId = pl.id;
     doc.stage = firstStage(pl).id;
     doc.updatedAt = Date.now();
@@ -1071,7 +1101,7 @@ export async function setQuotePipeline(id: string, pipelineId: string): Promise<
 export async function setPoReceived(id: string, on: boolean): Promise<Quote | null> {
   const q = await getDoc<Quote>("quotes", id);
   if (!q || !canSetPoReceived(q.status)) return null;
-  return patchDoc<Quote>("quotes", id, (doc) => {
+  return patchQuote(id, (doc) => {
     doc.poReceivedAt = on ? Date.now() : null;
     doc.updatedAt = Date.now();
   });
@@ -1126,7 +1156,7 @@ export async function submitForReview(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     q.review = rv("in_review", {
       reviewer: opts.reviewer || null,
       submittedBy: opts.by || null,
@@ -1142,7 +1172,7 @@ export async function claimReview(
 ): Promise<Quote | null> {
   const q = await getDoc<Quote>("quotes", id);
   if (!q || !q.review) return null;
-  return patchDoc<Quote>("quotes", id, (doc) => {
+  return patchQuote(id, (doc) => {
     doc.review.reviewer = by || null;
     doc.updatedAt = Date.now();
   });
@@ -1152,7 +1182,7 @@ export async function approve(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     const review = q.review || rv("in_review");
     review.state = "approved";
     review.decidedBy = opts.by || null;
@@ -1187,7 +1217,7 @@ export async function attestApproval(
 ): Promise<Quote | null> {
   const note = (opts.note || "").trim();
   if (!note) return null;
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     const review = q.review || rv("in_review");
     review.state = "approved";
     review.decidedBy = opts.by || null;
@@ -1204,7 +1234,7 @@ export async function requestChanges(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     const review = q.review || rv("in_review");
     review.state = "changes";
     review.decidedBy = opts.by || null;

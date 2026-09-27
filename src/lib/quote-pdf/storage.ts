@@ -1,5 +1,6 @@
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { blobEnabled, deleteBlob, getBlobStream, putBlob } from "@/lib/blob";
@@ -86,7 +87,16 @@ const fsStore: PdfStorage = {
   async put(path, bytes) {
     const full = fsPath(path);
     await mkdir(dirname(full), { recursive: true });
-    await writeFile(full, bytes);
+    // Atomic: a reader (or a crash mid-write) never sees a half-written PDF.
+    // The temp file sits beside the target so the rename stays on one volume.
+    const tmp = `${full}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+    try {
+      await writeFile(tmp, bytes);
+      await rename(tmp, full);
+    } catch (e) {
+      await rm(tmp, { force: true }).catch(() => undefined);
+      throw e;
+    }
     return path;
   },
   async read(path) {

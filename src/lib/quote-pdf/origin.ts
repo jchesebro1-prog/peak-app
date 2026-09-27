@@ -16,3 +16,12 @@ export function originFrom(host: string | null, proto: string | null, fixed?: st
   const scheme = p === "http" || p === "https" ? p : /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(h) ? "http" : "https";
   return `${scheme}://${h}`;
 }
+
+const ORIGIN_RE = /^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/;
+
+/** The shape originFrom returns — scheme + bare host[:port], no path, no
+ *  trailing slash, no credentials. The generator refuses anything else, so a
+ *  signed print URL is only ever built on an origin of this shape. */
+export function isAppOrigin(origin: unknown): origin is string {
+  return typeof origin === "string" && ORIGIN_RE.test(origin);
+}

@@ -10521,6 +10521,7 @@ seeded()
   .then(() => gridAccessoriesAsyncChecks230())
   .then(() => quotePdfOptions222AsyncChecks())
   .then(() => quotePdfEngine222AsyncChecks())
+  .then(() => quotePdfFix222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23608,6 +23609,169 @@ async function quotePdfEngine222AsyncChecks(): Promise<void> {
   } else {
     const pdf = await renderPrintRouteToPdf("data:text/html,<h1>Quartzite quote</h1>");
     ok(pdf.subarray(0, 5).toString() === "%PDF-" && pdf.length > 500, "#222 smoke: headless Chrome prints a page to a real PDF");
+  }
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    /* temp dir */
+  }
+}
+
+/* ============ #222 T3 fix — every quote write takes the row lock; renders refuse redirects; bypass stays on our origin ============ */
+import { canHavePdf as canHavePdf222, printOriginProblem as printOriginProblem222 } from "@/lib/quote-pdf/generate";
+import { isAppOrigin as isAppOrigin222 } from "@/lib/quote-pdf/origin";
+import { carriesBypass as carriesBypass222, landedOnRequested as landedOnRequested222 } from "@/lib/quote-pdf/render";
+import { createServer as createServer222, type IncomingHttpHeaders as IncomingHttpHeaders222 } from "node:http";
+{
+  const src222f = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const qs = src222f("src/lib/stores/quotes.ts");
+  const pq = qs.slice(qs.indexOf("async function patchQuote("), qs.indexOf("/**\n * Read-modify-write the quote's `pdf` state"));
+  const pdfWriters = qs.slice(qs.indexOf("export async function updateQuotePdf"), qs.indexOf("/** After a send commits"));
+  const rest = qs.replace(pq, "").replace(pdfWriters, "");
+  ok(/lockQuoteRow\(id\)/.test(pq) && /withTransaction\(/.test(pq) && /patchDoc<Quote>\("quotes"/.test(pq), "#222 fix: patchQuote locks the row inside a transaction before its patchDoc");
+  ok(!/patchDoc(<[^>]*>)?\(\s*"quotes"/.test(rest) && !/patchDoc(<[^>]*>)?\(\s*QUOTES/.test(rest), "#222 fix: no bare quote patchDoc outside patchQuote and the two PDF writers");
+  ok((rest.match(/\bpatchQuote\(id,/g) || []).length >= 12, "#222 fix: every quote writer (update, revisions, recall, status, stage, pipeline, PO, review flow) goes through patchQuote");
+  const ss = qs.slice(qs.indexOf("export async function setStatus("), qs.indexOf("export async function setQuoteStage("));
+  ok(ss.indexOf("await lockQuoteRow(id)") > -1 && ss.indexOf("await lockQuoteRow(id)") < ss.indexOf('getDoc<Quote>("quotes", id)'), "#222 fix: setStatus takes the row lock before it reads the quote");
+  ok(/Trade-off:[\s\S]{0,400}outer transaction/.test(ss), "#222 fix: the sent-copy call site documents Blob I/O inside an outer transaction");
+
+  ok(isAppOrigin222("https://quartzite-six.vercel.app") && isAppOrigin222("http://localhost:3000") && isAppOrigin222("http://print.test"), "#222 fix: isAppOrigin accepts scheme + bare host[:port]");
+  ok(
+    !isAppOrigin222("https://a.test/") && !isAppOrigin222("https://a.test/x") && !isAppOrigin222("https://u:p@a.test") && !isAppOrigin222("javascript:alert(1)") && !isAppOrigin222("ftp://a.test") && !isAppOrigin222("") && !isAppOrigin222(null),
+    "#222 fix: isAppOrigin refuses paths, trailing slashes, credentials and other schemes"
+  );
+  const prevFixed = process.env.QUOTE_PDF_ORIGIN;
+  process.env.QUOTE_PDF_ORIGIN = "https://quartzite-six.vercel.app/";
+  ok(printOriginProblem222("https://quartzite-six.vercel.app") === null && !!printOriginProblem222("https://other.vercel.app"), "#222 fix: with QUOTE_PDF_ORIGIN pinned, only that origin prints");
+  if (prevFixed === undefined) delete process.env.QUOTE_PDF_ORIGIN;
+  else process.env.QUOTE_PDF_ORIGIN = prevFixed;
+
+  ok(canHavePdf222("system") && canHavePdf222(undefined) && canHavePdf222("flame_test") && !canHavePdf222("consulting") && !canHavePdf222("rental"), "#222 fix: canHavePdf — system + the three service letters only");
+
+  ok(landedOnRequested222("https://a.test/print/quote/Q-1?t=x", "https://a.test/print/quote/Q-1?t=y"), "#222 fix: landing on the requested page (query aside) is accepted");
+  ok(
+    !landedOnRequested222("https://a.test/print/quote/Q-1?t=x", "https://a.test/login") && !landedOnRequested222("https://a.test/print/quote/Q-1", "https://b.test/print/quote/Q-1") && !landedOnRequested222("https://a.test/p", "not a url"),
+    "#222 fix: a different path or origin is refused"
+  );
+  ok(carriesBypass222("https://a.test/_next/x.js", "https://a.test") && !carriesBypass222("https://fonts.gstatic.com/x.woff2", "https://a.test") && !carriesBypass222("https://a.test.evil.com/", "https://a.test") && !carriesBypass222("data:text/html,x", "null"), "#222 fix: the bypass header rides only on the print origin");
+  const rs = src222f("src/lib/quote-pdf/render.ts");
+  ok(!/\.setExtraHTTPHeaders\(/.test(rs) && /setRequestInterception\(true\)/.test(rs) && /redirectChain\(\)\.length > 0/.test(rs), "#222 fix: render scopes the bypass per request and refuses a redirected navigation");
+  const st = src222f("src/lib/quote-pdf/storage.ts");
+  ok(/writeFile\(tmp, bytes\)/.test(st) && /rename\(tmp, full\)/.test(st), "#222 fix: the local store writes a temp file and renames it into place");
+}
+
+async function quotePdfFix222AsyncChecks(): Promise<void> {
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.VERCEL;
+  const root = mkdtempSync(join(tmpdir(), "quote-pdfs-222fix-"));
+  process.env.QUOTE_PDF_DIR = root;
+  const store = pdfStorage();
+  if ("unavailable" in store || store.backend !== "fs") {
+    ok(false, "#222 fix: local PDF store available for the fix checks");
+    return;
+  }
+  const origin = "http://print.test";
+  const secret = "spec-secret-222fix";
+  const fake = (label: string) => async () => Buffer.from(`%PDF-1.4 ${label}`);
+  const dirOf = (qid: string) => join(root, "quote-pdfs", qid.replace(/[^A-Za-z0-9_-]/g, "_"));
+
+  // 1. An unrelated update after a settle keeps the settled pdf.
+  const id = fixtureId222("222", "fix-upd");
+  registerFixture222("quotes", id);
+  await q222Create({ id, name: "#222 fix upd", customer: "Spec fixture", owner: "spec" });
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 10, 10));
+  const settled = await generateQuotePdf({ quoteId: id, savedAt: 10, origin, secret, render: fake("ten") });
+  await q222Update(id, { name: "#222 fix upd — renamed" });
+  const afterUpd = await q222Get(id);
+  ok(settled?.status === "ready" && afterUpd?.name === "#222 fix upd — renamed" && afterUpd.pdf?.status === "ready" && afterUpd.pdf.blobPath === settled.blobPath, "#222 fix: an update after a settle keeps the ready pdf and its file");
+  ok(readdirSync222(dirOf(id)).join(",") === "10.pdf", "#222 fix: the atomic local write leaves no temp file behind");
+  // …and when they race: every run ends ready, never back to pending.
+  let raceOk = true;
+  for (let i = 0; i < 5; i++) {
+    const at = 20 + i;
+    await q222UpdatePdf(id, (cur) => pendingPdf(cur, at, at));
+    await Promise.all([generateQuotePdf({ quoteId: id, savedAt: at, origin, secret, render: fake(`r${i}`) }), q222Update(id, { name: `race ${i}` })]);
+    const q = await q222Get(id);
+    if (q?.pdf?.status !== "ready" || q.pdf.savedAt !== at || q.name !== `race ${i}`) raceOk = false;
+  }
+  ok(raceOk, "#222 fix: an update racing a settle never writes back a stale pdf state");
+
+  // 2. A bad origin never renders.
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 40, 40));
+  let rendered = false;
+  const bad = await generateQuotePdf({ quoteId: id, savedAt: 40, origin: "http://evil.test/x", secret, render: async () => { rendered = true; return Buffer.from("%PDF-1.4 no"); } });
+  ok(!rendered && bad?.status === "failed" && /origin/i.test(bad.error || "") && bad.blobPath === (await q222Get(id))?.pdf?.blobPath, "#222 fix: an origin that isn't the app's shape settles failed without rendering");
+
+  // 3. The settle write throwing after an upload: the uploaded file is removed, the failure recorded.
+  await q222UpdatePdf(id, (cur) => pendingPdf(cur, 50, 50));
+  const lastGood = (await q222Get(id))?.pdf?.blobPath;
+  let calls = 0;
+  const flaky: typeof q222UpdatePdf = async (qid, mutate) => {
+    calls++;
+    if (calls === 1) throw new Error("db went away");
+    return q222UpdatePdf(qid, mutate);
+  };
+  const thrown = await generateQuotePdf({ quoteId: id, savedAt: 50, origin, secret, render: fake("fifty"), updatePdf: flaky });
+  ok(thrown?.status === "failed" && thrown.error === "db went away" && thrown.blobPath === lastGood, "#222 fix: a settle that throws after upload records the failure and keeps the last good file");
+  ok(!readdirSync222(dirOf(id)).includes("50.pdf"), "#222 fix: the orphaned upload is deleted");
+
+  // 4. A type with no PDF kind is never left pending.
+  const cid = fixtureId222("222", "fix-consult");
+  registerFixture222("quotes", cid);
+  await q222Create({ id: cid, name: "#222 fix consulting", customer: "Spec fixture", owner: "spec", quoteType: "consulting" });
+  const refused = await q222UpdatePdf(cid, (cur) => pendingPdf(cur, 60, 60));
+  ok(refused?.changed === false && !(await q222Get(cid))?.pdf, "#222 fix: updateQuotePdf refuses to mark a consulting quote pending");
+  await q222Update(cid, { pdf: pendingPdf(null, 61, 61) });
+  const legacy = await generateQuotePdf({ quoteId: cid, savedAt: 61, origin, secret, render: fake("never") });
+  ok(legacy?.status === "failed" && !!legacy.error && (await q222Get(cid))?.pdf?.status === "failed", "#222 fix: a stray pending state on a no-PDF type settles failed with a reason");
+
+  // 5. Real Chrome: redirects refused; the bypass header only reaches the print origin.
+  const launch = await chromeLaunch();
+  if ("unavailable" in launch) {
+    console.log(`SKIP #222 fix live render checks: ${launch.unavailable}`);
+  } else {
+    const seenA: IncomingHttpHeaders222[] = [];
+    const seenB: IncomingHttpHeaders222[] = [];
+    const b = createServer222((req, res) => {
+      seenB.push(req.headers);
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<h1>elsewhere</h1>");
+    });
+    await new Promise<void>((r) => b.listen(0, "127.0.0.1", () => r()));
+    const portB = (b.address() as { port: number }).port;
+    const a = createServer222((req, res) => {
+      seenA.push(req.headers);
+      if (req.url?.startsWith("/print/redir")) {
+        res.writeHead(302, { location: "/print/ok" });
+        return res.end();
+      }
+      if (req.url?.startsWith("/print/away")) {
+        res.writeHead(302, { location: `http://127.0.0.1:${portB}/print/ok` });
+        return res.end();
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<h1>Quartzite quote</h1><img src="http://127.0.0.1:${portB}/pixel.png">`);
+    });
+    await new Promise<void>((r) => a.listen(0, "127.0.0.1", () => r()));
+    const portA = (a.address() as { port: number }).port;
+    const prevBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET = "bypass-222";
+    try {
+      const pdf = await renderPrintRouteToPdf(`http://127.0.0.1:${portA}/print/ok?t=1`);
+      ok(pdf.subarray(0, 5).toString() === "%PDF-", "#222 fix live: a direct print page renders");
+      ok(seenA.some((h) => h["x-vercel-protection-bypass"] === "bypass-222"), "#222 fix live: the print origin receives the bypass header");
+      ok(seenB.length > 0 && seenB.every((h) => !("x-vercel-protection-bypass" in h)), "#222 fix live: a cross-origin subresource never receives the bypass header");
+      const refusedSame = await renderPrintRouteToPdf(`http://127.0.0.1:${portA}/print/redir?t=1`).then(() => false, (e: unknown) => /redirect/i.test(String(e)));
+      ok(refusedSame, "#222 fix live: a redirected print navigation is refused");
+      seenB.length = 0;
+      const refusedAway = await renderPrintRouteToPdf(`http://127.0.0.1:${portA}/print/away?t=1`).then(() => false, (e: unknown) => /redirect/i.test(String(e)));
+      ok(refusedAway && seenB.every((h) => !("x-vercel-protection-bypass" in h)), "#222 fix live: a cross-origin redirect is refused and never carries the bypass header");
+    } finally {
+      if (prevBypass === undefined) delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+      else process.env.VERCEL_AUTOMATION_BYPASS_SECRET = prevBypass;
+      a.close();
+      b.close();
+    }
   }
   try {
     rmSync(root, { recursive: true, force: true });

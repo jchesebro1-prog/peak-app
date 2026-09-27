@@ -47,6 +47,12 @@ export function pdfKindForQuoteType(quoteType: string | null | undefined): PdfKi
   return null;
 }
 
+/** Whether a quote of this type ever gets a saved PDF (#222). Callers check it
+ *  before marking a PDF pending; consulting and rental quotes never do. */
+export function canHavePdf(quoteType: string | null | undefined): boolean {
+  return pdfKindForQuoteType(quoteType) !== null;
+}
+
 export function printPathFor(kind: PdfKind, id: string): string {
   const eid = encodeURIComponent(id);
   return kind === "quote" ? `/print/quote/${eid}` : `/print/letter/${kind}/${eid}`;

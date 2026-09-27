@@ -42,6 +42,36 @@ export async function chromeLaunch(): Promise<ChromeLaunch | { unavailable: stri
   };
 }
 
+/**
+ * The print page is only trusted when Chrome landed exactly where it was sent:
+ * a redirect (to a login page, another host, anything) is refused rather than
+ * printed as the customer's quote. Compares origin + pathname — the query is
+ * the token and may legitimately be re-encoded. data: URLs (the smoke render)
+ * have no origin to compare and are only checked for "not redirected".
+ */
+export function landedOnRequested(requested: string, final: string): boolean {
+  let a: URL, b: URL;
+  try {
+    a = new URL(requested);
+    b = new URL(final);
+  } catch {
+    return false;
+  }
+  if (a.protocol === "data:") return b.protocol === "data:";
+  return a.origin === b.origin && a.pathname === b.pathname;
+}
+
+/** The Vercel protection-bypass secret rides only on requests to the print
+ *  origin itself — never a font CDN, an image host or a redirect target. */
+export function carriesBypass(requestUrl: string, printOrigin: string): boolean {
+  if (!printOrigin || printOrigin === "null") return false;
+  try {
+    return new URL(requestUrl).origin === printOrigin;
+  } catch {
+    return false;
+  }
+}
+
 let queue: Promise<unknown> = Promise.resolve();
 
 export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number } = {}): Promise<Buffer> {
@@ -67,8 +97,23 @@ async function renderOnce(url: string, timeout: number): Promise<Buffer> {
   try {
     const page = await browser.newPage();
     const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-    if (bypass) await page.setExtraHTTPHeaders({ "x-vercel-protection-bypass": bypass });
+    if (bypass) {
+      // Per request, not setExtraHTTPHeaders: that would send the secret to
+      // every host the page (or a redirect) touches.
+      const printOrigin = new URL(url).origin;
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        if (req.isInterceptResolutionHandled()) return;
+        const go = carriesBypass(req.url(), printOrigin)
+          ? req.continue({ headers: { ...req.headers(), "x-vercel-protection-bypass": bypass } })
+          : req.continue();
+        go.catch(() => undefined);
+      });
+    }
     const res = await page.goto(url, { waitUntil: "load", timeout });
+    if (res && (res.request().redirectChain().length > 0 || !landedOnRequested(url, res.url()))) {
+      throw new Error("The print page redirected instead of rendering — the PDF wasn’t made.");
+    }
     if (res ? !res.ok() : !url.startsWith("data:")) {
       throw new Error(`The print page answered ${res ? res.status() : "nothing"}.`);
     }
