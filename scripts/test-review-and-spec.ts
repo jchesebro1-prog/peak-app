@@ -22241,3 +22241,28 @@ async function gridAccessoriesAsyncChecks230(): Promise<void> {
   const back = await accOf(base);
   ok(restored.ok && back.length === 1 && back[0].id === id && back[0].qty === 4, "#230 store: restoring a revision brings its accessories back");
 }
+
+/* ======================================================================
+   #230 Grid BOM by category — Task 2: the grouped BOM UI (source pins).
+   ====================================================================== */
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const acc = read("src/app/(app)/design/grid/[id]/accessories.tsx");
+  const accFrom = [...acc.matchAll(/from\s+"([^"]+)"/g)].map((mm) => mm[1]);
+  ok(acc.startsWith('"use client"') && accFrom.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")),
+    "#230 UI: the accessory picker is a client component with no store import");
+  ok(acc.includes("accessoryCandidates(parts, group, search, all)") && acc.includes("Search all categories") &&
+    acc.includes("saveAccessoryAction(projectId, optionId, { partId: p.id, qty: n, scope: group })") &&
+    acc.includes("saveAccessoryAction(projectId, optionId, { id: accessoryId, qty: n })") && acc.includes("removeAccessoryAction(projectId, optionId, accessoryId)"),
+    "#230 UI: the picker searches the heading's types (Search all fallback); rows edit qty and remove through the actions");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("bomGroups(") && ed.includes("groupedBomLines(") && ed.includes("+ Add accessory") && ed.includes("<AccessoryPicker") && ed.includes("<AccessoryRow"),
+    "#230 UI: the editor BOM renders one heading per category, each with + Add accessory");
+  ok(ed.includes("accessoryBomLines(accessories, parts)") && ed.includes("accessoryValue") && ed.includes("accessoryLines.length === 0"),
+    "#230 UI: accessories price from the same parts rows, count in the total, and an accessory-only option can quote");
+  ok(ed.includes("groupOfCustomSystem(it.system) === g.key") && ed.includes("showAdd={false}"), "#230 UI: custom items print under their heading");
+  ok(ed.includes("Labor (suggested)"), "#230 UI: the D114 labor suggestion is untouched (#232 replaces it)");
+  const ci = read("src/app/(app)/design/grid/[id]/custom-items.tsx");
+  ok(ci.includes("CUSTOM_SYSTEM_OF_GROUP") && ci.includes("showAdd") && ci.includes("system: draft.system"),
+    "#230 UI: the custom-item form picks its BOM category and keeps it on edit");
+}

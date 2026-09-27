@@ -91,6 +91,9 @@ import CustomItemsSection from "./custom-items";
 import DevicePalette from "./device-palette";
 import { DRAPERY_TYPE_KEY, typeKeyOfPart, typeLayerRows, UNMAPPED_TYPE, type DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
+import { accessoriesOf, accessoryBomLines } from "@/lib/design/grid-accessories";
+import { bomGroups, groupedBomLines, groupOfCustomSystem, type BomGroupKey, type GroupedBomLine } from "@/lib/design/grid-bom-groups";
+import { AccessoryPicker, AccessoryRow } from "./accessories";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
 
@@ -210,6 +213,18 @@ function snappedPlacement(
       ) || null
   );
 }
+
+/** #230: the "+ Add accessory" link on a BOM heading. */
+const ADD_LINK: React.CSSProperties = {
+  border: "none",
+  background: "none",
+  padding: 0,
+  fontSize: 10.5,
+  color: "var(--accent)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  whiteSpace: "nowrap",
+};
 
 function moneyFmt(n: number): string {
   return "$" + Math.round(n).toLocaleString("en-US");
@@ -682,18 +697,146 @@ export default function GridEditor({
   // #212: per-design custom items — edited from the BOM, priced like allowances.
   const customItems = useMemo(() => customItemsOf(activeOption.customItems), [activeOption.customItems]);
   const customValue = customLines.reduce((a, l) => a + l.ext, 0);
-  const bomEmpty = lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0;
+  // #230: BOM accessories — option-scoped, priced from the SAME `parts` rows
+  // as a placed device of that partId (the quote re-prices both at tier).
+  const accessories = useMemo(() => accessoriesOf(activeOption.accessories), [activeOption.accessories]);
+  const accessoryLines = useMemo(() => accessoryBomLines(accessories, parts), [accessories, parts]);
+  const accessoryValue = accessoryLines.reduce((a, l) => a + l.ext, 0);
+  const bomEmpty =
+    lines.length === 0 && wires.lines.length === 0 && curtains.length === 0 && customLines.length === 0 && accessoryLines.length === 0;
+  // The one "+ Custom item" (at the BOM's foot); saved items print under their heading.
   const customSection = (
     <CustomItemsSection
-      key={activeOptionId}
+      key={`${activeOptionId}:add`}
       projectId={project.id}
       optionId={activeOptionId}
-      items={customItems}
+      items={[]}
       lines={customLines}
       onChanged={() => router.refresh()}
     />
   );
-  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue;
+  const grandValue = totals.value + wires.value + laborValue + curtainValue + customValue + accessoryValue;
+  /** #230: the BOM under its seven headings. */
+  const bomGroupList = useMemo(
+    () =>
+      bomGroups(
+        groupedBomLines({
+          devices: lines,
+          wires: wires.lines,
+          curtains,
+          custom: customLines,
+          customItems,
+          accessories: accessoryLines,
+          parts,
+          placements,
+        })
+      ),
+    [lines, wires.lines, curtains, customLines, customItems, accessoryLines, parts, placements]
+  );
+  /** The heading whose accessory picker is open — per option, so switching options closes it. */
+  const [addingTo, setAddingTo] = useState<{ optionId: string; group: BomGroupKey } | null>(null);
+  const pickerOpenFor = addingTo && addingTo.optionId === activeOptionId ? addingTo.group : null;
+  /** One BOM row under a heading. Device / wire / curtain rows are the
+   *  pre-#230 rows unchanged; custom items render through their heading's
+   *  CustomItemsSection. */
+  const renderBomLine = (l: GroupedBomLine) => {
+    if (l.source === "custom") return null;
+    if (l.source === "accessory") {
+      return l.accessoryId ? (
+        <AccessoryRow
+          key={`a-${l.accessoryId}-${l.qty}`}
+          projectId={project.id}
+          optionId={activeOptionId}
+          accessoryId={l.accessoryId}
+          line={l}
+          onChanged={() => router.refresh()}
+          onError={(m) => setErr(m)}
+        />
+      ) : null;
+    }
+    if (l.source === "curtain") {
+      // Curtains (punch #49): one line each, never grouped - two drapes of
+      // one fabric are different goods once their dimensions differ.
+      return (
+        <div key={`c-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+          <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>1×</strong>
+          <span
+            style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={l.desc}
+          >
+            {l.curtainName}
+          </span>
+          <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+        </div>
+      );
+    }
+    if (l.source === "wire") {
+      return (
+        <div key={`w-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+          <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
+          <span
+            style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            title={`${l.partId} — ${l.desc}`}
+          >
+            {l.partId}
+          </span>
+          {partById.get(l.partId)?.hasDatasheet && (
+            <a
+              href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+            >
+              datasheet
+            </a>
+          )}
+          {l.connectionType && (
+            <span style={{ color: "#9aa0ab", fontSize: 10.5, whiteSpace: "nowrap" }}>
+              {l.connectionType}
+            </span>
+          )}
+          <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+        </div>
+      );
+    }
+    return (
+      <div key={`d-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
+        <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty}×</strong>
+        <span
+          style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          title={`${l.partId} — ${l.desc}`}
+        >
+          {partById.get(l.partId)?.virtual ? l.desc : l.partId}
+        </span>
+        {partById.get(l.partId)?.virtualDead ? (
+          // #211 D313: nothing real behind it — the quote refuses it by name.
+          <span
+            title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
+            style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
+          >
+            Needs a part
+          </span>
+        ) : (
+          partById.get(l.partId)?.allowance && (
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
+              Allowance
+            </span>
+          )
+        )}
+        {partById.get(l.partId)?.hasDatasheet && (
+          <a
+            href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
+          >
+            datasheet
+          </a>
+        )}
+        <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
+      </div>
+    );
+  };
   const spaceRollups = useMemo(
     () => bomBySpace(placements, parts, project.spaces || [], curtainPrices),
     [placements, parts, project.spaces, curtainPrices]
@@ -1758,153 +1901,117 @@ export default function GridEditor({
           {/* BOM */}
           <div style={PANEL}>
             <div style={PANEL_LABEL}>Bill of materials</div>
-            {bomEmpty ? (
-              <>
-                <div style={{ fontSize: 11.5, color: "#8c919c" }}>
-                  Paint devices onto the plan to build the BOM.
-                </div>
-                {customSection}
-              </>
-            ) : (
-              <div style={{ display: "grid", gap: 4 }}>
-                {lines.map((l) => (
-                  <div key={l.partId} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty}×</strong>
-                    <span
-                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      title={`${l.partId} — ${l.desc}`}
-                    >
-                      {partById.get(l.partId)?.virtual ? l.desc : l.partId}
-                    </span>
-                    {partById.get(l.partId)?.virtualDead ? (
-                      // #211 D313: nothing real behind it — the quote refuses it by name.
-                      <span
-                        title={`${l.desc} — ${VIRTUAL_DEAD_HINT}`}
-                        style={{ fontSize: 9.5, fontWeight: 700, color: "#a0442b", background: "#fbe9e4", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}
-                      >
-                        Needs a part
+            {bomEmpty && (
+              <div style={{ fontSize: 11.5, color: "#8c919c", marginBottom: 4 }}>
+                Paint devices onto the plan to build the BOM.
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 4 }}>
+              {/* #230: one heading per category, in Jeff's order. Every
+                  heading shows, even empty, so an accessory can be added
+                  to a category nothing is placed in yet. */}
+              {bomGroupList.map((g) => {
+                const groupCustom = customItems.filter((it) => groupOfCustomSystem(it.system) === g.key);
+                return (
+                  <div key={g.key} style={{ display: "grid", gap: 4, borderTop: "1px dashed #e3e5ea", paddingTop: 5 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+                      <span style={{ flex: 1, fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
+                        {g.label}
                       </span>
-                    ) : (
-                      partById.get(l.partId)?.allowance && (
-                        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#8a6d1f", background: "#fbf3dd", borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>
-                          Allowance
-                        </span>
-                      )
-                    )}
-                    {partById.get(l.partId)?.hasDatasheet && (
-                      <a
-                        href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
-                      >
-                        datasheet
-                      </a>
-                    )}
-                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-                  </div>
-                ))}
-                {wires.lines.map((l) => (
-                  <div key={`w-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>{l.qty} {l.unit}</strong>
-                    <span
-                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      title={`${l.partId} — ${l.desc}`}
-                    >
-                      {l.partId}
-                    </span>
-                    {partById.get(l.partId)?.hasDatasheet && (
-                      <a
-                        href={`/api/part-datasheet/${encodeURIComponent(l.partId)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "var(--accent)", fontSize: 10.5, whiteSpace: "nowrap", textDecoration: "none" }}
-                      >
-                        datasheet
-                      </a>
-                    )}
-                    {l.connectionType && (
-                      <span style={{ color: "#9aa0ab", fontSize: 10.5, whiteSpace: "nowrap" }}>
-                        {l.connectionType}
-                      </span>
-                    )}
-                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-                  </div>
-                ))}
-                {wires.unmeasured > 0 && (
-                  <div style={{ fontSize: 10.5, color: "#a0442b" }}>
-                    {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
-                  </div>
-                )}
-                {/* Curtains (punch #49): one line each, never grouped - two
-                    drapes of one fabric are different goods once their
-                    dimensions differ. */}
-                {curtains.map((l) => (
-                  <div key={`c-${l.partId}`} style={{ display: "flex", gap: 6, fontSize: 12, alignItems: "baseline" }}>
-                    <strong style={{ color: "#16181d", whiteSpace: "nowrap" }}>1×</strong>
-                    <span
-                      style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      title={l.desc}
-                    >
-                      {l.curtainName}
-                    </span>
-                    <span style={{ color: "#16181d", fontWeight: 600 }}>{moneyFmt(l.ext)}</span>
-                  </div>
-                ))}
-                {customSection}
-                {laborRows.length > 0 && (
-                  <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
-                      Labor (suggested)
+                      {pickerOpenFor !== g.key && (
+                        <button type="button" style={ADD_LINK} onClick={() => setAddingTo({ optionId: activeOptionId, group: g.key })}>
+                          + Add accessory
+                        </button>
+                      )}
+                      {g.value > 0 && <span style={{ fontSize: 11, color: "#5b616e", fontWeight: 600 }}>{moneyFmt(g.value)}</span>}
                     </div>
-                    {laborRows.map((l) => (
-                      <div key={l.partId} style={{ display: "flex", gap: 5, fontSize: 12, alignItems: "center" }}>
-                        <input
-                          type="checkbox"
-                          checked={l.included}
-                          onChange={(e) =>
-                            setLaborOverrides((prev) => ({
-                              ...prev,
-                              [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
-                            }))
-                          }
-                          style={{ margin: 0 }}
-                        />
-                        <span
-                          style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title={`${l.desc} @ ${moneyFmt(l.rate)}/hr`}
-                        >
-                          {l.partId}
-                        </span>
-                        <input
-                          value={String(l.hours)}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            setLaborOverrides((prev) => ({
-                              ...prev,
-                              [`${activeOptionId}:${l.partId}`]: {
-                                included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
-                                hours: Number.isFinite(v) && v >= 0 ? v : 0,
-                              },
-                            }));
-                          }}
-                          inputMode="decimal"
-                          style={{ ...INPUT, width: 44, padding: "2px 5px", fontSize: 11.5, textAlign: "right" }}
-                        />
-                        <span style={{ fontSize: 10.5, color: "#8c919c" }}>hr</span>
-                        <span style={{ color: "#16181d", fontWeight: 600, opacity: l.included ? 1 : 0.4 }}>
-                          {moneyFmt(l.ext)}
-                        </span>
-                      </div>
-                    ))}
+                    {pickerOpenFor === g.key && (
+                      <AccessoryPicker
+                        projectId={project.id}
+                        optionId={activeOptionId}
+                        group={g.key}
+                        parts={parts}
+                        onDone={(added) => {
+                          setAddingTo(null);
+                          if (added) router.refresh();
+                        }}
+                      />
+                    )}
+                    {g.lines.map((l) => renderBomLine(l))}
+                    {groupCustom.length > 0 && (
+                      <CustomItemsSection
+                        key={`${activeOptionId}:${g.key}`}
+                        projectId={project.id}
+                        optionId={activeOptionId}
+                        items={groupCustom}
+                        lines={customLines}
+                        showAdd={false}
+                        onChanged={() => router.refresh()}
+                      />
+                    )}
                   </div>
-                )}
+                );
+              })}
+              {customSection}
+              {wires.unmeasured > 0 && (
+                <div style={{ fontSize: 10.5, color: "#a0442b" }}>
+                  {wires.unmeasured} unmeasured wire run{wires.unmeasured === 1 ? "" : "s"} excluded.
+                </div>
+              )}
+              {laborRows.length > 0 && (
+                <div style={{ borderTop: "1px dashed #e3e5ea", marginTop: 4, paddingTop: 5, display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: "#9aa0ab" }}>
+                    Labor (suggested)
+                  </div>
+                  {laborRows.map((l) => (
+                    <div key={l.partId} style={{ display: "flex", gap: 5, fontSize: 12, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={l.included}
+                        onChange={(e) =>
+                          setLaborOverrides((prev) => ({
+                            ...prev,
+                            [`${activeOptionId}:${l.partId}`]: { ...prev[`${activeOptionId}:${l.partId}`], included: e.target.checked },
+                          }))
+                        }
+                        style={{ margin: 0 }}
+                      />
+                      <span
+                        style={{ color: "#3d424e", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                        title={`${l.desc} @ ${moneyFmt(l.rate)}/hr`}
+                      >
+                        {l.partId}
+                      </span>
+                      <input
+                        value={String(l.hours)}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setLaborOverrides((prev) => ({
+                            ...prev,
+                            [`${activeOptionId}:${l.partId}`]: {
+                              included: prev[`${activeOptionId}:${l.partId}`]?.included ?? true,
+                              hours: Number.isFinite(v) && v >= 0 ? v : 0,
+                            },
+                          }));
+                        }}
+                        inputMode="decimal"
+                        style={{ ...INPUT, width: 44, padding: "2px 5px", fontSize: 11.5, textAlign: "right" }}
+                      />
+                      <span style={{ fontSize: 10.5, color: "#8c919c" }}>hr</span>
+                      <span style={{ color: "#16181d", fontWeight: 600, opacity: l.included ? 1 : 0.4 }}>
+                        {moneyFmt(l.ext)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!bomEmpty && (
                 <div style={{ borderTop: "1px solid #edeff3", marginTop: 3, paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
                   <span style={{ color: "#8c919c" }}>Total</span>
                   <strong>{moneyFmt(grandValue)}</strong>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
             <button
               style={{
                 ...BTN,
