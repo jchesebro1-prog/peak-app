@@ -144,6 +144,7 @@ export async function searchAddressAction(query: string): Promise<AddressHitVM[]
     street: h.street,
     city: h.city,
     state: h.state,
+    zip: h.zip,
     lat: h.lat,
     lng: h.lng,
   }));

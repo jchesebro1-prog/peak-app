@@ -266,7 +266,7 @@ export function mergeLocation(
   return { locations: list, created: true };
 }
 
-/** The controlled venueKind (companies/lib.ts VENUE_KINDS) a free-text
+/** The built-in venueKind (lib/venue-types.ts BUILT_IN_VENUE_KINDS) a free-text
  *  venue Category implies — used only for venues the import CREATES. */
 export function venueKindFromCategory(category: unknown): string {
   const c = txt(category).toLowerCase();

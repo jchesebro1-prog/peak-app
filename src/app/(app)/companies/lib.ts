@@ -42,20 +42,6 @@ export function typeColor(t: string | null | undefined): string {
   return (t && TYPE_COLORS[t]) || "#5b616e";
 }
 
-/** Venue kinds — [value, label] (prototype VENUE_KINDS). */
-export const VENUE_KINDS: Array<[string, string]> = [
-  ["proscenium", "Proscenium / Auditorium"],
-  ["church", "Worship / Church"],
-  ["flat", "Flat floor / Conference"],
-  ["blackbox", "Black box"],
-  ["arena", "Arena / Open floor"],
-];
-
-export function venueKindLabel(k: string | null | undefined): string {
-  const v = VENUE_KINDS.find((x) => x[0] === k);
-  return v ? v[1] : "Venue";
-}
-
 export type ChipMeta = { label: string; ink: string; soft: string; bd: string };
 
 /** Quote status pills (prototype statusMeta). */

@@ -24,7 +24,8 @@ import {
   officesFromSettings,
 } from "@/lib/geo";
 import { dateYear, shortDate, timeAgo } from "@/lib/format";
-import { getSiteByDocLocId } from "@/lib/identity/sites";
+import { getSiteByDocLocId, sitesForCompany } from "@/lib/identity/sites";
+import { venueDialogInitial } from "@/lib/identity/venue-save";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { hasVenueCalendar } from "@/lib/stores/venue-calendars";
 import { loadCustomerFeed } from "@/lib/customer-feed";
@@ -34,7 +35,7 @@ import ActivityComposer from "./activity-composer";
 import NoteDeleteButton from "./note-delete-button";
 import { Avatar } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
-import { venueTypesFrom } from "@/lib/venue-types";
+import { venueTypeLabel, venueTypesFrom } from "@/lib/venue-types";
 import { defsForType, resolveFieldDefs } from "@/lib/customer-fields";
 import { LIFECYCLE_LABEL, type Lifecycle } from "@/lib/identity/config";
 
@@ -42,7 +43,7 @@ export const metadata = { title: "Company — Quartzite-6" };
 import { grantsFor, grantPath } from "@/lib/portal";
 import { PortalAccessCard } from "./portal-access";
 import EditCustomerModal from "../edit-modal";
-import VenueQuickAdd from "../venue-quick-add";
+import VenueDialog from "../venue-dialog";
 import { DeleteVisitButton } from "../delete-visit-button";
 import {
   ACCENT_INK,
@@ -57,7 +58,6 @@ import {
   toLocationInput,
   TRAVEL_SOURCE_META,
   typeColor,
-  venueKindLabel,
 } from "../lib";
 import type { SaveCustomerInput } from "../types";
 
@@ -126,6 +126,9 @@ export default async function CustomerDetailPage({
   const edit = one(sp.edit);
   const venueTypes = venueTypesFrom(settings.venueTypes);
   const addVenue = one(sp.addVenue);
+  const editVenueId = one(sp.editVenue);
+  const companySites = await sitesForCompany(cust.id);
+  const editSite = editVenueId ? (companySites.find((s) => s.id === editVenueId) ?? null) : null;
 
   const roster = users.map((u) => ({ name: u.name, initials: u.initials, color: u.color }));
   const identOf = (name: string) => {
@@ -180,7 +183,7 @@ export default async function CustomerDetailPage({
         key: l.id || l.label || Math.random().toString(36).slice(2),
         label: l.label || "Venue",
         primary: !!l.primary,
-        kindLabel: venueKindLabel(l.venueKind),
+        kindLabel: venueTypeLabel(venueTypes, l.venueKind),
         // #137 — imported venue category, shown beside the kind when present.
         category: l.kind || "",
         address:
@@ -193,6 +196,7 @@ export default async function CustomerDetailPage({
         sourceSoft: sm.soft,
         calendarHref: site ? `/venues/${encodeURIComponent(site.id)}#calendar` : null,
         calendarOn,
+        editHref: site ? `/companies/${encodeURIComponent(cust.id)}?editVenue=${encodeURIComponent(site.id)}` : null,
       };
     })
   );
@@ -385,6 +389,11 @@ export default async function CustomerDetailPage({
                           PRIMARY
                         </span>
                       )}
+                      {l.editHref && (
+                        <Link href={l.editHref} scroll={false} aria-label={`Edit ${l.label}`} style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: ACCENT_INK, textDecoration: "none" }}>
+                          Edit
+                        </Link>
+                      )}
                     </div>
                     <div style={{ fontSize: 12, color: "#8c919c", marginTop: 5 }}>{l.address}</div>
                     {l.calendarHref && (
@@ -415,7 +424,7 @@ export default async function CustomerDetailPage({
           )}
           {locN === 0 && (
             <div style={{ padding: "26px 18px", textAlign: "center", color: "#9aa0ab", fontSize: 12.5 }}>
-              No locations yet — add one in Edit.
+              No venues yet — use + Add venue.
             </div>
           )}
         </div>
@@ -809,7 +818,27 @@ export default async function CustomerDetailPage({
       {edit === "1" && (
         <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} venueTypes={venueTypes} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
       )}
-      {addVenue === "1" && <VenueQuickAdd initial={editInitial} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />}
+      {addVenue === "1" && (
+        <VenueDialog
+          companyId={cust.id}
+          companyName={cust.name}
+          venueTypes={venueTypes}
+          siblingNames={companySites.map((s) => s.name)}
+          initial={null}
+          closeHref={`/companies/${encodeURIComponent(cust.id)}`}
+        />
+      )}
+      {editSite && (
+        <VenueDialog
+          key={editSite.id}
+          companyId={cust.id}
+          companyName={cust.name}
+          venueTypes={venueTypes}
+          siblingNames={companySites.filter((s) => s.id !== editSite.id).map((s) => s.name)}
+          initial={venueDialogInitial(editSite)}
+          closeHref={`/companies/${encodeURIComponent(cust.id)}`}
+        />
+      )}
     </>
   );
 }

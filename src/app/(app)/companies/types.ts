@@ -61,6 +61,9 @@ export type AddressHitVM = {
   street: string;
   city: string;
   state: string;
+  /** #216 — the hit's postcode ("" when Nominatim has none); the venue
+   *  dialog sends it so a picked address saves its zip. */
+  zip: string;
   lat: number;
   lng: number;
 };

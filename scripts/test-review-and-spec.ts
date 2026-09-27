@@ -23852,3 +23852,32 @@ async function venues216Task3FixesAsyncChecks(): Promise<void> {
     await removeCustomer(CO);
   }
 }
+/* --- #216 T5: one-venue dialog on the company + venue pages --- */
+{
+  const v216Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const dlg = v216Read("src/app/(app)/companies/venue-dialog.tsx");
+  ok(dlg.startsWith('"use client"') && dlg.includes("saveVenueAction(") && dlg.includes("Will display as") && dlg.includes("deriveVenueName(") && dlg.includes("searchAddressAction(") && !dlg.includes("Venue label"),
+    "#216 T5: the venue dialog saves one venue, searches addresses and previews the derived name");
+  ok(!gemValueImports(dlg).some((m) => /^@\/lib\/stores\/|^@\/db|identity\/|venue-save|^@\/lib\/settings$/.test(m)), "#216 T5: the dialog imports no store/DB/server value");
+  const cp = v216Read("src/app/(app)/companies/[id]/page.tsx");
+  ok(cp.includes("?editVenue=") && cp.includes("<VenueDialog") && !cp.includes("VenueQuickAdd") && cp.includes("venueTypeLabel(venueTypes, l.venueKind)"),
+    "#216 T5: company venue rows have Edit; + Add venue opens the same dialog; labels come from the list");
+  const vp = v216Read("src/app/(app)/venues/[id]/page.tsx");
+  ok(vp.includes("?edit=1") && vp.includes("<VenueDialog") && vp.includes("venueTypeLabel(venueTypes, site.venueKind)"), "#216 T5: the venue page has Edit and shows the type's current label");
+  let gone = false;
+  try { v216Read("src/app/(app)/companies/venue-quick-add.tsx"); } catch { gone = true; }
+  ok(gone, "#216 T5: the label-based venue quick-add is gone");
+  const lib = v216Read("src/app/(app)/companies/lib.ts");
+  ok(!lib.includes("VENUE_KINDS") && !lib.includes("venueKindLabel"), "#216 T5: the hardcoded venue-kind list is gone");
+  // Modal quality bar (#214/#215 lessons).
+  ok(dlg.includes('role="dialog"') && dlg.includes('aria-modal="true"') && /\.focus\(\)/.test(dlg) && dlg.includes("isConnected") && dlg.includes('"Escape"') && dlg.includes("defaultPrevented"),
+    "#216 T5: the dialog takes focus, restores it to a still-mounted opener and closes on Escape unless a nested dropdown handled it");
+  const saveFn = dlg.slice(dlg.indexOf("const save ="), dlg.indexOf("return (", dlg.indexOf("const save =")));
+  ok(/try\s*\{[\s\S]*saveVenueAction\([\s\S]*\}\s*catch[\s\S]*finally/.test(saveFn), "#216 T5: save runs in try/catch/finally so a thrown action never sticks the buttons");
+  // Coordinates/zip travel only from a picked search hit; untouched → none sent.
+  ok(saveFn.includes("picked?.lat ?? null") && saveFn.includes("picked?.lng ?? null") && saveFn.includes("picked?.zip"),
+    "#216 T5: the dialog sends a picked hit's coordinates and zip, nothing otherwise");
+  const acts = v216Read("src/app/(app)/companies/actions.ts");
+  const sa0 = acts.indexOf("export async function searchAddressAction");
+  ok(sa0 >= 0 && acts.slice(sa0, acts.indexOf("\n}\n", sa0)).includes("zip: h.zip"), "#216 T5: address search hits carry the postcode");
+}

@@ -2,7 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import { requireUser } from "@/lib/session";
-import { docLocId, getSite } from "@/lib/identity/sites";
+import { docLocId, getSite, sitesForCompany } from "@/lib/identity/sites";
+import { venueDialogInitial } from "@/lib/identity/venue-save";
+import { getSettings } from "@/lib/settings";
+import { venueTypeLabel, venueTypesFrom } from "@/lib/venue-types";
+import VenueDialog from "../../companies/venue-dialog";
 import { getCompany } from "@/lib/identity/companies";
 import { contactsForCompany, displayName } from "@/lib/identity/contacts";
 import { CONTACT_STATUS_LABEL, type ContactStatus } from "@/lib/identity/config";
@@ -12,7 +16,7 @@ import { dateYear } from "@/lib/format";
 import { fmtMiles, fmtTime } from "@/lib/geo";
 import { getVenueCalendar } from "@/lib/stores/venue-calendars";
 import VenueCalendarCard from "./calendar-card";
-import { ACCENT_INK, ACCENT_SOFT, cityState, mono, venueKindLabel } from "../../companies/lib";
+import { ACCENT_INK, ACCENT_SOFT, cityState, mono } from "../../companies/lib";
 
 /**
  * Venue detail (D101) — mirrors the `getX(id) → notFound() → getCompany(fk)`
@@ -138,21 +142,28 @@ function HistoryRow({ r, showDate }: { r: VenueHistoryRow; showDate: boolean }) 
 
 export default async function VenuePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireUser();
   const { id } = await params;
+  const sp = await searchParams;
+  const editing = (Array.isArray(sp.edit) ? sp.edit[0] : sp.edit) === "1";
   const site = await getSite(id);
   if (!site) notFound();
 
   const locationId = docLocId(site);
-  const [company, contacts, history, venueCalendar] = await Promise.all([
+  const [company, contacts, history, venueCalendar, settings, siblings] = await Promise.all([
     getCompany(site.companyId),
     contactsForCompany(site.companyId),
     loadVenueHistory(site),
     getVenueCalendar(locationId),
+    getSettings(),
+    sitesForCompany(site.companyId),
   ]);
+  const venueTypes = venueTypesFrom(settings.venueTypes);
 
   const address =
     [
@@ -243,7 +254,7 @@ export default async function VenuePage({
                 borderRadius: 20,
               }}
             >
-              {venueKindLabel(site.venueKind)}
+              {venueTypeLabel(venueTypes, site.venueKind)}
             </span>
             {site.isPrimary && (
               <span
@@ -260,6 +271,13 @@ export default async function VenuePage({
                 PRIMARY
               </span>
             )}
+            <Link
+              href={`/venues/${encodeURIComponent(site.id)}?edit=1`}
+              scroll={false}
+              style={{ fontSize: 12, fontWeight: 600, color: ACCENT_INK, background: ACCENT_SOFT, borderRadius: 7, padding: "4px 10px", textDecoration: "none" }}
+            >
+              Edit
+            </Link>
           </div>
           <div style={{ fontSize: 13, color: "#8c919c", marginTop: 4 }}>
             <Link href={`/companies/${encodeURIComponent(site.companyId)}`} style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
@@ -398,6 +416,17 @@ export default async function VenuePage({
           </div>
         )}
       </div>
+
+      {editing && (
+        <VenueDialog
+          companyId={site.companyId}
+          companyName={company?.name ?? ""}
+          venueTypes={venueTypes}
+          siblingNames={siblings.filter((s) => s.id !== site.id).map((s) => s.name)}
+          initial={venueDialogInitial(site)}
+          closeHref={`/venues/${encodeURIComponent(site.id)}`}
+        />
+      )}
     </div>
   );
 }
