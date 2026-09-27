@@ -100,6 +100,11 @@ export type SectionCardProps = {
   onDelete: () => void;
   onSetMargin: (v: string) => void;
   onSetFreight: (v: string) => void;
+  /** #242: the current selection's distance-rule default is unknown (no
+   *  locatable venue) — the freight % is pinned to the cap. Shown only for a
+   *  section still on the auto default (`sec.freightAuto`); a hand-set % is
+   *  never annotated. */
+  freightUnknown?: boolean;
   onInc: (id: number) => void;
   onDec: (id: number) => void;
   onSetQty: (id: number, v: string) => void;
@@ -452,6 +457,11 @@ export default function SectionCard(p: SectionCardProps) {
                 {fmt(secFreight)}
               </span>
             </div>
+            {sec.freightAuto && p.freightUnknown && (
+              <div style={{ fontSize: 11, fontWeight: 500, color: "#b4543a" }}>
+                Freight at max — venue not located
+              </div>
+            )}
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
               <button
                 type="button"

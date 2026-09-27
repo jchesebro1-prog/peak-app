@@ -20,6 +20,7 @@ import { loadPipelines } from "@/lib/pipelines-server";
 import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates, loadCurtainSewingPct } from "@/lib/stores/pricing";
+import { loadFreightRule } from "@/lib/freight-rule-load";
 import { blobEnabled } from "@/lib/blob";
 import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
@@ -234,7 +235,7 @@ export default async function EstimatorPage({
   // Estimator — this is the server-side backstop behind every link fix.
   if (q && estimatorShouldRedirect(q)) redirect(quoteBuilderHref(q));
 
-  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct] =
+  const [fabricRows, laborRows, customerDocs, reviewerRows, settings, fixtureRates, roster, catalogRows, pipelines, fixtures, curtainSewingPct, freightRule] =
     await Promise.all([
       byCategory("Fabric"),
       byCategory("Labor"),
@@ -247,6 +248,7 @@ export default async function EstimatorPage({
       loadPipelines(),
       listFixtures(),
       loadCurtainSewingPct(),
+      loadFreightRule(),
     ]);
   // PUNCHLIST #17 remainder — this quote's tasks (empty until the quote is
   // saved once; q.id is only real once a doc exists to key tasks off of).
@@ -370,6 +372,7 @@ export default async function EstimatorPage({
       quoteTasks={quoteTasks}
       templateSets={templateSets.map((s) => ({ id: s.id, name: s.name }))}
       assumptionLibrary={mergedConsultingAssumptions(settings.consultingAssumptions)}
+      freightRule={freightRule}
     />
   );
 }

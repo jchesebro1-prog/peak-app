@@ -27403,3 +27403,24 @@ async function portal242RulesAsyncChecks(): Promise<void> {
     "#242 rules: loadPortalRules() resolves to its documented defaults"
   );
 }
+
+/* ======================================================================
+   Portal catalog — Estimator adopts the freight rule for new sections
+   (#242, Task 2). Pure: sectionFreightDefault (new-section default) and
+   applyAutoFreight (re-apply on venue change, touched sections untouched).
+   ====================================================================== */
+import { sectionFreightDefault as d242SecFr, applyAutoFreight as d242ApplyFr } from "@/app/(app)/estimator/freight-default";
+{
+  const rule = { basePct: 2, stepMiles: 200, stepPct: 1, capPct: 10 };
+  ok(d242SecFr({ hasVenue: false, miles: null, rule }).pct === 2 && !d242SecFr({ hasVenue: false, miles: null, rule }).unknown, "#242 estimator: no venue yet → base %, not flagged");
+  ok(d242SecFr({ hasVenue: true, miles: 450, rule }).pct === 4, "#242 estimator: venue at 450 mi → 4%");
+  const u = d242SecFr({ hasVenue: true, miles: null, rule });
+  ok(u.pct === 10 && u.unknown, "#242 estimator: venue not located → cap + flag");
+  const secs = [
+    { id: "a", name: "A", kind: "materials", mfr: "", freightPct: 2, freightAuto: true, items: [] },
+    { id: "b", name: "B", kind: "materials", mfr: "", freightPct: 7, freightAuto: false, items: [] },
+    { id: "c", name: "C", kind: "materials", mfr: "", freightPct: 5, items: [] },
+  ];
+  const out = d242ApplyFr(secs as never, { pct: 4 });
+  ok(out[0].freightPct === 4 && out[1].freightPct === 7 && out[2].freightPct === 5, "#242 estimator: venue change re-applies only to untouched (auto) sections; saved quotes without the flag never change");
+}

@@ -5,6 +5,7 @@ import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 import type { Pipelines } from "@/lib/pipelines";
+import type { FreightRule } from "@/lib/freight-rule";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -151,6 +152,8 @@ export type SpecSection = {
   kind: string;
   mfr: string;
   freightPct: number;
+  /** #242: freight was set by the distance rule and staff haven't touched it. */
+  freightAuto?: boolean;
   items: SpecItem[];
 };
 
@@ -421,6 +424,9 @@ export type EstimatorProps = {
   /** Reusable task-template sets applicable to quotes (D149, #118), for the
    *  "Apply template" control next to the Tasks card. */
   templateSets: { id: string; name: string }[];
+  /** #242: the freight-by-distance rule (Estimating Rules), loaded server-side
+   *  via loadFreightRule() — plain numbers, client-safe. */
+  freightRule: FreightRule;
   /** Company-managed checked assumptions shared with consulting proposals. */
   assumptionLibrary: string[];
 };

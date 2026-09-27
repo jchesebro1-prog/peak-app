@@ -74,6 +74,7 @@ import type {
   VendorLineDraft,
   VendorQuote,
 } from "./types";
+import { sectionFreightDefault, applyAutoFreight } from "./freight-default";
 import { PAYMENT_TERMS, vendorAttachmentLoad } from "./types";
 import { fixtureBomLine } from "./fixture-bom";
 import { applyMobType, defaultLaborMobs, disciplineForSystemTitle, laborMob } from "./labor-defaults";
@@ -106,8 +107,11 @@ import { DeleteQuoteButton } from "../quotes/delete-quote-button";
 /** Prototype prop taxRatePct defaulted to 0 — kept as a constant. */
 const TAX_RATE_PCT = 0;
 
-const freshSections = (): SpecSection[] => [
-  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct: 2, items: [] },
+/** #242: freightPct comes from the caller — this runs at module scope (used by
+ *  a lazy useState initializer before props are in scope), so it can't read
+ *  the freight rule itself. */
+const freshSections = (freightPct: number): SpecSection[] => [
+  { id: "sys1", name: "New System", kind: "materials", mfr: "", freightPct, freightAuto: true, items: [] },
 ];
 
 const CSS = `
@@ -367,10 +371,24 @@ export default function EstimatorClient({
   quoteTasks,
   templateSets,
   assumptionLibrary,
+  freightRule,
 }: EstimatorProps) {
   /* ---------------- state (port of the prototype's this.state) ---------------- */
+  /** #242: the freight default for THIS load — computed once from the props
+   *  the server already seeded (no venue picked yet ⇒ base %; a picked venue
+   *  reads its precomputed travel entry, seeded by page.tsx the same way
+   *  travelSeen below is). Only used to seed the two initializers below and
+   *  the `freightDefault` state (~travel block) — never read after mount. */
+  const initialTravelMiles = initial.customerId
+    ? travel[initial.customerId + "|" + (initial.locationId || "")]?.miles ?? null
+    : travel["name|" + initial.custName]?.miles ?? null;
+  const initialFreightDefault = sectionFreightDefault({
+    hasVenue: !!initial.locationId,
+    miles: initialTravelMiles,
+    rule: freightRule,
+  });
   const [sections, setSections] = useState<SpecSection[]>(
-    () => initial.sections ?? freshSections()
+    () => initial.sections ?? freshSections(initialFreightDefault.pct)
   );
   const nidRef = useRef<number | null>(null);
   if (nidRef.current == null) nidRef.current = computeNid(initial.sections);
@@ -495,7 +513,7 @@ export default function EstimatorClient({
     [detail, pdfQty, pdfNotes, pdfPrices, pdfCover, pdfTerms, pdfOptions]
   );
   const [activeId, setActiveId] = useState<string | null>(
-    () => (initial.sections ?? freshSections())[0]?.id ?? null
+    () => (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.id ?? null
   );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   /* The add-part row is exclusive: at most ONE input method is open across the
@@ -607,7 +625,7 @@ export default function EstimatorClient({
   // curtain configurator; refreshed when the meta action re-stamps.
   const [tierMargin, setTierMargin] = useState<number | null>(initial.tierMargin);
   const [laborDraft, setLaborDraft] = useState<LaborDraft>(() =>
-    freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections())[0]?.name || "")
+    freshLabor(null, initial.tierMargin, (initial.sections ?? freshSections(initialFreightDefault.pct))[0]?.name || "")
   );
   const [, startTransition] = useTransition();
 
@@ -690,6 +708,27 @@ export default function EstimatorClient({
       const est = await travelForSelectionAction(custId, locId);
       setTravelSeen((m) => (k in m ? m : { ...m, [k]: est }));
       then(est);
+    });
+  };
+
+  /** #242 — the freight % a NEW/untouched system should carry right now:
+   *  base until a venue is picked, then the distance rule. Paired 1:1 with
+   *  what's actually been applied to `sections` (see reapplyAutoFreight
+   *  below) so the "venue not located" hint below the slider never flashes
+   *  ahead of — or lags behind — the number the slider shows. */
+  const [freightDefault, setFreightDefault] = useState(initialFreightDefault);
+  /** Re-apply the freight default to sections staff haven't touched
+   *  (`freightAuto`) when the customer/venue selection changes. Same
+   *  cached-vs-fetch shape as reapplyAutoTrips below: withTravelFor calls
+   *  back synchronously once the selection's travel is cached, and only
+   *  fetches (i.e. only "still loading") on a selection never seen before —
+   *  so a freshly-fetched `null` (venue not locatable) still re-applies,
+   *  just later, instead of being skipped. */
+  const reapplyAutoFreight = (custId: string | null, locId: string | null) => {
+    withTravelFor(custId, locId, (est) => {
+      const fd = sectionFreightDefault({ hasVenue: !!locId, miles: est?.miles ?? null, rule: freightRule });
+      setFreightDefault(fd);
+      setSections((ss) => applyAutoFreight(ss, { pct: fd.pct }));
     });
   };
 
@@ -1072,6 +1111,7 @@ export default function EstimatorClient({
       setContactName(contact);
       persistMeta({ customerId: id || null, locationId: locId, customer: name, contactName: contact });
       reapplyAutoTrips(id || null, locId);
+      reapplyAutoFreight(id || null, locId);
     });
   };
   const pickVenue = (locId: string) => {
@@ -1079,6 +1119,7 @@ export default function EstimatorClient({
       setLocationId(locId || null);
       persistMeta({ locationId: locId || null });
       reapplyAutoTrips(customerId, locId || null);
+      reapplyAutoFreight(customerId, locId || null);
     });
   };
   const pickContact = (name: string) => {
@@ -1182,7 +1223,9 @@ export default function EstimatorClient({
     let v = parseFloat(val);
     if (isNaN(v) || v < 0) v = 0;
     if (v > 15) v = 15;
-    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, freightPct: v } : s)));
+    // #242: a hand-set freight % opts this section out of the distance-rule
+    // auto-updates a later venue change would otherwise re-apply.
+    setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, freightPct: v, freightAuto: false } : s)));
   };
   const renameSystem = (secId: string, name: string) =>
     setSections((ss) => ss.map((s) => (s.id === secId ? { ...s, name } : s)));
@@ -1252,7 +1295,7 @@ export default function EstimatorClient({
     const id = "sys" + nextId();
     setSections((ss) => [
       ...ss,
-      { id, name: "New System", kind: "materials", mfr: "", freightPct: 2, items: [] },
+      { id, name: "New System", kind: "materials", mfr: "", freightPct: freightDefault.pct, freightAuto: true, items: [] },
     ]);
     setActiveId(id);
     openInputMethod("catalog", id);
@@ -3174,6 +3217,7 @@ export default function EstimatorClient({
                   onDelete={() => deleteSystem(sec.id)}
                   onSetMargin={(v) => setSystemMargin(sec.id, v)}
                   onSetFreight={(v) => setFreightPct(sec.id, v)}
+                  freightUnknown={freightDefault.unknown}
                   onInc={inc}
                   onDec={dec}
                   onSetQty={setQty}
