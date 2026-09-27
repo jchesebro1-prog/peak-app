@@ -7,7 +7,7 @@
  * (who/when the email came from), assignee (default me), optional due date.
  * Everything arrives on the server-built ReaderVM; one server action saves.
  */
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import type { ReaderVM } from "./types";
 import { createTaskFromThreadAction } from "./task-actions";
@@ -41,21 +41,28 @@ export default function TaskDialog({
   vm,
   messageId,
   onClose,
+  containerRef,
 }: {
   vm: ReaderVM;
   /** the message the dialog was opened from; null = the newest */
   messageId: string | null;
   onClose: () => void;
+  /** #215 fix wave 1 — where to send focus on close when the opener is no
+   *  longer in the document (e.g. the Link popup's "Create task", whose own
+   *  opener may have re-rendered away by the time this dialog closes) — the
+   *  reader's own root, so focus never falls all the way out to the page. */
+  containerRef?: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const openerRef = useRef<Element | null>(null);
   const [pending, start] = useTransition();
   const msg =
     (messageId ? vm.messages.find((m) => m.id === messageId) : null) ||
     vm.messages[vm.messages.length - 1] ||
     null;
-  const [title, setTitle] = useState(vm.subject || "");
+  const [title, setTitle] = useState(() => (vm.subject || "").slice(0, THREAD_TASK_TITLE_MAX));
   const [notes, setNotes] = useState(() =>
     defaultThreadTaskNotes(vm.subject, msg?.author || vm.contactName, msg?.time || "")
   );
@@ -70,13 +77,24 @@ export default function TaskDialog({
   // wave 1): without it the inbox shell's ArrowUp/ArrowDown handler (which
   // only skips a target inside `[role="dialog"]`) would keep switching
   // threads out from under this dialog, and focus would land on the page
-  // behind it once the dialog closes.
+  // behind it once the dialog closes. #215 fix wave 1 — the dialog never
+  // actually took focus (no auto-focus replacement, no dialogRef.focus()
+  // call), so this effect now moves focus onto the Title field itself via a
+  // ref rather than the previous uncontrolled JSX attribute; on close,
+  // focus only goes back to the opener when it's still on the page (e.g. opened
+  // from the Link popup's "Create task", the popup's own restore-focus
+  // cleanup runs first and can leave the opener re-rendered away by the
+  // time this one closes) — otherwise it falls back to the reader itself.
   useEffect(() => {
+    const fallback = containerRef?.current ?? null;
     openerRef.current = document.activeElement;
+    titleRef.current?.focus();
     return () => {
       const opener = openerRef.current;
-      if (opener instanceof HTMLElement) opener.focus();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      else fallback?.focus();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Trap Tab/Shift+Tab inside the dialog — the same fix wave 2 pattern —
@@ -112,9 +130,15 @@ export default function TaskDialog({
   // Escape closes the dialog unless something inside it already handled the
   // key (e.g. a select's own dropdown) — the same defaultPrevented guard the
   // Link popup uses, so this dialog never fights a nested widget's Escape.
+  // #215 fix wave 1 — also ignore it while the target is a plain field
+  // (Title/Notes/Assign to/Due date), the same `inField` guard LinkPopup
+  // uses, so a stray Escape while typing doesn't throw away what's typed.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      const inField = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+      if (inField) return;
       onClose();
     };
     window.addEventListener("keydown", onKey);
@@ -200,11 +224,11 @@ export default function TaskDialog({
         <label style={lbl} htmlFor="task-title">Title</label>
         <input
           id="task-title"
+          ref={titleRef}
           value={title}
           maxLength={THREAD_TASK_TITLE_MAX}
           onChange={(e) => setTitle(e.target.value)}
           style={inStyle}
-          autoFocus
         />
 
         <div style={lbl}>Links</div>

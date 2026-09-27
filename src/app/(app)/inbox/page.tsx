@@ -797,7 +797,11 @@ export default async function InboxPage({
     // sidebar's open tasks on this thread.
     const taskCandidates = threadTaskLinkCandidates({
       threadId: sel.id,
-      customerId: resolvedCid,
+      // Fix wave 1 — resolvedCid can be an id resolveCustomerId still
+      // returns but that no longer maps to a real customer record; only
+      // offer/link the company (and, transitively, its venue) once it
+      // actually resolves to one (mirrors inbox-task-write.ts).
+      customerId: linkedCustomer ? resolvedCid : null,
       siteId,
       link: sel.link,
       primaryContactId: sel.resolvedContactId ?? null,
@@ -836,7 +840,7 @@ export default async function InboxPage({
           ];
       }
     });
-    const threadTasks = threadTaskRows(await tasksForThread(sel.id), Date.now(), (n) => initialsOf(n));
+    const threadTasks = threadTaskRows(await tasksForThread(sel.id), (n) => initialsOf(n));
 
     const messages: MessageVM[] = (sel.messages || []).map((m) => ({
       id: m.id,

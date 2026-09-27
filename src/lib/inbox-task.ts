@@ -29,9 +29,15 @@ export type ThreadTaskRow = {
   title: string;
   assigneeName: string;
   assigneeInitials: string;
-  /** "Sep 30", "" when undated */
-  due: string;
-  overdue: boolean;
+  /** Raw due timestamp, null = undated. Fix wave 1 — this used to carry a
+   *  precomputed "due"/"overdue" pair, compared against the SERVER's clock
+   *  instant; dueAt is stored as noon UTC (the project's "picked date"
+   *  convention), so that comparison called a task due today "overdue"
+   *  hours early in every US timezone. The client
+   *  (inbox/thread-tasks-card.tsx) turns this into a day label with the
+   *  same localDayKey/dayKeyDiff calendar-tasks.ts uses, against the
+   *  BROWSER's today — the one place that's actually known. */
+  dueAt: number | null;
 };
 
 export const THREAD_TASK_TITLE_MAX = 200;
@@ -151,10 +157,11 @@ export function buildThreadTaskInput(args: {
   return { ok: true, input };
 }
 
-/** The sidebar's list: open tasks, soonest due first, undated last. */
+/** The sidebar's list: open tasks, soonest due first, undated last. Pure —
+ *  no "now" needed here (fix wave 1 moved overdue/day-label math to the
+ *  client, see ThreadTaskRow). */
 export function threadTaskRows(
   tasks: readonly TaskRecord[],
-  nowMs: number,
   initialsOf: (name: string) => string
 ): ThreadTaskRow[] {
   return tasks
@@ -165,7 +172,6 @@ export function threadTaskRows(
       title: t.title,
       assigneeName: t.assigneeName,
       assigneeInitials: t.assigneeName ? initialsOf(t.assigneeName) : "",
-      due: t.dueAt ? new Date(t.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "",
-      overdue: !!t.dueAt && t.dueAt < nowMs,
+      dueAt: t.dueAt && t.dueAt > 0 ? t.dueAt : null,
     }));
 }

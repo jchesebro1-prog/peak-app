@@ -350,7 +350,7 @@ export default function LinkSidebar({
       )}
 
       {/* #215 — open tasks created from this thread */}
-      <ThreadTasksCard tasks={vm.threadTasks} />
+      <ThreadTasksCard tasks={vm.threadTasks} isEmail={vm.isEmail} />
 
       {error && <div style={{ fontSize: 12, color: "#b4543a" }}>{error}</div>}
     </aside>
