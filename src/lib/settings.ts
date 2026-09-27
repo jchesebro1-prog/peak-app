@@ -90,6 +90,10 @@ export type AppSettingsData = {
    *  VALUES live per-company in the relational companies.custom column,
    *  keyed by CustomFieldDef.id. */
   customerFieldDefs?: import("@/lib/customer-fields").CustomFieldDef[];
+  /** #216 — Settings → Venue types. FULL REPLACEMENT list; resolved by
+   *  venueTypesFrom (lib/venue-types) — absent = the seed (5 built-ins +
+   *  Gym Stage). sites.venue_kind stores a type key. */
+  venueTypes?: import("@/lib/venue-types").VenueType[];
   /** Venue-class soft-goods and lighting guidance (D132), stored sparsely
    * over the source-sheet defaults in lib/venue-doctrine.ts. */
   venueDoctrine?: import("@/lib/venue-doctrine").VenueDoctrinePatch;

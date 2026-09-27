@@ -23536,3 +23536,96 @@ async function gridLabor232AsyncChecks(): Promise<void> {
   const restored = rev ? await GP.restoreRevision(gp.id, rev.rev, "Test Harness") : { ok: false as const };
   ok(restored.ok && (await GP.getProject(gp.id))!.options!.find((o) => o.id === base)?.laborOverrides?.lighting === 1500, "#232 store: restoring a revision brings the overrides back");
 }
+
+/* --- #216 T1: venue types + derived venue names (pure) --- */
+import {
+  BUILT_IN_VENUE_KINDS as v216BuiltIns, SEED_VENUE_TYPES as v216Seed, deriveLocationLabels as v216DeriveLabels,
+  deriveVenueName as v216Derive, mergeVenueTypes as v216Merge, planVenueRenames as v216Plan,
+  slugVenueTypeKey as v216Slug, venueTypeLabel as v216Label, venueTypeOptions as v216Options,
+  venueTypesFrom as v216From, worksLikeOf as v216WorksLike,
+} from "@/lib/venue-types";
+import { readdirSync as v216Readdir } from "node:fs";
+{
+  const seed = v216From(undefined);
+  ok(seed.map((t) => t.key).join(",") === "proscenium,church,flat,blackbox,arena,gymstage", "#216: nothing stored reads as the five built-ins plus Gym Stage");
+  const gym = seed.find((t) => t.key === "gymstage");
+  ok(gym?.label === "Gym Stage" && gym.worksLike === "proscenium", "#216: Gym Stage works like a proscenium");
+  ok(seed.find((t) => t.key === "church")?.label === "Worship / Church", "#216: built-ins keep today's labels");
+  ok(v216Seed.length === 6 && v216BuiltIns.length === 5, "#216: the seed is 5 built-ins + Gym Stage");
+  ok(v216From([]).length === 6, "#216: an empty stored list reads as the seed");
+
+  const junk = v216From([
+    { key: "x", label: "  Studio  ", worksLike: "nope", order: 2 },
+    { key: "x", label: "Dup" },
+    { label: "no key" },
+    "bad",
+    { key: "church", label: "Sanctuary", worksLike: "arena", order: 1, archived: true },
+  ]);
+  const jx = junk.find((t) => t.key === "x");
+  ok(jx?.label === "Studio" && jx.worksLike === "proscenium", "#216: stored rows are trimmed; an unknown works-like reads as proscenium");
+  ok(junk.filter((t) => t.key === "x").length === 1, "#216: a duplicated key keeps its first row");
+  const jch = junk.find((t) => t.key === "church");
+  ok(jch?.label === "Sanctuary" && jch.worksLike === "church" && jch.archived === true, "#216: a built-in keeps its own works-like; its rename and archive survive");
+  ok(["proscenium", "flat", "blackbox", "arena"].every((k) => junk.some((t) => t.key === k)), "#216: a built-in missing from storage is restored");
+  ok(junk[0].key === "church" && junk.every((t, i) => t.order === i), "#216: types read in stored order, renumbered 0..n");
+
+  ok(v216Label(seed, "gymstage") === "Gym Stage" && v216Label(seed, "gone") === "Venue" && v216Label(seed, null) === "Venue", "#216: venueTypeLabel falls back to Venue");
+  ok(v216WorksLike(seed, "gymstage") === "proscenium" && v216WorksLike(seed, "church") === "church" && v216WorksLike(seed, "gone") === "proscenium" && v216WorksLike([], "arena") === "arena",
+    "#216: worksLikeOf maps a custom type to its built-in, unknown to proscenium, a built-in key to itself");
+
+  const withArchived = seed.map((t) => (t.key === "blackbox" ? { ...t, archived: true as const } : t));
+  ok(!v216Options(withArchived).some((t) => t.key === "blackbox"), "#216: an archived type is hidden from pickers");
+  ok(v216Options(withArchived, "blackbox").some((t) => t.key === "blackbox"), "#216: …unless the venue already has it");
+  ok(v216Options(seed, "legacy-x").some((t) => t.key === "legacy-x"), "#216: an unknown stored key still shows as the current option");
+
+  ok(v216Slug("Gym Stage", new Set()) === "gymstage" && v216Slug("Gym Stage", new Set(["gymstage"])) === "gymstage2" && v216Slug("!!!", new Set()) === "type",
+    "#216: new keys slug from the label, first free");
+
+  const base = seed.map((t) => ({ key: t.key, label: t.label, worksLike: t.worksLike as string, archived: !!t.archived }));
+  const m1 = v216Merge(seed, [...base.map((r) => (r.key === "gymstage" ? { ...r, label: "Gymnasium Stage" } : r)), { label: "Outdoor Amphitheater", worksLike: "arena" }]);
+  const m1last = m1.ok ? m1.types[m1.types.length - 1] : undefined;
+  ok(m1.ok && m1.renamed.join() === "gymstage" && m1last?.key === "outdooramphitheater" && m1last.worksLike === "arena", "#216: merge renames in place and mints a key for an added type");
+  const m2 = v216Merge(seed, base.filter((r) => r.key !== "church"));
+  ok(!m2.ok && m2.error.includes("archive"), "#216: a built-in can't be removed — archive it instead");
+  const m3 = v216Merge(seed, base.filter((r) => r.key !== "gymstage"));
+  ok(m3.ok && m3.removed.join() === "gymstage", "#216: a custom type can be removed (the action refuses it while in use)");
+  ok(!v216Merge(seed, [...base, { label: " gym stage ", worksLike: "flat" }]).ok, "#216: labels are unique case-insensitively");
+  ok(!v216Merge(seed, base.map((r, i) => (i === 0 ? { ...r, label: "x".repeat(41) } : r))).ok, "#216: labels are capped at 40 characters");
+  ok(!v216Merge(seed, base.map((r, i) => (i === 0 ? { ...r, label: "   " } : r))).ok, "#216: a blank label is refused");
+  const m7 = v216Merge(seed, base.slice().reverse());
+  ok(m7.ok && m7.types[0].key === "gymstage" && m7.types.every((t, i) => t.order === i), "#216: order follows the submitted list");
+  const m8 = v216Merge(seed, base.map((r) => (r.key === "church" ? { ...r, worksLike: "arena" } : r)));
+  ok(m8.ok && m8.types.find((t) => t.key === "church")?.worksLike === "church", "#216: a built-in's works-like is fixed");
+  ok(!v216Merge(seed, [...base, { key: "forged", label: "Forged", worksLike: "flat" }]).ok, "#216: an unknown key is refused (keys are minted server-side)");
+  ok(!v216Merge(seed, base.map((r) => ({ ...r, archived: true }))).ok, "#216: at least one type stays un-archived");
+  ok(!v216Merge(seed, [...base, { label: "Chapel", worksLike: "sideways" }]).ok, "#216: a new type must work like a built-in");
+
+  const d = (loc: string, type: string, sibs: string[] = []) => v216Derive({ locationName: loc, companyName: "Lincoln Public Schools", typeLabel: type }, sibs);
+  ok(d("Lincoln High School", "Gym Stage") === "Lincoln High School — Gym Stage", "#216: name = Location — Type");
+  ok(d("  ", "Gym Stage") === "Lincoln Public Schools — Gym Stage", "#216: a blank location falls back to the company name");
+  ok(d("LHS", "Gym Stage", ["lhs — gym stage"]) === "LHS — Gym Stage (2)" && d("LHS", "Gym Stage", ["LHS — Gym Stage", "LHS — Gym Stage (2)"]) === "LHS — Gym Stage (3)",
+    "#216: a taken name numbers (2), (3)… first free, case-insensitively");
+  ok(v216Derive({ locationName: "", companyName: "", typeLabel: "Black box" }, []) === "Black box", "#216: no location and no company → the type alone");
+
+  const labels = v216DeriveLabels([
+    { label: "Main Hall", locationName: "", venueKind: "proscenium", derive: false },
+    { label: "", locationName: "LHS", venueKind: "gymstage", derive: true },
+    { label: "old", locationName: "LHS", venueKind: "gymstage", derive: true },
+  ], "Lincoln", seed);
+  ok(labels.join("|") === "Main Hall|LHS — Gym Stage|LHS — Gym Stage (2)", "#216: deriveLocationLabels keeps fixed names and numbers derived ones in order");
+
+  const plan = v216Plan([
+    { id: "b", name: "LHS — Gym (2)", locationName: "LHS", venueKind: "gymstage", nameAuto: true, isPrimary: false, createdAt: 2 },
+    { id: "a", name: "LHS — Gym", locationName: "LHS", venueKind: "gymstage", nameAuto: true, isPrimary: true, createdAt: 1 },
+    { id: "m", name: "Main Hall", locationName: null, venueKind: "gymstage", nameAuto: false, isPrimary: false, createdAt: 0 },
+  ], "Lincoln", seed);
+  ok(plan.map((p) => `${p.id}=${p.name}`).join("|") === "a=LHS — Gym Stage|b=LHS — Gym Stage (2)",
+    "#216: a type rename re-derives auto names primary-first, keeps numbering, never touches a hand-kept name");
+
+  // Behaviour must read worksLikeOf(), never the raw stored key.
+  const v216SrcRoot = join(process.cwd(), "src");
+  const v216Offenders = (v216Readdir(v216SrcRoot, { recursive: true, encoding: "utf8" }) as string[])
+    .filter((f) => /\.(ts|tsx)$/.test(f))
+    .filter((f) => /venueKind\s*[!=]==?|switch\s*\([^)]*venueKind/.test(readFileSync(join(v216SrcRoot, f), "utf8")));
+  ok(v216Offenders.length === 0, `#216: no code compares a raw venueKind — use worksLikeOf() (found: ${v216Offenders.join(", ")})`);
+}
