@@ -9040,3 +9040,19 @@ that message: who you're linking from, Done, then every #214 editor — From/To/
 companies/venues/people, the signature pre-fill, quick-adds and Create task. The popup is gone. The sidebar widens
 to 380px while linking (never squeezing the conversation below 320px), stays open for several links in a row, and
 won't drop a half-typed new contact without asking. See D394.
+
+---
+
+## 241. Imported Daylite flame tests and inspections open in the Estimator — DONE 2026-09-27 (D395)
+
+**Reported:** 2026-09-27 (Jeff): "The flame test for Blue man group still opened into the estimator."
+
+**Done.** The link was right; the quote was typed wrong. The Daylite history import typed every opportunity as a
+system quote, so it opened the Estimator. Imported quotes are now typed by name: "Flame Test" → flame test,
+"Inspection" → rigging inspection, "Consult"/"Consulting" → consulting, anything else stays a system quote. Only
+open quotes are retyped (Jeff: "Only edit the 4 that are still open"); a won or lost one is left alone. Migration
+0031 fixes what was already imported on the next deploy — in Jeff's export that is Blue Man Group's flame test, 3
+rigging inspections and 4 consulting proposals — and each opens its own builder with an FLM/RIG/CON number. The
+Daylite import preview names the builder too. See D395.
+
+**Still open.** Repairs are deliberately left as system quotes, by name or otherwise (Jeff's call pending).

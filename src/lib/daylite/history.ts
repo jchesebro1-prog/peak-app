@@ -375,6 +375,33 @@ export type ProjectPlan = {
   value: number | null; // null = UKN
 };
 
+/**
+ * #241 (D395) — the quote type an imported Daylite opportunity gets, read from
+ * its name. Daylite files flame tests, rigging inspections and consulting under
+ * the same pipelines as system quotes, so the name is the only signal, checked
+ * in this order:
+ *   "flame test" (flame-test, flametest, Flame Testing) → flame_test
+ *     ("BLUEMAN GROUP - 2026 Flame Test"; "Flame retardant treatment" and
+ *     "Flameproof drape" stay system — only the "flame test" phrasing counts)
+ *   the word "inspection" → inspection ("… Level 2 Rigging Inspection")
+ *   the word "consult" or "consulting" → consulting ("… AVL Consult",
+ *     "… Consulting with EUA"; "Consultant architect lunch" and "Consultation"
+ *     stay system — a job name says what we do, a person is not the job)
+ *   anything else → system (the Estimator).
+ * Repair is deliberately NOT inferred (Jeff, 2026-09-27). Only quotes that are
+ * still open take a name-derived type: a won quote stays system (see
+ * writeQuote). Migration 0031 applies the same patterns, in the same order, to
+ * history imported before this existed — keep the two in step.
+ */
+export type DayliteQuoteType = "flame_test" | "inspection" | "consulting" | "system";
+export function dayliteQuoteType(name: string | null | undefined): DayliteQuoteType {
+  const s = name || "";
+  if (/\bflame[\s-]*test/i.test(s)) return "flame_test";
+  if (/\binspection\b/i.test(s)) return "inspection";
+  if (/\bconsult(ing)?\b/i.test(s)) return "consulting";
+  return "system";
+}
+
 export type QuotePlan = {
   id: string;
   /** Task 12b — the July lead id for the same opp: leadId(Name, RAW Companies cell). */

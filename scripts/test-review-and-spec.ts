@@ -10525,6 +10525,7 @@ seeded()
   .then(() => estimate223AllocationAsyncChecks())
   .then(() => estimate223WritersAsyncChecks())
   .then(() => estimate223SweepDAsyncChecks())
+  .then(() => daylite241AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27138,4 +27139,229 @@ import { existsSync as sb214Exists, readdirSync as sb214Readdir } from "node:fs"
       "#214 sidebar fix 3: re-clicking Link… on the message already in link mode refocuses the panel's search box"
     );
   }
+}
+
+/* ======================================================================
+   #241 (D395) — imported Daylite flame tests and inspections get their own
+   quote type. The history import typed every open opportunity "system", so
+   "BLUEMAN GROUP - 2026 Flame Test" opened in the Estimator. dayliteQuoteType
+   reads the name (flame test → flame_test, the word inspection → inspection,
+   the word consult/consulting → consulting, else system; repair deliberately
+   not inferred), writeQuote uses it for open quotes (a won one stays system),
+   and drizzle/0031_daylite_quote_types.sql retypes open history already
+   imported. Runs on the harness's fresh datadir, so the real migration file
+   is what is under test.
+   ====================================================================== */
+import { dayliteQuoteType as d241Type } from "@/lib/daylite/history";
+import { quoteBuilderHref as d241Href } from "@/lib/quote-links";
+import { displayQuoteNumber as d241Display } from "@/lib/estimate-number";
+import type { Quote as D241Quote } from "@/lib/stores/quotes";
+import { createFixture as d241Create, fixtureId as d241Id, registerFixture as d241Register } from "./test-fixtures";
+{
+  const cases: Array<[string, string]> = [
+    ["BLUEMAN GROUP - 2026 Flame Test", "flame_test"],
+    ["LODI HS - 2026 Flame Test", "flame_test"],
+    ["NORTHLAND PINES SD - Flame Test", "flame_test"],
+    ["ACME - flame-test", "flame_test"],
+    ["ACME - FLAMETEST 2026", "flame_test"],
+    ["ACME - Flame Testing", "flame_test"],
+    ["SAUK PRAIRIE SD - Level 2 Rigging Inspection", "inspection"],
+    ["SUN PRAIRIE DISTRICT - Rigging Inspection", "inspection"],
+    ["ACME - Flame Test + Rigging Inspection", "flame_test"],
+    ["Flameproof drape", "system"],
+    ["Flame retardant treatment", "system"],
+    ["AL RINGLING - Lighting", "system"],
+    ["AL RINGLING - Audio System Upgrades CONSULT", "consulting"],
+    ["BELLEVILLE HS AUDITORIUM - Consulting with EUA and MainStage", "consulting"],
+    ["BROOKFIELD LUTHERAN - AVL Consult", "consulting"],
+    ["OAK CREEK HS - Fitness Center AV Consult via MSA", "consulting"],
+    ["XAVIER HS - Level 2 Rigging Inspection", "inspection"],
+    ["ACME - Rigging Inspection consult", "inspection"],
+    ["Consultant architect lunch", "system"],
+    ["ACME - Consultation", "system"],
+    ["SERVICE: Pardeeville Rigging Repair", "system"],
+    ["Preinspection walkthrough", "system"],
+    ["", "system"],
+  ];
+  const wrong = cases.filter(([n, t]) => d241Type(n) !== t).map(([n, t]) => `${n} → ${d241Type(n)} (want ${t})`);
+  ok(wrong.length === 0, `#241 dayliteQuoteType: flame test → flame_test (first), the word inspection → inspection, consult/consulting → consulting, everything else (flameproof, flame retardant, consultant, consultation, repair) → system${wrong.length ? " — " + wrong.join("; ") : ""}`);
+  ok(d241Type(null) === "system" && d241Type(undefined) === "system", "#241 dayliteQuoteType: a missing name is a system quote");
+
+  const commitSrc = readFileSync(join(process.cwd(), "src/lib/daylite/history-commit.ts"), "utf8");
+  const wq = commitSrc.slice(commitSrc.indexOf("async function writeQuote("), commitSrc.indexOf("export type CommitResult"));
+  ok(
+    /const quoteType = importedQuoteType\(q\);/.test(wq) && /\n\s+quoteType,\n\s+\},\n\s+quoteType,\n\s+pl,/.test(wq) && !/"system"/.test(wq) &&
+      /return q\.status === "won" \? "system" : dayliteQuoteType\(q\.name\);/.test(commitSrc),
+    "#241 writeQuote: the name-derived type (system for a won quote) goes into buildQuote's input AND its type argument — no hard-coded \"system\" left"
+  );
+  const journal = JSON.parse(readFileSync(join(process.cwd(), "drizzle/meta/_journal.json"), "utf8")) as { entries: Array<{ tag: string; when: number }> };
+  const j30 = journal.entries.find((e) => e.tag === "0030_estimate_numbers");
+  const j31 = journal.entries.find((e) => e.tag === "0031_daylite_quote_types");
+  ok(!!j30 && !!j31 && j31.when > j30.when, "#241 migration: 0031_daylite_quote_types is journaled after 0030, so drizzle applies it on deploy");
+  const clientSrc = readFileSync(join(process.cwd(), "src/app/(app)/import/daylite/daylite-client.tsx"), "utf8");
+  ok(/QUOTE_TYPE_LABEL\[r\.quoteType\]/.test(clientSrc) && /flame_test: "Flame test"/.test(clientSrc), "#241 /import/daylite: a quote row in the needs-a-pick table names its inferred builder (Flame test / Rigging inspection / Consulting)");
+}
+
+async function daylite241AsyncChecks(): Promise<void> {
+  const { previewHistory, commitHistory } = await import("@/lib/daylite/history-commit");
+  const { quoteId, projectId } = await import("@/lib/daylite/ids");
+  const Q = await import("@/lib/stores/quotes");
+  const { buildQuote } = Q;
+  const { getDb } = await import("@/db");
+  const { sql } = await import("drizzle-orm");
+  const db = await getDb();
+  const rowsOf = <T,>(result: unknown): T[] =>
+    result && typeof result === "object" && "rows" in result ? (result as { rows: T[] }).rows : Array.isArray(result) ? (result as T[]) : [];
+
+  // ---- the import path: preview + commit type by name ----
+  const O = `\tCategory\tName\tState\tState Reason\tForecasted Close\tValue\tPipeline\tStage\tNext Task\tNext Task Due\tPeople\tCompanies\tOwner\t
+\tDesign\t"ZZ241 BLUEMAN GROUP - 2026 Flame Test"\tOpen\t\t\t"$2,400.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZZ241 Blue Man Group"\t"Jeff Chesebro"\t
+\tDesign\t"ZZ241 SAUK PRAIRIE SD - Level 2 Rigging Inspection"\tOpen\t\t\t"$1,800.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZZ241 Sauk Prairie SD"\t"Jeff Chesebro"\t
+\tDesign\t"ZZ241 AL RINGLING - Lighting"\tOpen\t\t\t"$9,000.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZZ241 Al Ringling"\t"Jeff Chesebro"\t
+\tDesign\t"ZZ241 BROOKFIELD LUTHERAN - AVL Consult"\tOpen\t\t\t"$3,000.00"\tEstimate/Design\t"2 • Design"\t\t\t\t"ZZ241 Brookfield Lutheran"\t"Jeff Chesebro"\t
+\tBid\t"ZZ241 LODI HS - 2026 Flame Test"\tOpen\t\t\t"$1,200.00"\tBID SPEC\t"5 • Awarded"\t\t\t\t"ZZ241 Lodi HS"\t"Jeff Chesebro"\t`;
+  const ids = {
+    flame: quoteId("ZZ241 BLUEMAN GROUP - 2026 Flame Test", "ZZ241 Blue Man Group"),
+    insp: quoteId("ZZ241 SAUK PRAIRIE SD - Level 2 Rigging Inspection", "ZZ241 Sauk Prairie SD"),
+    sys: quoteId("ZZ241 AL RINGLING - Lighting", "ZZ241 Al Ringling"),
+    consult: quoteId("ZZ241 BROOKFIELD LUTHERAN - AVL Consult", "ZZ241 Brookfield Lutheran"),
+    wonFlame: quoteId("ZZ241 LODI HS - 2026 Flame Test", "ZZ241 Lodi HS"),
+  };
+  for (const id of Object.values(ids)) d241Register("quotes", id);
+  // The won quote's sold job gets its install project (existing import rule).
+  d241Register("projects", projectId("ZZ241 LODI HS - 2026 Flame Test", "ZZ241 Lodi HS"));
+  const pv = await previewHistory("", O);
+  const pvType = (id: string) => pv.rows.find((r) => r.id === id)?.quoteType;
+  ok(
+    pvType(ids.flame) === "flame_test" && pvType(ids.insp) === "inspection" && pvType(ids.consult) === "consulting" && pvType(ids.sys) === "system" && pvType(ids.wonFlame) === "system",
+    "#241 preview: each open Daylite quote row carries the type its name maps to; one imported as won stays system"
+  );
+  const res = await commitHistory("", O, {}, "Test Admin");
+  ok(res.errors.length === 0 && res.created.quotes === 5, `#241 commit: five Daylite opportunities import as quotes (${res.errors.join("; ")})`);
+  const flame = await Q.get(ids.flame);
+  const insp = await Q.get(ids.insp);
+  const sys = await Q.get(ids.sys);
+  ok(
+    flame?.quoteType === "flame_test" && flame.flameTest === null && flame.source === "daylite" && flame.value === 2400 && flame.stage === "design",
+    "#241 commit: \"… - 2026 Flame Test\" imports as a flame_test quote (no subdoc — the builder opens without one), keeping source/value/stage"
+  );
+  ok(insp?.quoteType === "inspection" && insp.inspection === null, "#241 commit: \"… Rigging Inspection\" imports as an inspection quote");
+  ok(sys?.quoteType === "system", "#241 commit: any other opportunity is still a system quote");
+  const consult = await Q.get(ids.consult);
+  ok(consult?.quoteType === "consulting" && consult.consulting === null && !!consult && d241Href(consult).startsWith("/design/engagements/quote?id="), "#241 commit: \"… AVL Consult\" imports as a consulting quote and opens the consulting builder");
+  const wonFlame = await Q.get(ids.wonFlame);
+  ok(wonFlame?.status === "won" && wonFlame.quoteType === "system", "#241 commit: a flame-test name imported as WON (a sold job) stays system — only open quotes are retyped");
+  ok(
+    !!flame && d241Href(flame).startsWith("/flame-tests/quote?id=") && !!insp && d241Href(insp).startsWith("/inspections/quote?id=") && !!sys && d241Href(sys).startsWith("/estimator?id="),
+    "#241 commit: the imported flame test opens the flame-test builder, the inspection its builder, the rest the Estimator"
+  );
+  ok(!!flame && /^FLM-\d+$/.test(d241Display(flame) || "") && !!insp && /^RIG-\d+$/.test(d241Display(insp) || ""), "#241 commit: the estimate number prints FLM- / RIG- from the type (estNo unchanged)");
+
+  // ---- the migration: retypes already-imported history, and only that ----
+  const file = join(process.cwd(), "drizzle", "0031_daylite_quote_types.sql");
+  const stmts = readFileSync(file, "utf8").split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean);
+  const run = async () => {
+    for (const s of stmts) await db.execute(sql.raw(s));
+  };
+  const t = Date.now();
+  const mk = (slug: string, name: string, quoteType: string, extra: Partial<D241Quote> = {}): D241Quote => ({
+    ...buildQuote(d241Id(241, slug), { name, owner: "spec", value: 1500 }, quoteType, null, t),
+    source: "daylite",
+    status: "sent",
+    ...extra,
+  });
+  const fx = [
+    mk("dl-flame", "X - 2026 Flame Test", "system"),
+    mk("dl-insp", "Y - Level 2 Rigging Inspection", "system"),
+    mk("dl-both", "Z - Flame Test and Rigging Inspection", "system"),
+    mk("dl-sys", "W - Auditorium AV", "system"),
+    mk("dl-retardant", "V - Flame retardant treatment", "system"),
+    mk("dl-typed", "U - 2026 Flame Test", "consulting"),
+    mk("quick-flame", "T - 2026 Flame Test", "system", { source: "quick" }),
+    mk("dl-consult", "S - AVL Consult", "system", { status: "draft" }),
+    mk("dl-consulting", "R - Consulting with EUA and MainStage", "system"),
+    mk("dl-consultant", "Q - Consultant architect lunch", "system"),
+    mk("dl-won-flame", "P - 2026 Flame Test", "system", { status: "won" }),
+    mk("dl-lost-insp", "O - Rigging Inspection", "system", { status: "lost" }),
+    mk("dl-lost-consult", "N - AV Consult", "system", { status: "lost" }),
+  ];
+  for (const d of fx) await d241Create("quotes", d);
+  const read = async () => {
+    const out = new Map<string, { rev: number; doc: Record<string, unknown> }>();
+    for (const d of fx) {
+      const r = rowsOf<{ rev: number; doc: Record<string, unknown> }>(await db.execute(sql`select rev, doc from quotes where id = ${d.id}`))[0];
+      if (r) out.set(d.id, r);
+    }
+    return out;
+  };
+  const before = await read();
+  let err: unknown = null;
+  try {
+    await run();
+  } catch (e) {
+    err = e;
+  }
+  ok(err === null, `#241 migration: every statement runs on the real database (${String(err)})`);
+  const after = await read();
+  const typeOf = (slug: string) => after.get(d241Id(241, slug))?.doc.quoteType;
+  ok(typeOf("dl-flame") === "flame_test", "#241 migration: a Daylite system quote named \"X - 2026 Flame Test\" becomes flame_test");
+  ok(typeOf("dl-insp") === "inspection", "#241 migration: a Daylite system quote named \"… Rigging Inspection\" becomes inspection");
+  ok(typeOf("dl-both") === "flame_test", "#241 migration: flame test wins over inspection, same as the import");
+  ok(typeOf("dl-sys") === "system" && typeOf("dl-retardant") === "system", "#241 migration: any other Daylite quote (flame retardant included) stays system");
+  ok(typeOf("dl-typed") === "consulting", "#241 migration: a Daylite quote already typed otherwise is left alone");
+  ok(typeOf("quick-flame") === "system", "#241 migration: a non-Daylite quote is never touched, whatever its name");
+  ok(typeOf("dl-consult") === "consulting" && typeOf("dl-consulting") === "consulting", "#241 migration: open Daylite quotes named \"… Consult\" / \"… Consulting …\" become consulting");
+  ok(typeOf("dl-consultant") === "system", "#241 migration: \"Consultant …\" is not a consulting job — stays system");
+  ok(
+    typeOf("dl-won-flame") === "system" && typeOf("dl-lost-insp") === "system" && typeOf("dl-lost-consult") === "system",
+    "#241 migration: won and lost Daylite quotes are never retyped, whatever their name (open = draft / sent only)"
+  );
+  const onlyType = [...before].every(([id, b]) => {
+    const a = after.get(id);
+    if (!a) return false;
+    const { quoteType: _qa, ...ra } = a.doc;
+    const { quoteType: _qb, ...rb } = b.doc;
+    void _qa;
+    void _qb;
+    return JSON.stringify(ra) === JSON.stringify(rb);
+  });
+  ok(onlyType, "#241 migration: writes only doc.quoteType — updatedAt, estNo and every other field are untouched");
+  const changed = ["dl-flame", "dl-insp", "dl-both", "dl-consult", "dl-consulting"].map((s) => d241Id(241, s));
+  ok(
+    [...before].every(([id, b]) => after.get(id)!.rev === (changed.includes(id) ? b.rev + 1 : b.rev)),
+    "#241 migration: rev is bumped on exactly the retyped rows, so pull-sync sees the change"
+  );
+  const retyped = await Q.get(d241Id(241, "dl-flame"));
+  ok(!!retyped && d241Href(retyped) === `/flame-tests/quote?id=${encodeURIComponent(d241Id(241, "dl-flame"))}`, "#241 migration: the retyped quote's link opens /flame-tests/quote, not the Estimator");
+  await run();
+  const again = await read();
+  ok(
+    [...after].every(([id, a]) => again.get(id)!.rev === a.rev && JSON.stringify(again.get(id)!.doc) === JSON.stringify(a.doc)),
+    "#241 migration: idempotent — a second run changes nothing"
+  );
+
+  // The SQL patterns and dayliteQuoteType agree name for name.
+  const names = [
+    "BLUEMAN GROUP - 2026 Flame Test", "NORTHLAND PINES SD - Flame Test", "ACME - flame-test", "ACME - FLAMETEST",
+    "SUN PRAIRIE DISTRICT - Rigging Inspection", "Flameproof drape", "Flame retardant treatment",
+    "Preinspection walkthrough", "Rigging Inspections", "NORTH HS - Consulting", "ACME - AVL Consult", "AUDIO CONSULT",
+    "Consultant architect lunch", "ACME - Consultation", "ACME - Rigging Inspection consult",
+  ];
+  const disagree: string[] = [];
+  for (const n of names) {
+    const r = rowsOf<{ f: boolean; i: boolean; c: boolean }>(
+      await db.execute(
+        sql`select ${n} ~* '\\mflame[[:space:]-]*test' as f, ${n} ~* '\\minspection\\M' as i, ${n} ~* '\\mconsult(ing)?\\M' as c`
+      )
+    )[0];
+    const sqlType = r?.f ? "flame_test" : r?.i ? "inspection" : r?.c ? "consulting" : "system";
+    if (sqlType !== d241Type(n)) disagree.push(`${n}: sql ${sqlType} vs ts ${d241Type(n)}`);
+  }
+  const src = readFileSync(file, "utf8");
+  ok(
+    disagree.length === 0 && src.includes("~* '\\mflame[[:space:]-]*test'") && src.includes("~* '\\minspection\\M'") &&
+      src.includes("~* '\\mconsult(ing)?\\M'") &&
+      (src.match(/NOT IN \('won', 'lost'\)/g) || []).length === 3,
+    `#241 migration: its three patterns (each guarded to open quotes) classify every sample name exactly like dayliteQuoteType${disagree.length ? " — " + disagree.join("; ") : ""}`
+  );
 }

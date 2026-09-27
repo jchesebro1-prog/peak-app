@@ -218,6 +218,13 @@
       "when": 1790483100340,
       "tag": "0030_estimate_numbers",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790515123795,
+      "tag": "0031_daylite_quote_types",
+      "breakpoints": true
     }
   ]
 }

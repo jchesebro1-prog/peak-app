@@ -128,6 +128,12 @@ const KIND_LABEL: Record<PreviewRow["kind"], string> = {
   order: "Order",
   quote: "Quote",
 };
+/** #241 — an imported quote's builder, when it isn't the Estimator. */
+const QUOTE_TYPE_LABEL: Partial<Record<NonNullable<PreviewRow["quoteType"]>, string>> = {
+  flame_test: "Flame test",
+  inspection: "Rigging inspection",
+  consulting: "Consulting",
+};
 /** Stage id → configured label, per kind — resolved server-side in page.tsx. */
 export type StageLabels = Record<"project" | "order" | "repair", Record<string, string>>;
 const emptyAcc = (): Acc => ({ created: {}, skippedExisting: 0, errors: [] });
@@ -577,7 +583,10 @@ export function DayliteHistory({ stageLabels }: { stageLabels: StageLabels }) {
                       <tr key={r.id}>
                         <td style={td}>
                           <div style={{ fontWeight: 500 }}>{r.name}</div>
-                          <div style={{ fontSize: 11, color: "#9aa0ab" }}>{KIND_LABEL[r.kind]}</div>
+                          <div style={{ fontSize: 11, color: "#9aa0ab" }}>
+                            {KIND_LABEL[r.kind]}
+                            {r.quoteType && QUOTE_TYPE_LABEL[r.quoteType] ? ` · ${QUOTE_TYPE_LABEL[r.quoteType]}` : ""}
+                          </div>
                         </td>
                         <td style={{ ...td, color: "#5b616e", fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
                           {r.companiesRaw || "—"}

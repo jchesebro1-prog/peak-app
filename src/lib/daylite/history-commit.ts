@@ -66,7 +66,7 @@ import {
 import * as Repairs from "@/lib/stores/repair-jobs";
 import * as Quotes from "@/lib/stores/quotes";
 import { assignEstimateNumbers } from "@/lib/stores/estimate-numbers";
-import { parseTsv, planHistory, staleLiveCompletedRepairs, type JulyRetire, type ProjectPlan, type QuotePlan } from "./history";
+import { dayliteQuoteType, parseTsv, planHistory, staleLiveCompletedRepairs, type DayliteQuoteType, type JulyRetire, type ProjectPlan, type QuotePlan } from "./history";
 import { companyId, contactId, projectId } from "./ids";
 import {
   countLiveJulyProjects,
@@ -83,6 +83,8 @@ import {
 export type PreviewRow = {
   id: string;
   kind: "project" | "repair" | "order" | "quote";
+  /** Quote rows only (#241) — the type the name maps to (flame test / inspection / system). */
+  quoteType?: DayliteQuoteType;
   name: string;
   company: string | null;
   candidates: string[];
@@ -482,6 +484,7 @@ function quotePreviewRow(
   return {
     id: q.id,
     kind: "quote",
+    quoteType: importedQuoteType(q),
     name: q.name,
     company: r.company?.name ?? null,
     candidates: q.companyCandidates,
@@ -830,6 +833,17 @@ async function linkOrCreateSoldProject(
 }
 
 /**
+ * #241 (D395): an open imported flame test / rigging inspection / consulting
+ * opportunity opens in its own builder, not the Estimator (its subdoc stays
+ * null — each builder opens without one). A quote imported as won stays
+ * system: it is a sold job the import links to an install project, and
+ * migration 0031 leaves won/lost quotes alone for the same reason.
+ */
+function importedQuoteType(q: Pick<QuotePlan, "name" | "status">): DayliteQuoteType {
+  return q.status === "won" ? "system" : dayliteQuoteType(q.name);
+}
+
+/**
  * One write: the doc create() would build (same builder), overlaid with the
  * imported state, then upserted once. Never create()-then-update() — a failure
  * between the two would leave a draft owned by Jeff that re-runs skip as
@@ -838,6 +852,7 @@ async function linkOrCreateSoldProject(
  */
 async function writeQuote(ctx: Ctx, q: QuotePlan, r: Resolved, importedAt: number): Promise<void> {
   const pl = quotePipelineFor(ctx.pipes, { pipelineId: q.pipelineId });
+  const quoteType = importedQuoteType(q);
   const doc: Quotes.Quote = {
     ...Quotes.buildQuote(
       q.id,
@@ -846,9 +861,9 @@ async function writeQuote(ctx: Ctx, q: QuotePlan, r: Resolved, importedAt: numbe
         customer: r.company?.name ?? q.companyRaw ?? "",
         customerId: r.company?.id ?? null,
         contactName: r.contactName ?? "",
-        quoteType: "system",
+        quoteType,
       },
-      "system",
+      quoteType,
       pl,
       importedAt
     ),

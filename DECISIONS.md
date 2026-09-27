@@ -6909,3 +6909,31 @@ thread change. The pane widens from 300px to `clamp(300px, 100% − 320px, 380px
 conversation keeps at least 320px; the phone overlay keeps its height. Escape in an idle field exits link mode, but
 never closes a quick-add that has typed content, and leaving link mode with a half-typed contact, company or venue
 asks first.
+
+## D395. Imported Daylite quotes are typed by name — flame test, inspection, consulting (#241, 2026-09-27)
+
+Jeff (2026-09-27): "The flame test for Blue man group still opened into the estimator." The #221 links were right;
+the data was wrong. The Daylite history import (#187) typed every open opportunity `system`, and Daylite files flame
+tests, rigging inspections and consulting under the same pipelines as installs, so "BLUEMAN GROUP - 2026 Flame
+Test" was a system quote and correctly opened the Estimator. The name is the only signal, so
+`dayliteQuoteType(name)` (`src/lib/daylite/history.ts`) reads it, first match wins: "flame test" (also flame-test,
+flametest, Flame Testing) → `flame_test`; the word "inspection" → `inspection`; the word "consult" or "consulting" →
+`consulting`; anything else → `system`. Only that phrasing counts: "Flame retardant treatment" and "Flameproof drape"
+stay system, and so do "Consultant architect lunch" and "Consultation" — a job name says what we do, a person in
+the name is not the job. **Repairs are not inferred** and stay system (Jeff, 2026-09-27).
+
+Only **open** quotes are retyped — Jeff: "Only edit the 4 that are still open" (consulting). The importer only makes
+quotes from State = Open opportunities; one at a won-tagged stage imports as a won sold job linked to an install
+project, and it stays `system` (`importedQuoteType` in `history-commit.ts`). Against Jeff's export (73 open
+opportunities) that is 1 flame test (Blue Man Group), 3 rigging inspections (Sauk Prairie, Sun Prairie, Xavier) and 4
+consulting (AL Ringling, Belleville HS, Brookfield Lutheran, Oak Creek HS); none of the 21 imported as won matches.
+The other flame tests and inspections in the export are Won/Lost/Suspended opportunities, which never became quotes.
+
+Already-imported history is retyped by migration `0031_daylite_quote_types` (custom, idempotent per D141): the same
+three patterns in the same order (Postgres `\m…\M` for `\b`), only where `source = 'daylite'`, `quoteType =
+'system'` and `status` is not `won`/`lost` (i.e. draft or sent). It writes only `doc.quoteType` via `jsonb_set` and
+bumps `rev`, like 0030 — `updatedAt`, `estNo` and `estSuffix` are untouched; the printed prefix follows the type
+(EST → FLM / RIG / CON). The subdoc stays null: all three builders open a quote without one. Saving one in the
+consulting builder is an ordinary edit (no auto-lead — that is the create path only), but it rewrites `source` to
+`consulting`, sets the value to the scopes' total (0 until scopes are entered), and needs the quote's customer
+to be a company on file. The `/import/daylite` needs-a-company table names a quote row's inferred builder.
