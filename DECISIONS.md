@@ -6978,3 +6978,12 @@ requested" can auto-approve at send when within the limit — consistent with th
 also reopens. The service builders' own "mark approved/won" step keeps its engine-owned bypass, so the chip there
 describes sending.
 
+Release fixes (2026-09-27): the snapshot also records `triggeredBy` / `trigger`, so the banner adds "— sent by Jena" /
+"— marked Won by Jena" when someone other than the owner made the move; a limit changed in Settings never re-stamps an
+unchanged quote (only a changed kind, owner or value does); a sent quote whose auto approval went stale can be
+resubmitted for review or attested, so it can still reach Won. The Estimator now stores a server-recomputed total
+(`totals()` over the saved sections — identical to the figure the builder shows) rather than the posted one, so the
+limit check can't be fed a wrong value. Service, rental and consulting quotes keep the owner who created them — a
+teammate's save no longer makes them the owner — which also fixes the "Mine" filter, Home "my quotes", the letter
+signer and the spawned job's owner to the creator; Send, the Home stage move and the renewal send record the person
+who clicked (sent revision, "Install sold" task).
