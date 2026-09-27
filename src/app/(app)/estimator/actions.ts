@@ -45,6 +45,8 @@ import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
 import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
+import { reviewLimitChipFor } from "@/lib/review-limits-server";
+import type { ReviewLimitChipData } from "@/lib/review-limits";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -172,6 +174,8 @@ export type SaveResult = {
   notice?: string;
   /** #222 — the saved PDF's state after this save (pending when a render was scheduled). */
   pdf?: QuotePdfView | null;
+  /** #242 — the review-limit chip, re-evaluated on the server. */
+  reviewLimit?: ReviewLimitChipData | null;
 };
 
 export type ReviewSync = {
@@ -181,15 +185,22 @@ export type ReviewSync = {
   /** Set on `ok: false` — a typed, UI-displayable reason (punch #60: never a
    *  raw thrown exception for an expected rejection like "not yet approved"). */
   error?: string;
+  /** #242 — the review-limit chip, re-evaluated on the server. */
+  reviewLimit?: ReviewLimitChipData | null;
 };
 
 function refresh() {
   revalidatePath("/", "layout");
 }
 
-async function syncOf(id: string): Promise<ReviewSync> {
+async function syncOf(id: string, viewer: string): Promise<ReviewSync> {
   const q = await get(id);
-  return { ok: !!q, review: q?.review ?? null, status: q?.status ?? null };
+  return {
+    ok: !!q,
+    review: q?.review ?? null,
+    status: q?.status ?? null,
+    reviewLimit: q ? await reviewLimitChipFor(q, viewer) : null,
+  };
 }
 
 /** Client-callable twin of ReviewSync for the Daylite stage bar (Task 6) — the
@@ -201,9 +212,11 @@ export type StageSync = {
   pipelineId: string | null;
   stage: string | null;
   error?: string;
+  /** #242 — the review-limit chip, re-evaluated on the server. */
+  reviewLimit?: ReviewLimitChipData | null;
 };
 
-async function stageSyncOf(id: string): Promise<StageSync> {
+async function stageSyncOf(id: string, viewer: string): Promise<StageSync> {
   const q = await get(id);
   return {
     ok: !!q,
@@ -211,6 +224,7 @@ async function stageSyncOf(id: string): Promise<StageSync> {
     review: q?.review ?? null,
     pipelineId: q?.pipelineId ?? null,
     stage: q?.stage ?? null,
+    reviewLimit: q ? await reviewLimitChipFor(q, viewer) : null,
   };
 }
 
@@ -499,6 +513,7 @@ export async function saveQuoteAction(
     stage: q?.stage ?? null,
     vendorQuotes: storedVendorQuotes,
     pdf: pdfState,
+    reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,
     ...(statusError ? { error: statusError } : {}),
     ...(statusNotice ? { notice: statusNotice } : {}),
   };
@@ -761,7 +776,7 @@ export async function setStatusAction(
     };
   }
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 /**
@@ -809,7 +824,7 @@ export async function setQuoteStageAction(id: string, stageId: string): Promise<
     };
   }
   refresh();
-  return stageSyncOf(id);
+  return stageSyncOf(id, user.name);
 }
 
 /**
@@ -818,7 +833,7 @@ export async function setQuoteStageAction(id: string, stageId: string): Promise<
  * (returns null, never throws) outside draft or for an unknown pipeline id.
  */
 export async function setQuotePipelineAction(id: string, pipelineId: string): Promise<StageSync> {
-  await requireUser();
+  const user = await requireUser();
   if (!id || !pipelineId) return { ok: false, status: null, review: null, pipelineId: null, stage: null };
   const q = await setQuotePipeline(id, pipelineId);
   if (!q) {
@@ -833,7 +848,7 @@ export async function setQuotePipelineAction(id: string, pipelineId: string): Pr
     };
   }
   refresh();
-  return stageSyncOf(id);
+  return stageSyncOf(id, user.name);
 }
 
 export async function submitReviewAction(
@@ -844,7 +859,7 @@ export async function submitReviewAction(
   if (!id) return { ok: false, review: null, status: null };
   await submitForReview(id, { by: user.name, reviewer: reviewer || null });
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 export async function claimReviewAction(id: string): Promise<ReviewSync> {
@@ -853,7 +868,7 @@ export async function claimReviewAction(id: string): Promise<ReviewSync> {
     return { ok: false, review: null, status: null };
   await claimReview(id, user.name);
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 export async function approveReviewAction(id: string): Promise<ReviewSync> {
@@ -862,7 +877,7 @@ export async function approveReviewAction(id: string): Promise<ReviewSync> {
     return { ok: false, review: null, status: null };
   await approve(id, { by: user.name });
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 export async function requestChangesAction(
@@ -874,7 +889,7 @@ export async function requestChangesAction(
     return { ok: false, review: null, status: null };
   await requestChanges(id, { by: user.name, note: note.trim() });
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 /**
@@ -888,7 +903,7 @@ export async function requestChangesAction(
  * reviewed it and how, e.g. a phone call). See `requireApprovalToAdvance`.
  */
 export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
-  await requireUser();
+  const user = await requireUser();
   if (!id) return { ok: false, review: null, status: null };
   const cur = await get(id);
   const gate = await checkApprovalGate(cur, "sent");
@@ -916,7 +931,7 @@ export async function sendToCustomerAction(id: string): Promise<ReviewSync> {
     };
   }
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 /**
@@ -978,7 +993,7 @@ export async function attestApprovalAction(
     return { ok: false, review: null, status: null, error: "Quote not found." };
   }
   refresh();
-  return syncOf(id);
+  return syncOf(id, user.name);
 }
 
 /* ============================================================

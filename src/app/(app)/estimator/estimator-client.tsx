@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { firstName } from "@/lib/team";
-import { approvedReviewLine } from "@/lib/review-line";
+import { approvedReviewLine, staleAutoApprovalLine } from "@/lib/review-line";
+import { ReviewLimitChip } from "@/components/review-limit-chip";
+import type { ReviewLimitChipData } from "@/lib/review-limits";
 import type { QuoteReview, QuoteStatus } from "@/lib/stores/quotes";
 import { carriesPipeline, firstStage, stageById } from "@/lib/pipelines";
 import {
@@ -362,6 +364,7 @@ export default function EstimatorClient({
   reviewers,
   me,
   canApprove,
+  reviewLimit: initialReviewLimit,
   aiSource,
   people,
   quoteTasks,
@@ -395,6 +398,8 @@ export default function EstimatorClient({
    *  change made elsewhere. */
   const [baseStatus, setBaseStatus] = useState<QuoteStatus>(initial.status);
   const [review, setReview] = useState<QuoteReview>(initial.review);
+  /** #242 — the server-evaluated review-limit chip; every sync/save refreshes it. */
+  const [reviewLimit, setReviewLimit] = useState<ReviewLimitChipData | null>(initialReviewLimit);
   /* Daylite stage bar (Task 6) — quoteType never changes client-side (no UI
      changes it), so it stays a plain const rather than state. */
   const quoteType = initial.quoteType;
@@ -779,6 +784,7 @@ export default function EstimatorClient({
 
   const applySync = (r: ReviewSync) => {
     if (r.review) setReview(r.review);
+    if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);
     // Server-confirmed — this is what makes baseStatus trustworthy for the
     // next save's stale-tab check (#180 review 2).
     if (r.status) {
@@ -792,6 +798,7 @@ export default function EstimatorClient({
    *  underneath when the tag changes), so all four fields sync together. */
   const applyStageSync = (r: StageSync) => {
     if (r.review) setReview(r.review);
+    if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);
     if (r.status) {
       setStatus(r.status);
       setBaseStatus(r.status);
@@ -851,6 +858,7 @@ export default function EstimatorClient({
           setRevNum(res.revNum);
           setRevDateMs(res.updatedAt);
           if (res.review) setReview(res.review);
+          if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);
           // Server-confirmed either way (ok or refused/stale) — this IS the
           // resync: whether the requested status applied, was refused, or
           // was left alone because this tab was stale, res.status is always
@@ -1861,11 +1869,19 @@ export default function EstimatorClient({
   /* ---------------- review banner view-model ---------------- */
   const owner = initial.owner || me;
   const isOwner = owner === me;
-  const rev = review || { state: "none" };
+  // #242: a stale auto approval (the quote changed and no longer fits its
+  // owner's current limit — value raised, labor added, owner changed) is not
+  // an approval — the bar reads it as unsubmitted so Submit / Attest reopen,
+  // exactly as the server gate does. The server decides staleness
+  // (approvalHolds); this only reads the chip it sent.
+  const staleAuto = !!reviewLimit?.staleAuto;
+  const rev = staleAuto ? { ...review, state: "none" as const } : review || { state: "none" };
   const rm = rbMeta[rev.state] || rbMeta.none;
   let rbSub: string;
   if (rev.state === "none")
-    rbSub = "Submit for a reviewer’s approval before sending to the customer.";
+    rbSub = staleAuto && reviewLimit
+      ? staleAutoApprovalLine(reviewLimit.text)
+      : "Submit for a reviewer’s approval before sending to the customer.";
   else if (rev.state === "in_review")
     rbSub = rev.reviewer
       ? "With " + firstName(rev.reviewer) + " for approval"
@@ -1887,7 +1903,9 @@ export default function EstimatorClient({
   const rbSubmitLabel = rev.state === "changes" ? "Resubmit for review" : "Submit for review";
   const rbCanDecide = canApprove && rev.state === "in_review" && !isOwner;
   const rbCanClaim = canApprove && rev.state === "in_review" && !rev.reviewer && !isOwner;
-  const rbCanSend = isOwner && rev.state === "approved" && !sentAlready;
+  // #242: Send also opens when the quote fits the owner's review limit — the
+  // server gate auto-approves it on the way to sent.
+  const rbCanSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");
   // Punch #60: the estimator can self-approve any time it isn't already
   // approved or sent — a stand-in for a review that happened by phone/Teams
   // rather than in the app. Available regardless of canApprove: this is
@@ -2314,6 +2332,7 @@ export default function EstimatorClient({
                   </div>
                 </>
               )}
+              {reviewLimit && !staleAuto && <ReviewLimitChip chip={reviewLimit} variant="inline" />}
               <button
                 type="button"
                 aria-expanded={reviewBarOpen}

@@ -5,6 +5,7 @@ import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import type { ResolvedFixtureAssembly, AssemblyRole } from "@/lib/fixture-assemblies";
 import type { Pipelines } from "@/lib/pipelines";
+import type { ReviewLimitChipData } from "@/lib/review-limits";
 
 export const PAYMENT_TERMS = ["Deposit with terms", "100% prepay", "Net 30", "Net 60", "Unknown"] as const;
 export type PaymentTerms = (typeof PAYMENT_TERMS)[number];
@@ -410,6 +411,9 @@ export type EstimatorProps = {
   reviewers: string[];
   me: string;
   canApprove: boolean;
+  /** #242 — the saved quote's review-limit chip, evaluated on the server
+   *  (null for a new quote or when the owner has no limit for its kind). */
+  reviewLimit: ReviewLimitChipData | null;
   /** Linked survey/inspection to assemble the scope from, or null
    *  (S12/D83 — rules-based, no AI gate). */
   aiSource: AiSource | null;

@@ -27934,3 +27934,30 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
     await r242SetSettings({ reviewLimits: before.reviewLimits ?? {} });
   }
 }
+
+/* --- #242 T5: the Estimator's chip, stale banner and Send-within-limit --- */
+{
+  const ea = readFileSync(join(process.cwd(), "src/app/(app)/estimator/actions.ts"), "utf8");
+  ok(
+    ea.includes("async function syncOf(id: string, viewer: string)") && ea.includes("async function stageSyncOf(id: string, viewer: string)") &&
+      (ea.match(/reviewLimitChipFor\(/g) || []).length >= 3,
+    "#242 estimator: syncOf / stageSyncOf / the save result re-evaluate the chip on the server"
+  );
+  ok(!/return (syncOf|stageSyncOf)\(id\);/.test(ea), "#242 estimator: every sync names its viewer (the chip says 'your' only to the owner)");
+  ok((ea.match(/reviewLimit\?: ReviewLimitChipData \| null;/g) || []).length === 3 && ea.includes("reviewLimit: q ? await reviewLimitChipFor(q, user.name) : null,"), "#242 estimator: SaveResult, ReviewSync and StageSync carry reviewLimit");
+  const pg = readFileSync(join(process.cwd(), "src/app/(app)/estimator/page.tsx"), "utf8");
+  ok(pg.includes("reviewLimitChipFor(q, user.name)") && pg.includes("reviewLimit={reviewLimit}"), "#242 estimator: the page evaluates the saved quote's chip for the viewer");
+  const ty = readFileSync(join(process.cwd(), "src/app/(app)/estimator/types.ts"), "utf8");
+  ok(ty.includes("reviewLimit: ReviewLimitChipData | null;"), "#242 estimator: EstimatorProps.reviewLimit");
+  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(
+    !/from "@\/(lib\/stores|db|lib\/review-limits-server)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline" />'),
+    "#242 estimator: the client renders the server-evaluated chip without importing a store or the server module"
+  );
+  ok(
+    ec.includes('const rbCanSend = isOwner && !sentAlready && (rev.state === "approved" || reviewLimit?.tone === "within");') &&
+      ec.includes("if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);") &&
+      ec.includes("if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);") && ec.includes("staleAutoApprovalLine(reviewLimit.text)"),
+    "#242 estimator: Send opens within the limit, a stale auto approval reads as unsubmitted, every sync refreshes the chip"
+  );
+}
