@@ -108,6 +108,10 @@ async function persist(formData: FormData): Promise<string | null> {
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
   // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
+  // #217 D286: the builder flags a typed total that's only the reopen-seed
+  // for an old off-grid sent price — never something anyone actually typed —
+  // so next year's renewal draft never calls it "hand-set" (priorHandSetPrice).
+  const priceOverrideSeeded = String(formData.get("priceOverrideSeeded") || "") === "1";
   const r = compute(
     { office: office || undefined, venues: venueInputs, travel: travelOverride, priceOverride },
     rates,
@@ -164,6 +168,7 @@ async function persist(formData: FormData): Promise<string | null> {
       marginAmount: Math.round(r.marginAmount),
       autoTotal: Math.round(r.autoTotal),
       ...(r.priceOverride != null ? { priceOverride: r.priceOverride } : {}),
+      ...(r.priceOverride != null && priceOverrideSeeded ? { priceOverrideSeeded: true } : {}),
       total: Math.round(r.total),
       contact,
     },

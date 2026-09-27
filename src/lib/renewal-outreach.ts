@@ -149,10 +149,18 @@ export function priceParagraph(p: RenewalPricing, kind: string): string {
         `from last year.` + handSet + closing
       );
     const dir = newPrice > p.lastPrice ? "increase" : "decrease";
-    const why = p.reasons.length ? listJoin(p.reasons) : "our current rates";
+    // #217 controller decision: when last year's price was hand-set, `handSet`
+    // already says "priced at our current rates" — the generic reflects
+    // sentence (no specific reasons to cite) would just repeat that phrase,
+    // so it's suppressed. A specific reason still prints either way.
+    const reflects = p.reasons.length
+      ? ` The ${dir} reflects ${listJoin(p.reasons)}.`
+      : p.lastHandSet
+        ? ""
+        : ` The ${dir} reflects our current rates.`;
     return (
       `I've attached this year's quote — ${money(newPrice)}, compared with ` +
-      `${money(p.lastPrice)} last year. The ${dir} reflects ${why}.` + handSet + closing
+      `${money(p.lastPrice)} last year.` + reflects + handSet + closing
     );
   }
   if (newPrice > 0)
@@ -160,10 +168,15 @@ export function priceParagraph(p: RenewalPricing, kind: string): string {
   return `I've attached this year's quote.` + handSet + closing;
 }
 
-/** #217: last year's typed total from a prior service subdoc, or null. */
+/** #217: last year's typed total from a prior service subdoc, or null. A
+ *  `priceOverrideSeeded` marker means that "typed total" was only the
+ *  D286 reopen-seed for an old off-grid sent price — never something anyone
+ *  actually typed — so it's ignored here rather than called "hand-set". */
 export function priorHandSetPrice(doc: unknown): number | null {
   if (!doc || typeof doc !== "object") return null;
-  return normalizePriceOverride((doc as { priceOverride?: unknown }).priceOverride) ?? null;
+  const d = doc as { priceOverride?: unknown; priceOverrideSeeded?: unknown };
+  if (d.priceOverrideSeeded === true) return null;
+  return normalizePriceOverride(d.priceOverride) ?? null;
 }
 
 /* ---------------- letterhead ---------------- */

@@ -19,6 +19,16 @@ import {
   type TravelOverride,
   type TravelPlan,
 } from "@/lib/travel-plan";
+import { ServiceTotalField } from "@/components/service-total-field";
+import {
+  finishFlame,
+  fmtPts,
+  normalizePriceOverride,
+  normalizeTestingOverride,
+  sliderPts,
+  venueTesting,
+  type FlameFinish,
+} from "@/lib/service-pricing";
 
 /**
  * QuoteBuilder — the auto-priced flame-test quote estimator (client port of
@@ -26,7 +36,9 @@ import {
  * venue toggles, curtain counts, margin/rate knobs) and previews pricing live
  * with the flametest-engine math inlined below (the engine module itself pulls
  * in the server doc-store, so it can't be imported into a client bundle —
- * Save/Approve re-price server-side in actions.ts).
+ * Save/Approve re-price server-side in actions.ts). The price finish (base
+ * fee, margin, $25 rounding, a typed total) is the engine's own finishFlame()
+ * from the import-free service-pricing module (#217).
  */
 
 /* ---------- serializable props from the server page ---------- */
@@ -69,7 +81,8 @@ export type BuilderInitial = {
   editingId: string | null;
   customerId: string;
   quoteName: string;
-  venueSel: Record<string, { on: boolean; curtains: string }>;
+  /** testing = the typed Testing cell ("" / absent = computed, #217). */
+  venueSel: Record<string, { on: boolean; curtains: string; testing?: string }>;
   contactSel: string;
   contactManual: string;
   saved: boolean;
@@ -83,6 +96,11 @@ export type BuilderInitial = {
   nameLocked: boolean;
   /** The saved travel override (flights over drive) — absent = auto. */
   travel?: TravelOverride | null;
+  /** #217: the typed total to reopen with (null = auto). */
+  priceOverride?: number | null;
+  /** #217 D286: true when priceOverride above is only the reopen-seed for an
+   *  old off-grid sent price — not something anyone actually typed. */
+  priceOverrideSeeded?: boolean;
 };
 
 /* ---------- inlined pure pricing (port of flametest-engine.ts) ---------- */
@@ -95,6 +113,8 @@ type VenueIn = {
   coords: Coords;
   oneWayMiles: number | null;
   oneWayMin: number | null;
+  /** #217: the typed Testing cell ("" = computed). */
+  testingOverride?: string;
 };
 
 function roundUpTo(min: number, step: number): number {
@@ -126,7 +146,14 @@ function driveMinutes(a: Coords | BuilderOffice, b: Coords | BuilderOffice, tr: 
   const mi = driveMiles(a, b, tr);
   return mi == null ? null : Math.round((mi / tr.mph) * 60);
 }
-type PerVenue = { id: string; label: string; curtains: number; laborCost: number };
+type PerVenue = {
+  id: string;
+  label: string;
+  curtains: number;
+  laborCost: number;
+  computedCost: number;
+  testingOverride: number | null;
+};
 type Trip = {
   miles: number;
   minutes: number;
@@ -134,17 +161,11 @@ type Trip = {
   timeCost: number;
   total: number;
 };
-type Pricing = {
+type Pricing = FlameFinish & {
   perVenue: PerVenue[];
   curtainsTotal: number;
   venueCount: number;
   trip: Trip;
-  cost: number;
-  rawCost: number;
-  baseApplied: boolean;
-  margin: number;
-  marginAmount: number;
-  total: number;
   /** Flights over drive — travel.total is the figure the quote prices. */
   travel: TravelPlan;
 };
@@ -152,8 +173,16 @@ type Pricing = {
 function priceVenue(v: VenueIn, rates: BuilderRates): PerVenue {
   const curtains = Math.max(0, Math.round(Number(v.curtains) || 0));
   const laborMin = curtains * rates.curtainMinutes;
-  const laborCost = laborMin * (rates.laborRate / 60);
-  return { id: v.id, label: v.label || "Venue", curtains, laborCost };
+  // #217: the engine's own rule — a typed testing cost replaces the computed one.
+  const t = venueTesting(laborMin * (rates.laborRate / 60), v.testingOverride);
+  return {
+    id: v.id,
+    label: v.label || "Venue",
+    curtains,
+    laborCost: t.laborCost,
+    computedCost: t.computedCost,
+    testingOverride: t.testingOverride,
+  };
 }
 function tripTravel(office: BuilderOffice | null, venues: VenueIn[], rates: BuilderRates, tr: BuilderTravelRates): Trip {
   let miles = 0;
@@ -196,7 +225,8 @@ function computePricing(
   venues: VenueIn[],
   rates: BuilderRates,
   tr: BuilderTravelRates,
-  override: TravelOverride | undefined
+  override: TravelOverride | undefined,
+  priceOverride: number | undefined
 ): Pricing {
   const perVenue = venues.map((v) => priceVenue(v, rates));
   const testingSubtotal = perVenue.reduce((a, v) => a + v.laborCost, 0);
@@ -211,24 +241,14 @@ function computePricing(
     rates: tr,
     override,
   });
-  const rawCost = travel.total + testingSubtotal;
-  const baseApplied = rawCost < rates.baseFee;
-  const cost = baseApplied ? rates.baseFee : rawCost;
-  const margin = rates.margin;
-  const total = margin > 0 && margin < 1 ? cost / (1 - margin) : cost;
-  return {
-    perVenue,
-    curtainsTotal,
-    venueCount: venues.length,
-    trip,
-    cost,
-    rawCost,
-    baseApplied,
-    margin,
-    marginAmount: total - cost,
-    total,
-    travel,
-  };
+  // #217: the engine's finish — base fee floor, margin, $25 rounding, typed total.
+  const fin = finishFlame({
+    rawCost: travel.total + testingSubtotal,
+    baseFee: rates.baseFee,
+    margin: rates.margin,
+    priceOverride,
+  });
+  return { perVenue, curtainsTotal, venueCount: venues.length, trip, travel, ...fin };
 }
 
 /* ---------- display helpers ---------- */
@@ -262,7 +282,7 @@ const FIELD: CSSProperties = {
   padding: "11px 13px",
   boxSizing: "border-box",
 };
-const VGRID = "34px minmax(0,1fr) 118px 92px";
+const VGRID = "34px minmax(0,1fr) 118px 104px";
 
 const CSS = `
   select.ftq-sel { -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238c919c' stroke-width='1.5'/></svg>"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px !important; }
@@ -302,6 +322,15 @@ export function QuoteBuilder({
   const [laborRate, setLaborRate] = useState(String(Math.round(baseRates.laborRate)));
   const [savedFlag, setSavedFlag] = useState(initial.saved || initial.approved);
   const [travelDraft, setTravelDraft] = useState<TravelDraft>(() => draftFromOverride(initial.travel));
+  /* #217: the typed Total ("" = auto — rounded to the nearest $25). */
+  const [priceText, setPriceText] = useState(
+    initial.priceOverride != null ? String(initial.priceOverride) : ""
+  );
+  /** #217 D286: true while the typed total is still the untouched reopen-seed
+   *  for an old off-grid sent price — not something anyone actually typed.
+   *  Clears on any edit to the total, Reset to auto, or a new customer, so
+   *  it's never mistaken for a real hand-set price next year. */
+  const [priceOverrideSeeded, setPriceOverrideSeeded] = useState(!!initial.priceOverrideSeeded);
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
 
@@ -375,6 +404,8 @@ export function QuoteBuilder({
         setMarginPts(Math.round(seeded * 100));
     }
     setVenueSel(sel);
+    setPriceText(""); // a new customer is a new price
+    setPriceOverrideSeeded(false);
     quoteNameManual.current = false;
     setQuoteName(automaticQuoteName(c, sel));
     setContactSel(primary ? primary.name : "");
@@ -406,6 +437,14 @@ export function QuoteBuilder({
     });
     dirty();
   }
+  function setTesting(locId: string, val: string) {
+    const clean = val === "" ? "" : String(Math.max(0, Math.round(+val || 0)));
+    setVenueSel((prev) => {
+      const cur = prev[locId] || { on: true, curtains: "" };
+      return { ...prev, [locId]: { ...cur, testing: clean, on: true } };
+    });
+    dirty();
+  }
 
   /* ---- live pricing ---- */
   const liveRates: BuilderRates = {
@@ -423,17 +462,27 @@ export function QuoteBuilder({
       id: l.id,
       label: l.label,
       curtains: +(venueSel[l.id]?.curtains || 0) || 0,
+      testingOverride: venueSel[l.id]?.testing ?? "",
       coords: l.coords,
       oneWayMiles: l.oneWayMiles,
       oneWayMin: l.oneWayMin,
     }));
   const hasCustomer = !!customer;
   const office = offices.find((o) => o.quoteDefault) || offices[0] || null;
+  const priceOverride = normalizePriceOverride(priceText);
   const r =
     hasCustomer && selectedVenues.length
-      ? computePricing(office, selectedVenues, liveRates, travelRates, overrideFromDraft(travelDraft))
+      ? computePricing(office, selectedVenues, liveRates, travelRates, overrideFromDraft(travelDraft), priceOverride)
       : null;
   const chargeById = new Map((r?.perVenue || []).map((p) => [p.id, p]));
+
+  /** #217 — back to the auto total; the slider stays where the typed total put it. */
+  function resetToAuto() {
+    if (r?.overridden) setMarginPts(sliderPts(r.effectiveMargin));
+    setPriceText("");
+    setPriceOverrideSeeded(false);
+    dirty();
+  }
 
   const canSave = hasCustomer && selectedVenues.length > 0;
   const showApprove = canSave && !isApproved;
@@ -467,9 +516,18 @@ export function QuoteBuilder({
     fd.set("mileageRate", mileageRate);
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
+    fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
+    fd.set("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded ? "1" : "");
     fd.set(
       "venues",
-      JSON.stringify(selectedVenues.map((v) => ({ id: v.id, label: v.label, curtains: v.curtains })))
+      JSON.stringify(
+        selectedVenues.map((v) => ({
+          id: v.id,
+          label: v.label,
+          curtains: v.curtains,
+          testingOverride: normalizeTestingOverride(v.testingOverride) ?? null,
+        }))
+      )
     );
     return fd;
   }
@@ -787,17 +845,31 @@ export function QuoteBuilder({
                         boxSizing: "border-box",
                       }}
                     />
-                    <div
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={st.testing ?? ""}
+                      onChange={(e) => setTesting(l.id, e.target.value)}
+                      disabled={!on}
+                      placeholder={on && pc ? String(Math.round(pc.computedCost)) : "—"}
+                      aria-label={"Testing cost for " + l.label + " (blank = computed)"}
+                      title="Type a dollar figure to set this venue's testing cost; clear it to use the computed cost"
                       style={{
+                        width: "100%",
                         fontFamily: "var(--font-mono)",
                         fontSize: 13.5,
                         fontWeight: 600,
                         textAlign: "right",
                         color: on ? "#16181d" : "#c0c5cd",
+                        background: on ? (st.testing ? "#fffaf0" : "#fff") : "#f7f8fa",
+                        border: "1px solid " + (on && st.testing ? "#f0d6cd" : "#e4e7ec"),
+                        borderRadius: 8,
+                        padding: "9px 8px",
+                        boxSizing: "border-box",
                       }}
-                    >
-                      {on && pc ? money(pc.laborCost) : "—"}
-                    </div>
+                    />
                   </div>
                 );
               })}
@@ -898,7 +970,14 @@ export function QuoteBuilder({
               {(r?.perVenue || []).map((p) => (
                 <BreakRow
                   key={p.id}
-                  label={p.label + " · " + p.curtains + " curtain" + (p.curtains === 1 ? "" : "s")}
+                  label={
+                    p.label +
+                    " · " +
+                    p.curtains +
+                    " curtain" +
+                    (p.curtains === 1 ? "" : "s") +
+                    (p.testingOverride != null ? " · set" : "")
+                  }
                   value={money(p.laborCost)}
                   ellipsis
                 />
@@ -921,7 +1000,9 @@ export function QuoteBuilder({
                     marginBottom: 5,
                   }}
                 >
-                  <span style={{ color: "#5b616e" }}>Margin · {marginPts} pts</span>
+                  <span style={{ color: "#5b616e" }}>
+                    Margin · {r?.overridden ? fmtPts(r.effectiveMargin) : marginPts} pts
+                  </span>
                   <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "#1f7a52" }}>
                     +{money(r?.marginAmount || 0)}
                   </span>
@@ -931,9 +1012,11 @@ export function QuoteBuilder({
                   min={10}
                   max={50}
                   step={1}
-                  value={marginPts}
+                  value={r?.overridden ? sliderPts(r.effectiveMargin) : marginPts}
                   onChange={(e) => {
                     setMarginPts(Math.round(+e.target.value));
+                    setPriceText("");
+                    setPriceOverrideSeeded(false);
                     dirty();
                   }}
                   style={{ width: "100%", accentColor: accent, cursor: "pointer", margin: "2px 0 0" }}
@@ -950,21 +1033,22 @@ export function QuoteBuilder({
                   <span>10 pts</span>
                   <span>50 pts</span>
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "baseline",
-                    fontSize: 14,
-                    fontWeight: 700,
-                    marginTop: 4,
-                    paddingTop: 9,
-                    borderTop: "1px solid #f0f1f4",
+                <ServiceTotalField
+                  total={total}
+                  autoTotal={r?.autoTotal ?? 0}
+                  cost={r?.cost ?? 0}
+                  margin={r?.effectiveMargin ?? 0}
+                  overridden={!!r?.overridden}
+                  text={priceText}
+                  onText={(t) => {
+                    setPriceText(t);
+                    setPriceOverrideSeeded(false);
+                    dirty();
                   }}
-                >
-                  <span>Total</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{money(total)}</span>
-                </div>
+                  onReset={resetToAuto}
+                  disabled={!r}
+                  accent={accent}
+                />
               </div>
 
               <button

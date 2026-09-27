@@ -6,6 +6,7 @@ import { getRates } from "@/lib/flametest-engine";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { normalizeTravelOverride } from "@/lib/travel-plan";
+import { seedPriceOverride, seedPriceOverrideIsLegacy } from "@/lib/service-pricing";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -31,13 +32,14 @@ function one(v: string | string[] | undefined): string {
 }
 
 /* flame-test quote subdoc shape (what actions.ts saves) */
-type FtVenue = { id?: string | null; label?: string; curtains?: number };
+type FtVenue = { id?: string | null; label?: string; curtains?: number; testingOverride?: number | null };
 type FtContact = { name?: string; role?: string; email?: string } | null;
 type FlameTestDoc = {
   venues?: FtVenue[];
   contact?: FtContact;
   travel?: unknown;
   trip?: { mode?: string } | null;
+  priceOverride?: unknown;
 } | null;
 
 export default async function FlameTestQuotePage({
@@ -125,7 +127,12 @@ export default async function FlameTestQuotePage({
     const cust = customers.find((c) => c.id === cid) || null;
     const venueSel: BuilderInitial["venueSel"] = {};
     ((ft && ft.venues) || []).forEach((v) => {
-      if (v.id) venueSel[v.id] = { on: true, curtains: String(v.curtains || "") };
+      if (v.id)
+        venueSel[v.id] = {
+          on: true,
+          curtains: String(v.curtains || ""),
+          testing: v.testingOverride != null ? String(v.testingOverride) : "",
+        };
     });
     const qc = editQuote.contact || (ft && ft.contact) || null;
     let contactSel = "";
@@ -161,6 +168,10 @@ export default async function FlameTestQuotePage({
       replaces: "",
       nameLocked: false,
       travel: normalizeTravelOverride(ft && ft.travel) ?? (legacyDrive ? { mode: "drive" } : null),
+      // #217: reopen with the typed total; an old sent price off the $25 grid
+      // reopens typed in too, so re-saving never silently changes it (D286).
+      priceOverride: seedPriceOverride(editQuote.status, editQuote.value, ft && ft.priceOverride),
+      priceOverrideSeeded: seedPriceOverrideIsLegacy(editQuote.status, editQuote.value, ft && ft.priceOverride),
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

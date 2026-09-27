@@ -334,16 +334,44 @@ export function travelLineShare(i: {
 }
 
 /**
+ * Shared computation behind seedPriceOverride() / seedPriceOverrideIsLegacy():
+ * the saved priceOverride wins outright (a real hand-set price, `legacy`
+ * false); otherwise — D286 parity, a sent price must not silently change —
+ * a quote past draft whose value is off the $25 grid (saved before #217)
+ * seeds that value typed in, flagged `legacy` true since it's a reopen
+ * artifact, not something anyone actually typed.
+ */
+function seedOverrideInfo(
+  status: string,
+  value: unknown,
+  saved: unknown
+): { value: number | null; legacy: boolean } {
+  const typed = normalizePriceOverride(saved);
+  if (typed != null) return { value: typed, legacy: false };
+  if (status === "draft") return { value: null, legacy: false };
+  const v = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  if (v <= 0 || v % PRICE_STEP === 0) return { value: null, legacy: false };
+  const legacyValue = normalizePriceOverride(v) ?? null;
+  return { value: legacyValue, legacy: legacyValue != null };
+}
+
+/**
  * The builder's typed-total seed when a saved quote is reopened: its saved
  * priceOverride; else — D286 parity, a sent price must not silently change —
  * a quote past draft whose value is off the $25 grid (saved before #217)
  * reopens with that value typed in. Drafts and on-grid values reopen on auto.
  */
 export function seedPriceOverride(status: string, value: unknown, saved: unknown): number | null {
-  const typed = normalizePriceOverride(saved);
-  if (typed != null) return typed;
-  if (status === "draft") return null;
-  const v = typeof value === "number" && Number.isFinite(value) ? value : 0;
-  if (v <= 0 || v % PRICE_STEP === 0) return null;
-  return normalizePriceOverride(v) ?? null;
+  return seedOverrideInfo(status, value, saved).value;
+}
+
+/**
+ * True when seedPriceOverride()'s result is the D286 legacy-parity fallback
+ * (an old off-grid sent price) rather than a real saved priceOverride. The
+ * builder posts this as `priceOverrideSeeded` and the save action stores it
+ * alongside `priceOverride`, so next year's renewal draft (priorHandSetPrice
+ * in renewal-outreach.ts) never calls a rounding artifact "hand-set".
+ */
+export function seedPriceOverrideIsLegacy(status: string, value: unknown, saved: unknown): boolean {
+  return seedOverrideInfo(status, value, saved).legacy;
 }

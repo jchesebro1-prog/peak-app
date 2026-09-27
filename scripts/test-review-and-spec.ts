@@ -21625,3 +21625,74 @@ import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
     "#212: both the save and remove catch blocks show the same generic \"Something went wrong — try again.\" message"
   );
 }
+
+/* ====================================================================
+   #217 T3 — the flame builder previews through the engine's finish, the Total
+   is an input (Reset to auto + warning), each venue's Testing cell is an input,
+   and reopening a quote restores both (D286-style seed for old sent prices).
+   Client component — raw-source idiom (#177).
+   ==================================================================== */
+import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib/service-pricing";
+{
+  const fc = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"), "utf8");
+  const fcCode = fc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  ok(/from "@\/lib\/service-pricing"/.test(fc) && /finishFlame\(\{/.test(fcCode) && /venueTesting\(/.test(fcCode) && !/\/ \(1 - margin\)/.test(fcCode),
+    "#217 flame builder: the preview finishes through finishFlame()/venueTesting(), no inlined margin math");
+  ok(/fd\.set\("priceOverride", priceOverride != null \? String\(priceOverride\) : ""\);/.test(fc) &&
+      /testingOverride: normalizeTestingOverride\(v\.testingOverride\) \?\? null,/.test(fc),
+    "#217 flame builder: posts the typed total and each venue's typed testing cost");
+  ok(/<ServiceTotalField/.test(fc) && /aria-label=\{"Testing cost for " \+ l\.label/.test(fc),
+    "#217 flame builder: the Total and each venue's Testing cell are inputs");
+  ok(/value=\{r\?\.overridden \? sliderPts\(r\.effectiveMargin\) : marginPts\}/.test(fc) &&
+      /setMarginPts\(Math\.round\(\+e\.target\.value\)\);\n\s*setPriceText\(""\);/.test(fc) &&
+      /function resetToAuto\(\)/.test(fc),
+    "#217 flame builder: the slider follows a typed total; moving it or Reset to auto clears the override");
+  ok(!/^import (?!type )[^;]*from "@\/lib\/(flametest-engine|repair-engine|inspection-engine)"/m.test(fc),
+    "#217 flame builder: imports no engine module (client bundle)");
+  const tf = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
+  ok(/^"use client";/.test(tf) && !/from "@\/(lib\/stores|db)\//.test(tf) && /Reset to auto/.test(tf) && /typedPriceWarning\(/.test(tf) && /rounded to the nearest \$25/.test(tf),
+    "#217: the shared Total field is a client component on the pure module, with Reset to auto and the warning");
+  const fp = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/page.tsx"), "utf8");
+  ok(/priceOverride: seedPriceOverride\(editQuote\.status, editQuote\.value, ft && ft\.priceOverride\),/.test(fp) &&
+      /testing: v\.testingOverride != null \? String\(v\.testingOverride\) : ""/.test(fp),
+    "#217 flame page: reopening restores the typed total and testing costs (old sent prices stay put)");
+
+  // ---- controller addendum (Task 2 review): D286 priceOverrideSeeded marker,
+  // and the renewal draft never says "current rates" twice.
+  ok(/setPriceOverrideSeeded\(false\)/.test(fc) &&
+      /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(fc),
+    "#217 flame builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
+  ok(/fd\.set\("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded \? "1" : ""\);/.test(fc),
+    "#217 flame builder: the typed total's seeded-ness posts alongside the total itself");
+  ok(/onReset=\{resetToAuto\}/.test(fc) &&
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(fc),
+    "#217 flame builder: Reset to auto also clears the seeded flag");
+  ok(/onText=\{\(t\) => \{\s*setPriceText\(t\);\s*setPriceOverrideSeeded\(false\);/.test(fc),
+    "#217 flame builder: typing into the Total field clears the seeded flag");
+  ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(fc),
+    "#217 flame builder: picking a different customer clears the seeded flag too");
+  ok(/priceOverrideSeeded: seedPriceOverrideIsLegacy\(editQuote\.status, editQuote\.value, ft && ft\.priceOverride\),/.test(fp),
+    "#217 flame page: reopening also seeds whether that typed total is a D286 legacy artifact");
+
+  const faSrc217 = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/actions.ts"), "utf8");
+  ok(/const priceOverrideSeeded = String\(formData\.get\("priceOverrideSeeded"\) \|\| ""\) === "1";/.test(faSrc217) &&
+      /\.\.\.\(r\.priceOverride != null && priceOverrideSeeded \? \{ priceOverrideSeeded: true \} : \{\}\),/.test(faSrc217),
+    "#217 flame save: a seeded typed total is stored flagged, never as a real hand-set price");
+
+  ok(seedPriceOverrideIsLegacy217("sent", 821, undefined) === true && seedPriceOverrideIsLegacy217("won", 821.4, null) === true,
+    "#217 D286 marker: a pre-#217 sent quote's off-grid reopen-seed is flagged legacy");
+  ok(seedPriceOverrideIsLegacy217("sent", 900, 900) === false && seedPriceOverrideIsLegacy217("draft", 821, undefined) === false,
+    "#217 D286 marker: a real saved priceOverride, or nothing seeded at all, is never flagged legacy");
+  ok(priorHandSetPrice217({ priceOverride: 850, priceOverrideSeeded: true }) === null,
+    "#217 renewal: a seeded (not hand-set) prior override reads as no hand-set price at all");
+  ok(priorHandSetPrice217({ priceOverride: 850, priceOverrideSeeded: false }) === 850,
+    "#217 renewal: priceOverrideSeeded false still reads the real hand-set price");
+
+  type PP217b = Parameters<typeof priceParagraph217>[0];
+  const para3 = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: [], lastHandSet: 850 } as unknown as PP217b, "inspection");
+  ok(!para3.includes("reflects our current rates") && (para3.match(/current rates/g) || []).length === 1,
+    "#217 renewal wording: when last year's price was hand-set, \"current rates\" is said once, not twice");
+  const para4 = priceParagraph217({ quote: { value: 900 }, lastPrice: 850, reasons: ["a longer curtain run"], lastHandSet: 850 } as unknown as PP217b, "inspection");
+  ok(para4.includes("reflects a longer curtain run") && para4.includes("hand-set at $850"),
+    "#217 renewal wording: a specific reason still prints alongside the hand-set sentence");
+}
