@@ -10540,6 +10540,7 @@ seeded()
   .then(() => portal242ImageLinksAsyncChecks())
   .then(() => portal242ImagesTask4AsyncChecks())
   .then(() => portal242IndexAsyncChecks())
+  .then(() => portal242CartAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27963,4 +27964,139 @@ async function portal242IndexAsyncChecks(): Promise<void> {
     d242Invalidate();
     await removeCustomer(CO);
   }
+}
+
+/* ======================================================================
+   Portal catalog — the portal_carts collection + store (#242, Task 8; spec
+   2026-09-27-portal-catalog-design.md). One cart per portal grant — NOT a
+   quote row, so no estimate number is ever used here — priced only by
+   src/lib/portal-pricing.ts (Task 7) when read. Registered in the async
+   chain as portal242CartAsyncChecks().
+   ====================================================================== */
+import {
+  addLine as d242AddLine,
+  clearCart as d242ClearCart,
+  getCart as d242GetCart,
+  MAX_CART_LINES as d242MaxLines,
+  MAX_LINE_QTY as d242MaxQty,
+  removeLine as d242RemoveLine,
+  saveCart as d242SaveCart,
+  setVenue as d242SetVenue,
+  updateLine as d242UpdateLine,
+} from "@/lib/stores/portal-carts";
+import { getAll as d242GetAllQuotes } from "@/lib/stores/quotes";
+
+async function portal242CartAsyncChecks(): Promise<void> {
+  const GRANT = fixtureId(242, "g1");
+  const CO_A = fixtureId(242, "cart-co-a");
+  const CO_B = fixtureId(242, "cart-co-b");
+  registerFixture("portal_carts", GRANT);
+
+  const empty = await d242GetCart(GRANT, CO_A);
+  ok(
+    empty.id === GRANT && empty.customerId === CO_A && empty.lines.length === 0 && empty.locationId === null,
+    "#242 cart: an absent grant reads as an empty cart — no quote row exists for it"
+  );
+
+  await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 2 });
+  await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-A", qty: 3 });
+  let cart = await d242GetCart(GRANT, CO_A);
+  ok(cart.lines.length === 1 && cart.lines[0].qty === 5, "#242 cart: same-SKU part ×2 then ×3 merges into one line, qty 5");
+
+  const curtainInput = {
+    name: "Main drape", fabricSku: "FAB-1", fabricName: "IFR Velour", qty: "1", width: "40", height: "20", fullness: "50" as const,
+  };
+  cart = await d242AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
+  ok(cart.lines.length === 2, "#242 cart: adding a curtain line makes two lines total (never merges with the part line)");
+  cart = await d242AddLine(GRANT, CO_A, { kind: "curtain", curtainInputs: curtainInput, qty: 1 });
+  ok(cart.lines.length === 3, "#242 cart: two curtain lines never merge with each other either — always new");
+
+  const partLineId = cart.lines.find((l) => l.kind === "part")!.lineId;
+  cart = await d242UpdateLine(GRANT, CO_A, partLineId, { qty: 0 });
+  ok(cart.lines.length === 2 && !cart.lines.some((l) => l.lineId === partLineId), "#242 cart: updateLine qty 0 removes the line");
+
+  // qty clamps to MAX_LINE_QTY on add, and again on a later updateLine; a
+  // negative updateLine qty removes rather than clamping to 1.
+  cart = await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BIG", qty: d242MaxQty + 500 });
+  const bigLineId = cart.lines.find((l) => l.sku === "SKU-BIG")!.lineId;
+  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d242MaxQty, "#242 cart: qty above MAX_LINE_QTY clamps to it on add");
+  cart = await d242UpdateLine(GRANT, CO_A, bigLineId, { qty: d242MaxQty + 1000 });
+  ok(cart.lines.find((l) => l.lineId === bigLineId)!.qty === d242MaxQty, "#242 cart: qty above MAX_LINE_QTY clamps to it on updateLine too");
+  cart = await d242UpdateLine(GRANT, CO_A, bigLineId, { qty: -3 });
+  ok(!cart.lines.some((l) => l.lineId === bigLineId), "#242 cart: updateLine qty <= 0 removes the line (negative, not just zero)");
+
+  // addLine validation (Task 7 review follow-up): a non-integer or < 1 qty
+  // refuses outright rather than silently coercing.
+  const wantsRefusal = "Enter a quantity from 1 to 10,000.";
+  for (const badQty of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    let threw = "";
+    try {
+      await d242AddLine(GRANT, CO_A, { kind: "part", sku: "SKU-BAD", qty: badQty });
+    } catch (e) {
+      threw = String((e as Error).message);
+    }
+    ok(threw === wantsRefusal, `#242 cart: addLine refuses qty ${badQty} with the exact message`);
+  }
+
+  // fixtureOptions: only finite integers 0..MAX_LINE_QTY survive; anything
+  // else (negative, fractional, over the cap, NaN) is dropped, not clamped.
+  cart = await d242AddLine(GRANT, CO_A, {
+    kind: "fixture",
+    fixtureId: "fx-1",
+    qty: 1,
+    fixtureOptions: {
+      "mounting:ok": 2,
+      "mounting:zero": 0,
+      "mounting:neg": -1,
+      "mounting:frac": 1.5,
+      "mounting:huge": d242MaxQty + 1,
+      "mounting:nan": Number.NaN,
+    },
+  });
+  const fxLine = cart.lines.find((l) => l.kind === "fixture")!;
+  ok(
+    JSON.stringify(fxLine.fixtureOptions) === JSON.stringify({ "mounting:ok": 2, "mounting:zero": 0 }),
+    "#242 cart: fixtureOptions keeps only finite integers in 0..MAX_LINE_QTY, drops the rest"
+  );
+
+  // MAX_CART_LINES: fill to the cap, prove a same-SKU merge still works right
+  // at the cap (it's not a new line), then prove a genuinely new line refuses.
+  await d242ClearCart(GRANT);
+  for (let i = 0; i < d242MaxLines; i++) {
+    await d242AddLine(GRANT, CO_A, { kind: "part", sku: `FILL-${i}`, qty: 1 });
+  }
+  cart = await d242GetCart(GRANT, CO_A);
+  ok(cart.lines.length === d242MaxLines, `#242 cart: filled to MAX_CART_LINES (${d242MaxLines})`);
+  cart = await d242AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-0", qty: 1 });
+  ok(
+    cart.lines.length === d242MaxLines && cart.lines.find((l) => l.sku === "FILL-0")!.qty === 2,
+    "#242 cart: a same-SKU merge is allowed even when the cart is already at the line cap"
+  );
+  let capThrew = "";
+  try {
+    await d242AddLine(GRANT, CO_A, { kind: "part", sku: "FILL-NEW", qty: 1 });
+  } catch (e) {
+    capThrew = String((e as Error).message);
+  }
+  ok(capThrew === "Your quote can hold up to 200 lines.", "#242 cart: a genuinely new line beyond the cap is refused with the exact message");
+
+  // Cross-customer isolation: a cart saved for CO_A reads empty as CO_B, and
+  // that read never mutates the real cart. A write made as the mismatched
+  // customer overwrites the row under the caller's own id (never CO_A's).
+  const asB = await d242GetCart(GRANT, CO_B);
+  ok(asB.lines.length === 0 && asB.customerId === CO_B, "#242 cart: another customer's grant reads as empty, never the real cart");
+  const stillA = await d242GetCart(GRANT, CO_A);
+  ok(stillA.lines.length === d242MaxLines, "#242 cart: reading the cart as the wrong customer never mutated it");
+  await d242SetVenue(GRANT, CO_B, "loc-1");
+  const nowB = await d242GetCart(GRANT, CO_B);
+  ok(nowB.locationId === "loc-1" && nowB.customerId === CO_B, "#242 cart: a save made under the mismatched customer overwrites the row under the caller's own id");
+
+  await d242SaveCart({ id: GRANT, customerId: CO_A, locationId: null, lines: [{ lineId: "z1", kind: "part", sku: "SKU-Z", qty: 1 }], updatedAt: Date.now() });
+  cart = await d242RemoveLine(GRANT, CO_A, "z1");
+  ok(cart.lines.length === 0, "#242 cart: removeLine drops the named line");
+
+  ok(
+    !(await d242GetAllQuotes()).some((q) => q.customerId === CO_A && q.source === "portal-catalog"),
+    "#242 cart: none of the above ever spawns a quote row — no estimate number is used until Generate"
+  );
 }

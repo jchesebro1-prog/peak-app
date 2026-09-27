@@ -225,6 +225,13 @@
       "when": 1790515123795,
       "tag": "0031_daylite_quote_types",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790525452581,
+      "tag": "0032_portal_carts",
+      "breakpoints": true
     }
   ]
 }
