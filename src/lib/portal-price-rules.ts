@@ -26,9 +26,9 @@ export function fixtureUnitPrice(components: FixtureComponentInput[], o: PriceRu
     if (c.qty <= 0) continue;
     if (!c.quotable) { if (c.required) unavailable = true; continue; }
     const u = unitPriceFor(c, o);
+    cost += pos(c.cost) * c.qty;
     if (u.por || u.unitPrice == null) { por = true; continue; }
     total += u.unitPrice * c.qty;
-    cost += pos(c.cost) * c.qty;
   }
   return { unitPrice: por || unavailable ? null : cents(total), por, unavailable, cost: cents(cost) };
 }

@@ -27795,3 +27795,12 @@ import { searchCatalog as d242Search, buildHaystack as d242Hay, type SearchEntry
   ok(p3.pages === 3 && p3.entries.length === 4 && p3.page === 3, "#242 search: 48 per page, last page partial");
   ok(d242Search(many, { q: "", mfr: [], cat: [], page: 99, pageSize: 48 }).page === 3, "#242 search: page clamps to the last page");
 }
+
+/* Fix round 1: fixture cost accumulation for POR components; group-based card detection */
+{
+  ok(d242FixPrice([{ sku: "A", cost: 700, list: 0, qty: 1, quotable: true, required: true }, { sku: "B", cost: 50, list: 0, qty: 2, quotable: true, required: true, note: "verify price" }], { margin: 0.3, staleCostMonths: 0, now: 0 }).cost === 800, "#242 fixture: a POR component's known cost still counts toward the fixture's internal cost");
+  ok(d242Card("PO 12345 4111 1111 1111 1111"), "#242 card guard: a card typed after a PO number is still caught");
+  ok(d242Card("PO-12345-4111-1111-1111-1111"), "#242 card guard: dash-separated run with a leading PO group");
+  ok(!d242Card("tracking 94111111111111111222"), "#242 card guard: a long unbroken digit string is not scanned window by window");
+  ok(!d242Card("qty 2 x 1000 units, call 608 555 0199"), "#242 card guard: short groups (qty, phone) don't add up to a card");
+}

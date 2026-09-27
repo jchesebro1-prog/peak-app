@@ -28,9 +28,20 @@ function luhn(d: string): boolean {
 }
 /** A 13–19 digit run (spaces/dashes allowed between digits) that passes Luhn. */
 export function looksLikeCardNumber(text: string): boolean {
-  for (const m of text.matchAll(/\d(?:[ -]?\d){12,18}/g)) {
-    const digits = m[0].replace(/[ -]/g, "");
-    if (digits.length >= 13 && digits.length <= 19 && luhn(digits)) return true;
+  // Digit groups separated by a single space or dash form one run; a card is
+  // any contiguous span of WHOLE groups totalling 13–19 digits that passes Luhn.
+  // Checking whole groups (not every sliding window) catches "PO 12345 4111 1111 1111 1111"
+  // without flagging long tracking numbers by accident.
+  for (const run of text.matchAll(/\d+(?:[ -]\d+)*/g)) {
+    const groups = run[0].split(/[ -]/);
+    for (let i = 0; i < groups.length; i++) {
+      let digits = "";
+      for (let j = i; j < groups.length; j++) {
+        digits += groups[j];
+        if (digits.length > 19) break;
+        if (digits.length >= 13 && luhn(digits)) return true;
+      }
+    }
   }
   return false;
 }
