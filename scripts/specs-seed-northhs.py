@@ -347,6 +347,16 @@ SECTIONS = {
         "subs": [
             (1, "QUALITY ASSURANCE", r"The design for each lighting is based", "The design for each lighting product is based", None),
         ],
+        # The PDF-to-Word source ran the Lonestar heading into the last
+        # General sentence ("B. Permission to bid … manufacturer Automated
+        # Profile Fixture"). Split it: the sentence goes back into General, the
+        # heading becomes the product entry it heads.
+        "splits": [
+            (2, "ENTERTAINMENT LUMINAIRES MOVING",
+             "Permission to bid does not imply acceptance of the manufacturer Automated Profile Fixture",
+             [[1, "Permission to bid does not imply acceptance of the manufacturer."], [0, "AUTOMATED PROFILE FIXTURE"]],
+             '2.8 ENTERTAINMENT LUMINAIRES MOVING: the source ran the "Automated Profile Fixture" heading into the General clause\'s last sentence — split back into General + a product heading.'),
+        ],
         "merge_part2": {"ENTERTAINMENT POWER CONTROLS": "2.2 repeats the title ENTERTAINMENT POWER CONTROLS (it holds the discrete-fed Mini Panel) — merged into 2.1 so the section has one Power Controls article."},
         "rename_part2": {"ENTERTAINMENT LUMINARIE ACCESSORIES": "ENTERTAINMENT LUMINAIRE ACCESSORIES"},
         "part2": {"*": {"general": "lead"}},
@@ -504,6 +514,13 @@ def build(parsed):
         for p in (1, 2, 3):
             for a in sec["parts"][p]:
                 a["items"] = [[l, STRAY_LABEL.sub("", t)] for l, t in a["items"]]
+        for part, title, text, repl, note in cfg.get("splits", []):
+            a = find_article(sec["parts"][part], title)
+            i = next((k for k, (_, t) in enumerate(a["items"]) if t == text), None)
+            if i is None:
+                raise SystemExit(f'{fnum}: split rule text not found in {title}')
+            a["items"][i:i + 1] = [list(x) for x in repl]
+            review.append(note)
         apply_subs(sec, cfg, review)
 
         arts2 = sec["parts"][2]
@@ -823,7 +840,9 @@ def review_md(review_all, lib):
 def main():
     src = Path(sys.argv[1])
     dump = "--dump" in sys.argv
-    files = sorted(src.glob("*.docx"))
+    # Only the North HS section files ("…_Spec 11 61 23_…"); the folder also
+    # holds other .docx (e.g. spec-builder samples).
+    files = sorted(f for f in src.glob("*.docx") if re.search(r"Spec \d\d \d\d \d\d_", f.name))
     parsed = [(f, parse(f)) for f in files]
     if dump:
         for f, d in parsed:

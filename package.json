@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/migrate.mjs && next build",
+    "build": "node scripts/migrate.mjs && tsx scripts/seed-specs-once.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "sync:pdf-worker": "cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs",
@@ -25,6 +25,7 @@
     "part-docs:backfill": "tsx scripts/part-docs-backfill.ts",
     "part-docs:davinci": "tsx scripts/part-docs-davinci.ts",
     "fixtures:convert": "tsx scripts/fixtures-convert.ts",
+    "specs:seed": "tsx scripts/seed-specs-once.ts --local",
     "db:inventory": "tsx scripts/inventory.ts",
     "ports:rules": "tsx scripts/port-rules.ts",
     "icons:grid": "tsx scripts/build-grid-icons.ts",

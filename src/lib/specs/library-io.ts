@@ -1,4 +1,4 @@
-import { upsertDoc } from "@/db/doc-store";
+import { getDocRows, upsertDoc } from "@/db/doc-store";
 import * as Sections from "@/lib/stores/spec-sections";
 import * as Articles from "@/lib/stores/spec-articles";
 import * as Templates from "@/lib/stores/spec-templates";
@@ -39,6 +39,21 @@ export type SpecLibraryImportCounts = {
   curtainTemplates: number;
   /** Curtain templates whose id is not a GRID_CURTAIN_TYPES entry — refused, never coerced. */
   skipped: number;
+  /** `onlyNew` only: records left alone because their id already exists
+   *  (live or soft-deleted). Always 0 on an ordinary import. */
+  kept: number;
+};
+
+export type SpecLibraryImportOptions = {
+  /**
+   * Create-only (the one-time North HS seed, D358): a record whose id is
+   * already in the database — live OR soft-deleted — is left exactly as it
+   * is and counted in `kept`. A library someone has edited keeps the edits,
+   * and a record someone deleted stays deleted. Off by default: the Import
+   * library button still adds and updates (and revives), as documented on
+   * importLibrary below.
+   */
+  onlyNew?: boolean;
 };
 
 /**
@@ -136,13 +151,27 @@ function presentFields<T extends object>(rec: unknown, keys: ReadonlyArray<keyof
  * every field, normalized with the store's own defaults for whatever it
  * omits — there's no stored value to preserve yet.
  */
-export async function importLibrary(file: SpecLibraryFile, by: string): Promise<SpecLibraryImportCounts> {
+export async function importLibrary(
+  file: SpecLibraryFile,
+  by: string,
+  opts: SpecLibraryImportOptions = {}
+): Promise<SpecLibraryImportCounts> {
   const now = Date.now();
   let sections = 0;
   let articles = 0;
   let templates = 0;
   let curtainTemplates = 0;
   let skipped = 0;
+  let kept = 0;
+  // getDocRows, not the stores' get*(): those hide a tombstone, and a
+  // soft-deleted id must count as existing here so it stays deleted.
+  const existsAnyState = async (coll: Parameters<typeof getDocRows>[0], id: string): Promise<boolean> =>
+    !!id && (await getDocRows(coll, [id])).length > 0;
+  const keepExisting = async (coll: Parameters<typeof getDocRows>[0], id: string): Promise<boolean> => {
+    if (!opts.onlyNew || !(await existsAnyState(coll, id))) return false;
+    kept++;
+    return true;
+  };
 
   for (const rec of file.sections) {
     const id = String((rec as { id?: unknown }).id || "").trim();
@@ -150,6 +179,7 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
       skipped++;
       continue;
     }
+    if (await keepExisting("spec_sections", id)) continue;
     const existing = await Sections.getSection(id);
     if (existing) {
       const patch = presentFields<SpecSection>(rec, ["number", "title", "sort", "part1", "part3", "part2Style", "quantities"]);
@@ -166,6 +196,7 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
     // so an existing-record lookup never forces the full-normalize defaults
     // this loop used to apply on every re-import.
     const id = String((rec as { id?: unknown }).id || "").trim();
+    if (await keepExisting("spec_articles", id)) continue;
     const existing = id ? await Articles.getArticle(id) : null;
     if (existing) {
       const patch = presentFields<SpecCategoryArticle>(rec, [
@@ -195,6 +226,7 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
   for (const rec of file.templates) {
     const key = String((rec as { key?: unknown }).key || "").trim();
     const id = key ? templateId(key) : "";
+    if (await keepExisting("spec_templates", id)) continue;
     const existing = id ? await Templates.getTemplate(id) : null;
     const patch = presentFields<SpecTemplate>(rec, ["key", "title", "headings", "rules", "example"]);
     // saveTemplate always writes the full record (it's keyed by slug, so
@@ -216,6 +248,7 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
       skipped++;
       continue;
     }
+    if (await keepExisting("spec_curtain_templates", rec.id)) continue;
     const existing = await Curtains.getCurtainTemplate(rec.id as GridCurtainType);
     const patch = presentFields<SpecCurtainTemplate>(rec, [
       "articleId",
@@ -243,5 +276,5 @@ export async function importLibrary(file: SpecLibraryFile, by: string): Promise<
     curtainTemplates++;
   }
 
-  return { sections, articles, templates, curtainTemplates, skipped };
+  return { sections, articles, templates, curtainTemplates, skipped, kept };
 }

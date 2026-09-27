@@ -8267,8 +8267,13 @@ DONE 2026-09-26 (D326, D327):** six sections' Part 1/Part 3 and 30 Part 2 catego
 review list in its `REVIEW-NOTES.md`. **Product specs by MFR # DONE 2026-09-26 (D328):** the same script writes
 `product-specs-template.xlsx` (45 product entries + the de-duplicated 27 41 00 AV list, MFR # pre-filled there);
 Jeff fills the MFR # column and loads it at Specs → Library → **Import product specs** (preview → import, matched
-parts only, never creates a part). Remaining from the seed: Jeff's fill of the template, then the production
-import (library first, then product specs); the drapes article's curtain blocks as curtain templates. Also open
+parts only, never creates a part). **Production load automated 2026-09-26 (D358):** Jeff's filled file is
+committed as `product-specs-filled.xlsx`, and the next production deploy loads the library (create-only) and
+the product specs once, from `npm run build` (`scripts/seed-specs-once.ts`; flag `seed:northhs-2026-07-30` in
+the `spec_seed_applied` blob; preview skips; never fails the build; `npm run specs:seed` is local PGlite only).
+Read the deploy's build log for the MFR #s it could not match. To re-run on production: Import product specs
+with the committed file, or `npx tsx scripts/seed-specs-once.ts --force` with the production DATABASE_URL. Remaining from the seed: the drapes article's curtain
+blocks as curtain templates. Also open
 from this branch: **#204** (a price-only Import-hub catalog import resets MAP to $0 — found while amending this
 plan, unrelated to spec fields, fix already scoped) and any Minor a reviewer carried during the branch (see the
 per-task reports in `.superpowers/sdd/task-*-report.md`).

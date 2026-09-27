@@ -10490,6 +10490,7 @@ seeded()
   .then(() => venues216SaveFixesAsyncChecks())
   .then(() => venues216Task3FixesAsyncChecks())
   .then(() => venues216NameAutoAsyncChecks())
+  .then(() => specSeedOnceAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23965,5 +23966,150 @@ async function venues216NameAutoAsyncChecks(): Promise<void> {
   } finally {
     for (const s of await v216Sites7(CID)) await v216SoftDel7(s.id);
     await removeCustomer(CID);
+  }
+}
+
+/* ======================================================================
+   #205 / D358 — the one-time spec seed (src/lib/specs/seed-once.ts), the
+   loader `npm run build` runs after migrations. DB-backed against the
+   suite's throwaway datadir: a two-section, two-article library file and a
+   small product-spec workbook (built here with exceljs) over two fixture
+   parts. Proves: applied once, then skipped; create-only library (an edit
+   survives a --force re-run, a deleted article stays deleted); product
+   text lands with specSource "product-specs:<id>"; text authored elsewhere
+   is never overwritten. The flag lives under a TEST358 key in the real
+   `spec_seed_applied` blob and is removed in the finally (blobs are not
+   swept by the fixture marker).
+   ==================================================================== */
+import {
+  applySpecSeedOnce as seed358Apply,
+  specSeedFlag as seed358Flag,
+  SPEC_SEED_BLOB as SEED358_BLOB,
+} from "@/lib/specs/seed-once";
+import {
+  getArticle as seed358GetArticle,
+  updateArticle as seed358UpdateArticle,
+  deleteArticle as seed358DeleteArticle,
+} from "@/lib/stores/spec-articles";
+import { getDocRows as seed358GetDocRows } from "@/db/doc-store";
+
+async function specSeedOnceAsyncChecks(): Promise<void> {
+  const KEY = fixtureId(358, "seed-once-flag");
+  const KEY_THROW = fixtureId(358, "seed-once-throw");
+  const secA = fixtureId(358, "ss-a");
+  const secB = fixtureId(358, "ss-b");
+  const artA = fixtureId(358, "ar-a");
+  const artB = fixtureId(358, "ar-b");
+  const skuA = fixtureId(358, "part-a");
+  const skuB = fixtureId(358, "part-b");
+  for (const id of [secA, secB]) registerFixture("spec_sections", id);
+  for (const id of [artA, artB]) registerFixture("spec_articles", id);
+  for (const id of [skuA, skuB]) registerFixture("catalog_parts", id);
+  const dir = mkdtempSync(join(tmpdir(), "seed358-"));
+  try {
+    const libraryPath = join(dir, "spec-library.json");
+    const article = (id: string, sectionId: string, title: string) => ({
+      id, sectionId, sort: 10, title, general: "", manufacturers: [], categoryKeys: [],
+    });
+    writeFileSync(
+      libraryPath,
+      JSON.stringify({
+        kind: SPEC_LIBRARY_KIND,
+        version: SPEC_LIBRARY_VERSION,
+        exportedAt: 0,
+        sections: [
+          { id: secA, number: "11 61 58", title: "Seed Test A", sort: 1, part1: [], part3: [] },
+          { id: secB, number: "11 61 59", title: "Seed Test B", sort: 2, part1: [], part3: [] },
+        ],
+        articles: [article(artA, secA, "SEED ARTICLE A"), article(artB, secB, "SEED ARTICLE B")],
+        templates: [],
+        curtainTemplates: [],
+      })
+    );
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Product specs");
+    ws.addRow(["Spec ID", "Article ID", "Manufacturer", "MFR #", "Spec Title", "Spec Text"]);
+    ws.addRow(["PS-T358-1", artA, "", skuA, "SEED PRODUCT A", "Material:\n  Seeded text"]);
+    ws.addRow(["PS-T358-2", artB, "", skuB, "SEED PRODUCT B", "Must never land"]);
+    ws.addRow(["PS-T358-3", artA, "", "NOPE-T358-XYZ", "NOT IN CATALOG", "Nothing to match"]);
+    ws.addRow(["PS-T358-4", artA, "", "", "BLANK MFR", "Skipped — no MFR #"]);
+    const productsPath = join(dir, "product-specs.xlsx");
+    await wb.xlsx.writeFile(productsPath);
+
+    await upsertPart({ id: skuA, sku: skuA, desc: "Seed test part A", category: "Other", unit: "ea", list: 10, cost: 5 });
+    await upsertPart({
+      id: skuB, sku: skuB, desc: "Seed test part B", category: "Other", unit: "ea", list: 10, cost: 5,
+      specTitle: "KEEP ME", specBody: "Authored elsewhere", specState: "authored", specSource: "manual",
+    });
+
+    const opts = { libraryPath, productsPath, by: "Seed test", key: KEY };
+    const first = await seed358Apply(opts);
+    if (first.status !== "applied") throw new Error(`D358 seed: expected applied, got ${first.reason}`);
+    ok(first.library.created === 4 && first.library.kept === 0, `D358 seed: first run creates the 2 sections + 2 articles (created ${first.library.created}, kept ${first.library.kept})`);
+    ok(!!(await getSection(secA)) && (await seed358GetArticle(artB))?.title === "SEED ARTICLE B", "D358 seed: the library's sections and articles are in the database");
+    const partA = await getPart(skuA);
+    ok(
+      partA?.specSource === "product-specs:PS-T358-1" && partA.specState === "authored" &&
+        partA.specArticleId === artA && (partA.specBody || "").includes("Seeded text"),
+      "D358 seed: a matched part gets the row's text, authored, with specSource product-specs:<Spec ID>"
+    );
+    const partB = await getPart(skuB);
+    ok(partB?.specBody === "Authored elsewhere" && partB.specSource === "manual" && partB.specTitle === "KEEP ME", "D358 seed: a part with text authored elsewhere is not overwritten");
+    ok(first.products.written === 1 && first.products.skippedExisting === 1, `D358 seed: 1 written, 1 skipped-existing (got ${first.products.written}/${first.products.skippedExisting})`);
+    ok(first.products.notFound.includes("PS-T358-3: NOPE-T358-XYZ"), `D358 seed: a not-found MFR # is reported as "<Spec ID>: <token>" (${first.products.notFound.join("; ")})`);
+    ok((await seed358Flag(KEY))?.by === "Seed test", "D358 seed: the once-only flag is recorded under its key");
+
+    const second = await seed358Apply(opts);
+    ok(second.status === "skipped" && second.reason.startsWith("already applied"), `D358 seed: a second run is skipped — already applied (${second.status === "skipped" ? second.reason : second.status})`);
+
+    await seed358UpdateArticle(artA, { title: "EDITED BY JEFF" }, "Jeff");
+    await seed358DeleteArticle(artB);
+    const forced = await seed358Apply({ ...opts, force: true });
+    ok(forced.status === "applied" && forced.library.created === 0 && forced.library.kept === 4, "D358 seed: --force re-runs, and the create-only library keeps all four existing records");
+    ok((await seed358GetArticle(artA))?.title === "EDITED BY JEFF", "D358 seed: an article edited after the seed keeps its edit through a forced re-run");
+    const artBRows = await seed358GetDocRows("spec_articles", [artB]);
+    ok((await seed358GetArticle(artB)) === null && artBRows.length === 1 && artBRows[0].deleted, "D358 seed: a soft-deleted article stays deleted — never revived by the seed");
+    ok((await getPart(skuB))?.specBody === "Authored elsewhere", "D358 seed: the part authored elsewhere is still untouched after the forced re-run");
+    ok(forced.status === "applied" && forced.products.unchanged === 1 && forced.products.written === 0, "D358 seed: the forced re-run finds the seeded part unchanged and writes nothing");
+    ok(forced.status === "applied" && forced.library.skipped === 0, "D358 seed: the result surfaces the library's skipped count");
+
+    // A throw (here: a products file that isn't there) leaves the flag unset,
+    // so the next deploy retries.
+    let threw = false;
+    try {
+      await seed358Apply({ ...opts, key: KEY_THROW, productsPath: join(dir, "missing.xlsx") });
+    } catch {
+      threw = true;
+    }
+    ok(threw && (await seed358Flag(KEY_THROW)) === null, "D358 seed: a run that throws (bad productsPath) leaves its flag unset");
+
+    // The Import library button's path — no onlyNew — still updates an
+    // existing record and reports kept: 0.
+    const plain = await importLibrary(
+      {
+        kind: SPEC_LIBRARY_KIND,
+        version: SPEC_LIBRARY_VERSION,
+        exportedAt: 0,
+        sections: [{ id: secA, number: "11 61 58", title: "Updated by a plain import" }],
+        articles: [],
+        templates: [],
+        curtainTemplates: [],
+      } as unknown as Parameters<typeof importLibrary>[0],
+      "Seed test"
+    );
+    ok(
+      plain.sections === 1 && plain.kept === 0 && (await getSection(secA))?.title === "Updated by a plain import",
+      "D358 seed: importLibrary without onlyNew still updates an existing section and reports kept: 0"
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    const db = await getDb();
+    for (const k of [KEY, KEY_THROW]) {
+      await db
+        .update(vaBlobsTable)
+        .set({ data: sql`${vaBlobsTable.data} - ${k}::text` })
+        .where(vaEq(vaBlobsTable.id, SEED358_BLOB));
+    }
+    ok((await seed358Flag(KEY)) === null, "D358 seed: teardown removes the test flag from the spec_seed_applied blob");
   }
 }
