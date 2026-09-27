@@ -10493,6 +10493,7 @@ seeded()
   .then(() => venues216T7FixAsyncChecks())
   .then(() => specSeedOnceAsyncChecks())
   .then(() => documentsStoreAsyncChecks())
+  .then(() => documentsUploadAsyncChecks())
   .then(() => documentsFixesAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
@@ -24425,4 +24426,94 @@ async function documentsFixesAsyncChecks(): Promise<void> {
   ok(!!back && d218fxJsonbSafe(back.title) && d218fxJsonbSafe(back.fileName) && d218fxJsonbSafe(back.notes) && d218fxJsonbSafe(back.uploadedBy) && back.fileName === "a".repeat(179) + EMOJI && back.title.endsWith(EMOJI), "#218 fix: a title/file name/notes with an emoji at the cap and a lone surrogate round-trip through the JSONB store");
   const up = await d218Update(d.id, { title: "u".repeat(d218fxMaxTitle - 1) + EMOJI + "z", notes: "m\uD800" });
   ok(!!up && d218fxJsonbSafe(up.title) && up.title.endsWith(EMOJI) && up.notes === "m" && (await d218Get(d.id))?.notes === "m", "#218 fix: an edit is capped and cleaned the same way before the JSONB write");
+}
+
+/* ======================================================================
+   Documents (#218) — Task 3: finalize (DB-backed, fake Blob) + team routes.
+   ====================================================================== */
+import { finalizeDocumentUpload as d218Finalize, type FinalizeResult as D218FinalizeResult } from "@/lib/documents-upload";
+import { listDocs as d218ListDocs } from "@/db/doc-store";
+
+{
+  const src218t = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const up = src218t("src/app/api/documents/upload/route.ts");
+  ok(up.includes("await auth()") && up.includes("parseUploadPayload(clientPayload)") && up.includes("getCompany(payload.customerId)") && up.includes("uploadGrantError(pathname, payload.customerId, payload.uploadKey)") && up.includes("maximumSizeInBytes: MAX_DOCUMENT_BYTES"), "#218 route: the team upload grant needs a user, a real company and a path under that company's upload key");
+  const dl = src218t("src/app/api/documents/[id]/route.ts");
+  ok(dl.includes("await requireUser()") && dl.includes("documentDownloadHeaders(doc.fileName)") && !dl.includes("inline"), "#218 route: team download requires a user and always sends an attachment");
+  const act = src218t("src/app/(app)/documents/actions.ts");
+  ok((act.match(/await requireUser\(\)/g) || []).length === 4 && act.includes('kind: "team"') && act.includes("resolveDocumentScope("), "#218 actions: every team document action requires a user; edits re-check scope");
+}
+
+async function documentsUploadAsyncChecks(): Promise<void> {
+  const CO = fixtureId(218, "up-co");
+  const OTHER = fixtureId(218, "up-other");
+  const removed: string[] = [];
+  const facts = async (customerId: string, projectId: string | null) => ({
+    customerExists: customerId === CO || customerId === OTHER,
+    siteIds: customerId === CO ? ["v1", "v2"] : ["o1"],
+    project:
+      projectId === "P-218" ? { id: "P-218", customerId: CO, locationId: "v2" }
+      : projectId === "P-OTHER" ? { id: "P-OTHER", customerId: OTHER, locationId: "o1" }
+      : null,
+  });
+  const deps = (bytes: Uint8Array | null, size = 2048) => ({
+    head: async () => (bytes ? { bytes, size } : null),
+    remove: async (p: string) => { removed.push(p); },
+    facts,
+    categories: async () => d218Resolve(undefined),
+  });
+  const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+  const pathFor = (cid: string, k: string, name = "plot.pdf") => d218Path(cid, k, name).replace(/\.pdf$/, "-Ab12Cd.pdf");
+  const team = { kind: "team" as const, name: "Jeff" };
+  const track = (r: D218FinalizeResult) => { if (r.ok) registerFixture("documents", r.document.id); return r; };
+
+  const k1 = d218NewKey();
+  const good = track(await d218Finalize({ customerId: CO, uploadKey: k1, blobPath: pathFor(CO, k1), fileName: "Stage plot.pdf", mime: "application/pdf", category: "drawings", visibility: "shared", siteId: "v1", notes: "rev B" }, team, deps(PDF)));
+  ok(good.ok && good.document.source === "team" && good.document.visibility === "shared" && good.document.category === "drawings" && good.document.siteId === "v1" && good.document.size === 2048 && good.document.title === "Stage plot" && good.document.uploadedBy === "Jeff", "#218 upload: a team file under its own path is recorded with the size Blob reports");
+  const again = await d218Finalize({ customerId: CO, uploadKey: k1, blobPath: pathFor(CO, k1), fileName: "Stage plot.pdf" }, team, deps(PDF));
+  ok(!again.ok && !removed.includes(pathFor(CO, k1)), "#218 upload: finalizing an already-recorded blob is refused and never deletes it");
+  const k2 = d218NewKey();
+  const foreign = await d218Finalize({ customerId: CO, uploadKey: k2, blobPath: pathFor(OTHER, k2), fileName: "x.pdf" }, team, deps(PDF));
+  ok(!foreign.ok && removed.length === 0, "#218 upload: a path under another company is refused without touching it");
+  const k3 = d218NewKey();
+  const exe = await d218Finalize({ customerId: CO, uploadKey: k3, blobPath: pathFor(CO, k3, "notes.pdf"), fileName: "notes.pdf" }, team, deps(new Uint8Array([0x4d, 0x5a, 0x90])));
+  ok(!exe.ok && exe.error.includes("program") && removed.includes(pathFor(CO, k3, "notes.pdf")), "#218 upload: program bytes behind an innocent name are refused and the blob deleted");
+  const k4 = d218NewKey();
+  const dbl = await d218Finalize({ customerId: CO, uploadKey: k4, blobPath: pathFor(CO, k4, "plan.pdf"), fileName: "plan.pdf.exe" }, team, deps(PDF));
+  ok(!dbl.ok && removed.includes(pathFor(CO, k4, "plan.pdf")), "#218 upload: a double extension is refused and the blob deleted");
+  const k5 = d218NewKey();
+  const big = await d218Finalize({ customerId: CO, uploadKey: k5, blobPath: pathFor(CO, k5), fileName: "big.pdf" }, team, deps(PDF, d218Max + 1));
+  ok(!big.ok && big.error.includes("100 MB") && removed.includes(pathFor(CO, k5)), "#218 upload: over 100 MB is refused and deleted");
+  const k6 = d218NewKey();
+  const missing = await d218Finalize({ customerId: CO, uploadKey: k6, blobPath: pathFor(CO, k6), fileName: "a.pdf" }, team, deps(null));
+  ok(!missing.ok && missing.error.includes("didn't arrive"), "#218 upload: a blob that never arrived is refused");
+  const k7 = d218NewKey();
+  const proj = track(await d218Finalize({ customerId: CO, uploadKey: k7, blobPath: pathFor(CO, k7), fileName: "rigging.pdf", projectId: "P-218" }, team, deps(PDF)));
+  ok(proj.ok && proj.document.projectId === "P-218" && proj.document.siteId === "v2" && proj.document.visibility === "internal" && proj.document.category === "other", "#218 upload: a project file takes the project's venue; visibility defaults Internal, category Other");
+  const k8 = d218NewKey();
+  const wrongProj = await d218Finalize({ customerId: CO, uploadKey: k8, blobPath: pathFor(CO, k8), fileName: "a.pdf", projectId: "P-OTHER" }, team, deps(PDF));
+  ok(!wrongProj.ok && removed.includes(pathFor(CO, k8)), "#218 upload: a project of another company is refused and the blob deleted");
+  const k9 = d218NewKey();
+  const portal = track(await d218Finalize({ customerId: OTHER, uploadKey: k9, blobPath: pathFor(CO, k9), fileName: "Signed form.pdf", visibility: "internal", projectId: "P-218", siteId: "v1", category: "forms" }, { kind: "customer", name: "Pat Customer", customerId: CO }, deps(PDF)));
+  ok(portal.ok && portal.document.customerId === CO && portal.document.source === "customer" && portal.document.visibility === "shared" && portal.document.projectId === null && portal.document.siteId === "v1" && portal.document.seenByTeamAt === null && portal.document.uploadedBy === "Pat Customer", "#218 upload: a portal upload is the session's company, Shared, From customer, unseen, never on a project");
+  const k10 = d218NewKey();
+  const portalForeign = await d218Finalize({ uploadKey: k10, blobPath: pathFor(OTHER, k10), fileName: "a.pdf" }, { kind: "customer", name: "Pat", customerId: CO }, deps(PDF));
+  ok(!portalForeign.ok && !removed.includes(pathFor(OTHER, k10)), "#218 upload: a portal session can never finalize (or delete) another company's path");
+  const k11 = d218NewKey();
+  const portalSite = await d218Finalize({ uploadKey: k11, blobPath: pathFor(CO, k11), fileName: "a.pdf", siteId: "o1" }, { kind: "customer", name: "Pat", customerId: CO }, deps(PDF));
+  ok(!portalSite.ok, "#218 upload: a portal upload to another company's venue is refused");
+  const k12 = d218NewKey();
+  const down = await d218Finalize({ customerId: CO, uploadKey: k12, blobPath: pathFor(CO, k12), fileName: "a.pdf" }, team, { ...deps(PDF), head: async () => { throw new Error("BlobError: ECONNREFUSED 127.0.0.1:443"); } });
+  ok(!down.ok && down.error === "Couldn't read the uploaded file — try again.", "#218 upload: a Blob read failure is a generic refusal, never the vendor's text");
+
+  // Idempotent per upload key: one document per key, and two finalizes of
+  // the same blob racing each other record it once.
+  const second = await d218Finalize({ customerId: CO, uploadKey: k1, blobPath: pathFor(CO, k1, "other.pdf"), fileName: "other.pdf" }, team, deps(PDF));
+  ok(!second.ok && !removed.includes(pathFor(CO, k1, "other.pdf")), "#218 upload: a second blob under an already-recorded upload key is refused (one document per key) and not deleted");
+  const k13 = d218NewKey();
+  const raceIn = { customerId: CO, uploadKey: k13, blobPath: pathFor(CO, k13), fileName: "race.pdf" };
+  const race = await Promise.all([d218Finalize(raceIn, team, deps(PDF)), d218Finalize(raceIn, team, deps(PDF)), d218Finalize(raceIn, team, deps(PDF))]);
+  for (const d of await d218ListDocs("documents", { includeDeleted: true })) if ((d as { blobPath?: string }).blobPath === raceIn.blobPath) registerFixture("documents", d.id);
+  const liveRace = (await d218ForCustomer(CO)).filter((d) => d.blobPath === raceIn.blobPath);
+  ok(race.filter((r) => r.ok).length === 1 && liveRace.length === 1 && !removed.includes(raceIn.blobPath), "#218 upload: concurrent finalizes of one upload record it exactly once and never delete the blob");
 }
