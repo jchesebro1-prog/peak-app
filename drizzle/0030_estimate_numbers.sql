@@ -6,8 +6,8 @@
 -- Internal ids (Q-2041, L-1050, Q-dl-…) are untouched.
 --
 -- assign_estimate_numbers() is the ONLY allocator: this migration calls it
--- once to renumber history (from 1001, date order, Daylite imports and
--- soft-deleted rows included), and src/lib/stores/estimate-numbers.ts calls
+-- once to renumber history (from 1001: Daylite imports first by company and
+-- name, then everything else in date order; soft-deleted rows included), and src/lib/stores/estimate-numbers.ts calls
 -- it after every insert — which also numbers any straggler the previous
 -- deployment or a preview deploy created while this function did not exist.
 --
@@ -33,6 +33,12 @@ CREATE INDEX IF NOT EXISTS "quotes_consulting_lead_id_idx" ON "quotes" USING btr
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "leads_converted_quote_id_idx" ON "leads" USING btree (("doc"->>'convertedQuoteId'));
 --> statement-breakpoint
+-- Fresh statistics for the expression indexes above before the backfill's
+-- lookups plan against them.
+ANALYZE quotes;
+--> statement-breakpoint
+ANALYZE leads;
+--> statement-breakpoint
 -- A positive epoch-ms from a JSON value, else NULL. CASE (not AND) so the
 -- cast is only ever evaluated on a JSON number.
 CREATE OR REPLACE FUNCTION estimate_ms(v jsonb) RETURNS numeric
@@ -56,8 +62,16 @@ LANGUAGE sql IMMUTABLE AS $$
   )
 $$;
 --> statement-breakpoint
--- Number every quote and lead that has no estNo, oldest first (ties by id),
--- leads and quotes interleaved. A quote whose lead is numbered carries the
+-- Number every quote and lead that has no estNo, in one ordered pass, leads
+-- and quotes interleaved:
+--   group 0 — Daylite-imported history (a quote with source 'daylite', a lead
+--     whose id starts 'L-dl-'). The import carries no original dates (its
+--     createdAt is the import time), so these go FIRST, by company (a quote's
+--     customer, a lead's org; lowercased, trimmed, empty last), then name (a
+--     quote's name, a lead's name else interest; lowercased), then id;
+--   group 1 — everything else, oldest first (estimate_created_at), then id.
+-- Every text key sorts COLLATE "C" (and is lowercased under "C", ASCII only)
+-- so Neon and PGlite, whose default collations differ, number identically. A quote whose lead is numbered carries the
 -- lead's number (+ the next suffix when a quote already has it); a lead whose
 -- quote was numbered first takes that quote's number; everything else takes
 -- nextval. A quote's lead: doc.leadId, else doc.consulting.leadId, else the
@@ -87,15 +101,27 @@ BEGIN
   FOR r IN
     SELECT u.kind, u.id
       FROM (
-        SELECT 'lead'::text AS kind, l.id, estimate_created_at(l.doc, l.updated_at) AS t
+        SELECT 'lead'::text AS kind, l.id,
+               CASE WHEN left(l.id, 5) = 'L-dl-' THEN 0 ELSE 1 END AS grp,
+               CASE WHEN left(l.id, 5) = 'L-dl-'
+                    THEN lower(btrim(COALESCE(l.doc->>'org', '')) COLLATE "C") ELSE '' END AS co,
+               CASE WHEN left(l.id, 5) = 'L-dl-'
+                    THEN lower(COALESCE(NULLIF(l.doc->>'name', ''), l.doc->>'interest', '') COLLATE "C") ELSE '' END AS nm,
+               CASE WHEN left(l.id, 5) = 'L-dl-' THEN NULL ELSE estimate_created_at(l.doc, l.updated_at) END AS t
           FROM leads l
          WHERE jsonb_typeof(l.doc->'estNo') IS DISTINCT FROM 'number'
         UNION ALL
-        SELECT 'quote'::text, q.id, estimate_created_at(q.doc, q.updated_at)
+        SELECT 'quote'::text, q.id,
+               CASE WHEN q.doc->>'source' = 'daylite' THEN 0 ELSE 1 END,
+               CASE WHEN q.doc->>'source' = 'daylite'
+                    THEN lower(btrim(COALESCE(q.doc->>'customer', '')) COLLATE "C") ELSE '' END,
+               CASE WHEN q.doc->>'source' = 'daylite'
+                    THEN lower(COALESCE(q.doc->>'name', '') COLLATE "C") ELSE '' END,
+               CASE WHEN q.doc->>'source' = 'daylite' THEN NULL ELSE estimate_created_at(q.doc, q.updated_at) END
           FROM quotes q
          WHERE jsonb_typeof(q.doc->'estNo') IS DISTINCT FROM 'number'
       ) u
-     ORDER BY u.t, u.id
+     ORDER BY u.grp, (u.co = ''), u.co COLLATE "C", u.nm COLLATE "C", u.t, u.id COLLATE "C"
   LOOP
     carry := NULL;
     next_suffix := NULL;
@@ -106,7 +132,7 @@ BEGIN
         FROM quotes q
        WHERE (q.id = conv_quote OR q.doc->>'leadId' = r.id OR (q.doc->'consulting')->>'leadId' = r.id)
          AND jsonb_typeof(q.doc->'estNo') = 'number'
-       ORDER BY estimate_created_at(q.doc, q.updated_at), q.id
+       ORDER BY estimate_created_at(q.doc, q.updated_at), q.id COLLATE "C"
        LIMIT 1;
       IF carry IS NULL THEN
         n := nextval('estimate_number_seq');
@@ -128,7 +154,7 @@ BEGIN
           INTO carry
           FROM leads
          WHERE doc->>'convertedQuoteId' = r.id AND jsonb_typeof(doc->'estNo') = 'number'
-         ORDER BY id
+         ORDER BY id COLLATE "C"
          LIMIT 1;
       END IF;
       IF carry IS NULL THEN
@@ -162,7 +188,8 @@ BEGIN
 END;
 $$;
 --> statement-breakpoint
--- The backfill: renumber everything that exists, from 1001, in date order.
+-- The backfill: renumber everything that exists, from 1001 — Daylite history
+-- first by company and name, then the rest in date order.
 SELECT assign_estimate_numbers();
 --> statement-breakpoint
 -- Continue after the highest number in use (only ever moves forward).

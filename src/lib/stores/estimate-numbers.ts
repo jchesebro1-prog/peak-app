@@ -23,6 +23,11 @@ function rowsOf<T>(result: unknown): T[] {
   return Array.isArray(result) ? (result as T[]) : [];
 }
 
+// Set once the probe has found the function: a migration is never undone, so
+// every later call skips the round-trip. Never set while it is absent, so a
+// preview keeps probing until production migrates.
+let functionPresent = false;
+
 /**
  * Number everything still unnumbered; returns how many records were numbered.
  * Returns 0 — without raising — when the function does not exist yet: a
@@ -33,14 +38,23 @@ function rowsOf<T>(result: unknown): T[] {
  */
 export async function assignEstimateNumbers(): Promise<number> {
   const db = await getDb();
-  const probe = rowsOf<{ ok: boolean }>(
-    await db.execute(sql`select to_regprocedure('assign_estimate_numbers()') is not null as ok`)
-  );
-  if (!probe[0]?.ok) return 0;
+  if (!functionPresent) {
+    const probe = rowsOf<{ ok: boolean }>(
+      await db.execute(sql`select to_regprocedure('assign_estimate_numbers()') is not null as ok`)
+    );
+    if (!probe[0]?.ok) return 0;
+    functionPresent = true;
+  }
   const res = rowsOf<{ n: number | string | bigint | null }>(
     await db.execute(sql`select assign_estimate_numbers() as n`)
   );
   return Number(res[0]?.n ?? 0);
+}
+
+/** Test seam: forget the cached probe (the spec harness drops the function
+ *  inside a rolled-back transaction to stand in for an un-migrated DB). */
+export function resetEstimateNumberProbe(): void {
+  functionPresent = false;
 }
 
 /** Number a just-inserted quote/lead and return it as stored (with estNo). */

@@ -10503,6 +10503,7 @@ seeded()
   .then(() => quotePdfCoalesce222AsyncChecks())
   .then(() => pdfPoll222AsyncChecks())
   .then(() => estimate223BackfillAsyncChecks())
+  .then(() => estimate223FixAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25545,7 +25546,7 @@ import {
    store wrapper's preview safety. Runs on the harness's fresh datadir, so
    the real drizzle/0030_estimate_numbers.sql is what is under test.
    ====================================================================== */
-import { assignEstimateNumbers as e223Assign } from "@/lib/stores/estimate-numbers";
+import { assignEstimateNumbers as e223Assign, resetEstimateNumberProbe as e223ResetProbe } from "@/lib/stores/estimate-numbers";
 import { buildQuote as e223BuildQuote, type Quote as E223Quote } from "@/lib/stores/quotes";
 import { mkLead as e223MkLead, type LeadRecord as E223Lead } from "@/lib/stores/leads";
 import { getDocRows as e223GetRows, softDeleteDoc as e223SoftDelete } from "@/db/doc-store";
@@ -25607,11 +25608,11 @@ async function estimate223BackfillAsyncChecks(): Promise<void> {
   const field = (slug: string, k: "estNo" | "estSuffix") =>
     (rows.find((r) => r.id === id(slug))?.doc as Record<string, unknown> | undefined)?.[k];
   const no = (slug: string) => Number(field(slug, "estNo") ?? -1);
-  const b = no("hist");
+  const b = no("dl");
   ok(b >= 1001, "#223 backfill: numbers start at 1001 or later");
   ok(
-    no("lead1") === b + 1 && no("gone") === b + 2 && no("dl") === b + 3 && no("q3") === b + 4 && no("tie-a") === b + 5 && no("tie-b") === b + 6,
-    "#223 backfill: leads and quotes interleave in date order (createdAt, else earliest history/activity; ties by id)"
+    no("hist") === b + 1 && no("lead1") === b + 2 && no("gone") === b + 3 && no("q3") === b + 4 && no("tie-a") === b + 5 && no("tie-b") === b + 6,
+    "#223 backfill: Daylite history first, then leads and quotes interleave in date order (createdAt, else earliest history/activity; ties by id)"
   );
   ok(rows.find((r) => r.id === id("gone"))?.deleted === true && no("gone") > 0, "#223 backfill: a soft-deleted quote is numbered too, so no number is ever reused");
   ok(no("dl") > 0, "#223 backfill: a Daylite-imported quote is numbered");
@@ -25675,6 +25676,7 @@ async function estimate223BackfillAsyncChecks(): Promise<void> {
     await e223Tx(async () => {
       const tx = await e223GetDb();
       await tx.execute(e223Sql`drop function assign_estimate_numbers()`);
+      e223ResetProbe();
       seen.n = await e223Assign();
       throw sentinel;
     });
@@ -25684,4 +25686,133 @@ async function estimate223BackfillAsyncChecks(): Promise<void> {
   ok(seen.n === 0, "#223 preview safety: with no assign_estimate_numbers() (an un-migrated DB) the wrapper returns 0 instead of throwing");
   const back = e223Rows<{ fn: string | null }>(await db.execute(e223Sql`select to_regprocedure('assign_estimate_numbers()')::text as fn`));
   ok(!!back[0]?.fn, "#223 …and rolling that transaction back restores the function");
+}
+
+/* ======================================================================
+   #223 T2 fix — Daylite history (no original dates) is numbered FIRST, by
+   company then name then id, with every text key under COLLATE "C"; a
+   soft-deleted sibling still holds its suffix; a lead newer than its
+   converted quote takes the quote's number; the function-exists probe is
+   cached after its first success.
+   ====================================================================== */
+import { upsertDoc as e223fUpsert } from "@/db/doc-store";
+import { registerFixture as e223fRegister } from "./test-fixtures";
+
+async function estimate223FixAsyncChecks(): Promise<void> {
+  const db = await e223GetDb();
+  await e223Assign();
+  const id = (slug: string) => fixtureId("223fix", slug);
+  const quote = (slug: string, t: number, extra: Partial<E223Quote> = {}): E223Quote => ({
+    ...e223BuildQuote(id(slug), { name: "#223 fix " + slug, owner: "spec" }, "system", null, t),
+    ...extra,
+  });
+  const lead = (slug: string, t: number, extra: Partial<E223Lead> = {}): E223Lead => ({
+    ...e223MkLead({ id: id(slug), org: "#223 fix " + slug, createdAt: t }),
+    ...extra,
+  });
+  const dlLeadId = "L-dl-e223fix";
+
+  // Pass 1: an app-era quote OLDER than every Daylite import, plus Daylite
+  // quotes and a Daylite lead whose import-time dates must not matter.
+  await createFixture("quotes", quote("old", 1));
+  await createFixture("quotes", quote("dl-beta", 50, { source: "daylite", customer: "Beta Co", name: "Anything" }));
+  await createFixture("quotes", quote("dl-alpha-z", 5, { source: "daylite", customer: "  alpha  ", name: "zeta" }));
+  await createFixture("quotes", quote("dl-alpha-e", 60, { source: "daylite", customer: "Alpha", name: "Echo" }));
+  await createFixture("quotes", quote("dl-empty", 2, { source: "daylite", customer: "", name: "aaa" }));
+  await createFixture("quotes", quote("dl-hyphen", 90, { source: "daylite", customer: "Al-Z Co", name: "x" }));
+  e223fRegister("leads", dlLeadId);
+  await e223fUpsert("leads", e223MkLead({ id: dlLeadId, org: "ALPHA", interest: "Foxtrot", createdAt: 70 }));
+
+  const n1 = await e223Assign();
+  ok(n1 === 7, `#223 fix: one pass numbers the six Daylite records and the app-era quote (got ${n1})`);
+  const rows1 = [
+    ...(await e223GetRows("quotes", ["old", "dl-beta", "dl-alpha-z", "dl-alpha-e", "dl-empty", "dl-hyphen"].map(id))),
+    ...(await e223GetRows("leads", [dlLeadId])),
+  ];
+  const no1 = (rowId: string) => Number((rows1.find((r) => r.id === rowId)?.doc as Record<string, unknown> | undefined)?.estNo ?? -1);
+  const order = [id("dl-hyphen"), id("dl-alpha-e"), dlLeadId, id("dl-alpha-z"), id("dl-beta"), id("dl-empty"), id("old")];
+  const base = no1(order[0]);
+  ok(
+    base >= 1001 && order.every((rowId, i) => no1(rowId) === base + i),
+    `#223 fix: Daylite history takes the lowest numbers — by company (lowercased, trimmed, byte order: "al-z co" < "alpha" < "beta co", empty last), then name ("echo" < "foxtrot" < "zeta") — got ${order.map(no1).join(",")}`
+  );
+  ok(no1(id("old")) > no1(id("dl-empty")), "#223 fix: an app-era quote older than every Daylite import is still numbered after them");
+  ok(no1(dlLeadId) > no1(id("dl-alpha-e")) && no1(dlLeadId) < no1(id("dl-alpha-z")), "#223 fix: a Daylite lead (L-dl-…) sorts by its org and interest among the Daylite quotes");
+
+  // Pass 2: a soft-deleted sibling holds its place in the suffix count.
+  await createFixture("leads", lead("sd-lead", 100));
+  await createFixture("quotes", quote("sd-1", 110, { leadId: id("sd-lead") }));
+  await e223Assign();
+  await e223SoftDelete("quotes", id("sd-1"));
+  await createFixture("quotes", quote("sd-2", 120, { leadId: id("sd-lead") }));
+  // …and a converted quote older than its lead.
+  await createFixture("quotes", quote("cq", 200));
+  await createFixture("leads", lead("cl", 210, { convertedQuoteId: id("cq") }));
+  const n2 = await e223Assign();
+  ok(n2 === 3, `#223 fix: the second pass numbers sd-2, the converted quote and its lead (got ${n2})`);
+
+  const rows2 = [
+    ...(await e223GetRows("quotes", ["sd-1", "sd-2", "cq"].map(id))),
+    ...(await e223GetRows("leads", ["sd-lead", "cl"].map(id))),
+  ];
+  const f2 = (slug: string, k: "estNo" | "estSuffix") =>
+    (rows2.find((r) => r.id === id(slug))?.doc as Record<string, unknown> | undefined)?.[k];
+  ok(
+    rows2.find((r) => r.id === id("sd-1"))?.deleted === true &&
+      f2("sd-1", "estNo") === f2("sd-lead", "estNo") && f2("sd-1", "estSuffix") === undefined &&
+      f2("sd-2", "estNo") === f2("sd-lead", "estNo") && f2("sd-2", "estSuffix") === 2,
+    "#223 fix: a soft-deleted sibling counts — the next quote on the lead is -2, never a reuse of the bare number"
+  );
+  ok(
+    typeof f2("cq", "estNo") === "number" && f2("cl", "estNo") === f2("cq", "estNo") && f2("cq", "estSuffix") === undefined,
+    "#223 fix: a lead newer than its converted quote (convertedQuoteId) takes the quote's number"
+  );
+
+  // Idempotent: nothing left to number, and re-running every statement of
+  // the migration file (ANALYZE included) changes no number.
+  ok((await e223Assign()) === 0, "#223 fix: a further pass assigns nothing");
+  const allIds = { quotes: ["old", "dl-beta", "dl-alpha-z", "dl-alpha-e", "dl-empty", "dl-hyphen", "sd-1", "sd-2", "cq"].map(id), leads: [dlLeadId, id("sd-lead"), id("cl")] };
+  const snap = async () =>
+    JSON.stringify(
+      [...(await e223GetRows("quotes", allIds.quotes)), ...(await e223GetRows("leads", allIds.leads))].map((r) => [
+        r.id,
+        (r.doc as Record<string, unknown>).estNo,
+        (r.doc as Record<string, unknown>).estSuffix,
+      ])
+    );
+  const before = await snap();
+  const file = e223ReadDir(e223Join(process.cwd(), "drizzle")).find((f) => /^\d{4}_estimate_numbers\.sql$/.test(f));
+  const sqlText = file ? e223ReadFile(e223Join(process.cwd(), "drizzle", file), "utf8") : "";
+  ok(/ANALYZE quotes;[\s\S]*ANALYZE leads;[\s\S]*SELECT assign_estimate_numbers\(\);/.test(sqlText), "#223 fix: the migration ANALYZEs quotes and leads before the backfill");
+  let rerunError: unknown = null;
+  try {
+    for (const stmt of sqlText.split("--> statement-breakpoint").map((x) => x.trim()).filter(Boolean)) await db.execute(e223Sql.raw(stmt));
+  } catch (e) {
+    rerunError = e;
+  }
+  ok(rerunError === null && (await snap()) === before, `#223 fix: re-running the migration is harmless and changes no number (${String(rerunError)})`);
+
+  // The probe is cached: once the function was found, a later call goes
+  // straight to it (here it is dropped inside a rolled-back transaction, so
+  // the cached call reaches the missing function and rejects).
+  const sentinel = new Error("e223fix-rollback");
+  const seen = { rejected: false };
+  try {
+    await e223Tx(async () => {
+      const tx = await e223GetDb();
+      await e223Assign();
+      await tx.execute(e223Sql`drop function assign_estimate_numbers()`);
+      try {
+        await e223Assign();
+      } catch {
+        seen.rejected = true;
+      }
+      throw sentinel;
+    });
+  } catch (e) {
+    if (e !== sentinel) throw e;
+  }
+  ok(seen.rejected, "#223 fix: after the first success the function-exists probe is skipped (cached)");
+  const back = e223Rows<{ fn: string | null }>(await db.execute(e223Sql`select to_regprocedure('assign_estimate_numbers()')::text as fn`));
+  ok(!!back[0]?.fn && (await e223Assign()) === 0, "#223 fix: …the rollback restores the function and the cached path works again");
 }
