@@ -120,7 +120,9 @@ function CellSummary({ cell }: { cell: EquipCellVM }) {
       {cell.detail && <div style={{ fontSize: 11, color: "#737985", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cell.detail}</div>}
       {cell.kind !== "empty" && cell.kind !== "none" && !cell.problem && (
         <div style={{ fontSize: 11, color: "#5b616e", marginTop: 2 }}>
-          {cell.perSqft ? `${money(cell.unitCost)}/${FABRIC_RATE_UNIT}` : `cost ${money(cell.unitCost)} · sell ${money(cell.unitSell)}`}
+          {cell.perSqft && cell.kind === "part"
+            ? `cost ${money(cell.unitCost)}/${FABRIC_RATE_UNIT}`
+            : `cost ${money(cell.unitCost)} · sell ${money(cell.unitSell)}`}
         </div>
       )}
       {cell.confirmedBy && <div style={{ fontSize: 10.5, color: "#8a6d1f", marginTop: 2 }}>Confirmed by {cell.confirmedBy} · {day(cell.confirmedAt)}</div>}

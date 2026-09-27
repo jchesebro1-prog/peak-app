@@ -98,7 +98,7 @@ export default function CurtainModal({
         >
           {fabrics.map((f) => (
             <option key={f.sku} value={f.sku}>
-              {f.name + "  ·  " + fabricRateLabel(f.curtainAreaRate)}
+              {f.name + "  ·  " + ((f.curtainAreaRate ?? 0) > 0 ? "cost " : "") + fabricRateLabel(f.curtainAreaRate)}
             </option>
           ))}
         </select>

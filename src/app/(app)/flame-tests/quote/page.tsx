@@ -7,7 +7,7 @@ import { getRates } from "@/lib/flametest-engine";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { normalizeTravelOverride } from "@/lib/travel-plan";
-import { seedPriceOverride, seedPriceOverrideIsLegacy } from "@/lib/service-pricing";
+import { seedPriceOverride } from "@/lib/service-pricing";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -44,7 +44,6 @@ type FlameTestDoc = {
   travel?: unknown;
   trip?: { mode?: string } | null;
   priceOverride?: unknown;
-  priceOverrideSeeded?: unknown;
 } | null;
 
 export default async function FlameTestQuotePage({
@@ -176,12 +175,6 @@ export default async function FlameTestQuotePage({
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
       priceOverride: seedPriceOverride(editQuote.status, editQuote.value, ft && ft.priceOverride),
-      priceOverrideSeeded: seedPriceOverrideIsLegacy(
-        editQuote.status,
-        editQuote.value,
-        ft && ft.priceOverride,
-        ft && ft.priceOverrideSeeded
-      ),
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

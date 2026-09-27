@@ -201,6 +201,8 @@ export function EquipmentCard({
                       ) : (
                         <span title="Only an admin can edit the Equipment map">{ASK_ADMIN_HINT}</span>
                       )}
+                      {/* #231 — an unmapped Wire pull still says what its footage counted. */}
+                      {l.note ? ` · ${l.note}` : null}
                     </>
                   ) : none ? (
                     "Not included in this tier"
@@ -215,6 +217,8 @@ export function EquipmentCard({
                   min={0}
                   value={draft[l.rowKey] ?? String(l.qty)}
                   onChange={(e) => setQty(l, e.target.value)}
+                  disabled={none}
+                  title={none ? "Not included in this tier — nothing to count" : undefined}
                   aria-label={`${l.label} quantity`}
                   style={{ ...INPUT, width: 70, textAlign: "right", borderColor: l.qty !== l.eqQty ? "var(--accent)" : "#e4e7ec" }}
                 />

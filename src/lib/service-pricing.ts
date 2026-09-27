@@ -375,10 +375,11 @@ export function seedPriceOverride(status: string, value: unknown, saved: unknown
 
 /**
  * True when seedPriceOverride()'s result is the D286 legacy-parity fallback
- * (an old off-grid sent price) rather than a real saved priceOverride. The
- * builder posts this as `priceOverrideSeeded` and the save action stores it
- * alongside `priceOverride`, so next year's renewal draft (priorHandSetPrice
- * in renewal-outreach.ts) never calls a rounding artifact "hand-set".
+ * (an old off-grid sent price) rather than a real saved priceOverride.
+ * deriveSeededMarker reads it on the server, from the stored quote, and the
+ * save action stores the result as `priceOverrideSeeded` alongside
+ * `priceOverride`, so next year's renewal draft (priorHandSetPrice in
+ * renewal-outreach.ts) never calls a rounding artifact "hand-set".
  */
 export function seedPriceOverrideIsLegacy(
   status: string,
@@ -400,12 +401,15 @@ export function seedPriceOverrideIsLegacy(
  * exists — read it as a real hand-set price, the builder posted
  * `priceOverrideSeeded=""`, and the marker was dropped from the save.
  *
- * True iff a priceOverride is being saved AND it equals the stored quote's
- * current value (nothing was actually typed differently) AND the stored
- * quote's status wasn't draft (nobody has seen a price yet) AND the stored
- * subdoc either had no real priceOverride yet, or already carried this
- * marker itself. Any other typed total — a genuinely new hand-set price,
- * including the very first time one is typed — is never flagged.
+ * True iff a priceOverride is being saved AND it is exactly the total the
+ * builder reopened with (seedPriceOverride of the stored quote) AND that
+ * reopen-seed was the D286 legacy fallback (seedPriceOverrideIsLegacy — an
+ * old off-grid sent price, or a saved priceOverride already carrying this
+ * marker). Re-derived from the same two functions the builder's reopen
+ * uses, so: a sent on-grid quote (no seed) where the user types the same
+ * number is a real hand-set price (false); a legacy fractional value (stored
+ * 821.4, reopened and saved as 821) stays flagged (true). Any other typed
+ * total — a genuinely new hand-set price — is never flagged.
  */
 export function deriveSeededMarker(i: {
   /** The (already-normalized) priceOverride about to be saved; null/undefined = none. */
@@ -418,9 +422,10 @@ export function deriveSeededMarker(i: {
     priceOverrideSeeded?: boolean;
   } | null;
 }): boolean {
-  if (i.postedOverride == null || !i.stored) return false;
-  if (i.stored.status === "draft") return false;
-  if (i.postedOverride !== i.stored.value) return false;
-  if (i.stored.priceOverride != null && !i.stored.priceOverrideSeeded) return false;
-  return true;
+  const s = i.stored;
+  if (i.postedOverride == null || !s) return false;
+  return (
+    i.postedOverride === seedPriceOverride(s.status, s.value, s.priceOverride) &&
+    seedPriceOverrideIsLegacy(s.status, s.value, s.priceOverride, s.priceOverrideSeeded)
+  );
 }

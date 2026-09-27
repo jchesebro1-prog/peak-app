@@ -9,6 +9,7 @@ import type { SysKey, TierKey } from "@/app/(app)/design/quick/engine";
 import { EQUIPMENT_ROWS, EQUIP_SYSTEM_LABEL, type EquipRowDef } from "./equipment-vocab";
 import {
   EQUIP_TIERS,
+  NOT_INCLUDED,
   cellFor,
   priceCell,
   sellFromCost,
@@ -81,7 +82,7 @@ function cellVM(def: EquipRowDef, tier: TierKey, map: EquipmentMap, ctx: EquipPr
   const cell = cellFor(map[def.key], tier);
   const perSqft = !!def.curtain;
   if (!cell) return { tier, kind: "empty", title: "Needs a part", detail: "", unitCost: null, unitSell: null, perSqft, problem: null, input: null };
-  if (cell.kind === "none") return { tier, kind: "none", title: "Not included", detail: "", unitCost: null, unitSell: null, perSqft, problem: null, input: { kind: "none" } };
+  if (cell.kind === "none") return { tier, kind: "none", title: NOT_INCLUDED, detail: "", unitCost: null, unitSell: null, perSqft, problem: null, input: { kind: "none" } };
   const price = priceCell(cell, def, ctx);
   const priced = price.status === "needs-part" ? null : price;
   const problem = price.status === "needs-part" ? price.reason : null;

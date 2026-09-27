@@ -845,9 +845,9 @@ export function RulesEditor({
       })}
 
       <div style={{ fontSize: 11.5, color: "#aab0bb", lineHeight: 1.6, marginTop: 6 }}>
-        Flame-test edits take effect on the next flame-test quote immediately. System-design install
-        / freight / contingency set the Quick Design defaults. Reference rates document the numbers
-        the estimators are built on and export with the rest.
+        Flame-test edits take effect on the next flame-test quote immediately. System-design freight /
+        contingency set the Quick Design defaults; labor is per system. Reference rates document the
+        numbers the estimators are built on and export with the rest.
       </div>
     </div>
   );

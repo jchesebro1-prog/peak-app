@@ -48,12 +48,13 @@ export async function searchAssemblyPartsAction(query: string, limit = 40): Prom
 }
 
 /**
- * Save a fixture or system (#210). Anyone signed in (spec §2.5); every save
- * stamps who/when. The snapshot ("was $X when built") prices from the live
- * catalog, read for THIS record's SKUs only — never the whole ~37k book. A
- * part missing from the catalog does not block the save. A fixture's lens
- * and box lines become its light engine's accessory links (scope
- * `fixture:<id>`); a system's scope is emptied.
+ * Save a fixture, system or hardware assembly (#210, #228). Anyone signed in
+ * (spec §2.5); every save stamps who/when. The snapshot ("was $X when
+ * built") prices from the live catalog, read for THIS record's SKUs only —
+ * never the whole ~37k book. A part missing from the catalog does not block
+ * the save. A fixture's lens and box lines become its light engine's
+ * accessory links (scope `fixture:<id>`); a system's or hardware
+ * assembly's scope is emptied (fixturePairs returns none for either).
  */
 export async function saveFixtureAction(input: FixtureInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const user = await requireUser();

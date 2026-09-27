@@ -144,6 +144,10 @@ export const EQUIPMENT_KEY_ALIASES: ReadonlyMap<string, string> = new Map([["con
  * where a saved config is read (cleanQtyOverrides, quick/engine.ts), which is
  * the screen's and the server's one read path. The next save writes the new
  * names; no stored record is rewritten.
+ *
+ * One hop only: each old label maps straight to its CURRENT label, and the
+ * lookup is applied once — never chained. A future relabel of a target here
+ * must update every entry pointing at it (and add the old target as a key).
  */
 export const EQUIPMENT_LABEL_ALIASES: ReadonlyMap<string, string> = new Map([
   ["rigging:Aircraft cable", "rigging:Suspension Method"],

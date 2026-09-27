@@ -13,7 +13,7 @@ import { getRates } from "@/lib/repair-engine";
 import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { normalizeTravelOverride } from "@/lib/travel-plan";
-import { seedPriceOverride, seedPriceOverrideIsLegacy } from "@/lib/service-pricing";
+import { seedPriceOverride } from "@/lib/service-pricing";
 import { coordsOf } from "@/lib/geo";
 import { QuoteBuilder, type BuilderCustomer, type BuilderInitial } from "./controls";
 import { builderTiers } from "@/lib/pricing-tiers";
@@ -63,7 +63,6 @@ type RepairDoc = {
   travel?: unknown;
   trip?: { mode?: string } | null;
   priceOverride?: unknown;
-  priceOverrideSeeded?: unknown;
 } | null;
 
 export default async function RepairQuotePage({
@@ -209,12 +208,6 @@ export default async function RepairQuotePage({
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
       priceOverride: seedPriceOverride(editQuote.status, editQuote.value, rp && rp.priceOverride),
-      priceOverrideSeeded: seedPriceOverrideIsLegacy(
-        editQuote.status,
-        editQuote.value,
-        rp && rp.priceOverride,
-        rp && rp.priceOverrideSeeded
-      ),
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,

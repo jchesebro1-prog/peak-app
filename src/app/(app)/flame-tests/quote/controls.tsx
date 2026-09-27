@@ -100,9 +100,6 @@ export type BuilderInitial = {
   travel?: TravelOverride | null;
   /** #217: the typed total to reopen with (null = auto). */
   priceOverride?: number | null;
-  /** #217 D286: true when priceOverride above is only the reopen-seed for an
-   *  old off-grid sent price — not something anyone actually typed. */
-  priceOverrideSeeded?: boolean;
 };
 
 /* ---------- inlined pure pricing (port of flametest-engine.ts) ---------- */
@@ -331,14 +328,6 @@ export function QuoteBuilder({
   const [priceText, setPriceText] = useState(
     initial.priceOverride != null ? String(initial.priceOverride) : ""
   );
-  /** #217 D286: true while the typed total is still the untouched reopen-seed
-   *  for an old off-grid sent price — not something anyone actually typed.
-   *  Clears on any edit to the total, Reset to auto, or a new customer.
-   *  #217 fix wave: no longer posted to the server — the save action derives
-   *  this itself from the STORED quote (a client-posted flag went stale on a
-   *  second save and could be spoofed) — kept here only so the seed reopens
-   *  correctly reflect the doc's own marker. */
-  const [priceOverrideSeeded, setPriceOverrideSeeded] = useState(!!initial.priceOverrideSeeded);
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
 
@@ -413,7 +402,6 @@ export function QuoteBuilder({
     }
     setVenueSel(sel);
     setPriceText(""); // a new customer is a new price
-    setPriceOverrideSeeded(false);
     quoteNameManual.current = false;
     setQuoteName(automaticQuoteName(c, sel));
     setContactSel(primary ? primary.name : "");
@@ -499,7 +487,6 @@ export function QuoteBuilder({
   function resetToAuto() {
     if (r?.overridden) setMarginPts(sliderPts(r.effectiveMargin));
     setPriceText("");
-    setPriceOverrideSeeded(false);
     dirty();
   }
 
@@ -1035,7 +1022,6 @@ export function QuoteBuilder({
                   onChange={(e) => {
                     setMarginPts(Math.round(+e.target.value));
                     setPriceText("");
-                    setPriceOverrideSeeded(false);
                     dirty();
                   }}
                   style={{ width: "100%", accentColor: accent, cursor: "pointer", margin: "2px 0 0" }}
@@ -1061,7 +1047,6 @@ export function QuoteBuilder({
                   text={priceText}
                   onText={(t) => {
                     setPriceText(t);
-                    setPriceOverrideSeeded(false);
                     dirty();
                   }}
                   onReset={resetToAuto}

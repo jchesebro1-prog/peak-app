@@ -589,7 +589,7 @@ export default function DesignClient({
                     )}
                   </div>
                   <div style={{ fontSize: 11, color: "#aab0bb", lineHeight: 1.5, marginTop: 8 }}>
-                    Recomputed live from the saved configuration — install, freight and contingency roll up in Quick Design.
+                    Recomputed live from the saved configuration — labor, freight and contingency roll up in Quick Design.
                   </div>
                 </>
               ) : (

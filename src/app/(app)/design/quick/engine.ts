@@ -594,11 +594,11 @@ export function compute(s: AState): ComputeResult {
     ctrlItems.push(eq("controls:distro", 1));
   }
   // #233: Output station moved to Lighting as the Cable Package — its own
-  // formula AND its own gate (Controls in scope, Data picked), pushed after
-  // the dimmer-rack count above, so racks and every existing Quick Design
-  // total with Lighting on are unchanged. Grid Auto never turns Controls on,
-  // so no Auto card gains a line.
-  if (s.sys.controls && ctrl.data) lightItems.push(eq("lighting:cablePackage", pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3))));
+  // formula, and it follows Lighting: any design with Lighting in scope gets
+  // it (Controls/Data no longer gate it). Pushed after the dimmer-rack count
+  // above, so the rack count is unchanged; a Lighting design without
+  // Controls + Data (Quick Design or a Grid Auto card) now gains this line.
+  if (s.sys.lighting) lightItems.push(eq("lighting:cablePackage", pick(2 * fl(D / 7), 2 * fl(D / 4), 2 * fl(D / 3))));
 
   // Acoustical shell — multi (size-independent)
   const shell = s.shell || {};

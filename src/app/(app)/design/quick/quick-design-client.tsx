@@ -518,7 +518,7 @@ export default function QuickDesignClient({
         // An allowance's refDesc is just the row's own name (no distinct
         // product) — the " · Allowance" suffix already says it once (#211 M3).
         const label = (it.refDesc && it.status !== "allowance" ? `${it.desc} — ${it.refDesc}` : it.desc) + (it.status === "allowance" ? " · Allowance" : "") + (it.note ? ` · ${it.note}` : "");
-        return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext };
+        return { desc: it.desc, label, unit: it.unit, qty, edited: hasOv, upLabel, ext, none: it.status === "none" };
       });
       return { key: x.key, name: x.name, dot: x.dot, sub, rows, open: !!bomOpen[x.key] };
     });
@@ -881,7 +881,7 @@ export default function QuickDesignClient({
                                 )}
                               </span>
                               <span style={{ fontFamily: MONO, textAlign: "right", color: "#5b616e" }}>{it.upLabel}</span>
-                              <span style={{ fontFamily: MONO, textAlign: "right", fontWeight: 600 }}>{moneyRound(it.ext)}</span>
+                              <span style={{ fontFamily: MONO, textAlign: "right", fontWeight: 600 }}>{it.none ? "—" : moneyRound(it.ext)}</span>
                             </div>
                           ))}
                         </>

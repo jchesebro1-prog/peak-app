@@ -18,7 +18,7 @@ import type { TierKey } from "@/app/(app)/design/quick/engine";
 import type { PartLite } from "./grid-bom";
 import { EQUIPMENT_ROWS, EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { isLaborSku } from "./wire-labor";
-import { EQUIP_TIERS, cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
+import { EQUIP_TIERS, NOT_INCLUDED, cellFor, isTierKey, sellFromCost, type EquipmentMap, type EquipPriceCtx } from "./equipment-map";
 import { GRID_SCOPE_OF_SYS, UNSCOPED, type GridLayer } from "./grid-scopes";
 import { resolveFixture, type FixtureCatalogPart, type FixtureResolvable } from "@/lib/fixture-assemblies";
 
@@ -116,7 +116,14 @@ export function virtualPartsFor(partIds: Iterable<string>, map: EquipmentMap, ct
     out.push({
       id,
       sku: "ALLOWANCE",
-      desc: amount > 0 ? label : `${label} (allowance no longer confirmed)`,
+      // #229: a row since switched to Not included can't be re-confirmed —
+      // the fix is a re-fill of this scope, which drops the line.
+      desc:
+        amount > 0
+          ? label
+          : cell?.kind === "none"
+            ? `${label} (row is now ${NOT_INCLUDED} — re-fill this scope)`
+            : `${label} (allowance no longer confirmed)`,
       category: "Allowance",
       unit: def.unit,
       list: amount > 0 ? sellFromCost(amount, ctx.margin) : 0,

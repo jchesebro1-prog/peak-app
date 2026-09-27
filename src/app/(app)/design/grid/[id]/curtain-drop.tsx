@@ -68,7 +68,8 @@ export default function CurtainDrop({
   onCancel: () => void;
 }) {
   const [name, setName] = useState("");
-  const [fabricSku, setFabricSku] = useState(fabrics[0]?.sku || "");
+  // #227 — default to the first fabric that actually has a $/sq ft rate.
+  const [fabricSku, setFabricSku] = useState((fabrics.find((f) => f.pricePerSqft > 0) ?? fabrics[0])?.sku || "");
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
   const [fullnessPct, setFullnessPct] = useState(50);
@@ -136,6 +137,11 @@ export default function CurtainDrop({
               </option>
             ))}
           </select>
+        )}
+        {fabric && !(fabric.pricePerSqft > 0) && (
+          <div style={{ fontSize: 11, color: "#a0442b", marginTop: 4 }}>
+            This fabric has no $/sq ft rate — the curtain prices at $0. Set its rate in the catalog.
+          </div>
         )}
       </div>
 

@@ -4085,6 +4085,10 @@ async function main() {
     const by = "tester";
     await Cat.upsert({ sku: "GEMK-PAR", desc: "GEMK LED par", category: "Lighting Fixtures", unit: "ea", list: 900, cost: 600 });
     await EM.saveEquipmentRow("lighting:par", { sameAll: true, tiers: { good: { kind: "part", sku: "GEMK-PAR" } } }, by);
+    // #233 final wave A: the Cable Package now follows Lighting, so a
+    // Lighting-only Auto design emits it — marked Not included here so
+    // "fully mapped" still means every line is accounted for.
+    await EM.saveEquipmentRow("lighting:cablePackage", { sameAll: true, tiers: { good: { kind: "none" } } }, by);
     const a = {
       ...defaultAState(0), venue: "school", size: "medium" as const, width: 40, depth: 30, grid: 24, wing: 12, ph: 20,
       sys: { rigging: false, curtains: false, lighting: true, controls: false, audio: false, video: false, acoustical: false, pit: false },
@@ -4141,6 +4145,7 @@ async function main() {
     await GP.setAutoEstimate(p0.id, opt, { ...autoEstimateFor((await GP.getProject(p0.id))!.autoEstimate, opt, opt)!, tierByScope: { lighting: "good", audio: "better" } });
     assert.equal(await autoNeedsPart((await GP.getProject(p0.id))!, opt), 3, "#211 D322: an unmapped Auto scope's lines (3 audio rows) are counted as missing from the quote");
     await EM.clearEquipmentRow("lighting:par");
+    await EM.clearEquipmentRow("lighting:cablePackage");
     await Cat.remove("GEMK-PAR");
   }
 

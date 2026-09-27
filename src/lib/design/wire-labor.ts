@@ -176,12 +176,22 @@ export function wirePullFeet(
   return { feet: Math.ceil(raw), missing };
 }
 
-/** "House depth not entered — counted as 0 ft", or undefined when nothing is missing. */
+/**
+ * The line's caveat, or undefined when nothing is missing. A stage dimension
+ * the user left blank reads "Stage width not entered — counted as 0 ft"; the
+ * house depth, which no design form asks for (#231), reads "House depth
+ * isn't in the design — not counted". Both parts join with " · ".
+ */
 export function wirePullNote(missing: readonly WireDimKey[]): string | undefined {
   if (!missing.length) return undefined;
-  const names = missing.map((k) => DIM_LABEL[k]);
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `${list} not entered — counted as 0 ft`;
+  const names = missing.filter((k) => k !== "houseDepth").map((k) => DIM_LABEL[k]);
+  const parts: string[] = [];
+  if (names.length) {
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    parts.push(`${list} not entered — counted as 0 ft`);
+  }
+  if (missing.includes("houseDepth")) parts.push(`${DIM_LABEL.houseDepth} isn't in the design — not counted`);
+  return parts.join(" · ");
 }
 
 /**
