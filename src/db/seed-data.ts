@@ -163,6 +163,7 @@ export const DEMO_COLLECTIONS: CollectionName[] = (Object.keys(
  * database. Deliberately leaves team members, app settings (company name,
  * accent, offices), estimating-rate blobs, and Gmail connections untouched —
  * those are real configuration, not demo fixtures. Returns rows removed.
+ * Database only — the reset action follows it with clearDemoDocumentFiles.
  */
 export async function clearDemoData(): Promise<number> {
   let cleared = 0;
@@ -170,6 +171,27 @@ export async function clearDemoData(): Promise<number> {
     cleared += await clearCollection(coll);
   }
   return cleared;
+}
+
+/**
+ * #218 — the go-live reset's second half: clearDemoData drops the
+ * `documents` rows, so their private file bytes under `documents/` in Blob
+ * go too. Best effort — a Blob failure is logged and never fails the reset;
+ * with no Blob token there is nothing to do. Kept out of clearDemoData so a
+ * test or script that resets a scratch database can never reach the real
+ * Blob store. Returns how many files were deleted.
+ */
+export async function clearDemoDocumentFiles(): Promise<number> {
+  try {
+    const { blobEnabled, deleteBlobsUnder } = await import("@/lib/blob");
+    if (!blobEnabled()) return 0;
+    const n = await deleteBlobsUnder("documents/");
+    console.log(`[go-live reset] deleted ${n} document file(s) from Blob`);
+    return n;
+  } catch (e) {
+    console.error("[go-live reset] document files in Blob could not be deleted", e);
+    return 0;
+  }
 }
 
 export async function seedIfEmpty(db: Db) {

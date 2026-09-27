@@ -345,12 +345,13 @@ export async function clearDemoDataAction(confirm: string) {
   if (confirm !== "CLEAR") {
     return { ok: false as const, error: 'Type CLEAR to confirm.' };
   }
-  const { clearDemoData } = await import("@/db/seed-data");
+  const { clearDemoData, clearDemoDocumentFiles } = await import("@/db/seed-data");
   // #210: fixtures and systems (the `subassemblies` table) are configuration
   // and survive the reset (CONFIG_COLLECTIONS), so the one-time conversion
   // is not re-armed here. Their accessory graph lives in a table the reset
   // does wipe, so rebuild it (add-only) from the kept fixtures.
   const cleared = await clearDemoData();
+  await clearDemoDocumentFiles(); // #218 — best effort, never throws
   try {
     const { syncAllAssemblyGraphs } = await import("@/lib/part-docs/assembly-sync");
     await syncAllAssemblyGraphs();

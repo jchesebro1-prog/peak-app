@@ -10503,6 +10503,7 @@ seeded()
   .then(() => quotePdfCoalesce222AsyncChecks())
   .then(() => pdfPoll222AsyncChecks())
   .then(() => documentsPortalFixAsyncChecks())
+  .then(() => finalWaveAAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -22070,20 +22071,15 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
 
   // ---- controller addendum (Task 2 review): D286 priceOverrideSeeded marker,
   // and the renewal draft never says "current rates" twice.
-  ok(/setPriceOverrideSeeded\(false\)/.test(fc) &&
-      /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(fc),
-    "#217 flame builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
+  ok(!fc.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !fc.includes("priceOverrideSeeded?: boolean"),
+    "#217 final: the flame builder keeps no write-only priceOverrideSeeded state (the server derives the marker)");
   ok(!/fd\.set\("priceOverrideSeeded"/.test(fc),
     "#217 fix wave: the flame builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(fc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(fc),
-    "#217 flame builder: Reset to auto also clears the seeded flag");
-  ok(/onText=\{\(t\) => \{\s*setPriceText\(t\);\s*setPriceOverrideSeeded\(false\);/.test(fc),
-    "#217 flame builder: typing into the Total field clears the seeded flag");
-  ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(fc),
-    "#217 flame builder: picking a different customer clears the seeded flag too");
-  ok(/priceOverrideSeeded: seedPriceOverrideIsLegacy\(\s*editQuote\.status,\s*editQuote\.value,\s*ft && ft\.priceOverride,\s*ft && ft\.priceOverrideSeeded\s*\)/.test(fp),
-    "#217 fix wave: the flame page also seeds the D286 legacy flag from the STORED marker, so it's right on every reopen");
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(fc),
+    "#217 flame builder: Reset to auto clears the typed total");
+  ok(!fp.includes("seedPriceOverrideIsLegacy") && !fp.includes("priceOverrideSeeded"),
+    "#217 final: the flame page no longer passes a seeded flag to the builder");
 
   const faSrc217 = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/actions.ts"), "utf8");
   ok(!/formData\.get\("priceOverrideSeeded"\)/.test(faSrc217) &&
@@ -22139,44 +22135,33 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
       `#217 ${svc} page: reopening restores the typed total (old sent prices stay put)`);
   }
 
-  // ---- addendum: the D286 priceOverrideSeeded marker (added alongside the
-  // flame builder in Task 3, aaa63769) is wired the same way through repairs
-  // and inspections — the builder tracks it, clears it on any edit, posts it,
-  // the save action stores it, and the page reopens it — so a re-opened old
-  // off-grid sent price is never mistaken for a real hand-set price by next
-  // year's renewal-outreach math (priorHandSetPrice, currently flame- and
-  // inspection-only, but the marker itself must exist on repairs too for
-  // #217 D286 parity across all three services).
-  ok(/setPriceOverrideSeeded\(false\)/.test(rc) &&
-      /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(rc),
-    "#217 repair builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
+  // ---- addendum: the D286 priceOverrideSeeded marker is wired the same way
+  // through repairs and inspections — the save action derives it on the
+  // server from the stored quote (deriveSeededMarker) and stores it; the
+  // builders keep no client copy — so a re-opened old off-grid sent price is
+  // never mistaken for a real hand-set price by next year's renewal-outreach
+  // math (priorHandSetPrice, currently flame- and inspection-only, but the
+  // marker itself must exist on repairs too for #217 D286 parity).
+  ok(!rc.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !rc.includes("priceOverrideSeeded?: boolean"),
+    "#217 final: the repair builder keeps no write-only priceOverrideSeeded state (the server derives the marker)");
   ok(!/fd\.set\("priceOverrideSeeded"/.test(rc),
     "#217 fix wave: the repair builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(rc) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.serviceMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(rc),
-    "#217 repair builder: Reset to auto also clears the seeded flag");
-  ok(/onText=\{\(t\) => \{\s*setPriceText\(t\);\s*setPriceOverrideSeeded\(false\);/.test(rc),
-    "#217 repair builder: typing into the Total field clears the seeded flag");
-  ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(rc),
-    "#217 repair builder: picking a different customer clears the seeded flag too");
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.serviceMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(rc),
+    "#217 repair builder: Reset to auto clears the typed total");
 
-  ok(/setPriceOverrideSeeded\(false\)/.test(ic) &&
-      /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(ic),
-    "#217 inspection builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
+  ok(!ic.includes("priceOverrideSeeded, setPriceOverrideSeeded") && !ic.includes("priceOverrideSeeded?: boolean"),
+    "#217 final: the inspection builder keeps no write-only priceOverrideSeeded state (the server derives the marker)");
   ok(!/fd\.set\("priceOverrideSeeded"/.test(ic),
     "#217 fix wave: the inspection builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(ic) &&
-      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(ic),
-    "#217 inspection builder: Reset to auto also clears the seeded flag");
-  ok(/onText=\{\(t\) => \{\s*setPriceText\(t\);\s*setPriceOverrideSeeded\(false\);/.test(ic),
-    "#217 inspection builder: typing into the Total field clears the seeded flag");
-  ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(ic),
-    "#217 inspection builder: picking a different customer clears the seeded flag too");
+      /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*dirty\(\);/.test(ic),
+    "#217 inspection builder: Reset to auto clears the typed total");
 
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
     const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
-    ok(new RegExp(`priceOverrideSeeded: seedPriceOverrideIsLegacy\\(\\s*editQuote\\.status,\\s*editQuote\\.value,\\s*${sub} && ${sub}\\.priceOverride,\\s*${sub} && ${sub}\\.priceOverrideSeeded\\s*\\)`).test(pg),
-      `#217 fix wave: the ${svc} page also seeds the D286 legacy flag from the STORED marker`);
+    ok(!pg.includes("seedPriceOverrideIsLegacy") && !pg.includes("priceOverrideSeeded") && pg.includes(`${sub} && ${sub}.priceOverride`),
+      `#217 final: the ${svc} page no longer passes a seeded flag to the builder`);
     const ac = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/actions.ts`), "utf8");
     ok(!/formData\.get\("priceOverrideSeeded"\)/.test(ac) &&
         /deriveSeededMarker\(\{/.test(ac) &&
@@ -22202,8 +22187,8 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
 import { deriveSeededMarker as deriveSeededMarker217 } from "@/lib/service-pricing";
 {
   // ---- the pure helper itself ----
-  const draftStored217 = { value: 821, status: "sent", priceOverride: undefined, priceOverrideSeeded: undefined };
-  ok(deriveSeededMarker217({ postedOverride: 821, stored: draftStored217 }) === true,
+  const firstReopen217 = { value: 821, status: "sent", priceOverride: undefined, priceOverrideSeeded: undefined };
+  ok(deriveSeededMarker217({ postedOverride: 821, stored: firstReopen217 }) === true,
     "#217 fix wave: a first reopen of a pre-#217 off-grid sent quote (no stored priceOverride yet) flags the marker");
 
   const secondSave217 = { value: 821, status: "sent", priceOverride: 821, priceOverrideSeeded: true };
@@ -22467,9 +22452,9 @@ import { LEGACY_HINTS as r233Hints } from "@/lib/design/equipment-legacy-hints";
   const cable = light.items.find((i) => i.key === "lighting:cablePackage");
   ok(cable?.qty === 20 && cable.desc === "Cable Package" && cable.unit === "ea" && !ctrl.items.some((i) => i.key === "controls:outputStation"),
     "#233: Cable Package keeps Output station's formula (2 × ⌊40/4⌋ = 20 at medium), now on the Lighting system");
-  const noCtrl = r233Compute({ ...s, sys: { ...s.sys, controls: false } });
-  ok(!noCtrl.systems.find((x) => x.key === "lighting")!.items.some((i) => i.key === "lighting:cablePackage"),
-    "#233: …and keeps its gate (Controls in scope, Data picked), so no existing Quick Design total moves");
+  const noLight = r233Compute({ ...s, sys: { ...s.sys, lighting: false } });
+  ok(!noLight.systems.some((x) => x.key === "lighting" && x.items.some((i) => i.key === "lighting:cablePackage")),
+    "#233: …and follows Lighting — with Lighting out of scope there is no Cable Package, whatever Controls/Data say");
   const everyItem = C.systems.flatMap((x) => x.items);
   ok(everyItem.every((i) => r233ByKey.get(i.key)?.label === i.desc && r233ByKey.get(i.key)?.unit === i.unit),
     "#233: every emitted item's name and unit are the vocabulary's");
@@ -22649,7 +22634,7 @@ import { GROUPS as wl231Groups } from "@/lib/stores/pricing";
   const lightRule = { runs: 2, mult: d.wire.lighting.mult };
   const f = wl231.wirePullFeet(dims, lightRule, "better");
   ok(f.feet === 161 && f.missing.join() === "houseDepth", `#231: feet = (40 + 30 + 0) × 2 runs × 1.15 = 161, house depth missing (${f.feet})`);
-  ok(wl231.wirePullNote(f.missing) === "House depth not entered — counted as 0 ft", "#231: a missing dimension is noted on the line");
+  ok(wl231.wirePullNote(f.missing) === "House depth isn't in the design — not counted", "#231: a missing dimension is noted on the line");
   ok(wl231.wirePullFeet(dims, lightRule, null).feet === 140, "#231: no tier chosen → ×1.0");
   ok(wl231.wirePullFeet(dims, { runs: 2.5, mult: d.wire.lighting.mult }, "best").feet === 228, "#231: footage rounds UP to a whole foot (227.5 → 228)");
   ok(wl231.wirePullFeet(dims, { runs: 0, mult: d.wire.lighting.mult }, "best").feet === 0, "#231: 0 runs → no footage");
@@ -22733,7 +22718,7 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
   const C = wp231Compute(s);
   const stepped = WL.withWirePull(C.systems, WL.wireDimsOf(s), "better", rules);
   const wire = (k: string) => stepped.find((x) => x.key === k)!.items.find((i) => i.key === `${k}:wirePull`);
-  ok(wire("lighting")?.qty === 161 && wire("lighting")?.unit === "ft" && wire("lighting")?.note === "House depth not entered — counted as 0 ft",
+  ok(wire("lighting")?.qty === 161 && wire("lighting")?.unit === "ft" && wire("lighting")?.note === "House depth isn't in the design — not counted",
     `#231: Lighting pulls (40 + 30 + 0) × 2 runs × 1.15 = 161 ft, noting the missing house depth (${wire("lighting")?.qty})`);
   ok(wire("rigging")?.qty === 81 && !wire("audio") && !wire("controls"), "#231: Rigging 70 × 1 × 1.15 → 81 ft; 0 runs (Audio) and an off system (Controls) get no line");
   ok(WL.withWirePull(C.systems, WL.wireDimsOf(s), "better", WL.defaultWireLaborRules()).every((x, i) => x === C.systems[i]), "#231: the default rules (0 runs everywhere) change nothing");
@@ -22769,7 +22754,7 @@ import { manualScopeInputs as wp231Inputs } from "@/lib/design/grid-intake";
   const cards = wp231Cards(inputs, est, mapped, {}, rules);
   const lw = cards.find((c) => c.scope === "lighting")!.lines.find((l) => l.rowKey === "lighting:wirePull")!;
   const rwc = cards.find((c) => c.scope === "rigging")!.lines.find((l) => l.rowKey === "rigging:wirePull")!;
-  ok(lw.qty === 161 && lw.status === "part" && lw.total === 241.5 && lw.note === "House depth not entered — counted as 0 ft" && lw.place === "lot",
+  ok(lw.qty === 161 && lw.status === "part" && lw.total === 241.5 && lw.note === "House depth isn't in the design — not counted" && lw.place === "lot",
     "#231: the Auto Lighting card carries the Wire pull at its tier, priced and noted");
   ok(rwc.qty === 91 && rwc.status === "needs-part" && wp231AutoNeeds(cards, est) >= 1, "#231: Rigging at Best pulls 70 × 1 × 1.3 = 91 ft; unmapped, it counts toward the D322 quote gate");
   ok(wp231Sell(cards).find((c) => c.scope === "lighting")!.lines.some((l) => l.rowKey === "lighting:wirePull" && !!l.note), "#231: the sell-only card keeps the note");
@@ -24345,7 +24330,7 @@ import {
 import {
   createDocument as d218Create, getDocument as d218Get, updateDocument as d218Update, removeDocument as d218Remove,
   documentsForCustomer as d218ForCustomer, markSeen as d218MarkSeen, markCustomerSeen as d218MarkCustomerSeen,
-  unseenCustomerDocuments as d218Unseen, documentByBlobPath as d218ByPath, documentCategories as d218Cats,
+  unseenCustomerDocuments as d218Unseen, documentsUnderUploadKey as d218UnderKey, documentCategories as d218Cats,
 } from "@/lib/stores/documents";
 
 {
@@ -24376,7 +24361,7 @@ async function documentsStoreAsyncChecks(): Promise<void> {
   const forCo = await d218ForCustomer(CO);
   ok(forCo.map((d) => d.id).sort().join(",") === [a.id, c.id].sort().join(","), "#218 store: documentsForCustomer never returns another company's files");
   ok((await d218ForCustomer(CO, { siteId: "v1" })).map((d) => d.id).join(",") === c.id && (await d218ForCustomer(CO, { portal: true })).map((d) => d.id).join(",") === c.id, "#218 store: venue and portal scoping");
-  ok((await d218ByPath(a.blobPath))?.id === a.id && (await d218ByPath("documents/none")) === null, "#218 store: lookup by blob path");
+  ok((await d218UnderKey(CO, "UP-0000000000000218", a.blobPath)).some((d) => d.id === a.id) && (await d218UnderKey(CO, "UP-0000000000009999", "documents/none")).length === 0, "#218 store: lookup by blob path / upload key");
   const up = await d218Update(a.id, { title: "  Revised plot  ", category: "photos", visibility: "shared", siteId: "v2", projectId: "P-9", notes: "n".repeat(2100), customerId: CO2, blobPath: "documents/evil" } as Parameters<typeof d218Update>[1]);
   ok(up?.title === "Revised plot" && up.category === "photos" && up.visibility === "shared" && up.siteId === "v2" && up.projectId === "P-9" && up.notes.length === 2000, "#218 store: title/category/visibility/venue/project/notes update, trimmed and capped");
   ok(up?.customerId === CO && up.blobPath === a.blobPath, "#218 store: an update can never move a file to another company or swap its blob");
@@ -25595,4 +25580,243 @@ async function documentsPortalFixAsyncChecks(): Promise<void> {
   ok(ids.has(fresh.id) && !ids.has(seen.id) && !ids.has(team.id), "#218 doc-store: nullFields filters in SQL (a seen customer upload and a team file never come back)");
   const unseen = new Set((await d218Unseen()).map((d) => d.id));
   ok(unseen.has(fresh.id) && !unseen.has(seen.id) && !unseen.has(team.id), "#218 bell: unseenCustomerDocuments returns only unseen customer uploads");
+}
+
+/* ======================================================================
+   final wave A — batch 2 review follow-ups (#216, #217, #218, #227–#233).
+   Pure/structural checks run here; DB-backed ones in finalWaveAAsyncChecks.
+   ====================================================================== */
+import { venueMoveRule as fwaMoveRule } from "@/lib/venue-types";
+import { applyVenueMoveRule as fwaApplyMove } from "@/lib/identity/venue-save";
+const fwaRd = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+{
+  // #216 final — the one move rule (pure).
+  const stored = { address: "1 Main St", city: "Omaha", state: "NE", zip: "68102", lat: "41.25", lng: "-95.9" };
+  const same = fwaMoveRule(stored, { address: " 1 Main St ", city: "Omaha", state: "NE", zip: null, lat: null, lng: null });
+  ok(same.sameAddress && !same.moved && same.zip === "68102" && same.lat === "41.25" && same.lng === "-95.9",
+    "#216 final: venueMoveRule — unchanged address, nothing sent → stored coordinates and zip kept, not moved");
+  const echo = fwaMoveRule(stored, { address: "1 Main St", city: "Omaha", state: "NE", zip: "68102", lat: "41.250", lng: "-95.90" });
+  ok(!echo.moved, "#216 final: venueMoveRule — the stored coordinates echoed back are not a move");
+  const hand = fwaMoveRule(stored, { address: "2 Oak St", city: "Omaha", state: "NE", zip: null, lat: null, lng: null });
+  ok(hand.moved && hand.lat == null && hand.lng == null && hand.zip == null,
+    "#216 final: venueMoveRule — moved by hand → coordinates and zip cleared");
+  const pick = fwaMoveRule(stored, { address: "5 Elm St", city: "Lincoln", state: "NE", zip: "68508", lat: "40.8", lng: "-96.7" });
+  ok(pick.moved && pick.lat === "40.8" && pick.zip === "68508", "#216 final: venueMoveRule — a picked hit sets coordinates and zip");
+  const fresh = fwaMoveRule(null, { address: "", city: "Omaha", state: "NE", zip: "68102", lat: null, lng: null });
+  ok(!fresh.moved && fresh.zip === "68102" && fresh.lat == null, "#216 final: venueMoveRule — a new venue takes what was sent");
+  const vs = fwaRd("src/lib/identity/venue-save.ts");
+  ok(vs.includes("venueMoveRule(existing,") && !vs.includes("const sameCoord"), "#216 final: saveVenue uses the shared venueMoveRule");
+  const ca = fwaRd("src/app/(app)/companies/actions.ts");
+  const sca = ca.slice(ca.indexOf("export async function saveCustomerAction"), ca.indexOf("export async function saveVenueAction"));
+  ok(/const locations = await applyVenueMoveRule\(\s*id,/.test(sca) && sca.indexOf("applyVenueMoveRule(") < sca.indexOf("await upsert(") && /\n\s+locations,\n/.test(sca),
+    "#216 final: saveCustomerAction runs every card through applyVenueMoveRule before the upsert");
+  const em = fwaRd("src/app/(app)/companies/edit-modal.tsx");
+  ok(/pickAddress = \(i: number, h: AddressHitVM\) => \{\s*setLoc\(i, \{[^}]*zip: h\.zip/.test(em) && em.includes("zip: l.zip || null,"),
+    "#216 final: the company modal sends a picked hit's zip");
+  ok(/typeSpot = [^\n]*\n\s*setLoc\(i, \{ \.\.\.patch, zip: "", lat: null, lng: null \}\)/.test(em)
+    && ["address", "city", "state"].every((f) => em.includes(`onChange={(e) => typeSpot(i, { ${f}: e.target.value })}`)),
+    "#216 final: typing the street/city/state by hand drops the picked coordinates and zip");
+}
+
+import { deriveSeededMarker as fwaSeeded } from "@/lib/service-pricing";
+{
+  // #217 final — deriveSeededMarker re-derives the builder's own reopen-seed.
+  ok(fwaSeeded({ postedOverride: 900, stored: { value: 900, status: "sent" } }) === false,
+    "#217 final: a sent on-grid quote (no reopen-seed) where the user types the same 900 is a real hand-set price — not seeded");
+  ok(fwaSeeded({ postedOverride: 821, stored: { value: 821.4, status: "sent" } }) === true,
+    "#217 final: a legacy fractional value (stored 821.4, reopened and saved as 821) is still flagged seeded");
+  ok(fwaSeeded({ postedOverride: 821, stored: { value: 821, status: "sent", priceOverride: 821, priceOverrideSeeded: true } }) === true,
+    "#217 final: a second save of an already-seeded quote stays seeded");
+  const sp = fwaRd("src/lib/service-pricing.ts");
+  ok(!sp.includes("builder posts this as `priceOverrideSeeded`") && /i\.postedOverride === seedPriceOverride\(s\.status, s\.value, s\.priceOverride\) &&\s*seedPriceOverrideIsLegacy\(s\.status, s\.value, s\.priceOverride, s\.priceOverrideSeeded\)/.test(sp),
+    "#217 final: deriveSeededMarker is seedPriceOverride + seedPriceOverrideIsLegacy of the stored quote; the stale 'builder posts' comment is gone");
+}
+
+{
+  // #233 final — Cable Package follows Lighting.
+  const b = r233Default(0);
+  const lightOnly = r233Compute({
+    ...b, venue: "pac", size: "medium", width: 60, depth: 40, grid: 50,
+    sys: { ...b.sys, lighting: true, controls: false }, ctrl: { console: false, architectural: false, data: false },
+  });
+  const cp = lightOnly.systems.find((x) => x.key === "lighting")!.items.find((i) => i.key === "lighting:cablePackage");
+  ok(cp?.qty === 20, "#233 final: Lighting on with Controls off (no Data) now includes the Cable Package (2 × ⌊40/4⌋ = 20)");
+  ok(/One hop only/.test(fwaRd("src/lib/design/equipment-vocab.ts")), "#233 final: EQUIPMENT_LABEL_ALIASES documents one-hop lookups");
+}
+
+import { wirePullNote as fwaWireNote } from "@/lib/design/wire-labor";
+import { allowancePartId as fwaAllowId, virtualPartsFor as fwaVirtual } from "@/lib/design/grid-virtual-parts";
+import { EQUIPMENT_ROW_BY_KEY as fwaRowByKey } from "@/lib/design/equipment-vocab";
+import type { EquipmentMap as FwaMap } from "@/lib/design/equipment-map";
+{
+  // #227 final — fabric labels say cost; the Grid drop-in defaults to a rated fabric.
+  const emc = fwaRd("src/app/(app)/design/grid/settings/equipment-map/equipment-map-client.tsx");
+  ok(emc.includes("`cost ${money(cell.unitCost)}/${FABRIC_RATE_UNIT}`"), "#227 final: the Equipment-map fabric cell reads cost $X/sq ft sewn (incl. making)");
+  const cm = fwaRd("src/app/(app)/estimator/curtain-modal.tsx");
+  ok(cm.includes('((f.curtainAreaRate ?? 0) > 0 ? "cost " : "") + fabricRateLabel(f.curtainAreaRate)'), "#227 final: the estimator curtain modal labels a fabric's rate as cost");
+  const cd = fwaRd("src/app/(app)/design/grid/[id]/curtain-drop.tsx");
+  ok(cd.includes("useState((fabrics.find((f) => f.pricePerSqft > 0) ?? fabrics[0])?.sku") && cd.includes("fabric && !(fabric.pricePerSqft > 0)") && cd.includes("the curtain prices at $0"),
+    "#227 final: the Grid curtain drop-in defaults to the first rated fabric and warns on a $0 rate");
+
+  // #229 final — Not included polish.
+  const card = fwaRd("src/app/(app)/design/grid/[id]/equipment-card.tsx");
+  ok(/onChange=\{\(e\) => setQty\(l, e\.target\.value\)\}\s*disabled=\{none\}/.test(card), "#229 final: a Not included line's qty input is disabled");
+  ok(fwaRd("src/app/(app)/design/quick/quick-design-client.tsx").includes('{it.none ? "—" : moneyRound(it.ext)}'), "#229 final: Quick Design shows — in the Ext. column for a Not included line");
+  const emv = fwaRd("src/lib/design/equipment-map-view.ts");
+  ok(emv.includes("title: NOT_INCLUDED") && !emv.includes('title: "Not included"'), "#229 final: the map view reuses the NOT_INCLUDED constant");
+  const label = fwaRowByKey.get("audio:subwoofer")!.label;
+  const noneMap: FwaMap = { "audio:subwoofer": { tiers: { good: { kind: "none" } }, sameAll: true, updatedBy: "J", updatedAt: 1 } };
+  const ctx = { parts: new Map(), fixtures: new Map(), margin: 0.3 };
+  const [dn] = fwaVirtual([fwaAllowId("audio:subwoofer", "good")], noneMap, ctx);
+  ok(dn?.desc === `${label} (row is now Not included — re-fill this scope)` && dn.virtualDead === true,
+    "#229 final: an allowance line whose row is now Not included says to re-fill the scope");
+  const [dd] = fwaVirtual([fwaAllowId("audio:subwoofer", "good")], {}, ctx);
+  ok(dd?.desc === `${label} (allowance no longer confirmed)`, "#229 final: any other dead allowance keeps its old message");
+
+  // #231 final — the house depth has no input; an unmapped wire line shows the note.
+  ok(fwaWireNote(["houseDepth"]) === "House depth isn't in the design — not counted", "#231 final: house depth reads 'isn't in the design — not counted'");
+  ok(fwaWireNote(["stageWidth", "houseDepth"]) === "Stage width not entered — counted as 0 ft · House depth isn't in the design — not counted",
+    "#231 final: a blank stage dimension still reads 'not entered — counted as 0 ft'");
+  ok(fwaWireNote([]) === undefined, "#231 final: nothing missing, no note");
+  ok(/ASK_ADMIN_HINT\}<\/span>\s*\)\}\s*\{\/\*[^*]*\*\/\}\s*\{l\.note \? ` · \$\{l\.note\}` : null\}/.test(card), "#231 final: an unmapped Auto Wire-pull line still shows its note");
+}
+
+import { resolveDocumentCategories as fwaResolveCats, mergeDocumentCategories as fwaMergeCats } from "@/lib/document-categories";
+{
+  // #232 final — copy.
+  const er = fwaRd("src/app/(app)/estimating-rules/controls.tsx").replace(/\s+/g, " ");
+  ok(er.includes("System-design freight / contingency set the Quick Design defaults; labor is per system.") && !er.includes("System-design install"),
+    "#232 final: the Estimating Rules footer says labor is per system");
+  const dc = fwaRd("src/app/(app)/design/designs/design-client.tsx");
+  ok(dc.includes("labor, freight and contingency roll up in Quick Design") && !dc.includes("install, freight and contingency"), "#232 final: the Designs dashboard says labor, not install");
+  // #228 final — the saveFixtureAction doc names all three kinds.
+  const aa = fwaRd("src/app/(app)/design/assemblies/actions.ts");
+  ok(aa.includes("Save a fixture, system or hardware assembly") && aa.includes("a system's or hardware\n * assembly's scope is emptied"), "#228 final: saveFixtureAction's doc covers fixture, system and hardware");
+
+  // #216 final — quick-adds default to the first live venue type.
+  const lp = fwaRd("src/app/(app)/inbox/link-popup.tsx");
+  ok(lp.includes("emptyVenueQuickAdd(venueTypeOptions(vm.venueTypes)[0]?.key)") && !lp.includes("emptyVenueQuickAdd()"), "#216 final: the Link popup's venue quick-add defaults to the first live venue type");
+  const qf = fwaRd("src/app/(app)/quotes/new/intake-form.tsx");
+  ok(qf.includes("const defaultVenueKind = venueTypeOptions(venueTypes)[0]?.key;") && !qf.includes("emptyVenueQuickAdd()"), "#216 final: the quote intake's venue quick-add defaults to the first live venue type");
+  const qa = fwaRd("src/app/(app)/quotes/new/actions.ts");
+  ok(qa.includes('(venueTypeOptions(types)[0]?.key ?? "proscenium")') && qa.includes('id: "l" + Date.now() + Math.random().toString(36).slice(2, 6),'),
+    "#216 final: the intake falls back to the first live type and mints a random-suffixed location id");
+  ok(fwaRd("src/app/(app)/inbox/link-actions.ts").includes("/** Link popup's \"new venue\" quick-add") && !/~\d{3}/.test(fwaRd("src/lib/inbox-task-write.ts").slice(0, 2000)),
+    "#216 final: the quick-add comments name the Link popup; inbox-task-write cites functions, not line numbers");
+
+  // #218 final — category labels cleaned; reset sweeps Blob; card key; route 404.
+  const rc = fwaResolveCats([{ key: "drawings", label: "  Draw\u0007ings\u200b  ", order: 0 }]);
+  ok(rc.find((c) => c.key === "drawings")?.label === "Drawings", "#218 final: a stored category label is cleaned (control/invisible characters stripped)");
+  const mc = fwaMergeCats(fwaResolveCats(undefined), [{ label: "Site\u0000 photos" }, { label: "x".repeat(41) }]);
+  ok(!mc.ok && mc.error.includes("longer than 40"), "#218 final: an over-long label is still refused, not cut");
+  const mc2 = fwaMergeCats(fwaResolveCats(undefined), [{ label: "Site\u0000 photos\u0007" }]);
+  ok(mc2.ok && mc2.categories[0].label === "Site photos", "#218 final: an edited category label is cleaned before it is stored");
+  const sd = fwaRd("src/db/seed-data.ts");
+  const clr = sd.slice(sd.indexOf("export async function clearDemoData()"), sd.indexOf("export async function clearDemoDocumentFiles"));
+  ok(!clr.includes("deleteBlobsUnder") && /export async function clearDemoDocumentFiles[\s\S]*if \(!blobEnabled\(\)\) return 0;[\s\S]*deleteBlobsUnder\("documents\/"\)[\s\S]*catch \(e\) \{\s*console\.error/.test(sd),
+    "#218 final: the go-live reset's Blob sweep deletes documents/ best effort and logs a failure (never inside clearDemoData)");
+  const sa = fwaRd("src/app/(app)/settings/actions.ts");
+  const reset = sa.slice(sa.indexOf("export async function clearDemoDataAction"));
+  ok(/await clearDemoData\(\);\s*await clearDemoDocumentFiles\(\);/.test(reset), "#218 final: the reset action sweeps the document files after the rows");
+  ok(fwaRd("src/lib/blob.ts").includes("export async function deleteBlobsUnder(prefix: string)"), "#218 final: blob.ts pages list() under a prefix and deletes");
+  ok(fwaRd("src/app/(app)/settings/settings-client.tsx").includes("key={documentCategories.map((c) => `${c.key}:${c.label}:${c.archived ? 1 : 0}`).join(\"|\")}"),
+    "#218 final: the Document categories card remounts on a label or archive change");
+  const dr = fwaRd("src/app/api/documents/[id]/route.ts");
+  ok(/catch \(e\) \{[\s\S]*if \(isBlobNotFound\(e\)\) return missing\(\);/.test(dr) && dr.includes('new Response("File missing", { status: 404'), "#218 final: a Blob not-found maps to 404 File missing");
+  const du = fwaRd("src/lib/documents-upload.ts");
+  ok(!du.includes("async function recordedUnder") && !du.includes("listDocsByField") && /const refuse = [\s\S]{0,400}if \(!\(await documentsUnderUploadKey\(customerId, uploadKey, blobPath\)\)\.length\) await deps\.remove\(blobPath\);/.test(du),
+    "#218 final: refuse() re-checks the store before deleting a blob; the lookup lives in the documents store");
+  ok(!fwaRd("src/lib/stores/documents.ts").includes("documentByBlobPath"), "#218 final: the dead documentByBlobPath is gone");
+  const da = fwaRd("src/app/(app)/documents/actions.ts");
+  ok(/const scopeChanged = [^\n]+\n\s*let scope[^\n]+\n\s*if \(scopeChanged\) \{/.test(da), "#218 final: a document edit re-validates venue/project only when it changes them");
+}
+
+async function finalWaveAAsyncChecks(): Promise<void> {
+  // #216 final — a save shaped like the company modal → saveCustomerAction.
+  const CO = fixtureId(216, "fwa-move");
+  const base = {
+    id: "fw1", label: "Main Hall", locationName: "", primary: true, venueKind: "proscenium",
+    address: "1 Main St", city: "Omaha", state: "NE", zip: "68102" as string | null,
+    lat: 41.25 as number | null, lng: -95.9 as number | null,
+    travelMiles: 12 as number | null, travelMin: 20 as number | null,
+  };
+  const site = async () => (await v216Sites(CO)).find((s) => s.legacyLocId === "fw1") ?? null;
+  const modalSave = async (patch: Partial<typeof base>) => {
+    const locations = await fwaApplyMove(CO, [{ ...base, ...patch }]);
+    await upsertCustomer({ id: CO, name: "Move Rule Hall Co", type: "Education", locations, contacts: [] });
+  };
+  try {
+    await upsertCustomer({ id: CO, name: "Move Rule Hall Co", type: "Education", locations: [base], contacts: [] });
+    let s = await site();
+    ok(!!s && s.zip === "68102" && Number(s.lat) === 41.25 && s.travelMiles === "12", "#216 final: fixture venue stored with coordinates, zip and drive distance");
+
+    // Unchanged address, coordinates/zip dropped by the client → stored kept.
+    await modalSave({ zip: null, lat: null, lng: null });
+    s = await site();
+    ok(!!s && Number(s.lat) === 41.25 && Number(s.lng) === -95.9 && s.zip === "68102" && s.travelMiles === "12" && s.travelMin === "20",
+      "#216 final: modal save with an unchanged address keeps coordinates, zip and drive distance");
+
+    // Unchanged address, travel typed → the manual override is honoured.
+    await modalSave({ travelMiles: 30, travelMin: 45 });
+    s = await site();
+    ok(!!s && s.travelMiles === "30" && s.travelMin === "45" && Number(s.lat) === 41.25, "#216 final: an unchanged venue keeps a hand-typed drive distance");
+
+    // Moved by hand: coordinates + zip dropped by the modal, travel echoed.
+    await modalSave({ address: "2 Oak St", zip: null, lat: null, lng: null, travelMiles: 30, travelMin: 45 });
+    s = await site();
+    ok(!!s && s.address === "2 Oak St" && s.lat == null && s.lng == null && s.zip == null && s.travelMiles == null && s.travelMin == null,
+      "#216 final: modal save moved by hand clears coordinates, zip and drive distance");
+
+    // Picked hit: its coordinates + zip land; the stale (null) travel stays null.
+    await modalSave({ address: "5 Elm St", city: "Lincoln", zip: "68508", lat: 40.8, lng: -96.7, travelMiles: null, travelMin: null });
+    s = await site();
+    ok(!!s && Number(s.lat) === 40.8 && Number(s.lng) === -96.7 && s.zip === "68508" && s.travelMiles == null,
+      "#216 final: modal save of a picked hit sets its coordinates and zip");
+
+    // Picked again + Route run after the move → the fresh distance is kept.
+    await modalSave({ address: "9 Pine St", city: "Lincoln", zip: "68510", lat: 40.81, lng: -96.68, travelMiles: 55, travelMin: 60 });
+    s = await site();
+    ok(!!s && s.zip === "68510" && s.travelMiles === "55" && s.travelMin === "60", "#216 final: a drive distance routed after the move is kept");
+  } finally {
+    for (const s of await v216Sites(CO)) await v216SoftDel(s.id);
+    await removeCustomer(CO);
+  }
+  // #218 final — refuse() re-checks before it deletes: a racing finalize that
+  // records the same blob mid-flight means the blob is never deleted.
+  const DCO = fixtureId(218, "fwa-race");
+  const k = d218NewKey();
+  const path = d218Path(DCO, k, "race.pdf").replace(/\.pdf$/, "-Zz12Yy.pdf");
+  const removed: string[] = [];
+  const raced = await d218Finalize(
+    { customerId: DCO, uploadKey: k, blobPath: path, fileName: "race.pdf", siteId: "not-this-company" },
+    { kind: "team", name: "Jeff" },
+    {
+      head: async () => ({ bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]), size: 10 }),
+      remove: async (p: string) => { removed.push(p); },
+      facts: async () => {
+        const rival = await d218Create({
+          title: "Race", fileName: "race.pdf", mime: "application/pdf", size: 10, blobPath: path,
+          category: "other", visibility: "internal", source: "team", customerId: DCO, siteId: null, projectId: null,
+          notes: "", uploadedBy: "Rival",
+        });
+        registerFixture("documents", rival.id);
+        return { customerExists: true, siteIds: ["v1"], project: null };
+      },
+      categories: async () => d218Resolve(undefined),
+    }
+  );
+  ok(!raced.ok && removed.length === 0, "#218 final: a refusal never deletes a blob a racing finalize has recorded meanwhile");
+  const k2 = d218NewKey();
+  const path2 = d218Path(DCO, k2, "lone.pdf").replace(/\.pdf$/, "-Qq34Ww.pdf");
+  const lone = await d218Finalize(
+    { customerId: DCO, uploadKey: k2, blobPath: path2, fileName: "lone.pdf", siteId: "not-this-company" },
+    { kind: "team", name: "Jeff" },
+    {
+      head: async () => ({ bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]), size: 10 }),
+      remove: async (p: string) => { removed.push(p); },
+      facts: async () => ({ customerExists: true, siteIds: ["v1"], project: null }),
+      categories: async () => d218Resolve(undefined),
+    }
+  );
+  ok(!lone.ok && removed.includes(path2), "#218 final: an unrecorded refused upload is still deleted");
 }

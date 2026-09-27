@@ -6,6 +6,7 @@
  * (old files keep their label, new uploads can't pick it). `other` always
  * exists, can't be archived, and is what an unknown key reads as.
  */
+import { cleanText } from "./document-files";
 
 export type DocumentCategory = { key: string; label: string; order: number; archived?: boolean };
 export type DocumentCategoryInput = { key?: string; label: string; archived?: boolean };
@@ -35,7 +36,9 @@ export function resolveDocumentCategories(stored: unknown): DocumentCategory[] {
     if (!raw || typeof raw !== "object") continue;
     const r = raw as Record<string, unknown>;
     const key = typeof r.key === "string" ? r.key : "";
-    const label = typeof r.label === "string" ? r.label.trim().slice(0, 40) : "";
+    // Same cleaner as every other stored document text (no control chars,
+    // capped by code point so an emoji is never split).
+    const label = typeof r.label === "string" ? cleanText(r.label, 40) : "";
     if (!KEY_RE.test(key) || seen.has(key) || !label) continue;
     seen.add(key);
     const c: DocumentCategory = { key, label, order: Number.isFinite(r.order) ? Number(r.order) : out.length };
@@ -85,9 +88,11 @@ export function mergeDocumentCategories(
   const out: DocumentCategory[] = [];
   for (const raw of input) {
     const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-    const label = typeof r.label === "string" ? r.label.trim() : "";
+    // cleanText (control chars stripped, trimmed), capped one past the limit
+    // so an over-long name is refused rather than silently cut.
+    const label = typeof r.label === "string" ? cleanText(r.label, 41) : "";
     if (!label) return { ok: false, error: "Every category needs a name." };
-    if (label.length > 40) return { ok: false, error: `"${label.slice(0, 40)}…" is longer than 40 characters.` };
+    if ([...label].length > 40) return { ok: false, error: `"${cleanText(label, 40)}…" is longer than 40 characters.` };
     const archived = r.archived === true;
     if (!archived) {
       const lower = label.toLowerCase();

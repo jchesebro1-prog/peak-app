@@ -1,4 +1,4 @@
-import { del, get, head, put } from "@vercel/blob";
+import { BlobNotFoundError, del, get, head, list, put } from "@vercel/blob";
 
 /**
  * Vercel Blob seam (D116, MASTER-HOWTO §9) — file bytes out of the
@@ -82,6 +82,11 @@ export async function getBlobHead(
   return { bytes, size: meta.size };
 }
 
+/** True for the vendor's "no such blob" error — a missing file, not an outage. */
+export function isBlobNotFound(e: unknown): boolean {
+  return e instanceof BlobNotFoundError || (e instanceof Error && e.name === "BlobNotFoundError");
+}
+
 /** Stream a private blob's bytes (server-side; the proxy route's engine). */
 export async function getBlobStream(
   pathname: string
@@ -97,6 +102,25 @@ export async function getBlobStream(
  */
 export async function deleteBlob(pathname: string): Promise<void> {
   await del(pathname);
+}
+
+/**
+ * Delete every blob whose pathname starts with `prefix` (the go-live reset's
+ * `documents/` sweep, #218). Pages through `list` and deletes each page in
+ * one call; returns how many were deleted.
+ */
+export async function deleteBlobsUnder(prefix: string): Promise<number> {
+  if (!prefix) throw new Error("deleteBlobsUnder needs a prefix");
+  let cursor: string | undefined;
+  let n = 0;
+  do {
+    const page = await list({ prefix, cursor, limit: 1000 });
+    const paths = page.blobs.map((b) => b.pathname).filter((p) => p.startsWith(prefix));
+    if (paths.length) await del(paths);
+    n += paths.length;
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+  return n;
 }
 
 /** Decode a data-URL's payload to bytes (the upload transport is still the

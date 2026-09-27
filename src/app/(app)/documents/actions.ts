@@ -53,11 +53,20 @@ export async function updateDocumentAction(
   const doc = await getDocument(String(id || ""));
   if (!doc) return { ok: false, error: "That document was deleted." };
   const p = (patch && typeof patch === "object" ? patch : {}) as NonNullable<typeof patch>;
+  const norm = (v: unknown): string | null => String(v ?? "").trim() || null;
   const siteId = p.siteId !== undefined ? p.siteId : doc.siteId;
   const projectId = p.projectId !== undefined ? p.projectId : doc.projectId;
-  const facts = await documentScopeFacts(doc.customerId, String(projectId ?? "").trim() || null);
-  const scope = resolveDocumentScope({ siteId, projectId }, doc.customerId, facts);
-  if (!scope.ok) return scope;
+  // Venue/project are re-validated only when this edit changes them — a
+  // title/category/notes edit on a file whose venue or project has since
+  // gone away must still save (it keeps its stored scope untouched).
+  const scopeChanged = norm(siteId) !== norm(doc.siteId) || norm(projectId) !== norm(doc.projectId);
+  let scope: { siteId?: string | null; projectId?: string | null } = {};
+  if (scopeChanged) {
+    const facts = await documentScopeFacts(doc.customerId, norm(projectId));
+    const r = resolveDocumentScope({ siteId, projectId }, doc.customerId, facts);
+    if (!r.ok) return r;
+    scope = { siteId: r.siteId, projectId: r.projectId };
+  }
   const categories = await documentCategories();
   const next = await updateDocument(doc.id, {
     title: typeof p.title === "string" ? p.title : undefined,

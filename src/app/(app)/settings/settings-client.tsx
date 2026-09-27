@@ -2213,7 +2213,7 @@ export default function SettingsClient({
             types={venueTypes}
           />
           <DocumentCategoriesCard
-            key={documentCategories.map((c) => c.key).join("|")}
+            key={documentCategories.map((c) => `${c.key}:${c.label}:${c.archived ? 1 : 0}`).join("|")}
             categories={documentCategories}
           />
         </>

@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { getBlobStream } from "@/lib/blob";
+import { getBlobStream, isBlobNotFound } from "@/lib/blob";
 import { documentDownloadHeaders } from "@/lib/document-files";
 import { getDocument, markSeen } from "@/lib/stores/documents";
 
@@ -14,14 +14,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params; // already decoded by Next's router
   const doc = await getDocument(id);
   if (!doc) return new Response("Not found", { status: 404, headers: { "cache-control": "private, no-store" } });
+  const missing = () => new Response("File missing", { status: 404, headers: { "cache-control": "private, no-store" } });
   let stream: ReadableStream | null;
   try {
     stream = await getBlobStream(doc.blobPath);
-  } catch {
+  } catch (e) {
+    // A blob that's gone is a missing file (404), not a storage outage.
+    if (isBlobNotFound(e)) return missing();
     // Never surface the Blob vendor's own error text.
     return new Response("Couldn't read the file — try again", { status: 502, headers: { "cache-control": "private, no-store" } });
   }
-  if (!stream) return new Response("File missing from storage", { status: 404, headers: { "cache-control": "private, no-store" } });
+  if (!stream) return missing();
   if (doc.source === "customer" && doc.seenByTeamAt == null) {
     try {
       await markSeen([doc.id]);

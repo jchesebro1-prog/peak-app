@@ -1,9 +1,8 @@
 import { deleteBlob, getBlobHead } from "@/lib/blob";
-import { listDocsByField } from "@/db/doc-store";
 import { getCompany } from "@/lib/identity/companies";
 import { docLocId, sitesForCompany } from "@/lib/identity/sites";
 import { getProject } from "@/lib/stores/projects";
-import { createDocument, documentCategories, removeDocument } from "@/lib/stores/documents";
+import { createDocument, documentCategories, documentsUnderUploadKey, removeDocument } from "@/lib/stores/documents";
 import { uploadCategory, type DocumentCategory } from "@/lib/document-categories";
 import {
   blobPathInScope,
@@ -11,7 +10,6 @@ import {
   checkDocumentBytes,
   displayFileName,
   DOCUMENT_SNIFF_BYTES,
-  documentUploadPrefix,
   isUploadKey,
   MAX_DOCUMENT_BYTES,
   MAX_DOCUMENT_LABEL,
@@ -44,7 +42,8 @@ import {
  *      field cleaned here (the store writes category/mime as given),
  *   8. and a racing finalize of the same upload key is resolved: the lowest
  *      id wins, a later duplicate record is withdrawn (never its blob).
- * A refusal after step 3 deletes the blob: it is provably the caller's own,
+ * A refusal after step 3 deletes the blob (re-checked first — a racing
+ * finalize may have recorded it meanwhile): it is provably the caller's own,
  * unrecorded upload. `deps` exists for the spec harness.
  */
 
@@ -96,22 +95,6 @@ const liveDeps: FinalizeDeps = {
 
 const ALREADY_SAVED = "That file is already saved.";
 
-/** Live documents recording this exact blob, or any blob under the same
- *  upload key (one upload key = one document). The by-path read is global,
- *  so two company ids that fold to the same path segment can't replay each
- *  other's blob either. */
-async function recordedUnder(customerId: string, uploadKey: string, blobPath: string): Promise<DocumentRecord[]> {
-  const prefix = documentUploadPrefix(customerId, uploadKey);
-  const [byPath, byCompany] = await Promise.all([
-    listDocsByField<DocumentRecord>("documents", "blobPath", [blobPath]),
-    listDocsByField<DocumentRecord>("documents", "customerId", [customerId]),
-  ]);
-  const out = new Map<string, DocumentRecord>();
-  for (const d of byPath) out.set(d.id, d);
-  for (const d of byCompany) if (typeof d.blobPath === "string" && d.blobPath.startsWith(prefix)) out.set(d.id, d);
-  return [...out.values()];
-}
-
 /** `DOC-1234` → 1234 (ids are minted max+1, so a later insert sorts higher). */
 function docSeq(id: string): number {
   const n = Number(/^DOC-(\d+)$/.exec(id)?.[1]);
@@ -134,11 +117,14 @@ export async function finalizeDocumentUpload(
   const blobPath = inp.blobPath;
   // Never touch a blob a document already records — it may be someone
   // else's real file (the whole point of replaying its path), or a retry.
-  if ((await recordedUnder(customerId, uploadKey, blobPath)).length) return { ok: false, error: ALREADY_SAVED };
+  if ((await documentsUnderUploadKey(customerId, uploadKey, blobPath)).length) return { ok: false, error: ALREADY_SAVED };
 
   const refuse = async (error: string): Promise<FinalizeResult> => {
     try {
-      await deps.remove(blobPath);
+      // Re-checked right before the delete: a racing finalize of the same
+      // upload may have recorded this blob since the check above, and a
+      // recorded blob is never deleted.
+      if (!(await documentsUnderUploadKey(customerId, uploadKey, blobPath)).length) await deps.remove(blobPath);
     } catch {
       /* best effort — the refusal stands either way */
     }
@@ -188,7 +174,7 @@ export async function finalizeDocumentUpload(
   // its own insert; ids are minted max+1, so the later insert always sees the
   // earlier one and withdraws its own record. The blob belongs to the winner.
   const mine = docSeq(document.id);
-  const rivals = (await recordedUnder(customerId, uploadKey, blobPath)).filter((d) => d.id !== document.id);
+  const rivals = (await documentsUnderUploadKey(customerId, uploadKey, blobPath)).filter((d) => d.id !== document.id);
   if (rivals.some((d) => docSeq(d.id) < mine)) {
     await removeDocument(document.id);
     return { ok: false, error: ALREADY_SAVED };

@@ -1,7 +1,7 @@
 import { getDoc, insertWithPrefixedId, listDocsByField, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { getSettings } from "@/lib/settings";
 import { resolveDocumentCategories, type DocumentCategory } from "@/lib/document-categories";
-import { cleanText, displayFileName } from "@/lib/document-files";
+import { cleanText, displayFileName, documentUploadPrefix } from "@/lib/document-files";
 import {
   cleanNotes,
   cleanTitle,
@@ -117,11 +117,25 @@ export async function documentsForCustomer(
   return filterDocuments(rows, { ...filter, customerId }).sort((a, b) => b.uploadedAt - a.uploadedAt);
 }
 
-/** The live document already recording this blob, if any (finalize refuses a replay). */
-export async function documentByBlobPath(blobPath: string): Promise<DocumentRecord | null> {
-  if (!blobPath) return null;
-  const [d] = await listDocsByField<DocumentRecord>(COLL, "blobPath", [blobPath]);
-  return d && !d.deleted ? normalize(d) : null;
+/** Live documents recording this exact blob, or any blob under the same
+ *  upload key (one upload key = one document) — what finalize checks before
+ *  it records a blob, and again before it deletes one. The by-path read is
+ *  global, so two company ids that fold to the same path segment can't
+ *  replay each other's blob either. */
+export async function documentsUnderUploadKey(
+  customerId: string,
+  uploadKey: string,
+  blobPath: string
+): Promise<DocumentRecord[]> {
+  const prefix = documentUploadPrefix(customerId, uploadKey);
+  const [byPath, byCompany] = await Promise.all([
+    listDocsByField<DocumentRecord>(COLL, "blobPath", [blobPath]),
+    listDocsByField<DocumentRecord>(COLL, "customerId", [customerId]),
+  ]);
+  const out = new Map<string, DocumentRecord>();
+  for (const d of byPath) out.set(d.id, d);
+  for (const d of byCompany) if (typeof d.blobPath === "string" && d.blobPath.startsWith(prefix)) out.set(d.id, d);
+  return [...out.values()];
 }
 
 export async function updateDocument(id: string, patch: DocumentPatch): Promise<DocumentRecord | null> {
