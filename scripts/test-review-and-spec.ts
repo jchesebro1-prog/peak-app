@@ -20072,9 +20072,11 @@ import { rankLinkTargets as lt214Rank, nameRank as lt214NameRank } from "@/lib/i
   ok(page214.includes("linkedContactIdsOf(sel)") && /\n      linkedPeople,\n    \};/.test(page214), "#214 page: the reader VM carries the linked people");
 }
 
-/* ====== #214 Inbox Link popup — review fix wave 1 (Task 4 follow-up):
-   never link a deleted company through a person; own-address and gone-
-   message guards. requireUser() throws outside a request scope, so the
+/* ====== #214 Inbox Link popup — review fix wave 1 (Task 4 follow-up),
+   narrowed by fix wave 2 (controller decision): a deleted company through
+   a person no longer blocks linking the person — only the auto-company
+   step is skipped; own-address and gone-message guards are unchanged.
+   requireUser() throws outside a request scope, so the
    actions themselves can't be called from here (same constraint as the
    rest of this file) — their guard rails are checked as source text, next
    to pure checks on the two new DB-free helpers the fixes lean on
@@ -20092,13 +20094,20 @@ import { shouldStampCcFetched as gmail214StampCc } from "@/lib/gmail/config";
     return at < 0 ? "" : acts214b.slice(at, acts214b.indexOf("\n}\n", at));
   })();
 
-  // 1 — setThreadContactsAction refuses a deleted-company contact.
+  // 1 — setThreadContactsAction narrowed in fix wave 2 (controller decision):
+  // linking the person always succeeds; only the auto-company step is
+  // skipped for a deleted/missing company.
   const set214b = fn214b("setThreadContactsAction");
   ok(
-    set214b.includes("await getCompany(c.homeCompanyId)") &&
-      set214b.includes('error: "That person\'s company was deleted."') &&
-      set214b.indexOf("getCompany(c.homeCompanyId)") < set214b.indexOf("applyContactLink(t, contactId, on)"),
-    "#214 fix wave 1: setThreadContactsAction refuses to link a contact whose home company was soft-deleted, before any write"
+    !set214b.includes('error: "That person\'s company was deleted."') &&
+      set214b.includes("await getCompany(c.homeCompanyId)") &&
+      set214b.indexOf("applyContactLink(t, contactId, on)") < set214b.indexOf("getCompany(c.homeCompanyId)"),
+    "#214 fix wave 2: setThreadContactsAction no longer refuses to link a deleted-company contact; applyContactLink runs before the (now narrower) company-aliveness check"
+  );
+  ok(
+    /note = "Their company was deleted, so the thread's company wasn't set\.";/.test(set214b) &&
+      set214b.includes("return note ? { ok: true, note } : { ok: true };"),
+    "#214 fix wave 2: the auto-company step's skip is reported as an ok:true note, never a refusal"
   );
 
   // rankLinkTargets: the same live-companies filter venues already get.
@@ -20165,45 +20174,74 @@ async function emailsMatchingCompanyDeletedAsyncChecks(): Promise<void> {
 }
 
 /* ======================================================================
-   #214 review fix wave 1 — setThreadContactsAction never links a deleted
-   company through a person. Real DB, scratch datadir.
+   #214 review fix wave 2 (controller decision) — narrows fix wave 1:
+   setThreadContactsAction must still link the person even when their
+   homeCompanyId points at a soft-deleted company; only the auto-company
+   step (linkThread, run when the thread has no company yet) is skipped
+   for that dead/missing company. Real DB, scratch datadir.
 
    requireUser() throws outside a request scope, so the "use server" action
    itself can't be called from this harness (same constraint noted
    throughout this file — see refusedAdvanceAsyncChecks, deletePartAAsync
-   Checks, etc.): this reproduces the action's real sequence up to and
-   including the #214 fix — getContact, then the company-aliveness guard
-   (a real getCompany call, the same one the action makes) — against a
+   Checks, etc.): this reproduces the action's real post-fix sequence —
+   getContact, applyContactLink + patchDoc (unconditional), then the
+   company-aliveness guard (a real getCompany call, the same one the
+   action makes) that gates only the auto-company step — against a
    contact whose homeCompanyId points at a company softDeleteCompany just
    tombstoned (which does not cascade to contacts, so getContact still
-   returns the row). The guard evaluates false, exactly as it does inside
-   the action, so the sequence stops there; a fresh read of the thread
-   fixture then confirms it was never touched. ====================== */
+   returns the row). A fresh read of each thread fixture then confirms
+   the person linked and the company outcome the fix promises. ========= */
 async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
-  const { saveCompany, softDeleteCompany, getCompany: getCompany214fw1 } = await import("@/lib/identity/companies");
-  const { saveContact, getContact: getContact214fw1 } = await import("@/lib/identity/contacts");
-  const CommStore214fw1 = await import("@/lib/stores/comms");
+  const { saveCompany, softDeleteCompany, getCompany: getCompany214fw2 } = await import("@/lib/identity/companies");
+  const { saveContact, getContact: getContact214fw2 } = await import("@/lib/identity/contacts");
+  const CommStore214fw2 = await import("@/lib/stores/comms");
+  const { patchDoc: patchDoc214fw2 } = await import("@/db/doc-store");
+  const { applyContactLink: applyContactLink214fw2 } = await import("@/lib/inbox-thread-contacts");
   const { createFixture, fixtureId } = await import("./test-fixtures");
 
-  const GONE_CO = "co214fw1-gone";
-  const CT = "ct214fw1-contact";
-  const THREAD = fixtureId(214, "fw1-thread-no-company");
+  const GONE_CO = "co214fw2-gone";
+  const LIVE_CO = "co214fw2-live";
+  const CT_NO_CO = "ct214fw2-no-co-contact";
+  const CT_LIVE_CO = "ct214fw2-live-co-contact";
+  const THREAD_NO_CO = fixtureId(214, "fw2-thread-no-company");
+  const THREAD_LIVE_CO = fixtureId(214, "fw2-thread-live-company");
 
-  await saveCompany({ id: GONE_CO, name: "#214 fix wave 1 — company about to be deleted" });
-  await saveContact({ id: CT, firstName: "Gone214FW1", lastName: "Contact", homeCompanyId: GONE_CO, title: "" });
+  await saveCompany({ id: GONE_CO, name: "#214 fix wave 2 — company about to be deleted" });
+  await saveCompany({ id: LIVE_CO, name: "#214 fix wave 2 — live company, unrelated to the deleted one" });
+  await saveContact({ id: CT_NO_CO, firstName: "Gone214FW2", lastName: "NoCoContact", homeCompanyId: GONE_CO, title: "" });
+  await saveContact({ id: CT_LIVE_CO, firstName: "Gone214FW2", lastName: "LiveCoContact", homeCompanyId: GONE_CO, title: "" });
   await softDeleteCompany(GONE_CO);
 
   await createFixture("comms", {
-    id: THREAD,
+    id: THREAD_NO_CO,
     mailbox: "personal",
     mailboxUser: "Test Harness",
     unread: false,
     archived: false,
     customerId: null,
     customer: "",
-    contactName: "Gone214FW1 Contact",
-    contactEmail: "gone214fw1@example.test",
-    subject: "#214 fix wave 1 harness",
+    contactName: "Gone214FW2 NoCoContact",
+    contactEmail: "gone214fw2-no-co@example.test",
+    subject: "#214 fix wave 2 harness — thread has no company yet",
+    channel: "email",
+    status: "waiting_us",
+    assignedTo: "Test Harness",
+    link: null,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  await createFixture("comms", {
+    id: THREAD_LIVE_CO,
+    mailbox: "personal",
+    mailboxUser: "Test Harness",
+    unread: false,
+    archived: false,
+    customerId: LIVE_CO,
+    customer: "#214 fix wave 2 — live company, unrelated to the deleted one",
+    contactName: "Gone214FW2 LiveCoContact",
+    contactEmail: "gone214fw2-live-co@example.test",
+    subject: "#214 fix wave 2 harness — thread already has a company",
     channel: "email",
     status: "waiting_us",
     assignedTo: "Test Harness",
@@ -20213,23 +20251,65 @@ async function setThreadContactsDeletedCompanyAsyncChecks(): Promise<void> {
     updatedAt: Date.now(),
   });
 
-  // setThreadContactsAction(THREAD, CT, true)'s real sequence, up to the fix:
-  const c = await getContact214fw1(CT);
+  // setThreadContactsAction(THREAD_NO_CO, CT_NO_CO, true)'s real post-fix
+  // sequence: getContact, then applyContactLink + patchDoc run regardless
+  // of the contact's company.
+  const c = await getContact214fw2(CT_NO_CO);
   ok(
     !!c && c.homeCompanyId === GONE_CO,
-    "#214 fix wave 1: harness contact carries a homeCompanyId pointing at the now-deleted company (softDeleteCompany doesn't cascade to contacts)"
+    "#214 fix wave 2: harness contact carries a homeCompanyId pointing at the now-deleted company (softDeleteCompany doesn't cascade to contacts)"
   );
-  const stillAlive = c?.homeCompanyId ? await getCompany214fw1(c.homeCompanyId) : null;
+  const before = await CommStore214fw2.get(THREAD_NO_CO);
+  const pre = applyContactLink214fw2(before!, CT_NO_CO, true);
+  ok(pre.ok, "#214 fix wave 2: applyContactLink succeeds for a deleted-company contact — linking the person is unaffected by their company's state");
+  if (pre.ok) {
+    await patchDoc214fw2("comms", THREAD_NO_CO, (d: CommThread) => {
+      const next = applyContactLink214fw2(d, CT_NO_CO, true);
+      if (!next.ok) return;
+      d.linkedContactIds = next.linkedContactIds;
+      d.resolvedContactId = next.resolvedContactId;
+    });
+  }
+
+  // The company-aliveness guard — the same getCompany call the action's
+  // (now narrower) auto-company step makes — still reads dead for this
+  // contact, so that step alone must be skipped, never the link itself.
+  const stillAlive = c?.homeCompanyId ? await getCompany214fw2(c.homeCompanyId) : null;
   ok(
     stillAlive === null,
-    "#214 fix wave 1: getCompany — the same call the action's guard makes — confirms the contact's home company is gone"
+    "#214 fix wave 2: getCompany confirms the contact's home company is still gone"
   );
-  const guardRefuses = !!(c?.homeCompanyId) && !stillAlive;
-  ok(guardRefuses, "#214 fix wave 1: the action's guard condition evaluates to refuse for this contact, before applyContactLink/patchDoc/linkThread ever run");
 
-  const after = await CommStore214fw1.get(THREAD);
+  const after = await CommStore214fw2.get(THREAD_NO_CO);
   ok(
-    !!after && after.customerId === null && (after.linkedContactIds || []).length === 0 && !after.resolvedContactId,
-    "#214 fix wave 1: linking a deleted-company contact refuses and leaves the thread's customerId (and linked people) unchanged"
+    !!after && (after.linkedContactIds || []).includes(CT_NO_CO) && after.resolvedContactId === CT_NO_CO,
+    "#214 fix wave 2: linking a deleted-company contact now succeeds — they land in linkedContactIds and become primary"
+  );
+  ok(
+    !!after && after.customerId === null,
+    "#214 fix wave 2: the thread's customerId is NOT set to the deleted company — only the auto-company step was skipped"
+  );
+
+  // Second thread: already has a live, unrelated company. Linking a
+  // deleted-company contact must succeed and must not touch that company.
+  const before2 = await CommStore214fw2.get(THREAD_LIVE_CO);
+  const pre2 = applyContactLink214fw2(before2!, CT_LIVE_CO, true);
+  ok(pre2.ok, "#214 fix wave 2: applyContactLink succeeds for a deleted-company contact on a thread that already has a company");
+  if (pre2.ok) {
+    await patchDoc214fw2("comms", THREAD_LIVE_CO, (d: CommThread) => {
+      const next = applyContactLink214fw2(d, CT_LIVE_CO, true);
+      if (!next.ok) return;
+      d.linkedContactIds = next.linkedContactIds;
+      d.resolvedContactId = next.resolvedContactId;
+    });
+  }
+  const after2 = await CommStore214fw2.get(THREAD_LIVE_CO);
+  ok(
+    !!after2 && (after2.linkedContactIds || []).includes(CT_LIVE_CO),
+    "#214 fix wave 2: on a thread that already has a live company, a deleted-company contact still links"
+  );
+  ok(
+    !!after2 && after2.customerId === LIVE_CO,
+    "#214 fix wave 2: the thread's existing live company is unchanged — the auto-company step only ever runs when the thread has no company yet"
   );
 }

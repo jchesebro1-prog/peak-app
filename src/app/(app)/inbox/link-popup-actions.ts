@@ -52,7 +52,7 @@ import {
 } from "@/lib/inbox-link-targets";
 import type { LinkPopupData, PopupParticipant } from "./types";
 
-type R = { ok: true } | { ok: false; error: string };
+type R = { ok: true; note?: string } | { ok: false; error: string };
 type DataR = { ok: true; data: LinkPopupData } | { ok: false; error: string };
 const revalidate = () => revalidatePath("/", "layout");
 
@@ -237,13 +237,6 @@ export async function setThreadContactsAction(
   if (!t || !visibleTo(t, me.name)) return { ok: false, error: "Thread not found." };
   const c = on ? await getContact(contactId) : null;
   if (on && !c) return { ok: false, error: "Person not found." };
-  // softDeleteCompany doesn't cascade to its contacts, so a contact can
-  // still carry a homeCompanyId that no longer resolves to a live company.
-  // Mirror linkThreadToCustomerAction's getCustomer check: refuse before
-  // any write rather than silently linking the thread to a dead company.
-  if (on && c?.homeCompanyId && !(await getCompany(c.homeCompanyId))) {
-    return { ok: false, error: "That person's company was deleted." };
-  }
   const pre = applyContactLink(t, contactId, on);
   if (!pre.ok) return pre;
   await patchDoc<CommThread>("comms", threadId, (d) => {
@@ -252,11 +245,21 @@ export async function setThreadContactsAction(
     d.linkedContactIds = next.linkedContactIds;
     d.resolvedContactId = next.resolvedContactId;
   });
+  // softDeleteCompany doesn't cascade to its contacts, so a contact can
+  // still carry a homeCompanyId that no longer resolves to a live company.
+  // Linking the person above always succeeds — only this auto-company step
+  // (mirroring linkThreadToCustomerAction's getCustomer check) is skipped
+  // for a dead/missing company, never the link itself (#214 fix wave 2).
+  let note: string | undefined;
   if (on && c?.homeCompanyId && !(t.customerId || (await resolveCustomerId(t)))) {
-    await linkThread(threadId, c.homeCompanyId, pre.resolvedContactId);
+    if (await getCompany(c.homeCompanyId)) {
+      await linkThread(threadId, c.homeCompanyId, pre.resolvedContactId);
+    } else {
+      note = "Their company was deleted, so the thread's company wasn't set.";
+    }
   }
   revalidate();
-  return { ok: true };
+  return note ? { ok: true, note } : { ok: true };
 }
 
 /** One search across companies (name, city), venues (name, address, city)
