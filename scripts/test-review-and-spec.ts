@@ -10539,6 +10539,7 @@ seeded()
   .then(() => portal242RulesAsyncChecks())
   .then(() => portal242ImageLinksAsyncChecks())
   .then(() => portal242ImagesTask4AsyncChecks())
+  .then(() => portal242IndexAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -27803,4 +27804,146 @@ import { searchCatalog as d242Search, buildHaystack as d242Hay, type SearchEntry
   ok(d242Card("PO-12345-4111-1111-1111-1111"), "#242 card guard: dash-separated run with a leading PO group");
   ok(!d242Card("tracking 94111111111111111222"), "#242 card guard: a long unbroken digit string is not scanned window by window");
   ok(!d242Card("qty 2 x 1000 units, call 608 555 0199"), "#242 card guard: short groups (qty, phone) don't add up to a card");
+}
+
+/* ======================================================================
+   Portal catalog — cached catalog index + server-canonical pricing (#242,
+   Task 7; spec §2/§8). Pure quote counting, then a DB pass over real
+   catalog rows, an image link, a Hide override and a cart.
+   ====================================================================== */
+import {
+  countRecentQuotesBySku as d242Counts,
+  invalidatePortalIndex as d242Invalidate,
+  portalIndex as d242Index,
+  portalFactsForSku as d242Facts,
+} from "@/lib/portal-catalog-index";
+import {
+  priceCart as d242PriceCart,
+  priceSku as d242PriceSku,
+  sellView as d242SellView,
+  pricingContextFor as d242Ctx,
+  freightFor as d242FreightFor,
+} from "@/lib/portal-pricing";
+import { mergeUpsert as d242MergeUpsert } from "@/lib/stores/catalog";
+import type { PortalCart as D242Cart } from "@/lib/portal-cart-types";
+{
+  const mk = (createdAt: number, skus: string[], source = "estimator") => ({ source, createdAt, spec: { sections: [{ items: skus.map((sku) => ({ sku })) }] } });
+  const since = 1000;
+  const m = d242Counts([mk(2000, ["A", "A", "B"]), mk(3000, ["A"]), mk(500, ["A"]), mk(4000, ["A"], "daylite"), { source: "x", createdAt: 5000, spec: null }], since);
+  ok(m.get("A") === 2 && m.get("B") === 1, "#242 index: counts distinct quotes per SKU inside the window, excluding Daylite history and old quotes");
+  const odd = d242Counts([
+    { source: "estimator", createdAt: 2000, deleted: true, spec: { sections: [{ items: [{ sku: "D" }] }] } },
+    { source: "estimator", createdAt: 2000, spec: { sections: "nope" } },
+    { source: "estimator", createdAt: 2000, spec: { sections: [{ items: null }, { items: [null, { sku: 7 }, { sku: "" }, { sku: "E" }] }] } },
+  ], since);
+  ok(!odd.has("D") && odd.get("E") === 1 && odd.size === 1, "#242 index: deleted quotes and malformed spec shapes are skipped safely");
+}
+
+async function portal242IndexAsyncChecks(): Promise<void> {
+  const IMG = fixtureId(242, "p-img");
+  const HIDE = fixtureId(242, "p-hide");
+  const PLAIN = fixtureId(242, "p-plain");
+  const CO = fixtureId(242, "co-index");
+  try {
+    await d242MergeUpsert(IMG, { desc: "Test242 Imaged Fixture", category: "Lighting", unit: "ea", list: 500, cost: 70, mfr: "Test242 Mfr" });
+    await d242MergeUpsert(HIDE, { desc: "Test242 Hidden Part", category: "Lighting", unit: "ea", list: 50, cost: 10, portalVisibility: "hide" });
+    await d242MergeUpsert(PLAIN, { desc: "Test242 Plain Part", category: "Cable", unit: "ea", list: 20, cost: 5 });
+    for (const s of [IMG, HIDE, PLAIN]) registerFixture("catalog_parts", s);
+    const img = await d242CreateDoc({ kind: "image", fileName: "p.png", contentType: "image/png", size: 10, blobKey: "part-docs/PD-t7-img/p.png", sourceUrl: null, source: "upload", by: "Test" });
+    if (!img) throw new Error("#242 index: fixture image failed to create");
+    registerFixture("part_documents", img.id);
+    await d242Attach(img.id, [IMG], "Test");
+    registerFixture("part_document_links", d242LinkId(IMG, img.id));
+    await upsertCustomer({ id: CO, name: "Test242 Portal Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
+
+    d242Invalidate();
+    const ix = await d242Index({ fresh: true });
+    const entry = (k: string) => ix.entries.find((e) => e.key === k);
+    ok(!ix.parts.has(HIDE) && !entry(HIDE), "#242 index: a Hide part is absent from the index and its search entries");
+    ok(entry(IMG)?.browsable === true && ix.parts.get(IMG)?.imageIds.includes(img.id) === true, "#242 index: a part with a visible image is browsable and carries the image id");
+    ok(!!entry(PLAIN) && entry(PLAIN)!.browsable === false, "#242 index: a plain part is searchable but not browsable");
+    ok(entry(IMG)!.haystack.includes("imaged") && entry(IMG)!.title === "Test242 Imaged Fixture", "#242 index: entry title + haystack come from the part");
+    ok((await d242Index()) === ix, "#242 index: a second read inside the TTL is the cached index");
+    d242Invalidate();
+    ok((await d242Index()) !== ix, "#242 index: invalidatePortalIndex forces a rebuild");
+
+    const fImg = await d242Facts(IMG);
+    ok(fImg.hasVisibleImage && fImg.reason === "Browsable: has image", "#242 facts: portalFactsForSku reads the index for a listed part");
+    ok((await d242Facts(HIDE)).reason === "Hidden from customers", "#242 facts: a hidden part reads Hidden from customers");
+
+    const ctx = await d242Ctx({ customerId: CO, name: "" });
+    ok(ctx.tier === "silver" && Math.abs(ctx.margin - 0.22) < 1e-9 && ctx.staleCostMonths === 0, "#242 pricing: context resolves the company tier + margin");
+    ok((await d242PriceSku(HIDE, ctx)) === null, "#242 pricing: a Hide part is not quotable (priceSku → null)");
+    const ps = await d242PriceSku(IMG, ctx);
+    ok(!!ps && ps.unitPrice === Math.round((70 / (1 - 0.22)) * 100) / 100 && !ps.por, "#242 pricing: priceSku = cost ÷ (1 − tier margin)");
+    const fr = await d242FreightFor(CO, null);
+    ok(fr.unknown && fr.pct === 10 && fr.miles === null, "#242 freight: no venue → unknown distance at the cap");
+
+    const cart: D242Cart = {
+      id: "TEST242:cart", customerId: CO, locationId: null, updatedAt: Date.now(),
+      lines: [
+        { lineId: "1", kind: "part", sku: IMG, qty: 2 },
+        { lineId: "2", kind: "curtain", qty: 1, curtainInputs: { name: "Main drape", fabricSku: "FAB-1", fabricName: "IFR Velour", qty: "1", width: "40", height: "20", fullness: "50" } },
+        { lineId: "3", kind: "part", sku: HIDE, qty: 1 },
+      ],
+    };
+    const p = await d242PriceCart(cart, ctx);
+    const partLine = p.lines.find((l) => l.lineId === "1")!;
+    const curtain = p.lines.find((l) => l.lineId === "2")!;
+    const gone = p.lines.find((l) => l.lineId === "3")!;
+    ok(p.mode === "review" && curtain.por && curtain.porReason === "curtain" && curtain.unitPrice === null, "#242 cart: a curtain line is price on request → review");
+    ok(partLine.extPrice === Math.round(2 * partLine.unitPrice! * 100) / 100 && !partLine.por, "#242 cart: part extPrice = qty × server unit price");
+    ok(gone.unavailable && gone.title === "No longer available" && gone.extPrice === null, "#242 cart: a hidden part reads No longer available");
+    ok(p.freight.unknown && p.freight.pct === 10 && p.freight.miles === null, "#242 cart: no venue → freight at the cap, unknown");
+    ok(p.subtotal === partLine.extPrice && p.freight.amount === Math.round(140 * 0.1 * 100) / 100 && p.total === Math.round((p.subtotal + p.freight.amount) * 100) / 100,
+      "#242 cart: subtotal is materials sell, freight is the section % of cost (Estimator math), total adds them");
+    ok(!p.sections.some((s) => s.items.some((i) => i.sku === HIDE)) && p.sections.every((s) => s.freightPct === 10 && s.freightMiles === null),
+      "#242 cart: staff sections skip unavailable lines and carry the freight % + miles");
+    const drape = p.sections.find((s) => s.id === "SEC-DRAPE");
+    ok(!!drape && drape.items[0].sku === "CRT-REQ" && drape.items[0].por === true && drape.items[0].desc.includes("50% fullness"), "#242 cart: the curtain request lands as a POR drapery line for staff");
+    // Fixture assembly: light engine (IMG) + a required PLAIN ×2 + an optional HIDE add-on
+    // (not quotable, so never offered) + an optional PLAIN-priced add-on the cart turns on.
+    const FX = fixtureId(242, "fx");
+    const OPT = fixtureId(242, "p-opt");
+    await d242MergeUpsert(OPT, { desc: "Test242 Optional Clamp", category: "Hardware", unit: "ea", list: 0, cost: 7.8 });
+    registerFixture("catalog_parts", OPT);
+    await createFixture("subassemblies", {
+      id: FX, kind: "fixture", label: "Test242 Fixture Kit", description: "Kit", lightEngineSku: IMG, lensSku: null,
+      lines: { data: [], power: [{ sku: PLAIN, qty: 2 }], mounting: [{ sku: OPT, qty: 0, label: "Clamp" }], accessories: [{ sku: HIDE, qty: 0 }] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    const FXH = fixtureId(242, "fx-hidden-req");
+    await createFixture("subassemblies", {
+      id: FXH, kind: "fixture", label: "Test242 Blocked Kit", description: "", lightEngineSku: IMG, lensSku: null,
+      lines: { data: [], power: [{ sku: HIDE, qty: 1 }], mounting: [], accessories: [] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    d242Invalidate();
+    const ix2 = await d242Index({ fresh: true });
+    ok(!ix2.fixtures.has(FXH) && !ix2.entries.some((e) => e.key === "fixture:" + FXH), "#242 index: a fixture with a hidden required component is not offered");
+    const ifx = ix2.fixtures.get(FX);
+    ok(!!ifx && ifx.lines.length === 3 && ifx.lines[0].slot === "lightEngine" && ifx.lines[0].required && ifx.lines.find((x) => x.sku === OPT)?.required === false,
+      "#242 index: a fixture lists its light engine (required) + box lines, qty 0 = optional");
+    ok(!!ifx && !ifx.lines.some((x) => x.sku === HIDE), "#242 index: a Hide part is never offered as a fixture add-on");
+    ok(ix2.entries.find((e) => e.key === "fixture:" + FX)?.browsable === true, "#242 index: a fixture is a browsable search entry");
+    const fxCart: D242Cart = { id: "TEST242:cart2", customerId: CO, locationId: null, updatedAt: Date.now(),
+      lines: [{ lineId: "f", kind: "fixture", fixtureId: FX, qty: 3, fixtureOptions: { [`mounting:${OPT}`]: 1 } }] };
+    const pf = await d242PriceCart(fxCart, ctx);
+    const fl = pf.lines[0];
+    const tp = (c: number) => Math.round((c / (1 - 0.22)) * 100) / 100;
+    const unit = Math.round((tp(70) + 2 * tp(5) + tp(7.8)) * 100) / 100;
+    ok(fl.kind === "fixture" && !fl.por && fl.unitPrice === unit && fl.extPrice === Math.round(unit * 3 * 100) / 100 && pf.mode === "firm",
+      "#242 cart: fixture unit = Σ chosen components' tier prices × qty; all priced → firm");
+    ok(fl.detail === "Included: Test242 Imaged Fixture, Test242 Plain Part ×2 · Add-ons: Clamp", "#242 cart: fixture detail names included parts and chosen add-ons");
+    const fitem = pf.sections.find((x) => x.id === "SEC-FIXT")?.items[0];
+    ok(!!fitem && fitem.fixture === true && fitem.cost === 70 + 10 + 7.8 && fitem.components?.length === 3 && !fitem.components.some((c) => c.sku === HIDE),
+      "#242 cart: staff fixture item carries per-unit cost + chosen components only");
+    ok(!JSON.stringify(d242SellView(pf)).includes("\"cost\""), "#242 cart: a fixture's sell view carries no cost");
+
+    const sv = JSON.stringify(d242SellView(p));
+    ok(!sv.includes("\"cost\"") && !sv.includes("\"sections\"") && !sv.includes("margin") && !sv.includes("silver"), "#242 cart: sellView carries no cost, sections, margin or tier name");
+  } finally {
+    d242Invalidate();
+    await removeCustomer(CO);
+  }
 }

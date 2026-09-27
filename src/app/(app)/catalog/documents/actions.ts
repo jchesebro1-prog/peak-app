@@ -21,6 +21,7 @@ import { fetchImageBytes } from "@/lib/part-docs/fetch";
 import { fileNameForFetched, sniffImageType } from "@/lib/part-docs/files";
 import { matchFileRows, type FilenameMatch } from "@/lib/part-docs/filename-match";
 import { loadPartDocsState } from "@/lib/part-docs/load";
+import { invalidatePortalIndex } from "@/lib/portal-catalog-index";
 import { setDocNotNeeded } from "@/lib/part-docs/not-needed";
 import { alsoCoversSuggestions, type Suggestion } from "@/lib/part-docs/suggest";
 import {
@@ -49,7 +50,11 @@ export type DocActionResult<T = object> = ({ ok: true } & T) | { ok: false; erro
 
 const MAX_SKUS_PER_CALL = 500;
 
+/** Every document write here changes what the portal index derives (images,
+ *  datasheet coverage) — drop this process's cached copy; other serverless
+ *  instances converge within the index's 5-minute TTL. */
 function revalidate(): void {
+  invalidatePortalIndex();
   revalidatePath("/catalog/documents");
   revalidatePath("/catalog");
 }

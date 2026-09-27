@@ -23,13 +23,14 @@ import { allSections } from "@/lib/stores/spec-sections";
 import { allTemplates, ensureStarterTemplates } from "@/lib/stores/spec-templates";
 import { articleIdForPart } from "@/lib/specs/articles";
 import { loadPartDocsState } from "@/lib/part-docs/load";
-import { buildImageIndex, imagesFor, partDocsView, viewSatisfied, type PartDocsView } from "@/lib/part-docs/views";
+import { buildImageIndex, imagesFor, partDocsView, type PartDocsView } from "@/lib/part-docs/views";
 import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
 import FabricRateField from "./fabric-rate-field";
 import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 import { loadPortalRules } from "@/lib/freight-rule-load";
 import { browseReason, normalizeVisibility } from "@/lib/portal-visibility";
+import { portalFactsForSku } from "@/lib/portal-catalog-index";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 // Part documents (#207): the part editor's slot cell calls fetchLinksAction
@@ -214,23 +215,18 @@ export default async function CatalogPage({
       })()
     : null;
 
-  // Customer visibility (#242 Task 5) — the reason line under the part
-  // editor's Auto/Show/Hide selector. Until Task 7's part-doc index lands,
-  // `hasVisibleImage`/`hasDatasheet` read the already-loaded partDocs view
-  // (partDocs is null for a brand-new, unsaved part, so both read false) and
-  // `quoteCount` is a placeholder 0 — switch to `portalFactsForSku` in Task 7
-  // Step 5.
-  const visibilityReason = showForm
-    ? browseReason(
-        {
-          visibility: normalizeVisibility(editingPart?.portalVisibility),
-          hasVisibleImage: !!partDocs?.images.some((img) => !img.hidden),
-          hasDatasheet: !!partDocs && viewSatisfied(partDocs.slots.datasheet),
-          quoteCount: 0,
-        },
-        { minQuotes: (await loadPortalRules()).browseMinQuotes }
-      )
-    : null;
+  // Customer visibility (#242) — the reason line under the part editor's
+  // Auto/Show/Hide selector, read from the portal's cached catalog index
+  // (image, datasheet and recent-quote facts). A brand-new, unsaved part has
+  // none of those yet, so it reads the rule against empty facts.
+  const visibilityReason = !showForm
+    ? null
+    : editingPart
+      ? (await portalFactsForSku(editingPart.sku)).reason
+      : browseReason(
+          { visibility: "auto", hasVisibleImage: false, hasDatasheet: false, quoteCount: 0 },
+          { minQuotes: (await loadPortalRules()).browseMinQuotes }
+        );
 
   return (
     <div className="pk-content">

@@ -76,6 +76,8 @@ export type SpecItem = {
   /** Section freight is not charged on this line (#143, D162) — the vendor's
    *  own price already includes it. */
   noFreight?: boolean;
+  /** #242: customer-requested line still waiting on a Peak price. */
+  por?: boolean;
 };
 
 /* ---------------- vendor quotes (#143, D162) ---------------- */
@@ -154,6 +156,8 @@ export type SpecSection = {
   freightPct: number;
   /** #242: freight was set by the distance rule and staff haven't touched it. */
   freightAuto?: boolean;
+  /** #242: one-way drive miles the freight rule priced from (null = venue not located). */
+  freightMiles?: number | null;
   items: SpecItem[];
 };
 
