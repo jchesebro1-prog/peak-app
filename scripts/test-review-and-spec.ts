@@ -10489,6 +10489,7 @@ seeded()
   .then(() => venues216AsyncChecks())
   .then(() => venues216SaveFixesAsyncChecks())
   .then(() => venues216Task3FixesAsyncChecks())
+  .then(() => venues216NameAutoAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23910,4 +23911,59 @@ async function venues216Task3FixesAsyncChecks(): Promise<void> {
   ok(/done = true;\s*router\.push\(/.test(saveFn) && /if \(!done\)\s*\{[\s\S]*busyRef\.current = false;[\s\S]*setBusy\(false\)/.test(fin) && !/finally\s*\{\s*busyRef\.current = false/.test(saveFn),
     "#216 T5: busy is not reset after a successful save (no double-submit during navigation)");
   ok(!readFileSync(join(process.cwd(), "src/app/(app)/venues/[id]/page.tsx"), "utf8").includes(" * Read-only:"), "#216 T5: the venue page header no longer claims read-only");
+}
+
+/* --- #216 T7: sites.name_auto — derived names follow type renames --- */
+import { rederiveVenueNamesForTypes as v216Rederive, saveVenue as v216Save7 } from "@/lib/identity/venue-save";
+import { setNameAutoForLocIds as v216SetAuto, sitesForCompany as v216Sites7, softDeleteSite as v216SoftDel7 } from "@/lib/identity/sites";
+{
+  const v216Read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const sa = v216Read("src/app/(app)/settings/actions.ts");
+  ok(sa.includes("rederiveVenueNamesForTypes(res.renamed, res.types)"), "#216 T7: renaming a type re-derives its auto-named venues");
+  ok(v216Read("src/app/(app)/companies/actions.ts").includes("setNameAutoForLocIds(id, derivedLocIds, true)"), "#216 T7: a modal/intake-derived name marks the venue auto-named");
+  const em = v216Read("src/app/(app)/companies/edit-modal.tsx");
+  ok(em.includes("autoNamed.has(l.id)"), "#216 T7: an auto-named venue re-derives on every company save");
+  ok(v216Read("src/app/(app)/companies/[id]/page.tsx").includes("autoNamedLocIds={companySites.filter((s) => s.nameAuto).map(docLocId)}"), "#216 T7: the company page tells the modal which venues are auto-named");
+  const mig = (v216Readdir(join(process.cwd(), "drizzle"), { encoding: "utf8" }) as string[]).find((f) => /_sites_name_auto\.sql$/.test(f));
+  ok(!!mig && v216Read(`drizzle/${mig}`).includes('ADD COLUMN IF NOT EXISTS "name_auto" boolean DEFAULT false NOT NULL'), "#216 T7: the name_auto migration is idempotent (D141)");
+}
+async function venues216NameAutoAsyncChecks(): Promise<void> {
+  const CID = fixtureId(216, "auto-co");
+  const blank = { siteId: null, locationName: "", address: "", city: "", state: "", lat: null, lng: null, primary: false };
+  try {
+    await upsertCustomer({
+      id: CID, name: "Lincoln High School", type: "Education",
+      locations: [
+        { id: "m1", label: "Main Hall", primary: true, venueKind: "gymstage" },
+        { id: "m2", label: "Band Room", primary: false, venueKind: "flat" },
+      ],
+      contacts: [],
+    });
+    let rows = await v216Sites7(CID);
+    ok(rows.length === 2 && rows.every((s) => s.nameAuto === false), "#216 T7: existing venues start with nameAuto false");
+    const a = await v216Save7({ ...blank, companyId: CID, venueKind: "gymstage" });
+    // createdAt orders the re-derive's numbering; keep a and b in distinct ms.
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await v216Save7({ ...blank, companyId: CID, venueKind: "gymstage" });
+    const aId = a.ok ? a.siteId : "";
+    const bId = b.ok ? b.siteId : "";
+    rows = await v216Sites7(CID);
+    ok(rows.find((s) => s.id === aId)?.nameAuto === true && rows.find((s) => s.id === bId)?.nameAuto === true, "#216 T7: a venue saved through the dialog is auto-named");
+    await v216SetAuto(CID, ["m2"], true);
+    rows = await v216Sites7(CID);
+    ok(rows.find((s) => s.legacyLocId === "m2")?.nameAuto === true && rows.find((s) => s.legacyLocId === "m1")?.nameAuto === false,
+      "#216 T7: setNameAutoForLocIds flags exactly the venues named (by doc location id)");
+    const renamedTypes = v216From(undefined).map((t) => (t.key === "gymstage" ? { ...t, label: "Gymnasium Stage" } : t));
+    const n = await v216Rederive(["gymstage"], renamedTypes);
+    rows = await v216Sites7(CID);
+    ok(rows.find((s) => s.id === aId)?.name === "Lincoln High School — Gymnasium Stage" && rows.find((s) => s.id === bId)?.name === "Lincoln High School — Gymnasium Stage (2)",
+      "#216 T7: a type rename re-derives its auto-named venues, numbering kept");
+    ok(rows.find((s) => s.legacyLocId === "m1")?.name === "Main Hall", "#216 T7: a hand-kept name is never renamed");
+    ok(rows.find((s) => s.legacyLocId === "m2")?.name === "Lincoln High School — Flat floor / Conference" && n === 3,
+      "#216 T7: every auto-named venue of an affected company is refreshed, and the count is returned");
+    ok((await v216Rederive([], renamedTypes)) === 0, "#216 T7: no renamed types → nothing re-derived");
+  } finally {
+    for (const s of await v216Sites7(CID)) await v216SoftDel7(s.id);
+    await removeCustomer(CID);
+  }
 }

@@ -17,6 +17,7 @@ import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
 import { getSettings } from "@/lib/settings";
 import { getCompanySummary, type CompanySummary } from "@/lib/company-summary";
 import { saveVenue } from "@/lib/identity/venue-save";
+import { setNameAutoForLocIds } from "@/lib/identity/sites";
 import { deriveLocationLabels, venueTypesFrom, type SaveVenueInput, type SaveVenueResult } from "@/lib/venue-types";
 
 /**
@@ -111,6 +112,9 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
       })),
     ...extras,
   });
+  // #216 — venues whose name this save derived follow future type renames.
+  const derivedLocIds = rawLocs.filter((l) => l.deriveName && l.id).map((l) => l.id as string);
+  if (derivedLocIds.length) await setNameAutoForLocIds(id, derivedLocIds, true);
   revalidatePath("/", "layout");
   return { ok: true as const, id };
 }

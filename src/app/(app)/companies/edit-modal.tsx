@@ -176,12 +176,15 @@ export default function EditCustomerModal({
   closeHref,
   fieldDefs = [],
   venueTypes,
+  autoNamedLocIds = [],
 }: {
   mode: "new" | "edit";
   initial: SaveCustomerInput | null;
   closeHref: string;
   fieldDefs?: CustomFieldDef[];
   venueTypes: VenueType[];
+  /** #216 — doc location ids of auto-named venues: they re-derive on every save. */
+  autoNamedLocIds?: string[];
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -250,10 +253,13 @@ export default function EditCustomerModal({
   const makePrimaryLoc = (i: number) =>
     setLocations((rows) => rows.map((r, idx) => ({ ...r, primary: idx === i })));
   const addLoc = () => setLocations((rows) => [...rows, newLoc(rows.length === 0, defaultKind)]);
-  // #216 — a card's name re-derives when it is new, has no name yet, or its
-  // location/type changed; an untouched venue keeps the name it has.
+  // #216 — a card's name re-derives when it is new, already auto-named, has
+  // no name yet, or its location/type changed; an untouched legacy venue
+  // keeps the name it has.
+  const autoNamed = new Set(autoNamedLocIds);
   const derives = (l: LocRow) =>
     l.isNew ||
+    autoNamed.has(l.id) ||
     !l.label.trim() ||
     l.locationName.trim() !== l.origLocationName.trim() ||
     l.venueKind !== l.origVenueKind;

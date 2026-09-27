@@ -361,6 +361,9 @@ export const sites = pgTable(
     lat: text("lat"),
     lng: text("lng"),
     venueKind: text("venue_kind").notNull().default("proscenium"),
+    /** #216 — `name` is the derived "Location — Type" and follows type
+     *  renames (lib/venue-types). false = a hand-kept (pre-#216) name. */
+    nameAuto: boolean("name_auto").notNull().default(false),
     travelMiles: text("travel_miles"),
     travelMin: text("travel_min"),
     /** Placeholder for the later Drive integration (§4.4) — free now. */

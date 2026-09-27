@@ -30,6 +30,7 @@ import { savePipelines, moveStageRecords } from "@/lib/pipelines-server";
 import type { ProjectPipeline, QuotePipeline } from "@/lib/pipelines";
 import { mergeVenueTypes, venueTypesFrom, type VenueTypeInput } from "@/lib/venue-types";
 import { countSitesByVenueKind, storedSiteVenueKinds } from "@/lib/identity/sites";
+import { rederiveVenueNamesForTypes } from "@/lib/identity/venue-save";
 
 const OFFICE_TYPES = ["Main Office", "Satellite", "Shop", "Temporary"];
 
@@ -733,6 +734,7 @@ export async function saveVenueTypesAction(
     }
   }
   await setSettings({ venueTypes: res.types });
+  if (res.renamed.length) await rederiveVenueNamesForTypes(res.renamed, res.types);
   revalidatePath("/", "layout");
   return { ok: true };
 }

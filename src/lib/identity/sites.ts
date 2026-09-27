@@ -109,6 +109,28 @@ export async function countSitesByVenueKind(
   return out;
 }
 
+/** #216 — flag (or unflag) venues as auto-named, addressed by the doc
+ *  location ids forms carry (legacyLocId, else the site id). Company-scoped. */
+export async function setNameAutoForLocIds(
+  companyId: string,
+  locIds: readonly string[],
+  on: boolean
+): Promise<void> {
+  const ids = [...new Set(locIds.filter(Boolean))];
+  if (!companyId || !ids.length) return;
+  const db = await getDb();
+  await db
+    .update(sites)
+    .set({ nameAuto: on, updatedAt: Date.now() })
+    .where(
+      and(
+        eq(sites.companyId, companyId),
+        eq(sites.deleted, false),
+        or(inArray(sites.legacyLocId, ids), inArray(sites.id, ids))
+      )
+    );
+}
+
 /** #216 — every distinct venue-type key stored on a site, soft-deleted
  *  rows included. Settings → Venue types never mints one of these as a new
  *  type's key (a deleted venue can come back live and would change type). */

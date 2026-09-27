@@ -24,7 +24,7 @@ import {
   officesFromSettings,
 } from "@/lib/geo";
 import { dateYear, shortDate, timeAgo } from "@/lib/format";
-import { getSiteByDocLocId, sitesForCompany } from "@/lib/identity/sites";
+import { docLocId, getSiteByDocLocId, sitesForCompany } from "@/lib/identity/sites";
 import { venueDialogInitial } from "@/lib/identity/venue-save";
 import { quoteBuilderHref } from "@/lib/quote-links";
 import { hasVenueCalendar } from "@/lib/stores/venue-calendars";
@@ -816,7 +816,7 @@ export default async function CustomerDetailPage({
       </div>
 
       {edit === "1" && (
-        <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} venueTypes={venueTypes} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
+        <EditCustomerModal mode="edit" initial={editInitial} fieldDefs={fieldDefs} venueTypes={venueTypes} autoNamedLocIds={companySites.filter((s) => s.nameAuto).map(docLocId)} closeHref={`/companies/${encodeURIComponent(cust.id)}`} />
       )}
       {addVenue === "1" && (
         <VenueDialog

@@ -1,11 +1,13 @@
-import { withTransaction } from "@/db";
-import type { SiteRow } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { getDb, withTransaction } from "@/db";
+import { sites, type SiteRow } from "@/db/schema";
 import { getCompany } from "@/lib/identity/companies";
 import { mintId } from "@/lib/identity/ids";
 import { docLocId, saveSite, sitesForCompany } from "@/lib/identity/sites";
 import { getSettings } from "@/lib/settings";
 import {
   deriveVenueName,
+  planVenueRenames,
   venueTypeLabel,
   venueTypeOptions,
   venueTypesFrom,
@@ -116,6 +118,7 @@ export async function saveVenue(input: SaveVenueInput): Promise<SaveVenueResult>
       lng,
       ...(moved ? { travelMiles: null, travelMin: null } : {}),
       venueKind,
+      nameAuto: true,
     });
   });
   return { ok: true, siteId: id, locId: existing ? docLocId(existing) : id, name };
@@ -137,4 +140,45 @@ export function venueDialogInitial(s: SiteRow): VenueDialogInitial {
     primary: s.isPrimary,
     currentName: s.name,
   };
+}
+
+/** #216 — after Settings renames venue types: re-derive the names of every
+ *  auto-named venue in each company that has one of those types (all of
+ *  that company's auto-named venues, primary first then creation order, so
+ *  numbering stays stable). Hand-kept names are never touched. Returns how
+ *  many names changed. */
+export async function rederiveVenueNamesForTypes(
+  keys: readonly string[],
+  types: readonly VenueType[]
+): Promise<number> {
+  if (!keys.length) return 0;
+  const db = await getDb();
+  const hit = await db
+    .select({ companyId: sites.companyId })
+    .from(sites)
+    .where(and(eq(sites.deleted, false), eq(sites.nameAuto, true), inArray(sites.venueKind, [...keys])));
+  let changed = 0;
+  for (const companyId of [...new Set(hit.map((r) => r.companyId))]) {
+    const company = await getCompany(companyId);
+    if (!company) continue;
+    const rows = await sitesForCompany(companyId);
+    const plan = planVenueRenames(
+      rows.map((s) => ({
+        id: s.id,
+        name: s.name,
+        locationName: s.locationName,
+        venueKind: s.venueKind,
+        nameAuto: s.nameAuto,
+        isPrimary: s.isPrimary,
+        createdAt: s.createdAt,
+      })),
+      company.name,
+      types
+    );
+    for (const p of plan) {
+      await db.update(sites).set({ name: p.name, updatedAt: Date.now() }).where(eq(sites.id, p.id));
+      changed++;
+    }
+  }
+  return changed;
 }
