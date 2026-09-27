@@ -8788,7 +8788,11 @@ async function dayliteChunkAsyncChecks(): Promise<void> {
     for (const c of colls)
       for (const d of await listDocs(c, { includeDeleted: true }))
         // A project note id is random ("nt-xxxxxx"); everything else must match.
-        out[`${c}/${d.id}`] = JSON.stringify(d).replace(/"nt-[a-z0-9]+"/g, '"nt-*"');
+        // #223: so is a quote's estimate number — the sequence never reuses a
+        // value, so the chunked re-run (after the hard delete) gets new ones.
+        out[`${c}/${d.id}`] = JSON.stringify(d)
+          .replace(/"nt-[a-z0-9]+"/g, '"nt-*"')
+          .replace(/"(estNo|estSuffix)":\d+/g, '"$1":*');
     return out;
   };
   const hardDelete = async (keys: string[]) => {
@@ -8808,6 +8812,12 @@ async function dayliteChunkAsyncChecks(): Promise<void> {
     const afterFull = await snapshot();
     const fullKeys = Object.keys(afterFull).filter((k) => !(k in base)).sort();
     ok(full.errors.length === 0 && full.total === 8 && fullKeys.length === 9, `daylite chunk: full commit writes 9 docs (8 work items + the sold job's new project) (${fullKeys.length}, total ${full.total}, errors ${full.errors.join("; ")})`);
+    const e223DlIds = fullKeys.filter((k) => k.startsWith("quotes/")).map((k) => k.slice("quotes/".length));
+    const e223DlRows = (await listDocs("quotes", { includeDeleted: true })).filter((d) => e223DlIds.includes(d.id));
+    ok(
+      e223DlIds.length > 0 && e223DlRows.length === e223DlIds.length && e223DlRows.every((d) => e223IsNo(d.estNo)),
+      "#223 daylite: commitHistory numbers the quotes it imported (one pass at the end of the chunk)"
+    );
     await hardDelete(fullKeys);
     ok(Object.keys(await snapshot()).length === Object.keys(base).length, "daylite chunk: the full run's docs are removed before the chunked run");
 
@@ -10504,6 +10514,8 @@ seeded()
   .then(() => pdfPoll222AsyncChecks())
   .then(() => estimate223BackfillAsyncChecks())
   .then(() => estimate223FixAsyncChecks())
+  .then(() => estimate223AllocationAsyncChecks())
+  .then(() => estimate223WritersAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -25600,10 +25612,13 @@ async function estimate223BackfillAsyncChecks(): Promise<void> {
   const assigned = await e223Assign();
   ok(assigned === 11, `#223 backfill: numbers all eleven unnumbered fixtures in one pass (got ${assigned})`);
 
-  const read = async () => [
-    ...(await e223GetRows("quotes", ["hist", "gone", "q1", "dl", "q2", "q3", "q4", "tie-a", "tie-b"].map(id))),
-    ...(await e223GetRows("leads", ["lead1", "lead2"].map(id))),
-  ];
+  // Sorted: getDocRows has no ORDER BY, and the re-run's ANALYZE can change
+  // the plan (and so the row order) without changing any number.
+  const read = async () =>
+    [
+      ...(await e223GetRows("quotes", ["hist", "gone", "q1", "dl", "q2", "q3", "q4", "tie-a", "tie-b"].map(id))),
+      ...(await e223GetRows("leads", ["lead1", "lead2"].map(id))),
+    ].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
   const rows = await read();
   const field = (slug: string, k: "estNo" | "estSuffix") =>
     (rows.find((r) => r.id === id(slug))?.doc as Record<string, unknown> | undefined)?.[k];
@@ -25815,4 +25830,153 @@ async function estimate223FixAsyncChecks(): Promise<void> {
   ok(seen.rejected, "#223 fix: after the first success the function-exists probe is skipped (cached)");
   const back = e223Rows<{ fn: string | null }>(await db.execute(e223Sql`select to_regprocedure('assign_estimate_numbers()')::text as fn`));
   ok(!!back[0]?.fn && (await e223Assign()) === 0, "#223 fix: …the rollback restores the function and the cached path works again");
+}
+
+/* ======================================================================
+   #223 — allocation on create: new leads, a lead's quotes (carry + suffix),
+   standalone quotes, renewals, the consulting auto-lead carry, update()
+   never renumbering, and the id→number lookups.
+   ====================================================================== */
+import * as e223Quotes from "@/lib/stores/quotes";
+import * as e223Leads from "@/lib/stores/leads";
+import { all as e223AllCustomers } from "@/lib/stores/customers";
+import { registerFixture as e223Register } from "./test-fixtures";
+import {
+  quoteNumbersFor as e223QuoteNos,
+  leadNumbersFor as e223LeadNos,
+  findQuoteIdByNumberOrId as e223FindQuote,
+} from "@/lib/stores/estimate-numbers";
+
+async function estimate223AllocationAsyncChecks(): Promise<void> {
+  const id = (slug: string) => fixtureId(223, slug);
+  const cust = (await e223AllCustomers())[0];
+  const lead = await e223Leads.create({ id: id("alloc-lead"), org: "#223 Alloc Co", customerId: cust?.id ?? null }, "spec");
+  e223Register("leads", lead.id);
+  ok(e223IsNo(lead.estNo), "#223 allocation: a new lead is numbered on create");
+
+  const conv = await e223Leads.convert(lead.id, {}, "spec");
+  if (conv?.quoteId) e223Register("quotes", conv.quoteId);
+  const first = conv?.quoteId ? await e223Quotes.get(conv.quoteId) : null;
+  ok(
+    !!first && first.estNo === lead.estNo && first.estSuffix === undefined && first.leadId === lead.id,
+    "#223 allocation: a lead's first quote carries its number with no suffix, and links back by leadId"
+  );
+  ok(
+    !!first && !!conv && conv.lead.activities.some((a) => a.note.includes(e223DisplayQuote(first))),
+    "#223 allocation: the lead's conversion activity names the quote by its number"
+  );
+
+  const second = await e223Quotes.create({ id: id("alloc-second"), name: "#223 second", owner: "spec", leadId: lead.id, quoteType: "flame_test" });
+  e223Register("quotes", second.id);
+  ok(
+    second.estNo === lead.estNo && second.estSuffix === 2 && e223FormatQuote(second) === `FLM-${lead.estNo}-2`,
+    "#223 allocation: a second quote on the same opportunity is -2, under its own type's prefix"
+  );
+
+  const solo = await e223Quotes.create({ id: id("alloc-solo"), name: "#223 solo", owner: "spec" });
+  e223Register("quotes", solo.id);
+  ok(e223IsNo(solo.estNo) && solo.estNo > (lead.estNo ?? 0) && solo.estSuffix === undefined, "#223 allocation: a standalone quote takes the next number");
+
+  const renewal = await e223Quotes.create({ id: id("alloc-renewal"), name: "#223 renewal", owner: "spec", quoteType: "flame_test", renewalOf: id("job") });
+  e223Register("quotes", renewal.id);
+  ok(renewal.estNo === (solo.estNo ?? 0) + 1, "#223 allocation: a renewal is a new estimate with the next number");
+
+  const kept = await e223Quotes.update(solo.id, { estNo: 1, estSuffix: 9, name: "#223 solo renamed" });
+  ok(kept?.estNo === solo.estNo && kept?.estSuffix === undefined && kept?.name === "#223 solo renamed", "#223 allocation: quotes.update() never changes an allocated number");
+  const keptLead = await e223Leads.update(lead.id, { estNo: 1 });
+  ok(keptLead?.estNo === lead.estNo, "#223 allocation: leads.update() never changes an allocated number");
+
+  const con = await e223Quotes.create({ id: id("alloc-con"), name: "#223 consulting", owner: "spec", quoteType: "consulting" });
+  e223Register("quotes", con.id);
+  const autoLead = await e223Leads.create({ id: id("alloc-autolead"), org: "#223 Auto", estNo: con.estNo ?? null }, "spec");
+  e223Register("leads", autoLead.id);
+  ok(autoLead.estNo === con.estNo && e223DisplayLead(autoLead) === `OPP-${con.estNo}`, "#223 allocation: the consulting auto-lead takes its proposal's number");
+
+  const again = await e223Quotes.create({ id: id("alloc-solo"), name: "#223 solo re-created", owner: "spec" });
+  ok(again.estNo === solo.estNo, "#223 allocation: create() over an existing id keeps that quote's number");
+
+  const qn = await e223QuoteNos([solo.id, second.id, "Q-NOPE-223", null]);
+  ok(qn.get(solo.id) === e223DisplayQuote(again) && qn.get(second.id) === `FLM-${lead.estNo}-2` && !qn.has("Q-NOPE-223"), "#223 lookup: quoteNumbersFor maps ids to display numbers and skips missing ids");
+  const ln = await e223LeadNos([lead.id]);
+  ok(ln.get(lead.id) === `OPP-${lead.estNo}`, "#223 lookup: leadNumbersFor");
+  ok(
+    (await e223FindQuote(solo.id)) === solo.id &&
+      (await e223FindQuote(`est-${solo.estNo}`)) === solo.id &&
+      (await e223FindQuote(`FLM-${lead.estNo}-2`)) === second.id &&
+      (await e223FindQuote(String(lead.estNo))) === null &&
+      (await e223FindQuote("nothing-223")) === null,
+    "#223 lookup: findQuoteIdByNumberOrId takes an id or one exact number; an ambiguous bare number (shared by a lead's quotes) resolves to nothing"
+  );
+}
+
+/* ======================================================================
+   #223 T3 review — no writer wipes or rewrites a stored number: a stale
+   whole-doc upsert, a stale patchDoc and a batch upsert all keep what the
+   database allocated; a duplicate/copy is a NEW estimate; a create inside
+   an outer transaction is not numbered there (the global advisory lock
+   would be held until that transaction commits) and the next create heals it.
+   ====================================================================== */
+import { patchDoc as e223tPatch, upsertDocs as e223tUpsertMany } from "@/db/doc-store";
+
+async function estimate223WritersAsyncChecks(): Promise<void> {
+  const id = (slug: string) => fixtureId(223, slug);
+  const lead = await e223Leads.create({ id: id("w-lead"), org: "#223 Writers" }, "spec");
+  e223Register("leads", lead.id);
+  const q1 = await e223Quotes.create({ id: id("w-q1"), name: "#223 w1", owner: "spec", leadId: lead.id });
+  e223Register("quotes", q1.id);
+  const q2 = await e223Quotes.create({ id: id("w-q2"), name: "#223 w2", owner: "spec", leadId: lead.id });
+  e223Register("quotes", q2.id);
+  ok(e223IsNo(q2.estNo) && q2.estNo === lead.estNo && q2.estSuffix === 2, "#223 writers: fixtures numbered (the -2 is what the stale writes below must keep)");
+
+  // A copy read BEFORE numbering, written back after it (a stale whole doc).
+  const stale = { ...q2 } as E223Quote;
+  delete stale.estNo;
+  delete stale.estSuffix;
+  await e223fUpsert("quotes", { ...stale, name: "#223 w2 stale" });
+  const afterStale = await e223Quotes.get(q2.id);
+  ok(
+    afterStale?.estNo === q2.estNo && afterStale?.estSuffix === 2 && afterStale?.name === "#223 w2 stale",
+    "#223 writers: a stale whole-doc upsert (no estNo) keeps the stored number and suffix, and still saves its other fields"
+  );
+  await e223fUpsert("quotes", { ...stale, estNo: 1, estSuffix: 7 });
+  const afterForged = await e223Quotes.get(q2.id);
+  ok(afterForged?.estNo === q2.estNo && afterForged?.estSuffix === 2, "#223 writers: a whole-doc upsert carrying a different estNo/estSuffix cannot change them");
+  await e223tUpsertMany("quotes", [{ ...stale, name: "#223 w2 batch" }]);
+  const afterBatch = await e223Quotes.get(q2.id);
+  ok(afterBatch?.estNo === q2.estNo && afterBatch?.estSuffix === 2 && afterBatch?.name === "#223 w2 batch", "#223 writers: a batch upsert keeps the stored number too");
+  await e223tUpsertMany("quotes", [{ ...stale, estNo: 1, estSuffix: 7 }]);
+  const afterBatchForged = await e223Quotes.get(q2.id);
+  ok(afterBatchForged?.estNo === q2.estNo && afterBatchForged?.estSuffix === 2, "#223 writers: …and a batch upsert cannot rewrite it");
+  await e223tPatch<E223Lead>("leads", lead.id, (l) => {
+    delete l.estNo;
+    l.interest = "#223 stale patch";
+    return l;
+  });
+  const afterPatch = await e223Leads.get(lead.id);
+  ok(afterPatch?.estNo === lead.estNo && afterPatch?.interest === "#223 stale patch", "#223 writers: a patchDoc whose doc lost estNo (read before numbering) keeps the stored number");
+  await e223tPatch<E223Lead>("leads", lead.id, (l) => ({ ...l, estNo: 1 }));
+  ok((await e223Leads.get(lead.id))?.estNo === lead.estNo, "#223 writers: a patchDoc cannot rewrite a lead's number");
+
+  // A duplicate/copy of a numbered quote is a new estimate — the spread
+  // estNo/estSuffix never travel (create() builds field by field).
+  const src = (await e223Quotes.get(q1.id))!;
+  const dup = await e223Quotes.create({ ...src, id: id("w-dup"), leadId: null, name: "#223 w1 copy" });
+  e223Register("quotes", dup.id);
+  ok(e223IsNo(dup.estNo) && dup.estNo > (q2.estNo ?? 0) && dup.estSuffix === undefined, "#223 writers: a duplicate of a numbered quote gets its own new number");
+  const minted = await e223Quotes.create({ ...src, id: undefined, leadId: null, name: "#223 w1 copy 2" });
+  e223Register("quotes", minted.id);
+  ok(e223IsNo(minted.estNo) && minted.estNo === (dup.estNo ?? 0) + 1, "#223 writers: …a minted-id copy too (the next number, never the source's)");
+
+  // Inside an outer transaction the create is not numbered (the lock would
+  // live as long as that transaction); the next create outside heals it.
+  e223Register("quotes", id("w-intx"));
+  const inTx: { q: E223Quote | null } = { q: null };
+  await e223Tx(async () => {
+    inTx.q = await e223Quotes.create({ id: id("w-intx"), name: "#223 in tx", owner: "spec" });
+  });
+  ok(!!inTx.q && inTx.q.estNo === undefined, "#223 writers: a create inside an outer transaction is left unnumbered (never holds the global numbering lock past its own statement)");
+  const healer = await e223Quotes.create({ id: id("w-healer"), name: "#223 healer", owner: "spec" });
+  e223Register("quotes", healer.id);
+  const healed = await e223Quotes.get(id("w-intx"));
+  ok(e223IsNo(healed?.estNo) && e223IsNo(healer.estNo) && (healed?.estNo ?? 0) < healer.estNo, "#223 writers: …and the next create outside a transaction numbers it (oldest first)");
 }

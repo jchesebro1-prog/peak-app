@@ -1,6 +1,14 @@
 import { sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { getDoc, type Doc } from "@/db/doc-store";
+import { getDb, inTransaction } from "@/db";
+import { getDoc, getDocRows, listDocsByField, type Doc } from "@/db/doc-store";
+import {
+  displayLeadNumber,
+  displayQuoteNumber,
+  parseEstimateNumber,
+  quoteNumberMatches,
+  type LeadNumberFields,
+  type QuoteNumberFields,
+} from "@/lib/estimate-number";
 
 /**
  * Estimate-number allocation (#223) — the server seam over the database's
@@ -57,8 +65,63 @@ export function resetEstimateNumberProbe(): void {
   functionPresent = false;
 }
 
-/** Number a just-inserted quote/lead and return it as stored (with estNo). */
+/**
+ * Number a just-inserted quote/lead and return it as stored (with estNo).
+ *
+ * Runs only OUTSIDE a transaction, i.e. after the insert has committed, as
+ * its own short statement: assign_estimate_numbers() takes a global advisory
+ * lock held until its transaction ends, so running it inside a caller's
+ * transaction would serialize every other create behind that whole
+ * transaction. A create inside one is left unnumbered — it shows its internal
+ * id until the next create numbers it (the function numbers every straggler).
+ *
+ * Never throws: the record is already written, and a create that reported
+ * failure after writing invites a duplicate re-save (D205). A failed pass is
+ * logged and healed the same way.
+ */
 export async function numberNewDoc<T extends Doc>(coll: "quotes" | "leads", doc: T): Promise<T> {
-  await assignEstimateNumbers();
-  return (await getDoc<T>(coll, doc.id)) ?? doc;
+  if (inTransaction()) return doc;
+  try {
+    await assignEstimateNumbers();
+    return (await getDoc<T>(coll, doc.id)) ?? doc;
+  } catch (e) {
+    console.error(`numberNewDoc: numbering ${coll}/${doc.id} failed — the next create will number it`, e);
+    return doc;
+  }
+}
+
+function cleanIds(ids: ReadonlyArray<string | null | undefined>): string[] {
+  return ids.filter((x): x is string => typeof x === "string" && x !== "");
+}
+
+/** id → display number for screens that hold only a quote id (a job's
+ *  quoteId, a Grid option's quoteId, a thread link). Soft-deleted quotes are
+ *  included (their number still identifies them); unknown ids are absent. */
+export async function quoteNumbersFor(ids: ReadonlyArray<string | null | undefined>): Promise<Map<string, string>> {
+  const rows = await getDocRows<Doc & QuoteNumberFields>("quotes", cleanIds(ids));
+  return new Map(rows.map((r) => [r.id, displayQuoteNumber(r.doc)]));
+}
+
+/** id → display number for leads (see quoteNumbersFor). */
+export async function leadNumbersFor(ids: ReadonlyArray<string | null | undefined>): Promise<Map<string, string>> {
+  const rows = await getDocRows<Doc & LeadNumberFields>("leads", cleanIds(ids));
+  return new Map(rows.map((r) => [r.id, displayLeadNumber(r.doc)]));
+}
+
+/**
+ * What a person typed into a "quote" field → one live quote id: an internal
+ * id that exists (`Q-2041` keeps working), or an estimate number that names
+ * exactly one live quote (`CON-1010`, `1010` when unambiguous). Null when
+ * nothing — or more than one quote — matches.
+ */
+export async function findQuoteIdByNumberOrId(input: string): Promise<string | null> {
+  const s = String(input || "").trim();
+  if (!s) return null;
+  if (await getDoc("quotes", s)) return s;
+  const parsed = parseEstimateNumber(s);
+  if (!parsed) return null;
+  const hits = (await listDocsByField<Doc & QuoteNumberFields>("quotes", "estNo", [String(parsed.estNo)])).filter((q) =>
+    quoteNumberMatches(q, parsed)
+  );
+  return hits.length === 1 ? hits[0].id : null;
 }

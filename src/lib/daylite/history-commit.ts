@@ -65,6 +65,7 @@ import {
 } from "@/lib/stores/projects";
 import * as Repairs from "@/lib/stores/repair-jobs";
 import * as Quotes from "@/lib/stores/quotes";
+import { assignEstimateNumbers } from "@/lib/stores/estimate-numbers";
 import { parseTsv, planHistory, staleLiveCompletedRepairs, type JulyRetire, type ProjectPlan, type QuotePlan } from "./history";
 import { companyId, contactId, projectId } from "./ids";
 import {
@@ -1021,6 +1022,18 @@ export async function commitHistory(
     }
   }
 
+  // #223: imported quotes are written whole (writeQuote → upsertDoc), not
+  // through create(), so number this chunk's new ones in one pass. Daylite
+  // rows carry the import time as createdAt, so assign_estimate_numbers()
+  // orders them by company and name. A failed pass never fails the chunk
+  // (its quotes are written; the next create numbers them).
+  if (created.quotes > 0) {
+    try {
+      await assignEstimateNumbers();
+    } catch (e) {
+      errors.push(`estimate numbers: ${e instanceof Error ? e.message : String(e)} — the next new quote or lead numbers these`);
+    }
+  }
   return { created, skippedExisting, errors, total };
 }
 

@@ -18,6 +18,7 @@ import {
 import type { ConsultingQuotePayload } from "@/lib/stores/engagements";
 import { scopesTotal, type ConsultingScope } from "@/lib/consulting-stages";
 import { getSettings, mergedConsultingDisciplines, resolveDisciplines } from "@/lib/settings";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
  * Consulting proposal mutations (#35 rebuild over the D90 lightweight
@@ -165,22 +166,29 @@ async function persist(formData: FormData): Promise<string | null> {
     consulting,
   };
 
+  /* ---- #35 auto-lead with dedupe — CREATE path only, never edits ----
+   * #223: the customer's open lead is found BEFORE the proposal is created,
+   * so the proposal carries that opportunity's estimate number (leadId). With
+   * no open lead, the auto-lead is created with the proposal's number
+   * instead — CON-1010 and OPP-1010 are one opportunity either way. */
+  const existingLead = editingId
+    ? null
+    : ((await openLeads()).find((l) => l.customerId === customerId) ?? null);
+
   const q = editingId
     ? await updateQuote(editingId, payload)
-    : await createQuote(payload);
+    : await createQuote({ ...payload, leadId: existingLead?.id ?? null });
   const qid = (q && q.id) || editingId || null;
 
-  /* ---- #35 auto-lead with dedupe — CREATE path only, never edits ---- */
   if (!editingId && q) {
-    const existing = (await openLeads()).find((l) => l.customerId === customerId);
     let leadId: string;
-    if (existing) {
+    if (existingLead) {
       await logLeadActivity(
-        existing.id,
-        { type: "system", note: `Consulting proposal ${q.id} created` },
+        existingLead.id,
+        { type: "system", note: `Consulting proposal ${displayQuoteNumber(q)} created` },
         user.name
       );
-      leadId = existing.id;
+      leadId = existingLead.id;
     } else {
       const lead = await createLead(
         {
@@ -190,12 +198,13 @@ async function persist(formData: FormData): Promise<string | null> {
           customerId,
           interest: "Consulting — " + payload.name,
           value,
+          estNo: q.estNo ?? null,
         },
         user.name
       );
       leadId = lead.id;
     }
-    await updateQuote(q.id, { consulting: { ...consulting, leadId } });
+    await updateQuote(q.id, { consulting: { ...consulting, leadId }, leadId });
   }
   // D205: first save of a "Change type" replacement retires the old draft.
   // The new quote already exists, so a failed retire is logged, never thrown —

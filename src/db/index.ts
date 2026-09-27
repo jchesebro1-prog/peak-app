@@ -114,6 +114,13 @@ export async function seeded(): Promise<void> {
   await (globalForDb.__peakReady ?? globalForDb.__peakDb);
 }
 
+/** True while the caller runs inside `withTransaction` (its writes are not
+ *  committed yet). estimate-numbers.ts uses it to keep its global numbering
+ *  lock out of long outer transactions (#223). */
+export function inTransaction(): boolean {
+  return transactionStore.getStore() !== undefined;
+}
+
 /** Run a unit of document/identity writes atomically. Nested calls join the outer transaction. */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   const active = transactionStore.getStore();
