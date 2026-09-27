@@ -26732,15 +26732,16 @@ async function estimate223WritersAsyncChecks(): Promise<void> {
 
   // Inside an outer transaction the create is not numbered (the lock would
   // live as long as that transaction); the next create outside heals it.
-  e223Register("quotes", id("w-intx"));
+  // Ids sort in create order, so a same-millisecond tie (ordered by id) still numbers the in-tx quote first.
+  e223Register("quotes", id("w-1-intx"));
   const inTx: { q: E223Quote | null } = { q: null };
   await e223Tx(async () => {
-    inTx.q = await e223Quotes.create({ id: id("w-intx"), name: "#223 in tx", owner: "spec" });
+    inTx.q = await e223Quotes.create({ id: id("w-1-intx"), name: "#223 in tx", owner: "spec" });
   });
   ok(!!inTx.q && inTx.q.estNo === undefined, "#223 writers: a create inside an outer transaction is left unnumbered (never holds the global numbering lock past its own statement)");
-  const healer = await e223Quotes.create({ id: id("w-healer"), name: "#223 healer", owner: "spec" });
+  const healer = await e223Quotes.create({ id: id("w-2-healer"), name: "#223 healer", owner: "spec" });
   e223Register("quotes", healer.id);
-  const healed = await e223Quotes.get(id("w-intx"));
+  const healed = await e223Quotes.get(id("w-1-intx"));
   ok(e223IsNo(healed?.estNo) && e223IsNo(healer.estNo) && (healed?.estNo ?? 0) < healer.estNo, "#223 writers: …and the next create outside a transaction numbers it (oldest first)");
 }
 
