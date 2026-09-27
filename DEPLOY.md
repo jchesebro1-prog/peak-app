@@ -274,10 +274,12 @@ Every quote save renders the customer document to a PDF after the response
 
 - **`QUOTE_PDF_ORIGIN` — required in production.** The address the headless
   browser prints from, e.g. `https://quartzite-six.vercel.app` (scheme + host,
-  no path). Set it in the **Production** scope. Without it the server falls
-  back to the request's own `Host`/`X-Forwarded-Host`, which is only
-  trustworthy behind a proxy that sets those headers itself — pinning it
-  means the signed print link is never built on an address a request made up.
+  no path). Set it in the **Production** scope. Without it, Vercel and local
+  dev fall back to the request's own `Host`/`X-Forwarded-Host` (Vercel's
+  router picked this project by that host); a production server anywhere
+  else refuses to render and every PDF reads "failed — Set QUOTE_PDF_ORIGIN",
+  because no proxy there vouches for those headers. Pinning it means the
+  signed print link is never built on an address a request made up.
   Leave it unset for **Preview** so each preview prints from its own URL.
 - **`BLOB_READ_WRITE_TOKEN`** — required for PDFs on Vercel. Without it the
   save still succeeds, and the PDF reads "failed" with the reason.

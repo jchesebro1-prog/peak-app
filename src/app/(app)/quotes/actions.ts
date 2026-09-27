@@ -15,6 +15,7 @@ import {
   type QuoteStatus,
 } from "@/lib/stores/quotes";
 import { createQuoteClientPackage } from "@/lib/client-package-server";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 
 /**
  * The Quotes hub's form actions (quotes/page.tsx + controls.tsx): status
@@ -103,7 +104,9 @@ export async function restoreQuoteRevisionAction(formData: FormData): Promise<vo
   const id = String(formData.get("id") || "");
   const rev = Number(formData.get("rev") || 0);
   if (!id || !Number.isFinite(rev) || rev < 1) return;
-  await restoreQuoteRevision(id, rev, user.name);
+  const res = await restoreQuoteRevision(id, rev, user.name);
+  // #222 fix wave 1: a recall puts an earlier document back on the quote.
+  if (res.ok) await scheduleQuotePdf(id);
   revalidatePath("/", "layout");
 }
 

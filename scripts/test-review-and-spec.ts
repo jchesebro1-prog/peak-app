@@ -10523,6 +10523,7 @@ seeded()
   .then(() => quotePdfEngine222AsyncChecks())
   .then(() => quotePdfFix222AsyncChecks())
   .then(() => quotePdfRoutes222AsyncChecks())
+  .then(() => quotePdfT4Fix222AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -16790,7 +16791,8 @@ import {
     const pageSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/page.tsx"), "utf8");
     ok(!/listDocsByField/.test(pageSrc + actionsSrc) && pageSrc.includes("getCatalogParts(") && actionsSrc.includes("getCatalogParts("), "#210 final review M3: the builder page and save read catalog parts by id (the SKU), not a doc-field scan");
     for (const rel of ["src/app/(app)/estimator/page.tsx", "src/app/(app)/design/quick/page.tsx", "src/app/(app)/design/assemblies/page.tsx"]) {
-      ok(/^export const maxDuration = 60;$/m.test(readFileSync(join(process.cwd(), rel), "utf8")), `#210 final review M8: ${rel} (can run the first-load conversion) sets maxDuration = 60`);
+      // #222 T4 fix raised the PDF-rendering pages to 120 s — still ≥ the 60 s this needs.
+      ok(Number(/^export const maxDuration = (\d+);$/m.exec(readFileSync(join(process.cwd(), rel), "utf8"))?.[1] ?? 0) >= 60, `#210 final review M8: ${rel} (can run the first-load conversion) sets maxDuration ≥ 60`);
     }
     const builderSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/assemblies/fixture-builder.tsx"), "utf8");
     const removeFn = builderSrc.slice(builderSrc.indexOf("const remove = async"), builderSrc.indexOf("const remove = async") + 600);
@@ -23317,7 +23319,7 @@ import { groupPortalProjects, groupPortalQuotes, isAppEraProject, portalProjectV
     { rev: 3, at: 3, reason: "sent" },
   ];
   ok(latestSentRevision(revs)?.rev === 3, "#222 latestSentRevision: the newest sent snapshot");
-  ok(portalPdfSource({ revisions: revs, pdf: ready })?.path === ready.blobPath, "#222 portalPdfSource: the latest sent revision has no copy → the current ready PDF");
+  ok(portalPdfSource({ revisions: revs, pdf: ready }) === null, "#222 portalPdfSource: the latest sent revision has no copy yet → nothing (being prepared), never the current file");
   ok(
     portalPdfSource({ revisions: [revs[0], revs[1], { rev: 3, at: 3, reason: "sent", pdfBlobPath: "r3" }], pdf: ready })?.path === "r3",
     "#222 portalPdfSource: the latest sent revision's copy wins over later edits"
@@ -23465,7 +23467,11 @@ import { readdirSync as readdirSync222 } from "node:fs";
   ok(/lockQuoteRow\(/.test(upd222) && /patchDoc<Quote>\(/.test(upd222), "#222 updateQuotePdf: the pdf state is compare-and-set under a row lock on a fresh re-read");
 }
 
+/** #222 T4 fix: the env this check deletes is put back afterwards. */
 async function quotePdfEngine222AsyncChecks(): Promise<void> {
+  await withPdfEnv222(quotePdfEngine222AsyncChecksInner);
+}
+async function quotePdfEngine222AsyncChecksInner(): Promise<void> {
   // Never Blob — a stray token would point this at the real store.
   delete process.env.BLOB_READ_WRITE_TOKEN;
   delete process.env.VERCEL;
@@ -23661,7 +23667,11 @@ import { createServer as createServer222, type IncomingHttpHeaders as IncomingHt
   ok(/writeFile\(tmp, bytes\)/.test(st) && /rename\(tmp, full\)/.test(st), "#222 fix: the local store writes a temp file and renames it into place");
 }
 
+/** #222 T4 fix: the env this check deletes is put back afterwards. */
 async function quotePdfFix222AsyncChecks(): Promise<void> {
+  await withPdfEnv222(quotePdfFix222AsyncChecksInner);
+}
+async function quotePdfFix222AsyncChecksInner(): Promise<void> {
   delete process.env.BLOB_READ_WRITE_TOKEN;
   delete process.env.VERCEL;
   const root = mkdtempSync(join(tmpdir(), "quote-pdfs-222fix-"));
@@ -23792,9 +23802,9 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   ok(crt.includes("scheduleQuotePdf(created.id)") && crt.indexOf("scheduleQuotePdf(created.id)") < crt.indexOf("setStatus(created.id"), "#222 saveQuoteAction (create): the PDF goes pending before any status change");
   for (const k of ["flame-tests", "repairs", "inspections"]) {
     ok(/  if \(q\) await scheduleQuotePdf\(q\.id\);\n  return \(q && q\.id\) \|\| editingId \|\| null;/.test(s222(`src/app/(app)/${k}/quote/actions.ts`)), `#222 ${k}: every save schedules the proposal-letter PDF`);
-    ok(/export const maxDuration = 60;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 60 s`);
+    ok(/export const maxDuration = 120;/.test(s222(`src/app/(app)/${k}/quote/page.tsx`)), `#222 ${k}: the quote page gives its after() render 120 s`);
   }
-  ok(/scheduleQuotePdf\(created\.id\)/.test(s222("src/app/portal/actions.ts")) && /export const maxDuration = 60;/.test(s222("src/app/portal/estimate/page.tsx")), "#222 a portal self-serve estimate gets its PDF too");
+  ok(/scheduleQuotePdf\(created\.id\)/.test(s222("src/app/portal/actions.ts")) && /export const maxDuration = 120;/.test(s222("src/app/portal/estimate/page.tsx")), "#222 a portal self-serve estimate gets its PDF too");
   const cfg = s222("next.config.ts");
   ok(/source: "\/api\/quotes\/:id\/pdf"[\s\S]{0,200}SAMEORIGIN/.test(cfg) && cfg.indexOf("SAMEORIGIN") > cfg.indexOf('value: "DENY"'), "#222 next.config: only the team PDF route may be framed, by the app itself — after the global DENY");
   const team = s222("src/app/api/quotes/[id]/pdf/route.ts");
@@ -23806,7 +23816,7 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
   // Review requirements on top of the brief.
   const sched = s222("src/lib/quote-pdf/schedule.ts");
   ok(/canHavePdf\(q\.quoteType\)/.test(sched) && /updateQuotePdf\(quoteId, \(cur\) => pendingPdf\(/.test(sched) && !/\bupdate\(/.test(sched), "#222 scheduleQuotePdf: pending only through updateQuotePdf, never for a type with no PDF");
-  ok(/export const maxDuration = 60;/.test(s222("src/app/(app)/estimator/page.tsx")), "#222 the Estimator page gives its after() render 60 s");
+  ok(/export const maxDuration = 120;/.test(s222("src/app/(app)/estimator/page.tsx")), "#222 the Estimator page gives its after() render 120 s");
   const acts = s222("src/app/(app)/quotes/pdf-actions.ts");
   ok((acts.match(/await requireUser\(\);/g) || []).length === 2 && acts.indexOf("requireUser()") < acts.indexOf("getQuote("), "#222 PDF status/retry actions: signed-in team only");
   ok(/QUOTE_PDF_ORIGIN/.test(s222("DEPLOY.md")) && /QUOTE_PDF_ORIGIN/.test(s222(".env.example")), "#222 QUOTE_PDF_ORIGIN is documented for production");
@@ -23814,6 +23824,8 @@ import { pdfResponse as pdfResponse222 } from "@/lib/quote-pdf/http";
 }
 
 async function quotePdfRoutes222AsyncChecks(): Promise<void> {
+  const prevBlob = process.env.BLOB_READ_WRITE_TOKEN;
+  const prevVercel = process.env.VERCEL;
   delete process.env.BLOB_READ_WRITE_TOKEN;
   delete process.env.VERCEL;
   const prevDir = process.env.QUOTE_PDF_DIR;
@@ -23844,6 +23856,204 @@ async function quotePdfRoutes222AsyncChecks(): Promise<void> {
   } finally {
     if (prevDir === undefined) delete process.env.QUOTE_PDF_DIR;
     else process.env.QUOTE_PDF_DIR = prevDir;
+    if (prevBlob === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+    else process.env.BLOB_READ_WRITE_TOKEN = prevBlob;
+    if (prevVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = prevVercel;
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+/* ============ #222 T4 fix — PDFs never go stale behind a send; the portal serves only sent copies; origin pinned off Vercel ============ */
+import { markQuotePdfStale as markQuotePdfStale222t4, scheduleQuotePdf as scheduleQuotePdf222t4 } from "@/lib/quote-pdf/schedule";
+import { PDF_ORIGIN_UNSET_ERROR as PDF_ORIGIN_UNSET_ERROR222t4, printOriginFor as printOriginFor222t4 } from "@/lib/quote-pdf/origin";
+import { pdfIsCurrent as pdfIsCurrent222t4, pdfRetryPlan as pdfRetryPlan222t4, portalPdfPreparing as portalPdfPreparing222t4 } from "@/lib/quote-pdf/state";
+import { QUOTE_CONTENT_FIELDS as QUOTE_CONTENT_FIELDS222t4, quoteContentKey as quoteContentKey222t4 } from "@/lib/stores/quotes";
+
+/** Save and restore the env the #222 async checks change. */
+async function withPdfEnv222(run: () => Promise<void>): Promise<void> {
+  const keys = ["BLOB_READ_WRITE_TOKEN", "VERCEL", "QUOTE_PDF_DIR"] as const;
+  const prev = keys.map((k) => [k, process.env[k]] as const);
+  try {
+    await run();
+  } finally {
+    for (const [k, v] of prev) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+{
+  const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const ready: QuotePdfState = { status: "ready", at: 20, savedAt: 20, blobPath: "quote-pdfs/Q-1/20.pdf" };
+
+  // 1. What counts as "current".
+  ok(pdfIsCurrent222t4(ready, undefined) && pdfIsCurrent222t4(ready, 20) && !pdfIsCurrent222t4(ready, 21), "#222 T4 fix: pdfIsCurrent — a ready file saved at/after the last content change, never before it");
+  ok(!pdfIsCurrent222t4({ ...ready, status: "pending" }, 0) && !pdfIsCurrent222t4({ ...ready, status: "failed" }, 0) && !pdfIsCurrent222t4(null, 0), "#222 T4 fix: pdfIsCurrent — pending, failed or absent is never current");
+  ok(
+    ["spec", "value", "name", "customer", "contactName", "quoteNote", "assumptions", "pdfOptions", "flameTest", "repair", "inspection", "vendorQuotes"].every((f) => (QUOTE_CONTENT_FIELDS222t4 as readonly string[]).includes(f)) &&
+      !["status", "history", "revisions", "review", "pdf", "updatedAt", "stage", "margin", "pricingTier"].some((f) => (QUOTE_CONTENT_FIELDS222t4 as readonly string[]).includes(f)),
+    "#222 T4 fix: content fields are what the documents print — not the lifecycle, the pdf state or the never-printed margin"
+  );
+  ok(quoteContentKey222t4({ spec: { a: 1 } }) !== quoteContentKey222t4({ spec: { a: 2 } }) && quoteContentKey222t4({ status: "sent" } as never) === quoteContentKey222t4({}), "#222 T4 fix: quoteContentKey changes with the spec and ignores status");
+
+  // 2. The portal serves only sent copies once a quote has been sent.
+  const sentNoCopy = [{ rev: 1, at: 1, reason: "sent", pdfBlobPath: "r1" }, { rev: 2, at: 2, reason: "sent" }];
+  ok(portalPdfSource({ revisions: sentNoCopy, pdf: ready }) === null, "#222 T4 fix: portal — the latest sent revision has no copy → 404, not the older sent copy, not the current file");
+  ok(portalPdfPreparing222t4({ revisions: sentNoCopy, pdf: ready }) && !portalPdfPreparing222t4({ revisions: [sentNoCopy[0]], pdf: ready }) && !portalPdfPreparing222t4({ revisions: [], pdf: ready }), "#222 T4 fix: portal — 'being prepared' only while the latest sent revision lacks its copy");
+  ok(portalPdfSource({ revisions: [sentNoCopy[0], { rev: 2, at: 2, reason: "manual" }], pdf: ready })?.path === "r1", "#222 T4 fix: portal — a manual revision after a send never unlocks the current file");
+  ok(portalPdfSource({ revisions: [{ rev: 1, at: 1, reason: "manual" }], pdf: ready })?.path === ready.blobPath && portalPdfSource({ revisions: undefined, pdf: ready })?.path === ready.blobPath, "#222 T4 fix: portal — a never-sent quote (self-serve, won without a send) may open its current ready file");
+  const route = src("src/app/portal/quotes/[id]/pdf/route.ts");
+  ok(/portalQuotePdfPreparing\(q, session\.customerId\)/.test(route) && /being prepared/.test(route) && /status: 404/.test(route), "#222 T4 fix: the portal PDF route answers 'being prepared' (404) for a sent quote still owed its copy");
+  ok(/portalListsQuote\(q, customerId\) && portalPdfPreparing\(q\)/.test(src("src/lib/quote-pdf/portal-access.ts")), "#222 T4 fix: 'being prepared' is only said to a customer the quote is listed for");
+
+  // 3. Off Vercel, production needs QUOTE_PDF_ORIGIN.
+  const offVercel = printOriginFor222t4({ NODE_ENV: "production" }, "evil.test", "https");
+  ok("error" in offVercel && offVercel.error === PDF_ORIGIN_UNSET_ERROR222t4 && /Set QUOTE_PDF_ORIGIN/.test(offVercel.error), "#222 T4 fix: production off Vercel without QUOTE_PDF_ORIGIN fails with 'Set QUOTE_PDF_ORIGIN' — the Host header isn't trusted");
+  const onVercel = printOriginFor222t4({ NODE_ENV: "production", VERCEL: "1" }, "quartzite-six.vercel.app", "https");
+  ok("origin" in onVercel && onVercel.origin === "https://quartzite-six.vercel.app", "#222 T4 fix: on Vercel the routed host still prints");
+  const pinned = printOriginFor222t4({ NODE_ENV: "production", QUOTE_PDF_ORIGIN: "https://app.example.com/" }, "evil.test", "https");
+  ok("origin" in pinned && pinned.origin === "https://app.example.com", "#222 T4 fix: QUOTE_PDF_ORIGIN pins the origin whatever the headers say");
+  const dev = printOriginFor222t4({ NODE_ENV: "development" }, "localhost:3000", null);
+  ok("origin" in dev && dev.origin === "http://localhost:3000", "#222 T4 fix: development prints from the request's own host");
+  const bad = printOriginFor222t4({ NODE_ENV: "production", VERCEL: "1", QUOTE_PDF_ORIGIN: "not a url" }, "a.test", "https");
+  ok("error" in bad, "#222 T4 fix: a malformed QUOTE_PDF_ORIGIN refuses");
+  const sched = src("src/lib/quote-pdf/schedule.ts");
+  ok(/printOriginFor\(process\.env,/.test(sched) && /failedPdf\(cur, savedAt, where\.error/.test(sched) && !/originFrom\(/.test(sched), "#222 T4 fix: scheduleQuotePdf takes its origin only from printOriginFor and settles failed with its reason");
+
+  // 4. Retry leaves a live render alone.
+  const livePending: QuotePdfState = { status: "pending", at: 1_000, savedAt: 900 };
+  const wait = pdfRetryPlan222t4({ pdf: livePending, contentChangedAt: 950 }, 1_000 + 10_000);
+  ok("wait" in wait && wait.wait.status === "pending" && wait.wait.savedAt === 900, "#222 T4 fix: retry while a render is pending (not stale) returns its view, no new render");
+  const stale = pdfRetryPlan222t4({ pdf: livePending }, 1_000 + PDF_PENDING_STALE_MS + 1);
+  ok("savedAt" in stale && stale.savedAt === 900, "#222 T4 fix: retry of a stale render re-renders the same save");
+  const changed = pdfRetryPlan222t4({ pdf: { ...ready, status: "failed" }, contentChangedAt: 50 }, 100);
+  ok("savedAt" in changed && changed.savedAt === 50, "#222 T4 fix: retry after an unscheduled content change renders as that change's save");
+  const acts = src("src/app/(app)/quotes/pdf-actions.ts");
+  const retry = acts.slice(acts.indexOf("export async function retryQuotePdfAction"));
+  ok(/pdfRetryPlan\(q, Date\.now\(\)\)/.test(retry) && retry.indexOf('if ("wait" in plan) return plan.wait;') > -1 && retry.indexOf('if ("wait" in plan) return plan.wait;') < retry.indexOf("scheduleQuotePdf("), "#222 T4 fix: retryQuotePdfAction returns a pending view before it could reschedule");
+
+  // 5. Every render-scheduling page gives after() 120 s.
+  const pages = [
+    "src/app/(app)/estimator/page.tsx",
+    "src/app/(app)/flame-tests/quote/page.tsx",
+    "src/app/(app)/repairs/quote/page.tsx",
+    "src/app/(app)/inspections/quote/page.tsx",
+    "src/app/portal/estimate/page.tsx",
+    "src/app/(app)/design/grid/[id]/page.tsx",
+    "src/app/(app)/design/designs/page.tsx",
+    "src/app/(app)/design/quick/page.tsx",
+    "src/app/(app)/quotes/page.tsx",
+    "src/app/(app)/flame-tests/page.tsx",
+    "src/app/(app)/inspections/page.tsx",
+    "src/app/(app)/page.tsx",
+  ];
+  const short = pages.filter((p) => !/\nexport const maxDuration = 120;\n/.test(src(p)));
+  ok(short.length === 0, `#222 T4 fix: every render-scheduling page sets maxDuration = 120${short.length ? " — missing: " + short.join(", ") : ""}`);
+
+  // 1b. Every content writer schedules (or marks stale).
+  const grid = src("src/app/(app)/design/grid/[id]/actions.ts");
+  const gridPromote = grid.slice(grid.indexOf("export async function createDraftQuoteAction("));
+  ok(gridPromote.indexOf("await scheduleQuotePdf(existing.id);") > gridPromote.indexOf("await updateQuote(existing.id, {") && gridPromote.indexOf("await scheduleQuotePdf(q.id);") > gridPromote.indexOf("q = await createQuote({"), "#222 T4 fix: a Grid promote or re-promote schedules the quote's PDF");
+  const designs = src("src/lib/stores/designs.ts");
+  const promote = designs.slice(designs.indexOf("export async function promoteDesignToQuote("));
+  ok((promote.match(/await schedulePdf\(q\.id\)/g) || []).length === 2 && /import\("@\/lib\/quote-pdf\/schedule"\)/.test(promote), "#222 T4 fix: every Quick Design / dashboard promote (update and create) schedules the PDF");
+  const renewal = src("src/lib/renewal-outreach.ts");
+  ok((renewal.match(/await scheduleRenewalPdf\(quote\.id\);/g) || []).length === 2, "#222 T4 fix: both renewal re-prices schedule the new quote's PDF");
+  const est = src("src/app/(app)/estimator/actions.ts");
+  ok(/await scheduleQuotePdf\(updated\.id\);/.test(est) && /await scheduleQuotePdf\(created\.id\);\n  refresh\(\);\n  return \{ ok: true, targetId: created\.id/.test(est) && /if \(q && q\.contentChangedAt === q\.updatedAt\) await scheduleQuotePdf\(q\.id\);/.test(est), "#222 T4 fix: Estimator move-system (both targets) and header edits schedule the PDF");
+  ok(/if \(res\.ok\) await scheduleQuotePdf\(id\);/.test(src("src/app/(app)/quotes/actions.ts")), "#222 T4 fix: recalling a revision schedules the PDF");
+  ok(/markQuotePdfStale\(updated\.id, updated\.contentChangedAt\)/.test(src("src/app/(app)/import/registry.ts")), "#222 T4 fix: the CSV import marks a changed quote's PDF stale");
+  const gen = src("src/lib/quote-pdf/generate.ts");
+  const copy = gen.slice(gen.indexOf("export async function copySentRevisionPdf("));
+  ok(/!pdfIsCurrent\(pdf, q\.contentChangedAt\)/.test(copy), "#222 T4 fix: copySentRevisionPdf copies only a file as new as the last content change");
+  const qs = src("src/lib/stores/quotes.ts");
+  const pq = qs.slice(qs.indexOf("async function patchQuote("), qs.indexOf("/**\n * Read-modify-write the quote's `pdf` state"));
+  ok(/stampContentChange\(doc, mutate\)/.test(pq) && /next\.contentChangedAt =/.test(pq), "#222 T4 fix: patchQuote — the one quote writer — stamps contentChangedAt");
+
+  // 6. The #222 async checks put the env back.
+  const tf = src("scripts/test-review-and-spec.ts");
+  const routes = tf.slice(tf.indexOf("async function quotePdfRoutes222AsyncChecks("), tf.indexOf("/* ============ #222 T4 fix"));
+  ok(/const prevBlob = process\.env\.BLOB_READ_WRITE_TOKEN;/.test(routes) && /process\.env\.BLOB_READ_WRITE_TOKEN = prevBlob;/.test(routes) && /process\.env\.VERCEL = prevVercel;/.test(routes) && routes.indexOf("} finally {") > -1, "#222 T4 fix: the T4 routes check restores BLOB_READ_WRITE_TOKEN and VERCEL in a finally");
+}
+
+async function quotePdfT4Fix222AsyncChecks(): Promise<void> {
+  await withPdfEnv222(async () => {
+    const prevVercel = process.env.VERCEL;
+    process.env.VERCEL = "spec-sentinel-222";
+    await quotePdfRoutes222AsyncChecks();
+    ok(process.env.VERCEL === "spec-sentinel-222", "#222 T4 fix: the routes check leaves VERCEL as it found it");
+    if (prevVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = prevVercel;
+
+    delete process.env.BLOB_READ_WRITE_TOKEN;
+    delete process.env.VERCEL;
+    const root = mkdtempSync(join(tmpdir(), "quote-pdfs-222t4-"));
+    process.env.QUOTE_PDF_DIR = root;
+    try {
+      const store = pdfStorage();
+      if ("unavailable" in store) {
+        ok(false, "#222 T4 fix: local PDF store available");
+        return;
+      }
+      const origin = "http://print.test";
+      const secret = "spec-secret-222t4";
+      const fake = (label: string) => async () => Buffer.from(`%PDF-1.4 ${label}`);
+
+      // contentChangedAt: stamped by a content write, left alone otherwise.
+      const cid = fixtureId222("222", "t4-stamp");
+      registerFixture222("quotes", cid);
+      await q222Create({ id: cid, name: "#222 t4 stamp", customer: "Spec fixture", owner: "spec" });
+      ok(!(await q222Get(cid))?.contentChangedAt, "#222 T4 fix: a new quote carries no contentChangedAt");
+      const renamed = await q222Update(cid, { name: "#222 t4 stamp — renamed" });
+      ok(!!renamed?.contentChangedAt && renamed.contentChangedAt === renamed.updatedAt, "#222 T4 fix: a content write stamps contentChangedAt with its own updatedAt");
+      const stampAt = renamed?.contentChangedAt;
+      await q222Update(cid, { category: "Rigging", margin: 0.4 } as never);
+      await q222UpdatePdf(cid, (cur) => pendingPdf(cur, Date.now(), Date.now()));
+      ok((await q222Get(cid))?.contentChangedAt === stampAt, "#222 T4 fix: a category/margin edit and a pdf-state write leave contentChangedAt alone");
+
+      // A stale PDF is never stamped onto the sent revision.
+      const sid = fixtureId222("222", "t4-stale-send");
+      registerFixture222("quotes", sid);
+      await q222Create({ id: sid, name: "#222 t4 stale send", customer: "Spec fixture", owner: "spec" });
+      await q222UpdatePdf(sid, (cur) => pendingPdf(cur, 1_000, 1_000));
+      await generateQuotePdf({ quoteId: sid, savedAt: 1_000, origin, secret, render: fake("before-edit") });
+      await q222Update(sid, { spec: { sections: [{ id: "s1", name: "Re-promoted" }] }, value: 12_345 });
+      const edited = await q222Get(sid);
+      ok(edited?.pdf?.status === "ready" && edited.pdf.savedAt < (edited.contentChangedAt ?? 0), "#222 T4 fix: an unscheduled spec/value write leaves the ready file older than the content");
+      ok((await copySentRevisionPdf(sid)) === null, "#222 T4 fix: copySentRevisionPdf refuses a file older than the last content change");
+      await q222SetStatus(sid, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+      const sentQ = await q222Get(sid);
+      const sentRev = latestSentRevision(sentQ?.revisions);
+      ok(!!sentRev && !sentRev.pdfBlobPath, "#222 T4 fix: a send over a stale PDF copies nothing onto the sent revision");
+      ok(!!sentQ && portalPdfSource(sentQ) === null && portalPdfPreparing222t4(sentQ), "#222 T4 fix: the portal says 'being prepared' instead of serving the pre-edit file");
+      const plan = pdfRetryPlan222t4(sentQ ?? {}, Date.now());
+      ok("savedAt" in plan && plan.savedAt === sentQ?.contentChangedAt, "#222 T4 fix: Retry renders as the content change's save");
+      if ("savedAt" in plan) {
+        await q222UpdatePdf(sid, (cur) => pendingPdf(cur, plan.savedAt, Date.now()));
+        await generateQuotePdf({ quoteId: sid, savedAt: plan.savedAt, origin, secret, render: fake("after-edit") });
+      }
+      const fixedRev = latestSentRevision((await q222Get(sid))?.revisions);
+      ok(!!fixedRev?.pdfBlobPath && (await store.read(fixedRev.pdfBlobPath))?.toString() === "%PDF-1.4 after-edit", "#222 T4 fix: the re-render of the edited document lands on the sent revision");
+
+      // Outside a request there is no after(): scheduling only marks the PDF stale.
+      const nid = fixtureId222("222", "t4-no-request");
+      registerFixture222("quotes", nid);
+      await q222Create({ id: nid, name: "#222 t4 no request", customer: "Spec fixture", owner: "spec" });
+      ok((await scheduleQuotePdf222t4(nid)) === null && !(await q222Get(nid))?.pdf, "#222 T4 fix: outside a request, a quote with no PDF is left alone");
+      await q222UpdatePdf(nid, (cur) => pendingPdf(cur, 2_000, 2_000));
+      const first = await generateQuotePdf({ quoteId: nid, savedAt: 2_000, origin, secret, render: fake("n1") });
+      await q222Update(nid, { value: 999 });
+      const view = await scheduleQuotePdf222t4(nid);
+      const marked = (await q222Get(nid))?.pdf;
+      ok(view?.status === "pending" && marked?.status === "pending" && marked.savedAt > 2_000 && marked.blobPath === first?.blobPath, "#222 T4 fix: outside a request, scheduleQuotePdf marks the PDF pending for a newer save and keeps the last good file");
+      await q222SetStatus(nid, "sent", "spec", { bypassApprovalGate: "engine-owned-flow" });
+      ok(!latestSentRevision((await q222Get(nid))?.revisions)?.pdfBlobPath, "#222 T4 fix: a send while the PDF is marked stale copies nothing");
+      const before = (await q222Get(nid))?.pdf;
+      await markQuotePdfStale222t4(nid, 1_500);
+      ok(JSON.stringify((await q222Get(nid))?.pdf) === JSON.stringify(before), "#222 T4 fix: markQuotePdfStale never moves a PDF back to an older save");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 }

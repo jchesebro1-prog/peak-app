@@ -11,6 +11,9 @@ import HomeStageSheet, { type SheetQuote } from "./home-stage-sheet";
 import WidgetHost from "./_dashboard/host";
 import { reconcileRecordingsIfStale } from "@/lib/krisp/reconcile";
 
+/** #222 fix wave 1: promoting a design from Home renders the quote's saved PDF in `after()`, inside this budget. */
+export const maxDuration = 120;
+
 /**
  * Home dashboard. Since #43 the cards are registry widgets rendered by
  * WidgetHost from the user's saved layout; this file keeps only the page

@@ -1,7 +1,7 @@
 "use server";
 
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
-import { pdfView, type QuotePdfView } from "@/lib/quote-pdf/state";
+import { pdfRetryPlan, pdfView, type QuotePdfView } from "@/lib/quote-pdf/state";
 import { requireUser } from "@/lib/session";
 import { get as getQuote } from "@/lib/stores/quotes";
 
@@ -12,12 +12,16 @@ export async function quotePdfStatusAction(id: string): Promise<QuotePdfView | n
   return pdfView(q?.pdf, Date.now());
 }
 
-/** Re-render the saved PDF (#222). Same `savedAt`: the document hasn't changed,
- *  so a send waiting on this render still gets its copy. Runs inside the
- *  calling page's `maxDuration` (the Estimator and the service builders set 60 s). */
+/** Re-render the saved PDF (#222). A render still in flight is left alone —
+ *  its view comes back unchanged (pdfRetryPlan). Otherwise the same `savedAt`
+ *  when the document hasn't changed, so a send waiting on this render still
+ *  gets its copy; the last content change's when it has. Runs inside the
+ *  calling page's `maxDuration` (the Estimator and the service builders set 120 s). */
 export async function retryQuotePdfAction(id: string): Promise<QuotePdfView | null> {
   await requireUser();
   const q = typeof id === "string" && id ? await getQuote(id) : null;
   if (!q) return null;
-  return scheduleQuotePdf(q.id, { savedAt: q.pdf?.savedAt ?? q.updatedAt ?? Date.now() });
+  const plan = pdfRetryPlan(q, Date.now());
+  if ("wait" in plan) return plan.wait;
+  return scheduleQuotePdf(q.id, { savedAt: plan.savedAt });
 }

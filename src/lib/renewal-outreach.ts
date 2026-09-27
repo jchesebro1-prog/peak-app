@@ -298,6 +298,17 @@ export function flameChangeReasons(
   return out;
 }
 
+/**
+ * A freshly re-priced renewal quote gets its saved customer PDF like any save
+ * (#222 fix wave 1) — the outreach sends it, and the portal only ever serves a
+ * sent revision's copy of that file. Loaded late so this module never pulls
+ * next/headers into the scripts that import it.
+ */
+async function scheduleRenewalPdf(quoteId: string): Promise<void> {
+  const { scheduleQuotePdf } = await import("@/lib/quote-pdf/schedule");
+  await scheduleQuotePdf(quoteId);
+}
+
 /** This cycle's renewal quote for a completed flame job — reused when it
  *  already exists, otherwise RE-PRICED AT CURRENT RATES from last year's
  *  venue/curtain data (Jeff's Jul-12 call, D69; the email cites last year's
@@ -409,6 +420,7 @@ async function ensureFlameRenewalQuote(
     },
     renewalOf: job.id,
   });
+  await scheduleRenewalPdf(quote.id);
   return {
     quote,
     lastPrice,
@@ -784,6 +796,7 @@ async function ensureInspectionRenewalQuote(
     },
     renewalOf: rec.id,
   });
+  await scheduleRenewalPdf(quote.id);
   return {
     quote,
     lastPrice,

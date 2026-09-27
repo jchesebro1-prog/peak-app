@@ -4,6 +4,7 @@ import { renderPrintRouteToPdf } from "./render";
 import {
   canHavePdf,
   latestSentRevision,
+  pdfIsCurrent,
   pdfKindForQuoteType,
   pdfStoragePath,
   printPathFor,
@@ -133,11 +134,16 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
  * commits, and by the generator when a render finishes after the send. The
  * stamp is once-only (setRevisionPdfPath); a copy that loses that race is
  * deleted unless it is the very file the revision now records.
+ *
+ * Only a CURRENT file is copied (#222 fix wave 1, pdfIsCurrent): one saved at
+ * or after the quote's last content change. A file older than that change is
+ * not the document that was sent — the revision waits for the render of the
+ * newer save instead.
  */
 export async function copySentRevisionPdf(quoteId: string): Promise<string | null> {
   const q = await getQuote(quoteId);
   const pdf = q?.pdf;
-  if (!q || !pdf || pdf.status !== "ready" || !pdf.blobPath) return null;
+  if (!q || !pdf || !pdfIsCurrent(pdf, q.contentChangedAt) || !pdf.blobPath) return null;
   const rev = latestSentRevision(q.revisions);
   if (!rev || !revisionAwaitingPdf(rev, pdf.savedAt)) return null;
   const store = pdfStorage();

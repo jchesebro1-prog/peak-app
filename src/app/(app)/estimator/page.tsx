@@ -39,9 +39,10 @@ import type {
 
 export const metadata = { title: "Estimator — Quartzite-6" };
 /** #210: this page's first listFixtures() can run the one-time fixture
- *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS) — 60 s keeps
- *  that well inside the function limit, like the Datasheets page. */
-export const maxDuration = 60;
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). #222: its
+ *  saves render the saved quote PDF in `after()`, inside this budget — 120 s
+ *  (fix wave 1) leaves a cold Chromium start room to finish. */
+export const maxDuration = 120;
 
 /**
  * Estimator — detailed line-item quote builder (port of Estimator.dc.html).

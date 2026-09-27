@@ -31,6 +31,8 @@ import type { MapPin } from "@/components/map/LeafletMap";
 import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Rigging Inspections — Quartzite-6" };
+/** #222 fix wave 1: renewal outreach renders the new quote's saved PDF in `after()`, inside this budget. */
+export const maxDuration = 120;
 
 /**
  * Rigging Inspections DASHBOARD — the flame-tests-style upgrade of the old

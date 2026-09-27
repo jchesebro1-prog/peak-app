@@ -599,6 +599,8 @@ export async function moveSystemToEstimateAction(
     if (!updated) {
       return { ok: false, error: "That estimate could not be found." };
     }
+    // #222 fix wave 1: the target's document gained a section.
+    await scheduleQuotePdf(updated.id);
     refresh();
     return { ok: true, targetId: updated.id, targetName: updated.name };
   }
@@ -637,6 +639,7 @@ export async function moveSystemToEstimateAction(
       ? { vendorQuotes: await storeVendorQuotes(created.id, movedVq) }
       : {}),
   } as QuotePatch);
+  await scheduleQuotePdf(created.id);
   refresh();
   return { ok: true, targetId: created.id, targetName: (withContact || created).name };
 }
@@ -696,6 +699,10 @@ export async function updateQuoteMetaAction(
   }
 
   const q = await update(id, patch);
+  // #222 fix wave 1: header fields print on the customer document — a write
+  // that changed one (patchQuote stamps contentChangedAt with this write's
+  // updatedAt) re-renders it; a category-only edit doesn't.
+  if (q && q.contentChangedAt === q.updatedAt) await scheduleQuotePdf(q.id);
   refresh();
   return { ok: !!q, ...(stamped ?? {}) };
 }

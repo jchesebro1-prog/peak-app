@@ -23,9 +23,10 @@ import "./quick-design.css";
 
 export const dynamic = "force-dynamic";
 /** #210: this page's first listFixtures() can run the one-time fixture
- *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS) — 60 s keeps
- *  that well inside the function limit, like the Datasheets page. */
-export const maxDuration = 60;
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). #222: Add
+ *  to Quotes renders the quote's saved PDF in `after()`, inside this budget —
+ *  120 s (fix wave 1). */
+export const maxDuration = 120;
 
 export default async function Page({
   searchParams,

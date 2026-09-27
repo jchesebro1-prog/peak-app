@@ -113,14 +113,55 @@ export function latestSentRevision<R extends RevisionPdfFields>(revisions: R[] |
   return null;
 }
 
+/**
+ * Whether the current file shows the quote as it stands now (#222 fix wave 1):
+ * READY, and rendered from a save at or after the last change to anything the
+ * document prints (`contentChangedAt`, stamped by the store's patchQuote). A
+ * writer that changed the document without scheduling a render leaves an
+ * older file — never one to stamp onto a sent revision.
+ */
+export function pdfIsCurrent(pdf: QuotePdfState | null | undefined, contentChangedAt: number | null | undefined): pdf is QuotePdfState {
+  return !!pdf && pdf.status === "ready" && !!pdf.blobPath && pdf.savedAt >= (contentChangedAt ?? 0);
+}
+
 type PdfSourceFields = { pdf?: QuotePdfState | null; revisions?: RevisionPdfFields[] | null };
 
-/** What a customer may open: the latest sent revision's copy, else the current READY file. */
+/**
+ * What a customer may open (#222 fix wave 1). Once a quote has been sent, only
+ * the exact document that went out: the latest sent revision's copy. When that
+ * copy isn't there yet it is nothing (the route says "being prepared") — never
+ * the current file, which may carry edits made after the send. A quote never
+ * sent (the customer's own self-serve estimate, legacy won-without-send) may
+ * open its current READY file.
+ */
 export function portalPdfSource(q: PdfSourceFields): { path: string; rev: number | null } | null {
   const sent = latestSentRevision(q.revisions);
-  if (sent?.pdfBlobPath) return { path: sent.pdfBlobPath, rev: sent.rev };
+  if (sent) return sent.pdfBlobPath ? { path: sent.pdfBlobPath, rev: sent.rev } : null;
   if (q.pdf?.status === "ready" && q.pdf.blobPath) return { path: q.pdf.blobPath, rev: null };
   return null;
+}
+
+/** A sent quote whose sent copy isn't stored yet — the portal's "being prepared". */
+export function portalPdfPreparing(q: PdfSourceFields): boolean {
+  const sent = latestSentRevision(q.revisions);
+  return !!sent && !sent.pdfBlobPath;
+}
+
+/**
+ * What the Retry button does (#222 fix wave 1). A render still in flight (not
+ * stale) is left alone — the view comes back as is. Otherwise re-render for
+ * the newest of the file's save and the last content change: an unchanged
+ * document keeps its `savedAt` (a send waiting on it still gets its copy), a
+ * changed one renders as the newer save.
+ */
+export function pdfRetryPlan(
+  q: { pdf?: QuotePdfState | null; contentChangedAt?: number | null; updatedAt?: number | null },
+  now: number
+): { wait: QuotePdfView } | { savedAt: number } {
+  const view = pdfView(q.pdf, now);
+  if (view?.status === "pending") return { wait: view };
+  const savedAt = Math.max(q.pdf?.savedAt ?? 0, q.contentChangedAt ?? 0);
+  return { savedAt: savedAt || q.updatedAt || now };
 }
 
 /** The team's file: revision `rev`'s copy, or the current file whatever its status. */

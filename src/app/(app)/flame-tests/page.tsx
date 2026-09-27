@@ -30,6 +30,8 @@ import {
 import type { MapPin } from "@/components/map/LeafletMap";
 
 export const metadata = { title: "Flame tests — Quartzite-6" };
+/** #222 fix wave 1: renewal outreach renders the new quote's saved PDF in `after()`, inside this budget. */
+export const maxDuration = 120;
 
 const DAY = 86400000;
 const YEAR = 365 * DAY;

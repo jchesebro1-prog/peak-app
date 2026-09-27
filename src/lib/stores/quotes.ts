@@ -234,7 +234,51 @@ export type Quote = {
   /** The saved customer PDF (#222) — server-written by lib/quote-pdf only.
    *  `blobPath` never leaves the server; browsers get a QuotePdfView. */
   pdf?: QuotePdfState | null;
+  /** When a field the customer document prints last changed (#222 fix wave
+   *  1) — stamped by patchQuote only (QUOTE_CONTENT_FIELDS). A PDF saved
+   *  before it is out of date and is never copied onto a sent revision.
+   *  Absent until the first such change (a new quote renders what it was
+   *  created with). */
+  contentChangedAt?: number;
 };
+
+/**
+ * The quote fields the customer documents print (#222 fix wave 1) — the
+ * quote document (quote-document-data.ts) and the three service letters.
+ * Margin and the tier stamp never print; status, history, revisions, review,
+ * stage and the pdf state are the document's lifecycle, not its content.
+ */
+export const QUOTE_CONTENT_FIELDS = [
+  "name",
+  "customer",
+  "customerId",
+  "locationId",
+  "contactName",
+  "contact",
+  "quoteNote",
+  "scopeNarrative",
+  "quoteBasis",
+  "installTimeframe",
+  "preparedBy",
+  "assumptions",
+  "termsText",
+  "paymentTerms",
+  "owner",
+  "value",
+  "quoteType",
+  "spec",
+  "flameTest",
+  "repair",
+  "inspection",
+  "vendorQuotes",
+  "pdfOptions",
+] as const;
+
+/** A comparable key of what the customer document shows. Pure. */
+export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
+  const rec = (q || {}) as Record<string, unknown>;
+  return JSON.stringify(QUOTE_CONTENT_FIELDS.map((k) => rec[k] ?? null));
+}
 
 /**
  * An immutable snapshot of a quote's priced state (punch item 24). Modelled on
@@ -661,8 +705,24 @@ async function lockQuoteRow(id: string): Promise<void> {
 async function patchQuote(id: string, mutate: (doc: Quote) => Quote | void): Promise<Quote | null> {
   return withTransaction(async () => {
     await lockQuoteRow(id);
-    return patchDoc<Quote>("quotes", id, mutate);
+    return patchDoc<Quote>("quotes", id, (doc) => stampContentChange(doc, mutate));
   });
+}
+
+/**
+ * Run a quote mutation and stamp `contentChangedAt` when it changed anything
+ * the customer document prints (#222 fix wave 1). The stamp is the write's own
+ * `updatedAt` when the mutation bumped it — a save's render (savedAt taken
+ * after the write) is then never older than its own change.
+ */
+function stampContentChange(doc: Quote, mutate: (doc: Quote) => Quote | void): Quote {
+  const beforeKey = quoteContentKey(doc);
+  const beforeUpdatedAt = doc.updatedAt;
+  const next = mutate(doc) || doc;
+  if (quoteContentKey(next) !== beforeKey) {
+    next.contentChangedAt = typeof next.updatedAt === "number" && next.updatedAt !== beforeUpdatedAt ? next.updatedAt : Date.now();
+  }
+  return next;
 }
 
 /**

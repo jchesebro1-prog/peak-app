@@ -20,8 +20,9 @@ import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/ne
 import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Repair quote — Quartzite-6" };
-/** #222: Save/Approve render the proposal PDF in `after()`, inside this budget. */
-export const maxDuration = 60;
+/** #222: Save/Approve render the proposal PDF in `after()`, inside this budget
+ *  — 120 s (fix wave 1) leaves a cold Chromium start room to finish. */
+export const maxDuration = 120;
 
 /**
  * Repair QUOTE builder — the auto-priced repair estimator (repair twin of the

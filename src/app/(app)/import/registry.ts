@@ -1075,10 +1075,18 @@ const WRITERS: Record<string, Writer> = {
       cache.push({ id: rec.id, name: str(v.name), customer: str(v.customer) });
     },
     update: async (ex, v) => {
-      await Quotes.update(str(ex.id), {
+      const updated = await Quotes.update(str(ex.id), {
         value: num(v.value) || num(ex.value),
         customer: str(v.customer) || str(ex.customer),
       });
+      // #222 fix wave 1: an import that changed what the document prints
+      // renders nothing (a bulk write) — it marks an existing PDF stale as of
+      // that change; the preview offers a retry, and the sent copy never takes
+      // the old file. Unchanged content leaves a current PDF alone.
+      if (updated?.contentChangedAt) {
+        const { markQuotePdfStale } = await import("@/lib/quote-pdf/schedule");
+        await markQuotePdfStale(updated.id, updated.contentChangedAt);
+      }
       const status = pick(v.status, ["draft", "sent", "won", "lost"] as const, "draft");
       // Same as the create path above (punch #60): imported history, not an
       // approval decision made in this app.
