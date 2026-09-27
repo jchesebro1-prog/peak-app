@@ -239,7 +239,9 @@ export default async function PortalPage({
 
   // #220: project history, app-era only (never Daylite imports), through the
   // portalProjectView whitelist — value only when known and the quote is won.
-  const quoteStatusById = new Map(quotes.map((q) => [q.id, q.status]));
+  // Only this customer's quotes (#222 final wave B): a project's quoteId is
+  // never trusted to point inside the tenant.
+  const quoteStatusById = new Map(quotes.filter((q) => q.customerId === cid).map((q) => [q.id, q.status]));
   const venueNameOf = (locationId: string | null) => {
     const l = locationId ? venues.find((v) => v.id === locationId) : undefined;
     return l ? l.label || l.locationName || "" : "";

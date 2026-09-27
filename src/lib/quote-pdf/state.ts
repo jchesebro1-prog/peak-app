@@ -166,18 +166,22 @@ export function portalPdfSource(q: PdfSourceFields): { path: string; rev: number
  * or before the send (revisionAwaitingPdf), so a revision sent before #222
  * with no PDF at all, or one whose document changed after the send (the PDF
  * now belongs to a newer save), will never get one: that is not "preparing"
- * but unavailable (portalPdfUnavailable). The portal route and the portal
- * list share this one predicate.
+ * but unavailable (portalPdfUnavailable). Nor is a render that FAILED (#222
+ * final wave B): a failed state — or a pending one past the stale window,
+ * which pdfView reports as failed — has nothing behind it that will ever
+ * land, so "being prepared" would read forever; it is unavailable until the
+ * team retries. The portal route and the portal list share this one predicate.
  */
-export function portalPdfPreparing(q: PdfSourceFields): boolean {
+export function portalPdfPreparing(q: PdfSourceFields, now: number = Date.now()): boolean {
   const sent = latestSentRevision(q.revisions);
-  return !!sent && !sent.pdfBlobPath && !!q.pdf && revisionAwaitingPdf(sent, q.pdf.savedAt);
+  if (!sent || sent.pdfBlobPath || !q.pdf || !revisionAwaitingPdf(sent, q.pdf.savedAt)) return false;
+  return pdfView(q.pdf, now)?.status !== "failed";
 }
 
 /** A sent quote whose sent copy is missing and never coming — "No PDF is available for this version". */
-export function portalPdfUnavailable(q: PdfSourceFields): boolean {
+export function portalPdfUnavailable(q: PdfSourceFields, now: number = Date.now()): boolean {
   const sent = latestSentRevision(q.revisions);
-  return !!sent && !sent.pdfBlobPath && !portalPdfPreparing(q);
+  return !!sent && !sent.pdfBlobPath && !portalPdfPreparing(q, now);
 }
 
 /**

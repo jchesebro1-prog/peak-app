@@ -85,6 +85,16 @@ export const RENDER_STEP_TIMEOUT_MS = 30_000;
 export const RENDER_FONTS_TIMEOUT_MS = 10_000;
 export const RENDER_WORST_CASE_MS = RENDER_LAUNCH_TIMEOUT_MS + 2 * RENDER_STEP_TIMEOUT_MS + RENDER_FONTS_TIMEOUT_MS;
 
+/** The URL's path for a log line — never the query, which carries the print token. */
+function printPathOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.protocol === "data:" ? "data:" : u.pathname;
+  } catch {
+    return "";
+  }
+}
+
 let queue: Promise<unknown> = Promise.resolve();
 
 export function renderPrintRouteToPdf(url: string, opts: { timeoutMs?: number } = {}): Promise<Buffer> {
@@ -131,9 +141,20 @@ async function renderOnce(url: string, timeout: number): Promise<Buffer> {
     if (res ? !res.ok() : !url.startsWith("data:")) {
       throw new Error(`The print page answered ${res ? res.status() : "nothing"}.`);
     }
-    await page.evaluate(async (capMs: number) => {
-      await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, capMs))]);
-    }, Math.min(timeout, RENDER_FONTS_TIMEOUT_MS));
+    const fontsCapMs = Math.min(timeout, RENDER_FONTS_TIMEOUT_MS);
+    const fontsCapped = await page.evaluate(async (capMs: number) => {
+      const cap = new Promise<boolean>((resolve) => setTimeout(() => resolve(true), capMs));
+      return Promise.race([document.fonts.ready.then(() => false), cap]);
+    }, fontsCapMs);
+    // Never fails the render — a font that never settles prints with its
+    // fallback — but say so, so a PDF in the wrong typeface can be traced.
+    if (fontsCapped) console.warn(`[quote-pdf] fonts still loading after ${fontsCapMs} ms — printing with fallback fonts`, printPathOf(url));
+    // Re-check where the page IS right before printing (#222 final wave B): a
+    // client-side redirect after "load" (a login bounce, a script navigating
+    // away) must be refused, not printed as the customer's quote.
+    if (!landedOnRequested(url, page.url())) {
+      throw new Error("The print page navigated away before printing — the PDF wasn’t made.");
+    }
     const pdf = await page.pdf({ format: "letter", printBackground: true, preferCSSPageSize: true, timeout });
     return Buffer.from(pdf);
   } finally {

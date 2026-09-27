@@ -146,8 +146,12 @@ export async function generateQuotePdf(input: GenerateInput): Promise<QuotePdfSt
       if (path !== res?.before?.blobPath) await store.remove(path).catch(() => undefined);
       return null;
     }
+    // The previous file goes only when it is no longer the one the quote
+    // records (#222 final wave B): never delete a path equal to the stored
+    // blobPath the settle just committed — the local store reuses a path for
+    // the same save, and a delete there would orphan the ready state.
     const prev = res.before?.blobPath;
-    if (prev && prev !== path) await store.remove(prev).catch(() => undefined);
+    if (prev && prev !== path && prev !== res.after?.blobPath) await store.remove(prev).catch(() => undefined);
     try {
       await copySentRevisionPdf(quoteId);
     } catch (e) {
