@@ -15,8 +15,19 @@ const nextConfig: NextConfig = {
   // DaVinci" action reads the committed extract with fs at run time, which
   // file tracing cannot see — ship it with that route's function.
   // #222: @sparticuz/chromium reads its brotli'd binary from bin/ at run time,
-  // which file tracing can't see — ship it with every page whose server
-  // actions render a quote PDF (saves + Retry), and nowhere else (~60 MB).
+  // which file tracing can't see — ship it with EVERY route whose server
+  // actions can (transitively) reach scheduleQuotePdf/generateQuotePdf
+  // (src/lib/quote-pdf/**), and nowhere else (~60 MB each). That's the three
+  // service quote builders + the Estimator + the portal's self-serve
+  // estimate (all of which render/retry directly); the Quotes hub (status
+  // changes + revision restore schedule a re-render); Home, the Designs
+  // dashboard and Quick Design (promoting a Quick-layout design schedules
+  // one); The Grid's project editor (creating/re-promoting a draft quote
+  // schedules one); and the Flame Tests / Inspections dashboards (one-click
+  // renewal outreach re-prices and re-renders a quote before it's mailed).
+  // Routes that only call markQuotePdfStale (the CSV importer) or
+  // copySentRevisionPdf (a send stamping a quote sent) never invoke Chrome
+  // themselves, so they're deliberately left out.
   outputFileTracingIncludes: {
     "/catalog/documents": ["./data/davinci-extract.json"],
     "/estimator": ["./node_modules/@sparticuz/chromium/bin/**"],
@@ -24,6 +35,13 @@ const nextConfig: NextConfig = {
     "/repairs/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/inspections/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/portal/estimate": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/quotes": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/design/designs": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/design/quick": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/design/grid/[id]": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/flame-tests": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/inspections": ["./node_modules/@sparticuz/chromium/bin/**"],
   },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy
