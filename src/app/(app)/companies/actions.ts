@@ -16,6 +16,8 @@ import { LIFECYCLES } from "@/lib/identity/config";
 import { resolveFieldDefs, validateFieldValues } from "@/lib/customer-fields";
 import { getSettings } from "@/lib/settings";
 import { getCompanySummary, type CompanySummary } from "@/lib/company-summary";
+import { saveVenue } from "@/lib/identity/venue-save";
+import type { SaveVenueInput, SaveVenueResult } from "@/lib/venue-types";
 
 /**
  * Customers mutations — thin wrappers over CustomerStore. The Customers screen
@@ -97,6 +99,15 @@ export async function saveCustomerAction(input: SaveCustomerInput) {
   });
   revalidatePath("/", "layout");
   return { ok: true as const, id };
+}
+
+/** #216 — create or update ONE venue (the venue dialog, the inbox quick-add).
+ *  Same permission as saveCustomerAction. The name is derived server-side. */
+export async function saveVenueAction(input: SaveVenueInput): Promise<SaveVenueResult> {
+  await requireUser();
+  const res = await saveVenue(input);
+  if (res.ok) revalidatePath("/", "layout");
+  return res;
 }
 
 /** Soft-delete a customer (prototype: setDirectory full-replace dropped it). */

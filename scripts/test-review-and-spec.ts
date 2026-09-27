@@ -10486,6 +10486,7 @@ seeded()
   .then(() => gridAccessoriesAsyncChecks230())
   .then(() => laborPerSystem232AsyncChecks())
   .then(() => gridLabor232AsyncChecks())
+  .then(() => venues216AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -23597,6 +23598,10 @@ import { readdirSync as v216Readdir } from "node:fs";
   const m8 = v216Merge(seed, base.map((r) => (r.key === "church" ? { ...r, worksLike: "arena" } : r)));
   ok(m8.ok && m8.types.find((t) => t.key === "church")?.worksLike === "church", "#216: a built-in's works-like is fixed");
   ok(!v216Merge(seed, [...base, { key: "forged", label: "Forged", worksLike: "flat" }]).ok, "#216: an unknown key is refused (keys are minted server-side)");
+  const noChurch = seed.filter((t) => t.key !== "church");
+  const m9 = v216Merge(noChurch, [...base.filter((r) => r.key !== "church"), { label: "Church", worksLike: "flat" }]);
+  const m9new = m9.ok ? m9.types[m9.types.length - 1] : undefined;
+  ok(m9.ok && m9new?.key === "church2" && m9new.worksLike === "flat", "#216: a new type never mints a built-in key, even one missing from the stored list");
   ok(!v216Merge(seed, base.map((r) => ({ ...r, archived: true }))).ok, "#216: at least one type stays un-archived");
   ok(!v216Merge(seed, [...base, { label: "Chapel", worksLike: "sideways" }]).ok, "#216: a new type must work like a built-in");
 
@@ -23624,8 +23629,89 @@ import { readdirSync as v216Readdir } from "node:fs";
 
   // Behaviour must read worksLikeOf(), never the raw stored key.
   const v216SrcRoot = join(process.cwd(), "src");
+  // Flags only a raw venueKind compared against a BUILT-IN literal (either
+  // order) or a switch on a bare venueKind; comments are stripped first.
+  // Change detection, key lookups and switch(worksLikeOf(…)) are fine.
+  const v216Guard = (text: string): boolean => {
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+    return /venueKind\s*[!=]==?\s*["'](proscenium|church|flat|blackbox|arena)["']/.test(code)
+      || /["'](proscenium|church|flat|blackbox|arena)["']\s*[!=]==?\s*[\w.?]*venueKind/.test(code)
+      || /switch\s*\(\s*[\w.?]*venueKind\s*\)/.test(code);
+  };
+  ok(![
+    "if (l.venueKind !== l.origVenueKind) derive = true;",
+    "switch (worksLikeOf(types, site.venueKind)) {}",
+    "const n = rows.filter((r) => r.venueKind === key).length;",
+    '// never write venueKind === "church"\n/* nor switch (site.venueKind) */',
+  ].some(v216Guard), "#216: the venueKind guard accepts change detection, key lookups, switch(worksLikeOf) and comments");
+  ok(['if (venueKind === "church") {}', 'if ("church" === s.venueKind) {}', "switch (site.venueKind) {}", "if (s?.venueKind !== 'arena') {}"].every(v216Guard),
+    "#216: the venueKind guard rejects a raw built-in comparison in either order and a switch on a bare venueKind");
   const v216Offenders = (v216Readdir(v216SrcRoot, { recursive: true, encoding: "utf8" }) as string[])
     .filter((f) => /\.(ts|tsx)$/.test(f))
-    .filter((f) => /venueKind\s*[!=]==?|switch\s*\([^)]*venueKind/.test(readFileSync(join(v216SrcRoot, f), "utf8")));
+    .filter((f) => v216Guard(readFileSync(join(v216SrcRoot, f), "utf8")));
   ok(v216Offenders.length === 0, `#216: no code compares a raw venueKind — use worksLikeOf() (found: ${v216Offenders.join(", ")})`);
+}
+
+/* --- #216 T2: saveVenue — one venue, derived name, primary hand-off --- */
+import { loadVenueTypes as v216Load, saveVenue as v216Save, venueDialogInitial as v216Initial } from "@/lib/identity/venue-save";
+import { countSitesByVenueKind as v216Count, getSite as v216GetSite, sitesForCompany as v216Sites, softDeleteSite as v216SoftDel } from "@/lib/identity/sites";
+import { getSettingsPatch as v216Patch, setSettings as v216SetSettings } from "@/lib/settings";
+{
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/companies/actions.ts"), "utf8");
+  const s = src.indexOf("export async function saveVenueAction");
+  const body = src.slice(s, src.indexOf("\nexport ", s + 10));
+  ok(s > 0 && body.includes("await requireUser()") && body.includes("saveVenue(input)") && body.includes('revalidatePath("/", "layout")'),
+    "#216 T2: saveVenueAction is a thin requireUser wrapper over saveVenue");
+}
+async function venues216AsyncChecks(): Promise<void> {
+  const CID = fixtureId(216, "co");
+  const OTHER = fixtureId(216, "other");
+  const before = await v216Patch();
+  const blank = { siteId: null, locationName: "", address: "", city: "Lincoln", state: "NE", lat: null, lng: null, primary: false };
+  try {
+    await upsertCustomer({ id: CID, name: "Lincoln High School", type: "Education", locations: [{ id: "v1", label: "Main Hall", primary: true, venueKind: "proscenium" }], contacts: [] });
+    await upsertCustomer({ id: OTHER, name: "Other Co", type: "Education", locations: [{ id: "o1", label: "Other Hall", primary: true, venueKind: "proscenium" }], contacts: [] });
+    const types = await v216Load();
+    ok(types.some((t) => t.key === "gymstage" && t.worksLike === "proscenium"), "#216 T2: loadVenueTypes seeds Gym Stage when nothing is stored");
+
+    const a = await v216Save({ ...blank, companyId: CID, venueKind: "gymstage" });
+    ok(a.ok && a.name === "Lincoln High School — Gym Stage", "#216 T2: a blank location falls back to the company name");
+    const b = await v216Save({ ...blank, companyId: CID, venueKind: "gymstage" });
+    ok(b.ok && b.name === "Lincoln High School — Gym Stage (2)", "#216 T2: a same-name sibling numbers (2)");
+    const aId = a.ok ? a.siteId : "";
+    const bId = b.ok ? b.siteId : "";
+    ok(a.ok && a.locId === aId, "#216 T2: a new venue's doc location id is its site id");
+    let rows = await v216Sites(CID);
+    ok(rows.length === 3 && rows.find((r) => r.legacyLocId === "v1")?.name === "Main Hall", "#216 T2: saving one venue never renames an untouched sibling");
+    ok(rows.find((r) => r.id === aId)?.isPrimary === false, "#216 T2: a new venue beside a primary one is not primary");
+
+    const b2 = await v216Save({ ...blank, companyId: CID, siteId: bId, venueKind: "gymstage" });
+    ok(b2.ok && b2.name === "Lincoln High School — Gym Stage (2)", "#216 T2: re-saving a venue keeps its own number");
+
+    const p = await v216Save({ ...blank, companyId: CID, siteId: aId, locationName: "North Campus", venueKind: "church", primary: true });
+    rows = await v216Sites(CID);
+    ok(p.ok && p.name === "North Campus — Worship / Church", "#216 T2: editing location + type re-derives the name");
+    ok(rows.filter((r) => r.isPrimary).length === 1 && rows.find((r) => r.id === aId)?.isPrimary === true, "#216 T2: making one venue primary clears the old primary");
+    const init = v216Initial(rows.find((r) => r.id === aId)!);
+    ok(init.locationName === "North Campus" && init.venueKind === "church" && init.primary && init.currentName === "North Campus — Worship / Church", "#216 T2: venueDialogInitial carries the stored venue");
+
+    const foreign = (await v216Sites(OTHER))[0];
+    const f = await v216Save({ ...blank, companyId: CID, siteId: foreign.id, venueKind: "church" });
+    ok(!f.ok && (await v216GetSite(foreign.id))?.name === "Other Hall", "#216 T2: a site from another company is refused and untouched");
+    ok(!(await v216Save({ ...blank, companyId: CID, venueKind: "nope" })).ok, "#216 T2: an unknown venue type is refused");
+    ok(!(await v216Save({ ...blank, companyId: fixtureId(216, "missing"), venueKind: "church" })).ok, "#216 T2: an unknown company is refused");
+
+    await v216SetSettings({ venueTypes: types.map((t) => (t.key === "gymstage" ? { ...t, archived: true as const } : t)) });
+    ok(!(await v216Save({ ...blank, companyId: CID, venueKind: "gymstage" })).ok, "#216 T2: an archived type can't be picked for a new venue");
+    ok((await v216Save({ ...blank, companyId: CID, siteId: bId, venueKind: "gymstage" })).ok, "#216 T2: a venue that already has an archived type keeps it");
+
+    // "v216unused": no venue carries it (the seed book already has an arena venue).
+    const counts = await v216Count(["gymstage", "church", "v216unused"]);
+    ok((counts.gymstage || 0) >= 1 && (counts.church || 0) >= 1 && !("v216unused" in counts), "#216 T2: countSitesByVenueKind counts live venues per key; unused keys are absent");
+  } finally {
+    await v216SetSettings({ venueTypes: before.venueTypes });
+    for (const s of [...(await v216Sites(CID)), ...(await v216Sites(OTHER))]) await v216SoftDel(s.id);
+    await removeCustomer(CID);
+    await removeCustomer(OTHER);
+  }
 }

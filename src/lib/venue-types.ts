@@ -121,7 +121,9 @@ export type VenueTypeMerge =
  */
 export function mergeVenueTypes(current: readonly VenueType[], input: readonly VenueTypeInput[]): VenueTypeMerge {
   const byKey = new Map(current.map((t) => [t.key, t]));
-  const taken = new Set(current.map((t) => t.key));
+  // Built-in keys are reserved even when absent from `current`, so a new
+  // "Church" can never mint the built-in `church` key.
+  const taken = new Set<string>([...BUILT_IN_VENUE_KINDS, ...current.map((t) => t.key)]);
   const labels = new Set<string>();
   const kept = new Set<string>();
   const renamed: string[] = [];

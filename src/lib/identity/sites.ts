@@ -93,6 +93,22 @@ export async function softDeleteSite(id: string): Promise<void> {
     .where(eq(sites.id, id));
 }
 
+/** #216 — live (non-deleted) venues per venue-type key; keys with none are
+ *  absent. Settings → Venue types refuses to remove a type still in use. */
+export async function countSitesByVenueKind(
+  keys: readonly string[]
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (!keys.length) return out;
+  const db = await getDb();
+  const rows = await db
+    .select({ venueKind: sites.venueKind })
+    .from(sites)
+    .where(and(eq(sites.deleted, false), inArray(sites.venueKind, [...keys])));
+  for (const r of rows) out[r.venueKind] = (out[r.venueKind] || 0) + 1;
+  return out;
+}
+
 /** The id doc records store as `locationId` — legacy alias when present. */
 export function docLocId(s: SiteRow): string {
   return s.legacyLocId ?? s.id;
