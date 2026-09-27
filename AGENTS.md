@@ -321,6 +321,31 @@ See `.env.example`.
     Remaining is Jeff-gated: the map starts empty, so mapping the rows in
     Grid Settings → Equipment map is what turns "Incomplete" into a real
     estimate. Punch item #211.
+18. ✅ **Sep 26 punch — Batch 1** (#212–#215, #219, #221, #224, #225,
+    D333–D357) — a Grid Equipment-map allowance can carry a customer-facing
+    description, and a design gains per-design custom items priced through
+    the allowance path (spec.lines still print on no customer document —
+    flagged, not fixed here); Catalog joins the Estimating nav group;
+    Inbox gains a Link popup off each message — multi-person linking from
+    From/To/Cc, one search across companies/venues/people, and a
+    deterministic signature reader that pre-fills a new contact or offers
+    to fill a known one's blanks — with the sidebar reduced to a read-only
+    summary; tasks created from an email carry contact/customer/site/lead/
+    thread links and, together with queue assignments, now place on
+    `/calendar` (due day, or floating "carried"/"overdue" until done or
+    deleted, Mine/Everyone toggle); `/import/daylite/calendar` imports
+    Daylite's calendar history into each owner's own connected Google
+    Calendar (one-offs only, repeating series skipped, deterministic event
+    ids); every quote link now opens that quote's own builder instead of
+    defaulting to the Estimator; company records and the companies/venues
+    directories page instead of endless-scrolling; and the consulting
+    proposal document drops its boilerplate header lines, gains a Dear
+    line and bulleted assumptions, and prints a clean PDF with the quote's
+    own terms and a contact + estimator acceptance. Batch 2 — #216 (venues),
+    #217 (service-quote rounding), #218 (documents), #220 (portal history),
+    #222 (saved quote PDFs), #223 (estimate numbers), #226 (Grid device
+    types) — is in progress on `feat/punch-inbox-tasks` /
+    `feat/punch-lane-b`.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.
