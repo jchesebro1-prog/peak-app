@@ -27951,7 +27951,7 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
   ok(ty.includes("reviewLimit: ReviewLimitChipData | null;"), "#242 estimator: EstimatorProps.reviewLimit");
   const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
   ok(
-    !/from "@\/(lib\/stores|db|lib\/review-limits-server)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline" />'),
+    !/from "@\/(lib\/stores|db|lib\/review-limits-server)/.test(ec.replace(/import type[^;]+;/g, "")) && ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline"'),
     "#242 estimator: the client renders the server-evaluated chip without importing a store or the server module"
   );
   ok(
@@ -27959,5 +27959,33 @@ async function reviewLimitsFix242AsyncChecks(): Promise<void> {
       ec.includes("if (r.reviewLimit !== undefined) setReviewLimit(r.reviewLimit);") &&
       ec.includes("if (res.reviewLimit !== undefined) setReviewLimit(res.reviewLimit);") && ec.includes("staleAutoApprovalLine(reviewLimit.text)"),
     "#242 estimator: Send opens within the limit, a stale auto approval reads as unsubmitted, every sync refreshes the chip"
+  );
+}
+
+/* --- #242 T4/T5 review fixes: stale hub badge, "as last saved", Reviews history --- */
+import { ReviewLimitChip as r242ChipView } from "@/components/review-limit-chip";
+{
+  const within = { tone: "within" as const, text: "Within your limit — approves automatically", short: "Within limit", staleAuto: false };
+  const plain = symRender(symH(r242ChipView, { chip: within }));
+  const saved = symRender(symH(r242ChipView, { chip: within, savedOnly: true }));
+  ok(
+    !plain.includes("as last saved") && saved.includes("Within your limit — approves automatically") && saved.includes("· as last saved"),
+    "#242 fix: savedOnly appends a muted '· as last saved' after the fixed chip sentence"
+  );
+  for (const p of ["flame-tests/quote", "repairs/quote", "inspections/quote", "rentals/quote", "design/engagements/quote"]) {
+    const src = readFileSync(join(process.cwd(), `src/app/(app)/${p}/page.tsx`), "utf8");
+    ok(src.includes("<ReviewLimitChip chip={reviewLimit} savedOnly />"), `#242 fix: the ${p} builder chip says it reflects the last save`);
+  }
+  const ec = readFileSync(join(process.cwd(), "src/app/(app)/estimator/estimator-client.tsx"), "utf8");
+  ok(ec.includes('<ReviewLimitChip chip={reviewLimit} variant="inline" savedOnly={pdfDirty} />'), "#242 fix: the Estimator chip says 'as last saved' while the form has unsaved changes");
+  const hub = readFileSync(join(process.cwd(), "src/app/(app)/quotes/page.tsx"), "utf8");
+  const iChip = hub.indexOf("const reviewLimit = reviewLimitChip(q, limitCtx, me);");
+  const iState = hub.indexOf('const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";');
+  ok(iChip > 0 && iState > iChip, "#242 fix: a stale auto approval never shows the hub row's green Approved badge");
+  const rvw = readFileSync(join(process.cwd(), "src/app/(app)/reviews/page.tsx"), "utf8");
+  ok(
+    rvw.includes("approvalHolds(q, limitCtx)") && rvw.includes("staleAutoApprovalLine(") && rvw.includes("loadReviewLimitContext()") &&
+      rvw.includes('state: x.staleLine ? "none" : r.state,'),
+    "#242 fix: Reviews history reads a stale auto approval as needing review (approvalHolds), never 'Auto-approved'"
   );
 }

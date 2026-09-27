@@ -2332,7 +2332,8 @@ export default function EstimatorClient({
                   </div>
                 </>
               )}
-              {reviewLimit && !staleAuto && <ReviewLimitChip chip={reviewLimit} variant="inline" />}
+              {/* #242: evaluated on the last save — say so while the form has unsaved edits. */}
+              {reviewLimit && !staleAuto && <ReviewLimitChip chip={reviewLimit} variant="inline" savedOnly={pdfDirty} />}
               <button
                 type="button"
                 aria-expanded={reviewBarOpen}

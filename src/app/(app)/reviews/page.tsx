@@ -9,7 +9,9 @@ import ReviewList, { type ReviewItem } from "./review-list";
 import { designBudgetLabel } from "@/lib/design/scope-targets";
 import { designOpenHref } from "@/lib/design/design-links";
 import { quoteBuilderHref } from "@/lib/quote-links";
-import { autoApprovalLine } from "@/lib/review-line";
+import { autoApprovalLine, staleAutoApprovalLine } from "@/lib/review-line";
+import { approvalHolds, reviewLimitChip } from "@/lib/review-limits";
+import { loadReviewLimitContext } from "@/lib/review-limits-server";
 import type { ReviewKind } from "./actions";
 import { displayQuoteNumber } from "@/lib/estimate-number";
 
@@ -58,6 +60,9 @@ type RawItem = {
   review: QuoteReview;
   ts: number;
   openHref: string;
+  /** #242 — set when a quote's auto approval no longer holds (approvalHolds):
+   *  the banner line the quote panel shows; the item reads as needing review. */
+  staleLine?: string;
 };
 
 export default async function ReviewsPage({
@@ -65,13 +70,14 @@ export default async function ReviewsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [user, sp, quotes, designs, users, engagements] = await Promise.all([
+  const [user, sp, quotes, designs, users, engagements, limitCtx] = await Promise.all([
     requireUser(),
     searchParams,
     getQuotes(),
     getAllDesigns(),
     allUsers(),
     allEngagements(),
+    loadReviewLimitContext(),
   ]);
   const me = user.name;
   const canApprove = can("approve", user.roles);
@@ -90,6 +96,14 @@ export default async function ReviewsPage({
     decidedAt: null,
     note: "",
   };
+  // #242: an auto approval that no longer holds (the same approvalHolds rule
+  // as the gate and the quote panel) reads as needing review, never
+  // "Auto-approved — within …".
+  const staleLineOf = (q: (typeof quotes)[number]): string | undefined => {
+    const r = q.review;
+    if (r?.state !== "approved" || r.method !== "auto_limit" || approvalHolds(q, limitCtx)) return undefined;
+    return staleAutoApprovalLine(reviewLimitChip(q, limitCtx, me)?.text || "needs review");
+  };
   const all: RawItem[] = [
     ...quotes.map((q) => ({
       kind: "Quote" as const,
@@ -101,6 +115,7 @@ export default async function ReviewsPage({
       review: q.review || NONE,
       ts: q.updatedAt || 0,
       openHref: quoteBuilderHref(q),
+      staleLine: staleLineOf(q),
     })),
     ...designs.map((d) => ({
       kind: "Design" as const,
@@ -162,7 +177,8 @@ export default async function ReviewsPage({
     const r = x.review;
     let metaLine: string;
     if (tab === "mine") {
-      if (r.state === "approved")
+      if (x.staleLine) metaLine = x.staleLine + " · " + timeAgo(r.decidedAt);
+      else if (r.state === "approved")
         metaLine =
           (r.method === "auto_limit"
             ? autoApprovalLine(r)
@@ -195,7 +211,7 @@ export default async function ReviewsPage({
       ownerFirst: firstName(x.owner),
       ownerColor: colorOf(x.owner),
       ownerInitials: initialsOf(x.owner),
-      state: r.state,
+      state: x.staleLine ? "none" : r.state,
       metaLine,
       value: x.valueLabel ?? shortMoney(x.value),
       note: r.note && r.state === "changes" ? r.note : "",

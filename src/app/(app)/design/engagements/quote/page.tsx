@@ -125,7 +125,7 @@ export default async function ConsultingQuotePage({
   return (
     <>
       <ActionError message={error || undefined} />
-      <ReviewLimitChip chip={reviewLimit} />
+      <ReviewLimitChip chip={reviewLimit} savedOnly />
       <ConsultingQuoteBuilder
         customers={customers}
         phaseMenu={phaseMenu}

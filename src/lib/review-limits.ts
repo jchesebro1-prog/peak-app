@@ -257,7 +257,8 @@ export function approvalHolds(q: ReviewableQuote, ctx: ReviewLimitContext): bool
 
 /** The auto-approval record should be rewritten when the current evaluation
  *  fits but no longer matches its snapshot (kind, limit, owner, or a value
- *  above the granted one) — so the banner never describes an old grant. */
+ *  above the granted one). The rewrite happens at the next gated transition
+ *  (decideApprovalGate), so until then the banner describes the last grant. */
 export function autoSnapshotStale(q: ReviewableQuote, ev: AutoApprovalEval): boolean {
   const r = q.review;
   const a = r?.auto;

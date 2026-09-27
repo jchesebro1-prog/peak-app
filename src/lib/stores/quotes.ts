@@ -957,8 +957,10 @@ export function autoApprovedReview(ev: AutoApprovalEval, now: number): QuoteRevi
  * - an approval that still holds (in-app, attested, legacy, or an auto
  *   approval the quote is unchanged against or still fits) → open; an auto
  *   approval whose snapshot no longer matches a fitting evaluation (kind,
- *   limit, owner, or a higher value) is re-stamped in the same write, so the
- *   banner never describes an old grant — otherwise nothing is re-stamped;
+ *   limit, owner, or a higher value) is re-stamped in the same write — so the
+ *   stamp refreshes at the next gated transition, not before; otherwise
+ *   nothing is re-stamped. An unchanged quote keeps its grant: a lowered
+ *   limit governs new grants only;
  * - else the owner's review limit: fits → open, with the auto-approval
  *   record to write in the same patch; over / blank / owner off the roster /
  *   changes requested → today's refusal sentence, verbatim.

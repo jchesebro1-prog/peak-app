@@ -171,7 +171,7 @@ export default async function RentalQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
-      <ReviewLimitChip chip={reviewLimit} />
+      <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
       customers={customers}
       items={items

@@ -228,7 +228,7 @@ export default async function InspectionQuotePage({
   return (
     <>
       <ActionError message={one(sp.err)} />
-      <ReviewLimitChip chip={reviewLimit} />
+      <ReviewLimitChip chip={reviewLimit} savedOnly />
       <QuoteBuilder
         customers={customers}
         offices={offices}

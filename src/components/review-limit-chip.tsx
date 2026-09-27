@@ -5,7 +5,9 @@ import type { ReviewLimitChipData } from "@/lib/review-limits";
  * or "Over your $25,000 limit — needs review". No hooks and no store, so
  * server pages render it directly and the Estimator client can import it.
  * `banner` sits above a builder; `inline` sits in a bar; `pill` is a hub-row
- * badge (short label, full sentence as the tooltip).
+ * badge (short label, full sentence as the tooltip). `savedOnly` appends a
+ * muted "· as last saved": the chip is evaluated against the SAVED quote, so a
+ * builder with unsaved edits must not read as describing them.
  */
 const TONE = {
   within: { ink: "#1f7a52", soft: "#eaf6ef", bd: "#cce9da", icon: "✓" },
@@ -15,9 +17,11 @@ const TONE = {
 export function ReviewLimitChip({
   chip,
   variant = "banner",
+  savedOnly = false,
 }: {
   chip: ReviewLimitChipData | null;
   variant?: "banner" | "inline" | "pill";
+  savedOnly?: boolean;
 }) {
   if (!chip) return null;
   const t = TONE[chip.tone];
@@ -63,6 +67,7 @@ export function ReviewLimitChip({
     >
       <span aria-hidden>{t.icon}</span>
       {chip.text}
+      {savedOnly && <span style={{ fontWeight: 500, color: "#8c919c" }}>· as last saved</span>}
     </div>
   );
 }

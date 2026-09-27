@@ -543,11 +543,12 @@ export default async function QuotesPage({
         </div>
 
         {filtered.map((q) => {
-          const rState = q.review?.state || "none";
+          const reviewLimit = reviewLimitChip(q, limitCtx, me);
+          // #242: a stale auto approval is not an approval — never the green badge.
+          const rState = reviewLimit?.staleAuto ? "none" : q.review?.state || "none";
           const rMeta = REVIEW_CHIP[rState];
           const selected = q.id === selectedId;
           const owner = q.owner || "Unassigned";
-          const reviewLimit = reviewLimitChip(q, limitCtx, me);
           return (
             <div key={q.id}>
               <Link
@@ -819,8 +820,11 @@ function SelectedPanel({
   reviewLimit: ReviewLimitChipData | null;
 }) {
   const stored = q.review || { state: "none" as const, reviewer: null, submittedBy: null, submittedAt: null, decidedBy: null, decidedAt: null, note: "" };
-  // #242: a stale auto approval (edited over the owner's limit, labor added,
-  // limit lowered) is not an approval — read it as unsubmitted, like the gate.
+  // #242: a stale auto approval is not an approval — read it as unsubmitted,
+  // like the gate. An unchanged quote keeps its grant (a lowered limit governs
+  // new grants only); once it changed (value raised past the snapshot, labor
+  // added, owner changed) and no longer fits the owner's current limit, it is
+  // stale (approvalHolds).
   const staleAuto = !!reviewLimit?.staleAuto;
   const rev = staleAuto ? { ...stored, state: "none" as const } : stored;
   const rm = RB_META[rev.state] || RB_META.none;
