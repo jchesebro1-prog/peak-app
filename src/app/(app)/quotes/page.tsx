@@ -24,6 +24,8 @@ import { DeleteQuoteButton } from "./delete-quote-button";
 import { quoteBuilderHref } from "@/lib/quote-links";
 
 export const metadata = { title: "Quotes — Quartzite-6" };
+/** #222 fix wave 1: recalling a revision renders the quote's saved PDF in `after()`, inside this budget. */
+export const maxDuration = 120;
 
 /* ---- prototype token maps (Quotes.dc.html statusMeta / rMeta, Estimator rbMeta) ---- */
 

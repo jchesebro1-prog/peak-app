@@ -19,8 +19,10 @@ import "./design.css";
 
 export const dynamic = "force-dynamic";
 /** #210: listFixtures() (via loadEquipmentPriceTable) can run the one-time
- *  fixture conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). */
-export const maxDuration = 60;
+ *  fixture conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS).
+ *  #222: a promote renders the quote's saved PDF in `after()`, inside this
+ *  budget — 120 s (fix wave 1). */
+export const maxDuration = 120;
 
 export default async function Page({
   searchParams,

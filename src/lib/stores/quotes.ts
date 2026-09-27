@@ -9,9 +9,13 @@ import {
 import { quotesSeed } from "@/db/seeds/quotes";
 import { canSetPoReceived } from "@/lib/opportunities";
 import { createAssignment } from "@/lib/stores/assignments";
-import { withTransaction } from "@/db";
+import { getDb, withTransaction } from "@/db";
+import { DOC_TABLES } from "@/db/doc-tables";
+import { eq } from "drizzle-orm";
 import { loadPipelines } from "@/lib/pipelines-server";
 import { isProjectExcludedQuoteType } from "@/lib/project-quote-types";
+import type { QuotePdfOptions } from "@/lib/quote-pdf/pdf-options";
+import { canHavePdf, type QuotePdfState } from "@/lib/quote-pdf/state";
 import {
   carriesPipeline,
   firstStage,
@@ -224,7 +228,57 @@ export type Quote = {
   stage?: string | null;
   /** Append-only priced snapshots (punch item 24). Absent on pre-D84 quotes. */
   revisions?: QuoteRevision[];
+  /** Customer-preview "Show on PDF" choices (#222) — saved with the quote so the
+   *  stored PDF is reproducible. Read through normalizePdfOptions. */
+  pdfOptions?: QuotePdfOptions | null;
+  /** The saved customer PDF (#222) — server-written by lib/quote-pdf only.
+   *  `blobPath` never leaves the server; browsers get a QuotePdfView. */
+  pdf?: QuotePdfState | null;
+  /** When a field the customer document prints last changed (#222 fix wave
+   *  1) — stamped by patchQuote only (QUOTE_CONTENT_FIELDS). A PDF saved
+   *  before it is out of date and is never copied onto a sent revision.
+   *  Absent until the first such change (a new quote renders what it was
+   *  created with). */
+  contentChangedAt?: number;
 };
+
+/**
+ * The quote fields the customer documents print (#222 fix wave 1) — the
+ * quote document (quote-document-data.ts) and the three service letters.
+ * Margin and the tier stamp never print; status, history, revisions, review,
+ * stage and the pdf state are the document's lifecycle, not its content.
+ */
+export const QUOTE_CONTENT_FIELDS = [
+  "name",
+  "customer",
+  "customerId",
+  "locationId",
+  "contactName",
+  "contact",
+  "quoteNote",
+  "scopeNarrative",
+  "quoteBasis",
+  "installTimeframe",
+  "preparedBy",
+  "assumptions",
+  "termsText",
+  "paymentTerms",
+  "owner",
+  "value",
+  "quoteType",
+  "spec",
+  "flameTest",
+  "repair",
+  "inspection",
+  "vendorQuotes",
+  "pdfOptions",
+] as const;
+
+/** A comparable key of what the customer document shows. Pure. */
+export function quoteContentKey(q: Partial<Quote> | null | undefined): string {
+  const rec = (q || {}) as Record<string, unknown>;
+  return JSON.stringify(QUOTE_CONTENT_FIELDS.map((k) => rec[k] ?? null));
+}
 
 /**
  * An immutable snapshot of a quote's priced state (punch item 24). Modelled on
@@ -270,6 +324,10 @@ export type QuoteRevision = {
    *  a snapshot that copied only `spec` recalled a priced vendor line whose
    *  source document, terms and notes had already been pruned away. */
   vendorQuotes?: unknown;
+  /** #222 — the exact PDF that went to the customer with a "sent" revision.
+   *  An annex stamped once after the snapshot is cut; the priced fields above
+   *  are still never rewritten. */
+  pdfBlobPath?: string;
 };
 
 export type ReviewOpts = {
@@ -524,7 +582,7 @@ export async function update(
   id: string,
   patch: Partial<Quote>
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     Object.assign(q, patch, { updatedAt: Date.now() });
     if (typeof q.value === "number") q.value = Math.round(q.value);
   });
@@ -612,7 +670,7 @@ export async function addQuoteRevision(
   opts: { by?: string | null; reason?: QuoteRevision["reason"]; note?: string } = {}
 ): Promise<QuoteRevision | null> {
   let out: QuoteRevision | null = null;
-  const res = await patchDoc<Quote>("quotes", id, (doc) => {
+  const res = await patchQuote(id, (doc) => {
     out = pushRevision(
       doc,
       opts.by || DEFAULT_ACTOR,
@@ -622,6 +680,103 @@ export async function addQuoteRevision(
     doc.updatedAt = Date.now();
   });
   return res ? out : null;
+}
+
+/**
+ * Take the quote row's write lock for the rest of the current transaction
+ * (#222). patchDoc is read-then-write; under the lock its re-read is the
+ * latest committed doc and no other writer can land between that read and
+ * its write — so the mutate callback is a true compare-and-set.
+ */
+async function lockQuoteRow(id: string): Promise<void> {
+  const db = await getDb();
+  const t = DOC_TABLES.quotes;
+  await db.select({ id: t.id }).from(t).where(eq(t.id, id)).for("update");
+}
+
+/**
+ * The one way a quote is patched (#222 fix wave). Every writer takes the row
+ * lock first, so its patchDoc re-read is the latest committed doc and nothing
+ * lands between that read and its write. Without this, a plain `update` that
+ * read the doc before a PDF render settled would write back the stale `pdf`
+ * state and orphan the file the render just stored. Joins an outer
+ * transaction when there is one (the lock then lives until it commits).
+ */
+async function patchQuote(id: string, mutate: (doc: Quote) => Quote | void): Promise<Quote | null> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    return patchDoc<Quote>("quotes", id, (doc) => stampContentChange(doc, mutate));
+  });
+}
+
+/**
+ * Run a quote mutation and stamp `contentChangedAt` when it changed anything
+ * the customer document prints (#222 fix wave 1). The stamp is the write's own
+ * `updatedAt` when the mutation bumped it — a save's render (savedAt taken
+ * after the write) is then never older than its own change.
+ */
+function stampContentChange(doc: Quote, mutate: (doc: Quote) => Quote | void): Quote {
+  const beforeKey = quoteContentKey(doc);
+  const beforeUpdatedAt = doc.updatedAt;
+  const next = mutate(doc) || doc;
+  if (quoteContentKey(next) !== beforeKey) {
+    next.contentChangedAt = typeof next.updatedAt === "number" && next.updatedAt !== beforeUpdatedAt ? next.updatedAt : Date.now();
+  }
+  return next;
+}
+
+/**
+ * Read-modify-write the quote's `pdf` state (#222) as a compare-and-set:
+ * `mutate` sees the state re-read under the row lock and returns the next
+ * state, or `undefined` to leave it (a superseded render). Deliberately does
+ * NOT bump `updatedAt`: the PDF is a by-product of a save, and `updatedAt` is
+ * the document's printed revision date and the portal's sort key.
+ */
+export async function updateQuotePdf(
+  id: string,
+  mutate: (cur: QuotePdfState | null) => QuotePdfState | undefined
+): Promise<{ before: QuotePdfState | null; after: QuotePdfState | null; changed: boolean } | null> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    let out: { before: QuotePdfState | null; after: QuotePdfState | null; changed: boolean } | null = null;
+    const res = await patchDoc<Quote>("quotes", id, (doc) => {
+      const before = doc.pdf ?? null;
+      let next = mutate(before);
+      // A type with no PDF kind is never marked pending — nothing would ever settle it.
+      if (next?.status === "pending" && !canHavePdf(doc.quoteType)) next = undefined;
+      if (next !== undefined) doc.pdf = next;
+      out = { before, after: next === undefined ? before : next, changed: next !== undefined };
+    });
+    return res ? out : null;
+  });
+}
+
+/** Stamp a revision's PDF copy once (#222). False when the revision is gone or already has one. */
+export async function setRevisionPdfPath(id: string, rev: number, path: string): Promise<boolean> {
+  return withTransaction(async () => {
+    await lockQuoteRow(id);
+    let hit = false;
+    await patchDoc<Quote>("quotes", id, (doc) => {
+      const r = (doc.revisions || []).find((x) => x.rev === rev);
+      if (r && !r.pdfBlobPath) {
+        r.pdfBlobPath = path;
+        hit = true;
+      }
+    });
+    return hit;
+  });
+}
+
+/** After a send commits: copy the current PDF onto the new sent revision (#222).
+ *  Never fails the send — a missing copy is logged, and the generator retries
+ *  it when a still-rendering PDF lands. */
+async function copySentPdfSafely(id: string): Promise<void> {
+  try {
+    const { copySentRevisionPdf } = await import("../quote-pdf/generate");
+    await copySentRevisionPdf(id);
+  } catch (e) {
+    console.error("[quotes] copying the sent revision's PDF failed", id, e);
+  }
 }
 
 /**
@@ -650,7 +805,7 @@ export async function restoreQuoteRevision(
   if (!target) return { ok: false, reason: "no-such-rev" };
 
   const actor = by || DEFAULT_ACTOR;
-  const updated = await patchDoc<Quote>("quotes", id, (doc) => {
+  const updated = await patchQuote(id, (doc) => {
     // 1. preserve where we are now, 2. apply the old payload, 3. record the recall.
     pushRevision(doc, actor, "manual", `Auto-saved before recalling v${rev}`);
     doc.name = target.name;
@@ -846,8 +1001,11 @@ export async function setStatus(
   by?: string | null,
   opts: SetStatusOpts = {}
 ): Promise<Quote | null> {
-  return withTransaction(async () => {
+  const sentCut = { value: false };
+  const out = await withTransaction(async () => {
   if (!STAGES.includes(status)) return null;
+  // #222: lock before the read, so the gate and the write see one version.
+  await lockQuoteRow(id);
   const q = await getDoc<Quote>("quotes", id);
   if (!q) return null;
   if (q.status === status) {
@@ -878,7 +1036,7 @@ export async function setStatus(
   if (!gate.ok) throw new ApprovalGateRefused(status === "won" ? "won" : "send", gate.error);
   // Loaded before the patch: the stage snaps to the new status inside the same write (§3.4).
   const pipes = carriesPipeline(q.quoteType) ? await loadPipelines() : null;
-  const result = await patchDoc<Quote>("quotes", id, (doc) => {
+  const result = await patchQuote(id, (doc) => {
     const t = Date.now();
     doc.history = doc.history || [];
     doc.history.push({ at: t, from: doc.status, to: status });
@@ -891,6 +1049,7 @@ export async function setStatus(
     }
     if (status === "sent") {
       pushRevision(doc, by || DEFAULT_ACTOR, "sent", "Sent to customer");
+      sentCut.value = true;
     }
     doc.updatedAt = t;
   });
@@ -924,6 +1083,21 @@ export async function setStatus(
   }
   return result;
   });
+  // #222: Blob I/O stays out of the status transaction. A same-status no-op
+  // cuts no revision, so it copies nothing.
+  // Trade-off: withTransaction JOINS an outer transaction, so when a caller
+  // wraps setStatus in its own (setQuoteStage does), this copy — a storage
+  // read + write, then setRevisionPdfPath's row lock — runs inside that outer
+  // transaction while it still holds this quote's row lock. Accepted: it is
+  // one bounded file copy, and the DB layer has no after-commit hook to defer
+  // it to. The costs are known: other writers to THIS quote wait for the copy;
+  // if the outer transaction then rolls back, the revision stamp rolls back
+  // with it and the copied file is an orphan (a stray file, never a wrong
+  // record — the generator re-copies on its next settle); and a DB error in
+  // the stamp, though swallowed here, leaves the outer Postgres transaction
+  // aborted, so the caller's next statement fails instead of committing.
+  if (out && sentCut.value) await copySentPdfSafely(id);
+  return out;
 }
 
 /**
@@ -951,7 +1125,7 @@ export async function setQuoteStage(
       const moved = await setStatus(id, tag, by);
       if (!moved || moved.status !== tag) return moved ? get(id) : null;
     }
-    const res = await patchDoc<Quote>("quotes", id, (doc) => {
+    const res = await patchQuote(id, (doc) => {
       doc.pipelineId = pl.id;
       doc.stage = stageId;
       doc.updatedAt = Date.now();
@@ -970,7 +1144,7 @@ export async function setQuotePipeline(id: string, pipelineId: string): Promise<
   if (!q || !carriesPipeline(q.quoteType) || q.status !== "draft") return null;
   const pl = (await loadPipelines()).quote.find((p) => p.id === pipelineId);
   if (!pl) return null;
-  const res = await patchDoc<Quote>("quotes", id, (doc) => {
+  const res = await patchQuote(id, (doc) => {
     doc.pipelineId = pl.id;
     doc.stage = firstStage(pl).id;
     doc.updatedAt = Date.now();
@@ -987,7 +1161,7 @@ export async function setQuotePipeline(id: string, pipelineId: string): Promise<
 export async function setPoReceived(id: string, on: boolean): Promise<Quote | null> {
   const q = await getDoc<Quote>("quotes", id);
   if (!q || !canSetPoReceived(q.status)) return null;
-  return patchDoc<Quote>("quotes", id, (doc) => {
+  return patchQuote(id, (doc) => {
     doc.poReceivedAt = on ? Date.now() : null;
     doc.updatedAt = Date.now();
   });
@@ -1042,7 +1216,7 @@ export async function submitForReview(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     q.review = rv("in_review", {
       reviewer: opts.reviewer || null,
       submittedBy: opts.by || null,
@@ -1058,7 +1232,7 @@ export async function claimReview(
 ): Promise<Quote | null> {
   const q = await getDoc<Quote>("quotes", id);
   if (!q || !q.review) return null;
-  return patchDoc<Quote>("quotes", id, (doc) => {
+  return patchQuote(id, (doc) => {
     doc.review.reviewer = by || null;
     doc.updatedAt = Date.now();
   });
@@ -1068,7 +1242,7 @@ export async function approve(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     const review = q.review || rv("in_review");
     review.state = "approved";
     review.decidedBy = opts.by || null;
@@ -1103,7 +1277,7 @@ export async function attestApproval(
 ): Promise<Quote | null> {
   const note = (opts.note || "").trim();
   if (!note) return null;
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     const review = q.review || rv("in_review");
     review.state = "approved";
     review.decidedBy = opts.by || null;
@@ -1120,7 +1294,7 @@ export async function requestChanges(
   id: string,
   opts: ReviewOpts = {}
 ): Promise<Quote | null> {
-  return patchDoc<Quote>("quotes", id, (q) => {
+  return patchQuote(id, (q) => {
     const review = q.review || rv("in_review");
     review.state = "changes";
     review.decidedBy = opts.by || null;

@@ -39,8 +39,10 @@ import GridIntake from "./grid-intake";
 export const metadata = { title: "The Grid — Quartzite-6" };
 export const dynamic = "force-dynamic";
 /** #210: listFixtures() (via loadEquipPriceCtx) can run the one-time fixture
- *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). */
-export const maxDuration = 60;
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). #222: a
+ *  quote from The Grid renders its saved PDF in `after()`, inside this budget
+ *  — 120 s (fix wave 1). */
+export const maxDuration = 120;
 
 /**
  * The Grid editor route (D108) — full-width like the markup screen: laying

@@ -513,9 +513,19 @@ export async function promoteDesignToQuote(
   if (!partial) return null;
   const fresh = { budget: price.budget, incomplete: { needsPart: price.needsPart } };
 
+  // #222 fix wave 1: every promote — Quick Design's and both dashboard paths —
+  // writes what the quote document shows, so it schedules the saved PDF like
+  // a save does (loaded late: this store must not pull next/headers into
+  // every importer).
+  const schedulePdf = async (quoteId: string) => {
+    const { scheduleQuotePdf } = await import("@/lib/quote-pdf/schedule");
+    await scheduleQuotePdf(quoteId);
+  };
+
   const existing = d.quoteId ? await getQuoteById(d.quoteId) : null;
   if (existing && existing.status === "draft") {
     const q = await updateQuote(existing.id, { ...(partial as unknown as Partial<Quote>), owner });
+    if (q) await schedulePdf(q.id);
     await updateDesign(id, fresh);
     return q;
   }
@@ -526,6 +536,7 @@ export async function promoteDesignToQuote(
   if (partial.requote) {
     await updateQuote(q.id, { requote: true } as unknown as Partial<Quote>);
   }
+  await schedulePdf(q.id);
   await updateDesign(id, { ...fresh, quoteId: q.id });
   return q;
 }

@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Native/WASM database drivers must not be bundled by the server compiler.
-  serverExternalPackages: ["@electric-sql/pglite", "postgres"],
+  // #222: headless Chrome for saved quote PDFs — never bundled.
+  serverExternalPackages: ["@electric-sql/pglite", "postgres", "puppeteer-core", "@sparticuz/chromium"],
   // #134 (D157): the catalog importers cap uploads at 1 MB themselves
   // (lib/catalog-import-guard) and surface the refusal through the Catalog
   // page's importError banner. Server actions default to a 1 MB request
@@ -13,7 +14,17 @@ const nextConfig: NextConfig = {
   // Part documents (#207): the Datasheets page's admin "Pre-fill from
   // DaVinci" action reads the committed extract with fs at run time, which
   // file tracing cannot see — ship it with that route's function.
-  outputFileTracingIncludes: { "/catalog/documents": ["./data/davinci-extract.json"] },
+  // #222: @sparticuz/chromium reads its brotli'd binary from bin/ at run time,
+  // which file tracing can't see — ship it with every page whose server
+  // actions render a quote PDF (saves + Retry), and nowhere else (~60 MB).
+  outputFileTracingIncludes: {
+    "/catalog/documents": ["./data/davinci-extract.json"],
+    "/estimator": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/flame-tests/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/repairs/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/inspections/quote": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/portal/estimate": ["./node_modules/@sparticuz/chromium/bin/**"],
+  },
   // Baseline security response headers applied to every route. These are the
   // non-breaking hardening headers (no CSP yet — a Content-Security-Policy
   // needs to be tuned against Leaflet/Three/inline styles and verified in a
@@ -41,6 +52,12 @@ const nextConfig: NextConfig = {
             value: "max-age=31536000; includeSubDomains",
           },
         ],
+      },
+      // #222: the Estimator's customer preview embeds the saved PDF. Later
+      // entries win for the same key, so this relaxes DENY for this route only.
+      {
+        source: "/api/quotes/:id/pdf",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
     ];
   },

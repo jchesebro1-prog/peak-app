@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { travelForCustomerVenues } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -20,6 +21,9 @@ import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/ne
 import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Repair quote — Quartzite-6" };
+/** #222: Save/Approve render the proposal PDF in `after()`, inside this budget
+ *  — 120 s (fix wave 1) leaves a cold Chromium start room to finish. */
+export const maxDuration = 120;
 
 /**
  * Repair QUOTE builder — the auto-priced repair estimator (repair twin of the
@@ -328,6 +332,7 @@ export default async function RepairQuotePage({
         categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
         priorities={PRIORITIES.map((p) => ({ key: p.key, label: p.label }))}
         initial={initial}
+        pdf={editQuote ? pdfView(editQuote.pdf, Date.now()) : null}
         accent={settings.accent || "#7b3f8a"}
       />
     </>

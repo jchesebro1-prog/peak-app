@@ -21,10 +21,12 @@ import { get as getSurvey } from "@/lib/stores/surveys";
 import { get as getInspection } from "@/lib/stores/inspections";
 import { getFixtureRates } from "@/lib/stores/pricing";
 import { blobEnabled } from "@/lib/blob";
+import { DEFAULT_PDF_OPTIONS, normalizePdfOptions } from "@/lib/quote-pdf/pdf-options";
 import { tasksForQuote } from "@/lib/stores/tasks";
 import { taskTemplateSetsFor } from "@/lib/stores/task-templates";
 import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/app/(app)/quotes/new/handoff";
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
+import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
 import type {
   AiSource,
@@ -38,9 +40,10 @@ import type {
 
 export const metadata = { title: "Estimator — Quartzite-6" };
 /** #210: this page's first listFixtures() can run the one-time fixture
- *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS) — 60 s keeps
- *  that well inside the function limit, like the Datasheets page. */
-export const maxDuration = 60;
+ *  conversion under its 15 s budget (FIXTURES_CONVERT_BUDGET_MS). #222: its
+ *  saves render the saved quote PDF in `after()`, inside this budget — 120 s
+ *  (fix wave 1) leaves a cold Chromium start room to finish. */
+export const maxDuration = 120;
 
 /**
  * Estimator — detailed line-item quote builder (port of Estimator.dc.html).
@@ -124,6 +127,8 @@ async function initialFrom(
       sections: null,
       vendorQuotes: [],
       replaces: "",
+      pdfOptions: { ...DEFAULT_PDF_OPTIONS },
+      pdf: null,
     };
   }
   const cid = q.customerId || (await resolveId(q.customer)) || null;
@@ -182,6 +187,8 @@ async function initialFrom(
     sections,
     vendorQuotes: vendorQuotesOf(q),
     replaces: "",
+    pdfOptions: normalizePdfOptions(q.pdfOptions),
+    pdf: pdfView(q.pdf, Date.now()),
   };
 }
 

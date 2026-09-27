@@ -93,6 +93,7 @@ import { polygonArea } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
+import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { AState } from "@/app/(app)/design/quick/engine";
 
 /** The Grid editor server actions (D108). */
@@ -925,6 +926,8 @@ export async function createDraftQuoteAction(
       tierMargin: build.tier.margin,
       spec: build.spec,
     });
+    // #222 fix wave 1: a re-promote rewrites what the quote document shows.
+    await scheduleQuotePdf(existing.id);
     await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${existing.id}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
@@ -952,6 +955,7 @@ export async function createDraftQuoteAction(
     console.error("createDraftQuoteAction: quote mint failed", error);
     return { ok: false, error: "Couldn’t create the draft quote — please try again." };
   }
+  await scheduleQuotePdf(q.id);
   await setOptionQuote(project.id, resolvedOptionId, q.id);
   await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${q.id}` });
   revalidatePath(editorPath(projectId));

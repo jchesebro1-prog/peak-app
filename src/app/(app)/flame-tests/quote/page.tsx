@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/session";
+import { pdfView } from "@/lib/quote-pdf/state";
 import { all as allCustomers, type CustomerDoc } from "@/lib/stores/customers";
 import { travelForCustomerVenues } from "@/lib/stores/customers";
 import { get as getQuote } from "@/lib/stores/quotes";
@@ -14,6 +15,9 @@ import { pickContactName, readHandoff, seedVenueOn } from "@/app/(app)/quotes/ne
 import ActionError from "@/components/action-error";
 
 export const metadata = { title: "Flame test quote — Quartzite-6" };
+/** #222: Save/Approve render the proposal PDF in `after()`, inside this budget
+ *  — 120 s (fix wave 1) leaves a cold Chromium start room to finish. */
+export const maxDuration = 120;
 
 /**
  * Flame test QUOTE builder — the auto-priced flame-test quote estimator
@@ -232,6 +236,7 @@ export default async function FlameTestQuotePage({
         rates={rates}
         travelRates={travelRates}
         initial={initial}
+        pdf={editQuote ? pdfView(editQuote.pdf, Date.now()) : null}
         accent={settings.accent || "#7b3f8a"}
       />
     </>
