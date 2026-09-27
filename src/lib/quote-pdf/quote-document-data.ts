@@ -5,6 +5,7 @@ import type { QuoteDocumentProps } from "@/app/(app)/estimator/quote-document";
 import { totals } from "@/app/(app)/estimator/pricing";
 import { PAYMENT_TERMS, type PaymentTerms, type SpecSection, type VendorQuote } from "@/app/(app)/estimator/types";
 import { normalizePdfOptions } from "./pdf-options";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 
 /**
  * A saved quote → the props of the customer QuoteDocument (#222). Mirrors what
@@ -51,7 +52,8 @@ export function quoteDocumentDataFor(
     ? (q.paymentTerms as PaymentTerms)
     : "Unknown";
   return {
-    quoteId: q.id,
+    // #223 — the document prints the estimate number (the id when unnumbered).
+    quoteId: displayQuoteNumber(q),
     revNum: Math.max(1, q.revisions?.length || 1),
     revDateMs: q.updatedAt || q.createdAt || 0,
     custName: (q.customerId && cust?.name) || q.customer || "",

@@ -298,10 +298,13 @@ export type QuoteRevisionVM = {
  */
 export function QuoteRevisions({
   id,
+  number,
   revisions,
   canRestore,
 }: {
   id: string;
+  /** #223 — the estimate number the drawer names the quote by; `id` stays the key. */
+  number?: string;
   revisions: QuoteRevisionVM[];
   canRestore: boolean;
 }) {
@@ -394,7 +397,7 @@ export function QuoteRevisions({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 16, fontWeight: 600 }}>Revision history</div>
                 <div style={{ fontSize: 12, color: "#9aa0ab", marginTop: 2 }}>
-                  Priced snapshots of {id}. Recalling one keeps the current version — it is
+                  Priced snapshots of {number || id}. Recalling one keeps the current version — it is
                   saved as a new revision first.
                 </div>
               </div>

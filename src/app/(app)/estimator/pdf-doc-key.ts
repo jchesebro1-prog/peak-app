@@ -12,6 +12,8 @@ import type { SpecSection, VendorQuote } from "./types";
  * same document — not "Unsaved changes" (#222 T5 review).
  */
 export type PdfDocKeyInput = {
+  /** #223 — the estimate number the document prints (QuoteDocument's quoteId). */
+  quoteNumber?: string;
   projectName: string;
   custName: string;
   customerId: string | null;
@@ -33,6 +35,7 @@ function printedVendorQuotes(sections: SpecSection[], vendorQuotes: VendorQuote[
 
 export function pdfDocKey(i: PdfDocKeyInput): string {
   return JSON.stringify([
+    i.quoteNumber || "",
     i.projectName,
     i.custName,
     i.customerId || "",

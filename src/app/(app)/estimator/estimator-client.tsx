@@ -460,7 +460,7 @@ export default function EstimatorClient({
   /** Result banner for "Move system" — never auto-navigates (the user may
    *  have other unsaved edits on the CURRENT estimate). */
   const [moveNotice, setMoveNotice] = useState<
-    { ok: true; targetId: string; targetName: string } | { ok: false; error: string } | null
+    { ok: true; targetId: string; targetName: string; targetNumber: string } | { ok: false; error: string } | null
   >(null);
   const [custName, setCustName] = useState(initial.custName);
   const [customerId, setCustomerId] = useState(initial.customerId);
@@ -702,6 +702,7 @@ export default function EstimatorClient({
   const docCustName = customerId ? customers.find((c) => c.id === customerId)?.name || custName : custName;
   const docInput = useMemo<PdfDocKeyInput>(
     () => ({
+      quoteNumber: quoteId,
       projectName,
       custName: docCustName,
       customerId,
@@ -714,7 +715,7 @@ export default function EstimatorClient({
       vendorQuotes,
       pdfOptions: pdfOpts,
     }),
-    [projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, vendorQuotes, pdfOpts]
+    [quoteId, projectName, docCustName, customerId, locationId, contactName, quoteNote, assumptions, paymentTerms, sections, vendorQuotes, pdfOpts]
   );
   const docKey = useMemo(() => pdfDocKey(docInput), [docInput]);
   const [savedDoc, setSavedDoc] = useState<PdfDocKeyInput>(docInput);
@@ -839,9 +840,10 @@ export default function EstimatorClient({
         // minted a second quote for the same draft.
         if (res.id) {
           setLoadedId(res.id);
-          setSavedDoc(docAtSave);
+          // #223: this save's render prints the number the server hands back.
+          setSavedDoc({ ...docAtSave, quoteNumber: res.number ?? res.id });
           if (res.pdf) setPdf(res.pdf);
-          setQuoteId(res.id);
+          setQuoteId(res.number ?? res.id);
           // The server may have moved attachments into Blob storage — take its
           // version back so the next save doesn't re-upload the same bytes.
           if (res.vendorQuotes) setVendorQuotes(res.vendorQuotes);
@@ -1228,7 +1230,7 @@ export default function EstimatorClient({
         setSections(list);
         if (movedVq.length) setVendorQuotes((vs) => vs.filter((v) => !movedVqIds.has(v.id)));
         setActiveId((a) => (a === secId ? (list[0] ? list[0].id : null) : a));
-        setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName });
+        setMoveNotice({ ok: true, targetId: res.targetId, targetName: res.targetName, targetNumber: res.targetNumber });
       } else {
         setMoveNotice({ ok: false, error: res.error || "Could not move that system." });
       }
@@ -2572,7 +2574,7 @@ export default function EstimatorClient({
               <span>
                 {moveNotice.ok ? (
                   <>
-                    Moved to {moveNotice.targetName} ({moveNotice.targetId}) —{" "}
+                    Moved to {moveNotice.targetName} ({moveNotice.targetNumber}) —{" "}
                     <a
                       href={`/estimator?id=${moveNotice.targetId}`}
                       style={{ color: "inherit", textDecoration: "underline" }}

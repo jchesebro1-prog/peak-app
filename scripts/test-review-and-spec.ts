@@ -25980,3 +25980,53 @@ async function estimate223WritersAsyncChecks(): Promise<void> {
   const healed = await e223Quotes.get(id("w-intx"));
   ok(e223IsNo(healed?.estNo) && e223IsNo(healer.estNo) && (healed?.estNo ?? 0) < healer.estNo, "#223 writers: …and the next create outside a transaction numbers it (oldest first)");
 }
+
+/* ======================================================================
+   #223 — display sweep A: search + quotes hub + intake + Estimator. The
+   screens are server/client components the harness can't render, so these
+   are landmark guards: the old id-as-label text is gone and the number
+   helpers are wired in. Behaviour of the helpers is asserted in Task 1.
+   ====================================================================== */
+import { quoteDocumentDataFor as e223QuoteDocData } from "@/lib/quote-pdf/quote-document-data";
+import { pdfDocKey as e223PdfDocKey } from "@/app/(app)/estimator/pdf-doc-key";
+import { DEFAULT_PDF_OPTIONS as E223_DEFAULT_PDF_OPTIONS } from "@/lib/quote-pdf/pdf-options";
+function e223Src(rel: string): string {
+  return e223ReadFile(e223Join(process.cwd(), rel), "utf8");
+}
+{
+  const hub = e223Src("src/app/(app)/quotes/page.tsx");
+  ok(!hub.includes("{q.id} · {owner}") && hub.includes("{displayQuoteNumber(q)} · {owner}"), "#223 quotes hub: rows show the estimate number, not the internal id");
+  ok(hub.includes("quoteMatchesSearch(q, searchTerm)") && hub.includes('name="q"'), "#223 quotes hub: a search box filters by number, old id, name and customer");
+  ok(hub.includes("was {q.id}"), "#223 quotes hub: the selected panel shows 'was Q-…' in small type");
+  ok(hub.includes("quoteSearchRank(") && hub.includes("number={displayQuoteNumber(q)}"), "#223 quotes hub: exact-number hits list first; revision history names the number");
+  ok(e223Src("src/app/(app)/quotes/controls.tsx").includes("Priced snapshots of {number || id}"), "#223 quotes hub: the revision-history drawer names the quote by its number");
+  const search = e223Src("src/app/api/search/route.ts");
+  ok(search.includes('listDocsByField("quotes", "estNo"') && search.includes('listDocsByField("leads", "estNo"') && search.includes("quoteMatchesSearch("), "#223 ⌘K: typed numbers are looked up by value; quotes also match by old id");
+  // Designs/surveys/inspections keep their own ids; only the Quotes → Designs span is checked.
+  const quoteGroups = search.slice(search.indexOf('"Quotes",'), search.indexOf('"Designs",'));
+  ok(quoteGroups.length > 0 && !quoteGroups.includes("sub: `${d.id} · ") && quoteGroups.includes("displayLeadNumber("), "#223 ⌘K: quote and opportunity sub-lines show numbers, not ids");
+  ok(search.includes("quoteSearchRank("), "#223 ⌘K: exact-number quote hits rank first");
+  const intake = e223Src("src/app/(app)/quotes/new/intake-form.tsx");
+  ok(!intake.includes("replacing.id") && intake.includes("replacing.number"), "#223 Change type intake names the quote by its number");
+  const est = e223Src("src/app/(app)/estimator/estimator-client.tsx");
+  ok(est.includes("setQuoteId(res.number ?? res.id)") && est.includes("({moveNotice.targetNumber})"), "#223 Estimator: header + move notice show numbers");
+  ok(e223Src("src/app/(app)/estimator/page.tsx").includes("quoteId: displayQuoteNumber(q)"), "#223 Estimator: the header label starts as the quote's number");
+  ok(e223Src("src/app/(app)/estimator/section-card.tsx").includes("{hit.number}"), "#223 Estimator: the move-to picker lists numbers");
+  ok(e223Src("src/app/(app)/estimator/actions.ts").includes("quoteSearchRank("), "#223 Estimator: the move-to picker finds by number and ranks exact hits first");
+
+  // The saved customer PDF (#222) prints the number; an unnumbered quote its id.
+  const docBase = { name: "", customer: "Walk-in", customerId: null, owner: "", updatedAt: 5, createdAt: 5 };
+  const numbered = e223QuoteDocData({ ...docBase, id: "Q-2041", estNo: 1005, estSuffix: 2 } as never, null, { companyName: "", logoDark: null });
+  const unnumbered = e223QuoteDocData({ ...docBase, id: "Q-2042" } as never, null, { companyName: "", logoDark: null });
+  ok(numbered.quoteId === "EST-1005-2" && unnumbered.quoteId === "Q-2042", "#223 saved quote PDF: prints the estimate number, else the internal id");
+  // …and the PDF's fingerprint carries that number, so a renumbered document reads as out of date.
+  const keyBase = {
+    projectName: "P", custName: "C", customerId: null, locationId: null, contactName: "", quoteNote: "", assumptions: "",
+    paymentTerms: "Unknown", sections: [], vendorQuotes: [], pdfOptions: E223_DEFAULT_PDF_OPTIONS,
+  };
+  ok(
+    e223PdfDocKey({ ...keyBase, quoteNumber: "Q-2041" }) !== e223PdfDocKey({ ...keyBase, quoteNumber: "EST-1005" }) &&
+      e223PdfDocKey({ ...keyBase, quoteNumber: "EST-1005" }) === e223PdfDocKey({ ...keyBase, quoteNumber: "EST-1005" }),
+    "#223 pdfDocKey: the printed estimate number is part of the saved-PDF fingerprint"
+  );
+}

@@ -44,6 +44,7 @@ import { normalizePdfOptions, type QuotePdfOptions } from "@/lib/quote-pdf/pdf-o
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
 import type { QuotePdfView } from "@/lib/quote-pdf/state";
 import { activeUsers } from "@/lib/users";
+import { displayQuoteNumber, quoteSearchRank } from "@/lib/estimate-number";
 
 export async function saveEstimatorCustomPartAction(input: {
   sku: string;
@@ -147,6 +148,8 @@ export type SavePayload = {
 export type SaveResult = {
   ok: boolean;
   id: string | null;
+  /** #223 — the saved quote's estimate number, for the header (null when nothing was saved). */
+  number: string | null;
   revNum: number;
   updatedAt: number;
   review: QuoteReview | null;
@@ -429,6 +432,7 @@ export async function saveQuoteAction(
       return {
         ok: false,
         id: null,
+        number: null,
         revNum: 1,
         updatedAt: Date.now(),
         review: null,
@@ -484,6 +488,7 @@ export async function saveQuoteAction(
   return {
     ok: !!q && !statusError,
     id: q?.id ?? null,
+    number: q ? displayQuoteNumber(q) : null,
     revNum: Math.max(1, q?.revisions?.length || 1),
     updatedAt: q?.updatedAt ?? Date.now(),
     review: q?.review ?? null,
@@ -512,16 +517,20 @@ export async function searchQuotesAction(
   limit = 20
 ): Promise<QuoteLite[]> {
   await requireUser();
-  const q = (query || "").trim().toLowerCase();
+  const q = (query || "").trim();
   const pool = (await getAll()).filter((quote) => quote.id !== excludeId);
+  // #223 — the one quote search rule: estimate number (EST-1005, 1005), old
+  // id, name, customer; exact-number hits first, newest-first within a tier.
   const matched = q
-    ? pool.filter(
-        (quote) =>
-          quote.name.toLowerCase().includes(q) || quote.customer.toLowerCase().includes(q)
-      )
+    ? pool
+        .map((quote, i) => ({ quote, i, r: quoteSearchRank(quote, q) }))
+        .filter((x): x is { quote: Quote; i: number; r: number } => x.r !== null)
+        .sort((a, b) => a.r - b.r || a.i - b.i)
+        .map((x) => x.quote)
     : pool;
   return matched.slice(0, Math.max(1, limit)).map((quote) => ({
     id: quote.id,
+    number: displayQuoteNumber(quote),
     name: quote.name,
     customer: quote.customer,
     status: quote.status,
@@ -532,7 +541,7 @@ export async function searchQuotesAction(
 export type MoveSystemTarget = { kind: "new" } | { kind: "existing"; quoteId: string };
 
 export type MoveSystemResult =
-  | { ok: true; targetId: string; targetName: string }
+  | { ok: true; targetId: string; targetName: string; targetNumber: string }
   | { ok: false; error: string };
 
 /**
@@ -602,7 +611,7 @@ export async function moveSystemToEstimateAction(
     // #222 fix wave 1: the target's document gained a section.
     await scheduleQuotePdf(updated.id);
     refresh();
-    return { ok: true, targetId: updated.id, targetName: updated.name };
+    return { ok: true, targetId: updated.id, targetName: updated.name, targetNumber: displayQuoteNumber(updated) };
   }
 
   const t = totals([moved], 0);
@@ -641,7 +650,7 @@ export async function moveSystemToEstimateAction(
   } as QuotePatch);
   await scheduleQuotePdf(created.id);
   refresh();
-  return { ok: true, targetId: created.id, targetName: (withContact || created).name };
+  return { ok: true, targetId: created.id, targetName: (withContact || created).name, targetNumber: displayQuoteNumber(withContact || created) };
 }
 
 /** Header fields persisted immediately as they change (prototype behavior). */

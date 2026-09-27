@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { searchDocs } from "@/db/doc-store";
+import { listDocsByField, searchDocs, type Doc } from "@/db/doc-store";
+import {
+  displayLeadNumber,
+  displayQuoteNumber,
+  leadNumberMatches,
+  parseEstimateNumber,
+  quoteSearchRank,
+  quoteMatchesSearch,
+  quoteNumberMatches,
+  type QuoteNumberFields,
+} from "@/lib/estimate-number";
 import { allCompanies, getCompanies } from "@/lib/identity/companies";
 import { allContacts, displayName, emailsForContacts } from "@/lib/identity/contacts";
 import { normalizeRecording, recordingStatusChip, type RecordingRecord } from "@/lib/stores/recordings";
@@ -31,6 +41,10 @@ function matches(q: string, ...fields: Array<unknown>): boolean {
     (f) => typeof f === "string" && f.toLowerCase().includes(q)
   );
 }
+
+/** #223 — a doc as the estimate-number helpers read it. */
+type NumberedDoc = QuoteNumberFields & { id: string; name?: string | null; customer?: string | null };
+const asNumbered = (d: Doc): NumberedDoc => d as unknown as NumberedDoc;
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -64,18 +78,54 @@ export async function GET(req: Request) {
     if (items.length) groups.push({ label, items: items.slice(0, LIMIT_PER_GROUP) });
   };
 
+  // #223 — a quote answers to its estimate number (FLM-1002), its OLD
+  // internal id (Q-2041) and its name/customer. The doc text holds
+  // `"estNo": 1002`, never "FLM-1002", so a typed number is also looked up
+  // by value (indexed on doc->>'estNo'). Leads are listed here only when a
+  // typed number names them (OPP-1002, or any prefix on the same number).
+  const parsedNo = parseEstimateNumber(q);
+  const [numberedQuotes, numberedLeads] = parsedNo
+    ? await Promise.all([
+        listDocsByField("quotes", "estNo", [String(parsedNo.estNo)]).then((rows) =>
+          rows.filter((d) => quoteNumberMatches(asNumbered(d), parsedNo))
+        ),
+        listDocsByField("leads", "estNo", [String(parsedNo.estNo)]).then((rows) =>
+          rows.filter((d) => leadNumberMatches(asNumbered(d), parsedNo))
+        ),
+      ])
+    : [[], []];
+  const seenQuote = new Set<string>();
+  const quoteHits = [...numberedQuotes, ...quotes.filter((d) => quoteMatchesSearch(asNumbered(d), q))]
+    .filter((d) => {
+      if (seenQuote.has(d.id)) return false;
+      seenQuote.add(d.id);
+      return true;
+    })
+    // Exact-number hits first (stable: the candidate order holds within a tier).
+    .map((d, i) => ({ d, i, r: quoteSearchRank(asNumbered(d), q) ?? Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.d);
   add(
     "Quotes",
-    quotes
-      .filter((d) => matches(q, d.id, d.name, d.customer))
-      .map((d) => ({
-        id: d.id,
-        title: String(d.name || d.id),
-        sub: `${d.id} · ${String(d.customer || "")}`,
-        href: `/quotes?id=${encodeURIComponent(d.id)}`,
-        letter: "Q",
-        color: "var(--accent)",
-      }))
+    quoteHits.map((d) => ({
+      id: d.id,
+      title: String(d.name || d.id),
+      sub: `${displayQuoteNumber(asNumbered(d))} · ${String(d.customer || "")}`,
+      href: `/quotes?id=${encodeURIComponent(d.id)}`,
+      letter: "Q",
+      color: "var(--accent)",
+    }))
+  );
+  add(
+    "Opportunities",
+    numberedLeads.map((d) => ({
+      id: d.id,
+      title: String(d.org || d.contact || d.id),
+      sub: `${displayLeadNumber(asNumbered(d))} · ${String(d.interest || "")}`,
+      href: `/leads?lead=${encodeURIComponent(d.id)}`,
+      letter: "O",
+      color: "var(--accent)",
+    }))
   );
   add(
     "Designs",

@@ -80,7 +80,8 @@ export type IntakeInitial = {
   name: string;
 };
 
-export type IntakeReplacing = { id: string; type: ServiceType; lines: number; editPath: string };
+/** `id` keys the replace; `number` is what the intake shows (#223). */
+export type IntakeReplacing = { id: string; number: string; type: ServiceType; lines: number; editPath: string };
 
 /** Validate the intake's seed against the directory: an unknown customer →
  *  blank form; a venue/contact not on the customer → "skip" (no fallback —

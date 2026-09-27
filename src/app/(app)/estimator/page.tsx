@@ -28,6 +28,7 @@ import { pickContactName, pickVenueId, readHandoff, systemQuoteName } from "@/ap
 import { mergedConsultingAssumptions } from "@/lib/consulting-stages";
 import { pdfView } from "@/lib/quote-pdf/state";
 import EstimatorClient from "./estimator-client";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import type {
   AiSource,
   CustomerLite,
@@ -156,7 +157,8 @@ async function initialFrom(
       : null;
   return {
     loadedId: q.id,
-    quoteId: q.id,
+    // #223: the header label — the estimate number; `loadedId` stays the key.
+    quoteId: displayQuoteNumber(q),
     status: q.status,
     review: q.review || rvNone(),
     // Normalized on read by the quotes store (normalizeQuotePipeline) — a

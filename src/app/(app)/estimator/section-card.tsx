@@ -545,7 +545,7 @@ export default function SectionCard(p: SectionCardProps) {
               <input
                 value={moveQuery}
                 onChange={(e) => setMoveQuery(e.target.value)}
-                placeholder="Search estimates by name or customer…"
+                placeholder="Search estimates by number, name or customer…"
                 style={{ ...PORTAL_FIELD, fontFamily: "var(--font-ui)", fontSize: 12.5 }}
               />
 
@@ -591,7 +591,7 @@ export default function SectionCard(p: SectionCardProps) {
                       {hit.name}
                     </span>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "#aab0bb" }}>
-                      {hit.id}
+                      {hit.number}
                       {hit.customer ? " · " + hit.customer : ""}
                       {" · " + (hit.status.charAt(0).toUpperCase() + hit.status.slice(1))}
                     </span>
