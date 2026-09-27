@@ -24193,3 +24193,136 @@ async function venues216T7FixAsyncChecks(): Promise<void> {
     await removeCustomer(CID);
   }
 }
+
+/* ======================================================================
+   Documents (#218) — Task 1: file rules, categories, access rules. Pure.
+   ====================================================================== */
+import {
+  MAX_DOCUMENT_BYTES as d218Max, blockedExtension as d218BlockedExt, checkDocumentBytes as d218CheckBytes,
+  checkDocumentName as d218CheckName, safeFileName as d218Safe, displayFileName as d218Display,
+  titleFromFileName as d218Title, attachmentDisposition as d218Disp, documentDownloadHeaders as d218Headers,
+  newUploadKey as d218NewKey, isUploadKey as d218IsKey, documentBlobPath as d218Path, blobPathInScope as d218InScope,
+  parseUploadPayload as d218Payload, parseUploadKey as d218PayloadKey, uploadGrantError as d218GrantErr,
+  formatBytes as d218Bytes,
+} from "@/lib/document-files";
+import {
+  SEED_DOCUMENT_CATEGORIES as d218Seed, resolveDocumentCategories as d218Resolve, mergeDocumentCategories as d218Merge,
+  normalizeCategory as d218Norm, uploadCategory as d218UploadCat, activeDocumentCategories as d218Active,
+  categoryLabel as d218CatLabel,
+} from "@/lib/document-categories";
+import {
+  filterDocuments as d218Filter, portalCanSee as d218PortalSee, resolveDocumentScope as d218Scope,
+  documentRows as d218Rows, groupForPortal as d218Group, customerUploadBell as d218Bell, cleanMime as d218Mime,
+  type DocumentRecord as D218Doc,
+} from "@/lib/document-rules";
+
+{
+  const b = (...xs: number[]) => new Uint8Array(xs);
+  ok(d218Max === 100 * 1024 * 1024, "#218 files: the cap is 100 MB");
+  ok(d218BlockedExt("setup.exe") === "exe" && d218BlockedExt("SETUP.EXE") === "exe", "#218 files: .exe is blocked in any case");
+  ok(d218BlockedExt("plan.pdf.exe") === "exe" && d218BlockedExt("plan.exe.pdf") === "exe", "#218 files: every dot-separated suffix is checked (double extensions)");
+  ok(d218BlockedExt("run.sh. ") === "sh" && d218BlockedExt(".sh") === "sh", "#218 files: trailing dots/spaces and a bare dotfile extension are still caught");
+  ok(d218BlockedExt("README") === null && d218BlockedExt("Stage plot.pdf") === null && d218BlockedExt("show.d3") === null, "#218 files: no extension and ordinary files pass");
+  ok(d218BlockedExt("C:\\Users\\x\\tool.ps1") === "ps1" && d218BlockedExt("dir/app.dmg") === "dmg", "#218 files: a path-shaped name is judged by its base name");
+  ok(d218CheckBytes(b(0x4d, 0x5a, 0x90, 0x00))?.includes("Windows program") === true, "#218 files: MZ bytes are refused");
+  ok(d218CheckBytes(b(0x7f, 0x45, 0x4c, 0x46, 2)) !== null && d218CheckBytes(b(0xcf, 0xfa, 0xed, 0xfe)) !== null && d218CheckBytes(b(0xfe, 0xed, 0xfa, 0xce)) !== null && d218CheckBytes(b(0xca, 0xfe, 0xba, 0xbe)) !== null, "#218 files: ELF, Mach-O and fat binaries are refused");
+  ok(d218CheckBytes(b(0x23, 0x21, 0x2f))?.includes("script") === true, "#218 files: a #! script is refused");
+  ok(d218CheckBytes(b(0x25, 0x50, 0x44, 0x46)) === null && d218CheckBytes(b()) === null && d218CheckBytes(b(0x4d)) === null, "#218 files: a PDF, empty bytes and a lone M pass");
+  ok(d218CheckName("a.pdf", d218Max + 1)?.includes("over 100 MB") === true && d218CheckName("a.pdf", 0)?.includes("empty") === true && d218CheckName("a.bat", 10)?.includes("program or script") === true && d218CheckName("a.pdf", 10) === null, "#218 files: the preflight refuses size, empty and blocked names");
+  ok(d218Safe("Stage Plot (v2).pdf") === "Stage_Plot_v2_.pdf" && d218Safe("../../etc/passwd") === "passwd" && d218Safe("..hidden") === "hidden" && d218Safe("") === "file", "#218 files: safeFileName is path-safe");
+  ok(d218Display("a\r\nb.pdf") === "ab.pdf" && d218Display("  ") === "file", "#218 files: control characters never reach a stored name");
+  ok(d218Title("Stage plot v2.pdf") === "Stage plot v2" && d218Title("README") === "README", "#218 files: the default title drops the extension");
+  ok(d218Disp('Plan "A".pdf') === `attachment; filename="Plan _A_.pdf"; filename*=UTF-8''Plan%20%22A%22.pdf`, "#218 files: Content-Disposition is attachment with an escaped ASCII name and the UTF-8 name");
+  ok(d218Disp("Tom's (v2).pdf").endsWith("filename*=UTF-8''Tom%27s%20%28v2%29.pdf"), "#218 files: RFC 5987 escapes ' ( )");
+  const h = d218Headers("x.html");
+  ok(h["content-type"] === "application/octet-stream" && h["x-content-type-options"] === "nosniff" && h["cache-control"] === "private, no-store" && h["content-disposition"].startsWith("attachment;"), "#218 files: downloads are octet-stream attachments, nosniff, no-store");
+
+  const k = d218NewKey();
+  ok(d218IsKey(k) && /^UP-[0-9a-f]{16}$/.test(k) && d218NewKey() !== k && !d218IsKey("UP-../x") && !d218IsKey(null), "#218 files: upload keys are UP- + 16 hex");
+  const K = "UP-0123456789abcdef";
+  ok(d218Path("lakefront", K, "Stage Plot.pdf") === `documents/lakefront/${K}/Stage_Plot.pdf`, "#218 files: the blob path is documents/<customer>/<key>/<file>");
+  ok(d218Path("TEST218:co a", K, "x.pdf") === `documents/TEST218_co_a/${K}/x.pdf`, "#218 files: an odd customer id becomes one safe segment");
+  ok(d218InScope(`documents/lakefront/${K}/Stage_Plot-Ab12Cd.pdf`, "lakefront", K), "#218 files: a Blob-suffixed name under the key is in scope");
+  ok(!d218InScope(`documents/other/${K}/x.pdf`, "lakefront", K) && !d218InScope("documents/lakefront/UP-ffffffffffffffff/x.pdf", "lakefront", K), "#218 files: another customer's or another upload's path is refused");
+  ok(!d218InScope(`documents/lakefront/${K}/../x.pdf`, "lakefront", K) && !d218InScope(`documents/lakefront/${K}/sub/x.pdf`, "lakefront", K) && !d218InScope(`documents/lakefront/${K}/`, "lakefront", K) && !d218InScope(42, "lakefront", K), "#218 files: traversal, nesting, an empty name and a non-string are refused");
+  ok(d218Payload(JSON.stringify({ customerId: "lakefront", uploadKey: K }))?.customerId === "lakefront" && d218Payload("{") === null && d218Payload(JSON.stringify({ customerId: "", uploadKey: K })) === null && d218Payload(JSON.stringify({ customerId: "x", uploadKey: "PD-1" })) === null && d218Payload(null) === null, "#218 files: the upload payload must carry a company and a real upload key");
+  ok(d218PayloadKey(JSON.stringify({ uploadKey: K })) === K && d218PayloadKey(JSON.stringify({ uploadKey: "x" })) === null && d218PayloadKey("null") === null, "#218 files: the portal payload needs only its upload key");
+  ok(d218GrantErr(`documents/lakefront/${K}/a.pdf`, "lakefront", K) === null && d218GrantErr(`documents/northridge/${K}/a.pdf`, "lakefront", K) !== null, "#218 files: an upload grant refuses a path that does not match its company and key");
+  ok(d218Bytes(512) === "512 B" && d218Bytes(1536) === "1.5 KB" && d218Bytes(d218Max) === "100 MB", "#218 files: sizes read as B / KB / MB");
+
+  const seed = d218Resolve(undefined);
+  ok(seed.map((c) => c.label).join("|") === "Drawings|Show files|User data|Forms|Photos|Contracts|Other" && seed.every((c, i) => c.order === i && !c.archived), "#218 categories: the seed list");
+  ok(d218Seed.length === 7 && d218Resolve([]).length === 7, "#218 categories: an empty stored list reads as the seed");
+  const cleaned = d218Resolve([{ key: "drawings", label: " Plans ", order: 1 }, { key: "BAD KEY", label: "x", order: 0 }, { key: "drawings", label: "dupe", order: 2 }, { key: "other", label: "Misc", order: 0, archived: true }]);
+  ok(cleaned.map((c) => c.key).join(",") === "other,drawings" && cleaned[1].label === "Plans" && !cleaned[0].archived, "#218 categories: bad and duplicate keys drop, labels trim, Other is never archived, order re-numbers");
+  ok(d218Resolve([{ key: "drawings", label: "Drawings", order: 0 }]).map((c) => c.key).join(",") === "drawings,other", "#218 categories: Other is always present");
+  ok(d218Norm(seed, "photos") === "photos" && d218Norm(seed, "nope") === "other" && d218Norm(seed, 7) === "other", "#218 categories: an unknown key reads as Other");
+  const withArchived = d218Resolve([{ key: "photos", label: "Photos", order: 0, archived: true }, { key: "other", label: "Other", order: 1 }]);
+  ok(d218Norm(withArchived, "photos") === "photos" && d218UploadCat(withArchived, "photos") === "other" && d218Active(withArchived).map((c) => c.key).join(",") === "other", "#218 categories: an archived key still labels old files but new uploads fall back to Other");
+  ok(d218CatLabel(seed, "show_files") === "Show files" && d218CatLabel(seed, "gone") === "Other", "#218 categories: labels resolve, unknown reads Other");
+  const m1 = d218Merge(seed, [{ key: "other", label: "Other" }, { key: "drawings", label: "Plans & drawings" }, { label: "Rider" }]);
+  ok(m1.ok && m1.categories.map((c) => c.key).join(",") === "other,drawings,rider,show_files,user_data,forms,photos,contracts" && m1.categories[1].label === "Plans & drawings", "#218 categories: rename, reorder and add; a new key is minted from the label");
+  ok(m1.ok && m1.categories.slice(3).every((c) => c.archived === true) && !m1.categories[0].archived && !m1.categories[2].archived, "#218 categories: rows left out are archived, never dropped");
+  const m2 = d218Merge(seed, [{ key: "drawings", label: "Drawings" }, { label: "Drawings 2" }, { label: "Drawings 2" }]);
+  ok(!m2.ok && m2.error.includes("Drawings 2"), "#218 categories: two active categories can't share a name");
+  const m3 = d218Merge(seed, [{ key: "other", label: "Other", archived: true }]);
+  ok(!m3.ok && m3.error.includes("can't be archived"), "#218 categories: Other can't be archived");
+  ok(!d218Merge(seed, [{ key: "invented", label: "X" }]).ok, "#218 categories: a key the list doesn't have is refused (keys are minted server-side)");
+  const m5 = d218Merge(seed, [{ label: "Drawings" }]);
+  ok(m5.ok && m5.categories[0].key === "drawings_2", "#218 categories: a minted key never reuses a stored one");
+  ok(!d218Merge(seed, [{ key: "drawings", label: "" }]).ok && !d218Merge(seed, "x").ok, "#218 categories: blank names and junk input are refused");
+
+  const base: D218Doc = { id: "DOC-1", title: "Plot", fileName: "plot.pdf", mime: "application/pdf", size: 10, blobPath: "documents/co/UP-0123456789abcdef/plot.pdf", category: "drawings", visibility: "internal", source: "team", customerId: "co", siteId: null, projectId: null, notes: "", uploadedBy: "Jeff", uploadedAt: 100, seenByTeamAt: 100 };
+  const docs: D218Doc[] = [
+    base,
+    { ...base, id: "DOC-2", visibility: "shared", siteId: "v1", uploadedAt: 300 },
+    { ...base, id: "DOC-3", source: "customer", visibility: "shared", siteId: "v1", projectId: "P-1", seenByTeamAt: null, uploadedAt: 200, category: "forms" },
+    { ...base, id: "DOC-4", customerId: "other", visibility: "shared" },
+    { ...base, id: "DOC-5", visibility: "shared", deleted: true },
+    { ...base, id: "DOC-6", source: "customer", visibility: "internal", uploadedAt: 50, seenByTeamAt: null },
+  ];
+  const ids = (xs: { id: string }[]) => xs.map((d) => d.id).join(",");
+  ok(ids(d218Filter(docs, { customerId: "co" })) === "DOC-1,DOC-2,DOC-3,DOC-6", "#218 rules: deleted rows and other companies drop out");
+  ok(ids(d218Filter(docs, { customerId: "co", siteId: "v1" })) === "DOC-2,DOC-3" && ids(d218Filter(docs, { customerId: "co", siteId: null })) === "DOC-1,DOC-6", "#218 rules: venue filter, and null = company-wide files");
+  ok(ids(d218Filter(docs, { customerId: "co", projectId: "P-1" })) === "DOC-3" && ids(d218Filter(docs, { customerId: "co", visibility: "internal" })) === "DOC-1,DOC-6" && ids(d218Filter(docs, { customerId: "co", category: "forms" })) === "DOC-3", "#218 rules: project, visibility and category filters");
+  ok(ids(d218Filter(docs, { customerId: "co", portal: true })) === "DOC-2,DOC-3,DOC-6" && d218Filter(docs, { portal: true }).length === 0, "#218 rules: the portal sees shared files and the customer's own uploads, never internal team files; no company = nothing");
+  ok(d218PortalSee(docs[1], "co") && d218PortalSee(docs[5], "co"), "#218 access: shared and customer-uploaded files are downloadable by that company");
+  ok(!d218PortalSee(docs[0], "co") && !d218PortalSee(docs[3], "co") && !d218PortalSee(docs[4], "co") && !d218PortalSee(docs[1], "other") && !d218PortalSee(null, "co") && !d218PortalSee(docs[1], ""), "#218 access: an internal file, another company's file, a deleted file, no session are all refused");
+
+  const facts = { customerExists: true, siteIds: ["v1", "v2"], project: { id: "P-1", customerId: "co", locationId: "v2" } };
+  const s1 = d218Scope({ projectId: "P-1" }, "co", facts);
+  ok(s1.ok && s1.siteId === "v2" && s1.projectId === "P-1", "#218 scope: a project file defaults to the project's venue");
+  const s2 = d218Scope({ siteId: "v1", projectId: "P-1" }, "co", facts);
+  ok(s2.ok && s2.siteId === "v1", "#218 scope: an explicit venue wins over the project's");
+  ok(!d218Scope({ siteId: "vX" }, "co", facts).ok, "#218 scope: a venue of another company is refused");
+  ok(!d218Scope({ projectId: "P-1" }, "co", { ...facts, project: { id: "P-1", customerId: "other", locationId: null } }).ok, "#218 scope: a project of another company is refused");
+  ok(!d218Scope({ projectId: "P-9" }, "co", { ...facts, project: null }).ok && !d218Scope({}, "co", { ...facts, customerExists: false }).ok, "#218 scope: a missing project or company is refused");
+  const s3 = d218Scope({ siteId: "", projectId: "" }, "co", facts);
+  ok(s3.ok && s3.siteId === null && s3.projectId === null, "#218 scope: blanks mean company-wide");
+
+  const rows = d218Rows(d218Filter(docs, { customerId: "co" }), { categories: seed, venues: [{ id: "v1", label: "Main Stage" }], projects: [{ id: "P-1", label: "Rigging refit" }] });
+  ok(ids(rows) === "DOC-2,DOC-3,DOC-1,DOC-6", "#218 rows: newest first");
+  const r3 = rows.find((r) => r.id === "DOC-3")!;
+  ok(r3.isNew && r3.siteLabel === "Main Stage" && r3.projectLabel === "Rigging refit" && r3.categoryLabel === "Forms" && r3.sizeLabel === "10 B", "#218 rows: labels resolve; an unseen customer upload is New");
+  const r1 = rows.find((r) => r.id === "DOC-1")!;
+  ok(!r1.isNew && r1.siteLabel === "", "#218 rows: team files are never New; company-wide files carry no venue label");
+  const groups = d218Group(docs, "co", seed, [{ id: "v1", label: "Main Stage" }]);
+  ok(groups.map((g) => g.venueLabel).join("|") === "Company-wide|Main Stage", "#218 portal: company-wide first, then venues in order");
+  ok(groups[1].categories.map((c) => c.label).join("|") === "Drawings|Forms" && ids(groups[0].categories[0].docs) === "DOC-6", "#218 portal: grouped by category within a venue; internal team files never appear");
+  const bell = d218Bell([...docs, { ...base, id: "DOC-7", customerId: "b", source: "customer", seenByTeamAt: null, uploadedAt: 900 }]);
+  ok(bell.map((x) => `${x.customerId}:${x.count}`).join(",") === "b:1,co:2", "#218 bell: one item per company with unseen customer uploads, newest first");
+  ok(d218Mime("application/pdf") === "application/pdf" && d218Mime("text/html\r\nX: y") === "application/octet-stream" && d218Mime("") === "application/octet-stream", "#218 rules: the browser MIME is informational and sanitized");
+}
+
+/* Documents (#218) — Task 1 hardening: header-safe names, linear-time trims. */
+{
+  const lone = "plan\uD800.pdf";
+  let disp = "";
+  try { disp = d218Disp(lone); } catch { disp = "THREW"; }
+  ok(disp.startsWith('attachment; filename="plan.pdf"') && d218Display(lone) === "plan.pdf" && d218Disp("\u{1F3AD} show.pdf").includes("%F0%9F%8E%AD"), "#218 files: a lone surrogate is dropped (never throws in the header); a real emoji survives");
+  const t0 = Date.now();
+  const run = "a" + " .".repeat(50_000) + "x";
+  const r1 = d218BlockedExt(run);
+  const r2 = d218Safe("a" + "_".repeat(50_000) + "b");
+  ok(r1 === null && r2 === "a" && Date.now() - t0 < 500, `#218 files: long dot/space/underscore runs are trimmed in linear time (${Date.now() - t0} ms)`);
+}
