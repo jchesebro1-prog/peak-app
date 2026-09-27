@@ -142,6 +142,7 @@ export default function DesignClient({
   const [scope, setScope] = useState<string>("all"); // 'mine' | 'all' | owner name
   const [promoteToast, setPromoteToast] = useState(false);
   const [promotedId, setPromotedId] = useState<string | null>(null);
+  const [promotedNo, setPromotedNo] = useState<string | null>(null);
   const [promoteError, setPromoteError] = useState<string | null>(null);
   /** The last refused promote was an incomplete estimate (D319) — offer the Equipment map. */
   const [promoteNeedsPart, setPromoteNeedsPart] = useState(false);
@@ -207,6 +208,7 @@ export default function DesignClient({
         return;
       }
       setPromotedId(res.quoteId);
+      setPromotedNo(res.quoteNumber);
       setPromoteToast(true);
       router.refresh();
     });
@@ -755,7 +757,7 @@ export default function DesignClient({
         <div style={{ position: "fixed", left: "50%", bottom: 26, transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 13, background: "#16181d", color: "#fff", padding: "13px 16px", borderRadius: 12, boxShadow: "0 8px 28px rgba(0,0,0,.22)", zIndex: 60, maxWidth: "92vw" }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#5fd29a", flexShrink: 0 }} />
           <span style={{ fontSize: 13, lineHeight: 1.4 }}>
-            Design linked to quote <b style={{ fontFamily: MONO }}>{promotedId}</b>
+            Design linked to quote <b style={{ fontFamily: MONO }}>{promotedNo ?? promotedId}</b>
           </span>
           <Link href={`/estimator?id=${encodeURIComponent(promotedId || "")}`} style={{ fontSize: 13, fontWeight: 600, color: "#fff", textDecoration: "underline", whiteSpace: "nowrap" }}>
             Open quote

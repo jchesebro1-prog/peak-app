@@ -1,6 +1,7 @@
 import { getDoc, insertWithPrefixedId, listDocs, patchDoc, softDeleteDoc } from "@/db/doc-store";
 import { withQuoteLock } from "@/db";
 import type { QuoteReview } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import {
   approvalIsStale,
   openChecklistItems,
@@ -520,6 +521,8 @@ type QuoteLike = {
   contact?: unknown;
   status?: string;
   quoteType?: string;
+  estNo?: number | null;
+  estSuffix?: number | null;
   consulting?: ConsultingQuotePayload;
 };
 
@@ -691,6 +694,9 @@ export async function applyEngagementStageAction(
   quoteId: string
 ): Promise<void> {
   if (action.kind === "close") {
+    // #223 — the decision names the quote by its estimate number.
+    const lost = await getDoc<QuoteLike>("quotes", quoteId);
+    const lostNo = lost ? displayQuoteNumber(lost) : quoteId;
     await patchEngagement(engagementId, (d) => {
       d.status = "closed";
       d.decisions.unshift({
@@ -698,7 +704,7 @@ export async function applyEngagementStageAction(
         at: Date.now(),
         by: "System",
         decision: "Proposal lost",
-        context: `Consulting quote ${quoteId} was marked lost while this engagement was still at Proposal sent.`,
+        context: `Consulting quote ${lostNo} was marked lost while this engagement was still at Proposal sent.`,
       });
     });
     return;
@@ -942,7 +948,7 @@ export async function attachQuoteToEngagement(
       id: uid("dc-"),
       at: Date.now(),
       by: me.name,
-      decision: `Proposal attached: ${quoteId}`,
+      decision: `Proposal attached: ${displayQuoteNumber(q)}`,
       context: "Linked to an existing consulting quote from the Consulting hub (#135).",
     });
   });

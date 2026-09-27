@@ -26060,3 +26060,18 @@ function e223Src(rel: string): string {
   const portalPdf = e223Src("src/app/portal/quotes/[id]/pdf/route.ts");
   ok(teamPdf.includes("pdfFileName(displayQuoteNumber(q), rev)") && portalPdf.includes("pdfFileName(displayQuoteNumber(q), src.rev)") && teamPdf.includes("getQuote(id)"), "#223 saved quote PDF downloads (team + portal) are named by number");
 }
+
+/* ======================================================================
+   #223 — display sweep C: Grid, Designs/Home promote, Specs, engagements.
+   ====================================================================== */
+{
+  const ed = e223Src("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId"), "#223 Grid editor: 'Update draft quote' names the number");
+  ok(!e223Src("src/app/(app)/design/grid/[id]/actions.ts").includes("quoted as ${q.id}"), "#223 Grid revisions note the quote by number");
+  ok(e223Src("src/app/(app)/design/grid/[id]/set/page.tsx").includes("optionQuoteNo"), "#223 drawing set title block prints the number");
+  ok(e223Src("src/app/(app)/design/designs/design-client.tsx").includes("{promotedNo ?? promotedId}"), "#223 Designs: 'linked to quote' shows the number");
+  ok(e223Src("src/app/(app)/home-my-designs.tsx").includes("{promotedNo ?? promoted}"), "#223 Home: 'Added to Quotes as' shows the number");
+  ok(e223Src("src/app/(app)/design/specs/[id]/header-fields.tsx").includes("quoteNumber || s.quoteId"), "#223 Spec builder: source line names the quote's number");
+  ok(e223Src("src/app/(app)/design/engagements/view.tsx").includes("Quote {q.number}"), "#223 engagement overview names the proposal by number");
+  ok(e223Src("src/app/(app)/design/engagements/actions.ts").includes("findQuoteIdByNumberOrId("), "#223 engagement quote fields accept an estimate number or an old id");
+}

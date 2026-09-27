@@ -4,6 +4,7 @@ import { getEngagement } from "@/lib/stores/engagements";
 import { allSections } from "@/lib/stores/spec-sections";
 import { specsForEngagement } from "@/lib/stores/generated-specs";
 import { getAll as getAllQuotes } from "@/lib/stores/quotes";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import SpecGenerator from "./generator";
 
 export const metadata = { title: "Bid Specification — Quartzite-6" };
@@ -50,7 +51,7 @@ export default async function SpecPage({
         q.id === eng.quoteId ||
         (eng.companyId && q.customerId === eng.companyId)
     )
-    .map((q) => ({ id: q.id, name: q.name, customer: q.customer, value: q.value }));
+    .map((q) => ({ id: q.id, number: displayQuoteNumber(q), name: q.name, customer: q.customer, value: q.value }));
 
   return (
     <SpecGenerator

@@ -18,6 +18,7 @@ import {
 import { createProject, removeProject as removeGridProject } from "@/lib/stores/grid-projects";
 import { createDraftQuoteAction } from "../grid/[id]/actions";
 import { quickPromoteCheck } from "@/lib/stores/design-pricing";
+import { quoteNumbersFor } from "@/lib/stores/estimate-numbers";
 import { activeUsers } from "@/lib/users";
 import { createTask, setTaskStatus as setTaskStatusStore, updateTask as updateTaskStore, removeTask as removeTaskStore, STATUSES as TASK_STATUSES, type TaskStatus } from "@/lib/stores/tasks";
 import { applyTaskTemplate } from "@/lib/stores/task-templates";
@@ -58,7 +59,7 @@ export async function createManualDesignAction(): Promise<
 // Punch #75: shared flow lives in promoteDesignToQuote(); this used to be a near-identical duplicate of the other copy, which is how #65's missing tier stamp happened.
 export async function promoteDesignAction(
   id: string
-): Promise<{ ok: true; quoteId: string } | { ok: false; error: string; needsPart?: number }> {
+): Promise<{ ok: true; quoteId: string; quoteNumber: string } | { ok: false; error: string; needsPart?: number }> {
   const user = await requireUser();
   const d = await getDesign(id);
   if (!d) return { ok: false, error: "Design not found." };
@@ -73,7 +74,8 @@ export async function promoteDesignAction(
     await updateDesign(id, { quoteId: result.quoteId });
     revalidatePath("/design/designs");
     revalidatePath("/quotes");
-    return { ok: true, quoteId: result.quoteId };
+    // #223 — the toast names the estimate number; the link keeps the id.
+    return { ok: true, quoteId: result.quoteId, quoteNumber: (await quoteNumbersFor([result.quoteId])).get(result.quoteId) ?? result.quoteId };
   }
 
   // #211 D310/D319/D323: never promote an incomplete estimate.
@@ -89,7 +91,7 @@ export async function promoteDesignAction(
   if (!q) return { ok: false, error: "Design not found." };
   revalidatePath("/design/designs");
   revalidatePath("/quotes");
-  return { ok: true, quoteId: q.id };
+  return { ok: true, quoteId: q.id, quoteNumber: (await quoteNumbersFor([q.id])).get(q.id) ?? q.id };
 }
 
 /**

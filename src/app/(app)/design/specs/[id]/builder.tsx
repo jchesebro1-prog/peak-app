@@ -749,6 +749,7 @@ export default function Builder({
   productRows,
   customerOptions,
   canEdit,
+  sourceQuoteNumber,
 }: {
   doc: SpecDocument;
   section: { id: string; number: string; title: string } | null;
@@ -757,6 +758,8 @@ export default function Builder({
   productRows: SpecProductRow[];
   customerOptions: CustomerComboboxOption[];
   canEdit: boolean;
+  /** #223 — the source quote's estimate number (null: no quote / unknown). */
+  sourceQuoteNumber: string | null;
 }) {
   const router = useRouter();
   const downloadHref = `/api/spec-documents/${encodeURIComponent(doc.id)}/docx`;
@@ -820,7 +823,7 @@ export default function Builder({
           </div>
         )}
 
-        <HeaderCard doc={doc} customerOptions={customerOptions} canEdit={canEdit} />
+        <HeaderCard doc={doc} customerOptions={customerOptions} canEdit={canEdit} sourceQuoteNumber={sourceQuoteNumber} />
 
         {assembled && <FillInsCard docId={doc.id} answers={doc.fillIns} labels={doc.fillInLabels} checklist={assembled.checklist} canEdit={canEdit} />}
 

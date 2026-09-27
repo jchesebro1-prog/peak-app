@@ -94,6 +94,7 @@ import { validateDeviceWire, resolveWireTypes } from "@/lib/catalog-connect";
 import { getSettings } from "@/lib/settings";
 import { create as createQuote, get as getQuote, update as updateQuote } from "@/lib/stores/quotes";
 import { scheduleQuotePdf } from "@/lib/quote-pdf/schedule";
+import { displayQuoteNumber } from "@/lib/estimate-number";
 import type { AState } from "@/app/(app)/design/quick/engine";
 
 /** The Grid editor server actions (D108). */
@@ -928,7 +929,7 @@ export async function createDraftQuoteAction(
     });
     // #222 fix wave 1: a re-promote rewrites what the quote document shows.
     await scheduleQuotePdf(existing.id);
-    await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${existing.id}` });
+    await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${displayQuoteNumber(existing)}` });
     revalidatePath(editorPath(projectId));
     revalidatePath("/quotes");
     revalidatePath("/design/designs");
@@ -957,7 +958,7 @@ export async function createDraftQuoteAction(
   }
   await scheduleQuotePdf(q.id);
   await setOptionQuote(project.id, resolvedOptionId, q.id);
-  await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${q.id}` });
+  await addRevision(projectId, { by: user.name, reason: "quote", note: `${option.name} quoted as ${displayQuoteNumber(q)}` });
   revalidatePath(editorPath(projectId));
   revalidatePath("/quotes");
   revalidatePath("/design/designs");

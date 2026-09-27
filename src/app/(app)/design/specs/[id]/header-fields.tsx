@@ -99,9 +99,10 @@ function blurOnEnter(e: KeyboardEvent<HTMLInputElement>) {
   if (e.key === "Enter") e.currentTarget.blur();
 }
 
-export function sourceText(s: SpecDocSource): string {
-  if (s.kind === "quote") return `From quote ${s.quoteId || s.id || ""}${s.label && s.label !== s.quoteId ? ` — ${s.label}` : ""}`;
-  if (s.kind === "grid") return `From Grid design ${s.id || ""}${s.quoteId ? ` (quote ${s.quoteId})` : ""}`;
+/** #223 — `quoteNumber` is the source quote's estimate number; the id shows when absent. */
+export function sourceText(s: SpecDocSource, quoteNumber?: string | null): string {
+  if (s.kind === "quote") return `From quote ${quoteNumber || s.quoteId || s.id || ""}${s.label && s.label !== s.quoteId ? ` — ${s.label}` : ""}`;
+  if (s.kind === "grid") return `From Grid design ${s.id || ""}${s.quoteId ? ` (quote ${quoteNumber || s.quoteId})` : ""}`;
   return "From scratch — no quantities";
 }
 
@@ -116,10 +117,12 @@ export function HeaderCard({
   doc,
   customerOptions,
   canEdit,
+  sourceQuoteNumber,
 }: {
   doc: SpecDocument;
   customerOptions: CustomerComboboxOption[];
   canEdit: boolean;
+  sourceQuoteNumber?: string | null;
 }) {
   const { err, pending, run } = useSave();
   const [values, setValues] = useState<SpecDocHeader>(doc.header);
@@ -204,7 +207,7 @@ export function HeaderCard({
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
-        <span style={MUTED}>Source: {sourceText(doc.source)}</span>
+        <span style={MUTED}>Source: {sourceText(doc.source, sourceQuoteNumber)}</span>
         {pending && <span style={MUTED}>Saving…</span>}
         {err && (
           <span role="alert" style={ERR}>

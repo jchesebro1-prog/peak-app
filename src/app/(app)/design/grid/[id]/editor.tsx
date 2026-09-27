@@ -265,6 +265,7 @@ export default function GridEditor({
   auto,
   venues,
   canCreate,
+  quoteNumbers,
   symbolCtx,
   activeOptionId,
   linesetDesigns,
@@ -276,6 +277,8 @@ export default function GridEditor({
   recent,
 }: {
   project: ProjectLite;
+  /** #223 — option quoteId → estimate number. */
+  quoteNumbers: Record<string, string>;
   sheets: SheetLite[];
   parts: PartLite[];
   /** Catalog fabric rows with SELL price/sq ft (punch #49) - never cost. */
@@ -1975,7 +1978,7 @@ export default function GridEditor({
               disabled={busy || bomEmpty}
               onClick={() => runQuote(false)}
             >
-              {activeOption.quoteId ? `Update draft quote ${activeOption.quoteId}` : "Create draft quote"}
+              {activeOption.quoteId ? `Update draft quote ${quoteNumbers[activeOption.quoteId] ?? activeOption.quoteId}` : "Create draft quote"}
             </button>
             {incompleteQuote && (
               <div style={{ marginTop: 8, background: "#fbf0ea", border: "1px solid #f0d6cd", borderRadius: 8, padding: "8px 10px", fontSize: 11.5, color: "#a0442b", lineHeight: 1.45 }}>

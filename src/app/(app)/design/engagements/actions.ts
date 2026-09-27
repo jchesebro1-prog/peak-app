@@ -39,6 +39,7 @@ import { getSettings, mergedConsultingDisciplines } from "@/lib/settings";
 import type { Annotation, MeasureUnit } from "@/lib/annotations";
 import { linkVisitToEngagement } from "@/lib/stores/site-visits";
 import { get as getQuote } from "@/lib/stores/quotes";
+import { findQuoteIdByNumberOrId } from "@/lib/stores/estimate-numbers";
 import { get as getCustomer, locationsForId, upsert as upsertCustomer } from "@/lib/stores/customers";
 import { CUSTOMER_TYPES } from "@/app/(app)/companies/lib";
 
@@ -118,11 +119,13 @@ export async function linkInstallQuoteAction(
   quoteId: string | null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireUser();
-  const clean = quoteId ? String(quoteId).trim() : null;
-  if (clean) {
+  const typed = quoteId ? String(quoteId).trim() : "";
+  // #223: accept an estimate number (EST-1005) as well as an internal id.
+  const clean = typed ? await findQuoteIdByNumberOrId(typed) : null;
+  if (typed) {
     // #35: validate the reference — the field used to accept any string.
-    const q = await getQuote(clean);
-    if (!q) return { ok: false, error: `No quote ${clean} exists.` };
+    const q = clean ? await getQuote(clean) : null;
+    if (!q) return { ok: false, error: `No quote ${typed} exists.` };
     if (q.quoteType === "consulting")
       return {
         ok: false,
@@ -294,8 +297,11 @@ export async function attachProposalAction(
   quoteId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
-  const clean = String(quoteId || "").trim();
-  if (!clean) return { ok: false, error: "Enter the consulting quote id (Q-…)." };
+  const typed = String(quoteId || "").trim();
+  if (!typed) return { ok: false, error: "Enter the consulting quote number (CON-…) or id (Q-…)." };
+  // #223: resolve a typed estimate number to its quote id; an unknown value
+  // passes through so attachQuoteToEngagement reports it as before.
+  const clean = (await findQuoteIdByNumberOrId(typed)) ?? typed;
   const r = await attachQuoteToEngagement(engId, clean, { name: user.name });
   if (!r.ok) return r;
   return done();
