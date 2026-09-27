@@ -40,6 +40,7 @@ type FlameTestDoc = {
   travel?: unknown;
   trip?: { mode?: string } | null;
   priceOverride?: unknown;
+  priceOverrideSeeded?: unknown;
 } | null;
 
 export default async function FlameTestQuotePage({
@@ -171,7 +172,12 @@ export default async function FlameTestQuotePage({
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
       priceOverride: seedPriceOverride(editQuote.status, editQuote.value, ft && ft.priceOverride),
-      priceOverrideSeeded: seedPriceOverrideIsLegacy(editQuote.status, editQuote.value, ft && ft.priceOverride),
+      priceOverrideSeeded: seedPriceOverrideIsLegacy(
+        editQuote.status,
+        editQuote.value,
+        ft && ft.priceOverride,
+        ft && ft.priceOverrideSeeded
+      ),
     };
   } else if (preCustomer) {
     const cust = customers.find((c) => c.id === preCustomer) || null;

@@ -21662,8 +21662,8 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(/setPriceOverrideSeeded\(false\)/.test(fc) &&
       /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(fc),
     "#217 flame builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
-  ok(/fd\.set\("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded \? "1" : ""\);/.test(fc),
-    "#217 flame builder: the typed total's seeded-ness posts alongside the total itself");
+  ok(!/fd\.set\("priceOverrideSeeded"/.test(fc),
+    "#217 fix wave: the flame builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(fc) &&
       /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(fc),
     "#217 flame builder: Reset to auto also clears the seeded flag");
@@ -21671,13 +21671,14 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217 flame builder: typing into the Total field clears the seeded flag");
   ok(/setPriceText\(""\); \/\/ a new customer is a new price\s*\n\s*setPriceOverrideSeeded\(false\);/.test(fc),
     "#217 flame builder: picking a different customer clears the seeded flag too");
-  ok(/priceOverrideSeeded: seedPriceOverrideIsLegacy\(editQuote\.status, editQuote\.value, ft && ft\.priceOverride\),/.test(fp),
-    "#217 flame page: reopening also seeds whether that typed total is a D286 legacy artifact");
+  ok(/priceOverrideSeeded: seedPriceOverrideIsLegacy\(\s*editQuote\.status,\s*editQuote\.value,\s*ft && ft\.priceOverride,\s*ft && ft\.priceOverrideSeeded\s*\)/.test(fp),
+    "#217 fix wave: the flame page also seeds the D286 legacy flag from the STORED marker, so it's right on every reopen");
 
   const faSrc217 = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/actions.ts"), "utf8");
-  ok(/const priceOverrideSeeded = String\(formData\.get\("priceOverrideSeeded"\) \|\| ""\) === "1";/.test(faSrc217) &&
+  ok(!/formData\.get\("priceOverrideSeeded"\)/.test(faSrc217) &&
+      /deriveSeededMarker\(\{/.test(faSrc217) &&
       /\.\.\.\(r\.priceOverride != null && priceOverrideSeeded \? \{ priceOverrideSeeded: true \} : \{\}\),/.test(faSrc217),
-    "#217 flame save: a seeded typed total is stored flagged, never as a real hand-set price");
+    "#217 fix wave: the flame save derives priceOverrideSeeded from the stored quote, never a posted flag");
 
   ok(seedPriceOverrideIsLegacy217("sent", 821, undefined) === true && seedPriceOverrideIsLegacy217("won", 821.4, null) === true,
     "#217 D286 marker: a pre-#217 sent quote's off-grid reopen-seed is flagged legacy");
@@ -21738,8 +21739,8 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(/setPriceOverrideSeeded\(false\)/.test(rc) &&
       /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(rc),
     "#217 repair builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
-  ok(/fd\.set\("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded \? "1" : ""\);/.test(rc),
-    "#217 repair builder: the typed total's seeded-ness posts alongside the total itself");
+  ok(!/fd\.set\("priceOverrideSeeded"/.test(rc),
+    "#217 fix wave: the repair builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(rc) &&
       /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.serviceMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(rc),
     "#217 repair builder: Reset to auto also clears the seeded flag");
@@ -21751,8 +21752,8 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
   ok(/setPriceOverrideSeeded\(false\)/.test(ic) &&
       /const \[priceOverrideSeeded, setPriceOverrideSeeded\] = useState\(!!initial\.priceOverrideSeeded\);/.test(ic),
     "#217 inspection builder: a priceOverrideSeeded flag tracks an untouched D286 reopen-seed");
-  ok(/fd\.set\("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded \? "1" : ""\);/.test(ic),
-    "#217 inspection builder: the typed total's seeded-ness posts alongside the total itself");
+  ok(!/fd\.set\("priceOverrideSeeded"/.test(ic),
+    "#217 fix wave: the inspection builder no longer posts priceOverrideSeeded — the save action derives it server-side");
   ok(/onReset=\{resetToAuto\}/.test(ic) &&
       /function resetToAuto\(\) \{\s*if \(r\?\.overridden\) setMarginPts\(sliderPts\(r\.effectiveMargin\)\);\s*setPriceText\(""\);\s*setPriceOverrideSeeded\(false\);/.test(ic),
     "#217 inspection builder: Reset to auto also clears the seeded flag");
@@ -21763,12 +21764,13 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
 
   for (const [svc, sub] of [["repairs", "rp"], ["inspections", "insp"]] as const) {
     const pg = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/page.tsx`), "utf8");
-    ok(new RegExp(`priceOverrideSeeded: seedPriceOverrideIsLegacy\\(editQuote\\.status, editQuote\\.value, ${sub} && ${sub}\\.priceOverride\\),`).test(pg),
-      `#217 ${svc} page: reopening also seeds whether that typed total is a D286 legacy artifact`);
+    ok(new RegExp(`priceOverrideSeeded: seedPriceOverrideIsLegacy\\(\\s*editQuote\\.status,\\s*editQuote\\.value,\\s*${sub} && ${sub}\\.priceOverride,\\s*${sub} && ${sub}\\.priceOverrideSeeded\\s*\\)`).test(pg),
+      `#217 fix wave: the ${svc} page also seeds the D286 legacy flag from the STORED marker`);
     const ac = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/actions.ts`), "utf8");
-    ok(/const priceOverrideSeeded = String\(formData\.get\("priceOverrideSeeded"\) \|\| ""\) === "1";/.test(ac) &&
+    ok(!/formData\.get\("priceOverrideSeeded"\)/.test(ac) &&
+        /deriveSeededMarker\(\{/.test(ac) &&
         /\.\.\.\(r\.priceOverride != null && priceOverrideSeeded \? \{ priceOverrideSeeded: true \} : \{\}\),/.test(ac),
-      `#217 ${svc} save: a seeded typed total is stored flagged, never as a real hand-set price`);
+      `#217 fix wave: the ${svc} save derives priceOverrideSeeded from the stored quote, never a posted flag`);
   }
 
   // ---- the repairs-only "below parts price" warning: a typed total under
@@ -21778,4 +21780,67 @@ import { seedPriceOverrideIsLegacy as seedPriceOverrideIsLegacy217 } from "@/lib
     "#217: the shared Total field threads an optional partsSell into typedPriceWarning() for repairs");
   ok(/partsSell=\{r\?\.partsSell/.test(rc),
     "#217 repair builder: the Total field is given the service's partsSell for the below-parts-price warning");
+}
+
+/* ====================================================================
+   #217 fix wave — the D286 priceOverrideSeeded marker is derived on the
+   SERVER (a client can't fake or drop it, and it agrees with itself across
+   every reopen), plus three review-flagged minors on the flame Testing
+   cell and the shared ServiceTotalField.
+   ==================================================================== */
+import { deriveSeededMarker as deriveSeededMarker217 } from "@/lib/service-pricing";
+{
+  // ---- the pure helper itself ----
+  const draftStored217 = { value: 821, status: "sent", priceOverride: undefined, priceOverrideSeeded: undefined };
+  ok(deriveSeededMarker217({ postedOverride: 821, stored: draftStored217 }) === true,
+    "#217 fix wave: a first reopen of a pre-#217 off-grid sent quote (no stored priceOverride yet) flags the marker");
+
+  const secondSave217 = { value: 821, status: "sent", priceOverride: 821, priceOverrideSeeded: true };
+  ok(deriveSeededMarker217({ postedOverride: 821, stored: secondSave217 }) === true,
+    "#217 fix wave: a SECOND save of that same seeded value still flags the marker (the bug: the old code read this as a real hand-set price)");
+
+  ok(deriveSeededMarker217({ postedOverride: 900, stored: secondSave217 }) === false,
+    "#217 fix wave: typing a different total off an already-seeded quote is a real hand-set price — no marker");
+
+  const draftQuote217 = { value: 821, status: "draft", priceOverride: undefined, priceOverrideSeeded: undefined };
+  ok(deriveSeededMarker217({ postedOverride: 821, stored: draftQuote217 }) === false,
+    "#217 fix wave: a draft quote — nobody has seen a price yet — is never flagged");
+
+  const realHandSet217 = { value: 900, status: "sent", priceOverride: 900, priceOverrideSeeded: false };
+  ok(deriveSeededMarker217({ postedOverride: 900, stored: realHandSet217 }) === false,
+    "#217 fix wave: a stored REAL hand-set override (no marker), re-saved unchanged, stays unmarked forever");
+
+  ok(deriveSeededMarker217({ postedOverride: 900, stored: null }) === false,
+    "#217 fix wave: a brand-new quote (nothing stored yet) is never flagged, even when its first typed total happens to equal itself");
+  ok(deriveSeededMarker217({ postedOverride: null, stored: secondSave217 }) === false,
+    "#217 fix wave: no posted override at all is never flagged");
+
+  // ---- client-posted flag ignored: none of the three save actions read it,
+  // and all three derive the marker from deriveSeededMarker() instead ----
+  for (const svc of ["flame-tests", "repairs", "inspections"] as const) {
+    const ac = readFileSync(join(process.cwd(), `src/app/(app)/${svc}/quote/actions.ts`), "utf8");
+    ok(!/formData\.get\("priceOverrideSeeded"\)/.test(ac) && /deriveSeededMarker\(\{/.test(ac) && /get as getQuote/.test(ac),
+      `#217 fix wave: ${svc}'s save action never reads a client-posted priceOverrideSeeded — it looks up the stored quote and derives the marker itself`);
+  }
+
+  // ---- minor (a): the flame Testing cell is a plain text input, normalized
+  // on blur — no rounding mid-keystroke ("12.5" jumping to "13"), and no
+  // native type="number" wipe on a transient state like "1e".
+  const fc217 = readFileSync(join(process.cwd(), "src/app/(app)/flame-tests/quote/controls.tsx"), "utf8");
+  ok(/type="text"\s*\n\s*inputMode="decimal"\s*\n\s*value=\{st\.testing/.test(fc217) &&
+      /onBlur=\{\(\) => blurTesting\(l\.id\)\}/.test(fc217),
+    "#217 fix wave (a): the flame Testing cell is a text input (inputMode=\"decimal\") normalized on blur, not a native number input");
+  ok(/function setTesting\(locId: string, val: string\) \{[\s\S]*?testing: val, on: true[\s\S]*?\n  \}/.test(fc217) &&
+      !/testing: clean/.test(fc217),
+    "#217 fix wave (a): typing into the Testing cell keeps exactly what's typed — no per-keystroke rounding");
+  ok(/function blurTesting\(locId: string\) \{[\s\S]*?normalizeTestingOverride\(cur\.testing\)/.test(fc217),
+    "#217 fix wave (a): the Testing cell normalizes (rounds to a whole dollar, blank = computed) only on blur");
+
+  // ---- minors (b)/(c), in the shared ServiceTotalField so all three
+  // builders get them ----
+  const stf217fix = readFileSync(join(process.cwd(), "src/components/service-total-field.tsx"), "utf8");
+  ok(!/Typed total · auto is/.test(stf217fix) && /Typed total · Reset keeps this margin/.test(stf217fix),
+    "#217 fix wave (b): the typed-total note states what Reset actually does (it parks the slider at the back-solved margin) instead of naming a figure Reset won't reproduce");
+  ok(/disabled \? "—" : String\(Math\.round\(autoTotal\)\)/.test(stf217fix),
+    "#217 fix wave (c): a disabled Total field shows \"—\", never a bare 0 that reads as a real free quote");
 }

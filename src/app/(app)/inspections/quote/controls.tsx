@@ -493,7 +493,8 @@ export function QuoteBuilder({
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
     fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
-    fd.set("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded ? "1" : "");
+    // #217 fix wave: no priceOverrideSeeded post — the save action derives
+    // the marker itself from the stored quote, never from a client flag.
     fd.set(
       "venues",
       JSON.stringify(

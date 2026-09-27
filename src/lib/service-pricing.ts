@@ -344,10 +344,18 @@ export function travelLineShare(i: {
 function seedOverrideInfo(
   status: string,
   value: unknown,
-  saved: unknown
+  saved: unknown,
+  storedSeeded?: unknown
 ): { value: number | null; legacy: boolean } {
   const typed = normalizePriceOverride(saved);
-  if (typed != null) return { value: typed, legacy: false };
+  // #217 fix wave: a real saved priceOverride only reads as "legacy" (a D286
+  // reopen-seed nobody actually typed) when the doc itself already says so.
+  // Without storedSeeded, a SECOND reopen of an already-seeded quote (the
+  // saved priceOverride is now present) would read as a real hand-set price
+  // even though the first reopen correctly flagged it legacy — see
+  // deriveSeededMarker below, which the save actions use instead of
+  // trusting a client-posted flag for the same reason.
+  if (typed != null) return { value: typed, legacy: storedSeeded === true };
   if (status === "draft") return { value: null, legacy: false };
   const v = typeof value === "number" && Number.isFinite(value) ? value : 0;
   if (v <= 0 || v % PRICE_STEP === 0) return { value: null, legacy: false };
@@ -372,6 +380,47 @@ export function seedPriceOverride(status: string, value: unknown, saved: unknown
  * alongside `priceOverride`, so next year's renewal draft (priorHandSetPrice
  * in renewal-outreach.ts) never calls a rounding artifact "hand-set".
  */
-export function seedPriceOverrideIsLegacy(status: string, value: unknown, saved: unknown): boolean {
-  return seedOverrideInfo(status, value, saved).legacy;
+export function seedPriceOverrideIsLegacy(
+  status: string,
+  value: unknown,
+  saved: unknown,
+  storedSeeded?: unknown
+): boolean {
+  return seedOverrideInfo(status, value, saved, storedSeeded).legacy;
+}
+
+/**
+ * #217 fix wave — the D286 `priceOverrideSeeded` marker, derived on the
+ * SERVER from the quote as stored before this save rather than trusted from
+ * a client-posted flag. The old flow trusted `formData.get("priceOverrideSeeded")`,
+ * which (a) let a client hide a real hand-set price by posting the flag, and
+ * (b) went stale on the SECOND save of an already-seeded quote: the builder
+ * reopens with `priceOverride` already present (the value just saved), so
+ * `seedPriceOverrideIsLegacy` — reading only whether a saved priceOverride
+ * exists — read it as a real hand-set price, the builder posted
+ * `priceOverrideSeeded=""`, and the marker was dropped from the save.
+ *
+ * True iff a priceOverride is being saved AND it equals the stored quote's
+ * current value (nothing was actually typed differently) AND the stored
+ * quote's status wasn't draft (nobody has seen a price yet) AND the stored
+ * subdoc either had no real priceOverride yet, or already carried this
+ * marker itself. Any other typed total — a genuinely new hand-set price,
+ * including the very first time one is typed — is never flagged.
+ */
+export function deriveSeededMarker(i: {
+  /** The (already-normalized) priceOverride about to be saved; null/undefined = none. */
+  postedOverride: number | null | undefined;
+  /** The quote as stored before this save; null for a brand-new quote. */
+  stored: {
+    value: number;
+    status: string;
+    priceOverride?: number | null;
+    priceOverrideSeeded?: boolean;
+  } | null;
+}): boolean {
+  if (i.postedOverride == null || !i.stored) return false;
+  if (i.stored.status === "draft") return false;
+  if (i.postedOverride !== i.stored.value) return false;
+  if (i.stored.priceOverride != null && !i.stored.priceOverrideSeeded) return false;
+  return true;
 }

@@ -555,7 +555,8 @@ export function QuoteBuilder({
     );
     fd.set("parts", JSON.stringify(partsIn));
     fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
-    fd.set("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded ? "1" : "");
+    // #217 fix wave: no priceOverrideSeeded post — the save action derives
+    // the marker itself from the stored quote, never from a client flag.
     fd.set("sourceKind", source?.kind || "");
     fd.set("sourceRef", source?.refId || "");
     fd.set("sourceLog", source?.logId != null ? String(source.logId) : "");

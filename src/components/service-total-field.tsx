@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { fmtDollars, typedPriceWarning } from "@/lib/service-pricing";
+import { typedPriceWarning } from "@/lib/service-pricing";
 
 /**
  * #217 — the service quote builders' Total row as an input. It shows the auto
@@ -43,7 +43,9 @@ export function ServiceTotalField({
   // While focused the field shows exactly what is being typed (even ""), so
   // clearing it to type a new figure doesn't snap back to the auto total.
   const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? (text !== "" ? text : String(Math.round(autoTotal)));
+  // #217 fix wave (c): disabled (no venues/pricing yet) reads "—", never a
+  // bare 0 that looks like a real free quote.
+  const shown = draft ?? (text !== "" ? text : disabled ? "—" : String(Math.round(autoTotal)));
   const invalid = text.trim() !== "" && !overridden;
   const warning = overridden ? typedPriceWarning(total, cost, margin, partsSell) : null;
   return (
@@ -107,7 +109,11 @@ export function ServiceTotalField({
       >
         <span>
           {overridden
-            ? `Typed total · auto is ${fmtDollars(autoTotal)}`
+            ? // #217 fix wave (b): Reset parks the slider at the back-solved
+              // margin, not the margin autoTotal was computed at above — so
+              // "auto is $X" here would promise a figure Reset doesn't
+              // actually produce. State what Reset does instead.
+              "Typed total · Reset keeps this margin"
             : invalid
               ? "Not a dollar amount — using the auto total."
               : "Auto · rounded to the nearest $25"}

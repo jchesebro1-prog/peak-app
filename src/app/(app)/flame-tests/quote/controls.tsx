@@ -328,8 +328,11 @@ export function QuoteBuilder({
   );
   /** #217 D286: true while the typed total is still the untouched reopen-seed
    *  for an old off-grid sent price — not something anyone actually typed.
-   *  Clears on any edit to the total, Reset to auto, or a new customer, so
-   *  it's never mistaken for a real hand-set price next year. */
+   *  Clears on any edit to the total, Reset to auto, or a new customer.
+   *  #217 fix wave: no longer posted to the server — the save action derives
+   *  this itself from the STORED quote (a client-posted flag went stale on a
+   *  second save and could be spoofed) — kept here only so the seed reopens
+   *  correctly reflect the doc's own marker. */
   const [priceOverrideSeeded, setPriceOverrideSeeded] = useState(!!initial.priceOverrideSeeded);
   const [pending, startTransition] = useTransition();
   const wonGuard = useWonEditGuard(initial.status);
@@ -438,12 +441,23 @@ export function QuoteBuilder({
     dirty();
   }
   function setTesting(locId: string, val: string) {
-    const clean = val === "" ? "" : String(Math.max(0, Math.round(+val || 0)));
+    // #217 fix wave (a): keep exactly what's typed while typing — rounding
+    // every keystroke jumped "12.5" to "13" mid-entry, and a native
+    // type="number" input wiped a transient state like "1e" outright.
+    // normalizeTestingOverride() runs on blur instead, below.
     setVenueSel((prev) => {
       const cur = prev[locId] || { on: true, curtains: "" };
-      return { ...prev, [locId]: { ...cur, testing: clean, on: true } };
+      return { ...prev, [locId]: { ...cur, testing: val, on: true } };
     });
     dirty();
+  }
+  function blurTesting(locId: string) {
+    setVenueSel((prev) => {
+      const cur = prev[locId];
+      if (!cur) return prev;
+      const n = normalizeTestingOverride(cur.testing);
+      return { ...prev, [locId]: { ...cur, testing: n != null ? String(n) : "" } };
+    });
   }
 
   /* ---- live pricing ---- */
@@ -517,7 +531,8 @@ export function QuoteBuilder({
     fd.set("laborRate", laborRate);
     fd.set("travel", JSON.stringify(overrideFromDraft(travelDraft) ?? {}));
     fd.set("priceOverride", priceOverride != null ? String(priceOverride) : "");
-    fd.set("priceOverrideSeeded", priceOverride != null && priceOverrideSeeded ? "1" : "");
+    // #217 fix wave: no priceOverrideSeeded post — the save action derives
+    // the marker itself from the stored quote, never from a client flag.
     fd.set(
       "venues",
       JSON.stringify(
@@ -846,12 +861,11 @@ export function QuoteBuilder({
                       }}
                     />
                     <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      inputMode="numeric"
+                      type="text"
+                      inputMode="decimal"
                       value={st.testing ?? ""}
                       onChange={(e) => setTesting(l.id, e.target.value)}
+                      onBlur={() => blurTesting(l.id)}
                       disabled={!on}
                       placeholder={on && pc ? String(Math.round(pc.computedCost)) : "—"}
                       aria-label={"Testing cost for " + l.label + " (blank = computed)"}

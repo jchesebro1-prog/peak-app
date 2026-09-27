@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/session";
 import { get as getCustomer, nameFor } from "@/lib/stores/customers";
 import {
   create as createQuote,
+  get as getQuote,
   update as updateQuote,
   retireReplacedDraftSafely,
   setStatus,
@@ -28,7 +29,7 @@ import { getSettings } from "@/lib/settings";
 import { getTravelRates } from "@/lib/stores/pricing";
 import { coordsOf, quoteOrigin, driveMiles, driveMinutes } from "@/lib/geo";
 import { parseTravelOverride, savedTrip } from "@/lib/travel-plan";
-import { normalizePriceOverride } from "@/lib/service-pricing";
+import { deriveSeededMarker, normalizePriceOverride } from "@/lib/service-pricing";
 
 function quoteFailure(formData: FormData, message: string): never {
   const id = String(formData.get("editingId") || "");
@@ -145,10 +146,27 @@ async function persist(formData: FormData): Promise<string | null> {
   // #217: a typed total (whole dollars, $1–$10,000,000) replaces the rounded
   // auto total exactly; the 5–50 clamp above bounds only the slider's margin.
   const priceOverride = normalizePriceOverride(formData.get("priceOverride"));
-  // #217 D286: the builder flags a typed total that's only the reopen-seed
-  // for an old off-grid sent price — never something anyone actually typed —
-  // so next year's renewal draft never calls it "hand-set" (priorHandSetPrice).
-  const priceOverrideSeeded = String(formData.get("priceOverrideSeeded") || "") === "1";
+  // #217 fix wave: whether this typed total is only the D286 reopen-seed for
+  // an old off-grid sent price — never something anyone actually typed — is
+  // derived from the STORED quote, not a client-posted flag (a client can't
+  // fake or drop it, and it agrees with itself across every reopen). Repairs
+  // have no renewal-draft consumer today, but the marker is still stored for
+  // #217 D286 parity across all three services.
+  const existingForMarker = editingId ? await getQuote(editingId) : null;
+  const existingRp = (existingForMarker?.repair ?? null) as
+    | { priceOverride?: number | null; priceOverrideSeeded?: boolean }
+    | null;
+  const priceOverrideSeeded = deriveSeededMarker({
+    postedOverride: priceOverride,
+    stored: existingForMarker
+      ? {
+          value: existingForMarker.value,
+          status: existingForMarker.status,
+          priceOverride: existingRp?.priceOverride ?? null,
+          priceOverrideSeeded: !!existingRp?.priceOverrideSeeded,
+        }
+      : null,
+  });
   const r = computeEstimate(
     {
       office: office || undefined,

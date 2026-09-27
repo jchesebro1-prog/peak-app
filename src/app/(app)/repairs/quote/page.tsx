@@ -59,6 +59,7 @@ type RepairDoc = {
   travel?: unknown;
   trip?: { mode?: string } | null;
   priceOverride?: unknown;
+  priceOverrideSeeded?: unknown;
 } | null;
 
 export default async function RepairQuotePage({
@@ -204,7 +205,12 @@ export default async function RepairQuotePage({
       // #217: reopen with the typed total; an old sent price off the $25 grid
       // reopens typed in too, so re-saving never silently changes it (D286).
       priceOverride: seedPriceOverride(editQuote.status, editQuote.value, rp && rp.priceOverride),
-      priceOverrideSeeded: seedPriceOverrideIsLegacy(editQuote.status, editQuote.value, rp && rp.priceOverride),
+      priceOverrideSeeded: seedPriceOverrideIsLegacy(
+        editQuote.status,
+        editQuote.value,
+        rp && rp.priceOverride,
+        rp && rp.priceOverrideSeeded
+      ),
       saved,
       approved: approved || wonAlready,
       savedId: editQuote.id,
