@@ -8,6 +8,19 @@
  * logic without touching React or a DB.
  */
 
+/**
+ * Parses a directory's `?n=` "Show more" page size (#224). Falls back to
+ * `page` for anything not a positive finite integer, and clamps the top
+ * end at `max` so an arbitrary `?n=999999` can't force an unbounded query
+ * — shared by the Companies and Venues directories, which previously each
+ * carried their own copy with no ceiling.
+ */
+export function parsePageSize(raw: string, page = 50, max = 500): number {
+  const v = parseInt(raw, 10);
+  if (!Number.isFinite(v) || v <= 0) return page;
+  return Math.min(v, max);
+}
+
 /** How many of `total` rows to render right now: `initial` while
  *  collapsed, every row once `expanded`. Clamped so a caller never gets a
  *  negative count or more rows than exist. */

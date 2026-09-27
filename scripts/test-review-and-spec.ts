@@ -21313,3 +21313,74 @@ async function dayliteCalendarAsyncChecks219(): Promise<void> {
   const hist = read("src/app/(app)/import/daylite/page.tsx");
   ok(hist.includes('href="/import/daylite/calendar"'), "#219 T3: /import/daylite links to the calendar import");
 }
+
+/* ====== Batch 1 final-review fixes — #221 redirect loop, #224 ?n= cap,
+   #212 custom-item save/remove never sticks ====== */
+import { estimatorShouldRedirect as fr221Redirect, quoteBuilderHref as fr221Href } from "@/lib/quote-links";
+import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
+{
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  // --- #221: estimatorShouldRedirect is now defined purely off quoteBuilderHref,
+  // so a quoteType that falls through to the Estimator (e.g. "service", coming
+  // from the Import hub) no longer redirects estimator/page.tsx back to itself.
+  const fr221False: Array<string | undefined | null> = ["service", "some-unknown-type", "system", "", null];
+  for (const t of fr221False)
+    ok(
+      fr221Redirect({ id: "x", quoteType: t }) === false,
+      `#221: estimatorShouldRedirect is false for quoteType=${JSON.stringify(t)} (quoteBuilderHref falls back to /estimator?id=…, so no redirect)`
+    );
+  const fr221True = ["flame_test", "repair", "inspection", "consulting", "rental"];
+  for (const t of fr221True)
+    ok(fr221Redirect({ id: "x", quoteType: t }) === true, `#221: estimatorShouldRedirect stays true for quoteType=${t}`);
+  // Purity check: the result always agrees with quoteBuilderHref's own prefix,
+  // for every case above — i.e. there is no separate allow-list to drift.
+  for (const t of [...fr221False, ...fr221True]) {
+    const href = fr221Href({ id: "x", quoteType: t });
+    ok(
+      fr221Redirect({ id: "x", quoteType: t }) === !href.startsWith("/estimator?"),
+      `#221: estimatorShouldRedirect(quoteType=${JSON.stringify(t)}) matches !quoteBuilderHref(...).startsWith("/estimator?") (href was ${href})`
+    );
+  }
+
+  // --- #224: ?n= is parsed by one shared, exported, clamped parsePageSize.
+  ok(fr224ParsePageSize("999999") === 500, "#224: parsePageSize clamps a huge ?n= to the max (500)");
+  ok(fr224ParsePageSize("-5") === 50, "#224: parsePageSize falls back to the default (50) for a negative ?n=");
+  ok(fr224ParsePageSize("abc") === 50, "#224: parsePageSize falls back to the default (50) for a non-numeric ?n=");
+  ok(fr224ParsePageSize("") === 50, "#224: parsePageSize falls back to the default (50) for an empty ?n=");
+  ok(fr224ParsePageSize("100") === 100, "#224: parsePageSize passes an in-range ?n= through unchanged");
+  ok(fr224ParsePageSize("500") === 500, "#224: parsePageSize passes the max itself through unchanged");
+  ok(fr224ParsePageSize("50", 25, 200) === 50, "#224: parsePageSize honors a caller's own default/max");
+
+  const companiesSrc224 = read("src/app/(app)/companies/page.tsx");
+  const venuesSrc224 = read("src/app/(app)/venues/page.tsx");
+  for (const [name, src] of [
+    ["companies/page.tsx", companiesSrc224],
+    ["venues/page.tsx", venuesSrc224],
+  ] as const) {
+    ok(src.includes('from "@/lib/short-list"'), `#224: ${name} imports the shared short-list module`);
+    ok(!/function parsePageSize\(/.test(src), `#224: ${name} no longer defines its own local parsePageSize`);
+  }
+  const shortListLibSrc224 = read("src/lib/short-list.ts");
+  ok(/export function parsePageSize\(/.test(shortListLibSrc224), "#224: short-list.ts exports the shared parsePageSize");
+
+  const shortListUiSrc224 = read("src/components/short-list.tsx");
+  ok(/<input[\s\S]*?aria-label=\{searchPlaceholder\}/.test(shortListUiSrc224), "#224: the ShortList filter input carries an aria-label built from its own placeholder text");
+
+  // --- #212: a thrown save or remove on a Grid custom item never leaves the
+  // button stuck reading "Saving…"/"Removing…" — both wrap their action in
+  // try/catch/finally and show the same generic retry message.
+  const customItemsSrc212 = read("src/app/(app)/design/grid/[id]/custom-items.tsx");
+  ok(
+    /const save = async \(\) => \{[\s\S]*?try \{[\s\S]*?saveCustomItemAction[\s\S]*?\} catch \{[\s\S]*?\} finally \{\s*setSaving\(false\);\s*\}\s*\};/.test(customItemsSrc212),
+    "#212: save() wraps saveCustomItemAction in try/catch/finally, and finally unconditionally clears setSaving — a throw can't leave the button stuck on \"Saving…\""
+  );
+  ok(
+    /onConfirm=\{async \(\) => \{\s*try \{[\s\S]*?removeCustomItemAction[\s\S]*?\} catch \{/.test(customItemsSrc212),
+    "#212: the remove confirm's onConfirm also wraps removeCustomItemAction in try/catch"
+  );
+  ok(
+    (customItemsSrc212.match(/Something went wrong — try again\./g) || []).length === 2,
+    "#212: both the save and remove catch blocks show the same generic \"Something went wrong — try again.\" message"
+  );
+}
