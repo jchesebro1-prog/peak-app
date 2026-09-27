@@ -11,7 +11,10 @@ import type { TileVM } from "@/lib/portal-catalog-view";
  * priced-at stamp) can never leak cost, list, margin or a tier name.
  */
 
-export type PartDocVM = { id: string; kind: "datasheet" | "specsheet"; title: string };
+/** `pdf` — the only kind the sidebar opens in an inline viewer; anything
+ *  else (a .doc/.docx spec sheet) would download inside an iframe, so it
+ *  gets "Open in new tab" only. */
+export type PartDocVM = { id: string; kind: "datasheet" | "specsheet"; title: string; pdf: boolean };
 
 export type PartDetailPart = {
   kind: "part";
@@ -86,6 +89,10 @@ export function cleanFixtureOptions(
   return out;
 }
 
+function docVM(d: PartDocVM): PartDocVM {
+  return { id: String(d.id), kind: d.kind === "specsheet" ? "specsheet" : "datasheet", title: String(d.title || ""), pdf: d.pdf === true };
+}
+
 type Price = { unitPrice: number | null; por: boolean } | null | undefined;
 
 function sell(price: Price): { unitPrice: number | null; por: boolean } {
@@ -117,7 +124,7 @@ export function toPartDetailVM(p: PartSource, price: Price, docs: readonly PartD
     unitPrice: s.unitPrice,
     por: s.por,
     images: [...(p.imageIds ?? [])].map(String),
-    docs: docs.map((d) => ({ id: String(d.id), kind: d.kind === "specsheet" ? "specsheet" : "datasheet", title: String(d.title || "") })),
+    docs: docs.map(docVM),
     specText: typeof p.specText === "string" && p.specText.trim() ? p.specText : null,
     goesWith: goesWith.slice(0, GOES_WITH_MAX),
   };
@@ -155,6 +162,6 @@ export function toFixtureDetailVM(
         return { key: fixtureOptionKey(l), sku: String(l.sku), label: String(l.label || l.sku), unitPrice: a.unitPrice, por: a.por };
       }),
     images: [...media.images].map(String),
-    docs: media.docs.map((d) => ({ id: String(d.id), kind: d.kind === "specsheet" ? "specsheet" : "datasheet", title: String(d.title || "") })),
+    docs: media.docs.map(docVM),
   };
 }

@@ -88,7 +88,13 @@ export type PortalIndex = {
   servableDocIds: Set<string>;
   /** Kind + title of every datasheet/spec-sheet id any `IndexedPart.datasheetIds`
    *  names (#242 Task 11 — the part sidebar's Documents list). */
-  docMeta: Map<string, { kind: "datasheet" | "specsheet"; title: string }>;
+  docMeta: Map<string, { kind: "datasheet" | "specsheet"; title: string; pdf: boolean }>;
+  /** Internal labor/travel rows left on "auto" (#242 Task 11 fix round 1) —
+   *  NOT quotable, searchable, browsable or doc-servable on their own, but a
+   *  fixture may carry one as a component (e.g. shop fabrication), so fixture
+   *  resolution and fixture pricing — and nothing else — read this map via
+   *  `fixtureComponentPart`. An explicit Hide is never here. */
+  componentParts: Map<string, IndexedPart>;
   /** Curtain fabrics a customer may name on a curtain request (#242 Task 11,
    *  spec §3.3): quotable "Fabric" parts with an area rate. Names only —
    *  the rate never leaves the server. */
@@ -129,6 +135,12 @@ async function built(opts?: { fresh?: boolean }): Promise<Built> {
 }
 
 /** The cached index (5 min per process); `fresh` forces a rebuild. */
+/** A fixture component: a quotable part, or a labor row the fixture carries.
+ *  Only fixture resolution/pricing may call this — never a lone-part path. */
+export function fixtureComponentPart(ix: Pick<PortalIndex, "parts" | "componentParts">, sku: string): IndexedPart | undefined {
+  return ix.parts.get(sku) ?? ix.componentParts.get(sku);
+}
+
 export async function portalIndex(opts?: { fresh?: boolean }): Promise<PortalIndex> {
   return (await built(opts)).ix;
 }
@@ -265,7 +277,10 @@ async function buildIndex(): Promise<Built> {
     for (const id of ip.datasheetIds) {
       if (docMeta.has(id)) continue;
       const d = state.index.docsById.get(id);
-      if (d && (d.kind === "datasheet" || d.kind === "specsheet")) docMeta.set(id, { kind: d.kind, title: (d.title || d.fileName || "").trim() });
+      if (d && (d.kind === "datasheet" || d.kind === "specsheet")) {
+        const pdf = (d.contentType || "").toLowerCase() === "application/pdf" || /\.pdf$/i.test(d.fileName || "");
+        docMeta.set(id, { kind: d.kind, title: (d.title || d.fileName || "").trim(), pdf });
+      }
     }
     if ((p.category || "").trim() === "Fabric" && fabricAreaRateOf(p) > 0) fabrics.push({ sku: p.sku, name: (p.desc || p.sku).trim() });
     entries.push({
@@ -281,12 +296,28 @@ async function buildIndex(): Promise<Built> {
     });
   }
 
+  // Labor rows on "auto": fixture components only (never entries, facts,
+  // docs, accessories or priceSku).
+  const componentParts = new Map<string, IndexedPart>();
+  for (const p of all) {
+    if (!p || !p.sku || parts.has(p.sku)) continue;
+    if (normalizeVisibility(p.portalVisibility) !== "auto" || !isInternalCategory(p.category)) continue;
+    componentParts.set(p.sku, {
+      sku: p.sku, desc: p.desc || "", mfr: p.mfr || "", category: p.category || "", unit: p.unit || "ea",
+      mpn: p.manufacturerPartNumber || "", model: p.manufacturerModelNumber || "",
+      cost: Number(p.cost) || 0, list: Number(p.list) || 0, note: p.note || "",
+      pricedAt: typeof p.pricedAt === "number" ? p.pricedAt : null, visibility: "auto",
+      imageIds: [], datasheetIds: [], specText: null, accessories: [], quoteCount: 0,
+    });
+  }
+  const comp = (sku: string) => parts.get(sku) ?? componentParts.get(sku);
+
   const fixtures = new Map<string, IndexedFixture>();
   for (const fx of fixtureRows) {
     if (fx.kind !== "fixture" || !fx.lightEngineSku) continue;
     const engine = parts.get(fx.lightEngineSku);
     if (!engine) continue; // a light engine the customer can't quote → no fixture
-    const labelOf = (sku: string, label?: string) => (label || "").trim() || parts.get(sku)?.desc || sku;
+    const labelOf = (sku: string, label?: string) => (label || "").trim() || comp(sku)?.desc || sku;
     const lines: IndexedFixture["lines"] = [
       { slot: "lightEngine", sku: fx.lightEngineSku, label: labelOf(fx.lightEngineSku, fx.lightEngineLine?.label), qty: headQty(fx.lightEngineLine?.qty), required: true },
     ];
@@ -296,12 +327,12 @@ async function buildIndex(): Promise<Built> {
         if (!l?.sku) continue;
         const qty = Number(l.qty) > 0 ? Number(l.qty) : 0;
         // An optional add-on the customer can't quote is simply not offered.
-        if (qty === 0 && !parts.has(l.sku)) continue;
+        if (qty === 0 && !comp(l.sku)) continue;
         lines.push({ slot: box, sku: l.sku, label: labelOf(l.sku, l.label), qty, required: qty > 0 });
       }
     }
     // Offered only when every required component is quotable (spec §2.1).
-    if (lines.some((l) => l.required && !parts.has(l.sku))) continue;
+    if (lines.some((l) => l.required && !comp(l.sku))) continue;
     const f: IndexedFixture = { id: fx.id, label: fx.label, description: fx.description || "", lightEngineSku: fx.lightEngineSku, lensSku: fx.lensSku || null, lines };
     fixtures.set(fx.id, f);
     entries.push({
@@ -321,7 +352,7 @@ async function buildIndex(): Promise<Built> {
 
   fabrics.sort((a, b) => a.name.localeCompare(b.name));
 
-  return { at: now, ix: { parts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics }, facts, rule };
+  return { at: now, ix: { parts, componentParts, fixtures, entries, builtAt: now, servableDocIds, docMeta, fabrics }, facts, rule };
 }
 
 function headQty(q: number | undefined): number {

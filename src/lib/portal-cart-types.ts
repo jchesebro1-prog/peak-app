@@ -10,6 +10,9 @@ export type CurtainRequest = {
   name: string;
   fabricSku: string;
   fabricName: string;
+  /** INFORMATIONAL ONLY — a copy of the cart line's qty, stamped on write.
+   *  `CartLine.qty` is authoritative (priceCurtain prices the line qty, and a
+   *  cart qty edit updates the line only); never read this for pricing. */
   qty: string;
   width: string;
   height: string;

@@ -8,7 +8,7 @@ import type { AssemblyRole } from "@/lib/fixture-assemblies";
 import { freightPctForMiles } from "@/lib/freight-rule";
 import { loadFreightRule, loadPortalRules } from "@/lib/freight-rule-load";
 import type { CartLine, PortalCart } from "@/lib/portal-cart-types";
-import { portalIndex, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, type IndexedFixture, type IndexedPart, type PortalIndex } from "@/lib/portal-catalog-index";
 import { fixtureUnitPrice, unitPriceFor, type FixtureComponentInput, type PriceRuleOpts } from "@/lib/portal-price-rules";
 import { quoteMode } from "@/lib/portal-quote-mode";
 import { resolveTier } from "@/lib/pricing-tiers";
@@ -171,7 +171,7 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
   const opts = l.fixtureOptions ?? {};
   const chosen = fx.lines.map((line) => ({ line, qty: line.required ? line.qty : optionQty(opts[`${line.slot}:${line.sku}`]) }));
   const components: FixtureComponentInput[] = chosen.map(({ line, qty: q }) => {
-    const part = ix.parts.get(line.sku);
+    const part = fixtureComponentPart(ix, line.sku);
     return {
       sku: line.sku,
       qty: q,
@@ -187,7 +187,7 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
   if (priced.unavailable) return { sell: unavailableLine(l, qty, fx.lightEngineSku), item: null, section: "fixt" };
 
   const included = chosen.filter((c) => c.line.required && c.qty > 0).map((c) => withQty(c.line.label, c.qty));
-  const addOns = chosen.filter((c) => !c.line.required && c.qty > 0 && ix.parts.has(c.line.sku)).map((c) => withQty(c.line.label, c.qty));
+  const addOns = chosen.filter((c) => !c.line.required && c.qty > 0 && !!fixtureComponentPart(ix, c.line.sku)).map((c) => withQty(c.line.label, c.qty));
   const detail = [included.length ? `Included: ${included.join(", ")}` : "", addOns.length ? `Add-ons: ${addOns.join(", ")}` : ""]
     .filter(Boolean)
     .join(" · ");
@@ -217,9 +217,9 @@ function priceFixtureLine(l: CartLine, qty: number, ix: PortalIndex, o: PriceRul
     fixture: true,
     ...(engine?.mfr ? { manufacturer: engine.mfr } : {}),
     components: chosen
-      .filter((c) => c.qty > 0 && ix.parts.has(c.line.sku))
+      .filter((c) => c.qty > 0 && !!fixtureComponentPart(ix, c.line.sku))
       .map((c) => {
-        const part = ix.parts.get(c.line.sku)!;
+        const part = fixtureComponentPart(ix, c.line.sku)!;
         const u = unitPriceFor(part, o);
         return { sku: part.sku, label: c.line.label, role: SLOT_ROLE[c.line.slot] ?? "other", qty: c.qty, unit: part.unit, cost: part.cost, price: u.unitPrice ?? 0 };
       }),

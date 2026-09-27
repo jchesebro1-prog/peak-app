@@ -28419,7 +28419,10 @@ import { priceFixture as d242PriceFixture } from "@/lib/portal-pricing";
 
   // Sidebar view models — sell only (controller decision 4).
   const leakyPart = { sku: "SKU-1", desc: "Widget", mfr: "ETC", mpn: "W-1", unit: "ft", cost: 42, list: 99, note: "vendor note", pricedAt: 123, margin: 0.3, tier: "silver", imageIds: ["IMG-1"], datasheetIds: ["DS-1"], specText: "Part 2 text", accessories: [], quoteCount: 5 };
-  const pv = d242PartVM(leakyPart, { unitPrice: 12.5, por: false }, [{ id: "DS-1", kind: "datasheet", title: "Widget datasheet" }], []);
+  const pv = d242PartVM(leakyPart, { unitPrice: 12.5, por: false }, [{ id: "DS-1", kind: "datasheet", title: "Widget datasheet", pdf: true }], []);
+  const docVms = d242PartVM(leakyPart, null, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false, blobKey: "x" } as never, { id: "D2", kind: "datasheet", title: "DS", pdf: true }], []).docs;
+  ok(eq(docVms, [{ id: "D1", kind: "specsheet", title: "Spec", pdf: false }, { id: "D2", kind: "datasheet", title: "DS", pdf: true }]),
+    "#242 sidebar (fix 1): a document carries pdf — only a PDF opens inline; the doc VM is a whitelist");
   ok(eq(Object.keys(pv).sort(), ["docs", "goesWith", "images", "key", "kind", "mfr", "mpn", "por", "sku", "specText", "title", "unit", "unitPrice"]),
     "#242 sidebar: the part detail is exactly the sell-only whitelist");
   const pj = JSON.stringify(pv);
@@ -28462,6 +28465,8 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
   const ADD = fixtureId(242, "sb-addon");
   const FAB = fixtureId(242, "sb-fabric");
   const FX = fixtureId(242, "sb-kit");
+  const FXL = fixtureId(242, "sb-kit-labor");
+  const FXH = fixtureId(242, "sb-kit-hidden");
   const CO = fixtureId(242, "sb-co");
   const GRANT = fixtureId(242, "sb-grant");
   const GRANT_ASK = fixtureId(242, "sb-grant-ask");
@@ -28484,6 +28489,23 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
       lines: { data: [], power: [], mounting: [], accessories: [{ sku: ADD, qty: 0, label: "" }, { sku: PH, qty: 0, label: "" }] },
       createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
     });
+    // Fix round 1: a fixture whose REQUIRED line is a labor row stays
+    // available; one whose required line is HIDDEN does not.
+    await createFixture("subassemblies", {
+      id: FXL, kind: "fixture", label: "Test242 Shop-built Kit", description: "", lightEngineSku: P, lensSku: null,
+      lines: { data: [], power: [], mounting: [{ sku: LAB, qty: 2, label: "" }], accessories: [] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    await createFixture("subassemblies", {
+      id: FXH, kind: "fixture", label: "Test242 Hidden-part Kit", description: "", lightEngineSku: P, lensSku: null,
+      lines: { data: [], power: [], mounting: [{ sku: PH, qty: 1, label: "" }], accessories: [] },
+      createdAt: 1, createdBy: "Test", updatedAt: 1, updatedBy: "Test",
+    });
+    const labDoc = await d242CreateDoc({ kind: "datasheet", fileName: "lab.pdf", contentType: "application/pdf", size: 10, blobKey: "part-docs/PD-t11-lab/lab.pdf", sourceUrl: null, source: "upload", by: "Test" });
+    if (!labDoc) throw new Error("#242 fix 1: labor doc failed to create");
+    registerFixture("part_documents", labDoc.id);
+    await d242Attach(labDoc.id, [LAB], "Test");
+    registerFixture("part_document_links", d242LinkId(LAB, labDoc.id));
     await upsertCustomer({ id: CO, name: "Test242 Sidebar Co", type: "Education", pricingTier: "silver", locations: [], contacts: [] });
     d242Invalidate();
     const ix = await d242Index({ fresh: true });
@@ -28491,6 +28513,8 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
     // Labor exclusion in the index.
     ok(!ix.parts.has(LAB) && !ix.entries.some((e) => e.key === LAB), "#242 labor: an auto Labor row is absent from the portal index and search");
     ok(ix.parts.has(LABS), "#242 labor: a Labor row set to Show stays quotable");
+    ok(ix.componentParts.has(LAB) && !ix.componentParts.has(PH) && !ix.componentParts.has(LABS) && !ix.servableDocIds.has(labDoc.id),
+      "#242 fix 1: an auto labor row is a fixture component only — its datasheet isn't servable; a Hide part is never a component");
     const fLab = await d242Facts(LAB);
     ok(fLab.reason === "Hidden from customers — labor/travel rate" && fLab.visibility === "auto", "#242 labor: the part editor's reason line names the labor/travel rule (Auto kept)");
     ok((await d242Facts(LABS)).reason === "Shown by override", "#242 labor: a shown labor row reads Shown by override");
@@ -28527,6 +28551,21 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
       "#242 fixture price: the live price = included parts + chosen add-ons, same path as the cart; foreign keys ignored");
     const pv = await d242PriceOpts({ grantId: "preview", customerId: CO, name: "", email: "" }, true, FX, {});
     ok(pv.ok && pv.unitPrice === base, "#242 fixture price: works for a team preview viewer");
+    ok(ix.fixtures.has(FXL), "#242 fix 1: a fixture with a required labor line stays available");
+    ok(!ix.fixtures.has(FXH) && (await d242Detail(ctx, "fixture:" + FXH)) === null, "#242 fix 1: a fixture with a required HIDDEN part is still excluded");
+    const labUnit = Math.round((60 / (1 - 0.22)) * 100) / 100;
+    const pUnit = (await d242PriceSku(P, ctx))?.unitPrice ?? NaN;
+    const fxl = await d242PriceFixture(FXL, {}, ctx);
+    ok(!!fxl && fxl.unitPrice != null && Math.abs(fxl.unitPrice - (pUnit + 2 * labUnit)) < 0.011,
+      "#242 fix 1: the labor line is priced inside the fixture (labor cost ÷ (1 − margin) × qty)");
+    ok((await d242PriceSku(LAB, ctx)) === null && (await d242Detail(ctx, LAB)) === null, "#242 fix 1: the labor SKU alone is still not quotable (priceSku null, no sidebar)");
+    const fxlD = await d242Detail(ctx, "fixture:" + FXL);
+    ok(!!fxlD && fxlD.kind === "fixture" && fxlD.fixed.some((f) => f.sku === LAB && f.qty === 2 && f.label === "Test242 Travel day") && !JSON.stringify(fxlD).includes("\"cost\""),
+      "#242 fix 1: the labor line shows in the fixture's included list like any part (sell only)");
+    const fxlAdd = await d242AddFor({ ...sess, grantId: GRANT_ASK }, { kind: "fixture", fixtureId: FXL, options: {}, qty: 1 });
+    ok(fxlAdd.ok, "#242 fix 1: the labor-bearing fixture can be added to a quote");
+    const fxlCart = await d242PriceCart(await d242GetCart(GRANT_ASK, CO), ctx);
+    ok(fxlCart.lines[0]?.unitPrice === fxl?.unitPrice && !fxlCart.lines[0]?.unavailable, "#242 fix 1: the cart prices the labor-bearing fixture the same way");
     const pn = await d242PriceOpts(null, false, FX, {});
     ok(!pn.ok && pn.error === "Your access link has expired — open the link we sent you again.", "#242 fixture price: no viewer → refused");
 
@@ -28556,6 +28595,7 @@ async function portal242SidebarAsyncChecks(): Promise<void> {
     const pl = cart.lines.find((l) => l.kind === "part");
     const fl = cart.lines.find((l) => l.kind === "fixture");
     const cl = cart.lines.find((l) => l.kind === "curtain");
+    ok(!!cl && cl.curtainInputs?.qty === String(cl.qty), "#242 fix 2: the curtain line qty is the source; curtainInputs.qty is stamped from it");
     ok(pl?.sku === P && pl.qty === 3 && !("unitPrice" in pl), "#242 add: the part line holds the merged qty, never a price");
     ok(fl?.fixtureId === FX && JSON.stringify(fl.fixtureOptions) === JSON.stringify({ [addKey]: 2 }), "#242 add: the fixture line stores only its own cleaned add-on keys");
     ok(cl?.qty === 3 && cl.curtainInputs?.fabricName === "Test242 Velour" && cl.curtainInputs?.fabricSku === FAB && cl.curtainInputs?.width === "40" && cl.curtainInputs?.fullness === "100",

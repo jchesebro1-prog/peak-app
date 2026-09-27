@@ -58,7 +58,9 @@ export async function addToCartFor(session: PortalSession | null, input: unknown
   } else if (r.kind === "curtain") {
     const c = cleanCurtainRequest(r.curtain, ix.fabrics);
     if (!c.ok) return c;
-    line = { kind: "curtain", curtainInputs: c.curtain, qty: c.qty };
+    // The line qty is the single source; curtainInputs.qty is stamped from
+    // it here and is informational only (see CurtainRequest.qty).
+    line = { kind: "curtain", curtainInputs: { ...c.curtain, qty: String(c.qty) }, qty: c.qty };
   } else {
     return { ok: false, error: ADD_FAIL_COPY };
   }

@@ -243,11 +243,32 @@ function Documents({ docs, previewCid }: { docs: PartDocVM[]; previewCid: string
           const isOpen = open === d.id;
           const src = docSrc(d.id, previewCid);
           const kind = d.kind === "specsheet" ? "Spec sheet" : "Datasheet";
+          // Only a PDF opens inline — a .doc/.docx would download inside the
+          // iframe, so it gets a new-tab link instead.
+          if (!d.pdf) {
+            return (
+              <div key={d.id} style={i ? { borderTop: "1px solid #f0f1f4" } : undefined}>
+                <a className="ps-doc-btn" href={src} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+                  <span className="ps-doc-icon" aria-hidden="true">
+                    DOC
+                  </span>
+                  <span className="ps-row-main">
+                    <span className="ps-row-title" style={{ display: "block" }}>
+                      {d.title || kind}
+                    </span>
+                    <span className="ps-doc-kind" style={{ display: "block" }}>
+                      {kind} · Open in new tab ↗
+                    </span>
+                  </span>
+                </a>
+              </div>
+            );
+          }
           return (
             <div key={d.id} className={isOpen ? "ps-doc-open" : ""} style={i ? { borderTop: "1px solid #f0f1f4" } : undefined}>
               <button type="button" className="ps-doc-btn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : d.id)}>
                 <span className="ps-doc-icon" aria-hidden="true">
-                  DOC
+                  PDF
                 </span>
                 <span className="ps-row-main">
                   <span className="ps-row-title" style={{ display: "block" }}>

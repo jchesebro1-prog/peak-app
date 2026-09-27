@@ -2,7 +2,7 @@
 // prices through portal-pricing.ts. Never import into a client component; it
 // hands the browser sell-only `PartDetail`s (see portal-part-view.ts).
 import type { PortalSession } from "@/lib/portal";
-import { portalIndex, type PortalIndex } from "@/lib/portal-catalog-index";
+import { fixtureComponentPart, portalIndex, type PortalIndex } from "@/lib/portal-catalog-index";
 import { PORTAL_EXPIRED_COPY, portalBrowseAllowed, PORTAL_BROWSE_RATE_COPY, tilesFor } from "@/lib/portal-catalog-browse";
 import {
   cleanFixtureOptions,
@@ -29,7 +29,7 @@ function docsFor(ix: PortalIndex, ids: readonly string[]): PartDocVM[] {
   const out: PartDocVM[] = [];
   for (const id of ids) {
     const m = ix.docMeta.get(id);
-    if (m) out.push({ id, kind: m.kind, title: m.title || (m.kind === "specsheet" ? "Spec sheet" : "Datasheet") });
+    if (m) out.push({ id, kind: m.kind, title: m.title || (m.kind === "specsheet" ? "Spec sheet" : "Datasheet"), pdf: m.pdf });
   }
   return out;
 }
@@ -51,7 +51,7 @@ export async function partDetailFor(ctx: PortalPricingContext, key: string): Pro
       engine?.mfr ?? "",
       await priceFixture(fx.id, {}, ctx),
       (sku) => {
-        const p = ix.parts.get(sku);
+        const p = fixtureComponentPart(ix, sku);
         return p ? unitPriceFor(p, o) : null;
       },
       { images: engine?.imageIds ?? [], docs: docsFor(ix, docIds) }
