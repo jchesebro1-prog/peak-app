@@ -26,6 +26,8 @@ import { loadPartDocsState } from "@/lib/part-docs/load";
 import { partDocsView, type PartDocsView } from "@/lib/part-docs/views";
 import { partsWithOwnDatasheet } from "@/lib/part-docs/datasheet-bridge";
 import PartDocumentsSection from "./part-documents-section";
+import FabricRateField from "./fabric-rate-field";
+import { fabricAreaRateOf } from "@/lib/design/curtain-pricing";
 
 export const metadata = { title: "Catalog — Quartzite-6" };
 // Part documents (#207): the part editor's slot cell calls fetchLinksAction
@@ -879,6 +881,16 @@ function PartFormModal({
                 />
               </div>
             </div>
+            {part?.category === "Fabric" && (
+              <div style={{ marginTop: 13, marginBottom: 4 }}>
+                <FabricRateField
+                  initialRate={part.curtainAreaRate ?? null}
+                  initialBoltWidthIn={part.boltWidthIn ?? null}
+                  fallbackRate={fabricAreaRateOf({ sku: part.sku, costPerSqft: part.costPerSqft })}
+                  inputStyle={inputStyle}
+                />
+              </div>
+            )}
             <div style={{ marginTop: 13, marginBottom: 4 }}>
               {label("Note")}
               <input name="note" defaultValue={part?.note || ""} placeholder="e.g. verify price" style={inputStyle} />

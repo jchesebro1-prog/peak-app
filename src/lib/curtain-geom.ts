@@ -66,3 +66,27 @@ export function curtainPriceEach(d: CurtainSpec, pricePerSqft: number): number {
   if (sewnArea <= 0) return 0;
   return round2(sewnArea * (pricePerSqft || 0));
 }
+
+/* ---------- #227: fabric rate labels + converter (client-safe, no cost basis) ---------- */
+
+/** The unit a fabric's flat rate is quoted in — making is inside it. */
+export const FABRIC_RATE_UNIT = "sq ft sewn (incl. making)";
+/** What a fabric with no rate shows; it prices curtains at $0. */
+export const NO_FABRIC_RATE = "No $/sq ft set";
+
+const round4 = (n: number): number => Math.round(n * 10000) / 10000;
+
+/**
+ * $/linear yard at a bolt width (inches) → $/sq ft. A linear yard of an N″
+ * bolt is 3 ft × N/12 ft, so a 54″ velour yard is 13.5 sq ft. 0 when either
+ * input is missing, zero or not a number.
+ */
+export function sqftRateFromLinearYard(perLinYd: number, boltWidthIn: number): number {
+  if (!(perLinYd > 0) || !(boltWidthIn > 0)) return 0;
+  return round4(perLinYd / ((3 * boltWidthIn) / 12));
+}
+
+/** $/sq yard → $/sq ft (÷ 9). 0 when missing. */
+export function sqftRateFromSquareYard(perSqYd: number): number {
+  return perSqYd > 0 ? round4(perSqYd / 9) : 0;
+}

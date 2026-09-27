@@ -12,7 +12,7 @@ import { list as listCatalog, mergeUpsert, type CatalogProductMetadata, type Cat
 import { looksLikeSpecId, resolveArticleRef, resolveSectionRef } from "@/lib/specs/articles";
 import { allSections } from "@/lib/stores/spec-sections";
 import { allArticles } from "@/lib/stores/spec-articles";
-import { parseCatalog } from "./parse";
+import { fabricFieldsOf, parseCatalog } from "./parse";
 
 export type CatalogImportInput = {
   /** Manufacturer as picked/typed; the guard normalizes it to an existing spelling. */
@@ -113,6 +113,8 @@ export async function runCatalogImport(input: CatalogImportInput): Promise<Catal
         ...(r.manufacturerPartNumber ? { manufacturerPartNumber: r.manufacturerPartNumber } : {}),
         ...(r.manufacturerModelNumber ? { manufacturerModelNumber: r.manufacturerModelNumber } : {}),
         ...(parsed.hasMap || isNew ? { mapPrice: r.mapPrice || null } : {}),
+        // #227 — only a carried, positive rate/bolt width is written.
+        ...fabricFieldsOf(r),
         ...(Object.keys(productMetadata).length ? { productMetadata } : {}),
         // Fix wave item 4 — when Spec Section and Spec Article both resolve
         // but disagree, the ARTICLE's own section wins (same mirror rule as

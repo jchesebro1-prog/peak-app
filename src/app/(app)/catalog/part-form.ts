@@ -7,22 +7,38 @@ function num(v: FormDataEntryValue | null): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** A positive, finite number, else undefined — a blank, zero, negative or junk
+ *  value clears the field (#227). */
+function positive(v: FormDataEntryValue | null): number | undefined {
+  const n = num(v);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+export type OptionalPartFields = {
+  manufacturerPartNumber?: string;
+  manufacturerModelNumber?: string;
+  mapPrice?: number;
+  /** #227 — Fabric parts only: $/sq ft of sewn fabric, making included. */
+  curtainAreaRate?: number;
+  /** #227 — Fabric parts only: bolt width in inches. */
+  boltWidthIn?: number;
+};
+
 /**
  * Fields the part modal may or may not render. A key the form did NOT submit
  * stays out of the patch, so mergeUpsert keeps the stored value; a submitted
  * blank clears it (an explicit undefined wins in mergeUpsert). Same rule
- * upsertPart already applies to `ports`.
+ * upsertPart already applies to `ports`. The two fabric fields render only on
+ * a Fabric part (#227), so any other part's save never touches them.
  */
-export function optionalPartFields(fd: FormData): {
-  manufacturerPartNumber?: string;
-  manufacturerModelNumber?: string;
-  mapPrice?: number;
-} {
+export function optionalPartFields(fd: FormData): OptionalPartFields {
   const text = (k: string) => String(fd.get(k) || "").trim() || undefined;
-  const out: { manufacturerPartNumber?: string; manufacturerModelNumber?: string; mapPrice?: number } = {};
+  const out: OptionalPartFields = {};
   if (fd.has("manufacturerPartNumber")) out.manufacturerPartNumber = text("manufacturerPartNumber");
   if (fd.has("manufacturerModelNumber")) out.manufacturerModelNumber = text("manufacturerModelNumber");
   if (fd.has("mapPrice")) out.mapPrice = num(fd.get("mapPrice"));
+  if (fd.has("curtainAreaRate")) out.curtainAreaRate = positive(fd.get("curtainAreaRate"));
+  if (fd.has("boltWidthIn")) out.boltWidthIn = positive(fd.get("boltWidthIn"));
   return out;
 }
 

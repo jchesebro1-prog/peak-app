@@ -280,6 +280,12 @@ export function catalogPatch(
     // the file's own preserve-when-absent pattern for a numeric field: only
     // write the key when the row actually carried a value.
     ...(num(v.mapPrice) ? { mapPrice: num(v.mapPrice) } : {}),
+    // #227 — a fabric's flat $/sq ft (making included) and bolt width. Same
+    // preserve-when-absent rule as MAP: coerce() turns an absent column or a
+    // blank cell into 0, so only a positive value is written and a price-only
+    // sheet never resets them.
+    ...(num(v.curtainAreaRate) > 0 ? { curtainAreaRate: num(v.curtainAreaRate) } : {}),
+    ...(num(v.boltWidthIn) > 0 ? { boltWidthIn: num(v.boltWidthIn) } : {}),
     ...(hasMetadata ? { productMetadata: metadata } : {}),
     // #205 fix wave item 4 — when Spec Section and Spec Article both
     // resolve but disagree, the ARTICLE's own section wins (the mirror
@@ -1211,6 +1217,8 @@ const WRITERS: Record<string, Writer> = {
         // unreviewed text.
         specState: "",
         specSource: p.specSource || "",
+        curtainAreaRate: p.curtainAreaRate ?? "",
+        boltWidthIn: p.boltWidthIn ?? "",
       }));
     },
   },

@@ -21905,3 +21905,63 @@ import { curtainSwapHits as fab227SwapHits } from "@/lib/design/auto-estimate";
     if (f !== "src/lib/design/curtain-pricing.ts") ok(!/curtainAreaRate\s*\?\?|SEED_FABRIC_RATES\[/.test(s), `#227: ${f} resolves a fabric rate only through fabricAreaRateOf`);
   }
 }
+
+/* ====== #227 T2: fabric $/sq ft — part form, converter, Import hub + price-book columns ====== */
+import { fabricFieldsOf as fab227Fields, parseCatalog as fab227ParseBook } from "@/app/(app)/catalog/parse";
+import { sqftRateFromLinearYard as fab227FromLinYd, sqftRateFromSquareYard as fab227FromSqYd } from "@/lib/curtain-geom";
+{
+  // Converter: a 54″ velour yard is 3 ft × 4.5 ft = 13.5 sq ft.
+  ok(fab227FromLinYd(40.5, 54) === 3, "#227 converter: $40.50/lin-yd of 54″ velour → $3/sq ft (÷ 13.5)");
+  ok(fab227FromLinYd(27, 54) === 2 && fab227FromLinYd(30, 120) === 1, "#227 converter: $/lin-yd ÷ (3 × bolt in ÷ 12) at any bolt width");
+  ok(fab227FromLinYd(40.5, 0) === 0 && fab227FromLinYd(0, 54) === 0 && fab227FromLinYd(Number.NaN, 54) === 0, "#227 converter: a missing price or bolt width converts to 0, never NaN/Infinity");
+  ok(fab227FromSqYd(9) === 1 && fab227FromSqYd(13.5) === 1.5 && fab227FromSqYd(0) === 0, "#227 converter: $/sq yd ÷ 9");
+
+  // Part form: submitted-only, blank clears.
+  const fd = new FormData();
+  fd.set("sku", "FAB227");
+  const none = optionalPartFields(fd);
+  ok(!("curtainAreaRate" in none) && !("boltWidthIn" in none), "#227 part form: a form without the fabric fields leaves the stored rate alone");
+  fd.set("curtainAreaRate", " $4.85 ");
+  fd.set("boltWidthIn", "54");
+  const set = optionalPartFields(fd);
+  ok(set.curtainAreaRate === 4.85 && set.boltWidthIn === 54, "#227 part form: a typed $/sq ft and bolt width save");
+  fd.set("curtainAreaRate", "");
+  fd.set("boltWidthIn", "-3");
+  const cleared = optionalPartFields(fd);
+  ok("curtainAreaRate" in cleared && cleared.curtainAreaRate === undefined && "boltWidthIn" in cleared && cleared.boltWidthIn === undefined, "#227 part form: a blanked or non-positive value clears it (the part falls back to seed / cost per sq ft)");
+
+  // Import hub: exact-header-only number columns; price-only rows carry no fabric key.
+  const hubCat = getTypeMeta("catalog")!;
+  const rateField = hubCat.fields.find((f) => f.key === "curtainAreaRate");
+  const boltField = hubCat.fields.find((f) => f.key === "boltWidthIn");
+  ok(rateField?.header === "Fabric $/sq ft" && rateField.kind === "number" && rateField.exactOnly === true && boltField?.header === "Bolt width (in)" && boltField.kind === "number" && boltField.exactOnly === true, "#227 Import hub: Fabric $/sq ft and Bolt width (in) are exact-header-only number columns");
+  const hubValues = (headers: string[], row: string[]) => prepareRows([row], autoMap(headers, hubCat.fields), hubCat.fields).rows[0].values;
+  const withRate = hubValues(["SKU", "Description", "Manufacturer", "Fabric $/sq ft", "Bolt width (in)"], ["FAB227-V", "Velour", "Rose Brand", "4.85", "54"]);
+  const created = catalogPatch(withRate, null, "FAB227-V");
+  ok(created.curtainAreaRate === 4.85 && created.boltWidthIn === 54, "#227 Import hub: the fabric columns land on curtainAreaRate / boltWidthIn");
+  const stored227 = { sku: "FAB227-V", desc: "Velour", category: "Fabric", unit: "sq ft", list: 0, cost: 0, mfr: "Rose Brand", curtainAreaRate: 4.85, boltWidthIn: 54 };
+  const priceOnly = catalogPatch(hubValues(["SKU", "Description", "Manufacturer", "List Price"], ["FAB227-V", "Velour", "Rose Brand", "12"]), stored227, "FAB227-V");
+  ok(!("curtainAreaRate" in priceOnly) && !("boltWidthIn" in priceOnly), "#227 Import hub: a price-only row carries no fabric key, so mergeUpsert keeps the stored rate");
+  const blankRate = catalogPatch(hubValues(["SKU", "Description", "Manufacturer", "Fabric $/sq ft"], ["FAB227-V", "Velour", "Rose Brand", ""]), stored227, "FAB227-V");
+  ok(!("curtainAreaRate" in blankRate), "#227 Import hub: a blank Fabric $/sq ft cell never clears the stored rate");
+  const lookalike = autoMap(["SKU", "Description", "Price per sq ft", "Width"], hubCat.fields);
+  ok(lookalike.curtainAreaRate === -1 && lookalike.boltWidthIn === -1, "#227 Import hub: a vendor's look-alike columns never map to the fabric fields");
+  ok(importTemplateCsv("catalog").split("\n")[0].includes("Fabric $/sq ft,Bolt width (in)"), "#227 Import hub: the catalog template advertises both columns");
+
+  // Price-book importer: header-only columns, only positive values written.
+  const book = fab227ParseBook("SKU,Description,Fabric $/sq ft,Bolt width (in)\nFAB227-V,Velour,4.85,54\n");
+  ok(book.ok && book.rows[0].curtainAreaRate === 4.85 && book.rows[0].boltWidthIn === 54, "#227 price book: the fabric headers parse");
+  const wrote = fab227Fields(book.rows[0]);
+  ok(wrote.curtainAreaRate === 4.85 && wrote.boltWidthIn === 54, "#227 price book: a carried rate and bolt width are written");
+  ok(Object.keys(fab227Fields(fab227ParseBook("SKU,Description,List Price\nFAB227-V,Velour,12\n").rows[0])).length === 0, "#227 price book: a price-only file writes no fabric key — the stored rate survives the re-import");
+  ok(Object.keys(fab227Fields(fab227ParseBook("FAB227-V,Velour,Fabric,sq ft,12,8,Rose Brand,,,,,,,,,,,,4.85,54\n").rows[0])).length === 0, "#227 price book: the fabric columns are header-only — no positional slot");
+  const importSrc227 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/import.ts"), "utf8");
+  ok(importSrc227.includes("...fabricFieldsOf(r),"), "#227 price book: runCatalogImport spreads fabricFieldsOf into the mergeUpsert patch");
+
+  // Catalog editor: client field, Fabric parts only, no store/cost import.
+  const frf = readFileSync(join(process.cwd(), "src/app/(app)/catalog/fabric-rate-field.tsx"), "utf8");
+  ok(frf.startsWith('"use client"') && !/from "@\/lib\/stores\/|from "@\/db|curtain-pricing"/.test(frf), "#227 catalog editor: the rate field is a client component importing no store or cost module");
+  ok(frf.includes('name="curtainAreaRate"') && frf.includes('name="boltWidthIn"') && frf.includes("$/sq ft sewn (includes making)"), "#227 catalog editor: it posts curtainAreaRate + boltWidthIn under the spec's label");
+  const catPage227 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/page.tsx"), "utf8");
+  ok(catPage227.includes('part?.category === "Fabric" && (') && catPage227.includes("<FabricRateField"), "#227 catalog editor: only Fabric parts show the $/sq ft field");
+}

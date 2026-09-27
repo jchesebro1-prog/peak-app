@@ -25,6 +25,10 @@ export type CatalogRow = {
   researchStatus: string;
   sourceDocumentName: string;
   sourceDocumentDate: string;
+  /** #227 — header-only: a fabric's $/sq ft sewn (making included); 0 when absent/blank. */
+  curtainAreaRate: number;
+  /** #227 — header-only: bolt width in inches; 0 when absent/blank. */
+  boltWidthIn: number;
   valid: boolean;
 };
 
@@ -64,6 +68,8 @@ const ALIASES: Record<keyof Omit<CatalogRow, "valid">, string[]> = {
   researchStatus: ["research status", "metadata status"],
   sourceDocumentName: ["source document", "source document name"],
   sourceDocumentDate: ["source date", "source document date"],
+  curtainAreaRate: ["fabric $/sq ft", "fabric $/sq ft sewn", "fabric per sq ft"],
+  boltWidthIn: ["bolt width (in)", "bolt width"],
 };
 
 function norm(s: unknown): string {
@@ -184,6 +190,10 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
     researchStatus: 15,
     sourceDocumentName: 16,
     sourceDocumentDate: 17,
+    // #227 — header-only: no positional slot, so a headerless paste never
+    // reads a stray 19th/20th cell as a fabric rate.
+    curtainAreaRate: -1,
+    boltWidthIn: -1,
   };
 
   let hasList: boolean;
@@ -228,6 +238,8 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
     const researchStatus = at(map.researchStatus).trim();
     const sourceDocumentName = at(map.sourceDocumentName).trim();
     const sourceDocumentDate = at(map.sourceDocumentDate).trim();
+    const curtainAreaRate = toNum(at(map.curtainAreaRate));
+    const boltWidthIn = toNum(at(map.boltWidthIn));
     const valid = !!sku && !!desc;
     return {
       sku,
@@ -248,6 +260,8 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
       researchStatus,
       sourceDocumentName,
       sourceDocumentDate,
+      curtainAreaRate,
+      boltWidthIn,
       valid,
     };
   });
@@ -263,5 +277,19 @@ export function parseCatalog(text: string, defaultCategory = ""): CatalogParse {
     hasList,
     hasCost,
     hasMap,
+  };
+}
+
+/**
+ * #227 — the fabric fields a price-book row writes: only a positive value,
+ * so a sheet without the column (or with a blank cell) never resets a stored
+ * rate. Pure; runCatalogImport spreads it into the mergeUpsert patch.
+ */
+export function fabricFieldsOf(
+  r: Pick<CatalogRow, "curtainAreaRate" | "boltWidthIn">
+): { curtainAreaRate?: number; boltWidthIn?: number } {
+  return {
+    ...(r.curtainAreaRate > 0 ? { curtainAreaRate: r.curtainAreaRate } : {}),
+    ...(r.boltWidthIn > 0 ? { boltWidthIn: r.boltWidthIn } : {}),
   };
 }

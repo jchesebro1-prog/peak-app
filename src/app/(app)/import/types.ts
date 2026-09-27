@@ -264,7 +264,8 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
     blurb:
       "Vendor price lists — SKU, manufacturer identity, pricing, and MAP. " +
       "The seven spec columns (Spec Section, Spec Article, Spec Title, Spec Body, Spec Same As, Spec State, Spec Source) match ONLY on their exact header — never a vendor column that merely resembles one — so a price sheet's own \"Title\" or \"State\" column can never be mistaken for spec data. " +
-      "Spec Body is multi-line — a quoted cell keeps its indentation. A row that changes spec text lands as a draft, never printed until reviewed; a blank spec cell never clears stored text (clear it in the part editor).",
+      "Spec Body is multi-line — a quoted cell keeps its indentation. A row that changes spec text lands as a draft, never printed until reviewed; a blank spec cell never clears stored text (clear it in the part editor). " +
+      "Fabric $/sq ft (a fabric's cost per sq ft of sewn fabric, making included) and Bolt width (in) also match only on their exact header; a blank cell or a price-only sheet never clears them.",
     dedupeLabel: "SKU",
     viewHref: "/catalog",
     viewLabel: "View in Catalog",
@@ -294,6 +295,8 @@ export const IMPORT_TYPES: ImportTypeMeta[] = [
       { key: "specSameAs", header: "Spec Same As", label: "Same spec as SKU", exactOnly: true, aliases: ["spec same as", "same spec as"], example: "CS-SPOT-1" },
       { key: "specState", header: "Spec State", label: "Spec state", kind: "enum", options: ["authored", "draft"], exactOnly: true, aliases: ["spec state", "spec status"], example: "draft" },
       { key: "specSource", header: "Spec Source", label: "Spec source", exactOnly: true, aliases: ["spec source", "spec provenance"], example: "skill:2026-09-22" },
+      { key: "curtainAreaRate", header: "Fabric $/sq ft", label: "Fabric $/sq ft sewn (incl. making)", kind: "number", exactOnly: true, aliases: ["fabric $/sq ft", "fabric per sq ft", "fabric $/sq ft sewn"], example: "4.85" },
+      { key: "boltWidthIn", header: "Bolt width (in)", label: "Bolt width (in)", kind: "number", exactOnly: true, aliases: ["bolt width (in)", "bolt width"], example: "54" },
     ],
   },
   {
