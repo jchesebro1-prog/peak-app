@@ -34,7 +34,6 @@ import {
   type BomLine,
 } from "@/lib/design/grid-bom";
 import {
-  GRID_LAYERS,
   isLayerVisible,
   normalizeCategory,
   SCOPE_COLORS,
@@ -44,7 +43,7 @@ import {
 } from "@/lib/design/grid-scopes";
 import { markerColor } from "@/lib/design/grid-symbols";
 import { legendRows, symbolLook, type SymbolContext, type SymbolEntry, type SymbolLook } from "@/lib/design/grid-icons";
-import { SymbolIcon, SymbolShape } from "@/components/design/symbol-shape";
+import { SymbolShape } from "@/components/design/symbol-shape";
 import { curtainPriceEach, type FabricSell, type SellCoeffs } from "@/lib/curtain-geom";
 import { distToPolyline, polygonCentroid, spaceOf } from "@/lib/design/grid-geometry";
 import { validateDeviceWire, type WireType } from "@/lib/catalog-connect";
@@ -84,11 +83,12 @@ import RevisionsPanel from "./revisions-panel";
 import WiresPanel from "./wires-panel";
 import ScopePanel from "./scope-panel";
 import AssembliesPanel from "./assemblies-panel";
-import { SearchFilterBar } from "@/components/search/search-filter-bar";
 import OptionSwitcher from "./option-switcher";
 import PlanLegend from "./plan-legend";
 import SymbolLookPanel from "./symbol-look-panel";
 import CustomItemsSection from "./custom-items";
+import DevicePalette from "./device-palette";
+import type { DeviceType } from "@/lib/design/device-types";
 import { customItemsOf } from "@/lib/design/grid-custom-items";
 
 const PdfCanvas = dynamic(() => import("@/components/design/pdf-canvas"), { ssr: false });
@@ -256,6 +256,9 @@ export default function GridEditor({
   linesetDesigns,
   wireTypes,
   customLines,
+  deviceTypes,
+  favorites,
+  recent,
 }: {
   project: ProjectLite;
   sheets: SheetLite[];
@@ -290,6 +293,11 @@ export default function GridEditor({
   wireTypes: WireType[];
   /** #212: the active option's custom items, priced server-side (sell only). */
   customLines: BomLine[];
+  /** #226: the curated device types (palette chips, Layers). */
+  deviceTypes: DeviceType[];
+  /** #226: this user's starred parts and last-placed parts (newest first). */
+  favorites: string[];
+  recent: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -362,13 +370,6 @@ export default function GridEditor({
     }
   }
 
-  const [search, setSearch] = useState("");
-  // Palette SCOPE filter (punch #48, replacing Task #39's group filter):
-  // "" = All (today's exact behavior, every device part); one of Jeff's five
-  // scopes; or Unscoped for parts the catalog taxonomy can't place (never
-  // hidden, just bucketed). This is the "what can I arm" control ONLY -
-  // layer visibility below is a separate axis and the two never touch.
-  const [scopeFilter, setScopeFilter] = useState("");
   const [armedPartId, setArmedPartId] = useState<string | null>(null);
 
   /** Hidden LAYERS (punch #48) - namespaced keys, scopes and user categories
@@ -438,24 +439,6 @@ export default function GridEditor({
     (part: PartLite | null | undefined): SymbolLook => (part && lookById.get(part.id)) || symbolLook(part, symbolCtx),
     [lookById, symbolCtx]
   );
-  const filteredParts = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return parts
-      .filter((p) => !p.virtual)
-      .filter((p) => {
-        if (!scopeFilter) return true; // All - identical to pre-Task-6 behavior.
-        // Fabric/Labor rows aren't placeable devices. "All" already showed
-        // them before this task (verified: no prior exclusion existed), so
-        // that legacy behavior stays untouched above; every specific bucket
-        // (a named scope, or Unscoped) excludes them. Fabric reaches the plan
-        // through the curtain drop-in (#49), never as an armed device.
-        if (p.category === "Fabric" || p.category === "Labor") return false;
-        return scopeOfPart(p) === scopeFilter;
-      })
-      .filter((p) => (q ? (p.desc + " " + (p.modelNumber || p.sku) + " " + (p.manufacturer || "")).toLowerCase().includes(q) : true))
-      .sort((a, b) => a.desc.localeCompare(b.desc) || a.sku.localeCompare(b.sku));
-  }, [parts, search, scopeFilter]);
-
   /* ------------------------- scopes + layers (#48) ------------------------- */
 
   /** The scope one placement belongs to. A curtain IS the Curtains scope by
@@ -1164,6 +1147,26 @@ export default function GridEditor({
     else router.refresh();
   }
 
+  /** #226: arming from the palette clears every other armed tool — exactly
+   *  what the palette row's inline onClick did before the palette moved to
+   *  device-palette.tsx. */
+  const armPart = useCallback((partId: string | null) => {
+    setArmedPartId(partId);
+    setArmedCurtainType(null);
+    setSelected(null);
+    setSpaceDrawing(false);
+    setSpaceDraft([]);
+    setSelectedSpaceId(null);
+    setWireDrawing(false);
+    setWireDraft([]);
+    setSelectedRouteId(null);
+  }, []);
+  /** The palette's "that layer is hidden" warning. */
+  const partLayerHidden = useCallback(
+    (p: PartLite) => hiddenSet.has(scopeLayerKey(scopeOfPart(p))),
+    [hiddenSet]
+  );
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {/* header */}
@@ -1368,110 +1371,18 @@ export default function GridEditor({
       <div style={{ display: "grid", gridTemplateColumns: "252px 1fr", gap: 12, alignItems: "start" }}>
         {/* sidebar */}
         <div style={{ display: "grid", gap: 12, position: "sticky", top: 12 }}>
-          {/* device palette */}
-          <div style={PANEL}>
-            <div style={PANEL_LABEL}>Devices</div>
-            {/* #121: search + scope filter on ONE row (SearchFilterBar; the
-                buttons wrap under the box inside this 252px column). */}
-            <SearchFilterBar value={search} onChange={setSearch} placeholder="Search names or Manufacturer #" ariaLabel="Search devices">
-              <div className="pk-searchbar-group">
-                {["", ...GRID_LAYERS].map((s) => {
-                  const count = s ? parts.filter((p) => scopeOfPart(p) === s).length : parts.length;
-                  const on = scopeFilter === s;
-                  return <button key={s || "all"} type="button" onClick={() => setScopeFilter(s)} style={{ ...BTN, padding: "4px 7px", fontSize: 10.5, background: on ? "#16181d" : "#fff", color: on ? "#fff" : "#5b616e", borderColor: on ? "#16181d" : "#dfe2e8" }}>{s || "All"} <span style={{ opacity: .65 }}>{count}</span></button>;
-                })}
-              </div>
-            </SearchFilterBar>
-            {armedPart && hiddenSet.has(scopeLayerKey(scopeOfPart(armedPart))) && (
-              <div style={{ marginTop: 6, fontSize: 10.5, color: "#a0442b", lineHeight: 1.4 }}>
-                The {scopeOfPart(armedPart)} layer is hidden, so what you place
-                won&apos;t show until you turn it back on.
-              </div>
-            )}
-            {armedPart ? (
-              <div style={{ marginTop: 8, fontSize: 11.5, color: "#2e7d55", fontWeight: 600 }}>
-                Painting: {armedPart.sku} — click the plan to place.{" "}
-                <button
-                  style={{ ...BTN, padding: "2px 7px", fontSize: 10.5, marginLeft: 2 }}
-                  onClick={() => setArmedPartId(null)}
-                >
-                  Done
-                </button>
-              </div>
-            ) : (
-              <div style={{ marginTop: 8, fontSize: 11, color: "#8c919c" }}>
-                Pick a part, then click the plan for each unit.
-              </div>
-            )}
-            <div style={{ marginTop: 8, maxHeight: 300, overflowY: "auto", display: "grid", gap: 3 }}>
-              {filteredParts.slice(0, 60).map((p) => {
-                const on = p.id === armedPartId;
-                return (
-                  <div key={p.id}>
-                    <button
-                      onClick={() => {
-                        setArmedPartId(on ? null : p.id);
-                        setArmedCurtainType(null);
-                        setSelected(null);
-                        setSpaceDrawing(false);
-                        setSpaceDraft([]);
-                        setSelectedSpaceId(null);
-                        setWireDrawing(false);
-                        setWireDraft([]);
-                        setSelectedRouteId(null);
-                      }}
-                      title={p.desc}
-                      style={{
-                        ...BTN,
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "5px 8px",
-                        fontWeight: 500,
-                        display: "grid",
-                        gap: 1,
-                        background: on ? "#16181d" : "#fff",
-                        color: on ? "#fff" : "#3d424e",
-                        borderColor: on ? "#16181d" : "#dfe2e8",
-                      }}
-                    >
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <SymbolIcon iconId={lookOf(p).iconId} color={lookOf(p).color} size={16} />
-                        <strong style={{ fontSize: 11.5 }}>{p.desc}</strong>
-                        <span style={{ marginLeft: "auto", fontSize: 11 }}>{moneyFmt(p.list)}</span>
-                      </span>
-                      <span style={{ fontSize: 10.5, color: on ? "#c9cdd6" : "#8c919c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.manufacturer ? `${p.manufacturer} · ` : ""}{p.modelNumber || p.sku}{p.kind === "assembly" ? " · assembly" : ""}
-                      </span>
-                    </button>
-                    {/* Datasheet link (Task 5, punch #39) — a sibling of the
-                        arm/paint button, not nested inside it: a real <a>
-                        inside a <button> is invalid, and this still needs to
-                        open in its own tab without arming the part. */}
-                    {p.hasDatasheet && (
-                      <a
-                        href={`/api/part-datasheet/${encodeURIComponent(p.sku)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ display: "block", marginTop: 2, padding: "0 8px", fontSize: 10, color: "var(--accent)", textDecoration: "none" }}
-                      >
-                        Datasheet
-                      </a>
-                    )}
-                  </div>
-                );
-              })}
-              {filteredParts.length > 60 && (
-                <div style={{ fontSize: 10.5, color: "#9aa0ab", padding: "3px 2px" }}>
-                  {filteredParts.length - 60} more — narrow the search.
-                </div>
-              )}
-              {filteredParts.length === 0 && (
-                <div style={{ fontSize: 11.5, color: "#9aa0ab", padding: "3px 2px" }}>
-                  Nothing matches.
-                </div>
-              )}
-            </div>
-          </div>
+          {/* device palette (#226: tabs, device-type chips, manufacturer filter, stars) */}
+          <DevicePalette
+            parts={parts}
+            types={deviceTypes}
+            favorites={favorites}
+            recent={recent}
+            armedPartId={armedPartId}
+            onArm={armPart}
+            onDisarm={() => setArmedPartId(null)}
+            isHidden={partLayerHidden}
+            lookOf={lookOf}
+          />
 
           <AssembliesPanel parts={parts} onChanged={() => router.refresh()} />
 

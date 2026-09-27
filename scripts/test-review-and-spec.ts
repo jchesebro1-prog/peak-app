@@ -17340,7 +17340,7 @@ import { RiserCanvas, RiserNotes } from "@/components/drawing/riser-canvas";
     && gridPartsFrom([gpSym] as never, gpCat as never, {}, { hasDatasheet: (p) => p.sku === "W1" })[0].hasDatasheet === true,
     "#209 parts: a caller's hasDatasheet (the #207 part-documents check) replaces the legacy blob check");
   const gpPlanSrc = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/page.tsx"), "utf8");
-  ok(gpPlanSrc.includes("gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile })") && gpPlanSrc.includes("ownFiles(docIndex, p.sku, \"datasheet\")"),
+  ok(gpPlanSrc.includes("gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile, deviceTypes })") && gpPlanSrc.includes("ownFiles(docIndex, p.sku, \"datasheet\")"),
     "#209 parts: the plan editor flags datasheets from part documents (#207), not the legacy blob key");
 
   const gpProj: RiserProjectLite = {
@@ -18041,10 +18041,9 @@ import { riserGraph as gemRiser6 } from "@/lib/design/grid-riser";
   ok(merged.tierByScope.lighting === "good" && !("lighting:par" in merged.overrides) && merged.overrides["lighting:front"].qty === 3 && !("audio:lineArray" in merged.overrides) && merged.overrides["audio:subwoofer"].assemblyId === "SA-1", "#211 T6: re-choosing one scope replaces only that scope's overrides");
   const refs = gemRefs6(est);
   ok(refs.skus.join(",") === "GEM-PAR" && refs.assemblyIds.join(",") === "SA-1", "#211 T6: overrideRefs names the SKUs and assemblies to load");
-  const ed6 = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/editor.tsx"), "utf8");
   const quote6 = readFileSync(join(process.cwd(), "src/lib/design/grid-quote.ts"), "utf8");
   const pages6 = ["riser", "set", "schedule"].map((d) => readFileSync(join(process.cwd(), `src/app/(app)/design/grid/[id]/${d}/page.tsx`), "utf8"));
-  ok(ed6.includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6: the palette hides virtual parts; the quote, riser, set and schedule resolve them");
+  ok(readFileSync(join(process.cwd(), "src/lib/design/grid-palette.ts"), "utf8").includes("!p.virtual") && quote6.includes("loadVirtualParts(") && pages6.every((s) => s.includes("loadVirtualParts(")), "#211 T6 (moved by #226): the palette (grid-palette.ts) hides virtual parts; the quote, riser, set and schedule resolve them");
 }
 
 /* --- #211 T6 fix wave 1: lot-aware riser rows, lot units on the drawing set + schedule, dead virtual parts, bid-spec rows, store sanitizers, per-option estimates --- */
@@ -21820,4 +21819,58 @@ import { parsePageSize as fr224ParsePageSize } from "@/lib/short-list";
     (customItemsSrc212.match(/Something went wrong — try again\./g) || []).length === 2,
     "#212: both the save and remove catch blocks show the same generic \"Something went wrong — try again.\" message"
   );
+}
+
+/* ======================================================================
+   #226 Grid device types — Task 3: the palette (pure filter + wiring).
+   ====================================================================== */
+import { paletteView as pal226View, isMapped as pal226Mapped, PALETTE_ROW_CAP as PAL226_CAP } from "@/lib/design/grid-palette";
+import type { PartLite as PL226 } from "@/lib/design/grid-bom";
+
+{
+  const j = (x: unknown) => JSON.stringify(x);
+  const types = dt226From(undefined);
+  const P = (id: string, extra: Partial<PL226>): PL226 => ({ id, sku: id, desc: id, category: "X", unit: "ea", list: 0, cost: 0, ...extra });
+  const parts: PL226[] = [
+    P("spk-a", { desc: "Alpha speaker", manufacturer: "QSC", deviceType: "speakers", gridScope: "Audio" }),
+    P("spk-b", { desc: "Beta speaker", manufacturer: "Meyer", deviceType: "speakers", gridScope: "Audio" }),
+    P("amp-a", { desc: "Amp", manufacturer: "QSC", deviceType: "amplifiers", gridScope: "Audio" }),
+    P("wid", { desc: "Widget speaker bracket", manufacturer: "Acme", deviceType: null, gridScope: "Audio" }),
+    P("asm", { desc: "Rack assembly", kind: "assembly", deviceType: null, gridScope: "Audio" }),
+    P("fab", { desc: "Velour", category: "Fabric", deviceType: null }),
+    P("virt", { desc: "Virtual", virtual: true, deviceType: "speakers", gridScope: "Audio" }),
+    P("fix", { desc: "Source Four", manufacturer: "ETC", deviceType: "fixtures", gridScope: "Lighting" }),
+  ];
+  const view = (over: Partial<{ tab: "favorites" | "recent" | "all"; search: string; scope: "" | "Audio" | "Lighting"; typeKey: string; mfr: string }>) =>
+    pal226View(parts, { tab: "all", search: "", scope: "", typeKey: "", mfr: "", ...over }, types, ["fix", "gone", "spk-b"], ["amp-a"]);
+  const ids = (v: ReturnType<typeof view>) => v.rows.map((p) => p.id).join(",");
+
+  const all = view({});
+  ok(ids(all) === "spk-a,amp-a,spk-b,asm,fix" && all.hiddenUnmapped === 1, "#226 palette: without a search, unmapped parts are hidden (and counted); virtual and Fabric rows never show");
+  ok(all.scopeCounts[""] === 5 && all.scopeCounts.Audio === 4 && all.scopeCounts.Lighting === 1, "#226 palette: scope chip counts cover what the chip would show");
+  ok(view({ scope: "Audio" }).typeChips.map((c) => c.key).join(",") === "speakers,amplifiers,__assembly", "#226 palette: a scope shows its type chips in type order, assemblies after");
+  const spk = view({ scope: "Audio", typeKey: "speakers" });
+  ok(ids(spk) === "spk-a,spk-b" && j(spk.manufacturers) === j(["Meyer", "QSC"]), "#226 palette: a type chip narrows the rows and the manufacturer list");
+  ok(ids(view({ scope: "Audio", typeKey: "speakers", mfr: "QSC" })) === "spk-a", "#226 palette: the manufacturer filter narrows further");
+  const found = view({ search: "speaker" });
+  ok(ids(found) === "spk-a,spk-b,wid" && found.hiddenUnmapped === 0 && !pal226Mapped(found.rows[2]), "#226 palette: a search finds unmapped parts too");
+  ok(view({ scope: "Audio", search: "speaker" }).typeChips.map((c) => c.key).join(",") === "speakers,__unmapped", "#226 palette: while searching, an Unmapped chip appears last");
+  ok(ids(view({ tab: "favorites" })) === "fix,spk-b" && ids(view({ tab: "favorites", search: "beta" })) === "spk-b" && ids(view({ tab: "recent" })) === "amp-a",
+    "#226 palette: Favorites and Recent keep their stored order, skip parts no longer in the library, and honour the search");
+  ok(PAL226_CAP === 60, "#226 palette: the row cap stays 60");
+
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+  const pal = read("src/app/(app)/design/grid/[id]/device-palette.tsx");
+  const palImports = [...pal.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+  ok(pal.startsWith('"use client"') && palImports.every((s) => !s.startsWith("@/lib/stores/") && !s.startsWith("@/db")) && pal.includes("paletteView(") && pal.includes("toggleGridFavoriteAction(") && pal.includes('href="/catalog/device-types"'),
+    "#226 palette: a client component on pure modules; stars through the action; admins get a link to Device types");
+  const ed = read("src/app/(app)/design/grid/[id]/editor.tsx");
+  ok(ed.includes("<DevicePalette") && !ed.includes("filteredParts") && !ed.includes("scopeFilter"), "#226 palette: the editor delegates the palette");
+  const pg = read("src/app/(app)/design/grid/[id]/page.tsx");
+  ok(pg.includes("loadDeviceTypeContext(catalog)") && pg.includes("getGridFavorites(user.id)") && pg.includes("getGridRecent(user.id)") && pg.includes("favorites={favorites}") && pg.includes("recent={recent}"),
+    "#226 palette: the page loads types, favorites and recent for the signed-in user");
+  const acts = read("src/app/(app)/design/grid/[id]/actions.ts");
+  const body = (name: string) => acts.slice(acts.indexOf(`export async function ${name}`), acts.indexOf("\n}\n", acts.indexOf(`export async function ${name}`)));
+  ok(body("placeDeviceAction").includes("pushGridRecent(user.id, input.partId)"), "#226 recent: placing a device updates the placer's Recent");
+  ok(body("toggleGridFavoriteAction").includes("await requireUser()") && body("toggleGridFavoriteAction").includes("toggleGridFavorite(user.id"), "#226 favorites: the star action is per signed-in user");
 }

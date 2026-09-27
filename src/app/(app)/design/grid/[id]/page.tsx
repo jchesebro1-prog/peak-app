@@ -28,6 +28,7 @@ import { autoEstimateCards, autoTargets, priceOverrides, sellOnlyCards } from "@
 import { autoEstimateFor } from "@/lib/design/grid-auto-model";
 import { virtualPartsFor } from "@/lib/design/grid-virtual-parts";
 import { customItemBomLines, customItemsOf } from "@/lib/design/grid-custom-items";
+import { getGridFavorites, getGridRecent, loadDeviceTypeContext } from "@/lib/stores/device-types";
 import type { PartLite } from "@/lib/design/grid-bom";
 import type { LaborPartLite } from "@/lib/design/grid-labor";
 import { CanMapProvider } from "@/components/design/equipment-map-link";
@@ -94,6 +95,15 @@ export default async function GridEditorPage({
   // the map itself.
   const categoryMap = resolveCategoryMap(settings.catalogCategoryMap);
 
+  // #226: curated device types. Reading the map auto-applies confident
+  // category matches (spec); every PartLite then carries its type + the
+  // type's scope. Favorites/Recent are the signed-in user's own lists.
+  const [deviceTypes, favorites, recent] = await Promise.all([
+    loadDeviceTypeContext(catalog),
+    getGridFavorites(user.id),
+    getGridRecent(user.id),
+  ]);
+
   // Admin-edited wire-type registry (Design → Grid Settings) — threaded into
   // the client-side canConnect() pre-check the same way the server action
   // (addRouteAction) re-derives it as the authority. Without this the editor
@@ -144,7 +154,7 @@ export default async function GridEditorPage({
   const hasDatasheetFile = (p: (typeof catalog)[number]) => ownFiles(docIndex, p.sku, "datasheet").length > 0;
   // #211: assemblies and allowances placed by Auto resolve live into PartLite rows.
   const parts: PartLite[] = [
-    ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile }),
+    ...gridPartsFrom(gridSymbols, catalog, categoryMap, { hasDatasheet: hasDatasheetFile, deviceTypes }),
     ...virtualPartsFor((project.placements || []).map((pl) => pl.partId), equipMap, equipCtx),
   ];
 
@@ -229,6 +239,9 @@ export default async function GridEditorPage({
       wireTypes={wireTypes}
       linesetDesigns={linesetDesigns.map((d) => ({ id: d.id, name: d.name }))}
       customLines={customLines}
+      deviceTypes={deviceTypes.types}
+      favorites={favorites}
+      recent={recent}
     />
     </CanMapProvider>
   );

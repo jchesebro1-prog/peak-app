@@ -49,6 +49,7 @@ import { getSite } from "@/lib/identity/sites";
 // /api/grid-sheets/upload (#146, D173) because a server action caps at 1200kb.
 import { get as getPart, getMany as getCatalogParts } from "@/lib/stores/catalog";
 import { createGridAssembly, removeGridAssembly, setGridSymbolLook } from "@/lib/stores/grid-catalog";
+import { pushGridRecent, toggleGridFavorite } from "@/lib/stores/device-types";
 import { autoNeedsPart, fillAutoScopes } from "@/lib/design/grid-auto-fill";
 import {
   AUTO_SCOPES,
@@ -360,8 +361,25 @@ export async function placeDeviceAction(
   if (!hasOption(project, input.optionId)) return { ok: false, error: OPTION_GONE };
   const p = await addPlacement(projectId, { ...input, by: user.name });
   if (!p) return { ok: false, error: "Design not found." };
+  // #226: Recent is the placer's own last-40 list — a convenience, so a
+  // failed write never fails the placement that already landed.
+  try {
+    await pushGridRecent(user.id, input.partId);
+  } catch {
+    /* best-effort */
+  }
   revalidatePath(editorPath(projectId));
   return { ok: true };
+}
+
+/** #226: star / unstar a part in the palette — the signed-in user's own
+ *  favorites (cap 300, refused past it). No revalidate: the palette keeps
+ *  the returned list; a reload reads the same blob. */
+export async function toggleGridFavoriteAction(
+  partId: string
+): Promise<{ ok: true; favorites: string[]; on: boolean } | { ok: false; error: string }> {
+  const user = await requireUser();
+  return toggleGridFavorite(user.id, String(partId || ""));
 }
 
 /** Reposition an already-placed device (punch #47). Wires attached to it
