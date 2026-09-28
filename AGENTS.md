@@ -441,6 +441,21 @@ See `.env.example`.
     (`intake.baseSheetTemplate`, `legacy-pros-geom.ts`). Remaining is
     Jeff-gated: DWGs for the other venue types (church, gym stage, black box,
     conference, arena). Punch item #249.
+22. ✅ **Portal curtain configurator** (#250, D437–D440) — the portal
+    catalog's "Request curtain pricing" panel is a priced configurator: the
+    same inputs (name, fabric, qty, width, height, fullness) now show a
+    live "$X each · $Y total", computed server-side (debounced
+    `priceCurtainOptions`) through the Estimator's own curtain math
+    (`curtainCost`/`curtainPrice` at the customer's tier margin, live
+    sewing %) — a portal curtain opened in the Estimator shows the same
+    number. A priced curtain line still carries a `review` flag distinct
+    from price-on-request (staff SpecItem `portalConfirm`), so the quote
+    stays a Peak-review quote — now possibly fully priced — until it's
+    actually sent; the staff banner and cart copy name which of POR/
+    curtain-confirm still blocks sending. "Not sure — recommend one" (or
+    any fabric the index can't price) still lands price-on-request,
+    unchanged. Remaining is Jeff-gated: try a curtain in the portal with a
+    real grant and compare against the Estimator. Punch item #250.
 
 QUESTIONS.md is the standing agenda for Jeff; DECISIONS.md logs defaults
 taken without asking.

@@ -7405,3 +7405,57 @@ Jeff's drawing is ~3" out of square across the back of the house (inside faces a
 the left house wall stays within an inch of 6" at any house width from 60' to 120' (harness-checked); every
 orthogonal wall elsewhere stays exactly 6". Labels render at 8 px on the drawing's own text baseline (top-left y +
 the drawing's text height), so a label Jeff set just above a wall stays clear of it.
+
+## D437. One curtain price = the Estimator's own math, run server-side only (#250, 2026-09-28)
+
+Jeff (2026-09-27, #245 brainstorm): *"long term we will just build out the curtain portion to include it like the
+fixture so we will always just use the same module."* `priceCurtain` (`src/lib/portal-pricing.ts`) now calls the
+exact functions the Estimator's `computeCurtain` calls — `curtainCost` + `curtainPrice`
+(`src/lib/design/curtain-pricing.ts`) — at the customer's resolved tier margin and the live sewing %
+(`loadCurtainSewingPct`, now threaded through `PortalPricingContext.curtainSewingPct`), so a portal curtain opened
+later in the Estimator shows the identical number. The browser never computes a price: the panel's fabric/qty/
+width/height/fullness inputs go to a new debounced server action, `priceCurtainOptions` →
+`priceCurtainOptionsFor` (`src/lib/portal-part-detail.ts`, pattern: `priceFixtureOptionsFor`) → the same
+`priceCurtain` path the cart itself uses. The fabric's `$/sq ft` rate is resolved once per portal-index build into
+a new server-only `PortalIndex.fabricRates: Map<sku, rate>` — deliberately separate from the client-facing
+`fabrics: {sku,name}[]` list handed to the browser, so the rate can never ride along in a server-component prop.
+
+## D438. Priced curtains still gate the quote for review — a `review` flag distinct from price-on-request (#250, 2026-09-28)
+
+Jeff (2026-09-27, #245 brainstorm): *"the only thing I am having a hiccup on is curtains"* — curtains stay a Peak
+review item even once they're priced (measurements and fabric still need a human look). `SellLine` and the staff
+`SpecItem` gain `review?: boolean` / `portalConfirm?: boolean`, kept apart from `por` (no price at all):
+`quoteMode` (`src/lib/portal-quote-mode.ts`) is review-mode on either flag, with three reasons — POR-only
+unchanged, review-only "Curtains are confirmed by Peak (measurements and fabric)", both joined "`<N> line(s) are
+price on request; curtains are confirmed by Peak`". A cart that is fully priced but carries only curtain lines
+now generates as a **review** draft, not firm — new territory (#245's review path previously meant "something is
+unpriced"; #250 makes review mean "something needs Peak's eyes," priced or not). The staff SpecItem stamps
+`sku: "CRT-P"` (vs. the not-sure line's `"CRT-REQ"`) so a saved quote's spec tells the two cases apart at a
+glance. `clearPricedPor` gains `anyConfirm` (a `portalConfirm` item, never rewritten — only `por` items clear on
+`price > 0`); the Estimator's `saveQuoteAction` clears `portalReview` on Save only when `!anyPor && !anyConfirm`.
+`setStatus(…, "sent")` already clears `portalReview` unconditionally (#245 final fix), so a curtain is "confirmed"
+simply by the quote going out — or by staff replacing the line, ordinary Estimator editing, no special-cased clear.
+
+## D439. "Not sure — recommend one" — and any fabric the index can't price — still lands price-on-request (#250, 2026-09-28)
+
+No new inputs, and no attempt to price without a known rate: a blank fabric, or a fabric SKU the portal index has
+no `fabricRates` entry for (deleted, hidden, or genuinely never given a `curtainAreaRate`/`costPerSqft`), both fall
+through to the original `por: true`, `sku: "CRT-REQ"` line untouched — the two are handled by the same branch in
+`priceCurtain`, not treated as separate cases. Hang and bottom option fields still don't affect price anywhere
+(unchanged from the #227 curtain-pricing rebuild); no custom-fabric entry was added.
+
+## D440. Review-banner and cart-reason copy account for both POR and curtain-confirm; curtain pricing gets its own rate-limit budget (fix round 1, #250, 2026-09-28)
+
+First pass left two copy strings assuming POR was the only reason a quote needed review, and shared the fixture
+configurator's `"portal-price:<grant>"` rate-limit key with the new curtain live-pricing action. Fixed: the staff
+Portal panel's banner heading (`reviewBannerHeading`, `src/lib/portal-quote-mode.ts`) now reads "Needs Peak's
+price and a curtain check before it can be sent" when both a POR line and a `portalConfirm` curtain remain, and
+"Curtains need Peak's confirmation before it can be sent" when only curtains do — POR-only and the "nothing
+remains" fallback keep the original heading. The cart's review-reason line (`cartReviewReasonLine`, same module)
+skips appending the generic "— Peak will confirm pricing." suffix whenever `quoteMode`'s own reason already says
+"confirmed by Peak" (review-only and the combined por+review reason both already do), avoiding a redundant double
+confirmation. `priceCurtainOptionsFor` now rate-limits under its own `"portal-price-curtain:<grant>"` key
+(`"portal-price-curtain:preview:<customerId>"` for a team preview) instead of sharing the fixture configurator's
+budget — pricing a curtain and configuring a fixture on the same grant no longer starve each other. The
+`portalReview` notification preference's description was widened to "Customer quotes with items waiting on a
+Peak price or confirmation." (`src/lib/stores/notif-prefs.ts`).

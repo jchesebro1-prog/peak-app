@@ -9295,3 +9295,36 @@ the template", then a Vectorworks DWG for the auditorium/PAC with labels on the 
 — each is a conversion + a key-lines file, no new engine work. An upload screen for templates (Grid Settings →
 Backgrounds) if Jeff wants to swap drawings himself. Seats or doors only if they're drawn into the DWG. When a second proscenium template id ships (e.g. `proscenium@2`), turn
 `grid-auto-fill.ts`'s `baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID` check into an id → geometry lookup.
+
+## 250. Customer portal — the curtain request panel becomes a priced configurator, still confirmed by Peak — DONE 2026-09-28 (D437–D440)
+
+**Reported:** Jeff (2026-09-27, #245 brainstorm): *"long term we will just build out the curtain portion to
+include it like the fixture so we will always just use the same module"* — and curtains were the one line he
+wanted Peak to review: *"the only thing I am having a hiccup on is curtains."* 2026-09-28: *"go ahead with the
+curtain configurator."*
+
+**Done.**
+- **The "Request curtain pricing" panel is now a priced configurator** — same inputs (name, fabric, qty, width,
+  height, fullness), header "Configure a curtain," a live "$X each · $Y total" (or "We'll recommend a fabric and
+  price it." for "Not sure") computed on the server, debounced, as the customer types (D437).
+- **One curtain price = the Estimator's.** `priceCurtain` runs the same `curtainCost`/`curtainPrice` chain
+  (`src/lib/design/curtain-pricing.ts`) at the customer's tier margin and the live sewing %, so a portal curtain
+  opened in the Estimator shows the same number. The browser never computes it (`priceCurtainOptions`, pattern:
+  `priceFixtureOptions`) (D437).
+- **Curtains still go to Peak for review — priced.** A curtain line carries its price but also a `review` flag
+  (staff SpecItem `portalConfirm`); any such line makes the quote a review quote, even when every line is fully
+  priced. Reason text tells POR and curtain-confirm apart, singly and combined. The review flag clears on Save
+  only when neither a POR line nor a portalConfirm curtain remains — it clears for real when the quote sends
+  (D438).
+- **"Not sure — recommend one"** (and any fabric the index can't price) stays price-on-request, unchanged (D439).
+- **Fix round 1:** the staff banner heading and the cart's review-reason line each read out which item kinds still
+  block sending (POR / curtain-confirm / both), instead of a single "price" framing that no longer fit a fully-
+  priced curtain; curtain live-pricing got its own rate-limit budget, separate from the fixture configurator's
+  (D440).
+
+**Jeff-gated.** Try a curtain in the portal with a real grant — configure one, watch the live price, Generate —
+and compare the number against the same curtain opened in the Estimator.
+
+**Follow-ups (not built).** The department tree (a separate spec, per the #245 brainstorm). Custom fabrics, hang/
+bottom pricing and a firmer (non-review) curtain path are all still Jeff's call — he wants curtains reviewed for
+now. See D437–D440.
