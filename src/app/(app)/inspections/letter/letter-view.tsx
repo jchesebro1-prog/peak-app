@@ -4,6 +4,7 @@ import { get as getQuote } from "@/lib/stores/quotes";
 import { locationById, nameFor } from "@/lib/stores/customers";
 import { levelMeta } from "@/lib/stores/inspections";
 import { getSettings } from "@/lib/settings";
+import { portalDocumentExtras } from "@/lib/quote-pdf/quote-document-data";
 import { renderField } from "@/lib/templates";
 import { allUsers } from "@/lib/users";
 import { getTravelRates } from "@/lib/stores/pricing";
@@ -304,6 +305,13 @@ export async function InspectionLetterView({ id }: { id: string }) {
   );
   const priceSupport = renderField(tpl, "inspection_proposal", "costTail", {});
   const signoffCta = renderField(tpl, "inspection_proposal", "signoff", {});
+
+  // #246 Task 2 (spec §4): a portal-service quote (generated/refreshed from
+  // the customer portal) prints the standing review + tax lines and, while
+  // still firm, "Valid until <date>" — the same helper #245 uses for the
+  // portal-catalog Estimator document, reused here with no sections (this
+  // letter has no freight row of its own).
+  const portalExtras = portalDocumentExtras(quote, []);
 
   const cellPad = "9px 11px";
 
@@ -638,6 +646,14 @@ export async function InspectionLetterView({ id }: { id: string }) {
                 </span>
               </div>
             </div>
+
+            {portalExtras.standingLines.length > 0 && (
+              <div className="pk-keep" style={{ marginBottom: 8, fontSize: "8.5pt", color: "#8c919c", lineHeight: 1.6 }}>
+                {portalExtras.standingLines.map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            )}
 
             {/* 7) authorization / sign-off */}
             <div className="pk-keep" style={{ borderTop: "1px solid #cfcfcf", marginTop: 22, paddingTop: 16 }}>

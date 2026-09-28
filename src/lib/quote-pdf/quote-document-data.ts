@@ -30,16 +30,22 @@ function longDate(ms: number): string {
 }
 
 /**
- * #245 — what a portal-catalog quote adds to the document: the review + tax
- * lines, "Valid until <date>" for a firm generation, and the freight row with
- * the venue's one-way miles when known ("Freight & delivery — 412 mi"). Never
- * the freight % (it is a % of cost — spec §8.1). Every other quote: nothing.
+ * #245 (widened #246 Task 2) — what a portal-catalog OR portal-service quote
+ * adds to the document: the review + tax lines, "Valid until <date>" for a
+ * firm generation, and (portal-catalog only, via `sections`) the freight row
+ * with the venue's one-way miles when known ("Freight & delivery — 412 mi").
+ * Never the freight % (it is a % of cost — spec §8.1). The flame/inspection
+ * proposal letters (letter-view.tsx) call this with an empty `sections` —
+ * they have no freight row of their own, only the standing lines. Every
+ * other quote: nothing.
  */
 export function portalDocumentExtras(
   q: Pick<Quote, "source" | "portalFirm">,
   sections: SpecSection[]
 ): { standingLines: string[]; validUntilMs: number | null; freightLabel: string } {
-  if (q.source !== "portal-catalog") return { standingLines: [], validUntilMs: null, freightLabel: "Freight & delivery" };
+  if (q.source !== "portal-catalog" && q.source !== "portal-service") {
+    return { standingLines: [], validUntilMs: null, freightLabel: "Freight & delivery" };
+  }
   const until = q.portalFirm && typeof q.portalFirm.validUntil === "number" ? q.portalFirm.validUntil : null;
   const miles = sections.map((s) => s.freightMiles).find((m): m is number => typeof m === "number" && Number.isFinite(m) && m >= 0);
   return {

@@ -429,12 +429,18 @@ type PortalQuoteFields = Pick<Quote, "customerId" | "status" | "source" | "porta
 
 /** Customer portal list rule: the grant's customer's published quotes plus
  *  their own self-serve drafts (the retired estimate builder's
- *  "portal-self-serve", and #245's "portal-catalog" review quotes) — never an
- *  internal draft, never imported Daylite history. */
+ *  "portal-self-serve", #245's "portal-catalog" review quotes, and #246's
+ *  "portal-service" flame/inspection quotes) — never an internal draft,
+ *  never imported Daylite history. */
 export function portalListsQuote(q: PortalQuoteFields, customerId: string): boolean {
   if (!customerId || q.customerId !== customerId) return false;
   if (isImportedHistoryQuote(q)) return false;
-  return q.status !== "draft" || q.source === "portal-self-serve" || q.source === "portal-catalog";
+  return (
+    q.status !== "draft" ||
+    q.source === "portal-self-serve" ||
+    q.source === "portal-catalog" ||
+    q.source === "portal-service"
+  );
 }
 
 /** Customer portal Accept rule (button AND server action): a listed quote,
