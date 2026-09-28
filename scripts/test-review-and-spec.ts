@@ -10650,6 +10650,7 @@ seeded()
   .then(() => specRecordsStoreAsyncChecks())
   .then(() => specRecordsImportAsyncChecks())
   .then(() => specRecordsImportFixRound1AsyncChecks())
+  .then(() => specRecordMatchAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32605,4 +32606,54 @@ async function specRecordsImportFixRound1AsyncChecks(): Promise<void> {
   const dupIdPlan = I.planSpecRecordImport(dupIdFile, { existing: [], sections: secs, articles: arts });
   ok(dupIdPlan.blocking && dupIdPlan.problems.some((p) => p.blocking && p.specId === firstId && /appears 2 times/i.test(p.message)),
     "fix round 1 (minor): a file carrying the same Spec ID twice is a blocking problem");
+}
+
+/* ---- Spec record matching — brief §10 (§3) ----
+ * Needs `await` (dynamic imports of not-yet-written modules and a real file
+ * read), so like every other async check in this file it lives in its own
+ * named async function, wired into the promise chain, rather than the
+ * brief's literal top-level `{ }` block — esbuild's cjs output refuses real
+ * top-level await. Assertions are copied verbatim from the brief. */
+async function specRecordMatchAsyncChecks(): Promise<void> {
+  const K = await import("@/lib/specs/record-keys");
+  const M = await import("@/lib/specs/record-match");
+  const I = await import("@/lib/specs/record-import");
+  const recs = I.recordsFromJson(JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"))).records;
+  const m = (row: Parameters<typeof M.matchRow>[0], part?: Parameters<typeof M.matchRow>[2], legacy?: boolean) => M.matchRow(row, recs, part, legacy);
+  const is = (r: ReturnType<typeof M.matchRow>, id: string) => r.status === "matched" && r.specId === id;
+  ok(is(m({ sku: "LS-P-CAM" }), "PS-260961-028"), "match: LS-P-CAM → Lonestar Prime 028");
+  ok(is(m({ sku: "LS-UB-MI" }), "PS-260961-022"), "match: LS-UB-MI → Lonestar 022");
+  ok(is(m({ sku: "CSPARVZMV-1" }), "PS-260961-021"), "match: CSPARVZMV-1 → 021 only (017 archived)");
+  const w = m({ sku: "UH10005-41F" });
+  ok(is(w, "PS-260961-007") && w.status === "matched" && w.via === "wildcard", "match: UH10005-41F → 007 via wildcard");
+  ok(m({ sku: "UH10005-61F" }).status === "no-match", "match: UH10005-61F → no-match (6 is not a Heritage color)");
+  ok(is(m({ sku: "DIN14-P-ACP/SPS" }), "PS-260961-006"), "match: DIN14-P-ACP/SPS → 006");
+  ok(is(m({ sku: "P-ACP-E Mk2" }), "PS-260961-005") && is(m({ sku: "p-acp-e  mk2" }), "PS-260961-005"), "match: P-ACP-E Mk2 normalization → 005");
+  ok(is(m({ sku: "", mfrNumber: "IQ24", desc: "Sensor IQ 24" }), "PS-260961-001"), "match: vendor line IQ24 (no catalog part) → 001");
+  ok(is(m({ sku: "ETC:IQ24" }), "PS-260961-001"), "match: the sku after its Mfr: prefix is a candidate");
+  ok(is(m({ sku: "SOMESKU" }, { manufacturerPartNumber: "IQ48" }), "PS-260961-001"), "match: the catalog part's MPN is a candidate");
+  const ion = m({ sku: "ION XE 20 2K-US" });
+  ok(is(ion, "PS-260961-012") && JSON.stringify(M.companionsFor(["PS-260961-012"], recs)) === '["PS-260961-011"]', "match: ION XE 20 → 012 + companion 011");
+  ok(JSON.stringify(M.companionsFor(["PS-260961-012", "PS-260961-013"], recs)) === '["PS-260961-011"]', "match: ION + ELEMENT → companion 011 once");
+  ok(is(m({ sku: "CUSTOM", specKey: "Stage Drapes – Main Curtain", desc: "Main curtain" }), "PS-116123-002"), "match: estimate line keyed Stage Drapes – Main Curtain → 002");
+  ok(is(m({ sku: "CUSTOM", specKey: "stage drapes - main curtain" }), "PS-116123-002"), "match: match key ignores case and dash style");
+  ok(K.curtainSpecKey("Full", "Main Curtain") === "Stage Drapes – Main Curtain" && is(m({ sku: "CURTAIN", specKey: K.curtainSpecKey("Full", "Main")! }), "PS-116123-002"), "match: Grid main curtain → 002 via curtainSpecKey");
+  ok(K.curtainSpecKey("Border", "") === "Stage Drapes – Borders" && K.curtainSpecKey("Leg", "") === "Stage Drapes – Legs"
+    && K.curtainSpecKey("Draw", "Traveler") === "Stage Drapes – Mid and Rear Draws" && K.curtainSpecKey("Full", "Cyc") === "Stage Drapes – Cyclorama"
+    && K.curtainSpecKey("Border", "Main Valance") === "Stage Drapes – Valance", "record-keys: curtainSpecKey name keywords win over type");
+  const x = m({ sku: "XYZ-123", desc: "Lonestar moving light" });
+  ok(x.status === "no-match" && x.candidates.length > 0 && x.candidates.includes("PS-260961-022"), "match: XYZ-123 → no-match with candidates, never assigned");
+  ok(m({ sku: "NOPE" }, null, true).status === "legacy", "match: legacy specBody is step 4");
+  ok(m({ sku: "LS-P", waived: { reason: "Owner furnished" } }).status === "waived", "match: waived rows report waived");
+  const draftRecs = recs.map((r) => (r.specId === "PS-260961-022" ? { ...r, status: "draft" as const } : r));
+  ok(M.matchRow({ sku: "LS-UB-MI" }, draftRecs).status === "draft", "match: a draft-only hit is reported as draft, not printed");
+  const twin = [...recs, { ...recs.find((r) => r.specId === "PS-260961-022")!, specId: "PS-X" }];
+  ok(M.matchRow({ sku: "LS-UB-MI" }, twin).status === "ambiguous", "match: two ready records on one number → ambiguous");
+  // Guard: the v1 library has no ready part-number collisions
+  const seen = new Map<string, string>(); let clash = "";
+  for (const r of recs.filter((r) => r.status === "ready")) for (const n of r.mfrNumbers) { const k = K.normPartNumber(n); if (seen.has(k) && seen.get(k) !== r.specId) clash = `${k} ${seen.get(k)} ${r.specId}`; seen.set(k, r.specId); }
+  ok(clash === "", "match guard: no two ready v1 records share a part number " + clash);
+  ok(K.specRowKey({ sku: "CURTAIN", specKey: "Stage Drapes – Legs", desc: "Legs" }) === "KEY:stage drapes - legs|legs"
+    && K.specRowKey({ sku: "", mfrNumber: " iq24 " }) === "MPN:IQ24" && K.specRowKey({ sku: "ls-p" }) === "SKU:LS-P"
+    && K.specRowKey({ specId: "PS-1", fromLibrary: true }) === "SPEC:PS-1", "record-keys: specRowKey");
 }

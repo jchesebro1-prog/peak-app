@@ -68,8 +68,10 @@ function tokens(s: string): Set<string> {
 
 /** Jaccard overlap — good enough to surface candidates a human then confirms.
  *  Deliberately NOT used to auto-assign: a wrong silent match would put the
- *  wrong product in a public bid document. */
-function similarity(a: string, b: string): number {
+ *  wrong product in a public bid document. Exported for `record-match.ts`'s
+ *  own no-match candidate scoring (#205 follow-on) — same tokenizer, same
+ *  math, no behavior change here. */
+export function similarity(a: string, b: string): number {
   const ta = tokens(a);
   const tb = tokens(b);
   if (!ta.size || !tb.size) return 0;
