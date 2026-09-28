@@ -30504,4 +30504,6 @@ import { defaultAState as vt247bDefault } from "@/app/(app)/design/quick/engine"
   ok(Math.abs((G.xWingR - G.xWingL) / G.ppf - 80) < 0.05 && Math.abs(G.openW / G.ppf - 50) < 0.05, "#247 T3: the canvas scale reads true — 80' wall to wall, 50' opening");
   const church = vt247bBuild({ ...a, venue: "church" }, 8, 3, "#3a3f4a");
   ok((church.handles || []).some((h) => h.type === "door"), "#247 T3: other venue kinds keep their own plans (church still has its doors)");
+  const regionBottom = (name: string) => Math.max(...G.regions[name].map((p) => p.y));
+  ok(["Booth", "Electrical Room", "MISC Rooms"].every((name) => { const l = G.labels.find((x) => x.text === name)!; return l.y + l.h < regionBottom(name); }), "#247 T3: room labels sit on the drawing's own baseline, clear of the room's bottom wall");
 }

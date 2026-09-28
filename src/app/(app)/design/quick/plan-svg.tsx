@@ -183,7 +183,7 @@ export function prosGeom(s: AState) {
     stageEdge: plan.lines.stageEdge.map(px),
     catwalkLine: plan.lines.catwalk.map(px),
     polylines: plan.polylines.map((pl) => pl.map(px)),
-    labels: plan.labels.map((l) => ({ text: l.text, ...px(l) })),
+    labels: plan.labels.map((l) => ({ text: l.text, ...px(l), h: R(l.h * ppi) })),
     handles: { sideL: pt("handleL"), sideR: pt("handleR"), back: pt("backWall") },
   };
 }
@@ -227,7 +227,7 @@ function buildPlanProscenium(s: AState, lineSets: number, electrics: number, _ac
   paths.push({ d: trace(G.regions.House) + " Z", fill: "#f9fafb", stroke: "none" });
   paths.push({ d: "M " + R(xProcL) + " " + R(yBack) + " H " + R(xProcR) + " V " + R(yPlaster) + " H " + R(xProcL) + " Z", fill: "#ffffff", stroke: "#e3e5ea", sw: 1 });
   paths.push({ d: G.polylines.map(trace).join(" "), fill: "none", stroke: "#3a3f4a", sw: 0.9 });
-  for (const l of G.labels) texts.push({ x: l.x, y: R(l.y + 7), t: l.text, fill: "#737985", size: 8, weight: 600, anchor: "start", transform: "" });
+  for (const l of G.labels) texts.push({ x: l.x, y: R(l.y + l.h), t: l.text, fill: "#737985", size: 8, weight: 600, anchor: "start", transform: "" }); // baseline sits on the drawing's own text baseline, so glyphs grow upward and stay clear of the wall Jeff drew them against
 
   // faded unrigged line sets (background grid)
   const n = Math.max(lineSets, 1);
