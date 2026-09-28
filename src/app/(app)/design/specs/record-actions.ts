@@ -11,6 +11,8 @@ import {
   nextSpecId,
   restoreSpecRecordRevision,
   saveSpecRecord,
+  specRecordRevisions,
+  type SaveOutcome,
 } from "@/lib/stores/spec-records";
 import { allSpecDocuments, getSpecDocument, patchSpecDocument, type SpecDocument } from "@/lib/stores/spec-documents";
 import {
@@ -25,8 +27,15 @@ import {
   withoutOverride,
   withoutWaive,
 } from "@/lib/specs/spec-document";
-import { isPlaceholderSku, normMatchKey, normPartNumber, specRowKey } from "@/lib/specs/record-keys";
-import { normalizeSpecRecord, validateSpecRecord, type SpecKind, type SpecRecord } from "@/lib/specs/records";
+import { isPlaceholderSku, normPartNumber, specRowKey } from "@/lib/specs/record-keys";
+import {
+  matchKeyConflict,
+  normalizeSpecRecord,
+  partNumberConflict,
+  validateSpecRecord,
+  type SpecKind,
+  type SpecRecord,
+} from "@/lib/specs/records";
 import { csiKey } from "@/lib/specs/articles";
 
 /**
@@ -78,16 +87,20 @@ function rowOnDoc(doc: SpecDocument, rowKey: string): SpecDocument["products"][n
 
 const ROW_GONE = "That row is no longer on this spec.";
 
+/** Live validation context, plus the raw record list so a caller can also
+ *  run the conflict guards below without a second `allSpecRecords()` fetch. */
 async function recordCtx(): Promise<{
   sections: Array<{ id: string; number: string }>;
   articles: Array<{ id: string; sectionId: string }>;
   specIds: Set<string>;
+  records: SpecRecord[];
 }> {
   const [sections, articles, records] = await Promise.all([allSections(), allArticles(), allSpecRecords()]);
   return {
     sections: sections.map((s) => ({ id: s.id, number: s.number })),
     articles: articles.map((a) => ({ id: a.id, sectionId: a.sectionId })),
     specIds: new Set(records.map((r) => r.specId)),
+    records,
   };
 }
 
@@ -107,36 +120,16 @@ async function partNumberForRow(row: { sku?: string; mfrNumber?: string }): Prom
   return ci >= 0 ? sku.slice(ci + 1) : sku;
 }
 
-/** The specId of another `ready` record that already carries one of
- *  `mfrNumbers` (normalized), or `null` — the guard that keeps a part
- *  number from ever matching two records (design §2, §3.2, §5.1). */
-async function partNumberConflict(specId: string, mfrNumbers: string[], all?: SpecRecord[]): Promise<string | null> {
-  const records = all ?? (await allSpecRecords());
-  const norms = mfrNumbers.map(normPartNumber).filter(Boolean);
-  if (!norms.length) return null;
-  for (const r of records) {
-    if (r.specId === specId || r.status !== "ready") continue;
-    if (r.mfrNumbers.some((m) => norms.includes(normPartNumber(m)))) return r.specId;
-  }
-  return null;
-}
-
-/** The specId of another non-archived `system` record sharing `matchKey`
- *  (normalized), or `null` (design §5.1 resolution: "the match key must not
- *  already be on another non-archived system record"). */
-async function matchKeyConflict(
-  specId: string,
-  kind: SpecKind,
-  matchKey: string | null,
-  all?: SpecRecord[]
-): Promise<string | null> {
-  if (kind !== "system" || !matchKey) return null;
-  const records = all ?? (await allSpecRecords());
-  const norm = normMatchKey(matchKey);
-  for (const r of records) {
-    if (r.specId === specId || r.status === "archived" || r.kind !== "system" || !r.matchKey) continue;
-    if (normMatchKey(r.matchKey) === norm) return r.specId;
-  }
+/** Runs both cross-record guards (`partNumberConflict`/`matchKeyConflict`,
+ *  `src/lib/specs/records.ts`) against `candidate` and returns the first
+ *  refusal, or `null` when neither fires. Shared by every write that saves
+ *  a record with a `ready` status: write-new, the library editor, approve,
+ *  and restore (fix round 1 — approve/restore used to skip these). */
+function conflictError(candidate: SpecRecord, all: readonly SpecRecord[]): string | null {
+  const mfrConflict = partNumberConflict(candidate, all);
+  if (mfrConflict) return `That part number is already on ${mfrConflict}.`;
+  const mkConflict = matchKeyConflict(candidate, all);
+  if (mkConflict) return `That match key is already used by ${mkConflict}.`;
   return null;
 }
 
@@ -215,7 +208,8 @@ export async function linkRowToRecordAction(docId: string, rowKey: string, specI
     const norm = normPartNumber(partNumber);
     const already = record.mfrNumbers.some((m) => normPartNumber(m) === norm);
     if (!already) {
-      const conflict = await partNumberConflict(specId, [partNumber]);
+      const all = await allSpecRecords();
+      const conflict = partNumberConflict({ ...record, mfrNumbers: [partNumber] }, all);
       if (conflict) return { ok: false, error: `That part number is already on ${conflict}.` };
       await saveSpecRecord({ ...record, mfrNumbers: [...record.mfrNumbers, partNumber] }, user.name, `Linked from ${docId}`);
     }
@@ -263,11 +257,13 @@ export async function createRecordFromRowAction(
   const row = rowOnDoc(doc, rowKey);
   if (!row) return { ok: false, error: ROW_GONE };
 
-  const sections = await allSections();
+  // Fetched once — sections/articles are needed both for the section/article
+  // lookup below and for `validateSpecRecord`'s context (fix round 1: this
+  // used to fetch both twice, once here and once inside `recordCtx()`).
+  const [sections, articles, allRecords] = await Promise.all([allSections(), allArticles(), allSpecRecords()]);
   const section = sections.find((s) => s.id === doc.sectionId);
   if (!section) return { ok: false, error: "This spec's section no longer exists." };
 
-  const articles = await allArticles();
   const sourceArticleId = String(input.sourceArticleId || "").trim();
   const article = articles.find((a) => a.id === sourceArticleId);
 
@@ -293,14 +289,16 @@ export async function createRecordFromRowAction(
   });
   if (!candidate) return { ok: false, error: "That spec record isn't valid." };
 
-  const ctx = await recordCtx();
+  const ctx = {
+    sections: sections.map((s) => ({ id: s.id, number: s.number })),
+    articles: articles.map((a) => ({ id: a.id, sectionId: a.sectionId })),
+    specIds: new Set(allRecords.map((r) => r.specId)),
+  };
   const problems = validateSpecRecord(candidate, ctx).filter((p) => p.blocking);
   if (problems.length) return { ok: false, error: problems.map((p) => p.message).join(" ") };
 
-  const mfrConflict = await partNumberConflict(specId, candidate.mfrNumbers);
-  if (mfrConflict) return { ok: false, error: `That part number is already on ${mfrConflict}.` };
-  const mkConflict = await matchKeyConflict(specId, candidate.kind, candidate.matchKey);
-  if (mkConflict) return { ok: false, error: `That match key is already used by ${mkConflict}.` };
+  const conflict = conflictError(candidate, allRecords);
+  if (conflict) return { ok: false, error: conflict };
 
   await saveSpecRecord(candidate, user.name, `Created from ${docId}`);
   if (candidate.kind === "system" && candidate.matchKey) {
@@ -331,7 +329,11 @@ export async function unwaiveRowAction(docId: string, rowKey: string): Promise<R
   return applyPatch(docId, user, (d) => withoutWaive(d, rowKey));
 }
 
-/** Approve a draft match (design §5.1) — validates first. */
+/** Approve a draft match (design §5.1) — validates as `ready` first, then
+ *  the same duplicate-part-number and match-key guards every other path to
+ *  `ready` uses (fix round 1: approve used to skip these, so a draft could
+ *  be approved straight into a collision another `ready` record already
+ *  held). */
 export async function approveDraftRecordAction(specId: string): Promise<Result> {
   const user = await requirePerm("create");
   const record = await getSpecRecord(specId);
@@ -341,6 +343,8 @@ export async function approveDraftRecordAction(specId: string): Promise<Result> 
   const ctx = await recordCtx();
   const problems = validateSpecRecord(next, ctx).filter((p) => p.blocking);
   if (problems.length) return { ok: false, error: problems.map((p) => p.message).join(" ") };
+  const conflict = conflictError(next, ctx.records);
+  if (conflict) return { ok: false, error: conflict };
   await saveSpecRecord(next, user.name, "Approved");
   revalidateAll();
   return { ok: true };
@@ -354,7 +358,7 @@ export async function saveRowOverrideAction(
   input: { title: string; specText: string }
 ): Promise<Result> {
   const user = await requirePerm("create");
-  const title = String(input.title ?? "");
+  const title = String(input.title ?? "").trim();
   const badTitle = tooLong(title, SPEC_OVERRIDE_TITLE_MAX, "the title");
   if (badTitle) return badTitle;
   const specText = String(input.specText ?? "");
@@ -424,7 +428,7 @@ export async function addLibraryRowAction(docId: string, specId: string): Promis
 export async function saveSpecRecordAction(
   record: unknown,
   why: string
-): Promise<Result<{ specId: string; outcome: "created" | "updated" | "unchanged" }>> {
+): Promise<Result<{ specId: string; outcome: SaveOutcome }>> {
   const user = await requirePerm("create");
   const normalized = normalizeSpecRecord(record);
   if (!normalized) return { ok: false, error: "That spec record isn't valid." };
@@ -446,19 +450,33 @@ export async function saveSpecRecordAction(
   const problems = validateSpecRecord(normalized, ctx).filter((p) => p.blocking);
   if (problems.length) return { ok: false, error: problems.map((p) => p.message).join(" ") };
 
-  const mfrConflict = await partNumberConflict(normalized.specId, normalized.mfrNumbers);
-  if (mfrConflict) return { ok: false, error: `That part number is already on ${mfrConflict}.` };
-  const mkConflict = await matchKeyConflict(normalized.specId, normalized.kind, normalized.matchKey);
-  if (mkConflict) return { ok: false, error: `That match key is already used by ${mkConflict}.` };
+  const conflict = conflictError(normalized, ctx.records);
+  if (conflict) return { ok: false, error: conflict };
 
   const result = await saveSpecRecord(normalized, user.name, w);
   revalidateAll();
   return { ok: true, specId: result.record.specId, outcome: result.outcome };
 }
 
+/** Restore a prior revision (design §1.2) — a new revision, never a rewind.
+ *  Fix round 1: if the version being restored is `ready`, it goes through
+ *  the same duplicate-part-number/match-key guards as every other path to
+ *  `ready` — restoring a `ready` revision could otherwise reintroduce a
+ *  collision the library has since resolved. A `draft`/`archived` target
+ *  needs no guard (design §1.1: those statuses never participate in
+ *  matching, so they can't collide). */
 export async function restoreSpecRecordRevisionAction(specId: string, revision: number): Promise<Result> {
   const user = await requirePerm("create");
-  const result = await restoreSpecRecordRevision(specId, Number(revision), user.name);
+  const rev = Number(revision);
+  const revs = await specRecordRevisions(specId);
+  const target = revs.find((r) => r.revision === rev);
+  if (!target) return { ok: false, error: `No revision ${rev} found for ${specId}.` };
+  if (target.record.status === "ready") {
+    const all = await allSpecRecords();
+    const conflict = conflictError({ ...target.record, specId }, all);
+    if (conflict) return { ok: false, error: conflict };
+  }
+  const result = await restoreSpecRecordRevision(specId, rev, user.name);
   if (!result.ok) return { ok: false, error: result.error };
   revalidateAll();
   return { ok: true };

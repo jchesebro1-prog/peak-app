@@ -9,6 +9,7 @@
  */
 
 import { csiKey } from "@/lib/specs/articles";
+import { normMatchKey, normPartNumber } from "@/lib/specs/record-keys";
 
 export type SpecKind = "product_catalog" | "product_vendor" | "system" | "companion";
 export type SpecStatus = "draft" | "ready" | "archived";
@@ -250,4 +251,38 @@ export function nextSpecIdFor(sectionNumber: string, existing: Iterable<string>)
   }
   const next = max + 1;
   return `${prefix}${String(next).padStart(3, "0")}`;
+}
+
+/* ---- Cross-record guards (spec records design §2, §3.2, §5.1) — pure, so
+ * the importer's plan, the record server actions, and any future caller
+ * check the same rule the same way. Both take the full candidate record
+ * (not just the field being checked) plus every other record, and return
+ * the conflicting specId, or `null`. The candidate's own specId is always
+ * excluded, so re-saving a record unchanged never conflicts with itself. */
+
+/** The specId of another `ready` record that already carries one of
+ *  `candidate.mfrNumbers` (normalized) — a part number may never match two
+ *  records. An `archived` holder of the number never counts. */
+export function partNumberConflict(candidate: SpecRecord, all: readonly SpecRecord[]): string | null {
+  const norms = candidate.mfrNumbers.map(normPartNumber).filter(Boolean);
+  if (!norms.length) return null;
+  for (const r of all) {
+    if (r.specId === candidate.specId || r.status !== "ready") continue;
+    if (r.mfrNumbers.some((m) => norms.includes(normPartNumber(m)))) return r.specId;
+  }
+  return null;
+}
+
+/** The specId of another non-`archived` `system` record whose match key
+ *  equals `candidate.matchKey` (case- and dash-insensitive, via
+ *  `normMatchKey`) — only meaningful for a `system` candidate with a match
+ *  key; anything else never conflicts. */
+export function matchKeyConflict(candidate: SpecRecord, all: readonly SpecRecord[]): string | null {
+  if (candidate.kind !== "system" || !candidate.matchKey) return null;
+  const norm = normMatchKey(candidate.matchKey);
+  for (const r of all) {
+    if (r.specId === candidate.specId || r.status === "archived" || r.kind !== "system" || !r.matchKey) continue;
+    if (normMatchKey(r.matchKey) === norm) return r.specId;
+  }
+  return null;
 }

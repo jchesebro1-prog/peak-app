@@ -10656,6 +10656,7 @@ seeded()
   .then(() => sixthLevelJobValuesAsyncChecks())
   .then(() => specRecordsAssemblyAsyncChecks())
   .then(() => specRecordActionsAsyncChecks())
+  .then(() => recordConflictGuardsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32934,4 +32935,57 @@ async function specRecordActionsAsyncChecks(): Promise<void> {
   const hist = await S.specRecordRevisions("PS-260961-028");
   ok(up.record.revision === before.revision + 1 && hist[0].record.specText === before.specText && proj.overrides["PS-260961-028"].specText === "Y",
     "brief §10: 'update the library' bumps revision, keeps the old version, leaves other specs' overrides untouched");
+}
+
+/* ---- Spec record conflict guards — Task 8 fix round 1 ----
+ * The coordinator's fix round moved `partNumberConflict`/`matchKeyConflict`
+ * out of record-actions.ts (where they were private, untestable async
+ * helpers) into pure, exported functions on `src/lib/specs/records.ts`, and
+ * wired `approveDraftRecordAction`/`restoreSpecRecordRevisionAction` to run
+ * them too — both used to be able to push a record to `ready` around the
+ * two guards every other write path enforces. Pure-function assertions run
+ * on the real v1 fixture; the two actions are checked by source (same
+ * pattern as `specRecordActionsAsyncChecks`'s session-check regex) since
+ * they're `requirePerm`-gated and the harness can't satisfy that. */
+async function recordConflictGuardsAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const I = await import("@/lib/specs/record-import");
+  const v1 = JSON.parse(readFileSync(join(process.cwd(), "docs/specs-seed/spec-library-v1/spec-library-v1.json"), "utf8"));
+  const recs = I.recordsFromJson(v1).records;
+
+  const base028 = recs.find((r) => r.specId === "PS-260961-028")!;
+  ok(!!base028 && base028.mfrNumbers.includes("LS-P"), "conflict guards fixture sanity: PS-260961-028 carries LS-P");
+  const dupCandidate = { ...base028, specId: "PS-DUP-1" };
+  ok(R.partNumberConflict(dupCandidate, recs) === "PS-260961-028",
+    "conflict guards: a candidate carrying LS-P under a different specId conflicts with PS-260961-028");
+  ok(R.partNumberConflict(base028, recs) === null,
+    "conflict guards: the same record re-saved does not conflict with itself");
+  const archivedHolder = recs.map((r) => (r.specId === "PS-260961-028" ? { ...r, status: "archived" as const } : r));
+  ok(R.partNumberConflict(dupCandidate, archivedHolder) === null,
+    "conflict guards: an archived holder of the number does not count");
+
+  const legs = recs.find((r) => r.specId === "PS-116123-004")!;
+  ok(!!legs && legs.kind === "system" && legs.matchKey === "Stage Drapes – Legs" && legs.status === "ready",
+    "conflict guards fixture sanity: PS-116123-004 is the ready system Legs record");
+  const legsCandidate = { ...legs, specId: "PS-TEST-999", matchKey: "stage drapes - legs" };
+  ok(R.matchKeyConflict(legsCandidate, recs) === "PS-116123-004",
+    "conflict guards: a system match key colliding case- and dash-insensitively with 'Stage Drapes – Legs' conflicts");
+  ok(R.matchKeyConflict(legs, recs) === null,
+    "conflict guards: the same system record re-saved does not conflict with itself");
+  const nonSystemCandidate = { ...base028, specId: "PS-DUP-2", kind: "product_catalog" as const, matchKey: "stage drapes - legs" };
+  ok(R.matchKeyConflict(nonSystemCandidate, recs) === null,
+    "conflict guards: a non-system candidate's matchKey is never checked");
+
+  const src = readFileSync(join(process.cwd(), "src/app/(app)/design/specs/record-actions.ts"), "utf8");
+  ok(/import\s*\{[^}]*matchKeyConflict[^}]*partNumberConflict[^}]*\}\s*from\s*"@\/lib\/specs\/records"/.test(src)
+    || /import\s*\{[^}]*partNumberConflict[^}]*matchKeyConflict[^}]*\}\s*from\s*"@\/lib\/specs\/records"/.test(src),
+    "conflict guards: record-actions.ts imports the pure guards from records.ts rather than reimplementing them");
+  const approveBody = src.slice(src.indexOf("export async function approveDraftRecordAction(")).split(/\nexport async function /)[0];
+  ok(/conflictError\(|partNumberConflict\(|matchKeyConflict\(/.test(approveBody),
+    "conflict guards: approveDraftRecordAction runs the conflict guards before saving ready");
+  const restoreBody = src.slice(src.indexOf("export async function restoreSpecRecordRevisionAction(")).split(/\nexport async function /)[0];
+  ok(/conflictError\(|partNumberConflict\(|matchKeyConflict\(/.test(restoreBody),
+    "conflict guards: restoreSpecRecordRevisionAction runs the conflict guards before restoring a ready revision");
+  ok(/status\s*===\s*"ready"/.test(restoreBody),
+    "conflict guards: restoreSpecRecordRevisionAction only runs the guards when the restored version is ready");
 }
