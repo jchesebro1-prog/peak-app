@@ -7,7 +7,7 @@ import DepartmentsClient from "./departments-client";
 import { saveDepartmentsAction } from "./actions";
 
 /**
- * Catalog → Departments — the outer, UNKEYED wrapper (#251 fix round 1).
+ * Catalog → Departments — the outer, UNKEYED wrapper (#252 fix round 1).
  *
  * The page keys DepartmentsClient by `JSON.stringify(departments)` so its
  * draft/catDept editing state resets to match the server after a save (the

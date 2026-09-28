@@ -6,9 +6,9 @@ import { saveDepartments } from "@/lib/stores/portal-departments";
 import type { Department } from "@/lib/portal-departments";
 
 /**
- * Catalog → Departments mutations (#251). Admin (manage_users) only, the
+ * Catalog → Departments mutations (#252). Admin (manage_users) only, the
  * same permission Catalog → Device types uses for editing. The known-
- * category derivation lives in saveDepartments itself (#251 fix round 1) —
+ * category derivation lives in saveDepartments itself (#252 fix round 1) —
  * this wrapper is just the cookie-reading session check + a save + refresh.
  */
 

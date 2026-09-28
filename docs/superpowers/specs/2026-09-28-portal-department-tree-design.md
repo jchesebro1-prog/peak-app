@@ -1,6 +1,6 @@
 # Portal department tree — browse the catalog by department
 
-Date: 2026-09-28 · Branch `feat/portal-depts` (off `origin/main` 46a384e8) · Punch **#251** (provisional — recompute
+Date: 2026-09-28 · Branch `feat/portal-depts` (off `origin/main` 46a384e8) · Punch **#252** (provisional — recompute
 from `origin/main` right before docs).
 
 Jeff (2026-09-27, #245 brainstorm): *"I think we can filter by Manufacturer then by category … We could also do the

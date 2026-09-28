@@ -3,7 +3,7 @@ import { sanitizeDepartments, type Department } from "@/lib/portal-departments";
 import { portalIndex } from "@/lib/portal-catalog-index";
 
 /**
- * Portal departments store (#251). One settings blob, no table and no
+ * Portal departments store (#252). One settings blob, no table and no
  * migration — same idiom as gridDeviceTypes (src/lib/stores/device-types.ts):
  *   portal_departments   { departments: Department[] }   full replacement
  */
@@ -21,14 +21,14 @@ export async function getDepartments(): Promise<Department[]> {
 
 /**
  * The Departments editor's save (spec pick 7). Reads the live catalog
- * categories itself (via the portal index — #251 fix round 1 moved this out
+ * categories itself (via the portal index — #252 fix round 1 moved this out
  * of the caller, src/app/(app)/catalog/departments/actions.ts, so any future
  * caller gets the same defensive drop for free) and hands them to
  * sanitizeDepartments as `knownCategories`, which drops anything the catalog
  * doesn't actually have.
  *
  * Deliberately skips the index-invalidation call other blob-store saves make
- * (#251 fix round 1, DECISIONS): departments are never baked into the cached
+ * (#252 fix round 1, DECISIONS): departments are never baked into the cached
  * PortalIndex — portal-catalog-browse.ts reads getDepartments() fresh on
  * every browse — so invalidating would only force an unrelated, expensive
  * rebuild of the whole ~37k-part index for no correctness benefit.

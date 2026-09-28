@@ -50,7 +50,7 @@ export type CatalogResult = {
   pages: number;
   mfrFacets: Facet[];
   catFacets: Facet[];
-  /** The active department (#251), resolved — null when none is selected
+  /** The active department (#252), resolved — null when none is selected
    *  or the `?dept=` id doesn't resolve to a real department/"other". */
   dept: { id: string; name: string } | null;
   /** Department tiles for the true landing page only (no q/mfr/cat, page 1,

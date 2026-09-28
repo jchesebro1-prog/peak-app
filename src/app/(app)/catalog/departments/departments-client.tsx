@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { Department } from "@/lib/portal-departments";
 
 /**
- * Catalog → Departments editor (#251, spec pick 7). One card for the
+ * Catalog → Departments editor (#252, spec pick 7). One card for the
  * department list (rename, reorder, add, delete) and one table of every
  * catalog category with a single "Department" select per row — a category
  * can only ever be in one department, so a plain select (the same idiom
@@ -15,7 +15,7 @@ import type { Department } from "@/lib/portal-departments";
  * UI; the server (sanitizeDepartments) still re-validates on save.
  *
  * `pending`/`onSave` are owned by the unkeyed wrapper (departments-editor.tsx,
- * #251 fix round 1) — this component only owns the DRAFT editing state, which
+ * #252 fix round 1) — this component only owns the DRAFT editing state, which
  * is exactly what should reset when the key (a stringified `departments`)
  * changes after a save.
  */

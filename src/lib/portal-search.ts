@@ -2,7 +2,7 @@ import { matchesDeptFilter, type DeptFilter } from "@/lib/portal-departments";
 
 /** Portal catalog search + two-way facets + paging (#245, spec §3.1). Pure. */
 export type SearchEntry = { key: string; kind: "part" | "fixture"; title: string; sku: string; mfr: string; category: string; haystack: string; browsable: boolean; rank: number };
-/** `dept` (#251) — resolved in the browse layer (portal-catalog-browse.ts),
+/** `dept` (#252) — resolved in the browse layer (portal-catalog-browse.ts),
  *  never a raw `?dept=` id: keeps this module pure and its own tests free
  *  of any department-store dependency. */
 export type SearchQuery = { q: string; mfr: string[]; cat: string[]; page: number; pageSize: number; dept?: DeptFilter };

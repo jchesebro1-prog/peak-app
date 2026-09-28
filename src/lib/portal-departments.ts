@@ -1,7 +1,7 @@
 import type { SearchEntry } from "@/lib/portal-search";
 
 /**
- * Portal department tree (#251, spec picks 1–7). Pure — no DB, no server
+ * Portal department tree (#252, spec picks 1–7). Pure — no DB, no server
  * import (same "pure, client-safe" convention as src/lib/design/device-types.ts).
  *
  * A department is a named grouping of catalog categories, edited by staff at
@@ -36,7 +36,7 @@ function slugify(name: string): string {
  * 7): names 1–40 chars and unique (case-insensitive); at most
  * MAX_DEPARTMENTS; a category in at most one department (refused, not
  * silently dropped — the UI is expected to have already uncheckedit from
- * wherever else it lived, per #251 controller decision). `knownCategories`
+ * wherever else it lived, per #252 controller decision). `knownCategories`
  * — when given — silently drops any category the current catalog doesn't
  * have (defensive; the editor only ever offers real categories). Pass
  * `null` to skip that check (used when just reading the stored value back,
@@ -55,7 +55,7 @@ export function sanitizeDepartments(
   if (raw.length > MAX_DEPARTMENTS) return { ok: false, error: `At most ${MAX_DEPARTMENTS} departments.` };
   const known = knownCategories ? new Set(knownCategories) : null;
 
-  // First pass (#251 fix round 1): every explicitly-supplied id, collected
+  // First pass (#252 fix round 1): every explicitly-supplied id, collected
   // BEFORE any slug is generated — so a new (id-less) row above an existing
   // row later in the array still avoids that row's id, regardless of order
   // (e.g. a new "Lighting" row saves as "lighting-2" when an existing
@@ -120,7 +120,7 @@ export function departmentOfCategory(depts: readonly Department[]): Map<string, 
 /** `deptId` resolved against the saved list (or "other") → its id+name, or
  *  null for anything else — an unknown/invalid id is simply not a department
  *  (spec pick: "Invalid ?dept= is ignored, no error"). With NO departments
- *  configured, "other" resolves to null too (#251 fix round 1) — spec pick
+ *  configured, "other" resolves to null too (#252 fix round 1) — spec pick
  *  3 says the portal browses exactly as today when nothing is configured,
  *  and a phantom Other (matching everything, since nothing is assigned)
  *  would otherwise still turn on the department UI for a stray `?dept=other`. */
@@ -225,7 +225,7 @@ export type DeptTileVM = { id: string; name: string; count: number; imageId: str
 export function departmentTiles(departments: readonly Department[], entries: readonly DeptTileSource[], imageIdOf: (key: string) => string | null): DeptTileVM[] {
   if (!departments.length) return [];
 
-  // #251 fix round 1: one pass over `entries` (was one filter pass PER
+  // #252 fix round 1: one pass over `entries` (was one filter pass PER
   // department, department count times) — build the category → department
   // map once, then bucket every browsable entry directly by its owning
   // department (or Other) as we scan. Same output, same tie-break (highest

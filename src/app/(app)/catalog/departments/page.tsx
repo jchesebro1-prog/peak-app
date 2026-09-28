@@ -10,7 +10,7 @@ export const metadata = { title: "Departments — Quartzite-6" };
 export const dynamic = "force-dynamic";
 
 /**
- * Catalog → Departments (#251, spec pick 7): the named grouping of catalog
+ * Catalog → Departments (#252, spec pick 7): the named grouping of catalog
  * categories that drives the portal's department tree. Every raw category
  * the portal index carries (including the "Fixture assemblies" pseudo-
  * category, spec pick 6) is offered with its part count; suggestions are

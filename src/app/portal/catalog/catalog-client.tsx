@@ -296,7 +296,7 @@ export function CatalogClient({
   detail: PartDetail | null;
   viewer: { name: string; email: string };
   fabrics: Array<{ sku: string; name: string }>;
-  /** #251: the active department (resolved server-side), and the landing
+  /** #252: the active department (resolved server-side), and the landing
    *  page's department tiles (empty outside the true landing, or when no
    *  departments are configured). */
   dept: { id: string; name: string } | null;

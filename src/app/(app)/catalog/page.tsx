@@ -283,7 +283,7 @@ export default async function CatalogPage({
               Device types
             </Link>
           )}
-          {/* #251 — the portal's department tree (admin). */}
+          {/* #252 — the portal's department tree (admin). */}
           {isAdmin && (
             <Link
               href="/catalog/departments"

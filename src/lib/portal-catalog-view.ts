@@ -43,7 +43,7 @@ function first(v: string | string[] | undefined): string {
 /** The raw `?dept=`/client `dept` field, cleaned to a plain id string. An
  *  id that doesn't resolve to a real department (or "other") is simply
  *  ignored downstream (departmentFilterFor/resolveDept) — no validation
- *  needed here beyond a length cap (#251). */
+ *  needed here beyond a length cap (#252). */
 export function cleanDeptId(raw: unknown): string {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const v = (raw as Record<string, unknown>).dept;

@@ -75,7 +75,7 @@ const ROUTES = [
   "/catalog/documents?show=missing-datasheet",
   "/catalog/documents/upload", // #207 — bulk drop
   "/catalog/device-types", // #226 — Grid device types (admin; auto-applies confident matches on read)
-  "/catalog/departments", // #251 — the portal department tree editor (admin)
+  "/catalog/departments", // #252 — the portal department tree editor (admin)
   "/estimating-rules",
   "/inspections",
   "/flame-tests",
@@ -153,9 +153,9 @@ const ROUTES = [
   "/portal/catalog",
   "/portal/catalog?preview=lakefront",
   "/portal/catalog?preview=lakefront&q=a&mfr=ETC&page=2",
-  // #251 — a ?dept= filter, signed out; an unknown id is simply ignored.
+  // #252 — a ?dept= filter, signed out; an unknown id is simply ignored.
   "/portal/catalog?dept=rigging",
-  // #251 fix round 1 — the same, as a team preview: Other, and an id that
+  // #252 fix round 1 — the same, as a team preview: Other, and an id that
   // resolves to nothing (both are ignored gracefully, no error).
   "/portal/catalog?preview=lakefront&dept=other",
   "/portal/catalog?preview=lakefront&dept=bogus",
