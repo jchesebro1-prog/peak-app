@@ -10631,6 +10631,7 @@ seeded()
   .then(() => reviewLimitsFix242AsyncChecks())
   .then(() => reviewLimitsFinal242AsyncChecks())
   .then(() => portal245FinalReviewAsyncChecks())
+  .then(() => grid247T5AsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -18277,7 +18278,7 @@ import { autoEstimateCards as gemCards7, autoTargets as gemAutoTargets7, clampSc
 import { EACH_CAP as gemEachCap7, generateAutoLayout as gemLayout7, partIdForLine as gemPartIdFor7, venueFrame as gemFrame7 } from "@/lib/design/grid-auto-layout";
 import { buildEquipmentPriceTable as gemTable7, type EquipCell as GemCell7 } from "@/lib/design/equipment-map";
 import { compute as gemCompute7, defaultAState as gemDefault7, type AState as GemAState7 } from "@/app/(app)/design/quick/engine";
-import { legacyProsGeom as gemProsGeom7 } from "@/lib/design/legacy-pros-geom";
+import { prosGeom as gemProsGeom7 } from "@/app/(app)/design/quick/plan-svg";
 import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake";
 {
   const parts = new Map<string, { sku: string; desc: string; unit: string; cost: number; list: number; category: string; curtainAreaRate?: number }>([
@@ -18364,7 +18365,7 @@ import { manualScopeInputs as gemManualInputs7 } from "@/lib/design/grid-intake"
   ok(pipeSpecs.length === 1 && pipeSpecs[0].qty === line("rigging", "rigging:pipe").qty && gemEachCap7 === 120, "#211 T7: a lot row lands once, carrying its quantity");
   ok(specs.every((s) => s.auto.tier === "better" && ["rigging", "curtains", "lighting", "audio"].includes(s.auto.scope)), "#211 T7: every placement carries its auto tag");
   const G = gemProsGeom7(a);
-  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.yHouseFront / G.H) < 1e-12 && Math.abs(fr.booth.y - G.yBackWall / G.H) < 1e-12, "#211 T7: the frame is the base sheet's own geometry");
+  ok(Math.abs(fr.stage.x - G.stage.x / G.W) < 1e-12 && Math.abs(fr.audience.y - G.house.y / G.H) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#211 T7: the frame is the base sheet's own geometry");
 }
 
 /* --- #211 T8: one intake — Auto or Blank; sell-only previews; New design → the Grid intake --- */
@@ -30531,4 +30532,65 @@ import { defaultAState as vt247cDefault } from "@/app/(app)/design/quick/engine"
   const sip = readFileSync(join(process.cwd(), "src/components/design/scope-inputs-panel.tsx"), "utf8");
   ok(qd.includes("plan.hasDoors") && qd.includes("houseWidthFt: null") && qd.includes("houseDepthFt: null"), "#247 T4: Quick Design shows door buttons only where the plan has doors, and Reset house clears the house size");
   ok(sip.includes("House width") && sip.includes("House depth") && sip.includes("houseDims(") && sip.includes("h.warning"), "#247 T4: the dimension panel shows house width, house depth and the narrow-house warning");
+}
+
+/* --- #247 T5: Grid — starter Spaces and Auto fill on the template --- */
+import { prosGeom as vt247dGeom } from "@/app/(app)/design/quick/plan-svg";
+import { defaultAState as vt247dDefault } from "@/app/(app)/design/quick/engine";
+import { generateAutoLayout as vt247dLayout, venueFrame as vt247dFrame } from "@/lib/design/grid-auto-layout";
+import { legacyProsGeom as vt247dLegacy } from "@/lib/design/legacy-pros-geom";
+import { PROSCENIUM_SPACES as vt247dSpaces } from "@/lib/design/venue-templates/proscenium.keys";
+import { PROSCENIUM_TEMPLATE_ID as vt247dTplId } from "@/lib/design/venue-templates/proscenium";
+import type { AutoCard as Vt247dCard } from "@/lib/design/auto-estimate";
+async function grid247T5AsyncChecks(): Promise<void> {
+  const GP = await import("../src/lib/stores/grid-projects");
+  const base = vt247dDefault(0);
+  const a = { ...base, venue: "pac", width: 50, depth: 30, wing: 15, sys: { ...base.sys, pit: true } };
+  ok(GP.starterSpaces(a, "proscenium", "sh").map((s) => s.name).join("|") === vt247dSpaces.join("|"), "#247 T5: a proscenium base sheet starts with Stage, Pit, House, Catwalk, Center Aisle, Booth, Electrical Room and MISC Rooms");
+  ok(!GP.starterSpaces({ ...a, sys: { ...a.sys, pit: false } }, "proscenium", "sh").some((s) => s.name === "Pit"), "#247 T5: no Pit Space when the pit is off");
+
+  const fr = vt247dFrame(a), G = vt247dGeom(a);
+  ok(!!fr.catwalk && !!fr.stageEdge && Math.abs(fr.audience.y - G.house.y / G.H) < 1e-12 && Math.abs(fr.booth.y - G.booth.y / G.H) < 1e-12, "#247 T5: the Auto fill frame is the template's own House, Booth, Catwalk and stage edge");
+  const old = vt247dFrame(a, { legacy: true }), L = vt247dLegacy(a);
+  ok(!old.catwalk && Math.abs(old.audience.y - L.yHouseFront / L.H) < 1e-12 && Math.abs(old.booth.y - L.yBackWall / L.H) < 1e-12, "#247 T5: a design whose base sheet predates the template keeps the old frame");
+
+  const line = (rowKey: string, ref: string, qty: number) => ({ rowKey, scope: rowKey.split(":")[0], label: rowKey, unit: "ea", place: "each", eqQty: qty, qty, status: "part", ref, unitCost: 1, unitSell: 1, total: qty, swapped: false });
+  const cards = [
+    { scope: "lighting", tier: "better", lines: [line("lighting:front", "VT247-FRONT", 8)] },
+    { scope: "audio", tier: "better", lines: [line("audio:subwoofer", "VT247-SUB", 4)] },
+  ] as unknown as Vt247dCard[];
+  const specs = vt247dLayout(a, cards, { electrics: 3, sets: 10 });
+  const fronts = specs.filter((s) => s.auto.rowKey === "lighting:front");
+  const subs = specs.filter((s) => s.auto.rowKey === "audio:subwoofer");
+  const cw = fr.catwalk!;
+  ok(fronts.length === 8 && fronts.every((s) => s.x >= cw.x && s.x <= cw.x + cw.w && s.y >= cw.y && s.y <= cw.y + cw.h), "#247 T5: front lights hang on the catwalk");
+  const sp = GP.starterSpaces(a, "proscenium", "sh");
+  const inPoly = (p: { x: number; y: number }, poly: Array<{ x: number; y: number }>) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      if (poly[i].y > p.y !== poly[j].y > p.y && p.x < ((poly[j].x - poly[i].x) * (p.y - poly[i].y)) / (poly[j].y - poly[i].y) + poly[i].x) c = !c;
+    }
+    return c;
+  };
+  ok(fronts.every((s) => inPoly(s, sp.find((x) => x.name === "Catwalk")!.points)), "#247 T5: …so each front light falls inside the Catwalk Space");
+  const edge = fr.stageEdge!;
+  const near = (p: { x: number; y: number }) => Math.min(...edge.map((q) => Math.hypot(q.x - p.x, q.y - p.y)));
+  ok(subs.length === 4 && subs.every((s) => near(s) < 0.01), "#247 T5: subwoofers sit along the stage edge curve");
+
+  const gp = await GP.createProject({ name: "Test247 template sheet", customer: "", customerId: null, by: "Test Harness" });
+  registerFixture("grid_projects", gp.id);
+  await GP.saveGridIntake(gp.id, { complete: true, measurementBased: true, mode: "auto", venueName: "Main", locationName: "HS", address: "", notes: "", autoConfig: a });
+  const sheet = await GP.generateBaseSheet(gp.id, a, "#3a3f4a", "Test Harness");
+  if (sheet) registerFixture("grid_sheets", sheet.id);
+  let p = (await GP.getProject(gp.id))!;
+  ok(p.intake?.baseSheetTemplate === vt247dTplId && (p.spaces || []).map((s) => s.name).join("|") === vt247dSpaces.join("|"), "#247 T5: generating the base sheet stamps the template id and adds the template's Spaces");
+  const cal = (p.calibrations || []).find((c) => c.docId === sheet?.id);
+  ok(!!cal && cal.unit === "ft" && cal.refLength === 80, "#247 T5: the sheet is calibrated from the template (80' inside stage width)");
+  await GP.saveGridIntake(gp.id, { ...p.intake!, baseSheetTemplate: undefined, notes: "edited" });
+  p = (await GP.getProject(gp.id))!;
+  ok(p.intake?.baseSheetTemplate === vt247dTplId && p.intake?.notes === "edited", "#247 T5: re-saving the intake keeps the template stamp");
+  const fill = readFileSync(join(process.cwd(), "src/lib/design/grid-auto-fill.ts"), "utf8");
+  ok(/legacy:\s*project\.intake\?\.baseSheetTemplate !== PROSCENIUM_TEMPLATE_ID/.test(fill), "#247 T5: Auto fill uses the old frame only for a design whose sheet the template did not draw");
+  const intake = readFileSync(join(process.cwd(), "src/app/(app)/design/grid/[id]/grid-intake.tsx"), "utf8");
+  ok(intake.includes("House width") && intake.includes("House depth") && intake.includes("houseDims(") && intake.includes("h.warning"), "#247 T5: the Grid intake shows house width, house depth and the narrow-house warning");
 }

@@ -22,7 +22,7 @@
  */
 import { clamp01, type Point } from "@/lib/annotations";
 import { venueOf, type AState, type SysKey, type TierKey } from "@/app/(app)/design/quick/engine";
-import { churchGeom } from "@/app/(app)/design/quick/plan-svg";
+import { churchGeom, prosGeom } from "@/app/(app)/design/quick/plan-svg";
 import { legacyProsGeom } from "./legacy-pros-geom";
 import type { GridCurtain } from "./grid-bom";
 import type { AutoTag } from "./grid-auto-model";
@@ -31,12 +31,20 @@ import { EQUIPMENT_ROW_BY_KEY } from "./equipment-vocab";
 import { allowancePartId, assemblyPartId } from "./grid-virtual-parts";
 
 export type Rect = { x: number; y: number; w: number; h: number };
-export type VenueFrame = { stage: Rect; audience: Rect; booth: Rect };
+/** Normalized to the base sheet. `catwalk` / `stageEdge` exist only on the #247 template plan. */
+export type VenueFrame = { stage: Rect; audience: Rect; booth: Rect; catwalk?: Rect; stageEdge?: Point[] };
 export const EACH_CAP = 120;
 
-export function venueFrame(a: AState): VenueFrame {
+export function venueFrame(a: AState, opts: { legacy?: boolean } = {}): VenueFrame {
   const kind = venueOf(a).kind || "proscenium";
+  if (kind === "proscenium" && !opts.legacy) {
+    // #247: the template's own House, Booth and Catwalk, and its stage-edge curve.
+    const G = prosGeom(a);
+    const n = (r: Rect): Rect => ({ x: r.x / G.W, y: r.y / G.H, w: r.w / G.W, h: r.h / G.H });
+    return { stage: n(G.stage), audience: n(G.house), booth: n(G.booth), catwalk: n(G.catwalk), stageEdge: G.stageEdge.map((p) => ({ x: p.x / G.W, y: p.y / G.H })) };
+  }
   if (kind === "proscenium") {
+    // A base sheet drawn before #247 keeps the old schematic's frame, so a re-fill lands on the plan the design has.
     const G = legacyProsGeom(a);
     const r = (x: number, y: number, w: number, h: number): Rect => ({ x: x / G.W, y: y / G.H, w: w / G.W, h: h / G.H });
     return {
@@ -77,6 +85,23 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 function spread(n: number, x0: number, x1: number, y: number): Point[] {
   return Array.from({ length: n }, (_, i) => ({ x: clamp01(x0 + ((i + 0.5) / n) * (x1 - x0)), y: clamp01(y) }));
+}
+
+/** n points evenly along a polyline (by length), each centred in its share. */
+function alongPath(n: number, pts: Point[]): Point[] {
+  const seg = pts.slice(1).map((p, i) => Math.hypot(p.x - pts[i].x, p.y - pts[i].y));
+  const total = seg.reduce((s, d) => s + d, 0);
+  return Array.from({ length: n }, (_, i) => {
+    let d = ((i + 0.5) / n) * total;
+    for (let j = 0; j < seg.length; j++) {
+      if (d <= seg[j] || j === seg.length - 1) {
+        const t = seg[j] ? Math.min(1, d / seg[j]) : 0;
+        return { x: clamp01(pts[j].x + (pts[j + 1].x - pts[j].x) * t), y: clamp01(pts[j].y + (pts[j + 1].y - pts[j].y) * t) };
+      }
+      d -= seg[j];
+    }
+    return pts[0];
+  });
 }
 
 /** n points round-robin across rows (one y per row), evenly across [x0, x1] within a row. */
@@ -151,6 +176,8 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
     case "lighting:automated":
       return onRows(n, S.x, S.x + S.w, electricYs(S, opts.electrics));
     case "lighting:front":
+      // #247: on the template plan, front lights hang on the catwalk.
+      if (f.catwalk) return spread(n, f.catwalk.x + 0.06 * f.catwalk.w, f.catwalk.x + 0.94 * f.catwalk.w, f.catwalk.y + f.catwalk.h / 2);
       return onRows(n, A.x, A.x + A.w, [A.y + 0.45 * A.h, A.y + 0.6 * A.h]);
     case "lighting:cyc":
       return spread(n, S.x, S.x + S.w, S.y + 0.05 * S.h);
@@ -159,6 +186,8 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
     case "audio:lineArray":
       return clusterPoints(n, S);
     case "audio:subwoofer":
+      // #247: subs sit along the stage-edge curve.
+      if (f.stageEdge && f.stageEdge.length > 1) return alongPath(n, f.stageEdge);
       return spread(n, S.x, S.x + S.w, S.y + S.h - 0.01);
     case "audio:mixerDsp":
     case "video:processor":
@@ -184,15 +213,17 @@ function eachPoints(line: AutoLine, n: number, f: VenueFrame, opts: { electrics:
  * Placement specs for the given cards (spec §5). `a` is the geometry the base
  * sheet was drawn from (intake.autoConfig); `opts` are that design's electric
  * and set counts (compute()), plus `kept` — units per row already on the plan
- * by hand (keptUnitsByRow, D320), subtracted before placing. Every spec
- * carries `auto: { scope, rowKey, tier }`.
+ * by hand (keptUnitsByRow, D320), subtracted before placing — and `legacy`,
+ * true when the base sheet predates the #247 template, so the fill lands on
+ * the plan the design actually has. Every spec carries
+ * `auto: { scope, rowKey, tier }`.
  */
 export function generateAutoLayout(
   a: AState,
   cards: AutoCard[],
-  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>> }
+  opts: { electrics: number; sets: number; kept?: Readonly<Record<string, number>>; legacy?: boolean }
 ): AutoPlacementSpec[] {
-  const f = venueFrame(a);
+  const f = venueFrame(a, { legacy: opts.legacy });
   const out: AutoPlacementSpec[] = [];
   const lots = new Map<SysKey, number>();
   for (const card of cards) {

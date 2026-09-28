@@ -42,7 +42,8 @@ import { isBomGroupKey } from "@/lib/design/grid-bom-groups";
 import { getGridSymbol } from "@/lib/stores/grid-catalog";
 import { compute, VENUES, type AState, type QuickScopeInputs, type SysKey, type TierKey, type VenueKind } from "@/app/(app)/design/quick/engine";
 import { buildPlan, churchGeom, prosGeom, renderPlanSvgMarkup } from "@/app/(app)/design/quick/plan-svg";
-import { legacyProsGeom } from "@/lib/design/legacy-pros-geom";
+import { PROSCENIUM_TEMPLATE_ID } from "@/lib/design/venue-templates/proscenium";
+import { PROSCENIUM_SPACES } from "@/lib/design/venue-templates/proscenium.keys";
 import {
   autoEstimatesOf,
   cleanLotQty,
@@ -242,6 +243,8 @@ export type GridProject = {
     notes: string;
     /** Shared Quick Design inputs; the Grid editor is their manual-layout workspace. */
     autoConfig?: AState;
+    /** #247: the venue template that drew the generated base sheet ("proscenium@1"); absent = the pre-#247 schematic. */
+    baseSheetTemplate?: string;
   };
   /** Sheet display order; the docs live in grid_sheets. */
   sheetIds: string[];
@@ -363,10 +366,14 @@ export async function createProject(input: {
 
 /**
  * Starter Spaces for a generated base sheet (Task 1, #38 — D145). Proscenium
- * and church venues get Spaces drawn from the SAME geometry the plan itself
- * used (`prosGeom`/`churchGeom`, already exported for exactly this kind of
- * reuse), so "Stage"/"Audience view"/"FOH · control" land roughly where the
- * real stage, house and booth are instead of arbitrary fixed fractions.
+ * Spaces come straight from the template's own labeled regions (#247) — one
+ * Space per region name in `PROSCENIUM_SPACES`, outlined from the stretched
+ * drawing (`prosGeom`), so they land exactly where the template drew them
+ * (Pit absent when the pit is off). Church venues get Spaces drawn from the
+ * SAME geometry the plan itself used (`churchGeom`, already exported for
+ * exactly this kind of reuse), so "Stage"/"Audience view"/"FOH · control"
+ * land roughly where the real stage, house and booth are instead of
+ * arbitrary fixed fractions.
  *
  * The other buildable kinds (flat, blackbox, gym) compute their room/booth
  * geometry as private local variables inside their own buildPlan* function —
@@ -375,28 +382,16 @@ export async function createProject(input: {
  * more than the "small addition" this task calls for. They keep the old
  * fixed-fraction Spaces; follow-up noted in DECISIONS.md D145.
  */
-function starterSpaces(
+export function starterSpaces(
   a: AState,
   kind: VenueKind,
   sheetId: string
 ): Array<{ sheetId: string; page: number; name: string; points: Point[] }> {
   if (kind === "proscenium") {
-    const G = legacyProsGeom(a);
-    const at = (x: number, y: number): Point => ({ x: clamp01(x / G.W), y: clamp01(y / G.H) });
-    return [
-      {
-        sheetId, page: 1, name: "Stage",
-        points: [at(G.stage.x, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y), at(G.stage.x + G.stage.w, G.stage.y + G.stage.h), at(G.stage.x, G.stage.y + G.stage.h)],
-      },
-      {
-        sheetId, page: 1, name: "Audience view",
-        points: [at(G.xAudL, G.yHouseFront), at(G.xAudR, G.yHouseFront), at(G.xAudR, G.yBackWall), at(G.xAudL, G.yBackWall)],
-      },
-      {
-        sheetId, page: 1, name: "FOH / control",
-        points: [at(G.cx - G.boothW / 2, G.yBackWall), at(G.cx + G.boothW / 2, G.yBackWall), at(G.cx + G.boothW / 2, G.yBoothBottom), at(G.cx - G.boothW / 2, G.yBoothBottom)],
-      },
-    ];
+    // #247: one Space per labeled area of the template, outlined from the stretched drawing.
+    const G = prosGeom(a);
+    const at = (p: Point): Point => ({ x: clamp01(p.x / G.W), y: clamp01(p.y / G.H) });
+    return PROSCENIUM_SPACES.filter((name) => G.regions[name]).map((name) => ({ sheetId, page: 1, name, points: G.regions[name].map(at) }));
   }
   if (kind === "church") {
     const G = churchGeom(a);
@@ -489,15 +484,20 @@ export async function generateBaseSheet(
   for (const sp of starterSpaces(a, kind, sheet.id)) {
     await addSpace(projectId, { ...sp, by });
   }
+  if (kind === "proscenium") {
+    await patchDoc<GridProject>("grid_projects", projectId, (p) => {
+      if (p.intake) p.intake.baseSheetTemplate = PROSCENIUM_TEMPLATE_ID;
+    });
+  }
   return sheet;
 }
 
 export async function saveGridIntake(
   projectId: string,
-  input: GridProject["intake"]
+  input: NonNullable<GridProject["intake"]>
 ): Promise<GridProject | null> {
   return patchDoc<GridProject>("grid_projects", projectId, (p) => {
-    p.intake = input;
+    p.intake = { ...input, baseSheetTemplate: input.baseSheetTemplate ?? p.intake?.baseSheetTemplate };
     p.updatedAt = Date.now();
   });
 }

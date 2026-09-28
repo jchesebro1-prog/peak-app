@@ -12,6 +12,7 @@ import {
   type DimField,
 } from "@/app/(app)/design/quick/engine";
 import { coverAutoName, coverFromVenue, gridIntakeDefaults, intakeScopeInputs, UNTITLED_GRID_DESIGN } from "@/lib/design/grid-intake";
+import { HOUSE_DEPTH_LIM, houseDims, houseWidthLim } from "@/lib/design/venue-templates/house-dims";
 import { TRACKABLE_SYS_KEYS } from "@/lib/design/grid-scopes";
 import type { AutoEstimate } from "@/lib/design/grid-auto-model";
 import type { VenueType } from "@/lib/venue-types";
@@ -57,9 +58,8 @@ const card = (on: boolean): React.CSSProperties => ({
 const primary = (busy: boolean): React.CSSProperties => ({ border: "none", borderRadius: 9, padding: "12px 16px", background: "var(--accent)", color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: busy ? "wait" : "pointer" });
 const ghost: React.CSSProperties = { border: "1px solid #e4e7ec", borderRadius: 9, padding: "12px 16px", background: "#fff", color: "#3a3f4a", fontSize: 13.5, fontWeight: 600, cursor: "pointer" };
 
-/** An exact-feet readout (#244): type any whole number; it clamps to the
- *  field's LIM on Enter / blur. The slider beside it moves in 1 ft steps. */
-function FeetInput({ field, value, onCommit }: { field: DimField; value: number; onCommit: (n: number) => void }) {
+/** An exact-feet readout (#244): type any whole number; it clamps to [min, max] on Enter / blur. */
+function FeetInput({ label, min, max, value, onCommit }: { label: string; min: number; max: number; value: number; onCommit: (n: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   const [synced, setSynced] = useState(value);
   if (value !== synced) {
@@ -67,7 +67,6 @@ function FeetInput({ field, value, onCommit }: { field: DimField; value: number;
     setDraft(String(value));
   }
   const commit = () => {
-    const [min, max] = LIM[field];
     const n = Math.round(Number(draft));
     const next = Number.isFinite(n) && draft.trim() !== "" ? Math.max(min, Math.min(max, n)) : value;
     setDraft(String(next));
@@ -78,8 +77,8 @@ function FeetInput({ field, value, onCommit }: { field: DimField; value: number;
       <input
         type="number"
         inputMode="numeric"
-        min={LIM[field][0]}
-        max={LIM[field][1]}
+        min={min}
+        max={max}
         step={1}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -90,7 +89,7 @@ function FeetInput({ field, value, onCommit }: { field: DimField; value: number;
             commit();
           }
         }}
-        aria-label={`${field} in feet`}
+        aria-label={`${label} in feet`}
         style={{ width: 56, border: "1px solid #e4e7ec", borderRadius: 6, padding: "3px 6px", fontFamily: "var(--font-mono)", fontSize: 12, color: "#16181d", textAlign: "right", background: "#fff" }}
       />
       ft
@@ -296,7 +295,7 @@ export default function GridIntake({
                           <div key={d.field}>
                             <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, fontWeight: 600 }}>
                               <span>{d.label}</span>
-                              <FeetInput field={d.field} value={a[d.field]} onCommit={(n) => setDimension(d.field, n)} />
+                              <FeetInput label={d.field} min={LIM[d.field][0]} max={LIM[d.field][1]} value={a[d.field]} onCommit={(n) => setDimension(d.field, n)} />
                             </span>
                             <span style={{ display: "block", color: "#9aa0ab", fontSize: 10.5, margin: "3px 0 5px" }}>{d.note}</span>
                             <input
@@ -311,6 +310,32 @@ export default function GridIntake({
                             />
                           </div>
                         ))}
+                        {venue.kind === "proscenium" &&
+                          (() => {
+                            // #247: the house the template stretches to — the value in use (typed, or the default).
+                            const h = houseDims(a);
+                            const rows = [
+                              { key: "houseWidthFt" as const, label: "House width", note: "Inside walls, at the back of the house", v: Math.round(h.widthFt), lim: houseWidthLim(a) },
+                              { key: "houseDepthFt" as const, label: "House depth", note: "Plaster line to back wall", v: Math.round(h.depthFt), lim: HOUSE_DEPTH_LIM },
+                            ];
+                            const setHouse = (key: "houseWidthFt" | "houseDepthFt", raw: number | string, lim: [number, number]) =>
+                              update({ [key]: Math.max(lim[0], Math.min(lim[1], Math.round(Number(raw)) || lim[0])) } as Partial<AState>);
+                            return (
+                              <>
+                                {rows.map((r) => (
+                                  <div key={r.key}>
+                                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, fontWeight: 600 }}>
+                                      <span>{r.label}</span>
+                                      <FeetInput label={r.key} min={r.lim[0]} max={r.lim[1]} value={r.v} onCommit={(n) => setHouse(r.key, n, r.lim)} />
+                                    </span>
+                                    <span style={{ display: "block", color: "#9aa0ab", fontSize: 10.5, margin: "3px 0 5px" }}>{r.note}</span>
+                                    <input type="range" min={r.lim[0]} max={r.lim[1]} step={1} value={r.v} onChange={(e) => setHouse(r.key, e.target.value, r.lim)} aria-label={r.label} style={{ width: "100%", accentColor: "var(--accent)" }} />
+                                  </div>
+                                ))}
+                                {h.warning && <div style={{ fontSize: 11.5, color: "#b4543a", lineHeight: 1.4 }}>{h.warning}</div>}
+                              </>
+                            );
+                          })()}
                       </div>
                       <div style={section}>
                         <div style={{ ...label, marginBottom: 12 }}>Venue cover page</div>
