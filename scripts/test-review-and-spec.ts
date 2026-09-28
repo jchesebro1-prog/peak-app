@@ -10642,6 +10642,7 @@ seeded()
   .then(() => portal250AsyncChecks())
   .then(() => portal250FixRound1AsyncChecks())
   .then(() => portal252AsyncChecks())
+  .then(() => specRecordsAsyncChecks())
   // Before the report and before the `.catch`, so a thrown suite is torn
   // down exactly like a passing one.
   .finally(() => teardownFixtures())
@@ -32412,4 +32413,39 @@ async function portal252AsyncChecks(): Promise<void> {
   const pageSrc251 = readFileSync(join(process.cwd(), "src/app/(app)/catalog/departments/page.tsx"), "utf8");
   ok(pageSrc251.includes("DepartmentsEditor") && !pageSrc251.includes("DepartmentsClient"), "#252 fix: the page renders DepartmentsEditor, not DepartmentsClient directly");
   ok(!/<DepartmentsEditor[^>]*\bkey=/.test(pageSrc251), "#252 fix: the page does NOT key <DepartmentsEditor> — it must survive router.refresh() for the save message to show, unlike the inner editor it wraps");
+}
+
+/* ---- Spec records (spec 2026-09-28-spec-records-design.md §1) ----
+ * Needs `await` (dynamic import of the not-yet-written module), so like every
+ * other async check in this file it lives in its own named async function,
+ * wired into the promise chain near the top of the file, rather than a bare
+ * top-level `{ }` block — esbuild's cjs output (this repo has no
+ * package.json "type": "module") refuses a real top-level await. */
+async function specRecordsAsyncChecks(): Promise<void> {
+  const R = await import("@/lib/specs/records");
+  const base = { specId: " PS-1 ", kind: "product_vendor", status: "Ready", section: "26 09 61", article: "A", title: "T",
+    basisOfDesign: "", manufacturer: "ETC", mfrNumbers: "IQ12\nIQ24; iq24", matchKey: "", includeWith: [], specText: "x",
+    notes: null, sourceArticleId: "ar-1" };
+  const n = R.normalizeSpecRecord(base)!;
+  ok(n.specId === "PS-1" && n.basisOfDesign === null && n.matchKey === null, "records: normalize trims and nulls blanks");
+  ok(JSON.stringify(n.mfrNumbers) === '["IQ12","IQ24"]', "records: mfrNumbers split on newline/semicolon and de-dup case-insensitively");
+  ok(n.status === "draft", "records: an unknown status label normalizes to draft (statusFromLabel is the label reader)");
+  ok(R.statusFromLabel("Ready") === "ready" && R.statusFromLabel("archived") === "archived", "records: statusFromLabel");
+  ok(R.normalizeSpecRecord({ ...base, kind: "widget" }) === null, "records: unknown kind is refused, not defaulted");
+  ok(R.kindFromLabel("System (custom, no part #)") === "system" && R.kindFromLabel("Product – vendor quote") === "product_vendor"
+    && R.kindFromLabel("Product - catalog") === "product_catalog" && R.kindFromLabel("Companion (rides with)") === "companion"
+    && R.kindFromLabel("nope") === null, "records: kindFromLabel maps workbook labels");
+  const ctx = { sections: [{ id: "ss1", number: "26 09 61" }], articles: [{ id: "ar-1", sectionId: "ss1" }, { id: "ar-x", sectionId: "other" }], specIds: new Set(["PS-1"]) };
+  const ready = { ...n, status: "ready" as const };
+  ok(R.validateSpecRecord(ready, ctx).length === 0, "records: a complete ready vendor record validates");
+  ok(R.validateSpecRecord({ ...ready, mfrNumbers: [] }, ctx).some((p) => p.blocking && p.field === "mfrNumbers"), "records: product record needs part numbers");
+  ok(R.validateSpecRecord({ ...ready, kind: "system", mfrNumbers: [] }, ctx).some((p) => p.field === "matchKey"), "records: system record needs a match key");
+  ok(R.validateSpecRecord({ ...ready, sourceArticleId: "ar-x" }, ctx).some((p) => p.blocking && p.field === "sourceArticleId"), "records: ready record's article must be in its section");
+  ok(!R.validateSpecRecord({ ...ready, status: "archived", sourceArticleId: "gone" }, ctx).some((p) => p.blocking), "records: archived article problems are non-blocking");
+  ok(R.validateSpecRecord({ ...ready, kind: "companion", mfrNumbers: [], includeWith: ["PS-9"] }, ctx).some((p) => p.field === "includeWith"), "records: companion naming an unknown spec is a problem");
+  ok(R.validateSpecRecord({ ...ready, section: "11 11 11" }, ctx).some((p) => p.field === "section"), "records: unknown section is a problem");
+  ok(R.sameSpecContent(ready, { ...ready, revision: 7, updatedAt: 9, updatedBy: "z" }), "records: sameSpecContent ignores revision/stamps");
+  ok(!R.sameSpecContent(ready, { ...ready, specText: "y" }), "records: sameSpecContent sees text changes");
+  ok(R.nextSpecIdFor("26 09 61", ["PS-260961-028", "PS-260961-007", "PS-116123-010"]) === "PS-260961-029"
+    && R.nextSpecIdFor("11 61 99", []) === "PS-116199-001", "records: nextSpecIdFor");
 }

@@ -1,0 +1,253 @@
+/**
+ * Spec Library records (#205 follow-on, spec 2026-09-28-spec-records-design.md
+ * §1.1) — the pure model for `spec_records`. A record is written once per
+ * product/system/companion and matched against BOM rows any number of times.
+ *
+ * Pure on purpose: no store imports, no `Date.now()`, no environment. This is
+ * what lets normalization/validation run identically in the importer, the
+ * builder's live preview and the server-side commit path.
+ */
+
+import { csiKey } from "@/lib/specs/articles";
+
+export type SpecKind = "product_catalog" | "product_vendor" | "system" | "companion";
+export type SpecStatus = "draft" | "ready" | "archived";
+
+export const SPEC_KINDS: readonly SpecKind[] = ["product_catalog", "product_vendor", "system", "companion"];
+export const SPEC_STATUSES: readonly SpecStatus[] = ["draft", "ready", "archived"];
+
+export type SpecRecord = {
+  specId: string;
+  kind: SpecKind;
+  status: SpecStatus;
+  section: string;
+  article: string;
+  title: string;
+  basisOfDesign: string | null;
+  manufacturer: string | null;
+  mfrNumbers: string[];
+  matchKey: string | null;
+  includeWith: string[];
+  specText: string;
+  notes: string | null;
+  sourceArticleId: string | null;
+  revision: number;
+  updatedAt: number;
+  updatedBy: string;
+};
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : v == null ? "" : String(v);
+}
+
+function trimmedOrNull(v: unknown): string | null {
+  const s = str(v).trim();
+  return s === "" ? null : s;
+}
+
+/** Splits on newline/comma/semicolon runs, trims, drops blanks, de-dups
+ *  case-insensitively keeping the first spelling seen. Accepts an array
+ *  (each entry trimmed, not re-split) or a string. */
+function splitList(v: unknown): string[] {
+  const parts = Array.isArray(v)
+    ? v.map((x) => str(x).trim())
+    : str(v)
+        .split(/[\n,;]+/)
+        .map((x) => x.trim());
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    if (!p) continue;
+    const k = p.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
+}
+
+/** Normalizes a raw (importer row / form / doc) shape into a `SpecRecord`, or
+ *  `null` when it can't be — an empty `specId` or an unrecognized `kind` are
+ *  refusals, never silently defaulted. Everything else has a safe default. */
+export function normalizeSpecRecord(raw: unknown): SpecRecord | null {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+
+  const specId = str(o.specId).trim();
+  if (!specId) return null;
+
+  const kind = str(o.kind).trim() as SpecKind;
+  if (!SPEC_KINDS.includes(kind)) return null;
+
+  const statusRaw = str(o.status).trim() as SpecStatus;
+  const status: SpecStatus = SPEC_STATUSES.includes(statusRaw) ? statusRaw : "draft";
+
+  const revisionRaw = Number(o.revision);
+  const revision = Number.isFinite(revisionRaw) && Math.floor(revisionRaw) >= 1 ? Math.floor(revisionRaw) : 1;
+
+  const updatedAtRaw = Number(o.updatedAt);
+  const updatedAt = Number.isFinite(updatedAtRaw) ? updatedAtRaw : 0;
+
+  return {
+    specId,
+    kind,
+    status,
+    section: str(o.section).trim(),
+    article: str(o.article).trim(),
+    title: str(o.title).trim(),
+    basisOfDesign: trimmedOrNull(o.basisOfDesign),
+    manufacturer: trimmedOrNull(o.manufacturer),
+    mfrNumbers: splitList(o.mfrNumbers),
+    matchKey: trimmedOrNull(o.matchKey),
+    includeWith: splitList(o.includeWith),
+    specText: str(o.specText),
+    notes: trimmedOrNull(o.notes),
+    sourceArticleId: trimmedOrNull(o.sourceArticleId),
+    revision,
+    updatedAt,
+    updatedBy: str(o.updatedBy),
+  };
+}
+
+/** True when two records have the same content — everything except
+ *  `revision`/`updatedAt`/`updatedBy`. `mfrNumbers`/`includeWith` are
+ *  compared in order, after normalizing each side (so a record built by hand
+ *  and one round-tripped through `normalizeSpecRecord` still compare equal). */
+export function sameSpecContent(a: SpecRecord, b: SpecRecord): boolean {
+  const an = normalizeSpecRecord(a);
+  const bn = normalizeSpecRecord(b);
+  if (!an || !bn) return false;
+  return (
+    an.specId === bn.specId &&
+    an.kind === bn.kind &&
+    an.status === bn.status &&
+    an.section === bn.section &&
+    an.article === bn.article &&
+    an.title === bn.title &&
+    an.basisOfDesign === bn.basisOfDesign &&
+    an.manufacturer === bn.manufacturer &&
+    an.matchKey === bn.matchKey &&
+    an.specText === bn.specText &&
+    an.notes === bn.notes &&
+    an.sourceArticleId === bn.sourceArticleId &&
+    an.mfrNumbers.length === bn.mfrNumbers.length &&
+    an.mfrNumbers.every((v, i) => v === bn.mfrNumbers[i]) &&
+    an.includeWith.length === bn.includeWith.length &&
+    an.includeWith.every((v, i) => v === bn.includeWith[i])
+  );
+}
+
+export type RecordProblem = { specId: string; field: string; message: string; blocking: boolean };
+
+export type RecordValidationCtx = {
+  sections: Array<{ id: string; number: string }>;
+  articles: Array<{ id: string; sectionId: string }>;
+  specIds: Set<string>;
+};
+
+/** The live section id a record's `section` (a CSI number) resolves to, or
+ *  `null` when it doesn't match exactly one live section (via `csiKey`). */
+export function sectionIdForRecord(r: SpecRecord, sections: Array<{ id: string; number: string }>): string | null {
+  const key = csiKey(r.section);
+  if (!key) return null;
+  const hits = sections.filter((s) => csiKey(s.number) === key);
+  return hits.length === 1 ? hits[0].id : null;
+}
+
+export function validateSpecRecord(r: SpecRecord, ctx: RecordValidationCtx): RecordProblem[] {
+  const problems: RecordProblem[] = [];
+  const problem = (field: string, message: string, blocking: boolean) =>
+    problems.push({ specId: r.specId, field, message, blocking });
+
+  if (!r.title.trim()) problem("title", "Title is required.", true);
+  if (!r.specText.trim()) problem("specText", "Spec text is required.", true);
+
+  if ((r.kind === "product_catalog" || r.kind === "product_vendor") && r.mfrNumbers.length === 0) {
+    problem("mfrNumbers", "A product record needs at least one MFR #.", true);
+  }
+  if (r.kind === "system" && !r.matchKey) {
+    problem("matchKey", "A system record needs a match key.", true);
+  }
+  if (r.kind === "companion") {
+    if (r.includeWith.length === 0) {
+      problem("includeWith", "A companion record needs at least one spec it rides with.", true);
+    } else {
+      for (const id of r.includeWith) {
+        if (!ctx.specIds.has(id)) {
+          problem("includeWith", `"${id}" is not a known spec id.`, true);
+        }
+      }
+    }
+  }
+
+  const sectionId = sectionIdForRecord(r, ctx.sections);
+  if (!sectionId) {
+    problem("section", `"${r.section}" does not resolve to exactly one section.`, true);
+  }
+
+  // Article placement is always checked, but only blocking for `ready`
+  // records — a draft/archived record can point at nothing yet, or at a
+  // stale article, without blocking anyone.
+  const articleBlocking = r.status === "ready";
+  if (!r.sourceArticleId) {
+    problem("sourceArticleId", "A ready record needs a source article.", articleBlocking);
+  } else {
+    const article = ctx.articles.find((a) => a.id === r.sourceArticleId);
+    if (!article) {
+      problem("sourceArticleId", `"${r.sourceArticleId}" is not a known article.`, articleBlocking);
+    } else if (!sectionId || article.sectionId !== sectionId) {
+      problem("sourceArticleId", "The source article is not in this record's section.", articleBlocking);
+    }
+  }
+
+  return problems;
+}
+
+export const KIND_LABELS: Record<SpecKind, string> = {
+  product_catalog: "Product – catalog",
+  product_vendor: "Product – vendor quote",
+  system: "System (custom, no part #)",
+  companion: "Companion",
+};
+
+/** Reverse of `KIND_LABELS`, tolerant of workbook drift: exact label match,
+ *  the raw enum value, or the lowercased leading text. */
+export function kindFromLabel(label: string): SpecKind | null {
+  const raw = str(label).trim();
+  if (!raw) return null;
+  if (SPEC_KINDS.includes(raw as SpecKind)) return raw as SpecKind;
+  for (const kind of SPEC_KINDS) {
+    if (KIND_LABELS[kind] === raw) return kind;
+  }
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("product")) {
+    return lower.includes("vendor") ? "product_vendor" : "product_catalog";
+  }
+  if (lower.startsWith("system")) return "system";
+  if (lower.startsWith("companion")) return "companion";
+  return null;
+}
+
+/** Reads a workbook status label (Ready/Draft/Archived, case-insensitive).
+ *  Unknown labels default to "draft" — this is the ONLY place that lenient
+ *  default lives; `normalizeSpecRecord`'s `status` field must already be an
+ *  exact enum value. */
+export function statusFromLabel(label: string): SpecStatus {
+  const lower = str(label).trim().toLowerCase();
+  return (SPEC_STATUSES as readonly string[]).includes(lower) ? (lower as SpecStatus) : "draft";
+}
+
+/** Next `PS-<digits>-<NNN>` id for a section, 3-digit zero-padded, one past
+ *  the highest existing sequence number under that same section's digits.
+ *  Ids under a different section's digits are ignored. */
+export function nextSpecIdFor(sectionNumber: string, existing: Iterable<string>): string {
+  const digits = csiKey(sectionNumber);
+  let max = 0;
+  const prefix = `PS-${digits}-`;
+  for (const id of existing) {
+    if (!id.startsWith(prefix)) continue;
+    const n = Number(id.slice(prefix.length));
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  const next = max + 1;
+  return `${prefix}${String(next).padStart(3, "0")}`;
+}
